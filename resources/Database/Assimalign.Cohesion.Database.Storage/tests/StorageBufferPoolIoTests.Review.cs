@@ -15,6 +15,36 @@ namespace Assimalign.Cohesion.Database.Storage.Tests;
 
 public sealed partial class StorageBufferPoolIoTests
 {
+    [Fact(DisplayName = "Cohesion Test [Storage] - Full flush: a read-pinned image is confirmed across a writer boundary")]
+    public void FlushAll_ReadPinnedCopyOverlapsWriter_ShouldRetryTheWholeImage()
+    {
+        // Arrange
+        using var stream = StorageStream.FromInMemory();
+        using var pool = new StorageBufferPool(1);
+        using var pin = pool.Pin((PageId)0L, stream);
+        pin.Page.AsBodySpan().Fill(0x11);
+        pin.MarkDirty();
+        int copies = 0;
+        pool.FlushCopyHalfway = () =>
+        {
+            if (++copies != 1) { return; }
+            int epoch = pin.Entry.BeginWrite(new object());
+            try { pin.Page.AsBodySpan().Fill(0x22); pin.MarkDirty(); }
+            finally { pin.Entry.EndWrite(epoch); }
+        };
+
+        // Act
+        pool.FlushAll(stream);
+        pool.FlushCopyHalfway = null;
+
+        // Assert
+        byte[] stored = new byte[Page.Size];
+        stream.ReadPage((PageId)0L, stored);
+        copies.ShouldBeGreaterThanOrEqualTo(2);
+        stored.AsSpan(Page.HeaderSize).ToArray().ShouldAllBe(value => value == 0x22);
+        pin.IsDirty.ShouldBeFalse();
+    }
+
     [Fact(DisplayName = "Cohesion Test [Storage] - Pool rendezvous: repeat every interrupt and waiter ownership window")]
     public async Task Io_RepeatedReviewRendezvous_ShouldExerciseEveryWindow()
     {

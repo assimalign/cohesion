@@ -12,22 +12,33 @@ internal sealed class StorageRecordFreeBytes
     private readonly Dictionary<long, Entry> _pages = new();
     private readonly Dictionary<ulong, List<Entry>> _owners = new();
 
-    internal void Register(ulong owner, long page, int? capacity = null)
+    internal void Register(ulong owner, long page, int? capacity = null, bool known = true)
     {
         if (_pages.TryGetValue(page, out var existing) && existing.Owner == owner)
         {
-            Change(existing, capacity ?? SlottedPage.MaxRecordSize, capacity.HasValue);
+            Change(existing, capacity ?? SlottedPage.MaxRecordSize, capacity.HasValue && known);
             return;
         }
         Remove(page);
         if (!_owners.TryGetValue(owner, out var heap)) { _owners.Add(owner, heap = new()); }
-        var entry = new Entry(owner, page, capacity ?? SlottedPage.MaxRecordSize, capacity.HasValue, heap.Count);
+        var entry = new Entry(owner, page, capacity ?? SlottedPage.MaxRecordSize, capacity.HasValue && known, heap.Count);
         _pages.Add(page, entry);
         heap.Add(entry);
         Up(heap, entry.Index);
     }
 
     internal bool IsUnknown(long page) => _pages.TryGetValue(page, out var entry) && !entry.Known;
+    internal bool MayFit(long page, int minimum) => _pages.TryGetValue(page, out var entry) && entry.Capacity >= minimum;
+
+    internal void RegisterHeader(ulong owner, long page, int slotCount, int freeDataEnd)
+    {
+        int contiguous = Page.Size - (slotCount * sizeof(uint)) - freeDataEnd - sizeof(uint);
+        // Dead bytes below FreeDataEnd may be recovered by compaction. Until the
+        // directory is measured, retain an upper bound rather than hiding that space.
+        int reclaimable = freeDataEnd - Page.HeaderSize;
+        bool valid = reclaimable >= 0 && contiguous >= -sizeof(uint);
+        Register(owner, page, valid ? contiguous + reclaimable : null, known: valid && reclaimable == 0);
+    }
 
     internal void MarkUnknown(long page)
     {

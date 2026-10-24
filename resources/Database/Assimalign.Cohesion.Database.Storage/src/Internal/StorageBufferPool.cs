@@ -24,7 +24,7 @@ internal sealed unsafe class StorageBufferPool : IDisposable
     private readonly LinkedList<long> _accessOrder = new(); // clock hand = First
     private readonly Stack<BufferEntry> _recycled = new();
     private LinkedListNode<long>? _clockHand;
-    private readonly Dictionary<long, LoadOperation> _loads = new();
+    private readonly Dictionary<long, LoadOperation?> _loads = new();
     private readonly object _syncRoot = new();
     // Flushes serialize with maintenance. Cold reads/evictions never take this gate.
     private readonly object _flushGate = new();
@@ -55,7 +55,7 @@ internal sealed unsafe class StorageBufferPool : IDisposable
         _capacity = capacity;
     }
 
-    public int Capacity { get { lock (_syncRoot) { return _capacity; } } }
+    public int Capacity => Volatile.Read(ref _capacity);
     public int Count { get { lock (_syncRoot) { return _entries.Count; } } }
 
     private static void ValidateCapacity(int capacity)
@@ -86,7 +86,6 @@ internal sealed unsafe class StorageBufferPool : IDisposable
         while (true)
         {
             LoadOperation? waiting = null;
-            LoadOperation? loading = null;
             BufferEntry? frame = null;
             long? victim = null;
             lock (_syncRoot)
@@ -95,7 +94,9 @@ internal sealed unsafe class StorageBufferPool : IDisposable
                 if (TryPin(id, out hit)) { return new StoragePageHandle(pageId, hit!, this); }
                 if (_loads.TryGetValue(id, out waiting))
                 {
-                    // One completion per page fault; a waiter's task is created lazily.
+                    // Uncontended faults need only dictionary membership. Allocate a
+                    // completion on the first waiter, never reuse it across flights.
+                    if (waiting is null) { _loads[id] = waiting = new LoadOperation(); }
                     waiting.PrepareWait();
                     Interlocked.Increment(ref _writeBackWaits);
                 }
@@ -117,15 +118,15 @@ internal sealed unsafe class StorageBufferPool : IDisposable
                         if (frame is null) { WaitForIoLocked(); continue; }
                         victim = frame.ResidentId;
                     }
-                    loading = new LoadOperation();
-                    _loads.Add(id, loading);
+                    _loads.Add(id, null);
                     _activeIo++;
                 }
             }
-            if (waiting is not null) { waiting.Wait(); continue; }
+            if (waiting is not null) { waiting.Wait(overwrite); continue; }
 
             bool ownsLoadingFrame = victim is null;
             bool published = false;
+            Exception? readFailure = null;
             try
             {
                 if (victim is long oldId)
@@ -139,7 +140,14 @@ internal sealed unsafe class StorageBufferPool : IDisposable
                         Monitor.PulseAll(_syncRoot);
                     }
                 }
-                LoadPage(stream, pageId, frame!, overwrite);
+                try { LoadPage(stream, pageId, frame!, overwrite); }
+                // Only an incoming read failure belongs to readers of this page.
+                // Victim/WAL failures and another thread's interrupt require retry.
+                catch (Exception failure) when (failure is not ThreadInterruptedException)
+                {
+                    if (!overwrite) { readFailure = failure; }
+                    throw;
+                }
                 lock (_syncRoot)
                 {
                     frame!.ResidentId = id;
@@ -152,17 +160,17 @@ internal sealed unsafe class StorageBufferPool : IDisposable
                     frame.PublishPin();
                     _loadingFrames--;
                     ownsLoadingFrame = false;
-                    CompleteLoadLocked(id, loading!, null);
+                    CompleteLoadLocked(id, null);
                     published = true;
                     AssertInvariantsLocked();
                 }
                 return new StoragePageHandle(pageId, frame!, this);
             }
-            catch (Exception failure)
+            catch (Exception)
             {
                 if (published) { throw; }
-                IoCleanupStarting?.Invoke();
-                lock (_syncRoot)
+                EnterCleanup(out var interruption);
+                try
                 {
                     if (ownsLoadingFrame) { _loadingFrames--; RecycleLocked(frame!); }
                     else if (victim is not null)
@@ -170,9 +178,10 @@ internal sealed unsafe class StorageBufferPool : IDisposable
                         frame!.WriteInProgress = false;
                         frame.AllowPins(); // failed write leaves the old dirty mapping intact
                     }
-                    CompleteLoadLocked(id, loading!, failure);
+                    CompleteLoadLocked(id, readFailure);
                     AssertInvariantsLocked();
                 }
+                finally { ExitCleanup(interruption); }
                 throw;
             }
         }
@@ -230,11 +239,11 @@ internal sealed unsafe class StorageBufferPool : IDisposable
         }
     }
 
-    private void CompleteLoadLocked(long id, LoadOperation operation, Exception? failure)
+    private void CompleteLoadLocked(long id, Exception? failure)
     {
-        _loads.Remove(id);
+        _loads.Remove(id, out var operation);
         _activeIo--;
-        operation.Complete(failure);
+        operation?.Complete(failure);
         Monitor.PulseAll(_syncRoot);
     }
 
@@ -328,86 +337,77 @@ internal sealed unsafe class StorageBufferPool : IDisposable
         }
         finally
         {
-            IoCleanupStarting?.Invoke();
-            lock (_syncRoot)
+            EnterCleanup(out var interruption);
+            try
             {
                 if (!removed) { entry.WriteInProgress = false; entry.AllowPins(); }
                 _activeIo--;
                 Monitor.PulseAll(_syncRoot);
                 AssertInvariantsLocked();
             }
+            finally { ExitCleanup(interruption); }
         }
     }
 
     internal void Resize(int capacity, StorageStream stream)
     {
         ValidateCapacity(capacity);
-        int previous;
+        int previous = 0;
         lock (_flushGate)
         {
             var victims = new List<BufferEntry>();
-            lock (_syncRoot)
+            bool admissionClosed = false, drainingFinished = false;
+            try
             {
-                ObjectDisposedException.ThrowIf(_disposed, this);
-                _maintenance = true;
-                while (_activeIo != 0) { Monitor.Wait(_syncRoot); }
-                previous = _capacity;
-                int pinned = 0;
-                foreach (var entry in _entries.Values) { if (entry.PinCount > 0) { pinned++; } }
-                if (pinned > capacity)
+                lock (_syncRoot)
                 {
-                    _maintenance = false;
-                    Monitor.PulseAll(_syncRoot);
-                    throw new StorageIOException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageBufferPoolResizeStorageIO, capacity, pinned));
-                }
-                try
-                {
+                    ObjectDisposedException.ThrowIf(_disposed, this);
+                    _maintenance = true;
+                    admissionClosed = true;
+                    while (_activeIo != 0) { Monitor.Wait(_syncRoot); }
+                    previous = _capacity;
+                    int pinned = 0;
+                    foreach (var entry in _entries.Values) { if (entry.PinCount > 0) { pinned++; } }
+                    if (pinned > capacity)
+                    {
+                        throw new StorageIOException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageBufferPoolResizeStorageIO, capacity, pinned));
+                    }
                     int needed = Math.Max(0, _entries.Count - capacity);
-                    // Reserve the complete shrink before I/O: later cached pins cannot
-                    // turn a previously valid shrink into an over-capacity state.
+                    // Reserve the entire shrink before releasing mapping ownership.
                     while (victims.Count < needed)
                     {
                         var victim = ReserveVictimLocked();
                         if (victim is not null) { victims.Add(victim); }
                         else { throw new StorageIOException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageBufferPoolResizeStorageIO, capacity, _entries.Count - victims.Count)); }
                     }
+                    drainingFinished = true;
                 }
-                catch
-                {
-                    foreach (var entry in victims) { entry.WriteInProgress = false; entry.AllowPins(); }
-                    _maintenance = false;
-                    Monitor.PulseAll(_syncRoot);
-                    throw;
-                }
-            }
-            try
-            {
                 foreach (var entry in victims)
                 {
                     long id = entry.ResidentId;
                     WriteVictim(stream, id, entry);
                     lock (_syncRoot) { DetachLocked(id, entry); RecycleLocked(entry); }
                 }
-                lock (_syncRoot) { _capacity = capacity; }
-            }
-            catch
-            {
-                lock (_syncRoot) { _capacity = Math.Max(capacity, _entries.Count); }
-                throw;
+                lock (_syncRoot) { Volatile.Write(ref _capacity, capacity); }
             }
             finally
             {
-                IoCleanupStarting?.Invoke();
-                lock (_syncRoot)
+                if (admissionClosed)
                 {
-                    foreach (var entry in victims)
+                    EnterCleanup(out var interruption);
+                    try
                     {
-                        if (!entry.IsRecycled) { entry.WriteInProgress = false; entry.AllowPins(); }
+                        if (drainingFinished) { Volatile.Write(ref _capacity, Math.Max(capacity, _entries.Count)); }
+                        foreach (var entry in victims)
+                        {
+                            if (!entry.IsRecycled) { entry.WriteInProgress = false; entry.AllowPins(); }
+                        }
+                        while (_recycled.Count > _capacity - _entries.Count) { _recycled.Pop(); }
+                        _maintenance = false;
+                        Monitor.PulseAll(_syncRoot);
+                        AssertInvariantsLocked();
                     }
-                    while (_recycled.Count > _capacity - _entries.Count) { _recycled.Pop(); }
-                    _maintenance = false;
-                    Monitor.PulseAll(_syncRoot);
-                    AssertInvariantsLocked();
+                    finally { ExitCleanup(interruption); }
                 }
             }
         }
@@ -437,7 +437,14 @@ internal sealed unsafe class StorageBufferPool : IDisposable
     {
         lock (_flushGate)
         {
-            FlushSnapshot(stream, SnapshotDirty(int.MaxValue, false), false);
+            while (true)
+            {
+                int written = FlushSnapshot(stream, SnapshotDirty(int.MaxValue, false), false, confirmReadPins: true);
+                if (DirtyPageCount == 0) { break; }
+                // Retry newer versions after I/O, but refuse if every remaining
+                // image was skipped. A sharp checkpoint must retain their WAL.
+                if (written == 0) { throw new StorageIOException(ErrorMessages.PinnedDirtyPages); }
+            }
             stream.Flush();
         }
     }
@@ -462,7 +469,7 @@ internal sealed unsafe class StorageBufferPool : IDisposable
         }
     }
 
-    private int FlushSnapshot(StorageStream stream, List<KeyValuePair<long, BufferEntry>>? dirty, bool skipPinned)
+    private int FlushSnapshot(StorageStream stream, List<KeyValuePair<long, BufferEntry>>? dirty, bool skipPinned, bool confirmReadPins = false)
     {
         if (dirty is null) { return 0; }
         byte[] image = ArrayPool<byte>.Shared.Rent(Page.Size);
@@ -472,7 +479,8 @@ internal sealed unsafe class StorageBufferPool : IDisposable
             for (int index = 0; index < dirty.Count; index++)
             {
                 var pair = dirty[index];
-                if (FlushEntry(stream, pair.Key, pair.Value, image, skipPinned)) { written++; }
+                if (FlushEntry(stream, pair.Key, pair.Value, image, skipPinned)
+                    || (confirmReadPins && FlushReadPinnedEntry(stream, pair.Key, pair.Value, image))) { written++; }
                 if ((index + 1) % flushBatchPages == 0 && index + 1 < dirty.Count) { Thread.Yield(); }
             }
         }
@@ -491,15 +499,14 @@ internal sealed unsafe class StorageBufferPool : IDisposable
                 if (!_entries.TryGetValue(id, out var entry) || !ReferenceEquals(entry, expected) ||
                     !entry.IsDirty || (skipPinned && entry.PinCount != 0)) { return false; }
                 if (entry.WriteInProgress) { WaitForIoLocked(); continue; }
-                version = Volatile.Read(ref entry.Version);
-                if (FlushCopyHalfway is null) { entry.Buffer.AsSpan().CopyTo(image); }
-                else
+                if (!entry.TryReserve()) { return false; }
+                try
                 {
-                    entry.Buffer.AsSpan(0, Page.Size / 2).CopyTo(image);
-                    FlushCopyHalfway();
-                    entry.Buffer.AsSpan(Page.Size / 2).CopyTo(image.AsSpan(Page.Size / 2));
+                    version = Volatile.Read(ref entry.Version);
+                    CopyImage(entry, image);
+                    entry.WriteInProgress = true;
                 }
-                entry.WriteInProgress = true;
+                finally { entry.AllowPins(); }
                 break;
             }
         }
@@ -510,12 +517,62 @@ internal sealed unsafe class StorageBufferPool : IDisposable
         }
         finally
         {
-            lock (_syncRoot)
+            EnterCleanup(out var interruption);
+            try
             {
                 expected.WriteInProgress = false;
                 Monitor.PulseAll(_syncRoot);
                 AssertFrameLocked(id, expected);
             }
+            finally { ExitCleanup(interruption); }
+        }
+    }
+
+    // Full flushes also need stable read-pinned pages before a sharp checkpoint
+    // discards WAL. Keep an extra pin and an I/O lease, and confirm the private
+    // copy through D1. Mutable bytes qualify only for the serialized owning scope.
+    private bool FlushReadPinnedEntry(StorageStream stream, long id, BufferEntry expected, byte[] image)
+    {
+        lock (_syncRoot)
+        {
+            if (!_entries.TryGetValue(id, out var entry) || !ReferenceEquals(entry, expected)
+                || !entry.IsDirty || entry.WriteInProgress || !TryPinEntry(id, entry)) { return false; }
+            entry.WriteInProgress = true;
+        }
+        try
+        {
+            while (true)
+            {
+                if (!expected.TryBeginRead(out long sequence)) { return false; }
+                long version = Volatile.Read(ref expected.Version);
+                CopyImage(expected, image);
+                if (!expected.IsUnchangedSince(sequence) || version != Volatile.Read(ref expected.Version)) { continue; }
+                lock (IoGate(id)) { WriteImage(stream, (PageId)id, expected, image, version); }
+                return true;
+            }
+        }
+        finally
+        {
+            EnterCleanup(out var interruption);
+            try
+            {
+                expected.WriteInProgress = false;
+                expected.ReleasePin();
+                Monitor.PulseAll(_syncRoot);
+                AssertFrameLocked(id, expected);
+            }
+            finally { ExitCleanup(interruption); }
+        }
+    }
+
+    private void CopyImage(BufferEntry entry, byte[] image)
+    {
+        if (FlushCopyHalfway is null) { entry.Buffer.AsSpan().CopyTo(image); }
+        else
+        {
+            entry.Buffer.AsSpan(0, Page.Size / 2).CopyTo(image);
+            FlushCopyHalfway();
+            entry.Buffer.AsSpan(Page.Size / 2).CopyTo(image.AsSpan(Page.Size / 2));
         }
     }
 
@@ -572,7 +629,31 @@ internal sealed unsafe class StorageBufferPool : IDisposable
     }
 
     private void BeginIo() { lock (_syncRoot) { WaitForAdmissionLocked(); _activeIo++; } }
-    private void EndIo() { lock (_syncRoot) { _activeIo--; Monitor.PulseAll(_syncRoot); } }
+    private void EndIo()
+    {
+        EnterCleanup(out var interruption);
+        try { _activeIo--; Monitor.PulseAll(_syncRoot); }
+        finally { ExitCleanup(interruption); }
+    }
+
+    // Resource release must finish even if Monitor.Enter observes an interrupt.
+    // Re-raise it only after bookkeeping and reservations have been released.
+    private void EnterCleanup(out ThreadInterruptedException? interruption)
+    {
+        IoCleanupStarting?.Invoke();
+        interruption = null;
+        while (true)
+        {
+            try { Monitor.Enter(_syncRoot); return; }
+            catch (ThreadInterruptedException failure) { interruption ??= failure; }
+        }
+    }
+
+    private void ExitCleanup(ThreadInterruptedException? interruption)
+    {
+        Monitor.Exit(_syncRoot);
+        if (interruption is not null) { ExceptionDispatchInfo.Capture(interruption).Throw(); }
+    }
 
     internal void CheckInvariants() { lock (_syncRoot) { CheckInvariantsLocked(); } }
 
@@ -583,14 +664,20 @@ internal sealed unsafe class StorageBufferPool : IDisposable
             lock (_syncRoot)
             {
                 _maintenance = true;
-                while (_activeIo != 0) { Monitor.Wait(_syncRoot); }
-                Volatile.Write(ref _disposed, true);
-                _entries.Clear();
-                _accessOrder.Clear();
-                _clockHand = null;
-                _recycled.Clear();
-                _maintenance = false;
-                Monitor.PulseAll(_syncRoot);
+                try
+                {
+                    while (_activeIo != 0) { Monitor.Wait(_syncRoot); }
+                    Volatile.Write(ref _disposed, true);
+                    _entries.Clear();
+                    _accessOrder.Clear();
+                    _clockHand = null;
+                    _recycled.Clear();
+                }
+                finally
+                {
+                    _maintenance = false;
+                    Monitor.PulseAll(_syncRoot);
+                }
             }
         }
     }
@@ -639,7 +726,11 @@ internal sealed unsafe class StorageBufferPool : IDisposable
         private TaskCompletionSource? _completion;
         private ExceptionDispatchInfo? _failure;
         internal void PrepareWait() => _completion ??= new(TaskCreationOptions.RunContinuationsAsynchronously);
-        internal void Wait() { _completion!.Task.GetAwaiter().GetResult(); _failure?.Throw(); }
+        internal void Wait(bool overwrite)
+        {
+            _completion!.Task.GetAwaiter().GetResult();
+            if (!overwrite) { _failure?.Throw(); }
+        }
         internal void Complete(Exception? failure)
         {
             if (failure is not null) { _failure = ExceptionDispatchInfo.Capture(failure); }
@@ -880,6 +971,7 @@ internal sealed unsafe class StorageBufferPool : IDisposable
         private int _writeDepth;
         // Only the owning writer reads this while updating a record-space hint.
         internal bool HasNestedWriter => _writeDepth > 1;
+        internal bool HasWriter => Volatile.Read(ref _writeDepth) > 0;
         private int _writeEpoch;
         private int _restoring;
         private int _restoreEpoch;
@@ -934,6 +1026,20 @@ internal sealed unsafe class StorageBufferPool : IDisposable
             return (sequence & 1) == 0 ? sequence : WaitForWriter();
         }
 
+        // A space search can choose a different page rather than wait for a writer
+        // that acquired ownership after its transaction-lock check.
+        internal bool TryBeginRead(out long sequence)
+        {
+            sequence = Volatile.Read(ref _restoreSequence);
+            if ((sequence & 1) == 0) { return true; }
+            lock (_dirtySync)
+            {
+                RetireCompletedWriter();
+                sequence = Volatile.Read(ref _restoreSequence);
+                return (sequence & 1) == 0 || (_restoring == 0 && CanReadOwnWrite());
+            }
+        }
+
         /// <summary>
         /// Returns whether no write boundary ran since <paramref name="sequence"/> was read
         /// (<see cref="BeginRead"/>): every load the read made before this call happened before the
@@ -947,6 +1053,7 @@ internal sealed unsafe class StorageBufferPool : IDisposable
         }
 
         internal int BeginWrite(object owner) => BeginWriteCore(owner, restoring: false);
+        internal void InvalidateReadPermission() => Interlocked.Add(ref _restoreSequence, 2);
 
         private int BeginWriteCore(object owner, bool restoring)
         {
@@ -957,6 +1064,10 @@ internal sealed unsafe class StorageBufferPool : IDisposable
                 {
                     Monitor.Wait(_dirtySync);
                     RetireCompletedWriter();
+                }
+                if (!restoring && _writer is not null && _writerThread != Environment.CurrentManagedThreadId)
+                {
+                    throw new StorageTransactionException(ErrorMessages.MixedThreadMutableScopes);
                 }
                 // Exclude own-thread reads before publishing the restore boundary.
                 if (restoring) { Volatile.Write(ref _restoring, 1); }
@@ -984,6 +1095,25 @@ internal sealed unsafe class StorageBufferPool : IDisposable
             lock (_dirtySync)
             {
                 if (_writeEpoch == epoch && ReferenceEquals(_writer, previousOwner)) { _writer = owner; }
+            }
+        }
+
+        // A sole handle can move to a serialized continuation. Its next Page access
+        // transfers own-read permission before exposing writable memory. Nested scopes
+        // must stay on one thread; otherwise an older scope could accept a torn copy.
+        internal void AccessWriter(int epoch)
+        {
+            int thread = Environment.CurrentManagedThreadId;
+            if (Volatile.Read(ref _writerThread) == thread) { return; }
+            lock (_dirtySync)
+            {
+                if (_writer is null || epoch != _writeEpoch) { return; }
+                if (_writeDepth != 1 || _restoring != 0)
+                {
+                    throw new StorageTransactionException(ErrorMessages.MixedThreadMutableScopes);
+                }
+                Volatile.Write(ref _writerThread, thread);
+                Interlocked.Add(ref _restoreSequence, 2);
             }
         }
 
@@ -1042,12 +1172,12 @@ internal sealed unsafe class StorageBufferPool : IDisposable
             bool observed = false;
             while (true)
             {
+                lock (_dirtySync) { RetireCompletedWriter(); }
                 // Capture before permission: a restore starting after the check
                 // must invalidate this copy, never supply it with a newer token.
                 long sequence = Volatile.Read(ref _restoreSequence);
                 if ((sequence & 1) == 0) { return sequence; }
-                if (Volatile.Read(ref _writerThread) == Environment.CurrentManagedThreadId
-                    && Volatile.Read(ref _restoring) == 0)
+                if (Volatile.Read(ref _restoring) == 0 && CanReadOwnWrite())
                 {
                     OwnReadAccepted?.Invoke();
                     return sequence;
@@ -1057,9 +1187,17 @@ internal sealed unsafe class StorageBufferPool : IDisposable
                     ReadWaitStarted?.Invoke();
                     observed = true;
                 }
-                lock (_dirtySync) { RetireCompletedWriter(); }
                 spinner.SpinOnce();
             }
+        }
+
+        private bool CanReadOwnWrite()
+        {
+            if (Volatile.Read(ref _writerThread) == Environment.CurrentManagedThreadId) { return true; }
+            if (!StoragePageHandle.OwnsReadScope(this, Volatile.Read(ref _writeEpoch))) { return false; }
+            int depth = Volatile.Read(ref _writeDepth);
+            if (depth > 1) { throw new StorageTransactionException(ErrorMessages.MixedThreadMutableScopes); }
+            return depth == 1;
         }
 
         private sealed class DebugView

@@ -11,18 +11,23 @@ using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Storage.Units;
 using Shouldly;
 using Xunit;
+using Xunit.Abstractions;
 
 namespace Assimalign.Cohesion.Database.Storage.Tests;
 
 [Collection(StorageRaceCollection.Name)]
 public sealed class StorageReviewTests
 {
+    private readonly ITestOutputHelper _output;
+
+    public StorageReviewTests(ITestOutputHelper output) => _output = output;
+
     [Fact(DisplayName = "Cohesion Test [Storage] - Writer rendezvous: repeat all read paths and serialized continuation")]
     public async Task OpenPageForWrite_RepeatedThreadChanges_ShouldExerciseEveryReadPath()
     {
         // Arrange
         var elapsed = Stopwatch.StartNew();
-        var counts = new int[4];
+        var counts = new int[5];
 
         // Act
         do
@@ -31,7 +36,8 @@ public sealed class StorageReviewTests
             await OpenPageForWrite_CrossThreadNestedScope_ShouldRejectBeforeAllReadPaths("direct"); counts[0]++;
             await OpenPageForWrite_CrossThreadNestedScope_ShouldRejectBeforeAllReadPaths("try"); counts[1]++;
             await OpenPageForWrite_CrossThreadNestedScope_ShouldRejectBeforeAllReadPaths("scan"); counts[2]++;
-            await OpenPageForWrite_ContinuationThread_ShouldTransferItsReadPermission(); counts[3]++;
+            await OpenPageForWrite_ContinuationThread_ShouldTransferItsReadPermission(true); counts[3]++;
+            await OpenPageForWrite_ContinuationThread_ShouldTransferItsReadPermission(false); counts[4]++;
         }
         while (elapsed.Elapsed < TimeSpan.FromSeconds(1) || counts[0] < 5);
 
@@ -127,6 +133,7 @@ public sealed class StorageReviewTests
             int images = storage.Log.ReadAll().Count(record => record.Lsn > before && record.Type == JournalRecordType.FullPageImage);
             int touched = transaction.PreImages.Count;
             transaction.Rollback();
+            _output.WriteLine($"Full pages={count}; attempt={attempt}; pre-images={touched}; full-page images={images}.");
             touched.ShouldBeLessThanOrEqualTo(2);
             images.ShouldBeLessThanOrEqualTo(2);
         }
@@ -233,12 +240,15 @@ public sealed class StorageReviewTests
         finally { resume.Set(); await nested.WaitAsync(TimeSpan.FromSeconds(30)); }
 
         // Assert
+        _output.WriteLine($"Read {kind}: first={bytes[0]:X2}; last={bytes[^1]:X2}; nested failure={failure?.GetType().Name ?? "none"}.");
         bytes.ShouldAllBe(value => value == 0x11);
         failure.ShouldBeOfType<StorageTransactionException>();
     }
 
-    [Fact(DisplayName = "Cohesion Test [Storage] - Mutable scopes: a serialized continuation can read after accessing its handle")]
-    public async Task OpenPageForWrite_ContinuationThread_ShouldTransferItsReadPermission()
+    [Theory(DisplayName = "Cohesion Test [Storage] - Mutable scopes: a serialized continuation can read through its handle scope")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task OpenPageForWrite_ContinuationThread_ShouldTransferItsReadPermission(bool accessPage)
     {
         // Arrange
         using var storage = TornStorage.Create();
@@ -250,21 +260,29 @@ public sealed class StorageReviewTests
         }
         using var transaction = storage.BeginTransaction();
         using var writer = storage.OpenPageForWrite(transaction, target.PageId);
-        writer.Entry.ReadWaitStarted = () => throw new InvalidOperationException("self wait");
+        Task? continuation = null;
         try
         {
             // Act: guaranteed different thread, as after an await that moves the handle.
-            await DedicatedTestTask.Run(() =>
+            continuation = DedicatedTestTask.Run(() =>
             {
-                writer.Page.AsBodySpan().Slice(0, 64).Fill(0x22);
-                writer.MarkDirty();
-                storage.ReadBytes(target.PageId, target.SlotIndex).ShouldAllBe(value => value == 0x22);
-            }).WaitAsync(TimeSpan.FromSeconds(30));
+                if (accessPage)
+                {
+                    writer.Page.AsBodySpan().Slice(0, 64).Fill(0x22);
+                    writer.MarkDirty();
+                }
+                storage.ReadBytes(target.PageId, target.SlotIndex).ShouldAllBe(value => value == (accessPage ? 0x22 : 0));
+            });
+            await continuation.WaitAsync(TimeSpan.FromSeconds(10));
         }
-        finally { writer.Entry.ReadWaitStarted = null; writer.Dispose(); }
+        finally
+        {
+            writer.Dispose();
+            if (continuation is { IsCompleted: false }) { await continuation.WaitAsync(TimeSpan.FromSeconds(30)); }
+        }
 
         // Assert
         transaction.Commit();
-        storage.ReadBytes(target.PageId, target.SlotIndex).ShouldAllBe(value => value == 0x22);
+        storage.ReadBytes(target.PageId, target.SlotIndex).ShouldAllBe(value => value == (accessPage ? 0x22 : 0));
     }
 }

@@ -21,6 +21,10 @@ using Assimalign.Cohesion.Database.Storage.Units;
 /// is a mutable scope: dispose it promptly after the writes, and never mutate it after the
 /// transaction completes. A handle obtained with <see cref="StoragePageManager.GetPage"/>
 /// is a read pin; its native page view must not be used to bypass transactional writes.
+/// Nested mutable handles for one page must stay on the same thread. A sole mutable
+/// handle may move to a continuation thread; its scope also permits reads through
+/// Storage there. Never use a mutable handle or its borrowed page memory
+/// concurrently on multiple threads. Disposal may run on another thread.
 ///
 /// <example>
 /// <code>
@@ -35,6 +39,7 @@ using Assimalign.Cohesion.Database.Storage.Units;
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Storage.StoragePageHandle.DebugView))]
 public sealed class StoragePageHandle : IDisposable
 {
+    private static readonly AsyncLocal<MutableScope?> _mutableScope = new(ScopeChanged);
     private readonly StorageBufferPool _pool;
     internal readonly StorageBufferPool.BufferEntry Entry;
     private int _disposed;
@@ -61,6 +66,7 @@ public sealed class StoragePageHandle : IDisposable
     /// <see cref="ObjectDisposedException"/> when the page is read through a disposed
     /// handle; release builds do not check.
     /// </remarks>
+    /// <exception cref="StorageTransactionException">A mutable handle moved threads while another mutable scope for the page remains open.</exception>
     public Page Page
     {
         get
@@ -70,6 +76,7 @@ public sealed class StoragePageHandle : IDisposable
             // reference through a released handle is a use-after-unpin.
             ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
 #endif
+            if (_writeEpoch != 0) { Entry.AccessWriter(_writeEpoch); }
             return Entry.Page;
         }
     }
@@ -99,6 +106,37 @@ public sealed class StoragePageHandle : IDisposable
         else { Entry.AdoptWriter(_writeEpoch, this, owner); }
     }
 
+    // Only public raw mutable handles need permission to flow through an await.
+    // Typed synchronous record writes and ordinary pins allocate no ambient scope.
+    internal void EnterMutableScope() => _mutableScope.Value = new MutableScope(this, ActiveScope(_mutableScope.Value));
+
+    internal static bool OwnsReadScope(StorageBufferPool.BufferEntry entry, int epoch)
+    {
+        var scope = _mutableScope.Value;
+        while (scope is not null)
+        {
+            if (scope.IsSoleContext && scope.TryGetHandle(out var handle)
+                && ReferenceEquals(handle.Entry, entry) && handle._writeEpoch == epoch) { return true; }
+            scope = scope.Previous;
+        }
+        return false;
+    }
+
+    private static MutableScope? ActiveScope(MutableScope? scope)
+    {
+        while (scope is not null && !scope.TryGetHandle(out _)) { scope = scope.Previous; }
+        return scope;
+    }
+
+    private static void ScopeChanged(AsyncLocalValueChangedArgs<MutableScope?> change)
+    {
+        // A forked reader inherits ExecutionContext too. It must not become an own
+        // reader while its writer's context is still running. An awaited continuation
+        // is the sole active context and can read without binding to a physical thread.
+        for (var scope = change.PreviousValue; scope is not null; scope = scope.Previous) { scope.ChangeContexts(-1); }
+        for (var scope = change.CurrentValue; scope is not null; scope = scope.Previous) { scope.ChangeContexts(1); }
+    }
+
     /// <summary>
     /// Releases the pin. Exactly one release happens per handle, even when two threads dispose
     /// it at once.
@@ -110,6 +148,43 @@ public sealed class StoragePageHandle : IDisposable
         {
             if (_writeEpoch != 0) { Entry.EndWrite(_writeEpoch); }
             _pool.Unpin(Entry);
+            var scope = _mutableScope.Value;
+            var active = ActiveScope(scope);
+            if (!ReferenceEquals(active, scope)) { _mutableScope.Value = active; }
+        }
+    }
+
+    [global::System.Diagnostics.DebuggerDisplay("MutableScope")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(MutableScope.DebugView))]
+    private sealed class MutableScope
+    {
+        private readonly WeakReference<StoragePageHandle> _handle;
+        private int _activeContexts;
+        internal readonly MutableScope? Previous;
+        internal bool IsSoleContext => Volatile.Read(ref _activeContexts) == 1;
+
+        internal MutableScope(StoragePageHandle handle, MutableScope? previous)
+        {
+            _handle = new(handle);
+            Previous = previous;
+        }
+
+        // Cross-thread disposal can leave this context's old node in place. Keep
+        // no strong reference to its handle/frame/pool while awaiting the next access.
+        internal bool TryGetHandle(out StoragePageHandle handle)
+            => _handle.TryGetTarget(out handle!) && Volatile.Read(ref handle._disposed) == 0;
+
+        internal void ChangeContexts(int difference)
+        {
+            Interlocked.Add(ref _activeContexts, difference);
+            // Invalidate a copy that crossed a change in permission. This callback
+            // takes no monitor and cannot wait or throw during context transitions.
+            if (_handle.TryGetTarget(out var handle)) { handle.Entry.InvalidateReadPermission(); }
+        }
+
+        private sealed class DebugView
+        {
+            public DebugView(MutableScope value) { _ = value; }
         }
     }
 

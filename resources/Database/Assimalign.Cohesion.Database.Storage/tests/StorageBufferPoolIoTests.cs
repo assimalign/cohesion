@@ -225,27 +225,37 @@ public sealed partial class StorageBufferPoolIoTests
     }
 
     [Fact(DisplayName = "Cohesion Test [Storage] - Buffer pool I/O: a write-back audit can read the prior physical image during resize (#1541)")]
-    public void Resize_AuditReadsStoredImage_ShouldReenterItsOwnIoGate()
+    public async Task Resize_AuditReadsStoredImage_ShouldReenterItsOwnIoGate()
     {
-        using var stream = StorageStream.FromInMemory();
-        stream.SetLength(2L * Page.Size);
-        using var pool = new StorageBufferPool(2);
-        for (long id = 0; id < 2; id++)
+        // The worker owns teardown as well, so a gate deadlock cannot defeat the
+        // caller's bounded wait by blocking its pool.Dispose during unwinding.
+        await DedicatedTestTask.Run(() =>
         {
-            using var handle = pool.Pin((PageId)id, stream);
-            var page = handle.Page; page.Id = id; page.Type = PageType.Data; page.Lsn = 1;
-            handle.MarkDirty();
-        }
-        int audits = 0;
-        pool.WriteBackAudit = (id, _) =>
-        {
-            pool.TryReadStored((PageId)id, stream, new byte[Page.Size]).ShouldBeTrue();
-            audits++;
-        };
-        pool.Resize(1, stream);
-        audits.ShouldBe(1);
-        pool.Capacity.ShouldBe(1);
-        pool.CheckInvariants();
+            // Arrange
+            using var stream = StorageStream.FromInMemory();
+            stream.SetLength(2L * Page.Size);
+            using var pool = new StorageBufferPool(2);
+            for (long id = 0; id < 2; id++)
+            {
+                using var handle = pool.Pin((PageId)id, stream);
+                var page = handle.Page; page.Id = id; page.Type = PageType.Data; page.Lsn = 1;
+                handle.MarkDirty();
+            }
+            int audits = 0;
+            pool.WriteBackAudit = (id, _) =>
+            {
+                pool.TryReadStored((PageId)id, stream, new byte[Page.Size]).ShouldBeTrue();
+                audits++;
+            };
+
+            // Act
+            pool.Resize(1, stream);
+
+            // Assert
+            audits.ShouldBe(1);
+            pool.Capacity.ShouldBe(1);
+            pool.CheckInvariants();
+        }).WaitAsync(TimeSpan.FromSeconds(30));
     }
 
     [Theory(DisplayName = "Cohesion Test [Storage] - Buffer pool I/O: failed foreground eviction preserves the dirty page and its original exception (#1541)")]

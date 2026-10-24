@@ -299,10 +299,11 @@ public sealed class CrashRecoveryTests
         var first = storage.BeginTransaction();
         var second = storage.BeginTransaction();
 
-        storage.Insert(first, Text("first"));
+        var target = storage.Insert(first, Text("first"));
 
-        // Act / Assert: the second transaction hits the page lock held by the first.
-        Should.Throw<StorageTransactionException>(() => storage.Insert(second, Text("second")));
+        // Act / Assert: explicit writes still refuse a rival's lock. Insert's
+        // capacity search now skips locked targets and can select another page.
+        Should.Throw<StorageTransactionException>(() => storage.OpenPageForWrite(second, target.PageId));
 
         first.Commit();
 
