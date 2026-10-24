@@ -178,7 +178,7 @@ public sealed partial class StorageBufferPoolIoTests
             {
                 resume.Set();
                 returning.Wait(TimeSpan.FromSeconds(30)).ShouldBeTrue();
-                SpinWait.SpinUntil(() => (actor.ThreadState & ThreadState.WaitSleepJoin) != 0, TimeSpan.FromSeconds(30)).ShouldBeTrue();
+                SpinWait.SpinUntil(() => (actor.ThreadState & System.Threading.ThreadState.WaitSleepJoin) != 0, TimeSpan.FromSeconds(30)).ShouldBeTrue();
                 // Act: the cleanup lock is contended, not the I/O callback.
                 actor.Interrupt();
             }
