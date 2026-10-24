@@ -768,6 +768,11 @@ SQL Server's and InnoDB's lock managers; letting a parent row's shared requests 
 exclusive one again, a victim rule that spares the cascade, or a cascade lock order without the
 cycle required an owner decision. D2 chooses the unwritten cascade release/wait/retain/restart
 protocol, using #1668 statement marks, while preserving queue fairness outside soft-cycle repair.
+The 2026-10-24 owner decision bounds this protocol per cascade statement: the first two
+refusals release new attempt grants; from the third refusal onward the statement retains
+its closure grants and queues normally on each refused resource. Completed wait grants
+remain retained throughout. This prevents repeated release/rebuild from admitting hot child
+inserters indefinitely; it does not suppress genuine held-lock deadlocks or change victims.
 The shapes above remain the before/after measurement workloads.
 
 **A wait still queued at the threshold is reported (#1390).** `SlowLockWait` is written as a wait
@@ -1190,11 +1195,11 @@ Foreign-storage transaction refusals are operational failures (#1277), including
 run by a statement for a deferred request. They are retained for the next worker checkpoint
 call; only ordinary storage-bracket contention is retried as busy.
 
-**A checkpoint is refused inside a statement apply.** The semaphore is not reentrant, so a
-checkpoint asked for from an `ApplyStatementAsync` callback would wait forever for the semaphore
+**Maintenance is refused inside a statement apply.** The semaphore is not reentrant, so a
+checkpoint or version purge asked for from an `ApplyStatementAsync` callback would wait forever for the semaphore
 its own caller holds. The coordinator marks the apply's asynchronous flow (an `AsyncLocal`) and
-`Checkpoint` and `TryCheckpoint` throw `StorageTransactionException` there instead; before the
-review the call hung.
+`Checkpoint`, `TryCheckpoint` and `RunVersionPurgePass` throw `StorageTransactionException`
+at entry, before undo or pruning work; before the review the purge call hung with an index pruner.
 
 Logical undo, pruning, and recovery scrub apply at most 64 record/index mutations
 per physical bracket. A blob transaction can contain many thousands of chunks;
