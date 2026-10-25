@@ -256,8 +256,9 @@ application functions. META and lazy COALESCE/IFMISSING/IFNULL/IFMISSINGORNULL r
 forms. NULL/MISSING truth rules, Unicode operations, size limits, transaction clocks, native
 arithmetic/domain codes, index selection and rollback semantics retain the existing contract.
 External callback/result/accumulator failures use CD05017; structured diagnostic messages remain
-unprefixed and wire formatting adds the code once. Database, storage, I/O, timeout and statement
-cancellation preserve their established boundary behavior. No SQLSTATE or format/version bump.
+unprefixed and wire formatting adds the code once. DatabaseException, out-of-memory, insufficient
+stack and actual statement cancellation retain their identity; application I/O, storage and timeout
+exceptions use CD05017 and leave the wire session reusable. No SQLSTATE or format/version bump.
 
 Typed callback JSON parameters accept arrays and objects, not primitive JSON values. Wrong-kind
 literals fail planning, while incompatible stored values yield scalar NULL or skipped aggregate
