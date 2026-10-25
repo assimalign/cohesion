@@ -34,6 +34,13 @@ and owed full purge passes on the pump. They allocate nothing and dispatch no la
 index stubs dispatch only through their internal test hook until a real maintenance body exists.
 A detached write-back completion wakes collection without advancing other databases' interval;
 the next regular write-back deadline remains absolute, including a stuck-detection timeout.
+The completion-pacing regression holds a real completed lane through `AfterDatabase`, then
+owes new dirty peer pages after their lanes have settled and snapshots their exact two visits
+on the collecting pump pass. `BeforeDatabase` forces idle work due, including follow-up batches;
+using it here or reading live visit counts after a delayed test continuation confuses that
+injected work or a later regular interval with the completion being tested. Both base and
+review implementations preserve the same pacing; the test retains the exact count and also
+requires the dirty peers to remain unattempted on the completion pass.
 Work deferred by capacity remains owed and can use reclaimed slots on these early wakes. Runner parking and result publication
 share one critical section. Provisional and published SQL/Key-Value data file sets keep the same
 lane identity; a published database waits for an outstanding provisional catalog flush before
