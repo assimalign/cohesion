@@ -10,6 +10,24 @@ namespace Assimalign.Cohesion.Database.Graph.Tests;
 
 public sealed class GraphQueryMemoryTests
 {
+    [Fact(DisplayName = "Cohesion Test [Graph] - Shared small immutable leaves consume one value grant (w11 review)")]
+    public void RetainValue_SharedSmallLeaves_ShouldAccountTheirStorageOnce()
+    {
+        // Arrange
+        var memory = new GraphQueryMemory(65536);
+        using var owner = new GraphMemoryOwner(memory);
+        var shared = new string('s', 128);
+        var values = Enumerable.Repeat<object?>(shared, 1000).ToArray();
+
+        // Act
+        owner.RetainValue(values, CancellationToken.None);
+
+        // Assert
+        memory.PeakRetainedBytes.ShouldBeLessThan(32_000);
+        owner.ReleaseValue(values);
+        memory.RetainedBytes.ShouldBe(0);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Graph] - Cached accounting buffers contain no values and are discarded on session disposal (#1533)")]
     public void Dispose_CachedWorkspace_ShouldKeepNoValueReferences()
     {

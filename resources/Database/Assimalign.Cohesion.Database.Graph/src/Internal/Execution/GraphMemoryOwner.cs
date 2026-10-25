@@ -41,10 +41,10 @@ internal sealed class GraphMemoryOwner : IDisposable
         if (!GraphValueMemory.IsTracked(value) && value is not (GraphNode or GraphRelationship)) { Add(GraphValueMemory.Shallow(value)); return; }
         ObjectDisposedException.ThrowIf(_memory is null, this);
         _values ??= _memory.RentOwner();
-        bool added = !_values.TryGetValue(value, out int count);
-        if (added) { Add(64); }
-        try { _memory.RetainValue(value, token); }
-        catch { if (added) { Release(64); } throw; }
+        _values.TryGetValue(value, out int count);
+        // The statement ledger's entry grant includes root-owner bookkeeping. Charging
+        // another entry here counted the same retained container's accounting twice.
+        _memory.RetainValue(value, token);
         _values[value] = checked(count + 1);
     }
 
@@ -54,7 +54,7 @@ internal sealed class GraphMemoryOwner : IDisposable
         if (!GraphValueMemory.IsTracked(value) && value is not (GraphNode or GraphRelationship)) { Release(GraphValueMemory.Shallow(value)); return; }
         ObjectDisposedException.ThrowIf(_memory is null, this);
         int count = _values![value];
-        if (count == 1) { _values.Remove(value); Release(64); }
+        if (count == 1) { _values.Remove(value); }
         else { _values[value] = count - 1; }
         _memory.ReleaseValue(value);
     }

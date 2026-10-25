@@ -401,7 +401,9 @@ public sealed partial class GraphDatabase : DatabaseInstance
     /// <exception cref="DatabaseException">
     /// The traversal's depth or direction is invalid (<c>CG05001</c>); the session belongs to
     /// another database (<c>CG07005</c>), it is closed (also while the nodes are yielded), another
-    /// statement holds it, or its transaction refuses statements (<c>CG04007</c>).
+    /// statement holds it, its transaction refuses statements (<c>CG04007</c>), a query limit is
+    /// invalid (<c>CG08021</c>), or retained memory / physical work exhausts the configured
+    /// ceiling (<c>CG05020</c> / <c>CG05004</c>). Default work is capped at 1,000,000 units.
     /// </exception>
     /// <exception cref="DatabaseOfflineException">The database is offline (<c>CG06012</c>, #1243).</exception>
     public async IAsyncEnumerable<GraphNode> TraverseAsync(GraphDatabaseSession session, GraphTraversal traversal,

@@ -24,10 +24,9 @@ internal static class GraphValueMemory
     internal static bool IsTracked(object value)
         => value switch
         {
-            // Small immutable leaves cost less to account directly than to index by identity.
-            // Shared containers and large leaves still acquire reference-counted ownership.
-            string text => text.Length > 128,
-            byte[] bytes => bytes.Length > 256,
+            // Small strings and byte arrays can be shared by many retained rows too.
+            // Count their storage once, just like containers, rather than per reference.
+            string or byte[] => true,
             _ => value is IList or IReadOnlyList<GraphNode> or IReadOnlyList<GraphRelationship> or IReadOnlyDictionary<string, object?> or GraphPath or GraphOrderComparer.PreparedMap,
         };
 

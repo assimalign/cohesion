@@ -20,9 +20,11 @@ namespace Assimalign.Cohesion.Database.Graph;
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.GraphDatabaseEngineOptions.DebugView))]
 public sealed class GraphDatabaseEngineOptions
 {
-    /// <summary>Gets or sets the retained execution-memory ceiling per statement; defaults to 64 MiB.</summary>
-    /// <remarks>Positive. A request may select a lower limit. Raising this ceiling explicitly opts into a larger budget.</remarks>
-    public long QueryMemoryBudget { get; set; } = 64L * 1024 * 1024;
+    /// <summary>Gets or sets the retained execution-memory ceiling per statement; defaults to 256 MiB.</summary>
+    /// <remarks>Positive. The default admits 100,000 one-property rows for SET, FOR/INSERT,
+    /// entity RETURN and QueryPaths. Wider rows and retained intermediate stages use more memory.
+    /// Raise this ceiling for larger workloads; a request may select a lower limit.</remarks>
+    public long QueryMemoryBudget { get; set; } = 256L * 1024 * 1024;
 
     /// <summary>Gets or sets the physical-work ceiling per statement; defaults to 1,000,000 units.</summary>
     /// <remarks>Positive. Candidates count after direction/type filtering; merge heads and dead ends count.</remarks>

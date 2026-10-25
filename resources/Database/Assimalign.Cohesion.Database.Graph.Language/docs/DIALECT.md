@@ -53,7 +53,7 @@ The sum of upper bounds, or lower bounds for unbounded segments, times body hop 
 64 (CG00005 for text, CG05001 for direct ASTs). Unbounded segments use implicit trails, a deliberate
 ISO deviation from the requirement for a mode/selector. An eligible 65th relationship after type
 and direction, bound-identity and own-property filtering raises CG05004; endpoint predicates do not hide a visited 65th hop. An unordered read LIMIT may stop before visiting that branch (D4). The
-64 MiB default retained-memory and 1,000,000-unit physical-work budgets also apply. Results materialize before wire output.
+256 MiB default retained-memory and 1,000,000-unit physical-work budgets also apply. Results materialize before wire output.
 
 Variables inside quantifiers are lists in source order, including under RETURN * and WITH *.
 FOR/UNWIND preserve the singleton entity kind; list expressions and aggregates can consume them.
@@ -91,7 +91,7 @@ matches once in an either-direction hop. Safe relationship and endpoint constrai
 viable descent; deferred predicates retain their final checks. Physical work counts anchor
 candidates plus selected visible relationships and retains its 1,000,000 safety cap even for
 dead ends. CG05004 includes actual physical and viable totals when that cap is exceeded;
-The 64-hop trail limit remains. #1533 replaces the fixed binding count with a 64 MiB default retained-memory budget (CG05020); explicit engine ceilings and lower request limits are supported.
+The 64-hop trail limit remains. #1533 replaces the fixed binding count with a 256 MiB default retained-memory budget (CG05020); explicit engine ceilings and lower request limits are supported.
 Incident ranges are read incrementally with cancellation, merging type/direction streams in
 relationship identity order. Reaching the expansion cap closes every active parent cursor;
 only bounded index batches and one decoded head per selected range are prefetched (#1542).
@@ -242,7 +242,13 @@ graph values, including NULL and floating types, fail CG02013 before reads or wr
 Paging never reduces mutation inputs. For reads, LIMIT without ORDER BY can stop upstream work,
 while ordered finite pages retain a top set bounded by OFFSET + LIMIT. Grouping consumes its
 input incrementally. Final rows and paths remain materialized within the statement memory budget;
-the former 100,000-result guard is removed. Row and path requests share this stage (#1533, D4).
+the default 256 MiB grant preserves the former 100,000-row envelope for one-property SET,
+FOR/INSERT, entity RETURN and QueryPaths. Capacity depends on row width and retained intermediate
+state: larger workloads can still fail with CG05020. Raise GraphDatabaseEngineOptions.QueryMemoryBudget
+(and QueryWorkBudget when needed) on the server to increase capacity; in-process GraphQueryLimits
+can only lower those ceilings. TraverseAsync also uses these grants and now has a default
+1,000,000-unit physical-work ceiling (CG05004), where it previously had no cap. Row and path
+requests share this stage (#1533, D4).
 Standalone ORDER BY/page statements before RETURN remain CK00001. WITH and aggregate ordering execute through the same per-stage pipeline. See [ordering design](DESIGN.md#ordering-and-paging-1142).
 
 ## Core functions and CAST
@@ -286,7 +292,8 @@ string/Decimal overflow still fails; toInteger saturates finite floating overflo
 CURRENT_DATE and CURRENT_TIMESTAMP are niladic without parentheses, returning UTC DateOnly
 and DateTimeOffset. One instant is captured before beginning the transaction: all rows and
 stages, and all statements in an explicit API transaction (also ReadCommitted), reuse it.
-Every autocommit statement captures its own; Graph wire statements are always autocommit.
+Every autocommit statement captures its own; START TRANSACTION / COMMIT / ROLLBACK on one
+wire connection share the explicit transaction instant.
 The clock seam remains internal. Dates and timestamps compare/sort by date or UTC instant;
 total ordering places zoned timestamps then dates between paths and strings. Temporal values
 cannot become stored graph properties: proven kinds fail planning with CG03003 for MATCH
@@ -455,6 +462,11 @@ the copy before decoding; this adds no syntax, SQLSTATE or format version. Valid
 START uses Snapshot; embedded callers retain typed Snapshot/ReadCommitted transaction APIs.
 A failed explicit transaction refuses work until rollback. BEGIN, savepoints, transaction options,
 EXPLAIN controls and multi-statement text are unsupported. ExecutePaths cannot control transactions.
+
+An idle open wire transaction holds the database writer lock once it has acquired it, until
+COMMIT, ROLLBACK, disconnect, pool return or IdleTimeout (30 minutes by default). Keep transactions
+short: an idle writer blocks other writers. New clients discard sessions against pre-#1540 servers
+that cannot negotiate transaction-status, so those servers are not pooled.
 
 ## Graph diagnostic conventions (#1470)
 

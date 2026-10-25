@@ -50,6 +50,7 @@ internal sealed class GraphQueryMemory
                 }
                 if (values.TryGetValue(current, out var retained))
                 { values[current] = (checked(retained.References + 1), retained.Bytes); journal.Add(current); continue; }
+                // One combined grant covers the ledger entry and root-owner bookkeeping.
                 long bytes = 96 + GraphValueMemory.Shallow(current);
                 Add(bytes);
                 values.Add(current, (1, bytes));
