@@ -45,8 +45,8 @@ public sealed partial class SqlViewTests
         var parameter = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "CREATE VIEW v AS SELECT @p FROM t"));
         var table = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "DROP VIEW t"));
         // Assert
-        parameter.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE033");
-        table.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE033");
+        parameter.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS03033");
+        table.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS03033");
         table.Message.ShouldBe("The target is a table, not a view.");
     }
 
@@ -63,7 +63,7 @@ public sealed partial class SqlViewTests
         // Act
         var error = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "DROP VIEW target_v RESTRICT"));
         // Assert
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLD002");
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS03302");
         error.Message.ShouldBe("Cannot drop 'dbo.target_v' because other objects depend on it: view 'dbo.dependent_v' depends on it.");
     }
 
@@ -183,7 +183,7 @@ public sealed partial class SqlViewTests
         var error = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "CREATE OR REPLACE VIEW v AS SELECT " + replacement + " AS y FROM t"));
         // Assert
         rows.ShouldHaveSingleItem().ShouldBe([5L, 2L]);
-        error.Diagnostics[0].Code.ShouldBe("COHSQLE033");
+        error.Diagnostics[0].Code.ShouldBe("CS03033");
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - Views: repeated grouped expressions retain every overload")]
@@ -225,7 +225,7 @@ public sealed partial class SqlViewTests
         await ExecuteAsync(session, "ALTER TABLE t ALTER COLUMN spare VARCHAR(4)");
         await ExecuteAsync(session, "ALTER TABLE t ADD COLUMN extra INT");
         // Assert
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLD002");
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS03302");
         error.Message.ShouldContain("view 'dbo.dependent_view'", Case.Sensitive);
     }
 
@@ -275,7 +275,7 @@ public sealed partial class SqlViewTests
         await ExecuteAsync(reader, "DROP VIEW v");
         // Assert
         rows.ShouldHaveSingleItem().ShouldBe(["CHARACTER VARYING", 7L]);
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE006");
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS01006");
         (await RowsAsync(reader, "SELECT COUNT(*) FROM t")).ShouldHaveSingleItem().ShouldBe([3L]);
         restored.Catalog.Views.ShouldBeEmpty();
     }
@@ -297,6 +297,6 @@ public sealed partial class SqlViewTests
         // Act
         var error = await Should.ThrowAsync<DatabaseException>(() => RowsAsync(session, "SELECT * FROM v"));
         // Assert
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE033");
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS03033");
     }
 }

@@ -13,6 +13,8 @@ namespace Assimalign.Cohesion.Database.Transactions.Internal;
 /// Not thread-safe: the manager guards it with its own lock. Time comes from a
 /// <see cref="TimeProvider"/>, so tests can drive the schedule without waiting.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("DeferredUndoBackoff")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Transactions.Internal.DeferredUndoBackoff.DebugView))]
 internal sealed class DeferredUndoBackoff
 {
     /// <summary>
@@ -127,5 +129,13 @@ internal sealed class DeferredUndoBackoff
         _delay = delay;
         _scheduledAt = _time.GetTimestamp();
         _scheduled = true;
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Transactions.Internal.DeferredUndoBackoff value)
+        {
+            _ = value;
+        }
     }
 }

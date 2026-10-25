@@ -239,7 +239,7 @@ public sealed class BlobDatabaseServerTests
     /// 2026-10-07). The engine is <see cref="EngineState.Faulted"/> with the failing worker, yet
     /// the server starts, accepts and serves the healthy database over the wire; the failing
     /// database's handshake, and an exchange on its session opened before the failure, are refused
-    /// with <see cref="ProtocolErrorCode.Unavailable"/> and <c>COHDBB003</c>; once a pass finishes
+    /// with <see cref="ProtocolErrorCode.Unavailable"/> and <c>CB06003</c>; once a pass finishes
     /// the failing work the database is served again. Before the decision the server refused every
     /// start, connection, handshake and exchange while the engine was not
     /// <see cref="EngineState.Running"/>, so one failing database made the whole server unavailable.
@@ -307,14 +307,14 @@ public sealed class BlobDatabaseServerTests
         worker.Fault.ShouldNotBeNull().Message.ShouldBe("Injected checkpoint failure");
         written.Length.ShouldBe(7);
         handshakeRefusal.Code.ShouldBe(ProtocolErrorCode.Unavailable);
-        handshakeRefusal.Message.ShouldStartWith("COHDBB003", Case.Sensitive);
+        handshakeRefusal.Message.ShouldStartWith("CB06003", Case.Sensitive);
         handshakeRefusal.Message.ShouldContain("Database 'failing'");
         recovered.ShouldBe((EngineState.Running, false));
         listed.Count.ShouldBe(0);
         exchangeFrame.Type.ShouldBe(ProtocolMessageType.Error);
         var exchangeRefusal = ProtocolErrorMessage.Decode(exchangeFrame.Payload.Span);
         exchangeRefusal.Code.ShouldBe(ProtocolErrorCode.Unavailable);
-        exchangeRefusal.Message.ShouldStartWith("COHDBB003", Case.Sensitive);
+        exchangeRefusal.Message.ShouldStartWith("CB06003", Case.Sensitive);
         closedAfterTheRefusal.ShouldBeNull();
         properties.Properties.Length.ShouldBe(7);
         served.Count.ShouldBe(1);
@@ -327,7 +327,7 @@ public sealed class BlobDatabaseServerTests
     /// database a failure of its own storage takes offline, not the engine's give-up, keeps a
     /// worker's record of it until that worker's next pass, which for the version purge can be a
     /// whole maintenance interval away; meanwhile its handshakes and the exchanges of its open
-    /// sessions are refused with <c>COHDBB002</c>, not <c>COHDBB003</c>, because the database is
+    /// sessions are refused with <c>CB06002</c>, not <c>CB06003</c>, because the database is
     /// offline, not merely failing.
     /// </summary>
     [Fact(DisplayName = "Cohesion Test [Database.Blob] - Blob server: an offline database is refused as offline while a worker's record of it lingers")]
@@ -368,21 +368,21 @@ public sealed class BlobDatabaseServerTests
         takenOffline.ShouldBeTrue();
         lingering.ShouldBeTrue();
         handshakeRefusal.Code.ShouldBe(ProtocolErrorCode.Unavailable);
-        handshakeRefusal.Message.ShouldStartWith("COHDBB002", Case.Sensitive);
+        handshakeRefusal.Message.ShouldStartWith("CB06002", Case.Sensitive);
         exchangeFrame.Type.ShouldBe(ProtocolMessageType.Error);
         var exchangeRefusal = ProtocolErrorMessage.Decode(exchangeFrame.Payload.Span);
         exchangeRefusal.Code.ShouldBe(ProtocolErrorCode.Unavailable);
-        exchangeRefusal.Message.ShouldStartWith("COHDBB002", Case.Sensitive);
+        exchangeRefusal.Message.ShouldStartWith("CB06002", Case.Sensitive);
     }
 
     /// <summary>
     /// An exchange refused because a worker is failing on its database is terminal like every Blob
     /// wire failure, so it ends a host-opened transaction too (owner decision 42 review, #1225): the
     /// server aborts the transaction with the refusal before it writes the error, so the host's
-    /// COMMIT fails with <c>COHDBB001</c> naming <c>COHDBB003</c> whichever of the commit and the
+    /// COMMIT fails with <c>CB04001</c> naming <c>CB06003</c> whichever of the commit and the
     /// connection's teardown runs first, and the transaction's earlier wire delete is undone.
     /// </summary>
-    [Fact(DisplayName = "Cohesion Test [Database.Blob] - Blob server: a worker-failure refusal ends the host's transaction, and COMMIT fails with COHDBB001 naming COHDBB003")]
+    [Fact(DisplayName = "Cohesion Test [Database.Blob] - Blob server: a worker-failure refusal ends the host's transaction, and COMMIT fails with CB04001 naming CB06003")]
     public async Task Server_ExchangeRefusedForAFailingWorker_ShouldAbortTheHostTransactionFirst()
     {
         // Arrange: a host transaction on the connection's engine session deletes a blob over the wire.
@@ -419,8 +419,8 @@ public sealed class BlobDatabaseServerTests
         refusalFrame.Type.ShouldBe(ProtocolMessageType.Error);
         var refusal = ProtocolErrorMessage.Decode(refusalFrame.Payload.Span);
         refusal.Code.ShouldBe(ProtocolErrorCode.Unavailable);
-        refusal.Message.ShouldStartWith("COHDBB003", Case.Sensitive);
-        commit.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBB001");
+        refusal.Message.ShouldStartWith("CB06003", Case.Sensitive);
+        commit.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CB04001");
         commit.Message.ShouldContain(refusal.Message, Case.Sensitive);
         transaction.State.ShouldBe(TransactionState.RolledBack);
         (await ReadBlobAsync(files, "keep", token)).ShouldBe("original"u8.ToArray());

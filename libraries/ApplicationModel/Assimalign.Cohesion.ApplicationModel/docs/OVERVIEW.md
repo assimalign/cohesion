@@ -45,10 +45,12 @@ See [DESIGN.md](DESIGN.md) for identity, validation, ownership, external referen
 and NativeAOT boundaries; see the [package README](../README.md) for model and set composition.
 
 Application identities, resource HTTP paths, mount-source expressions, and credential schemes
-and values have generated value objects. Manifest probe `Http`, control-plane `Path`, and mount
-`Source` properties keep their string types for the owner's Database freeze (#1168), with the
-typed DTO change deferred to #1470. `ResourceManifest.Validate` checks their text through the
-value types' `IsValid`/`TryCreate` rules and throws `InvalidDataException` before reconcile.
+and values have generated value objects. Manifest probe `Http` is `ResourceHttpPath?`, control-plane
+`Path` is `ResourceHttpPath`, and mount `Source` is `ResourceMountSource?` (#1470). Malformed text
+fails value construction with `ArgumentException` or JSON import with `JsonException`.
+`ResourceManifest.Validate` retains `IsValid`/`TryCreate` guards for present default values and
+refuses them with `InvalidDataException` before reconcile. JSON remains strings/nulls in
+`cohesion/resource/v1`.
 Plan `MountBinding.Source` and credential components use value types; valid string assignments
 remain supported through implicit conversions. Use `TryCreate` for nonthrowing validation and
 `.Value` when passing a value object's raw text to a transport. HTTP paths begin with `/` and

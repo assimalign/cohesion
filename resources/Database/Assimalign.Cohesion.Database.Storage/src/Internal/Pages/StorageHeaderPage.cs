@@ -53,15 +53,15 @@ internal static class StorageHeaderPage
     internal const int FormatVersionOffset = IdentityOffset + sizeof(int);
 
     // Offsets inside the identity block (StorageFileHeader's field offsets).
-    private const int BlockMagicOffset = 0;
-    private const int BlockFormatVersionOffset = 4;
-    private const int BlockPageSizeOffset = 8;
-    private const int BlockModelOffset = 12;
-    private const int BlockStorageIdOffset = 16;
-    private const int BlockCreatedOffset = 32;
-    private const int BlockNameOffset = 40;
-    private const int BlockChecksumOffset = 168;
-    private const int NameCapacity = 128;
+    private const int blockMagicOffset = 0;
+    private const int blockFormatVersionOffset = 4;
+    private const int blockPageSizeOffset = 8;
+    private const int blockModelOffset = 12;
+    private const int blockStorageIdOffset = 16;
+    private const int blockCreatedOffset = 32;
+    private const int blockNameOffset = 40;
+    private const int blockChecksumOffset = 168;
+    private const int nameCapacity = 128;
 
     /// <summary>The size of one header slot.</summary>
     internal const int SlotSize = 3584;
@@ -78,34 +78,34 @@ internal static class StorageHeaderPage
     /// </summary>
     internal const int LeadingBlockSize = Slot0Offset + SlotSize;
 
-    private const int SlotMagicValue = 0x544F4C53; // "SLOT"
-    private const int SlotMagicOffset = 0;
-    private const int SlotChecksumOffset = 4;
-    private const int SlotGenerationOffset = 8;
-    private const int SlotLsnFloorOffset = 16;
-    private const int SlotSequenceFloorOffset = 24;
-    private const int SlotTotalPagesOffset = 32;
-    private const int SlotFreePagesOffset = 40;
-    private const int SlotModifiedOffset = 48;
-    private const int SlotAnchorCountOffset = 56;
-    private const int SlotAnchorInlineOffset = 60;
-    private const int SlotAnchorChainHeadOffset = 64;
-    private const int SlotAnchorChainPagesOffset = 72;
-    private const int SlotIdentityOffset = 80;
-    private const int SlotHeaderSize = SlotIdentityOffset + StorageFileHeader.ByteSize;
+    private const int slotMagicValue = 0x544F4C53; // "SLOT"
+    private const int slotMagicOffset = 0;
+    private const int slotChecksumOffset = 4;
+    private const int slotGenerationOffset = 8;
+    private const int slotLsnFloorOffset = 16;
+    private const int slotSequenceFloorOffset = 24;
+    private const int slotTotalPagesOffset = 32;
+    private const int slotFreePagesOffset = 40;
+    private const int slotModifiedOffset = 48;
+    private const int slotAnchorCountOffset = 56;
+    private const int slotAnchorInlineOffset = 60;
+    private const int slotAnchorChainHeadOffset = 64;
+    private const int slotAnchorChainPagesOffset = 72;
+    private const int slotIdentityOffset = 80;
+    private const int slotHeaderSize = slotIdentityOffset + StorageFileHeader.ByteSize;
 
     /// <summary>The most anchor sequences a slot holds itself.</summary>
-    internal const int InlineAnchorCapacity = (SlotSize - SlotHeaderSize) / sizeof(long);
+    internal const int InlineAnchorCapacity = (SlotSize - slotHeaderSize) / sizeof(long);
 
-    private const int AnchorGenerationOffset = Page.HeaderSize;
-    private const int AnchorSlotOffset = Page.HeaderSize + 8;
-    private const int AnchorCountOffset = Page.HeaderSize + 12;
-    private const int AnchorNextOffset = Page.HeaderSize + 16;
-    private const int AnchorIndexOffset = Page.HeaderSize + 24;
-    private const int AnchorEntriesOffset = Page.HeaderSize + 32;
+    private const int anchorGenerationOffset = Page.HeaderSize;
+    private const int anchorSlotOffset = Page.HeaderSize + 8;
+    private const int anchorCountOffset = Page.HeaderSize + 12;
+    private const int anchorNextOffset = Page.HeaderSize + 16;
+    private const int anchorIndexOffset = Page.HeaderSize + 24;
+    private const int anchorEntriesOffset = Page.HeaderSize + 32;
 
     /// <summary>The most anchor sequences one anchor page holds.</summary>
-    internal const int AnchorPageCapacity = (Page.Size - AnchorEntriesOffset) / sizeof(long);
+    internal const int AnchorPageCapacity = (Page.Size - anchorEntriesOffset) / sizeof(long);
 
     /// <summary>Gets the offset of a header slot in page 0.</summary>
     internal static int SlotOffset(int slot) => slot == 0 ? Slot0Offset : Slot1Offset;
@@ -118,21 +118,21 @@ internal static class StorageHeaderPage
     {
         block = block[..StorageFileHeader.ByteSize];
         block.Clear();
-        BinaryPrimitives.WriteInt32LittleEndian(block[BlockMagicOffset..], StorageFileHeader.ExpectedMagic);
-        BinaryPrimitives.WriteInt32LittleEndian(block[BlockFormatVersionOffset..], StorageFileHeader.CurrentFormatVersion);
-        BinaryPrimitives.WriteInt32LittleEndian(block[BlockPageSizeOffset..], Page.Size);
-        BinaryPrimitives.WriteInt32LittleEndian(block[BlockModelOffset..], (int)model);
-        ((Guid)id).TryWriteBytes(block.Slice(BlockStorageIdOffset, 16));
-        BinaryPrimitives.WriteInt64LittleEndian(block[BlockCreatedOffset..], createdAtUtcTicks);
+        BinaryPrimitives.WriteInt32LittleEndian(block[blockMagicOffset..], StorageFileHeader.ExpectedMagic);
+        BinaryPrimitives.WriteInt32LittleEndian(block[blockFormatVersionOffset..], StorageFileHeader.CurrentFormatVersion);
+        BinaryPrimitives.WriteInt32LittleEndian(block[blockPageSizeOffset..], Page.Size);
+        BinaryPrimitives.WriteInt32LittleEndian(block[blockModelOffset..], (int)model);
+        ((Guid)id).TryWriteBytes(block.Slice(blockStorageIdOffset, 16));
+        BinaryPrimitives.WriteInt64LittleEndian(block[blockCreatedOffset..], createdAtUtcTicks);
 
         string? text = (string?)name;
         if (!string.IsNullOrEmpty(text))
         {
             byte[] encoded = Encoding.UTF8.GetBytes(text);
-            encoded.AsSpan(0, Math.Min(encoded.Length, NameCapacity)).CopyTo(block[BlockNameOffset..]);
+            encoded.AsSpan(0, Math.Min(encoded.Length, nameCapacity)).CopyTo(block[blockNameOffset..]);
         }
 
-        BinaryPrimitives.WriteUInt32LittleEndian(block[BlockChecksumOffset..], ComputeIdentityChecksum(block));
+        BinaryPrimitives.WriteUInt32LittleEndian(block[blockChecksumOffset..], ComputeIdentityChecksum(block));
     }
 
     /// <summary>
@@ -167,26 +167,26 @@ internal static class StorageHeaderPage
     /// verified.
     /// </summary>
     internal static (int Magic, int FormatVersion) ReadIdentityFormat(ReadOnlySpan<byte> identity)
-        => (BinaryPrimitives.ReadInt32LittleEndian(identity[BlockMagicOffset..]),
-            BinaryPrimitives.ReadInt32LittleEndian(identity[BlockFormatVersionOffset..]));
+        => (BinaryPrimitives.ReadInt32LittleEndian(identity[blockMagicOffset..]),
+            BinaryPrimitives.ReadInt32LittleEndian(identity[blockFormatVersionOffset..]));
 
     /// <summary>
     /// Verifies an identity block's checksum.
     /// </summary>
     internal static bool VerifyIdentity(ReadOnlySpan<byte> identity)
-        => BinaryPrimitives.ReadUInt32LittleEndian(identity[BlockChecksumOffset..]) == ComputeIdentityChecksum(identity);
+        => BinaryPrimitives.ReadUInt32LittleEndian(identity[blockChecksumOffset..]) == ComputeIdentityChecksum(identity);
 
     /// <summary>
     /// Reads the storage identifier and name from a verified identity block.
     /// </summary>
     internal static (StorageId Id, Name Name) ReadIdentity(ReadOnlySpan<byte> identity)
     {
-        var id = (StorageId)new Guid(identity.Slice(BlockStorageIdOffset, 16));
-        var nameBytes = identity.Slice(BlockNameOffset, NameCapacity);
+        var id = (StorageId)new Guid(identity.Slice(blockStorageIdOffset, 16));
+        var nameBytes = identity.Slice(blockNameOffset, nameCapacity);
         int length = nameBytes.IndexOf((byte)0);
         if (length < 0)
         {
-            length = NameCapacity;
+            length = nameCapacity;
         }
 
         var name = length > 0 ? (Name)Encoding.UTF8.GetString(nameBytes[..length]) : (Name)"";
@@ -197,7 +197,7 @@ internal static class StorageHeaderPage
     /// Gets the copy of the identity block a verified header slot carries.
     /// </summary>
     internal static ReadOnlySpan<byte> SlotIdentity(ReadOnlySpan<byte> slot)
-        => slot.Slice(SlotIdentityOffset, StorageFileHeader.ByteSize);
+        => slot.Slice(slotIdentityOffset, StorageFileHeader.ByteSize);
 
     /// <summary>
     /// Composes a header slot: its fields, a copy of the identity block, its inline anchor
@@ -207,35 +207,35 @@ internal static class StorageHeaderPage
     {
         if (inlineAnchor.Length != state.AnchorInlineCount || inlineAnchor.Length > InlineAnchorCapacity)
         {
-            throw new ArgumentException("The inline anchor does not match the slot state.", nameof(inlineAnchor));
+            throw new ArgumentException(ErrorMessages.StorageHeaderPageWriteSlotArgument, nameof(inlineAnchor));
         }
 
         if (identity.Length != StorageFileHeader.ByteSize)
         {
-            throw new ArgumentException("The identity block has the wrong size.", nameof(identity));
+            throw new ArgumentException(ErrorMessages.StorageHeaderPageWriteSlotArgument2, nameof(identity));
         }
 
         slot = slot[..SlotSize];
         slot.Clear();
-        BinaryPrimitives.WriteInt32LittleEndian(slot[SlotMagicOffset..], SlotMagicValue);
-        BinaryPrimitives.WriteInt64LittleEndian(slot[SlotGenerationOffset..], state.Generation);
-        BinaryPrimitives.WriteInt64LittleEndian(slot[SlotLsnFloorOffset..], state.LsnFloor);
-        BinaryPrimitives.WriteInt64LittleEndian(slot[SlotSequenceFloorOffset..], state.SequenceFloor);
-        BinaryPrimitives.WriteInt64LittleEndian(slot[SlotTotalPagesOffset..], state.TotalPageCount);
-        BinaryPrimitives.WriteInt64LittleEndian(slot[SlotFreePagesOffset..], state.FreePageCount);
-        BinaryPrimitives.WriteInt64LittleEndian(slot[SlotModifiedOffset..], state.ModifiedAtUtcTicks);
-        BinaryPrimitives.WriteInt32LittleEndian(slot[SlotAnchorCountOffset..], state.AnchorCount);
-        BinaryPrimitives.WriteInt32LittleEndian(slot[SlotAnchorInlineOffset..], state.AnchorInlineCount);
-        BinaryPrimitives.WriteInt64LittleEndian(slot[SlotAnchorChainHeadOffset..], state.AnchorChainHead);
-        BinaryPrimitives.WriteInt32LittleEndian(slot[SlotAnchorChainPagesOffset..], state.AnchorChainPageCount);
-        identity.CopyTo(slot[SlotIdentityOffset..]);
+        BinaryPrimitives.WriteInt32LittleEndian(slot[slotMagicOffset..], slotMagicValue);
+        BinaryPrimitives.WriteInt64LittleEndian(slot[slotGenerationOffset..], state.Generation);
+        BinaryPrimitives.WriteInt64LittleEndian(slot[slotLsnFloorOffset..], state.LsnFloor);
+        BinaryPrimitives.WriteInt64LittleEndian(slot[slotSequenceFloorOffset..], state.SequenceFloor);
+        BinaryPrimitives.WriteInt64LittleEndian(slot[slotTotalPagesOffset..], state.TotalPageCount);
+        BinaryPrimitives.WriteInt64LittleEndian(slot[slotFreePagesOffset..], state.FreePageCount);
+        BinaryPrimitives.WriteInt64LittleEndian(slot[slotModifiedOffset..], state.ModifiedAtUtcTicks);
+        BinaryPrimitives.WriteInt32LittleEndian(slot[slotAnchorCountOffset..], state.AnchorCount);
+        BinaryPrimitives.WriteInt32LittleEndian(slot[slotAnchorInlineOffset..], state.AnchorInlineCount);
+        BinaryPrimitives.WriteInt64LittleEndian(slot[slotAnchorChainHeadOffset..], state.AnchorChainHead);
+        BinaryPrimitives.WriteInt32LittleEndian(slot[slotAnchorChainPagesOffset..], state.AnchorChainPageCount);
+        identity.CopyTo(slot[slotIdentityOffset..]);
 
         for (int i = 0; i < inlineAnchor.Length; i++)
         {
-            BinaryPrimitives.WriteInt64LittleEndian(slot[(SlotHeaderSize + i * sizeof(long))..], inlineAnchor[i]);
+            BinaryPrimitives.WriteInt64LittleEndian(slot[(slotHeaderSize + i * sizeof(long))..], inlineAnchor[i]);
         }
 
-        BinaryPrimitives.WriteUInt32LittleEndian(slot[SlotChecksumOffset..], ComputeSlotChecksum(slot));
+        BinaryPrimitives.WriteUInt32LittleEndian(slot[slotChecksumOffset..], ComputeSlotChecksum(slot));
     }
 
     /// <summary>
@@ -248,23 +248,23 @@ internal static class StorageHeaderPage
         state = null;
         slot = slot[..SlotSize];
 
-        if (BinaryPrimitives.ReadInt32LittleEndian(slot[SlotMagicOffset..]) != SlotMagicValue
-            || BinaryPrimitives.ReadUInt32LittleEndian(slot[SlotChecksumOffset..]) != ComputeSlotChecksum(slot))
+        if (BinaryPrimitives.ReadInt32LittleEndian(slot[slotMagicOffset..]) != slotMagicValue
+            || BinaryPrimitives.ReadUInt32LittleEndian(slot[slotChecksumOffset..]) != ComputeSlotChecksum(slot))
         {
             return false;
         }
 
         var candidate = new StorageHeaderSlot(
-            Generation: BinaryPrimitives.ReadInt64LittleEndian(slot[SlotGenerationOffset..]),
-            LsnFloor: BinaryPrimitives.ReadInt64LittleEndian(slot[SlotLsnFloorOffset..]),
-            SequenceFloor: BinaryPrimitives.ReadInt64LittleEndian(slot[SlotSequenceFloorOffset..]),
-            TotalPageCount: BinaryPrimitives.ReadInt64LittleEndian(slot[SlotTotalPagesOffset..]),
-            FreePageCount: BinaryPrimitives.ReadInt64LittleEndian(slot[SlotFreePagesOffset..]),
-            ModifiedAtUtcTicks: BinaryPrimitives.ReadInt64LittleEndian(slot[SlotModifiedOffset..]),
-            AnchorCount: BinaryPrimitives.ReadInt32LittleEndian(slot[SlotAnchorCountOffset..]),
-            AnchorInlineCount: BinaryPrimitives.ReadInt32LittleEndian(slot[SlotAnchorInlineOffset..]),
-            AnchorChainHead: BinaryPrimitives.ReadInt64LittleEndian(slot[SlotAnchorChainHeadOffset..]),
-            AnchorChainPageCount: BinaryPrimitives.ReadInt32LittleEndian(slot[SlotAnchorChainPagesOffset..]));
+            Generation: BinaryPrimitives.ReadInt64LittleEndian(slot[slotGenerationOffset..]),
+            LsnFloor: BinaryPrimitives.ReadInt64LittleEndian(slot[slotLsnFloorOffset..]),
+            SequenceFloor: BinaryPrimitives.ReadInt64LittleEndian(slot[slotSequenceFloorOffset..]),
+            TotalPageCount: BinaryPrimitives.ReadInt64LittleEndian(slot[slotTotalPagesOffset..]),
+            FreePageCount: BinaryPrimitives.ReadInt64LittleEndian(slot[slotFreePagesOffset..]),
+            ModifiedAtUtcTicks: BinaryPrimitives.ReadInt64LittleEndian(slot[slotModifiedOffset..]),
+            AnchorCount: BinaryPrimitives.ReadInt32LittleEndian(slot[slotAnchorCountOffset..]),
+            AnchorInlineCount: BinaryPrimitives.ReadInt32LittleEndian(slot[slotAnchorInlineOffset..]),
+            AnchorChainHead: BinaryPrimitives.ReadInt64LittleEndian(slot[slotAnchorChainHeadOffset..]),
+            AnchorChainPageCount: BinaryPrimitives.ReadInt32LittleEndian(slot[slotAnchorChainPagesOffset..]));
 
         int overflow = candidate.AnchorCount - candidate.AnchorInlineCount;
         bool consistent = candidate.Generation > 0
@@ -293,7 +293,7 @@ internal static class StorageHeaderPage
     {
         for (int i = 0; i < destination.Length; i++)
         {
-            destination[i] = BinaryPrimitives.ReadInt64LittleEndian(slot[(SlotHeaderSize + i * sizeof(long))..]);
+            destination[i] = BinaryPrimitives.ReadInt64LittleEndian(slot[(slotHeaderSize + i * sizeof(long))..]);
         }
     }
 
@@ -318,7 +318,7 @@ internal static class StorageHeaderPage
     {
         if (entries.Length is 0 or > AnchorPageCapacity)
         {
-            throw new ArgumentOutOfRangeException(nameof(entries), entries.Length, "An anchor page holds between 1 and its capacity of entries.");
+            throw new ArgumentOutOfRangeException(nameof(entries), entries.Length, ErrorMessages.HeaderPageWriteAnchorPageFailure);
         }
 
         page = page[..Page.Size];
@@ -326,15 +326,15 @@ internal static class StorageHeaderPage
         BinaryPrimitives.WriteInt64LittleEndian(page, pageId);
         BinaryPrimitives.WriteInt64LittleEndian(page[Page.LsnFieldOffset..], lsn);
         page[Page.TypeFieldOffset] = (byte)PageType.CheckpointAnchor;
-        BinaryPrimitives.WriteInt64LittleEndian(page[AnchorGenerationOffset..], generation);
-        BinaryPrimitives.WriteInt32LittleEndian(page[AnchorSlotOffset..], slot);
-        BinaryPrimitives.WriteInt32LittleEndian(page[AnchorCountOffset..], entries.Length);
-        BinaryPrimitives.WriteInt64LittleEndian(page[AnchorNextOffset..], next);
-        BinaryPrimitives.WriteInt32LittleEndian(page[AnchorIndexOffset..], index);
+        BinaryPrimitives.WriteInt64LittleEndian(page[anchorGenerationOffset..], generation);
+        BinaryPrimitives.WriteInt32LittleEndian(page[anchorSlotOffset..], slot);
+        BinaryPrimitives.WriteInt32LittleEndian(page[anchorCountOffset..], entries.Length);
+        BinaryPrimitives.WriteInt64LittleEndian(page[anchorNextOffset..], next);
+        BinaryPrimitives.WriteInt32LittleEndian(page[anchorIndexOffset..], index);
 
         for (int i = 0; i < entries.Length; i++)
         {
-            BinaryPrimitives.WriteInt64LittleEndian(page[(AnchorEntriesOffset + i * sizeof(long))..], entries[i]);
+            BinaryPrimitives.WriteInt64LittleEndian(page[(anchorEntriesOffset + i * sizeof(long))..], entries[i]);
         }
     }
 
@@ -366,17 +366,17 @@ internal static class StorageHeaderPage
             return $"it is not checkpoint anchor page {pageId} (type {(PageType)page[Page.TypeFieldOffset]})";
         }
 
-        long pageGeneration = BinaryPrimitives.ReadInt64LittleEndian(page[AnchorGenerationOffset..]);
-        int pageSlot = BinaryPrimitives.ReadInt32LittleEndian(page[AnchorSlotOffset..]);
-        int pageIndex = BinaryPrimitives.ReadInt32LittleEndian(page[AnchorIndexOffset..]);
+        long pageGeneration = BinaryPrimitives.ReadInt64LittleEndian(page[anchorGenerationOffset..]);
+        int pageSlot = BinaryPrimitives.ReadInt32LittleEndian(page[anchorSlotOffset..]);
+        int pageIndex = BinaryPrimitives.ReadInt32LittleEndian(page[anchorIndexOffset..]);
         if (pageGeneration != generation || pageSlot != slot || pageIndex != index)
         {
             return $"it belongs to generation {pageGeneration}, slot {pageSlot}, position {pageIndex}, " +
                 $"not generation {generation}, slot {slot}, position {index}";
         }
 
-        count = BinaryPrimitives.ReadInt32LittleEndian(page[AnchorCountOffset..]);
-        next = BinaryPrimitives.ReadInt64LittleEndian(page[AnchorNextOffset..]);
+        count = BinaryPrimitives.ReadInt32LittleEndian(page[anchorCountOffset..]);
+        next = BinaryPrimitives.ReadInt64LittleEndian(page[anchorNextOffset..]);
         if (count is <= 0 or > AnchorPageCapacity)
         {
             return $"it claims {count} entries; an anchor page holds 1 to {AnchorPageCapacity}";
@@ -392,7 +392,7 @@ internal static class StorageHeaderPage
     {
         for (int i = 0; i < destination.Length; i++)
         {
-            destination[i] = BinaryPrimitives.ReadInt64LittleEndian(page[(AnchorEntriesOffset + i * sizeof(long))..]);
+            destination[i] = BinaryPrimitives.ReadInt64LittleEndian(page[(anchorEntriesOffset + i * sizeof(long))..]);
         }
     }
 
@@ -400,18 +400,18 @@ internal static class StorageHeaderPage
     {
         var block = identity[..StorageFileHeader.ByteSize];
         uint state = Crc32C.Begin();
-        state = Crc32C.Append(state, block[..BlockChecksumOffset]);
+        state = Crc32C.Append(state, block[..blockChecksumOffset]);
         state = Crc32C.AppendZeros(state, sizeof(uint));
-        state = Crc32C.Append(state, block[(BlockChecksumOffset + sizeof(uint))..]);
+        state = Crc32C.Append(state, block[(blockChecksumOffset + sizeof(uint))..]);
         return Crc32C.Finalize(state);
     }
 
     private static uint ComputeSlotChecksum(ReadOnlySpan<byte> slot)
     {
         uint state = Crc32C.Begin();
-        state = Crc32C.Append(state, slot[..SlotChecksumOffset]);
+        state = Crc32C.Append(state, slot[..slotChecksumOffset]);
         state = Crc32C.AppendZeros(state, sizeof(uint));
-        state = Crc32C.Append(state, slot[(SlotChecksumOffset + sizeof(uint))..SlotSize]);
+        state = Crc32C.Append(state, slot[(slotChecksumOffset + sizeof(uint))..SlotSize]);
         return Crc32C.Finalize(state);
     }
 }

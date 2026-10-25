@@ -162,7 +162,7 @@ internal sealed class DatabaseMemoryFiles
             if (!ReferenceEquals(current, closed))
             {
                 throw new InvalidOperationException(
-                    $"The in-memory file set '{Describe(key)}' was opened or created again while an open copied it.");
+                    string.Format(System.Globalization.CultureInfo.CurrentCulture, EngineErrorMessages.DatabaseMemoryFilesTryOpenFailure, Describe(key)));
             }
 
             _files[key] = reopened;
@@ -232,7 +232,7 @@ internal sealed class DatabaseMemoryFiles
         if (files.Data.CanRead || files.Journal.CanRead || files.Backup.CanRead)
         {
             throw new InvalidOperationException(
-                $"The in-memory file set '{Describe(key)}' is still open: its database's storage has not closed, so it cannot be opened again.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, EngineErrorMessages.DatabaseMemoryFilesThrowIfOpenFailure, Describe(key)));
         }
     }
 

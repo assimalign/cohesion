@@ -11,6 +11,8 @@ namespace Assimalign.Cohesion.Database.Transactions;
 /// external identity. Sequence numbers are engine-local and never persist beyond the
 /// lifetime of a database's transaction history.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("TransactionSequence")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Transactions.TransactionSequence.DebugView))]
 public readonly struct TransactionSequence : IEquatable<TransactionSequence>, IComparable<TransactionSequence>
 {
     private readonly ulong _value;
@@ -66,4 +68,16 @@ public readonly struct TransactionSequence : IEquatable<TransactionSequence>, IC
 
     /// <summary>Greater-than-or-equal operator.</summary>
     public static bool operator >=(TransactionSequence left, TransactionSequence right) => left._value >= right._value;
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Transactions.TransactionSequence _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Transactions.TransactionSequence value)
+        {
+            _target = value;
+        }
+
+        public ulong Value => _target.Value;
+    }
 }

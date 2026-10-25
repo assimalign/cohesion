@@ -10,8 +10,11 @@ namespace Assimalign.Cohesion.Database.Graph.Internal;
 /// autocommit context of its own), and the hold it keeps on the session and its admission into
 /// the explicit transaction until it completes or is aborted.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("GraphOperation")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Internal.GraphOperation.DebugView))]
 internal sealed class GraphOperation
 {
+    internal GraphPlanExecutor.ExpansionBudget? QueryBudget { get; set; }
     private readonly GraphDatabase _database;
     private readonly GraphDatabaseSession _session;
     private readonly GraphDatabaseTransaction? _transaction;
@@ -73,7 +76,7 @@ internal sealed class GraphOperation
         _session.ThrowIfNotOpen();
         if (Context.State != TransactionState.Active || Volatile.Read(ref _finished) != 0)
         {
-            throw new DatabaseException("The graph operation's transaction is no longer active.");
+            throw DatabaseException.CreateGraphFailure("CK04002", ErrorMessages.GraphOperationEnsureActiveDatabase);
         }
     }
 
@@ -164,6 +167,14 @@ internal sealed class GraphOperation
         {
             _database.BeforeSnapshotPinRelease?.Invoke(pin);
             await _database.Coordinator.RollbackAsync(pin).ConfigureAwait(false);
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Graph.Internal.GraphOperation value)
+        {
+            _ = value;
         }
     }
 }

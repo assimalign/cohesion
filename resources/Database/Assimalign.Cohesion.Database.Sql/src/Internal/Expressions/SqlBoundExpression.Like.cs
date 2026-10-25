@@ -6,6 +6,8 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// <c>[NOT] LIKE</c> over a bound value and pattern, with their collation resolved when the
 /// expression was bound.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("SqlBoundLike")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlBoundLike.DebugView))]
 internal sealed class SqlBoundLike : SqlBoundExpression
 {
     /// <summary>Initializes a bound pattern match.</summary>
@@ -45,4 +47,12 @@ internal sealed class SqlBoundLike : SqlBoundExpression
     internal SqlBoundCollation Collation { get; }
 
     internal Location? Location { get; }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlBoundLike value)
+        {
+            _ = value;
+        }
+    }
 }

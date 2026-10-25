@@ -46,7 +46,7 @@ public sealed class GqlValueParserTests
         foreach (string suffix in new[] { "", " -- trailing comment", " /* trailing comment */" })
         {
             var error = new GqlQueryParser().Parse(source + suffix).Diagnostics.ShouldHaveSingleItem();
-            error.Code.ShouldBe("GQL0002");
+            error.Code.ShouldBe("CG00002");
             error.Start.ShouldBe((source + suffix).Length);
         }
     }
@@ -59,8 +59,8 @@ public sealed class GqlValueParserTests
         // Arrange / Act
         var errors = new GqlQueryParser().Parse("MATCH (a) RETURN " + value).Diagnostics;
         // Assert
-        errors.ShouldContain(error => error.Code == "COHDBL001");
-        errors.ShouldNotContain(error => error.Code == "GQL0002");
+        errors.ShouldContain(error => error.Code == "CK00001");
+        errors.ShouldNotContain(error => error.Code == "CG00002");
     }
 
     [Theory(DisplayName = "Cohesion Test [GQL] - Values: malformed CASE identifies the offending token")]
@@ -72,7 +72,7 @@ public sealed class GqlValueParserTests
         // Act
         var error = new GqlQueryParser().Parse(source).Diagnostics.First();
         // Assert
-        error.Code.ShouldBe("GQL0002");
+        error.Code.ShouldBe("CG00002");
         source[error.Start!.Value..error.End!.Value].ShouldBe(token);
     }
 
@@ -87,6 +87,6 @@ public sealed class GqlValueParserTests
         // Act
         var diagnostics = new GqlQueryParser().Parse("MATCH (a) RETURN " + expression).Diagnostics;
         // Assert
-        diagnostics.ShouldContain(item => item.Code == "COHDBL001" && item.Message!.Contains(construct));
+        diagnostics.ShouldContain(item => item.Code == "CK00001" && item.Message!.Contains(construct));
     }
 }

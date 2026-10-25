@@ -16,11 +16,11 @@ public sealed class SqlParseStrictnessTests
 {
     /// <summary>
     /// A stray character used to lex as a one-character identifier, so <c>SELECT * FROM t ?</c>
-    /// bound <c>?</c> as an alias of <c>t</c> and ran. It is now one SQL0003 at the character,
+    /// bound <c>?</c> as an alias of <c>t</c> and ran. It is now one CS00003 at the character,
     /// and the statement keeps only its command type: no alias, column or placeholder.
     /// </summary>
     /// <param name="marked">The statement; the stray character sits between '«' and '»'.</param>
-    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Strictness: a stray character is one SQL0003 at its span and binds nothing")]
+    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Strictness: a stray character is one CS00003 at its span and binds nothing")]
     [InlineData("SELECT * FROM t «?»")]
     [InlineData("SELECT * FROM t «#»")]
     [InlineData("SELECT * FROM t «^»")]
@@ -48,7 +48,7 @@ public sealed class SqlParseStrictnessTests
 
         // Assert
         var error = Errors(statement).ShouldHaveSingleItem();
-        error.Code.ShouldBe("SQL0003");
+        error.Code.ShouldBe("CS00003");
         error.Start.ShouldBe(start);
         error.End.ShouldBe(end);
         if (parameterForm)
@@ -62,17 +62,17 @@ public sealed class SqlParseStrictnessTests
         }
         statement.SqlExpression.GetType().ShouldBe(typeof(SqlQueryExpression));
         statement.SqlExpression.CommandType.ShouldNotBe(SqlQueryCommandType.Unknown);
-        statement.Diagnostics.ShouldNotContain(diagnostic => diagnostic.Code == "SQL0002");
+        statement.Diagnostics.ShouldNotContain(diagnostic => diagnostic.Code == "CS00002");
     }
 
-    [Fact(DisplayName = "Cohesion Test [Sql.Language] - Strictness: text of stray characters only is one SQL0003 and no unknown command")]
+    [Fact(DisplayName = "Cohesion Test [Sql.Language] - Strictness: text of stray characters only is one CS00003 and no unknown command")]
     public void Parse_OnlyStrayCharacters_ShouldReportOnlyTheCharacter()
     {
         // Act
         var statement = Parse("?;");
 
         // Assert
-        Errors(statement).ShouldHaveSingleItem().Code.ShouldBe("SQL0003");
+        Errors(statement).ShouldHaveSingleItem().Code.ShouldBe("CS00003");
         statement.SqlExpression.CommandType.ShouldBe(SqlQueryCommandType.Unknown);
     }
 
@@ -81,7 +81,7 @@ public sealed class SqlParseStrictnessTests
     /// a raw FormatException naming no code or span.
     /// </summary>
     /// <param name="marked">The statement; the literal sits between '«' and '»'.</param>
-    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Strictness: a numeric literal whose exponent has no digits is one SQL0003")]
+    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Strictness: a numeric literal whose exponent has no digits is one CS00003")]
     [InlineData("SELECT «1e» FROM t;")]
     [InlineData("SELECT «1E+» FROM t;")]
     [InlineData("SELECT a FROM t WHERE a = «2.5e-»;")]
@@ -94,7 +94,7 @@ public sealed class SqlParseStrictnessTests
         var error = Errors(Parse(sql)).ShouldHaveSingleItem();
 
         // Assert
-        error.Code.ShouldBe("SQL0003");
+        error.Code.ShouldBe("CS00003");
         error.Start.ShouldBe(start);
         error.End.ShouldBe(end);
         error.Message.ShouldBe($"Malformed numeric literal '{sql[start..end]}': the exponent has no digits.");
@@ -136,11 +136,11 @@ public sealed class SqlParseStrictnessTests
 
     /// <summary>
     /// <c>~</c> is recognized but outside the executable subset. Prefix (bitwise NOT) and infix
-    /// (PostgreSQL regular-expression match) each report one COHDBL001 at the operator.
+    /// (PostgreSQL regular-expression match) each report one CK00001 at the operator.
     /// </summary>
     /// <param name="marked">The statement; the operator sits between '«' and '»'.</param>
     /// <param name="form">The operator form the message names.</param>
-    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Strictness: ~ reports one COHDBL001 naming the operator")]
+    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Strictness: ~ reports one CK00001 naming the operator")]
     [InlineData("SELECT «~»a FROM t;", "prefix")]
     [InlineData("SELECT «~»NULL;", "prefix")]
     [InlineData("SELECT «~» -a FROM t;", "prefix")]
@@ -170,7 +170,7 @@ public sealed class SqlParseStrictnessTests
         var error = Errors(Parse(sql)).ShouldHaveSingleItem();
 
         // Assert
-        error.Code.ShouldBe("COHDBL001");
+        error.Code.ShouldBe("CK00001");
         error.Start.ShouldBe(start);
         error.End.ShouldBe(end);
         error.Message.ShouldBe(form == "prefix"
@@ -180,11 +180,11 @@ public sealed class SqlParseStrictnessTests
 
     /// <summary>
     /// PostgreSQL's pattern-match operators built on <c>~</c> are one operator each. They used to
-    /// report two diagnostics, or a generic SQL0003 at the <c>!</c>.
+    /// report two diagnostics, or a generic CS00003 at the <c>!</c>.
     /// </summary>
     /// <param name="marked">The statement; the operator sits between '«' and '»'.</param>
     /// <param name="meaning">The match the message names.</param>
-    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Strictness: compound ~ operators report one COHDBL001 naming the whole operator")]
+    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Strictness: compound ~ operators report one CK00001 naming the whole operator")]
     [InlineData("SELECT a FROM t WHERE a «~*» 'x';", "regular-expression match")]
     [InlineData("SELECT a FROM t WHERE a «!~» 'x';", "regular-expression match")]
     [InlineData("SELECT a FROM t WHERE a «!~*» 'x';", "regular-expression match")]
@@ -202,20 +202,20 @@ public sealed class SqlParseStrictnessTests
         var error = Errors(Parse(sql)).ShouldHaveSingleItem();
 
         // Assert
-        error.Code.ShouldBe("COHDBL001");
+        error.Code.ShouldBe("CK00001");
         error.Start.ShouldBe(start);
         error.End.ShouldBe(end);
         error.Message.ShouldBe($"The infix {sql[start..end]} operator ({meaning}) is not supported by the SQL surface.");
     }
 
     /// <summary>
-    /// Each used to report its COHDBL001 plus a second diagnostic from the text after it: a
+    /// Each used to report its CK00001 plus a second diagnostic from the text after it: a
     /// quantified operand parsed as a call to a function named ANY, LATERAL bound as a table
     /// name, and WITHIN read as a column alias.
     /// </summary>
     /// <param name="marked">The statement; the reported span sits between '«' and '»'.</param>
     /// <param name="construct">The construct the message names.</param>
-    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Strictness: a recognized construct is one COHDBL001 and its text is skipped")]
+    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Strictness: a recognized construct is one CK00001 and its text is skipped")]
     [InlineData("SELECT a FROM t WHERE a = «ANY» (SELECT b FROM u);", "ANY quantified comparison")]
     [InlineData("SELECT a FROM t WHERE a <> «SOME» (SELECT b FROM u) AND a > 1;", "SOME quantified comparison")]
     [InlineData("SELECT a FROM t WHERE a >= «ALL» (SELECT b FROM u);", "ALL quantified comparison")]
@@ -234,7 +234,7 @@ public sealed class SqlParseStrictnessTests
         var error = Errors(Parse(sql)).ShouldHaveSingleItem();
 
         // Assert
-        error.Code.ShouldBe("COHDBL001");
+        error.Code.ShouldBe("CK00001");
         error.Start.ShouldBe(start);
         error.End.ShouldBe(end);
         error.Message.ShouldBe($"The {construct} clause is not supported by the SQL surface of this database model.");
@@ -252,8 +252,8 @@ public sealed class SqlParseStrictnessTests
         // Assert
         errors.Select(error => (error.Code, error.Message)).ShouldBe(
         [
-            ("COHDBL001", "The ALL quantified comparison clause is not supported by the SQL surface of this database model."),
-            ("COHDBL001", "The ANY quantified comparison clause is not supported by the SQL surface of this database model."),
+            ("CK00001", "The ALL quantified comparison clause is not supported by the SQL surface of this database model."),
+            ("CK00001", "The ANY quantified comparison clause is not supported by the SQL surface of this database model."),
         ], ignoreOrder: true);
     }
 

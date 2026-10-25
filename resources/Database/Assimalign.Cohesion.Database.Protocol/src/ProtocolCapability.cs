@@ -27,4 +27,7 @@ public sealed class ProtocolCapability
 
     /// <summary>Gets the shared structured statement diagnostics capability.</summary>
     public static ProtocolCapability Diagnostics { get; } = new("diagnostics", (byte)ProtocolMessageType.Diagnostics);
+
+    /// <summary>Gets the shared Execute status and ROLLBACK reset contract, using existing Execute and Ready identifiers.</summary>
+    public static ProtocolCapability TransactionStatus { get; } = new("transaction-status");
 }

@@ -27,7 +27,7 @@ namespace Assimalign.Cohesion.Database.Sql;
 /// refused with "A transaction or operation is already active on this session." while the
 /// session's transaction is usable, a closed session refuses everything with "The session is
 /// closed.", and disposal ends the open transaction as the session's teardown (a later commit of it
-/// reports <c>COHSQLT005</c> naming the closure). This type supplies the model's work: the
+/// reports <c>CS04005</c> naming the closure). This type supplies the model's work: the
 /// isolation-level and offline refusals of BEGIN, the statements, the SQL transaction-control
 /// statements (<c>BEGIN</c>, <c>COMMIT</c>, <c>ROLLBACK</c>) and the translation of the kernel's
 /// exceptions at the model boundary.
@@ -44,15 +44,15 @@ namespace Assimalign.Cohesion.Database.Sql;
 /// <para>
 /// <b>Transaction control through statement text.</b> <c>BEGIN</c> on a session with a usable
 /// transaction and <c>COMMIT</c> or <c>ROLLBACK</c> without one are state misuse, reported as
-/// diagnostics (<c>COHSQLT001</c>, <c>COHSQLT002</c>) without throwing or changing the transaction.
+/// diagnostics (<c>CS04001</c>, <c>CS04002</c>) without throwing or changing the transaction.
 /// <c>BEGIN</c> on a session whose transaction refuses work throws that transaction's refusal, as
 /// the typed BEGIN does; <c>COMMIT</c> and <c>ROLLBACK</c> end the transaction through the base, so
-/// a <c>COMMIT</c> of a transaction the kernel ended rolls it back and throws <c>COHSQLT005</c>.
+/// a <c>COMMIT</c> of a transaction the kernel ended rolls it back and throws <c>CS04005</c>.
 /// </para>
 /// <para>
 /// A target table definition changed during a lock wait invalidates the bound statement plan.
 /// Execution throws <see cref="DatabaseTransactionAbortedException"/> with diagnostic
-/// <c>COHSQLT006</c>; retry in a fresh transaction. Adjacent FK changes rebuild before row reads.
+/// <c>CS04006</c>; retry in a fresh transaction. Adjacent FK changes rebuild before row reads.
 /// </para>
 /// <para>
 /// <b>Shape (concrete-types plan, phase 4, #1260).</b> A public sealed leaf of the root's language
@@ -63,6 +63,8 @@ namespace Assimalign.Cohesion.Database.Sql;
 /// <c>new</c> members over the base's public members.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("SqlDatabaseSession")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.SqlDatabaseSession.DebugView))]
 public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest>
 {
     private readonly SqlDatabase _database;
@@ -178,9 +180,9 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
     /// <exception cref="ObjectDisposedException">The session's database has been disposed.</exception>
     /// <exception cref="DatabaseException">
     /// The session is closed; a transaction or operation is already active on it; or the session's
-    /// transaction refuses work (<c>COHSQLT005</c>).
+    /// transaction refuses work (<c>CS04005</c>).
     /// </exception>
-    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHSQLT004</c>, #1243).</exception>
+    /// <exception cref="DatabaseOfflineException">The database is offline (<c>CS04004</c>, #1243).</exception>
     public new async ValueTask<SqlDatabaseTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default)
         => (SqlDatabaseTransaction)await base.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
 
@@ -194,10 +196,10 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
     /// <exception cref="ObjectDisposedException">The session's database has been disposed.</exception>
     /// <exception cref="DatabaseException">
     /// The session is closed; a transaction or operation is already active on it; the session's
-    /// transaction refuses work (<c>COHSQLT005</c>); or <paramref name="isolationLevel"/> is
+    /// transaction refuses work (<c>CS04005</c>); or <paramref name="isolationLevel"/> is
     /// <see cref="IsolationLevel.Serializable"/>.
     /// </exception>
-    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHSQLT004</c>, #1243).</exception>
+    /// <exception cref="DatabaseOfflineException">The database is offline (<c>CS04004</c>, #1243).</exception>
     /// <remarks>
     /// The session begins an MVCC transaction context on the database's transaction manager
     /// alongside the physical storage bracket (paired under one sequence):
@@ -218,9 +220,7 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
         if (isolationLevel == IsolationLevel.Serializable)
         {
             throw new DatabaseException(
-                "IsolationLevel.Serializable is not supported by the SQL engine yet: serialization-conflict " +
-                "detection is a post-MVP feature, and the session contract forbids running weaker than requested. " +
-                "Use IsolationLevel.Snapshot or IsolationLevel.ReadCommitted.");
+                ErrorMessages.BeginTransactionCoreAsyncDatabase);
         }
 
         var transactionStart = (_database.Engine.EngineOptions.TimeProvider ?? TimeProvider.System).GetUtcNow();
@@ -247,7 +247,7 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
     /// The SQL session's text seam: the statement is parsed with the SQL dialect, under the
     /// engine's expression nesting limit, into the <see cref="SqlQueryRequest"/> the typed member
     /// takes. The SQL wire server executes the statement text it receives through this member of
-    /// its typed session. A parse that runs out of stack fails with <c>COHSQLE004</c>, as any other
+    /// its typed session. A parse that runs out of stack fails with <c>CS05004</c>, as any other
     /// walk over the statement does.
     /// </remarks>
     protected override ValueTask<DatabaseResult> ExecuteCoreAsync(string statement, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken)
@@ -317,7 +317,7 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
             // work may survive the reopen: a self-committing DDL statement that already committed a
             // catalog change a reopened database shows, or a bracket whose commit record was
             // written, is unconfirmed instead (#1272). The unconfirmed commit that took the database offline
-            // keeps its own type. Both lead with COHSQLT004.
+            // keeps its own type. Both lead with CS04004.
             throw translated;
         }
         catch (Exception exception) when (exception is DatabaseException or InsufficientExecutionStackException)
@@ -392,7 +392,7 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
     {
         // The abort path retains this exact coded cause (#1364). Location attachment must not
         // substitute another exception for a storage failure already recorded on the transaction.
-        if (failure.Diagnostics is [{ Code: "COHSQLT005" or "COHSQLE041" or "COHDBS003" }, ..]
+        if (failure.Diagnostics is [{ Code: "CS04005" or "CS06041" or "CK06003" }, ..]
             || SqlDatabase.IsStorageFailure(failure)) { return failure; }
         if (failure is SqlConstraintViolationException constraint) { return constraint.At(location); }
         if (failure is SqlExecutionException execution) { return execution.At(location); }
@@ -494,16 +494,16 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
         {
             if (diagnostic.Severity == DiagnosticSeverity.Error)
             {
-                if (diagnostic.Code is "SQL0006" or "SQL0007")
+                if (diagnostic.Code is "CS00006" or "CS00007")
                 {
                     SqlDatabaseEventSource.Log.StatementTooComplex(_database.Name, request.Statement.ExpressionNestingDepth);
                 }
-                if (diagnostic.Code == "SQL0007")
+                if (diagnostic.Code == "CS00007")
                 {
                     throw SqlEvaluationException.StatementTooComplex(new InsufficientExecutionStackException(
-                        $"SQL parse error {diagnostic.Code}: {diagnostic.Message}"));
+                        string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExecuteStatementCoreAsyncFailure, diagnostic.Code, diagnostic.Message)));
                 }
-                throw new DatabaseParseException($"SQL parse error {diagnostic.Code}: {diagnostic.Message}", request.Statement.Diagnostics);
+                throw new DatabaseParseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExecuteStatementCoreAsyncFailure, diagnostic.Code, diagnostic.Message), request.Statement.Diagnostics);
             }
         }
 
@@ -516,7 +516,7 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
         {
             SqlDatabaseEventSource.Log.StatementTooComplex(_database.Name, request.Statement.ExpressionNestingDepth);
             var diagnostic = NestingLimitDiagnostic(request.Statement.ExpressionNestingDepth);
-            throw new DatabaseParseException($"SQL parse error {diagnostic.Code}: {diagnostic.Message}", [diagnostic]);
+            throw new DatabaseParseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExecuteStatementCoreAsyncFailure, diagnostic.Code, diagnostic.Message), [diagnostic]);
         }
 
         SqlSystemViews.EnsureReadOnly(request.Statement.SqlExpression);
@@ -555,8 +555,8 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
             {
                 if (IsSelfCommitting(request))
                 {
-                    return TransactionDiagnostic("COHSQLT003",
-                        "DDL requires auto-commit mode because the catalog does not enlist in session transactions.");
+                    return TransactionDiagnostic("CS04003",
+                        ErrorMessages.StatementCoreAsyncDatabaseResult);
                 }
 
                 TransactionContext? snapshotPin = null;
@@ -582,10 +582,9 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
                     {
                         throw transaction.RecordStorageFailure(_database.TranslateFailure(exception));
                     }
-                    // The requester-closes-cycle victim: the statement failed and is
-                    // retryable by construction — roll the transaction back and
-                    // re-attempt. The session stays usable.
-                    throw new DatabaseTransactionDeadlockException(exception.Message, exception);
+                    // Statement atomicity retains earlier work and locks. The caller
+                    // must roll the victim transaction back before retrying it.
+                    throw SqlExecutionException.Deadlock((TransactionDeadlockException)exception);
                 }
                 catch (Exception exception) when (exception is TransactionLockTimeoutException
                     || (exception is OperationCanceledException && _statementTimer?.IsCancellationRequested == true
@@ -658,7 +657,7 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
         catch (TransactionDeadlockException exception)
         {
             await RollbackAutoCommitAsync(context).ConfigureAwait(false);
-            throw new DatabaseTransactionDeadlockException(exception.Message, exception);
+            throw SqlExecutionException.Deadlock(exception);
         }
         catch (TransactionAbortedException exception)
         {
@@ -689,13 +688,25 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
 
         cancellationToken.ThrowIfCancellationRequested();
         SqlSystemViews.EnsureReadOnly(explain.Statement);
+        if (explain.Analyze && explain.Statement is not SqlQueryBodyExpression)
+        {
+            throw new SqlExecutionException(SqlExecutionException.UnsupportedCode,
+                ErrorMessages.ExplainAnalyzeSelectOnly, location: explain.Location);
+        }
         var parameters = SqlQueryExecutor.NormalizeParameters(request.Parameters);
         _database.Definitions.EnsureDefinitions(cancellationToken);
         var planner = new SqlPlanner(_database.Catalog, parameters, _database.Definitions.Functions, cancellationToken, scope);
         try
         {
             var plan = planner.Plan(explain.Statement);
+            var executor = new SqlPlanExecutor(_database.DataStorage, _database.Catalog, _database.IndexManager, _database.Definitions);
+            plan = executor.Cost(plan, scope, cancellationToken);
             scope.Metrics.IsPlanned = true;
+            if (explain.Analyze)
+            {
+                scope.Metrics.BeginAnalysis();
+                return ExecuteExplainAnalyzeAsync(executor, plan, scope, request.Statement.Diagnostics, cancellationToken);
+            }
             var result = SqlPlanner.Describe(plan, request.Statement.Diagnostics);
             return Task.FromResult<DatabaseResult>(result);
         }
@@ -703,6 +714,19 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
         {
             return Task.FromResult<DatabaseResult>(new SqlQueryResult(DatabaseResultStatus.Error, affectedCount: 0, [.. exception.Diagnostics]));
         }
+    }
+
+    private static async Task<DatabaseResult> ExecuteExplainAnalyzeAsync(SqlPlanExecutor executor, SqlPlan plan,
+        SqlStatementContext scope, IEnumerable<Diagnostic> diagnostics, CancellationToken cancellationToken)
+    {
+        await using var result = (DatabaseResultSet)await executor.ExecuteAsync(plan, scope, cancellationToken).ConfigureAwait(false);
+        // Drain the SELECT before returning its description; dispose its ordinary result on every exit.
+        await foreach (var row in result.GetRowsAsync(cancellationToken).ConfigureAwait(false))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            for (int ordinal = 0; ordinal < row.FieldCount; ordinal++) { _ = row.GetValue(ordinal); }
+        }
+        return SqlPlanner.Describe(plan, diagnostics, scope.Metrics);
     }
 
     private static async Task<DatabaseResult> PrepareExecutionResultAsync(Task<DatabaseResult> execution,
@@ -801,14 +825,14 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
     }
 
     /// <summary>
-    /// The <c>SQL0006</c> a typed request gets when its statement nests deeper than this engine's
+    /// The <c>CS00006</c> a typed request gets when its statement nests deeper than this engine's
     /// limit: the diagnostic the engine's own parse of the text would have reported, without its
     /// position, which only a parse finds.
     /// </summary>
     private Diagnostic NestingLimitDiagnostic(int depth) => new()
     {
-        Code = "SQL0006",
-        Message = $"Expression nesting of {depth} levels exceeds this engine's limit of {_parserOptions.ExpressionNestingLimit} levels.",
+        Code = "CS00006",
+        Message = string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.NestingLimitDiagnosticDiagnostic, depth, _parserOptions.ExpressionNestingLimit),
         Severity = DiagnosticSeverity.Error,
         Location = DiagnosticLocation.Absolute,
     };
@@ -824,7 +848,7 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
                 // A transaction that refuses work refuses BEGIN with its own refusal, as the typed
                 // BEGIN does; a usable one makes BEGIN state misuse, reported, not thrown.
                 ThrowIfTransactionRefuses();
-                return TransactionDiagnostic("COHSQLT001", "BEGIN requires a session with no open transaction.");
+                return TransactionDiagnostic("CS04001", ErrorMessages.TransactionControlAsyncDatabaseResult);
             }
 
             await BeginTransactionAsync(_isolationLevel, cancellationToken).ConfigureAwait(false);
@@ -833,11 +857,11 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
         {
             if (transaction is null)
             {
-                return TransactionDiagnostic("COHSQLT002", $"{control.CommandType.ToString().ToUpperInvariant()} requires an open transaction.");
+                return TransactionDiagnostic("CS04002", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.TransactionControlAsyncDatabaseResult2, control.CommandType.ToString().ToUpperInvariant()));
             }
 
             // The base ends the transaction whatever the outcome; a COMMIT of a transaction the
-            // kernel ended under its caller rolls it back and throws COHSQLT005.
+            // kernel ended under its caller rolls it back and throws CS04005.
             if (control.CommandType == SqlQueryCommandType.Commit)
             {
                 await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
@@ -854,4 +878,18 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
     private static DatabaseResult TransactionDiagnostic(string code, string message)
         => new SqlQueryResult(DatabaseResultStatus.Error, affectedCount: 0,
             [new Diagnostic { Code = code, Message = message, Severity = DiagnosticSeverity.Error }]);
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Sql.SqlDatabaseSession _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.SqlDatabaseSession value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Sql.SqlDatabase Database => _target.Database;
+        public global::System.TimeSpan? StatementTimeout => _target.StatementTimeout;
+        public global::System.TimeSpan? LockTimeout => _target.LockTimeout;
+    }
 }

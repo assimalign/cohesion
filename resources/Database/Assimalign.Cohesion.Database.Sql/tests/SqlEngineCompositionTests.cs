@@ -7,6 +7,8 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
+
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 /// <summary>
@@ -17,6 +19,7 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 /// engine already had), and the shared builder state disposes whatever a failed build leaves
 /// unowned and fails a compose method that breaks its contract.
 /// </summary>
+[Collection(ThreadPoolSaturationCollection.Name)]
 public sealed class SqlEngineCompositionTests
 {
     [Fact(DisplayName = "Cohesion Test [Database.Sql] - Composition: products attach in order, a later factory sees the earlier product, and the engine and builder freeze")]
@@ -550,20 +553,24 @@ public sealed class SqlEngineCompositionTests
         worker.ShouldNotBeNull().Waiting.Wait(TimeSpan.FromSeconds(10)).ShouldBeTrue();
 
         // Act
-        Task disposal = Task.Run(async () => await engine.DisposeAsync());
+        using var saturation = ThreadPoolSaturation.Start();
+        Task disposal = DedicatedTestTask.Run(async () => await engine.DisposeAsync());
         bool cancelled = worker.Cancelled.Wait(TimeSpan.FromSeconds(10));
+        bool poolHeld = saturation.HasHeld;
         bool completedBeforeTheWorkerStopped = disposal.IsCompleted;
         bool releasedBeforeTheWorkerStopped = worker.Released;
         worker.AllowStop.Set();
-        var failure = await Should.ThrowAsync<AggregateException>(() => disposal.WaitAsync(TimeSpan.FromSeconds(10)));
+        saturation.Dispose();
+        var failure = await Record.ExceptionAsync(() => disposal.WaitAsync(TimeSpan.FromSeconds(10)));
 
         // Assert
+        poolHeld.ShouldBeTrue("The reproduction must hold queued pool work throughout the cancellation observation.");
         cancelled.ShouldBeTrue();
         completedBeforeTheWorkerStopped.ShouldBeFalse();
         releasedBeforeTheWorkerStopped.ShouldBeFalse();
         worker.Released.ShouldBeTrue();
         worker.StoppedBeforeRelease.ShouldBeTrue();
-        failure.Flatten().InnerExceptions.ShouldContain(exception => exception.Message == "The cancellation callback failed.");
+        failure.ShouldBeOfType<AggregateException>().Flatten().InnerExceptions.ShouldContain(exception => exception.Message == "The cancellation callback failed.");
     }
 
     // A server whose stop awaits before it completes, which posts its continuation to the current

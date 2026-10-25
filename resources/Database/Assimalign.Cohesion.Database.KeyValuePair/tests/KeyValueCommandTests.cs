@@ -201,10 +201,10 @@ public class KeyValueCommandTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Database.KeyValuePair] - Commands: Empty SCAN operands still count as clauses and null fails parsing (#1088)")]
-    [InlineData("SCAN FROM @empty FROM @p", false, "COHKV010")]
-    [InlineData("SCAN TO @empty TO @p", false, "COHKV010")]
-    [InlineData("SCAN PREFIX @empty PREFIX @p", false, "COHKV010")]
-    [InlineData("SCAN TO @empty", true, "COHKV012")]
+    [InlineData("SCAN FROM @empty FROM @p", false, "CV00010")]
+    [InlineData("SCAN TO @empty TO @p", false, "CV00010")]
+    [InlineData("SCAN PREFIX @empty PREFIX @p", false, "CV00010")]
+    [InlineData("SCAN TO @empty", true, "CV02012")]
     public async Task Execute_RepeatedOrNullScanOperand_ShouldRetainParseFailure(string command, bool nullOperand, string code)
     {
         // Arrange

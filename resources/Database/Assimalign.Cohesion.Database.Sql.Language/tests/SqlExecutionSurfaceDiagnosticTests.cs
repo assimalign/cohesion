@@ -42,12 +42,12 @@ public class SqlExecutionSurfaceDiagnosticTests
     {
         var statement = (SqlQueryStatement)new SqlQueryParser().Parse(sql);
 
-        var diagnostic = statement.Diagnostics.Single(item => item.Code == "COHDBL001");
+        var diagnostic = statement.Diagnostics.Single(item => item.Code == "CK00001");
         diagnostic.Severity.ShouldBe(DiagnosticSeverity.Error);
         diagnostic.Message!.ShouldContain(form);
         diagnostic.Message!.ShouldContain("INNER, LEFT [OUTER] and CROSS JOIN");
         sql[diagnostic.Start!.Value..diagnostic.End!.Value].ShouldBe(locationText);
-        statement.Diagnostics.ShouldNotContain(item => item.Code == "SQL0002");
+        statement.Diagnostics.ShouldNotContain(item => item.Code == "CS00002");
     }
 
     [Theory(DisplayName = "Cohesion Test [Database.Sql.Language] - JOIN: Reports the explicit execution boundary")]
@@ -58,10 +58,10 @@ public class SqlExecutionSurfaceDiagnosticTests
     {
         var statement = (SqlQueryStatement)new SqlQueryParser().Parse(sql);
 
-        var diagnostic = statement.Diagnostics.Single(item => item.Code == "COHDBL001");
+        var diagnostic = statement.Diagnostics.Single(item => item.Code == "CK00001");
         diagnostic.Severity.ShouldBe(DiagnosticSeverity.Error);
         diagnostic.Message!.ShouldContain(message);
-        statement.Diagnostics.ShouldNotContain(item => item.Code == "SQL0002");
+        statement.Diagnostics.ShouldNotContain(item => item.Code == "CS00002");
     }
 
     [Theory(DisplayName = "Cohesion Test [Database.Sql.Language] - JOIN: Rejects incomplete INNER JOIN syntax")]
@@ -72,7 +72,7 @@ public class SqlExecutionSurfaceDiagnosticTests
     {
         var statement = (SqlQueryStatement)new SqlQueryParser().Parse(sql);
 
-        statement.Diagnostics.ShouldContain(item => item.Code == "SQL0003");
+        statement.Diagnostics.ShouldContain(item => item.Code == "CS00003");
     }
 
     [Theory(DisplayName = "Cohesion Test [Database.Sql.Language] - Grouping: Restores executable grouping clauses")]
@@ -119,11 +119,11 @@ public class SqlExecutionSurfaceDiagnosticTests
 
         var statement = (SqlQueryStatement)new SqlQueryParser().Parse(sql);
 
-        var diagnostic = statement.Diagnostics.Single(item => item.Code == "COHDBL001");
+        var diagnostic = statement.Diagnostics.Single(item => item.Code == "CK00001");
         diagnostic.Severity.ShouldBe(DiagnosticSeverity.Error);
         diagnostic.Message!.ShouldContain(form);
         sql[diagnostic.Start!.Value..diagnostic.End!.Value].ShouldBe(locationText);
-        statement.Diagnostics.ShouldNotContain(item => item.Code == "SQL0002");
+        statement.Diagnostics.ShouldNotContain(item => item.Code == "CS00002");
     }
 
     [Theory(DisplayName = "Cohesion Test [Database.Sql.Language] - CAST: Accepts supported scalar contexts")]

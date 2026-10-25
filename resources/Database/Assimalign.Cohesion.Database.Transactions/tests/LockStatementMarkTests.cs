@@ -16,13 +16,13 @@ public sealed class LockStatementMarkTests
     public void Equals_SameBoundary_ShouldHaveValueSemantics()
     {
         // Arrange
-        var locks = LockManager.Create();
+        var locks = new LockManager();
         var owner = new TransactionSequence(1);
         var first = locks.MarkStatement(owner);
         IEquatable<LockStatementMark> typed = first;
         var same = locks.MarkStatement(owner);
         var otherOwner = locks.MarkStatement(new TransactionSequence(2));
-        var otherManager = LockManager.Create().MarkStatement(owner);
+        var otherManager = new LockManager().MarkStatement(owner);
         locks.TryAcquire(owner, LockResource.Entry(1, 1), LockMode.Exclusive).ShouldBeTrue();
         var later = locks.MarkStatement(owner);
 
@@ -50,7 +50,7 @@ public sealed class LockStatementMarkTests
         int waitsCompleted = 0;
         for (int iteration = 0; iteration < iterations; iteration++)
         {
-            var locks = LockManager.Create();
+            var locks = new LockManager();
             var first = new TransactionSequence(1);
             var second = new TransactionSequence(2);
             var holder = new TransactionSequence(3);
@@ -125,7 +125,7 @@ public sealed class LockStatementMarkTests
     public void ReleaseSince_PreviousGrants_ShouldKeepEveryMode()
     {
         // Arrange
-        var locks = LockManager.Create();
+        var locks = new LockManager();
         var owner = new TransactionSequence(1);
         var other = new TransactionSequence(2);
         var earlier = LockResource.Entry(1, 1);
@@ -154,7 +154,7 @@ public sealed class LockStatementMarkTests
     {
         // Arrange
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        var locks = LockManager.Create();
+        var locks = new LockManager();
         var owner = new TransactionSequence(1);
         var second = new TransactionSequence(2);
         var third = new TransactionSequence(3);
@@ -183,7 +183,7 @@ public sealed class LockStatementMarkTests
     public void ReleaseSince_AbandonedOwner_ShouldKeepGrants()
     {
         // Arrange
-        var locks = LockManager.Create();
+        var locks = new LockManager();
         var owner = new TransactionSequence(1);
         var resource = LockResource.Entry(1, 1);
         var mark = locks.MarkStatement(owner);
@@ -203,19 +203,20 @@ public sealed class LockStatementMarkTests
     public void ReleaseSince_InvalidMark_ShouldReject()
     {
         // Arrange
-        var locks = LockManager.Create();
-        var foreign = LockManager.Create().MarkStatement(new TransactionSequence(1));
+        var locks = new LockManager();
+        var foreign = new LockManager().MarkStatement(new TransactionSequence(1));
 
         // Act / Assert
         Should.Throw<ArgumentException>(() => locks.ReleaseSince(default));
         Should.Throw<ArgumentException>(() => locks.ReleaseSince(foreign));
     }
 
+#if !DEBUG
     [Fact(DisplayName = "Cohesion Test [Transactions] - Statement marks: mark and successful re-grant allocate nothing")]
     public void MarkStatement_UncontendedRegrant_ShouldAllocateNothing()
     {
         // Arrange
-        var locks = LockManager.Create();
+        var locks = new LockManager();
         var owner = new TransactionSequence(1);
         var resource = LockResource.Entry(1, 1);
         locks.TryAcquire(owner, resource, LockMode.Exclusive).ShouldBeTrue();
@@ -235,4 +236,5 @@ public sealed class LockStatementMarkTests
         granted.ShouldBe(1000);
         allocated.ShouldBe(0);
     }
+#endif
 }

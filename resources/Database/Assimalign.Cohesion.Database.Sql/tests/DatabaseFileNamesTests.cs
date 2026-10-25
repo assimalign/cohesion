@@ -23,7 +23,7 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 public sealed class DatabaseFileNamesTests
 {
     // The characters the rule allows, written out: the test's own statement of the rule.
-    private const string Allowed = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-.";
+    private const string allowedValue = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-.";
 
     private static readonly string _root = Path.Combine(Path.GetTempPath(), "cohesion-names-root");
 
@@ -87,7 +87,7 @@ public sealed class DatabaseFileNamesTests
     {
         // Arrange: every allowed character, in a name of its own and beside each case of a letter.
         var names = new List<string>();
-        foreach (char character in Allowed.Where(character => character != '.'))
+        foreach (char character in allowedValue.Where(character => character != '.'))
         {
             names.Add(character.ToString());
             names.Add("a" + character);
@@ -248,7 +248,7 @@ public sealed class DatabaseFileNamesTests
         }
 
         // Assert
-        new string(allowed.ToArray()).ShouldBe(new string(Allowed.Order().ToArray()));
+        new string(allowed.ToArray()).ShouldBe(new string(allowedValue.Order().ToArray()));
         allowed.ShouldAllBe(character => character >= ' ' && windowsRefuses.IndexOf(character) < 0 && unixRefuses.IndexOf(character) < 0);
     }
 

@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -7,6 +8,7 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.Database.Execution;
+using Assimalign.Cohesion.Database.Graph.Internal;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Types;
 
@@ -14,7 +16,30 @@ namespace Assimalign.Cohesion.Database.Graph.Tests;
 
 public sealed class StorageCorruptionTests
 {
-    [Theory(DisplayName = "Cohesion Test [Database.Graph] - Conformance: a corrupt page fails the operation with database, page and COHDBS003")]
+    [Theory(DisplayName = "Cohesion Test [Database.Graph] - Short headers are located truncation, not unsupported formats (w11 review)")]
+    [InlineData(0)]
+    [InlineData(16)]
+    [InlineData(17)]
+    public void Decode_TruncatedHeader_ShouldPreserveLocationWithoutFormatRefusal(int length)
+    {
+        // Arrange
+        var bytes = new byte[length];
+        if (length > 16) { bytes[16] = 1; } // Readable node kind, missing version byte.
+        var page = (PageId)9L;
+
+        // Act
+        var failure = Should.Throw<StorageCorruptionException>(() => GraphRecordCodec.Decode(bytes, page, 3));
+
+        // Assert
+        failure.PageId.ShouldBe(page);
+        failure.SlotIndex.ShouldBe(3);
+        failure.Code.ShouldBe("CK06003");
+        failure.Message.ShouldContain("truncat");
+        failure.InnerException.ShouldBeOfType<EndOfStreamException>();
+        failure.Message.ShouldNotContain("recreate");
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Graph] - Conformance: a corrupt page fails the operation with database, page and CK06003")]
     [InlineData(false, 0)]
     [InlineData(true, 0)]
     [InlineData(false, 1)]
@@ -46,7 +71,7 @@ public sealed class StorageCorruptionTests
             faults.WrapCorruption = corruption =>
             {
                 var coded = new DatabaseException("Storage read failed.", [new Diagnostic
-                { Code = "COHDBG018", Message = "Storage read failed.", Severity = DiagnosticSeverity.Error }], corruption);
+                { Code = "CG06018", Message = "Storage read failed.", Severity = DiagnosticSeverity.Error }], corruption);
                 return wrapper == 1 ? coded : new AggregateException(new InvalidOperationException("Cleanup failed."), coded);
             };
         }
@@ -71,7 +96,7 @@ public sealed class StorageCorruptionTests
             });
 
             // Assert
-            failure.Code.ShouldBe("COHDBS003");
+            failure.Code.ShouldBe("CK06003");
             failure.Database.ShouldBe((DatabaseName)"corrupt");
             failure.PageId.ShouldBe(pageId);
             failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(failure.Code);
@@ -80,7 +105,7 @@ public sealed class StorageCorruptionTests
             failure.Message.ShouldContain("page " + (long)pageId, Case.Sensitive);
             faults.RottenPageReads.ShouldBeGreaterThan(0);
             var aborted = await Should.ThrowAsync<DatabaseException>(() => database.GetNodeAsync(session, node.Id, CancellationToken.None).AsTask());
-            aborted.Message.Split("COHDBS003:", StringSplitOptions.None).Length.ShouldBe(2);
+            aborted.Message.Split("CK06003:", StringSplitOptions.None).Length.ShouldBe(2);
         }
         finally { faults.Clear(); }
     }
@@ -97,17 +122,17 @@ public sealed class StorageCorruptionTests
         await database.DisposeAsync();
         var cause = new StorageCorruptionException((PageId)9L, "Page 9 failed checksum verification.");
         var coded = new DatabaseException("Storage open failed.", [new Diagnostic
-        { Code = "COHDBG018", Message = "Storage open failed.", Severity = DiagnosticSeverity.Error }], cause);
+        { Code = "CG06018", Message = "Storage open failed.", Severity = DiagnosticSeverity.Error }], cause);
         strategy.OpenFailure = aggregate ? new AggregateException(new InvalidOperationException("Cleanup failed."), coded) : coded;
 
         // Act
         var failure = await Should.ThrowAsync<DatabaseCorruptionException>(() => engine.OpenDatabaseAsync("corrupt", CancellationToken.None).AsTask());
 
         // Assert: a failed open publishes nothing, and the files remain usable after the fault clears.
-        failure.Code.ShouldBe("COHDBS003");
+        failure.Code.ShouldBe("CK06003");
         failure.PageId.ShouldBe((PageId)9L);
         failure.InnerException.ShouldBeSameAs(cause);
-        failure.Diagnostics.Select(diagnostic => diagnostic.Code).ShouldBe(["COHDBS003", "COHDBG018"]);
+        failure.Diagnostics.Select(diagnostic => diagnostic.Code).ShouldBe(["CK06003", "CG06018"]);
         strategy.OpenFailure = null;
         (await engine.OpenDatabaseAsync("corrupt", CancellationToken.None)).Name.ShouldBe((DatabaseName)"corrupt");
     }

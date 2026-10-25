@@ -16,7 +16,7 @@ the Web health API to those applications.
 using Assimalign.Cohesion.Web.Health;
 using Assimalign.Cohesion.Web.Hosting.Health;
 
-IHealthCheckService health = HealthChecks.CreateBuilder()
+IHealthCheckService health = new HealthChecksBuilder()
     .AddCheck(
         "self",
         () => HealthCheckResult.Healthy(),

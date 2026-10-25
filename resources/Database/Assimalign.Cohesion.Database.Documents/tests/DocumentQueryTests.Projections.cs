@@ -42,7 +42,7 @@ public sealed partial class DocumentQueryTests
         ordered[1].GetValue(0).ShouldBe(2m);
         var error = await Should.ThrowAsync<DatabaseException>(async () => await RowsAsync(session, "SELECT DISTINCT x FROM items ORDER BY META().id"));
         var diagnostic = error.Diagnostics.ShouldHaveSingleItem();
-        diagnostic.Code.ShouldBe("COHDOC014");
+        diagnostic.Code.ShouldBe("CD01014");
         diagnostic.Start.ShouldBe(38);
         diagnostic.End.ShouldBe(47);
         diagnostic.Line.ShouldBe(1);
@@ -159,7 +159,7 @@ public sealed partial class DocumentQueryTests
         // Act
         var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(request, CancellationToken.None));
         // Assert
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDOC001");
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD05001");
         error.Message.ShouldBe("SELECT VALUE requires exactly one expression without an alias or star.");
     }
 
@@ -200,18 +200,18 @@ public sealed partial class DocumentQueryTests
         string invalid = "SELECT VALUE " + Wrap("@p") + " FROM items";
         var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(invalid, parameters, CancellationToken.None));
         var diagnostic = error.Diagnostics.ShouldHaveSingleItem();
-        diagnostic.Code.ShouldBe("COHDOC015");
+        diagnostic.Code.ShouldBe("CD05015");
         diagnostic.Start.ShouldBe(13);
         diagnostic.End.ShouldBe(invalid.IndexOf(" FROM", StringComparison.Ordinal));
         error.Message.ShouldBe("SELECT " + (objects ? "object" : "array") + " constructor values must be nested no deeper than 256 levels.");
         parameters["p"] = parameter.RootElement;
         var insertError = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(
             "INSERT INTO items (KEY, VALUE) VALUES ('deep', " + Wrap("@p") + ")", parameters, CancellationToken.None));
-        insertError.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDOC008");
+        insertError.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD02008");
         insertError.Message.ShouldBe("INSERT JSON must be valid and nested no deeper than 128 levels.");
         var selectInsertError = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(
             "INSERT INTO items (KEY k, VALUE v) SELECT 'deep' AS k, " + Wrap("@p") + " AS v FROM items", parameters, CancellationToken.None));
-        selectInsertError.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDOC008");
+        selectInsertError.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD02008");
         selectInsertError.Message.ShouldBe("INSERT JSON must be valid and nested no deeper than 128 levels.");
     }
 }

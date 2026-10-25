@@ -97,7 +97,7 @@ public sealed class GqlOrderPagingTests
         foreach (string source in new[] { "INSERT (:Unwritten) RETURN 1 LIMIT $page", "MATCH (n:Missing) RETURN n LIMIT @page", "EXPLAIN RETURN 1 SKIP $page" })
         {
             var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(source, parameters, CancellationToken.None));
-            error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG013");
+            error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG02013");
         }
         (await RowsAsync(session, "SHOW LABELS")).ShouldBeEmpty();
     }
@@ -115,7 +115,7 @@ public sealed class GqlOrderPagingTests
         {
             var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(
                 "INSERT (:Unwritten) RETURN 1 LIMIT $page", new Dictionary<string, object?> { ["page"] = value }, CancellationToken.None));
-            error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG003");
+            error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG03003");
         }
         (await RowsAsync(session, "SHOW LABELS")).ShouldBeEmpty();
     }
@@ -137,7 +137,7 @@ public sealed class GqlOrderPagingTests
         // Act
         var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(source, cancellationToken: CancellationToken.None));
         // Assert
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG001");
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG05001");
     }
 
     [Fact(DisplayName = "Cohesion Test [Graph] - Ordering and paging: DISTINCT computed expressions compare structurally and project before paging")]
@@ -207,8 +207,8 @@ public sealed class GqlOrderPagingTests
             "MATCH ()-[r:MANAGES]->() RETURN r AS relAlias ORDER BY relAlias:MANAGES", cancellationToken: CancellationToken.None)).ShouldBeAssignableTo<DatabaseResultSet>();
         // Assert
         rows.Select(row => row[0]).ShouldBe(["Bob", "Alice", "Isolated"]);
-        scalar.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG003");
-        staticScalar.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG003");
+        scalar.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG03003");
+        staticScalar.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG03003");
         nodeAlias.Diagnostics.ShouldBeEmpty();
         relationshipAlias.Diagnostics.ShouldBeEmpty();
     }
@@ -311,8 +311,8 @@ public sealed class GqlOrderPagingTests
         rows.Select(row => row[0]).ShouldBe(["Alice", "Isolated", "Bob"]);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Graph] - Ordering and paging: LIMIT does not bypass the materialization cap")]
-    public async Task Execute_LimitOnOversizedMatch_ShouldKeepCapAsync()
+    [Fact(DisplayName = "Cohesion Test [Graph] - Ordering and paging: LIMIT stops an oversized match before retaining its fan-out (#1533, D4)")]
+    public async Task Execute_LimitOnOversizedMatch_ShouldStopUpstreamAsync()
     {
         // Arrange
         using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(2));
@@ -323,11 +323,12 @@ public sealed class GqlOrderPagingTests
         await session.ExecuteAsync("INSERT " + string.Join(",", Enumerable.Repeat("(:N)", 317)), cancellationToken: timeout.Token);
         var watch = Stopwatch.StartNew();
         // Act
-        var error = await Should.ThrowAsync<DatabaseException>(async () =>
-            await session.ExecuteAsync("MATCH (a:N), (b:N) RETURN a LIMIT 1", cancellationToken: timeout.Token));
+        var rows = await RowsAsync(session, "MATCH (a:N), (b:N) RETURN a LIMIT 1");
         // Assert
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG004");
-        _output.WriteLine($"100,000-match cap: {watch.Elapsed.TotalMilliseconds:F1} ms");
+        rows.ShouldHaveSingleItem();
+        session.LastStatementMetrics!.Physical.ShouldBe(2);
+        session.LastStatementMetrics.Memory.ActiveLeases.ShouldBe(0);
+        _output.WriteLine($"LIMIT 1 over a 100,489-match fan-out: {watch.Elapsed.TotalMilliseconds:F1} ms");
     }
 
     [Fact(DisplayName = "Cohesion Test [Graph] - Ordering and paging: ten thousand rows sort before LIMIT ten")]
@@ -371,7 +372,7 @@ public sealed class GqlOrderPagingTests
         {
             var error = await Should.ThrowAsync<DatabaseException>(async () =>
                 await session.ExecuteAsync(new GraphQueryRequest(new GqlQueryStatement(query)), CancellationToken.None));
-            error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG001");
+            error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG05001");
         }
     }
 
@@ -386,7 +387,7 @@ public sealed class GqlOrderPagingTests
         var error = await Should.ThrowAsync<DatabaseException>(async () =>
             await session.ExecuteAsync("MATCH p = (a)->(b) RETURN p AS route ORDER BY route.name", cancellationToken: CancellationToken.None));
         // Assert
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG003");
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG03003");
     }
 
     private static async Task<List<object?[]>> RowsAsync(GraphDatabaseSession session, string source, IReadOnlyDictionary<string, object?>? parameters = null)

@@ -216,7 +216,7 @@ public sealed partial class SqlQueryParser
                 constraints.Any(constraint => constraint.Kind == SqlConstraintKind.PrimaryKey &&
                     constraint.Columns.Contains(column.ColumnName, StringComparer.OrdinalIgnoreCase)))
             {
-                AddSyntaxDiagnostic(pos, _lastTokenEnd, $"Conflicting NULL/NOT NULL declarations for column '{column.ColumnName}'.");
+                AddSyntaxDiagnostic(pos, _lastTokenEnd, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlQueryParserParseCreateTableVoid, column.ColumnName));
             }
         }
 
@@ -238,7 +238,7 @@ public sealed partial class SqlQueryParser
             AddExpectedDiagnostic(ref lexer, "a column name");
         }
 
-        string dataType = ParseDefinitionType(ref lexer, $"Column '{columnName}'", out var resolvedType);
+        string dataType = ParseDefinitionType(ref lexer, string.Format(System.Globalization.CultureInfo.CurrentCulture, _errorColumnSubject, columnName), out var resolvedType);
 
         // Parse optional constraints
         bool isNullable = true;
@@ -257,14 +257,14 @@ public sealed partial class SqlQueryParser
         {
             if (IsWord(ref lexer, "GENERATED") || IsWord(ref lexer, "IDENTITY"))
             {
-                if (identity is not null) { AddSyntaxDiagnostic(ref lexer, "A column may declare only one IDENTITY clause."); }
+                if (identity is not null) { AddSyntaxDiagnostic(ref lexer, ErrorMessages.QueryParserParseColumnDefinitionVoid); }
                 identity = ParseIdentity(ref lexer);
             }
             else if (IsKeyword(ref lexer, "COLLATE"))
             {
                 if (collationName is not null)
                 {
-                    AddSyntaxDiagnostic(ref lexer, "A column may declare only one COLLATE clause.");
+                    AddSyntaxDiagnostic(ref lexer, ErrorMessages.QueryParserParseColumnDefinitionVoid2);
                 }
                 Advance(ref lexer);
                 collationName = ParseCollationName(ref lexer);
@@ -309,7 +309,7 @@ public sealed partial class SqlQueryParser
                 // Recovery leaves an offending token in place, so this may already be
                 // reported; either way, skip to the end of this column definition so one
                 // mistake yields one diagnostic.
-                AddSyntaxDiagnostic(ref lexer, "Expected a column constraint or the end of the column definition.");
+                AddSyntaxDiagnostic(ref lexer, ErrorMessages.QueryParserParseColumnDefinitionVoid3);
                 SkipToColumnDefinitionEnd(ref lexer);
             }
         }
@@ -317,7 +317,7 @@ public sealed partial class SqlQueryParser
         // PostgreSQL parse_utilcmd.c:873: explicit NULL conflicts with every NOT NULL implication.
         if (sawNull && (sawNotNull || isPrimaryKey || identity is not null))
         {
-            AddSyntaxDiagnostic(columnStart, _lastTokenEnd, $"Conflicting NULL/NOT NULL declarations for column '{columnName}'.");
+            AddSyntaxDiagnostic(columnStart, _lastTokenEnd, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlQueryParserParseCreateTableVoid, columnName));
         }
         return new SqlColumnDefinition(columnName, dataType, isNullable && identity is null, isPrimaryKey, defaultValue, constraints, collationName, resolvedType, identity, sawNull);
     }
@@ -422,7 +422,7 @@ public sealed partial class SqlQueryParser
             if (lexer.Current.Type == TokenType.Keyword)
             {
                 AddSyntaxDiagnostic(ref lexer,
-                    $"ALTER {CurrentText(ref lexer).ToUpperInvariant()} is not supported; the dialect supports ALTER TABLE only.");
+                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlQueryParserParseAlterTableVoid, CurrentText(ref lexer).ToUpperInvariant()));
             }
             else
             {
@@ -477,7 +477,7 @@ public sealed partial class SqlQueryParser
                 }
                 if (!IsIdentifierOrKeyword(ref lexer))
                 {
-                    AddSyntaxDiagnostic(ref lexer, "Expected a column definition after ALTER TABLE ... ADD.");
+                    AddSyntaxDiagnostic(ref lexer, ErrorMessages.SqlQueryParserParseAlterTableVoid2);
                 }
                 action = new SqlAlterAddColumnAction(ParseColumnDefinition(ref lexer));
             }
@@ -502,8 +502,8 @@ public sealed partial class SqlQueryParser
             else
             {
                 AddSyntaxDiagnostic(ref lexer, isConstraint
-                    ? "Expected a constraint name after ALTER TABLE ... DROP CONSTRAINT."
-                    : "Expected a column name after ALTER TABLE ... DROP.");
+                    ? ErrorMessages.SqlQueryParserParseAlterTableVoid3
+                    : ErrorMessages.SqlQueryParserParseAlterTableVoid4);
             }
             action = isConstraint
                 ? new SqlAlterDropConstraintAction(colName)
@@ -556,7 +556,7 @@ public sealed partial class SqlQueryParser
             string target = ReadAlterName(ref lexer, "table name after RENAME TO");
             if (lexer.Current.Type == TokenType.Dot)
             {
-                AddSyntaxDiagnostic(ref lexer, "RENAME TO requires an unqualified target in the same schema.");
+                AddSyntaxDiagnostic(ref lexer, ErrorMessages.SqlQueryParserParseRenameActionVoid);
                 ConsumeRemaining(ref lexer);
             }
             return new SqlAlterRenameTableAction(target);
@@ -667,7 +667,7 @@ public sealed partial class SqlQueryParser
         const string supported = "ADD [COLUMN], ADD CONSTRAINT, DROP [COLUMN], DROP CONSTRAINT, RENAME TO, RENAME [COLUMN], ALTER COLUMN, and ALTER [COLUMN] SET/DROP DEFAULT or SET/DROP NOT NULL";
         if (IsAtEnd(ref lexer) || lexer.Current.Type == TokenType.Semicolon)
         {
-            AddSyntaxDiagnostic(ref lexer, $"ALTER TABLE requires an action: {supported}.");
+            AddSyntaxDiagnostic(ref lexer, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.QueryParserRejectAlterTableActionVoid, supported));
             return;
         }
 
@@ -683,7 +683,7 @@ public sealed partial class SqlQueryParser
         }
 
         AddSyntaxDiagnostic(start, end,
-            $"The ALTER TABLE action '{action}' is not supported; the supported actions are {supported}.");
+            string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.QueryParserRejectAlterTableActionVoid2, action, supported));
     }
 
     /// <summary>

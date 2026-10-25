@@ -19,7 +19,7 @@ public sealed class IndexFormatException : IndexException
     /// The code that leads the message of every refusal: an index whose pages are in a
     /// page format this engine does not read.
     /// </summary>
-    public const string ErrorCode = "COHDBI001";
+    public const string ErrorCode = "CK06101";
 
     /// <summary>
     /// Initializes a new <see cref="IndexFormatException"/>.
@@ -65,20 +65,17 @@ public sealed class IndexFormatException : IndexException
 
     private static string Describe(string indexName, ulong objectId, long rootPageId, int foundVersion)
     {
-        string subject = $"{ErrorCode}: Index '{indexName}' on object {objectId}";
+        string subject = string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.FormatExceptionDescribeIndexFormat, ErrorCode, indexName, objectId);
 
         if (foundVersion == 0)
         {
-            return $"{subject} has a root page ({rootPageId}) that is not a B-tree page of any known format, " +
-                $"and this engine supports only B-tree page format {BTreeIndexManager.FormatVersion}: the index is damaged.";
+            return string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.IndexFormatExceptionDescribeIndex, subject, rootPageId, BTreeIndexManager.FormatVersion);
         }
 
         string remedy = foundVersion < BTreeIndexManager.FormatVersion
-            ? "This engine does not upgrade index pages: export the data with the engine that wrote it, drop the database " +
-              "and create it again with this engine (on-disk format upgrades are tracked by assimalign/cohesion#1152)."
-            : "The index was written by a newer engine; open it with that engine.";
+            ? ErrorMessages.FormatExceptionDescribeIndexFormat2
+            : ErrorMessages.FormatExceptionDescribeIndexFormat3;
 
-        return $"{subject} uses B-tree page format {foundVersion}, but this engine supports only format " +
-            $"{BTreeIndexManager.FormatVersion}. {remedy}";
+        return string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.IndexFormatExceptionDescribeIndex2, subject, foundVersion, BTreeIndexManager.FormatVersion, remedy);
     }
 }

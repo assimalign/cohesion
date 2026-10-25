@@ -56,7 +56,7 @@ public sealed class GraphQuantifiedPathWireTests
         var comment = await Should.ThrowAsync<GraphClientException>(async () => await connection.QueryAsync(
             "MATCH (a:V {name:'A'})-[:T*--1..1]->(hidden)\n]->(b) RETURN b.name", cancellationToken: harness.Token));
         comment.Code.ShouldBe(ProtocolErrorCode.ParseFailure);
-        comment.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("GQL0008");
+        comment.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG00008");
         var empty = await connection.QueryAsync("MATCH (a:V {name:'A'})-[r:T*0]->(b) RETURN r", cancellationToken: harness.Token);
         empty.ShouldHaveSingleItem()[0].ShouldBeOfType<object?[]>().ShouldBeEmpty();
         foreach (string projection in new[] { "r", "COALESCE(r,r)" })
@@ -64,14 +64,14 @@ public sealed class GraphQuantifiedPathWireTests
             var entityList = await Should.ThrowAsync<GraphClientException>(async () => await connection.QueryAsync(
                 "MATCH (a:V {name:'A'})-[r:T]->{2}(b) RETURN " + projection, cancellationToken: harness.Token));
             entityList.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
-            entityList.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG001");
+            entityList.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG05001");
             entityList.Message.ShouldContain("Lists of nodes or relationships cannot be returned over the wire yet", Case.Sensitive);
             (await connection.QueryAsync("RETURN 42", cancellationToken: harness.Token)).ShouldHaveSingleItem()[0].ShouldBe(42L);
             harness.Server.Sessions.ShouldHaveSingleItem().Id.ShouldBe(sessionId);
         }
         var malformed = await Should.ThrowAsync<GraphClientException>(async () => await connection.QueryAsync("MATCH (a)->{3,1}(b) RETURN a.name", cancellationToken: harness.Token));
         malformed.Code.ShouldBe(ProtocolErrorCode.ParseFailure);
-        malformed.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("GQL0002");
+        malformed.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG00002");
         (await connection.QueryAsync("RETURN 42", cancellationToken: harness.Token)).ShouldHaveSingleItem()[0].ShouldBe(42L);
         harness.Server.Sessions.ShouldHaveSingleItem().Id.ShouldBe(sessionId);
     }

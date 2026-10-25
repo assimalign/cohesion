@@ -6,6 +6,8 @@ using Assimalign.Cohesion.Database.Graph.Language;
 namespace Assimalign.Cohesion.Database.Graph.Internal;
 
 /// <summary>Indexes the grouped scope once for every RETURN and ORDER BY expression.</summary>
+[global::System.Diagnostics.DebuggerDisplay("GraphGroupingScope")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Internal.GraphGroupingScope.DebugView))]
 internal sealed class GraphGroupingScope
 {
     private readonly HashSet<GqlExpression> _keys;
@@ -47,8 +49,16 @@ internal sealed class GraphGroupingScope
             };
             if (name is not null && (_variables.Contains(name) || aliases is not null && aliases.ContainsKey(name))) { continue; }
             if (name is not null || expression is GqlAggregateExpression)
-            { throw new GraphPlanningException("COHDBG001", ErrorMessages.GroupedExpressionRequired, expression.Location); }
+            { throw new GraphPlanningException("CG05001", ErrorMessages.GroupedExpressionRequired, expression.Location); }
             foreach (var child in GraphValueExpressions.Children(expression)) { pending.Push(child); }
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Graph.Internal.GraphGroupingScope value)
+        {
+            _ = value;
         }
     }
 }

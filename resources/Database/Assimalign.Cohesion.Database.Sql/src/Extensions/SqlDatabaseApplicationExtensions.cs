@@ -3,7 +3,7 @@ using System;
 namespace Assimalign.Cohesion.Database.Sql;
 
 /// <summary>Registers deferred SQL composition through the dependency-free Database root contract.</summary>
-public static class SqlDatabaseApplicationExtensions
+public static partial class SqlDatabaseApplicationExtensions
 {
     extension(IDatabaseApplicationBuilder builder)
     {
@@ -37,8 +37,8 @@ public static class SqlDatabaseApplicationExtensions
         /// The engine's open, recovery and schema migration therefore run inside application Build,
         /// synchronously, with no timeout (a host's startup timeout bounds service start only) and no
         /// cancellation (owner decision 49 of 2026-10-09). A provisioning failure, for example a
-        /// <see cref="Assimalign.Cohesion.Database.Sql.Schema.SqlSchemaMigrationException"/> led by <c>COHSQLP001</c> to
-        /// <c>COHSQLP005</c>, propagates out of application Build after the engines built before it
+        /// <see cref="Assimalign.Cohesion.Database.Sql.Schema.SqlSchemaMigrationException"/> led by <c>CS03101</c> to
+        /// <c>CS03105</c>, propagates out of application Build after the engines built before it
         /// are disposed.
         /// </para>
         /// </remarks>

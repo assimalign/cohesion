@@ -15,14 +15,14 @@ namespace Assimalign.Cohesion.Database.Sql.Client.Tests;
 /// A 200,000-term statement used to overflow the server's stack and end its process, taking every
 /// session with it. Only genuine nesting counts now: a 10,000-term AND or OR predicate executes,
 /// text nested deeper than the engine's configured limit (256 by default) is a ParseFailure, a
-/// statement within the limit that the server's thread is too small for is a COHSQLE004
+/// statement within the limit that the server's thread is too small for is a CS05004
 /// ExecutionFailure, and the connection that sent any of them
 /// keeps working.
 /// </summary>
 public sealed class SqlExpressionDepthWireTests
 {
-    private const int Limit = SqlQueryParserOptions.DefaultExpressionNestingLimit;
-    private const int Hostile = 200_000;
+    private const int limit = SqlQueryParserOptions.DefaultExpressionNestingLimit;
+    private const int hostile = 200_000;
 
     [Fact(DisplayName = "Cohesion Test [Database.Sql.Client] - Nesting: an expression at the 256-level limit executes over the wire")]
     public async Task QueryAsync_AtLimit_ShouldExecute()
@@ -32,11 +32,11 @@ public sealed class SqlExpressionDepthWireTests
         await using var connection = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout());
 
         // Act
-        var rows = await connection.QueryAsync($"SELECT {Chain(Limit)} AS total FROM users WHERE id = 1",
+        var rows = await connection.QueryAsync($"SELECT {Chain(limit)} AS total FROM users WHERE id = 1",
             cancellationToken: SqlClientTestHarness.Timeout());
 
         // Assert
-        rows.ShouldHaveSingleItem()["total"].ShouldBe((long)Limit);
+        rows.ShouldHaveSingleItem()["total"].ShouldBe((long)limit);
     }
 
     /// <summary>
@@ -73,8 +73,8 @@ public sealed class SqlExpressionDepthWireTests
     /// </summary>
     /// <param name="terms">The number of terms in a <c>1 + 1 + ...</c> chain.</param>
     [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - Nesting: an expression past the limit is a ParseFailure that keeps the connection")]
-    [InlineData(Limit + 1)]
-    [InlineData(Hostile)]
+    [InlineData(limit + 1)]
+    [InlineData(hostile)]
     public async Task ExecuteAsync_PastLimit_ShouldReportParseFailureAndKeepServing(int terms)
     {
         // Arrange
@@ -87,7 +87,7 @@ public sealed class SqlExpressionDepthWireTests
 
         // Assert
         error.Kind.ShouldBe(SqlClientErrorKind.ParseFailure);
-        error.Message.ShouldContain("SQL0006", Case.Sensitive);
+        error.Message.ShouldContain("CS00006", Case.Sensitive);
         error.ConnectionUsable.ShouldBeTrue();
         (await connection.QueryAsync("SELECT 1 AS one FROM users WHERE id = 1", cancellationToken: SqlClientTestHarness.Timeout()))
             .ShouldHaveSingleItem()["one"].ShouldBe(1L);
@@ -115,18 +115,18 @@ public sealed class SqlExpressionDepthWireTests
         // Assert
         atLimit.ShouldHaveSingleItem()["total"].ShouldBe(32L);
         error.Kind.ShouldBe(SqlClientErrorKind.ParseFailure);
-        error.Message.ShouldContain("SQL0006: Expression nesting exceeds the supported limit of 32 levels.", Case.Sensitive);
+        error.Message.ShouldContain("CS00006: Expression nesting exceeds the supported limit of 32 levels.", Case.Sensitive);
         error.ConnectionUsable.ShouldBeTrue();
     }
 
     /// <summary>
     /// A statement within a high configured limit runs where the server's thread has the stack for
-    /// it, and where it does not, it is COHSQLE004, statement too complex (ISO SQLSTATE 54001), an
+    /// it, and where it does not, it is CS05004, statement too complex (ISO SQLSTATE 54001), an
     /// ExecutionFailure: the text is valid, the thread ran out. 4,000 nested parentheses need a few
     /// MB to parse: more than the 1.5 MB a .NET thread has by default on Windows and macOS, less
     /// than the 8 MB it has on Linux. Either way the connection keeps working.
     /// </summary>
-    [Fact(DisplayName = "Cohesion Test [Database.Sql.Client] - Nesting: a statement within a high limit runs, or fails with COHSQLE004")]
+    [Fact(DisplayName = "Cohesion Test [Database.Sql.Client] - Nesting: a statement within a high limit runs, or fails with CS05004")]
     public async Task QueryAsync_WithinHighLimit_ShouldRunOrFailWithStatementTooComplex()
     {
         // Arrange
@@ -155,7 +155,7 @@ public sealed class SqlExpressionDepthWireTests
         else
         {
             error.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
-            error.Message.ShouldStartWith("COHSQLE004: Statement too complex", Case.Sensitive);
+            error.Message.ShouldStartWith("CS05004: Statement too complex", Case.Sensitive);
             error.ConnectionUsable.ShouldBeTrue();
         }
         (await connection.QueryAsync("SELECT COUNT(*) AS total FROM users", cancellationToken: SqlClientTestHarness.Timeout()))
@@ -171,8 +171,8 @@ public sealed class SqlExpressionDepthWireTests
         await using var connection = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout());
         var parameters = new Dictionary<string, object?>
         {
-            ["value"] = new string('a', Hostile),
-            ["pattern"] = string.Concat(Enumerable.Repeat("%a", Hostile)),
+            ["value"] = new string('a', hostile),
+            ["pattern"] = string.Concat(Enumerable.Repeat("%a", hostile)),
         };
 
         // Act

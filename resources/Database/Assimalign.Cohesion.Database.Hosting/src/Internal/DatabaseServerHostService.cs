@@ -16,6 +16,8 @@ namespace Assimalign.Cohesion.Database.Hosting.Internal;
 /// and registers them last, so every endpoint starts after — and drains before —
 /// every other composed service.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("DatabaseServerHostService")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Hosting.Internal.DatabaseServerHostService.DebugView))]
 internal sealed class DatabaseServerHostService : IHostService
 {
     private readonly DatabaseServer _server;
@@ -36,4 +38,16 @@ internal sealed class DatabaseServerHostService : IHostService
     /// <inheritdoc />
     public Task StopAsync(CancellationToken cancellationToken = default)
         => _server.StopAsync(cancellationToken);
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Hosting.Internal.DatabaseServerHostService _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Hosting.Internal.DatabaseServerHostService value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Hosting.ServiceId Id => _target.Id;
+    }
 }

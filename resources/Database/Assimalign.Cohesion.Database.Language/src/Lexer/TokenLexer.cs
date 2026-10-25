@@ -13,6 +13,8 @@ namespace Assimalign.Cohesion.Database.Language;
 /// foreach (var token in lexer) { /* ... */ }
 /// </code>
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("TokenLexer")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Language.TokenLexer.DebugView))]
 public ref struct TokenLexer
 {
     // The line terminators every language shares: LF, CR, NEL, LINE SEPARATOR and PARAGRAPH
@@ -527,6 +529,14 @@ public ref struct TokenLexer
                     _pos++;
                 }
                 return new Token(TokenType.Unrecognized, _source[start.._pos], start);
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Language.TokenLexer value)
+        {
+            _ = value;
         }
     }
 }

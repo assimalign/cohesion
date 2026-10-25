@@ -55,7 +55,7 @@ internal static class PageChecksum
         {
             throw new StorageCorruptionException(
                 pageId,
-                $"Page {(long)pageId} failed checksum verification (stored 0x{stored:X8}, computed 0x{computed:X8}).");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.PageChecksumVerifyFailure, (long)pageId, stored, computed));
         }
     }
 

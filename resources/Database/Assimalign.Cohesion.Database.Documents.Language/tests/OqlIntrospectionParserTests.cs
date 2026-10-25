@@ -36,5 +36,5 @@ public sealed class OqlIntrospectionParserTests
     [InlineData("CREATE INDEX ix ON other.items (x)")]
     [InlineData("DROP INDEX ix ON other.items")]
     public void Reserved_namespace_does_not_enable_database_qualification(string text)
-        => new OqlQueryParser().Parse(text).Diagnostics.Any(diagnostic => diagnostic.Code == "OQL0002").ShouldBeTrue();
+        => new OqlQueryParser().Parse(text).Diagnostics.Any(diagnostic => diagnostic.Code == "CD00002").ShouldBeTrue();
 }

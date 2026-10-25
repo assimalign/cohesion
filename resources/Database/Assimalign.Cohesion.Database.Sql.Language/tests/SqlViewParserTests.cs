@@ -20,7 +20,7 @@ public sealed class SqlViewParserTests
         var statement = (SqlQueryStatement)parser.Parse(sql);
         // Assert
         var error = statement.Diagnostics.Where(item => item.Severity == DiagnosticSeverity.Error).ShouldHaveSingleItem();
-        error.Code.ShouldBe("COHDBL001");
+        error.Code.ShouldBe("CK00001");
         error.Message!.ShouldContain(construct, Case.Sensitive);
         error.Message!.ShouldNotContain("VIEW", Case.Sensitive);
     }
@@ -61,7 +61,7 @@ public sealed class SqlViewParserTests
         var statement = (SqlQueryStatement)parser.Parse(sql);
         // Assert
         var error = statement.Diagnostics.Where(item => item.Severity == DiagnosticSeverity.Error).ShouldHaveSingleItem();
-        error.Code.ShouldBe("COHDBL001");
+        error.Code.ShouldBe("CK00001");
         error.Message!.ShouldContain(form);
     }
 }

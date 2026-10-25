@@ -19,6 +19,8 @@ using Assimalign.Cohesion.Database.Storage;
 /// record surface the key-value engine composes — the physical layout (pages,
 /// buffer pool, journal) is the shared kernel's, unchanged.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("KeyValueStorage {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.KeyValuePair.Storage.KeyValueStorage.DebugView))]
 public sealed class KeyValueStorage : Assimalign.Cohesion.Database.Storage.Storage
 {
     private KeyValueStorage(StorageStream data, StorageStream journal, StorageStream backup)
@@ -195,5 +197,19 @@ public sealed class KeyValueStorage : Assimalign.Cohesion.Database.Storage.Stora
     public void DeleteEntry(StorageTransaction transaction, PageId pageId, int slotIndex)
     {
         DeleteRecord(transaction, pageId, slotIndex);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.KeyValuePair.Storage.KeyValueStorage _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.KeyValuePair.Storage.KeyValueStorage value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Storage.StorageId Id => _target.Id;
+        public global::Assimalign.Cohesion.Database.Storage.Name Name => _target.Name;
+        public global::Assimalign.Cohesion.Database.Storage.StorageModel Model => _target.Model;
     }
 }

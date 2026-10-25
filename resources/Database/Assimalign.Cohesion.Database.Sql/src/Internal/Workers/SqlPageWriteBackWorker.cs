@@ -22,6 +22,8 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// second after the error before it writes again (<c>src/backend/postmaster/bgwriter.c:154-205</c>).
 /// An offline database is skipped.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("SqlPageWriteBackWorker {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlPageWriteBackWorker.DebugView))]
 internal sealed class SqlPageWriteBackWorker : DatabaseWriteWorker<SqlDatabase>
 {
     private readonly SqlDatabaseEngine _engine;
@@ -49,5 +51,21 @@ internal sealed class SqlPageWriteBackWorker : DatabaseWriteWorker<SqlDatabase>
         TryWrite(() => database.DataStorage.WriteBackDirtyPages(batch), ref failures);
         TryWrite(() => database.CatalogStorage.WriteBackDirtyPages(batch), ref failures);
         return failures;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Sql.Internal.SqlPageWriteBackWorker _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlPageWriteBackWorker value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.DatabaseWorkerLanes<global::Assimalign.Cohesion.Database.DatabaseWriteResult> Lanes => _target.Lanes;
+        public bool CompletionOnly => _target.CompletionOnly;
+        public string Name => _target.Name;
+        public global::Assimalign.Cohesion.Database.DatabaseEngineWorkerKind Kind => _target.Kind;
+        public global::System.TimeSpan Interval => _target.Interval;
     }
 }

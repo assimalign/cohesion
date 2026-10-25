@@ -11,6 +11,8 @@ using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Hosting.Health;
 
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
+
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 [Collection(SqlLockWaitCollection.Name)]
@@ -58,7 +60,7 @@ public sealed class SqlRecoveryHealthTests
             var clock = Stopwatch.StartNew();
             do
             {
-                pendingCheck = Task.Run(async () => await application.Context.CheckAsync(timeout.Token), timeout.Token);
+                pendingCheck = DedicatedTestTask.Run(async () => await application.Context.CheckAsync(timeout.Token), timeout.Token);
                 HealthContribution health = await pendingCheck.WaitAsync(TimeSpan.FromSeconds(2), timeout.Token);
 
                 // Assert: the reopen service retains the offline cause while the engine's
@@ -108,7 +110,7 @@ public sealed class SqlRecoveryHealthTests
             release.Wait(timeout.Token);
         };
         database.DataStorage.TakeOffline(StorageOfflineCause.CheckpointFailures, "Inventory reopen regression.", new InvalidOperationException("Injected checkpoint failure."));
-        var reopen = Task.Run(async () => await engine.OpenDatabaseAsync(database.Name, timeout.Token), timeout.Token);
+        var reopen = DedicatedTestTask.Run(async () => await engine.OpenDatabaseAsync(database.Name, timeout.Token), timeout.Token);
         Task? enumerate = null;
         try
         {
@@ -117,7 +119,7 @@ public sealed class SqlRecoveryHealthTests
             canceled.Cancel();
 
             // Act
-            enumerate = Task.Run(async () =>
+            enumerate = DedicatedTestTask.Run(async () =>
             {
                 await foreach (var item in inventory)
                 {

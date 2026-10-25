@@ -31,7 +31,7 @@ public sealed class SqlCatalogScriptPublication
         if (contentHash.Length != 64 || !contentHash.All(Uri.IsHexDigit) || statementCount <= 0 ||
             expectedObject.Length != 0 && string.IsNullOrWhiteSpace(expectedObject))
         {
-            throw new ArgumentException("Invalid declared script publication expectation.");
+            throw new ArgumentException(ErrorMessages.SqlCatalogScriptPublicationArgument);
         }
         Name = name;
         ContentHash = contentHash;

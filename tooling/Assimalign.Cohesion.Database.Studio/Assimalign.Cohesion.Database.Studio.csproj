@@ -73,4 +73,10 @@
     <CohesionProjectReference Include="Assimalign.Cohesion.Database.Blob.Protocol" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Blob.Client" />
 	</ItemGroup>
+	<!-- WinUI compiles the C# inputs before the ordinary ResGen phase. Generate the shared
+	     internal resource accessor before that pass; PrepareResources itself would cycle
+	     because it already includes XamlPreCompile. -->
+	<Target Name="PrepareStudioErrorMessageResources"
+	        BeforeTargets="XamlPreCompile"
+	        DependsOnTargets="PrepareResourceNames;ResGen" />
 </Project>

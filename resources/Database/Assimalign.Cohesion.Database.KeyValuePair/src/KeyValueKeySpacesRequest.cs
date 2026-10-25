@@ -11,6 +11,8 @@ namespace Assimalign.Cohesion.Database.KeyValuePair;
 /// at command execution from the session's database catalog, including within
 /// an explicit transaction. The model has no named key spaces or schema ownership.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("KeyValueKeySpacesRequest Operation={Operation}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.KeyValuePair.KeyValueKeySpacesRequest.DebugView))]
 public sealed class KeyValueKeySpacesRequest : KeyValueRequest
 {
     /// <summary>
@@ -19,5 +21,17 @@ public sealed class KeyValueKeySpacesRequest : KeyValueRequest
     public KeyValueKeySpacesRequest()
         : base(KeyValueOperation.KeySpaces)
     {
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.KeyValuePair.KeyValueKeySpacesRequest _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.KeyValuePair.KeyValueKeySpacesRequest value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.KeyValuePair.KeyValueOperation Operation => _target.Operation;
     }
 }

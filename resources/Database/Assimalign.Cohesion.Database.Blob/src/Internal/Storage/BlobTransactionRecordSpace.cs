@@ -9,6 +9,8 @@ using Assimalign.Cohesion.Database.Blob.Storage;
 
 namespace Assimalign.Cohesion.Database.Blob.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("BlobTransactionRecordSpace")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Blob.Internal.BlobTransactionRecordSpace.DebugView))]
 internal sealed class BlobTransactionRecordSpace : TransactionRecordSpace
 {
     private readonly BlobStorage _storage;
@@ -26,4 +28,12 @@ internal sealed class BlobTransactionRecordSpace : TransactionRecordSpace
     protected override void DeleteCore(StorageTransaction transaction, PageId pageId, int slotIndex) => _storage.DeleteEntry(transaction, pageId, slotIndex);
     protected override ulong PackLocationCore(PageId pageId, int slotIndex) => BlobStorage.PackLocation(pageId, slotIndex);
     protected override (PageId PageId, int SlotIndex) UnpackLocationCore(ulong location) => BlobStorage.UnpackLocation(location);
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Blob.Internal.BlobTransactionRecordSpace value)
+        {
+            _ = value;
+        }
+    }
 }

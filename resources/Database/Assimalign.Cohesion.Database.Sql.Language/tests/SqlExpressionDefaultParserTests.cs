@@ -87,6 +87,6 @@ public sealed class SqlExpressionDefaultParserTests
     public void Parse_ExcludedForm_ShouldReportCapability(string sql)
     {
         // Act / Assert
-        new SqlQueryParser().Parse(sql).Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHDBL001");
+        new SqlQueryParser().Parse(sql).Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CK00001");
     }
 }

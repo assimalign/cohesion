@@ -4,6 +4,8 @@ using Assimalign.Cohesion.Database.Language;
 namespace Assimalign.Cohesion.Database.Documents.Language;
 
 /// <summary>Inserts externally keyed documents from VALUES or a SELECT result.</summary>
+[global::System.Diagnostics.DebuggerDisplay("OqlInsertExpression")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Documents.Language.OqlInsertExpression.DebugView))]
 public sealed class OqlInsertExpression : OqlExpression
 {
     /// <summary>Initializes an INSERT statement.</summary>
@@ -38,4 +40,23 @@ public sealed class OqlInsertExpression : OqlExpression
     public string? KeyName { get; }
     /// <summary>Gets the SELECT value output name, or null for the complete row.</summary>
     public string? ValueName { get; }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Documents.Language.OqlInsertExpression _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Documents.Language.OqlInsertExpression value)
+        {
+            _target = value;
+        }
+
+        public string Collection => _target.Collection;
+        public string? Alias => _target.Alias;
+        public global::System.Collections.Generic.IReadOnlyList<(global::Assimalign.Cohesion.Database.Documents.Language.OqlExpression Key, global::Assimalign.Cohesion.Database.Documents.Language.OqlExpression Value)> Values => _target.Values;
+        public global::Assimalign.Cohesion.Database.Documents.Language.OqlSelectExpression? Select => _target.Select;
+        public string? KeyName => _target.KeyName;
+        public string? ValueName => _target.ValueName;
+        public string? Text => _target.Text;
+        public global::Assimalign.Cohesion.Database.Language.Location? Location => _target.Location;
+    }
 }

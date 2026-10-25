@@ -147,7 +147,7 @@ The legacy `this T param` syntax is forbidden in new code.
 ### Concrete types use a private nested debugger view only to filter nonpublic state
 
 This rule applies only to C# source files in `src/` folders under `libraries/` and `resources/`:
-`libraries/**/src/**/*.cs` and `resources/**/src/**/*.cs`, excluding `resources/Database/**`.
+`libraries/**/src/**/*.cs` and `resources/**/src/**/*.cs`, including `resources/Database/**`.
 A concrete instance type there — a non-abstract, non-static class, struct, or record, regardless
 of visibility — needs a debugger view **only when it has private or internal instance fields or
 properties that should be omitted from the default debugging view**, including inherited state.
@@ -193,8 +193,7 @@ state and have no existing base view, follow this pattern:
 - The nested debugger view is debugger infrastructure and does **not** require its own nested
   view or debugger attributes; this rule must not recurse.
 
-**Everything else is excluded:** do not apply this rule under `resources/Database/**` or outside
-the scoped `src/` folders. This excludes tests, shared source, fixtures, samples, examples, and
+**Everything else is excluded:** do not apply this rule outside the scoped `src/` folders. This excludes tests, shared source, fixtures, samples, examples, and
 all other repository areas. Build output such as `bin/` and `obj/` is also excluded.
 
 ```csharp

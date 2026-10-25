@@ -213,7 +213,7 @@ public sealed class SqlSchemaDefaultProvisioningTests : IDisposable
             await BuildAsync(schema, CancellationToken.None));
 
         // Assert
-        refusal.Message.ShouldStartWith("COHSQLP001:", Case.Sensitive);
+        refusal.Message.ShouldStartWith("CS03101:", Case.Sensitive);
         refusal.Message.ShouldContain("DEFAULT on column 'orders.Payload'", Case.Sensitive);
         Directory.Exists(_rootPath).ShouldBeFalse();
     }
@@ -242,7 +242,7 @@ public sealed class SqlSchemaDefaultProvisioningTests : IDisposable
             await BuildAsync(schema, CancellationToken.None));
 
         // Assert
-        refusal.Message.ShouldStartWith("COHSQLP001:", Case.Sensitive);
+        refusal.Message.ShouldStartWith("CS03101:", Case.Sensitive);
         refusal.Message.ShouldContain("DEFAULT on column 'orders.Quantity'", Case.Sensitive);
         refusal.Message.ShouldEndWith("Nothing was opened or written.", Case.Sensitive);
         Directory.Exists(_rootPath).ShouldBeFalse();
@@ -315,7 +315,7 @@ public sealed class SqlSchemaDefaultProvisioningTests : IDisposable
 
         // Assert: neither the data nor catalog file set may exist after a preflight refusal.
         Directory.Exists(_rootPath).ShouldBeFalse(refusal.Message);
-        refusal.Message.ShouldStartWith("COHSQLP001:", Case.Sensitive);
+        refusal.Message.ShouldStartWith("CS03101:", Case.Sensitive);
         refusal.Message.ShouldContain($"DEFAULT on column 'orders.{column}'", Case.Sensitive);
         refusal.Message.ShouldEndWith("Nothing was opened or written.", Case.Sensitive);
     }

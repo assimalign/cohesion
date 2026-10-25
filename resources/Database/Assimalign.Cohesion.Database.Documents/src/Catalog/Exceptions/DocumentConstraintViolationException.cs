@@ -22,8 +22,8 @@ public sealed class DocumentConstraintViolationException : DatabaseException
     public string? SqlState => Path is null ? "23505" : null;
 
     internal static DocumentConstraintViolationException Duplicate(string index, string collection)
-        => new(index, collection, null, "COHDOC020", string.Format(CultureInfo.CurrentCulture, ErrorMessages.UniqueIndexViolation, index, collection));
+        => new(index, collection, null, "CD03020", string.Format(CultureInfo.CurrentCulture, ErrorMessages.UniqueIndexViolation, index, collection));
 
     internal static DocumentConstraintViolationException NonScalar(string index, string path)
-        => new(index, null, path, "COHDOC021", string.Format(CultureInfo.CurrentCulture, ErrorMessages.UniqueIndexNonScalar, index, path));
+        => new(index, null, path, "CD02021", string.Format(CultureInfo.CurrentCulture, ErrorMessages.UniqueIndexNonScalar, index, path));
 }

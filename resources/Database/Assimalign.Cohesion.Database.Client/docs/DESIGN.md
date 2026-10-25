@@ -211,13 +211,22 @@ its transport instead of reusing the session. This is non-cancellable; abort on 
 lease joins the same return task as repeated disposal, without touching the connector. It makes no claim about whether the server completed an
 unacknowledged command; transaction outcome and reconciliation remain model concerns.
 
-### Known gap: transaction reset (#1540)
+### Transaction reset (#1540)
 
-End or roll back an explicit transaction before disposing a connection. The pool currently
-returns a healthy session with its transaction state intact, so a later renter can inherit an
-unfinished transaction. #1540 (with P8 #1264) owns server-reported transaction status and pool
-rollback on return; #1313 does not infer transaction state from commands. The SQL client carries
-a skipped regression test naming #1540 until that design is implemented.
+SQL and Graph negotiate transaction-status. The connector consumes the terminal Ready status
+before completing an Execute exchange, including complete statement errors. Pool return sends
+ROLLBACK for active or failed transactions, then requires a successful zero-count completion and
+Idle status before reuse. It performs this I/O outside the pool lock, after joining the last
+lease operation. The rollback reply and its Ready drain each have a five-second internal bound
+(up to ten seconds in total). Failure, missing/invalid status, cancellation
+or an unnegotiated transaction-capable peer discards the connector. Idle sessions need no reset
+exchange. No state is inferred from statement text. The connector observes Execute (5) and
+ExecutePaths (64) frames and drains negotiated status even for application exchanges using the
+one-argument constructor. The explicit transactionStatus flag can still require a postamble.
+After a complete result or statement error, status is read with a bounded five-second internal
+token; caller cancellation in that window does not turn an acknowledged COMMIT into cancellation.
+Ping and other non-Execute exchanges retain their existing completion contract. The original
+statement exception survives a failure reading its status, and the connector is discarded.
 
 ## Streaming exchange and ownership
 
@@ -477,8 +486,72 @@ lowercase endpoint family followed by a dot. The core owns `diagnostics` and fra
 SQL and Graph register `ProtocolCapability.Diagnostics`. When agreed, one Diagnostics
 frame carries the complete Warning/Error list immediately before Error on failure,
 or immediately before ResultComplete (PathsComplete for graph paths) on success.
-Information, including SQL0100, is never sent. Error and result payloads are unchanged.
+Information, including CS00009, is never sent. Error and result payloads are unchanged.
 Statement failures leave the server session ready. Model clients validate diagnostic
 ordering and preserve every code, severity, message, nullable offset and source line.
 
 DatabaseConnection.ServerVersion and Capabilities expose the actual agreement. An empty Ready reports 2.0 rather than assuming Current. DatabaseClientException retains structured diagnostics through its locally declared read-only Diagnostics snapshot.
+
+## Dedicated test actors (#1285)
+
+Deadline-dependent peers and busy test drivers use the linked Storage test helper's LongRunning threads. Ordinary async driver continuations stay on their actor scheduler, without changing SynchronizationContext. Existing deadlines of 25 seconds or more are hang guards. Runner settings impose no parallel-thread cap. See the [scheduling audit](../../Assimalign.Cohesion.Database.Storage/docs/TEST-HYGIENE-AUDIT.md) for every original Task.Run site, the exact journal counters and the physical index-work guards.
+
+Reference consulted: RavenDB test/StressTests/Voron/InvalidReleasesOfScratchPages.cs:39–68 and :71–103 use LongRunning stress drivers. No code was copied.
+
+## Server-reported transaction reset (#1540)
+
+SQL/Graph transaction-status negotiation adds an existing Ready I/T/E frame after Execute
+completion or a statement error. The shared client drains it before returning, rolls back open
+or failed transactions on pool return, and only reuses an Idle session. Cleanup runs outside the
+pool lock. Rollback reply and Ready drain each have a five-second internal bound (up to ten
+seconds total). Missing/invalid state or legacy transaction-capable peers
+are discarded. SQL's formerly skipped pool-rollback regression is enabled. No new wire identifier,
+public interface, protocol version or persistent format is introduced.
+
+## Error and construction conventions (#1470)
+
+Exception messages and format templates are generated from `src/Properties/ErrorMessages.resx`;
+format arguments use the current culture. Cancellation and abort templates used during normal
+cleanup are cached before reuse. Error identities remain separate from message text where a
+structured diagnostic carrier exists. Standard .NET guards retain their argument names and exception types.
+
+## Explicit pool-reset construction
+
+The private rollback exchange and its failure-test exchange use explicit constructors. The family and transaction-status setting still reach the exchange base at construction, and the test retains the same failure instance. Pool-reset timing, completion evidence, cancellation and connection-reuse rules are unchanged. Private names follow the field convention without changing endpoint or transport text.
+
+
+## Debugger inspection (#1470)
+
+Eligible concrete source types use private nested debugger views of reviewed public/protected
+state; existing inherited display/proxy pairs are reused. See the shared
+[debugger convention](../../Assimalign.Cohesion.Database/docs/CONVENTIONS.md#debugger-inspection).
+Lease getters that take locks or enforce disposal, delegated stream state and transport callbacks are omitted. Stored connection metadata is exposed without I/O or exchange activity.
+Runtime APIs, methods, allocation budgets, persistent formats and wire behavior are unchanged.
+
+## Lease cancellation completion
+
+A return that wins before exchange cleanup publishes an operation-local cancellation-completion
+marker under the lease lock, then starts and joins `CancelAsync` outside that lock. Exchange
+cleanup claims the source under the same lock and awaits any published marker before disposing
+it. If cleanup claims the source first, return only joins exchange completion and never starts a
+later cancellation. The active-exchange guard remains set until source disposal completes.
+
+This prevents source disposal from removing callbacks whose cancellation dispatch is already
+queued. Linked-source disposal can also join a caller's cancellation callback; it remains outside
+the lease lock so callbacks may inspect the lease. Cancellation callback failures are reported by
+disposal or abort after exchange completion and pool-slot release; they do not replace the
+exchange's original result or cancellation exception. Repeated return still joins one task.
+
+The dispatch-gated regression stops the cancellation work item at captured-context entry and
+releases the exchange through an inline continuation chain. Cleanup must remain pending until
+the dispatch gate opens, the inspection callback must run once, and a later rental must remain
+usable. The existing admission/disposal race keeps its exact callback-count assertions. A
+Release-only warmed-rental ping probe records precise process allocations and duration medians
+and sample shares without thresholds. No public API, wire message, error code or persistent
+format changes.
+
+Runtime reference consulted: [.NET 10 `dotnet/runtime` v10.0.0](https://github.com/dotnet/runtime/blob/v10.0.0/src/libraries/System.Private.CoreLib/src/System/Threading/CancellationTokenSource.cs#L284),
+`src/libraries/System.Private.CoreLib/src/System/Threading/CancellationTokenSource.cs:284–329`
+(queued cancellation), `:483–514` (source disposal), and `:680–689` (callback registration
+ownership), and `:829–846` (linked parent-registration cleanup). No code was copied. This corrects
+the exchange-join guarantee of #1313.

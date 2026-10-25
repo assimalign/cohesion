@@ -5,6 +5,8 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// candidates. Every value of one subquery carries the subquery's column collation, so one
 /// collation serves every candidate.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("SqlBoundInSubquery")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlBoundInSubquery.DebugView))]
 internal sealed class SqlBoundInSubquery : SqlBoundExpression
 {
     /// <summary>Initializes a bound subquery membership test.</summary>
@@ -32,4 +34,12 @@ internal sealed class SqlBoundInSubquery : SqlBoundExpression
 
     /// <summary>Gets whether the test is <c>NOT IN</c>.</summary>
     internal bool IsNegated { get; }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlBoundInSubquery value)
+        {
+            _ = value;
+        }
+    }
 }

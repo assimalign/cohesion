@@ -11,6 +11,8 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// The evaluator picks the cast by that identity or the value's storage type, applies the target's
 /// length, precision and scale, and a domain target's check (<see cref="SqlCastConverter.Convert"/>).
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("SqlBoundCast")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlBoundCast.DebugView))]
 internal sealed class SqlBoundCast : SqlBoundExpression
 {
     /// <summary>Initializes a bound CAST.</summary>
@@ -68,4 +70,12 @@ internal sealed class SqlBoundCast : SqlBoundExpression
 
     /// <summary>Gets the source expression span.</summary>
     internal Location? Location { get; }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlBoundCast value)
+        {
+            _ = value;
+        }
+    }
 }

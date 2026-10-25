@@ -15,6 +15,8 @@ namespace Assimalign.Cohesion.Database.KeyValuePair.Internal;
 /// are bounded by the caller), so materialization keeps the wire exchange and
 /// the typed decode simple.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("KeyValueMaterializedResultSet")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.KeyValuePair.Internal.KeyValueMaterializedResultSet.DebugView))]
 internal sealed class KeyValueMaterializedResultSet : DatabaseResultSet
 {
     private readonly IReadOnlyList<DatabaseColumn> _columns;
@@ -54,4 +56,19 @@ internal sealed class KeyValueMaterializedResultSet : DatabaseResultSet
 
     /// <inheritdoc />
     public override ValueTask DisposeAsync() => default;
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.KeyValuePair.Internal.KeyValueMaterializedResultSet _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.KeyValuePair.Internal.KeyValueMaterializedResultSet value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Execution.DatabaseResultStatus Status => _target.Status;
+        public long AffectedCount => _target.AffectedCount;
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.Types.Diagnostic> Diagnostics => _target.Diagnostics;
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.Execution.DatabaseColumn> Columns => _target.Columns;
+    }
 }

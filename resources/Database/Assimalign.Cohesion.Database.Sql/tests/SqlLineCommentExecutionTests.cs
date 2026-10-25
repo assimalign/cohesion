@@ -20,8 +20,8 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 /// </summary>
 public sealed class SqlLineCommentExecutionTests
 {
-    private const string Schema = "CREATE TABLE t (id INT PRIMARY KEY, a INT);";
-    private const string Rows = "INSERT INTO t VALUES (1, 10), (2, 20), (3, 30);";
+    private const string schema = "CREATE TABLE t (id INT PRIMARY KEY, a INT);";
+    private const string rowsValue = "INSERT INTO t VALUES (1, 10), (2, 20), (3, 30);";
 
     /// <param name="terminator">The line terminator, by name (see <see cref="Terminator"/>).</param>
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - Comments: DELETE with a WHERE after a line comment deletes exactly one row")]
@@ -105,7 +105,7 @@ public sealed class SqlLineCommentExecutionTests
         var typed = await Should.ThrowAsync<DatabaseParseException>(() => RunAsync(session, sql, typed: true));
 
         // Assert
-        error.Message.ShouldStartWith("SQL parse error SQL0003: ", Case.Sensitive);
+        error.Message.ShouldStartWith("SQL parse error CS00003: ", Case.Sensitive);
         typed.Diagnostics.Select(diagnostic => (diagnostic.Code, diagnostic.Message, diagnostic.Start, diagnostic.End)).ShouldBe(error.Diagnostics.Select(diagnostic => (diagnostic.Code, diagnostic.Message, diagnostic.Start, diagnostic.End)));
         (await SnapshotAsync(session)).ShouldBe(["1,10", "2,20", "3,30"]);
     }
@@ -114,8 +114,8 @@ public sealed class SqlLineCommentExecutionTests
     {
         var database = await engine.CreateDatabaseAsync("comments");
         var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
-        (await RunAsync(session, Schema, typed: false)).Status.ShouldBe(DatabaseResultStatus.Success);
-        (await RunAsync(session, Rows, typed: false)).AffectedCount.ShouldBe(3);
+        (await RunAsync(session, schema, typed: false)).Status.ShouldBe(DatabaseResultStatus.Success);
+        (await RunAsync(session, rowsValue, typed: false)).AffectedCount.ShouldBe(3);
         return session;
     }
 

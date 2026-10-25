@@ -14,6 +14,8 @@ namespace Assimalign.Cohesion.Database.Blob.Client;
 /// It layers the Blob transfer surface over the shared <see cref="DatabaseClient"/> core, which owns
 /// pooling, framing and the wire handshake. Dispose rented connections before disposing the client.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("BlobClient")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Blob.Client.BlobClient.DebugView))]
 public sealed class BlobClient : IAsyncDisposable
 {
     private readonly DatabaseClient _client;
@@ -33,7 +35,7 @@ public sealed class BlobClient : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(options);
         if (options.Settings is null || options.ConnectionFactory is null)
         {
-            throw new ArgumentException("Connection settings and a connection factory are required.", nameof(options));
+            throw new ArgumentException(ErrorMessages.BlobClientCreateArgument, nameof(options));
         }
 
         return new BlobClient(DatabaseClient.Create(new DatabaseClientOptions
@@ -70,4 +72,12 @@ public sealed class BlobClient : IAsyncDisposable
     /// </summary>
     /// <returns>A task that completes when the idle connections are closed.</returns>
     public ValueTask DisposeAsync() => _client.DisposeAsync();
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Blob.Client.BlobClient value)
+        {
+            _ = value;
+        }
+    }
 }

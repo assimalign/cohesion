@@ -43,7 +43,7 @@ public sealed class SqlT1FunctionGrammarTests
         SqlExpressionRenderer.Render(((SqlSelectExpression)rendered.SqlExpression).Columns[0].Expression).ShouldBe(canonical);
     }
 
-    [Theory(DisplayName = "Cohesion Test [Sql.Language] - T1 functions: malformed standard forms report SQL0003")]
+    [Theory(DisplayName = "Cohesion Test [Sql.Language] - T1 functions: malformed standard forms report CS00003")]
     [InlineData("SUBSTRING(s FOR 2)")]
     [InlineData("SUBSTRING(s 2)")]
     [InlineData("POSITION(s, t)")]
@@ -63,7 +63,7 @@ public sealed class SqlT1FunctionGrammarTests
         var parsed = new SqlQueryParser().Parse($"SELECT {expression} FROM t;");
 
         // Assert
-        parsed.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "SQL0003");
+        parsed.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS00003");
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - T1 functions: precision arguments retain a reusable capability rejection")]
@@ -78,10 +78,10 @@ public sealed class SqlT1FunctionGrammarTests
 
         // Assert
         var diagnostic = parsed.Diagnostics.ShouldHaveSingleItem();
-        diagnostic.Code.ShouldBe("COHDBL001");
+        diagnostic.Code.ShouldBe("CK00001");
         diagnostic.Message.ShouldNotBeNull().ShouldContain("precision argument", Case.Sensitive);
         var declaration = new SqlQueryParser().Parse($"CREATE TABLE t (ts TIMESTAMP DEFAULT {expression});");
-        declaration.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBL001");
+        declaration.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CK00001");
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql.Language] - T1 functions: every EXTRACT field retains grammar and identifiers retain their roles")]
@@ -103,7 +103,7 @@ public sealed class SqlT1FunctionGrammarTests
             // LEFT remains a clause keyword; its target-list spelling already required quotes.
             if (name == "left")
             {
-                new SqlQueryParser().Parse("INSERT INTO t (left) VALUES (1);").Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("SQL0003");
+                new SqlQueryParser().Parse("INSERT INTO t (left) VALUES (1);").Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS00003");
             }
             else
             {

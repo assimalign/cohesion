@@ -17,7 +17,7 @@ internal sealed partial class SqlPlanner
             outerScope: OuterScope, outerDependencies: OuterDependencies);
         if (select.Columns.Any(column => column.Expression is SqlStarExpression))
         {
-            throw new SqlPlanningException("COHSQLE013", ErrorMessages.ConstantQueryWildcard, select.Location);
+            throw new SqlPlanningException("CS05013", ErrorMessages.ConstantQueryWildcard, select.Location);
         }
         if (ViewDefinitionBinding is not null) { CaptureViewSelect(select, [], null, null, evaluator); }
         if (select.GroupBy.Count > 0 || select.Having is not null || ProjectsOrOrdersByAggregate(select))
@@ -65,7 +65,7 @@ internal sealed partial class SqlPlanner
             {
                 if (!state.Future.Add(definition.Name))
                 {
-                    throw new SqlPlanningException("COHSQLE026", string.Format(CultureInfo.CurrentCulture,
+                    throw new SqlPlanningException("CS01026", string.Format(CultureInfo.CurrentCulture,
                         ErrorMessages.CteDuplicateName, definition.Name), definition.Location);
                 }
             }
@@ -124,6 +124,8 @@ internal sealed partial class SqlPlanner
     }
 
     // Stored-only planners retain one nullable reference; WITH alone allocates its scope state.
+    [global::System.Diagnostics.DebuggerDisplay("CommonTableState")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlPlanner.CommonTableState.DebugView))]
     private sealed class CommonTableState
     {
         internal CommonTableState(HashSet<SqlCommonTableExpression> referenced) { Referenced = referenced; }
@@ -134,5 +136,13 @@ internal sealed partial class SqlPlanner
         internal HashSet<SqlDerivedRelation>? Dependencies { get; set; }
         internal HashSet<SqlSelectExpression>? BindingOperands { get; set; }
         internal bool BindingUnused { get; set; }
+
+        private sealed class DebugView
+        {
+            public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlPlanner.CommonTableState value)
+            {
+                _ = value;
+            }
+        }
     }
 }

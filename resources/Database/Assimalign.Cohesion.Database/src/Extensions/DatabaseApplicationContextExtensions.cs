@@ -34,7 +34,7 @@ public static partial class DatabaseApplicationContextExtensions
             ArgumentException.ThrowIfNullOrWhiteSpace(name);
             DatabaseEngine engine = context.GetEngine(name);
             return engine as TEngine ?? throw new InvalidOperationException(
-                $"Database engine '{name}' is a {engine.GetType().Name}, not a {typeof(TEngine).Name}.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.GetEngineFailure, name, engine.GetType().Name, typeof(TEngine).Name));
         }
     }
 }

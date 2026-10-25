@@ -166,6 +166,8 @@ internal sealed partial class SqlPlanExecutor
     // DISTINCT belongs to the executor so an application's accumulator sees the same
     // coerced SQL equivalence classes as built-ins. Ordered calls retain only distinct
     // tuples when requested, choosing their first representative in stable sorted order.
+    [global::System.Diagnostics.DebuggerDisplay("GroupAggregateState")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlPlanExecutor.GroupAggregateState.DebugView))]
     private sealed class GroupAggregateState
     {
         internal readonly SqlAggregateAccumulator Accumulator;
@@ -184,6 +186,14 @@ internal sealed partial class SqlPlanExecutor
             }
             Ordering = aggregate.OrderBy.Count == 0 ? [] : aggregate.OrderBy.Select((key, i) => key with { Key = new SqlBoundSlot(aggregate.Arguments.Length + i) }).ToArray();
             if (Ordering.Count > 0) { Inputs = new List<object?[]>(); }
+        }
+
+        private sealed class DebugView
+        {
+            public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlPlanExecutor.GroupAggregateState value)
+            {
+                _ = value;
+            }
         }
     }
 
@@ -355,6 +365,8 @@ internal sealed partial class SqlPlanExecutor
     }
 
     /// <summary>Uses SQL comparison equality, with NULL keys in one group and binary values by content.</summary>
+    [global::System.Diagnostics.DebuggerDisplay("GroupKeyComparer")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlPlanExecutor.GroupKeyComparer.DebugView))]
     private sealed class GroupKeyComparer : IEqualityComparer<object?[]>
     {
         private readonly IReadOnlyList<Collation> _collations;
@@ -395,6 +407,14 @@ internal sealed partial class SqlPlanExecutor
                 hash.Add(SqlValueComparer.GetHashCode(values[i], _collations[i]));
             }
             return hash.ToHashCode();
+        }
+
+        private sealed class DebugView
+        {
+            public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlPlanExecutor.GroupKeyComparer value)
+            {
+                _ = value;
+            }
         }
     }
 
@@ -444,7 +464,7 @@ internal sealed partial class SqlPlanExecutor
         catch (OverflowException exception)
         {
             throw SqlEvaluationException.NumericValueOutOfRange(
-                $"{Convert.ToString(value, CultureInfo.InvariantCulture)} does not fit the {type} result type.", exception);
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.NormalizeGroupValueSqlEvaluation, Convert.ToString(value, CultureInfo.InvariantCulture), type), exception);
         }
     }
 }

@@ -15,7 +15,7 @@ namespace Assimalign.Cohesion.Database.Transactions;
 /// <summary>
 /// Grants and releases hierarchical locks for write-write conflict control: a lock table keyed
 /// by <see cref="LockResource"/> with a mode-compatibility matrix, a FIFO queue per resource,
-/// and wait-for-graph deadlock detection that aborts the requester whose wait would close a cycle.
+/// and wait-for-graph detection that repairs soft queue cycles before choosing a hard-cycle victim.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -23,7 +23,7 @@ namespace Assimalign.Cohesion.Database.Transactions;
 /// transaction sequences and are released as a set at commit or rollback. Before applying any
 /// writes, a statement may use <see cref="MarkStatement"/> and <see cref="ReleaseSince"/> to
 /// release only its new resources and retry arbitration. A request whose wait
-/// would close a cycle is chosen as the deadlock victim and fails with
+/// would close an unavoidable held-lock cycle is chosen as the victim and fails with
 /// <see cref="TransactionDeadlockException"/>.
 /// </para>
 /// <para>
@@ -40,8 +40,8 @@ namespace Assimalign.Cohesion.Database.Transactions;
 /// <b>Deadlock detection (#1390).</b> The wait-for graph is read from the table each time a
 /// request queues: the requester waits for every owner holding a mode its request conflicts
 /// with, and for the owner of every conflicting request queued ahead of it; the search follows
-/// each of those owners' own queued requests the same way. A cycle back to the requester makes
-/// it the victim. A grant can add an edge too, from a request queued on the resource to the
+/// each of those owners' own queued requests the same way. A cycle first tries queue
+/// reordering; a hard held-lock cycle makes the requester the victim. A grant can add an edge too, from a request queued on the resource to the
 /// owner granted it, but with the queue's places that request already waits for the owner, so
 /// no grant closes a cycle; a grant to an owner with a request queued still searches from it,
 /// and a request found on a cycle would fail as the victim. Every wait-for edge between
@@ -61,8 +61,16 @@ namespace Assimalign.Cohesion.Database.Transactions;
 /// which a sealed type cannot have (plan §6.2).
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("LockManager")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Transactions.LockManager.DebugView))]
 public sealed class LockManager
 {
+    private static readonly string _errorLockManagerFailEndedFailure = ErrorMessages.LockManagerFailEndedFailure;
+
+    private static readonly string _errorLockManagerAcquireCoreAsyncFailure = ErrorMessages.LockManagerAcquireCoreAsyncFailure;
+
+    private static readonly string _errorLockManagerAbandonedFailure = ErrorMessages.LockManagerAbandonedFailure;
+
     // Compatibility matrix indexed [held, requested]:
     // Shared, Update, Exclusive, IntentShared, IntentExclusive. It is symmetric.
     private static readonly bool[,] _compatible =
@@ -75,8 +83,8 @@ public sealed class LockManager
         /* IX */ { false, false, false, true,  true  },
     };
 
-    private const int ModeCount = 5;
-    private const byte AllModes = (1 << ModeCount) - 1;
+    private const int modeCount = 5;
+    private const byte allModes = (1 << modeCount) - 1;
 
     // The modes each mode conflicts with, as a mask with bit (int)mode set for each: a row of the
     // matrix. The matrix is symmetric, so a row is also the held modes a request for the mode
@@ -148,22 +156,23 @@ public sealed class LockManager
     private Func<bool>? _insideApply;
 
     // How a lock request's wait ended, as the LockWaitStop event names it.
-    private const string WaitGranted = "Granted";
-    private const string WaitCancelled = "Cancelled";
-    private const string WaitTimedOut = "Timeout";
-    private const string WaitEnded = "Ended";
-    private const string WaitAbandoned = "Abandoned";
-    private const string WaitDeadlock = "Deadlock";
+    private const string waitGranted = "Granted";
+    private const string waitCancelled = "Cancelled";
+    private const string waitTimedOut = "Timeout";
+    private const string waitEnded = "Ended";
+    private const string waitAbandoned = "Abandoned";
+    private const string waitDeadlock = "Deadlock";
 
     // The most blockers a LockWaitBlocked report names for the waiting request, for each blocker
     // it describes in turn, and the most queued requests it lists for a blocker. The report is
     // built under _sync, and ETW drops an event larger than 64 KB, so it is bounded; the rest is
     // counted ("... (+N more)").
-    private const int MaxBlockersDescribed = 16;
-    private const int MaxNestedBlockersDescribed = 4;
-    private const int MaxQueuedDescribed = 4;
+    private const int maxBlockersDescribed = 16;
+    private const int maxNestedBlockersDescribed = 4;
+    private const int maxQueuedDescribed = 4;
 
-    internal LockManager()
+    /// <summary>Initializes a standalone FIFO lock table with deadlock detection.</summary>
+    public LockManager()
     {
     }
 
@@ -172,15 +181,7 @@ public sealed class LockManager
     internal Action? BeforeWaitOutcome { get; set; }
     internal Action? BeforeGrantNotification { get; set; }
 
-    /// <summary>
-    /// Creates a standalone lock manager: a mode-compatibility lock table with a FIFO queue per
-    /// resource and wait-for-graph deadlock detection that aborts the requester whose wait would
-    /// close a cycle.
-    /// </summary>
-    /// <returns>The lock manager.</returns>
-    public static LockManager Create() => new();
-
-    /// <summary>
+/// <summary>
     /// Acquires a lock on the specified resource for the specified transaction,
     /// waiting until the lock is granted, the wait times out, or a deadlock is resolved.
     /// </summary>
@@ -273,7 +274,7 @@ public sealed class LockManager
 
         if (_abandon is not null)
         {
-            throw new InvalidOperationException("The lock manager is already in engine mode.");
+            throw new InvalidOperationException(ErrorMessages.LockManagerEnterEngineModeFailure);
         }
 
         _releaseOwedByManager = releaseOwedByManager;
@@ -293,7 +294,7 @@ public sealed class LockManager
     {
         ArgumentNullException.ThrowIfNull(cause);
 
-        var abandon = _abandon ?? throw new InvalidOperationException("Only a lock manager in engine mode abandons its waits.");
+        var abandon = _abandon ?? throw new InvalidOperationException(ErrorMessages.LockManagerAbandonFailure);
         if (Interlocked.CompareExchange(ref _abandonCause, cause, null) is null)
         {
             // Asynchronously: the storage's offline hook may run under its locks.
@@ -337,12 +338,10 @@ public sealed class LockManager
     }
 
     private static TransactionAbortedException Abandoned(TransactionSequence owner, LockResource resource, LockMode mode, StorageOfflineException cause)
-        => new($"Transaction {owner}'s request for {mode} on {resource} was refused: the database's storage went offline, " +
-            "so no lock of it is released until it is reopened.", cause);
+        => new(string.Format(System.Globalization.CultureInfo.CurrentCulture, _errorLockManagerAbandonedFailure, owner, mode, resource), cause);
 
     private static InvalidOperationException WaitInsideApply(TransactionSequence owner, LockResource resource, LockMode mode)
-        => new($"Transaction {owner}'s request for {mode} on {resource} would wait inside a statement apply, which holds the " +
-            "database's apply gate; the request was refused. A statement acquires every lock its apply needs before the apply begins.");
+        => new(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.LockManagerWaitInsideApplyFailure, owner, mode, resource));
 
     /// <remarks>
     /// An owner whose pending requests were abandoned (<see cref="AbandonPending"/>) is refused
@@ -376,7 +375,7 @@ public sealed class LockManager
             {
                 RemoveIfUnusedLocked(entry);
                 throw new TransactionAbortedException(
-                    $"Transaction {owner} has ended; its request for {mode} on {resource} was refused.");
+                    string.Format(System.Globalization.CultureInfo.CurrentCulture, _errorLockManagerAcquireCoreAsyncFailure, owner, mode, resource));
             }
 
             if (CanGrantNewLocked(entry, owner.Value, mode, out int place))
@@ -388,8 +387,8 @@ public sealed class LockManager
             else
             {
                 // Queue the request at its place, then look for a cycle through it in the table as
-                // it stands: one means granting can never happen without an abort, and the
-                // requester is the victim. Every edge the request added starts or ends at its
+                // it stands. First repair reversible queue edges; only an unavoidable
+                // held-lock cycle needs a victim. Every new edge starts or ends at its
                 // owner, so the search from the owner sees every cycle it closed. Taking it off
                 // again restores the queue as it was, so it unblocks nobody.
                 waiter = new Waiter(this, owner.Value, mode, entry, cancellationToken);
@@ -397,9 +396,16 @@ public sealed class LockManager
 
                 if (ClosesCycleLocked(owner.Value))
                 {
-                    DequeueLocked(waiter);
-                    RemoveIfUnusedLocked(entry);
-                    deadlocked = true;
+                    if (TryReorderQueuesLocked())
+                    {
+                        WakeScheduledLocked(ref granted, ref victims);
+                    }
+                    else
+                    {
+                        DequeueLocked(waiter);
+                        RemoveIfUnusedLocked(entry);
+                        deadlocked = true;
+                    }
                 }
             }
         }
@@ -419,6 +425,11 @@ public sealed class LockManager
             throw Deadlock(owner, resource, mode);
         }
 
+        // A soft-cycle repair may have granted existing waiters, including this one.
+        // Notify outside _sync, as in every other grant path.
+        CompleteGranted(granted);
+        FailDeadlocked(victims);
+
         // A wait already costs a queued waiter and a registration, so its start is timed
         // whether or not anyone listens (plan D5 (b)): a listener that attaches during a long
         // wait still learns how long it lasted. Start and stop are written on this flow.
@@ -434,9 +445,9 @@ public sealed class LockManager
             // wait was traced: a late cancellation cannot reach CancelWaiter during a listener's
             // synchronous dispatch. The callback is static and the waiter its state, so a request
             // granted at once allocates no closure for a registration it never makes.
-            using var registration = cancellationToken.Register(static state => ((Waiter)state!).Cancel(WaitCancelled), waiter);
-            using var timeoutRegistration = timeoutToken.Register(static state => ((Waiter)state!).Cancel(WaitTimedOut), waiter);
-            using var abandonRegistration = abandonToken.Register(static state => ((Waiter)state!).Cancel(WaitAbandoned), waiter);
+            using var registration = cancellationToken.Register(static state => ((Waiter)state!).Cancel(waitCancelled), waiter);
+            using var timeoutRegistration = timeoutToken.Register(static state => ((Waiter)state!).Cancel(waitTimedOut), waiter);
+            using var abandonRegistration = abandonToken.Register(static state => ((Waiter)state!).Cancel(waitAbandoned), waiter);
             await waiter.Completion.Task.ConfigureAwait(false);
         }
         finally
@@ -457,13 +468,13 @@ public sealed class LockManager
     /// </summary>
     private static string WaitOutcome(Waiter waiter) => waiter.CancellationOutcome ?? (waiter.Completion.Task.Status switch
     {
-        TaskStatus.RanToCompletion => WaitGranted,
-        _ when waiter.Completion.Task.Exception?.InnerException is TransactionDeadlockException => WaitDeadlock,
-        _ => WaitEnded,
+        TaskStatus.RanToCompletion => waitGranted,
+        _ when waiter.Completion.Task.Exception?.InnerException is TransactionDeadlockException => waitDeadlock,
+        _ => waitEnded,
     });
 
     private static TransactionDeadlockException Deadlock(TransactionSequence owner, LockResource resource, LockMode mode)
-        => new($"Transaction {owner} was chosen as the deadlock victim requesting {mode} on {resource}.");
+        => new(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.LockManagerDeadlockFailure, owner, mode, resource));
 
     /// <summary>
     /// Attempts to acquire a lock without waiting.
@@ -698,7 +709,7 @@ public sealed class LockManager
         foreach (var waiter in ended)
         {
             waiter.Completion.TrySetException(new TransactionAbortedException(
-                $"Transaction {owner} ended while it waited for {waiter.Mode} on {waiter.Resource}; the request was not granted."));
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, _errorLockManagerFailEndedFailure, owner, waiter.Mode, waiter.Resource)));
         }
     }
 
@@ -744,11 +755,11 @@ public sealed class LockManager
         // its completion owns the outcome even if its asynchronous notification has not run.
         if (removed)
         {
-            if (outcome == WaitTimedOut)
+            if (outcome == waitTimedOut)
             {
                 waiter.Completion.TrySetException(new TransactionLockTimeoutException(new OperationCanceledException()));
             }
-            else if (outcome == WaitAbandoned)
+            else if (outcome == waitAbandoned)
             {
                 waiter.Completion.TrySetException(Abandoned(new TransactionSequence(waiter.Owner), waiter.Resource,
                     waiter.Mode, Volatile.Read(ref _abandonCause)!));
@@ -800,10 +811,10 @@ public sealed class LockManager
 
     private static byte[] BuildConflicts()
     {
-        var conflicts = new byte[ModeCount];
-        for (int held = 0; held < ModeCount; held++)
+        var conflicts = new byte[modeCount];
+        for (int held = 0; held < modeCount; held++)
         {
-            for (int requested = 0; requested < ModeCount; requested++)
+            for (int requested = 0; requested < modeCount; requested++)
             {
                 if (!_compatible[held, requested])
                 {
@@ -817,10 +828,10 @@ public sealed class LockManager
 
     private static byte[] BuildHeldConflicts()
     {
-        var conflicts = new byte[AllModes + 1];
-        for (int mask = 1; mask <= AllModes; mask++)
+        var conflicts = new byte[allModes + 1];
+        for (int mask = 1; mask <= allModes; mask++)
         {
-            for (int mode = 0; mode < ModeCount; mode++)
+            for (int mode = 0; mode < modeCount; mode++)
             {
                 if ((mask & (1 << mode)) != 0)
                 {
@@ -1110,8 +1121,10 @@ public sealed class LockManager
             if (CanGrantQueuedLocked(entry, waiter, ahead))
             {
                 // Takes the request off the queue, so the next one is at the same index.
+                int orderVersion = entry.OrderVersion;
                 GrantLocked(entry, waiter.Owner, waiter.Mode, waiter, ref victims);
                 (granted ??= new()).Add(waiter);
+                if (entry.OrderVersion != orderVersion) { i = 0; ahead = 0; }
             }
             else
             {
@@ -1154,6 +1167,7 @@ public sealed class LockManager
 
             if (ReachesLocked(owner))
             {
+                if (TryReorderQueuesLocked()) { return; }
                 DequeueLocked(waiter);
                 LeftLocked(waiter.Entry);
                 (victims ??= new()).Add(waiter);
@@ -1172,8 +1186,8 @@ public sealed class LockManager
     /// (<see cref="CanGrantQueuedLocked"/>). PostgreSQL calls the second kind a soft edge and, before it
     /// aborts anyone, tries to rearrange the queue so that no cycle is left
     /// (<c>src/backend/storage/lmgr/deadlock.c:624-768</c>, <c>TopoSort</c>). This lock manager
-    /// follows it like any other edge: under its grant rule the request does wait for that owner,
-    /// and a cycle through it aborts the requester, as every cycle does.
+    /// first tries consistent queue repair when a cycle is found; a hard held-lock
+    /// cycle still aborts the requester. Ordinary acyclic queues preserve FIFO.
     /// </remarks>
     private bool ClosesCycleLocked(ulong owner)
     {
@@ -1227,6 +1241,119 @@ public sealed class LockManager
             frontier.Clear();
             visited.Clear();
         }
+    }
+
+    // Called only after finding a cycle. Held-lock edges cannot be changed; queued
+    // edges can. Build an owner DAG from hard edges, then retain FIFO edges greedily
+    // whenever they do not close a cycle. A stable topological owner order supplies
+    // consistent queue orders across every resource (one owner may wait on several).
+    // No live queue changes until hard-edge acyclicity has been proved.
+    private bool TryReorderQueuesLocked()
+    {
+        var blockers = new Dictionary<ulong, HashSet<ulong>>();
+        foreach (var requests in _waiting.Values)
+        {
+            foreach (var waiter in requests)
+            {
+                if (!blockers.TryGetValue(waiter.Owner, out var dependencies))
+                {
+                    dependencies = new();
+                    blockers.Add(waiter.Owner, dependencies);
+                }
+                foreach (var (holder, held) in waiter.Entry.Granted)
+                {
+                    if (holder != waiter.Owner && Conflicts(held.Modes, waiter.Mode))
+                    {
+                        dependencies.Add(holder);
+                        if (!blockers.ContainsKey(holder)) { blockers.Add(holder, new()); }
+                    }
+                }
+            }
+        }
+        if (OrderOwners(blockers) is null) { return false; }
+
+        foreach (var entry in _table.Values)
+        {
+            var queue = entry.Waiters;
+            for (int later = 1; later < queue.Count; later++)
+            {
+                var waiting = queue[later];
+                var dependencies = blockers[waiting.Owner];
+                for (int earlier = 0; earlier < later; earlier++)
+                {
+                    var ahead = queue[earlier];
+                    if (ahead.Owner == waiting.Owner || !Conflicts(ahead.Mode, waiting.Mode) ||
+                        dependencies.Contains(ahead.Owner)) { continue; }
+                    if (!GraphReaches(blockers, ahead.Owner, waiting.Owner))
+                    {
+                        dependencies.Add(ahead.Owner);
+                    }
+                }
+            }
+        }
+        var order = OrderOwners(blockers)!;
+        foreach (var entry in _table.Values)
+        {
+            var queue = entry.Waiters;
+            bool changed = false;
+            // Stable insertion sort keeps each owner's own requests in original order.
+            for (int index = 1; index < queue.Count; index++)
+            {
+                var waiter = queue[index];
+                int place = index;
+                while (place > 0 && order[queue[place - 1].Owner] > order[waiter.Owner])
+                {
+                    queue[place] = queue[place - 1];
+                    place--;
+                }
+                if (place != index) { queue[place] = waiter; changed = true; }
+            }
+            if (changed) { entry.OrderVersion++; ScheduleWakeLocked(entry); }
+        }
+        return true;
+    }
+
+    private static Dictionary<ulong, int>? OrderOwners(Dictionary<ulong, HashSet<ulong>> blockers)
+    {
+        var remaining = new Dictionary<ulong, int>(blockers.Count);
+        var ready = new Queue<ulong>();
+        foreach (var (owner, dependencies) in blockers)
+        {
+            remaining.Add(owner, dependencies.Count);
+            if (dependencies.Count == 0) { ready.Enqueue(owner); }
+        }
+        var order = new Dictionary<ulong, int>(blockers.Count);
+        while (ready.TryDequeue(out ulong resolved))
+        {
+            order.Add(resolved, order.Count);
+            foreach (var (owner, dependencies) in blockers)
+            {
+                if (dependencies.Contains(resolved) && --remaining[owner] == 0)
+                {
+                    ready.Enqueue(owner);
+                }
+            }
+        }
+        return order.Count == blockers.Count ? order : null;
+    }
+
+    private bool GraphReaches(Dictionary<ulong, HashSet<ulong>> blockers, ulong start, ulong target)
+    {
+        var frontier = _searchFrontier;
+        var visited = _searchVisited;
+        frontier.Clear(); visited.Clear();
+        frontier.Push(start);
+        try
+        {
+            while (frontier.TryPop(out ulong owner))
+            {
+                if (owner == target) { return true; }
+                if (!visited.Add(owner)) { continue; }
+                foreach (ulong dependency in blockers[owner]) { frontier.Push(dependency); }
+            }
+            return false;
+        }
+        finally { frontier.Clear(); visited.Clear(); }
     }
 
     // Pushes the owners a queued request waits for, its edges: those whose grants conflict with
@@ -1289,7 +1416,7 @@ public sealed class LockManager
     // counted.
     private void DescribeBlockersLocked(Waiter waiter, StringBuilder description, int depth)
     {
-        int limit = depth == 0 ? MaxBlockersDescribed : MaxNestedBlockersDescribed;
+        int limit = depth == 0 ? maxBlockersDescribed : maxNestedBlockersDescribed;
         int described = 0;
         int more = 0;
 
@@ -1351,7 +1478,7 @@ public sealed class LockManager
         int described = 0;
         foreach (var request in queued)
         {
-            if (described == MaxQueuedDescribed)
+            if (described == maxQueuedDescribed)
             {
                 break;
             }
@@ -1389,7 +1516,7 @@ public sealed class LockManager
     private static void AppendModes(StringBuilder description, byte held)
     {
         bool first = true;
-        for (int mode = 0; mode < ModeCount; mode++)
+        for (int mode = 0; mode < modeCount; mode++)
         {
             if ((held & (1 << mode)) == 0)
             {
@@ -1411,6 +1538,8 @@ public sealed class LockManager
     /// (<see cref="ReportBlocked"/>). Created only while a listener takes the source's warnings, so
     /// a wait costs nothing more when nobody listens.
     /// </summary>
+    [global::System.Diagnostics.DebuggerDisplay("BlockedWaitReport")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Transactions.LockManager.BlockedWaitReport.DebugView))]
     private sealed class BlockedWaitReport : IDisposable
     {
         private readonly LockManager _manager;
@@ -1427,7 +1556,7 @@ public sealed class LockManager
         }
 
         // A timer's longest due time; a threshold past it (about 49 days) reports nothing.
-        private const double LongestDueMilliseconds = uint.MaxValue - 1;
+        private const double longestDueMilliseconds = uint.MaxValue - 1;
 
         public static BlockedWaitReport? Arm(LockManager manager, Waiter waiter, long started)
         {
@@ -1437,7 +1566,7 @@ public sealed class LockManager
             }
 
             double threshold = TransactionEventSource.Log.SlowLockWaitThresholdMilliseconds;
-            return threshold <= LongestDueMilliseconds
+            return threshold <= longestDueMilliseconds
                 ? new BlockedWaitReport(manager, waiter, started, TimeSpan.FromMilliseconds(threshold))
                 : null;
         }
@@ -1445,6 +1574,14 @@ public sealed class LockManager
         public void Dispose() => _timer.Dispose();
 
         private void Report() => _manager.ReportBlocked(_waiter, _started);
+
+        private sealed class DebugView
+        {
+            public DebugView(global::Assimalign.Cohesion.Database.Transactions.LockManager.BlockedWaitReport value)
+            {
+                _ = value;
+            }
+        }
     }
 
     private readonly record struct LockGrant(byte Modes, ulong Sequence);
@@ -1464,10 +1601,14 @@ public sealed class LockManager
         // The queued requests, in the order they queued.
         public List<Waiter> Waiters { get; } = new();
 
+        public int OrderVersion { get; set; }
+
         // Whether the entry is on the wake list (WakeScheduledLocked).
         public bool WakeScheduled { get; set; }
     }
 
+    [global::System.Diagnostics.DebuggerDisplay("LockTimeoutScope")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Transactions.LockManager.LockTimeoutScope.DebugView))]
     private sealed class LockTimeoutScope : IDisposable
     {
         private LockManager? _manager;
@@ -1484,8 +1625,18 @@ public sealed class LockManager
             var manager = Interlocked.Exchange(ref _manager, null);
             if (manager is not null) { manager._lockTimeout.Value = _previous; }
         }
+
+        private sealed class DebugView
+        {
+            public DebugView(global::Assimalign.Cohesion.Database.Transactions.LockManager.LockTimeoutScope value)
+            {
+                _ = value;
+            }
+        }
     }
 
+    [global::System.Diagnostics.DebuggerDisplay("Waiter")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Transactions.LockManager.Waiter.DebugView))]
     private sealed class Waiter
     {
         private readonly LockManager _manager;
@@ -1518,5 +1669,27 @@ public sealed class LockManager
 
         // The wait's cancellation callback.
         public void Cancel(string outcome) => _manager.CancelWaiter(this, outcome);
+
+        private sealed class DebugView
+        {
+            private readonly global::Assimalign.Cohesion.Database.Transactions.LockManager.Waiter _target;
+
+            public DebugView(global::Assimalign.Cohesion.Database.Transactions.LockManager.Waiter value)
+            {
+                _target = value;
+            }
+
+            public ulong Owner => _target.Owner;
+            public global::Assimalign.Cohesion.Database.Transactions.LockMode Mode => _target.Mode;
+            public string? CancellationOutcome => _target.CancellationOutcome;
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Transactions.LockManager value)
+        {
+            _ = value;
+        }
     }
 }

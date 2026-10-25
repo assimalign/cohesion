@@ -43,11 +43,11 @@ public sealed class SqlCatalogColumn
         ArgumentNullException.ThrowIfNull(type);
         if (collation is not null && type.Type is not (DatabaseType.String or DatabaseType.Character))
         {
-            throw new ArgumentException("Only string columns may declare a collation.", nameof(collation));
+            throw new ArgumentException(ErrorMessages.SqlCatalogColumnArgument, nameof(collation));
         }
         if (domainName is not null && string.IsNullOrWhiteSpace(domainName))
         {
-            throw new ArgumentException("A column's domain name cannot be empty or white space.", nameof(domainName));
+            throw new ArgumentException(ErrorMessages.SqlCatalogColumnArgument2, nameof(domainName));
         }
 
         Identity = identity;
@@ -61,7 +61,7 @@ public sealed class SqlCatalogColumn
         DefaultFunctionCalls = Array.AsReadOnly((defaultFunctionCalls ?? []).ToArray());
         if (DefaultFunctionCalls.Any(string.IsNullOrWhiteSpace))
         {
-            throw new ArgumentException("A default function identity cannot be blank.", nameof(defaultFunctionCalls));
+            throw new ArgumentException(ErrorMessages.SqlCatalogColumnArgument3, nameof(defaultFunctionCalls));
         }
     }
 

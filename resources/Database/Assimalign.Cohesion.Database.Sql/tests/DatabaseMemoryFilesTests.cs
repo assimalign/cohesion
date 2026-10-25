@@ -14,14 +14,14 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 /// </summary>
 public sealed class DatabaseMemoryFilesTests
 {
-    private const string Set = "sql";
+    private const string set = "sql";
 
     [Fact(DisplayName = "Cohesion Test [Database.Sql] - In-memory files: an open copies the closed files' bytes into new streams")]
     public void TryOpen_AfterTheFilesClosed_ShouldCopyTheirBytesIntoNewStreams()
     {
         // Arrange: a file set written and closed, as a storage leaves it.
         var files = new DatabaseMemoryFiles();
-        files.TryCreate("db", Set, out var data, out var journal, out var backup).ShouldBeTrue();
+        files.TryCreate("db", set, out var data, out var journal, out var backup).ShouldBeTrue();
         data.Write([1, 2, 3]);
         journal.Write([4, 5]);
         data.Dispose();
@@ -29,7 +29,7 @@ public sealed class DatabaseMemoryFilesTests
         backup.Dispose();
 
         // Act
-        bool opened = files.TryOpen("db", Set, out var reopenedData, out var reopenedJournal, out var reopenedBackup);
+        bool opened = files.TryOpen("db", set, out var reopenedData, out var reopenedJournal, out var reopenedBackup);
         var dataBytes = new byte[(int)reopenedData.Length];
         reopenedData.ReadExactly(dataBytes);
         var journalBytes = new byte[(int)reopenedJournal.Length];
@@ -53,10 +53,10 @@ public sealed class DatabaseMemoryFilesTests
     {
         // Arrange
         var files = new DatabaseMemoryFiles();
-        files.TryCreate("db", Set, out var data, out var journal, out var backup).ShouldBeTrue();
+        files.TryCreate("db", set, out var data, out var journal, out var backup).ShouldBeTrue();
 
         // Act
-        var refused = Should.Throw<InvalidOperationException>(() => files.TryOpen("db", Set, out _, out _, out _));
+        var refused = Should.Throw<InvalidOperationException>(() => files.TryOpen("db", set, out _, out _, out _));
 
         // Assert: the message names the file set as its path in the database's directory reads.
         refused.Message.ShouldContain("'db/sql' is still open", Case.Sensitive);
@@ -70,8 +70,8 @@ public sealed class DatabaseMemoryFilesTests
     {
         // Arrange
         var files = new DatabaseMemoryFiles();
-        files.TryCreate("a", Set, out var data, out var journal, out var backup).ShouldBeTrue();
-        files.TryCreate("b", Set, out var otherData, out var otherJournal, out var otherBackup).ShouldBeTrue();
+        files.TryCreate("a", set, out var data, out var journal, out var backup).ShouldBeTrue();
+        files.TryCreate("b", set, out var otherData, out var otherJournal, out var otherBackup).ShouldBeTrue();
         foreach (var stream in new[] { data, journal, backup, otherData, otherJournal, otherBackup })
         {
             stream.Dispose();
@@ -82,8 +82,8 @@ public sealed class DatabaseMemoryFilesTests
 
         // Assert
         files.Names.ShouldBeEmpty();
-        files.Exists("a", Set).ShouldBeFalse();
-        files.TryOpen("b", Set, out _, out _, out _).ShouldBeFalse();
+        files.Exists("a", set).ShouldBeFalse();
+        files.TryOpen("b", set, out _, out _, out _).ShouldBeFalse();
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Sql] - In-memory files: every spelling of a name reaches the one file set, and the names are the storage names (#1392)")]
@@ -91,7 +91,7 @@ public sealed class DatabaseMemoryFilesTests
     {
         // Arrange
         var files = new DatabaseMemoryFiles();
-        files.TryCreate("Sales", Set, out var data, out var journal, out var backup).ShouldBeTrue();
+        files.TryCreate("Sales", set, out var data, out var journal, out var backup).ShouldBeTrue();
         data.Write([7]);
         foreach (var stream in new[] { data, journal, backup })
         {
@@ -99,9 +99,9 @@ public sealed class DatabaseMemoryFilesTests
         }
 
         // Act
-        bool createdAgain = files.TryCreate("SALES", Set, out _, out _, out _);
-        bool exists = files.Exists("sales", Set);
-        bool opened = files.TryOpen("sAlEs", Set, out var reopenedData, out var reopenedJournal, out var reopenedBackup);
+        bool createdAgain = files.TryCreate("SALES", set, out _, out _, out _);
+        bool exists = files.Exists("sales", set);
+        bool opened = files.TryOpen("sAlEs", set, out var reopenedData, out var reopenedJournal, out var reopenedBackup);
 
         // Assert
         createdAgain.ShouldBeFalse();
@@ -120,9 +120,9 @@ public sealed class DatabaseMemoryFilesTests
         // Arrange: 'sales' with a data and a catalog set, and a database literally named
         // 'sales.catalog', whose files were the catalog of 'sales' before #1392.
         var files = new DatabaseMemoryFiles();
-        files.TryCreate("sales", Set, out var a, out var b, out var c).ShouldBeTrue();
+        files.TryCreate("sales", set, out var a, out var b, out var c).ShouldBeTrue();
         files.TryCreate("sales", DatabaseFileNames.CatalogFileSet, out var d, out var e, out var f).ShouldBeTrue();
-        bool separate = files.TryCreate("sales.catalog", Set, out var g, out var h, out var i);
+        bool separate = files.TryCreate("sales.catalog", set, out var g, out var h, out var i);
         foreach (var stream in new[] { a, b, c, d, e, f, g, h, i })
         {
             stream?.Dispose();
@@ -134,9 +134,9 @@ public sealed class DatabaseMemoryFilesTests
         // Assert
         separate.ShouldBeTrue();
         dropped.ShouldBeTrue();
-        files.Exists("sales", Set).ShouldBeFalse();
+        files.Exists("sales", set).ShouldBeFalse();
         files.Exists("sales", DatabaseFileNames.CatalogFileSet).ShouldBeFalse();
-        files.Exists("sales.catalog", Set).ShouldBeTrue();
+        files.Exists("sales.catalog", set).ShouldBeTrue();
         files.Names.ShouldBe(["sales.catalog"]);
         files.Drop("sales").ShouldBeFalse();
     }
@@ -148,7 +148,7 @@ public sealed class DatabaseMemoryFilesTests
         var files = new DatabaseMemoryFiles();
 
         // Act
-        var refusal = Should.Throw<ArgumentException>(() => files.TryCreate("a/b", Set, out _, out _, out _));
+        var refusal = Should.Throw<ArgumentException>(() => files.TryCreate("a/b", set, out _, out _, out _));
 
         // Assert
         refusal.Message.ShouldStartWith(DatabaseFileNames.Rule, Case.Sensitive);

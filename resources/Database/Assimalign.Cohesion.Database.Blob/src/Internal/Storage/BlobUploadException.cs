@@ -4,7 +4,7 @@ namespace Assimalign.Cohesion.Database.Blob.Internal;
 
 internal sealed class BlobUploadException : InvalidOperationException
 {
-    internal const string Code = "COHDBB007";
+    internal const string Code = "CB02007";
 
     internal BlobUploadException(string message) : base(message)
     {

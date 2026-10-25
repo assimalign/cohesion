@@ -141,12 +141,12 @@ public sealed partial class SqlSubqueryExecutionTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - Correlation: invalid grouped outer names ambiguous scopes and outer-only aggregates fail during binding")]
-    [InlineData("SELECT (SELECT x.id FROM choices x WHERE x.id = c.id) FROM candidates c GROUP BY c.id + 1;", "COHSQLE017", "Outer column 'id'")]
-    [InlineData("SELECT (SELECT SUM(c.id) FROM choices x) FROM candidates c;", "COHDBL001", "outer")]
-    [InlineData("SELECT c.id FROM candidates c WHERE EXISTS (SELECT x.id FROM choices x WHERE SUM(c.id) > 0);", "COHDBL001", "outer")]
-    [InlineData("SELECT c.id FROM candidates c WHERE EXISTS (SELECT x.id FROM choices x JOIN choices y ON SUM(c.id) > 0);", "COHDBL001", "outer")]
-    [InlineData("SELECT c.id FROM candidates c WHERE EXISTS (SELECT x.id FROM choices x JOIN candidates y ON x.id = y.id WHERE id = c.id);", "COHSQLE015", "Ambiguous")]
-    [InlineData("SELECT c.id FROM candidates c WHERE EXISTS (SELECT x.missing FROM choices x WHERE x.missing = c.id);", "COHSQLE015", "x.missing")]
+    [InlineData("SELECT (SELECT x.id FROM choices x WHERE x.id = c.id) FROM candidates c GROUP BY c.id + 1;", "CS05017", "Outer column 'id'")]
+    [InlineData("SELECT (SELECT SUM(c.id) FROM choices x) FROM candidates c;", "CK00001", "outer")]
+    [InlineData("SELECT c.id FROM candidates c WHERE EXISTS (SELECT x.id FROM choices x WHERE SUM(c.id) > 0);", "CK00001", "outer")]
+    [InlineData("SELECT c.id FROM candidates c WHERE EXISTS (SELECT x.id FROM choices x JOIN choices y ON SUM(c.id) > 0);", "CK00001", "outer")]
+    [InlineData("SELECT c.id FROM candidates c WHERE EXISTS (SELECT x.id FROM choices x JOIN candidates y ON x.id = y.id WHERE id = c.id);", "CS01015", "Ambiguous")]
+    [InlineData("SELECT c.id FROM candidates c WHERE EXISTS (SELECT x.missing FROM choices x WHERE x.missing = c.id);", "CS01015", "x.missing")]
     public async Task Execute_InvalidCorrelatedBinding_ShouldReportNamedDiagnostic(string sql, string code, string name)
     {
         // Arrange
@@ -156,7 +156,7 @@ public sealed partial class SqlSubqueryExecutionTests
         await SeedMembershipAsync(session);
 
         // Act
-        if (code == "COHDBL001")
+        if (code == "CK00001")
         {
             var result = await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None);
             // Assert

@@ -20,7 +20,7 @@ namespace Assimalign.Cohesion.Database.Sql.Client.Tests;
 /// and aggregate resolve, fold, short-circuit and fail like the built-ins; a CHECK admits only an
 /// immutable function; a stored CHECK binds again when its database reopens; and once the function
 /// is gone from the next engine's build, the database still opens and serves reads while each write
-/// that would evaluate the CHECK fails with <c>COHSQLE009</c> on a connection that stays usable.
+/// that would evaluate the CHECK fails with <c>CS01009</c> on a connection that stays usable.
 /// </summary>
 public sealed class SqlFunctionExtensibilityWireTests
 {
@@ -60,15 +60,15 @@ public sealed class SqlFunctionExtensibilityWireTests
     /// <summary>A function's failure, an ambiguous call and a call no overload accepts are coded execution failures on a usable connection.</summary>
     /// <param name="statement">The failing statement.</param>
     /// <param name="message">The complete failure message.</param>
-    [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - Functions: COHSQLE006, COHSQLE007 and COHSQLE008 are coded failures on a usable connection")]
+    [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - Functions: CS01006, CS05007 and CS01008 are coded failures on a usable connection")]
     [InlineData("SELECT clamp(1, 5, 0) FROM users",
-        "COHSQLE007: Function 'clamp' failed: '5' cannot be greater than 0.")]
+        "CS05007: Function 'clamp' failed: '5' cannot be greater than 0.")]
     [InlineData("SELECT pick(NULL) FROM users",
-        "COHSQLE008: Function call 'pick(unknown)' is ambiguous: pick(BIGINT) and pick(TEXT) accept it equally well. Cast an argument to choose one.")]
+        "CS01008: Function call 'pick(unknown)' is ambiguous: pick(BIGINT) and pick(TEXT) accept it equally well. Cast an argument to choose one.")]
     [InlineData("SELECT pick(TRUE) FROM users",
-        "COHSQLE006: Function 'pick' has no overload that accepts argument types (BOOLEAN). Accepted: pick(BIGINT) or pick(TEXT).")]
+        "CS01006: Function 'pick' has no overload that accepts argument types (BOOLEAN). Accepted: pick(BIGINT) or pick(TEXT).")]
     [InlineData("SELECT lying(score) FROM users",
-        "COHSQLE007: Function 'lying' failed: The function returned TEXT, but it declares BIGINT.")]
+        "CS05007: Function 'lying' failed: The function returned TEXT, but it declares BIGINT.")]
     public async Task QueryAsync_FunctionFailure_ShouldBeCodedOnAUsableConnection(string statement, string message)
     {
         // Arrange
@@ -139,8 +139,8 @@ public sealed class SqlFunctionExtensibilityWireTests
         // Assert
         refused.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
         refused.ConnectionUsable.ShouldBeTrue();
-        refused.Message.ShouldStartWith("COHSQLE059: Function 'is_email_volatile' is VOLATILE, and a CHECK admits only IMMUTABLE functions.", Case.Sensitive);
-        refused.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE059");
+        refused.Message.ShouldStartWith("CS03059: Function 'is_email_volatile' is VOLATILE, and a CHECK admits only IMMUTABLE functions.", Case.Sensitive);
+        refused.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS03059");
         violation.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
         violation.ConnectionUsable.ShouldBeTrue();
         violation.Message.ShouldContain("ck_email", Case.Sensitive);
@@ -155,9 +155,9 @@ public sealed class SqlFunctionExtensibilityWireTests
     /// A stored CHECK naming a registered function binds again when its database reopens under an
     /// engine that registers the function; once the next engine's build no longer registers it, the
     /// database still opens and serves reads, each write that would evaluate the CHECK fails with
-    /// <c>COHSQLE009</c> on a usable connection, and dropping the CHECK lets writes through again.
+    /// <c>CS01009</c> on a usable connection, and dropping the CHECK lets writes through again.
     /// </summary>
-    [Fact(DisplayName = "Cohesion Test [Database.Sql.Client] - Functions: a stored CHECK reopens, then fails writes with COHSQLE009 once its function is removed")]
+    [Fact(DisplayName = "Cohesion Test [Database.Sql.Client] - Functions: a stored CHECK reopens, then fails writes with CS01009 once its function is removed")]
     public async Task Reopen_StoredCheck_ShouldBindAgainThenFailWritesOnceTheFunctionIsRemoved()
     {
         string root = Path.Combine(Path.GetTempPath(), "cohesion-function-wire", Guid.NewGuid().ToString("N"));
@@ -201,7 +201,7 @@ public sealed class SqlFunctionExtensibilityWireTests
             refused.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
             refused.ConnectionUsable.ShouldBeTrue();
             refused.Message.ShouldBe(
-                "COHSQLE009: CHECK constraint 'ck_email' on table 'dbo.contacts' calls function 'is_email(TEXT)', which this engine does not " +
+                "CS01009: CHECK constraint 'ck_email' on table 'dbo.contacts' calls function 'is_email(TEXT)', which this engine does not " +
                 "register, so the constraint cannot be evaluated and the write is refused. Register the function on the engine's builder " +
                 "(SqlDatabaseEngineBuilder.Functions), or drop the constraint.");
             stillReadable.ShouldHaveSingleItem()["c"].ShouldBe(2L);
@@ -223,7 +223,7 @@ public sealed class SqlFunctionExtensibilityWireTests
         }
     }
 
-    [Fact(DisplayName = "Cohesion Test [Sql.Client] - Execution: a function stack refusal reports COHSQLE004 and preserves the connection")]
+    [Fact(DisplayName = "Cohesion Test [Sql.Client] - Execution: a function stack refusal reports CS05004 and preserves the connection")]
     public async Task QueryAsync_RuntimeStackFailure_ShouldReturnCodedFailureAsync()
     {
         // Arrange
@@ -241,7 +241,7 @@ public sealed class SqlFunctionExtensibilityWireTests
         // Assert
         calls.ShouldBe(1);
         error.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE004");
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS05004");
         error.ConnectionUsable.ShouldBeTrue();
         (await connection.QueryAsync("SELECT COUNT(*) FROM users", cancellationToken: Timeout())).ShouldHaveSingleItem()[0].ShouldBe(2L);
     }
@@ -279,7 +279,7 @@ public sealed class SqlFunctionExtensibilityWireTests
     /// </summary>
     private sealed class FunctionHarness : IAsyncDisposable
     {
-        private const string DatabaseName = "app";
+        private const string databaseName = "app";
 
         private readonly SqlDatabaseEngine _engine;
         private readonly InMemoryConnectionListener _listener;
@@ -307,14 +307,14 @@ public sealed class SqlFunctionExtensibilityWireTests
             SqlDatabaseEngine engine = await builder.BuildAsync();
             if (create)
             {
-                var database = await engine.CreateDatabaseAsync(DatabaseName);
+                var database = await engine.CreateDatabaseAsync(databaseName);
                 await using var session = await database.CreateSessionAsync();
                 await session.ExecuteAsync("CREATE TABLE users (id INT NOT NULL, name VARCHAR(100), score BIGINT)");
                 await session.ExecuteAsync("INSERT INTO users (id, name, score) VALUES (1, 'ada', 100), (2, 'grace', 200)");
             }
             else
             {
-                await engine.OpenDatabaseAsync(DatabaseName);
+                await engine.OpenDatabaseAsync(databaseName);
             }
 
             var listener = new InMemoryConnectionListener();
@@ -322,7 +322,7 @@ public sealed class SqlFunctionExtensibilityWireTests
             await server.StartAsync();
             var client = SqlClient.Create(new SqlClientOptions
             {
-                Settings = new DatabaseConnectionSettings { Database = DatabaseName, Principal = "tester", EndPoint = listener.EndPoint },
+                Settings = new DatabaseConnectionSettings { Database = databaseName, Principal = "tester", EndPoint = listener.EndPoint },
                 ConnectionFactory = listener.CreateFactory(),
             });
 

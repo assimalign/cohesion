@@ -120,7 +120,7 @@ public static class SqlExpressionRenderer
         if (depth > SqlQueryParserOptions.MaximumExpressionNestingLimit)
         {
             throw new NotSupportedException(
-                $"The expression nests {depth} levels deep; the SQL dialect allows at most {SqlQueryParserOptions.MaximumExpressionNestingLimit}, so its text would not parse.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.RendererThrowIfTooDeepNotSupported, depth, SqlQueryParserOptions.MaximumExpressionNestingLimit));
         }
     }
 
@@ -161,7 +161,7 @@ public static class SqlExpressionRenderer
         SqlCastExpression cast => "CAST(" + Expression(cast.Operand) + " AS " + CastTarget(cast.TargetType) + ")",
         SqlExistsExpression exists => (exists.IsNegated ? "NOT EXISTS (" : "EXISTS (") + Select(exists.Subquery) + ")",
         SqlSubqueryExpression subquery => "(" + Select(subquery.Select) + ")",
-        _ => throw new NotSupportedException($"Expression node '{expression.GetType().Name}' has no SQL spelling."),
+        _ => throw new NotSupportedException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlExpressionRendererNodeNotSupported, expression.GetType().Name)),
     };
 
     private static string Ordering(SqlOrderByColumn key) => Expression(key.Expression) + (key.IsDescending ? " DESC" : "") +
@@ -204,7 +204,7 @@ public static class SqlExpressionRenderer
         SqlBinaryExpression { Operator: SqlBinaryOperator.Add or SqlBinaryOperator.Subtract } => additiveLevel,
         SqlBinaryExpression { Operator: SqlBinaryOperator.Concat } => concatLevel,
         SqlBinaryExpression { Operator: SqlBinaryOperator.Multiply or SqlBinaryOperator.Divide or SqlBinaryOperator.Modulo } => multiplicativeLevel,
-        SqlBinaryExpression binary => throw new NotSupportedException($"Binary operator '{binary.Operator}' has no SQL spelling."),
+        SqlBinaryExpression binary => throw new NotSupportedException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExpressionRendererLevelNotSupported, binary.Operator)),
         SqlUnaryExpression => unaryLevel,
         SqlCollateExpression => collateLevel,
         _ => primaryLevel,
@@ -265,7 +265,7 @@ public static class SqlExpressionRenderer
         SqlBinaryOperator.LessOrEqual => "<=",
         SqlBinaryOperator.GreaterOrEqual => ">=",
         // AND and OR are SqlLogicalExpression chains; the parser builds no binary node for them.
-        _ => throw new NotSupportedException($"Binary operator '{op}' has no SQL spelling."),
+        _ => throw new NotSupportedException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExpressionRendererLevelNotSupported, op)),
     };
 
     private static string Unary(SqlUnaryExpression unary)
@@ -283,7 +283,7 @@ public static class SqlExpressionRenderer
             SqlUnaryOperator.Negate => "-",
             SqlUnaryOperator.Plus => "+",
             SqlUnaryOperator.BitwiseNot => "~",
-            _ => throw new NotSupportedException($"Unary operator '{unary.Operator}' has no SQL spelling."),
+            _ => throw new NotSupportedException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExpressionRendererUnaryNotSupported, unary.Operator)),
         };
 
         // A sign applied to a sign is parenthesized: two minus signs in a row would start a
@@ -314,7 +314,7 @@ public static class SqlExpressionRenderer
         SqlLiteralType.Null => "NULL",
         SqlLiteralType.Boolean => literal.Value.Equals("TRUE", StringComparison.OrdinalIgnoreCase) ? "TRUE" : "FALSE",
         SqlLiteralType.Integer or SqlLiteralType.Float => literal.Value,
-        _ => throw new NotSupportedException($"Literal type '{literal.LiteralType}' has no SQL spelling."),
+        _ => throw new NotSupportedException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExpressionRendererLiteralNotSupported, literal.LiteralType)),
     };
 
     private static string Column(SqlColumnReferenceExpression column)
@@ -471,7 +471,7 @@ public static class SqlExpressionRenderer
                     SqlJoinType.RightOuter => " RIGHT OUTER JOIN ",
                     SqlJoinType.FullOuter => " FULL OUTER JOIN ",
                     SqlJoinType.Cross => " CROSS JOIN ",
-                    _ => throw new NotSupportedException($"Join type '{join.JoinType}' has no SQL spelling."),
+                    _ => throw new NotSupportedException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExpressionRendererSelectNotSupported, join.JoinType)),
                 }).Append(Table(join.Table));
                 if (join.Condition is not null)
                 {

@@ -7,6 +7,8 @@ namespace Assimalign.Cohesion.Database.Indexing.Internal;
 /// reference and a writer. Leaf entries always carry all three; separators keep as
 /// many as they need; searches carry what they know.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("BTreeSearchKey")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Indexing.Internal.BTreeSearchKey.DebugView))]
 internal readonly ref struct BTreeSearchKey
 {
     private BTreeSearchKey(ReadOnlySpan<byte> key, BTreeTiebreaker tiebreaker, ulong entryReference, ulong writer)
@@ -73,4 +75,12 @@ internal readonly ref struct BTreeSearchKey
     /// </summary>
     internal static BTreeSearchKey AtEntry(ReadOnlySpan<byte> key, ulong entryReference, ulong writer)
         => new(key, BTreeTiebreaker.Entry, entryReference, writer);
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Indexing.Internal.BTreeSearchKey value)
+        {
+            _ = value;
+        }
+    }
 }

@@ -43,3 +43,32 @@ Database names cannot contain `/`, which keeps ownership keys unambiguous.
 The project is guarded by COHAM001 and never references Database runtime, gateway, or
 platform packages; its built closure holds no other Database assembly. It emits no legacy resource-specific environment variables; runtime
 endpoint and mount values flow through the `Hosting.Resources` `ResourceContext`.
+
+## Error and construction conventions (#1470)
+
+Exception messages and format templates are generated from `src/Properties/ErrorMessages.resx`;
+format arguments use the current culture. Cancellation and abort templates used during normal
+cleanup are cached before reuse. Error identities remain separate from message text where a
+structured diagnostic carrier exists. Standard .NET guards retain their argument names and exception types.
+
+
+## Checked manifest paths and sources (#1470)
+
+Manifest probe `Http` is `ResourceHttpPath?`, control-plane `Path` is `ResourceHttpPath`, and mount
+`Source` is `ResourceMountSource?`. Consumers use the underlying `Value` when composing addresses
+or comparing raw text. Valid string initializers remain supported; malformed strings are refused
+at construction or typed JSON import. Default structs still pass through explicit manifest/plan
+validation. JSON stays plain strings/nulls under `cohesion/resource/v1`; no transport message,
+Database storage format, diagnostic identity, event or counter changes. All binary consumers
+must be rebuilt together, including installed SDK/framework E2E payloads.
+
+Private identifiers and extension-container syntax follow the shared conventions. Resource kind strings, manifest fields, descriptor ownership and public composition signatures are unchanged.
+
+
+## Debugger inspection (#1470)
+
+Eligible concrete source types use private nested debugger views of reviewed public/protected
+state; existing inherited display/proxy pairs are reused. See the shared
+[debugger convention](../../Assimalign.Cohesion.Database/docs/CONVENTIONS.md#debugger-inspection).
+Views use materialized resource identity and endpoint/mount references; descriptor delegation, environment secrets and serializer option initialization are omitted.
+Runtime APIs, methods, allocation budgets, persistent formats and wire behavior are unchanged.

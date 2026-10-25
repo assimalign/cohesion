@@ -61,7 +61,7 @@ public sealed class SqlSchemaParsingTests
 
         // Assert
         var diagnostic = result.Diagnostics.Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error).ShouldHaveSingleItem();
-        diagnostic.Code.ShouldBe("COHDBL001");
+        diagnostic.Code.ShouldBe("CK00001");
         diagnostic.Message.ShouldNotBeNull().ShouldContain(construct, Case.Sensitive);
         diagnostic.Start.ShouldNotBeNull();
         diagnostic.Start.GetValueOrDefault().ShouldBeGreaterThan(0);
@@ -83,7 +83,7 @@ public sealed class SqlSchemaParsingTests
         var result = Parse(sql);
 
         // Assert
-        result.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "SQL0003");
+        result.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS00003");
         result.SqlExpression.ShouldNotBeOfType<SqlCreateTableExpression>();
         result.SqlExpression.ShouldNotBeOfType<SqlDropTableExpression>();
     }

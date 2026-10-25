@@ -133,6 +133,7 @@ internal abstract class DatabaseVersionPurgeWorker<TDatabase> : DatabaseMaintena
             else
             {
                 BeforeDeferredUndoRetry?.Invoke(database);
+                result.UndoRetried = true;
                 GetCoordinator(database).RetryDeferredUndo(cancellationToken);
             }
             if (HasReclamation(database) && (full || !previousFullFailed)) { Reclaim(database, cancellationToken); }
@@ -160,7 +161,12 @@ internal abstract class DatabaseVersionPurgeWorker<TDatabase> : DatabaseMaintena
         var result = outcome.Result;
         var failure = outcome.Failure ?? result.Failure;
         bool full = state.InFlightFull;
-        if (visit is not null) { visit.WorkUnits = result.FullCompleted ? 1 : 0; }
+        if (visit is not null)
+        {
+            visit.WorkUnits = result.FullCompleted ? 1 : 0;
+            visit.UndoRetried = result.UndoRetried;
+            visit.UndoPending = result.UndoPending;
+        }
         bool fullPending = full && !result.FullCompleted;
         if (full) { state.AttemptedEpoch = state.InFlightEpoch; }
         if (result.FullCompleted)

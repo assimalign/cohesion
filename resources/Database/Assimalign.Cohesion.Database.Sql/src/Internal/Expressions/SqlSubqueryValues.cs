@@ -19,6 +19,8 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// read the row retained by the named enclosing frame. Execution has one logical thread, so these
 /// frame-local stores need no synchronization.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("SqlSubqueryValues")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlSubqueryValues.DebugView))]
 internal sealed class SqlSubqueryValues
 {
     private object?[]?[] _values = new object?[]?[4];
@@ -106,5 +108,13 @@ internal sealed class SqlSubqueryValues
     internal static object?[] Get(SqlSubqueryValues? subqueries, int slot)
         => subqueries is not null && subqueries.TryGet(slot, out var values)
             ? values
-            : throw new DatabaseException("A subquery must be materialized by its plan before scalar evaluation.");
+            : throw new DatabaseException(ErrorMessages.EvaluatorNotMaterializedSqlPlanning);
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlSubqueryValues value)
+        {
+            _ = value;
+        }
+    }
 }

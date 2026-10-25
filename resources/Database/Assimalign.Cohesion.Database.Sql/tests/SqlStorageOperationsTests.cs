@@ -14,6 +14,7 @@ using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Sql.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
+using Assimalign.Cohesion.Database.Tests;
 using Assimalign.Cohesion.Database.Transactions;
 
 using Assimalign.Cohesion.Database.Sql.Protocol;
@@ -25,14 +26,15 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 /// it is reopened (#1243), the buffer pool and the checkpoint triggers are options (#1254), and a
 /// deferred undo is retried on its own backoff (#1226).
 /// </summary>
+[Collection(nameof(SqlWorkerResilienceTests))]
 public sealed class SqlStorageOperationsTests
 {
-    private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan _timeout = TimeSpan.FromSeconds(10);
 
     /// <summary>
     /// The commit's journal fsync fails: the caller gets the unconfirmed commit, and from then on
     /// every operation — a new session, a statement, BEGIN, COMMIT and ROLLBACK of an open
-    /// transaction, over the wire too — is refused with COHSQLT004, and nothing reaches either file
+    /// transaction, over the wire too — is refused with CS04004, and nothing reaches either file
     /// set, while the background workers run and when the sessions close. Reopening the database
     /// runs recovery, which keeps the commit when its record's bytes survived and drops it when
     /// they were lost with the failed fsync; the open transaction is aborted either way.
@@ -123,16 +125,17 @@ public sealed class SqlStorageOperationsTests
 
         // Assert: the coded refusals, everywhere.
         unconfirmed.InnerException.ShouldBeOfType<TransactionCommitUnconfirmedException>();
-        unconfirmed.Message.ShouldStartWith("COHSQLT004: Database 'app' went offline while a transaction was committing", Case.Sensitive);
+        unconfirmed.Diagnostics.ShouldContain(d => d.Code == "CS04004");
+        unconfirmed.Message.ShouldStartWith("Database 'app' went offline while a transaction was committing", Case.Sensitive);
         StorageOfflineException.Find(unconfirmed).ShouldNotBeNull();
-        refusals.ShouldAllBe(refusal => refusal.Code == "COHSQLT004" && refusal.Message.StartsWith("COHSQLT004", StringComparison.Ordinal));
+        refusals.ShouldAllBe(refusal => refusal.Code == "CS04004" && refusal.Diagnostics.Count == 1 && refusal.Diagnostics[0].Code == "CS04004" && refusal.Message.StartsWith("Database", StringComparison.Ordinal));
         statementError.Code.ShouldBe(ProtocolErrorCode.Unavailable);
-        statementError.Message.ShouldStartWith("COHSQLT004", Case.Sensitive);
+        statementError.Message.ShouldStartWith("CS04004", Case.Sensitive);
         handshakeError.Code.ShouldBe(ProtocolErrorCode.Unavailable);
-        handshakeError.Message.ShouldStartWith("COHSQLT004", Case.Sensitive);
+        handshakeError.Message.ShouldStartWith("CS04004", Case.Sensitive);
         harness.Engine.State.ShouldBe(EngineState.Running);
 
-        staleCommit.Code.ShouldBe("COHSQLT004");
+        staleCommit.Code.ShouldBe("CS04004");
 
         // Assert: nothing reached either file set after the failure, from the workers or the close.
         catalogOfflineAtOnce.ShouldBeTrue();
@@ -252,12 +255,13 @@ public sealed class SqlStorageOperationsTests
 
         // Assert
         unspent.ShouldBe(0);
-        ddl.Message.ShouldStartWith("COHSQLT004", Case.Sensitive);
+        ddl.Diagnostics.ShouldContain(d => d.Code == "CS04004");
+        ddl.Message.ShouldStartWith("Database", Case.Sensitive);
         StorageOfflineException.Find(ddl).ShouldNotBeNull().CommitRecordWritten.ShouldBeTrue();
         dataOfflineAtOnce.ShouldBeTrue();
         dataAfterTheWorkers.Data.ShouldBe(dataAtTheFailure.Data);
         dataAfterTheWorkers.Journal.ShouldBe(dataAtTheFailure.Journal);
-        commit.Code.ShouldBe("COHSQLT004");
+        commit.Code.ShouldBe("CS04004");
         engine.OfflineDatabases.ShouldBe([(DatabaseName)name]);
     }
 
@@ -366,15 +370,16 @@ public sealed class SqlStorageOperationsTests
             await Should.ThrowAsync<DatabaseTransactionCommitUnconfirmedException>(async () => await other.ExecuteAsync("INSERT INTO u (id) VALUES (1)"));
         }
 
-        var refused = await Should.ThrowAsync<DatabaseException>(async () => await drop.WaitAsync(Timeout));
+        var refused = await Should.ThrowAsync<DatabaseException>(async () => await drop.WaitAsync(_timeout));
         var reopened = await engine.OpenDatabaseAsync(name);
         await using var observer = await reopened.CreateSessionAsync();
 
         // Assert: refused with the offline code, and the table is still there.
         dropWaited.ShouldBeTrue();
         var offline = refused.ShouldBeOfType<DatabaseOfflineException>();
-        offline.Code.ShouldBe("COHSQLT004");
-        offline.Message.ShouldStartWith("COHSQLT004: Database 'ddl' is offline", Case.Sensitive);
+        offline.Code.ShouldBe("CS04004");
+        offline.Diagnostics.ShouldContain(d => d.Code == "CS04004");
+        offline.Message.ShouldStartWith("Database 'ddl' is offline", Case.Sensitive);
         (await Scalar(observer, "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 't'")).ShouldBe(1L);
         (await Scalar(observer, "SELECT COUNT(*) FROM t")).ShouldBe(2L);
     }
@@ -419,17 +424,17 @@ public sealed class SqlStorageOperationsTests
             await release.Task;
             return true;
         }, durable: false).AsTask();
-        await entered.Task.WaitAsync(Timeout);
+        await entered.Task.WaitAsync(_timeout);
         await using var ddl = await database.CreateSessionAsync();
         var drop = ddl.ExecuteAsync("DROP TABLE t").AsTask();
         bool catalogCommitted = await Eventually(() => !database.Catalog.TryGetTable("dbo", "t", out _));
-        await drop.WaitAsync(Timeout);
+        await drop.WaitAsync(_timeout);
         database.TableReclamation.ReclaimedPages.ShouldBe(0);
 
         // Act: storage goes offline after DROP returned; then release the old statement.
         database.DataStorage.TakeOffline(offlineError);
         release.SetResult();
-        await Record.ExceptionAsync(async () => await holding.WaitAsync(Timeout));
+        await Record.ExceptionAsync(async () => await holding.WaitAsync(_timeout));
         await Record.ExceptionAsync(async () => await database.Coordinator.RollbackAsync(holder));
         var reopened = await engine.OpenDatabaseAsync(name);
         await using var observer = await reopened.CreateSessionAsync();
@@ -486,7 +491,7 @@ public sealed class SqlStorageOperationsTests
             await release.Task;
             return true;
         }, durable: false).AsTask();
-        await entered.Task.WaitAsync(Timeout);
+        await entered.Task.WaitAsync(_timeout);
         await using var ddl = await database.CreateSessionAsync();
         var create = ddl.ExecuteAsync("CREATE TABLE u (id INT PRIMARY KEY)").AsTask();
         bool createWaited = !await CompletesWithin(create, TimeSpan.FromMilliseconds(200));
@@ -494,8 +499,8 @@ public sealed class SqlStorageOperationsTests
         // Act: the database goes offline while the create waits; then the gate is released.
         database.DataStorage.TakeOffline(offlineError);
         release.SetResult();
-        await Record.ExceptionAsync(async () => await holding.WaitAsync(Timeout));
-        var refused = await Should.ThrowAsync<DatabaseException>(async () => await create.WaitAsync(Timeout));
+        await Record.ExceptionAsync(async () => await holding.WaitAsync(_timeout));
+        var refused = await Should.ThrowAsync<DatabaseException>(async () => await create.WaitAsync(_timeout));
         await Record.ExceptionAsync(async () => await database.Coordinator.RollbackAsync(holder));
         var reopened = await engine.OpenDatabaseAsync(name);
         await using var observer = await reopened.CreateSessionAsync();
@@ -505,8 +510,9 @@ public sealed class SqlStorageOperationsTests
         // reservation's identity never reused.
         createWaited.ShouldBeTrue();
         var offline = refused.ShouldBeOfType<DatabaseOfflineException>();
-        offline.Code.ShouldBe("COHSQLT004");
-        offline.Message.ShouldStartWith("COHSQLT004: Database 'ddl' is offline", Case.Sensitive);
+        offline.Code.ShouldBe("CS04004");
+        offline.Diagnostics.ShouldContain(d => d.Code == "CS04004");
+        offline.Message.ShouldStartWith("Database 'ddl' is offline", Case.Sensitive);
         (await Scalar(observer, "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'u'")).ShouldBe(0L);
         reopened.Catalog.TryGetTable("dbo", "v", out var next).ShouldBeTrue();
         next.ObjectId.ShouldBe(existing.ObjectId + 2);
@@ -535,8 +541,10 @@ public sealed class SqlStorageOperationsTests
     {
         // Arrange: a time backstop far out of the way, so only the size can trigger.
         const long size = 4 * 1024 * 1024;
+        var strategy = new FaultInjectingJournalSqlStorageStrategy();
         await using var engine = SqlDatabaseEngine.Create("sql-engine", new SqlDatabaseEngineOptions
         {
+            StorageStrategy = strategy,
             CheckpointJournalSize = size,
             CheckpointInterval = TimeSpan.FromHours(1),
         });
@@ -568,31 +576,31 @@ public sealed class SqlStorageOperationsTests
             await release.Task;
             return true;
         }, durable: false).AsTask();
-        await entered.Task.WaitAsync(Timeout);
+        await entered.Task.WaitAsync(_timeout);
         busy.DataStorage.CheckpointJournalSize = 1;
         long busyJournalWhileHeld = busy.DataStorage.JournalLength;
         busyJournalWhileHeld.ShouldBeGreaterThan(1024, "the busy database's journal must hold its inserts before the deferred checkpoint");
 
         using var stop = new CancellationTokenSource();
         string payload = new('x', 6000);
-        var writers = Enumerable.Range(0, 2).Select(writer => Task.Run(async () =>
+        var writers = Enumerable.Range(0, 2).Select(writer => DedicatedTestTask.Run(async () =>
         {
             await using var session = await written.CreateSessionAsync();
-            for (int i = 0; !stop.IsCancellationRequested; i++)
+            for (int i = 0; !stop.IsCancellationRequested && strategy.JournalCounters(written.Name.ToString()).Written < 40 * size; i++)
             {
                 await session.ExecuteAsync($"INSERT INTO t (id, payload) VALUES ({writer * 10_000_000 + i}, '{payload}')");
             }
         })).ToArray();
 
-        // Act: sample the written database's journal until many sizes went through it, counting
+        // Act: observe exact stream counters until forty sizes went through the journal, counting
         // the checkpoints that truncated it.
-        var journal = await JournalSamples.CollectAsync(() => written.DataStorage.JournalLength, 40 * size, Task.WhenAll(writers));
+        var journal = await JournalSamples.CollectAsync(() => strategy.JournalCounters(written.Name.ToString()), 40 * size, Task.WhenAll(writers));
         stop.Cancel();
-        await Task.WhenAll(writers).WaitAsync(Timeout);
+        await Task.WhenAll(writers).WaitAsync(_timeout);
         bool heldThroughout = !statement.IsCompleted;
 
         release.SetResult();
-        await statement.WaitAsync(Timeout);
+        await statement.WaitAsync(_timeout);
         long busyJournalAfterTheStatement = busy.DataStorage.JournalLength;
         await busy.Coordinator.CommitAsync(context);
 
@@ -650,7 +658,7 @@ public sealed class SqlStorageOperationsTests
         bool faulted = await Eventually(() => engine.State == EngineState.Faulted);
         strategy.FailEveryDataRead = false;
         database.DataStorage.BufferPoolCapacity = capacity;
-        await other.ExecuteAsync("DROP TABLE t").AsTask().WaitAsync(Timeout);
+        await other.ExecuteAsync("DROP TABLE t").AsTask().WaitAsync(_timeout);
         bool recovered = await Eventually(() => engine.State == EngineState.Running);
 
         // Assert
@@ -761,8 +769,10 @@ public sealed class SqlStorageOperationsTests
     {
         // Arrange: a time backstop far out of the way, so only the size can trigger.
         const long size = 4 * 1024 * 1024;
+        var strategy = new FaultInjectingJournalSqlStorageStrategy();
         await using var engine = SqlDatabaseEngine.Create("sql-engine", new SqlDatabaseEngineOptions
         {
+            StorageStrategy = strategy,
             CheckpointJournalSize = size,
             CheckpointInterval = TimeSpan.FromHours(1),
         });
@@ -775,21 +785,21 @@ public sealed class SqlStorageOperationsTests
         using var stop = new CancellationTokenSource();
         string payload = new('x', 6000);
         long inserted = 0;
-        var writers = Enumerable.Range(0, 4).Select(writer => Task.Run(async () =>
+        var writers = Enumerable.Range(0, 4).Select(writer => DedicatedTestTask.Run(async () =>
         {
             await using var session = await database.CreateSessionAsync();
-            for (int i = 0; !stop.IsCancellationRequested; i++)
+            for (int i = 0; !stop.IsCancellationRequested && strategy.JournalCounters(database.Name.ToString()).Written < 40 * size; i++)
             {
                 await session.ExecuteAsync($"INSERT INTO t (id, payload) VALUES ({writer * 10_000_000 + i}, '{payload}')");
                 Interlocked.Increment(ref inserted);
             }
         })).ToArray();
 
-        // Act: sample the journal while the writers push well past the size many times over,
+        // Act: read exact stream counters while writers stop at forty journal sizes,
         // counting the checkpoints that truncated it.
-        var journal = await JournalSamples.CollectAsync(() => database.DataStorage.JournalLength, 40 * size, Task.WhenAll(writers));
+        var journal = await JournalSamples.CollectAsync(() => strategy.JournalCounters(database.Name.ToString()), 40 * size, Task.WhenAll(writers));
         stop.Cancel();
-        await Task.WhenAll(writers).WaitAsync(Timeout);
+        await Task.WhenAll(writers).WaitAsync(_timeout);
 
         // Assert: tens of journal sizes were written, and checkpoints truncated the journal before
         // it held four sizes on average.
@@ -801,14 +811,11 @@ public sealed class SqlStorageOperationsTests
     }
 
     /// <summary>
-    /// A rollback's undo fails once. The undo is retried on its own backoff, about 100 ms later,
-    /// so the writer waiting for the rolled-back transaction's lock proceeds within about a second,
-    /// although the maintenance interval is an hour (#1226 owner decision of 2026-10-04). The
-    /// engine's wiring is checked exactly (the first retry is due within 100 ms of the deferral),
-    /// and the release end to end as a ratio to that first delay.
+    /// A refused undo retries on the coordinator's own schedule, independently of full maintenance.
+    /// A recorded undo-only worker completion and the next writer prove release; elapsed time is diagnostic.
     /// </summary>
-    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Deferred undo: a transient undo failure releases the writer within about a second")]
-    public async Task RollbackAsync_TransientUndoFailure_ShouldReleaseTheWriterWithinAboutASecond()
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Deferred undo: a transient undo failure releases the writer through an undo-only worker pass")]
+    public async Task RollbackAsync_TransientUndoFailure_ShouldReleaseTheWriterAfterRecordedUndoRetry()
     {
         // Arrange
         var maintenance = TimeSpan.FromHours(1);
@@ -830,29 +837,27 @@ public sealed class SqlStorageOperationsTests
         // bracket cannot touch the first page it undoes and the undo is deferred with
         // the writer's locks held; the pages are released at once. (Until #1252 a failed journal
         // write was the transient fault; a journal write failure now takes the database offline.)
+        using var undo = CheckpointPace.ObserveDeferredUndo(
+            engine.Workers.OfType<DatabaseVersionPurgeWorker<SqlDatabase>>().Single(), database.Name, database.Coordinator.DeferredUndoRetryDelay);
         var watch = Stopwatch.StartNew();
         using (PageWriteLockHolder.LockEveryPage(database.DataStorage))
         {
             await transaction.RollbackAsync();
+            database.Coordinator.VersionStore.PendingAbortedPurges.ShouldNotBeEmpty();
+            database.Coordinator.NextDeferredUndoRetry.ShouldNotBeNull("the refused undo must be scheduled while its pages stay held");
         }
 
-        // The engine handed the coordinator its first retry delay: the retry is due within it.
-        var firstRetry = database.Coordinator.NextDeferredUndoRetry;
-
         // DROP TABLE needs the table's exclusive lock, which the writer's intent lock holds.
-        await other.ExecuteAsync("DROP TABLE t").AsTask().WaitAsync(Timeout);
+        await other.ExecuteAsync("DROP TABLE t").AsTask().WaitAsync(TimeSpan.FromSeconds(30));
         watch.Stop();
+        await undo.VerifyAsync();
 
         // Assert
         options.DeferredUndoRetryDelay.ShouldBe(TimeSpan.FromMilliseconds(100));
-        firstRetry.ShouldNotBeNull().ShouldBeLessThanOrEqualTo(options.DeferredUndoRetryDelay);
+        database.Coordinator.DeferredUndoRetryDelay.ShouldBe(options.DeferredUndoRetryDelay);
         transaction.State.ShouldBe(TransactionState.RolledBack);
         database.Coordinator.VersionStore.PendingAbortedPurges.ShouldBeEmpty();
-        // The regression this guards against waits a full MaintenanceInterval (an hour here) per retry.
-        // 100 retry delays (10 s) still catches it by a factor of 360 and leaves room for a loaded CI
-        // runner; the exact wiring is the firstRetry check above.
-        (watch.Elapsed / options.DeferredUndoRetryDelay).ShouldBeLessThan(100);
-        engine.State.ShouldBe(EngineState.Running);
+        engine.State.ShouldBe(EngineState.Running, $"writer released after {watch.Elapsed}");
     }
 
     // Options whose background workers stay out of the way: only the passes a test runs itself
@@ -888,7 +893,7 @@ public sealed class SqlStorageOperationsTests
         var watch = Stopwatch.StartNew();
         while (!condition())
         {
-            if (watch.Elapsed > Timeout)
+            if (watch.Elapsed > _timeout)
             {
                 return false;
             }

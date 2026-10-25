@@ -14,4 +14,10 @@ public readonly record struct GraphTraversal(
     GraphNodeId Start,
     GraphDirection Direction = GraphDirection.Outgoing,
     string? RelationshipType = null,
-    int MaxDepth = 1);
+    int MaxDepth = 1)
+{
+    /// <summary>Optional statement limits, bounded by the owning engine's query ceilings.</summary>
+    /// <remarks>Omitted limits use the engine defaults: 256 MiB retained memory and 1,000,000
+    /// physical work units. Traversal now enforces both ceilings; it previously had no work cap.</remarks>
+    public GraphQueryLimits? Limits { get; init; }
+}

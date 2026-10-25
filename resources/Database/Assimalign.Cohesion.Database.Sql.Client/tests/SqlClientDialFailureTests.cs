@@ -14,6 +14,8 @@ using Assimalign.Cohesion.Connections.Tcp;
 using Assimalign.Cohesion.Database.Client;
 using Assimalign.Cohesion.Database.Protocol;
 
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
+
 namespace Assimalign.Cohesion.Database.Sql.Client.Tests;
 
 /// <summary>
@@ -74,7 +76,7 @@ public sealed class SqlClientDialFailureTests
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         await using var listener = new InMemoryConnectionListener();
         await using var client = CreateClient(listener.CreateFactory(), listener.EndPoint);
-        Task server = Task.Run(async () =>
+        Task server = DedicatedTestTask.Run(async () =>
         {
             await using IDuplexConnection connection = await listener.AcceptAsync(timeout.Token);
             ReadResult startup = await connection.Input.ReadAsync(timeout.Token);

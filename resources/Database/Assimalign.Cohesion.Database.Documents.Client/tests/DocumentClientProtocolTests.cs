@@ -142,7 +142,7 @@ public sealed class DocumentClientProtocolTests
             var failure = DocumentProtocolFailureMessage.Decode(response.Payload.Span);
             failure.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
             var diagnostic = failure.Diagnostics.ShouldHaveSingleItem();
-            diagnostic.Code.ShouldBe("COHDOC001");
+            diagnostic.Code.ShouldBe("CD05001");
             diagnostic.Start.ShouldBeNull();
             diagnostic.End.ShouldBeNull();
             await WriteAsync(channel, (byte)DocumentProtocolMessageType.Command,

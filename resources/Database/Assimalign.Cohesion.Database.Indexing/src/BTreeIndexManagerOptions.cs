@@ -48,6 +48,13 @@ public sealed class BTreeIndexManagerOptions
     /// </summary>
     public LockManager? LockManager { get; init; }
 
+    /// <summary>Gets or sets the safe horizon used by opportunistic unique-key pruning.</summary>
+    /// <remarks>
+    /// Model engines supply their coordinator's PruneBound. Without a provider, inserts retain
+    /// old versions and callers drive explicit pruning with a proven safe horizon instead.
+    /// </remarks>
+    public Func<TransactionSequence>? PruneBound { get; init; }
+
     /// <summary>
     /// Gets or sets the registrations of indexes that already exist in storage
     /// (exported by the catalog at its last persistence point).

@@ -65,10 +65,11 @@ public abstract class DatabaseSession : IAsyncDisposable
     /// <summary>
     /// The one message of the "already active" check.
     /// </summary>
-    internal const string AlreadyActiveMessage = "A transaction or operation is already active on this session.";
+    internal static readonly string AlreadyActiveMessage = ErrorMessages.DatabaseSessionDatabase;
 
     // The last number the root event source gave a session, process-wide.
     private static long _lastSessionNumber;
+    private static readonly string _transactionClosureMessage = ErrorMessages.DatabaseSessionDisposeAsyncDatabase;
 
     private readonly DatabaseInstance _database;
     private readonly object _sync = new();
@@ -187,12 +188,12 @@ public abstract class DatabaseSession : IAsyncDisposable
             ThrowIfClosedLocked();
             if (OpenTransactionLocked is { } open)
             {
-                throw open.IsUsable ? new DatabaseException(AlreadyActiveMessage) : open.CreateRefusal();
+                throw open.IsUsable ? DatabaseException.CreateRootFailure("CK04004", AlreadyActiveMessage) : open.CreateRefusal();
             }
 
             if (_beginning || _operating)
             {
-                throw new DatabaseException(AlreadyActiveMessage);
+                throw DatabaseException.CreateRootFailure("CK07003", AlreadyActiveMessage);
             }
 
             cancellationToken.ThrowIfCancellationRequested();
@@ -202,7 +203,7 @@ public abstract class DatabaseSession : IAsyncDisposable
         try
         {
             var transaction = await BeginTransactionCoreAsync(isolationLevel, cancellationToken).ConfigureAwait(false)
-                ?? throw new InvalidOperationException("The session's transaction core returned null.");
+                ?? throw new InvalidOperationException(ErrorMessages.SessionBeginTransactionAsyncFailure);
             bool closed;
             lock (_sync)
             {
@@ -276,7 +277,7 @@ public abstract class DatabaseSession : IAsyncDisposable
             {
                 // The transaction object stays with its caller: a later rollback is a no-op, and a
                 // later commit fails with the model's coded error naming the closure.
-                await transaction.CloseAsync(new DatabaseException("The session closed before the transaction ended.")).ConfigureAwait(false);
+                await transaction.CloseAsync(new DatabaseException(_transactionClosureMessage)).ConfigureAwait(false);
             }
             catch (Exception failure) when (failure is not OutOfMemoryException)
             {
@@ -290,7 +291,7 @@ public abstract class DatabaseSession : IAsyncDisposable
         // report theirs: a caller catches one type whatever failed.
         if (failures is not null)
         {
-            throw new AggregateException("The session failed to close.", failures);
+            throw new AggregateException(ErrorMessages.DatabaseSessionDisposeAsyncAggregate, failures);
         }
     }
 
@@ -435,5 +436,5 @@ public abstract class DatabaseSession : IAsyncDisposable
         }
     }
 
-    private static DatabaseException CreateClosedException() => new("The session is closed.");
+    private static DatabaseException CreateClosedException() => DatabaseException.CreateRootFailure("CK07004", ErrorMessages.SessionCreateClosedExceptionDatabase);
 }

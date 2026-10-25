@@ -7,5 +7,5 @@ namespace Assimalign.Cohesion.Database.Sql.Tests.TestObjects;
 internal sealed class PredicateFaultComparand : IComparable
 {
     public int CompareTo(object? obj)
-        => throw new SqlPlanningException("COHSQLE003", "Comparison operand refused by the test comparand.");
+        => throw new SqlPlanningException("CS02003", "Comparison operand refused by the test comparand.");
 }

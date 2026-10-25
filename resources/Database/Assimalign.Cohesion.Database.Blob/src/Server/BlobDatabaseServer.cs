@@ -29,8 +29,8 @@ namespace Assimalign.Cohesion.Database.Blob;
 /// background worker of the engine holds a failure of one database
 /// (<see cref="DatabaseEngine.HasFailingWorker"/>), the server refuses that database's handshakes
 /// and exchanges with <see cref="ProtocolErrorCode.Unavailable"/> and a message led by
-/// <c>COHDBB003</c>, and serves the engine's other databases; the refusal ends with the failure,
-/// or turns into the offline refusal (<c>COHDBB002</c>) once the engine gives up on the database.
+/// <c>CB06003</c>, and serves the engine's other databases; the refusal ends with the failure,
+/// or turns into the offline refusal (<c>CB06002</c>) once the engine gives up on the database.
 /// The server refuses its start, new connections, handshakes and exchanges for every database only
 /// while the engine is disposed or has failed as a whole
 /// (<see cref="DatabaseEngine.HasEngineWideFailure"/>). Before the decision it refused all of them
@@ -51,6 +51,8 @@ namespace Assimalign.Cohesion.Database.Blob;
 /// confirmation, decision 31 of the plan).
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("BlobDatabaseServer")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Blob.BlobDatabaseServer.DebugView))]
 public sealed class BlobDatabaseServer : DatabaseServer
 {
     private readonly BlobDatabaseEngine _engine;
@@ -74,23 +76,11 @@ public sealed class BlobDatabaseServer : DatabaseServer
         // The server keeps a copy, checked here, as the engine keeps a copy of its options (B3 of
         // the engine extensibility design): the sessions read the limits and timeouts live.
         options = options.Snapshot();
-        if (options.Listener is null)
-        {
-            throw new ArgumentException("A connection listener is required.", nameof(options));
-        }
-        if (options.MaxSessions <= 0)
-        {
-            throw new ArgumentException("The session limit must be positive.", nameof(options));
-        }
-
-        ValidateTimeout(options.AuthenticationTimeout, nameof(options.AuthenticationTimeout));
-        ValidateTimeout(options.IdleTimeout, nameof(options.IdleTimeout));
-        ValidateDrainTimeout(options.ShutdownDrainTimeout, nameof(options.ShutdownDrainTimeout));
-        ValidateDrainTimeout(options.TerminalDrainLinger, nameof(options.TerminalDrainLinger));
+        options.ValidateFor(engine.Name);
 
         _engine = engine;
         _options = options;
-        _listener = options.Listener;
+        _listener = options.Listener!;
         _authenticator = options.Authenticator ?? DatabaseAuthenticator.AllowAll;
     }
 
@@ -142,7 +132,7 @@ public sealed class BlobDatabaseServer : DatabaseServer
             // The base leaves a server whose start failed stopped for good, so a later stop has
             // nothing to release: the listener the server owns is released here, before the
             // refusal propagates (concrete-types plan, row 9).
-            var refusal = new DatabaseException($"The Blob engine is {state} and cannot accept sessions.");
+            var refusal = DatabaseException.CreateBlobFailure("CB09002", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabaseServerStartCoreAsyncDatabase, state));
             await DisposeListenerAfterFailedStartAsync().ConfigureAwait(false);
             throw refusal;
         }
@@ -377,25 +367,23 @@ public sealed class BlobDatabaseServer : DatabaseServer
         }
     }
 
-    private static void ValidateTimeout(TimeSpan value, string name)
-    {
-        if (value != Timeout.InfiniteTimeSpan && (value <= TimeSpan.Zero || value.TotalMilliseconds > uint.MaxValue - 1))
-        {
-            throw new ArgumentOutOfRangeException(name, "A timeout must be positive or infinite.");
-        }
-    }
-
-    private static void ValidateDrainTimeout(TimeSpan value, string name)
-    {
-        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(value, TimeSpan.Zero, name);
-        ArgumentOutOfRangeException.ThrowIfGreaterThan(value, TimeSpan.FromMilliseconds(uint.MaxValue - 1), name);
-    }
-
     internal void OnSessionCompleted(BlobDatabaseServerSession session)
     {
         if (_sessions.TryRemove(session.Id, out _))
         {
             BlobDatabaseEventSource.Log.SessionClosed(session, session.CloseReason, session.AcceptedTimestamp);
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Blob.BlobDatabaseServer _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Blob.BlobDatabaseServer value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Blob.BlobDatabaseEngine Engine => _target.Engine;
     }
 }

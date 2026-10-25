@@ -25,7 +25,7 @@ public sealed class SqlParameterWireTests
             "SELECT id FROM empty_parameters WHERE id = $missing", cancellationToken: SqlClientTestHarness.Timeout()));
         failure.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
         failure.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
-        failure.Message.ShouldStartWith("COHSQLE020:", Case.Sensitive);
+        failure.Message.ShouldStartWith("CS01020:", Case.Sensitive);
         failure.ConnectionUsable.ShouldBeTrue();
         (await connection.QueryAsync("SELECT id FROM users WHERE id = 1", cancellationToken: SqlClientTestHarness.Timeout()))
             .ShouldHaveSingleItem().GetInt32("id").ShouldBe(1);

@@ -28,15 +28,18 @@ namespace Assimalign.Cohesion.Database.Storage;
 /// back a transaction that enlisted it.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("StoragePageLatch")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Storage.StoragePageLatch.DebugView))]
 public sealed class StoragePageLatch
 {
-    private static long s_created;
+    private static long _created;
 
     private readonly ReaderWriterLockSlim _latch = new(LockRecursionPolicy.NoRecursion);
 
-    private StoragePageLatch()
+    /// <summary>Initializes a page latch with a unique rollback acquisition order.</summary>
+    public StoragePageLatch()
     {
-        Order = Interlocked.Increment(ref s_created);
+        Order = Interlocked.Increment(ref _created);
     }
 
     /// <summary>
@@ -57,12 +60,6 @@ public sealed class StoragePageLatch
 
     /// <summary>Gets the current shared-acquisition waiters (diagnostics and tests).</summary>
     internal int WaitingReaders => _latch.WaitingReadCount;
-
-    /// <summary>
-    /// Creates a latch for one structure's pages.
-    /// </summary>
-    /// <returns>The latch.</returns>
-    public static StoragePageLatch Create() => new();
 
     /// <summary>
     /// Holds the latch shared, waiting while a writer or a rollback holds it.
@@ -105,4 +102,12 @@ public sealed class StoragePageLatch
     /// </summary>
     /// <exception cref="SynchronizationLockException">The current thread does not hold the latch exclusively.</exception>
     public void ExitWrite() => _latch.ExitWriteLock();
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Storage.StoragePageLatch value)
+        {
+            _ = value;
+        }
+    }
 }

@@ -51,7 +51,7 @@ public static class DatabaseValueCodec
             case TimeSpan typed: writer.AppendTimeSpan(typed); break;
             case Guid typed: writer.AppendGuid(typed); break;
             default:
-                throw new DatabaseTypeException($"Values of runtime type {value.GetType()} have no component encoding.");
+                throw new DatabaseTypeException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabaseValueCodecAppendDatabaseType, value.GetType()));
         }
     }
 
@@ -82,7 +82,7 @@ public static class DatabaseValueCodec
             DatabaseType.DateTimeOffset => reader.ReadDateTimeOffset(),
             DatabaseType.TimeSpan => reader.ReadTimeSpan(),
             DatabaseType.Guid => reader.ReadGuid(),
-            var other => throw new DatabaseTypeException($"Component type {other} is not a scalar value component."),
+            var other => throw new DatabaseTypeException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabaseValueCodecReadDatabaseType, other)),
         };
     }
 
@@ -113,7 +113,7 @@ public static class DatabaseValueCodec
 
         if (!reader.IsAtEnd)
         {
-            throw new DatabaseTypeException("The payload carries more than one component.");
+            throw new DatabaseTypeException(ErrorMessages.ValueCodecDecodeComponentDatabaseType);
         }
 
         return value;

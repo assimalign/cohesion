@@ -21,8 +21,12 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// the imperative <see cref="SqlDatabase.ApplySchemaAsync"/> path and phase 6 of the engine
 /// builder's build (<see cref="SqlDeclaredDatabase"/>) share it.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("SqlSchemaProvisioner")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlSchemaProvisioner.DebugView))]
 internal sealed partial class SqlSchemaProvisioner
 {
+    private static readonly string _errorSqlSchemaProvisionerApplyAsyncFailure4 = ErrorMessages.SqlSchemaProvisionerApplyAsyncFailure4;
+
     private static CompiledSchemaReferentialAction CompiledDeleteAction(SqlCatalogReferentialAction action) => action switch
     {
         SqlCatalogReferentialAction.Restrict => CompiledSchemaReferentialAction.Restrict,
@@ -122,8 +126,7 @@ internal sealed partial class SqlSchemaProvisioner
             TraceStage("Planning", SqlProvisioningCodes.PolicyRefused);
             if (_catalog.PendingMigration is { } intent && !string.Equals(intent.ContentHash, schema.Hash, StringComparison.Ordinal))
             {
-                throw new SqlSchemaMigrationException($"{SqlProvisioningCodes.PolicyRefused}: {Describe()}: a different schema is pending. " +
-                    "Finish the recorded migration before replacing its declaration.");
+                throw new SqlSchemaMigrationException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlSchemaProvisionerApplyAsyncFailure, SqlProvisioningCodes.PolicyRefused, Describe()));
             }
             SqlCatalogSchemaState? recorded = _catalog.SchemaState;
             if (IsApplied(recorded, schema))
@@ -143,7 +146,7 @@ internal sealed partial class SqlSchemaProvisioner
             {
                 // The planner knows the schemas, not where they are applied.
                 throw new SqlSchemaMigrationException(
-                    $"{SqlProvisioningCodes.PolicyRefused}: {Describe()}: {refused.Message} Nothing was changed.",
+                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlSchemaProvisionerApplyAsyncFailure2, SqlProvisioningCodes.PolicyRefused, Describe(), refused.Message),
                     refused);
             }
 
@@ -199,7 +202,7 @@ internal sealed partial class SqlSchemaProvisioner
                 ulong generation = _catalog.DdlGeneration;
                 if (FirstCatalogDifference(schema) is { } difference)
                 {
-                    throw new SqlSchemaMigrationException($"{Describe()}: the applied catalog differs: {difference}.");
+                    throw new SqlSchemaMigrationException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlSchemaProvisionerApplyAsyncFailure3, Describe(), difference));
                 }
 
                 await _catalog.SaveSchemaStateAsync(
@@ -238,27 +241,27 @@ internal sealed partial class SqlSchemaProvisioner
                     }
 
                     throw new OperationCanceledException(
-                        $"{Describe()}: applying schema '{schema.Name}' was canceled; every completed step was compensated.",
+                        string.Format(System.Globalization.CultureInfo.CurrentCulture, _errorSqlSchemaProvisionerApplyAsyncFailure4, Describe(), schema.Name),
                         failure,
                         cancellationToken);
                 }
 
                 string state = compensation.IsComplete
-                    ? "Every completed step was compensated."
-                    : "Compensation was incomplete; the live catalog must be reconciled before retrying.";
+                    ? ErrorMessages.CompensationComplete
+                    : ErrorMessages.CompensationIncomplete;
                 Exception inner = compensation.Failures.Count == 0
                     ? failure
                     : new AggregateException(new[] { failure }.Concat(compensation.Failures));
                 string where = applied.Count < script.Steps.Count
-                    ? $"step {applied.Count + 1} of {script.Steps.Count} ({Describe(script.Steps[applied.Count].Operation)}) failed"
-                    : $"recording the applied schema failed after all {script.Steps.Count} step(s)";
+                    ? string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.MigrationStepFailureContext, applied.Count + 1, script.Steps.Count, Describe(script.Steps[applied.Count].Operation))
+                    : string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SchemaRecordFailureContext, script.Steps.Count);
                 // Keep the named dependent view visible at the schema-apply boundary,
                 // rather than requiring callers to inspect the compensation's inner error.
                 string dependency = failure is DatabaseException databaseFailure &&
-                    databaseFailure.Diagnostics.Any(diagnostic => diagnostic.Code == "COHSQLD002")
+                    databaseFailure.Diagnostics.Any(diagnostic => diagnostic.Code == "CS03302")
                     ? " " + failure.Message : string.Empty;
                 throw new SqlSchemaMigrationException(
-                    $"{SqlProvisioningCodes.StepFailed}: {Describe()}: applying schema '{schema.Name}': {where}. {state}{dependency}",
+                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlSchemaProvisionerApplyAsyncFailure5, SqlProvisioningCodes.StepFailed, Describe(), schema.Name, where, state, dependency),
                     inner);
             }
 
@@ -307,7 +310,7 @@ internal sealed partial class SqlSchemaProvisioner
     /// <param name="cancellationToken">Observed before the nonblocking admission check.</param>
     /// <returns>The result, always already applied.</returns>
     /// <exception cref="DatabaseObjectLockedException">An apply, verification or deferred migration is already active.</exception>
-    /// <exception cref="SqlSchemaMigrationException">The database drifted (<c>COHSQLP003</c>).</exception>
+    /// <exception cref="SqlSchemaMigrationException">The database drifted (<c>CS03103</c>).</exception>
     internal async ValueTask<SqlSchemaMigrationResult> VerifyAsync(
         SqlCompiledSchema schema,
         CancellationToken cancellationToken)
@@ -333,18 +336,16 @@ internal sealed partial class SqlSchemaProvisioner
             }
 
             string reason = recorded is null
-                ? "the database records no applied schema"
+                ? ErrorMessages.SchemaProvisionerVerifyAsyncFailure2
                 : !string.Equals(recorded.ContentHash, schema.Hash, StringComparison.Ordinal)
-                    ? $"the database records schema hash {recorded.ContentHash}"
-                    : $"the catalog DDL generation changed from {recorded.Generation} to {_catalog.DdlGeneration}";
+                    ? string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SchemaProvisionerVerifyAsyncFailure3, recorded.ContentHash)
+                    : string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SchemaProvisionerVerifyAsyncFailure4, recorded.Generation, _catalog.DdlGeneration);
 
             // Name the first object that differs, so the developer need not diff the catalog by hand.
             reason = AppendCatalogDifference(reason, schema);
 
             throw new SqlSchemaMigrationException(
-                $"{SqlProvisioningCodes.Drift}: {Describe()}: the declared schema (hash {schema.Hash}) is not the one " +
-                $"applied: {reason}. The database is declared in Verify mode, so nothing was changed; migrate it out of " +
-                "band, or declare it in Apply mode.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SchemaProvisionerVerifyAsyncFailure, SqlProvisioningCodes.Drift, Describe(), schema.Hash, reason));
         }
         catch (Exception failure) when (CaptureTraceFailure(schema, failure))
         {
@@ -360,7 +361,7 @@ internal sealed partial class SqlSchemaProvisioner
     // Keep verification's formatting local out of the Debug async state machine.
     private string AppendCatalogDifference(string reason, SqlCompiledSchema schema)
         => FirstCatalogDifference(schema) is { } difference
-            ? reason + $"; first difference from the declaration: {difference}"
+            ? reason + string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DeclarationDifferenceContext, difference)
             : reason;
 
     /// <summary>
@@ -373,7 +374,7 @@ internal sealed partial class SqlSchemaProvisioner
     /// <returns>The first unsupported object, described for a message, or null.</returns>
     internal static string? DescribeUnsupported(SqlCompiledSchema schema)
         => schema.Principals.Count > 0
-            ? $"principal '{schema.Principals[0].Name}', and principals and grants are refused until their DDL exists"
+            ? string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.PrincipalDdlUnavailable, schema.Principals[0].Name)
             : null;
 
     /// <summary>
@@ -409,16 +410,15 @@ internal sealed partial class SqlSchemaProvisioner
         if (types.Resolve(declared, out string? error) is not { } type)
         {
             throw error is not null
-                ? new DatabaseException($"Column '{column.Name}' is declared with type '{declared}': {error}.")
-                : SqlEvaluationException.UnknownType(declared, $"Column '{column.Name}'");
+                ? new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ProvisionerResolveColumnTypeDatabase, column.Name, declared, error))
+                : SqlEvaluationException.UnknownType(declared, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ColumnSubject, column.Name));
         }
 
         if (type.Storage.Type != column.Type &&
             !(type.Storage.Type == DatabaseType.Character && column.Type == DatabaseType.String))
         {
             throw new DatabaseException(
-                $"Column '{column.Name}' is declared with type '{declared}', which is stored as {SqlType.NameOf(type.Storage.Type)}, " +
-                $"but its member is stored as {SqlType.NameOf(column.Type)}; declare a type whose storage is the member's.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ProvisionerResolveColumnTypeDatabase2, column.Name, declared, SqlType.NameOf(type.Storage.Type), SqlType.NameOf(column.Type)));
         }
 
         domain = type.IsDomain ? type.Name : null;
@@ -443,10 +443,7 @@ internal sealed partial class SqlSchemaProvisioner
                 registered.Storage.Precision != declared.Precision || registered.Storage.Scale != declared.Scale)
             {
                 throw new DatabaseException(
-                    $"The schema declares domain '{declared.Name}' over {SqlType.ForStorage(new DatabaseTypeInfo(declared.StorageType, null, declared.Precision, declared.Scale)).Name}, " +
-                    "which this engine does not register with that base type; declare the database on the engine's builder " +
-                    "(SqlDatabaseEngineBuilder.AddDatabase), which registers the domains its schema declares, or register the domain " +
-                    "(SqlDatabaseEngineBuilder.Types).");
+                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ProvisionerBindDeclaredTypesDatabase, declared.Name, SqlType.ForStorage(new DatabaseTypeInfo(declared.StorageType, null, declared.Precision, declared.Scale)).Name));
             }
         }
 
@@ -460,7 +457,7 @@ internal sealed partial class SqlSchemaProvisioner
                 }
                 catch (DatabaseException exception)
                 {
-                    throw new DatabaseException($"Table '{table.Name}': {exception.Message}", exception.Diagnostics, exception);
+                    throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ProvisionerBindDeclaredTypesDatabase2, table.Name, exception.Message), exception.Diagnostics, exception);
                 }
             }
         }
@@ -498,12 +495,12 @@ internal sealed partial class SqlSchemaProvisioner
                         // Use the DDL path before any storage exists: domain base types and
                         // numeric/length bounds must accept exactly the same literal here.
                         SqlPlanExecutor.ResolveDefault(boundColumn, SqlPersistedExpression.LoadDefaultValue(literal,
-                            $"DEFAULT on column '{table.Name}.{column.Name}'"));
+                            string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.QualifiedColumnDefaultSubject, table.Name, column.Name)));
                     }
                 }
                 catch (DatabaseException exception)
                 {
-                    throw new DatabaseException($"DEFAULT on column '{table.Name}.{column.Name}' does not bind: {exception.Message}",
+                    throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ProvisionerBindDeclaredChecksDatabase, table.Name, column.Name, exception.Message),
                         SqlExecutionException.DiagnosticsOf(exception, discardLocations: true), exception);
                 }
             }
@@ -530,8 +527,8 @@ internal sealed partial class SqlSchemaProvisioner
                 }
                 catch (DatabaseException exception)
                 {
-                    string reason = exception.Message.EndsWith('.') ? exception.Message : exception.Message + ".";
-                    throw new DatabaseException($"CHECK constraint '{constraint.Name}' on table '{table.Name}' does not bind: {reason}",
+                    string reason = exception.Message.EndsWith('.') ? exception.Message : string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ProvisionerBindDeclaredChecksDatabase3, exception.Message);
+                    throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ProvisionerBindDeclaredChecksDatabase2, constraint.Name, table.Name, reason),
                         SqlExecutionException.DiagnosticsOf(exception, discardLocations: true), exception);
                 }
             }
@@ -546,7 +543,7 @@ internal sealed partial class SqlSchemaProvisioner
             recorded.Generation == _catalog.DdlGeneration;
 
     // Names where a provisioning message happened: the engine and the database.
-    private string Describe() => $"SQL engine '{_database.Engine.Name}', database '{_database.Name}'";
+    private string Describe() => string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.EngineDatabaseContext, _database.Engine.Name, _database.Name);
 
     private static string Describe(SqlSchemaMigrationOperation operation)
         => operation.ParentName is null
@@ -599,8 +596,7 @@ internal sealed partial class SqlSchemaProvisioner
             if (!string.Equals(catalogTable.Schema, SqlPlanner.DefaultSchema, StringComparison.OrdinalIgnoreCase))
             {
                 throw new SqlSchemaMigrationException(
-                    $"{Describe()}: the live SQL catalog contains table '{catalogTable.Schema}.{catalogTable.Name}', " +
-                    "but compiled schemas currently address the 'dbo' schema only.");
+                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ProvisionerSnapshotCatalogFailure, Describe(), catalogTable.Schema, catalogTable.Name));
             }
 
             desiredTables.TryGetValue(catalogTable.Name, out CompiledSchemaTable? desiredTable);
@@ -697,12 +693,12 @@ internal sealed partial class SqlSchemaProvisioner
         {
             if (!_catalog.TryGetTable(SqlPlanner.DefaultSchema, expected.Name, out SqlCatalogTable actual))
             {
-                return $"table '{expected.Name}' is missing";
+                return string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DeclaredTableMissing, expected.Name);
             }
 
             if (!IsOwnedBy(actual.Owner, actual.OwningSchema, schema.Name))
             {
-                return $"table '{expected.Name}' was not created by schema '{schema.Name}'";
+                return string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.TableSchemaOwnershipMismatch, expected.Name, schema.Name);
             }
 
             if (DescribeColumnDifference(expected, actual) is { } column)
@@ -712,8 +708,8 @@ internal sealed partial class SqlSchemaProvisioner
 
             if (!NamesEqual(expected.PrimaryKey?.Columns ?? Array.Empty<string>(), actual.PrimaryKeyColumns))
             {
-                return $"table '{expected.Name}': its primary key is ({string.Join(", ", actual.PrimaryKeyColumns)}), " +
-                    $"declared ({string.Join(", ", expected.PrimaryKey?.Columns ?? Array.Empty<string>())})";
+                return string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.PrimaryKeyActualContext, expected.Name, string.Join(", ", actual.PrimaryKeyColumns)) +
+                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.PrimaryKeyDeclaredContext, string.Join(", ", expected.PrimaryKey?.Columns ?? Array.Empty<string>()));
             }
 
             foreach (CompiledSchemaConstraint constraint in expected.Constraints)
@@ -722,7 +718,7 @@ internal sealed partial class SqlSchemaProvisioner
                     string.Equals(value.Name, constraint.Name, StringComparison.OrdinalIgnoreCase));
                 if (persisted is null)
                 {
-                    return $"table '{expected.Name}': constraint '{constraint.Name}' is missing";
+                    return string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DeclaredConstraintMissing, expected.Name, constraint.Name);
                 }
 
                 if ((persisted.Kind == SqlCatalogConstraintKind.Reference) != (constraint.Kind == CompiledSchemaConstraintKind.Reference) ||
@@ -733,7 +729,7 @@ internal sealed partial class SqlSchemaProvisioner
                     CompiledDeleteAction(persisted.OnDelete) != constraint.OnDelete ||
                     !string.Equals(persisted.CheckExpression, CanonicalCheck(constraint.Expression?.CanonicalText), StringComparison.Ordinal))
                 {
-                    return $"table '{expected.Name}': constraint '{constraint.Name}' differs from its declaration";
+                    return string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ConstraintDeclarationMismatch, expected.Name, constraint.Name);
                 }
             }
 
@@ -742,8 +738,8 @@ internal sealed partial class SqlSchemaProvisioner
                 SqlCatalogConstraint? extra = actual.Constraints.FirstOrDefault(value => !expected.Constraints.Any(declared =>
                     string.Equals(declared.Name, value.Name, StringComparison.OrdinalIgnoreCase)));
                 return extra is null
-                    ? $"table '{expected.Name}' has {actual.Constraints.Count} constraint(s), declared {expected.Constraints.Count}"
-                    : $"table '{expected.Name}': constraint '{extra.Name}' is not declared";
+                    ? string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ConstraintCountMismatch, expected.Name, actual.Constraints.Count, expected.Constraints.Count)
+                    : string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExtraConstraint, expected.Name, extra.Name);
             }
 
             IReadOnlyList<SqlCatalogIndex> actualIndexes = _catalog.GetIndexes(actual.ObjectId)
@@ -755,13 +751,13 @@ internal sealed partial class SqlSchemaProvisioner
                     index => string.Equals(index.Name, expectedIndex.Name, StringComparison.OrdinalIgnoreCase));
                 if (actualIndex is null)
                 {
-                    return $"table '{expected.Name}': index '{expectedIndex.Name}' is missing";
+                    return string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DeclaredIndexMissing, expected.Name, expectedIndex.Name);
                 }
 
                 if (actualIndex.IsUnique != expectedIndex.IsUnique ||
                     !NamesEqual(expectedIndex.Columns, actualIndex.ColumnNames))
                 {
-                    return $"table '{expected.Name}': index '{expectedIndex.Name}' differs from its declaration (uniqueness or columns)";
+                    return string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.IndexDeclarationMismatch, expected.Name, expectedIndex.Name);
                 }
             }
 
@@ -770,8 +766,8 @@ internal sealed partial class SqlSchemaProvisioner
                 SqlCatalogIndex? extra = actualIndexes.FirstOrDefault(index => !expected.Indexes.Any(declared =>
                     string.Equals(declared.Name, index.Name, StringComparison.OrdinalIgnoreCase)));
                 return extra is null
-                    ? $"table '{expected.Name}' has {actualIndexes.Count} schema-owned index(es), declared {expected.Indexes.Count}"
-                    : $"table '{expected.Name}': index '{extra.Name}' is not declared";
+                    ? string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SchemaIndexCountMismatch, expected.Name, actualIndexes.Count, expected.Indexes.Count)
+                    : string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExtraIndex, expected.Name, extra.Name);
             }
         }
 
@@ -781,8 +777,8 @@ internal sealed partial class SqlSchemaProvisioner
                 string.Equals(declared.Name, table.Name, StringComparison.OrdinalIgnoreCase) &&
                 string.Equals(table.Schema, SqlPlanner.DefaultSchema, StringComparison.OrdinalIgnoreCase)));
             return extra is null
-                ? $"the database has {ownedTables.Count} table(s) created by schema '{schema.Name}', declared {schema.Tables.Count}"
-                : $"table '{extra.Schema}.{extra.Name}' was created by schema '{schema.Name}' but is not declared";
+                ? string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.OwnedTableCountMismatch, ownedTables.Count, schema.Name, schema.Tables.Count)
+                : string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExtraOwnedTable, extra.Schema, extra.Name, schema.Name);
         }
 
         return null;
@@ -797,14 +793,14 @@ internal sealed partial class SqlSchemaProvisioner
                 string.Equals(live.Name, column.Name, StringComparison.OrdinalIgnoreCase)));
             if (missing is not null)
             {
-                return $"table '{expected.Name}': column '{missing.Name}' is missing";
+                return string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DeclaredColumnMissing, expected.Name, missing.Name);
             }
 
             SqlCatalogColumn? extra = actual.Columns.FirstOrDefault(column => !expected.Columns.Any(declared =>
                 string.Equals(declared.Name, column.Name, StringComparison.OrdinalIgnoreCase)));
             return extra is null
-                ? $"table '{expected.Name}' has {actual.Columns.Count} column(s), declared {expected.Columns.Count}"
-                : $"table '{expected.Name}': column '{extra.Name}' is not declared";
+                ? string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ColumnCountMismatch, expected.Name, actual.Columns.Count, expected.Columns.Count)
+                : string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExtraColumn, expected.Name, extra.Name);
         }
 
         for (int index = 0; index < expected.Columns.Count; index++)
@@ -815,28 +811,28 @@ internal sealed partial class SqlSchemaProvisioner
                 !IsPrimaryKeyColumn(expected.PrimaryKey, expectedColumn.Name);
             if (!string.Equals(expectedColumn.Name, actualColumn.Name, StringComparison.OrdinalIgnoreCase))
             {
-                return $"table '{expected.Name}': column {index + 1} is '{actualColumn.Name}', declared '{expectedColumn.Name}'";
+                return string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ColumnOrderMismatch, expected.Name, index + 1, actualColumn.Name, expectedColumn.Name);
             }
 
             if (DescribeTypeDifference(expectedColumn, actualColumn) is { } type)
             {
-                return $"table '{expected.Name}': column '{expectedColumn.Name}' {type}";
+                return string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ColumnDifferenceContext, expected.Name, expectedColumn.Name, type);
             }
 
             if (expectedIsNullable != actualColumn.IsNullable)
             {
-                return $"table '{expected.Name}': column '{expectedColumn.Name}' is " +
-                    $"{(actualColumn.IsNullable ? "nullable" : "not nullable")}, declared {(expectedIsNullable ? "nullable" : "not nullable")}";
+                return string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ColumnTypeContext, expected.Name, expectedColumn.Name) +
+                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DeclarationComparison, (actualColumn.IsNullable ? ErrorMessages.NullableColumnDescription : ErrorMessages.NonNullableColumnDescription), (expectedIsNullable ? ErrorMessages.NullableColumnDescription : ErrorMessages.NonNullableColumnDescription));
             }
 
             if (actualColumn.Identity is not null)
             {
-                return $"table '{expected.Name}': column '{expectedColumn.Name}' has identity metadata absent from its declaration";
+                return string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ColumnIdentityUndeclared, expected.Name, expectedColumn.Name);
             }
 
             if (!string.Equals(actualColumn.DefaultLiteral, CanonicalDefault(expectedColumn.DefaultLiteral), StringComparison.Ordinal))
             {
-                return $"table '{expected.Name}': column '{expectedColumn.Name}' has a different default from its declaration";
+                return string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ColumnDefaultMismatch, expected.Name, expectedColumn.Name);
             }
         }
 
@@ -857,20 +853,20 @@ internal sealed partial class SqlSchemaProvisioner
         }
         catch (DatabaseException exception)
         {
-            return $"is declared with a type this engine does not resolve ({exception.Message})";
+            return string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DeclaredTypeUnresolvedReason, exception.Message);
         }
 
         if (type.Type != actual.Type.Type || type.MaxLength != actual.Type.MaxLength ||
             type.Precision != actual.Type.Precision || type.Scale != actual.Type.Scale)
         {
-            return $"is {DescribeType(actual.Type.Type, actual.Type.MaxLength, actual.Type.Precision, actual.Type.Scale)}, " +
-                $"declared {DescribeType(type.Type, type.MaxLength, type.Precision, type.Scale)}";
+            return string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ActualTypeContext, DescribeType(actual.Type.Type, actual.Type.MaxLength, actual.Type.Precision, actual.Type.Scale)) +
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DeclaredTypeContext, DescribeType(type.Type, type.MaxLength, type.Precision, type.Scale));
         }
 
         return string.Equals(domain, actual.DomainName, StringComparison.OrdinalIgnoreCase)
             ? null
-            : $"is {(actual.DomainName is null ? "of no domain" : $"of domain '{actual.DomainName}'")}, " +
-              $"declared {(domain is null ? "with no domain" : $"of domain '{domain}'")}";
+            : string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ActualTypeContext, (actual.DomainName is null ? ErrorMessages.NoActualDomain : string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ActualDomainContext, actual.DomainName))) +
+              string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DeclaredTypeContext, (domain is null ? ErrorMessages.NoDeclaredDomain : string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ActualDomainContext, domain)));
     }
 
     private static string DescribeType(DatabaseType type, int? maxLength, int? precision, int? scale)
@@ -893,7 +889,7 @@ internal sealed partial class SqlSchemaProvisioner
 
         try
         {
-            return SqlPersistedExpression.Canonicalize(SqlPersistedExpression.Load(declared, "Compiled CHECK predicate"), "Compiled CHECK predicate");
+            return SqlPersistedExpression.Canonicalize(SqlPersistedExpression.Load(declared, ErrorMessages.CompiledCheckSubject), ErrorMessages.CompiledCheckSubject);
         }
         catch (DatabaseException)
         {
@@ -915,12 +911,12 @@ internal sealed partial class SqlSchemaProvisioner
         var expression = SqlPersistedExpression.ParseDeclaration(declared, new SqlQueryParserOptions());
         if (!SqlPersistedExpression.IsDefaultLiteral(expression))
         {
-            throw new DatabaseException("Only literal DEFAULT values are supported.");
+            throw new DatabaseException(ErrorMessages.ProvisionerCanonicalDefaultDatabase);
         }
 
         return expression is SqlLiteralExpression { LiteralType: SqlLiteralType.Null }
             ? null
-            : SqlPersistedExpression.Canonicalize(expression, "Compiled column DEFAULT");
+            : SqlPersistedExpression.Canonicalize(expression, ErrorMessages.CompiledDefaultSubject);
     }
 
     /// <summary>
@@ -951,8 +947,7 @@ internal sealed partial class SqlSchemaProvisioner
             if (!IsOwnedBy(actual.Owner, actual.OwningSchema, schema.Name))
             {
                 throw new SqlSchemaMigrationException(
-                    $"{SqlProvisioningCodes.PolicyRefused}: {Describe()}: SQL schema '{schema.Name}' cannot adopt table '{table.Name}' " +
-                    "because it was not created by this schema. Nothing was changed.");
+                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ValidateCatalogOwnershipFailure, SqlProvisioningCodes.PolicyRefused, Describe(), schema.Name, table.Name));
             }
 
             foreach (CompiledSchemaIndex index in table.Indexes)
@@ -961,8 +956,7 @@ internal sealed partial class SqlSchemaProvisioner
                     !IsOwnedBy(existing.Owner, existing.OwningSchema, schema.Name))
                 {
                     throw new SqlSchemaMigrationException(
-                        $"{SqlProvisioningCodes.PolicyRefused}: {Describe()}: SQL schema '{schema.Name}' cannot adopt index '{index.Name}' " +
-                        "because it was not created by this schema. Nothing was changed.");
+                        string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ValidateCatalogOwnershipFailure2, SqlProvisioningCodes.PolicyRefused, Describe(), schema.Name, index.Name));
                 }
             }
         }
@@ -1001,13 +995,13 @@ internal sealed partial class SqlSchemaProvisioner
         if (!string.Equals(schema.Name, _database.Name.ToString(), StringComparison.OrdinalIgnoreCase))
         {
             throw new SqlSchemaMigrationException(
-                $"{Describe()}: the database cannot apply schema '{schema.Name}'.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ValidateSupportedSchemaFailure, Describe(), schema.Name));
         }
 
         if (DescribeUnsupported(schema) is { } unsupported)
         {
             throw new SqlSchemaMigrationException(
-                $"{Describe()}: SQL schema '{schema.Name}' declares {unsupported}.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ValidateSupportedSchemaFailure2, Describe(), schema.Name, unsupported));
         }
 
         // Phase 3 bound all declaration rules except qualifier identity. An already-applied
@@ -1031,7 +1025,7 @@ internal sealed partial class SqlSchemaProvisioner
         catch (DatabaseException invalid)
         {
             throw new SqlSchemaMigrationException(
-                $"{SqlProvisioningCodes.PolicyRefused}: {Describe()}: SQL schema '{schema.Name}': {invalid.Message} Nothing was changed.",
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ValidateSupportedSchemaFailure3, SqlProvisioningCodes.PolicyRefused, Describe(), schema.Name, invalid.Message),
                 invalid);
         }
     }
@@ -1085,4 +1079,12 @@ internal sealed partial class SqlSchemaProvisioner
     }
 
     private sealed record CompensationResult(bool IsComplete, IReadOnlyList<Exception> Failures);
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlSchemaProvisioner value)
+        {
+            _ = value;
+        }
+    }
 }

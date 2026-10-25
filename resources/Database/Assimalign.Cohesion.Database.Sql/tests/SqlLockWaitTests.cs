@@ -6,6 +6,7 @@ using System.Linq;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Execution;
+using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Sql.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Transactions;
 
@@ -127,11 +128,24 @@ public sealed class SqlLockWaitTests
         var writer = await writerSession.BeginTransactionAsync(IsolationLevel.Snapshot, TestTimeout.Token());
         await writerSession.ExecuteAsync("INSERT INTO c (id, pid, qid) VALUES (12, 1, 1)", cancellationToken: TestTimeout.Token());
 
-        // Act: the first cascade locks the in-flight child and fails; the deleter's cascade waits
-        // for that lock while the writer rolls back, then gets it when the first transaction ends.
+        // Keep the child grant from earlier work: #1420 now releases every new
+        // grant of a failed unwritten cascade, so the race must not depend on one.
+        database.Catalog.TryGetTable("dbo", "c", out var child).ShouldBeTrue();
+        using (var iterator = database.DataStorage.GetUnitIterator(child.ObjectId))
+        {
+            iterator.MoveNext().ShouldBeTrue();
+            var unit = iterator.Current;
+            await database.Coordinator.LockManager.AcquireAsync(first.Context.Sequence,
+                LockResource.Entry(child.ObjectId, SqlRecordLocation.Pack(unit.PageId, unit.SlotIndex)),
+                LockMode.Exclusive, TestTimeout.Token());
+        }
+
+        // Act: the first cascade fails while retaining the pre-statement child
+        // grant. The second waits through writer undo, then restarts the closure.
         var firstConflict = await Should.ThrowAsync<DatabaseTransactionAbortedException>(async () =>
             await firstSession.ExecuteAsync("DELETE FROM q WHERE id = 1", cancellationToken: TestTimeout.Token()));
         var deleting = deleterSession.ExecuteAsync("DELETE FROM p WHERE id = 1", cancellationToken: TestTimeout.Token()).AsTask();
+        deleting.IsCompleted.ShouldBeFalse();
         await waits.WaitForWaitAsync(deleter.Context.Sequence, TestTimeout.Token());
         await writer.RollbackAsync(TestTimeout.Token());
         await first.RollbackAsync(TestTimeout.Token());
@@ -140,12 +154,13 @@ public sealed class SqlLockWaitTests
         await deleter.RollbackAsync(TestTimeout.Token());
         var retried = await setup.ExecuteAsync("DELETE FROM p WHERE id = 1", cancellationToken: TestTimeout.Token());
 
-        // Assert: both cascades failed first-updater-wins; the second names no writer, whose
-        // version is gone; nothing was deleted until the retry.
+        // Assert: both cascades still fail first-updater-wins. The #1420 restart
+        // discards the rolled-back child candidate and now reaches the direct
+        // parent's concurrently committed replacement. No freed child is read.
         firstConflict.Message.ShouldContain("ON DELETE CASCADE reached a row version written by transaction", Case.Sensitive);
         conflict.InnerException.ShouldBeOfType<TransactionAbortedException>();
-        conflict.Message.ShouldContain("'dbo.c'", Case.Sensitive);
-        conflict.Message.ShouldContain("rolled back after the walk found it", Case.Sensitive);
+        conflict.Message.ShouldContain("'dbo.p'", Case.Sensitive);
+        conflict.Message.ShouldContain("concurrently committed transaction", Case.Sensitive);
         conflict.Message.ShouldContain("first-updater-wins", Case.Sensitive);
         stateAfter.ShouldBe(TransactionState.Active);
         retried.AffectedCount.ShouldBe(1);

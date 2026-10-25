@@ -23,7 +23,7 @@ public sealed class SqlSchemaWireTests
 
         // Act / Assert
         var failure = await Should.ThrowAsync<SqlClientException>(() => ExecuteAsync(writer, "DROP SCHEMA sales RESTRICT"));
-        failure.Message.ShouldContain("COHSQLE030");
+        failure.Message.ShouldContain("CS03030");
         failure.ConnectionUsable.ShouldBeTrue();
         (await reader.QueryAsync("SELECT TABLE_SCHEMA FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 't'", cancellationToken: SqlClientTestHarness.Timeout()))
             .ShouldHaveSingleItem()[0].ShouldBe("sales");
@@ -38,11 +38,11 @@ public sealed class SqlSchemaWireTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql.Client] - Schema failures preserve codes and leave the wire connection usable")]
-    [InlineData("CREATE TABLE missing.t(id INT)", "COHSQLE028")]
-    [InlineData("CREATE SCHEMA s AUTHORIZATION owner", "COHDBL001")]
-    [InlineData("CREATE SCHEMA s CREATE TABLE t(id INT)", "COHDBL001")]
-    [InlineData("DROP SCHEMA dbo", "COHSQLE031")]
-    [InlineData("CREATE SCHEMA INFORMATION_SCHEMA", "COHSQLE021")]
+    [InlineData("CREATE TABLE missing.t(id INT)", "CS01028")]
+    [InlineData("CREATE SCHEMA s AUTHORIZATION owner", "CK00001")]
+    [InlineData("CREATE SCHEMA s CREATE TABLE t(id INT)", "CK00001")]
+    [InlineData("DROP SCHEMA dbo", "CS03031")]
+    [InlineData("CREATE SCHEMA INFORMATION_SCHEMA", "CS04021")]
     public async Task ExecuteAsync_RejectedSchemaDdl_ShouldCarryDiagnostic(string sql, string code)
     {
         // Arrange

@@ -8,7 +8,7 @@ namespace Assimalign.Cohesion.Database.Sql.Language;
 /// in this project's <c>docs/DIALECT.md</c> — tokens listed here may be recognized
 /// by the lexer ahead of parser support so diagnostics stay precise.
 /// </summary>
-public static class SqlLanguageExtensions
+public static partial class SqlLanguageExtensions
 {
     extension(TokenLexerOptions options)
     {

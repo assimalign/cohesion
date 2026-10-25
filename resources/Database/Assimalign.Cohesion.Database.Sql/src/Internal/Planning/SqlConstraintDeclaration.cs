@@ -32,7 +32,7 @@ internal static class SqlConstraintDeclaration
         {
             if (!columns.Add(column))
             {
-                throw new SqlPlanningException("COHSQLE019", string.Format(CultureInfo.CurrentCulture,
+                throw new SqlPlanningException("CS01019", string.Format(CultureInfo.CurrentCulture,
                     ErrorMessages.DuplicateConstraintColumn, column, name));
             }
         }
@@ -40,5 +40,5 @@ internal static class SqlConstraintDeclaration
 
     // PostgreSQL parse_utilcmd.c:2378 rejects a second PRIMARY KEY declaration (42P16).
     internal static SqlPlanningException MultiplePrimaryKeys(string table, string constraint)
-        => new("COHSQLE019", string.Format(CultureInfo.CurrentCulture, ErrorMessages.MultiplePrimaryKeys, constraint, table));
+        => new("CS01019", string.Format(CultureInfo.CurrentCulture, ErrorMessages.MultiplePrimaryKeys, constraint, table));
 }

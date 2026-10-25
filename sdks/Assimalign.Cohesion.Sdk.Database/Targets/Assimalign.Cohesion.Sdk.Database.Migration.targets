@@ -54,6 +54,8 @@
 		<ItemGroup>
 			<_CohesionDatabaseRecordedArtifact Include="$(CohesionDatabaseSchemaOutputDirectory)%(_CohesionDatabaseRecordedSchema.Identity).schema.json" />
 			<_CohesionDatabaseRecordedArtifact Include="$(CohesionDatabaseSchemaOutputDirectory)%(_CohesionDatabaseRecordedSchema.Identity).schema.sha256" />
+		</ItemGroup>
+		<ItemGroup>
 			<_CohesionDatabaseMissingArtifact Include="@(_CohesionDatabaseRecordedArtifact)" Condition="!Exists('%(_CohesionDatabaseRecordedArtifact.FullPath)')" />
 		</ItemGroup>
 		<Delete Files="$(_CohesionDatabaseSchemaManifest)" Condition="'@(_CohesionDatabaseMissingArtifact)' != ''" />
@@ -85,6 +87,8 @@
 				<DatabaseName>%(_CohesionDatabaseDeclaredSchema.Identity)</DatabaseName>
 				<HashPath>$(_CohesionDatabaseSchemaFullDirectory)%(_CohesionDatabaseDeclaredSchema.Identity).schema.sha256</HashPath>
 			</CohesionDatabaseSchema>
+		</ItemGroup>
+		<ItemGroup>
 			<FileWrites Include="@(CohesionDatabaseSchema);@(CohesionDatabaseSchema->'%(HashPath)');$(_CohesionDatabaseSchemaManifest)" />
 		</ItemGroup>
 	</Target>

@@ -42,7 +42,7 @@ internal sealed partial class SqlPlanner
                 {
                     if (ContainsAggregate(on))
                     {
-                        if (!metadataOnly) { throw new SqlPlanningException("COHSQLE017", "Aggregate functions are not allowed in JOIN ON.", on.Location); }
+                        if (!metadataOnly) { throw new SqlPlanningException("CS05017", ErrorMessages.SqlPlannerBindJoinSqlPlanning, on.Location); }
                     }
                     if (!metadataOnly)
                     {
@@ -61,7 +61,7 @@ internal sealed partial class SqlPlanner
                     {
                         if (!names.Add(name))
                         {
-                            throw new SqlPlanningException("COHSQLE015", $"Column '{name}' appears more than once in USING.", select.Location);
+                            throw new SqlPlanningException("CS01015", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlPlannerBindJoinSqlPlanning2, name), select.Location);
                         }
                         int leftOrdinal = FindUsing(visible, name, "left");
                         int rightOrdinal = FindUsing(Enumerable.Range(right.Offset, right.Source.Columns.Count), name, "right");
@@ -114,7 +114,7 @@ internal sealed partial class SqlPlanner
                     (join.JoinType != SqlJoinType.Cross && condition is null) ||
                     (join.JoinType == SqlJoinType.Cross && condition is not null)))
                 {
-                    throw new SqlPlanningException("COHSQLE013", "INNER and LEFT JOIN require ON or USING; CROSS JOIN accepts neither.", select.Location);
+                    throw new SqlPlanningException("CS05013", ErrorMessages.SqlPlannerBindJoinSqlPlanning3, select.Location);
                 }
                 visible.AddRange(Enumerable.Range(right.Offset, right.Source.Columns.Count)
                     .Where(ordinal => !right.HiddenColumns.Contains(ordinal - right.Offset)));
@@ -134,7 +134,7 @@ internal sealed partial class SqlPlanner
             var found = ordinals.Where(i => string.Equals(allColumns[i].Name, name, StringComparison.OrdinalIgnoreCase)).ToArray();
             if (found.Length != 1)
             {
-                throw new SqlPlanningException("COHSQLE015", $"USING column '{name}' is {(found.Length == 0 ? "missing" : "ambiguous")} on the {side} input.", select.Location);
+                throw new SqlPlanningException("CS01015", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlPlannerBindJoinSqlPlanning4, name, (found.Length == 0 ? ErrorMessages.UsingColumnMissing : ErrorMessages.UsingColumnAmbiguous), side), select.Location);
             }
             return found[0];
         }
@@ -148,7 +148,7 @@ internal sealed partial class SqlPlanner
                     source.Derived is { IsCommonTable: true } || binding.Source.Derived is { IsCommonTable: true } ||
                     string.Equals(source.Schema, binding.Source.Schema, StringComparison.OrdinalIgnoreCase))))
             {
-                throw new SqlPlanningException("COHSQLE019", $"Duplicate table name or alias '{name}'; use distinct aliases for a self join.", select.Location);
+                throw new SqlPlanningException("CS01019", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlPlannerBindJoinSqlPlanning5, name), select.Location);
             }
             bindings.Add(new SqlRelationBinding(source, reference, allColumns.Count));
             allColumns.AddRange(source.Columns.Select(column => nullable && !column.IsNullable
@@ -185,9 +185,9 @@ internal sealed partial class SqlPlanner
             && left.Precision == right.Precision && left.Scale == right.Scale
                 ? left : new DatabaseTypeInfo(common);
 
-        void Refuse() => throw new SqlPlanningException(setOperation ? "COHSQLE003" : "COHSQLE015",
+        void Refuse() => throw new SqlPlanningException(setOperation ? "CS02003" : "CS01015",
             setOperation ? string.Format(CultureInfo.CurrentCulture, ErrorMessages.SetColumnTypes, name, left.Type, right.Type)
-                : $"USING column '{name}' requires a common type; found {left.Type} and {right.Type}.", select.Location);
+                : string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlPlannerUsingTypeSqlPlanning, name, left.Type, right.Type), select.Location);
     }
 
     /// <summary>Coerces the merged value without changing the physical input or qualified references.</summary>
@@ -207,6 +207,7 @@ internal sealed partial class SqlPlanner
     {
         if (ViewDefinitionBinding is not null) { return null; }
         SqlJoinIndexPath? best = null;
+        var alternatives = new List<SqlJoinIndexPath>();
         foreach (int inner in firstBinding is int driver ? new[] { driver == 1 ? 0 : added }
             : maySwap ? new[] { added, 0 } : new[] { added })
         {
@@ -238,14 +239,18 @@ internal sealed partial class SqlPlanner
                     outerOrdinals.Add(outer);
                     innerColumns.Add(columns[joined]);
                 }
-                if (outerOrdinals.Count > 0 && (best is null || outerOrdinals.Count > best.OuterOrdinals.Count ||
+                if (outerOrdinals.Count == 0) { continue; }
+                var path = new SqlJoinIndexPath(inner, index, outerOrdinals, innerColumns);
+                alternatives.Add(path);
+                if (best is null || outerOrdinals.Count > best.OuterOrdinals.Count ||
                     outerOrdinals.Count == best.OuterOrdinals.Count && (index.IsUnique && !best.Index.IsUnique ||
-                    index.IsUnique == best.Index.IsUnique && StringComparer.OrdinalIgnoreCase.Compare(index.Name, best.Index.Name) < 0)))
+                    index.IsUnique == best.Index.IsUnique && StringComparer.OrdinalIgnoreCase.Compare(index.Name, best.Index.Name) < 0))
                 {
-                    best = new SqlJoinIndexPath(inner, index, outerOrdinals, innerColumns);
+                    best = path;
                 }
             }
         }
+        if (best is not null && alternatives.Count > 1) { best.Alternatives = alternatives; }
         return best;
     }
 

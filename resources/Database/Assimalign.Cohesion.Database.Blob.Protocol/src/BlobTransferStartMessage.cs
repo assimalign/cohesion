@@ -17,7 +17,7 @@ public sealed record BlobTransferStartMessage(long Length = -1, string ContentTy
     {
         if (Length < -1)
         {
-            throw new ProtocolException("A Blob transfer length must be nonnegative or -1.");
+            throw new ProtocolException(ErrorMessages.ProtocolTransferReceiveAsyncProtocol2);
         }
         var buffer = new List<byte>();
         BlobProtocolPayload.WriteInt64(buffer, Length);
@@ -35,7 +35,7 @@ public sealed record BlobTransferStartMessage(long Length = -1, string ContentTy
         long length = BlobProtocolPayload.ReadInt64(payload, ref position);
         if (length < -1)
         {
-            throw new ProtocolException("A Blob transfer length must be nonnegative or -1.");
+            throw new ProtocolException(ErrorMessages.ProtocolTransferReceiveAsyncProtocol2);
         }
         string contentType = BlobProtocolPayload.ReadString(payload, ref position, allowEmpty: true);
         BlobProtocolPayload.RequireEnd(payload, position);

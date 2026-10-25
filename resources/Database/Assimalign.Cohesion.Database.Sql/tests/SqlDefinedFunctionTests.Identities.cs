@@ -22,7 +22,7 @@ public sealed partial class SqlDefinedFunctionTests
         await ExecuteAsync(session, "CREATE FUNCTION allowed(p INT) RETURNS BOOLEAN VOLATILE RETURN TRUE");
         // Assert
         await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "INSERT INTO t VALUES(-1)"));
-        (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "DROP FUNCTION allowed(BIGINT)"))).Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLD002");
+        (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "DROP FUNCTION allowed(BIGINT)"))).Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS03302");
         await ExecuteAsync(session, "DROP FUNCTION allowed(INT)");
     }
 
@@ -52,8 +52,8 @@ public sealed partial class SqlDefinedFunctionTests
             // Assert
             (await RowsAsync(read, "SELECT v, body(id) FROM t")).ShouldBe([[1, 1]]);
             await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(read, "INSERT INTO t(id,p) VALUES(2,-1)"));
-            (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(read, "DROP FUNCTION value_of(BIGINT)"))).Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLD002");
-            (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(read, "DROP FUNCTION allowed(BIGINT)"))).Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLD002");
+            (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(read, "DROP FUNCTION value_of(BIGINT)"))).Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS03302");
+            (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(read, "DROP FUNCTION allowed(BIGINT)"))).Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS03302");
         }
         finally { if (Directory.Exists(root)) { Directory.Delete(root, true); } }
     }
@@ -140,7 +140,7 @@ public sealed partial class SqlDefinedFunctionTests
             foreach (string sql in new[] { "INSERT INTO checked VALUES(1)", "INSERT INTO defaults(id) VALUES(1)",
                 "INSERT INTO domains VALUES(1)", "SELECT body(v) FROM checked" })
             {
-                (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(read, sql))).Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE009");
+                (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(read, sql))).Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS01009");
             }
         }
         finally { if (Directory.Exists(root)) { Directory.Delete(root, true); } }
@@ -165,7 +165,7 @@ public sealed partial class SqlDefinedFunctionTests
             await using var read = await database.CreateSessionAsync();
             // Assert
             var failure = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(read, "INSERT INTO t VALUES(-1)"));
-            failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE009");
+            failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS01009");
             failure.Message.ShouldContain("IMMUTABLE");
         }
         finally { if (Directory.Exists(root)) { Directory.Delete(root, true); } }

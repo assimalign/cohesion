@@ -63,7 +63,7 @@ public sealed class SqlSubqueryWireTests
         // Assert
         error.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
         error.ConnectionUsable.ShouldBeTrue();
-        error.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE013");
+        error.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS05013");
         (await QueryAsync(connection, "SELECT name FROM users WHERE id = 1")).ShouldHaveSingleItem()[0].ShouldBe("pending");
         await ExecuteAsync(connection, "ROLLBACK");
         (await QueryAsync(connection, "SELECT name FROM users WHERE id = 1")).ShouldHaveSingleItem()[0].ShouldBe("ada");
@@ -271,7 +271,7 @@ public sealed class SqlSubqueryWireTests
             () => ExecuteAsync(connection, "INSERT INTO target_rows SELECT id FROM source_rows"));
         literalError.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
         selectError.Kind.ShouldBe(literalError.Kind);
-        string code = kind == "UNIQUE" ? "COHSQLE037" : "COHSQLE039";
+        string code = kind == "UNIQUE" ? "CS03037" : "CS03039";
         literalError.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(code);
         selectError.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(code);
         selectError.Message.ShouldContain(kind);
@@ -281,7 +281,7 @@ public sealed class SqlSubqueryWireTests
 
     /// <summary>Excluded forms have the capability diagnostic through the server rather than a late executor rejection.</summary>
     /// <param name="statement">The unsupported form.</param>
-    [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - Subquery: excluded forms report COHDBL001 over the wire")]
+    [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - Subquery: excluded forms report CK00001 over the wire")]
     [InlineData("SELECT id FROM users WHERE id = ANY (SELECT id FROM users)")]
     [InlineData("SELECT id FROM users WHERE id = ALL (SELECT id FROM users)")]
     [InlineData("SELECT id FROM users WHERE id = SOME (SELECT id FROM users)")]
@@ -299,7 +299,7 @@ public sealed class SqlSubqueryWireTests
         // Act / Assert
         var error = await Should.ThrowAsync<SqlClientException>(() => QueryAsync(connection, statement));
         error.Kind.ShouldBe(SqlClientErrorKind.ParseFailure);
-        error.Message.ShouldContain("COHDBL001", Case.Sensitive);
+        error.Message.ShouldContain("CK00001", Case.Sensitive);
         (await QueryAsync(connection, "SELECT id FROM users ORDER BY id")).Select(row => row[0]).ShouldBe(new object?[] { 1, 2 });
     }
 

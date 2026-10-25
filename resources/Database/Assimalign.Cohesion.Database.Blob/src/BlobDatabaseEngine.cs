@@ -9,6 +9,7 @@ using System.Runtime.ExceptionServices;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Database;
 using Assimalign.Cohesion.Database.Blob.Internal;
 using Assimalign.Cohesion.Database.Blob.Storage;
 using Assimalign.Cohesion.Database.Storage;
@@ -65,9 +66,13 @@ namespace Assimalign.Cohesion.Database.Blob;
 /// </para>
 /// </remarks>
 // Deviates from the repo interface-first rule per design decision: Database engines are concrete-first — abstract bases with protected cores and sealed model leaves (owner, 2026-10-04; database-area.md).
+[global::System.Diagnostics.DebuggerDisplay("BlobDatabaseEngine {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Blob.BlobDatabaseEngine.DebugView))]
 public sealed class BlobDatabaseEngine : DatabaseEngine
 {
-    private const string interruptedCreationCode = "COHDBB004";
+    private static readonly string _errorEngineDisposeAsyncCoreAggregate = ErrorMessages.EngineDisposeAsyncCoreAggregate;
+
+    private const string interruptedCreationCode = "CB06004";
 
     // How the model's messages start: "Blob engine '{name}' …".
     internal const string ModelName = "Blob";
@@ -356,7 +361,7 @@ public sealed class BlobDatabaseEngine : DatabaseEngine
     /// <exception cref="ObjectDisposedException">The engine has been disposed.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the database was opened.</exception>
     /// <exception cref="DatabaseNotFoundException">The database does not exist.</exception>
-    /// <exception cref="DatabaseException">The database's file set is in another storage format (COHDBS001).</exception>
+    /// <exception cref="DatabaseException">The database's file set is in another storage format (CK06001).</exception>
     /// <remarks>
     /// A database a holder closed is forgotten once its close ends (owner decision 33, #1289), and
     /// this opens it again, with recovery over its files, in memory as on disk. An open that finds
@@ -443,7 +448,7 @@ public sealed class BlobDatabaseEngine : DatabaseEngine
             bool open = _databases.Remove(name, out var database);
             if (!open && !StorageExists(name, directory))
             {
-                throw new DatabaseNotFoundException($"Database '{name}' does not exist.");
+                throw DatabaseNotFoundException.CreateEngineAbsence("CK03002", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.EngineDropDatabaseCoreAsyncFailure, name));
             }
 
             // The engine lets the database go before it closes it, and the close waits for one a
@@ -571,7 +576,7 @@ public sealed class BlobDatabaseEngine : DatabaseEngine
 
         if (failures is not null)
         {
-            throw new AggregateException("One or more blob databases failed to close.", failures);
+            throw new AggregateException(_errorEngineDisposeAsyncCoreAggregate, failures);
         }
     }
 
@@ -587,7 +592,7 @@ public sealed class BlobDatabaseEngine : DatabaseEngine
             {
                 if (create)
                 {
-                    throw new DatabaseException($"Database '{name}' already exists.");
+                    throw DatabaseException.CreateEngineFailure("CK03001", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.BlobDatabaseEngineGetDatabaseDatabase, name));
                 }
 
                 if (existing.IsClosed || !existing.IsOffline)
@@ -633,12 +638,12 @@ public sealed class BlobDatabaseEngine : DatabaseEngine
             }
             if (create && StorageExists(name, directory))
             {
-                throw new DatabaseException($"Database '{name}' already exists.");
+                throw DatabaseException.CreateEngineFailure("CK03001", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.BlobDatabaseEngineGetDatabaseDatabase, name));
             }
 
             if (!create && !HasDatabase(name, directory))
             {
-                throw new DatabaseNotFoundException($"Database '{name}' does not exist.");
+                throw DatabaseNotFoundException.CreateEngineAbsence("CK03002", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.EngineDropDatabaseCoreAsyncFailure, name));
             }
 
             if (directory is not null && create)
@@ -653,7 +658,7 @@ public sealed class BlobDatabaseEngine : DatabaseEngine
                     : OpenStorage(directory, _memory, name, create, _options.Durability);
                 if (storage is null)
                 {
-                    throw new InvalidOperationException("The storage strategy returned null.");
+                    throw new InvalidOperationException(ErrorMessages.BlobDatabaseEngineGetDatabaseFailure);
                 }
                 // Recovery may retain a partial tail described only by uncommitted work.
                 // Storage ignores it until the next allocation overwrites it.
@@ -692,20 +697,20 @@ public sealed class BlobDatabaseEngine : DatabaseEngine
                 storage?.TakeOffline(StorageOfflineCause.RecoveryInterrupted, message, exception);
                 storage?.Dispose();
                 throw new DatabaseException(message, [new Types.Diagnostic
-                { Code = "COHDBB005", Message = message, Severity = Types.DiagnosticSeverity.Error }], exception);
+                { Code = "CB06005", Message = message, Severity = Types.DiagnosticSeverity.Error }], exception);
             }
             catch (Blob.Catalog.BlobCatalogException exception)
             {
                 storage?.Dispose();
                 throw new DatabaseException(exception.Message, [new Types.Diagnostic
-                { Code = "COHDBB006", Message = exception.Message, Severity = Types.DiagnosticSeverity.Error }], exception);
+                { Code = "CB06006", Message = exception.Message, Severity = Types.DiagnosticSeverity.Error }], exception);
             }
             catch (StorageFormatException exception)
             {
                 // The storage refused the file set before recovery wrote anything; the refusal
                 // names the formats and the remedy, and this names the database.
                 storage?.Dispose();
-                throw new DatabaseException($"Database '{name}' cannot be opened. {exception.Message}", exception);
+                throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.BlobDatabaseEngineGetDatabaseDatabase2, name, exception.Message), exception);
             }
             catch
             {
@@ -731,8 +736,8 @@ public sealed class BlobDatabaseEngine : DatabaseEngine
                 if (!found)
                 {
                     throw create
-                        ? new DatabaseException($"Database '{name}' already exists.")
-                        : new DatabaseNotFoundException($"Database '{name}' does not exist.");
+                        ? DatabaseException.CreateEngineFailure("CK03001", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.BlobDatabaseEngineGetDatabaseDatabase, name))
+                        : DatabaseNotFoundException.CreateEngineAbsence("CK03002", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.EngineDropDatabaseCoreAsyncFailure, name));
                 }
             }
             else
@@ -822,5 +827,18 @@ public sealed class BlobDatabaseEngine : DatabaseEngine
     private void RebuildSnapshot()
     {
         Volatile.Write(ref _instances, [.. _databases.Values]);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Blob.BlobDatabaseEngine _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Blob.BlobDatabaseEngine value)
+        {
+            _target = value;
+        }
+
+        public string Name => _target.Name;
+        public global::Assimalign.Cohesion.Database.EngineModel Model => _target.Model;
     }
 }

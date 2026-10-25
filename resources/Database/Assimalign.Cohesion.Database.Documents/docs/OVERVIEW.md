@@ -16,7 +16,7 @@ transaction-start instant. COUNT and string/array lengths and positions return I
 with matching wire column types; the language [dialect](../../Assimalign.Cohesion.Database.Documents.Language/docs/DIALECT.md)
 records the full contract. LIMIT/OFFSET page stored and system queries after grouping, DISTINCT
 and ordering. Counts accept literals or parameters through Int64.MaxValue; invalid values carry
-OQL0007. Column types remain independent of the page, including empty results.
+CD00007. Column types remain independent of the page, including empty results.
 INNER/LEFT UNNEST expands array elements into scoped rows before WHERE, grouping and paging.
 ANY/SOME/EVERY and array-value IN query arrays without expansion. A star with UNNEST returns
 synthetic objects keyed by variable names; an ordinary star preserves the stored document.
@@ -39,13 +39,13 @@ engine forgets it, and `OpenDatabaseAsync` opens it again with its documents, in
 disk (owner decision 33). Index definitions are changed with OQL on the session, using its
 active transaction or an automatic statement transaction; neither the database nor the session
 has index-management members. A statement that fails inside an explicit transaction aborts the
-whole transaction: the session refuses further statements and BEGIN with `COHDBD001` until the
+whole transaction: the session refuses further statements and BEGIN with `CD04101` until the
 caller rolls back, and a commit fails without committing.
 
 OQL INSERT creates externally keyed documents from VALUES pairs or SELECT output names and
 reports the number inserted. META([alias]).id and .version read stored identity and version;
 missing object members are omitted and explicit NULL members are stored. Duplicates fail the
-whole statement with DocumentDuplicateKeyException (COHDOC012).
+whole statement with DocumentDuplicateKeyException (CD03012).
 
 OQL UPSERT shares INSERT's grammar and validation, inserting an absent key or replacing its
 whole document with a fresh version. Repeated keys fail atomically. It reports written-document
@@ -66,7 +66,7 @@ OQL also creates and removes collections with `CREATE COLLECTION [IF NOT EXISTS]
 ownership rules and return Success with affected count zero. `IF` remains usable as a name.
 
 A failed journal or data fsync takes the database offline: every later operation is refused
-with `DatabaseOfflineException` (`COHDBD002`) until `OpenDatabaseAsync` reopens it and recovery
+with `DatabaseOfflineException` (`CD06102`) until `OpenDatabaseAsync` reopens it and recovery
 decides the unconfirmed commit (#1243). `BufferPoolCapacity` (32 MiB), `CheckpointJournalSize`
 (256 MiB) and `CheckpointInterval` (5 minutes) size the buffer pool and trigger checkpoints
 (#1254); a failed undo is retried on a 100 ms backoff (#1226). See DESIGN.md, "Storage
@@ -134,7 +134,7 @@ Its B+Trees come from `Database.Indexing`, and every data/index mutation joins t
 `DocumentCatalog.Open(storage, coordinator)` opens the metadata directory and persisted physical
 trees. `DocumentCatalog.EnsureIndexFormat(storage)` checks, before the coordinator's recovery
 scrub and without writing, that every persisted tree is in the B-tree page format this engine
-reads, and throws `IndexFormatException` (`COHDBI001`) when one is not (#1194). Read methods
+reads, and throws `IndexFormatException` (`CK06101`) when one is not (#1194). Read methods
 accept an explicit visibility snapshot. Mutation methods neither begin nor
 commit the caller's transaction. The engine takes the logical database's exclusive writer lock,
 rejects write conflicts and stale index definitions, and enforces schema ownership before calling
@@ -175,3 +175,116 @@ The original `InsertDocument`, `ReadDocument`, `UpdateDocument`, and `DeleteDocu
 retained low-level, unstamped record helpers for existing consumers. They are not the engine's
 document write path and must not be mixed into engine-owned file sets. See [DESIGN.md](DESIGN.md)
 for the exact format, compatibility policy, and recovery order.
+
+Offline refusals and unconfirmed commits expose their existing model code through Diagnostics,
+with unprefixed exception detail and the original cause. Failure tracing reads that carrier;
+legacy wire error text keeps its existing code prefix. See DESIGN, structured failure codes (#1350).
+
+## Dedicated test actors (#1285)
+
+Deadline-dependent peers and busy test drivers use the linked Storage test helper's LongRunning threads. Ordinary async driver continuations stay on their actor scheduler, without changing SynchronizationContext. Existing deadlines of 25 seconds or more are hang guards. Runner settings impose no parallel-thread cap. See the [scheduling audit](../../Assimalign.Cohesion.Database.Storage/docs/TEST-HYGIENE-AUDIT.md) for every original Task.Run site, the exact journal counters and the physical index-work guards.
+
+## Index history reclamation (#1195)
+
+The shared coordinator's purge pass reclaims safe dead B-tree entries in bounded batches;
+unique inserts also prune their key's history while reusing a single descent. Old snapshot
+views remain valid. Empty-leaf reclamation remains deferred, with no format, wire or language
+change. The callback follows the current manager after catalog/store reattachment.
+
+
+## Confirmed decode failures (#1372)
+
+Storage's D1 seqlock confirms private record copies before models decode them. Malformed
+copies report the existing corruption code with page and slot. Direct catalog APIs retain
+their model exception type and cause; engine boundaries use the common corruption exception. The shared version store rejects records shorter than its
+16-byte stamp header and retains failed undo/prune work for retry. StorageCorruptionException
+adds a record-scoped constructor and nullable SlotIndex. Formats and wire frames are unchanged.
+
+Documents keeps the existing model refusal for a recognized unsupported catalog version;
+its location is appended to the original format remedy. Current-format damage carries the
+common corruption code. Both paths retain the original cause and refuse before recovery writes.
+
+## Costed document access (#1527)
+
+Competing scalar and composite index paths use bounded snapshot-visible entry probes. A rare
+range can beat a common equality. Comparable complete inputs may intersect ordinal document
+identities before reading JSON; full residual filtering, ordering, snapshot and mutation rules
+remain intact. EXPLAIN names IndexSeek/IndexIntersection and labels entry estimates or bounds,
+without executing the statement. There are no persisted statistics, ANALYZE command or format
+changes. See DESIGN for probe budgets, eligibility thresholds and the limits of incomplete counts.
+All five server-options leaves inherit DatabaseServerOptions. Database.Tcp provides generic
+Listen(Uri), retaining the concrete options type, and is public in App.Database (#1391, D7 B).
+The SQL-specific TCP integration is removed; import Assimalign.Cohesion.Database for the helper.
+
+## Error and construction conventions (#1470)
+
+Exception messages and format templates are generated from `src/Properties/ErrorMessages.resx`;
+format arguments use the current culture. Cancellation and abort templates used during normal
+cleanup are cached before reuse. Error identities remain separate from message text where a
+structured diagnostic carrier exists. Standard .NET guards retain their argument names and exception types.
+Shared Engine source uses the consuming assembly's generated accessor through the internal `EngineErrorMessages` binding; no public resource accessor or cross-assembly internal access is introduced.
+
+## Documents diagnostic conventions (#1470)
+
+Exception and diagnostic templates use the project's build-generated `ErrorMessages` resources.
+Parameterized templates format with the current culture; abort/cancellation templates used in
+normal cleanup are cached. The [Database error-code registry](../../Assimalign.Cohesion.Database/docs/ERROR-CODES.md)
+assigns this family its two-letter prefix and categorized five-digit identities.
+Existing SQLSTATE meanings, numeric wire error kinds, frame layouts and disk formats are preserved.
+Structured diagnostics keep their code outside the message. Compiler diagnostic identifiers and
+standard .NET argument guards retain their own contracts.
+
+
+## Reusable conflict throw member (#1470)
+
+The model-specific snapshot-conflict throw is an internal static extension member of
+`DatabaseTransactionAbortedException`, whose defining assembly is Database. Documents owns the
+resource and the failure condition; a separate public exception/helper is unnecessary.
+`ThrowDocumentConflict()` preserves the exception type, existing message and diagnostic
+translation. Database/collection/executor callers share this member. There is no public API,
+SQLSTATE, wire, storage-format, event or counter change. Local validation predicates remain
+with the objects whose validity they check.
+
+
+## Shared validation message completion (#1470)
+
+Engine option requirements and portable database-name refusal reasons, including their rule
+text, resolve through each consuming model's generated internal resources. Valid name checks
+still avoid resource lookup; the engine-description template is cached for construction.
+Existing message text, parameter names, refused values and pre-I/O validation order remain
+unchanged. No public API, error identity, SQLSTATE, storage or wire format, event or counter changes.
+Local predicate guards remain with the policies they validate; reusable unconditional catalog
+throws use exception-type extension members. Private cold comparison and location-attachment
+paths retain their allocation and exception-identity behavior.
+
+## Internal convention maintenance
+
+Internal conflict/resource helpers follow the folder convention, and private/test-only names follow the coding rules. Existing public component namespaces, messages and behavior are preserved; see [DESIGN.md](DESIGN.md).
+
+## Direct catalog diagnostics
+
+`DocumentCatalogException.Diagnostics` is non-null and preserves the existing catalog error identities
+without changing exception ancestry or message text. See [DESIGN.md](DESIGN.md#direct-catalog-diagnostic-carriers)
+for producer codes and the legacy public-constructor contract.
+
+## Shared lifecycle diagnostic completion
+
+Duplicate logical database/storage creation carries CK03001, whether the database is open or
+represented only by its closed files. Ordinary logical absence remains the precise
+DatabaseNotFoundException and carries CK03002. Each diagnostic has Error severity, the unchanged
+unprefixed exception message and no statement span. Existing coded interrupted-creation failures
+and original causes are retained. No ownership, file mutation, lifecycle ordering, format or
+protocol message-kind change accompanies these diagnostics.
+
+## Model failure producer completion
+
+Session-state, result-row and model-specific refusals expose structured codes while preserving
+their exception types and detail. The [producer table](DESIGN.md#model-failure-producer-completion)
+lists each condition. Successful execution, transaction ownership, storage formats and wire
+layouts are unchanged; the existing wire formatter includes an error code once.
+
+## Debugger inspection (#1470)
+
+Documents debugger views show stored metadata without evaluating queries, reading content or taking session snapshots.
+
+Eligible types follow the [Database conventions](../../Assimalign.Cohesion.Database/docs/CONVENTIONS.md) debugger display/proxy rules. Views are private and read-only; inspection does not change the public API, execution paths, error contracts, storage formats or protocol bytes.

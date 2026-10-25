@@ -11,6 +11,8 @@ using Assimalign.Cohesion.Database.Blob.Storage;
 using Assimalign.Cohesion.Database.Storage.Units;
 using Assimalign.Cohesion.Database.Transactions;
 
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
+
 namespace Assimalign.Cohesion.Database.Blob.Catalog.Tests;
 
 public sealed partial class BlobCatalogTests
@@ -248,7 +250,7 @@ public sealed partial class BlobCatalogTests
 
         // Assert: use another thread to verify the directory monitor was released.
         database.Catalog.CachedReferenceCount.ShouldBe(0);
-        (await Task.Run(() => database.Catalog.GetContainers(reader.Snapshot))
+        (await DedicatedTestTask.Run(() => database.Catalog.GetContainers(reader.Snapshot))
             .WaitAsync(TimeSpan.FromSeconds(10))).ShouldBeEmpty();
         await database.Coordinator.RollbackAsync(reader);
     }

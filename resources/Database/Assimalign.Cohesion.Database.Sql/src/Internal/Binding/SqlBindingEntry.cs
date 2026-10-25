@@ -5,6 +5,8 @@ using System.Threading.Tasks;
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 /// <summary>One successful binding, with cancellable waiters and retry after an unsuccessful attempt.</summary>
+[global::System.Diagnostics.DebuggerDisplay("SqlBindingEntry")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlBindingEntry<>.DebugView))]
 internal sealed class SqlBindingEntry<T> where T : class
 {
     private readonly object _sync = new();
@@ -54,6 +56,14 @@ internal sealed class SqlBindingEntry<T> where T : class
                 lock (_sync) { _pending = null; }
                 pending.SetResult();
             }
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlBindingEntry<T> value)
+        {
+            _ = value;
         }
     }
 }

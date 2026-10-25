@@ -1,4 +1,5 @@
 using System.Threading;
+using Assimalign.Cohesion.Database;
 using Assimalign.Cohesion.Database.Sql.Storage;
 using Assimalign.Cohesion.Database.Storage;
 
@@ -15,6 +16,8 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// reopens with every commit its journal holds (#1272; owner decision 33 of 2026-10-06, #1289).
 /// Until then an open returned fresh empty storage and silently lost the database's rows.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("InMemorySqlStorageStrategy")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.InMemorySqlStorageStrategy.DebugView))]
 internal sealed class InMemorySqlStorageStrategy : SqlStorageStrategy
 {
     private readonly DatabaseMemoryFiles _files = new();
@@ -32,12 +35,12 @@ internal sealed class InMemorySqlStorageStrategy : SqlStorageStrategy
         // set of the name, in any spelling, means the database exists.
         if (!catalog && (_files.Exists(databaseName, DataFileSet) || _files.Exists(databaseName, DatabaseFileNames.CatalogFileSet)))
         {
-            throw new DatabaseException($"In-memory storage for database '{databaseName}' already exists.");
+            throw DatabaseException.CreateEngineFailure("CK03001", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageStrategyCreateStorageDatabase, databaseName));
         }
 
         if (!_files.TryCreate(databaseName, GetFileSet(catalog), out var data, out var journal, out var backup))
         {
-            throw new DatabaseException($"In-memory storage '{GetLabel(databaseName, catalog)}' already exists.");
+            throw DatabaseException.CreateEngineFailure("CK03001", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageStrategyCreateStorageDatabase2, GetLabel(databaseName, catalog)));
         }
 
         return SqlStorage.Create(data, journal, backup, GetLabel(databaseName, catalog), _durability);
@@ -52,7 +55,7 @@ internal sealed class InMemorySqlStorageStrategy : SqlStorageStrategy
     {
         if (!_files.TryOpen(databaseName, GetFileSet(catalog), out var data, out var journal, out var backup))
         {
-            throw new DatabaseException($"In-memory storage '{GetLabel(databaseName, catalog)}' does not exist.");
+            throw DatabaseException.CreateEngineFailure("CK06005", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlStorageStrategyOpenStorageDatabase2, GetLabel(databaseName, catalog)));
         }
 
         try
@@ -79,4 +82,12 @@ internal sealed class InMemorySqlStorageStrategy : SqlStorageStrategy
     /// at its disposal: nothing opens them again.
     /// </summary>
     internal void Release() => _files.Clear();
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.InMemorySqlStorageStrategy value)
+        {
+            _ = value;
+        }
+    }
 }

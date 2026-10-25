@@ -5,6 +5,8 @@ using Assimalign.Cohesion.Database.Types;
 namespace Assimalign.Cohesion.Database.Documents.Language;
 
 /// <summary>Describes one executable OQL built-in function.</summary>
+[global::System.Diagnostics.DebuggerDisplay("OqlFunction {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Documents.Language.OqlFunction.DebugView))]
 public sealed class OqlFunction
 {
     internal OqlFunction(string name, int minimumArguments, int maximumArguments, DatabaseType resultType,
@@ -47,5 +49,21 @@ public sealed class OqlFunction
         if (_argumentTypes.Length == 0) { return true; }
         var expected = _argumentTypes[System.Math.Min(index, _argumentTypes.Length - 1)];
         return expected == JsonValueKind.Undefined || expected == kind;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Documents.Language.OqlFunction _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Documents.Language.OqlFunction value)
+        {
+            _target = value;
+        }
+
+        public string Name => _target.Name;
+        public int MinimumArguments => _target.MinimumArguments;
+        public int MaximumArguments => _target.MaximumArguments;
+        public global::Assimalign.Cohesion.Database.Types.DatabaseType ResultType => _target.ResultType;
+        public bool IsAggregate => _target.IsAggregate;
     }
 }

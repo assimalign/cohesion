@@ -87,3 +87,73 @@ graceful-stop routes. Principal mutation currently returns an explicit provider 
   control plane. It is not a dependency of this testing library.
 
 See [`DESIGN.md`](DESIGN.md) for lifecycle, entry-point, isolation, and AOT details.
+
+## Error and construction conventions (#1470)
+
+Exception messages and format templates are generated from `src/Properties/ErrorMessages.resx`;
+format arguments use the current culture. Cancellation and abort templates used during normal
+cleanup are cached before reuse. Error identities remain separate from message text where a
+structured diagnostic carrier exists. Standard .NET guards retain their argument names and exception types.
+
+
+## Shared TCP binding in the SDK fixture (found during #1470)
+
+The real SampleHost imports `Assimalign.Cohesion.Database` for the generic `Listen(Uri)`
+extension supplied by Database.Tcp. Its SQL namespace import supplies model APIs; it does not
+bring the shared server-options extension into scope. This fixture is compiled against the
+installed SDK/framework packs after Install-Local, so it verifies the same exported binding an
+application consumes. Retained outputs compiled against the former Sql.Tcp namespace must not
+be used as evidence that a fresh compile succeeds. No fixture-specific listener or alternate
+bootstrap replaces the resource's ordinary Program entry point.
+
+
+## Workflow hang guards (#1470)
+
+The Database workflow keeps a 60-minute build-job timeout and an explicit 45-minute E2E-job
+timeout. The three latest successful consolidated main runs (39656175267, 39625288435 and
+39285511469) measured at most 24m 1s for a build leg and 3m 15s for an E2E leg. Twice each
+maximum rounded up to 15 minutes gives 60 and 15 minutes respectively; the issue's 45-minute
+E2E minimum governs the latter. These job timeouts and the fixture's existing two-minute test
+budget are hang guards. The shared build action retains blame-hang diagnostics and mini-dumps.
+
+
+## Checked manifest paths and sources (#1470)
+
+Manifest probe `Http` is `ResourceHttpPath?`, control-plane `Path` is `ResourceHttpPath`, and mount
+`Source` is `ResourceMountSource?`. Consumers use the underlying `Value` when composing addresses
+or comparing raw text. Valid string initializers remain supported; malformed strings are refused
+at construction or typed JSON import. Default structs still pass through explicit manifest/plan
+validation. JSON stays plain strings/nulls under `cohesion/resource/v1`; no transport message,
+Database storage format, diagnostic identity, event or counter changes. All binary consumers
+must be rebuilt together, including installed SDK/framework E2E payloads.
+
+The SampleHost inherits equivalent compiler and AOT defaults from the shared build. Manifest generation, its local framework consumer and all end-to-end host behavior are unchanged.
+
+
+## Debugger inspection (#1470)
+
+Eligible concrete source types use private nested debugger views of reviewed public/protected
+state; existing inherited display/proxy pairs are reused. See the shared
+[debugger convention](../../Assimalign.Cohesion.Database/docs/CONVENTIONS.md#debugger-inspection).
+Views return the stored resource context without starting a host or reading synchronized lifecycle state; bootstrap credential state remains hidden.
+Runtime APIs, methods, allocation budgets, persistent formats and wire behavior are unchanged.
+
+## Packaged TCP composition acceptance (#1391)
+
+The separate `fixtures/Assimalign.Cohesion.Database.TcpSdkHost` executable uses only
+`Sdk.Database` and its App/App.Database framework references. Its ordinary Program composes
+KeyValuePair, Graph and Blob through `AddServer(server => server.Listen(uri))`, with no direct
+project/package references. The compiler-reference artifact must contain Database.Tcp from the
+App.Database reference pack and omit Connections.Tcp; the self-contained output must carry the
+driver at runtime.
+
+The test launches that process, awaits READY after application startup, completes authentication
+and Ping/Pong with each model family, then sends STOP and requires a clean exit. This uses the
+existing generic DatabaseClient exchange seam without adding a public Ping member. The 90-second
+operation and independent 30-second cleanup budgets are hang guards, not timing assertions.
+The fixture disables ApplicationModel/schema generation; the existing SampleHost retains SQL
+schema, manifest, LocalGateway, admin and restart coverage. Both use the fresh local feed from
+`scripts/Install-Local.ps1` before the explicit Database.Testing test project is built.
+
+All three fixture engines retain their default in-memory storage: no RootPath or storage
+strategy is configured, so the process creates no persistent data directory to clean up.

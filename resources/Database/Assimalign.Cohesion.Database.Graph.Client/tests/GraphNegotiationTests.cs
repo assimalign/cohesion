@@ -54,7 +54,7 @@ public sealed class GraphNegotiationTests
         {
             var warning = await ReadAsync();
             warning.Type.ShouldBe(ProtocolMessageType.Diagnostics);
-            ProtocolDiagnosticsMessage.Decode(warning.Payload.Span).Entries.ShouldHaveSingleItem().Code.ShouldBe("COHDBG010");
+            ProtocolDiagnosticsMessage.Decode(warning.Payload.Span).Entries.ShouldHaveSingleItem().Code.ShouldBe("CG01010");
         }
         (await ReadAsync()).Type.ShouldBe((ProtocolMessageType)GraphProtocolMessageType.ResultComplete);
         await SendAsync(ProtocolMessageType.Ping, ReadOnlyMemory<byte>.Empty);

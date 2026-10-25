@@ -4,6 +4,8 @@ using Assimalign.Cohesion.Database.Language;
 namespace Assimalign.Cohesion.Database.Documents.Language;
 
 /// <summary>Partially updates documents in one collection using SET and UNSET paths.</summary>
+[global::System.Diagnostics.DebuggerDisplay("OqlUpdateExpression")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Documents.Language.OqlUpdateExpression.DebugView))]
 public sealed class OqlUpdateExpression : OqlExpression
 {
     /// <summary>Initializes an UPDATE statement.</summary>
@@ -33,4 +35,22 @@ public sealed class OqlUpdateExpression : OqlExpression
     public IReadOnlyList<OqlPathExpression> Unset { get; }
     /// <summary>Gets the filter, or null to update every document.</summary>
     public OqlExpression? Predicate { get; }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Documents.Language.OqlUpdateExpression _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Documents.Language.OqlUpdateExpression value)
+        {
+            _target = value;
+        }
+
+        public string Collection => _target.Collection;
+        public string? Alias => _target.Alias;
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.Documents.Language.OqlUpdateAssignment> Assignments => _target.Assignments;
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.Documents.Language.OqlPathExpression> Unset => _target.Unset;
+        public global::Assimalign.Cohesion.Database.Documents.Language.OqlExpression? Predicate => _target.Predicate;
+        public string? Text => _target.Text;
+        public global::Assimalign.Cohesion.Database.Language.Location? Location => _target.Location;
+    }
 }

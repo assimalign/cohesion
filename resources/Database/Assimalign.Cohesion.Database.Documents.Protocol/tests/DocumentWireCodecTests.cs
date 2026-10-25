@@ -44,7 +44,7 @@ public sealed class DocumentWireCodecTests
             69 => new DocumentProtocolCommandMessage(DocumentProtocolOperation.Put, "items", "one", new(ulong.MaxValue), "{}"u8.ToArray()).Encode(),
             70 => new DocumentProtocolStoredDocumentMessage(new("one", new(ulong.MaxValue), "[1]"u8.ToArray())).Encode(),
             71 => new DocumentProtocolCollectionMessage("items").Encode(),
-            _ => new DocumentProtocolFailureMessage(ProtocolErrorCode.ParseFailure, "invalid", [new Diagnostic { Code = "COHDBL001", Message = "detail", Start = 1, End = 2, Severity = DiagnosticSeverity.Error }]).Encode(),
+            _ => new DocumentProtocolFailureMessage(ProtocolErrorCode.ParseFailure, "invalid", [new Diagnostic { Code = "CK00001", Message = "detail", Start = 1, End = 2, Severity = DiagnosticSeverity.Error }]).Encode(),
         };
 
         // Act / Assert
@@ -88,7 +88,7 @@ public sealed class DocumentWireCodecTests
     public void Failure_DiagnosticLocations_ShouldRoundTripWithoutParsingText()
     {
         // Arrange
-        var diagnostic = new Diagnostic { Code = "COHDBL001", Message = "detail", Start = 5, Severity = DiagnosticSeverity.Error };
+        var diagnostic = new Diagnostic { Code = "CK00001", Message = "detail", Start = 5, Severity = DiagnosticSeverity.Error };
         var message = new DocumentProtocolFailureMessage(ProtocolErrorCode.ParseFailure, "summary", [diagnostic]);
 
         // Act

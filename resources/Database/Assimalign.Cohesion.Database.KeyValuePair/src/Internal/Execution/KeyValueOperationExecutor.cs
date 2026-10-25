@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -49,8 +50,18 @@ using Assimalign.Cohesion.Database.Types;
 /// outcomes — no mutation, no exception.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("KeyValueOperationExecutor")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.KeyValuePair.Internal.KeyValueOperationExecutor.DebugView))]
 internal sealed class KeyValueOperationExecutor
 {
+    private static readonly string _errorExecutorEnsureLatestVersionFailure3 = ErrorMessages.ExecutorEnsureLatestVersionFailure3;
+
+    private static readonly string _errorExecutorEnsureLatestVersionFailure = ErrorMessages.ExecutorEnsureLatestVersionFailure;
+
+    private static readonly string _errorExecutorAcquireKeyLockAsyncFailure = ErrorMessages.ExecutorAcquireKeyLockAsyncFailure;
+
+    private static readonly string _errorExecutorExecutePutAsyncFailure = ErrorMessages.ExecutorExecutePutAsyncFailure;
+
     // Test seam: after the final PUT effect, while its statement apply is still admitted.
     internal static Action? AfterPutApplied { get; set; }
 
@@ -67,9 +78,6 @@ internal sealed class KeyValueOperationExecutor
     /// </summary>
     internal const string PrimaryIndexName = "key";
 
-    // How many times DecodeConfirmed reads a slot again before it reports a record that does not
-    // decode; it stops sooner when two reads agree.
-    private const int confirmingReads = 2;
 
     private static readonly IReadOnlyList<DatabaseColumn> _entryColumns =
     [
@@ -127,7 +135,7 @@ internal sealed class KeyValueOperationExecutor
             KeyValueScanRequest scan => await ExecuteScanAsync(scan, context, cancellationToken).ConfigureAwait(false),
             KeyValuePutRequest put => await ExecutePutAsync(put, context, cancellationToken).ConfigureAwait(false),
             KeyValueDeleteRequest delete => await ExecuteDeleteAsync(delete, context, cancellationToken).ConfigureAwait(false),
-            _ => throw new DatabaseException($"The key-value engine has no executor for {request.GetType().Name}."),
+            _ => throw DatabaseException.CreateKeyValuePairFailure("CV05002", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.OperationExecutorExecuteAsyncDatabase, request.GetType().Name)),
         };
     }
 
@@ -268,7 +276,7 @@ internal sealed class KeyValueOperationExecutor
             // see: a concurrently committed writer beat this command to the key.
             // The bracket has rolled back; the conflict is retryable.
             throw new TransactionAbortedException(
-                $"Write-write conflict on key '{Convert.ToHexString(request.Key.Span)}': the key was concurrently written by a committed transaction (first-updater-wins). Retry the transaction.",
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, _errorExecutorExecutePutAsyncFailure, Convert.ToHexString(request.Key.Span)),
                 exception);
         }
 
@@ -339,7 +347,7 @@ internal sealed class KeyValueOperationExecutor
         {
             context.Coordinator.LockManager.ReleaseAll(owner);
             throw new TransactionAbortedException(
-                $"Transaction {owner} ended while the command waited for the key lock; the command was not applied.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, _errorExecutorAcquireKeyLockAsyncFailure, owner));
         }
     }
 
@@ -382,13 +390,9 @@ internal sealed class KeyValueOperationExecutor
     /// fails its checksum or cannot be read fails the command (#1342).
     /// </summary>
     /// <remarks>
-    /// The read holds a pin, not a latch, so it can copy a slot while a writer reclaims it (the
-    /// version purge freeing and clearing it; a failed command's bracket rollback restoring the
-    /// page did too until #1371, when the storage read began confirming itself against the
-    /// restore), and that copy is torn rather than damaged. A record that does not decode is
-    /// therefore confirmed before it is reported (#1362, <see cref="DecodeConfirmed"/>). The
-    /// confirmation narrows the window and does not close it: a writer descheduled half-way
-    /// through rewriting the page leaves the same torn bytes for every read.
+    /// Storage confirms each owned copy against every page mutation, including forward
+    /// writes and rollback restores (#1365, #1372). A failed decode is damage in that stable
+    /// record; no speculative confirming re-read or whole-transaction lock wait is needed.
     /// </remarks>
     /// <exception cref="StorageCorruptionException">
     /// The entry page failed its checksum or is malformed, or the record does not decode. The read
@@ -415,66 +419,16 @@ internal sealed class KeyValueOperationExecutor
         {
             KeyValueRecordCodec.Decode(record.Span, out key, out value, out writer, out deleter);
         }
-        catch (DatabaseTypeException)
+        catch (DatabaseTypeException defect)
         {
-            if (!DecodeConfirmed(record, pageId, slotIndex, out key, out value, out writer, out deleter))
-            {
-                return null;
-            }
+            throw new StorageCorruptionException(pageId, slotIndex, string.Format(CultureInfo.CurrentCulture,
+                ErrorMessages.StoredEntryDecodeFailed, defect.Message), defect);
         }
 
         bool visible = snapshot.IsVisible(writer)
             && (deleter == TransactionSequence.None || !snapshot.IsVisible(deleter));
 
         return visible ? new ResolvedVersion(key, value, writer, entryReference) : null;
-    }
-
-    /// <summary>
-    /// Confirms an entry record whose read did not decode (<see cref="ReadVisibleVersion"/>) by
-    /// reading its slot again, with the key space's owner check: a slot reclaimed by then reads
-    /// as absence, and a re-read that decodes is the entry. A re-read that does not decode is
-    /// corrupt when it returns the same bytes as the read before it, because damage is stable and
-    /// a copy a writer tore is not; a re-read that differs means the slot is still changing, so
-    /// the slot is read once more, up to <see cref="confirmingReads"/> re-reads.
-    /// </summary>
-    /// <param name="failed">The copy that did not decode.</param>
-    /// <param name="pageId">The page the record was read from.</param>
-    /// <param name="slotIndex">The slot the record was read from.</param>
-    /// <param name="key">The entry's key.</param>
-    /// <param name="value">The entry's value.</param>
-    /// <param name="writer">The record's writer stamp.</param>
-    /// <param name="deleter">The record's deleter stamp.</param>
-    /// <returns><c>true</c> when a re-read decodes; <c>false</c> when the slot was reclaimed.</returns>
-    /// <exception cref="StorageCorruptionException">The record does not decode, and the reads agree or ran out.</exception>
-    private bool DecodeConfirmed(ReadOnlyMemory<byte> failed, PageId pageId, int slotIndex,
-        out byte[] key, out byte[] value, out TransactionSequence writer, out TransactionSequence deleter)
-    {
-        for (int read = 1; ; read++)
-        {
-            if (!_storage.TryReadRecord(pageId, slotIndex, KeySpaceObjectId, out var record))
-            {
-                key = [];
-                value = [];
-                writer = default;
-                deleter = default;
-                return false;
-            }
-
-            try
-            {
-                KeyValueRecordCodec.Decode(record.Span, out key, out value, out writer, out deleter);
-                return true;
-            }
-            catch (DatabaseTypeException defect) when (read == confirmingReads || record.Span.SequenceEqual(failed.Span))
-            {
-                throw new StorageCorruptionException(
-                    pageId, $"The key-value entry record in slot {slotIndex} of page {(long)pageId} does not decode: {defect.Message}");
-            }
-            catch (DatabaseTypeException)
-            {
-                failed = record;
-            }
-        }
     }
 
     /// <summary>
@@ -497,15 +451,14 @@ internal sealed class KeyValueOperationExecutor
         if (!_storage.TryReadRecord(pageId, slotIndex, KeySpaceObjectId, out var record))
         {
             throw new TransactionAbortedException(
-                "Write-write conflict: the target entry version was reclaimed by a concurrent transaction. Retry the transaction.");
+                _errorExecutorEnsureLatestVersionFailure);
         }
 
         if (record.Length < KeyValueRecordCodec.StampHeaderSize)
         {
             throw new StorageCorruptionException(
                 pageId,
-                $"The key-value entry record in slot {slotIndex} of page {(long)pageId} holds {record.Length} bytes, " +
-                $"fewer than its {KeyValueRecordCodec.StampHeaderSize}-byte version-stamp header.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExecutorEnsureLatestVersionFailure2, slotIndex, (long)pageId, record.Length, KeyValueRecordCodec.StampHeaderSize));
         }
 
         var (_, deleter) = KeyValueRecordCodec.ReadStamps(record.Span);
@@ -513,7 +466,7 @@ internal sealed class KeyValueOperationExecutor
         if (deleter != TransactionSequence.None && deleter != self)
         {
             throw new TransactionAbortedException(
-                $"Write-write conflict: the entry was modified by concurrently committed transaction {deleter} (first-updater-wins). Retry the transaction.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, _errorExecutorEnsureLatestVersionFailure3, deleter));
         }
     }
 
@@ -586,4 +539,12 @@ internal sealed class KeyValueOperationExecutor
     }
 
     private readonly record struct ResolvedVersion(byte[] Key, byte[] Value, TransactionSequence Writer, ulong Location);
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.KeyValuePair.Internal.KeyValueOperationExecutor value)
+        {
+            _ = value;
+        }
+    }
 }

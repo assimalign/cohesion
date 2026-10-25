@@ -32,7 +32,7 @@ public class HealthChecksBuilderTests
         var contributor = new StubHealthContributor(
             "database",
             new HealthContribution(contributorStatus, "database status", data));
-        IHealthChecksBuilder builder = HealthChecks.CreateBuilder()
+        IHealthChecksBuilder builder = new HealthChecksBuilder()
             .AddContributor(contributor);
 
         HealthReport report = await builder.Build().CheckHealthAsync();
@@ -56,7 +56,7 @@ public class HealthChecksBuilderTests
             "cache",
             _ => ValueTask.FromException<HealthContribution>(new InvalidOperationException("cache offline")));
         TimeSpan timeout = TimeSpan.FromSeconds(2);
-        IHealthChecksBuilder builder = HealthChecks.CreateBuilder()
+        IHealthChecksBuilder builder = new HealthChecksBuilder()
             .AddContributor(
                 contributor,
                 failureStatus: WebHealthStatus.Degraded,
@@ -86,7 +86,7 @@ public class HealthChecksBuilderTests
             cancellationToken.ThrowIfCancellationRequested();
             return ValueTask.FromResult(HealthContribution.Healthy());
         });
-        IHealthCheckService service = HealthChecks.CreateBuilder()
+        IHealthCheckService service = new HealthChecksBuilder()
             .AddContributor(contributor)
             .Build();
 
@@ -99,7 +99,7 @@ public class HealthChecksBuilderTests
     [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Builder: contributor names use normal duplicate validation")]
     public void AddContributor_WhenNameAlreadyRegistered_ShouldThrow()
     {
-        IHealthChecksBuilder builder = HealthChecks.CreateBuilder()
+        IHealthChecksBuilder builder = new HealthChecksBuilder()
             .AddContributor(new StubHealthContributor("database", HealthContribution.Healthy()));
 
         Should.Throw<InvalidOperationException>(() =>
@@ -109,7 +109,7 @@ public class HealthChecksBuilderTests
     [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Builder: rejects a null contributor")]
     public void AddContributor_WhenContributorNull_ShouldThrow()
     {
-        IHealthChecksBuilder builder = HealthChecks.CreateBuilder();
+        IHealthChecksBuilder builder = new HealthChecksBuilder();
 
         Should.Throw<ArgumentNullException>(() => builder.AddContributor(null!));
     }

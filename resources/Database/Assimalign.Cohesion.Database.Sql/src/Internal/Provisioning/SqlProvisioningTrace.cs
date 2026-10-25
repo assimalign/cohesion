@@ -6,6 +6,8 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 // Allocated only while the source is enabled. Kept outside async state machines so the
 // disabled path retains the original machine size, including in Debug.
+[global::System.Diagnostics.DebuggerDisplay("SqlProvisioningTrace")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlProvisioningTrace.DebugView))]
 internal sealed class SqlProvisioningTrace
 {
     internal SqlProvisioningTrace(SqlCompiledSchema schema)
@@ -26,4 +28,12 @@ internal sealed class SqlProvisioningTrace
     internal long RowsProcessed { get; set; } = -1;
     internal long TotalRows { get; set; } = -1;
     internal long LastProgress { get; set; }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlProvisioningTrace value)
+        {
+            _ = value;
+        }
+    }
 }

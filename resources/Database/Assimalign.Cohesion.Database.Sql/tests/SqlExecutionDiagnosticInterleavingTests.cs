@@ -63,7 +63,7 @@ public sealed class SqlExecutionDiagnosticInterleavingTests
 
             // Assert
             var diagnostic = (await failed).ShouldHaveSingleItem();
-            diagnostic.Code.ShouldBe("COHSQLE064");
+            diagnostic.Code.ShouldBe("CS04064");
             diagnostic.Start.ShouldBe(0);
             diagnostic.End.ShouldBe(sql.Length);
             database.Catalog.TryGetTable("dbo", "replacement", out _).ShouldBeTrue();

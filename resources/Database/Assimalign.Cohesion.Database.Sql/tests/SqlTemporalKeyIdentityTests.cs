@@ -23,24 +23,24 @@ using Assimalign.Cohesion.Database.Types;
 /// </summary>
 public sealed class SqlTemporalKeyIdentityTests
 {
-    private static readonly DateTime Noon = new(2026, 9, 30, 12, 0, 0, DateTimeKind.Unspecified);
-    private static readonly DateTimeOffset Instant = new(2026, 9, 30, 12, 0, 0, TimeSpan.Zero);
+    private static readonly DateTime _noon = new(2026, 9, 30, 12, 0, 0, DateTimeKind.Unspecified);
+    private static readonly DateTimeOffset _instant = new(2026, 9, 30, 12, 0, 0, TimeSpan.Zero);
 
     /// <summary>Every predicate shape the planner turns into an index seek.</summary>
-    private static readonly string[] Predicates =
+    private static readonly string[] _predicates =
     [
         "{0} = @p", "@p = {0}", "{0} >= @p", "{0} > @p", "{0} <= @p", "{0} < @p", "{0} BETWEEN @p AND @q",
     ];
 
     /// <summary>Equal ticks in all three kinds, neighbors on both sides, and NULL.</summary>
-    private static readonly object?[][] TimestampRows =
+    private static readonly object?[][] _timestampRows =
     [
-        [1, Noon],
-        [2, Utc(Noon)],
-        [3, Local(Noon)],
-        [4, Utc(Noon.AddHours(-1))],
-        [5, Noon.AddHours(1)],
-        [6, Local(Noon.AddHours(1))],
+        [1, _noon],
+        [2, Utc(_noon)],
+        [3, Local(_noon)],
+        [4, Utc(_noon.AddHours(-1))],
+        [5, _noon.AddHours(1)],
+        [6, Local(_noon.AddHours(1))],
         [7, null],
     ];
 
@@ -49,14 +49,14 @@ public sealed class SqlTemporalKeyIdentityTests
     /// sorts opposite to their instant (11:00Z at +01:00 reads 12:00; 13:00Z at
     /// −08:00 reads 05:00), and NULL.
     /// </summary>
-    private static readonly object?[][] InstantRows =
+    private static readonly object?[][] _instantRows =
     [
-        [1, Instant],
-        [2, Instant.ToOffset(TimeSpan.FromHours(3))],
-        [3, Instant.ToOffset(TimeSpan.FromHours(-5.5))],
-        [4, Instant.AddHours(-1).ToOffset(TimeSpan.FromHours(1))],
-        [5, Instant.AddHours(1).ToOffset(TimeSpan.FromHours(-8))],
-        [6, Instant.AddHours(1)],
+        [1, _instant],
+        [2, _instant.ToOffset(TimeSpan.FromHours(3))],
+        [3, _instant.ToOffset(TimeSpan.FromHours(-5.5))],
+        [4, _instant.AddHours(-1).ToOffset(TimeSpan.FromHours(1))],
+        [5, _instant.AddHours(1).ToOffset(TimeSpan.FromHours(-8))],
+        [6, _instant.AddHours(1)],
         [7, null],
     ];
 
@@ -76,17 +76,17 @@ public sealed class SqlTemporalKeyIdentityTests
         await using var engine = SqlDatabaseEngine.Create("temporal-timestamp", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("temporal-timestamp");
         await using var session = await database.CreateSessionAsync();
-        object?[][] keyed = [[1, Noon], [4, Utc(Noon.AddHours(-1))], [6, Local(Noon.AddHours(1))], [8, Utc(Noon.AddHours(2))]];
-        await CreateParityTablesAsync(session, "TIMESTAMP", TimestampRows, keyed);
+        object?[][] keyed = [[1, _noon], [4, Utc(_noon.AddHours(-1))], [6, Local(_noon.AddHours(1))], [8, Utc(_noon.AddHours(2))]];
+        await CreateParityTablesAsync(session, "TIMESTAMP", _timestampRows, keyed);
 
         // Act + Assert: every probe kind, every seekable predicate shape.
-        foreach (var probe in new[] { Noon, Utc(Noon), Local(Noon) })
+        foreach (var probe in new[] { _noon, Utc(_noon), Local(_noon) })
         {
-            await AssertParityAsync(session, new Dictionary<string, object?> { ["p"] = probe, ["q"] = Local(Noon.AddHours(1)) });
+            await AssertParityAsync(session, new Dictionary<string, object?> { ["p"] = probe, ["q"] = Local(_noon.AddHours(1)) });
         }
 
         // The scans are the reference; pin the reference to hand-computed answers.
-        var probeUtc = new Dictionary<string, object?> { ["p"] = Utc(Noon), ["q"] = Noon.AddHours(1) };
+        var probeUtc = new Dictionary<string, object?> { ["p"] = Utc(_noon), ["q"] = _noon.AddHours(1) };
         (await IdsAsync(session, "SELECT id FROM indexed WHERE ts = @p ORDER BY id", probeUtc)).ShouldBe([1, 2, 3]);
         (await IdsAsync(session, "SELECT id FROM indexed WHERE ts >= @p ORDER BY id", probeUtc)).ShouldBe([1, 2, 3, 5, 6]);
         (await IdsAsync(session, "SELECT id FROM indexed WHERE ts > @p ORDER BY id", probeUtc)).ShouldBe([5, 6]);
@@ -106,17 +106,17 @@ public sealed class SqlTemporalKeyIdentityTests
         await using var session = await database.CreateSessionAsync();
         object?[][] keyed =
         [
-            [1, At(Instant, 3)], [4, At(Instant.AddHours(-1), 1)], [5, At(Instant.AddHours(1), -8)], [8, At(Instant.AddHours(2), 14)],
+            [1, At(_instant, 3)], [4, At(_instant.AddHours(-1), 1)], [5, At(_instant.AddHours(1), -8)], [8, At(_instant.AddHours(2), 14)],
         ];
-        await CreateParityTablesAsync(session, "TIMESTAMPTZ", InstantRows, keyed);
+        await CreateParityTablesAsync(session, "TIMESTAMPTZ", _instantRows, keyed);
 
         // Act + Assert.
         foreach (double offset in new[] { 0, 3, -5.5, 14, -12 })
         {
-            await AssertParityAsync(session, new Dictionary<string, object?> { ["p"] = At(Instant, offset), ["q"] = At(Instant.AddHours(1), 9) });
+            await AssertParityAsync(session, new Dictionary<string, object?> { ["p"] = At(_instant, offset), ["q"] = At(_instant.AddHours(1), 9) });
         }
 
-        var probe = new Dictionary<string, object?> { ["p"] = At(Instant, 14), ["q"] = At(Instant.AddHours(1), -8) };
+        var probe = new Dictionary<string, object?> { ["p"] = At(_instant, 14), ["q"] = At(_instant.AddHours(1), -8) };
         (await IdsAsync(session, "SELECT id FROM indexed WHERE ts = @p ORDER BY id", probe)).ShouldBe([1, 2, 3]);
         (await IdsAsync(session, "SELECT id FROM indexed WHERE ts >= @p ORDER BY id", probe)).ShouldBe([1, 2, 3, 5, 6]);
         (await IdsAsync(session, "SELECT id FROM indexed WHERE ts > @p ORDER BY id", probe)).ShouldBe([5, 6]);
@@ -141,9 +141,9 @@ public sealed class SqlTemporalKeyIdentityTests
         await ExecuteAsync(session, "CREATE INDEX ix_tenant_at_ts ON indexed (tenant, at, ts)");
         object?[][] rows =
         [
-            [1, 1, Instant, Noon], [2, 1, At(Instant, 3), Utc(Noon)], [3, 1, At(Instant, -5.5), Local(Noon)],
-            [4, 2, At(Instant, 3), Noon], [5, 1, At(Instant.AddHours(1), -8), Local(Noon.AddHours(1))],
-            [6, 1, At(Instant.AddHours(-1), 1), Utc(Noon.AddHours(-1))],
+            [1, 1, _instant, _noon], [2, 1, At(_instant, 3), Utc(_noon)], [3, 1, At(_instant, -5.5), Local(_noon)],
+            [4, 2, At(_instant, 3), _noon], [5, 1, At(_instant.AddHours(1), -8), Local(_noon.AddHours(1))],
+            [6, 1, At(_instant.AddHours(-1), 1), Utc(_noon.AddHours(-1))],
         ];
         foreach (string table in new[] { "scanned", "indexed" })
         {
@@ -164,9 +164,9 @@ public sealed class SqlTemporalKeyIdentityTests
         // Act + Assert.
         foreach (double offset in new[] { 0, 3, -5.5 })
         {
-            foreach (var probe in new[] { Noon, Utc(Noon), Local(Noon) })
+            foreach (var probe in new[] { _noon, Utc(_noon), Local(_noon) })
             {
-                var parameters = new Dictionary<string, object?> { ["p"] = At(Instant, offset), ["q"] = At(Instant.AddHours(1), 2), ["t"] = probe };
+                var parameters = new Dictionary<string, object?> { ["p"] = At(_instant, offset), ["q"] = At(_instant.AddHours(1), 2), ["t"] = probe };
                 foreach (string predicate in predicates)
                 {
                     int[] expected = await IdsAsync(session, $"SELECT id FROM scanned WHERE {predicate} ORDER BY id", parameters);
@@ -178,7 +178,7 @@ public sealed class SqlTemporalKeyIdentityTests
             }
         }
 
-        var exact = new Dictionary<string, object?> { ["p"] = At(Instant, 7), ["t"] = Local(Noon) };
+        var exact = new Dictionary<string, object?> { ["p"] = At(_instant, 7), ["t"] = Local(_noon) };
         (await IdsAsync(session, "SELECT id FROM indexed WHERE tenant = 1 AND at = @p AND ts = @t ORDER BY id", exact)).ShouldBe([1, 2, 3]);
     }
 
@@ -193,33 +193,33 @@ public sealed class SqlTemporalKeyIdentityTests
         await using var session = await database.CreateSessionAsync();
         await ExecuteAsync(session, "CREATE TABLE unique_ts (id INT, ts TIMESTAMP UNIQUE)");
         await ExecuteAsync(session, "CREATE TABLE keyed_ts (ts TIMESTAMP PRIMARY KEY, id INT)");
-        await ExecuteAsync(session, "INSERT INTO unique_ts VALUES (1, @p)", P(Noon));
-        await ExecuteAsync(session, "INSERT INTO keyed_ts VALUES (@p, 1)", P(Utc(Noon)));
+        await ExecuteAsync(session, "INSERT INTO unique_ts VALUES (1, @p)", P(_noon));
+        await ExecuteAsync(session, "INSERT INTO keyed_ts VALUES (@p, 1)", P(Utc(_noon)));
 
         // Act + Assert: inserts and updates of equal ticks in another kind fail.
-        foreach (var equal in new[] { Noon, Utc(Noon), Local(Noon) })
+        foreach (var equal in new[] { _noon, Utc(_noon), Local(_noon) })
         {
             await SqlConstraintAssertions.ThrowAsync(() => ExecuteAsync(session, "INSERT INTO unique_ts VALUES (2, @p)", P(equal)));
             await SqlConstraintAssertions.ThrowAsync(() => ExecuteAsync(session, "INSERT INTO keyed_ts VALUES (@p, 2)", P(equal)));
         }
 
-        await ExecuteAsync(session, "INSERT INTO unique_ts VALUES (2, @p)", P(Utc(Noon.AddTicks(1))));
-        await SqlConstraintAssertions.ThrowAsync(() => ExecuteAsync(session, "UPDATE unique_ts SET ts = @p WHERE id = 2", P(Local(Noon))));
+        await ExecuteAsync(session, "INSERT INTO unique_ts VALUES (2, @p)", P(Utc(_noon.AddTicks(1))));
+        await SqlConstraintAssertions.ThrowAsync(() => ExecuteAsync(session, "UPDATE unique_ts SET ts = @p WHERE id = 2", P(Local(_noon))));
 
         // Re-writing a row's own value in another kind is not a duplicate, and
         // the row keeps the kind it was last written with.
-        await ExecuteAsync(session, "UPDATE unique_ts SET ts = @p WHERE id = 1", P(Local(Noon)));
+        await ExecuteAsync(session, "UPDATE unique_ts SET ts = @p WHERE id = 1", P(Local(_noon)));
         (await ValuesAsync(session, "SELECT ts FROM unique_ts WHERE id = 1")).Single().ShouldBeOfType<DateTime>().Kind.ShouldBe(DateTimeKind.Unspecified);
         (await IdsAsync(session, "SELECT id FROM unique_ts ORDER BY id")).ShouldBe([1, 2]);
         (await IdsAsync(session, "SELECT id FROM keyed_ts ORDER BY id")).ShouldBe([1]);
 
         // Backfills reject rows that are duplicates only under SQL equality.
         await ExecuteAsync(session, "CREATE TABLE loose_ts (id INT, ts TIMESTAMP)");
-        await ExecuteAsync(session, "INSERT INTO loose_ts VALUES (1, @a), (2, @b)", new Dictionary<string, object?> { ["a"] = Noon, ["b"] = Utc(Noon) });
+        await ExecuteAsync(session, "INSERT INTO loose_ts VALUES (1, @a), (2, @b)", new Dictionary<string, object?> { ["a"] = _noon, ["b"] = Utc(_noon) });
         await SqlConstraintAssertions.ThrowAsync(() => ExecuteAsync(session, "CREATE UNIQUE INDEX ux_ts ON loose_ts (ts)"));
         await SqlConstraintAssertions.ThrowAsync(() => ExecuteAsync(session, "ALTER TABLE loose_ts ADD CONSTRAINT uq_ts UNIQUE (ts)"));
         await ExecuteAsync(session, "CREATE INDEX ix_ts ON loose_ts (ts)");
-        (await IdsAsync(session, "SELECT id FROM loose_ts WHERE ts = @p ORDER BY id", P(Local(Noon)))).ShouldBe([1, 2]);
+        (await IdsAsync(session, "SELECT id FROM loose_ts WHERE ts = @p ORDER BY id", P(Local(_noon)))).ShouldBe([1, 2]);
         Metrics(session).AccessPath.ShouldBe("seek:ix_ts");
     }
 
@@ -233,26 +233,26 @@ public sealed class SqlTemporalKeyIdentityTests
         await ExecuteAsync(session, "CREATE TABLE unique_at (id INT, at TIMESTAMPTZ UNIQUE)");
         await ExecuteAsync(session, "CREATE TABLE keyed_at (at TIMESTAMPTZ PRIMARY KEY, id INT)");
         await ExecuteAsync(session, "CREATE TABLE tenant_at (tenant INT, at TIMESTAMPTZ, UNIQUE (tenant, at))");
-        await ExecuteAsync(session, "INSERT INTO unique_at VALUES (1, @p)", P(Instant));
-        await ExecuteAsync(session, "INSERT INTO keyed_at VALUES (@p, 1)", P(At(Instant, 3)));
-        await ExecuteAsync(session, "INSERT INTO tenant_at VALUES (1, @p), (2, @q)", new Dictionary<string, object?> { ["p"] = Instant, ["q"] = At(Instant, 3) });
+        await ExecuteAsync(session, "INSERT INTO unique_at VALUES (1, @p)", P(_instant));
+        await ExecuteAsync(session, "INSERT INTO keyed_at VALUES (@p, 1)", P(At(_instant, 3)));
+        await ExecuteAsync(session, "INSERT INTO tenant_at VALUES (1, @p), (2, @q)", new Dictionary<string, object?> { ["p"] = _instant, ["q"] = At(_instant, 3) });
 
         // Act + Assert.
         foreach (double offset in new[] { 0, 3, -5.5, 14 })
         {
-            await SqlConstraintAssertions.ThrowAsync(() => ExecuteAsync(session, "INSERT INTO unique_at VALUES (2, @p)", P(At(Instant, offset))));
-            await SqlConstraintAssertions.ThrowAsync(() => ExecuteAsync(session, "INSERT INTO keyed_at VALUES (@p, 2)", P(At(Instant, offset))));
-            await SqlConstraintAssertions.ThrowAsync(() => ExecuteAsync(session, "INSERT INTO tenant_at VALUES (1, @p)", P(At(Instant, offset))));
+            await SqlConstraintAssertions.ThrowAsync(() => ExecuteAsync(session, "INSERT INTO unique_at VALUES (2, @p)", P(At(_instant, offset))));
+            await SqlConstraintAssertions.ThrowAsync(() => ExecuteAsync(session, "INSERT INTO keyed_at VALUES (@p, 2)", P(At(_instant, offset))));
+            await SqlConstraintAssertions.ThrowAsync(() => ExecuteAsync(session, "INSERT INTO tenant_at VALUES (1, @p)", P(At(_instant, offset))));
         }
 
-        await ExecuteAsync(session, "INSERT INTO unique_at VALUES (2, @p)", P(At(Instant.AddTicks(1), 3)));
-        await SqlConstraintAssertions.ThrowAsync(() => ExecuteAsync(session, "UPDATE unique_at SET at = @p WHERE id = 2", P(At(Instant, -8))));
-        await ExecuteAsync(session, "UPDATE unique_at SET at = @p WHERE id = 1", P(At(Instant, -8)));
+        await ExecuteAsync(session, "INSERT INTO unique_at VALUES (2, @p)", P(At(_instant.AddTicks(1), 3)));
+        await SqlConstraintAssertions.ThrowAsync(() => ExecuteAsync(session, "UPDATE unique_at SET at = @p WHERE id = 2", P(At(_instant, -8))));
+        await ExecuteAsync(session, "UPDATE unique_at SET at = @p WHERE id = 1", P(At(_instant, -8)));
         (await ValuesAsync(session, "SELECT at FROM unique_at WHERE id = 1")).Single().ShouldBeOfType<DateTimeOffset>().Offset.ShouldBe(TimeSpan.FromHours(-8));
         (await IdsAsync(session, "SELECT id FROM unique_at ORDER BY id")).ShouldBe([1, 2]);
 
         await ExecuteAsync(session, "CREATE TABLE loose_at (id INT, at TIMESTAMPTZ)");
-        await ExecuteAsync(session, "INSERT INTO loose_at VALUES (1, @a), (2, @b)", new Dictionary<string, object?> { ["a"] = Instant, ["b"] = At(Instant, -5.5) });
+        await ExecuteAsync(session, "INSERT INTO loose_at VALUES (1, @a), (2, @b)", new Dictionary<string, object?> { ["a"] = _instant, ["b"] = At(_instant, -5.5) });
         await SqlConstraintAssertions.ThrowAsync(() => ExecuteAsync(session, "CREATE UNIQUE INDEX ux_at ON loose_at (at)"));
         await SqlConstraintAssertions.ThrowAsync(() => ExecuteAsync(session, "ALTER TABLE loose_at ADD CONSTRAINT uq_at UNIQUE (at)"));
     }
@@ -271,19 +271,19 @@ public sealed class SqlTemporalKeyIdentityTests
         await ExecuteAsync(session, "CREATE TABLE moment_refs (id INT, at TIMESTAMPTZ REFERENCES moments(at) ON DELETE RESTRICT)");
         await ExecuteAsync(session, "CREATE INDEX ix_day_refs ON day_refs (ts)");
         await ExecuteAsync(session, "CREATE INDEX ix_moment_refs ON moment_refs (at)");
-        await ExecuteAsync(session, "INSERT INTO days VALUES (@p)", P(Utc(Noon)));
-        await ExecuteAsync(session, "INSERT INTO moments VALUES (@p)", P(At(Instant, 3)));
+        await ExecuteAsync(session, "INSERT INTO days VALUES (@p)", P(Utc(_noon)));
+        await ExecuteAsync(session, "INSERT INTO moments VALUES (@p)", P(At(_instant, 3)));
 
         // Act + Assert: the parent lookup seeks the identity, so equal values in
         // another kind or offset satisfy the reference...
-        await ExecuteAsync(session, "INSERT INTO day_refs VALUES (1, @p)", P(Local(Noon)));
+        await ExecuteAsync(session, "INSERT INTO day_refs VALUES (1, @p)", P(Local(_noon)));
         Metrics(session).AccessPath.ShouldStartWith("constraint-seek:");
-        await ExecuteAsync(session, "INSERT INTO moment_refs VALUES (1, @p)", P(At(Instant, -5.5)));
+        await ExecuteAsync(session, "INSERT INTO moment_refs VALUES (1, @p)", P(At(_instant, -5.5)));
         Metrics(session).AccessPath.ShouldStartWith("constraint-seek:");
 
         // ...unequal values do not...
-        await SqlConstraintAssertions.ThrowAsync(() => ExecuteAsync(session, "INSERT INTO day_refs VALUES (2, @p)", P(Local(Noon.AddTicks(1)))));
-        await SqlConstraintAssertions.ThrowAsync(() => ExecuteAsync(session, "INSERT INTO moment_refs VALUES (2, @p)", P(At(Instant.AddTicks(1), 3))));
+        await SqlConstraintAssertions.ThrowAsync(() => ExecuteAsync(session, "INSERT INTO day_refs VALUES (2, @p)", P(Local(_noon.AddTicks(1)))));
+        await SqlConstraintAssertions.ThrowAsync(() => ExecuteAsync(session, "INSERT INTO moment_refs VALUES (2, @p)", P(At(_instant.AddTicks(1), 3))));
 
         // ...and the reverse lookup finds the children, so RESTRICT holds.
         await SqlConstraintAssertions.ThrowAsync(() => ExecuteAsync(session, "DELETE FROM days"));
@@ -304,21 +304,21 @@ public sealed class SqlTemporalKeyIdentityTests
         await ExecuteAsync(session, "CREATE INDEX ix_at ON t (at)");
 
         // Act.
-        await ExecuteAsync(session, "INSERT INTO t VALUES (1, @ts, @at)", new Dictionary<string, object?> { ["ts"] = Local(Noon), ["at"] = At(Instant, 3) });
+        await ExecuteAsync(session, "INSERT INTO t VALUES (1, @ts, @at)", new Dictionary<string, object?> { ["ts"] = Local(_noon), ["at"] = At(_instant, 3) });
         var row = (await RowsAsync(session, "SELECT ts, at FROM t WHERE ts = @p AND at = @q",
-            new Dictionary<string, object?> { ["p"] = Utc(Noon), ["q"] = At(Instant, -5.5) })).Single();
+            new Dictionary<string, object?> { ["p"] = Utc(_noon), ["q"] = At(_instant, -5.5) })).Single();
 
         // Assert: storage normalizes the wall clock kind and retains the instant offset...
         var timestamp = row[0].ShouldBeOfType<DateTime>();
-        timestamp.Ticks.ShouldBe(Noon.Ticks);
+        timestamp.Ticks.ShouldBe(_noon.Ticks);
         timestamp.Kind.ShouldBe(DateTimeKind.Unspecified);
         var instant = row[1].ShouldBeOfType<DateTimeOffset>();
-        instant.UtcTicks.ShouldBe(Instant.UtcTicks);
+        instant.UtcTicks.ShouldBe(_instant.UtcTicks);
         instant.Offset.ShouldBe(TimeSpan.FromHours(3));
 
         // ...while each key holds only the identity: Unspecified ticks, offset zero.
-        (await KeysAsync(database, "t", "ix_ts")).Single().ShouldBe(Encode(writer => writer.AppendDateTime(Noon)));
-        (await KeysAsync(database, "t", "ix_at")).Single().ShouldBe(Encode(writer => writer.AppendDateTimeOffset(Instant)));
+        (await KeysAsync(database, "t", "ix_ts")).Single().ShouldBe(Encode(writer => writer.AppendDateTime(_noon)));
+        (await KeysAsync(database, "t", "ix_at")).Single().ShouldBe(Encode(writer => writer.AppendDateTimeOffset(_instant)));
     }
 
     // ── Crash recovery ─────────────────────────────────────────────────
@@ -334,12 +334,12 @@ public sealed class SqlTemporalKeyIdentityTests
         var session = await database.CreateSessionAsync();
         await ExecuteAsync(session, "CREATE TABLE t (id INT, at TIMESTAMPTZ)");
         await ExecuteAsync(session, "CREATE INDEX ix_at ON t (at)");
-        await ExecuteAsync(session, "INSERT INTO t VALUES (1, @a), (2, @b)", new Dictionary<string, object?> { ["a"] = Instant, ["b"] = At(Instant, 3) });
+        await ExecuteAsync(session, "INSERT INTO t VALUES (1, @a), (2, @b)", new Dictionary<string, object?> { ["a"] = _instant, ["b"] = At(_instant, 3) });
         var uncommitted = await session.BeginTransactionAsync();
         uncommitted.ShouldNotBeNull();
-        await ExecuteAsync(session, "INSERT INTO t VALUES (3, @p)", P(At(Instant, -5.5)));
+        await ExecuteAsync(session, "INSERT INTO t VALUES (3, @p)", P(At(_instant, -5.5)));
         var flusher = await database.CreateSessionAsync();
-        await ExecuteAsync(flusher, "INSERT INTO t VALUES (4, @p)", P(At(Instant, 9)));
+        await ExecuteAsync(flusher, "INSERT INTO t VALUES (4, @p)", P(At(_instant, 9)));
 
         // Act.
         var reopenedEngine = SqlDatabaseEngine.Create("temporal-crash-reopen", new SqlDatabaseEngineOptions { StorageStrategy = strategy.CaptureDurableImages() });
@@ -350,7 +350,7 @@ public sealed class SqlTemporalKeyIdentityTests
         // that mirror the surviving rows exactly.
         await using (var verify = await reopened.CreateSessionAsync())
         {
-            (await IdsAsync(verify, "SELECT id FROM t WHERE at = @p ORDER BY id", P(At(Instant, 1)))).ShouldBe([1, 2, 4]);
+            (await IdsAsync(verify, "SELECT id FROM t WHERE at = @p ORDER BY id", P(At(_instant, 1)))).ShouldBe([1, 2, 4]);
             Metrics(verify).AccessPath.ShouldBe("seek:ix_at");
             (await IdsAsync(verify, "SELECT id FROM t ORDER BY id")).ShouldBe([1, 2, 4]);
         }
@@ -404,7 +404,7 @@ public sealed class SqlTemporalKeyIdentityTests
     private static async Task AssertSeekMatchesScanAsync(
         SqlDatabaseSession session, string indexedTable, string scanTable, string column, string accessPath, Dictionary<string, object?> parameters)
     {
-        foreach (string template in Predicates)
+        foreach (string template in _predicates)
         {
             string predicate = string.Format(System.Globalization.CultureInfo.InvariantCulture, template, column);
             int[] expected = await IdsAsync(session, $"SELECT id FROM {scanTable} WHERE {predicate} ORDER BY id", parameters);

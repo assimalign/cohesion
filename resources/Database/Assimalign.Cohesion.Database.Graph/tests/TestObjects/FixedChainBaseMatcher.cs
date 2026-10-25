@@ -39,13 +39,13 @@ internal static class FixedChainBaseMatcher
         {
             if (node.Variable is not { } name || !input.TryGetValue(name, out var value)) { continue; }
             if (value is null) { return; }
-            if (value is not GraphNode) { throw new GraphPlanningException("COHDBG013", ErrorMessages.EntityBindingRequired); }
+            if (value is not GraphNode) { throw new GraphPlanningException("CG02013", ErrorMessages.EntityBindingRequired); }
         }
         foreach (var edge in path.Relationships)
         {
             if (edge.Variable is not { } name || !input.TryGetValue(name, out var value)) { continue; }
             if (value is null) { return; }
-            if (value is not GraphRelationship) { throw new GraphPlanningException("COHDBG013", ErrorMessages.EntityBindingRequired); }
+            if (value is not GraphRelationship) { throw new GraphPlanningException("CG02013", ErrorMessages.EntityBindingRequired); }
         }
         IReadOnlyList<StoredGraphNode> candidates;
         if (path.Nodes[anchor.NodeIndex].Variable is { } variable && input.TryGetValue(variable, out var existing) && existing is GraphNode bound)

@@ -23,7 +23,7 @@ namespace Assimalign.Cohesion.Database.Sql;
 /// once, for an empty group too. Anything a core throws other than
 /// <see cref="InsufficientExecutionStackException"/>,
 /// <see cref="OutOfMemoryException"/> or a <see cref="DatabaseException"/> fails the statement as
-/// <c>COHSQLE007</c>, naming the function. An <see cref="OperationCanceledException"/> passes
+/// <c>CS05007</c>, naming the function. An <see cref="OperationCanceledException"/> passes
 /// through only when the statement's token is canceled. Addition reads it from the row's context;
 /// the engine supplies it internally when finishing, including an empty group. Direct public
 /// <see cref="Finish()"/> calls have no statement to cancel and code application cancellation as
@@ -47,20 +47,20 @@ public abstract class SqlAggregateAccumulator
     /// The accumulator was not created by <see cref="SqlAggregateFunction.CreateAccumulator"/>, or it is finished.
     /// </exception>
     /// <exception cref="ArgumentException">The number of arguments does not match the function's parameters.</exception>
-    /// <exception cref="DatabaseException">The function failed: <c>COHSQLE007</c>, or the database exception it threw.</exception>
+    /// <exception cref="DatabaseException">The function failed: <c>CS05007</c>, or the database exception it threw.</exception>
     /// <exception cref="OperationCanceledException">The core threw cancellation and the row context's token is canceled.</exception>
     public void Add(scoped in SqlArguments arguments)
     {
         var function = _function
-            ?? throw new InvalidOperationException("The accumulator was not created by SqlAggregateFunction.CreateAccumulator.");
+            ?? throw new InvalidOperationException(ErrorMessages.SqlAggregateAccumulatorAddFailure);
         if (_finished)
         {
-            throw new InvalidOperationException($"The accumulator of aggregate '{function.Name}' is finished.");
+            throw new InvalidOperationException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlAggregateAccumulatorAddFailure2, function.Name));
         }
         if (arguments.Count != function.ParameterTypes.Length)
         {
             throw new ArgumentException(
-                $"Aggregate '{function.Name}' takes {function.ParameterTypes.Length} argument(s), but {arguments.Count} were passed.",
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlAggregateAccumulatorAddArgument, function.Name, function.ParameterTypes.Length, arguments.Count),
                 nameof(arguments));
         }
         AddResolved(in arguments);
@@ -72,7 +72,7 @@ public abstract class SqlAggregateAccumulator
     /// the one <see cref="AddCore"/> call, its failure coded, as <see cref="Add"/> does.
     /// </summary>
     /// <param name="arguments">The row's arguments, of their parameters' types.</param>
-    /// <exception cref="DatabaseException">The function failed (<c>COHSQLE007</c>), or the database exception it threw.</exception>
+    /// <exception cref="DatabaseException">The function failed (<c>CS05007</c>), or the database exception it threw.</exception>
     internal void AddResolved(scoped in SqlArguments arguments)
     {
         if (_function!.NullBehavior == SqlNullBehavior.ReturnsNullOnNullInput && arguments.HasNull)
@@ -95,7 +95,7 @@ public abstract class SqlAggregateAccumulator
     /// and the call's arguments and no buffer of four values for the prologue to clear. A value
     /// that has its parameter's type already, as a column of that type always does, is not passed
     /// through the conversion, except CHAR whose declared width must still be applied. An integer
-    /// that does not fit its parameter is coded as the evaluator codes one (<c>COHSQLE002</c>), not
+    /// that does not fit its parameter is coded as the evaluator codes one (<c>CS02002</c>), not
     /// as a failure of the function.
     /// </remarks>
     /// <param name="value">The argument as the row holds it.</param>
@@ -104,7 +104,7 @@ public abstract class SqlAggregateAccumulator
     /// <param name="collation">The collation the call's input compares under.</param>
     /// <param name="cancellationToken">The statement's cancellation token.</param>
     /// <param name="transactionTimestamp">The transaction or statement start; null when no context exists.</param>
-    /// <exception cref="DatabaseException">The function failed (<c>COHSQLE007</c>), the database exception it threw, or the argument does not fit its parameter.</exception>
+    /// <exception cref="DatabaseException">The function failed (<c>CS05007</c>), the database exception it threw, or the argument does not fit its parameter.</exception>
     internal void AddResolved(object? value, DatabaseType target, DatabaseName database, Collation collation,
         CancellationToken cancellationToken, DateTimeOffset? transactionTimestamp)
     {
@@ -134,7 +134,7 @@ public abstract class SqlAggregateAccumulator
     /// <param name="collation">The collation the call's input compares under.</param>
     /// <param name="cancellationToken">The statement's cancellation token.</param>
     /// <param name="transactionTimestamp">The transaction or statement start; null when no context exists.</param>
-    /// <exception cref="DatabaseException">The function failed (<c>COHSQLE007</c>), or the database exception it threw.</exception>
+    /// <exception cref="DatabaseException">The function failed (<c>CS05007</c>), or the database exception it threw.</exception>
     internal void AddResolved(DatabaseName database, Collation collation, CancellationToken cancellationToken, DateTimeOffset? transactionTimestamp)
     {
         var arguments = new SqlArguments([], database, collation, cancellationToken, transactionTimestamp);
@@ -164,7 +164,7 @@ public abstract class SqlAggregateAccumulator
 
     /// <summary>Adds a row the strict rule admits: the one <see cref="AddCore"/> call, its failure coded.</summary>
     /// <param name="arguments">The row's arguments, of their parameters' types.</param>
-    /// <exception cref="DatabaseException">The function failed (<c>COHSQLE007</c>), or the database exception it threw.</exception>
+    /// <exception cref="DatabaseException">The function failed (<c>CS05007</c>), or the database exception it threw.</exception>
     internal void AddCoded(scoped in SqlArguments arguments)
     {
         try
@@ -180,14 +180,14 @@ public abstract class SqlAggregateAccumulator
     /// <summary>Computes the group's result; called once per group, after its last row.</summary>
     /// <remarks>
     /// A direct call has no statement to cancel, so an <see cref="OperationCanceledException"/>
-    /// from the core is a function failure (<c>COHSQLE007</c>). The engine supplies its statement
+    /// from the core is a function failure (<c>CS05007</c>). The engine supplies its statement
     /// token through an internal route, without retaining extra state in each accumulator.
     /// </remarks>
     /// <returns>The result.</returns>
     /// <exception cref="InvalidOperationException">
     /// The accumulator was not created by <see cref="SqlAggregateFunction.CreateAccumulator"/>, or it is already finished.
     /// </exception>
-    /// <exception cref="DatabaseException">The function failed: <c>COHSQLE007</c>, or the database exception it threw.</exception>
+    /// <exception cref="DatabaseException">The function failed: <c>CS05007</c>, or the database exception it threw.</exception>
     public SqlValue Finish() => Finish(default);
 
     /// <summary>Finishes a group inside the statement that owns it, with that statement's token.</summary>
@@ -196,10 +196,10 @@ public abstract class SqlAggregateAccumulator
     internal SqlValue Finish(CancellationToken cancellationToken)
     {
         var function = _function
-            ?? throw new InvalidOperationException("The accumulator was not created by SqlAggregateFunction.CreateAccumulator.");
+            ?? throw new InvalidOperationException(ErrorMessages.SqlAggregateAccumulatorAddFailure);
         if (_finished)
         {
-            throw new InvalidOperationException($"The accumulator of aggregate '{function.Name}' is already finished.");
+            throw new InvalidOperationException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlAggregateAccumulatorFinishFailure, function.Name));
         }
 
         _finished = true;
@@ -224,7 +224,7 @@ public abstract class SqlAggregateAccumulator
     /// <returns>
     /// The result, of the function's declared type, or <see cref="SqlValue.Null"/>. A value of a type
     /// that widens to the declared one implicitly is converted; any other type fails the statement as
-    /// <c>COHSQLE007</c>, as a NULL does from a function that is <see cref="SqlFunction.IsNeverNull"/>.
+    /// <c>CS05007</c>, as a NULL does from a function that is <see cref="SqlFunction.IsNeverNull"/>.
     /// </returns>
     protected abstract SqlValue FinishCore();
 

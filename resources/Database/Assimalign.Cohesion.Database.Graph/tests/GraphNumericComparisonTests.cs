@@ -125,6 +125,6 @@ public sealed class GraphNumericComparisonTests
             new Dictionary<string, object?> { ["v"] = double.NaN }, CancellationToken.None));
 
         // Assert
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG003");
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG03003");
     }
 }

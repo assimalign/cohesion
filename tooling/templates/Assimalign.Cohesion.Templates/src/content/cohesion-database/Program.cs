@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 
+using Assimalign.Cohesion.Database;
 using Assimalign.Cohesion.Database.Hosting;
 using Assimalign.Cohesion.Database.Sql;
 using Assimalign.Cohesion.Hosting;

@@ -41,7 +41,7 @@ internal sealed class DocumentWorkspace : LanguageWorkspace
     public override DocumentDatabaseSession? Session => _session;
 
     // The session runs its own collection operations (option B, concrete-types plan §6.6).
-    private DocumentDatabaseSession DocumentSession => _session ?? throw new InvalidOperationException("Select a database first.");
+    private DocumentDatabaseSession DocumentSession => _session ?? throw new InvalidOperationException(ErrorMessages.SessionSelectionMissing);
 
     protected override async Task OpenSessionAsync(string database, CancellationToken cancellationToken)
     {
@@ -59,7 +59,7 @@ internal sealed class DocumentWorkspace : LanguageWorkspace
     protected override QueryStatement ParseLocally(string statement) => new OqlQueryParser().Parse(statement);
 
     protected override Task OpenWireAsync(string database, EndPoint endPoint, CancellationToken cancellationToken)
-        => throw new NotSupportedException("Documents has no wire server or client.");
+        => throw new NotSupportedException(ErrorMessages.DocumentWireUnsupported);
 
     protected override ValueTask CloseWireAsync() => ValueTask.CompletedTask;
 

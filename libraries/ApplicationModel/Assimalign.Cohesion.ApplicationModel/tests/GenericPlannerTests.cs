@@ -460,9 +460,23 @@ public class GenericPlannerTests
     {
         // Arrange
         ResourceManifest original = CreateWebManifest();
-        ResourceManifest manifest = original with
+        Action compose = () => _ = original with
         {
             Mounts = [original.Mounts[0] with { Source = source }]
+        };
+
+        // Act and Assert: typed construction refuses invalid text before binding begins.
+        Should.Throw<ArgumentException>(compose);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel] - CreatePlan: Default typed mount sources cannot enter bindings")]
+    public void CreatePlan_DefaultMountSource_ShouldRejectBeforeBinding()
+    {
+        // Arrange
+        ResourceManifest original = CreateWebManifest();
+        ResourceManifest manifest = original with
+        {
+            Mounts = [original.Mounts[0] with { Source = default(ResourceMountSource) }]
         };
 
         // Act and Assert
@@ -478,7 +492,7 @@ public class GenericPlannerTests
         ResourcePlan legacy = CopyPlan(original, original.Workload, original.Container, new ControlPlaneSpec());
         ResourceManifest invalid = manifest with
         {
-            ControlPlane = manifest.ControlPlane with { Path = null! }
+            ControlPlane = manifest.ControlPlane with { Path = default }
         };
 
         // Act and Assert
@@ -493,7 +507,7 @@ public class GenericPlannerTests
         {
             Probes = new ResourceManifestProbes
             {
-                Readiness = new ResourceManifestProbe { Endpoint = "http", Http = string.Empty }
+                Readiness = new ResourceManifestProbe { Endpoint = "http", Http = default(ResourceHttpPath) }
             }
         };
         ResourcePlan plan = GenericPlanner.CreatePlan(CreateContext(manifest));

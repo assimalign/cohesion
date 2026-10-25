@@ -18,6 +18,8 @@ namespace Assimalign.Cohesion.Database.Sql.Schema;
 /// implementation. The <c>Sdk.Database</c> extractor recognizes its calls by its metadata name
 /// (<c>SqlTableBuilder`1</c>).
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("SqlTableBuilder")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Schema.SqlTableBuilder<>.DebugView))]
 public sealed class SqlTableBuilder<TRow>
 {
     private readonly List<string> _columns = [];
@@ -77,7 +79,7 @@ public sealed class SqlTableBuilder<TRow>
         {
             throw new SqlSchemaValidationException([
                 new SqlSchemaValidationError(SqlSchemaValidationErrorCode.UnsupportedType, $"{_name}.{name}",
-                    $"'{sqlType}' is not a SQL type name: an identifier, optionally followed by one or two unsigned Int32 arguments.")]);
+                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlTableBuilderColumnFailure, sqlType))]);
         }
 
         SqlTypeModifiers.TrySplit(sqlType, out string typeName, out int? first, out int? second);
@@ -92,7 +94,7 @@ public sealed class SqlTableBuilder<TRow>
         var column = _columnDefinitions[index];
         if (column.SqlType is not null && !string.Equals(column.SqlType, sqlType, StringComparison.Ordinal))
         {
-            throw new ArgumentException($"Column '{name}' is already declared with SQL type '{column.SqlType}'.", nameof(sqlType));
+            throw new ArgumentException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlTableBuilderColumnArgument, name, column.SqlType), nameof(sqlType));
         }
 
         _columnDefinitions[index] = column with { SqlType = sqlType };
@@ -151,7 +153,7 @@ public sealed class SqlTableBuilder<TRow>
         var column = _columnDefinitions[index];
         if (column.DefaultLiteral is not null && !string.Equals(column.DefaultLiteral, literal, StringComparison.Ordinal))
         {
-            throw new ArgumentException($"Column '{name}' is already declared with DEFAULT '{column.DefaultLiteral}'.", parameterName);
+            throw new ArgumentException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlTableBuilderSetDefaultArgument, name, column.DefaultLiteral), parameterName);
         }
 
         _columnDefinitions[index] = column with { DefaultLiteral = literal };
@@ -264,9 +266,17 @@ public sealed class SqlTableBuilder<TRow>
         if (body is not MemberExpression member ||
             !ReferenceEquals(member.Expression, selector.Parameters[0]))
         {
-            throw new ArgumentException("A schema member selector must select one row member.", nameof(selector));
+            throw new ArgumentException(ErrorMessages.SqlTableBuilderSelectMemberArgument, nameof(selector));
         }
 
         return member;
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Schema.SqlTableBuilder<TRow> value)
+        {
+            _ = value;
+        }
     }
 }

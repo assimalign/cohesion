@@ -16,7 +16,7 @@ public class HealthCheckMiddlewareTests
     [Fact(DisplayName = "Cohesion Test [Web.Health] - MapHealthChecks: a healthy report returns 200 with JSON and short-circuits")]
     public async Task MapHealthChecks_WhenHealthy_ShouldReturn200AndShortCircuit()
     {
-        IHealthCheckService service = HealthChecks.CreateBuilder()
+        IHealthCheckService service = new HealthChecksBuilder()
             .AddCheck("db", () => HealthCheckResult.Healthy("connected"))
             .Build();
 
@@ -43,7 +43,7 @@ public class HealthCheckMiddlewareTests
     [Fact(DisplayName = "Cohesion Test [Web.Health] - MapHealthChecks: an unhealthy report returns 503")]
     public async Task MapHealthChecks_WhenUnhealthy_ShouldReturn503()
     {
-        IHealthCheckService service = HealthChecks.CreateBuilder()
+        IHealthCheckService service = new HealthChecksBuilder()
             .AddCheck("db", () => HealthCheckResult.Unhealthy("down"))
             .Build();
 
@@ -59,7 +59,7 @@ public class HealthCheckMiddlewareTests
     [Fact(DisplayName = "Cohesion Test [Web.Health] - MapHealthChecks: a degraded report returns 200 by default")]
     public async Task MapHealthChecks_WhenDegraded_ShouldReturn200()
     {
-        IHealthCheckService service = HealthChecks.CreateBuilder()
+        IHealthCheckService service = new HealthChecksBuilder()
             .AddCheck("cache", () => HealthCheckResult.Degraded("slow"))
             .Build();
 
@@ -75,7 +75,7 @@ public class HealthCheckMiddlewareTests
     [Fact(DisplayName = "Cohesion Test [Web.Health] - MapHealthChecks: a non-matching path passes through to downstream middleware")]
     public async Task MapHealthChecks_WhenPathDoesNotMatch_ShouldPassThrough()
     {
-        IHealthCheckService service = HealthChecks.CreateBuilder()
+        IHealthCheckService service = new HealthChecksBuilder()
             .AddCheck("db", () => HealthCheckResult.Unhealthy())
             .Build();
 
@@ -98,7 +98,7 @@ public class HealthCheckMiddlewareTests
     [Fact(DisplayName = "Cohesion Test [Web.Health] - MapHealthChecks: a non-GET/HEAD method passes through")]
     public async Task MapHealthChecks_WhenMethodNotGetOrHead_ShouldPassThrough()
     {
-        IHealthCheckService service = HealthChecks.CreateBuilder()
+        IHealthCheckService service = new HealthChecksBuilder()
             .AddCheck("db", () => HealthCheckResult.Healthy())
             .Build();
 
@@ -120,7 +120,7 @@ public class HealthCheckMiddlewareTests
     [Fact(DisplayName = "Cohesion Test [Web.Health] - MapHealthChecks: emits no-store Cache-Control by default")]
     public async Task MapHealthChecks_ByDefault_ShouldEmitNoStoreCacheControl()
     {
-        IHealthCheckService service = HealthChecks.CreateBuilder()
+        IHealthCheckService service = new HealthChecksBuilder()
             .AddCheck("db", () => HealthCheckResult.Healthy())
             .Build();
 
@@ -136,7 +136,7 @@ public class HealthCheckMiddlewareTests
     [Fact(DisplayName = "Cohesion Test [Web.Health] - MapHealthChecks: attaches the health report as an IHealthFeature")]
     public async Task MapHealthChecks_WhenEvaluated_ShouldAttachHealthFeature()
     {
-        IHealthCheckService service = HealthChecks.CreateBuilder()
+        IHealthCheckService service = new HealthChecksBuilder()
             .AddCheck("db", () => HealthCheckResult.Degraded())
             .Build();
 
@@ -154,7 +154,7 @@ public class HealthCheckMiddlewareTests
     [Fact(DisplayName = "Cohesion Test [Web.Health] - MapReadinessCheck: runs only ready-tagged checks")]
     public async Task MapReadinessCheck_ShouldRunOnlyReadyTaggedChecks()
     {
-        IHealthCheckService service = HealthChecks.CreateBuilder()
+        IHealthCheckService service = new HealthChecksBuilder()
             .AddCheck("ready-db", () => HealthCheckResult.Healthy(), tags: new[] { HealthTags.Ready })
             .AddCheck("live-self", () => HealthCheckResult.Unhealthy(), tags: new[] { HealthTags.Live })
             .Build();
@@ -176,7 +176,7 @@ public class HealthCheckMiddlewareTests
     [Fact(DisplayName = "Cohesion Test [Web.Health] - MapLivenessCheck: with no live-tagged checks reports the process up (200)")]
     public async Task MapLivenessCheck_WhenNoLiveChecks_ShouldReturn200()
     {
-        IHealthCheckService service = HealthChecks.CreateBuilder()
+        IHealthCheckService service = new HealthChecksBuilder()
             .AddCheck("ready-db", () => HealthCheckResult.Unhealthy(), tags: new[] { HealthTags.Ready })
             .Build();
 
@@ -196,7 +196,7 @@ public class HealthCheckMiddlewareTests
     [Fact(DisplayName = "Cohesion Test [Web.Health] - MapHealthChecks: a custom response writer overrides the default")]
     public async Task MapHealthChecks_WhenCustomWriter_ShouldUseIt()
     {
-        IHealthCheckService service = HealthChecks.CreateBuilder()
+        IHealthCheckService service = new HealthChecksBuilder()
             .AddCheck("db", () => HealthCheckResult.Healthy())
             .Build();
 
@@ -213,7 +213,7 @@ public class HealthCheckMiddlewareTests
     public async Task MapHealthChecks_WhenCheckThrowsWithHostName_ShouldOmitHostNameFromResponse()
     {
         // Arrange
-        IHealthCheckService service = HealthChecks.CreateBuilder()
+        IHealthCheckService service = new HealthChecksBuilder()
             .AddCheck("db", StubCheck.Throwing(new InvalidOperationException(ThrownHostMessage)))
             .Build();
         TestPipelineBuilder builder = new();
@@ -238,7 +238,7 @@ public class HealthCheckMiddlewareTests
     public async Task MapHealthChecks_WhenCheckTimesOutWithHostName_ShouldOmitHostNameFromResponse()
     {
         // Arrange
-        IHealthCheckService service = HealthChecks.CreateBuilder()
+        IHealthCheckService service = new HealthChecksBuilder()
             .AddCheck(
                 "db",
                 StubCheck.BlockingThenCancelledWith(TimedOutHostMessage),
@@ -266,7 +266,7 @@ public class HealthCheckMiddlewareTests
     {
         // Arrange
         var exception = new InvalidOperationException(ThrownHostMessage);
-        IHealthCheckService service = HealthChecks.CreateBuilder()
+        IHealthCheckService service = new HealthChecksBuilder()
             .AddCheck("db", () => HealthCheckResult.Unhealthy(exception.Message, exception))
             .Build();
         TestPipelineBuilder builder = new();
@@ -284,7 +284,7 @@ public class HealthCheckMiddlewareTests
     public async Task MapHealthChecks_WhenDeveloperDetailsAndCheckThrows_ShouldPublishExceptionMessage()
     {
         // Arrange
-        IHealthCheckService service = HealthChecks.CreateBuilder()
+        IHealthCheckService service = new HealthChecksBuilder()
             .AddCheck("db", StubCheck.Throwing(new InvalidOperationException(ThrownHostMessage)))
             .Build();
         TestPipelineBuilder builder = new();
@@ -305,7 +305,7 @@ public class HealthCheckMiddlewareTests
     public async Task MapHealthChecks_WhenDeveloperDetailsAndCheckTimesOut_ShouldPublishExceptionMessage()
     {
         // Arrange
-        IHealthCheckService service = HealthChecks.CreateBuilder()
+        IHealthCheckService service = new HealthChecksBuilder()
             .AddCheck(
                 "db",
                 StubCheck.BlockingThenCancelledWith(TimedOutHostMessage),
@@ -328,7 +328,7 @@ public class HealthCheckMiddlewareTests
     public async Task MapHealthChecks_WhenDeveloperDetailsAndCustomWriter_ShouldUseCustomWriter()
     {
         // Arrange
-        IHealthCheckService service = HealthChecks.CreateBuilder()
+        IHealthCheckService service = new HealthChecksBuilder()
             .AddCheck("db", StubCheck.Throwing(new InvalidOperationException(ThrownHostMessage)))
             .Build();
         TestPipelineBuilder builder = new();
@@ -351,7 +351,7 @@ public class HealthCheckMiddlewareTests
     {
         // Arrange
         var exception = new InvalidOperationException(ThrownHostMessage);
-        IHealthCheckService service = HealthChecks.CreateBuilder()
+        IHealthCheckService service = new HealthChecksBuilder()
             .AddCheck("db", StubCheck.Throwing(exception))
             .Build();
         TestPipelineBuilder builder = new();

@@ -24,7 +24,7 @@ namespace Assimalign.Cohesion.Database.Sql;
 /// calls <see cref="InvokeCore"/> once. Anything the core throws other than
 /// <see cref="InsufficientExecutionStackException"/>,
 /// <see cref="OutOfMemoryException"/> or a <see cref="DatabaseException"/> fails the statement as
-/// <c>COHSQLE007</c>, naming the function, with the original as the inner exception; a
+/// <c>CS05007</c>, naming the function, with the original as the inner exception; a
 /// <see cref="DatabaseException"/> the core throws reaches the statement and the client unchanged,
 /// which is how a function raises an error of its own: a message that leads with its own code
 /// (<c>APP001: ...</c>) keeps it. The result is checked against <see cref="SqlFunction.ReturnType"/>
@@ -65,14 +65,14 @@ public abstract class SqlScalarFunction : SqlFunction
     /// <remarks>
     /// The token in <see cref="SqlArguments.Context"/> identifies cancellation of this call. Direct
     /// calls with the default context have no statement to cancel: an
-    /// <see cref="OperationCanceledException"/> becomes <c>COHSQLE007</c>. Supplying a context opts
+    /// <see cref="OperationCanceledException"/> becomes <c>CS05007</c>. Supplying a context opts
     /// into its token's cancellation semantics; no separate token parameter is needed.
     /// </remarks>
     /// <param name="arguments">The arguments, already of the declared types.</param>
     /// <returns>The result; NULL without a call when the function is strict and an argument is NULL.</returns>
     /// <exception cref="ArgumentException">The number of arguments does not match the parameters.</exception>
     /// <exception cref="DatabaseException">
-    /// The function failed: <c>COHSQLE007</c> wrapping what it threw, or the database exception it threw.
+    /// The function failed: <c>CS05007</c> wrapping what it threw, or the database exception it threw.
     /// </exception>
     /// <exception cref="OperationCanceledException">The core threw cancellation and the call context's token is canceled.</exception>
     public SqlValue Invoke(scoped in SqlArguments arguments)
@@ -110,7 +110,7 @@ public abstract class SqlScalarFunction : SqlFunction
     /// </remarks>
     /// <param name="arguments">The arguments: as many as the function declares, of their parameters' types.</param>
     /// <returns>The result as the row holds it.</returns>
-    /// <exception cref="DatabaseException">The function failed (<c>COHSQLE007</c>), or the database exception it threw.</exception>
+    /// <exception cref="DatabaseException">The function failed (<c>CS05007</c>), or the database exception it threw.</exception>
     internal object? InvokeResolved(scoped in SqlArguments arguments)
     {
         SqlValue result;
@@ -148,7 +148,7 @@ public abstract class SqlScalarFunction : SqlFunction
     /// <param name="cancellationToken">The statement's cancellation token.</param>
     /// <returns>The result as the row holds it.</returns>
     /// <exception cref="OverflowException">An integer does not fit the parameter's type.</exception>
-    /// <exception cref="DatabaseException">The function failed (<c>COHSQLE007</c>), or the database exception it threw.</exception>
+    /// <exception cref="DatabaseException">The function failed (<c>CS05007</c>), or the database exception it threw.</exception>
     internal object? InvokeResolved(object? value, DatabaseType target, DatabaseName database, Collation collation,
         CancellationToken cancellationToken, DateTimeOffset? transactionStart = null)
     {
@@ -185,7 +185,7 @@ public abstract class SqlScalarFunction : SqlFunction
     /// <returns>
     /// The result, of the declared type, or <see cref="SqlValue.Null"/>. A value of a type that widens
     /// to the declared one implicitly (INTEGER for BIGINT) is converted; any other type fails the
-    /// statement as <c>COHSQLE007</c>, as a NULL does from a function that is
+    /// statement as <c>CS05007</c>, as a NULL does from a function that is
     /// <see cref="SqlFunction.IsNeverNull"/>.
     /// </returns>
     protected abstract SqlValue InvokeCore(scoped in SqlArguments arguments);

@@ -29,8 +29,7 @@ public static class SqlMigrationScriptGenerator
             !string.Equals(plan.SourceHash, currentSchema.Hash, StringComparison.Ordinal))
         {
             throw new SqlSchemaMigrationException(
-                $"Migration plan source hash '{plan.SourceHash ?? "<empty>"}' does not match " +
-                $"the supplied current schema hash '{currentSchema.Hash}'.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ScriptGeneratorGenerateFailure, plan.SourceHash ?? "<empty>", currentSchema.Hash));
         }
 
         var steps = new List<SqlMigrationScriptStep>(plan.Operations.Count);
@@ -127,7 +126,7 @@ public static class SqlMigrationScriptGenerator
         catch (Exception exception) when (exception is DatabaseException or ArgumentException)
         {
             throw new SqlSchemaMigrationException(
-                $"Cannot render SQL migration operation '{operation.Kind}' for '{QualifiedName(operation)}': {exception.Message}",
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.MigrationScriptGeneratorRenderFailure, operation.Kind, QualifiedName(operation), exception.Message),
                 exception);
         }
     }
@@ -163,7 +162,7 @@ public static class SqlMigrationScriptGenerator
         // identity; its immutable bounds are validated when provisioning binds the schema.
         if (!SqlTypeRules.TrySplit(declared, out string name, out int? first, out _) || first is not null)
         {
-            throw new DatabaseException($"Column '{column.Name}' is declared with an invalid domain type '{declared}'.");
+            throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ResolveAlterColumnTypeDatabase, column.Name, declared));
         }
         SqlTypeRules.ValidateDomainName(name);
         domain = name;
@@ -246,8 +245,7 @@ public static class SqlMigrationScriptGenerator
         if (!string.Equals(operation.ObjectName, payloadName, StringComparison.Ordinal))
         {
             throw new SqlSchemaMigrationException(
-                $"Migration operation '{operation.Kind}' names '{operation.ObjectName}' but carries " +
-                $"a {payloadKind} definition named '{payloadName}'.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.GeneratorRequireMatchingNameFailure, operation.Kind, operation.ObjectName, payloadKind, payloadName));
         }
     }
 
@@ -259,12 +257,12 @@ public static class SqlMigrationScriptGenerator
     private static SqlSchemaMigrationException InvalidPayload(
         SqlSchemaMigrationOperation operation,
         string expected)
-        => new($"Migration operation '{operation.Kind}' for '{QualifiedName(operation)}' does not carry {expected}.");
+        => new(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ScriptGeneratorInvalidPayloadFailure, operation.Kind, QualifiedName(operation), expected));
 
     private static SqlSchemaMigrationException Unsupported(
         SqlSchemaMigrationOperation operation,
         string reason)
-        => new($"SQL migration operation '{operation.Kind}' for '{QualifiedName(operation)}' is unsupported: {reason}.");
+        => new(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ScriptGeneratorUnsupportedFailure, operation.Kind, QualifiedName(operation), reason));
 
     private static string QualifiedName(SqlSchemaMigrationOperation operation)
         => operation.ParentName is null

@@ -14,4 +14,19 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// expression tree is rebuilt with the values in it: that would mean reconstructing the
 /// language package's AST nodes from here, which needs their internal constructors.
 /// </remarks>
-internal sealed record SqlSubqueryPlan(SqlPlan Input, IReadOnlyList<SqlSubqueryBinding> Queries) : SqlPlan;
+[global::System.Diagnostics.DebuggerDisplay("SqlSubqueryPlan")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlSubqueryPlan.DebugView))]
+internal sealed record SqlSubqueryPlan(SqlPlan Input, IReadOnlyList<SqlSubqueryBinding> Queries) : SqlPlan{
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Sql.Internal.SqlSubqueryPlan _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlSubqueryPlan value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Sql.Internal.SqlPlan Input => _target.Input;
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.Sql.Internal.SqlSubqueryBinding> Queries => _target.Queries;
+    }
+}

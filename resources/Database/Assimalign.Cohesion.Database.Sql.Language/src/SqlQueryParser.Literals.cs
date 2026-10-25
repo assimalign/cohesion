@@ -34,7 +34,7 @@ public sealed partial class SqlQueryParser
             Advance(ref lexer);
             if (prefix is "B" or "E" or "U&")
             {
-                AddUnsupportedSurfaceDiagnostic(start, end, $"The {prefix}'...' SQL literal form is not supported.");
+                AddUnsupportedSurfaceDiagnostic(start, end, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.QueryParserTryParseTypedLiteralVoid, prefix));
                 literal = new SqlLiteralExpression("NULL", SqlLiteralType.Null, Location.Create(1, 1, start, end));
                 return true;
             }
@@ -72,7 +72,7 @@ public sealed partial class SqlQueryParser
             literalEnd = qualifierEnd ?? literalEnd;
             if (lexer.Current.Type == TokenType.LeftParen)
             {
-                AddUnsupportedSurfaceDiagnostic(start, literalEnd, "INTERVAL literal field precision is not supported.");
+                AddUnsupportedSurfaceDiagnostic(start, literalEnd, ErrorMessages.QueryParserTryParseTypedLiteralVoid2);
                 SkipParenthesized(ref lexer);
                 // Consume the rest of a precision-qualified range, rather than treating TO as an alias.
                 if (IsWord(ref lexer, "TO"))
@@ -94,13 +94,13 @@ public sealed partial class SqlQueryParser
         };
         if (kind is null)
         {
-            // TIME WITH TIME ZONE has a declaration-specific SQL0005; literals use the
+            // TIME WITH TIME ZONE has a declaration-specific CS00005; literals use the
             // recognized-unsupported diagnostic instead, as do numeric/UUID/JSON prefixes.
             if (type.StartsWith("TIME WITH TIME ZONE", StringComparison.OrdinalIgnoreCase))
             {
                 _parseDiagnostics.RemoveRange(before, _parseDiagnostics.Count - before);
             }
-            if (_parseDiagnostics.Count == before) { AddUnsupportedSurfaceDiagnostic(start, literalEnd, $"The {type.ToUpperInvariant()} '...' SQL literal form is not supported."); }
+            if (_parseDiagnostics.Count == before) { AddUnsupportedSurfaceDiagnostic(start, literalEnd, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.QueryParserTryParseTypedLiteralVoid3, type.ToUpperInvariant())); }
             literal = new SqlLiteralExpression("NULL", SqlLiteralType.Null, Location.Create(1, 1, start, literalEnd));
         }
         else if (_parseDiagnostics.Count > before)
@@ -132,7 +132,7 @@ public sealed partial class SqlQueryParser
         {
             _parseDiagnostics.Add(new Diagnostic
             {
-                Code = "SQL0008", Message = $"Invalid {type} literal: {exception.Message}", Start = start, End = end,
+                Code = "CS00008", Message = string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.QueryParserMakeTypedLiteralDiagnostic, type, exception.Message), Start = start, End = end,
                 Severity = DiagnosticSeverity.Error, Location = DiagnosticLocation.Absolute,
             });
         }

@@ -53,7 +53,7 @@ public sealed class DocumentClientPagingTests
         (await connection.QueryAsync("SELECT v FROM items OFFSET 9223372036854775807 LIMIT 9223372036854775807", cancellationToken: harness.Token)).ShouldBeEmpty();
     }
 
-    [Theory(DisplayName = "Cohesion Test [Documents.Client] - Paging: parameter normalization failures preserve OQL0007 and session reuse")]
+    [Theory(DisplayName = "Cohesion Test [Documents.Client] - Paging: parameter normalization failures preserve CD00007 and session reuse")]
     [InlineData(false)]
     [InlineData(true)]
     public async Task QueryAsync_InvalidPagingParameters_ShouldPreserveDiagnosticsAsync(bool tcp)
@@ -75,7 +75,7 @@ public sealed class DocumentClientPagingTests
                 // Assert
                 failure.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
                 var diagnostic = failure.Diagnostics.ShouldHaveSingleItem();
-                diagnostic.Code.ShouldBe("OQL0007");
+                diagnostic.Code.ShouldBe("CD00007");
                 diagnostic.Message.ShouldBe($"{clause} requires a non-negative integer in the signed 64-bit range.");
                 diagnostic.Start.ShouldBe(query.Length - 2);
                 diagnostic.End.ShouldBe(query.Length);

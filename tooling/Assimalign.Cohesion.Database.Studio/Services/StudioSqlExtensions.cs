@@ -13,7 +13,7 @@ namespace Assimalign.Cohesion.Database.Studio;
 /// editor, the catalog explorer, the wire server and a declared CHECK all reach them as they reach
 /// <c>UPPER</c>.
 /// </summary>
-internal static class StudioSqlExtensions
+internal static partial class StudioSqlExtensions
 {
     /// <summary>The registered scalar: the upper-case first letter of each space-separated word.</summary>
     public const string InitialsFunction = "studio_initials";

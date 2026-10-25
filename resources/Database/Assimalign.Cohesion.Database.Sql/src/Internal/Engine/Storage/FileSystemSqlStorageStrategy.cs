@@ -3,6 +3,7 @@ using System.IO;
 using System.Text;
 using System.Threading;
 
+using Assimalign.Cohesion.Database;
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 using Assimalign.Cohesion.Database.Sql.Storage;
@@ -20,6 +21,8 @@ using Assimalign.Cohesion.Database.Storage;
 /// database created as <c>sales</c> and opened as <c>SALES</c> on Linux was not found, and the
 /// engine's open-or-create made a second, empty database.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("FileSystemSqlStorageStrategy")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.FileSystemSqlStorageStrategy.DebugView))]
 internal sealed class FileSystemSqlStorageStrategy : SqlStorageStrategy
 {
     private readonly string _rootPath;
@@ -44,9 +47,11 @@ internal sealed class FileSystemSqlStorageStrategy : SqlStorageStrategy
         // drop deletes; a create takes over neither, so a stale catalog set never meets new data.
         if (!catalog && !restarting && Directory.Exists(directory))
         {
-            throw new DatabaseException(File.Exists(DatabaseFileNames.GetFiles(directory, GetFileSet(catalog)).Data)
-                ? $"Storage for database '{databaseName}' already exists."
-                : DatabaseFileNames.GetLeftoverRefusal(databaseName, directory));
+            bool exists = File.Exists(DatabaseFileNames.GetFiles(directory, GetFileSet(catalog)).Data);
+            string message = exists
+                ? string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.FileStorageAlreadyExists, databaseName)
+                : DatabaseFileNames.GetLeftoverRefusal(databaseName, directory);
+            throw DatabaseException.CreateEngineFailure(exists ? "CK03001" : "CK06004", message);
         }
 
         Directory.CreateDirectory(directory);
@@ -80,13 +85,13 @@ internal sealed class FileSystemSqlStorageStrategy : SqlStorageStrategy
 
         if (!File.Exists(files.Data))
         {
-            throw new DatabaseException($"Storage '{GetLabel(databaseName, catalog)}' does not exist.");
+            throw DatabaseException.CreateEngineFailure("CK06005", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlStorageStrategyOpenStorageDatabase, GetLabel(databaseName, catalog)));
         }
 
         if (!File.Exists(files.Journal) || !File.Exists(files.Backup))
         {
             throw new SqlDataStorageFormatException(string.Format(System.Globalization.CultureInfo.CurrentCulture,
-                ErrorMessages.CreationSidecarMissing, databaseName), "COHSQLC001");
+                ErrorMessages.CreationSidecarMissing, databaseName), "CS03401");
         }
         var dataStream = StorageStream.FromFile(files.Data, FileMode.Open, FileShare.Read);
 
@@ -200,4 +205,12 @@ internal sealed class FileSystemSqlStorageStrategy : SqlStorageStrategy
 
     private string CreationPath(string databaseName)
         => Path.Combine(DatabaseFileNames.GetDirectory(_rootPath, databaseName), CreationFileName);
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.FileSystemSqlStorageStrategy value)
+        {
+            _ = value;
+        }
+    }
 }

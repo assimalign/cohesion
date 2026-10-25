@@ -18,6 +18,8 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// it refuses to drop one (owner decision 56 of 2026-10-09), and each records the outcome of its
 /// provisioning for this assembly's tests.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("SqlDeclaredDatabase")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlDeclaredDatabase.DebugView))]
 internal sealed partial class SqlDeclaredDatabase
 {
     private SqlSchemaMigrationResult? _result;
@@ -62,7 +64,7 @@ internal sealed partial class SqlDeclaredDatabase
     /// <param name="declaration">The database's declaration.</param>
     /// <param name="types">The engine's types, not yet frozen.</param>
     /// <returns>The compiled schema, or null when the database declares none.</returns>
-    /// <exception cref="SqlSchemaMigrationException">The declaration is refused (<c>COHSQLP001</c>).</exception>
+    /// <exception cref="SqlSchemaMigrationException">The declaration is refused (<c>CS03101</c>).</exception>
     internal static SqlCompiledSchema? CompileSchema(string engineName, SqlDatabaseBuilder declaration, SqlTypeCollection types)
     {
         if (declaration.DeclaredSchema is not { } schema)
@@ -82,7 +84,7 @@ internal sealed partial class SqlDeclaredDatabase
 
         if (SqlSchemaProvisioner.DescribeUnsupported(compiled) is { } unsupported)
         {
-            throw Refuse(engineName, declaration.Name, $"its schema declares {unsupported}.", inner: null);
+            throw Refuse(engineName, declaration.Name, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DeclaredSchemaUnsupported, unsupported), inner: null);
         }
 
         foreach (CompiledSchemaType declared in compiled.Types)
@@ -121,7 +123,7 @@ internal sealed partial class SqlDeclaredDatabase
     /// <param name="types">The engine's frozen type catalog (phase 2).</param>
     /// <param name="parserOptions">The engine's parser options, which its DDL will parse the CHECK with.</param>
     /// <returns>The compiled declaration.</returns>
-    /// <exception cref="SqlSchemaMigrationException">The declaration is refused (<c>COHSQLP001</c>).</exception>
+    /// <exception cref="SqlSchemaMigrationException">The declaration is refused (<c>CS03101</c>).</exception>
     internal static SqlDeclaredDatabase Compile(string engineName, SqlDatabaseBuilder declaration, SqlCompiledSchema? compiled,
         SqlFunctionCatalog functions, SqlTypeCatalog types, SqlQueryParserOptions parserOptions)
     {
@@ -168,8 +170,8 @@ internal sealed partial class SqlDeclaredDatabase
     /// <param name="cancellationToken">Observed by each step.</param>
     /// <returns>A task that completes once the database is provisioned.</returns>
     /// <exception cref="SqlSchemaMigrationException">
-    /// The collation differs (<c>COHSQLP002</c>), the database drifted from a Verify declaration or
-    /// does not exist (<c>COHSQLP003</c>), or the schema's apply failed (<c>COHSQLP004</c> for a
+    /// The collation differs (<c>CS03102</c>), the database drifted from a Verify declaration or
+    /// does not exist (<c>CS03103</c>), or the schema's apply failed (<c>CS03104</c> for a
     /// failed step).
     /// </exception>
     internal async ValueTask ProvisionAsync(SqlDatabaseEngine engine, CancellationToken cancellationToken)
@@ -182,9 +184,7 @@ internal sealed partial class SqlDeclaredDatabase
         if (existing.Id != Collation.Id)
         {
             throw new SqlSchemaMigrationException(
-                $"{SqlProvisioningCodes.CollationMismatch}: SQL engine '{engine.Name}', database '{Name}': the database was created " +
-                $"with default collation '{existing.Name}', but it is declared with '{Collation.Name}'. A key's collation is " +
-                "persisted in it and cannot change: declare the collation the database has, or move its data to a new database.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DeclaredDatabaseProvisionAsyncFailure, SqlProvisioningCodes.CollationMismatch, engine.Name, Name, existing.Name, Collation.Name));
         }
 
         await ValidateScriptsAsync(database, cancellationToken).ConfigureAwait(false);
@@ -204,10 +204,7 @@ internal sealed partial class SqlDeclaredDatabase
         if (database.Definitions.FindUnresolved(cancellationToken) is { } unresolved)
         {
             throw new SqlSchemaMigrationException(
-                $"SQL engine '{engine.Name}', database '{Name}': {unresolved.Describe()}. " +
-                "The engine declares this database, so its build fails before the engine accepts work: register the function on the " +
-                "engine's builder (SqlDatabaseEngineBuilder.Functions), or drop the constraint through an engine that does not declare " +
-                "the database.",
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DeclaredDatabaseProvisionAsyncFailure2, engine.Name, Name, unresolved.Describe()),
                 SqlEvaluationException.UnregisteredFunction(unresolved));
         }
 
@@ -216,9 +213,7 @@ internal sealed partial class SqlDeclaredDatabase
         if (database.Definitions.FindUnresolvedDomain(cancellationToken) is { } domain)
         {
             throw new SqlSchemaMigrationException(
-                $"SQL engine '{engine.Name}', database '{Name}': {domain.Describe()}. " +
-                "The engine declares this database, so its build fails before the engine accepts work: register the domain on the " +
-                "engine's builder (SqlDatabaseEngineBuilder.Types), or drop the column through an engine that does not declare the database.",
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DeclaredDatabaseProvisionAsyncFailure3, engine.Name, Name, domain.Describe()),
                 SqlEvaluationException.UnregisteredDomain(domain));
         }
     }
@@ -239,8 +234,7 @@ internal sealed partial class SqlDeclaredDatabase
             if (Mode == SqlProvisioningMode.Verify)
             {
                 throw new SqlSchemaMigrationException(
-                    $"{SqlProvisioningCodes.Drift}: SQL engine '{engine.Name}', database '{Name}': the database does not exist. It is " +
-                    "declared in Verify mode, so it is not created; create and migrate it out of band, or declare it in Apply mode.",
+                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabaseOpenOrCreateAsyncFailure, SqlProvisioningCodes.Drift, engine.Name, Name),
                     missing);
             }
         }
@@ -251,8 +245,15 @@ internal sealed partial class SqlDeclaredDatabase
 
     private static SqlSchemaMigrationException Refuse(string engineName, DatabaseName databaseName, string reason, Exception? inner)
     {
-        string message = $"{SqlProvisioningCodes.DeclarationRefused}: SQL engine '{engineName}' cannot provision database " +
-            $"'{databaseName}': {reason} Nothing was opened or written.";
+        string message = string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlDeclaredDatabaseRefuseFailure, SqlProvisioningCodes.DeclarationRefused, engineName, databaseName, reason);
         return inner is null ? new SqlSchemaMigrationException(message) : new SqlSchemaMigrationException(message, inner);
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlDeclaredDatabase value)
+        {
+            _ = value;
+        }
     }
 }

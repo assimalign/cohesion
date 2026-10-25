@@ -54,7 +54,7 @@ public static class ProtocolPayload
 
         if (length < 0 || (uint)position > (uint)payload.Length || length > payload.Length - position)
         {
-            throw new ProtocolException("Malformed payload: invalid string length.");
+            throw new ProtocolException(ErrorMessages.ProtocolPayloadReadStringProtocol);
         }
 
         try
@@ -78,7 +78,7 @@ public static class ProtocolPayload
     {
         if ((uint)position > (uint)payload.Length || sizeof(int) > payload.Length - position)
         {
-            throw new ProtocolException("Malformed payload: truncated integer.");
+            throw new ProtocolException(ErrorMessages.ProtocolPayloadReadInt32Protocol);
         }
 
         int value = BinaryPrimitives.ReadInt32BigEndian(payload[position..]);
@@ -95,7 +95,7 @@ public static class ProtocolPayload
     {
         if ((uint)position > (uint)payload.Length || sizeof(long) > payload.Length - position)
         {
-            throw new ProtocolException("Malformed payload: truncated integer.");
+            throw new ProtocolException(ErrorMessages.ProtocolPayloadReadInt32Protocol);
         }
 
         long value = BinaryPrimitives.ReadInt64BigEndian(payload[position..]);
@@ -112,7 +112,7 @@ public static class ProtocolPayload
     {
         if ((uint)position > (uint)payload.Length || sizeof(ushort) > payload.Length - position)
         {
-            throw new ProtocolException("Malformed payload: truncated integer.");
+            throw new ProtocolException(ErrorMessages.ProtocolPayloadReadInt32Protocol);
         }
 
         ushort value = BinaryPrimitives.ReadUInt16BigEndian(payload[position..]);

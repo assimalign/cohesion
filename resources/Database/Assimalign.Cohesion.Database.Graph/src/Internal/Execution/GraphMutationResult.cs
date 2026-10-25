@@ -4,6 +4,8 @@ using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Graph.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("GraphMutationResult")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Internal.GraphMutationResult.DebugView))]
 internal sealed class GraphMutationResult : DatabaseResult
 {
     private readonly long _count;
@@ -21,4 +23,18 @@ internal sealed class GraphMutationResult : DatabaseResult
     public override DatabaseResultStatus Status => DatabaseResultStatus.Success;
     public override long AffectedCount => _count;
     public override IReadOnlyList<Diagnostic> Diagnostics => _warnings;
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Graph.Internal.GraphMutationResult _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Graph.Internal.GraphMutationResult value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Execution.DatabaseResultStatus Status => _target.Status;
+        public long AffectedCount => _target.AffectedCount;
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.Types.Diagnostic> Diagnostics => _target.Diagnostics;
+    }
 }

@@ -25,7 +25,7 @@ public sealed partial class GqlQueryParser
             if (token.Type is TokenType.String or TokenType.QuotedIdentifier or TokenType.Comment) { continue; }
             if (token.Text.ToUpperInvariant() is "INSERT" or "CREATE" or "DELETE" or "DETACH" or "SET" or "REMOVE" or "MERGE" or "DROP" or "ALTER")
             {
-                Error("GQL0007", "Graph catalog introspection is read-only.", token);
+                Error("CG00007", ErrorMessages.GqlQueryParserFindCatalogMutationVoid, token);
                 return;
             }
         }

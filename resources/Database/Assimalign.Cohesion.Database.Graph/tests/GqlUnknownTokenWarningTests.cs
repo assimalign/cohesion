@@ -17,7 +17,7 @@ namespace Assimalign.Cohesion.Database.Graph.Tests;
 
 /// <summary>
 /// A read that names a label or relationship type the database does not have returns no rows and a
-/// coded warning instead of failing with COHDBG002 (#1228), as Neo4j answers it with
+/// coded warning instead of failing with CG01002 (#1228), as Neo4j answers it with
 /// <c>UnknownLabelWarning</c> or <c>UnknownRelationshipTypeWarning</c>. Since a failed statement
 /// aborts the explicit transaction (#1188), the read must not fail: a probe for a label that does not
 /// exist yet keeps the caller's transaction and its earlier writes.
@@ -119,7 +119,7 @@ public sealed class GqlUnknownTokenWarningTests
         // Assert
         rows.Select(row => row[0]).ShouldBe(["l"]);
         diagnostics.ShouldBeEmpty();
-        invalid.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHDBG001");
+        invalid.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CG05001");
     }
 
     /// <summary>
@@ -197,7 +197,7 @@ public sealed class GqlUnknownTokenWarningTests
 
     /// <summary>
     /// A read-only statement with no projection reports its warning on the mutation-shaped result.
-    /// The parser rejects MATCH without RETURN (GQL0002), but the public
+    /// The parser rejects MATCH without RETURN (CG00002), but the public
     /// <see cref="GraphQueryRequest(GqlQueryStatement, IReadOnlyDictionary{string, object?})"/>
     /// constructor runs a hand-built statement of that shape.
     /// </summary>
@@ -253,7 +253,7 @@ public sealed class GqlUnknownTokenWarningTests
 
     /// <summary>
     /// A schema read of an unknown label is empty with the same warning and keeps the transaction;
-    /// schema writes still require an existing label (COHDBG002) and, like any failed statement,
+    /// schema writes still require an existing label (CG01002) and, like any failed statement,
     /// abort the transaction.
     /// </summary>
     [Fact(DisplayName = "Cohesion Test [Graph] - Unknown tokens: a schema read of an unknown label is empty and warns")]
@@ -286,7 +286,7 @@ public sealed class GqlUnknownTokenWarningTests
         known.Select(index => index.Name).ShouldBe(["by_name"]);
         known.Diagnostics.ShouldBeEmpty();
         activeAfterReads.ShouldBe(TransactionState.Active);
-        drop.Message.ShouldStartWith("COHDBG002", Case.Sensitive);
+        drop.Message.ShouldStartWith("CG01002", Case.Sensitive);
         afterWrite.ShouldBe(TransactionState.Faulted);
     }
 

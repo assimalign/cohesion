@@ -61,7 +61,7 @@ internal sealed partial class SqlPlanExecutor
                     {
                         throw new SqlExecutionException(SqlDefinitionBinder.NativeCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.NativeTypeDrop, drop.Name));
                     }
-                    throw SqlDefinitionBinder.Refuse($"Domain '{drop.Name}' does not exist.", drop.Location);
+                    throw SqlDefinitionBinder.Refuse(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExecuteDefinitionAsyncSqlPlanning, drop.Name), drop.Location);
                 }
                 CheckDefinitionOwner(definition.Name, definition.Owner, definition.OwningSchema, statement);
                 EnsureNoDependents(SqlDefinitionBinder.DomainKey(drop.Name));
@@ -82,7 +82,7 @@ internal sealed partial class SqlPlanExecutor
         }
         if (owner == DatabaseObjectOwner.Adhoc && statement.ProvisioningSchema is not null)
         {
-            throw SqlDefinitionBinder.Refuse($"Schema '{statement.ProvisioningSchema}' cannot adopt or drop ad-hoc definition '{name}'.");
+            throw SqlDefinitionBinder.Refuse(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CheckDefinitionOwnerSqlPlanning, statement.ProvisioningSchema, name));
         }
     }
 
@@ -100,7 +100,7 @@ internal sealed partial class SqlPlanExecutor
         {
             if (key.Equals(next, StringComparison.OrdinalIgnoreCase))
             {
-                throw SqlDefinitionBinder.Refuse($"Recursive SQL definition dependency at '{key}'.");
+                throw SqlDefinitionBinder.Refuse(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlDefinitionBinderLoadSqlPlanning, key));
             }
             if (seen.Add(next) && graph.TryGetValue(next, out var children))
             {
@@ -117,7 +117,7 @@ internal sealed partial class SqlPlanExecutor
         foreach (var view in _catalog.Views)
         {
             if (view.Dependencies.Contains(key, StringComparer.OrdinalIgnoreCase) || view.FunctionCalls.Contains(key, StringComparer.OrdinalIgnoreCase))
-            { throw new SqlPlanningException("COHSQLD002", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.EngineViewDropDependent, key, view.Schema, view.Name)); }
+            { throw new SqlPlanningException("CS03302", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.EngineViewDropDependent, key, view.Schema, view.Name)); }
         }
         foreach (var function in _catalog.Functions)
         {

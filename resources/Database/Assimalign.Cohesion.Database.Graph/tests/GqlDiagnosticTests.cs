@@ -53,7 +53,7 @@ public sealed class GqlDiagnosticTests
 
         // Assert
         var diagnostic = failure.Diagnostics.ShouldHaveSingleItem();
-        diagnostic.Code.ShouldBe("COHDBG001");
+        diagnostic.Code.ShouldBe("CG05001");
         diagnostic.Start.ShouldBe(parsed.GqlExpression.Location!.Start);
         diagnostic.End.ShouldBe(parsed.GqlExpression.Location.End);
         diagnostic.Severity.ShouldBe(DiagnosticSeverity.Error);
@@ -75,7 +75,7 @@ public sealed class GqlDiagnosticTests
 
         // Assert
         var warning = result.Diagnostics.ShouldNotBeNull().ShouldHaveSingleItem();
-        warning.Code.ShouldBe("COHDBG010");
+        warning.Code.ShouldBe("CG01010");
         warning.Severity.ShouldBe(DiagnosticSeverity.Warning);
         warning.Start.ShouldBe(parsed.GqlExpression.Predicate!.Location!.Start);
         warning.End.ShouldBe(parsed.GqlExpression.Predicate.Location.End);

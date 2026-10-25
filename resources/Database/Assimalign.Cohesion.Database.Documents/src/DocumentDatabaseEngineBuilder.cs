@@ -53,6 +53,8 @@ namespace Assimalign.Cohesion.Database.Documents;
 /// </para>
 /// </remarks>
 // Deviates from the repo interface-first rule per design decision: Database engines are concrete-first — abstract bases with protected cores and sealed model leaves (owner, 2026-10-04; database-area.md).
+[global::System.Diagnostics.DebuggerDisplay("DocumentDatabaseEngineBuilder {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Documents.DocumentDatabaseEngineBuilder.DebugView))]
 public sealed class DocumentDatabaseEngineBuilder
 {
     private readonly DatabaseEngineBuilderState<DocumentDatabaseEngine> _state;
@@ -208,7 +210,7 @@ public sealed class DocumentDatabaseEngineBuilder
     /// </exception>
     /// <exception cref="DatabaseException">
     /// A declared database's storage format was refused, or opening it failed with corruption
-    /// (<c>COHDBS003</c>) or coded I/O failure (<c>COHDBD004</c>); the engine was disposed.
+    /// (<c>CK06003</c>) or coded I/O failure (<c>CD06104</c>); the engine was disposed.
     /// </exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled; a created engine was disposed.</exception>
     /// <exception cref="AggregateException">The failure, together with a failure to dispose what it rejected.</exception>
@@ -240,4 +242,17 @@ public sealed class DocumentDatabaseEngineBuilder
     /// </summary>
     /// <param name="failure">The failure that abandoned the engine.</param>
     internal void Abort(Exception failure) => _state.Abort(failure);
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Documents.DocumentDatabaseEngineBuilder _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Documents.DocumentDatabaseEngineBuilder value)
+        {
+            _target = value;
+        }
+
+        public string Name => _target.Name;
+        public global::Assimalign.Cohesion.Database.Documents.DocumentDatabaseEngineOptions Options => _target.Options;
+    }
 }

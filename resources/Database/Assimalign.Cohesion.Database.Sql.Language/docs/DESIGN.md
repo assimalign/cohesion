@@ -1,5 +1,12 @@
 # Assimalign.Cohesion.Database.Sql.Language — Design
 
+## Cascade progress and deadlock diagnostics (w11 review)
+
+DIALECT.md records the per-statement bound of three cascade lock refusals: two releases,
+then normal queued waits retaining closure grants and deadlock detection. Hard deadlocks
+carry CS04065 mapped to 40P01; explicit victim rollback remains caller-managed under
+statement atomicity. Grammar, diagnostic transport and disk formats are unchanged.
+
 ## Bounded SELECT evaluation (#1523)
 
 DIALECT.md records early termination across stored/system, grouped, correlated,
@@ -10,7 +17,7 @@ These are engine execution rules; grammar and public syntax are unchanged.
 
 ## Result encoding failures (#1651)
 
-DIALECT records COHSQLE045's result encoding contract. Writing statements prepare results before
+DIALECT records CS05045's result encoding contract. Writing statements prepare results before
 commit, with DML failures rolling back only the statement. Read-only statements encode during
 delivery; late failures end partial results without invalidating the connection or explicit
 transaction. Both paths enforce only the per-frame header/row limit, with no aggregate cap
@@ -19,7 +26,7 @@ Parser and AST shapes are unchanged.
 
 ## Key declaration semantics (#1192)
 
-The engine rejects repeated child or referenced key columns with COHSQLE019; rejecting
+The engine rejects repeated child or referenced key columns with CS01019; rejecting
 repeated FOREIGN KEY child columns is stricter than PostgreSQL. Existing-table CREATE TABLE
 IF NOT EXISTS skips key declaration validation and preserves the table. DIALECT.md records
 these execution rules; parser shapes and advertised clauses are unchanged.
@@ -29,7 +36,7 @@ these execution rules; parser shapes and advertised clauses are unchanged.
 The shared lexer keeps `"a""b"` as one identifier token; CurrentIdentifierText decodes it to
 `a"b` for every name position. Expression rendering doubles embedded quotes in ordinary and
 function identifiers. Lexical completeness checks distinguish a closing quote from a final
-escaped quote, so `"a""` is SQL0003. Parser conformance, identifier-value and renderer round-trip
+escaped quote, so `"a""` is CS00003. Parser conformance, identifier-value and renderer round-trip
 tests pin the behavior. See Database.Language DESIGN for the PostgreSQL scanner reference.
 Simple column-reference spans retain the complete raw token, including delimiters and doubled
 quotes. Persisted-view binding edits use those source spans, so canonical expansion replaces
@@ -48,7 +55,7 @@ assignments and optional filter. The parser supplies its EXCLUDED relation refer
 keep construction inside this assembly. ON CONFLICT adds one advertised clause; no keyword
 or unsupported-vocabulary row changes. INSERT OR IGNORE/REPLACE and ON DUPLICATE KEY UPDATE
 are positional capability refusals (REPLACE uses its existing function token). Inference
-expressions/options, partial WHERE and DO SELECT retain named COHDBL001. Preflight resets
+expressions/options, partial WHERE and DO SELECT retain named CK00001. Preflight resets
 INSERT VALUES/FROM state at arbitration and names SET/WHERE subqueries ON CONFLICT DO UPDATE,
 including after WITH-prefixed INSERT SELECT. RETURNING ends that scope and refuses
 the EXCLUDED pseudo-relation; a visible target table or alias really named excluded masks
@@ -59,7 +66,7 @@ DIALECT specifies execution and errors.
 
 CREATE examines the object word after modifiers before choosing the view parser.
 Excluded TEMP/TEMPORARY TABLE and OR REPLACE FUNCTION constructs keep their own
-COHDBL001 names. View input references are serialized from their engine bindings;
+CK00001 names. View input references are serialized from their engine bindings;
 ORDER BY output aliases remain output references. DIALECT.md specifies frozen view
 metadata and isolated bind failures.
 
@@ -68,8 +75,8 @@ metadata and isolated bind failures.
 SQL follows the [shared parameter contract](../../Assimalign.Cohesion.Database.Language/docs/DESIGN.md#parameter-contract-1102).
 The parser retains sigils in SqlParameterExpression. It links Execution's stateless
 name check, with no Execution assembly dependency. Numeric names use ASCII digits only;
-Unicode numeric spellings such as `$١` and `$1١` report SQL0003 at the whole reference.
-Malformed names report SQL0003; operand `?` and `:name` use the shared supported-form message.
+Unicode numeric spellings such as `$١` and `$1١` report CS00003 at the whole reference.
+Malformed names report CS00003; operand `?` and `:name` use the shared supported-form message.
 Trailing `?` keeps the lexical generic error. Adjacent host names in operand position bypass the
 clause/capability scan even when they spell keywords such as `:union`, `:like` and `:select`; syntax parsing
 reports the whole reference once. DIALECT.md and ParameterConformanceTests measure these forms.
@@ -79,7 +86,7 @@ reports the whole reference once. DIALECT.md and ParameterConformanceTests measu
 
 CHAR and CHARACTER resolve to DatabaseType.Character, distinct from VARCHAR/TEXT (String).
 The parser supplies length one for bare CHAR, and explicit lengths reuse the existing shared
-SqlTypeModifiers rule in every declaration and CAST. SQL0005 and the common length ceiling remain
+SqlTypeModifiers rule in every declaration and CAST. CS00005 and the common length ceiling remain
 unchanged. The runtime owns padding, trimming casts and comparison; DIALECT.md specifies their
 PostgreSQL anchors and the dialect differences. Schema and SDK normalization share this identity
 in the [current canonical document](../../Assimalign.Cohesion.Database.Sql.Schema/docs/DESIGN.md#fixed-length-schema-columns-1437).
@@ -111,11 +118,11 @@ Special-form names render as quoted ordinary calls when a quantifier or ordering
 the standard EXTRACT/POSITION and niladic arms apply only without those modifiers.
 
 Boolean search conditions (#1190) use the existing AST. Engine planning and runtime
-reject non-Boolean predicates with COHSQLE003 (42804), including upsert WHERE; NULL
+reject non-Boolean predicates with CS02003 (42804), including upsert WHERE; NULL
 retains three-valued logic. Every CASE result and COALESCE alternative in a Boolean position
 must qualify, including unreachable alternatives. Valid Boolean input string literals coerce
 in these positions; text columns and parameters keep their types. Non-Boolean table/domain
-CHECK roots use the same COHSQLE003 / 42804 code. The live clause corpus pins these errors.
+CHECK roots use the same CS02003 / 42804 code. The live clause corpus pins these errors.
 
 FROM-less SELECT (#1373) retains the existing AST and grammar. The engine now uses
 one implicit row for every such query, including views and nested queries; DIALECT.md
@@ -127,16 +134,16 @@ Column DEFAULT uses the restricted comparison/distinct expression grammar, leavi
 unconsumed (PostgreSQL gram.y:4032-4037). Parentheses, CAST and scalar calls execute; the
 engine enforces variable-free definitions and volatility. NO and ACTION are contextual words.
 The five delete actions are retained in the AST; omitted references use NoAction (#1121).
-SET column lists retain COHDBL001. The profile and live clause corpus add exactly three clauses.
+SET column lists retain CK00001. The profile and live clause corpus add exactly three clauses.
 
 The #1120 profile executes all 42 T1 scalar names, including bare datetime values.
 SUBSTRING/TRIM/POSITION normalize onto calls; NULLIF/EXTRACT remain evaluator forms.
 Canonical rendering preserves the standard separators and niladic syntax. Precision
-arguments retain a reusable COHDBL001 rejection; malformed forms use SQL0003.
+arguments retain a reusable CK00001 rejection; malformed forms use CS00003.
 Function tokens share identifier/qualifier parsing, so additions preserve ordinary names.
 
 The profile's Functions list contains only executable built-ins, including the CAST special
-form. Non-executing window functions remain in SqlUnsupportedVocabulary and report named COHDBL001 diagnostics. Bare datetime forms execute and cannot bind unquoted columns.
+form. Non-executing window functions remain in SqlUnsupportedVocabulary and report named CK00001 diagnostics. Bare datetime forms execute and cannot bind unquoted columns.
 The engine's single function-coverage guard requires a passing live case for every declaration.
 
 `SqlLanguageProfile.RecognizedUnsupportedVocabulary` exposes a read-only snapshot of spellings
@@ -147,9 +154,9 @@ is the issue's approved public-profile option; no visibility grant or public int
 ## DML qualifiers (#1106)
 
 The UPDATE and DELETE dialect rows specify the same target qualifier rule as SELECT:
-an alias hides the base relation name, and unknown qualifiers fail with located COHSQLE015
+an alias hides the base relation name, and unknown qualifiers fail with located CS01015
 before any mutation. The engine supplies relation bindings; parser shapes are unchanged. #1113 adds correlated and uncorrelated WHERE subqueries; the existing
-COHDBL001 refusal is retained for UPDATE SET. PostgreSQL `parse_relation.c:3759`
+CK00001 refusal is retained for UPDATE SET. PostgreSQL `parse_relation.c:3759`
 is the reference for the hidden-name rule.
 
 ## System relation joins (#1106)
@@ -166,7 +173,7 @@ and the live JOIN conformance case cover system-to-system joins.
 and reports `SqlQueryCommandType.Explain`. The parser handles the prefix once, then uses the
 ordinary statement parser and terminator check. Capability scanning classifies the wrapped
 statement, so supported subqueries remain supported and excluded UPDATE SET subqueries stay
-excluded. DDL, transactions, nested EXPLAIN and ANALYZE receive `COHDBL001`. The wrapped
+excluded. DDL, transactions, nested EXPLAIN and ANALYZE receive `CK00001`. The wrapped
 statement's nesting measure remains subject to the engine's existing limit. SqlClauses.Explain,
 the statement corpus and the live conformance case change together; DIALECT.md is the contract.
 The engine's deferred-provisioning admission walks the wrapped statement before binding, just
@@ -178,10 +185,10 @@ The public `SqlRelationReference` variant set has sealed named-table and derived
 query leaves; DML/DDL targets keep `SqlTableReference`. FROM and JOIN retain the
 variant directly. Derived parsing uses the existing subquery and expression depth
 budgets, requires an alias, and preserves an optional column-name list. The engine
-checks full output-name width and rejects blank names with COHSQLE013 before execution.
+checks full output-name width and rejects blank names with CS05013 before execution.
 Rendering and query depth visit every body. Derived-name classification waits for
 catalog binding: only actual sibling references require LATERAL, enclosing-query
-references resolve through the lexical scope chain, and unknown/hidden names retain COHSQLE015.
+references resolve through the lexical scope chain, and unknown/hidden names retain CS01015.
 Correlated and uncorrelated UPDATE/DELETE WHERE children use ordinary subquery grammar;
 UPDATE SET and lateral references remain explicit capability refusals.
 Outer ordering binds derived outputs, including projection aliases and ordinals, with
@@ -194,10 +201,10 @@ SqlColumnDefinition.Identity retains SqlIdentityDefinition (ALWAYS/BY DEFAULT, s
 increment). Canonical identity syntax and the SQL Server IDENTITY(seed, increment) lexical
 alias share a contextual parser; no identity word becomes globally reserved. Capability scanning
 skips identity option parentheses so START WITH cannot masquerade as a CTE. The type grammar's
-shared rejection rule keeps SERIAL/BIGSERIAL/SMALLSERIAL as COHDBL001 with an identity suggestion.
+shared rejection rule keeps SERIAL/BIGSERIAL/SMALLSERIAL as CK00001 with an identity suggestion.
 SqlClauses.Identity and the parser and live conformance corpora advance together; DIALECT.md
 defines allocation, exclusions and direction-dependent generator bounds. Explicit NULL conflicts
-with NOT NULL, PRIMARY KEY or IDENTITY through the common CREATE/ADD/ALTER column parser (`SQL0003`, naming the
+with NOT NULL, PRIMARY KEY or IDENTITY through the common CREATE/ADD/ALTER column parser (`CS00003`, naming the
 column); CREATE also checks table primary keys after reading all definitions. This follows
 PostgreSQL `src/backend/parser/parse_utilcmd.c:873`. INSERT target parsing leaves a bare
 OVERRIDING clause token unconsumed while explicit AS aliases retain their lexical meaning.
@@ -215,7 +222,7 @@ for SET/DROP DEFAULT and SET/DROP NOT NULL lower onto the existing column replac
 remain contextual, and each form uses the ordinary complete-statement terminator check. Lookahead
 copies the token lexer without changing parser bookkeeping. The action changes no clause count.
 The SqlAlterAction constructor is private protected, closing its leaves to this assembly. Only the
-named excluded forms use COHDBL001; unknown and incomplete actions use SQL0003, including a bare
+named excluded forms use CK00001; unknown and incomplete actions use CS00003, including a bare
 SET or ALTER c SET/DROP. SET SCHEMA is classified only when both words are present.
 
 Parse the declared dialect into a stable, fully-typed AST that planners, catalogs,
@@ -225,7 +232,7 @@ and the conformance corpus change together, and anything outside the matrix fail
 loudly instead of half-parsing. `SqlLanguageProfile.Instance` is the executable
 contract: it owns the SQL keyword/function tables and opts into only the clauses
 the parser implements today. Recognized clauses outside that set produce the shared
-`COHDBL001` model-specific diagnostic; `SQL0002` remains the unknown-command diagnostic.
+`CK00001` model-specific diagnostic; `CS00002` remains the unknown-command diagnostic.
 
 ## Why-this-not-that decisions
 
@@ -265,7 +272,7 @@ rather than source trivia. FETCH consumes a primary expression or signed numeric
 following PostgreSQL src/backend/parser/gram.y:13674-13696; compound counts require
 parentheses, which canonical rendering restores. Renderer fuzz roots and WITH bodies
 generate all families, including parenthesized compound FETCH counts. INSERT, UPDATE and
-DELETE TOP are recognized DML TOP exclusions with COHDBL001.
+DELETE TOP are recognized DML TOP exclusions with CK00001.
 PERCENT and TIES are contextual unsupported entries; their identifier quoting requires
 the engine format-19 gate. PostgreSQL gram.y:13537-13658 supplies the offset/fetch grammar.
 
@@ -285,7 +292,7 @@ the first unadvertised construct, so USING cannot mask NATURAL, WINDOW or OVER.
 The renderer and nesting measure traverse every item and condition; catalog-aware correlation binding belongs to the engine.
 The engine implements written-order steps; DIALECT.md defines LEFT null extension and the
 common-typed merged expressions and modifier clearing for USING. Qualified wildcards keep
-COHDBL001. ORDER BY aliases and ordinals count visible wildcard output after USING merges.
+CK00001. ORDER BY aliases and ordinals count visible wildcard output after USING merges.
 
 
 - **Recursive descent, hand-written** — over a parser generator. The dialect is
@@ -301,7 +308,7 @@ COHDBL001. ORDER BY aliases and ordinals count visible wildcard output after USI
 - **Total parsing never means silent parsing (#1068).** A recursive-descent branch
   returns at the first token it does not understand, so `ParseCore` requires the
   statement to end at the end of the text or at one terminating `;`, for every
-  statement kind. Anything left over is `SQL0003` at the first unconsumed token.
+  statement kind. Anything left over is `CS00003` at the first unconsumed token.
   Required tokens (closing `)`, `THEN`, `END`, `BY`, `SET`, `=`, names) are
   expected, not skipped when absent. Error recovery may still substitute a
   placeholder node, such as the NULL literal for a missing expression or the `?`
@@ -336,8 +343,8 @@ COHDBL001. ORDER BY aliases and ordinals count visible wildcard output after USI
   canonical text: dates and times, wall-clock timestamps, offset timestamps, day-time
   intervals and uppercase binary hex. N strings use String. The existing multi-word
   type grammar resolves temporal prefixes; X/N require token adjacency. Unsupported
-  valid forms (including year-month intervals) report COHDBL001, invalid contents
-  SQL0008, both at the complete literal. Canonical rendering retains typed prefixes
+  valid forms (including year-month intervals) report CK00001, invalid contents
+  CS00008, both at the complete literal. Canonical rendering retains typed prefixes
   so persisted-expression equivalence checks kind and value without losing type.
   TIME and INTERVAL plain-string assignment share these readers with CAST (#1422).
   An unqualified bare signed interval number means seconds, following PostgreSQL's
@@ -350,7 +357,7 @@ COHDBL001. ORDER BY aliases and ordinals count visible wildcard output after USI
   by DecodeTimeCommon (datetime.c:2656-2740). Hours are unbounded within TimeSpan, while
   seven fractional digits retain the dialect's 100 ns precision. SQL years-months
   (datetime.c:3669-3695) and ISO alternative dates (datetime.c:4038-4108) are recognized and
-  refused as COHDBL001 rather than malformed SQL0008. Day-time ISO P1DT2H remains executable.
+  refused as CK00001 rather than malformed CS00008. Day-time ISO P1DT2H remains executable.
 - **String literal nodes carry the value, not the lexeme** — quotes stripped,
   doubled quotes unescaped — because every consumer (executor, planner, schema
   compiler) wants the value, and exactly one component (the parser) knows the
@@ -371,7 +378,7 @@ COHDBL001. ORDER BY aliases and ordinals count visible wildcard output after USI
   A name outside the table is not this package's error (phase E3):
   an engine's type catalog may register it as a domain, so a CAST target that is not
   a built-in name parses with no resolved type and no diagnostic when it has no
-  arguments (domains take none; arguments produce `SQL0005`). DDL retains normalized type text
+  arguments (domains take none; arguments produce `CS00005`). DDL retains normalized type text
   and a built-in's resolved `DatabaseTypeInfo` in `SqlColumnDefinition.ResolvedType`;
   the engine resolves remaining domain names and reports a name it does not know. Which conversions a
   CAST may make is the engine's cast registry's question too, so every built-in type
@@ -383,8 +390,8 @@ COHDBL001. ORDER BY aliases and ordinals count visible wildcard output after USI
   while reserved future clauses such as recursive/nested CTEs, windows,
   unsupported join forms remain absent. `ParseCore` scans a copy of its configured
   lexer before recursive descent and attaches the first rejected clause to the
-  statement, so analyzers observe `COHDBL001` with the token location and the `SQL`
-  surface name. An actually unknown leading command still receives `SQL0002`, even
+  statement, so analyzers observe `CK00001` with the token location and the `SQL`
+  surface name. An actually unknown leading command still receives `CS00002`, even
   when a later recognized token is also unsupported.
 
 ## ISO names and lexical aliases (#1108)
@@ -402,13 +409,13 @@ schemas and SDK extraction. No reflection, Regex, new public type, interface or 
 
 MAX means unbounded only on VARCHAR, NVARCHAR and VARBINARY. NCHAR, NATIONAL CHAR and NATIONAL CHARACTER
 retain #1437's padded Character identity. Every temporal precision, including 7, and INTERVAL
-field qualifiers retain #1438's COHDBL001, because their semantics are not enforced. SQL0004
-stays retired for domains. BIT, SMALLDATETIME and TIME WITH TIME ZONE have SQL0005 reasons
-and replacements; arrays use COHDBL001. The planner consumes resolved column types directly.
+field qualifiers retain #1438's CK00001, because their semantics are not enforced. CS00004
+stays retired for domains. BIT, SMALLDATETIME and TIME WITH TIME ZONE have CS00005 reasons
+and replacements; arrays use CK00001. The planner consumes resolved column types directly.
 The preflight scan skips complete temporal WITH TIME ZONE suffixes so they cannot become CTE
 diagnostics. It walks the whole parenthesized modifier list, including malformed arguments and
-nested parentheses, without validating it. Shared declaration/CAST parsing alone reports SQL0005
-for malformed lists; a well-formed temporal precision keeps COHDBL001. Canonical CAST rendering retains spaces between type-name words; parser/renderer
+nested parentheses, without validating it. Shared declaration/CAST parsing alone reports CS00005
+for malformed lists; a well-formed temporal precision keeps CK00001. Canonical CAST rendering retains spaces between type-name words; parser/renderer
 fixed points and persisted SQL function bodies cover these targets through reopen and the wire.
 
 ## Namespace note
@@ -449,11 +456,11 @@ named start/work bindable and keeping the schema renderer from quoting them.
 END was already a keyword; its statement dispatch leaves CASE ... END unchanged.
 The executor joins subsequent statements to the session's active scope, and
 disconnect aborts that transaction. The language adds no concurrency machinery.
-Malformed suffixes produce `SQL0003` instead of silently treating `ROLLBACK TO`
+Malformed suffixes produce `CS00003` instead of silently treating `ROLLBACK TO`
 as a complete rollback. END without a transaction retains the canonical
-`COHSQLT002` message, "COMMIT requires an open transaction."
+`CS04002` message, "COMMIT requires an open transaction."
 
-The uniform `SQL0100` policy applies to transaction statements too: omitting `;`
+The uniform `CS00009` language/syntax note (formerly the retired `CS00100`) applies to transaction statements too: omitting `;`
 produces an informational diagnostic, with no error or warning for a valid spelling.
 A valid spelling terminated with `;` produces no diagnostics. The transaction corpus
 asserts both forms rather than exempting transaction control from the common policy.
@@ -464,8 +471,8 @@ commit node, with WORK/TRANSACTION sharing `opt_transaction`
 The family deliberately stops short of that broader grammar: END WORK and
 END TRANSACTION, transaction modes, AND [NO] CHAIN, ROLLBACK [WORK] TO
 [SAVEPOINT], BEGIN TRAN and named transactions, and COMMIT PREPARED remain
-`SQL0003`. ABORT [WORK|TRANSACTION], SAVEPOINT, RELEASE, SET TRANSACTION, and
-PREPARE TRANSACTION remain `SQL0002`. Recognition or recoding belongs to #1012.
+`CS00003`. ABORT [WORK|TRANSACTION], SAVEPOINT, RELEASE, SET TRANSACTION, and
+PREPARE TRANSACTION remain `CS00002`. Recognition or recoding belongs to #1012.
 
 B7 anticipates **`SAVEPOINT <name>`**, **`ROLLBACK TO [SAVEPOINT] <name>`**,
 **`RELEASE [SAVEPOINT] <name>`**, and **`SET TRANSACTION ISOLATION LEVEL <level>`**.
@@ -482,12 +489,12 @@ action, or a check predicate. `SqlCreateTableExpression.Constraints` contains al
 constraints; column definitions also retain their own constraints so `ALTER TABLE
 ADD COLUMN` carries the same information. The executor consumes the normalized
 table list once. The engine rejects duplicate key columns and multiple PRIMARY KEY declarations
-with COHSQLE019 before publication; it does not merge separate declarations (#1192). `CHECK` retains both its expression tree and the predicate source
+with CS01019 before publication; it does not merge separate declarations (#1192). `CHECK` retains both its expression tree and the predicate source
 as written (`CheckExpressionText`, for tooling); the engine never persists that
 source. It persists the canonical text `SqlExpressionRenderer` renders from the
 tree (below), so no spelling — and no leniency an older parser had for a spelling —
 reaches storage. New constraint syntax follows the DDL parser's diagnostic recovery
-discipline and emits `SQL0003` on malformed input.
+discipline and emits `CS00003` on malformed input.
 
 **`UNIQUE` is a unique index, not a new compiled-schema constraint kind.** The
 syntax still has a `Unique` AST kind so it can preserve the declaration and name,
@@ -496,7 +503,7 @@ INDEX` and `CompiledSchemaIndex(IsUnique: true)`. This keeps compiled schemas,
 SQL DDL, persistence, and concurrent uniqueness enforcement on one path.
 Foreign keys and checks remain constraint catalog records. `ON DELETE` accepts
 CASCADE, RESTRICT, NO ACTION, SET NULL and SET DEFAULT; an omitted action is NO ACTION.
-`ON UPDATE` stays outside the profile and reports `COHDBL001`.
+`ON UPDATE` stays outside the profile and reports `CK00001`.
 
 ## Canonical rendering (`SqlExpressionRenderer`)
 
@@ -504,7 +511,7 @@ CASCADE, RESTRICT, NO ACTION, SET NULL and SET DEFAULT; an omitted action is NO 
 item or UPDATE SET value (#1193); canonical rendering emits `DEFAULT`. It never enters
 the scalar precedence parser as an operand. INSERT/UPDATE share a contextual value
 parser which recognizes the whole-item keyword before scalar parsing. The scalar parser
-rejects bare DEFAULT everywhere with SQL0003; qualified field names such as `t.default`
+rejects bare DEFAULT everywhere with CS00003; qualified field names such as `t.default`
 and `t."default"` use the normal column-reference parser. Quoted identifiers, comments
 and strings retain their lexical identity; no token rescan is needed.
 `SqlInsertExpression.IsDefaultValues` distinguishes one all-omitted row from a missing
@@ -586,7 +593,7 @@ The owner's follow-up decision (2026-10-01) is a middle course between SQL Serve
 and PostgreSQL: genuine nesting counts against one documented, configurable limit
 (256 by default, 32..4096), a flat `AND`/`OR` chain counts once, and the stack
 checks stay as PostgreSQL's backstop. The parser reports nesting past the limit as
-`SQL0006`; the user-facing rule, with the comparison table, is in
+`CS00006`; the user-facing rule, with the comparison table, is in
 [DIALECT.md](DIALECT.md#expression-nesting-limit-1151).
 
 - **`AND` and `OR` chains are n-ary, PostgreSQL's shape.** `SqlLogicalExpression`
@@ -682,10 +689,10 @@ checks stay as PostgreSQL's backstop. The parser reports nesting past the limit 
   calls, parses on a 1 MB thread; in a debug build it needs about 3 MB, so the tests
   parse at the limit on an 8 MB thread. A higher configured limit admits text no
   default thread can recurse through. A thread with too little left reports
-  `SQL0007` rather than overflowing. It is a separate code from the limit's `SQL0006`
+  `CS00007` rather than overflowing. It is a separate code from the limit's `CS00006`
   because the text is within the dialect and parses on a bigger stack; the engine
   relies on the difference to tell a thread too small for a stored definition apart
-  from a damaged catalog, and reports it to clients as `COHSQLE004`, statement too
+  from a damaged catalog, and reports it to clients as `CS05004`, statement too
   complex, like any other walk out of stack. Collapsing the binary rungs into one
   precedence-climbing loop would cut the cost per level, should smaller threads ever
   need to accept the deepest text the default limit admits in a debug build.
@@ -693,8 +700,8 @@ checks stay as PostgreSQL's backstop. The parser reports nesting past the limit 
   outer references without a post-parse correlation walk. The engine searches lexical
   scopes using catalog metadata; deep expression chains still parse within their
   configured budget on a small stack.
-- **Crossing the limit abandons the statement.** The parser reports `SQL0006` (or
-  `SQL0007`) once, consumes the rest of the text, and every rule still on the stack
+- **Crossing the limit abandons the statement.** The parser reports `CS00006` (or
+  `CS00007`) once, consumes the rest of the text, and every rule still on the stack
   meets the end and returns. What those rules report on the way out describes the
   abandoned text, not the statement, so `ParseCore` drops every diagnostic after it and keeps
   only the statement's command type, as it does for a character outside the dialect.
@@ -734,8 +741,8 @@ it, so a quoted type name's punctuation cannot be mistaken for type arguments.
 
 CAST and ParseDefinitionType apply SqlTypeModifiers before producing an executable statement.
 The latter serves columns (CREATE, ADD and ALTER), domain bases, and function parameters and
-results, with an object-specific diagnostic subject. SQL0005 now covers malformed and invalid
-modifiers on every type spelling, including a domain given arguments. SQL0003 remains for
+results, with an object-specific diagnostic subject. CS00005 now covers malformed and invalid
+modifiers on every type spelling, including a domain given arguments. CS00003 remains for
 surrounding syntax errors. SqlTypeNames.TryResolve returns false for an unknown name or invalid
 modifiers; name-only resolution still distinguishes known built-ins. The shared splitter preserves
 quoted identifiers and reads at most two unsigned Int32 arguments; typed schemas admit
@@ -748,18 +755,18 @@ builders, SDK extraction and engine provisioning use this same rule as SQL and C
 
 FLOAT(p) admission and resolution follow PostgreSQL's `gram.y:14991-15016`: 1..24 bits selects
 Float32, 25..53 selects Float64, and bare FLOAT is Float64. The resolved type carries no length,
-decimal precision or scale. Out-of-range FLOAT precision remains SQL0005. Temporal precision
+decimal precision or scale. Out-of-range FLOAT precision remains CS00005. Temporal precision
 (TIME, TIMESTAMP/DATETIME, TIMESTAMPTZ and INTERVAL) is valid PostgreSQL syntax whose rounding
-is not implemented here: the shared rule returns COHDBL001 with the modifier, and parser callers
+is not implemented here: the shared rule returns CK00001 with the modifier, and parser callers
 attach the declaration or CAST target. The rule distinguishes these unsupported modifiers from
-malformed argument lists, which remain SQL0005. A single unsigned precision above six is also
+malformed argument lists, which remain CS00005. A single unsigned precision above six is also
 recognized, because PostgreSQL clamps it with a warning; DIALECT.md records the difference.
 
 The declaration parser and CAST share interval-field consumption before argument parsing.
 SqlTypeModifiers owns the six fields and seven accepted X TO Y ranges, following PostgreSQL
 `src/backend/parser/gram.y:15197-15267`. Only SECOND (alone or at a range's end) takes precision.
-Every valid qualifier reports one COHDBL001 naming the declaration and complete modifier, including
-forms without precision. Invalid ranges remain SQL0003; malformed arguments remain SQL0005 and
+Every valid qualifier reports one CK00001 naming the declaration and complete modifier, including
+forms without precision. Invalid ranges remain CS00003; malformed arguments remain CS00005 and
 suppress a secondary unsupported diagnostic. Case and token trivia do not change admission.
 Delimited names retain their lexical identity so a domain named `"INTERVAL DAY"` is still a domain.
 
@@ -775,12 +782,12 @@ A lowercase quoted unsupported call retains its diagnostic and NULL recovery exp
 renderer round-trip guarantee continues to apply to error-free parser trees. Renderer tests
 cover both accepted spellings and the coded recovery of rejected spellings.
 
-Definition-binding diagnostics remain engine-owned. DIALECT.md records COHSQLE003 for non-Boolean
-CHECK predicates and COHSQLD001 for invalid definitions and absent DROP definitions, including
+Definition-binding diagnostics remain engine-owned. DIALECT.md records CS02003 for non-Boolean
+CHECK predicates and CS03301 for invalid definitions and absent DROP definitions, including
 the structured carrier and span fallback.
 
 Wire diagnostic overflow does not change parser admission or its complete in-process
-carrier. The endpoint bounds delivery with an explicit COHDBP001 prefix/omission notice
+carrier. The endpoint bounds delivery with an explicit CK07001 prefix/omission notice
 while retaining the original failure and session; DIALECT.md records this wire behavior.
 
 ## Persisted view statements (#1124)
@@ -810,7 +817,7 @@ comparison, distinct, LIKE and BETWEEN rungs still refuse chaining once at the s
 bind above COLLATE (gram.y:910), and NOT EXISTS resumes the ordinary NOT operand
 grammar before choosing the compact leaf. DIALECT.md specifies behavior.
 
-Concurrent FK catalog refresh is engine-owned. DIALECT records retryable COHSQLT006
+Concurrent FK catalog refresh is engine-owned. DIALECT records retryable CS04006
 for an invalidated target plan; adjacent definition changes rebuild before row reads.
 
 ## Temporal text conformance (#1422)
@@ -828,4 +835,67 @@ or interval-overflow reason. The public literal facade preserves FormatException
 and now reports OverflowException for out-of-range calendar/clock/offset fields. SQL assignment, DEFAULT
 and CAST translate the same reason into 22007, 22008 or 22015 without adding a public bridge or assembly
 reference. Unknown COLLATE identifiers now reach binding (42704); unsupported collation creation
-retains COHDBL001. DIALECT records the corrected mappings and persisted-expression span provenance.
+retains CK00001. DIALECT records the corrected mappings and persisted-expression span provenance.
+
+## SELECT-only EXPLAIN ANALYZE (#1522)
+
+SqlExplainExpression.Analyze distinguishes execution analysis from a plain nonexecuting description.
+ANALYZE is contextual after EXPLAIN; standalone statistics maintenance is not introduced. The engine
+accepts SELECT query bodies only for execution analysis. DIALECT.md defines candidate counts,
+bounded probe estimates, budget refusals and the unchanged result shape.
+
+## Sql diagnostic conventions (#1470)
+
+Exception and diagnostic templates use the project's build-generated `ErrorMessages` resources.
+Parameterized templates format with the current culture; abort/cancellation templates used in
+normal cleanup are cached. The [Database error-code registry](../../Assimalign.Cohesion.Database/docs/ERROR-CODES.md)
+assigns this family its two-letter prefix and categorized five-digit identities.
+Existing SQLSTATE meanings, numeric wire error kinds, frame layouts and disk formats are preserved.
+Structured diagnostics keep their code outside the message. Compiler diagnostic identifiers and
+standard .NET argument guards retain their own contracts.
+
+
+The shared Types module also binds modifier-refusal templates to each consumer's own generated
+resources through internal `SqlTypeModifierErrorMessages`. Unsupported type/modifier text and
+codes are preserved. Numeric modifier spelling remains invariant SQL text; message templates
+format with the current culture. Successful type validation adds no resource lookup.
+
+The validation reference was rechecked in the local PostgreSQL clone: src/backend/utils/adt/varchar.c:33-57 refuses invalid modifier counts and character lengths; src/backend/parser/gram.y:14991-15016 bounds FLOAT precision. This convention change preserves Cohesion's existing validation behavior and only moves its text; no reference-engine code was copied.
+
+## Rules audit after main cleanup
+
+Parser nesting refusal templates use the generated ErrorMessages accessor; their existing
+codes, text, limits and locations are preserved. The assembly-local Types resource binding now
+lives under Internal. Private constants use repository casing and extension containers are
+partial. Successful parsing adds no resource lookup or grammar change.
+
+## Error message producers and catalog carriers
+
+Human diagnostic context (implicit-alias recovery, token descriptions, expected delimiters and
+type-declaration subjects) uses generated resources without changing any code, span or text.
+The parser caches these templates in static readonly fields because expected-token descriptions
+are also evaluated on successful parses; it adds no instance fields or repeated resource lookup
+on that path. Canonical SQL, recognized construct names and token spellings remain data.
+
+The dialect records CS06059/XX001 for malformed persisted SQL catalog metadata and CS06060/0A000
+for unsupported metadata formats. These engine-side carrier corrections do not change grammar,
+accepted storage formats or the no-upgrade policy.
+
+## Debugger inspection
+
+Concrete source types with explicit nonpublic instance state use a private nested DebugView
+and debugger display/proxy attributes. The view is the last member in the same type file and
+exposes only reviewed public/protected state through read-only properties. Exception and
+EventSource types remain excluded. A type with no state to filter keeps its normal member view;
+a type whose base supplies both debugger attributes inherits that view.
+
+Inspection does not perform I/O, take lifecycle locks, mutate state, invoke application callbacks,
+or materialize lazy results. The additions are debugger metadata and nested helper types; existing
+instance fields, runtime operations, error identities, data formats and protocol contracts do
+not change. SDK and Studio source are outside this rule's scope.
+
+The concrete SqlQueryExpression base supplies the inherited view for its derived query
+expressions. Its projection uses nonvirtual CommandType; Text is omitted because an application
+subclass can override that getter. Scalar-expression views expose existing syntax data without
+walking depth or diagnostics enumerations. Parser inspection does not advance lexers or initialize
+a language profile through its protected getter.

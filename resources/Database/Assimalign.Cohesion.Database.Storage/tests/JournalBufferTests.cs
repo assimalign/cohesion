@@ -26,7 +26,7 @@ namespace Assimalign.Cohesion.Database.Storage.Tests;
 [Collection(StorageRaceCollection.Name)]
 public sealed class JournalBufferTests
 {
-    private static readonly byte[] Image = CreateImage();
+    private static readonly byte[] _image = CreateImage();
 
     [Fact(DisplayName = "Cohesion Test [Storage] - Journal buffer: a large checkpoint uses a direct pooled frame")]
     public void Checkpoint_FrameLargerThanBuffer_ShouldKeepAppendBufferBounded()
@@ -81,7 +81,7 @@ public sealed class JournalBufferTests
 
         // Act
         long first = journal.AppendBegin(1);
-        journal.AppendPageImage(1, (PageId)3L, JournalRecordType.FullPageImage, Image);
+        journal.AppendPageImage(1, (PageId)3L, JournalRecordType.FullPageImage, _image);
         journal.AppendOperation(1, [1, 2, 3]);
         long last = journal.AppendCommit(1);
         int writesBeforeTheDrain = medium.Writes;
@@ -107,7 +107,7 @@ public sealed class JournalBufferTests
         using var journal = StorageJournal.Create(new StorageStream(medium));
         for (int i = 0; i < 200; i++)
         {
-            journal.AppendPageImage(i, (PageId)1L, JournalRecordType.CommittedPageImage, Image);
+            journal.AppendPageImage(i, (PageId)1L, JournalRecordType.CommittedPageImage, _image);
             journal.AppendCommit(i);
         }
 
@@ -125,7 +125,7 @@ public sealed class JournalBufferTests
             long before = GC.GetAllocatedBytesForCurrentThread();
             for (int i = 0; i < frames / 2; i++)
             {
-                journal.AppendPageImage(i, (PageId)1L, JournalRecordType.CommittedPageImage, Image);
+                journal.AppendPageImage(i, (PageId)1L, JournalRecordType.CommittedPageImage, _image);
                 journal.AppendCommit(i);
             }
 
@@ -148,7 +148,7 @@ public sealed class JournalBufferTests
         // Act: 2.5 MiB of page images.
         for (int i = 1; i <= 320; i++)
         {
-            journal.AppendPageImage(i, (PageId)i, JournalRecordType.CommittedPageImage, Image);
+            journal.AppendPageImage(i, (PageId)i, JournalRecordType.CommittedPageImage, _image);
             if (capacities.Count == 0 || capacities[^1] != journal.BufferCapacity)
             {
                 capacities.Add(journal.BufferCapacity);
@@ -396,9 +396,9 @@ public sealed class JournalBufferTests
         medium.OnWrite = (_, bytes) => writes.Add(bytes.ToArray());
         using var journal = StorageJournal.Create(new StorageStream(medium));
         journal.AppendBegin(1);
-        journal.AppendPageImage(1, (PageId)3L, JournalRecordType.FullPageImage, Image);
+        journal.AppendPageImage(1, (PageId)3L, JournalRecordType.FullPageImage, _image);
         journal.AppendOperation(1, [1, 2, 3]);
-        journal.AppendPageImage(1, (PageId)3L, JournalRecordType.CommittedPageImage, Image);
+        journal.AppendPageImage(1, (PageId)3L, JournalRecordType.CommittedPageImage, _image);
         journal.AppendCommit(1);
         journal.AppendRollback(2);
 

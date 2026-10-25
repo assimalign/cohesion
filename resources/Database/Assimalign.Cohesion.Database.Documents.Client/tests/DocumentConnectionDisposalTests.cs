@@ -6,6 +6,8 @@ using Xunit;
 
 using Assimalign.Cohesion.Database.Documents.Protocol;
 
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
+
 namespace Assimalign.Cohesion.Database.Documents.Client.Tests;
 
 [Collection(nameof(DocumentClientEventSourceCollection))]
@@ -22,7 +24,7 @@ public sealed class DocumentConnectionDisposalTests
         await using var old = await harness.Client.ConnectAsync(harness.Token);
         await old.CreateCollectionAsync("items", harness.Token);
         using var listener = new PausedQueryListener(harness.Token);
-        Task<Document> put = Task.Run(async () =>
+        Task<Document> put = DedicatedTestTask.Run(async () =>
             await old.PutAsync("items", "late", "{}"u8.ToArray(), cancellationToken: harness.Token), harness.Token);
         await listener.Paused.WaitAsync(harness.Token);
 

@@ -6,6 +6,8 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// that <c>ORDER BY</c> names by alias or position. The expression's own nodes are not bound; the
 /// slot's value stands for them.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("SqlBoundSlot")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlBoundSlot.DebugView))]
 internal sealed class SqlBoundSlot : SqlBoundExpression
 {
     /// <summary>Initializes a slot reference.</summary>
@@ -18,4 +20,12 @@ internal sealed class SqlBoundSlot : SqlBoundExpression
 
     /// <summary>Gets the slot's ordinal in the evaluated row.</summary>
     internal int Ordinal { get; }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlBoundSlot value)
+        {
+            _ = value;
+        }
+    }
 }

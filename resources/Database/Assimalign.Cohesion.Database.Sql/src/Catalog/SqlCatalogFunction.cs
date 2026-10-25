@@ -37,7 +37,7 @@ public sealed class SqlCatalogFunction
             parameterNames.Any(string.IsNullOrWhiteSpace) || parameterTypes.Any(string.IsNullOrWhiteSpace) || dependencies.Any(string.IsNullOrWhiteSpace) ||
             parameterNames.Distinct(StringComparer.OrdinalIgnoreCase).Count() != parameterNames.Count)
         {
-            throw new ArgumentException("Invalid SQL function signature, volatility or dependencies.");
+            throw new ArgumentException(ErrorMessages.SqlCatalogFunctionArgument);
         }
         SqlCatalogOwnership.Validate(owner, owningSchema);
         Name = name;
@@ -55,7 +55,7 @@ public sealed class SqlCatalogFunction
         BodyFunctionCalls = Array.AsReadOnly((bodyFunctionCalls ?? []).ToArray());
         if (BodyFunctionCalls.Any(string.IsNullOrWhiteSpace))
         {
-            throw new ArgumentException("A function identity cannot be blank.", nameof(bodyFunctionCalls));
+            throw new ArgumentException(ErrorMessages.SqlCatalogDomainArgument2, nameof(bodyFunctionCalls));
         }
         Owner = owner;
         OwningSchema = owningSchema;

@@ -10,6 +10,8 @@ using Assimalign.Cohesion.Database.Documents.Protocol;
 
 namespace Assimalign.Cohesion.Database.Documents.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("DocumentReadStream")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Documents.Internal.DocumentReadStream.DebugView))]
 internal sealed class DocumentReadStream : Stream
 {
     private readonly DocumentStorage _storage;
@@ -25,7 +27,7 @@ internal sealed class DocumentReadStream : Stream
     {
         if (content.Length < 0 || (content.Head == 0) != (content.Length == 0))
         {
-            throw new StorageCorruptionException("Invalid document content reference.");
+            throw new StorageCorruptionException(ErrorMessages.DocumentReadStreamFailure);
         }
 
         _storage = storage;
@@ -51,7 +53,7 @@ internal sealed class DocumentReadStream : Stream
             if (_buffer.IsEmpty)
             {
                 var (page, slot) = DocumentStorage.UnpackLocation(_next);
-                var chunk = DocumentChunkCodec.Decode(_storage.ReadEntry(page, slot), _content.Length - _position);
+                var chunk = DocumentChunkCodec.Decode(_storage.ReadEntry(page, slot), _content.Length - _position, page, slot);
                 _next = chunk.Next;
                 _buffer = chunk.Payload;
             }
@@ -66,7 +68,7 @@ internal sealed class DocumentReadStream : Stream
         }
         if (_position == _content.Length && ~_checksum != _content.Checksum)
         {
-            throw new StorageCorruptionException("Document content checksum disagrees with its catalog metadata.");
+            throw new StorageCorruptionException(ErrorMessages.DocumentReadStreamReadFailure);
         }
 
         return total;
@@ -116,5 +118,21 @@ internal sealed class DocumentReadStream : Stream
     public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
     public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
     public override void SetLength(long value) => throw new NotSupportedException();
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Documents.Internal.DocumentReadStream _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Documents.Internal.DocumentReadStream value)
+        {
+            _target = value;
+        }
+
+        public bool CanRead => _target.CanRead;
+        public bool CanSeek => _target.CanSeek;
+        public bool CanWrite => _target.CanWrite;
+        public long Length => _target.Length;
+        public long Position => _target.Position;
+    }
 }
 

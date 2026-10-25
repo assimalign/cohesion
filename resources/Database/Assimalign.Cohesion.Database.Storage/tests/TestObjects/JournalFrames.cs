@@ -18,10 +18,10 @@ namespace Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
 /// </remarks>
 public static class JournalFrames
 {
-    private const int PrefixSize = sizeof(int) + sizeof(int);
-    private const int TypeOffset = 1 + sizeof(long) + sizeof(long);
-    private const int ChecksumSize = sizeof(uint);
-    private const int Magic = 0x324C4157; // 'WAL2'
+    private const int prefixSize = sizeof(int) + sizeof(int);
+    private const int typeOffset = 1 + sizeof(long) + sizeof(long);
+    private const int checksumSize = sizeof(uint);
+    private const int magicValue = 0x324C4157; // 'WAL2'
 
     /// <summary>Fills the append buffer so the next record must first drain it.</summary>
     /// <param name="journal">The journal whose append buffer to fill.</param>
@@ -34,8 +34,8 @@ public static class JournalFrames
     {
         journal.Flush();
         const int capacity = 1024 * 1024;
-        const int bodyHeaderSize = TypeOffset + 1 + sizeof(long);
-        journal.AppendOperation(0, new byte[capacity - PrefixSize - bodyHeaderSize - ChecksumSize]);
+        const int bodyHeaderSize = typeOffset + 1 + sizeof(long);
+        journal.AppendOperation(0, new byte[capacity - prefixSize - bodyHeaderSize - checksumSize]);
     }
 
     /// <summary>
@@ -48,21 +48,21 @@ public static class JournalFrames
     public static bool Carries(ReadOnlySpan<byte> written, JournalRecordType type)
     {
         int offset = 0;
-        while (written.Length - offset >= PrefixSize + TypeOffset + 1)
+        while (written.Length - offset >= prefixSize + typeOffset + 1)
         {
             int bodyLength = BinaryPrimitives.ReadInt32LittleEndian(written[offset..]);
             int magic = BinaryPrimitives.ReadInt32LittleEndian(written[(offset + sizeof(int))..]);
-            if (magic != Magic || bodyLength <= TypeOffset || bodyLength > written.Length - offset - PrefixSize - ChecksumSize)
+            if (magic != magicValue || bodyLength <= typeOffset || bodyLength > written.Length - offset - prefixSize - checksumSize)
             {
                 return false;
             }
 
-            if (written[offset + PrefixSize + TypeOffset] == (byte)type)
+            if (written[offset + prefixSize + typeOffset] == (byte)type)
             {
                 return true;
             }
 
-            offset += PrefixSize + bodyLength + ChecksumSize;
+            offset += prefixSize + bodyLength + checksumSize;
         }
 
         return false;

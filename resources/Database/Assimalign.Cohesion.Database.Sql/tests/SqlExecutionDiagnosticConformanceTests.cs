@@ -19,49 +19,49 @@ public sealed class SqlExecutionDiagnosticConformanceTests
 {
     public static IEnumerable<object[]> Cases()
     {
-        yield return ["", "SELECT (SELECT id FROM t)", "COHSQLE046"];
-        yield return ["", "INSERT INTO t VALUES (3, 'bad')", "COHSQLE022"];
-        yield return ["CREATE TABLE target (v DATE)", "INSERT INTO target VALUES ('bad')", "COHSQLE047"];
-        yield return ["CREATE TABLE target (v TIME)", "INSERT INTO target VALUES ('bad')", "COHSQLE047"];
-        yield return ["CREATE TABLE target (v TIMESTAMP)", "INSERT INTO target VALUES ('bad')", "COHSQLE047"];
-        yield return ["CREATE TABLE target (v TIMESTAMPTZ)", "INSERT INTO target VALUES ('bad')", "COHSQLE047"];
-        yield return ["CREATE TABLE target (v INTERVAL)", "INSERT INTO target VALUES ('99999999999999999999999999999 days')", "COHSQLE062"];
-        yield return ["CREATE TABLE bad (v INT CHECK(1 / v > 0))", "INSERT INTO bad VALUES (0)", "COHSQLE001"];
+        yield return ["", "SELECT (SELECT id FROM t)", "CS02046"];
+        yield return ["", "INSERT INTO t VALUES (3, 'bad')", "CS02022"];
+        yield return ["CREATE TABLE target (v DATE)", "INSERT INTO target VALUES ('bad')", "CS02047"];
+        yield return ["CREATE TABLE target (v TIME)", "INSERT INTO target VALUES ('bad')", "CS02047"];
+        yield return ["CREATE TABLE target (v TIMESTAMP)", "INSERT INTO target VALUES ('bad')", "CS02047"];
+        yield return ["CREATE TABLE target (v TIMESTAMPTZ)", "INSERT INTO target VALUES ('bad')", "CS02047"];
+        yield return ["CREATE TABLE target (v INTERVAL)", "INSERT INTO target VALUES ('99999999999999999999999999999 days')", "CS02062"];
+        yield return ["CREATE TABLE bad (v INT CHECK(1 / v > 0))", "INSERT INTO bad VALUES (0)", "CS02001"];
         foreach (var (type, value) in new[] { ("DATE", "2026-02-30"), ("TIME", "25:00:00"), ("TIMESTAMP", "2026-02-30 12:00:00") })
         {
-            yield return [$"CREATE TABLE target (v {type})", $"INSERT INTO target VALUES ('{value}')", "COHSQLE048"];
-            yield return ["", $"SELECT CAST('{value}' AS {type})", "COHSQLE048"];
-            yield return ["", $"CREATE TABLE target (v {type} DEFAULT '{value}')", "COHSQLE048"];
+            yield return [$"CREATE TABLE target (v {type})", $"INSERT INTO target VALUES ('{value}')", "CS02048"];
+            yield return ["", $"SELECT CAST('{value}' AS {type})", "CS02048"];
+            yield return ["", $"CREATE TABLE target (v {type} DEFAULT '{value}')", "CS02048"];
         }
-        yield return ["", "CREATE TABLE huge (v TEXT DEFAULT '" + new string('a', 8200) + "')", "COHSQLE042"];
-        yield return ["", "CREATE FUNCTION huge_fn() RETURNS TEXT RETURN '" + new string('a', 8200) + "'", "COHSQLE042"];
+        yield return ["", "CREATE TABLE huge (v TEXT DEFAULT '" + new string('a', 8200) + "')", "CS05042"];
+        yield return ["", "CREATE FUNCTION huge_fn() RETURNS TEXT RETURN '" + new string('a', 8200) + "'", "CS05042"];
         yield return ["CREATE TABLE p (v TEXT COLLATE binary UNIQUE); CREATE TABLE c (v TEXT COLLATE case_insensitive)",
-            "ALTER TABLE c ADD CONSTRAINT fk FOREIGN KEY(v) REFERENCES p(v)", "COHSQLE063"];
-        yield return ["", "CREATE TABLE target (v TEXT DEFAULT 'a' COLLATE \"nope\")", "COHSQLE052"];
-        yield return ["", "CREATE TABLE target (v TEXT DEFAULT ('a' COLLATE \"nope\"))", "COHSQLE052"];
-        yield return ["CREATE FUNCTION fail(p INT) RETURNS INT RETURN 1 / p", "SELECT fail(0)", "COHSQLE001"];
-        yield return ["", "DROP SCHEMA missing", "COHSQLE028"];
-        yield return ["CREATE SCHEMA occupied; CREATE TABLE occupied.x (id INT)", "DROP SCHEMA occupied", "COHSQLE030"];
-        yield return ["CREATE VIEW dependent AS SELECT id FROM t", "DROP TABLE t", "COHSQLD002"];
-        yield return ["CREATE FUNCTION f(p INT) RETURNS INT RETURN p", "CREATE FUNCTION f(p INT) RETURNS INT RETURN p", "COHSQLE065"];
-        yield return ["", "DROP FUNCTION missing(INT)", "COHSQLE009"];
-        yield return ["CREATE TABLE target (v UUID)", "INSERT INTO target VALUES ('bad')", "COHSQLE022"];
-        yield return ["CREATE TABLE target (v BYTEA)", "INSERT INTO target VALUES ('bad')", "COHSQLE055"];
-        yield return ["", "SELECT id FROM t ORDER BY CASE WHEN id = 1 THEN 'a' ELSE id END", "COHSQLE055"];
-        yield return ["", "CREATE TABLE t (id INT)", "COHSQLE049"];
-        yield return ["", "CREATE INDEX uq_t ON t(v)", "COHSQLE049"];
-        yield return ["", "ALTER TABLE t ADD CONSTRAINT uq_t CHECK(id > 0)", "COHSQLE050"];
-        yield return ["ALTER TABLE t ADD CONSTRAINT ck_t CHECK(id > 0)", "CREATE INDEX ck_t ON t(v)", "COHSQLE050"];
-        yield return ["", "ALTER TABLE t ADD CONSTRAINT fk FOREIGN KEY(v) REFERENCES absent(id)", "COHSQLE051"];
-        yield return ["", "ALTER TABLE t DROP CONSTRAINT absent", "COHSQLE052"];
-        yield return ["", "ALTER TABLE parent DROP COLUMN id", "COHSQLE056"];
-        yield return ["CREATE TABLE target (v INT)", "ALTER TABLE target DROP COLUMN v", "COHSQLE053"];
-        yield return ["", "ALTER TABLE t ADD CONSTRAINT fk FOREIGN KEY(v) REFERENCES parent(v)", "COHSQLE054"];
-        yield return ["CREATE TABLE target (v TEXT)", "ALTER TABLE target ADD CONSTRAINT fk FOREIGN KEY(v) REFERENCES parent(id)", "COHSQLE055"];
-        yield return ["CREATE TABLE target (v CHAR(4)); INSERT INTO target VALUES ('x')", "ALTER TABLE target ALTER COLUMN v CHAR(2)", "COHSQLE057"];
-        yield return ["", "ALTER TABLE t ADD CONSTRAINT ck CHECK(CURRENT_TIMESTAMP IS NOT NULL)", "COHSQLE059"];
-        yield return ["", "ALTER TABLE t ADD COLUMN id INT", "COHSQLE061"];
-        yield return ["CREATE DOMAIN d AS INT; CREATE TABLE target (v d)", "DROP DOMAIN d", "COHSQLD002"];
+            "ALTER TABLE c ADD CONSTRAINT fk FOREIGN KEY(v) REFERENCES p(v)", "CS02063"];
+        yield return ["", "CREATE TABLE target (v TEXT DEFAULT 'a' COLLATE \"nope\")", "CS01052"];
+        yield return ["", "CREATE TABLE target (v TEXT DEFAULT ('a' COLLATE \"nope\"))", "CS01052"];
+        yield return ["CREATE FUNCTION fail(p INT) RETURNS INT RETURN 1 / p", "SELECT fail(0)", "CS02001"];
+        yield return ["", "DROP SCHEMA missing", "CS01028"];
+        yield return ["CREATE SCHEMA occupied; CREATE TABLE occupied.x (id INT)", "DROP SCHEMA occupied", "CS03030"];
+        yield return ["CREATE VIEW dependent AS SELECT id FROM t", "DROP TABLE t", "CS03302"];
+        yield return ["CREATE FUNCTION f(p INT) RETURNS INT RETURN p", "CREATE FUNCTION f(p INT) RETURNS INT RETURN p", "CS03065"];
+        yield return ["", "DROP FUNCTION missing(INT)", "CS01009"];
+        yield return ["CREATE TABLE target (v UUID)", "INSERT INTO target VALUES ('bad')", "CS02022"];
+        yield return ["CREATE TABLE target (v BYTEA)", "INSERT INTO target VALUES ('bad')", "CS02055"];
+        yield return ["", "SELECT id FROM t ORDER BY CASE WHEN id = 1 THEN 'a' ELSE id END", "CS02055"];
+        yield return ["", "CREATE TABLE t (id INT)", "CS03049"];
+        yield return ["", "CREATE INDEX uq_t ON t(v)", "CS03049"];
+        yield return ["", "ALTER TABLE t ADD CONSTRAINT uq_t CHECK(id > 0)", "CS03050"];
+        yield return ["ALTER TABLE t ADD CONSTRAINT ck_t CHECK(id > 0)", "CREATE INDEX ck_t ON t(v)", "CS03050"];
+        yield return ["", "ALTER TABLE t ADD CONSTRAINT fk FOREIGN KEY(v) REFERENCES absent(id)", "CS01051"];
+        yield return ["", "ALTER TABLE t DROP CONSTRAINT absent", "CS01052"];
+        yield return ["", "ALTER TABLE parent DROP COLUMN id", "CS03056"];
+        yield return ["CREATE TABLE target (v INT)", "ALTER TABLE target DROP COLUMN v", "CS03053"];
+        yield return ["", "ALTER TABLE t ADD CONSTRAINT fk FOREIGN KEY(v) REFERENCES parent(v)", "CS03054"];
+        yield return ["CREATE TABLE target (v TEXT)", "ALTER TABLE target ADD CONSTRAINT fk FOREIGN KEY(v) REFERENCES parent(id)", "CS02055"];
+        yield return ["CREATE TABLE target (v CHAR(4)); INSERT INTO target VALUES ('x')", "ALTER TABLE target ALTER COLUMN v CHAR(2)", "CS05057"];
+        yield return ["", "ALTER TABLE t ADD CONSTRAINT ck CHECK(CURRENT_TIMESTAMP IS NOT NULL)", "CS03059"];
+        yield return ["", "ALTER TABLE t ADD COLUMN id INT", "CS03061"];
+        yield return ["CREATE DOMAIN d AS INT; CREATE TABLE target (v d)", "DROP DOMAIN d", "CS03302"];
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - Conformance: execution and DDL failures carry codes and statement spans (#1653)")]

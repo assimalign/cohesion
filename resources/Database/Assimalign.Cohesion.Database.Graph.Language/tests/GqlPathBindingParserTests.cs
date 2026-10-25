@@ -32,6 +32,6 @@ public sealed class GqlPathBindingParserTests
     {
         var parsed = new GqlQueryParser().Parse(statement);
 
-        parsed.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "GQL0002");
+        parsed.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CG00002");
     }
 }

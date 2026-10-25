@@ -146,7 +146,7 @@ public sealed partial class SqlViewTests
         var retained = await connection.QueryAsync("SELECT n FROM v ORDER BY n", cancellationToken: TestTimeout.Token());
 
         // Assert
-        error.Diagnostics[0].Code.ShouldBe("COHSQLE033");
+        error.Diagnostics[0].Code.ShouldBe("CS03033");
         retained.Count.ShouldBe(2);
         connection.IsOpen.ShouldBeTrue();
     }
@@ -212,7 +212,7 @@ public sealed partial class SqlViewTests
 
         // Assert
         metadata.ShouldHaveSingleItem().ShouldBe(numeric ? [5L, 2L, null] : [null, null, 5L]);
-        error.Diagnostics[0].Code.ShouldBe("COHSQLE033");
+        error.Diagnostics[0].Code.ShouldBe("CS03033");
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - Views: different or absent alternative modifiers produce unconstrained output")]

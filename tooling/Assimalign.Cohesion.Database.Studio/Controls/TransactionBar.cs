@@ -69,5 +69,5 @@ internal sealed class TransactionBar : ContentView
         _indicator.TextColor = text is null ? Ui.Muted : Ui.Bad;
     }
 
-    private ModelWorkspace RequireWorkspace() => _workspace ?? throw new InvalidOperationException("No workspace.");
+    private ModelWorkspace RequireWorkspace() => _workspace ?? throw new InvalidOperationException(ErrorMessages.WorkspaceMissing);
 }

@@ -8,7 +8,7 @@ there is no alternate lexer or duplicated keyword configuration.
 Double-quoted identifiers decode doubled `""` to one embedded quote (#1235), in collection,
 field and alias names. The shared lexer keeps the whole identifier in one token; OQL verifies
 its closing quote before unescaping it. A final escaped quote without a closing delimiter is
-OQL0003. The parser conformance corpus and identifier-value test pin this extension to the
+CD00003. The parser conformance corpus and identifier-value test pin this extension to the
 existing double-quoted name syntax. See Database.Language DESIGN for the scanner reference.
 
 The OQL name is retained, but the language basis is SQL++ for JSON, following Couchbase
@@ -43,7 +43,7 @@ flowchart TD
 
 The profile's supported set is deliberately the executable subset of `OqlClauses`.
 Lexical recognition preserves the established vocabulary so rejected constructs receive
-`COHDBL001`; recognizing a token does not make its operation supported.
+`CK00001`; recognizing a token does not make its operation supported.
 
 | Clause | Supported | Shape or reason |
 | --- | --- | --- |
@@ -58,7 +58,7 @@ Lexical recognition preserves the established vocabulary so rejected constructs 
 | `UPDATE` | Yes | One collection, optional alias, SET assignments and/or UNSET paths, optional WHERE |
 | `UNSET` | Yes | Removes properties in UPDATE; a final array index is invalid |
 | `DELETE` | Yes | `DELETE FROM collection [AS? alias] [WHERE expression]`; keeps the collection and indexes |
-| `OPTIONS` | No | INSERT/UPSERT header element; one COHDBL001 at OPTIONS, including directly after KEY; no TTL or version precondition in T1 |
+| `OPTIONS` | No | INSERT/UPSERT header element; one CK00001 at OPTIONS, including directly after KEY; no TTL or version precondition in T1 |
 | `VALUES` | Yes | One or more parenthesized key/value pairs for INSERT or UPSERT |
 | `FROM` | Yes | One collection or reserved `COHESION_SCHEMA` source, optional iteration variable, then ordered UNNEST bindings |
 | `UNNEST` | Yes | Optional INNER; one row per array element, chainable |
@@ -75,7 +75,7 @@ Lexical recognition preserves the established vocabulary so rejected constructs 
 | `ORDER BY` | Yes | One or more expressions, each optionally `ASC` or `DESC` |
 | `LIMIT` | Yes | Non-negative signed Int64 integer literal or parameter, applied after ordering |
 | `OFFSET` | Yes | Non-negative signed Int64 integer literal or parameter; either order with LIMIT |
-| `FETCH` | No | The SQL FETCH FIRST spelling is not adopted; one COHDBL001 at FETCH |
+| `FETCH` | No | The SQL FETCH FIRST spelling is not adopted; one CK00001 at FETCH |
 | `CREATE COLLECTION` | Yes | One database-local collection, optionally `IF NOT EXISTS` |
 | `DROP COLLECTION` | Yes | One database-local collection, optionally `IF EXISTS` |
 | `CREATE INDEX` | Yes | One named index over 1..32 ordered paths, optional UNIQUE and IF NOT EXISTS |
@@ -124,7 +124,7 @@ argument. Aggregate placement and grouped scalar arguments are validated by the 
 
 The conditional rules follow [Couchbase](https://docs.couchbase.com/server/current/n1ql/n1ql-language-reference/condfununknown.html).
 ARRAY_AGG, REGEXP_LIKE, REGEXP_REPLACE and REGEXP_POSITION are deliberately deferred and report
-one COHDBL001 in call position. Unknown function names instead report OQL0008 after their
+one CK00001 in call position. Unknown function names instead report CD00008 after their
 arguments are parsed, avoiding secondary syntax diagnostics. Retired ODMG constructs retain
 their positional refusals. Calls never become planner constants or index seek bounds, and
 INSERT/UPSERT VALUES continues to reject calls.
@@ -132,8 +132,8 @@ INSERT/UPSERT VALUES continues to reject calls.
 REPLACE's optional fourth argument limits replacement to the first n nonoverlapping occurrences;
 an omitted or negative count replaces all, following the
 [Couchbase string-function contract](https://docs.couchbase.com/server/current/n1ql/n1ql-language-reference/stringfun.html#replace).
-A fractional count gives the engine type diagnostic COHDOC008. Plain arity errors name only
-the invalid count; the OQL0006 COUNT-star explanation appears only for an actual star operand.
+A fractional count gives the engine type diagnostic CD02008. Plain arity errors name only
+the invalid count; the CD00006 COUNT-star explanation appears only for an actual star operand.
 
 ### Projection semantics (#1128)
 
@@ -145,8 +145,8 @@ After AS, a projection label accepts reserved words, following PostgreSQL ColLab
 (`src/backend/parser/gram.y:17638,18042-18046` in the reference clone). DISTINCT and ALL retain
 their positional capability refusal everywhere except directly after a clause-head SELECT (and after a dot).
 A property or projection label named select does not open a SELECT clause. The AS-label exemption
-applies only within a SELECT list; reserved unsupported FROM and INSERT aliases retain COHDBL001.
-COUNT(DISTINCT x) remains one COHDBL001 naming COUNT(DISTINCT). Function-position names in the
+applies only within a SELECT list; reserved unsupported FROM and INSERT aliases retain CK00001.
+COUNT(DISTINCT x) remains one CK00001 naming COUNT(DISTINCT). Function-position names in the
 recognized-unsupported table receive that same single refusal for DISTINCT/ALL:
 ARRAY_AGG(DISTINCT x) and ARRAY_AGG(ALL x) name ARRAY_AGG(DISTINCT) and ARRAY_AGG(ALL).
 ARRAY comprehensions, computed
@@ -170,19 +170,19 @@ above Int32.MaxValue (the 2026-10-18 ruling supersedes the issue's original Int3
 arrays and document-dependent expressions are invalid counts. Integral decimal and JSON numeric
 parameter values are accepted after normalization; NULL parameters are invalid.
 
-Every invalid count has OQL0007 at its full operand span, with the message
+Every invalid count has CD00007 at its full operand span, with the message
 "LIMIT requires a non-negative integer in the signed 64-bit range." (OFFSET names OFFSET).
 A missing operand, duplicate clause (at its second keyword), arithmetic after a count or
-ORDER BY after paging retains OQL0002. LIMIT m, n reports one COHDBL001 at LIMIT before
+ORDER BY after paging retains CD00002. LIMIT m, n reports one CK00001 at LIMIT before
 validating m (including ALL, negative and string operands), naming that unsupported spelling
-and asking for LIMIT n OFFSET m. Missing parameters retain COHDOC005;
+and asking for LIMIT n OFFSET m. Missing parameters retain CD01005;
 parameter lookup is the shared contract. Normalization failures, including nonfinite values and
-numbers outside the decimal domain, become OQL0007 for paging. Direct AST counts are checked too.
+numbers outside the decimal domain, become CD00007 for paging. Direct AST counts are checked too.
 No new shared public member or visibility grant is required; the two assemblies keep the message
 locally, with equality covered by planner/parser tests.
 
 Paging follows WHERE, grouping/HAVING, projection, DISTINCT and ORDER BY. INSERT and UPSERT SELECT
-sources use the same final page. UPDATE/DELETE LIMIT and OFFSET remain COHDBL001, naming the
+sources use the same final page. UPDATE/DELETE LIMIT and OFFSET remain CK00001, naming the
 statement and clause (for example, DELETE LIMIT). INSERT/UPSERT VALUES paging names
 INSERT VALUES LIMIT, UPSERT VALUES OFFSET, or the corresponding clause. RETURNING as an implicit source alias may precede paging.
 EXPLAIN validates counts without reading documents and reports the resolved limit and offset.
@@ -194,7 +194,7 @@ agrees with Cohesion SQL #1100; these NULL and literal-grammar rules remain OQL-
 ### Keyword disposition (#1101)
 
 The capability scan reads one static recognized-unsupported table, `OqlUnsupportedVocabulary`.
-Each entry has a spelling, the construct its `COHDBL001` names, and a position. Each
+Each entry has a spelling, the construct its `CK00001` names, and a position. Each
 recognized-unsupported construct is reported once at the word that names it, and never bound as
 a name:
 
@@ -218,7 +218,7 @@ a name:
   index names and aliases named `returning` are ordinary identifiers. An implicit FROM alias
   uses that name when followed by the end or a following clause; `FROM c RETURNING *` leaves
   RETURNING for the capability rejection. This positional check keeps a real trailing clause
-  at COHDBL001 without treating positional INTO or KEY as preceding operands. VALUE is reserved for projection and INSERT binding syntax.
+  at CK00001 without treating positional INTO or KEY as preceding operands. VALUE is reserved for projection and INSERT binding syntax.
 - **Function** (`ELEMENT`, `FLATTEN`, `LISTTOSET`, `STRUCT`, `LIST`, `BAG`, `TYPEOF`, `ARRAY_AGG`, and the deferred REGEXP functions):
   only immediately before `(`. Elsewhere these spellings are ordinary identifiers.
 - **Quantifiers**: `EVERY`, `ANY` or `SOME` followed by `name IN` opens a supported predicate.
@@ -233,10 +233,10 @@ the scan reports that word and nothing after it. Each
 operand of a set operation starts its own `SELECT`, which is not reported as a subquery, and a
 set operation with `ALL` or `DISTINCT` (`UNION ALL`) is one construct spanning both words.
 `OqlKeywordDispositionTests` enumerates the profile's keywords plus the table. Every word needs
-a supported parse case or a case with exactly one `COHDBL001` naming its construct, and for a
+a supported parse case or a case with exactly one `CK00001` naming its construct, and for a
 table entry that diagnostic must also name the construct the table records. A word added
 without a case fails, so oql-sqlpp-basis and the flip items add their cases in the same change.
-OQL declares no `~`, so `SELECT ~a FROM c` stays an `OQL0002` syntax error (a pin). It is one
+OQL declares no `~`, so `SELECT ~a FROM c` stays an `CD00002` syntax error (a pin). It is one
 error: a second error with the same code at the same span is dropped, so recovery that reaches
 one bad token from several rules no longer reports it three times.
 
@@ -257,15 +257,15 @@ Membership tests assert these lists without freezing arrays that later T1 items 
 rejected only in call position; a future positional SELECT ELEMENT needs no reservation.
 `STRUCT`, `LIST`, `BAG` and `TYPEOF` lose their ODMG constructor/type meaning and are likewise
 rejected only as calls. All eight freed names can be projected as unquoted fields.
-`FIRST`, `LAST` and `UNIQUE` retain SQL++ reservations and report COHDBL001 wherever a
+`FIRST`, `LAST` and `UNIQUE` retain SQL++ reservations and report CK00001 wherever a
 reserved unsupported word does; UNIQUE is executable only directly after CREATE in CREATE UNIQUE INDEX.
 `UNDEFINED` stays reserved and rejected, never a MISSING synonym. `NIL` remains a NULL synonym.
 SET and UNSET are reserved for UPDATE assignments and removals. Only SET immediately after
 UPDATE's destination and optional alias is exempt from the unsupported-word scan; SET calls
-in SELECT, UPDATE right-hand sides or WHERE still report COHDBL001. Property segments such as
+in SELECT, UPDATE right-hand sides or WHERE still report CK00001. Property segments such as
 `d.set` remain names. ARRAY, COLLECTION, FOR, SOME and ANY remain reserved.
 COLLECTION retains its collection-DDL meaning. KNOWN and UNKNOWN are
-reserved but deferred; `IS KNOWN` and `IS UNKNOWN` report COHDBL001 at that word.
+reserved but deferred; `IS KNOWN` and `IS UNKNOWN` report CK00001 at that word.
 
 Removing public `OqlClauses.Define`, `Element` and `Flatten` is an intentional source/binary
 API break, allowed by the owner's decision that nothing has shipped publicly. No aliases remain.
@@ -332,13 +332,13 @@ The full source name keys an unaliased COHESION_SCHEMA synthetic star too.
 
 The explicit FROM alias (or unaliased collection name) and its UNNEST bindings form one list with unique ordinal names. Quantifier
 variables may shadow outer variables and document fields. Duplicate names in one binding
-list give OQL0010; a direct SELECT AST receives COHDOC023. Multi-binding quantifiers remain
+list give CD00010; a direct SELECT AST receives CD01023. Multi-binding quantifiers remain
 deferred. An omitted UNNEST alias defaults to the final named path step; expressions without
 one require an explicit alias. An inferred duplicate spans the final path-name token, including
 bracket-string paths and parenthesized paths. UNNEST, INNER, LEFT, OUTER, EVERY and SATISFIES are contextual,
 preserving existing fields and AS-less aliases named every or satisfies. END was already
 reserved. ANY and SOME retain their existing reservations. UNNEST in UPDATE/DELETE, FLATTEN calls,
-JOIN, NEST, WITHIN, ANY AND EVERY and ARRAY/FIRST comprehensions remain COHDBL001.
+JOIN, NEST, WITHIN, ANY AND EVERY and ARRAY/FIRST comprehensions remain CK00001.
 UPDATE/DELETE reject UNNEST only where their grammar expects a clause; a field named unnest
 in SATISFIES remains an expression. MERGE INTO in a CASE result under SATISFIES reports the
 single MERGE construct before its internal mutation tokens are scanned.
@@ -382,7 +382,7 @@ insert       := INSERT INTO collection [AS identifier] write-input
 upsert       := UPSERT INTO collection [AS identifier] write-input
 write-input  := '(' KEY ',' VALUE [refused-options] ')' VALUES '(' expression ',' expression ')' (',' '(' expression ',' expression ')')*
               | '(' KEY identifier [',' VALUE identifier] [refused-options] ')' query
-refused-options := ',' OPTIONS [expression]  -- recognized header element; rejected with one COHDBL001 at OPTIONS
+refused-options := ',' OPTIONS [expression]  -- recognized header element; rejected with one CK00001 at OPTIONS
 delete       := DELETE FROM collection [AS? identifier] [WHERE expression]
 update       := UPDATE collection [AS? identifier] (set [unset] | unset) [WHERE expression]
 set          := SET assignment (',' assignment)*
@@ -430,8 +430,8 @@ address arbitrary property names. Array indices are nonnegative, zero-based 32-b
 Parentheses group expressions. Parameters follow the
 [shared parameter contract](../../Assimalign.Cohesion.Database.Language/docs/DESIGN.md#parameter-contract-1102):
 `$name`, `@name`, `$_x`, `$1` and `@1` produce bare parameter names. Empty sigils and
-mixed numeric/identifier names such as `$1a` report one OQL0002 naming the grammar.
-Numeric names use ASCII digits only: `$١`, `@١` and `$1١` report OQL0002 at the whole reference.
+mixed numeric/identifier names such as `$1a` report one CD00002 naming the grammar.
+Numeric names use ASCII digits only: `$١`, `@١` and `$1١` report CD00002 at the whole reference.
 Operand `?` and `:name` use the shared supported-form message at the complete span;
 a trailing stray `?` keeps its generic character error. Empty identifiers are syntax errors.
 The parser links Execution's stateless name check without an assembly dependency.
@@ -441,8 +441,8 @@ Literal nodes hold a string, Boolean, numeric `JsonElement`, or null; `NIL` is a
 These values use `OqlLiteralExpression`; MISSING has its own `OqlMissingExpression`.
 Decimal and scientific notation retain every digit until the Documents evaluator applies
 `DocumentStorage.ValidateContent` before conversion to decimal. Underflow, excess nonzero
-fractional precision and overflow report `COHDOC007` (SQLSTATE 22003) at the literal's span.
-The parser reports malformed numeric syntax as `OQL0004`; it adapts optional integer digits
+fractional precision and overflow report `CD02007` (SQLSTATE 22003) at the literal's span.
+The parser reports malformed numeric syntax as `CD00004`; it adapts optional integer digits
 (`.5`) and leading zeros to JSON syntax without changing the number's value.
 
 Operator precedence, lowest first: `OR`, `AND`, comparisons, presence tests and IN/BETWEEN/LIKE, addition/subtraction,
@@ -472,8 +472,8 @@ backslash, matching [Couchbase's default](https://github.com/couchbase/query/blo
 ESCAPE overrides it with one Unicode scalar; `ESCAPE ''` disables escaping. String literals
 do not consume backslashes, so `a LIKE 'x\%'` matches the literal x%. An escape quotes the
 next scalar, including `%`, `_` and itself. A literal escape longer than one scalar is an
-OQL0002 syntax error at that literal; an evaluated invalid escape or a trailing escape in
-the pattern gives COHDOC013. Non-string operands, patterns or escapes give NULL, unless
+CD00002 syntax error at that literal; an evaluated invalid escape or a trailing escape in
+the pattern gives CD02013. Non-string operands, patterns or escapes give NULL, unless
 another operand is MISSING. The hand-written matcher uses two pointers and only the latest
 percent as its backtracking point; it uses no Regex, reflection or suffix recursion. The statement
 cancellation token is checked periodically during compilation, scalar decoding and matching.
@@ -506,7 +506,7 @@ SQL++'s EXPLAIN for SELECT, INSERT, UPSERT, UPDATE and DELETE produces the share
 [Execution](../../Assimalign.Cohesion.Database.Execution/docs/DESIGN.md#plan-descriptions-1104).
 `OqlExplainExpression.Statement` retains the query for ordinary parameter validation and
 planning. The parser rejects DDL, transaction control, nested EXPLAIN and EXPLAIN ANALYZE with
-`COHDBL001`, and applies the normal single-statement/trailing-token check to the whole form.
+`CK00001`, and applies the normal single-statement/trailing-token check to the whole form.
 The Documents engine owns its operator names and JSON-document wire representation.
 `EXPLAIN` is contextual only at the statement prefix, matching PostgreSQL's unreserved keyword
 classification (`src/include/parser/kwlist.h:167` in the local clone). It is not a lexer keyword;
@@ -517,24 +517,24 @@ The keyword-disposition corpus covers these identifiers both with and without th
 
 | Code | Meaning |
 | --- | --- |
-| `COHDBL001` | A recognized clause or operation lies outside the executable profile, reported once at the word that names it (see Keyword disposition) |
-| `OQL0001` | Empty statement, including whitespace/comment-only text |
-| `OQL0002` | Syntax error, missing token, invalid identifier/path, multiple statements or leftover tokens, or a character OQL does not use (`?`, `#`, `^`, `§`, ...) |
-| `OQL0003` | Unterminated quoted text or block comment |
-| `OQL0004` | Malformed numeric literal (decimal-domain refusals belong to the engine's `COHDOC007`) |
-| `OQL0005` | Expression nesting exceeds the supported depth |
-| `OQL0006` | Invalid function argument count or star operand; only COUNT accepts * |
-| `OQL0007` | Invalid LIMIT/OFFSET operand or value; same clause-specific message at parse and plan time, located at the operand |
-| `OQL0008` | Unknown function name, reported once at its name after argument parsing |
-| `OQL0009` | More than 32 index key paths, at the 33rd path |
-| `OQL0010` | A duplicate variable within one FROM/UNNEST or quantifier binding list, at the repeated name |
+| `CK00001` | A recognized clause or operation lies outside the executable profile, reported once at the word that names it (see Keyword disposition) |
+| `CD00001` | Empty statement, including whitespace/comment-only text |
+| `CD00002` | Syntax error, missing token, invalid identifier/path, multiple statements or leftover tokens, or a character OQL does not use (`?`, `#`, `^`, `§`, ...) |
+| `CD00003` | Unterminated quoted text or block comment |
+| `CD00004` | Malformed numeric literal (decimal-domain refusals belong to the engine's `CD02007`) |
+| `CD00005` | Expression nesting exceeds the supported depth |
+| `CD00006` | Invalid function argument count or star operand; only COUNT accepts * |
+| `CD00007` | Invalid LIMIT/OFFSET operand or value; same clause-specific message at parse and plan time, located at the operand |
+| `CD00008` | Unknown function name, reported once at its name after argument parsing |
+| `CD00009` | More than 32 index key paths, at the 33rd path |
+| `CD00010` | A duplicate variable within one FROM/UNNEST or quantifier binding list, at the repeated name |
 
 Every error has an absolute start/end span and source line. End-of-input errors use the source
 length for both offsets. A line breaks at LF, CR, NEL (U+0085), LS (U+2028) or PS (U+2029), and
 CR LF is one break (`TokenLexer.CountLineBreaks`). Capability validation precedes statement parsing
 so an unsupported construct receives the shared capability diagnostic instead of an accidental
 generic syntax error. Quotes, comments, and property names after dots are not mistaken for clauses.
-Malformed collection or index DDL produces `OQL0002` at the missing or invalid token; it does not escape the
+Malformed collection or index DDL produces `CD00002` at the missing or invalid token; it does not escape the
 parser as an exception.
 
 A `--` comment ends before the first of those line terminators, the rule
@@ -545,14 +545,14 @@ matched. The `WHERE` now stays in effect at every terminator, and `OqlLineCommen
 together with the diagnostic lines. OQL has no `//` comment: `/` is the division operator.
 
 A character OQL does not use lexes as `TokenType.Unrecognized`. It reports
-`Unexpected character '<c>'; it is not part of OQL.` (`OQL0002`) at its span during
+`Unexpected character '<c>'; it is not part of OQL.` (`CD00002`) at its span during
 tokenization. The statement is then not parsed, so nothing is bound and no `NULL` literal stands
 in for the character. `?` defers rejection to syntax parsing: an operand gets the shared
 supported-form message, while a trailing stray `?` keeps the generic character message.
 Adjacent host-parameter names in operand position, including `:union`, `:like` and `:select`,
 bypass the capability scan and receive that one syntax diagnostic at the whole reference.
 Every statement form (`SELECT`, collection DDL, and index DDL)
-rejects leftover tokens with `OQL0002`, with or without a separating `;`, and the corpus pins
+rejects leftover tokens with `CD00002`, with or without a separating `;`, and the corpus pins
 both.
 
 ## Scope, index DDL, and mutations
@@ -568,8 +568,8 @@ engine in the same change that adds them to `OqlLanguageProfile`.
 `IF` remains an identifier, recognized as a modifier only immediately after `COLLECTION` or `INDEX` when
 followed by `NOT` or `EXISTS`. Thus `CREATE COLLECTION if`, `CREATE COLLECTION "if"`, and
 `DROP COLLECTION if` use the name `if`. The shared DDL helper requires `NOT EXISTS` for creation
-and `EXISTS` for removal. `CREATE COLLECTION IF EXISTS c` reports `OQL0002` at `EXISTS`.
-Unquoted `EXISTS` remains reserved and reports `COHDBL001` outside that modifier (except an
+and `EXISTS` for removal. `CREATE COLLECTION IF EXISTS c` reports `CD00002` at `EXISTS`.
+Unquoted `EXISTS` remains reserved and reports `CK00001` outside that modifier (except an
 ordinary property segment after a dot); `COLLECTION` remains reserved outside its DDL position.
 Both statements return Success with affected count zero. Creation defaults to Adhoc ownership;
 conditional creation preserves any existing collection, including a schema-owned one. Conditional
@@ -608,12 +608,12 @@ removes a property; an array element assigned MISSING becomes NULL. The engine d
 creation, shape failure, ordering, depth, version and transaction rules.
 Every index segment needs an existing array and an in-range index, including removals beneath
 missing object members; an absent object member alone is a no-op for UNSET. Invalid shapes,
-overlapping targets and invalid stored results carry COHDOC016, COHDOC017 and COHDOC018
+overlapping targets and invalid stored results carry CD02016, CD01017 and CD02018
 respectively. The [dialect page](DIALECT.md) records the executable UPDATE contract.
 
 WHERE and SET values share ordinary parameter, numeric and META validation, and reject aggregates.
-Subqueries in either clause report COHDBL001 naming SUBQUERY at the inner SELECT, including under
-EXPLAIN. USE KEYS, RETURNING and FOR comprehensions remain COHDBL001 at USE, RETURNING or FOR.
+Subqueries in either clause report CK00001 naming SUBQUERY at the inner SELECT, including under
+EXPLAIN. USE KEYS, RETURNING and FOR comprehensions remain CK00001 at USE, RETURNING or FOR.
 UPDATE's grammar itself refuses LIMIT and OFFSET, independently of SELECT capabilities. An update returns
 the matched-document count without rows; EXPLAIN UPDATE describes its scan or seek without writing.
 
@@ -628,7 +628,7 @@ all documents are deleted and the collection and its index definitions remain.
 The public OqlDeleteExpression retains Collection, Alias, Predicate and source spans. The
 engine chooses the existing scan or index seek, reapplies the full predicate to the statement
 snapshot, then deletes the collected identities atomically. META predicates remain residual
-filters with no key lookup in T1. USE KEYS, RETURNING and DELETE LIMIT remain COHDBL001 at
+filters with no key lookup in T1. USE KEYS, RETURNING and DELETE LIMIT remain CK00001 at
 their clause token; DELETE's parser refuses LIMIT and OFFSET independently of SELECT's paging support.
 System collections are read-only; Schema-owned stored collections permit content deletion.
 Commands report the deleted-document count, including zero, through the existing completion
@@ -644,7 +644,7 @@ properties absent from the replacement disappear. Every pair counts once and rec
 version, including an unchanged value. SELECT sources materialize before writes, including self-sources.
 Repeated keys in one statement raise DocumentDuplicateKeyException and roll back the statement;
 last-writer-wins does not apply. Key/value validation, MISSING omission and complete-row binding
-are shared with INSERT. OPTIONS and RETURNING remain COHDBL001 at their tokens, and a nested
+are shared with INSERT. OPTIONS and RETURNING remain CK00001 at their tokens, and a nested
 SELECT in VALUES reports SUBQUERY. There is no statement-level version precondition in T1;
 use PutAsync(expectedVersion) or UPDATE WHERE META().version = $v for optimistic replacement.
 EXPLAIN UPSERT describes Upsert or UpsertSelect without writing. The existing completion carries
@@ -654,9 +654,9 @@ the affected count with no result rows; no wire or persisted catalog shape chang
 
 Document keys are external: collections declare no key field and never generate ids. The
 SQL++ KEY/VALUE forms above are the T1 mutation grammar. Id-less VALUE/VALUES forms report
-OQL0002 asking for KEY. KEY, VALUES and INTO remain non-reserved; the header reads KEY and
+CD00002 asking for KEY. KEY, VALUES and INTO remain non-reserved; the header reads KEY and
 VALUE by position, independently of SELECT VALUE's eventual reservation. OPTIONS in the
-header reports one COHDBL001 at OPTIONS, including when it follows KEY directly in the SELECT
+header reports one CK00001 at OPTIONS, including when it follows KEY directly in the SELECT
 form, because Documents has no TTL or statement-level version precondition. A trailing RETURNING clause is recognized
 but deferred; identifier positions keep `returning` as a name. General database-qualified destinations remain invalid.
 
@@ -673,7 +673,7 @@ an earlier value. Thus `{'a':1, 'a':2}` yields `{"a":2}` in SELECT and INSERT VA
 This follows Couchbase's keyed map construction
 ([expression/cons_object.go:53-77](https://github.com/couchbase/query/blob/master/expression/cons_object.go#L53-L77)),
 including omission before assignment at lines 72-73. Raw JsonElement parameters still obey
-storage's duplicate-property refusal, translated to COHDOC008 for INSERT. #1128 extends this
+storage's duplicate-property refusal, translated to CD02008 for INSERT. #1128 extends this
 existing parser, evaluator and OqlObjectExpression node, retaining these constructor semantics.
 
 META is a declared function with its own OqlMetaExpression. It exposes id and the engine's
@@ -689,16 +689,16 @@ CREATE INDEX retains Paths in source order, with Path as the first path. IsUniqu
 are explicit AST flags; DROP INDEX retains IfExists. Single-path constructors remain useful
 convenience forms. Quoted "if" stays an index name. Duplicate paths compare segment values, so
 `a`, `"a"` and `['a']` name the same key. Empty/duplicate paths, wildcards, expressions, ASC/DESC,
-partial WHERE and INCLUDE MISSING receive OQL0002 at the invalid token. The engine enforces the
-32-path cap on directly constructed ASTs with COHDOC022; text reports OQL0009 at the 33rd key. ALL and DISTINCT ARRAY keys receive one COHDBL001 from the key parser,
+partial WHERE and INCLUDE MISSING receive CD00002 at the invalid token. The engine enforces the
+32-path cap on directly constructed ASTs with CD03022; text reports CD00009 at the 33rd key. ALL and DISTINCT ARRAY keys receive one CK00001 from the key parser,
 at ALL or DISTINCT and naming that array-key form. They remain deferred independently of SELECT
 quantifiers. Capability validation computes the balanced key-list token range once, so repeated
 array-key words do not cause quadratic prefix rescans. UNIQUE elsewhere, including SELECT UNIQUE(a),
-retains COHDBL001 and is never a function.
+retains CK00001 and is never a function.
 
 Composite keys follow SQL++'s leading-key MISSING rule. UNIQUE is a Cohesion SQL-spelled extension;
 any NULL/MISSING component exempts the key from conflicts (PostgreSQL NULLS DISTINCT). Arrays and
-objects in a UNIQUE key fail COHDOC021; duplicate valued scalar keys fail COHDOC020 (23505).
+objects in a UNIQUE key fail CD02021; duplicate valued scalar keys fail CD03020 (23505).
 Immediate per-row checks and the existing failed-transaction contract apply to every mutation.
 COHESION_SCHEMA.INDEXES exposes PATH, ordered PATHS and the real IS_UNIQUE. Conditional creation
 preserves an existing name even if the requested definition differs. Conditional absent DROP is
@@ -732,3 +732,27 @@ The root DatabaseException.Diagnostics carrier preserves the complete parser lis
 factories and session boundaries, including parsed typed requests. DatabaseParseException
 retains the existing first-error message and no error-recovery AST executes. Graph's path
 request factory shares this contract. Diagnostics remain plain Database.Types data.
+
+## Access estimates (#1527)
+
+The engine costs competing equality-prefix/range paths using bounded snapshot-visible B+Tree
+probes and may intersect selected identity sets before JSON reads. EXPLAIN retains its existing
+grammar and nonexecuting contract, naming IndexSeek/IndexIntersection with entry estimates or
+explicit bounds in the existing nullable count columns. actual_rows remains NULL; EXPLAIN ANALYZE
+and standalone ANALYZE remain unsupported in OQL. No persisted statistics or language AST changes.
+
+## Documents diagnostic conventions (#1470)
+
+Exception and diagnostic templates use the project's build-generated `ErrorMessages` resources.
+Parameterized templates format with the current culture; abort/cancellation templates used in
+normal cleanup are cached. The [Database error-code registry](../../Assimalign.Cohesion.Database/docs/ERROR-CODES.md)
+assigns this family its two-letter prefix and categorized five-digit identities.
+Existing SQLSTATE meanings, numeric wire error kinds, frame layouts and disk formats are preserved.
+Structured diagnostics keep their code outside the message. Compiler diagnostic identifiers and
+standard .NET argument guards retain their own contracts.
+
+## Debugger inspection (#1470)
+
+Language debugger views expose stored AST properties and the reviewed source-text/location getters on sealed expression leaves. Parse Diagnostics sorting, the create-index Path indexer and parser Profile initialization are omitted. Source text is not included in debugger summaries.
+
+Eligible types follow the [Database conventions](../../Assimalign.Cohesion.Database/docs/CONVENTIONS.md) debugger display/proxy rules. Views are private and read-only; inspection does not change the public API, execution paths, error contracts, storage formats or protocol bytes.

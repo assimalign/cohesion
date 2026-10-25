@@ -15,13 +15,13 @@ internal static class DatabasePlanner
         if (!string.Equals(manifest.Kind, "Database", StringComparison.Ordinal))
         {
             throw new InvalidOperationException(
-                $"Database planner cannot plan resource '{manifest.Name}' with kind '{manifest.Kind}'.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabasePlannerCreatePlanFailure, manifest.Name, manifest.Kind));
         }
 
         if (manifest.Lifecycle.Workload is not WorkloadKind.StatefulSet)
         {
             throw new InvalidOperationException(
-                $"Database resource '{manifest.Name}' requires a StatefulSet workload for stable replica identity.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabasePlannerCreatePlanFailure2, manifest.Name));
         }
 
         bool hasVolume = false;
@@ -37,7 +37,7 @@ internal static class DatabasePlanner
         if (!hasVolume)
         {
             throw new InvalidOperationException(
-                $"Database resource '{manifest.Name}' requires at least one persistent Volume mount.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabasePlannerCreatePlanFailure3, manifest.Name));
         }
 
         ResourcePlan plan = GenericPlanner.CreatePlan(context);
@@ -45,7 +45,7 @@ internal static class DatabasePlanner
         if (!plan.Workload.StableIdentity)
         {
             throw new InvalidOperationException(
-                $"Database resource '{manifest.Name}' requires stable workload identity.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabasePlannerCreatePlanFailure4, manifest.Name));
         }
 
         for (int index = 0; index < plan.Volumes.Count; index++)
@@ -54,7 +54,7 @@ internal static class DatabasePlanner
             if (!volume.PerReplicaClaim || string.IsNullOrWhiteSpace(volume.Size))
             {
                 throw new InvalidOperationException(
-                    $"Database volume '{volume.Name}' must be a sized per-replica claim.");
+                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabasePlannerCreatePlanFailure5, volume.Name));
             }
         }
 
@@ -66,8 +66,7 @@ internal static class DatabasePlanner
             if (!serviceNames.Add(service.Name))
             {
                 throw new InvalidOperationException(
-                    $"Database resource '{manifest.Name}' produces duplicate service name '{service.Name}'. " +
-                    "Endpoint name 'headless' is reserved for the governing service.");
+                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabasePlannerCreatePlanFailure6, manifest.Name, service.Name));
             }
 
             if (service.Headless && service.Governing)
@@ -79,7 +78,7 @@ internal static class DatabasePlanner
         if (governingServiceCount is not 1)
         {
             throw new InvalidOperationException(
-                $"Database resource '{manifest.Name}' requires exactly one headless governing service.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabasePlannerCreatePlanFailure7, manifest.Name));
         }
 
         return plan;

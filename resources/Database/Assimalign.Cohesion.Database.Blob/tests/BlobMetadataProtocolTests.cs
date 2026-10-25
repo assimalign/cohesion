@@ -11,7 +11,7 @@ namespace Assimalign.Cohesion.Database.Blob.Tests;
 
 public sealed class BlobMetadataProtocolTests
 {
-    private const string PropertiesVector =
+    private const string propertiesVector =
         "0000000162" + // text name = b
         "0000000000000009" + // length = 9
         "00" + // null content type
@@ -49,7 +49,7 @@ public sealed class BlobMetadataProtocolTests
     {
         var expected = new BlobProperties("b", 9, null, 0xFEDCBA9876543210,
             DateTimeOffset.MinValue, DateTimeOffset.MinValue.AddTicks(1), 0xDEADBEEF);
-        byte[] payload = Convert.FromHexString(PropertiesVector);
+        byte[] payload = Convert.FromHexString(propertiesVector);
         new BlobPropertiesMessage(expected).Encode().ShouldBe(payload);
         BlobPropertiesMessage.Decode(payload).Properties.ShouldBe(expected);
     }
@@ -57,11 +57,11 @@ public sealed class BlobMetadataProtocolTests
     [Fact(DisplayName = "Cohesion Test [Blob] - Metadata wire: Null and empty content types remain distinct")]
     public void Properties_NullAndEmptyContentType_ShouldRemainDistinct()
     {
-        byte[] empty = Convert.FromHexString(PropertiesVector[..26] + "0100000000" + PropertiesVector[28..]);
+        byte[] empty = Convert.FromHexString(propertiesVector[..26] + "0100000000" + propertiesVector[28..]);
         var properties = BlobPropertiesMessage.Decode(empty).Properties;
         properties.ContentType.ShouldBe("");
         new BlobPropertiesMessage(properties).Encode().ShouldBe(empty);
-        BlobPropertiesMessage.Decode(Convert.FromHexString(PropertiesVector)).Properties.ContentType.ShouldBeNull();
+        BlobPropertiesMessage.Decode(Convert.FromHexString(propertiesVector)).Properties.ContentType.ShouldBeNull();
 
         var offset = properties with
         {
@@ -79,7 +79,7 @@ public sealed class BlobMetadataProtocolTests
     [Fact(DisplayName = "Cohesion Test [Blob] - Metadata wire: All truncated property payloads and trailing bytes reject")]
     public void Properties_TruncatedOrTrailingPayload_ShouldReject()
     {
-        byte[] payload = Convert.FromHexString(PropertiesVector);
+        byte[] payload = Convert.FromHexString(propertiesVector);
         for (int size = 0; size < payload.Length; size++)
         {
             byte[] truncated = payload[..size];
@@ -97,7 +97,7 @@ public sealed class BlobMetadataProtocolTests
     [InlineData(30, long.MaxValue)]
     public void Properties_InvalidNumericField_ShouldReject(int offset, long value)
     {
-        byte[] payload = Convert.FromHexString(PropertiesVector);
+        byte[] payload = Convert.FromHexString(propertiesVector);
         BinaryPrimitives.WriteInt64BigEndian(payload.AsSpan(offset), value);
         Should.Throw<ProtocolException>(() => BlobPropertiesMessage.Decode(payload));
     }
@@ -120,13 +120,13 @@ public sealed class BlobMetadataProtocolTests
     [Fact(DisplayName = "Cohesion Test [Blob] - Metadata wire: Invalid properties and completion values reject")]
     public void Metadata_InvalidValues_ShouldReject()
     {
-        byte[] flag = Convert.FromHexString(PropertiesVector);
+        byte[] flag = Convert.FromHexString(propertiesVector);
         flag[13] = 2;
         Should.Throw<ProtocolException>(() => BlobPropertiesMessage.Decode(flag));
         Should.Throw<ProtocolException>(() => new BlobOperationCompleteMessage(-1).Encode());
         Should.Throw<ProtocolException>(() => BlobOperationCompleteMessage.Decode(Convert.FromHexString("FFFFFFFFFFFFFFFF")));
         Should.Throw<ProtocolException>(() => BlobOperationCompleteMessage.Decode(new byte[9]));
-        var properties = BlobPropertiesMessage.Decode(Convert.FromHexString(PropertiesVector)).Properties;
+        var properties = BlobPropertiesMessage.Decode(Convert.FromHexString(propertiesVector)).Properties;
         Should.Throw<ProtocolException>(() => new BlobPropertiesMessage(properties with { Length = -1 }).Encode());
         Should.Throw<ProtocolException>(() => new BlobPropertiesMessage(properties with { Name = "" }).Encode());
         Should.Throw<ProtocolException>(() => new BlobListMessage("c", new string('x', 65_536)).Encode());

@@ -131,7 +131,7 @@ public sealed class SqlTimeoutRegressionTests
         // Assert: no partial physical effect survives, including after recovery.
         evictions.ShouldBeGreaterThan(0);
         statementToken.IsCancellationRequested.ShouldBeTrue();
-        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE043");
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS05043");
         session.StatementTimeout = TimeSpan.Zero;
         (await ScalarAsync(session, "SELECT COUNT(*) FROM items", ceiling.Token)).ShouldBe(600L);
         (await ScalarAsync(session, "SELECT COUNT(*) FROM items WHERE v = 1", ceiling.Token)).ShouldBe(0L);
@@ -179,7 +179,7 @@ public sealed class SqlTimeoutRegressionTests
 
         // Assert
         flushes.ShouldBeGreaterThan(0);
-        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE043");
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS05043");
         database.IndexManager.ExportRegistrations().ShouldBeEmpty();
         session.StatementTimeout = TimeSpan.Zero;
         (await session.ExecuteAsync(sql, cancellationToken: ceiling.Token)).Status.ShouldBe(DatabaseResultStatus.Success);
@@ -257,7 +257,7 @@ public sealed class SqlTimeoutRegressionTests
         statementToken.IsCancellationRequested.ShouldBeTrue();
         outcome.ShouldBe("Timeout");
         failure.SqlState.ShouldBe("55P03");
-        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE044");
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS04044");
     }
 
     private static SqlDatabaseEngineOptions Options(FaultInjectingJournalSqlStorageStrategy? strategy = null) => new()

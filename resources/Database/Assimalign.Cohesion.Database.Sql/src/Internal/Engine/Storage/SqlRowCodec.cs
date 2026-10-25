@@ -199,7 +199,7 @@ internal static class SqlRowCodec
         if (record.Length < StampHeaderSize)
         {
             throw new DatabaseTypeException(
-                $"The record holds {record.Length} bytes, fewer than its {StampHeaderSize}-byte version-stamp header.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlRowCodecDecodeDatabaseType, record.Length, StampHeaderSize));
         }
 
         (writer, deleter) = ReadStamps(record);
@@ -212,7 +212,7 @@ internal static class SqlRowCodec
             if (objectId != table.ObjectId)
             {
                 throw new DatabaseTypeException(
-                    $"The record's object-id prefix names object {objectId}, not the table's object {table.ObjectId}.");
+                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlRowCodecDecodeDatabaseType2, objectId, table.ObjectId));
             }
 
             var values = new object?[table.Columns.Count];
@@ -238,7 +238,7 @@ internal static class SqlRowCodec
         {
             // A temporal component outside its type's range, or a decimal beyond decimal's: the
             // component is well formed, but no value of its type was ever encoded as it.
-            throw new DatabaseTypeException($"A component holds a value outside its type: {exception.Message}", exception);
+            throw new DatabaseTypeException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlRowCodecDecodeDatabaseType3, exception.Message), exception);
         }
     }
 
@@ -316,7 +316,7 @@ internal static class SqlRowCodec
             case DatabaseType.TimeSpan: writer.AppendTimeSpan((TimeSpan)value); break;
             case DatabaseType.Guid: writer.AppendGuid((Guid)value); break;
             default:
-                throw new DatabaseException($"Column type {type} cannot be stored yet.");
+                throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlRowCodecAppendValueDatabase, type));
         }
     }
 
@@ -363,7 +363,7 @@ internal static class SqlRowCodec
             DatabaseType.TimeSpan => reader.ReadTimeSpan(),
             DatabaseType.Guid => reader.ReadGuid(),
             _ => throw new DatabaseTypeException(
-                $"A {reader.PeekType()} component is stored for a column of type {type}, which stores only NULL."),
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlRowCodecReadValueDatabaseType, reader.PeekType(), type)),
         };
     }
 }

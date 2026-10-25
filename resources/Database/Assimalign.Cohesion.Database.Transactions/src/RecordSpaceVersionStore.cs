@@ -14,11 +14,13 @@ using Assimalign.Cohesion.Database.Storage;
 /// carry the shared 16-byte writer/deleter stamp prefix. Payloads remain in the
 /// record space; the ledger supplies logical undo and safe space reclamation.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("RecordSpaceVersionStore")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Transactions.RecordSpaceVersionStore.DebugView))]
 public sealed class RecordSpaceVersionStore : VersionStore
 {
     // A logical transaction can span a streamed object larger than RAM. Physical
     // undo/reclamation must bound the page pre-images a storage bracket retains independently of it.
-    private const int MutationBatchSize = 64;
+    private const int mutationBatchSize = 64;
     private readonly Storage _storage;
     private readonly TransactionRecordSpace _records;
     private readonly SemaphoreSlim _applyGate;
@@ -163,7 +165,7 @@ public sealed class RecordSpaceVersionStore : VersionStore
 
         if (record.Length < RecordVersionStamp.HeaderSize)
         {
-            return new ValueTask<ReadOnlyMemory<byte>?>((ReadOnlyMemory<byte>?)null);
+            throw ShortRecord(pageId, slotIndex, record.Length);
         }
 
         var (writer, deleter) = RecordVersionStamp.ReadStamps(record.Span);
@@ -212,17 +214,17 @@ public sealed class RecordSpaceVersionStore : VersionStore
         // The candidates a committed batch reclaimed or found stale. A batch that does not commit
         // rolls back, so its candidates stay tracked, as the unreadable ones do.
         var settled = new HashSet<PrunableVersion>(candidates.Count);
-        var batchSettled = new List<PrunableVersion>(Math.Min(MutationBatchSize, candidates.Count));
+        var batchSettled = new List<PrunableVersion>(Math.Min(mutationBatchSize, candidates.Count));
         ExceptionDispatchInfo? unreadable = null;
 
         await _applyGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            for (int offset = 0; offset < candidates.Count; offset += MutationBatchSize)
+            for (int offset = 0; offset < candidates.Count; offset += mutationBatchSize)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 using var bracket = _storage.BeginTransaction();
-                int end = Math.Min(offset + MutationBatchSize, candidates.Count);
+                int end = Math.Min(offset + mutationBatchSize, candidates.Count);
                 long batchPruned = 0;
                 batchSettled.Clear();
                 for (int index = offset; index < end; index++)
@@ -350,7 +352,7 @@ public sealed class RecordSpaceVersionStore : VersionStore
     /// <returns>The number of versions physically undone.</returns>
     internal long ScrubRecovered(IReadOnlySet<TransactionSequence> aborted, CancellationToken cancellationToken = default)
     {
-        var mutations = new List<(PageId PageId, int SlotIndex, byte[]? Restored)>(MutationBatchSize);
+        var mutations = new List<(PageId PageId, int SlotIndex, byte[]? Restored)>(mutationBatchSize);
         var prunable = new List<PrunableVersion>();
         long changed = 0;
 
@@ -387,7 +389,7 @@ public sealed class RecordSpaceVersionStore : VersionStore
 
                 if (unit.Data.Length < RecordVersionStamp.HeaderSize)
                 {
-                    continue;
+                    throw ShortRecord(unit.PageId, unit.SlotIndex, unit.Data.Length);
                 }
 
                 var (writer, deleter) = RecordVersionStamp.ReadStamps(unit.Data.Span);
@@ -395,7 +397,7 @@ public sealed class RecordSpaceVersionStore : VersionStore
                 if (writer != TransactionSequence.None && aborted.Contains(writer))
                 {
                     mutations.Add((unit.PageId, unit.SlotIndex, null));
-                    if (mutations.Count == MutationBatchSize)
+                    if (mutations.Count == mutationBatchSize)
                     {
                         ApplyBatch();
                     }
@@ -408,7 +410,7 @@ public sealed class RecordSpaceVersionStore : VersionStore
                     if (aborted.Contains(deleter))
                     {
                         mutations.Add((unit.PageId, unit.SlotIndex, RecordVersionStamp.WithoutDeleter(unit.Data.Span)));
-                        if (mutations.Count == MutationBatchSize)
+                        if (mutations.Count == mutationBatchSize)
                         {
                             ApplyBatch();
                         }
@@ -440,11 +442,11 @@ public sealed class RecordSpaceVersionStore : VersionStore
         await _applyGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            for (int offset = 0; offset < entries.Count; offset += MutationBatchSize)
+            for (int offset = 0; offset < entries.Count; offset += mutationBatchSize)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 using var bracket = _storage.BeginTransaction();
-                int end = Math.Min(offset + MutationBatchSize, entries.Count);
+                int end = Math.Min(offset + mutationBatchSize, entries.Count);
                 for (int index = offset; index < end; index++)
                 {
                     var entry = entries[index];
@@ -540,12 +542,16 @@ public sealed class RecordSpaceVersionStore : VersionStore
 
         if (record.Length < RecordVersionStamp.HeaderSize)
         {
-            return false;
+            throw ShortRecord(pageId, slotIndex, record.Length);
         }
 
         (writer, deleter) = RecordVersionStamp.ReadStamps(record.Span);
         return true;
     }
+
+    private static StorageCorruptionException ShortRecord(PageId pageId, int slotIndex, int length)
+        => new(pageId, slotIndex, string.Format(System.Globalization.CultureInfo.CurrentCulture,
+            ErrorMessages.VersionRecordTooShort, length, RecordVersionStamp.HeaderSize));
 
     private enum LedgerEntryKind : byte
     {
@@ -562,4 +568,12 @@ public sealed class RecordSpaceVersionStore : VersionStore
         byte[]? Key = null);
 
     private readonly record struct PrunableVersion(ulong Deleter, ulong Location);
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Transactions.RecordSpaceVersionStore value)
+        {
+            _ = value;
+        }
+    }
 }

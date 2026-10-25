@@ -51,6 +51,41 @@ internal static class DocumentCatalogCodec
         return stream.ToArray();
     }
 
+    internal static void EnsureHeader(ReadOnlySpan<byte> bytes, Assimalign.Cohesion.Database.Storage.PageId page, int slot)
+    {
+        try
+        {
+            if (bytes.Length < 18 || bytes[16] is not (1 or 2 or 4))
+            {
+                throw new DocumentCatalogException("CD06105", ErrorMessages.CatalogHeaderMalformed);
+            }
+            EnsureVersion(bytes[16], bytes[17]);
+        }
+        catch (DocumentCatalogException error) { throw At(page, slot, error); }
+    }
+
+    internal static CatalogRecord Decode(ReadOnlySpan<byte> bytes, Assimalign.Cohesion.Database.Storage.PageId page, int slot)
+    {
+        try { return Decode(bytes); }
+        catch (DocumentCatalogException error)
+        {
+            throw At(page, slot, error);
+        }
+    }
+
+    internal static DocumentCatalogException At(Assimalign.Cohesion.Database.Storage.PageId page, int slot, DocumentCatalogException error)
+    {
+        if (error.IsFormatRefusal)
+        {
+            return new DocumentCatalogException(error.Code, string.Format(CultureInfo.CurrentCulture,
+                ErrorMessages.CatalogFormatRefusalLocation, (long)page, slot, error.Message), error)
+            { IsFormatRefusal = true, PageId = page, SlotIndex = slot };
+        }
+        var corruption = new Assimalign.Cohesion.Database.Storage.StorageCorruptionException(page, slot, error.Message, error);
+        return new DocumentCatalogException(error.Code, corruption.Message, corruption)
+        { PageId = page, SlotIndex = slot };
+    }
+
     internal static CatalogRecord Decode(ReadOnlySpan<byte> bytes)
     {
         try
@@ -63,7 +98,7 @@ internal static class DocumentCatalogCodec
             byte version = reader.ReadByte();
             EnsureVersion(kind, version);
             var id = new Guid(reader.ReadBytes(16));
-            string name = ReadString(reader) ?? throw new DocumentCatalogException("Catalog names cannot be null.");
+            string name = ReadString(reader) ?? throw new DocumentCatalogException("CD06105", ErrorMessages.CatalogCodecDecodeDocumentCatalog);
             CatalogRecord result;
             switch (kind)
             {
@@ -73,7 +108,7 @@ internal static class DocumentCatalogCodec
                     if (owner is not (DatabaseObjectOwner.Adhoc or DatabaseObjectOwner.Schema)
                         || (owner == DatabaseObjectOwner.Schema && string.IsNullOrWhiteSpace(schema)))
                     {
-                        throw new DocumentCatalogException("Invalid collection ownership metadata.");
+                        throw new DocumentCatalogException("CD06105", ErrorMessages.CatalogCodecDecodeDocumentCatalog2);
                     }
                     result = new CatalogRecord(new DocumentCollectionMetadata(id, name, owner, schema), null);
                     break;
@@ -84,40 +119,40 @@ internal static class DocumentCatalogCodec
                     uint checksum = reader.ReadUInt32();
                     if (documentVersion == 0 || head == 0 || length <= 0 || length > int.MaxValue)
                     {
-                        throw new DocumentCatalogException("Invalid document version or content reference.");
+                        throw new DocumentCatalogException("CD06105", ErrorMessages.CatalogCodecDecodeDocumentCatalog3);
                     }
                     result = new CatalogRecord(null, new DocumentCatalogEntry(id, name, documentVersion, head, length, checksum));
                     break;
                 case 4:
                     int count = reader.ReadInt32();
-                    if (count is < 1 or > 32) { throw new DocumentCatalogException(ErrorMessages.IndexPathCountInvalid); }
+                    if (count is < 1 or > 32) { throw new DocumentCatalogException("CD06105", ErrorMessages.IndexPathCountInvalid); }
                     var paths = new string[count];
                     for (int i = 0; i < count; i++)
                     {
-                        paths[i] = ReadString(reader) ?? throw new DocumentCatalogException("Index paths cannot be null.");
+                        paths[i] = ReadString(reader) ?? throw new DocumentCatalogException("CD06105", ErrorMessages.CatalogCodecDecodeDocumentCatalog4);
                         DocumentIndexKeys.ValidatePath(paths[i]);
                     }
                     byte flags = reader.ReadByte();
-                    if (flags > 1) { throw new DocumentCatalogException(ErrorMessages.IndexFlagsInvalid); }
+                    if (flags > 1) { throw new DocumentCatalogException("CD06105", ErrorMessages.IndexFlagsInvalid); }
                     ulong objectId = reader.ReadUInt64();
                     if (objectId == 0)
                     {
-                        throw new DocumentCatalogException("Index identities cannot be zero.");
+                        throw new DocumentCatalogException("CD06105", ErrorMessages.CatalogCodecDecodeDocumentCatalog5);
                     }
                     result = new CatalogRecord(null, null, new DocumentIndexMetadata(id, name, paths, flags == 1, objectId));
                     break;
                 default:
-                    throw new DocumentCatalogException($"Unexpected document metadata record kind {kind}.");
+                    throw new DocumentCatalogException("CD06105", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CatalogCodecDecodeDocumentCatalog6, kind));
             }
             if (id == Guid.Empty || string.IsNullOrWhiteSpace(name) || stream.Position != stream.Length)
             {
-                throw new DocumentCatalogException("Invalid or trailing document catalog metadata.");
+                throw new DocumentCatalogException("CD06105", ErrorMessages.CatalogCodecDecodeDocumentCatalog7);
             }
             return result;
         }
         catch (Exception error) when (error is IOException or ArgumentException or OverflowException)
         {
-            throw new DocumentCatalogException("Malformed document catalog metadata.", error);
+            throw new DocumentCatalogException("CD06105", ErrorMessages.CatalogCodecDecodeDocumentCatalog8, error);
         }
     }
 
@@ -126,7 +161,8 @@ internal static class DocumentCatalogCodec
         byte supported = (byte)(kind is 4 or 5 ? 2 : 1);
         if (version != supported)
         {
-            throw new DocumentCatalogException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.CatalogFormatMismatch, kind, version, supported));
+            throw new DocumentCatalogException("CD06105", string.Format(CultureInfo.CurrentCulture, ErrorMessages.CatalogFormatMismatch, kind, version, supported))
+            { IsFormatRefusal = true };
         }
     }
 
@@ -151,7 +187,7 @@ internal static class DocumentCatalogCodec
         }
         if (length < 0 || length > reader.BaseStream.Length - reader.BaseStream.Position)
         {
-            throw new DocumentCatalogException("Invalid catalog string length.");
+            throw new DocumentCatalogException("CD06105", ErrorMessages.CatalogCodecReadStringDocumentCatalog);
         }
         return _utf8.GetString(reader.ReadBytes(length));
     }

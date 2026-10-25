@@ -53,10 +53,10 @@ public sealed class DocumentInsertNumericWireTests
         // Assert
         failure.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
         var diagnostic = failure.Diagnostics.ShouldHaveSingleItem();
-        diagnostic.Code.ShouldBe("COHDOC007");
+        diagnostic.Code.ShouldBe("CD02007");
         diagnostic.Start.ShouldBe(statement.IndexOf(operand, StringComparison.Ordinal));
         diagnostic.End.ShouldBe(diagnostic.Start + operand.Length);
-        failure.Message.ShouldBe($"COHDOC007: {diagnostic.Message}");
+        failure.Message.ShouldBe($"CD02007: {diagnostic.Message}");
         var saved = (await connection.GetAsync("items", "seed", harness.Token)).ShouldNotBeNull();
         saved.Version.ShouldBe(original.Version);
         saved.Content.ToArray().ShouldBe(original.Content.ToArray());

@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
+  <resheader name="version"><value>2.0</value></resheader>
+  <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms</value></resheader>
+  <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
+  <data name="ChunkMessageValidateLengthProtocol" xml:space="preserve"><value>A Blob chunk must contain 1 through {0} bytes.</value></data>
+  <data name="BlobPropertiesMessageEncodeProtocol" xml:space="preserve"><value>A Blob property length must be nonnegative.</value></data>
+  <data name="BlobPropertiesMessageDecodeProtocol" xml:space="preserve"><value>Malformed Blob property length or content-type flag.</value></data>
+  <data name="BlobPropertiesMessageDecodeProtocol2" xml:space="preserve"><value>Malformed Blob property timestamps or checksum.</value></data>
+  <data name="BlobProtocolTransferSendAsyncArgument" xml:space="preserve"><value>The content stream must be readable.</value></data>
+  <data name="BlobProtocolTransferSendAsyncProtocol" xml:space="preserve"><value>The Blob chunk acknowledgement disagrees with the transferred content.</value></data>
+  <data name="BlobProtocolTransferSendAsyncProtocol2" xml:space="preserve"><value>The Blob source ended before its declared length.</value></data>
+  <data name="ProtocolTransferReceiveAsyncArgument" xml:space="preserve"><value>The content stream must be writable.</value></data>
+  <data name="ProtocolTransferReceiveAsyncProtocol" xml:space="preserve"><value>A Blob transfer must begin with TransferStart.</value></data>
+  <data name="ProtocolTransferReceiveAsyncProtocol2" xml:space="preserve"><value>A Blob transfer length must be nonnegative or -1.</value></data>
+  <data name="ProtocolTransferReceiveAsyncProtocol3" xml:space="preserve"><value>The Blob completion length disagrees with the transferred content.</value></data>
+  <data name="ProtocolTransferReceiveAsyncProtocol4" xml:space="preserve"><value>Unexpected message {0} during a Blob transfer.</value></data>
+  <data name="TransferValidateChannelArgument" xml:space="preserve"><value>The channel must be bound to BlobProtocol.Family.</value></data>
+  <data name="BlobProtocolTransferAddLengthProtocol" xml:space="preserve"><value>The Blob content exceeds its declared or supported length.</value></data>
+  <data name="BlobProtocolTransferReadAsyncProtocol" xml:space="preserve"><value>The connection ended before the Blob transfer completed.</value></data>
+  <data name="BlobProtocolTransferReadAsyncProtocol2" xml:space="preserve"><value>Blob transfer failed ({0}): {1}</value></data>
+  <data name="TransferCompleteMessageEncodeProtocol" xml:space="preserve"><value>A completed Blob transfer length must be nonnegative.</value></data>
+  <data name="BlobWriteMessageDecodeProtocol" xml:space="preserve"><value>Malformed Blob Write overwrite flag.</value></data>
+  <data name="ProtocolPayloadWriteStringProtocol" xml:space="preserve"><value>A Blob metadata string is missing.</value></data>
+  <data name="ProtocolPayloadWriteStringProtocol2" xml:space="preserve"><value>A Blob metadata string exceeds 65,535 UTF-8 bytes.</value></data>
+  <data name="ProtocolPayloadWriteStringProtocol3" xml:space="preserve"><value>A Blob metadata string contains invalid Unicode.</value></data>
+  <data name="BlobProtocolPayloadReadStringProtocol" xml:space="preserve"><value>Truncated Blob metadata string length.</value></data>
+  <data name="BlobProtocolPayloadReadStringProtocol2" xml:space="preserve"><value>Invalid Blob metadata string length.</value></data>
+  <data name="BlobProtocolPayloadReadStringProtocol3" xml:space="preserve"><value>A Blob metadata string contains invalid UTF-8.</value></data>
+  <data name="BlobProtocolPayloadReadInt64Protocol" xml:space="preserve"><value>Truncated Blob transfer length.</value></data>
+  <data name="BlobProtocolPayloadRequireEndProtocol" xml:space="preserve"><value>Unexpected trailing bytes in a Blob payload.</value></data>
+</root>

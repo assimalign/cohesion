@@ -83,6 +83,8 @@ internal sealed partial class SqlPlanner
     private bool TryReadTable(string schema, string name, out SqlCatalogTable table)
         => ViewImageState is { } image ? image.Snapshot.TryGetTable(schema, name, out table!) : _catalog.TryGetTable(schema, name, out table!);
 
+    [global::System.Diagnostics.DebuggerDisplay("ViewImageDirectory")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlPlanner.ViewImageDirectory.DebugView))]
     private sealed class ViewImageDirectory
     {
         internal object Sync { get; } = new();
@@ -90,8 +92,18 @@ internal sealed partial class SqlPlanner
         internal ViewImage? Current { get; set; }
         internal List<WeakReference<ViewImage>> Images { get; } = new();
         internal ConditionalWeakTable<SqlCatalogSnapshot, ViewImage> Captures { get; } = new();
+
+        private sealed class DebugView
+        {
+            public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlPlanner.ViewImageDirectory value)
+            {
+                _ = value;
+            }
+        }
     }
 
+    [global::System.Diagnostics.DebuggerDisplay("ViewImage")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlPlanner.ViewImage.DebugView))]
     internal sealed class ViewImage
     {
         internal ViewImage(SqlCatalogSnapshot snapshot, SqlBindingEntry<SqlFunctionEnvironment> functions)
@@ -99,5 +111,13 @@ internal sealed partial class SqlPlanner
         internal SqlCatalogSnapshot Snapshot { get; }
         internal SqlBindingEntry<SqlFunctionEnvironment> Functions { get; }
         internal ViewPlans Plans { get; } = new();
+
+        private sealed class DebugView
+        {
+            public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlPlanner.ViewImage value)
+            {
+                _ = value;
+            }
+        }
     }
 }

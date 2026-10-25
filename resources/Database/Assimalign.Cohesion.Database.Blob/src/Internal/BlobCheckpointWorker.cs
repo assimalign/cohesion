@@ -20,6 +20,8 @@ namespace Assimalign.Cohesion.Database.Blob.Internal;
 /// A database its holder closed is never due (<see cref="IsCheckpointDue"/>), so a failure recorded
 /// for it ends with the first pass after its backoff.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("BlobCheckpointWorker {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Blob.Internal.BlobCheckpointWorker.DebugView))]
 internal sealed class BlobCheckpointWorker : DatabaseCheckpointWorker<BlobDatabase>
 {
     private readonly BlobDatabaseEngine _engine;
@@ -82,4 +84,19 @@ internal sealed class BlobCheckpointWorker : DatabaseCheckpointWorker<BlobDataba
     /// </remarks>
     protected override bool Checkpoint(BlobDatabase database, TimeSpan interval, CancellationToken cancellationToken)
         => database.Coordinator.TryCheckpoint(TimeSpan.Zero, cancellationToken);
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Blob.Internal.BlobCheckpointWorker _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Blob.Internal.BlobCheckpointWorker value)
+        {
+            _target = value;
+        }
+
+        public bool CompletionOnly => _target.CompletionOnly;
+        public string Name => _target.Name;
+        public global::Assimalign.Cohesion.Database.DatabaseEngineWorkerKind Kind => _target.Kind;
+        public global::System.TimeSpan Interval => _target.Interval;
+    }
 }

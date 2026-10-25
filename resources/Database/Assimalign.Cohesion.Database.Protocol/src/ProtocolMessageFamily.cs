@@ -7,6 +7,8 @@ namespace Assimalign.Cohesion.Database.Protocol;
 /// <summary>An immutable endpoint-selected set of model message identifiers.</summary>
 /// <remarks>One channel binds one family for its entire lifetime. Identifiers 5 through 9
 /// and 64 through 255 belong to models; all other identifiers are reserved by the core.</remarks>
+[global::System.Diagnostics.DebuggerDisplay("ProtocolMessageFamily")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Protocol.ProtocolMessageFamily.DebugView))]
 public sealed class ProtocolMessageFamily
 {
     private readonly bool[] _types = new bool[256];
@@ -25,7 +27,7 @@ public sealed class ProtocolMessageFamily
         {
             if (type is not (>= 5 and <= 9 or >= 64) || _types[type])
             {
-                throw new ArgumentException($"Message identifier {type} is reserved or duplicated.", nameof(messageTypes));
+                throw new ArgumentException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ProtocolMessageFamilyArgument, type), nameof(messageTypes));
             }
             _types[type] = true;
         }
@@ -46,7 +48,7 @@ public sealed class ProtocolMessageFamily
         foreach (var capability in capabilities)
         {
             ArgumentNullException.ThrowIfNull(capability);
-            bool core = ReferenceEquals(capability, ProtocolCapability.Diagnostics);
+            bool core = ReferenceEquals(capability, ProtocolCapability.Diagnostics) || ReferenceEquals(capability, ProtocolCapability.TransactionStatus);
             if (!names.Add(capability.Name) || (!core && !capability.Name.StartsWith(name.ToLowerInvariant() + ".", StringComparison.Ordinal)))
             {
                 throw new ArgumentException(ErrorMessages.CapabilityListInvalid, nameof(capabilities));
@@ -77,4 +79,17 @@ public sealed class ProtocolMessageFamily
         ProtocolMessageType.AuthenticateResponse or ProtocolMessageType.Ready or
         ProtocolMessageType.Error or ProtocolMessageType.Ping or ProtocolMessageType.Pong or
         ProtocolMessageType.Terminate or ProtocolMessageType.Diagnostics || _types[(byte)type];
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Protocol.ProtocolMessageFamily _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Protocol.ProtocolMessageFamily value)
+        {
+            _target = value;
+        }
+
+        public string Name => _target.Name;
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.Protocol.ProtocolCapability> Capabilities => _target.Capabilities;
+    }
 }

@@ -143,7 +143,7 @@ public sealed class SqlAddColumnWireTests
 
         // Assert
         error.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
-        error.Message.ShouldStartWith("COHSQLE002:", Case.Sensitive);
+        error.Message.ShouldStartWith("CS02002:", Case.Sensitive);
         error.ConnectionUsable.ShouldBeTrue();
         (await QueryAsync(connection, "SELECT extra FROM additions ORDER BY id"))
             .Select(row => row[0]).ShouldBe(new object?[] { 12.3m, 12.3m, 12.3m });
@@ -165,7 +165,7 @@ public sealed class SqlAddColumnWireTests
         var error = await Should.ThrowAsync<SqlClientException>(() => ExecuteAsync(connection,
             $"ALTER TABLE additions ADD COLUMN extra INT {constraint}"));
         error.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(constraint == "DEFAULT 7 UNIQUE" ? "COHSQLE037" : "COHSQLE038");
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(constraint == "DEFAULT 7 UNIQUE" ? "CS03037" : "CS03038");
         error.ConnectionUsable.ShouldBeTrue();
         await AssertUnchangedAsync(connection);
 
@@ -258,7 +258,7 @@ public sealed class SqlAddColumnWireTests
         var error = await Should.ThrowAsync<SqlClientException>(() => ExecuteAsync(connection,
             "ALTER TABLE additions ADD COLUMN extra INT DEFAULT 7"));
         error.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
-        error.Message.ShouldContain("COHSQLT003", Case.Sensitive);
+        error.Message.ShouldContain("CS04003", Case.Sensitive);
         error.ConnectionUsable.ShouldBeTrue();
         await ExecuteAsync(connection, "ROLLBACK");
         await AssertUnchangedAsync(connection);

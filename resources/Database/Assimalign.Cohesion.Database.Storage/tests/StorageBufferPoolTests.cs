@@ -9,10 +9,12 @@ using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Storage.Internal;
 using Assimalign.Cohesion.Database.Storage.Units;
 
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
+
 namespace Assimalign.Cohesion.Database.Storage.Tests;
 
 /// <summary>
-/// Tests for the buffer pool's allocation, pinning, LRU eviction, buffer reuse, and
+/// Tests for the buffer pool's allocation, pinning, clock eviction, buffer reuse, and
 /// concurrency behavior (#158/#159).
 /// </summary>
 public class StorageBufferPoolTests
@@ -59,26 +61,33 @@ public class StorageBufferPoolTests
         second.Dispose();
     }
 
-    [Fact(DisplayName = "Cohesion Test [Storage] - BufferPool: capacity overflow evicts the least recently used page")]
-    public void Pin_AtCapacity_ShouldEvictLeastRecentlyUsed()
+    [Fact(DisplayName = "Cohesion Test [Storage] - BufferPool: clock eviction gives referenced unpinned pages a second chance (#1541)")]
+    public void Pin_AtCapacity_ShouldSweepTheClockAndHonorNewReferences()
     {
-        // Arrange: capacity 2, load pages 0 and 1, touch 0 so 1 becomes LRU.
-        using var stream = StreamWithPages(3);
-        using var pool = new StorageBufferPool(2);
-
+        using var stream = StreamWithPages(5);
+        using var pool = new StorageBufferPool(3);
         pool.Pin((PageId)0L, stream).Dispose();
         pool.Pin((PageId)1L, stream).Dispose();
-        pool.Pin((PageId)0L, stream).Dispose(); // touch 0 -> 1 is now LRU
-
-        // Act: loading page 2 must evict page 1 (LRU), not page 0.
         pool.Pin((PageId)2L, stream).Dispose();
+        pool.Pin((PageId)0L, stream).Dispose();
 
-        // Assert
-        pool.TryGet((PageId)0L, out var handle0).ShouldBeTrue();
-        handle0!.Dispose();
-        pool.TryGet((PageId)1L, out _).ShouldBeFalse();
-        pool.TryGet((PageId)2L, out var handle2).ShouldBeTrue();
-        handle2!.Dispose();
+        // All reference bits start set. A full first sweep ages them, then the
+        // clock claims page 0, independent of its last access's LRU position.
+        pool.Pin((PageId)3L, stream).Dispose();
+        pool.TryGet((PageId)0L, out _).ShouldBeFalse();
+        using (var touch = pool.Pin((PageId)1L, stream)) { }
+
+        // Page 1 was referenced after aging; page 2 was not. The next sweep
+        // skips page 1, claims page 2 and leaves every other payload intact.
+        pool.Pin((PageId)4L, stream).Dispose();
+        pool.TryGet((PageId)2L, out _).ShouldBeFalse();
+        foreach (long id in new long[] { 1, 3, 4 })
+        {
+            pool.TryGet((PageId)id, out var handle).ShouldBeTrue();
+            using (handle) { handle!.Page.Id.ShouldBe(id); }
+        }
+        pool.Count.ShouldBe(3);
+        pool.CheckInvariants();
     }
 
     [Fact(DisplayName = "Cohesion Test [Storage] - BufferPool: pinned pages are never evicted")]
@@ -269,7 +278,7 @@ public class StorageBufferPoolTests
         using var pool = new StorageBufferPool(8);
 
         // Act
-        var workers = Enumerable.Range(0, 8).Select(worker => Task.Run(() =>
+        var workers = Enumerable.Range(0, 8).Select(worker => DedicatedTestTask.Run(() =>
         {
             var random = new Random(worker * 7919);
             for (int i = 0; i < 500; i++)
@@ -302,7 +311,7 @@ public class StorageBufferPoolTests
         using var pool = new StorageBufferPool(4);
 
         // Act
-        var workers = Enumerable.Range(0, 4).Select(worker => Task.Run(() =>
+        var workers = Enumerable.Range(0, 4).Select(worker => DedicatedTestTask.Run(() =>
         {
             for (int i = 0; i < 100; i++)
             {

@@ -28,6 +28,8 @@ public sealed partial class BlobCatalog
         public Reference? Next { get; set; }
     }
 
+    [global::System.Diagnostics.DebuggerDisplay("Versions Count={Count}")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Blob.Catalog.BlobCatalog.Versions.DebugView))]
     private sealed class Versions
     {
         private readonly Dictionary<(PageId Page, int Slot), Reference> _locations = new();
@@ -176,6 +178,24 @@ public sealed partial class BlobCatalog
             First = null;
             Current = null;
             _sweep = null;
+        }
+
+        private sealed class DebugView
+        {
+            private readonly global::Assimalign.Cohesion.Database.Blob.Catalog.BlobCatalog.Versions _target;
+
+            public DebugView(global::Assimalign.Cohesion.Database.Blob.Catalog.BlobCatalog.Versions value)
+            {
+                _target = value;
+            }
+
+            public global::Assimalign.Cohesion.Database.Blob.Catalog.BlobCatalog.Reference? First => _target.First;
+            public global::Assimalign.Cohesion.Database.Blob.Catalog.BlobCatalog.Reference? Current => _target.Current;
+            public bool TerminalKnown => _target.TerminalKnown;
+            public int Count => _target.Count;
+            public global::System.Collections.Generic.LinkedListNode<global::Assimalign.Cohesion.Database.Blob.Catalog.BlobCatalog.Versions>? MaintenanceNode => _target.MaintenanceNode;
+            public global::System.Func<global::Assimalign.Cohesion.Database.Blob.Internal.CatalogRecord, bool> Matches => _target.Matches;
+            public global::System.Action Retire => _target.Retire;
         }
     }
 }

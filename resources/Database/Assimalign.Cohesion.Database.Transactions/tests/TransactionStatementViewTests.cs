@@ -13,7 +13,7 @@ namespace Assimalign.Cohesion.Database.Transactions.Tests;
 public class TransactionStatementViewTests
 {
     private static TransactionManager CreateManager()
-        => TransactionManager.Create(LockManager.Create(), VersionStore.CreateInMemory());
+        => TransactionManager.Create(new LockManager(), VersionStore.CreateInMemory());
 
     [Fact(DisplayName = "Cohesion Test [Database.Transactions] - PinStatementSnapshot: Should keep its snapshot while the read-committed transaction's snapshot moves on")]
     public async Task PinStatementSnapshot_ReadCommittedAfterLaterCommit_ShouldKeepPinnedSnapshot()

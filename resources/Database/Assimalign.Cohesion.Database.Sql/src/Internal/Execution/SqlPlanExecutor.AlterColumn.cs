@@ -33,7 +33,7 @@ internal sealed partial class SqlPlanExecutor
             !plan.AllowDefaultChange && !string.Equals(previous.DefaultLiteral,
                 column.DefaultLiteral, StringComparison.Ordinal))
         {
-            throw new SqlPlanningException("COHSQLE013", $"ALTER COLUMN '{column.Name}' requiring a storage-type, domain, collation, scale or default rewrite is not supported. Use an explicit table-copy migration; in-place rewrites are tracked by #1447.");
+            throw new SqlPlanningException("CS05013", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExecuteAlterColumnAsyncSqlPlanning, column.Name));
         }
         if (column.IsNullable && plan.Table.PrimaryKeyColumns.Contains(column.Name, StringComparer.OrdinalIgnoreCase))
         {
@@ -63,8 +63,8 @@ internal sealed partial class SqlPlanExecutor
             }
             catch (DatabaseException failure)
             {
-                throw new SqlPlanningException("COHSQLE013", string.Format(CultureInfo.CurrentCulture,
-                    ErrorMessages.MissingValueConversion, column.Name, column.Type.Type) + ". " + failure.Message);
+                throw new SqlPlanningException("CS05013", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ArgumentTypeMismatchSqlEvaluation, string.Format(CultureInfo.CurrentCulture,
+                    ErrorMessages.MissingValueConversion, column.Name, column.Type.Type) + ". " + failure.Message));
             }
         }
 

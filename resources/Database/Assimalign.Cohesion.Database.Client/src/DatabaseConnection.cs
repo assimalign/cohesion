@@ -26,10 +26,12 @@ namespace Assimalign.Cohesion.Database.Client;
 /// returning its session, and an overlapping exchange is rejected before it writes any frame.
 /// </para>
 /// <para>
-/// End or roll back an explicit transaction before disposing a connection. The pool does not yet
-/// reset transaction state on return; server-reported status and pool rollback are tracked by #1540.
+/// Pool return rolls back an active or failed transaction using negotiated server status. A session
+/// that cannot certify a clean state is closed instead of reused (#1540).
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("DatabaseConnection")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Client.DatabaseConnection.DebugView))]
 public sealed class DatabaseConnection : IAsyncDisposable
 {
     private readonly DatabaseClient _owner;
@@ -40,6 +42,8 @@ public sealed class DatabaseConnection : IAsyncDisposable
     private readonly object _exchangeLock = new();
     private bool _disposed;
     private CancellationTokenSource? _operation;
+    private bool _operationCompleting;
+    private TaskCompletionSource? _operationCancellationCompletion;
     private TaskCompletionSource? _exchangeCompletion;
     private Task? _returnTask;
 
@@ -157,7 +161,7 @@ public sealed class DatabaseConnection : IAsyncDisposable
             ArgumentNullException.ThrowIfNull(exchange);
             if (!ReferenceEquals(_connector.Family, exchange.Family))
             {
-                throw new ArgumentException("The exchange belongs to a different message family.", nameof(exchange));
+                throw new ArgumentException(ErrorMessages.ClientExecuteStreamingAsyncArgument, nameof(exchange));
             }
             if (!_connector.CanExecute)
             {
@@ -165,11 +169,13 @@ public sealed class DatabaseConnection : IAsyncDisposable
             }
             if (_operation is not null)
             {
-                throw new InvalidOperationException("An exchange is already active on this connection.");
+                throw new InvalidOperationException(ErrorMessages.DatabaseConnectionExecuteAsyncFailure);
             }
             operation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             _operation = operation;
+            _operationCompleting = false;
+            _operationCancellationCompletion = null;
             _exchangeCompletion = completion;
         }
 
@@ -179,14 +185,42 @@ public sealed class DatabaseConnection : IAsyncDisposable
         }
         finally
         {
-            // Disposing a linked source can join a caller's cancellation callback. That callback
-            // may inspect this lease, so it must never be joined while holding the lease lock.
-            operation.Dispose();
+            Task? cancellationCompletion;
             lock (_exchangeLock)
             {
-                _operation = null;
-                _exchangeCompletion = null;
-                completion.TrySetResult();
+                // Cleanup and return claim source ownership under the same lock. Once cleanup
+                // claims it, return may join this exchange but cannot start cancellation later.
+                _operationCompleting = true;
+                cancellationCompletion = _operationCancellationCompletion?.Task;
+            }
+            try
+            {
+                if (cancellationCompletion is not null)
+                {
+                    // CancelAsync can queue callbacks after marking the token canceled. Keep
+                    // their registrations alive until that dispatch has actually completed.
+                    await cancellationCompletion.ConfigureAwait(false);
+                }
+            }
+            finally
+            {
+                try
+                {
+                    // Disposing a linked source can join a caller's cancellation callback. That
+                    // callback may inspect this lease, so never join it under the lease lock.
+                    operation.Dispose();
+                }
+                finally
+                {
+                    lock (_exchangeLock)
+                    {
+                        _operation = null;
+                        _operationCompleting = false;
+                        _operationCancellationCompletion = null;
+                        _exchangeCompletion = null;
+                        completion.TrySetResult();
+                    }
+                }
             }
         }
     }
@@ -230,6 +264,7 @@ public sealed class DatabaseConnection : IAsyncDisposable
     {
         TaskCompletionSource returned;
         CancellationTokenSource? operation;
+        TaskCompletionSource? cancellationCompletion;
         Task? exchangeCompletion;
         lock (_exchangeLock)
         {
@@ -245,15 +280,24 @@ public sealed class DatabaseConnection : IAsyncDisposable
             DatabaseClientEventSource.Log.RentalEnded();
             returned = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             _returnTask = returned.Task;
-            operation = _operation;
             exchangeCompletion = _exchangeCompletion?.Task;
+            operation = null;
+            cancellationCompletion = null;
+            if (_operation is not null && !_operationCompleting)
+            {
+                // Publish the join before requesting cancellation outside the lock. Cleanup
+                // must keep the source alive until this particular dispatch has finished.
+                operation = _operation;
+                cancellationCompletion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                _operationCancellationCompletion = cancellationCompletion;
+            }
         }
-        _ = ReturnAfterExchangeAsync(operation, exchangeCompletion, returned);
+        _ = ReturnAfterExchangeAsync(operation, cancellationCompletion, exchangeCompletion, returned);
         return new ValueTask(returned.Task);
     }
 
-    private async Task ReturnAfterExchangeAsync(CancellationTokenSource? operation, Task? completion,
-        TaskCompletionSource returned)
+    private async Task ReturnAfterExchangeAsync(CancellationTokenSource? operation,
+        TaskCompletionSource? cancellationCompletion, Task? completion, TaskCompletionSource returned)
     {
         Exception? failure = null;
         try
@@ -265,13 +309,19 @@ public sealed class DatabaseConnection : IAsyncDisposable
         }
         catch (ObjectDisposedException)
         {
-            // The admitted exchange finished and disposed its source before cancellation began.
+            // Preserve non-faulting teardown if the operation source was already disposed.
         }
         catch (Exception exception)
         {
             // Exchange-owned cancellation callbacks are an open seam. Even a throwing callback
             // cannot skip joining the exchange or returning its pool slot.
             failure = exception;
+        }
+        finally
+        {
+            // The marker only joins dispatch; callback failures belong to return, not to the
+            // exchange's original result or cancellation exception.
+            cancellationCompletion?.TrySetResult();
         }
         try
         {
@@ -293,6 +343,14 @@ public sealed class DatabaseConnection : IAsyncDisposable
         else
         {
             returned.TrySetException(failure);
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Client.DatabaseConnection value)
+        {
+            _ = value;
         }
     }
 }

@@ -1068,3 +1068,14 @@ preserves those inputs locally. Existing validation guards remain in place. This
 public API and behavior are unchanged from 10.0.0-preview.1. Its updated dependency creation
 signatures require rebuilding; the source and binary breaks are recorded in the JWT and
 DataProtection package designs on decision 15's terms. Advisory: not applicable: API shape.
+
+
+## Checked manifest paths and sources (#1470)
+
+Manifest probe `Http` is `ResourceHttpPath?`, control-plane `Path` is `ResourceHttpPath`, and mount
+`Source` is `ResourceMountSource?`. Consumers use the underlying `Value` when composing addresses
+or comparing raw text. Valid string initializers remain supported; malformed strings are refused
+at construction or typed JSON import. Default structs still pass through explicit manifest/plan
+validation. JSON stays plain strings/nulls under `cohesion/resource/v1`; no transport message,
+Database storage format, diagnostic identity, event or counter changes. All binary consumers
+must be rebuilt together, including installed SDK/framework E2E payloads.

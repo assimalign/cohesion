@@ -57,16 +57,16 @@ internal sealed partial class SqlPlanner
                 string text = negative ? $"-{literal.Value}" : literal.Value;
                 if (literal.LiteralType != SqlLiteralType.Integer)
                 {
-                    throw new SqlPlanningException("COHSQLE018", $"ORDER BY ordinal '{text}' must be an integer.", order.Expression.Location);
+                    throw new SqlPlanningException("CS02018", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.BindOrderByProjectionsSqlPlanning, text), order.Expression.Location);
                 }
                 if (negative || literal.Value.TrimStart('0').Length == 0)
                 {
-                    throw new SqlPlanningException("COHSQLE018", $"ORDER BY ordinal '{text}' must be a positive integer.", order.Expression.Location);
+                    throw new SqlPlanningException("CS02018", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.BindOrderByProjectionsSqlPlanning2, text), order.Expression.Location);
                 }
                 if (!int.TryParse(literal.Value, NumberStyles.None, CultureInfo.InvariantCulture, out int ordinal)
                     || ordinal > projections.Count)
                 {
-                    throw new SqlPlanningException("COHSQLE018", $"ORDER BY ordinal '{text}' is out of range for {projections.Count} output columns.", order.Expression.Location);
+                    throw new SqlPlanningException("CS02018", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.BindOrderByProjectionsSqlPlanning3, text, projections.Count), order.Expression.Location);
                 }
                 slots.Add(order.Expression, ordinal - 1);
             }
@@ -85,7 +85,7 @@ internal sealed partial class SqlPlanner
             {
                 if (index < 0)
                 {
-                    throw new SqlPlanningException("COHSQLE019", $"Ambiguous ORDER BY alias '{reference.ColumnName}'.", reference.Location);
+                    throw new SqlPlanningException("CS01019", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.BindOrderByProjectionsSqlPlanning4, reference.ColumnName), reference.Location);
                 }
                 slots.Add(expression, index);
                 return;

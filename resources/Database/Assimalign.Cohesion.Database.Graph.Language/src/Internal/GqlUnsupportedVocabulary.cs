@@ -2,7 +2,7 @@ namespace Assimalign.Cohesion.Database.Graph.Language.Internal;
 
 /// <summary>
 /// The GQL recognized-unsupported table (#1101): every word and edge spelling the capability
-/// scan recognizes but the Graph engine does not run, with the construct its <c>COHDBL001</c>
+/// scan recognizes but the Graph engine does not run, with the construct its <c>CK00001</c>
 /// names.
 /// </summary>
 /// <remarks>

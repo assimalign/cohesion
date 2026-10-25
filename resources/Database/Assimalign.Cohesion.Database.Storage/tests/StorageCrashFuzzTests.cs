@@ -25,7 +25,7 @@ namespace Assimalign.Cohesion.Database.Storage.Tests;
 /// </remarks>
 public sealed class StorageCrashFuzzTests
 {
-    private const int Owners = 3;
+    private const int owners = 3;
     private readonly ITestOutputHelper _output;
 
     public StorageCrashFuzzTests(ITestOutputHelper output) => _output = output;
@@ -94,7 +94,7 @@ public sealed class StorageCrashFuzzTests
                     int kind = random.Next(10);
                     if (kind < 4 || working.Count < 4)
                     {
-                        ulong owner = (ulong)random.Next(1, Owners + 1);
+                        ulong owner = (ulong)random.Next(1, owners + 1);
                         var record = Record(random, random.Next(50, 2500));
                         var location = storage.Insert(transaction, owner, record);
                         working[location] = (owner, record);
@@ -161,7 +161,7 @@ public sealed class StorageCrashFuzzTests
     private static Dictionary<ulong, List<string>> Snapshot(TornStorage storage)
     {
         var snapshot = new Dictionary<ulong, List<string>>();
-        for (ulong owner = 1; owner <= Owners; owner++)
+        for (ulong owner = 1; owner <= owners; owner++)
         {
             snapshot[owner] = [.. storage.ScanOwner(owner).Select(Convert.ToHexString).Order(StringComparer.Ordinal)];
         }
@@ -171,7 +171,7 @@ public sealed class StorageCrashFuzzTests
 
     private static bool Matches(Dictionary<ulong, List<string>> actual, Dictionary<(PageId, int), (ulong Owner, byte[] Record)> model)
     {
-        for (ulong owner = 1; owner <= Owners; owner++)
+        for (ulong owner = 1; owner <= owners; owner++)
         {
             var expected = model.Values.Where(value => value.Owner == owner).Select(value => Convert.ToHexString(value.Record)).Order(StringComparer.Ordinal);
             if (!actual[owner].SequenceEqual(expected))

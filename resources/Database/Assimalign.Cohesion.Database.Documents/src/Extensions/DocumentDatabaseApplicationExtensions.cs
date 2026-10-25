@@ -5,7 +5,7 @@ using Assimalign.Cohesion.Database.Documents.Protocol;
 namespace Assimalign.Cohesion.Database.Documents;
 
 /// <summary>Registers deferred document engines through the dependency-free Database application seam.</summary>
-public static class DocumentDatabaseApplicationExtensions
+public static partial class DocumentDatabaseApplicationExtensions
 {
     extension(IDatabaseApplicationBuilder builder)
     {

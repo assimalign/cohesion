@@ -163,7 +163,7 @@ public sealed class SqlBoundedSelectionRegressionTests
         {
             var failure = await Should.ThrowAsync<SqlTimeoutException>(async () => await session.ExecuteAsync(
                 "SELECT cancel_row(id) FROM t LIMIT 1", cancellationToken: caller.Token));
-            failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE043");
+            failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS05043");
             statementToken.IsCancellationRequested.ShouldBeTrue();
         }
         else

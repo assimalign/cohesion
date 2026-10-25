@@ -31,18 +31,18 @@ public sealed class DocumentCollectionDdlTests
         (await session.GetCollectionAsync("x", CancellationToken.None)).Name.ShouldBe("x");
         Refusal(await Should.ThrowAsync<DatabaseException>(async () =>
             await session.ExecuteAsync("CREATE COLLECTION x", cancellationToken: CancellationToken.None)),
-            "COHDOC010", "Collection 'x' already exists.", "CREATE COLLECTION x");
+            "CD03010", "Collection 'x' already exists.", "CREATE COLLECTION x");
         Refusal(await Should.ThrowAsync<DatabaseException>(async () =>
-            await session.CreateCollectionAsync("x", CancellationToken.None)), "COHDOC010", "Collection 'x' already exists.");
+            await session.CreateCollectionAsync("x", CancellationToken.None)), "CD03010", "Collection 'x' already exists.");
         Success(await session.ExecuteAsync("CREATE COLLECTION IF NOT EXISTS x", cancellationToken: CancellationToken.None));
         Success(await session.ExecuteAsync("DROP COLLECTION IF EXISTS absent", cancellationToken: CancellationToken.None));
         (await CollectionsAsync(session)).ShouldBe(metadata);
         await session.DropCollectionAsync("x", CancellationToken.None);
         Refusal(await Should.ThrowAsync<DatabaseException>(async () =>
             await session.ExecuteAsync("DROP COLLECTION x", cancellationToken: CancellationToken.None)),
-            "COHDOC002", "Collection 'x' does not exist.", "DROP COLLECTION x");
+            "CD01002", "Collection 'x' does not exist.", "DROP COLLECTION x");
         Refusal(await Should.ThrowAsync<DatabaseException>(async () =>
-            await session.DropCollectionAsync("x", CancellationToken.None)), "COHDOC002", "Collection 'x' does not exist.");
+            await session.DropCollectionAsync("x", CancellationToken.None)), "CD01002", "Collection 'x' does not exist.");
         await session.CreateCollectionAsync("x", CancellationToken.None);
         Success(await session.ExecuteAsync("DROP COLLECTION x", cancellationToken: CancellationToken.None));
         (await CollectionsAsync(session)).ShouldBeEmpty();
@@ -68,7 +68,7 @@ public sealed class DocumentCollectionDdlTests
         // Assert
         error.Message.ShouldBe("System collection 'COHESION_SCHEMA.INDEXES' is read-only.");
         var diagnostic = error.Diagnostics.ShouldHaveSingleItem();
-        diagnostic.Code.ShouldBe("COHDOC004");
+        diagnostic.Code.ShouldBe("CD04004");
         diagnostic.Start.ShouldBe(0);
         diagnostic.End.ShouldBe(statement.Length);
     }
@@ -96,10 +96,10 @@ public sealed class DocumentCollectionDdlTests
                 await session.ExecuteAsync(statement, cancellationToken: CancellationToken.None));
             error.Operation.ShouldBe("DROP COLLECTION");
             error.OwningSchema.ShouldBe("Sales");
-            Refusal(error, "COHDOC011", "Object 'owned' is owned by schema 'Sales' and cannot be changed by DROP COLLECTION. Alter the schema and redeploy it.", statement);
+            Refusal(error, "CD03011", "Object 'owned' is owned by schema 'Sales' and cannot be changed by DROP COLLECTION. Alter the schema and redeploy it.", statement);
         }
         Refusal(await Should.ThrowAsync<DatabaseObjectLockedException>(async () =>
-            await session.DropCollectionAsync("owned", CancellationToken.None)), "COHDOC011",
+            await session.DropCollectionAsync("owned", CancellationToken.None)), "CD03011",
             "Object 'owned' is owned by schema 'Sales' and cannot be changed by DROP COLLECTION. Alter the schema and redeploy it.");
         (await CollectionsAsync(session)).ShouldBe(before);
     }
@@ -206,18 +206,18 @@ public sealed class DocumentCollectionDdlTests
         transaction.State.ShouldBe(TransactionState.Faulted);
         (await Should.ThrowAsync<DatabaseException>(async () =>
             await session.ExecuteAsync("CREATE COLLECTION later", cancellationToken: CancellationToken.None)))
-            .Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBD001");
+            .Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD04101");
         await transaction.RollbackAsync(CancellationToken.None);
         (await CollectionsAsync(session)).ShouldBe(["items:Adhoc"]);
     }
 
     [Theory(DisplayName = "Cohesion Test [Documents] - Invalid collection names fail planning without closing the session")]
-    [InlineData("CREATE COLLECTION \" \"", "COHDOC001")]
-    [InlineData("CREATE COLLECTION IF NOT EXISTS \"\t\u2003\"", "COHDOC001")]
-    [InlineData("DROP COLLECTION IF EXISTS \" \"", "COHDOC001")]
-    [InlineData("DROP COLLECTION \"\r\n \"", "COHDOC001")]
-    [InlineData("CREATE COLLECTION \"\"", "OQL0002")]
-    [InlineData("DROP COLLECTION IF EXISTS \"\"", "OQL0002")]
+    [InlineData("CREATE COLLECTION \" \"", "CD05001")]
+    [InlineData("CREATE COLLECTION IF NOT EXISTS \"\t\u2003\"", "CD05001")]
+    [InlineData("DROP COLLECTION IF EXISTS \" \"", "CD05001")]
+    [InlineData("DROP COLLECTION \"\r\n \"", "CD05001")]
+    [InlineData("CREATE COLLECTION \"\"", "CD00002")]
+    [InlineData("DROP COLLECTION IF EXISTS \"\"", "CD00002")]
     public async Task Execute_InvalidCollectionName_ShouldPreserveSessionAsync(string text, string code)
     {
         // Arrange: comments and newlines exercise absolute name offsets and lines.
@@ -249,7 +249,7 @@ public sealed class DocumentCollectionDdlTests
 
     private static void Refusal(DatabaseException failure, string code, string message, string? statement = null)
     {
-        failure.GetType().ShouldBe(code == "COHDOC011" ? typeof(DatabaseObjectLockedException) : typeof(DatabaseException));
+        failure.GetType().ShouldBe(code == "CD03011" ? typeof(DatabaseObjectLockedException) : typeof(DatabaseException));
         failure.Message.ShouldBe(message);
         var diagnostic = failure.Diagnostics.ShouldHaveSingleItem();
         diagnostic.Code.ShouldBe(code);

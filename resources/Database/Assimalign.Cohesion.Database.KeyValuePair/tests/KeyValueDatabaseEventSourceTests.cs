@@ -33,7 +33,7 @@ namespace Assimalign.Cohesion.Database.KeyValuePair.Tests;
 [Collection(nameof(KeyValueDatabaseEventSourceCollection))]
 public sealed class KeyValueDatabaseEventSourceTests
 {
-    private static readonly string[] SessionClosedPayload = ["sessionId", "reason", "durationMilliseconds"];
+    private static readonly string[] _sessionClosedPayload = ["sessionId", "reason", "durationMilliseconds"];
 
     [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - KeyValueDatabaseEventSource: Should be named for its assembly")]
     public void GetName_KeyValueDatabaseEventSource_ShouldEqualAssemblyName()
@@ -99,7 +99,7 @@ public sealed class KeyValueDatabaseEventSourceTests
         recorder.Events.Where(e => IsFor(e, 5, sessionId)).ShouldHaveSingleItem();
         closed.EventName.ShouldBe("SessionClosed");
         closed.Level.ShouldBe(EventLevel.Verbose);
-        closed.PayloadNames.ShouldBe(SessionClosedPayload);
+        closed.PayloadNames.ShouldBe(_sessionClosedPayload);
         closed.Payload![1].ShouldBe("Terminated");
         ((double)closed.Payload[2]!).ShouldBeGreaterThan(0);
         recorder.Events.Where(e => IsForSession(e, sessionId)).Select(e => e.EventId).ShouldBe([5]);
@@ -436,7 +436,7 @@ public sealed class KeyValueDatabaseEventSourceTests
         failed.EventName.ShouldBe("StatementParseFailed");
         failed.Level.ShouldBe(EventLevel.Error);
         failed.PayloadNames.ShouldBe(["sessionId", "database", "code", "exceptionType", "suppressedCount"]);
-        failed.Payload!.Take(4).ShouldBe([sessionId, KeyValueServerHarness.DatabaseName, string.Empty, typeof(DatabaseParseException).FullName]);
+        failed.Payload!.Take(4).ShouldBe([sessionId, KeyValueServerHarness.DatabaseName, "CV00003", typeof(DatabaseParseException).FullName]);
         failed.Payload![4].ShouldBeOfType<int>().ShouldBeGreaterThanOrEqualTo(0);
         failed.Payload!.OfType<string>().ShouldNotContain(error.Message, "A parse error quotes the command; the event writes its type only.");
         recorder.Events.ShouldNotContain(e => e.EventId == 0);

@@ -93,7 +93,7 @@ public sealed partial class DocumentQueryTests
         (await RowsAsync(session, "SELECT items.tags FROM items UNNEST tags t")).ShouldAllBe(row => row.IsMissing(0));
         var collision = await Should.ThrowAsync<DatabaseException>(async () =>
             await session.ExecuteAsync("SELECT * FROM items LEFT UNNEST tags items", cancellationToken: CancellationToken.None));
-        collision.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("OQL0010");
+        collision.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD00010");
         (await RowsAsync(session, "SELECT \" \" FROM items d UNNEST d.tags AS \" \""))
             .Select(row => row.GetValue(0)).ShouldBe(new object?[] { "blue", null });
     }
@@ -195,7 +195,7 @@ public sealed partial class DocumentQueryTests
             var exception = await Should.ThrowAsync<DatabaseException>(async () =>
                 await session.ExecuteAsync(query, cancellationToken: CancellationToken.None));
             var diagnostic = exception.Diagnostics.ShouldHaveSingleItem();
-            diagnostic.Code.ShouldBe("COHDOC001");
+            diagnostic.Code.ShouldBe("CD05001");
             query[diagnostic.Start!.Value..diagnostic.End!.Value].ShouldBe("s.x");
         }
         // Corresponding local quantifiers still match, including repeated-name nesting.
@@ -361,13 +361,13 @@ public sealed partial class DocumentQueryTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Documents] - Arrays: metadata aggregates and missing inputs fail before empty execution")]
-    [InlineData("SELECT ANY d IN [1] SATISFIES META(d).id = 'a' END FROM items d", "COHDOC001")]
-    [InlineData("SELECT ANY x IN [1] SATISFIES META(x).id = 'a' END FROM items d", "COHDOC001")]
-    [InlineData("SELECT META(t).id FROM items d UNNEST d.tags t", "COHDOC001")]
-    [InlineData("SELECT ANY x IN [1] SATISFIES COUNT(*) > 0 END FROM items", "COHDOC001")]
-    [InlineData("SELECT * FROM items d UNNEST [COUNT(*)] t", "COHDOC001")]
-    [InlineData("SELECT ANY x IN [1] SATISFIES @absent END FROM items", "COHDOC005")]
-    [InlineData("SELECT 1 FROM items UNNEST @absent t", "COHDOC005")]
+    [InlineData("SELECT ANY d IN [1] SATISFIES META(d).id = 'a' END FROM items d", "CD05001")]
+    [InlineData("SELECT ANY x IN [1] SATISFIES META(x).id = 'a' END FROM items d", "CD05001")]
+    [InlineData("SELECT META(t).id FROM items d UNNEST d.tags t", "CD05001")]
+    [InlineData("SELECT ANY x IN [1] SATISFIES COUNT(*) > 0 END FROM items", "CD05001")]
+    [InlineData("SELECT * FROM items d UNNEST [COUNT(*)] t", "CD05001")]
+    [InlineData("SELECT ANY x IN [1] SATISFIES @absent END FROM items", "CD01005")]
+    [InlineData("SELECT 1 FROM items UNNEST @absent t", "CD01005")]
     public async Task Execute_InvalidArrayContext_ShouldRejectBeforeReadingAsync(string query, string code)
     {
         // Arrange
@@ -488,7 +488,7 @@ public sealed partial class DocumentQueryTests
         // Act
         var exception = Should.Throw<DocumentPlanningException>(() => DocumentPlanner.CreateLogicalPlan(query));
         // Assert
-        exception.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDOC023");
+        exception.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD01023");
         exception.Message.ShouldBe("An OQL binding list cannot repeat a variable name.");
     }
 

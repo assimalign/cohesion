@@ -88,9 +88,9 @@ public sealed class SqlCteParserTests
         var statement = parser.Parse(sql);
 
         // Assert
-        var diagnostic = statement.Diagnostics.Where(item => item.Code == "COHDBL001").ShouldHaveSingleItem();
+        var diagnostic = statement.Diagnostics.Where(item => item.Code == "CK00001").ShouldHaveSingleItem();
         diagnostic.Message!.ShouldContain(construct);
-        statement.Diagnostics.ShouldNotContain(item => item.Code == "SQL0002");
+        statement.Diagnostics.ShouldNotContain(item => item.Code == "CS00002");
         if (construct == "RECURSIVE")
         {
             statement.Diagnostics.Count(item => item.Severity == DiagnosticSeverity.Error).ShouldBe(1);
@@ -112,6 +112,6 @@ public sealed class SqlCteParserTests
         var statement = parser.Parse(sql);
 
         // Assert
-        statement.Diagnostics.ShouldContain(item => item.Code == "SQL0003");
+        statement.Diagnostics.ShouldContain(item => item.Code == "CS00003");
     }
 }

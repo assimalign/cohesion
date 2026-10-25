@@ -15,6 +15,8 @@ namespace Assimalign.Cohesion.Database.Indexing;
 /// collation encoding is provided by the shared type system). Composite keys
 /// concatenate component encodings.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("IndexKey")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Indexing.IndexKey.DebugView))]
 public readonly struct IndexKey : IEquatable<IndexKey>, IComparable<IndexKey>
 {
     private readonly ReadOnlyMemory<byte> _encoded;
@@ -129,4 +131,16 @@ public readonly struct IndexKey : IEquatable<IndexKey>, IComparable<IndexKey>
 
     /// <inheritdoc />
     public override string ToString() => Convert.ToHexString(_encoded.Span);
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Indexing.IndexKey _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Indexing.IndexKey value)
+        {
+            _target = value;
+        }
+
+        public int Length => _target.Length;
+    }
 }

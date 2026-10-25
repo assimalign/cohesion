@@ -20,7 +20,7 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 /// </summary>
 public sealed class SqlJoinExecutionTests
 {
-    private const string MotivatingQuery =
+    private const string motivatingQuery =
         "SELECT usr.Users.FirstName, usr.Users.LastName, usr.UsersProfile.Email " +
         "FROM usr.Users INNER JOIN usr.UsersProfile ON usr.Users.Id = usr.UsersProfile.UserId";
 
@@ -35,7 +35,7 @@ public sealed class SqlJoinExecutionTests
         await SeedUsersAsync(session);
 
         // Act
-        await using var result = (await ExecuteAsync(session, MotivatingQuery)).ShouldBeAssignableTo<DatabaseResultSet>();
+        await using var result = (await ExecuteAsync(session, motivatingQuery)).ShouldBeAssignableTo<DatabaseResultSet>();
         var rows = await ReadRowsAsync(result);
 
         // Assert: no ORDER BY means the result is compared as a collection of pairs.
@@ -354,7 +354,7 @@ public sealed class SqlJoinExecutionTests
         seekRows[1].ShouldBe(new object?[] { 201, "n201" });
         scanRows.Select(row => string.Join("|", row)).ShouldBe(seekRows.Select(row => string.Join("|", row)));
         seekExamined.ShouldBe(4);
-        scanMetrics.JoinAccessPaths.ShouldBe(["join-scan"]);
+        scanMetrics.JoinAccessPaths.ShouldBe(["join-hash"]);
         scanMetrics.RecordsExamined.ShouldBeGreaterThanOrEqualTo(size);
     }
 

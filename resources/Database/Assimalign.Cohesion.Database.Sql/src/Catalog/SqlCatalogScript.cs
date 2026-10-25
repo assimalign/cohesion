@@ -36,7 +36,7 @@ public sealed record SqlCatalogScript
         if (contentHash.Length != 64 || !System.Linq.Enumerable.All(contentHash, Uri.IsHexDigit) ||
             statementCount < 0 || completedStatements < 0 || completedStatements > statementCount || generation < baseGeneration)
         {
-            throw new ArgumentException("Invalid declared script receipt.");
+            throw new ArgumentException(ErrorMessages.SqlCatalogScriptArgument);
         }
         Name = name;
         ContentHash = contentHash;
@@ -50,12 +50,12 @@ public sealed record SqlCatalogScript
         if (StatementObjects.Count != completedStatements || StatementObjects.Any(value => value is null) ||
             Objects.Any(string.IsNullOrWhiteSpace))
         {
-            throw new ArgumentException("Invalid declared script object claims.");
+            throw new ArgumentException(ErrorMessages.SqlCatalogScriptArgument2);
         }
         if (statementParameterTypes is not null && (statementParameterTypes.Count != completedStatements ||
             statementParameterTypes.Any(types => types is null || types.Any(string.IsNullOrWhiteSpace))))
         {
-            throw new ArgumentException("Invalid declared script parameter-type claims.");
+            throw new ArgumentException(ErrorMessages.SqlCatalogScriptArgument3);
         }
         StatementParameterTypes = Array.AsReadOnly(statementParameterTypes is null
             ? Enumerable.Range(0, completedStatements).Select(_ => (IReadOnlyList<string>)Array.Empty<string>()).ToArray()

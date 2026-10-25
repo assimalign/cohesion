@@ -172,7 +172,7 @@ public sealed class SqlProvisioningHardeningTests
             await verify.BuildAsync(CancellationToken.None));
 
         // Assert
-        error.Message.ShouldContain("COHSQLP003");
+        error.Message.ShouldContain("CS03103");
         await using var reopened = CreateBuilder(storage.CaptureDurableImages()).Build();
         (await reopened.OpenDatabaseAsync("b2", CancellationToken.None)).Catalog.SchemaState!.Generation.ShouldBe(generation);
     }

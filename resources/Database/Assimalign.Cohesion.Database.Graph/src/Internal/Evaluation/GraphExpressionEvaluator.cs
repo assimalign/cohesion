@@ -49,20 +49,20 @@ internal static partial class GraphExpressionEvaluator
                 GqlSubscriptExpression subscript => Subscript(subscript, bindings, context, parameters),
                 GqlInExpression membership => In(membership, bindings, context, parameters),
                 GqlStringPredicateExpression predicate => StringPredicate(predicate, bindings, context, parameters),
-                _ => throw new GraphPlanningException("COHDBG001", "Unsupported graph expression."),
+                _ => throw new GraphPlanningException("CG05001", ErrorMessages.EvaluatorEvaluateGraphPlanning),
             };
             result = context.Current(result);
             if (result is string || GraphCompositeValues.IsComposite(result))
             {
                 try { GraphCompositeEncoding.Measure(result); }
                 catch (DatabaseTypeException error)
-                { throw new GraphPlanningException("COHDBG013", error.Message, expression.Location, error); }
+                { throw new GraphPlanningException("CG02013", error.Message, expression.Location, error); }
             }
             return result;
         }
         catch (ArithmeticException error)
         {
-            throw new GraphPlanningException("COHDBG013", ErrorMessages.ArithmeticFailure, expression.Location, error);
+            throw new GraphPlanningException("CG02013", ErrorMessages.ArithmeticFailure, expression.Location, error);
         }
     }
 
@@ -71,10 +71,10 @@ internal static partial class GraphExpressionEvaluator
     {
         var value = Evaluate(expression, bindings, context, parameters);
         if (GraphCompositeValues.IsComposite(value) || value is GraphNode or GraphRelationship or GraphPath)
-        { throw new GraphPlanningException("COHDBG003", ErrorMessages.PropertyScalarRequired, expression.Location); }
+        { throw new GraphPlanningException("CG03003", ErrorMessages.PropertyScalarRequired, expression.Location); }
         try { GraphDatabase.TypeOf(value); }
         catch (DatabaseException error)
-        { throw new GraphPlanningException("COHDBG013", ErrorMessages.PropertyScalarRequired, expression.Location, error); }
+        { throw new GraphPlanningException("CG02013", ErrorMessages.PropertyScalarRequired, expression.Location, error); }
         return value;
     }
 
@@ -84,10 +84,10 @@ internal static partial class GraphExpressionEvaluator
         {
             GqlLiteralExpression literal => literal.Value,
             GqlParameterExpression parameter => Parameter(parameter, parameters),
-            _ => throw new GraphPlanningException("COHDBG001", ErrorMessages.PropertyScalarRequired, expression?.Location),
+            _ => throw new GraphPlanningException("CG05001", ErrorMessages.PropertyScalarRequired, expression?.Location),
         };
         if (GraphCompositeValues.IsComposite(value))
-        { throw new GraphPlanningException("COHDBG003", ErrorMessages.ParameterScalarRequired, expression.Location); }
+        { throw new GraphPlanningException("CG03003", ErrorMessages.ParameterScalarRequired, expression.Location); }
         return value;
     }
 
@@ -95,7 +95,7 @@ internal static partial class GraphExpressionEvaluator
     {
         if (parameter.Name is null || parameters is null || !parameters.TryGetValue(parameter.Name, out var value))
         {
-            throw new GraphPlanningException("COHDBG001", string.Format(CultureInfo.CurrentCulture,
+            throw new GraphPlanningException("CG05001", string.Format(CultureInfo.CurrentCulture,
                 ErrorMessages.ParameterUnbound, parameter.Name), parameter.Location);
         }
         return value;
@@ -109,7 +109,7 @@ internal static partial class GraphExpressionEvaluator
     {
         null => null,
         bool boolean => boolean,
-        _ => throw new GraphPlanningException("COHDBG013", ErrorMessages.BooleanRequired, expression?.Location),
+        _ => throw new GraphPlanningException("CG02013", ErrorMessages.BooleanRequired, expression?.Location),
     };
 
     private static object? Logical(GqlLogicalExpression logical, IReadOnlyDictionary<string, object?> bindings, GraphEvaluationContext context, IReadOnlyDictionary<string, object?>? parameters)
@@ -130,7 +130,7 @@ internal static partial class GraphExpressionEvaluator
             GqlLogicalOperator.And => true,
             GqlLogicalOperator.Or => false,
             GqlLogicalOperator.Xor => parity,
-            _ => throw new GraphPlanningException("COHDBG001", "Unsupported logical operator."),
+            _ => throw new GraphPlanningException("CG05001", ErrorMessages.EvaluatorLogicalGraphPlanning),
         };
     }
 
@@ -144,7 +144,7 @@ internal static partial class GraphExpressionEvaluator
         {
             GraphNode node => GraphLabelEvaluator.Matches(labeled.LabelExpression, node.Labels),
             GraphRelationship relationship => GraphLabelEvaluator.Matches(labeled.LabelExpression, relationship.Type),
-            _ => throw new GraphPlanningException("COHDBG003", "A labeled predicate requires a node or relationship."),
+            _ => throw new GraphPlanningException("CG03003", ErrorMessages.EvaluatorLabeledGraphPlanning),
         };
         return matches != labeled.IsNegated;
     }
@@ -154,14 +154,14 @@ internal static partial class GraphExpressionEvaluator
         GraphNode node => node.Properties.TryGetValue(name, out var value) ? value : null,
         GraphRelationship relationship => relationship.Properties.TryGetValue(name, out var value) ? value : null,
         IReadOnlyDictionary<string, object?> map => map.TryGetValue(name, out var value) ? value : null,
-        _ => throw new GraphPlanningException("COHDBG003", "Property access requires a node or relationship."),
+        _ => throw new GraphPlanningException("CG03003", ErrorMessages.EvaluatorPropertyGraphPlanning),
     };
     private static object? Unary(GqlUnaryExpression unary, IReadOnlyDictionary<string, object?> bindings, GraphEvaluationContext context, IReadOnlyDictionary<string, object?>? parameters)
     {
         var value = Evaluate(unary.Operand, bindings, context, parameters);
         if (unary.Operator == "NOT") { return !Boolean(value, unary.Operand); }
         if (value is null) { return null; }
-        if (!IsNumber(value)) { throw new GraphPlanningException("COHDBG013", ErrorMessages.NumericRequired, unary.Location); }
+        if (!IsNumber(value)) { throw new GraphPlanningException("CG02013", ErrorMessages.NumericRequired, unary.Location); }
         if (value is float or double)
         {
             double number = Convert.ToDouble(value, CultureInfo.InvariantCulture);
@@ -182,7 +182,7 @@ internal static partial class GraphExpressionEvaluator
         var evaluated = Evaluate(membership.List, bindings, context, parameters);
         if (evaluated is null) { return null; }
         if (evaluated is not object?[] candidates)
-        { throw new GraphPlanningException("COHDBG013", ErrorMessages.CompositeRequired, membership.List.Location); }
+        { throw new GraphPlanningException("CG02013", ErrorMessages.CompositeRequired, membership.List.Location); }
         bool unknown = false;
         foreach (var candidate in candidates)
         {
@@ -203,7 +203,7 @@ internal static partial class GraphExpressionEvaluator
             GqlStringPredicateOperator.StartsWith => text.StartsWith(search, StringComparison.Ordinal),
             GqlStringPredicateOperator.EndsWith => text.EndsWith(search, StringComparison.Ordinal),
             GqlStringPredicateOperator.Contains => text.Contains(search, StringComparison.Ordinal),
-            _ => throw new GraphPlanningException("COHDBG001", ErrorMessages.UnsupportedStringPredicate),
+            _ => throw new GraphPlanningException("CG05001", ErrorMessages.UnsupportedStringPredicate),
         };
     }
 
@@ -216,7 +216,7 @@ internal static partial class GraphExpressionEvaluator
         {
             if (binary.Operator is "+" or "||" && left is string a && right is string b) { return a + b; }
             if (binary.Operator == "||" || !IsNumber(left) || !IsNumber(right))
-            { throw new GraphPlanningException("COHDBG013", ErrorMessages.ArithmeticOperands, binary.Location); }
+            { throw new GraphPlanningException("CG02013", ErrorMessages.ArithmeticOperands, binary.Location); }
             return Arithmetic(binary.Operator, left, right);
         }
         if (binary.Operator is "=" or "!=" or "<>")
@@ -232,7 +232,7 @@ internal static partial class GraphExpressionEvaluator
             "<=" => order is null ? null : order <= 0,
             ">" => order is null ? null : order > 0,
             ">=" => order is null ? null : order >= 0,
-            _ => throw new GraphPlanningException("COHDBG001", "Unsupported graph operator."),
+            _ => throw new GraphPlanningException("CG05001", ErrorMessages.EvaluatorBinaryGraphPlanning),
         };
     }
 

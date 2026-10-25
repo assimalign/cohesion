@@ -68,7 +68,7 @@ public sealed class SqlCastMatrixTests
             {
                 var error = await Should.ThrowAsync<DatabaseException>(async () =>
                     await session.ExecuteAsync($"SELECT {expression} FROM t WHERE {predicate};", cancellationToken: CancellationToken.None));
-                error.DiagnosticDetail("COHSQLE011").ShouldStartWith("Cannot CAST type", Case.Sensitive);
+                error.DiagnosticDetail("CS02011").ShouldStartWith("Cannot CAST type", Case.Sensitive);
                 error.Message.ShouldContain($"Cannot CAST type {DiagnosticName(source)} to {DiagnosticName(target)}", Case.Sensitive);
             }
             return;
@@ -209,51 +209,51 @@ public sealed class SqlCastMatrixTests
     }
 
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - CAST: invalid strict text, exactness and range fail as database errors")]
-    [InlineData("CAST('2024-02-30' AS DATE)", "COHSQLE048")]
-    [InlineData("CAST('1e400' AS DOUBLE PRECISION)", "COHSQLE002")]
-    [InlineData("CAST('1e-400' AS DOUBLE PRECISION)", "COHSQLE002")]
-    [InlineData("CAST('1e-50' AS REAL)", "COHSQLE002")]
-    [InlineData("CAST(CAST('1.5' AS DOUBLE PRECISION) AS INT)", "COHSQLE011")]
-    [InlineData("CAST(CAST('1e300' AS DOUBLE PRECISION) AS REAL)", "COHSQLE002")]
-    [InlineData("CAST(CAST('NaN' AS DOUBLE PRECISION) AS DECIMAL)", "COHSQLE022")]
-    [InlineData("CAST(CAST('NaN' AS REAL) AS TINYINT)", "COHSQLE002")]
-    [InlineData("CAST(CAST('NaN' AS REAL) AS SMALLINT)", "COHSQLE002")]
-    [InlineData("CAST(CAST('NaN' AS REAL) AS INTEGER)", "COHSQLE002")]
-    [InlineData("CAST(CAST('NaN' AS REAL) AS BIGINT)", "COHSQLE002")]
-    [InlineData("CAST(CAST('Infinity' AS REAL) AS TINYINT)", "COHSQLE002")]
-    [InlineData("CAST(CAST('Infinity' AS REAL) AS SMALLINT)", "COHSQLE002")]
-    [InlineData("CAST(CAST('Infinity' AS REAL) AS INTEGER)", "COHSQLE002")]
-    [InlineData("CAST(CAST('Infinity' AS REAL) AS BIGINT)", "COHSQLE002")]
-    [InlineData("CAST(CAST('-Infinity' AS REAL) AS TINYINT)", "COHSQLE002")]
-    [InlineData("CAST(CAST('-Infinity' AS REAL) AS SMALLINT)", "COHSQLE002")]
-    [InlineData("CAST(CAST('-Infinity' AS REAL) AS INTEGER)", "COHSQLE002")]
-    [InlineData("CAST(CAST('-Infinity' AS REAL) AS BIGINT)", "COHSQLE002")]
-    [InlineData("CAST(CAST('NaN' AS DOUBLE) AS TINYINT)", "COHSQLE002")]
-    [InlineData("CAST(CAST('NaN' AS DOUBLE) AS SMALLINT)", "COHSQLE002")]
-    [InlineData("CAST(CAST('NaN' AS DOUBLE) AS INTEGER)", "COHSQLE002")]
-    [InlineData("CAST(CAST('NaN' AS DOUBLE) AS BIGINT)", "COHSQLE002")]
-    [InlineData("CAST(CAST('Infinity' AS DOUBLE) AS TINYINT)", "COHSQLE002")]
-    [InlineData("CAST(CAST('Infinity' AS DOUBLE) AS SMALLINT)", "COHSQLE002")]
-    [InlineData("CAST(CAST('Infinity' AS DOUBLE) AS INTEGER)", "COHSQLE002")]
-    [InlineData("CAST(CAST('Infinity' AS DOUBLE) AS BIGINT)", "COHSQLE002")]
-    [InlineData("CAST(CAST('-Infinity' AS DOUBLE) AS TINYINT)", "COHSQLE002")]
-    [InlineData("CAST(CAST('-Infinity' AS DOUBLE) AS SMALLINT)", "COHSQLE002")]
-    [InlineData("CAST(CAST('-Infinity' AS DOUBLE) AS INTEGER)", "COHSQLE002")]
-    [InlineData("CAST(CAST('-Infinity' AS DOUBLE) AS BIGINT)", "COHSQLE002")]
-    [InlineData("CAST(CAST('1e-29' AS DOUBLE) AS NUMERIC)", "COHSQLE002")]
-    [InlineData("CAST(INTERVAL '25 hours' AS TIME)", "COHSQLE011")]
-    [InlineData("CAST(INTERVAL '-0.0000001 seconds' AS TIME)", "COHSQLE011")]
-    [InlineData("CAST('1 year' AS INTERVAL)", "COHSQLE047")]
-    [InlineData("CAST('12.34.56' AS INTERVAL)", "COHSQLE047")]
-    [InlineData("CAST('2024-01-01 00:00:00+02:00' AS TIMESTAMP)", "COHSQLE047")]
-    [InlineData("CAST('00:00:00.12345678' AS TIME)", "COHSQLE047")]
-    [InlineData("CAST('\\xZZ' AS BYTEA)", "COHSQLE022")]
-    [InlineData("CAST('\\x0' AS BYTEA)", "COHSQLE022")]
-    [InlineData("CAST('a\\b' AS BYTEA)", "COHSQLE022")]
-    [InlineData("CAST('{bad' AS JSON)", "COHSQLE022")]
-    [InlineData("CAST('true false' AS JSONB)", "COHSQLE022")]
-    [InlineData("CAST('00112233-4455-6677-8899-aabbccddeefg' AS UUID)", "COHSQLE022")]
-    [InlineData("CAST('\\x00ff' AS VARBINARY(1))", "COHSQLE011")]
+    [InlineData("CAST('2024-02-30' AS DATE)", "CS02048")]
+    [InlineData("CAST('1e400' AS DOUBLE PRECISION)", "CS02002")]
+    [InlineData("CAST('1e-400' AS DOUBLE PRECISION)", "CS02002")]
+    [InlineData("CAST('1e-50' AS REAL)", "CS02002")]
+    [InlineData("CAST(CAST('1.5' AS DOUBLE PRECISION) AS INT)", "CS02011")]
+    [InlineData("CAST(CAST('1e300' AS DOUBLE PRECISION) AS REAL)", "CS02002")]
+    [InlineData("CAST(CAST('NaN' AS DOUBLE PRECISION) AS DECIMAL)", "CS02022")]
+    [InlineData("CAST(CAST('NaN' AS REAL) AS TINYINT)", "CS02002")]
+    [InlineData("CAST(CAST('NaN' AS REAL) AS SMALLINT)", "CS02002")]
+    [InlineData("CAST(CAST('NaN' AS REAL) AS INTEGER)", "CS02002")]
+    [InlineData("CAST(CAST('NaN' AS REAL) AS BIGINT)", "CS02002")]
+    [InlineData("CAST(CAST('Infinity' AS REAL) AS TINYINT)", "CS02002")]
+    [InlineData("CAST(CAST('Infinity' AS REAL) AS SMALLINT)", "CS02002")]
+    [InlineData("CAST(CAST('Infinity' AS REAL) AS INTEGER)", "CS02002")]
+    [InlineData("CAST(CAST('Infinity' AS REAL) AS BIGINT)", "CS02002")]
+    [InlineData("CAST(CAST('-Infinity' AS REAL) AS TINYINT)", "CS02002")]
+    [InlineData("CAST(CAST('-Infinity' AS REAL) AS SMALLINT)", "CS02002")]
+    [InlineData("CAST(CAST('-Infinity' AS REAL) AS INTEGER)", "CS02002")]
+    [InlineData("CAST(CAST('-Infinity' AS REAL) AS BIGINT)", "CS02002")]
+    [InlineData("CAST(CAST('NaN' AS DOUBLE) AS TINYINT)", "CS02002")]
+    [InlineData("CAST(CAST('NaN' AS DOUBLE) AS SMALLINT)", "CS02002")]
+    [InlineData("CAST(CAST('NaN' AS DOUBLE) AS INTEGER)", "CS02002")]
+    [InlineData("CAST(CAST('NaN' AS DOUBLE) AS BIGINT)", "CS02002")]
+    [InlineData("CAST(CAST('Infinity' AS DOUBLE) AS TINYINT)", "CS02002")]
+    [InlineData("CAST(CAST('Infinity' AS DOUBLE) AS SMALLINT)", "CS02002")]
+    [InlineData("CAST(CAST('Infinity' AS DOUBLE) AS INTEGER)", "CS02002")]
+    [InlineData("CAST(CAST('Infinity' AS DOUBLE) AS BIGINT)", "CS02002")]
+    [InlineData("CAST(CAST('-Infinity' AS DOUBLE) AS TINYINT)", "CS02002")]
+    [InlineData("CAST(CAST('-Infinity' AS DOUBLE) AS SMALLINT)", "CS02002")]
+    [InlineData("CAST(CAST('-Infinity' AS DOUBLE) AS INTEGER)", "CS02002")]
+    [InlineData("CAST(CAST('-Infinity' AS DOUBLE) AS BIGINT)", "CS02002")]
+    [InlineData("CAST(CAST('1e-29' AS DOUBLE) AS NUMERIC)", "CS02002")]
+    [InlineData("CAST(INTERVAL '25 hours' AS TIME)", "CS02011")]
+    [InlineData("CAST(INTERVAL '-0.0000001 seconds' AS TIME)", "CS02011")]
+    [InlineData("CAST('1 year' AS INTERVAL)", "CS02047")]
+    [InlineData("CAST('12.34.56' AS INTERVAL)", "CS02047")]
+    [InlineData("CAST('2024-01-01 00:00:00+02:00' AS TIMESTAMP)", "CS02047")]
+    [InlineData("CAST('00:00:00.12345678' AS TIME)", "CS02047")]
+    [InlineData("CAST('\\xZZ' AS BYTEA)", "CS02022")]
+    [InlineData("CAST('\\x0' AS BYTEA)", "CS02022")]
+    [InlineData("CAST('a\\b' AS BYTEA)", "CS02022")]
+    [InlineData("CAST('{bad' AS JSON)", "CS02022")]
+    [InlineData("CAST('true false' AS JSONB)", "CS02022")]
+    [InlineData("CAST('00112233-4455-6677-8899-aabbccddeefg' AS UUID)", "CS02022")]
+    [InlineData("CAST('\\x00ff' AS VARBINARY(1))", "CS02011")]
     public async Task Cast_InvalidInput_ShouldReturnConversionFailure(string expression, string code)
     {
         // Arrange
@@ -419,7 +419,7 @@ public sealed class SqlCastMatrixTests
         {
             var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync($"SELECT CAST(@v AS {type}) FROM t;",
                 new Dictionary<string, object?> { ["v"] = text }, cancellationToken: CancellationToken.None));
-            error.DiagnosticDetail("COHSQLE022").ShouldContain("CAST from TEXT", Case.Sensitive);
+            error.DiagnosticDetail("CS02022").ShouldContain("CAST from TEXT", Case.Sensitive);
         }
     }
 

@@ -7,6 +7,8 @@ namespace Assimalign.Cohesion.Database.Protocol;
 /// <summary>A bounded list of structured statement diagnostics.</summary>
 /// <param name="Entries">The diagnostics in source order.</param>
 /// <exception cref="ArgumentNullException">The collection is null, including an init assignment.</exception>
+[global::System.Diagnostics.DebuggerDisplay("ProtocolDiagnosticsMessage")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Protocol.ProtocolDiagnosticsMessage.DebugView))]
 public sealed record ProtocolDiagnosticsMessage(IReadOnlyList<ProtocolDiagnostic> Entries)
 {
     private IReadOnlyList<ProtocolDiagnostic> _entries = Entries ?? throw new ArgumentNullException(nameof(Entries));
@@ -88,5 +90,17 @@ public sealed record ProtocolDiagnosticsMessage(IReadOnlyList<ProtocolDiagnostic
         {
             throw new ProtocolException(ErrorMessages.DiagnosticPayloadInvalid);
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Protocol.ProtocolDiagnosticsMessage _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Protocol.ProtocolDiagnosticsMessage value)
+        {
+            _target = value;
+        }
+
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.Protocol.ProtocolDiagnostic> Entries => _target.Entries;
     }
 }

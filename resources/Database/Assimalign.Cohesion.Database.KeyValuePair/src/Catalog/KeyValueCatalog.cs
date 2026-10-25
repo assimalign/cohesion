@@ -41,6 +41,8 @@ namespace Assimalign.Cohesion.Database.KeyValuePair.Catalog;
 /// instance method. <see cref="Open"/> is the one way to create it.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("KeyValueCatalog")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.KeyValuePair.Catalog.KeyValueCatalog.DebugView))]
 public sealed class KeyValueCatalog
 {
     private const int indexRegistrationsKind = 1;
@@ -186,23 +188,32 @@ public sealed class KeyValueCatalog
         while (iterator.MoveNext())
         {
             var unit = iterator.Current;
-            var reader = new DatabaseKeyReader(unit.Data.Span);
-            int kind = reader.ReadInt32();
-
-            switch (kind)
+            try
             {
-                case indexRegistrationsKind:
-                    _registrations = DecodeRegistrations(ref reader);
-                    _registrationsLocation = (unit.PageId, unit.SlotIndex);
-                    break;
+                var reader = new DatabaseKeyReader(unit.Data.Span);
+                int kind = reader.ReadInt32();
 
-                case entrySpaceFormatKind:
-                    _entrySpaceFormatVersion = reader.ReadInt32();
-                    _formatLocation = (unit.PageId, unit.SlotIndex);
-                    break;
+                switch (kind)
+                {
+                    case indexRegistrationsKind:
+                        _registrations = DecodeRegistrations(ref reader);
+                        _registrationsLocation = (unit.PageId, unit.SlotIndex);
+                        break;
 
-                default:
-                    throw new KeyValueCatalogException($"Malformed catalog record of kind {kind}.");
+                    case entrySpaceFormatKind:
+                        _entrySpaceFormatVersion = reader.ReadInt32();
+                        _formatLocation = (unit.PageId, unit.SlotIndex);
+                        break;
+
+                    default:
+                        throw new KeyValueCatalogException("CV06105", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.KeyValueCatalogLoadKeyValueCatalog, kind));
+                }
+            }
+            catch (Exception error) when (error is KeyValueCatalogException or DatabaseTypeException
+                or System.IO.InvalidDataException or FormatException or ArgumentException or OverflowException)
+            {
+                var corruption = new StorageCorruptionException(unit.PageId, unit.SlotIndex, error.Message, error);
+                throw new KeyValueCatalogException("CV06105", corruption.Message, corruption);
             }
         }
     }
@@ -267,5 +278,13 @@ public sealed class KeyValueCatalog
         }
 
         return registrations;
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.KeyValuePair.Catalog.KeyValueCatalog value)
+        {
+            _ = value;
+        }
     }
 }

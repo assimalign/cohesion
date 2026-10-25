@@ -147,7 +147,7 @@ public sealed partial class SqlDatabaseEventSourceTests
         {
             var failed = NewEvent(recorder, 15, "ProvisioningFailed", "engineName", "database", "schema", "position", "kind", "code", "exceptionType");
             failed.Level.ShouldBe(EventLevel.Error);
-            failed.Payload.ShouldBe([engine.Name, "traced", "traced", 1, "AddTable", "COHSQLP004", typeof(InvalidOperationException).FullName]);
+            failed.Payload.ShouldBe([engine.Name, "traced", "traced", 1, "AddTable", "CS03104", typeof(InvalidOperationException).FullName]);
         }
         recorder.Events.SelectMany(entry => entry.Payload ?? []).ShouldNotContain(value => Equals(value, failure.Message));
     }
@@ -222,7 +222,7 @@ public sealed partial class SqlDatabaseEventSourceTests
         {
             var failed = NewEvent(recorder, 21, "DeferredStepFailed", [.. _deferredPayload, "code", "exceptionType"]);
             failed.Level.ShouldBe(EventLevel.Error);
-            failed.Payload![9].ShouldBe("COHSQLP004");
+            failed.Payload![9].ShouldBe("CS03104");
             ((string)failed.Payload[10]!).ShouldNotBeNullOrEmpty();
             database.IsOffline.ShouldBeTrue();
         }
@@ -333,7 +333,7 @@ public sealed partial class SqlDatabaseEventSourceTests
             {
                 var failed = NewEvent(recorder, 21, "DeferredStepFailed", [.. _deferredPayload, "code", "exceptionType"]);
                 failed.Payload!.Take(9).ShouldBe(completed.Payload.Take(9));
-                failed.Payload![9].ShouldBe("COHSQLP004");
+                failed.Payload![9].ShouldBe("CS03104");
             }
             else
             {
@@ -466,7 +466,7 @@ public sealed partial class SqlDatabaseEventSourceTests
 
             // Assert
             var failed = NewEvent(recorder.ShouldNotBeNull(), 15, "ProvisioningFailed", "engineName", "database", "schema", "position", "kind", "code", "exceptionType");
-            failed.Payload!.Skip(3).ShouldBe([1, "AddTable", "COHSQLP004", typeof(InvalidOperationException).FullName]);
+            failed.Payload!.Skip(3).ShouldBe([1, "AddTable", "CS03104", typeof(InvalidOperationException).FullName]);
             recorder.Events.ShouldNotContain(entry => entry.EventId == 13 || entry.EventId == 14);
         }
         finally

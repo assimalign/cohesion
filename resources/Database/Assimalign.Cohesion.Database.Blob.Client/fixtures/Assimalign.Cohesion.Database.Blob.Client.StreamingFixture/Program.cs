@@ -13,8 +13,8 @@ namespace Assimalign.Cohesion.Database.Blob.Client.StreamingFixture;
 
 internal static class Program
 {
-    private const long BlobLength = 256L * 1024 * 1024 + 123;
-    private const long MaximumHeap = 64L * 1024 * 1024;
+    private const long blobLength = 256L * 1024 * 1024 + 123;
+    private const long maximumHeap = 64L * 1024 * 1024;
 
     private static async Task<int> Main(string[] args)
     {
@@ -25,9 +25,9 @@ internal static class Program
                 throw new ArgumentException("Expected one database root path.");
             }
             long available = GC.GetGCMemoryInfo().TotalAvailableMemoryBytes;
-            if (available <= 0 || available > MaximumHeap || BlobLength < available * 4)
+            if (available <= 0 || available > maximumHeap || blobLength < available * 4)
             {
-                throw new InvalidOperationException($"The wire fixture needs a heap at most 64 MiB and a blob at least four times larger: heap={available}, blob={BlobLength}.");
+                throw new InvalidOperationException($"The wire fixture needs a heap at most 64 MiB and a blob at least four times larger: heap={available}, blob={blobLength}.");
             }
 
             using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(8));
@@ -61,13 +61,13 @@ internal static class Program
             string expectedDigest = ExpectedDigest();
             using var source = new PatternStream();
             long sent = await connection.UploadAsync("objects", "payload", source, "application/test-pattern",
-                length: BlobLength, cancellationToken: token);
-            if (sent != BlobLength || source.LargestReadRequest > BlobProtocol.MaxChunkLength)
+                length: blobLength, cancellationToken: token);
+            if (sent != blobLength || source.LargestReadRequest > BlobProtocol.MaxChunkLength)
             {
                 throw new InvalidDataException("Upload did not preserve the length or bounded source read size.");
             }
             var properties = await connection.GetPropertiesAsync("objects", "payload", token);
-            if (properties?.Length != BlobLength || properties?.ContentType != "application/test-pattern")
+            if (properties?.Length != blobLength || properties?.ContentType != "application/test-pattern")
             {
                 throw new InvalidDataException("Committed wire metadata differs from the uploaded object.");
             }
@@ -82,7 +82,7 @@ internal static class Program
                 received += count;
             }
             string digest = Convert.ToHexString(hash.GetHashAndReset());
-            if (received != BlobLength || digest != expectedDigest)
+            if (received != blobLength || digest != expectedDigest)
             {
                 throw new InvalidDataException($"Wire content changed: received={received}, digest={digest}, expected={expectedDigest}.");
             }
@@ -104,9 +104,9 @@ internal static class Program
     {
         using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         var buffer = new byte[32 * 1024];
-        for (long offset = 0; offset < BlobLength;)
+        for (long offset = 0; offset < blobLength;)
         {
-            int count = (int)Math.Min(buffer.Length, BlobLength - offset);
+            int count = (int)Math.Min(buffer.Length, blobLength - offset);
             for (int index = 0; index < count; index++)
             {
                 long position = offset + index;
@@ -132,7 +132,7 @@ internal static class Program
         {
             cancellationToken.ThrowIfCancellationRequested();
             LargestReadRequest = Math.Max(LargestReadRequest, buffer.Length);
-            int count = (int)Math.Min(buffer.Length, BlobLength - _offset);
+            int count = (int)Math.Min(buffer.Length, blobLength - _offset);
             for (int index = 0; index < count; index++)
             {
                 long position = _offset + index;

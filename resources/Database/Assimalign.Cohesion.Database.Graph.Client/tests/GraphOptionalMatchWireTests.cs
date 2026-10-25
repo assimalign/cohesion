@@ -29,10 +29,10 @@ public sealed class GraphOptionalMatchWireTests
         result.Select(row => (row[0], row[1]))
             .ShouldBe(new (object?, object?)[] { ("Alice", "Bob"), ("Bob", null), ("Isolated", null) }, ignoreOrder: true);
         unknown.ShouldHaveSingleItem()[0].ShouldBeNull();
-        unknown.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG010");
+        unknown.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG01010");
     }
 
-    [Theory(DisplayName = "Cohesion Test [Graph.Client] - OPTIONAL MATCH: path rejection completes with COHDBG001 and preserves the session")]
+    [Theory(DisplayName = "Cohesion Test [Graph.Client] - OPTIONAL MATCH: path rejection completes with CG05001 and preserves the session")]
     [InlineData("OPTIONAL MATCH (a:Person) RETURN a")]
     [InlineData("MATCH (a:Person {name:'Alice'}) OPTIONAL MATCH (a)-[r:KNOWS]->(b) RETURN b")]
     [InlineData("MATCH (a:Person {name:'Alice'}) OPTIONAL MATCH (a)-[r:KNOWS]->(b) RETURN r")]
@@ -49,7 +49,7 @@ public sealed class GraphOptionalMatchWireTests
         { await foreach (var path in connection.QueryPathsAsync(source, cancellationToken: harness.Token)) { } });
         // Assert
         error.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG001");
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG05001");
         (await connection.QueryAsync("RETURN 1 AS one", cancellationToken: harness.Token)).ShouldHaveSingleItem()[0].ShouldBe(1L);
         harness.Server.Sessions.ShouldHaveSingleItem().Id.ShouldBe(id);
     }
@@ -67,6 +67,6 @@ public sealed class GraphOptionalMatchWireTests
         await foreach (var path in result) { paths.Add(path); }
         // Assert
         paths.ShouldHaveSingleItem().Nodes.ShouldHaveSingleItem().Properties["name"].ShouldBe("Alice");
-        result.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG010");
+        result.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG01010");
     }
 }

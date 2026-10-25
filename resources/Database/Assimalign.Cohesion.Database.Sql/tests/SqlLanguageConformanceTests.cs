@@ -51,21 +51,21 @@ public sealed class SqlLanguageConformanceTests
     /// <param name="table">The constrained table, or empty for a domain CAST.</param>
     /// <returns>The asynchronous verification.</returns>
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - Conformance: constraint failures retain exact diagnostics and roll back the statement (#1666)")]
-    [InlineData("INSERT INTO t VALUES (3,10,3,3,1)", "COHSQLE037", "uq_t", "dbo.t")]
-    [InlineData("INSERT INTO t VALUES (1,30,3,3,1)", "COHSQLE037", "pk_t", "dbo.t")]
-    [InlineData("INSERT INTO t VALUES (3,30,3,1,1)", "COHSQLE037", "uq_d", "dbo.t")]
-    [InlineData("INSERT INTO t VALUES (3,30,3,3,1),(4,10,4,4,1)", "COHSQLE037", "uq_t", "dbo.t")]
-    [InlineData("INSERT INTO t SELECT * FROM source", "COHSQLE037", "uq_t", "dbo.t")]
-    [InlineData("UPDATE t SET u = 10 WHERE id = 2", "COHSQLE037", "uq_t", "dbo.t")]
-    [InlineData("INSERT INTO t VALUES (3,30,3,3,1),(1,40,4,4,1) ON CONFLICT(id) DO UPDATE SET u = 20", "COHSQLE037", "uq_t", "dbo.t")]
-    [InlineData("INSERT INTO t VALUES (3,30,0,3,1)", "COHSQLE038", "ck_t", "dbo.t")]
-    [InlineData("UPDATE t SET qty = 0 WHERE id = 1", "COHSQLE038", "ck_t", "dbo.t")]
-    [InlineData("INSERT INTO t VALUES (3,30,3,0,1)", "COHSQLE038", "positive", "dbo.t")]
-    [InlineData("UPDATE t SET d = 0 WHERE id = 1", "COHSQLE038", "positive", "dbo.t")]
-    [InlineData("SELECT CAST(0 AS positive) FROM t", "COHSQLE038", "positive", "")]
-    [InlineData("INSERT INTO t VALUES (3,30,3,3,99)", "COHSQLE039", "fk_t", "dbo.t")]
-    [InlineData("UPDATE t SET pid = 99 WHERE id = 1", "COHSQLE039", "fk_t", "dbo.t")]
-    [InlineData("DELETE FROM p WHERE id = 1", "COHSQLE039", "fk_t", "dbo.t")]
+    [InlineData("INSERT INTO t VALUES (3,10,3,3,1)", "CS03037", "uq_t", "dbo.t")]
+    [InlineData("INSERT INTO t VALUES (1,30,3,3,1)", "CS03037", "pk_t", "dbo.t")]
+    [InlineData("INSERT INTO t VALUES (3,30,3,1,1)", "CS03037", "uq_d", "dbo.t")]
+    [InlineData("INSERT INTO t VALUES (3,30,3,3,1),(4,10,4,4,1)", "CS03037", "uq_t", "dbo.t")]
+    [InlineData("INSERT INTO t SELECT * FROM source", "CS03037", "uq_t", "dbo.t")]
+    [InlineData("UPDATE t SET u = 10 WHERE id = 2", "CS03037", "uq_t", "dbo.t")]
+    [InlineData("INSERT INTO t VALUES (3,30,3,3,1),(1,40,4,4,1) ON CONFLICT(id) DO UPDATE SET u = 20", "CS03037", "uq_t", "dbo.t")]
+    [InlineData("INSERT INTO t VALUES (3,30,0,3,1)", "CS03038", "ck_t", "dbo.t")]
+    [InlineData("UPDATE t SET qty = 0 WHERE id = 1", "CS03038", "ck_t", "dbo.t")]
+    [InlineData("INSERT INTO t VALUES (3,30,3,0,1)", "CS03038", "positive", "dbo.t")]
+    [InlineData("UPDATE t SET d = 0 WHERE id = 1", "CS03038", "positive", "dbo.t")]
+    [InlineData("SELECT CAST(0 AS positive) FROM t", "CS03038", "positive", "")]
+    [InlineData("INSERT INTO t VALUES (3,30,3,3,99)", "CS03039", "fk_t", "dbo.t")]
+    [InlineData("UPDATE t SET pid = 99 WHERE id = 1", "CS03039", "fk_t", "dbo.t")]
+    [InlineData("DELETE FROM p WHERE id = 1", "CS03039", "fk_t", "dbo.t")]
     public async Task ExecuteAsync_ConstraintViolation_ShouldCarryOneLocatedDiagnostic(string sql, string code, string constraint, string table)
     {
         // Arrange
@@ -219,7 +219,7 @@ public sealed class SqlLanguageConformanceTests
         var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None));
         // Assert
         var diagnostic = error.Diagnostics.ShouldHaveSingleItem();
-        diagnostic.Code.ShouldBe("COHSQLE040");
+        diagnostic.Code.ShouldBe("CS05040");
         diagnostic.Location.ShouldBe(DiagnosticLocation.Absolute);
         diagnostic.Start.ShouldNotBeNull();
         diagnostic.End.ShouldNotBeNull();
@@ -372,7 +372,7 @@ public sealed class SqlLanguageConformanceTests
         session.LastStatementMetrics.ShouldNotBeNull().RecordsExamined.ShouldBe(0);
         var failure = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(
             "SELECT id FROM bounded_rows ORDER BY 10 / (id - 3) LIMIT 1", cancellationToken: CancellationToken.None));
-        failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE001");
+        failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS02001");
     }
 
     /// <summary>Keeps invalid count diagnostics unchanged before a row window executes.</summary>
@@ -595,7 +595,11 @@ public sealed class SqlLanguageConformanceTests
             async (_, result) =>
             {
                 var rows = await ReadRowsAsync(result);
-                rows.ShouldContain(row => Equals(row[2], "IndexSeek") && Equals(row[4], "by_age") && Equals(row[5], "age = 36"));
+                var seek = rows.Single(row => Equals(row[2], "IndexSeek"));
+                seek[4].ShouldBe("by_age");
+                seek[5].ShouldBe("age = 36; estimate_kind=exact_probe; probe_entries=2; probe_pages=1");
+                seek[6].ShouldBe(1L);
+                seek[7].ShouldBeNull();
             }),
         [SqlClauses.Select] = new("SELECT id, age + 1 AS next_age FROM t ORDER BY id;", _seed,
             expression => expression is SqlSelectExpression,
@@ -658,7 +662,7 @@ public sealed class SqlLanguageConformanceTests
                     "SELECT TRUE OR age FROM t", "SELECT FALSE AND age FROM t", "SELECT NOT age FROM t" })
                 {
                     var failure = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None));
-                    failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE003");
+                    failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS02003");
                 }
             }),
         [SqlClauses.Collate] = Query("SELECT id FROM t WHERE name = 'ada' COLLATE case_insensitive;",

@@ -52,7 +52,7 @@ internal static class DocumentJsonPatcher
         }
         catch (Exception exception) when (exception is JsonException or InvalidOperationException)
         {
-            throw new DocumentPlanningException("COHDOC018", ErrorMessages.UpdateJsonInvalid, location, exception);
+            throw new DocumentPlanningException("CD02018", ErrorMessages.UpdateJsonInvalid, location, exception);
         }
     }
 
@@ -67,7 +67,7 @@ internal static class DocumentJsonPatcher
                 // Count the enclosing containers even though this writer serializes only the target.
                 if (depth >= 128 && values[leaf] is JsonElement { ValueKind: JsonValueKind.Object or JsonValueKind.Array })
                 {
-                    throw new DocumentPlanningException("COHDOC018", ErrorMessages.UpdateJsonInvalid, node.Target.Path.Location);
+                    throw new DocumentPlanningException("CD02018", ErrorMessages.UpdateJsonInvalid, node.Target.Path.Location);
                 }
                 using var writer = new Utf8JsonWriter(buffer, new JsonWriterOptions
                 {
@@ -79,13 +79,13 @@ internal static class DocumentJsonPatcher
             }
             catch (Exception exception) when (exception is JsonException or InvalidOperationException)
             {
-                throw new DocumentPlanningException("COHDOC018", ErrorMessages.UpdateJsonInvalid, node.Target.Path.Location, exception);
+                throw new DocumentPlanningException("CD02018", ErrorMessages.UpdateJsonInvalid, node.Target.Path.Location, exception);
             }
             return;
         }
         if (depth >= 128)
         {
-            throw new DocumentPlanningException("COHDOC018", ErrorMessages.UpdateJsonInvalid, node.Target.Path.Location);
+            throw new DocumentPlanningException("CD02018", ErrorMessages.UpdateJsonInvalid, node.Target.Path.Location);
         }
         if (current.ValueKind == JsonValueKind.Array)
         {
@@ -202,10 +202,12 @@ internal static class DocumentJsonPatcher
             ? $"[{ordinal}]" : segment.Name is { Length: > 0 } name && (char.IsLetter(name[0]) || name[0] == '_') &&
                 name.All(character => char.IsLetterOrDigit(character) || character == '_')
                 ? (index == 0 ? name : "." + name) : "['" + segment.Name!.Replace("'", "''", StringComparison.Ordinal) + "']"));
-        return new DocumentPlanningException("COHDOC016", string.Format(CultureInfo.CurrentCulture,
+        return new DocumentPlanningException("CD02016", string.Format(CultureInfo.CurrentCulture,
             ErrorMessages.UpdatePathShapeInvalid, path), node.Target.Path.Location);
     }
 
+    [global::System.Diagnostics.DebuggerDisplay("PatchNode")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Documents.Internal.DocumentJsonPatcher.PatchNode.DebugView))]
     private sealed class PatchNode
     {
         internal PatchNode(OqlPathSegment segment, DocumentUpdateTarget target)
@@ -220,5 +222,13 @@ internal static class DocumentJsonPatcher
         internal List<PatchNode> Ordered { get; } = new();
         internal int? Leaf { get; set; }
         internal bool HasWrites { get; set; }
+
+        private sealed class DebugView
+        {
+            public DebugView(global::Assimalign.Cohesion.Database.Documents.Internal.DocumentJsonPatcher.PatchNode value)
+            {
+                _ = value;
+            }
+        }
     }
 }

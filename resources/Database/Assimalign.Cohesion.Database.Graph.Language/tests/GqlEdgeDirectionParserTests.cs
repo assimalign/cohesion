@@ -7,7 +7,7 @@ namespace Assimalign.Cohesion.Database.Graph.Language.Tests;
 
 /// <summary>
 /// ISO/IEC 39075 16.7 edge patterns (#1139): every full and abbreviated directed form maps to its
-/// <see cref="GqlPatternDirection"/>. The tilde (undirected) forms are rejected with COHDBL001,
+/// <see cref="GqlPatternDirection"/>. The tilde (undirected) forms are rejected with CK00001,
 /// pinned in <c>GqlParseStrictnessTests</c>.
 /// </summary>
 public sealed class GqlEdgeDirectionParserTests
@@ -69,7 +69,7 @@ public sealed class GqlEdgeDirectionParserTests
     /// there is never a clause); and '&lt;--' and '&lt;--&gt;' are not edges.
     /// </summary>
     /// <param name="gql">A malformed edge.</param>
-    [Theory(DisplayName = "Cohesion Test [Graph.Language] - Edges: split arrows, filled abbreviated edges and Cypher left arrows report one GQL0002")]
+    [Theory(DisplayName = "Cohesion Test [Graph.Language] - Edges: split arrows, filled abbreviated edges and Cypher left arrows report one CG00002")]
     [InlineData("MATCH (a)<- >(b) RETURN a")]
     [InlineData("MATCH (a)- >(b) RETURN a")]
     [InlineData("MATCH (a)< ->(b) RETURN a")]
@@ -99,7 +99,7 @@ public sealed class GqlEdgeDirectionParserTests
 
         // Assert
         var error = statement.Diagnostics.ShouldHaveSingleItem();
-        error.Code.ShouldBe("GQL0002");
+        error.Code.ShouldBe("CG00002");
         int start = error.Start.ShouldNotBeNull();
         start.ShouldBeInRange(0, gql.Length);
         error.End.ShouldNotBeNull().ShouldBeInRange(start, gql.Length);
@@ -112,7 +112,7 @@ public sealed class GqlEdgeDirectionParserTests
         var statement = Parse("MATCH (a) WHERE a.x = ~1 RETURN a");
 
         // Assert
-        statement.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("GQL0002");
+        statement.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG00002");
     }
 
     private static GqlQueryStatement Parse(string gql) => (GqlQueryStatement)new GqlQueryParser().Parse(gql);

@@ -14,6 +14,7 @@ using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
+using Assimalign.Cohesion.Database.Tests;
 using Assimalign.Cohesion.Database.Transactions;
 
 using Assimalign.Cohesion.Database.Graph.Protocol;
@@ -25,14 +26,15 @@ namespace Assimalign.Cohesion.Database.Graph.Tests;
 /// until it is reopened (#1243), the buffer pool and the checkpoint triggers are options (#1254),
 /// and a deferred undo is retried on its own backoff (#1226).
 /// </summary>
+[Collection(nameof(GraphWorkerResilienceCollection))]
 public sealed class GraphStorageOperationsTests
 {
-    private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan _timeout = TimeSpan.FromSeconds(10);
 
     /// <summary>
     /// The commit's journal fsync fails: the caller gets the unconfirmed commit, and from then on
     /// every operation — a new session, a statement, BEGIN, COMMIT and ROLLBACK of an open
-    /// transaction, over the wire too — is refused with COHDBG012, and nothing reaches the file
+    /// transaction, over the wire too — is refused with CG06012, and nothing reaches the file
     /// set, through the workers' passes and the sessions' close included. The root bases' checks
     /// come first (concrete-types plan §6.4): BEGIN on the session holding the open transaction is
     /// refused as already active, a canceled token is refused before the offline refusal of a new
@@ -97,7 +99,7 @@ public sealed class GraphStorageOperationsTests
         // The root bases' order (concrete-types plan §6.4): BEGIN on the session that holds the
         // open transaction is refused as already active before the offline refusal, and a canceled
         // token is refused before the offline refusal of a new session, both execute seams and
-        // BEGIN. Before the bases, each of these was refused with COHDBG012. The typed node and
+        // BEGIN. Before the bases, each of these was refused with CG06012. The typed node and
         // relationship operations do not pass the session's execute seams, so their order holds.
         var activeBegin = await Should.ThrowAsync<DatabaseException>(async () => await other.BeginTransactionAsync());
         using var canceled = new CancellationTokenSource();
@@ -146,19 +148,20 @@ public sealed class GraphStorageOperationsTests
 
         // Assert
         unconfirmed.InnerException.ShouldBeOfType<TransactionCommitUnconfirmedException>();
-        unconfirmed.Message.ShouldStartWith("COHDBG012: Database 'graph' went offline while a transaction was committing", Case.Sensitive);
+        unconfirmed.Diagnostics.ShouldContain(d => d.Code == "CG06012");
+        unconfirmed.Message.ShouldStartWith("Database 'graph' went offline while a transaction was committing", Case.Sensitive);
         StorageOfflineException.Find(unconfirmed).ShouldNotBeNull();
-        refusals.ShouldAllBe(refusal => refusal.Code == "COHDBG012" && refusal.Message.StartsWith("COHDBG012", StringComparison.Ordinal));
+        refusals.ShouldAllBe(refusal => refusal.Code == "CG06012" && refusal.Diagnostics.Count == 1 && refusal.Diagnostics[0].Code == "CG06012" && refusal.Message.StartsWith("Database", StringComparison.Ordinal));
         activeBegin.Message.ShouldBe("A transaction or operation is already active on this session.");
         canceledCalls.ShouldAllBe(refusal => refusal.CancellationToken == canceled.Token);
-        typedRefusal.Code.ShouldBe("COHDBG012");
+        typedRefusal.Code.ShouldBe("CG06012");
         nullRequest.ParamName.ShouldBe("request");
         blankStatement.ParamName.ShouldBe("statement");
         closedState.ShouldBe(TransactionState.Faulted);
         statementError.Code.ShouldBe(ProtocolErrorCode.Unavailable);
-        statementError.Message.ShouldStartWith("COHDBG012", Case.Sensitive);
+        statementError.Message.ShouldStartWith("CG06012", Case.Sensitive);
         handshakeError.Code.ShouldBe(ProtocolErrorCode.Unavailable);
-        handshakeError.Message.ShouldStartWith("COHDBG012", Case.Sensitive);
+        handshakeError.Message.ShouldStartWith("CG06012", Case.Sensitive);
         engine.State.ShouldBe(EngineState.Running);
         beforeTheReopen.Data.ShouldBe(atTheFailure.Data);
         beforeTheReopen.Journal.ShouldBe(atTheFailure.Journal);
@@ -232,8 +235,10 @@ public sealed class GraphStorageOperationsTests
     {
         // Arrange: a time backstop far out of the way, so only the size can trigger.
         const long size = 4 * 1024 * 1024;
+        var strategy = new FaultInjectingJournalStorageStrategy();
         await using var engine = GraphDatabaseEngine.Create("graph-engine", new()
         {
+            StorageStrategy = strategy,
             CheckpointJournalSize = size,
             CheckpointInterval = TimeSpan.FromHours(1),
         });
@@ -246,20 +251,20 @@ public sealed class GraphStorageOperationsTests
             await database.CreateNodeAsync(setup, ["Item"], new Dictionary<string, object?> { ["payload"] = payload });
         }
 
-        var writers = Enumerable.Range(0, 4).Select(writer => Task.Run(async () =>
+        var writers = Enumerable.Range(0, 4).Select(writer => DedicatedTestTask.Run(async () =>
         {
             await using var session = await database.CreateSessionAsync();
-            while (!stop.IsCancellationRequested)
+            while (!stop.IsCancellationRequested && strategy.JournalCounters(database.Name.ToString()).Written < 40 * size)
             {
                 await database.CreateNodeAsync(session, ["Item"], new Dictionary<string, object?> { ["payload"] = payload });
             }
         })).ToArray();
 
-        // Act: sample the journal while the writers push well past the size many times over,
+        // Act: read exact stream counters while writers stop at forty journal sizes,
         // counting the checkpoints that truncated it.
-        var journal = await JournalSamples.CollectAsync(() => database.DataStorage.JournalLength, 40 * size, Task.WhenAll(writers));
+        var journal = await JournalSamples.CollectAsync(() => strategy.JournalCounters(database.Name.ToString()), 40 * size, Task.WhenAll(writers));
         stop.Cancel();
-        await Task.WhenAll(writers).WaitAsync(Timeout);
+        await Task.WhenAll(writers).WaitAsync(_timeout);
 
         // Assert: tens of journal sizes were written, and checkpoints truncated the journal before
         // it held four sizes on average.
@@ -270,14 +275,11 @@ public sealed class GraphStorageOperationsTests
     }
 
     /// <summary>
-    /// A rollback's undo fails once. The undo is retried on its own backoff, about 100 ms later,
-    /// so the writer waiting for the rolled-back transaction's writer lock proceeds within about a
-    /// second although the maintenance interval is an hour (#1226 owner decision of 2026-10-04).
-    /// The engine's wiring is checked exactly (the first retry is due within 100 ms of the
-    /// deferral), and the release end to end as a ratio to that first delay.
+    /// A refused undo retries on the coordinator's own schedule, independently of full maintenance.
+    /// A recorded undo-only worker completion and the next writer prove release; elapsed time is diagnostic.
     /// </summary>
-    [Fact(DisplayName = "Cohesion Test [Database.Graph] - Deferred undo: a transient undo failure releases the writer within about a second")]
-    public async Task RollbackAsync_TransientUndoFailure_ShouldReleaseTheWriterWithinAboutASecond()
+    [Fact(DisplayName = "Cohesion Test [Database.Graph] - Deferred undo: a transient undo failure releases the writer through an undo-only worker pass")]
+    public async Task RollbackAsync_TransientUndoFailure_ShouldReleaseTheWriterAfterRecordedUndoRetry()
     {
         // Arrange
         var maintenance = TimeSpan.FromHours(1);
@@ -297,29 +299,27 @@ public sealed class GraphStorageOperationsTests
         // bracket cannot touch the first page it undoes and the undo is deferred with
         // the database writer lock held; the pages are released at once. (Until #1252 a failed journal
         // write was the transient fault; a journal write failure now takes the database offline.)
+        using var undo = CheckpointPace.ObserveDeferredUndo(
+            engine.Workers.OfType<DatabaseVersionPurgeWorker<GraphDatabase>>().Single(), database.Name, database.Coordinator.DeferredUndoRetryDelay);
         var watch = Stopwatch.StartNew();
         using (PageWriteLockHolder.LockEveryPage(database.DataStorage))
         {
             await transaction.RollbackAsync();
+            database.Coordinator.VersionStore.PendingAbortedPurges.ShouldNotBeEmpty();
+            database.Coordinator.NextDeferredUndoRetry.ShouldNotBeNull("the refused undo must be scheduled while its pages stay held");
         }
 
-        // The engine handed the coordinator its first retry delay: the retry is due within it.
-        var firstRetry = database.Coordinator.NextDeferredUndoRetry;
-
-        await other.ExecuteAsync("INSERT (:Item {name: 'other'})").AsTask().WaitAsync(Timeout);
+        await other.ExecuteAsync("INSERT (:Item {name: 'other'})").AsTask().WaitAsync(TimeSpan.FromSeconds(30));
         watch.Stop();
+        await undo.VerifyAsync();
 
         // Assert
         transaction.State.ShouldBe(TransactionState.RolledBack);
         database.Coordinator.VersionStore.PendingAbortedPurges.ShouldBeEmpty();
         (await Names(other)).ShouldBe(["other"]);
         options.DeferredUndoRetryDelay.ShouldBe(TimeSpan.FromMilliseconds(100));
-        firstRetry.ShouldNotBeNull().ShouldBeLessThanOrEqualTo(options.DeferredUndoRetryDelay);
-        // The regression this guards against waits a full MaintenanceInterval (an hour here) per retry.
-        // 100 retry delays (10 s) still catches it by a factor of 360 and leaves room for a loaded CI
-        // runner; the exact wiring is the firstRetry check above.
-        (watch.Elapsed / options.DeferredUndoRetryDelay).ShouldBeLessThan(100);
-        engine.State.ShouldBe(EngineState.Running);
+        database.Coordinator.DeferredUndoRetryDelay.ShouldBe(options.DeferredUndoRetryDelay);
+        engine.State.ShouldBe(EngineState.Running, $"writer released after {watch.Elapsed}");
     }
 
     private static async Task<List<string>> Names(GraphDatabaseSession session)

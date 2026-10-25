@@ -366,7 +366,7 @@ public sealed partial class DocumentQueryTests
         await session.CreateCollectionAsync("items");
         var statement = (OqlQueryStatement)new OqlQueryParser().Parse("MERGE INTO items");
         var exception = await Should.ThrowAsync<DatabaseParseException>(async () => await session.ExecuteAsync(new DocumentQueryRequest(statement)));
-        exception.Message.ShouldContain("COHDBL001");
+        exception.Message.ShouldContain("CK00001");
     }
 
     private static ValueTask<Document> PutAsync(DocumentCollection collection, DocumentDatabaseSession session, string id, string json)

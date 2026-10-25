@@ -53,6 +53,8 @@ public sealed partial class GraphStore
 
     // A value lease and SemaphoreSlim's completed wait keep repeated uncontended
     // entries allocation-free after the transaction's gate has been associated.
+    [global::System.Diagnostics.DebuggerDisplay("MutationLease")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Storage.GraphStore.MutationLease.DebugView))]
     private readonly struct MutationLease : IDisposable
     {
         private readonly MutationGate _gate;
@@ -61,12 +63,30 @@ public sealed partial class GraphStore
             => context.IsolationLevel == IsolationLevel.ReadCommitted && ReferenceEquals(context, _gate.Transaction)
                 ? context.PinStatementSnapshot() : context;
         public void Dispose() => _gate.Semaphore.Release();
+
+        private sealed class DebugView
+        {
+            public DebugView(global::Assimalign.Cohesion.Database.Graph.Storage.GraphStore.MutationLease value)
+            {
+                _ = value;
+            }
+        }
     }
 
+    [global::System.Diagnostics.DebuggerDisplay("MutationGate")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Storage.GraphStore.MutationGate.DebugView))]
     private sealed class MutationGate
     {
         internal readonly SemaphoreSlim Semaphore = new(1, 1);
         internal readonly TransactionContext Transaction;
         internal MutationGate(TransactionContext transaction) { Transaction = transaction; }
+
+        private sealed class DebugView
+        {
+            public DebugView(global::Assimalign.Cohesion.Database.Graph.Storage.GraphStore.MutationGate value)
+            {
+                _ = value;
+            }
+        }
     }
 }

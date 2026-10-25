@@ -5,6 +5,7 @@
 		<IsPackable>false</IsPackable>
 	</PropertyGroup>
 	<ItemGroup>
+		<Compile Include="$(CohesionRepositoryDirectory)resources\Database\Assimalign.Cohesion.Database.Storage\tests\TestObjects\DedicatedTestTask.cs" Link="TestObjects\DedicatedTestTask.cs" />
 		<Compile Include="$(CohesionRepositoryDirectory)resources\Database\Assimalign.Cohesion.Database\tests\TestObjects\WorkerPumpObservation.cs" Link="TestObjects\WorkerPumpObservation.cs" />
 		<Compile Include="$(CohesionRepositoryDirectory)resources\Database\Assimalign.Cohesion.Database\tests\TestObjects\CheckpointPace.cs" Link="TestObjects\CheckpointPace.cs" />
 		<Compile Include="$(CohesionRepositoryDirectory)build\TestSupport\EventSourceRecorder.cs" Link="Shared\EventSourceRecorder.cs" />
@@ -44,4 +45,7 @@
 		      DestinationFiles="@(DocumentRecoveryFixtureOutput->'$(OutDir)DocumentRecoveryFixture\%(RecursiveDir)%(Filename)%(Extension)')"
 		      SkipUnchangedFiles="true" />
 	</Target>
+	<ItemGroup>
+		<Compile Include="$(CohesionRepositoryDirectory)resources\Database\Assimalign.Cohesion.Database.Storage\tests\TestObjects\JournalTrackingStream.cs" Link="TestObjects\JournalTrackingStream.cs" />
+	</ItemGroup>
 </Project>

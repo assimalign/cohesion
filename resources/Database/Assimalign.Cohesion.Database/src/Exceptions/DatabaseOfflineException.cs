@@ -1,6 +1,8 @@
 using System;
+using System.Globalization;
 
 using Assimalign.Cohesion.Database.Storage;
+using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database;
 
@@ -36,10 +38,10 @@ namespace Assimalign.Cohesion.Database;
 /// <para>
 /// The commit whose flush failed is reported to its caller as
 /// <see cref="DatabaseTransactionCommitUnconfirmedException"/>; this exception is what every
-/// operation after it gets. The message leads with the model's code (<see cref="Code"/>):
-/// <c>COHSQLT004</c> (SQL), <c>COHDBK002</c> (key-value), <c>COHDBD002</c> (documents),
-/// <c>COHDBG012</c> (graph) and <c>COHDBB002</c> (blob). The storage's own
-/// <c>COHDBS002</c> error is the inner exception.
+/// operation after it gets. The diagnostic carrier holds the model's code (<see cref="Code"/>):
+/// <c>CS04004</c> (SQL), <c>CV06102</c> (key-value), <c>CD06102</c> (documents),
+/// <c>CG06012</c> (graph) and <c>CB06002</c> (blob). The storage's own
+/// <c>CK06002</c> error is the inner exception.
 /// </para>
 /// </remarks>
 public sealed class DatabaseOfflineException : DatabaseException
@@ -47,25 +49,36 @@ public sealed class DatabaseOfflineException : DatabaseException
     /// <summary>
     /// Initializes a new <see cref="DatabaseOfflineException"/>.
     /// </summary>
-    /// <param name="code">The model's code that leads the message.</param>
-    /// <param name="message">The error message, which leads with <paramref name="code"/>.</param>
+    /// <param name="code">The model's structured code.</param>
+    /// <param name="message">The error detail. An existing leading <paramref name="code"/> prefix is removed.</param>
     /// <param name="innerException">The storage failure that took the database offline.</param>
     public DatabaseOfflineException(string code, string message, Exception? innerException)
-        : base(message, innerException)
+        : base(Unprefixed(code, message), [new Diagnostic
+        {
+            Code = code,
+            Message = Unprefixed(code, message),
+            Severity = DiagnosticSeverity.Error,
+        }], innerException)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(code);
         Code = code;
     }
 
     /// <summary>
-    /// Gets the model's code that leads the message.
+    /// Gets the model's structured code, also available in Diagnostics.
     /// </summary>
     public string Code { get; }
+
+    private static string Unprefixed(string code, string message)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(code);
+        return message is not null && message.StartsWith(code + ": ", StringComparison.Ordinal) ? message[(code.Length + 2)..] : message!;
+    }
 
     /// <summary>
     /// Creates the refusal an engine raises for an operation on an offline database.
     /// </summary>
-    /// <param name="code">The model's code, for example <c>COHDBD002</c>.</param>
+    /// <param name="code">The model's code, for example <c>CD06102</c>.</param>
     /// <param name="database">The database's name.</param>
     /// <param name="cause">The storage's offline error.</param>
     /// <returns>The exception to throw.</returns>
@@ -75,9 +88,7 @@ public sealed class DatabaseOfflineException : DatabaseException
 
         return new DatabaseOfflineException(
             code,
-            $"{code}: Database '{database}' is offline: {DescribeFailure(cause)}, so nothing " +
-            "more is written to it. Every operation is refused until the database is reopened (OpenDatabaseAsync); the " +
-            "reopen's recovery reads the journal and decides the outcome of every commit that was not confirmed.",
+            string.Format(CultureInfo.CurrentCulture, ErrorMessages.DatabaseOffline, database, DescribeFailure(cause)),
             cause);
     }
 
@@ -93,8 +104,8 @@ public sealed class DatabaseOfflineException : DatabaseException
     {
         string detail = offline.InnerException?.Message ?? offline.Message;
         return offline.Cause is StorageOfflineCause.JournalFlush or StorageOfflineCause.DataFlush or StorageOfflineCause.HeaderWrite
-            ? $"{Describe(offline.Cause)} of its storage failed ({detail})"
-            : $"{Describe(offline.Cause)} ({detail})";
+            ? string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DescribeFailureDatabaseOffline, Describe(offline.Cause), detail)
+            : string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DescribeFailureDatabaseOffline2, Describe(offline.Cause), detail);
     }
 
     /// <summary>
@@ -111,14 +122,14 @@ public sealed class DatabaseOfflineException : DatabaseException
     /// </remarks>
     internal static string Describe(StorageOfflineCause cause) => cause switch
     {
-        StorageOfflineCause.JournalFlush => "a write or flush of the journal",
-        StorageOfflineCause.DataFlush => "a durable flush of the data file",
-        StorageOfflineCause.HeaderWrite => "a write of the file header",
-        StorageOfflineCause.CheckpointFailures => "its checkpoints kept failing and its engine gave up on it",
-        StorageOfflineCause.PageWriteBackFailures => "its page write-backs kept failing and its engine gave up on it",
-        StorageOfflineCause.WriteAheadFlushFailures => "its write-ahead flushes kept failing and its engine gave up on it",
-        StorageOfflineCause.VersionPurgeFailures => "its version purge kept failing and its engine gave up on it",
-        StorageOfflineCause.JournalSizeLimit => "its journal grew past its engine's limit while its checkpoints kept failing",
-        _ => "a write",
+        StorageOfflineCause.JournalFlush => ErrorMessages.ExceptionDescribeDatabaseOffline,
+        StorageOfflineCause.DataFlush => ErrorMessages.ExceptionDescribeDatabaseOffline2,
+        StorageOfflineCause.HeaderWrite => ErrorMessages.ExceptionDescribeDatabaseOffline3,
+        StorageOfflineCause.CheckpointFailures => ErrorMessages.ExceptionDescribeDatabaseOffline4,
+        StorageOfflineCause.PageWriteBackFailures => ErrorMessages.ExceptionDescribeDatabaseOffline5,
+        StorageOfflineCause.WriteAheadFlushFailures => ErrorMessages.ExceptionDescribeDatabaseOffline6,
+        StorageOfflineCause.VersionPurgeFailures => ErrorMessages.ExceptionDescribeDatabaseOffline7,
+        StorageOfflineCause.JournalSizeLimit => ErrorMessages.ExceptionDescribeDatabaseOffline8,
+        _ => ErrorMessages.ExceptionDescribeDatabaseOffline9,
     };
 }

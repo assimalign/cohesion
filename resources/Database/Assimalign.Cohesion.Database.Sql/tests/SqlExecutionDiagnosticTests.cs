@@ -28,12 +28,36 @@ public sealed class SqlExecutionDiagnosticTests
         // Arrange / Act
         var messages = ErrorMessages.ResourceManager.GetResourceSet(CultureInfo.InvariantCulture, true, true)!;
 
-        // Assert: script-history messages still owned by their legacy uncoded path are outside this migration.
+        // Literal message-only script refusals joined these resources in #1470. Preserve
+        // that contract, validate each prefix exactly once, and keep carrier templates bare.
         foreach (DictionaryEntry entry in messages)
         {
-            if (entry.Key is string name && name != nameof(ErrorMessages.ScriptNamespaceTypedObjects) && entry.Value is string message)
+            if (entry.Key is not string name || entry.Value is not string message) { continue; }
+            string? messageOnlyCode = name switch
             {
-                Regex.IsMatch(message, @"^COH[A-Z]+\d+:\s").ShouldBeFalse(name);
+                nameof(ErrorMessages.ScriptNamespaceTypedObjects) => "CS03205",
+                nameof(ErrorMessages.ValidateScriptOwnershipFailure) => "CS03205",
+                nameof(ErrorMessages.DatabaseValidateScriptsAsyncFailure) => "CS03201",
+                nameof(ErrorMessages.DatabaseValidateScriptsAsyncFailure2) => "CS03201",
+                nameof(ErrorMessages.DatabaseValidateScriptsAsyncFailure3) => "CS03201",
+                nameof(ErrorMessages.DatabaseValidateScriptsAsyncFailure4) => "CS03201",
+                nameof(ErrorMessages.DatabaseValidateScriptsAsyncFailure5) => "CS03202",
+                nameof(ErrorMessages.DatabaseApplyScriptsAsyncFailure) => "CS03204",
+                nameof(ErrorMessages.DatabaseApplyScriptsAsyncFailure2) => "CS03204",
+                nameof(ErrorMessages.DatabaseApplyScriptsAsyncFailure3) => "CS03204",
+                nameof(ErrorMessages.DatabaseApplyScriptsAsyncFailure4) => "CS03201",
+                nameof(ErrorMessages.DeclaredDatabaseScriptTargetFailure) => "CS03201",
+                nameof(ErrorMessages.SqlDeclaredScriptDatabase) => "CS03203",
+                _ => null,
+            };
+            if (messageOnlyCode is not null)
+            {
+                message.ShouldStartWith(messageOnlyCode + ": ", Case.Sensitive, name);
+                Regex.Matches(message, @"(?:COH[A-Z]+\d+|C[KSDBGVC]\d{5}):\s").Count.ShouldBe(1, name);
+            }
+            else
+            {
+                Regex.IsMatch(message, @"^(?:COH[A-Z]+\d+|C[KSDBGVC]\d{5}):\s").ShouldBeFalse(name);
             }
         }
     }
@@ -51,7 +75,7 @@ public sealed class SqlExecutionDiagnosticTests
 
         // Assert
         var diagnostic = failure.Diagnostics.ShouldHaveSingleItem();
-        diagnostic.Code.ShouldBe("COHSQLE003");
+        diagnostic.Code.ShouldBe("CS02003");
         diagnostic.Start.ShouldBeNull();
         diagnostic.End.ShouldBeNull();
         diagnostic.Location.ShouldBeNull();
@@ -59,8 +83,8 @@ public sealed class SqlExecutionDiagnosticTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - View reload: new rendering is an invariant failure; loaded text is corruption (#1653)")]
-    [InlineData(false, "COHSQLE058")]
-    [InlineData(true, "COHSQLE060")]
+    [InlineData(false, "CS06058")]
+    [InlineData(true, "CS05060")]
     public void LoadQuery_InvalidText_ShouldClassifyItsOrigin(bool declaring, string code)
     {
         // Arrange / Act
@@ -97,21 +121,21 @@ public sealed class SqlExecutionDiagnosticTests
 
         // Assert
         var diagnostic = diagnostics.ShouldHaveSingleItem();
-        diagnostic.Code.ShouldBe("COHSQLE001");
+        diagnostic.Code.ShouldBe("CS02001");
         diagnostic.Start.ShouldBe(0);
         diagnostic.End.ShouldBe(sql.Length);
         diagnostic.Line.ShouldBe(1);
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - Persisted failures: damaged definitions and default wrappers retain codes and statement spans (#1653)")]
-    [InlineData(false, "qty >", "COHSQLE058")]
-    [InlineData(true, "qty >", "COHSQLE058")]
-    [InlineData(false, "'bad'", "COHSQLE022")]
-    [InlineData(true, "'bad'", "COHSQLE022")]
-    [InlineData(false, "1 IS TRUE", "COHSQLE003")]
-    [InlineData(true, "1 IS TRUE", "COHSQLE003")]
-    [InlineData(false, "'a' COLLATE \"nope\"", "COHSQLE058")]
-    [InlineData(true, "'a' COLLATE \"nope\"", "COHSQLE058")]
+    [InlineData(false, "qty >", "CS06058")]
+    [InlineData(true, "qty >", "CS06058")]
+    [InlineData(false, "'bad'", "CS02022")]
+    [InlineData(true, "'bad'", "CS02022")]
+    [InlineData(false, "1 IS TRUE", "CS02003")]
+    [InlineData(true, "1 IS TRUE", "CS02003")]
+    [InlineData(false, "'a' COLLATE \"nope\"", "CS06058")]
+    [InlineData(true, "'a' COLLATE \"nope\"", "CS06058")]
     public async Task ExecuteAsync_PersistedFailure_ShouldKeepCarrier(bool wire, string literal, string code)
     {
         // Arrange: use the engine's existing test grant to publish a definition SQL DDL refuses.
@@ -172,7 +196,7 @@ public sealed class SqlExecutionDiagnosticTests
 
         // Assert
         var diagnostic = diagnostics.ShouldHaveSingleItem();
-        diagnostic.Code.ShouldBe("COHSQLE060");
+        diagnostic.Code.ShouldBe("CS05060");
         diagnostic.Start.ShouldBe(0);
         diagnostic.End.ShouldBe(sql.Length);
         diagnostic.Message.ShouldBe("Index 'uq_users' on 'dbo.users' is unavailable; writes cannot bypass its constraints.");
@@ -207,19 +231,19 @@ public sealed class SqlExecutionDiagnosticTests
 
         // Assert
         var diagnostic = local.Diagnostics.ShouldHaveSingleItem();
-        diagnostic.Code.ShouldBe("COHSQLD003");
+        diagnostic.Code.ShouldBe("CS03303");
         diagnostic.Start.ShouldBe(0);
         diagnostic.End.ShouldBe(sql.Length);
-        local.Message.ShouldNotContain("COHSQLD003:", Case.Sensitive);
+        local.Message.ShouldNotContain("CS03303:", Case.Sensitive);
         remote.Diagnostics.ShouldHaveSingleItem().Message.ShouldBe(local.Message);
-        remote.Message.ShouldBe("COHSQLD003: " + local.Message);
+        remote.Message.ShouldBe("CS03303: " + local.Message);
         remote.ConnectionUsable.ShouldBeTrue();
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - Persisted defaults: wrappers retain the inner code and original message (#1653)")]
-    [InlineData(DatabaseType.Guid, "'bad'", "bad", "COHSQLE022")]
-    [InlineData(DatabaseType.DateTime, "'bad'", "bad", "COHSQLE047")]
-    [InlineData(DatabaseType.Int32, "DATE '2026-01-01'", "2026-01-01", "COHSQLE055")]
+    [InlineData(DatabaseType.Guid, "'bad'", "bad", "CS02022")]
+    [InlineData(DatabaseType.DateTime, "'bad'", "bad", "CS02047")]
+    [InlineData(DatabaseType.Int32, "DATE '2026-01-01'", "2026-01-01", "CS02055")]
     public void ResolveDefault_InvalidStoredValue_ShouldRetainCarrier(DatabaseType type, string literal, string value, string code)
     {
         // Arrange
@@ -251,7 +275,7 @@ public sealed class SqlExecutionDiagnosticTests
 
         // Assert
         var diagnostic = failure.Diagnostics.ShouldHaveSingleItem();
-        diagnostic.Code.ShouldBe("COHSQLE055");
+        diagnostic.Code.ShouldBe("CS02055");
         diagnostic.Start.ShouldBe(sql.IndexOf("text_fn", StringComparison.Ordinal));
         diagnostic.End.ShouldBe(diagnostic.Start + "text_fn(v)".Length);
         failure.Message.ShouldStartWith("Function 'text_fn' returns TEXT, where the CHECK needs a value that compares with ", Case.Sensitive);
@@ -269,7 +293,7 @@ public sealed class SqlExecutionDiagnosticTests
         remote.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(diagnostic.Code);
         remote.Diagnostics[0].Start.ShouldBe(diagnostic.Start);
         remote.Diagnostics[0].End.ShouldBe(diagnostic.End);
-        remote.Message.ShouldBe("COHSQLE055: " + failure.Message);
+        remote.Message.ShouldBe("CS02055: " + failure.Message);
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - Compiled ownership: a located refusal retains its concrete type and metadata (#1653)")]
@@ -291,7 +315,7 @@ public sealed class SqlExecutionDiagnosticTests
         failure.OwningSchema.ShouldBe("model");
         failure.Operation.ShouldBe("DROP TABLE");
         var diagnostic = failure.Diagnostics.ShouldHaveSingleItem();
-        diagnostic.Code.ShouldBe("COHSQLE066");
+        diagnostic.Code.ShouldBe("CS03066");
         diagnostic.Start.ShouldBe(0);
         diagnostic.End.ShouldBe(sql.Length);
         diagnostic.Message.ShouldBe(failure.Message);
@@ -306,10 +330,10 @@ public sealed class SqlExecutionDiagnosticTests
         });
         await using var connection = await client.ConnectAsync(TestTimeout.Token());
         var remote = await Should.ThrowAsync<SqlClientException>(async () => await connection.ExecuteAsync(sql, cancellationToken: TestTimeout.Token()));
-        remote.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE066");
+        remote.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS03066");
         remote.Diagnostics[0].Start.ShouldBe(0);
         remote.Diagnostics[0].End.ShouldBe(sql.Length);
-        remote.Message.ShouldBe("COHSQLE066: " + failure.Message);
+        remote.Message.ShouldBe("CS03066: " + failure.Message);
         remote.ConnectionUsable.ShouldBeTrue();
     }
 

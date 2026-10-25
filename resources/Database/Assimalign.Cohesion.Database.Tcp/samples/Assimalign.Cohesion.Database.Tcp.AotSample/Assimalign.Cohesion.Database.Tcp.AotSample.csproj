@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><RootNamespace>Assimalign.Cohesion.Database.Tcp.AotSample</RootNamespace><OutputType>Exe</OutputType><IsPackable>false</IsPackable><PublishAot>true</PublishAot><PublishTrimmed>true</PublishTrimmed></PropertyGroup>
+  <ItemGroup>
+    <CohesionProjectReference Include="Assimalign.Cohesion.Database.Tcp" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Database.Graph" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Database.Documents" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Database.Blob" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Database.KeyValuePair" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Connections.Tcp" />
+  </ItemGroup>
+</Project>

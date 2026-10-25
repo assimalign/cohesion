@@ -23,7 +23,7 @@ internal static partial class DocumentPlanExecutor
         operation.EnsureActive();
         cancellationToken.ThrowIfCancellationRequested();
         var error = statement.Diagnostics.FirstOrDefault(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
-        if (error is not null) { throw new DatabaseParseException($"OQL parse error {error.Code}: {error.Message}", statement.Diagnostics); }
+        if (error is not null) { throw new DatabaseParseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.QueryRequestFromOqlDatabaseParse, error.Code, error.Message), statement.Diagnostics); }
         var plan = new DocumentPlanner(database.Catalog, operation.Context.Snapshot, parameters, cancellationToken).Plan(statement.OqlExpression);
         return plan switch
         {
@@ -40,7 +40,7 @@ internal static partial class DocumentPlanExecutor
             DocumentDropCollectionPlan dropCollection => await ExecuteDropCollectionAsync(database, operation, dropCollection, cancellationToken).ConfigureAwait(false),
             DocumentCreateIndexPlan createIndex => await ExecuteCreateIndexAsync(database, operation, createIndex, cancellationToken).ConfigureAwait(false),
             DocumentDropIndexPlan dropIndex => await ExecuteDropIndexAsync(database, operation, dropIndex, cancellationToken).ConfigureAwait(false),
-            _ => throw new DocumentPlanningException("COHDOC001", "The document plan is not executable.", statement.OqlExpression.Location),
+            _ => throw new DocumentPlanningException("CD05001", ErrorMessages.PlanExecutorExecuteAsyncFailure, statement.OqlExpression.Location),
         };
     }
 
@@ -60,6 +60,7 @@ internal static partial class DocumentPlanExecutor
             if (PageComplete(plan.Logical, matches.Count)) { break; }
             cancellationToken.ThrowIfCancellationRequested();
             operation.EnsureActive();
+            operation.Session.LastQueryDocumentsRead++;
             var document = database.ReadDocument(entry);
             using var json = JsonDocument.Parse(document.Content, new JsonDocumentOptions { MaxDepth = 128 });
             var context = new DocumentEvaluationContext(json.RootElement, entry.Id, entry.Version,
@@ -79,11 +80,41 @@ internal static partial class DocumentPlanExecutor
 
     private static ValueTask<IReadOnlyList<DocumentCatalogEntry>> ReadCandidatesAsync(DocumentDatabase database,
         DocumentOperation operation, DocumentCollectionMetadata collection, DocumentAccessPath access, CancellationToken cancellationToken)
-        => access is DocumentIndexPath seek
-            ? database.Catalog.SearchIndexAsync(collection.Id, seek.Index.Name, seek.EqualityPrefix ?? [],
+        => access switch
+        {
+            DocumentIndexPath seek => database.Catalog.SearchIndexAsync(collection.Id, seek.Index.Name, seek.EqualityPrefix ?? [],
                 seek.Lower?.Value, seek.Lower?.Inclusive ?? false, seek.Upper?.Value, seek.Upper?.Inclusive ?? false,
-                operation.Context.Snapshot, cancellationToken)
-            : ValueTask.FromResult(database.Catalog.GetDocuments(collection.Id, null, operation.Context.Snapshot));
+                operation.Context.Snapshot, cancellationToken),
+            DocumentIntersectionPath intersection => ReadIntersectionAsync(database, operation, collection, intersection, cancellationToken),
+            _ => ValueTask.FromResult(database.Catalog.GetDocuments(collection.Id, null, operation.Context.Snapshot)),
+        };
+
+    private static async ValueTask<IReadOnlyList<DocumentCatalogEntry>> ReadIntersectionAsync(DocumentDatabase database,
+        DocumentOperation operation, DocumentCollectionMetadata collection, DocumentIntersectionPath intersection,
+        CancellationToken cancellationToken)
+    {
+        IReadOnlyList<DocumentCatalogEntry>? matches = null;
+        foreach (var input in intersection.Inputs)
+        {
+            operation.EnsureActive();
+            var candidates = await ReadCandidatesAsync(database, operation, collection, input, cancellationToken).ConfigureAwait(false);
+            if (matches is null) { matches = candidates; continue; }
+            var merged = new List<DocumentCatalogEntry>(Math.Min(matches.Count, candidates.Count));
+            int left = 0, right = 0;
+            while (left < matches.Count && right < candidates.Count)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                operation.EnsureActive();
+                int comparison = string.CompareOrdinal(matches[left].Id, candidates[right].Id);
+                if (comparison == 0) { merged.Add(matches[left++]); right++; }
+                else if (comparison < 0) { left++; }
+                else { right++; }
+            }
+            matches = merged;
+            if (matches.Count == 0) { break; }
+        }
+        return matches ?? Array.Empty<DocumentCatalogEntry>();
+    }
 
     private static DatabaseResult ExecuteSystemCollection(DocumentDatabase database, DocumentOperation operation,
         DocumentSystemCollectionPlan plan, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken, string? writeVerb = null)
@@ -308,7 +339,7 @@ internal static partial class DocumentPlanExecutor
         await database.LockWriterAsync(operation.Context, cancellationToken).ConfigureAwait(false);
         if (collection != database.Catalog.FindCollection(collection.Name, database.LatestSnapshot(operation.Context)))
         {
-            DocumentDatabase.ThrowConflict();
+            DatabaseTransactionAbortedException.ThrowDocumentConflict();
         }
         if (collection.Owner == DatabaseObjectOwner.Schema &&
             (absentNoOp is null || database.Catalog.GetIndexes(collection.Id, operation.Context.Snapshot).Any(index => index.Name == absentNoOp)))
@@ -318,7 +349,7 @@ internal static partial class DocumentPlanExecutor
             !database.Catalog.GetIndexes(collection.Id, operation.Context.Snapshot)
                 .SequenceEqual(database.Catalog.GetIndexes(collection.Id, database.LatestSnapshot(operation.Context))))
         {
-            DocumentDatabase.ThrowConflict();
+            DatabaseTransactionAbortedException.ThrowDocumentConflict();
         }
     }
 
@@ -332,9 +363,26 @@ internal static partial class DocumentPlanExecutor
         _ => DatabaseType.Null,
     };
 
+    [global::System.Diagnostics.DebuggerDisplay("EvaluatedRow")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Documents.Internal.DocumentPlanExecutor.EvaluatedRow.DebugView))]
     private sealed record EvaluatedRow(object?[] Values, DocumentEvaluationContext Document, IReadOnlyList<DocumentEvaluationContext>? Group, int Ordinal)
     {
         internal object?[] OrderKeys { get; set; } = [];
+
+        private sealed class DebugView
+        {
+            private readonly global::Assimalign.Cohesion.Database.Documents.Internal.DocumentPlanExecutor.EvaluatedRow _target;
+
+            public DebugView(global::Assimalign.Cohesion.Database.Documents.Internal.DocumentPlanExecutor.EvaluatedRow value)
+            {
+                _target = value;
+            }
+
+            public object?[] Values => _target.Values;
+            public global::Assimalign.Cohesion.Database.Documents.Internal.DocumentEvaluationContext Document => _target.Document;
+            public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.Documents.Internal.DocumentEvaluationContext>? Group => _target.Group;
+            public int Ordinal => _target.Ordinal;
+        }
     }
 
     private sealed class TupleComparer : IComparer<object?[]>

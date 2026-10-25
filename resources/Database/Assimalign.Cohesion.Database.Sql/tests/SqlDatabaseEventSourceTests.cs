@@ -35,7 +35,7 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 [Collection(nameof(SqlDatabaseEventSourceCollection))]
 public sealed partial class SqlDatabaseEventSourceTests
 {
-    private static readonly string[] SessionClosedPayload = ["sessionId", "reason", "durationMilliseconds"];
+    private static readonly string[] _sessionClosedPayload = ["sessionId", "reason", "durationMilliseconds"];
 
     [Fact(DisplayName = "Cohesion Test [Database.Sql] - StatementPlanned: Should report final metrics once for a real statement")]
     public async Task StatementPlanned_ExecutedStatement_ShouldReportItsFinalMetricsOnce()
@@ -102,7 +102,7 @@ public sealed partial class SqlDatabaseEventSourceTests
         if (request is not null)
         {
             var failure = await Should.ThrowAsync<DatabaseParseException>(() => session.ExecuteAsync(request, CancellationToken.None).AsTask());
-            failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "SQL0006");
+            failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS00006");
         }
         else
         {
@@ -181,7 +181,7 @@ public sealed partial class SqlDatabaseEventSourceTests
             await session.ExecuteAsync("SELECT trace_stack(id) FROM items", cancellationToken: CancellationToken.None));
 
         // Assert
-        failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE004");
+        failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS05004");
         NewEvent(recorder, 11, "StatementTooComplex", "database", "depth").Payload.ShouldBe(["stack", -1]);
         NewEvent(recorder, 10, "StatementPlanned", "database", "accessPath", "recordsExamined");
         recorder.Events.SelectMany(entry => entry.Payload ?? []).ShouldNotContain("private statement content");
@@ -395,7 +395,7 @@ public sealed partial class SqlDatabaseEventSourceTests
         recorder.Events.Where(e => IsFor(e, 5, sessionId)).ShouldHaveSingleItem();
         closed.EventName.ShouldBe("SessionClosed");
         closed.Level.ShouldBe(EventLevel.Verbose);
-        closed.PayloadNames.ShouldBe(SessionClosedPayload);
+        closed.PayloadNames.ShouldBe(_sessionClosedPayload);
         closed.Payload![1].ShouldBe("Terminated");
         ((double)closed.Payload[2]!).ShouldBeGreaterThan(0);
         recorder.Events.Where(e => IsForSession(e, sessionId)).Select(e => e.EventId).ShouldBe([5]);

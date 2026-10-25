@@ -33,7 +33,7 @@ namespace Assimalign.Cohesion.Database.Graph.Tests;
 [Collection(nameof(GraphDatabaseEventSourceCollection))]
 public sealed class GraphDatabaseEventSourceTests
 {
-    private static readonly string[] SessionClosedPayload = ["sessionId", "reason", "durationMilliseconds"];
+    private static readonly string[] _sessionClosedPayload = ["sessionId", "reason", "durationMilliseconds"];
 
     [Fact(DisplayName = "Cohesion Test [Database.Graph] - GraphDatabaseEventSource: Should be named for its assembly")]
     public void GetName_GraphDatabaseEventSource_ShouldEqualAssemblyName()
@@ -99,7 +99,7 @@ public sealed class GraphDatabaseEventSourceTests
         recorder.Events.Where(e => IsFor(e, 5, sessionId)).ShouldHaveSingleItem();
         closed.EventName.ShouldBe("SessionClosed");
         closed.Level.ShouldBe(EventLevel.Verbose);
-        closed.PayloadNames.ShouldBe(SessionClosedPayload);
+        closed.PayloadNames.ShouldBe(_sessionClosedPayload);
         closed.Payload![1].ShouldBe("Terminated");
         ((double)closed.Payload[2]!).ShouldBeGreaterThan(0);
         recorder.Events.Where(e => IsForSession(e, sessionId)).Select(e => e.EventId).ShouldBe([5]);
@@ -558,6 +558,35 @@ public sealed class GraphDatabaseEventSourceTests
         events[1].Payload![1].ShouldBe("Error");
     }
 
+    [Theory(DisplayName = "Cohesion Test [Database.Graph] - GraphDatabaseEventSource: parse tracing prefers the first error diagnostic (#1350)")]
+    [InlineData(true, "TESTE001")]
+    [InlineData(false, "TESTW001")]
+    public async Task StatementParseFailed_Diagnostics_ShouldPreferError(bool hasError, string expected)
+    {
+        // Arrange
+        await using var harness = await GraphServerHarness.StartAsync(engineName: UniqueEngineName());
+        await using var client = await harness.DialAsync();
+        await client.HandshakeAsync();
+        var session = harness.Server.Sessions.ShouldHaveSingleItem();
+        var diagnostics = new List<Types.Diagnostic>
+        {
+            new("TESTW001", "private warning", 0, 1, Types.DiagnosticSeverity.Warning),
+        };
+        if (hasError) { diagnostics.Add(new("TESTE001", "private error", 2, 3, Types.DiagnosticSeverity.Error)); }
+        var failure = new DatabaseException("private statement", diagnostics);
+        using var recorder = new EventSourceRecorder(GraphDatabaseEventSource.Log, EventLevel.Error);
+
+        // Act
+        GraphDatabaseEventSource.Log.StatementParseFailed(session, new DatabaseName(GraphServerHarness.DatabaseName), failure);
+
+        // Assert
+        var failed = recorder.Events.Where(e => e.EventId == 12 && Equals(e.Payload![0], session.Id)).ShouldHaveSingleItem();
+        failed.Payload![2].ShouldBe(expected);
+        failed.Payload!.OfType<string>().ShouldNotContain(failure.Message);
+        failed.Payload!.OfType<string>().ShouldNotContain("private warning");
+        failed.Payload!.OfType<string>().ShouldNotContain("private error");
+    }
+
     [Theory(DisplayName = "Cohesion Test [Database.Graph] - GraphDatabaseEventSource: Should report a wire statement that fails to parse once, before the root sees it")]
     [InlineData(false)]
     [InlineData(true)]
@@ -572,7 +601,7 @@ public sealed class GraphDatabaseEventSourceTests
         await client.HandshakeAsync();
         Guid sessionId = await AcceptedSessionAsync(recorder, engineName);
 
-        // Act: a Cypher arrow, the GQL0008 syntax error.
+        // Act: a Cypher arrow, the CG00008 syntax error.
         await client.SendAsync(paths ? GraphProtocolMessageType.ExecutePaths : GraphProtocolMessageType.Execute,
             GraphProtocolExecuteMessage.Create("MATCH (a)-->(b) RETURN a").Encode());
         var error = ProtocolErrorMessage.Decode((await client.ExpectAsync(ProtocolMessageType.Error)).Payload.Span);
@@ -585,7 +614,7 @@ public sealed class GraphDatabaseEventSourceTests
         failed.EventName.ShouldBe("StatementParseFailed");
         failed.Level.ShouldBe(EventLevel.Error);
         failed.PayloadNames.ShouldBe(["sessionId", "database", "code", "exceptionType"]);
-        failed.Payload.ShouldBe([sessionId, GraphServerHarness.DatabaseName, string.Empty, typeof(DatabaseParseException).FullName]);
+        failed.Payload.ShouldBe([sessionId, GraphServerHarness.DatabaseName, "CG00008", typeof(DatabaseParseException).FullName]);
         failed.Payload!.OfType<string>().ShouldNotContain(error.Message, "A parse error quotes the statement; the event writes its type only.");
         recorder.Events.ShouldNotContain(e => e.EventId == 0);
 
@@ -613,11 +642,12 @@ public sealed class GraphDatabaseEventSourceTests
 
         // Assert: the in-process text path is the root's: its StatementFailed exactly once, by the
         // failure's type and never its message, and Graph's event 12 not at all.
-        failure.Message.ShouldStartWith("GQL parse error GQL0008: ", Case.Sensitive);
+        failure.Message.ShouldStartWith("GQL parse error CG00008: ", Case.Sensitive);
         recorder.Events.ShouldNotContain(e => e.EventId == 12);
         long sessionNumber = (long)root.Events.Where(e => e.EventId == 23 && Equals(e.Payload![0], engineName)).ShouldHaveSingleItem().Payload![2]!;
         var failed = root.Events.Where(e => e.EventId == 28 && Equals(e.Payload![1], sessionNumber)).ShouldHaveSingleItem();
         failed.PayloadNames.ShouldBe(["database", "sessionNumber", "requestKind", "code", "exceptionType", "durationMilliseconds"]);
+        failed.Payload![3].ShouldBe("CG00008");
         failed.Payload![4].ShouldBe(typeof(DatabaseParseException).FullName);
         failed.Payload!.OfType<string>().ShouldNotContain(failure.Message);
     }
@@ -706,14 +736,14 @@ public sealed class GraphDatabaseEventSourceTests
     /// </summary>
     private sealed class RootEventRecorder : EventListener
     {
-        private const string RootSourceName = "Assimalign.Cohesion.Database";
+        private const string rootSourceName = "Assimalign.Cohesion.Database";
         private readonly ConcurrentQueue<EventWrittenEventArgs> _events = new();
 
         public IReadOnlyList<EventWrittenEventArgs> Events => _events.ToArray();
 
         protected override void OnEventSourceCreated(EventSource eventSource)
         {
-            if (eventSource.Name == RootSourceName)
+            if (eventSource.Name == rootSourceName)
             {
                 EnableEvents(eventSource, EventLevel.Verbose, EventKeywords.All);
             }
@@ -721,7 +751,7 @@ public sealed class GraphDatabaseEventSourceTests
 
         protected override void OnEventWritten(EventWrittenEventArgs eventData)
         {
-            if (eventData.EventSource.Name == RootSourceName)
+            if (eventData.EventSource.Name == rootSourceName)
             {
                 _events.Enqueue(eventData);
             }

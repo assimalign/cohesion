@@ -11,6 +11,8 @@ namespace Assimalign.Cohesion.Database.Types;
 /// Keys are self-describing: <see cref="PeekType"/> reveals the next component's
 /// type before it is read.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("DatabaseKeyReader")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Types.DatabaseKeyReader.DebugView))]
 public ref struct DatabaseKeyReader
 {
     private readonly ReadOnlySpan<byte> _source;
@@ -91,7 +93,7 @@ public ref struct DatabaseKeyReader
                     int length = BinaryPrimitives.ReadInt32BigEndian(TakeSpan(sizeof(int)));
                     if (length < 0 || _position + length > _source.Length)
                     {
-                        throw new DatabaseTypeException("Malformed key: invalid string payload length.");
+                        throw new DatabaseTypeException(ErrorMessages.DatabaseKeyReaderSkipDatabaseType);
                     }
 
                     _position += length;
@@ -102,7 +104,7 @@ public ref struct DatabaseKeyReader
                 KeyComponentEncoding.SkipEscaped(_source, ref _position);
                 break;
             default:
-                throw new DatabaseTypeException($"Malformed key: unexpected component type {type}.");
+                throw new DatabaseTypeException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabaseKeyReaderSkipDatabaseType2, type));
         }
     }
 
@@ -115,7 +117,7 @@ public ref struct DatabaseKeyReader
     {
         if (IsAtEnd)
         {
-            throw new DatabaseTypeException("The key has no further components.");
+            throw new DatabaseTypeException(ErrorMessages.DatabaseKeyReaderPeekTypeDatabaseType);
         }
 
         return (DatabaseType)_source[_position];
@@ -234,7 +236,7 @@ public ref struct DatabaseKeyReader
 
         if (length < 0 || _position + length > _source.Length)
         {
-            throw new DatabaseTypeException("Malformed key: invalid string payload length.");
+            throw new DatabaseTypeException(ErrorMessages.DatabaseKeyReaderSkipDatabaseType);
         }
 
         string value = Encoding.UTF8.GetString(_source.Slice(_position, length));
@@ -326,7 +328,7 @@ public ref struct DatabaseKeyReader
 
         if (actual != expected)
         {
-            throw new DatabaseTypeException($"Expected a {expected} component but found {actual}.");
+            throw new DatabaseTypeException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabaseKeyReaderExpectDatabaseType, expected, actual));
         }
 
         _position++;
@@ -336,7 +338,7 @@ public ref struct DatabaseKeyReader
     {
         if (_position >= _source.Length)
         {
-            throw new DatabaseTypeException("Malformed key: truncated component.");
+            throw new DatabaseTypeException(ErrorMessages.DatabaseKeyReaderTakeDatabaseType);
         }
 
         return _source[_position++];
@@ -346,11 +348,23 @@ public ref struct DatabaseKeyReader
     {
         if (_position + length > _source.Length)
         {
-            throw new DatabaseTypeException("Malformed key: truncated component.");
+            throw new DatabaseTypeException(ErrorMessages.DatabaseKeyReaderTakeDatabaseType);
         }
 
         var span = _source.Slice(_position, length);
         _position += length;
         return span;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly bool _value0;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Types.DatabaseKeyReader value)
+        {
+            _value0 = value.IsAtEnd;
+        }
+
+        public bool IsAtEnd => _value0;
     }
 }

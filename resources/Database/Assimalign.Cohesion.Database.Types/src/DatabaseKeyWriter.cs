@@ -35,6 +35,8 @@ namespace Assimalign.Cohesion.Database.Types;
 /// The writer is reusable: <see cref="Reset"/> clears it without releasing the buffer.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("DatabaseKeyWriter")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Types.DatabaseKeyWriter.DebugView))]
 public sealed class DatabaseKeyWriter
 {
     private byte[] _buffer;
@@ -356,5 +358,17 @@ public sealed class DatabaseKeyWriter
 
         int newSize = Math.Max(_buffer.Length * 2, _length + additional);
         Array.Resize(ref _buffer, newSize);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Types.DatabaseKeyWriter _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Types.DatabaseKeyWriter value)
+        {
+            _target = value;
+        }
+
+        public int Length => _target.Length;
     }
 }

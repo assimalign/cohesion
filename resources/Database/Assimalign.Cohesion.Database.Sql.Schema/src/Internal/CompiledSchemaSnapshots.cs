@@ -16,7 +16,7 @@ internal static class CompiledSchemaSnapshots
         {
             if (values[index] is null)
             {
-                throw new ArgumentException("Compiled schema collections cannot contain null values.", nameof(values));
+                throw new ArgumentException(ErrorMessages.CompiledSchemaSnapshotsCopyArgument, nameof(values));
             }
 
             copy[index] = values[index];

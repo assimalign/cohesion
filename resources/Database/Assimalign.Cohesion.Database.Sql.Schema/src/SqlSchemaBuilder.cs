@@ -20,6 +20,8 @@ namespace Assimalign.Cohesion.Database.Sql.Schema;
 /// were deleted (owner decision 57 of 2026-10-09): their canonical text was never executed. A SQL
 /// engine's functions are registered on its engine builder instead.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("SqlSchemaBuilder")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Schema.SqlSchemaBuilder.DebugView))]
 public sealed class SqlSchemaBuilder
 {
     private readonly List<SqlSchemaType> _types = [];
@@ -116,4 +118,12 @@ public sealed class SqlSchemaBuilder
 
     private static ReadOnlyCollection<T> Snapshot<T>(List<T> values)
         => Array.AsReadOnly(values.ToArray());
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Schema.SqlSchemaBuilder value)
+        {
+            _ = value;
+        }
+    }
 }

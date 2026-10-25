@@ -23,7 +23,7 @@ namespace Assimalign.Cohesion.Database.Protocol.Tests;
 [Collection(nameof(ProtocolEventSourceCollection))]
 public sealed class ProtocolEventSourceTests
 {
-    private static readonly ProtocolMessageFamily Family = new("model", 64);
+    private static readonly ProtocolMessageFamily _family = new("model", 64);
 
     private readonly ITestOutputHelper _output;
 
@@ -67,7 +67,7 @@ public sealed class ProtocolEventSourceTests
         using var recorder = new EventSourceRecorder(ProtocolEventSource.Log, EventLevel.Verbose, ProtocolEventSource.Keywords.Frames);
 
         // Act
-        await using (var channel = new ProtocolChannel(stream, Family, leaveOpen: true))
+        await using (var channel = new ProtocolChannel(stream, _family, leaveOpen: true))
         {
             await channel.Writer.WriteFrameAsync(new ProtocolFrame(ProtocolMessageType.Ping, ReadOnlyMemory<byte>.Empty));
             await channel.Writer.WriteFrameAsync(new ProtocolFrame((ProtocolMessageType)64, new byte[] { 1, 2, 3 }));
@@ -75,7 +75,7 @@ public sealed class ProtocolEventSourceTests
         }
 
         stream.Position = 0;
-        await using (var channel = new ProtocolChannel(stream, Family, leaveOpen: true))
+        await using (var channel = new ProtocolChannel(stream, _family, leaveOpen: true))
         {
             (await channel.Reader.ReadFrameAsync())!.Value.Type.ShouldBe(ProtocolMessageType.Ping);
             (await channel.Reader.ReadFrameAsync())!.Value.Type.ShouldBe((ProtocolMessageType)64);

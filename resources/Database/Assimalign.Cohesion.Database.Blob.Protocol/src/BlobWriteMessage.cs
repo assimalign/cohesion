@@ -34,7 +34,7 @@ public sealed record BlobWriteMessage(string Container, string Name, bool Overwr
         string name = BlobProtocolPayload.ReadString(payload, ref position, allowEmpty: false);
         if (payload.Length - position != 1 || payload[position] > 1)
         {
-            throw new ProtocolException("Malformed Blob Write overwrite flag.");
+            throw new ProtocolException(ErrorMessages.BlobWriteMessageDecodeProtocol);
         }
         return new(container, name, payload[position] == 1);
     }

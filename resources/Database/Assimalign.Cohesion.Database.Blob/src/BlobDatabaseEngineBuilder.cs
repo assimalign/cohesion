@@ -52,6 +52,8 @@ namespace Assimalign.Cohesion.Database.Blob;
 /// </para>
 /// </remarks>
 // Deviates from the repo interface-first rule per design decision: Database engines are concrete-first — abstract bases with protected cores and sealed model leaves (owner, 2026-10-04; database-area.md).
+[global::System.Diagnostics.DebuggerDisplay("BlobDatabaseEngineBuilder {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Blob.BlobDatabaseEngineBuilder.DebugView))]
 public sealed class BlobDatabaseEngineBuilder
 {
     private readonly DatabaseEngineBuilderState<BlobDatabaseEngine> _state;
@@ -207,7 +209,7 @@ public sealed class BlobDatabaseEngineBuilder
     /// </exception>
     /// <exception cref="DatabaseException">
     /// A declared database's storage format was refused, or opening it failed with corruption
-    /// (<c>COHDBS003</c>) or coded I/O failure (<c>COHDBB005</c>); the engine was disposed.
+    /// (<c>CK06003</c>) or coded I/O failure (<c>CB06005</c>); the engine was disposed.
     /// </exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled; a created engine was disposed.</exception>
     /// <exception cref="AggregateException">The failure, together with a failure to dispose what it rejected.</exception>
@@ -239,4 +241,17 @@ public sealed class BlobDatabaseEngineBuilder
     /// </summary>
     /// <param name="failure">The failure that abandoned the engine.</param>
     internal void Abort(Exception failure) => _state.Abort(failure);
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Blob.BlobDatabaseEngineBuilder _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Blob.BlobDatabaseEngineBuilder value)
+        {
+            _target = value;
+        }
+
+        public string Name => _target.Name;
+        public global::Assimalign.Cohesion.Database.Blob.BlobDatabaseEngineOptions Options => _target.Options;
+    }
 }

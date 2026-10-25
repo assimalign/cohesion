@@ -59,3 +59,8 @@ reports exact missing packages or an SDK pack without executable defaults as ski
 present, one test also starts the generated `cohesion-database`: it builds it self-contained for
 the host RID, so that run restores the matching `Microsoft.NETCore.App` runtime pack from nuget.org,
 then writes and reads one full customer row over the wire.
+
+The standalone Database template, the app Database and the three landing-zone Databases import
+`Assimalign.Cohesion.Database` for the shared `Listen(Uri)` extension. `App.Database` already
+carries `Database.Tcp`; generated projects need no extra package reference. Their configured
+endpoints, schemas and defaults stay the same.

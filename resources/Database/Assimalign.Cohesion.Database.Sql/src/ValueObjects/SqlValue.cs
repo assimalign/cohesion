@@ -30,11 +30,13 @@ namespace Assimalign.Cohesion.Database.Sql;
 /// ordinally, binary by content, and a <see cref="System.DateTimeOffset"/> by instant and offset.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("SqlValue {Type}, IsNull = {IsNull}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.SqlValue.DebugView))]
 [StructLayout(LayoutKind.Auto)]
 public readonly struct SqlValue : IEquatable<SqlValue>
 {
-    private static readonly object BoxedTrue = true;
-    private static readonly object BoxedFalse = false;
+    private static readonly object _boxedTrue = true;
+    private static readonly object _boxedFalse = false;
 
     // The text or binary value; for a value the engine read from a row, the boxed value it read,
     // so handing it back to the row allocates nothing.
@@ -365,7 +367,7 @@ public readonly struct SqlValue : IEquatable<SqlValue>
     [DoesNotReturn]
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static void ThrowNullCompared(bool leftIsNull)
-        => throw new ArgumentException("NULL has no place in the order; test IsNull first.", leftIsNull ? "left" : "right");
+        => throw new ArgumentException(ErrorMessages.SqlValueThrowNullComparedArgument, leftIsNull ? "left" : "right");
 
     /// <summary>
     /// Converts a value of the engine's row representation: <see langword="null"/> or a boxed value
@@ -434,7 +436,7 @@ public readonly struct SqlValue : IEquatable<SqlValue>
         uint number => FromInt64(number),
         ulong number => FromDecimal(number),
         char character => FromString(character.ToString()),
-        _ => throw new DatabaseException($"A value of CLR type '{value.GetType().Name}' has no SQL type a function can take."),
+        _ => throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlValueFromOtherObjectDatabase, value.GetType().Name)),
     };
 
     /// <summary>
@@ -468,7 +470,7 @@ public readonly struct SqlValue : IEquatable<SqlValue>
         {
             // Shared boxes, as the evaluator's predicates return: a function returning BOOLEAN
             // allocates nothing per row.
-            DatabaseType.Boolean => Read<bool>() ? BoxedTrue : BoxedFalse,
+            DatabaseType.Boolean => Read<bool>() ? _boxedTrue : _boxedFalse,
             DatabaseType.Int8 => Read<sbyte>(),
             DatabaseType.Int16 => Read<short>(),
             DatabaseType.Int32 => Read<int>(),
@@ -482,7 +484,7 @@ public readonly struct SqlValue : IEquatable<SqlValue>
             DatabaseType.DateTimeOffset => Read<DateTimeOffset>(),
             DatabaseType.TimeSpan => Read<TimeSpan>(),
             DatabaseType.Guid => Read<Guid>(),
-            _ => throw new InvalidOperationException($"A {_type} value has no row representation."),
+            _ => throw new InvalidOperationException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlValueBoxFailure, _type)),
         };
     }
 
@@ -518,6 +520,19 @@ public readonly struct SqlValue : IEquatable<SqlValue>
     private void ThrowMismatch(DatabaseType requested) => throw Mismatch(requested);
 
     private InvalidCastException Mismatch(DatabaseType requested) => _type == DatabaseType.Null
-        ? new InvalidCastException($"The value is NULL, not {SqlType.NameOf(requested)}.")
-        : new InvalidCastException($"The value is {SqlType.NameOf(_type)}, not {SqlType.NameOf(requested)}; read it with the accessor of its type.");
+        ? new InvalidCastException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlValueMismatchInvalidCast, SqlType.NameOf(requested)))
+        : new InvalidCastException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlValueMismatchInvalidCast2, SqlType.NameOf(_type), SqlType.NameOf(requested)));
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Sql.SqlValue _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.SqlValue value)
+        {
+            _target = value;
+        }
+
+        public bool IsNull => _target.IsNull;
+        public global::Assimalign.Cohesion.Database.Types.DatabaseType Type => _target.Type;
+    }
 }

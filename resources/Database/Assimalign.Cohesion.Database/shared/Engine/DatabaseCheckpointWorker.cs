@@ -279,6 +279,7 @@ internal abstract class DatabaseCheckpointWorker<TDatabase> : DatabaseLaneWorker
 
     private void Settle(TDatabase database, string name, DatabaseWorkerLanes<bool>.Outcome outcome, CancellationToken cancellationToken, ref bool unfinishedReported, DatabaseWorkerPass.Visit? visit)
     {
+        if (visit is not null) { visit.RunnerAvailable = outcome.RunnerAvailable; }
         switch (outcome.Failure)
         {
             case null when outcome.Result:

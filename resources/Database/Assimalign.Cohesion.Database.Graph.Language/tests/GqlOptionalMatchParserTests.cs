@@ -52,7 +52,7 @@ public sealed class GqlOptionalMatchParserTests
         var statement = new GqlQueryParser().Parse(source);
         // Assert
         var diagnostic = statement.Diagnostics.ShouldHaveSingleItem();
-        diagnostic.Code.ShouldBe("COHDBL001");
+        diagnostic.Code.ShouldBe("CK00001");
         diagnostic.Message!.ShouldContain("OPTIONAL BLOCK OPERAND", Case.Sensitive);
         diagnostic.Message!.ShouldNotContain("FUNCTION OPTIONAL", Case.Sensitive);
         diagnostic.Start.ShouldBe(source.IndexOf("OPTIONAL", System.StringComparison.Ordinal));
@@ -60,8 +60,8 @@ public sealed class GqlOptionalMatchParserTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Graph.Language] - MATCH: unsupported and invalid compositions keep exact codes")]
-    [InlineData("MANDATORY MATCH (a) RETURN a", "COHDBL001")]
-    [InlineData("OPTIONAL RETURN a", "GQL0002")]
+    [InlineData("MANDATORY MATCH (a) RETURN a", "CK00001")]
+    [InlineData("OPTIONAL RETURN a", "CG00002")]
     public void Parse_InvalidComposition_ShouldKeepCode(string source, string code)
     {
         // Arrange / Act

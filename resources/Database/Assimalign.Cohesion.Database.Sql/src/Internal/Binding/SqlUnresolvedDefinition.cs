@@ -4,7 +4,7 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// A persisted definition bound as unresolved: it calls a function the engine that opened the
 /// database does not register, or whose registration no longer accepts the call (owner decision 65
 /// of 2026-10-09; the design's §4.10). The database opens and its reads proceed; every write that
-/// would evaluate the definition fails with <c>COHSQLE009</c>, and an engine build that declares the
+/// would evaluate the definition fails with <c>CS01009</c>, and an engine build that declares the
 /// database fails with it before the engine accepts work.
 /// </summary>
 /// <remarks>
@@ -14,6 +14,8 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// a function's implementation is missing at use, not when it loads its catalog
 /// (<c>src/backend/utils/fmgr/fmgr.c</c>, "is not in internal lookup table").
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("SqlUnresolvedDefinition")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlUnresolvedDefinition.DebugView))]
 internal sealed class SqlUnresolvedDefinition
 {
     /// <summary>Initializes an unresolved definition.</summary>
@@ -38,5 +40,13 @@ internal sealed class SqlUnresolvedDefinition
 
     /// <summary>Describes the definition and its call: <c>CHECK constraint 'ck' on table 'dbo.t' calls function 'f(TEXT)', which ...</c>.</summary>
     /// <returns>The description.</returns>
-    internal string Describe() => $"{Subject} calls function '{Signature}', {Reason}";
+    internal string Describe() => string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.UnresolvedFunctionDescription, Subject, Signature, Reason);
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlUnresolvedDefinition value)
+        {
+            _ = value;
+        }
+    }
 }

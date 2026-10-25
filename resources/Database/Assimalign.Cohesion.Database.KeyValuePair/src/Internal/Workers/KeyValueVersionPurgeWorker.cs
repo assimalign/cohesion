@@ -55,6 +55,8 @@ namespace Assimalign.Cohesion.Database.KeyValuePair.Internal;
 /// a backoff, not only on its coordinator's doubling schedule.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("KeyValueVersionPurgeWorker {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.KeyValuePair.Internal.KeyValueVersionPurgeWorker.DebugView))]
 internal sealed class KeyValueVersionPurgeWorker : DatabaseVersionPurgeWorker<KeyValueDatabase>
 {
     private readonly KeyValueDatabaseEngine _engine;
@@ -74,4 +76,19 @@ internal sealed class KeyValueVersionPurgeWorker : DatabaseVersionPurgeWorker<Ke
     protected override TransactionCoordinator GetCoordinator(KeyValueDatabase database) => database.Coordinator;
     protected override void Purge(KeyValueDatabase database, CancellationToken cancellationToken)
         => database.Coordinator.RunVersionPurgePass(cancellationToken);
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.KeyValuePair.Internal.KeyValueVersionPurgeWorker _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.KeyValuePair.Internal.KeyValueVersionPurgeWorker value)
+        {
+            _target = value;
+        }
+
+        public bool CompletionOnly => _target.CompletionOnly;
+        public string Name => _target.Name;
+        public global::Assimalign.Cohesion.Database.DatabaseEngineWorkerKind Kind => _target.Kind;
+        public global::System.TimeSpan Interval => _target.Interval;
+    }
 }

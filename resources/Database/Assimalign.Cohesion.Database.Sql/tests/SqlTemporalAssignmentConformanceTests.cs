@@ -82,23 +82,23 @@ public sealed class SqlTemporalAssignmentConformanceTests
     }
 
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - Conformance: invalid temporal assignment fails atomically (#1422)")]
-    [InlineData("INTERVAL", "1.02:03:04", "COHSQLE047")]
-    [InlineData("INTERVAL", "2.03:04:05.1234567", "COHSQLE047")]
-    [InlineData("INTERVAL", "-2.03:04:05.1234567", "COHSQLE047")]
-    [InlineData("INTERVAL", "1 year", "COHSQLE047")]
-    [InlineData("INTERVAL", "0.00000001", "COHSQLE047")]
-    [InlineData("INTERVAL", "garbage", "COHSQLE047")]
-    [InlineData("INTERVAL", "12\u00a0", "COHSQLE047")]
-    [InlineData("INTERVAL", "1\u00a02 hours", "COHSQLE047")]
-    [InlineData("INTERVAL", "99999999999999999999999999999 days", "COHSQLE062")]
-    [InlineData("TIME", "24:00", "COHSQLE048")]
-    [InlineData("TIME", "25:00", "COHSQLE048")]
-    [InlineData("TIME", "10:00:00.12345678", "COHSQLE047")]
-    [InlineData("TIME", "10:00\u00a0", "COHSQLE047")]
-    [InlineData("REAL", "1,000", "COHSQLE022")]
-    [InlineData("REAL", "1e400", "COHSQLE002")]
-    [InlineData("DOUBLE", "1,000", "COHSQLE022")]
-    [InlineData("DOUBLE", "1e400", "COHSQLE002")]
+    [InlineData("INTERVAL", "1.02:03:04", "CS02047")]
+    [InlineData("INTERVAL", "2.03:04:05.1234567", "CS02047")]
+    [InlineData("INTERVAL", "-2.03:04:05.1234567", "CS02047")]
+    [InlineData("INTERVAL", "1 year", "CS02047")]
+    [InlineData("INTERVAL", "0.00000001", "CS02047")]
+    [InlineData("INTERVAL", "garbage", "CS02047")]
+    [InlineData("INTERVAL", "12\u00a0", "CS02047")]
+    [InlineData("INTERVAL", "1\u00a02 hours", "CS02047")]
+    [InlineData("INTERVAL", "99999999999999999999999999999 days", "CS02062")]
+    [InlineData("TIME", "24:00", "CS02048")]
+    [InlineData("TIME", "25:00", "CS02048")]
+    [InlineData("TIME", "10:00:00.12345678", "CS02047")]
+    [InlineData("TIME", "10:00\u00a0", "CS02047")]
+    [InlineData("REAL", "1,000", "CS02022")]
+    [InlineData("REAL", "1e400", "CS02002")]
+    [InlineData("DOUBLE", "1,000", "CS02022")]
+    [InlineData("DOUBLE", "1e400", "CS02002")]
     public async Task ExecuteAsync_InvalidTemporalText_ShouldRejectCastAndAssignment(string type, string text, string code)
     {
         // Arrange
@@ -163,7 +163,7 @@ public sealed class SqlTemporalAssignmentConformanceTests
             await reopening.OpenDatabaseAsync("db", CancellationToken.None));
 
         // Assert
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE041");
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS06041");
         error.Message.ShouldContain("uses data-storage format 25");
         error.Message.ShouldContain("supports only format 26");
     }

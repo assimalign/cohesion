@@ -19,6 +19,8 @@ namespace Assimalign.Cohesion.Database.KeyValuePair.Client;
 /// telemetry hook, and delegates pooling, framing, and the wire handshake to the core. Disposing the
 /// client closes every pooled connection.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("KeyValueClient")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.KeyValuePair.Client.KeyValueClient.DebugView))]
 public sealed class KeyValueClient : IAsyncDisposable
 {
     private readonly DatabaseClient _client;
@@ -44,11 +46,11 @@ public sealed class KeyValueClient : IAsyncDisposable
 
         if (options.Settings is null)
         {
-            throw new ArgumentException("Connection settings are required.", nameof(options));
+            throw new ArgumentException(ErrorMessages.KeyValueClientCreateArgument, nameof(options));
         }
         if (options.ConnectionFactory is null)
         {
-            throw new ArgumentException("A connection factory is required.", nameof(options));
+            throw new ArgumentException(ErrorMessages.KeyValueClientCreateArgument2, nameof(options));
         }
 
         // The shared core validates the settings and factory in full (database,
@@ -96,4 +98,12 @@ public sealed class KeyValueClient : IAsyncDisposable
     /// </summary>
     /// <returns>A task that completes when the idle connections are closed.</returns>
     public ValueTask DisposeAsync() => _client.DisposeAsync();
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.KeyValuePair.Client.KeyValueClient value)
+        {
+            _ = value;
+        }
+    }
 }

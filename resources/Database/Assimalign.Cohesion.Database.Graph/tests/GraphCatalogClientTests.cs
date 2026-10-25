@@ -105,8 +105,8 @@ public sealed class GraphCatalogClientTests
         var error = await Should.ThrowAsync<DatabaseClientException>(async () =>
             await connection.ExecuteAsync(statement, cancellationToken: timeout.Token));
         error.Code.ShouldBe(ProtocolErrorCode.ParseFailure);
-        error.Message.ShouldContain("GQL0007: Graph catalog introspection is read-only.", Case.Sensitive);
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("GQL0007");
+        error.Message.ShouldContain("CG00007: Graph catalog introspection is read-only.", Case.Sensitive);
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG00007");
         (await connection.ExecuteAsync("SHOW LABELS", cancellationToken: timeout.Token)).Rows.ShouldBeEmpty();
 
         (await connection.ExecuteAsync("CREATE (n:Injected)", cancellationToken: timeout.Token)).AffectedCount.ShouldBe(1);

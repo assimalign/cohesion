@@ -102,12 +102,12 @@ public sealed partial class SqlQueryParser
             try
             {
                 var query = ParseQueryExpression(ref lexer);
-                Expect(ref lexer, TokenType.RightParen, "')' after the query operand");
+                Expect(ref lexer, TokenType.RightParen, _errorQueryOperandClosingExpected);
                 return query;
             }
             finally { _parenthesisDepth--; }
         }
-        AddSyntaxDiagnostic(ref lexer, "Expected SELECT or a parenthesized query after the set operator.");
+        AddSyntaxDiagnostic(ref lexer, ErrorMessages.SqlQueryParserParseQueryOperandVoid);
         return EmptyWithQuery();
     }
 
@@ -120,7 +120,7 @@ public sealed partial class SqlQueryParser
         var orderBy = new List<SqlOrderByColumn>();
         if (query.OrderBy.Count > 0 && IsKeyword(ref lexer, "ORDER"))
         {
-            AddSyntaxDiagnostic(ref lexer, "A query accepts only one ORDER BY clause.");
+            AddSyntaxDiagnostic(ref lexer, ErrorMessages.SqlQueryParserParseQueryTailVoid);
         }
         if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "ORDER"))
         {
@@ -144,7 +144,7 @@ public sealed partial class SqlQueryParser
             int end = start + lexer.Current.Value.Length;
             if (clause == "OFFSET" ? offset is not null || limitSyntaxKind == SqlLimitSyntaxKind.Top : limit is not null)
             {
-                AddSyntaxDiagnostic(start, end, "A SELECT accepts one row limit and one OFFSET; TOP cannot combine with LIMIT, OFFSET or FETCH, and LIMIT cannot combine with FETCH.");
+                AddSyntaxDiagnostic(start, end, ErrorMessages.SqlQueryParserParseQueryTailVoid2);
             }
             Advance(ref lexer);
             if (clause == "OFFSET")
@@ -160,14 +160,14 @@ public sealed partial class SqlQueryParser
             else
             {
                 if (IsWord(ref lexer, "FIRST") || IsKeyword(ref lexer, "NEXT")) { Advance(ref lexer); }
-                else { AddSyntaxDiagnostic(ref lexer, "Expected FIRST or NEXT after FETCH."); }
+                else { AddSyntaxDiagnostic(ref lexer, ErrorMessages.SqlQueryParserParseQueryTailVoid3); }
                 limit = IsKeyword(ref lexer, "ROW") || IsKeyword(ref lexer, "ROWS")
                     ? new SqlLiteralExpression("1", SqlLiteralType.Integer, Location.Create(1, 1, start, end))
                     : ParseFetchCount(ref lexer);
                 limitSyntaxKind = SqlLimitSyntaxKind.Fetch;
                 RejectPagingSuffix(ref lexer, "FETCH");
                 if (IsKeyword(ref lexer, "ROW") || IsKeyword(ref lexer, "ROWS")) { Advance(ref lexer); }
-                else { AddSyntaxDiagnostic(ref lexer, "Expected ROW or ROWS after the FETCH count."); }
+                else { AddSyntaxDiagnostic(ref lexer, ErrorMessages.SqlQueryParserParseQueryTailVoid4); }
                 if (!RejectPagingSuffix(ref lexer, "FETCH"))
                 {
                     ExpectKeyword(ref lexer, "ONLY", "ONLY after FETCH ... ROW or ROWS");

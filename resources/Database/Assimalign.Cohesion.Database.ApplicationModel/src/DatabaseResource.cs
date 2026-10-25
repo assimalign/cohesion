@@ -13,9 +13,11 @@ namespace Assimalign.Cohesion.ApplicationModel;
 /// produced by an enabled database executable, and its realization plan contains no
 /// platform-specific objects or runtime database dependencies.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("DatabaseResource {Name}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.ApplicationModel.DatabaseResource.DebugView))]
 public sealed class DatabaseResource : PlannedResource
 {
-    private const string DatabasePlannerName = "Database planner";
+    private const string databasePlannerName = "Database planner";
 
     /// <summary>
     /// Initializes a new <see cref="DatabaseResource"/> from a build-produced manifest.
@@ -36,7 +38,7 @@ public sealed class DatabaseResource : PlannedResource
     }
 
     /// <inheritdoc />
-    public override string PlannerName => DatabasePlannerName;
+    public override string PlannerName => databasePlannerName;
 
     /// <inheritdoc />
     public override ResourcePlan CreatePlan(PlanContext context)
@@ -46,9 +48,25 @@ public sealed class DatabaseResource : PlannedResource
         if (!Manifest.Name.Equals(context.Manifest.Name))
         {
             throw new InvalidOperationException(
-                $"Planning context resource '{context.Manifest.Name}' does not match '{Manifest.Name}'.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabaseResourceCreatePlanFailure, context.Manifest.Name, Manifest.Name));
         }
 
         return DatabasePlanner.CreatePlan(context);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.ApplicationModel.DatabaseResource _target;
+
+        public DebugView(global::Assimalign.Cohesion.ApplicationModel.DatabaseResource value)
+        {
+            _target = value;
+        }
+
+        public string PlannerName => _target.PlannerName;
+        public global::Assimalign.Cohesion.ApplicationModel.ResourceName Name => _target.Name;
+        public string Artifact => _target.Artifact;
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.ApplicationModel.ResourceEndpoint> Endpoints => _target.Endpoints;
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.ApplicationModel.ResourceMount> Mounts => _target.Mounts;
     }
 }

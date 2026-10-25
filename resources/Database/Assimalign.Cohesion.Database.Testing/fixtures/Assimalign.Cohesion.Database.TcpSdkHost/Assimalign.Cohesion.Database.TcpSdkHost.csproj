@@ -1,0 +1,27 @@
+<Project Sdk="Assimalign.Cohesion.Sdk.Database">
+  <PropertyGroup>
+    <RootNamespace>Assimalign.Cohesion.Database.TcpSdkHost</RootNamespace>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <CohesionApplicationModel>disabled</CohesionApplicationModel>
+    <CohesionDatabaseProject>false</CohesionDatabaseProject>
+    <!-- Exercise the SDK's framework packs on runners without installed Cohesion frameworks. -->
+    <RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == ''">$(NETCoreSdkRuntimeIdentifier)</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
+  </PropertyGroup>
+  <!-- Record real compiler inputs before trimming or runtime resolution could hide visibility. -->
+  <Target Name="WriteTcpSdkCompilerClosure" AfterTargets="ResolveAssemblyReferences">
+    <ItemGroup>
+      <_TcpSdkExistingReference Include="@(ReferencePath)" Condition="Exists('%(FullPath)')" />
+    </ItemGroup>
+    <GetAssemblyIdentity AssemblyFiles="@(_TcpSdkExistingReference)" Condition="'@(_TcpSdkExistingReference)' != ''">
+      <Output TaskParameter="Assemblies" ItemName="_TcpSdkReferenceIdentity" />
+    </GetAssemblyIdentity>
+    <WriteLinesToFile File="$(IntermediateOutputPath)tcp-sdk-compiler-closure.txt"
+                      Lines="@(_TcpSdkReferenceIdentity->'%(Name)|%(OriginalItemSpec)')" Overwrite="true" />
+  </Target>
+  <Target Name="CopyTcpSdkCompilerClosure" AfterTargets="Build">
+    <Copy SourceFiles="$(IntermediateOutputPath)tcp-sdk-compiler-closure.txt" DestinationFolder="$(TargetDir)" />
+  </Target>
+</Project>

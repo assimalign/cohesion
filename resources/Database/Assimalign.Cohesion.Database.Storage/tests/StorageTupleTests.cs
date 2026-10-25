@@ -1,5 +1,6 @@
 using System;
 using System.Text;
+using Shouldly;
 using Xunit;
 
 namespace Assimalign.Cohesion.Database.Storage.Tests;
@@ -17,15 +18,15 @@ public class StorageTupleTests
 		byte[] payload = tuple.ToBytes();
 		var decoded = StorageTuple.FromBytes(payload);
 
-		Assert.Equal(3, decoded.Count);
-		Assert.True(decoded.TryGetField("id", out var idField));
-		Assert.Equal(42, BitConverter.ToInt32(idField.Value.Span));
+		decoded.Count.ShouldBe(3);
+		decoded.TryGetField("id", out var idField).ShouldBeTrue();
+		BitConverter.ToInt32(idField.Value.Span).ShouldBe(42);
 
-		Assert.True(decoded.TryGetField("name", out var nameField));
-		Assert.Equal("Alice", Encoding.UTF8.GetString(nameField.Value.Span));
+		decoded.TryGetField("name", out var nameField).ShouldBeTrue();
+		Encoding.UTF8.GetString(nameField.Value.Span).ShouldBe("Alice");
 
-		Assert.True(decoded.TryGetField("active", out var activeField));
-		Assert.Equal(1, activeField.Value.Span[0]);
+		decoded.TryGetField("active", out var activeField).ShouldBeTrue();
+		activeField.Value.Span[0].ShouldBe((byte)1);
 	}
 
 	[Fact(DisplayName = "Cohesion Test [StorageTuple] - TryGetField: Should return false for missing field")]
@@ -35,7 +36,7 @@ public class StorageTupleTests
 
 		bool found = tuple.TryGetField("missing", out _);
 
-		Assert.False(found);
+		found.ShouldBeFalse();
 	}
 
 	[Fact(DisplayName = "Cohesion Test [StorageTuple] - FromBytes: Should reject malformed payload")]
@@ -43,12 +44,12 @@ public class StorageTupleTests
 	{
 		byte[] malformed = { 1, 0, 0, 0, 2, 0, 0, 0, (byte)'i' };
 
-		Assert.Throws<ArgumentException>(() => StorageTuple.FromBytes(malformed));
+		Should.Throw<ArgumentException>(() => StorageTuple.FromBytes(malformed)).GetType().ShouldBe(typeof(ArgumentException));
 	}
 
 	[Fact(DisplayName = "Cohesion Test [StorageTupleField] - Ctor: Should reject empty names")]
 	public void StorageTupleFieldCtor_ShouldRejectEmptyNames()
 	{
-		Assert.Throws<ArgumentException>(() => new StorageTupleField("", ReadOnlyMemory<byte>.Empty));
+		Should.Throw<ArgumentException>(() => new StorageTupleField("", ReadOnlyMemory<byte>.Empty)).GetType().ShouldBe(typeof(ArgumentException));
 	}
 }

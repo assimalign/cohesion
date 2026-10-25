@@ -14,6 +14,8 @@ using Assimalign.Cohesion.Database.Sql.Schema;
 using Assimalign.Cohesion.Database.Sql.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Types;
 
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
+
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 [Collection("SQL namespace DDL interlock")]
@@ -83,7 +85,7 @@ public sealed class SqlSchemaDdlInterlockReviewTests
                         releaseDdl.Wait(timeout.Token);
                     }
                 };
-                pending = Task.Run(async () => await ddl.ExecuteAsync("CREATE SCHEMA other", cancellationToken: timeout.Token), timeout.Token);
+                pending = DedicatedTestTask.Run(async () => await ddl.ExecuteAsync("CREATE SCHEMA other", cancellationToken: timeout.Token), timeout.Token);
                 enteredDdl.Wait(timeout.Token);
             }
 
@@ -151,7 +153,7 @@ public sealed class SqlSchemaDdlInterlockReviewTests
         var failure = await Should.ThrowAsync<DatabaseException>(async () => await pending.WaitAsync(timeout.Token));
 
         // Assert: the retry operates on the complete new set, with no stranded locks.
-        failure.Diagnostics.ShouldContain(value => value.Code == "COHSQLE013");
+        failure.Diagnostics.ShouldContain(value => value.Code == "CS05013");
         failure.Message.ShouldContain("Retry the statement", Case.Sensitive);
         database.Catalog.DdlGeneration.ShouldBe(generation);
         database.Catalog.Tables.Count.ShouldBe(2);

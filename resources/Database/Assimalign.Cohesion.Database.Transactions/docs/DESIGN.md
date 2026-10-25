@@ -36,11 +36,12 @@ The area is concrete-first (`.claude/rules/database-area.md`); the project decla
 interface since phase 2 of the concrete-types program
 (`docs/programs/DATABASE_CONCRETE_TYPES_PLAN.md`).
 
-- **Sealed, with internal constructors:** `TransactionManager` (since #1257),
-  `TransactionContext` (the most-consumed kernel contract, so every call on it is direct) and
-  `LockManager` ("The lock manager implementation", below). Each has one implementation and
-  is created here: by `TransactionManager.Create`, `TransactionManager.BeginAsync` and
-  `LockManager.Create`.
+- **Sealed, with internal constructors:** `TransactionManager` (since #1257) and
+  `TransactionContext` (the most-consumed kernel contract, so every call on it is direct).
+  Each has one implementation and is created here by `TransactionManager.Create` and
+  `TransactionManager.BeginAsync`, respectively. `LockManager` is sealed with a public
+  parameterless constructor (`new LockManager()`, owner decision 61; "The lock manager
+  implementation", below).
 - **`TransactionContext.PinStatementSnapshot()`** returns a statement view: it shares the
   transaction's id, sequence, isolation level and state, and fixes the snapshot at the call.
   Documents, Graph and Blob pin one per read-committed operation, so every metadata lookup and
@@ -83,7 +84,7 @@ scrubbing instead of treating the remaining abandoned stamps as committed.
 
 `VersionStore.GetVisibleVersionAsync` returns absence only for a reclaimed location or an
 invisible version. A checksum failure propagates `StorageCorruptionException` with
-`COHDBS003` and the page id; the record-space test corrupts media after eviction and proves
+`CK06003` and the page id; the record-space test corrupts media after eviction and proves
 both failure and a successful lookup after repair. Engines translate the storage failure
 at their own boundary. The short-record rule is tracked separately by #1372.
 
@@ -158,7 +159,7 @@ record inside a critical section, so any failure there is `PANIC` too,
 `src/backend/access/transam/xact.c:1470-1583`), because a retried fsync can report success for
 bytes the operating system already dropped. The storage does the equivalent without stopping
 the process: the failing flush latches the journal and the storage offline
-(`StorageOfflineException`, `COHDBS002`; `Database.Storage` DESIGN.md, "A failed durable flush
+(`StorageOfflineException`, `CK06002`; `Database.Storage` DESIGN.md, "A failed durable flush
 takes the storage offline"), and the unconfirmed commit carries that exception as its inner
 exception (`StorageOfflineException.Find` locates it). From then on nothing is written to the
 database's files — no append, no checkpoint, no undo, no write-back, not even at close — and
@@ -508,6 +509,37 @@ MarkStatement reads the grant sequence atomically without taking the manager-wid
 caller serializes the owner's requests, so all its earlier grants have completed and no later
 one can race the mark; concurrent grants to other owners do not change that owner's boundary.
 First grants advance the sequence with Interlocked.Increment, paired with Interlocked.Read.
+The mark/re-grant allocation guard runs only in Release, with tiered compilation disabled in
+this test project, as SQL already does. Its populated-table, uncontended loop still requires
+exactly zero bytes over 1,000 operations after 100 warmups; runtime tier transitions cannot
+define the production allocation contract. The Linux failure after #1689 reported 1,792 bytes;
+Initial unpressured Windows runs did not reproduce it, including with tiering enabled. The optimized path adds no
+entry, owner list, waiter or grant and allocates no product object. A forced 16-byte-array
+allocation per mark fails the guard before restoration. This changes test execution, not
+locking semantics. PostgreSQL likewise handles an already-held lock through its local grant
+path (src/backend/storage/lmgr/lock.c:969-982); no reference code is copied.
+
+**Exact counters also exclude background-GC accounting (found during #1288).** Tiering
+control alone is insufficient: the Storage map's new zero-byte guard passed alone but
+reported 7,288 bytes in the full Release suite. A standalone .NET 10.0.13 win-arm64
+control measured only counter reads and `SpinWait`, yet background GC produced four
+8,136-byte deltas in 256 intervals; the same executable with concurrent GC disabled
+reported zero in every interval. Explicit allocation controls were 64 bytes in all
+32 samples in both modes. Replacing `SpinWait` with the existing 1,000 mark/re-grant
+loop produced seven nonzero intervals out of 2,048 with background GC, and none
+without it. The zero-byte assertion and operation count therefore remain unchanged;
+this test host disables concurrent GC and checks the actual `ConcurrentGC` runtime
+configuration. A real-allocation positive control remains observable. Runner parallelism
+is uncapped; model-engine suites retain their own GC configuration.
+
+This matches the upstream accounting defect [dotnet/runtime#134724](https://github.com/dotnet/runtime/issues/134724)
+and its proposed [fix #134855](https://github.com/dotnet/runtime/pull/134855).
+The consulted runtime source computes the counter after subtracting the unused context
+(`src/coreclr/vm/comutilnative.cpp:859–868`); the normal collection path retires those
+bytes (`src/coreclr/gc/allocation.cpp:1123–1130`), while background context clearing
+zeroes its pointers (`:1149–1158`). No runtime code is copied or changed. The test-only
+configuration gives a platform-independent measurement without an allowance, a minimum
+of retries or suppressing product allocations. The runtime fix remains an upstream follow-up.
 
 This operation performs no undo: it releases only after unwritten arbitration or a failed
 statement bracket that has already been fully restored physically (#1231). Surviving writes
@@ -583,16 +615,38 @@ engine (298,671 commits, 5,294 deadlock victims).
 Now the lock manager keeps only each owner's queued requests, and the search reads the edges from
 the table as it stands. The requester waits for every owner that holds, in a conflicting mode,
 a resource one of its queued requests is for, and for the owner of every conflicting request
-queued ahead of it ("Grants respect the queue" below). The search follows those owners' queued requests the
-same way and makes the requester the victim if it comes back to it. PostgreSQL's detector also
-reads its graph from the lock table each time it runs (`CheckDeadLock` takes every partition
-lock, `src/backend/storage/lmgr/proc.c:1880-1891`): hard edges to holders (`deadlock.c:561-583`)
-and soft edges to requests queued ahead with a conflicting mode (`deadlock.c:624-768`). This
-detector follows a soft edge like a hard one. PostgreSQL first tries to rearrange the queue so
-that no cycle is left (`TopoSort`) and aborts only when it cannot; here a cycle through a queued
-request aborts the requester as every cycle does, a retryable failure where PostgreSQL might
-have reordered the queue instead (`LockManagerTests`, "A cycle through a request queued behind
-another owner's request").
+queued ahead of it ("Grants respect the queue" below). The search follows every queued
+request of each owner. A cycle first tries queue repair (#1420); an unavoidable held-lock
+cycle still chooses the requester as victim. PostgreSQL likewise reads its current lock table
+(`src/backend/storage/lmgr/proc.c:1880–1891`), distinguishes hard holder edges from soft queue
+edges (`deadlock.c:561–583,624–768`), and tries queue reorderings before aborting.
+
+**Soft-cycle repair (#1420).** Under `_sync`, construct a dependency graph containing every
+conflicting held-lock edge of every queued request. A cycle in those hard edges cannot be
+repaired by queue movement: return without changing any live queue. Otherwise retain existing
+conflicting FIFO edges greedily, adding one only when it cannot close a cycle in this graph.
+Stable topological owner ranks then give consistent orders to all affected resource queues,
+including owners waiting on multiple resources. An omitted edge already has the reverse path,
+so the resulting order reverses the dependency that could not coexist with retained edges.
+Every final hard or queue edge follows the same acyclic rank order. Queues without a detected
+cycle retain their ordinary FIFO/holder placement rules.
+
+This follows PostgreSQL's queue-reordering behaviour (`src/backend/storage/lmgr/deadlock.c:310–370,860–996`)
+without copying its backtracking search. The polynomial graph construction preserves a maximal
+consistent set of FIFO edges, rather than searching for a minimum number of moved waiters.
+No new grant is permitted against an incompatible holder. Queue moves keep the original waiter,
+completion, cancellation and timeout registrations; notification remains outside `_sync`.
+A queue's private order version restarts a wake scan if grant-time repair reordered it.
+A hard-cycle failure leaves all queue orders intact. Temporary graph storage is allocated only
+after a detected cycle; no hot-path process-wide atomic or public API is added.
+
+`LockQueueReorderTests` checks repair across the five modes, multiple queued requests per owner,
+hard-cycle refusal without partial movement, and cancellation after dequeue/before notification.
+The prior #1390 test that required a soft-cycle victim now requires repaired completion while
+retaining actual held-lock blockers. Hard-deadlock tests remain. Neo4j verifies actual held-lock
+cycles before selecting a victim (`community/lock/src/main/java/org/neo4j/kernel/impl/locking/forseti/ForsetiClient.java:829–860`);
+RavenDB instead queues writes on a merger thread (`src/Raven.Server/Documents/TransactionMerger/AbstractTransactionOperationsMerger.cs:101–134`).
+Those ownership models were consulted; neither is copied into this shared lock manager.
 
 A grant can add edges as well, from each request queued on the resource whose mode conflicts
 with the one granted and with nothing the grantee held before, to the grantee. A queued request
@@ -696,7 +750,7 @@ index range updates; KeyValuePair writers on six hot keys), 90 s each with the q
 wait reach 1 s (the longest 523 ms) and no error but the conflicts each workload provokes; the
 coordinator's refusal of a wait inside a statement apply never fired.
 
-With one hot parent row the cascade starved on `a60f850c` by waiting, and starves with the queue
+Before #1420, with one hot parent row the cascade starved on `a60f850c` by waiting, and starved with the queue
 as the deadlock victim, with no long wait. The cascade's queued exclusive request now holds back
 the child writers' shared requests on the parent row, and the writers queued behind it hold
 child rows from their earlier statements. When the cascade is granted the parent row and asks
@@ -712,7 +766,14 @@ update or delete has reached the row, so it passes a deleter that is still waiti
 kept because it bounds every wait (the #1390 gate) and is the rule of PostgreSQL's,
 SQL Server's and InnoDB's lock managers; letting a parent row's shared requests pass a queued
 exclusive one again, a victim rule that spares the cascade, or a cascade lock order without the
-cycle is an owner decision, and the shapes above are how to measure it.
+cycle required an owner decision. D2 chooses the unwritten cascade release/wait/retain/restart
+protocol, using #1668 statement marks, while preserving queue fairness outside soft-cycle repair.
+The 2026-10-24 owner decision bounds this protocol per cascade statement: the first two
+refusals release new attempt grants; from the third refusal onward the statement retains
+its closure grants and queues normally on each refused resource. Completed wait grants
+remain retained throughout. This prevents repeated release/rebuild from admitting hot child
+inserters indefinitely; it does not suppress genuine held-lock deadlocks or change victims.
+The shapes above remain the before/after measurement workloads.
 
 **A wait still queued at the threshold is reported (#1390).** `SlowLockWait` is written as a wait
 ends, so a wait that never ended was never reported. A request that queues while a listener takes
@@ -748,7 +809,7 @@ It alternates sizes in one non-parallel process, compares the minima of five rou
 an eightfold ratio; a whole-table scan grows with the hundredfold increase in foreign entries.
 
 **One sealed type, with an engine mode (#1258).** `LockManager` is a sealed class with an
-internal constructor and `LockManager.Create()`; the `ILockManager` interface and the internal
+internal constructor and `new LockManager()`; the `ILockManager` interface and the internal
 `DefaultLockManager` it fronted are gone, so every manager has `AbandonPending` (before, a
 lock manager of another type passed to `TransactionManager.Create` left a deferred writer's
 queued requests queued). The coordinator used to hand engine code a private decorator over the
@@ -778,6 +839,11 @@ Storage owns the physical journal (`Database.Storage`); the transaction log is t
 
 `TransactionDeadlockException` and `TransactionCommitUnconfirmedException` are sealed leaves
 (#1264). `TransactionAbortedException` remains the shared base for retryable abort variants.
+
+A hard deadlock refuses the lock request; it does not roll back the victim transaction.
+Under SQL statement atomicity, earlier explicit-transaction work and locks stay active
+until the caller rolls the victim back, allowing surviving waiters to progress. SQL
+translates the refusal to structured CS04065, mapped to SQLSTATE 40P01.
 
 `TransactionAbortedException : Exception` for engine-initiated aborts (an independent exception root — this package is a child root and must not depend on the area contracts; a model engine that surfaces an abort through the area's session contract wraps it in a `DatabaseException` at the model boundary, the same rule the engines apply to `StorageException`); `TransactionDeadlockException : TransactionAbortedException` for deadlock victims (retryable by construction). `TransactionCommitUnconfirmedException : Exception`, a second independent root, for a commit whose record was written but not made durable: the transaction is committed, so it is deliberately not an abort and not retryable ("A commit record that was written but not made durable", above); engines wrap it in the area's `DatabaseTransactionCommitUnconfirmedException`. Caller-initiated rollback is not an error: once started it throws nothing (#1226); before the start it throws only for a canceled token or a context it cannot end, and `ObjectDisposedException` once the manager's disposal began.
 
@@ -952,7 +1018,7 @@ A statement that fails keeps its own error. Its bracket rolls back before the fa
 propagates, and when only the bracket's rollback record cannot be appended (the bracket still
 ends, `Database.Storage` DESIGN.md, "Failed appends"), that advisory record's failure is
 dropped rather than thrown in place of the statement's. The engines name the statement's
-failure as the cause of an aborted transaction (`COHDBD001`, `COHDBB001`, `COHDBG007`), so a
+failure as the cause of an aborted transaction (`CD04101`, `CB04001`, `CG04007`), so a
 journal error must not take its place. A failure that leaves the bracket active (restoring
 its pages failed) still propagates.
 
@@ -977,9 +1043,11 @@ zero means no deletion. A nonzero deleter is a tombstone, not physical removal.
 Visibility is exactly `snapshot.IsVisible(writer) && (deleter == None ||
 !snapshot.IsVisible(deleter))`. Setting or clearing a deleter produces a copy of
 the same length and changes only bytes 8–15, so stamp changes cannot relocate a
-record. Short records (less than 16 bytes) are ignored by store visibility,
-undo, and recovery scans as before; the low-level helpers require a complete
-prefix. Payload interpretation and legacy format upgrades remain engine policy.
+record. A present record shorter than the 16-byte stamp prefix is corruption (#1372),
+not an absent version: visibility, logical undo, pruning and recovery scrub report
+StorageCorruptionException with page and slot. Failed undo/prune work remains tracked for retry
+after repair. Exactly 16 bytes is a valid empty payload. Payload interpretation remains engine
+policy; existing format fences refuse earlier formats without a legacy reader or upgrade.
 B+Tree entries retain their own physical layout and existing stamp implementation.
 
 ### Recovery and checkpoint interlock
@@ -1132,11 +1200,11 @@ Foreign-storage transaction refusals are operational failures (#1277), including
 run by a statement for a deferred request. They are retained for the next worker checkpoint
 call; only ordinary storage-bracket contention is retried as busy.
 
-**A checkpoint is refused inside a statement apply.** The semaphore is not reentrant, so a
-checkpoint asked for from an `ApplyStatementAsync` callback would wait forever for the semaphore
+**Maintenance is refused inside a statement apply.** The semaphore is not reentrant, so a
+checkpoint or version purge asked for from an `ApplyStatementAsync` callback would wait forever for the semaphore
 its own caller holds. The coordinator marks the apply's asynchronous flow (an `AsyncLocal`) and
-`Checkpoint` and `TryCheckpoint` throw `StorageTransactionException` there instead; before the
-review the call hung.
+`Checkpoint`, `TryCheckpoint` and `RunVersionPurgePass` throw `StorageTransactionException`
+at entry, before undo or pruning work; before the review the purge call hung with an index pruner.
 
 Logical undo, pruning, and recovery scrub apply at most 64 record/index mutations
 per physical bracket. A blob transaction can contain many thousands of chunks;
@@ -1263,7 +1331,7 @@ every Database source shares (failure payloads, `Start`/`Stop` endings) are in t
 so the coordinator hands `Storage.Name` to the two it builds, through internal members only: the
 `TransactionManager` constructor's `database` parameter and `LockManager.EnterEngineMode`. The
 events the coordinator writes itself read the name from its storage inside the enabled check. A
-standalone `TransactionManager.Create` or `LockManager.Create` reports an empty `database`.
+standalone `TransactionManager.Create` or `new LockManager()` reports an empty `database`.
 
 **Payloads carry identifiers only** (event-source.md rule 11; plan D8): a sequence, a lock mode,
 a lock resource's kind and object id, a storage-offline cause, counts, and, for the kernel's own
@@ -1385,7 +1453,7 @@ rollback still counts. The canonical recorder is wrapped by a test-side rate his
 uncontended `LockManager.AcquireAsync` reaches no instrumentation before its grant. Two
 `TransactionEventSourceTests` delta tests pin it. The engine-mode path every engine uses never
 enters `AcquireCoreAsync`: a re-grant allocates 0 bytes, and a new resource allocates exactly what
-the `TryAcquire` it runs does. The standalone path (`LockManager.Create`) runs `AcquireCoreAsync`,
+the `TryAcquire` it runs does. The standalone path (`new LockManager()`) runs `AcquireCoreAsync`,
 the method the lock-wait and deadlock events are written from, on every request, and in an
 optimized build allocates nothing for it. Until #1390 it allocated the 56-byte closure of its
 cancellation registration per request, which the compiler created at the method's entry because
@@ -1410,3 +1478,107 @@ synchronization. No reflection, dynamic code generation, or `Microsoft.Extension
 The event source writes only strings, integers and doubles, which bind to the trim-safe
 `WriteEvent` overloads; a NativeAOT application receives its events only with
 `<EventSourceSupport>true</EventSourceSupport>`, and nothing depends on delivery.
+
+## Dedicated test actors (#1285)
+
+Deadline-dependent peers and busy test drivers use the linked Storage test helper's LongRunning threads. Ordinary async driver continuations stay on their actor scheduler, without changing SynchronizationContext. Existing deadlines of 25 seconds or more are hang guards. Runner settings impose no parallel-thread cap. See the [scheduling audit](../../Assimalign.Cohesion.Database.Storage/docs/TEST-HYGIENE-AUDIT.md) for every original Task.Run site, the exact journal counters and the physical index-work guards.
+
+Reference consulted: RavenDB test/StressTests/Voron/InvalidReleasesOfScratchPages.cs:39–68 and :71–103 use LongRunning stress drivers. No code was copied.
+
+## Index pruning in the version-purge pass (#1195)
+
+The existing three-argument coordinator constructor remains. The new overload is
+`TransactionCoordinator(Storage storage, StorageJournal journal, TransactionRecordSpace records,
+Func<TransactionSequence, CancellationToken, ValueTask<long>> indexPruner)`. It retains the
+non-null callback for the database lifetime. `TransactionSequence PruneBound { get; }` exposes
+the existing conservative bound, including manager snapshot minima, the recovered floor and
+open coordinator contexts, for Indexing's opportunistic unique-insert walk. Computing it visits
+open contexts under the coordinator lock rather than allocating a context-array copy; the manager
+lock never waits for coordinator apply/log gates, preserving the existing lock order.
+
+`RunVersionPurgePass` first retries aborted undo and prunes records, then takes the apply gate
+and invokes the index callback with that same safe bound and cancellation token. A bounded
+Indexing callback visits at most 64 leaf pages. SQL, KeyValuePair, Documents and Graph all bind
+their current manager; catalog/store reattachment after a failed DDL does not leave a stale
+captured manager. Blob has no B-tree manager. Scheduling stays on the existing version-purge
+worker; no model owns a second vacuum or reaches into tree pages.
+
+The returned count and existing VersionPurgePass event's reclaimed total now include physical
+index entries. No new event/counter, interface or format is added. A recoverable record-prune
+failure still allows independent index work; the first deferred failure is rethrown unchanged
+after the pass. Cancellation, disposal and out-of-memory failures escape immediately. The apply
+gate is released for every callback outcome, including asynchronous ValueTask failure. Providers
+must perform only bounded index maintenance and must not request a checkpoint inside this gate.
+Tests prove gate exclusion, exact exception/cancellation identity, release after failure, old
+snapshot preservation and the four real model bindings. Existing statement rollback semantics
+are unchanged, as approved in #1393.
+
+## Confirmed record decoding (D1, #1372)
+
+The record-space version store rejects a present record shorter than
+RecordVersionStamp.HeaderSize in visibility, undo/pruning stamp reads and recovery scrub.
+Reclaimed locations remain absent; short present records cannot silently settle ledger work.
+The shared StorageCorruptionException carries the physical page, slot and existing CK06003.
+
+Reference consulted, without copying code: Neo4j
+community/record-storage-engine/src/main/java/org/neo4j/kernel/impl/store/CommonAbstractStore.java:785–792
+retries the page cursor before checking decoding errors; :861–865 checks bounds and cursor errors.
+Its record/RecordLoad.java:155–163 retains the cursor failure as the invalid-record cause.
+Cohesion uses the already-established D1 seqlock rather than adding a page read latch.
+
+Stable malformed copies are reported without speculative retries or waiting for a whole
+physical transaction. The existing storage read confirms both bytes and absence against
+all page mutations (#1365), including the copy-to-confirm window. Storage I/O, cancellation,
+timeout and existing storage exception identities are not caught by decoder-only wrappers.
+No file format, version, protocol frame, event, counter or diagnostic number changes.
+
+## #1420 measurements
+
+Release Windows ARM64 / .NET 10.0.13, tiering and background GC disabled in the standalone
+measurement host, shared machine. The committed #1390 probe runs one warm-up and twelve
+interleaved five-second samples per shape on each version. Precise active durations normalize
+commits/victims; setup-only reflection invokes the existing test helper outside its worker hot
+loops. These are development-scale measurements, not rankings or per-sample timing assertions.
+The before DLLs are frozen, and loaded SQL/Transactions/Storage hashes are checked on the fixed
+operation probe. No unexpected failure or wait of ten seconds was recorded in either phase.
+
+| Shape | Median commits/s before -> after | Median victims/s before -> after | Median victims / 1,000 commits before -> after | After samples above before commit-rate median |
+| --- | --- | --- | --- | --- |
+| 6 parents, 3 deleters, 5 writers | 899.412 -> 1440.178 | 17.825 -> 23.169 | 20.234 -> 16.419 | 12/12 |
+| 1 parent, 1 deleter, 14 explicit writers | 246.993 -> 355.118 | 28.369 -> 27.155 | 115.068 -> 77.325 | 12/12 |
+
+Absolute default-shape victims increase from 1,095 to 1,401 while more work commits; its parent
+deletes increase from 8,261 to 12,693. Hot-shape victims decrease from 1,752 to 1,613 and parent
+deletes increase from zero to 24, but only four of twelve samples make parent-delete progress.
+Its median parent-delete rate remains zero. D2 therefore improves this measured shape without
+guaranteeing uniform cascade progress. Earlier grants and retained wait grants can still form
+hard cycles; this result does not authorize key-share modes or a different victim policy.
+
+A separate fixed operation deletes one parent with 32 children and rolls back outside the
+measured interval. After one warm-up, twelve batches of 100 deletes measure median
+80,958.5 -> 81,858.5 ns/delete and 108,032 -> 108,056 B/delete. Four of twelve final duration
+samples are at or below the old median. Allocation is the precise process-wide GC counter,
+including engine workers; periodic worker samples are visible in the raw data. Every batch
+validates the restored child ids/parent values outside timing. Digest FBF326266BA187D1 is
+unchanged. The additional 24 median bytes are on DELETE; no context/metrics field was added
+to the SELECT path. Stored-query allocation remains a required Release guard.
+
+Raw measurements/hashes/harness: temporary wave11-1420-probe-before/after.jsonl,
+wave11-1420-delete-before-v2/after.csv, wave11-1420-delete-final-hashes.json and
+Wave11CascadeProbe/Wave11DeleteProbe. The initial delete baseline without the final payload
+verification is retained separately; the figures above use the final matching harness on both
+versions. The local Windows results do not replace official quiet-host profiling.
+
+## Error and construction conventions (#1470)
+
+Exception messages and format templates are generated from `src/Properties/ErrorMessages.resx`;
+format arguments use the current culture. Cancellation and abort templates used during normal
+cleanup are cached before reuse. Error identities remain separate from message text where a
+structured diagnostic carrier exists. Standard .NET guards retain their argument names and exception types.
+`LockManager()` is public; the parameterless `Create()` factory is removed. FIFO grant order, statement marks and deadlock handling are unchanged.
+
+## Debugger inspection convention
+
+Transaction debugger views filter private/internal coordination state. Reviewed public identity, sequence, isolation and state values may be projected; snapshot capture, prune-bound work, oldest-active scans, lock-taking counts and retry-clock/provider calls are omitted. The views do not enter a transaction, acquire a lock, refresh a snapshot or expose internal-only counters.
+
+Concrete eligible types carry their own concise display and private nested DebugView at the end of the type; an effective inherited display/proxy pair is reused. Projections are public read-only members of that private view and never reveal private/internal data. Empty views use the constant type name. Debugger attributes and nested infrastructure add no public API, instance fields to existing runtime types, storage/wire format change or successful-path work.

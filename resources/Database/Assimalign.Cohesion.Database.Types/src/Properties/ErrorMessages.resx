@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
+  <resheader name="version"><value>2.0</value></resheader>
+  <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms</value></resheader>
+  <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
+  <data name="CollationFromIdDatabaseType" xml:space="preserve"><value>Unknown collation identifier {0}.</value></data>
+  <data name="CollationFromNameDatabaseType" xml:space="preserve"><value>Unknown or unsupported collation '{0}'. Culture-aware and user-defined collations are not supported.</value></data>
+  <data name="CollationNormalizeDatabaseType" xml:space="preserve"><value>Collation '{0}' is not index-backed and has no deterministic byte transform.</value></data>
+  <data name="CollationNormalizeDatabaseType2" xml:space="preserve"><value>Collated strings must contain valid UTF-16 Unicode scalar values.</value></data>
+  <data name="LinguisticGlobalizationDatabaseType" xml:space="preserve"><value>The legacy invariant linguistic collation is unavailable under invariant globalization; use an index-backed collation.</value></data>
+  <data name="DatabaseKeyReaderSkipDatabaseType" xml:space="preserve"><value>Malformed key: invalid string payload length.</value></data>
+  <data name="DatabaseKeyReaderSkipDatabaseType2" xml:space="preserve"><value>Malformed key: unexpected component type {0}.</value></data>
+  <data name="DatabaseKeyReaderPeekTypeDatabaseType" xml:space="preserve"><value>The key has no further components.</value></data>
+  <data name="DatabaseKeyReaderExpectDatabaseType" xml:space="preserve"><value>Expected a {0} component but found {1}.</value></data>
+  <data name="DatabaseKeyReaderTakeDatabaseType" xml:space="preserve"><value>Malformed key: truncated component.</value></data>
+  <data name="DatabaseValueCodecAppendDatabaseType" xml:space="preserve"><value>Values of runtime type {0} have no component encoding.</value></data>
+  <data name="DatabaseValueCodecReadDatabaseType" xml:space="preserve"><value>Component type {0} is not a scalar value component.</value></data>
+  <data name="ValueCodecDecodeComponentDatabaseType" xml:space="preserve"><value>The payload carries more than one component.</value></data>
+  <data name="EncodingReadEscapedDatabaseType" xml:space="preserve"><value>Malformed key: unterminated variable-length component.</value></data>
+  <data name="EncodingReadEscapedDatabaseType2" xml:space="preserve"><value>Malformed key: truncated escape sequence.</value></data>
+  <data name="EncodingReadEscapedDatabaseType3" xml:space="preserve"><value>Malformed key: invalid escape marker 0x{0:X2}.</value></data>
+  <data name="EncodingSkipDecimalDatabaseType" xml:space="preserve"><value>Malformed key: truncated decimal component.</value></data>
+  <data name="EncodingSkipDecimalDatabaseType2" xml:space="preserve"><value>Malformed key: invalid decimal sign byte 0x{0:X2}.</value></data>
+  <data name="EncodingSkipDecimalDatabaseType3" xml:space="preserve"><value>Malformed key: truncated decimal exponent.</value></data>
+  <data name="EncodingSkipDecimalDatabaseType4" xml:space="preserve"><value>Malformed key: unterminated decimal digits.</value></data>
+  <data name="EncodingSkipDecimalDatabaseType5" xml:space="preserve"><value>Malformed key: invalid decimal digit byte 0x{0:X2}.</value></data>
+  <data name="EncodingSkipDecimalDatabaseType6" xml:space="preserve"><value>Malformed key: decimal component has no digits.</value></data>
+</root>

@@ -146,7 +146,7 @@ public static class ResourcePlanValidator
         ResourceManifestControlPlane manifestControlPlane)
     {
         Require(
-            ResourceHttpPath.TryCreate(manifestControlPlane.Path, out _),
+            ResourceHttpPath.TryCreate(manifestControlPlane.Path.Value, out _),
             ErrorMessages.ResourceHttpPathInvalid);
         string endpoint = RequireNotNull(
             controlPlane.Endpoint,
@@ -297,7 +297,7 @@ public static class ResourcePlanValidator
                 $"Manifest mount '{mount.Name}' is declared more than once.");
 
             Require(
-                mount.Source is null || ResourceMountSource.TryCreate(mount.Source, out _),
+                mount.Source is null || ResourceMountSource.TryCreate(mount.Source.Value.Value, out _),
                 ErrorMessages.ResourceMountSourceInvalid);
             MountBinding binding = FindMount(plan.Container.Mounts, mount.Name, plan.Resource);
             Require(

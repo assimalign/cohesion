@@ -14,7 +14,6 @@ namespace Assimalign.Cohesion.Database.Graph;
 
 public sealed partial class GraphDatabase
 {
-    private static readonly string _catalogSnapshotChangedMessage = ErrorMessages.CatalogSnapshotChanged;
 
     /// <summary>
     /// Starts one statement on a session: holds the session, admits the statement into the
@@ -63,7 +62,9 @@ public sealed partial class GraphDatabase
         var operation = await BeginOperationAsync(session, token).ConfigureAwait(false);
         try
         {
-            var result = await action(operation).ConfigureAwait(false);
+            T result;
+            try { result = await action(operation).ConfigureAwait(false); }
+            finally { operation.Updates.Dispose(); }
             await operation.CompleteAsync().ConfigureAwait(false);
             return result;
         }
@@ -79,7 +80,7 @@ public sealed partial class GraphDatabase
 
     // Child-root failures cross the engine boundary as the area root's exceptions. A failure the
     // offline storage caused is the database's coded refusal (#1243), checked first: the offline
-    // error is a StorageException, which the kernel translation would report as COHDBG006.
+    // error is a StorageException, which the kernel translation would report as CG06006.
     internal Exception TranslateFailure(Exception error) => TranslateOffline(error) is var offline && !ReferenceEquals(offline, error)
         ? offline
         : TranslateStatementFailure(error);
@@ -88,7 +89,7 @@ public sealed partial class GraphDatabase
     {
         var translated when !ReferenceEquals(translated, error) => translated,
         _ when error is InvalidOperationException => new DatabaseException(error.Message, [new Types.Diagnostic
-            { Code = "COHDBG003", Message = error.Message, Severity = Types.DiagnosticSeverity.Error }], error),
+            { Code = "CG03003", Message = error.Message, Severity = Types.DiagnosticSeverity.Error }], error),
         // A label expression or predicate nested deeper than this thread's stack: the walks
         // check the stack before they descend, so the statement fails, not the process.
         _ when error is InsufficientExecutionStackException stack => GraphStatementTooComplex.Create(stack),
@@ -115,21 +116,21 @@ public sealed partial class GraphDatabase
         // An element whose record or index key outgrows storage fails its statement; the store
         // wrote nothing for it. It derives from StorageException, so it is matched first.
         GraphElementTooLargeException => new DatabaseException(error.Message, [new Types.Diagnostic
-            { Code = "COHDBG009", Message = error.Message, Severity = Types.DiagnosticSeverity.Error }], error),
+            { Code = "CG02009", Message = error.Message, Severity = Types.DiagnosticSeverity.Error }], error),
         _ when DatabaseFailure.Find<StorageException>(error) is not null || DatabaseFailure.Find<System.IO.IOException>(error) is not null
             || DatabaseFailure.Find<Assimalign.Cohesion.Database.Indexing.IndexException>(error) is not null
             || DatabaseFailure.Find<GraphCatalogException>(error) is { IsConflict: false, IsCallerError: false }
             => new DatabaseException(error.Message, [new Types.Diagnostic
-            { Code = "COHDBG006", Message = error.Message, Severity = Types.DiagnosticSeverity.Error }], error),
+            { Code = "CG06006", Message = error.Message, Severity = Types.DiagnosticSeverity.Error }], error),
         _ when DatabaseFailure.Find<ObjectDisposedException>(error) is not null
             => new DatabaseException(ErrorMessages.GraphDisposed, [new Types.Diagnostic
-            { Code = "COHDBG019", Message = ErrorMessages.GraphDisposed, Severity = Types.DiagnosticSeverity.Error }], error),
+            { Code = "CG09019", Message = ErrorMessages.GraphDisposed, Severity = Types.DiagnosticSeverity.Error }], error),
         _ when DatabaseFailure.Find<GraphCatalogException>(error) is { IsConflict: true }
             => new DatabaseTransactionAbortedException(error.Message, [new Types.Diagnostic
-            { Code = "COHDBG007", Message = error.Message, Severity = Types.DiagnosticSeverity.Error }], error),
+            { Code = "CG04007", Message = error.Message, Severity = Types.DiagnosticSeverity.Error }], error),
         _ when DatabaseFailure.Find<GraphCatalogException>(error) is { IsCallerError: true }
             => new DatabaseException(error.Message, [new Types.Diagnostic
-            { Code = "COHDBG003", Message = error.Message, Severity = Types.DiagnosticSeverity.Error }], error),
+            { Code = "CG03003", Message = error.Message, Severity = Types.DiagnosticSeverity.Error }], error),
         _ => error,
     };
 
@@ -164,7 +165,7 @@ public sealed partial class GraphDatabase
             ThrowIfOffline();
             if (context.State != TransactionState.Active)
             {
-                throw new DatabaseException("The graph operation's transaction ended while waiting for the writer lock.");
+                throw DatabaseException.CreateGraphFailure("CK04002", ErrorMessages.GraphDatabaseLockWriterAsyncDatabase);
             }
         }
         catch
@@ -181,8 +182,6 @@ public sealed partial class GraphDatabase
     internal TransactionSnapshot LatestSnapshot(TransactionContext context) => new(context.Sequence,
         TransactionSequence.None, new TransactionSequence(ulong.MaxValue), Coordinator.GetOpenContexts().Where(item => item.State != TransactionState.Committed).Select(item => item.Sequence));
 
-    internal static void ThrowConflict() => throw new DatabaseTransactionAbortedException(_catalogSnapshotChangedMessage,
-        [new Types.Diagnostic { Code = "COHDBG007", Message = _catalogSnapshotChangedMessage, Severity = Types.DiagnosticSeverity.Error }]);
 
     /// <inheritdoc />
     /// <remarks>

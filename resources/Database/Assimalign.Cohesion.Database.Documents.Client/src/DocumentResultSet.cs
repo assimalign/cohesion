@@ -8,6 +8,8 @@ using Assimalign.Cohesion.Database.Documents.Protocol;
 namespace Assimalign.Cohesion.Database.Documents.Client;
 
 /// <summary>A materialized document query result with column metadata and an affected count.</summary>
+[global::System.Diagnostics.DebuggerDisplay("DocumentResultSet Count={Count}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Documents.Client.DocumentResultSet.DebugView))]
 public sealed class DocumentResultSet : IReadOnlyList<DocumentRow>
 {
     private readonly IReadOnlyList<DocumentRow> _rows;
@@ -57,4 +59,20 @@ public sealed class DocumentResultSet : IReadOnlyList<DocumentRow>
     public IEnumerator<DocumentRow> GetEnumerator() => _rows.GetEnumerator();
 
     IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Documents.Client.DocumentResultSet _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Documents.Client.DocumentResultSet value)
+        {
+            _target = value;
+        }
+
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.Documents.Client.DocumentColumn> Columns => _target.Columns;
+        public long AffectedCount => _target.AffectedCount;
+        public bool IsDocumentQuery => _target.IsDocumentQuery;
+        public global::System.Collections.Generic.IReadOnlyList<global::System.Text.Json.JsonElement> Documents => _target.Documents;
+        public int Count => _target.Count;
+    }
 }

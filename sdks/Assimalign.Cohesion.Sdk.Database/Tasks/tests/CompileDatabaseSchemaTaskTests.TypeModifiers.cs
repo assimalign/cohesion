@@ -68,7 +68,7 @@ public partial class CompileDatabaseSchemaTaskTests
         // Assert
         success.ShouldBeFalse();
         engine.Errors.ShouldContain(error => error.Code == "COHDBSDK106");
-        Errors(engine).ShouldContain("COHDBL001", Case.Sensitive);
+        Errors(engine).ShouldContain("CK00001", Case.Sensitive);
         Errors(engine).ShouldContain($"items.{member}", Case.Sensitive);
         Errors(engine).ShouldContain(type, Case.Sensitive);
         task.Schemas.ShouldBeEmpty();

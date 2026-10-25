@@ -49,7 +49,7 @@ public class HealthCheckEventSourceTests
         string checkName = "lifecycle-" + Guid.NewGuid().ToString("N");
         var exception = new InvalidOperationException("Dependency db-primary.internal is unavailable.");
         HealthCheckResult result = HealthCheckResult.Degraded();
-        IHealthCheckService service = HealthChecks.CreateBuilder()
+        IHealthCheckService service = new HealthChecksBuilder()
             .AddCheck(checkName, () => result)
             .Build();
         using var cancellation = new CancellationTokenSource(_testTimeout);
@@ -88,7 +88,7 @@ public class HealthCheckEventSourceTests
     {
         // Arrange
         string checkName = "first-unhealthy-" + Guid.NewGuid().ToString("N");
-        IHealthCheckService service = HealthChecks.CreateBuilder()
+        IHealthCheckService service = new HealthChecksBuilder()
             .AddCheck(checkName, () => HealthCheckResult.Unhealthy())
             .Build();
         using var cancellation = new CancellationTokenSource(_testTimeout);
@@ -112,7 +112,7 @@ public class HealthCheckEventSourceTests
         // Arrange
         string checkName = "first-healthy-" + Guid.NewGuid().ToString("N");
         HealthCheckResult result = HealthCheckResult.Healthy();
-        IHealthCheckService service = HealthChecks.CreateBuilder()
+        IHealthCheckService service = new HealthChecksBuilder()
             .AddCheck(checkName, () => result)
             .Build();
         using var cancellation = new CancellationTokenSource(_testTimeout);
@@ -143,7 +143,7 @@ public class HealthCheckEventSourceTests
         int arrivals = 0;
         var allEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        IHealthCheckService service = HealthChecks.CreateBuilder()
+        IHealthCheckService service = new HealthChecksBuilder()
             .AddCheck("other-" + checkName, () => HealthCheckResult.Healthy(), tags: [HealthTags.Ready])
             .AddCheck(checkName, async (_, token) =>
             {
@@ -191,7 +191,7 @@ public class HealthCheckEventSourceTests
     {
         // Arrange
         string checkName = "instances-" + Guid.NewGuid().ToString("N");
-        IHealthChecksBuilder builder = HealthChecks.CreateBuilder()
+        IHealthChecksBuilder builder = new HealthChecksBuilder()
             .AddCheck(checkName, new StubCheck(HealthStatus.Unhealthy));
         IHealthCheckService first = builder.Build();
         IHealthCheckService second = builder.Build();
@@ -230,7 +230,7 @@ public class HealthCheckEventSourceTests
         StubCheck check = timesOut
             ? StubCheck.BlockingThenCancelledWith(message)
             : StubCheck.Throwing(new InvalidOperationException(message));
-        IHealthCheckService service = HealthChecks.CreateBuilder()
+        IHealthCheckService service = new HealthChecksBuilder()
             .AddCheck(checkName, check, failureStatus: HealthStatus.Degraded, timeout: timeout)
             .Build();
         using var cancellation = new CancellationTokenSource(_testTimeout);
@@ -264,7 +264,7 @@ public class HealthCheckEventSourceTests
     public async Task CheckHealthAsync_NoListener_ShouldCountOnlyThrownAndTimedOutChecksAsync()
     {
         // Arrange
-        IHealthCheckService service = HealthChecks.CreateBuilder()
+        IHealthCheckService service = new HealthChecksBuilder()
             .AddCheck("exception", StubCheck.Throwing(new InvalidOperationException("offline")))
             .AddCheck("timeout", StubCheck.Blocking(), timeout: TimeSpan.FromMilliseconds(50))
             .AddCheck("reported", new StubCheck(HealthStatus.Unhealthy))
@@ -289,7 +289,7 @@ public class HealthCheckEventSourceTests
         string checkName = "cancelled-" + Guid.NewGuid().ToString("N");
         bool block = true;
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        IHealthCheckService service = HealthChecks.CreateBuilder()
+        IHealthCheckService service = new HealthChecksBuilder()
             .AddCheck(checkName, async (_, token) =>
             {
                 if (block)

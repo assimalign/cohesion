@@ -14,17 +14,23 @@ namespace Assimalign.Cohesion.Database.Graph.Client;
 
 /// <summary>One authenticated graph connection supporting one active exchange at a time.</summary>
 /// <remarks>Value results are materialized. Paths stream until enumeration completes or is disposed.
-/// An unfinished path exchange is discarded. Explicit graph transactions are not supported.
+/// An unfinished path exchange is discarded. ExecuteAsync accepts START TRANSACTION, COMMIT and
+/// ROLLBACK on this connection; pool return rolls back an unfinished transaction before reuse.
+/// After acquiring the database writer lock, an idle transaction holds it until completion,
+/// disconnect, pool return or server IdleTimeout (30 minutes by default).
+/// Servers without negotiated transaction-status (pre-#1540) are not pooled.
 /// Lists materialize as <c>object?[]</c>; maps as read-only <c>IReadOnlyDictionary&lt;string, object?&gt;</c>.
 /// Values permit depth 64, 65,536 total values including the root, and 16 MiB encoded bytes.
 /// Pattern property maps remain scalar-only. Without graph.composite-values, composite parameters
 /// are refused locally with ExecutionFailure before a frame is sent; the connection remains reusable.</remarks>
+[global::System.Diagnostics.DebuggerDisplay("GraphConnection {Database,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Client.GraphConnection.DebugView))]
 public sealed class GraphConnection : IAsyncDisposable
 {
     // The operation names the event source writes: the public members that run a query.
-    private const string QueryOperation = "Query";
-    private const string ExecuteOperation = "Execute";
-    private const string QueryPathsOperation = "QueryPaths";
+    private const string queryOperation = "Query";
+    private const string executeOperation = "Execute";
+    private const string queryPathsOperation = "QueryPaths";
 
     private readonly DatabaseConnection _connection;
     // Diagnostics finish after a failed stream has returned its shared lease.
@@ -57,7 +63,7 @@ public sealed class GraphConnection : IAsyncDisposable
     /// <exception cref="GraphClientException">The server rejected the statement or the exchange failed.</exception>
     public ValueTask<GraphResultSet> QueryAsync(string statement, IReadOnlyDictionary<string, object?>? parameters = null,
         CancellationToken cancellationToken = default)
-        => QueryCoreAsync(QueryOperation, statement, parameters, cancellationToken);
+        => QueryCoreAsync(queryOperation, statement, parameters, cancellationToken);
 
     /// <summary>Executes a graph mutation and returns its affected entity count.</summary>
     /// <param name="statement">The GQL statement.</param>
@@ -71,7 +77,7 @@ public sealed class GraphConnection : IAsyncDisposable
     /// <exception cref="GraphClientException">The server rejected the statement or the exchange failed.</exception>
     public async ValueTask<long> ExecuteAsync(string statement, IReadOnlyDictionary<string, object?>? parameters = null,
         CancellationToken cancellationToken = default)
-        => (await QueryCoreAsync(ExecuteOperation, statement, parameters, cancellationToken).ConfigureAwait(false)).AffectedCount;
+        => (await QueryCoreAsync(executeOperation, statement, parameters, cancellationToken).ConfigureAwait(false)).AffectedCount;
 
     /// <summary>Streams paths selected by a single bound path, node, or relationship variable.</summary>
     /// <param name="statement">A MATCH statement returning one bound path or entity variable.</param>
@@ -101,7 +107,7 @@ public sealed class GraphConnection : IAsyncDisposable
     {
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
         long startTimestamp = GraphClientEventSource.Log.GetTimestamp();
-        bool startWritten = GraphClientEventSource.Log.QueryStart(this, QueryPathsOperation);
+        bool startWritten = GraphClientEventSource.Log.QueryStart(this, queryPathsOperation);
 
         // The start's activity lives in this first MoveNextAsync's execution context: the iterator
         // runs each later MoveNextAsync, and its DisposeAsync, on its caller's context, where the
@@ -166,7 +172,7 @@ public sealed class GraphConnection : IAsyncDisposable
             Exception? error = ReferenceEquals(status, GraphClientEventSource.StatusError) ? failure : null;
             if (startContext is null)
             {
-                GraphClientEventSource.Log.QueryEnded(this, QueryPathsOperation, startWritten, status, error, paths, startTimestamp);
+                GraphClientEventSource.Log.QueryEnded(this, queryPathsOperation, startWritten, status, error, paths, startTimestamp);
             }
             else
             {
@@ -246,6 +252,8 @@ public sealed class GraphConnection : IAsyncDisposable
     /// The end of a path query whose start was written, carried into the start's execution context
     /// so its <c>QueryStop</c> closes the activity its <c>QueryStart</c> opened.
     /// </summary>
+    [global::System.Diagnostics.DebuggerDisplay("PathQueryEnd")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Client.GraphConnection.PathQueryEnd.DebugView))]
     private sealed class PathQueryEnd
     {
         private readonly GraphConnection _connection;
@@ -264,7 +272,27 @@ public sealed class GraphConnection : IAsyncDisposable
         }
 
         public void Write()
-            => GraphClientEventSource.Log.QueryEnded(_connection, QueryPathsOperation, startWritten: true, _status, _failure, _paths, _startTimestamp);
+            => GraphClientEventSource.Log.QueryEnded(_connection, queryPathsOperation, startWritten: true, _status, _failure, _paths, _startTimestamp);
+
+        private sealed class DebugView
+        {
+            public DebugView(global::Assimalign.Cohesion.Database.Graph.Client.GraphConnection.PathQueryEnd value)
+            {
+                _ = value;
+            }
+        }
     }
 
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Graph.Client.GraphConnection _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Graph.Client.GraphConnection value)
+        {
+            _target = value;
+        }
+
+        public string Database => _target.Database;
+    }
 }

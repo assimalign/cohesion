@@ -42,7 +42,7 @@ public sealed class SqlCatalogIndex
 
         if (columnNames.Count == 0)
         {
-            throw new SqlCatalogException($"Index '{name}' must declare at least one key column.");
+            throw new SqlCatalogException("CS03059", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlCatalogIndexSqlCatalog, name));
         }
 
         TableObjectId = tableObjectId;
@@ -53,7 +53,7 @@ public sealed class SqlCatalogIndex
         OwningSchema = owningSchema;
         if (isPrimaryKey && !isUnique)
         {
-            throw new ArgumentException("A primary-key index must enforce uniqueness.", nameof(isPrimaryKey));
+            throw new ArgumentException(ErrorMessages.SqlCatalogIndexArgument, nameof(isPrimaryKey));
         }
         IsPrimaryKey = isPrimaryKey;
     }

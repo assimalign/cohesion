@@ -1,10 +1,12 @@
 using System;
 
+using Example.AppC.Database;
+
+using Assimalign.Cohesion.Database;
 using Assimalign.Cohesion.Database.Hosting;
 using Assimalign.Cohesion.Database.Sql;
-using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Database.Storage;
-using Example.AppC.Database;
+using Assimalign.Cohesion.Hosting;
 
 DatabaseApplicationBuilder builder = DatabaseApplication.CreateBuilder(args);
 

@@ -17,7 +17,7 @@ public readonly struct StorageTupleField
     {
         if (string.IsNullOrWhiteSpace(name))
         {
-            throw new ArgumentException("Tuple field name cannot be null or empty.", nameof(name));
+            throw new ArgumentException(ErrorMessages.StorageTupleFieldArgument, nameof(name));
         }
 
         Name = name;

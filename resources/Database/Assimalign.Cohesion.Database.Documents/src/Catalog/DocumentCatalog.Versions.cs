@@ -28,6 +28,8 @@ public sealed partial class DocumentCatalog
         public Reference? Next { get; set; }
     }
 
+    [global::System.Diagnostics.DebuggerDisplay("Versions Count={Count}")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Documents.Catalog.DocumentCatalog.Versions.DebugView))]
     private sealed class Versions
     {
         private readonly Dictionary<(PageId Page, int Slot), Reference> _locations = new();
@@ -176,6 +178,24 @@ public sealed partial class DocumentCatalog
             First = null;
             Current = null;
             _sweep = null;
+        }
+
+        private sealed class DebugView
+        {
+            private readonly global::Assimalign.Cohesion.Database.Documents.Catalog.DocumentCatalog.Versions _target;
+
+            public DebugView(global::Assimalign.Cohesion.Database.Documents.Catalog.DocumentCatalog.Versions value)
+            {
+                _target = value;
+            }
+
+            public global::Assimalign.Cohesion.Database.Documents.Catalog.DocumentCatalog.Reference? First => _target.First;
+            public global::Assimalign.Cohesion.Database.Documents.Catalog.DocumentCatalog.Reference? Current => _target.Current;
+            public bool TerminalKnown => _target.TerminalKnown;
+            public int Count => _target.Count;
+            public global::System.Collections.Generic.LinkedListNode<global::Assimalign.Cohesion.Database.Documents.Catalog.DocumentCatalog.Versions>? MaintenanceNode => _target.MaintenanceNode;
+            public global::System.Func<global::Assimalign.Cohesion.Database.Documents.Internal.CatalogRecord, bool> Matches => _target.Matches;
+            public global::System.Action Retire => _target.Retire;
         }
     }
 }

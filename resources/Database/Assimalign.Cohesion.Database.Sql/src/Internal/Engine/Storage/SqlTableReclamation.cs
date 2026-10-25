@@ -10,6 +10,8 @@ using Assimalign.Cohesion.Database.Sql.Storage;
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 /// <summary>Retires unreachable owner chains in durable, bounded storage brackets.</summary>
+[global::System.Diagnostics.DebuggerDisplay("SqlTableReclamation")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlTableReclamation.DebugView))]
 internal sealed class SqlTableReclamation
 {
     internal const int BatchSize = 32;
@@ -164,6 +166,8 @@ internal sealed class SqlTableReclamation
         lock (_runLock) { _closed = true; }
     }
 
+    [global::System.Diagnostics.DebuggerDisplay("Pending")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlTableReclamation.Pending.DebugView))]
     private sealed class Pending
     {
         internal Pending(ulong objectId, TransactionSequence fence, long epoch)
@@ -177,6 +181,22 @@ internal sealed class SqlTableReclamation
         internal long Epoch { get; }
         internal bool Started { get; set; }
         internal long Pages { get; set; }
+
+        private sealed class DebugView
+        {
+            public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlTableReclamation.Pending value)
+            {
+                _ = value;
+            }
+        }
     }
 
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlTableReclamation value)
+        {
+            _ = value;
+        }
+    }
 }

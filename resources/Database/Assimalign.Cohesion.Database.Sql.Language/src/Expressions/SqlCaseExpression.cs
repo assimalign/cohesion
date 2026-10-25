@@ -7,6 +7,8 @@ using Assimalign.Cohesion.Database.Language;
 /// <summary>
 /// Represents a <c>CASE</c> expression such as <c>CASE WHEN x = 1 THEN 'a' ELSE 'b' END</c>.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("SqlCaseExpression")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Language.SqlCaseExpression.DebugView))]
 public sealed class SqlCaseExpression : SqlExpression
 {
     /// <summary>
@@ -46,4 +48,18 @@ public sealed class SqlCaseExpression : SqlExpression
     /// Gets the ELSE result expression, if present.
     /// </summary>
     public SqlExpression? ElseResult { get; }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Sql.Language.SqlCaseExpression _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Language.SqlCaseExpression value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Sql.Language.SqlExpression? Input => _target.Input;
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.Sql.Language.SqlWhenClause> WhenClauses => _target.WhenClauses;
+        public global::Assimalign.Cohesion.Database.Sql.Language.SqlExpression? ElseResult => _target.ElseResult;
+    }
 }

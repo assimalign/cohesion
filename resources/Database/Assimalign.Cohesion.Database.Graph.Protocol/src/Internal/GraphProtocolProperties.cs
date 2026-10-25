@@ -35,7 +35,7 @@ internal static class GraphProtocolProperties
                     buffer.Add(14);
                     foreach (int part in decimal.GetBits(number)) { ProtocolPayload.WriteInt32(buffer, part); }
                     break;
-                default: throw new ProtocolException("Unsupported graph property type or non-finite number.");
+                default: throw new ProtocolException(ErrorMessages.PathPropertyUnsupported);
             }
         }
     }
@@ -65,20 +65,20 @@ internal static class GraphProtocolProperties
                 12 => BitConverter.Int32BitsToSingle(ProtocolPayload.ReadInt32(payload, ref position)),
                 13 => BitConverter.Int64BitsToDouble(ProtocolPayload.ReadInt64(payload, ref position)),
                 14 => ReadDecimal(payload, ref position),
-                _ => throw new ProtocolException("Unknown graph property type tag."),
+                _ => throw new ProtocolException(ErrorMessages.GraphProtocolPropertiesReadProtocol),
             };
             if (value is float single && !float.IsFinite(single) || value is double number && !double.IsFinite(number))
             {
-                throw new ProtocolException("Graph properties require finite numbers.");
+                throw new ProtocolException(ErrorMessages.GraphProtocolPropertiesReadProtocol2);
             }
-            if (!properties.TryAdd(name, value)) { throw new ProtocolException("Duplicate graph property name."); }
+            if (!properties.TryAdd(name, value)) { throw new ProtocolException(ErrorMessages.GraphProtocolPropertiesReadProtocol3); }
         }
         return properties;
     }
 
     private static byte ReadByte(ReadOnlySpan<byte> payload, ref int position)
     {
-        if (position >= payload.Length) { throw new ProtocolException("Truncated graph property payload."); }
+        if (position >= payload.Length) { throw new ProtocolException(ErrorMessages.ProtocolPropertiesReadByteProtocol); }
         return payload[position++];
     }
 
@@ -90,7 +90,7 @@ internal static class GraphProtocolProperties
         int flags = ProtocolPayload.ReadInt32(payload, ref position);
         if ((flags & 0x7f00ffff) != 0 || ((flags >> 16) & 0xff) > 28)
         {
-            throw new ProtocolException("Malformed graph decimal flags.");
+            throw new ProtocolException(ErrorMessages.ProtocolPropertiesReadDecimalProtocol);
         }
         return new decimal(low, middle, high, flags < 0, (byte)((flags >> 16) & 0xff));
     }

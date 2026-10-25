@@ -53,13 +53,13 @@ Session operations use the active explicit transaction when present; otherwise e
 automatic transaction. The engine has one writer at a time, so a write from one session while
 another session's explicit transaction has written waits for that transaction to end.
 An operation that fails inside an explicit transaction aborts the whole transaction: the session
-refuses further operations and BEGIN with `COHDBB001` until the caller rolls back, and a commit
+refuses further operations and BEGIN with `CB04001` until the caller rolls back, and a commit
 fails without committing.
 A failed journal or data fsync takes the database offline: every later operation, streams and
-the server included, is refused with `DatabaseOfflineException` (`COHDBB002`) until
+the server included, is refused with `DatabaseOfflineException` (`CB06002`) until
 `OpenDatabaseAsync` reopens it and recovery decides the unconfirmed upload (#1243). While an
 engine worker's work on a database keeps failing, the server refuses that database alone with
-`COHDBB003` until the work succeeds or the engine gives up on the database
+`CB06003` until the work succeeds or the engine gives up on the database
 (`WorkerFailureWindow`, `WorkerFailureMinimumPasses`) and takes it offline.
 `BufferPoolCapacity` (32 MiB), `CheckpointJournalSize` (256 MiB) and `CheckpointInterval`
 (5 minutes) size the buffer pool and trigger checkpoints (#1254); a failed undo is retried on a
@@ -77,8 +77,8 @@ session to one database; requests identify only containers and objects in that d
 The default authenticator trusts every principal; configure `Authenticator` for authenticated
 access. Session limits, authentication deadlines, idle eviction, and bounded two-phase shutdown
 are configurable. While a background worker fails on one database, the server refuses only that
-database's handshakes and exchanges (`Unavailable`, `COHDBB003`) and serves the others; an
-offline database is refused as offline (`COHDBB002`). Only a disposed engine, or one that has
+database's handshakes and exchanges (`Unavailable`, `CB06003`) and serves the others; an
+offline database is refused as offline (`CB06002`). Only a disposed engine, or one that has
 failed as a whole (`DatabaseEngine.HasEngineWideFailure`), rejects every session, and a start
 refused for that reason releases the listener and leaves the server stopped for good (owner
 decision 42). A refused exchange, like every wire failure, ends the connection and aborts a
@@ -181,3 +181,100 @@ disposal callback keeps the caller's snapshot pinned until the download closes.
 Cancellation and failed uploads invoke the abort callback with the failure and cannot publish.
 
 The [design](DESIGN.md) specifies the binary format and recovery invariants.
+
+Offline refusals and unconfirmed commits expose their existing model code through Diagnostics,
+with unprefixed exception detail and the original cause. Failure tracing reads that carrier;
+legacy wire error text keeps its existing code prefix. See DESIGN, structured failure codes (#1350).
+
+## Dedicated test actors (#1285)
+
+Deadline-dependent peers and busy test drivers use the linked Storage test helper's LongRunning threads. Ordinary async driver continuations stay on their actor scheduler, without changing SynchronizationContext. Existing deadlines of 25 seconds or more are hang guards. Runner settings impose no parallel-thread cap. See the [scheduling audit](../../Assimalign.Cohesion.Database.Storage/docs/TEST-HYGIENE-AUDIT.md) for every original Task.Run site, the exact journal counters and the physical index-work guards.
+
+
+## Confirmed decode failures (#1372)
+
+Storage's D1 seqlock confirms private record copies before models decode them. Malformed
+copies report the existing corruption code with page and slot. Direct catalog APIs retain
+their model exception type and cause; engine boundaries use the common corruption exception. The shared version store rejects records shorter than its
+16-byte stamp header and retains failed undo/prune work for retry. StorageCorruptionException
+adds a record-scoped constructor and nullable SlotIndex. Formats and wire frames are unchanged.
+
+Unsupported blob catalog versions retain their existing model refusal and terminal wire behavior,
+with page/slot context appended. Malformed current-format metadata uses located corruption.
+
+All five server-options leaves inherit DatabaseServerOptions. Database.Tcp provides generic
+Listen(Uri), retaining the concrete options type, and is public in App.Database (#1391, D7 B).
+The SQL-specific TCP integration is removed; import Assimalign.Cohesion.Database for the helper.
+
+## Error and construction conventions (#1470)
+
+Exception messages and format templates are generated from `src/Properties/ErrorMessages.resx`;
+format arguments use the current culture. Cancellation and abort templates used during normal
+cleanup are cached before reuse. Error identities remain separate from message text where a
+structured diagnostic carrier exists. Standard .NET guards retain their argument names and exception types.
+Shared Engine source uses the consuming assembly's generated accessor through the internal `EngineErrorMessages` binding; no public resource accessor or cross-assembly internal access is introduced.
+
+## Blob diagnostic conventions (#1470)
+
+Exception and diagnostic templates use the project's build-generated `ErrorMessages` resources.
+Parameterized templates format with the current culture; abort/cancellation templates used in
+normal cleanup are cached. The [Database error-code registry](../../Assimalign.Cohesion.Database/docs/ERROR-CODES.md)
+assigns this family its two-letter prefix and categorized five-digit identities.
+Existing SQLSTATE meanings, numeric wire error kinds, frame layouts and disk formats are preserved.
+Structured diagnostics keep their code outside the message. Compiler diagnostic identifiers and
+standard .NET argument guards retain their own contracts.
+
+
+## Reusable conflict throw member (#1470)
+
+Catalog conflict callers use the internal static extension member
+`DatabaseTransactionAbortedException.ThrowBlobConflict()`. The root Database assembly owns the
+exception; Blob retains its existing resource and failure translation. This placement preserves
+exception identity and text, with no public API, diagnostic code, wire, storage-format, event or
+counter change. Existing snapshot-conflict and transaction-failure tests cover the behavior.
+
+
+## Shared validation message completion (#1470)
+
+Engine option requirements and portable database-name refusal reasons, including their rule
+text, resolve through each consuming model's generated internal resources. Valid name checks
+still avoid resource lookup; the engine-description template is cached for construction.
+Existing message text, parameter names, refused values and pre-I/O validation order remain
+unchanged. No public API, error identity, SQLSTATE, storage or wire format, event or counter changes.
+Local predicate guards remain with the policies they validate; reusable unconditional catalog
+throws use exception-type extension members. Private cold comparison and location-attachment
+paths retain their allocation and exception-identity behavior.
+
+## Internal convention maintenance
+
+Internal conflict/resource helpers and private names follow the coding rules. Public component namespaces, transfer behavior and error identities are preserved; see [DESIGN.md](DESIGN.md).
+
+## Direct catalog diagnostics
+
+`BlobCatalogException.Diagnostics` is non-null and preserves the existing catalog error identities
+without changing exception ancestry or message text. See [DESIGN.md](DESIGN.md#direct-catalog-diagnostic-carriers)
+for producer codes and the legacy public-constructor contract.
+
+## Shared lifecycle diagnostic completion
+
+Duplicate logical database/storage creation carries CK03001, whether the database is open or
+represented only by its closed files. Ordinary logical absence remains the precise
+DatabaseNotFoundException and carries CK03002. Each diagnostic has Error severity, the unchanged
+unprefixed exception message and no statement span. Existing coded interrupted-creation failures
+and original causes are retained. No ownership, file mutation, lifecycle ordering, format or
+protocol message-kind change accompanies these diagnostics.
+
+## Model failure producer completion
+
+Session-state, result-row and model-specific refusals expose structured codes while preserving
+their exception types and detail. The [producer table](DESIGN.md#model-failure-producer-completion)
+lists each condition. Successful execution, transaction ownership, storage formats and wire
+layouts are unchanged; the existing wire formatter includes an error code once.
+Handshake refusal descriptions resolve through resources with their existing text and numeric
+protocol error categories. Authentication/version negotiation and refusal control flow are unchanged.
+
+## Debugger inspection (#1470)
+
+Blob debugger views show safe stored metadata without reading streams, taking session snapshots or exposing content.
+
+Eligible types follow the [Database conventions](../../Assimalign.Cohesion.Database/docs/CONVENTIONS.md) debugger display/proxy rules. Views are private and read-only; inspection does not change the public API, execution paths, error contracts, storage formats or protocol bytes.

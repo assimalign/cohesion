@@ -28,10 +28,10 @@ internal sealed partial class SqlPlanExecutor
 
     private async Task<DatabaseResult> ExecuteDropViewAsync(SqlDropViewPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
-        if (_catalog.TryGetTable(plan.Schema, plan.Name, out _)) { throw new SqlPlanningException("COHSQLE033", ErrorMessages.ViewTargetIsTable); }
+        if (_catalog.TryGetTable(plan.Schema, plan.Name, out _)) { throw new SqlPlanningException("CS03033", ErrorMessages.ViewTargetIsTable); }
         if (!_catalog.TryGetView(plan.Schema, plan.Name, out var view))
         {
-            if (!plan.IfExists) { throw new SqlPlanningException("COHSQLE033", string.Format(CultureInfo.CurrentCulture, ErrorMessages.ViewMissing, plan.Schema, plan.Name)); }
+            if (!plan.IfExists) { throw new SqlPlanningException("CS03033", string.Format(CultureInfo.CurrentCulture, ErrorMessages.ViewMissing, plan.Schema, plan.Name)); }
             if (statement.ScriptReceipt is { } absence)
             { await SelfCommitAsync(statement, _catalog.DropViewAsync(plan.Schema, plan.Name, plan.Cascade, absence, cancellationToken)).ConfigureAwait(false); }
             return new SqlQueryResult(DatabaseResultStatus.Success, affectedCount: 0);
@@ -49,7 +49,7 @@ internal sealed partial class SqlPlanExecutor
         var dependent = _catalog.Views.FirstOrDefault(view => column is null ? view.TableDependencies.Contains(table.ObjectId)
             : view.Dependencies.Contains(SqlObjectIdentity.Column(table.ObjectId, column), StringComparer.OrdinalIgnoreCase));
         if (dependent is not null)
-        { throw new SqlPlanningException("COHSQLD002", rename ? string.Format(CultureInfo.CurrentCulture, ErrorMessages.EngineViewDependent, dependent.Schema, dependent.Name)
+        { throw new SqlPlanningException("CS03302", rename ? string.Format(CultureInfo.CurrentCulture, ErrorMessages.EngineViewDependent, dependent.Schema, dependent.Name)
             : string.Format(CultureInfo.CurrentCulture, ErrorMessages.EngineViewDropDependent, table.Schema + "." + table.Name + (column is null ? "" : "." + column), dependent.Schema, dependent.Name)); }
     }
 

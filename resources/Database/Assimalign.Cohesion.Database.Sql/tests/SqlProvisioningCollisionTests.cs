@@ -39,7 +39,7 @@ public sealed class SqlProvisioningCollisionTests
 
         // Assert: only the completed schema-owned step was compensated.
         completed.ShouldBe(1);
-        failure.Message.ShouldStartWith("COHSQLP004:");
+        failure.Message.ShouldStartWith("CS03104:");
         failure.InnerException.ShouldBeOfType<DatabaseObjectLockedException>();
         database.Catalog.TryGetTable("dbo", "a_first", out _).ShouldBeFalse();
         database.Catalog.TryGetTable("dbo", "z_collision", out _).ShouldBeFalse();
@@ -80,7 +80,7 @@ public sealed class SqlProvisioningCollisionTests
 
         // Assert
         completed.ShouldBe(1);
-        failure.Message.ShouldStartWith("COHSQLP004:");
+        failure.Message.ShouldStartWith("CS03104:");
         failure.InnerException.ShouldBeOfType<DatabaseObjectLockedException>();
         database.Catalog.TryGetTable("dbo", "orders", out var table).ShouldBeTrue();
         table.FindColumn("note").ShouldBeNull();

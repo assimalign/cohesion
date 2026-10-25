@@ -16,12 +16,12 @@ public sealed partial class OqlQueryParser
         if (!distinct) { Take("ALL"); }
         var kindToken = Current;
         bool value = Take("VALUE") || Take("RAW");
-        if (value && Is("FROM")) { Error("OQL0002", "SELECT VALUE requires an expression.", kindToken); }
+        if (value && Is("FROM")) { Error("CD00002", ErrorMessages.OqlQueryParserParseSelectVoid, kindToken); }
         List<OqlProjection> projections = [];
         do
         {
             var expression = Failed ? new OqlLiteralExpression(null, Span(kindToken, kindToken)) : ParseExpression();
-            if (value && expression is OqlStarExpression) { Error("OQL0002", "SELECT VALUE requires an expression other than star.", Previous); }
+            if (value && expression is OqlStarExpression) { Error("CD00002", ErrorMessages.OqlQueryParserParseSelectVoid2, Previous); }
             string? projectionAlias = !value && Take("AS") ? Identifier(allowKeyword: true) : null;
             projections.Add(new OqlProjection(expression, projectionAlias));
         } while (!value && !Failed && Take(TokenType.Comma));
@@ -62,8 +62,8 @@ public sealed partial class OqlQueryParser
                 if (_tokens[pathEnd].Type == TokenType.RightBracket) { pathEnd--; }
                 variableToken = _tokens[pathEnd];
             }
-            if (!Failed && variable is null) { Error("OQL0002", "UNNEST requires an alias for an expression without a final path name.", variableToken); }
-            if (!Failed && !variables.Add(variable!)) { Error("OQL0010", ErrorMessages.BindingNameDuplicate, variableToken); }
+            if (!Failed && variable is null) { Error("CD00002", ErrorMessages.OqlQueryParserParseSelectVoid3, variableToken); }
+            if (!Failed && !variables.Add(variable!)) { Error("CD00010", ErrorMessages.BindingNameDuplicate, variableToken); }
             unnest.Add(new OqlUnnestExpression(expression, variable ?? string.Empty, left, Span(bindingStart, Previous)));
         }
 
@@ -99,7 +99,7 @@ public sealed partial class OqlQueryParser
             bool isLimit = Is("LIMIT");
             if (isLimit ? limit is not null : offset is not null)
             {
-                Error("OQL0002", $"Multiple {clause.Text.ToUpperInvariant()} clauses are not allowed.", clause);
+                Error("CD00002", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.OqlQueryParserParseSelectVoid4, clause.Text.ToUpperInvariant()), clause);
                 break;
             }
             Advance();
@@ -153,7 +153,7 @@ public sealed partial class OqlQueryParser
         var start = Current;
         if (Current.Type is TokenType.Eof or TokenType.Semicolon || Is("LIMIT") || Is("OFFSET"))
         {
-            Error("OQL0002", $"Expected an integer literal or parameter after {clause}.", Current);
+            Error("CD00002", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.OqlQueryParserParseCountVoid, clause), Current);
             return new OqlLiteralExpression(null, Span(start, start));
         }
         // Reuse primary parsing for the shared parameter forms and exact operand spans.
@@ -167,7 +167,7 @@ public sealed partial class OqlQueryParser
             NumberStyles.AllowLeadingSign | NumberStyles.AllowLeadingWhite | NumberStyles.AllowTrailingWhite,
             CultureInfo.InvariantCulture, out long number) || number < 0))
         {
-            Error("OQL0007", string.Format(CultureInfo.CurrentCulture, ErrorMessages.PagingCountInvalid, clause),
+            Error("CD00007", string.Format(CultureInfo.CurrentCulture, ErrorMessages.PagingCountInvalid, clause),
                 new Lexeme(start.Type, _source[start.Start..Previous.End], start.Start, Previous.End, start.Line));
         }
         return count;

@@ -49,6 +49,8 @@ namespace Assimalign.Cohesion.Database.Sql.Schema;
 /// is read, and kept: the schema is immutable, so they never change.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("SqlCompiledSchema {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Schema.SqlCompiledSchema.DebugView))]
 public sealed class SqlCompiledSchema
 {
     /// <summary>Gets the current compiled-schema document format.</summary>
@@ -149,7 +151,7 @@ public sealed class SqlCompiledSchema
         {
             throw SqlCompiledSchemaValidator.InvalidDocument(
                 declaration,
-                "The compiled schema collection cannot be null.");
+                ErrorMessages.SqlCompiledSchemaSnapshotFailure);
         }
 
         var copy = new T[values.Count];
@@ -159,7 +161,7 @@ public sealed class SqlCompiledSchema
             {
                 throw SqlCompiledSchemaValidator.InvalidDocument(
                     $"{declaration}[{index}]",
-                    "The compiled schema collection cannot contain a null entry.");
+                    ErrorMessages.SqlCompiledSchemaSnapshotFailure2);
             }
 
             copy[index] = normalize is null ? values[index] : normalize(values[index]);
@@ -168,5 +170,22 @@ public sealed class SqlCompiledSchema
         Array.Sort(copy, (left, right) =>
             StringComparer.Ordinal.Compare(nameSelector(left), nameSelector(right)));
         return Array.AsReadOnly(copy);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Sql.Schema.SqlCompiledSchema _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Schema.SqlCompiledSchema value)
+        {
+            _target = value;
+        }
+
+        public string Format => _target.Format;
+        public string Name => _target.Name;
+        public bool AllowsDestructiveChanges => _target.AllowsDestructiveChanges;
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.Sql.Schema.CompiledSchemaType> Types => _target.Types;
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.Sql.Schema.CompiledSchemaTable> Tables => _target.Tables;
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.Sql.Schema.CompiledSchemaPrincipal> Principals => _target.Principals;
     }
 }

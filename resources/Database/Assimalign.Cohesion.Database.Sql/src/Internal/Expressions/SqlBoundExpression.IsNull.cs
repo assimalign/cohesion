@@ -1,6 +1,8 @@
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 /// <summary><c>IS [NOT] NULL</c> over a bound operand.</summary>
+[global::System.Diagnostics.DebuggerDisplay("SqlBoundIsNull")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlBoundIsNull.DebugView))]
 internal sealed class SqlBoundIsNull : SqlBoundExpression
 {
     /// <summary>Initializes a bound null test.</summary>
@@ -18,4 +20,12 @@ internal sealed class SqlBoundIsNull : SqlBoundExpression
 
     /// <summary>Gets whether the test is <c>IS NOT NULL</c>.</summary>
     internal bool IsNegated { get; }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlBoundIsNull value)
+        {
+            _ = value;
+        }
+    }
 }

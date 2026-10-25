@@ -33,10 +33,10 @@ public sealed partial class SqlCatalog
             ThrowIfOffline();
             if (!_tables.TryGetValue((table.Schema, table.Name), out var current) || !ReferenceEquals(current.Table, table))
             {
-                throw new SqlCatalogException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.IdentityTableChanged, table.Schema, table.Name));
+                throw new SqlCatalogException("CS04064", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.IdentityTableChanged, table.Schema, table.Name));
             }
             var column = table.Columns.SingleOrDefault(column => column.Identity is not null)
-                ?? throw new SqlCatalogException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.IdentityColumnMissing, table.Schema, table.Name));
+                ?? throw new SqlCatalogException("CS01015", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.IdentityColumnMissing, table.Schema, table.Name));
             var identity = column.Identity!;
             if (!_identityCounters.TryGetValue(table.ObjectId, out var counter))
             {
@@ -53,7 +53,7 @@ public sealed partial class SqlCatalog
                     DatabaseType.Int32 => "INT",
                     _ => "BIGINT",
                 };
-                throw new SqlCatalogException(string.Format(System.Globalization.CultureInfo.CurrentCulture,
+                throw new SqlCatalogException("CS02002", string.Format(System.Globalization.CultureInfo.CurrentCulture,
                     ErrorMessages.IdentityRangeExhausted, column.Name, typeName, identity.Increment > 0 ? maximum : minimum));
             }
             if (counter.Remaining == 0)
@@ -91,7 +91,7 @@ public sealed partial class SqlCatalog
             DatabaseType.Int16 => (short.MinValue, short.MaxValue),
             DatabaseType.Int32 => (int.MinValue, int.MaxValue),
             DatabaseType.Int64 => (long.MinValue, long.MaxValue),
-            _ => throw new SqlCatalogException(ErrorMessages.IdentityIntegerRequired),
+            _ => throw new SqlCatalogException("CS02003", ErrorMessages.IdentityIntegerRequired),
         };
         return increment > 0 ? (1, maximum) : (minimum, -1);
     }
@@ -102,7 +102,7 @@ public sealed partial class SqlCatalog
         long reserved = reader.ReadInt64();
         if (!reader.IsAtEnd || id == 0 || !_identityCounters.TryAdd(id, new IdentityCounter { Next = reserved, Location = (pageId, slotIndex) }))
         {
-            throw new SqlCatalogException(ErrorMessages.IdentityCounterMalformed);
+            throw new SqlCatalogException("CS06059", ErrorMessages.IdentityCounterMalformed);
         }
     }
 
@@ -111,13 +111,13 @@ public sealed partial class SqlCatalog
         foreach (var (id, counter) in _identityCounters)
         {
             var column = (tablesById.TryGetValue(id, out var table) ? table : null)?.Columns.SingleOrDefault(column => column.Identity is not null)
-                ?? throw new SqlCatalogException(ErrorMessages.IdentityCounterOrphaned);
+                ?? throw new SqlCatalogException("CS06059", ErrorMessages.IdentityCounterOrphaned);
             var identity = column.Identity!;
             var (minimum, maximum) = IdentityBounds(column.Type.Type, identity.Increment);
             Int128 distance = counter.Next - identity.Start;
             if (counter.Next < minimum || counter.Next > maximum || distance % identity.Increment != 0 || distance / identity.Increment < 0)
             {
-                throw new SqlCatalogException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.IdentityCounterInvalid, column.Name));
+                throw new SqlCatalogException("CS06059", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.IdentityCounterInvalid, column.Name));
             }
             counter.Next += identity.Increment;
         }
@@ -133,7 +133,7 @@ public sealed partial class SqlCatalog
         if (column.Identity is not { } identity || column.Type.Type != oldColumn.Type.Type ||
             identity.IsAlways != oldIdentity.IsAlways || identity.Start != oldIdentity.Start || identity.Increment != oldIdentity.Increment)
         {
-            throw new SqlCatalogException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.IdentityMetadataInvalid, column.Name));
+            throw new SqlCatalogException("CS03053", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.IdentityMetadataInvalid, column.Name));
         }
     }
 
@@ -145,10 +145,20 @@ public sealed partial class SqlCatalog
         }
     }
 
+    [global::System.Diagnostics.DebuggerDisplay("IdentityCounter")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Catalog.SqlCatalog.IdentityCounter.DebugView))]
     private sealed class IdentityCounter
     {
         internal Int128 Next { get; set; }
         internal int Remaining { get; set; }
         internal (PageId PageId, int SlotIndex)? Location { get; set; }
+
+        private sealed class DebugView
+        {
+            public DebugView(global::Assimalign.Cohesion.Database.Sql.Catalog.SqlCatalog.IdentityCounter value)
+            {
+                _ = value;
+            }
+        }
     }
 }

@@ -11,6 +11,8 @@ using Xunit;
 using Assimalign.Cohesion.Database.Graph.Storage.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Transactions;
 
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
+
 namespace Assimalign.Cohesion.Database.Graph.Storage.Tests;
 
 [CollectionDefinition(nameof(GraphAdjacencyConcurrencyTests), DisableParallelization = true)]
@@ -36,7 +38,7 @@ public sealed class GraphAdjacencyConcurrencyTests
         // Act: the only outgoing entry is consumed; the incoming range has not opened yet.
         (await cursor.MoveNextAsync()).ShouldBeTrue();
         cursor.Current.Id.ShouldBe(outgoing.Id);
-        ulong added = await Task.Run(async () =>
+        ulong added = await DedicatedTestTask.Run(async () =>
         {
             var writer = await fixture.Coordinator.BeginAsync(IsolationLevel.Snapshot, timeout.Token);
             await fixture.Store.UpdateRelationshipAsync(changed.Id, Properties(1), writer, timeout.Token);
@@ -80,7 +82,7 @@ public sealed class GraphAdjacencyConcurrencyTests
 
         // Act: independent loops yield inside operations so seeks and record reads can race
         // mutation brackets. Two barrier phases per round keep both operation lifetimes open.
-        var readerTask = Task.Run(async () =>
+        var readerTask = DedicatedTestTask.Run(async () =>
         {
             for (int iteration = 0; iteration < rounds; iteration++)
             {
@@ -111,7 +113,7 @@ public sealed class GraphAdjacencyConcurrencyTests
                 await Task.Yield();
             }
         }, timeout.Token);
-        var writerTask = Task.Run(async () =>
+        var writerTask = DedicatedTestTask.Run(async () =>
         {
             ulong prior = replaced.Id;
             for (int version = 1; version <= rounds; version++)

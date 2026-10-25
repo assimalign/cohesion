@@ -33,7 +33,7 @@ public sealed class DocumentInsertNumericTests
         }
     }
 
-    [Theory(DisplayName = "Cohesion Test [Documents] - INSERT: lossy numbers fail with COHDOC007 and roll back all work")]
+    [Theory(DisplayName = "Cohesion Test [Documents] - INSERT: lossy numbers fail with CD02007 and roll back all work")]
     [MemberData(nameof(LossyInputs))]
     public async Task Execute_LossyNumber_ShouldPreserveCollectionAsync(string number, string source, bool explicitTransaction)
     {
@@ -64,7 +64,7 @@ public sealed class DocumentInsertNumericTests
 
         // Assert
         var diagnostic = failure.Diagnostics.ShouldHaveSingleItem();
-        diagnostic.Code.ShouldBe("COHDOC007");
+        diagnostic.Code.ShouldBe("CD02007");
         diagnostic.Start.ShouldBe(statement.IndexOf(operand, StringComparison.Ordinal));
         diagnostic.End.ShouldBe(diagnostic.Start + operand.Length);
         diagnostic.Line.ShouldBe(1);
@@ -74,7 +74,7 @@ public sealed class DocumentInsertNumericTests
             transaction.State.ShouldBe(TransactionState.Faulted);
             var refused = await Should.ThrowAsync<DatabaseException>(async () =>
                 await session.ExecuteAsync("SELECT * FROM items", cancellationToken: CancellationToken.None));
-            refused.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBD001");
+            refused.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD04101");
             await transaction.RollbackAsync(CancellationToken.None);
         }
         await using var result = (DatabaseResultSet)await session.ExecuteAsync("SELECT META().id FROM items WHERE n = 2", cancellationToken: CancellationToken.None);

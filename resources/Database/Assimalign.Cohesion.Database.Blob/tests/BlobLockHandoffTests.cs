@@ -12,6 +12,8 @@ using Xunit;
 using Assimalign.Cohesion.Database.Blob.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Transactions;
 
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
+
 namespace Assimalign.Cohesion.Database.Blob.Tests;
 
 [Collection(nameof(BlobLockHandoffCollection))]
@@ -63,7 +65,7 @@ public sealed class BlobLockHandoffTests
             pending.IsCompleted.ShouldBeFalse();
             blocked++;
             using var gate = new CommitEventGate(database.Name, writer.Context.Sequence.Value);
-            var committing = Task.Run(async () => await writer.CommitAsync(token), token);
+            var committing = DedicatedTestTask.Run(async () => await writer.CommitAsync(token), token);
             try
             {
                 // Act: the waiter finishes while commit is held before untracking.

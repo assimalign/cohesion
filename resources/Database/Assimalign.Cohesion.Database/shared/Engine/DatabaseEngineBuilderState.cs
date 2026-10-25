@@ -191,7 +191,7 @@ internal sealed class DatabaseEngineBuilderState<TEngine>
     {
         if (Volatile.Read(ref _buildAttempted) != 0)
         {
-            throw new InvalidOperationException($"{_model} engine '{_name}': composition is frozen after a build attempt.");
+            throw new InvalidOperationException(string.Format(System.Globalization.CultureInfo.CurrentCulture, EngineErrorMessages.BuilderStateEnsureMutableFailure, _model, _name));
         }
     }
 
@@ -229,7 +229,7 @@ internal sealed class DatabaseEngineBuilderState<TEngine>
     {
         if (Interlocked.Exchange(ref _buildAttempted, 1) != 0)
         {
-            throw new InvalidOperationException($"{_model} engine '{_name}': the builder supports one build attempt.");
+            throw new InvalidOperationException(string.Format(System.Globalization.CultureInfo.CurrentCulture, EngineErrorMessages.EngineBuilderStateBeginBuildFailure, _model, _name));
         }
     }
 
@@ -272,7 +272,7 @@ internal sealed class DatabaseEngineBuilderState<TEngine>
                 // A sequence never read to the end dropped its remaining factories.
                 if (_progress != ComposeProgress.ServersAttached)
                 {
-                    throw new InvalidOperationException("The compose method returned before it attached every product.");
+                    throw new InvalidOperationException(EngineErrorMessages.EngineBuilderStateCompleteFailure);
                 }
             }
             catch (Exception failure) when (failure is not OutOfMemoryException)
@@ -360,12 +360,12 @@ internal sealed class DatabaseEngineBuilderState<TEngine>
             : (ComposeProgress.ReadingWorkers, ComposeProgress.None, ComposeProgress.WorkersAttached);
         if (_progress >= reading)
         {
-            throw new InvalidOperationException("The compose method read a product sequence twice.");
+            throw new InvalidOperationException(EngineErrorMessages.EngineBuilderStateProduceFailure);
         }
 
         if (_progress != required)
         {
-            throw new InvalidOperationException("The compose method requested a server before it attached every worker.");
+            throw new InvalidOperationException(EngineErrorMessages.EngineBuilderStateProduceFailure2);
         }
 
         _progress = reading;
@@ -387,7 +387,7 @@ internal sealed class DatabaseEngineBuilderState<TEngine>
     {
         if (_pending is { } previous && !IsAttached(engine, previous))
         {
-            throw new InvalidOperationException("The compose method read past a product it did not attach.");
+            throw new InvalidOperationException(EngineErrorMessages.StateThrowIfPendingUnattachedFailure);
         }
     }
 

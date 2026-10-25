@@ -21,7 +21,7 @@ namespace Assimalign.Cohesion.Database.Graph.Tests;
 [Collection("Graph wire diagnostics")]
 public sealed class GraphWireDiagnosticTests
 {
-    [Theory(DisplayName = "Cohesion Test [Graph] - Wire: empty statements carry GQL0001 and their complete span")]
+    [Theory(DisplayName = "Cohesion Test [Graph] - Wire: empty statements carry CG00001 and their complete span")]
     [InlineData("", false)]
     [InlineData(" \n  ", false)]
     [InlineData("", true)]
@@ -56,9 +56,9 @@ public sealed class GraphWireDiagnosticTests
         finally { AppDomain.CurrentDomain.FirstChanceException -= Capture; }
 
         // Assert
-        AssertDiagnostic(captured.ShouldNotBeNull(), "GQL0001", Location.Create(1, 1, 0, text.Length));
+        AssertDiagnostic(captured.ShouldNotBeNull(), "CG00001", Location.Create(1, 1, 0, text.Length));
         error.Code.ShouldBe(ProtocolErrorCode.ParseFailure);
-        error.Message.ShouldBe("GQL0001: A graph statement must not be empty.");
+        error.Message.ShouldBe("CG00001: A graph statement must not be empty.");
         transaction.State.ShouldBe(Transactions.TransactionState.Active);
         await client.SendAsync(ProtocolMessageType.Ping);
         await client.ExpectAsync(ProtocolMessageType.Pong);
@@ -87,9 +87,9 @@ public sealed class GraphWireDiagnosticTests
         var error = ProtocolErrorMessage.Decode(frame.Payload.Span);
 
         // Assert
-        AssertDiagnostic(failure, "COHDBG001", location);
+        AssertDiagnostic(failure, "CG05001", location);
         error.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
-        error.Message.ShouldBe("COHDBG001: " + failure.Message);
+        error.Message.ShouldBe("CG05001: " + failure.Message);
         await client.SendAsync(ProtocolMessageType.Ping);
         await client.ExpectAsync(ProtocolMessageType.Pong);
     }
@@ -110,7 +110,7 @@ public sealed class GraphWireDiagnosticTests
         var failure = await Should.ThrowAsync<DatabaseException>(() => WritePathsAsync(session, new RejectedGraphResult([]), CancellationToken.None));
 
         // Assert
-        AssertDiagnostic(failure, "COHDBG001", Location.Create(1, 1, 0, text.Length));
+        AssertDiagnostic(failure, "CG05001", Location.Create(1, 1, 0, text.Length));
         failure.Message.ShouldBe("A path request did not produce a graph path result.");
     }
 
@@ -118,9 +118,9 @@ public sealed class GraphWireDiagnosticTests
     public async Task WriteResultAsync_RejectedResult_ShouldPreserveDiagnosticCarrierAsync()
     {
         // Arrange
-        var warning = new Diagnostic { Code = "COHDBG010", Message = "Unknown label.", Severity = DiagnosticSeverity.Warning,
+        var warning = new Diagnostic { Code = "CG01010", Message = "Unknown label.", Severity = DiagnosticSeverity.Warning,
             Location = DiagnosticLocation.Absolute, Start = 7, End = 12, Line = 2 };
-        var error = new Diagnostic { Code = "COHDBG001", Message = "Invalid graph request.", Severity = DiagnosticSeverity.Error,
+        var error = new Diagnostic { Code = "CG05001", Message = "Invalid graph request.", Severity = DiagnosticSeverity.Error,
             Location = DiagnosticLocation.Absolute, Start = 20, End = 25, Line = 3 };
         await using var harness = await GraphServerHarness.StartAsync();
         await using var client = await harness.DialAsync();
@@ -139,6 +139,31 @@ public sealed class GraphWireDiagnosticTests
         failure.Diagnostics[1].End.ShouldBe(25);
         failure.Diagnostics[1].Line.ShouldBe(3);
         failure.Message.ShouldBe(error.Message);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Graph] - Wire: an oversized result header carries the existing value-limit identity")]
+    public async Task WriteResultAsync_OversizedHeader_ShouldCarryValueLimitDiagnosticAsync()
+    {
+        // Exercise the real header encoder without parsing or executing a large statement.
+        await using var harness = await GraphServerHarness.StartAsync();
+        await using var client = await harness.DialAsync();
+        await client.HandshakeAsync();
+        var session = (GraphDatabaseServerSession)harness.Server.Sessions.Single();
+        var result = new GraphQueryResult([
+            new DatabaseColumn { Name = new string('h', GraphValueCodec.MaxPayloadLength), Ordinal = 0, Type = DatabaseType.String },
+        ], []);
+
+        var failure = await Should.ThrowAsync<GraphPlanningException>(() =>
+            WriteResultAsync(session, result, new DatabaseKeyWriter(), CancellationToken.None));
+
+        failure.ShouldBeOfType<GraphPlanningException>();
+        failure.Message.ShouldBe("Graph values are limited to depth 64, 65536 values and 16777216 encoded bytes.");
+        var diagnostic = failure.Diagnostics.ShouldHaveSingleItem();
+        diagnostic.Code.ShouldBe("CG02013");
+        diagnostic.Message.ShouldBe(failure.Message);
+        diagnostic.Severity.ShouldBe(DiagnosticSeverity.Error);
+        diagnostic.Start.ShouldBeNull();
+        diagnostic.End.ShouldBeNull();
     }
 
     private static void AssertDiagnostic(DatabaseException failure, string code, Location location)

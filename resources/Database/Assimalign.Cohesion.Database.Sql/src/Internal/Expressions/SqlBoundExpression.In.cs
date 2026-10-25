@@ -6,6 +6,8 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// <c>[NOT] IN</c> over a group of candidates without column references, with the common
 /// comparison type and collations resolved when the expression was bound.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("SqlBoundIn")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlBoundIn.DebugView))]
 internal sealed class SqlBoundIn : SqlBoundExpression
 {
     /// <summary>Initializes a bound list membership test.</summary>
@@ -56,4 +58,12 @@ internal sealed class SqlBoundIn : SqlBoundExpression
         SqlBoundParameter { Value: string text } parameter => new SqlBoundParameter(parameter.Name, new SqlCharacter(text)),
         _ => expression,
     };
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlBoundIn value)
+        {
+            _ = value;
+        }
+    }
 }

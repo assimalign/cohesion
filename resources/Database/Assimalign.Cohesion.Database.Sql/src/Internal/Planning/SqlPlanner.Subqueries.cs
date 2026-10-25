@@ -126,7 +126,7 @@ internal sealed partial class SqlPlanner
         var projections = SubqueryProjections(child);
         if (kind != SqlSubqueryKind.Exists && projections.Count != 1)
         {
-            throw new SqlPlanningException("COHSQLE013", string.Format(CultureInfo.CurrentCulture,
+            throw new SqlPlanningException("CS05013", string.Format(CultureInfo.CurrentCulture,
                 ErrorMessages.SubqueryColumnCount, kind == SqlSubqueryKind.Scalar ? "Scalar" : "IN", projections.Count), source.Location);
         }
         var type = kind == SqlSubqueryKind.Exists ? DatabaseType.Boolean : projections[0].Type;

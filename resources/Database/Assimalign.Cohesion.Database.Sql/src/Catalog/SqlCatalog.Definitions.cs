@@ -157,7 +157,7 @@ public sealed partial class SqlCatalog
         var requestedParameterTypes = Array.AsReadOnly(parameterTypes.ToArray());
         if (requestedParameterTypes.Any(string.IsNullOrWhiteSpace))
         {
-            throw new ArgumentException("A requested function parameter type cannot be blank.", nameof(parameterTypes));
+            throw new ArgumentException(ErrorMessages.SqlCatalogDropFunctionAsyncArgument, nameof(parameterTypes));
         }
         return DropFunctionCoreAsync(signature, cancellationToken, publication, requestedParameterTypes);
     }
@@ -213,7 +213,7 @@ public sealed partial class SqlCatalog
         byte[] record = new DatabaseKeyWriter().AppendInt32(kind).AppendString(JsonSerializer.Serialize(value, typeInfo), Collation.Binary).ToArray();
         if (record.Length > SlottedPage.MaxRecordSize)
         {
-            throw new SqlCatalogException("COHSQLE042", $"SQL definition '{key}' exceeds the catalog record limit of {SlottedPage.MaxRecordSize} bytes.");
+            throw new SqlCatalogException("CS05042", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CreateDefinitionAsyncSqlCatalog, key, SlottedPage.MaxRecordSize));
         }
 
         lock (_sync)
@@ -221,7 +221,7 @@ public sealed partial class SqlCatalog
             ThrowIfOffline();
             if (directory.ContainsKey(key))
             {
-                throw new SqlCatalogException(value is SqlCatalogFunction ? "COHSQLE065" : "COHSQLE050", $"SQL definition '{key}' already exists.");
+                throw new SqlCatalogException(value is SqlCatalogFunction ? "CS03065" : "CS03050", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CreateDefinitionAsyncSqlCatalog2, key));
             }
             using var transaction = _storage.BeginTransaction();
             var location = _storage.InsertRow(transaction, record);
@@ -243,14 +243,14 @@ public sealed partial class SqlCatalog
             ThrowIfOffline();
             if (!directory.TryGetValue(key, out var slot))
             {
-                throw new SqlCatalogException(typeof(T) == typeof(SqlCatalogFunction) ? "COHSQLE009" : "COHSQLE052", $"SQL definition '{key}' does not exist.");
+                throw new SqlCatalogException(typeof(T) == typeof(SqlCatalogFunction) ? "CS01009" : "CS01052", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CatalogDropDefinitionAsyncSqlCatalog, key));
             }
             if (slot.Value is SqlCatalogFunction function)
             {
                 actualObject = "F:" + function.Signature;
                 if (requestedParameterTypes is not null && requestedParameterTypes.Count != function.ParameterTypes.Count)
                 {
-                    throw new SqlCatalogException("COHSQLS001", ErrorMessages.ScriptParameterCountMismatch);
+                    throw new SqlCatalogException("CS03201", ErrorMessages.ScriptParameterCountMismatch);
                 }
                 requestedParameterTypes ??= function.ParameterTypes;
             }
@@ -272,27 +272,27 @@ public sealed partial class SqlCatalog
             if (kind == functionRecordKind)
             {
                 var value = JsonSerializer.Deserialize(json, SqlCatalogJsonContext.Default.SqlCatalogFunction)
-                    ?? throw new SqlCatalogException("Missing SQL function definition.");
+                    ?? throw new SqlCatalogException("CS06059", ErrorMessages.SqlCatalogLoadDefinitionSqlCatalog);
                 if (!_functions.TryAdd(value.Signature, new DefinitionSlot<SqlCatalogFunction>(value, location)))
                 {
-                    throw new SqlCatalogException($"Duplicate SQL function '{value.Signature}'.");
+                    throw new SqlCatalogException("CS06059", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlCatalogLoadDefinitionSqlCatalog2, value.Signature));
                 }
 
             }
             else
             {
                 var value = JsonSerializer.Deserialize(json, SqlCatalogJsonContext.Default.SqlCatalogDomain)
-                    ?? throw new SqlCatalogException("Missing SQL domain definition.");
+                    ?? throw new SqlCatalogException("CS06059", ErrorMessages.SqlCatalogLoadDefinitionSqlCatalog3);
                 if (!_domains.TryAdd(value.Name, new DefinitionSlot<SqlCatalogDomain>(value, location)))
                 {
-                    throw new SqlCatalogException($"Duplicate SQL domain '{value.Name}'.");
+                    throw new SqlCatalogException("CS06059", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlCatalogLoadDefinitionSqlCatalog4, value.Name));
                 }
 
             }
         }
         catch (Exception failure) when (failure is JsonException or ArgumentException)
         {
-            throw new SqlCatalogException($"Malformed SQL definition: {failure.Message}");
+            throw new SqlCatalogException("CS06059", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlCatalogLoadDefinitionSqlCatalog5, failure.Message));
         }
     }
 

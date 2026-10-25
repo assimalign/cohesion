@@ -243,7 +243,7 @@ public sealed class SqlTransactionRollbackTests
 
         // Assert: the kernel aborted; the engine translates the cause as offline, not unconfirmed.
         journal.LastLsn.ShouldBe(lastBeforeCommit);
-        error.Code.ShouldBe("COHSQLT004");
+        error.Code.ShouldBe("CS04004");
         var offline = StorageOfflineException.Find(error).ShouldNotBeNull();
         offline.Cause.ShouldBe(StorageOfflineCause.JournalFlush);
         offline.CommitRecordWritten.ShouldBeFalse();

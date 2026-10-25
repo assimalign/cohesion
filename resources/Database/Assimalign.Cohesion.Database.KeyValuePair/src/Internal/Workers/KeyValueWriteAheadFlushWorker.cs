@@ -30,6 +30,8 @@ namespace Assimalign.Cohesion.Database.KeyValuePair.Internal;
 /// so is a database its holder closed, whose close flushes both file sets.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("KeyValueWriteAheadFlushWorker {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.KeyValuePair.Internal.KeyValueWriteAheadFlushWorker.DebugView))]
 internal sealed class KeyValueWriteAheadFlushWorker : DatabaseWriteWorker<KeyValueDatabase>
 {
     private readonly KeyValueDatabaseEngine _engine;
@@ -125,4 +127,19 @@ internal sealed class KeyValueWriteAheadFlushWorker : DatabaseWriteWorker<KeyVal
         out DatabaseWorkerLanes<DatabaseWriteResult>.Outcome outcome, DatabaseWorkerPass.Visit? visit)
         => Lanes.Run(storage, () => new DatabaseWriteResult { Units = storage.FlushPendingCommits() ? 1 : 0 },
             LaneSignal, LaneTimeout, cancellationToken, out outcome, visit, storage.Name);
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.KeyValuePair.Internal.KeyValueWriteAheadFlushWorker _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.KeyValuePair.Internal.KeyValueWriteAheadFlushWorker value)
+        {
+            _target = value;
+        }
+
+        public bool CompletionOnly => _target.CompletionOnly;
+        public string Name => _target.Name;
+        public global::Assimalign.Cohesion.Database.DatabaseEngineWorkerKind Kind => _target.Kind;
+        public global::System.TimeSpan Interval => _target.Interval;
+    }
 }

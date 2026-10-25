@@ -45,7 +45,7 @@ public sealed class SqlJoinShapeTests
         var statement = (SqlQueryStatement)new SqlQueryParser().Parse(sql);
 
         // Assert
-        var diagnostic = statement.Diagnostics.Single(d => d.Code == "COHDBL001");
+        var diagnostic = statement.Diagnostics.Single(d => d.Code == "CK00001");
         sql[diagnostic.Start!.Value..diagnostic.End!.Value].ShouldBe(token);
     }
 

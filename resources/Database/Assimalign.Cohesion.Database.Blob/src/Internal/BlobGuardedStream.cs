@@ -16,6 +16,8 @@ namespace Assimalign.Cohesion.Database.Blob.Internal;
 /// transaction like any other failed operation (#1225). An upload's failures reach the operation
 /// through the storage stream's own abort callback.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("BlobGuardedStream")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Blob.Internal.BlobGuardedStream.DebugView))]
 internal sealed class BlobGuardedStream : Stream
 {
     private readonly Stream _inner;
@@ -173,7 +175,7 @@ internal sealed class BlobGuardedStream : Stream
         Check();
         if (!_inner.CanRead)
         {
-            throw new NotSupportedException("The blob stream does not support reading.");
+            throw new NotSupportedException(ErrorMessages.StreamCheckReadableNotSupported);
         }
     }
 
@@ -222,5 +224,17 @@ internal sealed class BlobGuardedStream : Stream
             BlobDatabaseEventSource.Log.TransferFailed(null, string.Empty, code: null, error);
         }
         GC.SuppressFinalize(this);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Blob.Internal.BlobGuardedStream _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Blob.Internal.BlobGuardedStream value)
+        {
+            _target = value;
+        }
+
+        public bool CanSeek => _target.CanSeek;
     }
 }

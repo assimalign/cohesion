@@ -28,7 +28,7 @@ namespace Assimalign.Cohesion.Database.Indexing.Tests;
 [Collection(nameof(IndexEventSourceCollection))]
 public sealed class IndexEventSourceTests
 {
-    private const ulong ObjectId = 9;
+    private const ulong objectId = 9;
 
     [Fact(DisplayName = "Cohesion Test [Database.Indexing] - IndexEventSource: Should be named for its assembly")]
     public void GetName_IndexEventSource_ShouldEqualAssemblyName()
@@ -64,8 +64,8 @@ public sealed class IndexEventSourceTests
 
         // Act
         var transaction = await harness.BeginAsync();
-        await harness.IndexManager.CreateIndexAsync(transaction, ObjectId, new IndexDefinition("ix_lifecycle"));
-        await harness.IndexManager.DropIndexAsync(transaction, ObjectId, "ix_lifecycle");
+        await harness.IndexManager.CreateIndexAsync(transaction, objectId, new IndexDefinition("ix_lifecycle"));
+        await harness.IndexManager.DropIndexAsync(transaction, objectId, "ix_lifecycle");
         await harness.CommitAsync(transaction);
 
         // Assert
@@ -76,12 +76,12 @@ public sealed class IndexEventSourceTests
         events[0].EventId.ShouldBe(1);
         events[0].Level.ShouldBe(EventLevel.Verbose);
         events[0].PayloadNames.ShouldBe(["database", "objectId", "index", "kind"]);
-        events[0].Payload.ShouldBe([name, (long)ObjectId, "ix_lifecycle", nameof(IndexKind.BTree)]);
+        events[0].Payload.ShouldBe([name, (long)objectId, "ix_lifecycle", nameof(IndexKind.BTree)]);
 
         events[1].EventId.ShouldBe(2);
         events[1].Level.ShouldBe(EventLevel.Verbose);
         events[1].PayloadNames.ShouldBe(["database", "objectId", "index"]);
-        events[1].Payload.ShouldBe([name, (long)ObjectId, "ix_lifecycle"]);
+        events[1].Payload.ShouldBe([name, (long)objectId, "ix_lifecycle"]);
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Indexing] - IndexEventSource: Should report the first leaf split of a root and the root's growth once each")]
@@ -160,7 +160,7 @@ public sealed class IndexEventSourceTests
         string name = UniqueName();
         await using var harness = new IndexTestHarness(name: name);
         var setup = await harness.BeginAsync();
-        var index = await harness.IndexManager.CreateIndexAsync(setup, ObjectId, new IndexDefinition("ix_damaged"));
+        var index = await harness.IndexManager.CreateIndexAsync(setup, objectId, new IndexDefinition("ix_damaged"));
         for (long i = 0; i < 2_000; i++)
         {
             await index.InsertAsync(setup, IndexKey.FromInt64(i), (ulong)i);
@@ -214,7 +214,7 @@ public sealed class IndexEventSourceTests
         refused.EventId.ShouldBe(3);
         refused.Level.ShouldBe(EventLevel.Error);
         refused.PayloadNames.ShouldBe(["database", "objectId", "index", "rootPageId", "foundFormat"]);
-        refused.Payload.ShouldBe([name, (long)ObjectId, "ix_legacy", root, 1]);
+        refused.Payload.ShouldBe([name, (long)objectId, "ix_legacy", root, 1]);
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Indexing] - IndexEventSource: Should report a split whose separator would misorder its parent, once")]
@@ -335,7 +335,7 @@ public sealed class IndexEventSourceTests
     {
         var harness = new IndexTestHarness(name: name);
         var setup = await harness.BeginAsync();
-        var created = await harness.IndexManager.CreateIndexAsync(setup, ObjectId, new IndexDefinition(index));
+        var created = await harness.IndexManager.CreateIndexAsync(setup, objectId, new IndexDefinition(index));
         for (long i = 0; i < entries; i++)
         {
             await created.InsertAsync(setup, IndexKey.FromInt64(i), (ulong)i);
@@ -368,12 +368,12 @@ public sealed class IndexEventSourceTests
 
     // The node layout the two helpers below read (BTreeNode): kind at 3, entry count at 4, the
     // leftmost child at 24, the directory at 32.
-    private const int NodeKindOffset = 3;
-    private const int NodeCountOffset = 4;
-    private const int NodeLeftmostChildOffset = 24;
-    private const int NodeDirectoryOffset = 32;
-    private const byte LeafNodeKind = 1;
-    private const byte InternalNodeKind = 2;
+    private const int nodeKindOffset = 3;
+    private const int nodeCountOffset = 4;
+    private const int nodeLeftmostChildOffset = 24;
+    private const int nodeDirectoryOffset = 32;
+    private const byte leafNodeKind = 1;
+    private const byte internalNodeKind = 2;
 
     private static long LeftmostLeaf(Storage.Storage storage, long root)
     {
@@ -382,12 +382,12 @@ public sealed class IndexEventSourceTests
         {
             using var handle = storage.PageManager.GetPage(current);
             var body = handle.Page.AsBodySpan();
-            if (body[NodeKindOffset] == LeafNodeKind)
+            if (body[nodeKindOffset] == leafNodeKind)
             {
                 return current;
             }
 
-            current = BinaryPrimitives.ReadInt64LittleEndian(body[NodeLeftmostChildOffset..]);
+            current = BinaryPrimitives.ReadInt64LittleEndian(body[nodeLeftmostChildOffset..]);
         }
     }
 
@@ -402,10 +402,10 @@ public sealed class IndexEventSourceTests
         using (var handle = storage.OpenPageForWrite(bracket, pageId))
         {
             var body = handle.Page.AsBodySpan();
-            body[NodeKindOffset].ShouldBe(InternalNodeKind);
-            BinaryPrimitives.ReadUInt16LittleEndian(body[NodeCountOffset..]).ShouldBe((ushort)1);
+            body[nodeKindOffset].ShouldBe(internalNodeKind);
+            BinaryPrimitives.ReadUInt16LittleEndian(body[nodeCountOffset..]).ShouldBe((ushort)1);
 
-            int entry = BinaryPrimitives.ReadUInt16LittleEndian(body[NodeDirectoryOffset..]);
+            int entry = BinaryPrimitives.ReadUInt16LittleEndian(body[nodeDirectoryOffset..]);
             int field = BinaryPrimitives.ReadUInt16LittleEndian(body[entry..]);
             (field >> 14).ShouldBe(0, "the separator keeps no tiebreaker");
             int length = field & 0x3FFF;

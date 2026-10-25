@@ -113,27 +113,27 @@ public sealed class SqlT1ScalarTests
 
         // Act / Assert
         var failure = await Should.ThrowAsync<DatabaseException>(() => session.ExecuteAsync($"SELECT {expression} FROM t;", cancellationToken: CancellationToken.None).AsTask());
-        failure.Diagnostics[0].Code.ShouldBe("COHSQLE006");
+        failure.Diagnostics[0].Code.ShouldBe("CS01006");
         failure.Message.ShouldContain(expression.Split('(')[0], Case.Sensitive);
         failure.Message.ShouldContain("Accepted", Case.Sensitive);
     }
 
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - T1 scalars: numeric domain faults retain coded evaluation failures")]
-    [InlineData("SQRT(-1)", "COHSQLE002")]
-    [InlineData("LN(0)", "COHSQLE002")]
-    [InlineData("LOG10(-1)", "COHSQLE002")]
-    [InlineData("POWER(0, -1)", "COHSQLE002")]
-    [InlineData("POWER(10, 400)", "COHSQLE002")]
-    [InlineData("POWER(0.1, -29)", "COHSQLE002")]
-    [InlineData("EXP(1000)", "COHSQLE002")]
-    [InlineData("MOD(1, 0)", "COHSQLE001")]
-    [InlineData("SUBSTRING('x' FROM 1 FOR -1)", "COHSQLE002")]
-    [InlineData("LPAD('x', 2147483647)", "COHSQLE002")]
-    [InlineData("RPAD('x', 2147483647, '😀')", "COHSQLE002")]
-    [InlineData("LPAD('x', 524289, '😀')", "COHSQLE002")]
-    [InlineData("REPLACE(LPAD('a', 50000, 'a'), 'a', LPAD('a', 50000, 'a'))", "COHSQLE002")]
-    [InlineData("CONCAT(LPAD('a', 524288), LPAD('a', 524288), 'x')", "COHSQLE002")]
-    [InlineData("CONCAT_WS('x', LPAD('a', 524288), LPAD('a', 524288))", "COHSQLE002")]
+    [InlineData("SQRT(-1)", "CS02002")]
+    [InlineData("LN(0)", "CS02002")]
+    [InlineData("LOG10(-1)", "CS02002")]
+    [InlineData("POWER(0, -1)", "CS02002")]
+    [InlineData("POWER(10, 400)", "CS02002")]
+    [InlineData("POWER(0.1, -29)", "CS02002")]
+    [InlineData("EXP(1000)", "CS02002")]
+    [InlineData("MOD(1, 0)", "CS02001")]
+    [InlineData("SUBSTRING('x' FROM 1 FOR -1)", "CS02002")]
+    [InlineData("LPAD('x', 2147483647)", "CS02002")]
+    [InlineData("RPAD('x', 2147483647, '😀')", "CS02002")]
+    [InlineData("LPAD('x', 524289, '😀')", "CS02002")]
+    [InlineData("REPLACE(LPAD('a', 50000, 'a'), 'a', LPAD('a', 50000, 'a'))", "CS02002")]
+    [InlineData("CONCAT(LPAD('a', 524288), LPAD('a', 524288), 'x')", "CS02002")]
+    [InlineData("CONCAT_WS('x', LPAD('a', 524288), LPAD('a', 524288))", "CS02002")]
     public async Task Select_DomainFault_ShouldReturnCodedDatabaseException(string expression, string code)
     {
         // Arrange

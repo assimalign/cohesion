@@ -7,6 +7,8 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Transactions;
 
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
+
 namespace Assimalign.Cohesion.Database.KeyValuePair.Tests;
 
 /// <summary>
@@ -65,13 +67,13 @@ internal static class KeyValueReadCommittedProbe
         for (int i = 0; i < writers; i++)
         {
             int seed = 1000 + i;
-            actors.Add(Task.Run(() => WriteAsync(database, counts, seed, stop.Token)));
+            actors.Add(DedicatedTestTask.Run(() => WriteAsync(database, counts, seed, stop.Token)));
         }
 
         for (int i = 0; i < readers; i++)
         {
             int first = i;
-            actors.Add(Task.Run(() => ReadAsync(database, counts, first, stop.Token)));
+            actors.Add(DedicatedTestTask.Run(() => ReadAsync(database, counts, first, stop.Token)));
         }
 
         // The purge loop has a thread of its own: on a small runner the readers and writers hold

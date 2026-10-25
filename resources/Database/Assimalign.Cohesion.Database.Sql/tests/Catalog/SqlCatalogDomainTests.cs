@@ -69,7 +69,9 @@ public sealed class SqlCatalogDomainTests
         Insert(storage, record.ToArray());
 
         // Act / Assert
-        Should.Throw<SqlCatalogException>(() => SqlCatalog.Open(storage)).Message.ShouldContain("Unsupported table-constraint metadata version 3");
+        var failure = Should.Throw<SqlCatalogException>(() => SqlCatalog.Open(storage));
+        failure.Message.ShouldContain("Unsupported table-constraint metadata version 3", Case.Sensitive);
+        failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS06060");
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql.Catalog] - Domains: a persisted blank domain name is refused at load")]

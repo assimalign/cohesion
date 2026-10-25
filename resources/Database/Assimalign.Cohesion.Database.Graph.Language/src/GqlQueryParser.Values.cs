@@ -93,7 +93,7 @@ public sealed partial class GqlQueryParser
                 string name = Identifier(allowKeyword: true);
                 Expect(TokenType.Colon, "':'");
                 var value = ParseExpression(0);
-                if (!entries.TryAdd(name, value)) { Error("GQL0006", $"Duplicate map key '{name}'.", key); }
+                if (!entries.TryAdd(name, value)) { Error("CG00006", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.GqlQueryParserParseMapVoid, name), key); }
             } while (!Failed && Take(TokenType.Comma));
         }
         Expect(TokenType.RightBrace, "'}'");
@@ -107,7 +107,7 @@ public sealed partial class GqlQueryParser
         Advance();
         GqlExpression? operand = Is("WHEN") ? null : ParseExpression(0);
         List<GqlCaseAlternative> alternatives = [];
-        if (!Failed && !Is("WHEN")) { Error("GQL0002", "Expected WHEN in CASE.", Current); }
+        if (!Failed && !Is("WHEN")) { Error("CG00002", ErrorMessages.GqlQueryParserParseCaseVoid, Current); }
         while (!Failed && Take("WHEN"))
         {
             var operands = new List<(GqlExpression When, string Comparison)>();
@@ -156,7 +156,7 @@ public sealed partial class GqlQueryParser
         do { items.Add(ParseExpression(0)); } while (!Failed && Take(TokenType.Comma));
         Expect(TokenType.RightParen, "')'");
         if (!Failed && (coalesce ? items.Count < 2 : items.Count != 2))
-        { Error("GQL0002", coalesce ? "COALESCE requires at least two operands." : "NULLIF requires two operands.", Previous); }
+        { Error("CG00002", coalesce ? ErrorMessages.QueryParserParseCaseAbbreviationVoid : ErrorMessages.QueryParserParseCaseAbbreviationVoid2, Previous); }
         return coalesce ? new GqlCoalesceExpression(items, Span(start, Previous)) :
             new GqlNullIfExpression(items[0], items.Count > 1 ? items[1] : items[0], Span(start, Previous));
     }

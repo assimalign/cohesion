@@ -39,7 +39,7 @@ public static class SqlCompiledSchemaSerializer
         {
             throw SqlCompiledSchemaValidator.InvalidDocument(
                 "schema",
-                "The compiled schema document cannot be empty.");
+                ErrorMessages.SchemaSerializerDeserializeFailure);
         }
 
         try
@@ -57,7 +57,7 @@ public static class SqlCompiledSchemaSerializer
                 SqlCompiledSchemaJsonContext.Default.SqlCompiledSchema)
                 ?? throw SqlCompiledSchemaValidator.InvalidDocument(
                     "schema",
-                    "The compiled schema document was empty.");
+                    ErrorMessages.SchemaSerializerDeserializeFailure2);
             SqlCompiledSchemaValidator.Validate(schema);
             return schema;
         }
@@ -73,7 +73,7 @@ public static class SqlCompiledSchemaSerializer
                 : "schema";
             throw SqlCompiledSchemaValidator.InvalidDocument(
                 declaration,
-                "The compiled schema document is malformed.",
+                ErrorMessages.SchemaSerializerDeserializeFailure3,
                 exception);
         }
     }

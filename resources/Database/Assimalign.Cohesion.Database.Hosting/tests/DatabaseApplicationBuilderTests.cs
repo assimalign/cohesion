@@ -231,7 +231,7 @@ public class DatabaseApplicationBuilderTests
         var failure = Should.Throw<SqlSchemaMigrationException>(() => builder.Build());
 
         // Assert
-        failure.Message.ShouldStartWith("COHSQLP001: SQL engine 'refusing' cannot provision database 'orders'", Case.Sensitive);
+        failure.Message.ShouldStartWith("CS03101: SQL engine 'refusing' cannot provision database 'orders'", Case.Sensitive);
         earlier.DisposeCount.ShouldBe(1);
     }
 

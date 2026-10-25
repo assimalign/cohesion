@@ -8,6 +8,8 @@ using Assimalign.Cohesion.Database.Language;
 /// <remarks>
 /// Examples: <c>Id</c>, <c>u.Name</c>, <c>dbo.Users.Id</c>.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("SqlColumnReferenceExpression")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Language.SqlColumnReferenceExpression.DebugView))]
 public sealed class SqlColumnReferenceExpression : SqlExpression
 {
     /// <summary>
@@ -39,4 +41,18 @@ public sealed class SqlColumnReferenceExpression : SqlExpression
     /// Gets the schema qualifier, if present.
     /// </summary>
     public string? SchemaName { get; }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Sql.Language.SqlColumnReferenceExpression _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Language.SqlColumnReferenceExpression value)
+        {
+            _target = value;
+        }
+
+        public string ColumnName => _target.ColumnName;
+        public string? TableAlias => _target.TableAlias;
+        public string? SchemaName => _target.SchemaName;
+    }
 }

@@ -1,5 +1,9 @@
 # Database event sources: plan of record
 
+Current Database diagnostic identities and their historical mappings are maintained in the
+[error-code registry](../../resources/Database/Assimalign.Cohesion.Database/docs/ERROR-CODES.md).
+Use those identities when implementing the dated phase records below.
+
 **Status:** batches B1-B5 and the integration pass implemented 2026-10-08, with the section 9 recommendations applied; Q1-Q4 still await owner confirmation, Q5 and `SessionFaulted`'s message were decided on 2026-10-09; section 5 records batch D parts 1 and 2 (#1349 complete) after B2/49a, and Hosting event 10 landed through the owner-approved shared Host failure hook (#1441) ·
 **Created:** 2026-10-08 · **Owner:** Chase Crawford
 **Request:** the owner's request of 2026-10-08, "Event Source Tracing: add extensive EventSource
@@ -89,7 +93,7 @@ the manager it builds (`TransactionCoordinator.cs:117-123`) and to
 `LockManager.EnterEngineMode` (`LockManager.cs:121`); `Storage` sets its pool's and gate's name
 when `InitializeNew`/`OpenExisting` learn it (`Storage.cs:969-971`, `:1072`); `BTreeIndexManager`
 reads `BTreeIndexManagerOptions.Storage.Name` (`BTreeIndexManagerOptions.cs:17`). A standalone
-`TransactionManager.Create`/`LockManager.Create` reports an empty `database`.
+`TransactionManager.Create`/`new LockManager()` reports an empty `database`.
 
 ## 3. Inventory and decision per project
 

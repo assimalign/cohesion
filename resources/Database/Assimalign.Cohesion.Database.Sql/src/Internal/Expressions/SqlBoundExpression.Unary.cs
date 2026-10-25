@@ -8,6 +8,8 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// literal that spells the BIGINT minimum binds as a <see cref="SqlBoundConstant"/> instead, because
 /// its magnitude alone does not fit BIGINT.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("SqlBoundUnary")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlBoundUnary.DebugView))]
 internal sealed class SqlBoundUnary : SqlBoundExpression
 {
     /// <summary>Initializes a bound unary operator.</summary>
@@ -30,4 +32,12 @@ internal sealed class SqlBoundUnary : SqlBoundExpression
 
     /// <summary>Gets the source expression span.</summary>
     internal Location? Location { get; }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlBoundUnary value)
+        {
+            _ = value;
+        }
+    }
 }

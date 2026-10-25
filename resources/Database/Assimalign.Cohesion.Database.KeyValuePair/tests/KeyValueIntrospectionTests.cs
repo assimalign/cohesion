@@ -152,7 +152,7 @@ public sealed class KeyValueIntrospectionTests
         await client.SendAsync(ProtocolMessageType.Execute, ProtocolExecuteMessage.Create("DELETE KEYSPACES").Encode());
         var error = ProtocolErrorMessage.Decode((await client.ExpectAsync(ProtocolMessageType.Error)).Payload.Span);
         error.Code.ShouldBe(ProtocolErrorCode.ParseFailure);
-        error.Message.ShouldBe("COHKV002: The KEYSPACES catalog surface is read-only.");
+        error.Message.ShouldBe("CV03002: The KEYSPACES catalog surface is read-only.");
 
         await client.SendAsync(ProtocolMessageType.Execute, ProtocolExecuteMessage.Create("KEYSPACES").Encode());
         await client.ExpectAsync(ProtocolMessageType.ResultHeader);

@@ -74,7 +74,7 @@ public sealed class SqlConstantSelectTests
         // Assert
         rows.ShouldBe(new object?[][] { [42, 42], [43, 43] });
         var failure = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("SELECT *", cancellationToken: CancellationToken.None));
-        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE013");
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS05013");
         failure.Message.ShouldContain("without FROM", Case.Sensitive);
     }
 

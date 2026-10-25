@@ -3,6 +3,8 @@ using Assimalign.Cohesion.Database.Language;
 namespace Assimalign.Cohesion.Database.Documents.Language;
 
 /// <summary>An array expansion binding in a SELECT FROM clause.</summary>
+[global::System.Diagnostics.DebuggerDisplay("OqlUnnestExpression")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Documents.Language.OqlUnnestExpression.DebugView))]
 public sealed class OqlUnnestExpression : OqlExpression
 {
     /// <summary>Initializes an array binding.</summary>
@@ -23,4 +25,20 @@ public sealed class OqlUnnestExpression : OqlExpression
     public string Variable { get; }
     /// <summary>Gets whether empty or non-array input is preserved.</summary>
     public bool IsLeft { get; }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Documents.Language.OqlUnnestExpression _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Documents.Language.OqlUnnestExpression value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Documents.Language.OqlExpression Collection => _target.Collection;
+        public string Variable => _target.Variable;
+        public bool IsLeft => _target.IsLeft;
+        public string? Text => _target.Text;
+        public global::Assimalign.Cohesion.Database.Language.Location? Location => _target.Location;
+    }
 }

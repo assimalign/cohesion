@@ -28,7 +28,7 @@ public sealed class StorageFormatException : StorageException
     /// The code that leads the message of every refusal: a storage file set in an on-disk
     /// format this engine does not read.
     /// </summary>
-    public const string ErrorCode = "COHDBS001";
+    public const string ErrorCode = "CK06001";
 
     private StorageFormatException(string message, int foundVersion, int supportedVersion)
         : base(message)
@@ -64,13 +64,11 @@ public sealed class StorageFormatException : StorageException
     {
         int supported = StorageFileHeader.CurrentFormatVersion;
         string remedy = foundVersion < supported
-            ? "This engine does not upgrade storage files: export the data with the engine that wrote it, drop the database " +
-              "and create it again with this engine (on-disk format upgrades are tracked by assimalign/cohesion#1152)."
-            : "The file was written by a newer engine; open it with that engine (on-disk format upgrades are tracked by " +
-              "assimalign/cohesion#1152).";
+            ? ErrorMessages.ExceptionForDataFileStorageFormat2
+            : ErrorMessages.ExceptionForDataFileStorageFormat3;
 
         return new StorageFormatException(
-            $"{ErrorCode}: The storage file uses storage format {foundVersion}, but this engine supports only storage format {supported}. {remedy}",
+            string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExceptionForDataFileStorageFormat, ErrorCode, foundVersion, supported, remedy),
             foundVersion,
             supported);
     }
@@ -85,14 +83,11 @@ public sealed class StorageFormatException : StorageException
     internal static StorageFormatException ForJournalFrame(long frameNumber, int foundVersion, int supportedVersion)
     {
         string remedy = foundVersion < supportedVersion
-            ? "This engine does not upgrade journals: recover the file set with the engine that wrote it, which empties the journal " +
-              "at its clean close (on-disk format upgrades are tracked by assimalign/cohesion#1152)."
-            : "The journal was written by a newer engine; open the file set with that engine (on-disk format upgrades are tracked by " +
-              "assimalign/cohesion#1152).";
+            ? ErrorMessages.ExceptionForJournalFrameStorageFormat2
+            : ErrorMessages.ExceptionForJournalFrameStorageFormat3;
 
         return new StorageFormatException(
-            $"{ErrorCode}: Journal frame {frameNumber} uses journal frame format {foundVersion}, but this engine reads only " +
-            $"journal frame format {supportedVersion}; it passed its checksum, so it is not a torn tail. {remedy}",
+            string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExceptionForJournalFrameStorageFormat, ErrorCode, frameNumber, foundVersion, supportedVersion, remedy),
             foundVersion,
             supportedVersion);
     }

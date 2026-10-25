@@ -36,7 +36,7 @@ public sealed class StorageOpenFailureTests
         var failure = await Should.ThrowAsync<DatabaseException>(() => engine.OpenDatabaseAsync("test", CancellationToken.None).AsTask());
 
         // Assert
-        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBK005");
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CV06105");
         failure.InnerException.ShouldBeSameAs(cause);
         failure.Message.ShouldContain("test", Case.Sensitive);
         engine.TryGetDatabase("test", out _).ShouldBeFalse();
@@ -61,7 +61,7 @@ public sealed class StorageOpenFailureTests
         var failure = await Should.ThrowAsync<DatabaseException>(() => engine.CreateDatabaseAsync("test", CancellationToken.None).AsTask());
 
         // Assert
-        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBK005");
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CV06105");
         failure.InnerException.ShouldBeSameAs(cause);
         engine.TryGetDatabase("test", out _).ShouldBeFalse();
     }

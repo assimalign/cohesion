@@ -121,3 +121,14 @@ prohibited in the descriptor verb.
 Certificate mounts remain ordinary single-file Secret inputs. Explicit `parameter:` or `<source>:<key>` sources are authoritative and unusable bundles return a named Unresolved result. A source-free certificate mount gets its leaf from the registered certificate authority (`ApplicationProviders.CertificateAuthority`, for example `UseSecretStore(store).AsCertificateAuthority()`) once its resource is Running. The authority resource's own leaf always comes from the gateway development authority. Without a registered authority only Local uses the development authority; every other environment fails loudly, naming the endpoint and the registration to add, and a registered authority that cannot issue falls back to the development authority in Local only. The development authority persists a P-256 root and protected PKCS#8 key under `<state>/<application>/.state/certs/`; leaf bundles cache by resource/endpoint with loopback and observed/declared host SANs. New bundles use leaf, intermediates if any, and one PKCS#8 key; readers preserve both existing producer orders and tolerate a supplied root.
 
 Certificates-only transport anchors are carried in ResourceInputs, materialized beside bootstrap.token as a protected `.state/trust.pem`, and exposed through AppEnvironment.Variables.TrustBundlePath. Local and in-process probes use the shared CustomRootTrust validator while preserving hostname checks. Providers receive the same trust policy as `ResourceProviderConnection.ServerCertificateValidator`. This transport root is distinct from the ES256 application trust-signing key.
+
+
+## Checked manifest paths and sources (#1470)
+
+Manifest probe `Http` is `ResourceHttpPath?`, control-plane `Path` is `ResourceHttpPath`, and mount
+`Source` is `ResourceMountSource?`. Consumers use the underlying `Value` when composing addresses
+or comparing raw text. Valid string initializers remain supported; malformed strings are refused
+at construction or typed JSON import. Default structs still pass through explicit manifest/plan
+validation. JSON stays plain strings/nulls under `cohesion/resource/v1`; no transport message,
+Database storage format, diagnostic identity, event or counter changes. All binary consumers
+must be rebuilt together, including installed SDK/framework E2E payloads.

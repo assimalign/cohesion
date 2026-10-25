@@ -21,7 +21,7 @@ public static class SqlSchemaMigrationPlanner
         if (current is not null && !identifiers.Equals(current.Name, desired.Name))
         {
             throw new SqlSchemaMigrationException(
-                $"Cannot migrate database '{current.Name}' with schema '{desired.Name}'.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlSchemaMigrationPlannerPlanFailure, current.Name, desired.Name));
         }
 
         if (current is not null && string.Equals(current.Hash, desired.Hash, StringComparison.Ordinal))
@@ -47,8 +47,7 @@ public static class SqlSchemaMigrationPlanner
                 ? destructive.ObjectName
                 : $"{destructive.ParentName}.{destructive.ObjectName}";
             throw new SqlSchemaMigrationException(
-                $"Destructive migration step '{destructive.Kind}' for '{qualifiedName}' was refused. " +
-                "Call schema.AllowDestructiveChanges() in the database declaration to opt in.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlSchemaMigrationPlannerPlanFailure2, destructive.Kind, qualifiedName));
         }
 
         return new SqlSchemaMigrationPlan(current?.Hash, desired.Hash, operations);
@@ -368,6 +367,5 @@ public static class SqlSchemaMigrationPlanner
 
     private static SqlSchemaMigrationException UnsupportedMetadata(string schemaName)
         => new(
-            $"Schema '{schemaName}' changes principals, " +
-            "but the shipped migration statement models cannot apply those metadata dimensions yet.");
+            string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.PlannerUnsupportedMetadataFailure, schemaName));
 }
