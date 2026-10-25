@@ -11,6 +11,7 @@ using Xunit;
 using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
+using Assimalign.Cohesion.Database.Tests;
 using Assimalign.Cohesion.Database.Transactions;
 using Assimalign.Cohesion.Database.Types;
 
@@ -25,6 +26,7 @@ using static KeyValueTestHarness;
 /// until it is reopened (#1243), the buffer pool and the checkpoint triggers are options (#1254),
 /// and a deferred undo is retried on its own backoff (#1226).
 /// </summary>
+[Collection(nameof(KeyValueWorkerResilienceTests))]
 public sealed class KeyValueStorageOperationsTests
 {
     private static readonly TimeSpan _timeout = TimeSpan.FromSeconds(10);
@@ -404,14 +406,11 @@ public sealed class KeyValueStorageOperationsTests
     }
 
     /// <summary>
-    /// A rollback's undo fails once. The undo is retried on its own backoff, about 100 ms later,
-    /// so the writer waiting for the rolled-back transaction's key lock proceeds within about a
-    /// second although the maintenance interval is an hour (#1226 owner decision of 2026-10-04).
-    /// The engine's wiring is checked exactly (the first retry is due within 100 ms of the
-    /// deferral), and the release end to end as a ratio to that first delay.
+    /// A refused undo retries on the coordinator's own schedule, independently of full maintenance.
+    /// A recorded undo-only worker completion and the next writer prove release; elapsed time is diagnostic.
     /// </summary>
-    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Deferred undo: a transient undo failure releases the writer within about a second")]
-    public async Task RollbackAsync_TransientUndoFailure_ShouldReleaseTheWriterWithinAboutASecond()
+    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Deferred undo: a transient undo failure releases the writer through an undo-only worker pass")]
+    public async Task RollbackAsync_TransientUndoFailure_ShouldReleaseTheWriterAfterRecordedUndoRetry()
     {
         // Arrange
         var maintenance = TimeSpan.FromHours(1);
@@ -432,30 +431,28 @@ public sealed class KeyValueStorageOperationsTests
         // bracket cannot touch the first page it undoes and the undo is deferred with
         // the writer's key lock held; the pages are released at once. (Until #1252 a failed journal
         // write was the transient fault; a journal write failure now takes the database offline.)
+        using var undo = CheckpointPace.ObserveDeferredUndo(
+            engine.Workers.OfType<DatabaseVersionPurgeWorker<KeyValueDatabase>>().Single(), database.Name, database.Coordinator.DeferredUndoRetryDelay);
         var watch = Stopwatch.StartNew();
         using (PageWriteLockHolder.LockEveryPage(database.DataStorage))
         {
             await transaction.RollbackAsync();
+            database.Coordinator.VersionStore.PendingAbortedPurges.ShouldNotBeEmpty();
+            database.Coordinator.NextDeferredUndoRetry.ShouldNotBeNull("the refused undo must be scheduled while its pages stay held");
         }
 
-        // The engine handed the coordinator its first retry delay: the retry is due within it.
-        var firstRetry = database.Coordinator.NextDeferredUndoRetry;
-
-        var put = await database.PutAsync(other, Bytes("hot"), Bytes("next")).AsTask().WaitAsync(_timeout);
+        var put = await database.PutAsync(other, Bytes("hot"), Bytes("next")).AsTask().WaitAsync(TimeSpan.FromSeconds(30));
         watch.Stop();
+        await undo.VerifyAsync();
 
         // Assert
         var retryDelay = configured.ShouldNotBeNull().DeferredUndoRetryDelay;
         retryDelay.ShouldBe(TimeSpan.FromMilliseconds(100));
-        firstRetry.ShouldNotBeNull().ShouldBeLessThanOrEqualTo(retryDelay);
+        database.Coordinator.DeferredUndoRetryDelay.ShouldBe(retryDelay);
         put.Applied.ShouldBeTrue();
         transaction.State.ShouldBe(TransactionState.RolledBack);
         database.Coordinator.VersionStore.PendingAbortedPurges.ShouldBeEmpty();
-        // The regression this guards against waits a full MaintenanceInterval (an hour here) per retry.
-        // 100 retry delays (10 s) still catches it by a factor of 360 and leaves room for a loaded CI
-        // runner; the exact wiring is the firstRetry check above.
-        (watch.Elapsed / retryDelay).ShouldBeLessThan(100);
-        engine.State.ShouldBe(EngineState.Running);
+        engine.State.ShouldBe(EngineState.Running, $"writer released after {watch.Elapsed}");
     }
 
     // Options whose background workers stay out of the way: only the passes a test runs itself

@@ -88,11 +88,14 @@ public sealed class GraphWorkerResilienceTests
 
     /// <summary>
     /// Every pass visits the healthy database while another database fails and backs off.
-    /// Measured waits and due-state evidence distinguish a database backoff from a pump or lane
+    /// Requested waits and due-state evidence distinguish a database backoff from a pump or lane
     /// slowdown; completed worker visits prove progress independently of statement checkpoints (#1284).
     /// </summary>
-    [Fact(DisplayName = "Cohesion Test [Database.Graph] - Workers: a failing database leaves every healthy pass unthrottled")]
-    public async Task CheckpointWorker_OneDatabaseKeepsFailing_ShouldKeepTheOthersAtFullPace()
+    /// <param name="observerPauseMilliseconds">Injected scheduler delay in the trigger observer.</param>
+    [Theory(DisplayName = "Cohesion Test [Database.Graph] - Workers: a failing database leaves every healthy pass unthrottled")]
+    [InlineData(0)]
+    [InlineData(150)]
+    public async Task CheckpointWorker_OneDatabaseKeepsFailing_ShouldKeepTheOthersAtFullPace(int observerPauseMilliseconds)
     {
         // Arrange: observe the actual engine pump and its database lanes, without changing waits.
         var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
@@ -105,7 +108,7 @@ public sealed class GraphWorkerResilienceTests
         // Act / Assert: all five engines use the same per-visit progress proof.
         await CheckpointPace.VerifyAsync(worker, engine.CheckpointNeededSignal, failing.DataStorage, healthy.DataStorage,
             failingDatabaseName, healthyDatabaseName, strategy.Faults(failingDatabaseName),
-            id => InsertAsync(failing, id, 10), id => InsertAsync(healthy, id, 10), paceJournalSize);
+            id => InsertAsync(failing, id, 10), id => InsertAsync(healthy, id, 10), paceJournalSize, observerPauseMilliseconds);
     }
 
     /// <summary>

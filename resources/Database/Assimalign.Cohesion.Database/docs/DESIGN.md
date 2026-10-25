@@ -562,16 +562,18 @@ ordinary storage transaction contention is retried as busy.
   Lane timing includes monitor acquisition and runner dispatch, including a late parking runner.
   The failing-checkpoint pace helper (#1284) includes each healthy attempted visit, including a visit left running;
   request counts and requested durations remain strictly bounded per visit.
-  For each measured wait category it collects at least 12 samples within the 30-second safety
-  ceiling and requires the median and at least 75% of samples below the configured 100 ms budget.
-  Durations in the per-pass record are judged by the median rather than the maximum because
-  scheduler hiccups affect a few samples while a persistent slowdown affects every pass.
-  The helper compares recorded monotonic wait durations with that budget,
-  requires every due healthy visit to attempt work, and requires worker completions. Its overall
-  stopwatch supplies a minimum race exercise and a safety ceiling, never a throughput ratio.
-  This proves the named wait and skipped-visit regressions on the in-memory fixture, not a
-  deterministic operating-system scheduling latency or a bound on real device checkpoint I/O.
-  No embedded source guard decides these tests.
+  The failing-checkpoint helper requires at least twelve signalled trigger waits and healthy
+  attempted visits, four completed due batches, two failing attempts and three backing-off visits
+  under a 30-second hang guard. Trigger request counts and totals, lane request counts and totals,
+  pump backoff requests and runner availability at completion publication decide correctness.
+  Recorded elapsed times are diagnostics only; a delayed test observer exercises scheduler pauses.
+  A completion records runner availability in the publication critical section, before Park can
+  conceal late availability. Additional pump pauses use the existing observed delay operation;
+  signal pauses use the observed signal-wait operation. No embedded source guard decides these tests.
+  Deferred-undo tests require a collected undo-only completion, a positive-work DeferredUndoCompleted
+  event, an empty pending-undo set and a released writer independently of the hour-long maintenance
+  interval, under 30-second hang guards. Failed undo attempts are counted from passes to check
+  requested waits against the configured doubling backoff; scheduler latency is not an input.
 
   Pending waits belong to their pump thread. Thread-local state is created on first attachment,
   and no record, history, per-pass allocation or process-wide atomic is added when unobserved.
@@ -590,7 +592,7 @@ ordinary storage transaction contention is retried as busy.
   elapsed durations are diagnostic only. A legitimate
   stuck-lane advisory may appear while held, but operational failures/offline visits are refused
   and collection must clear the advisory after release. The #1284
-  failing-checkpoint median rule above is retained. Root pump isolation likewise counts
+  failing-checkpoint helper likewise uses requested waits and completed work. Root pump isolation likewise counts
   healthy visits and database skips and rejects pump-wide backoff requests instead of a rate ratio.
   Cancellation gates the observed backoff request, cancels it, and requires pump exit without a retry;
   delayed observation cannot turn cancellation into a latency failure. There are no per-pass

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Diagnostics.Tracing;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -10,6 +11,7 @@ using Shouldly;
 
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
+using Assimalign.Cohesion.Testing;
 
 // Deviates from namespace-matches-assembly: linked test support keeps its owning namespace.
 namespace Assimalign.Cohesion.Database.Tests;
@@ -21,13 +23,19 @@ internal static class CheckpointPace
     internal static async Task VerifyAsync<TDatabase>(DatabaseCheckpointWorker<TDatabase> worker,
         ManualResetEventSlim signal, Assimalign.Cohesion.Database.Storage.Storage failingStorage, Assimalign.Cohesion.Database.Storage.Storage healthyStorage,
         string failingName, string healthyName, DeviceFaults faults,
-        Func<int, Task> writeFailing, Func<int, Task> writeHealthy, long journalSize)
+        Func<int, Task> writeFailing, Func<int, Task> writeHealthy, long journalSize, int observerPauseMilliseconds = 0)
         where TDatabase : class
     {
         // Arrange: record the real pump and lanes. No explicit RunIteration or replacement waits.
         var passes = new ConcurrentQueue<DatabaseWorkerPass>();
         worker.PumpBackoffObserved = true;
-        using var pump = WorkerPumpObservation.Create(worker, worker.RecordPumpBackoff, worker.RecordTriggerElapsed);
+        using var pump = WorkerPumpObservation.Create(worker, worker.RecordPumpBackoff, elapsed =>
+        {
+            // A test observer can deschedule the pump after a correct trigger. It must not
+            // turn the recorded inter-pass duration into a correctness oracle.
+            if (observerPauseMilliseconds > 0) { Thread.Sleep(observerPauseMilliseconds); }
+            worker.RecordTriggerElapsed(elapsed);
+        });
         worker.PassCompleted = passes.Enqueue;
         faults.FailPageWrites = true;
         var watch = Stopwatch.StartNew();
@@ -76,11 +84,11 @@ internal static class CheckpointPace
                     pendingBatch = 0;
                 }
             }
-            while ((watch.Elapsed < TimeSpan.FromMilliseconds(250) || completedBatches < 4 || worker.FailureCount < 2
+            while ((completedBatches < 4 || worker.FailureCount < 2
                 || passes.Count(pass => pass.Visits.Any(visit => visit.Database == failingName
                     && visit.Reason == DatabaseWorkerPass.VisitReason.BackingOff)) < 3
-                || passes.Count(pass => pass.TriggerMeasured && pass.TriggerSignaled) < minimumSamples
-                || passes.Count(pass => pass.TriggerMeasured && pass.TriggerSignaled && pass.PumpElapsed.HasValue) < minimumSamples
+                || passes.Count(pass => pass.TriggerMeasured && pass.TriggerWaits > 0 && pass.TriggerSignaled) < minimumSamples
+                || passes.Count(pass => pass.TriggerMeasured && pass.TriggerWaits > 0 && pass.TriggerSignaled && pass.PumpElapsed.HasValue) < minimumSamples
                 || passes.Count(pass => pass.Visits.Any(visit => visit.Database == healthyName && visit.Attempted)) < minimumSamples
                 || passes.Count(pass => pass.Visits.Any(visit => visit.Database == healthyName && visit.LaneWaits > 0)) < minimumSamples)
                 && watch.Elapsed < TimeSpan.FromSeconds(30));
@@ -101,15 +109,23 @@ internal static class CheckpointPace
         worker.PassObserverFailure.ShouldBeNull();
         foreach (var pass in recorded)
         {
-            string context = $"pass {pass.Number}";
+            string context = $"pass {pass.Number}; " + DescribeDurations(recorded);
             pass.Cancelled.ShouldBeFalse(context);
             pass.PassThrew.ShouldBeFalse(context);
             pass.PumpBackoff.ShouldBe(TimeSpan.Zero, context);
-            pass.TriggerTimeout.ShouldBeLessThanOrEqualTo(DatabaseCheckpointWorker<TDatabase>.PollInterval);
+            pass.TriggerTimeout.ShouldBeLessThanOrEqualTo(laneBudget, context);
+            // The first wait may have begun before attachment; every subsequent pump wait
+            // must carry its request record, even if an observer delays its completion.
+            if (pass.TriggerMeasured && (pass.Number > 1 || pass.TriggerWaits > 0))
+            {
+                pass.TriggerWaits.ShouldBe(1, context);
+                pass.TriggerWaitRequested.ShouldBe(pass.TriggerTimeout, context);
+            }
             foreach (var visit in pass.Visits)
             {
                 visit.GiveUpRequested.ShouldBeFalse(context);
                 visit.Offline.ShouldBeFalse(context);
+                if (visit.RunnerAvailable.HasValue) { visit.RunnerAvailable.ShouldBe(true, context); }
                 // Bound the observed request independently of the production constant:
                 // a quick device must not hide a quarter-second blocking request.
                 visit.LaneWaitRequested.ShouldBeLessThanOrEqualTo(TimeSpan.FromMilliseconds(5) * visit.LaneWaits, context);
@@ -140,7 +156,9 @@ internal static class CheckpointPace
                 failing.LaneWaitRequested.ShouldBe(TimeSpan.Zero);
             }
         }
-        VerifyDurations(recorded.Select(pass => pass.Elapsed), laneBudget, "whole checkpoint pass");
+
+        recorded.Count(pass => pass.Visits.Any(visit => visit.Database == healthyName && visit.RunnerAvailable == true))
+            .ShouldBeGreaterThanOrEqualTo(4, "exercise completion-publication evidence");
         worker.FailureCount.ShouldBeGreaterThanOrEqualTo(2);
         recorded.Count(pass => pass.Visits.Any(visit => visit.Database == failingName
             && visit.Reason == DatabaseWorkerPass.VisitReason.BackingOff)).ShouldBeGreaterThanOrEqualTo(3);
@@ -149,13 +167,12 @@ internal static class CheckpointPace
         completedBatches.ShouldBeGreaterThanOrEqualTo(4);
         recorded.Count(pass => pass.Visits.Any(visit => visit.Database == healthyName && visit.LaneWaits > 0))
             .ShouldBeGreaterThanOrEqualTo(minimumSamples, "exercise actual lane wait requests");
-        var signaled = recorded.Where(pass => pass.TriggerMeasured && pass.TriggerSignaled).ToArray();
-        VerifyDurations(signaled.Select(pass => pass.TriggerElapsed), laneBudget, "measured Set wake");
-        VerifyDurations(signaled.Where(pass => pass.PumpElapsed.HasValue).Select(pass => pass.PumpElapsed!.Value),
-            laneBudget, "measured inter-pass wait");
-        VerifyDurations(recorded.SelectMany(pass => pass.Visits)
-            .Where(visit => visit.Database == healthyName && visit.Attempted).Select(visit => visit.LaneWait),
-            laneBudget, "healthy lane wait");
+        recorded.Count(pass => pass.TriggerMeasured && pass.TriggerWaits > 0 && pass.TriggerSignaled)
+            .ShouldBeGreaterThanOrEqualTo(minimumSamples, DescribeDurations(recorded));
+        recorded.Count(pass => pass.TriggerMeasured && pass.TriggerWaits > 0 && pass.TriggerSignaled && pass.PumpElapsed.HasValue)
+            .ShouldBeGreaterThanOrEqualTo(minimumSamples, DescribeDurations(recorded));
+        recorded.Count(pass => pass.Visits.Any(visit => visit.Database == healthyName && visit.Attempted))
+            .ShouldBeGreaterThanOrEqualTo(minimumSamples, DescribeDurations(recorded));
     }
 
     // Hold dispatch before dirtying the database. Arming device I/O first can leave the
@@ -364,13 +381,101 @@ internal static class CheckpointPace
         internal static ValueTask Release(DatabaseEngineWorker worker) => ReleaseUnownedWorkerAsync(worker);
     }
 
-    private static void VerifyDurations(IEnumerable<TimeSpan> measured, TimeSpan budget, string description)
+    // A delayed observer or descheduled pump may exceed every configured request. These
+    // measurements help diagnose a hang but never decide whether a pass was correct.
+    private static string DescribeDurations(IEnumerable<DatabaseWorkerPass> recorded)
+        => string.Join("; ", recorded.TakeLast(8).Select(pass =>
+            $"pass {pass.Number}: elapsed={pass.Elapsed}, trigger={pass.TriggerElapsed}, between={pass.PumpElapsed}, "
+            + $"trigger requests={pass.TriggerWaits}/{pass.TriggerWaitRequested}, signaled={pass.TriggerSignaled}"));
+
+    internal static DeferredUndoObservation<TDatabase> ObserveDeferredUndo<TDatabase>(
+        DatabaseVersionPurgeWorker<TDatabase> worker, string database, TimeSpan retryDelay) where TDatabase : class => new(worker, database, retryDelay);
+
+    internal sealed class DeferredUndoObservation<TDatabase> : IDisposable where TDatabase : class
     {
-        var samples = measured.Order().ToArray();
-        string context = $"{description}: budget {budget}; sorted samples ({samples.Length}): [{string.Join(", ", samples)}]";
-        samples.Length.ShouldBeGreaterThanOrEqualTo(minimumSamples, context);
-        var median = TimeSpan.FromTicks((samples[(samples.Length - 1) / 2].Ticks + samples[samples.Length / 2].Ticks) / 2);
-        median.ShouldBeLessThan(budget, context);
-        samples.Count(sample => sample < budget).ShouldBeGreaterThanOrEqualTo((samples.Length * 3 + 3) / 4, context);
+        private readonly DatabaseVersionPurgeWorker<TDatabase> _worker;
+        private readonly WorkerPumpObservation _pump;
+        private readonly EventSourceRecorder _undoEvents;
+        private readonly string _database;
+        private readonly TimeSpan _retryDelay;
+        private int _failedUndoRetries;
+        private string? _observationFailure;
+        private readonly ConcurrentQueue<DatabaseWorkerPass> _passes = new();
+        private readonly TaskCompletionSource<DatabaseWorkerPass> _completed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        internal DeferredUndoObservation(DatabaseVersionPurgeWorker<TDatabase> worker, string database, TimeSpan retryDelay)
+        {
+            _worker = worker;
+            _database = database;
+            _retryDelay = retryDelay;
+            _undoEvents = new EventSourceRecorder(EventSource.GetSources().Single(source =>
+                source.Name == "Assimalign.Cohesion.Database.Transactions"), EventLevel.Informational);
+            worker.PumpBackoffObserved = true;
+            _pump = WorkerPumpObservation.Create(worker, worker.RecordPumpBackoff, worker.RecordTriggerElapsed);
+            worker.PassCompleted = pass =>
+            {
+                // Failed worker retries double the coordinator's next delay. Count the facts
+                // before deriving the next request bound; scheduler latency is never an input.
+                var maximumRetry = TimeSpan.FromMilliseconds(Math.Min(worker.Interval.TotalMilliseconds,
+                    _retryDelay.TotalMilliseconds * Math.Pow(2, Volatile.Read(ref _failedUndoRetries))));
+                bool observedTrigger = pass.TriggerMeasured && (pass.Number > 1 || pass.TriggerWaits > 0);
+                bool invalid = pass.PassThrew || pass.Cancelled || pass.PumpBackoff != TimeSpan.Zero
+                    || observedTrigger && (pass.TriggerWaits != 1 || pass.TriggerWaitRequested != pass.TriggerTimeout)
+                    || !pass.TriggerSignaled && pass.TriggerWaits > 0 && pass.TriggerWaitRequested > maximumRetry;
+                if (invalid)
+                {
+                    Interlocked.CompareExchange(ref _observationFailure,
+                        $"invalid undo pump request on pass {pass.Number}: backoff={pass.PumpBackoff}, "
+                        + $"trigger={pass.TriggerWaits}/{pass.TriggerWaitRequested}, signaled={pass.TriggerSignaled}, maximum retry={maximumRetry}", null);
+                }
+                if (pass.Visits.Any(visit => visit.Database == database && visit.UndoRetried
+                    && visit.Reason is DatabaseWorkerPass.VisitReason.Busy or DatabaseWorkerPass.VisitReason.Failed))
+                {
+                    Interlocked.Increment(ref _failedUndoRetries);
+                }
+                _passes.Enqueue(pass);
+                while (_passes.Count > 64) { _passes.TryDequeue(out _); }
+                if (pass.Visits.Any(visit => visit.Database == database && visit.UndoRetried
+                    && !visit.UndoPending && visit.Reason == DatabaseWorkerPass.VisitReason.Completed))
+                {
+                    _completed.TrySetResult(pass);
+                }
+            };
+        }
+
+        internal async Task VerifyAsync()
+        {
+            // Assert: the real pump collected an undo-only lane, independently of the hour-long
+            // full-maintenance interval. A foreground writer's completion alone is insufficient.
+            DatabaseWorkerPass settled;
+            try { settled = await _completed.Task.WaitAsync(TimeSpan.FromSeconds(30)); }
+            catch (TimeoutException)
+            {
+                _completed.Task.IsCompleted.ShouldBeTrue("missing collected undo-only completion; " + DescribeDurations(_passes));
+                throw;
+            }
+            string context = DescribeDurations(_passes);
+            settled.PassThrew.ShouldBeFalse(context);
+            settled.Cancelled.ShouldBeFalse(context);
+            settled.PumpBackoff.ShouldBe(TimeSpan.Zero, context);
+            Volatile.Read(ref _observationFailure).ShouldBeNull(context);
+            var undo = settled.Visits.Single(visit => visit.UndoRetried);
+            undo.WorkUnits.ShouldBe(0, "undo-only completion must not depend on full maintenance; " + context);
+            undo.Offline.ShouldBeFalse(context);
+            undo.GiveUpRequested.ShouldBeFalse(context);
+            var completed = _undoEvents.Events.Where(item => item.EventId == 12
+                && item.Payload is { Count: 3 } payload && Equals(payload[0], _database)).ShouldHaveSingleItem();
+            completed.Payload![2].ShouldBeOfType<long>().ShouldBeGreaterThan(0L, "the retry must complete real undo work; " + context);
+            _undoEvents.Events.ShouldNotContain(item => item.EventId == 0, context);
+            _pump.Failure.ShouldBeNull(context);
+            _worker.PassObserverFailure.ShouldBeNull(context);
+        }
+
+        public void Dispose()
+        {
+            _worker.PassCompleted = null;
+            _pump.Dispose();
+            _undoEvents.Dispose();
+        }
     }
 }

@@ -57,6 +57,11 @@ before closing storages. Lock order is the root pass gate, then the lane monitor
 spans model/apply/storage locks, failure reporting or observer callbacks.
 
 The shared DatabaseLaneWorker publishes opt-in DatabaseWorkerPass observations for all kinds.
+Checkpoint failure tests assert requested waits, due visits, completed work and runner availability
+at publication, including a delayed observer; elapsed times are diagnostic. Deferred-undo tests
+require a recorded undo-only worker completion, a positive-work DeferredUndoCompleted event and a
+released writer with 30-second hang guards,
+independently of the hour-long full-maintenance interval.
 Checkpoint due evidence remains optional checkpoint-specific data. Resilience tests hold the actual
 page-write/fsync faults (purge/index use the internal dispatch hook), require K = 4 healthy
 positive-work completions while exactly one runner remains held, and assert lane-wait counters.
