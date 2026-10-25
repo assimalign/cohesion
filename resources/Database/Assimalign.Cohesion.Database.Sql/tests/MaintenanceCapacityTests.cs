@@ -114,42 +114,76 @@ public sealed class MaintenanceCapacityTests
         {
             await using var engine = SqlDatabaseEngine.Create("paced-completion", new SqlDatabaseEngineOptions
             {
-                CheckpointInterval = TimeSpan.FromHours(1), PageWriteBackInterval = TimeSpan.FromMilliseconds(300),
+                CheckpointInterval = TimeSpan.FromHours(1), PageWriteBackInterval = TimeSpan.FromSeconds(1),
                 MaintenanceInterval = TimeSpan.FromHours(1),
             });
             var held = await engine.CreateDatabaseAsync("held");
-            await engine.CreateDatabaseAsync("healthy0");
-            await engine.CreateDatabaseAsync("healthy1");
+            var peers = new[] { await engine.CreateDatabaseAsync("healthy0"), await engine.CreateDatabaseAsync("healthy1") };
+            Dirty(held.DataStorage);
+            foreach (var peer in peers) { Dirty(peer.DataStorage); }
             var worker = engine.Workers.OfType<SqlPageWriteBackWorker>().Single();
             using var release = new ManualResetEventSlim();
-            var passes = new ConcurrentQueue<DatabaseWorkerPass>();
+            var collected = new TaskCompletionSource<(int Healthy, DatabaseWorkerPass Pass, int[] Dirty)>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            var settled = new System.Collections.Generic.HashSet<string>(StringComparer.Ordinal);
             int healthy = 0;
-            worker.PassCompleted = passes.Enqueue;
-            worker.BeforeDatabase = current =>
+            bool prepared = false;
+            // AfterDatabase observes actual due work without forcing idle databases due.
+            worker.AfterDatabase = (current, _) =>
             {
                 if (ReferenceEquals(current, held)) { release.Wait(); }
                 else { Interlocked.Increment(ref healthy); }
             };
+            worker.PassCompleted = pass =>
+            {
+                foreach (var visit in pass.Visits)
+                {
+                    if (visit.Database.StartsWith("healthy", StringComparison.Ordinal)
+                        && visit.Reason == DatabaseWorkerPass.VisitReason.Completed) { settled.Add(visit.Database); }
+                }
+                if (!prepared && settled.Count == peers.Length)
+                {
+                    // Both peer lanes have been settled. Owe real new work while the
+                    // pump is in this callback, then let only the held lane wake it.
+                    foreach (var peer in peers) { Dirty(peer.DataStorage); }
+                    prepared = true;
+                    release.Set();
+                }
+                else if (prepared && pass.Visits.Any(visit => visit.Database == "held" && visit.Collected))
+                {
+                    // Snapshot on the pump: a delayed test continuation may resume
+                    // after a later legitimate regular interval has already run.
+                    collected.TrySetResult((Volatile.Read(ref healthy), pass,
+                        peers.Select(peer => peer.DataStorage.DirtyPageCount).ToArray()));
+                }
+            };
             try
             {
-                // Act: release after the interval pass, before the next interval is due.
-                var race = Stopwatch.StartNew();
-                while (passes.IsEmpty && race.Elapsed < TimeSpan.FromSeconds(30)) { await Task.Delay(5); }
-                passes.IsEmpty.ShouldBeFalse();
-                healthy.ShouldBe(2);
-                release.Set();
-                while (!passes.Any(pass => pass.Visits.Any(visit => visit.Database == "held" && visit.Collected))
-                    && race.Elapsed < TimeSpan.FromSeconds(30)) { await Task.Delay(5); }
+                // Act: the observer releases and captures the actual completion wake.
+                var result = await collected.Task.WaitAsync(TimeSpan.FromSeconds(30));
 
                 // Assert: a completion pass only settles/follows up its completed database.
-                passes.Any(pass => pass.Visits.Any(visit => visit.Database == "held" && visit.Collected)).ShouldBeTrue();
-                healthy.ShouldBe(2);
+                worker.PassObserverFailure.ShouldBeNull();
+                result.Pass.TriggerSignaled.ShouldBeTrue();
+                result.Pass.Visits.Single(visit => visit.Database == "held").Collected.ShouldBeTrue();
+                result.Healthy.ShouldBe(2);
+                var visits = result.Pass.Visits.Where(visit => visit.Database.StartsWith("healthy", StringComparison.Ordinal)).ToArray();
+                visits.Length.ShouldBe(2);
+                visits.ShouldAllBe(visit => !visit.Attempted && !visit.Collected && visit.Reason == DatabaseWorkerPass.VisitReason.NotDue);
+                result.Dirty.ShouldAllBe(count => count > 0);
                 rounds++;
             }
-            finally { release.Set(); worker.BeforeDatabase = null; worker.PassCompleted = null; }
+            finally { release.Set(); worker.AfterDatabase = null; worker.PassCompleted = null; }
         }
         while ((duration.Elapsed < TimeSpan.FromMilliseconds(250) || rounds < 6) && duration.Elapsed < TimeSpan.FromSeconds(30));
         rounds.ShouldBeGreaterThanOrEqualTo(6);
+
+        static void Dirty(Assimalign.Cohesion.Database.Storage.Storage storage)
+        {
+            using var transaction = storage.BeginTransaction();
+            using (var page = storage.AllocatePageForWrite(transaction, PageType.Index)) { page.MarkDirty(); }
+            transaction.Commit();
+        }
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Sql] - Disposal: held I/O stays owned and periodic events name its database and worker")]

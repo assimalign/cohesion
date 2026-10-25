@@ -78,8 +78,8 @@ public sealed class StoragePageManager
 
         try
         {
-            // Now extend the stream to accommodate the new page. Grow only, and under the pool
-            // monitor: a concurrent allocation of a
+            // Now extend the stream to accommodate the new page. Grow only, under the pool's
+            // extension gate, outside its mapping monitor: a concurrent allocation of a
             // higher page may already have extended it (a shorter length would cut that page
             // off), and an in-memory stream replaces its array when it grows, which would drop
             // a write-back landing in the old array. The backing handle serializes growth with

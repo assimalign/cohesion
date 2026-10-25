@@ -129,7 +129,12 @@ public sealed class StorageBufferPoolConcurrencyTests
         using var pool = new StorageBufferPool(2);
         var handle = pool.Pin((PageId)0L, stream);
         WriteVersion(handle, 0, 1);
-        file.OnWrite = () => WriteVersion(handle, 0, 2);
+        handle.Dispose();
+        file.OnWrite = () =>
+        {
+            using var writer = pool.Pin((PageId)0L, stream);
+            WriteVersion(writer, 0, 2);
+        };
 
         // Act
         pool.FlushPage((PageId)0L, stream);
@@ -155,7 +160,14 @@ public sealed class StorageBufferPoolConcurrencyTests
         using var pool = new StorageBufferPool(2);
         using var handle = pool.Pin((PageId)0L, stream);
         WriteVersion(handle, 0, 1);
-        file.OnWrite = () => WriteVersion(handle, 0, 2);
+        handle.Dispose();
+        int writes = 0;
+        file.OnWrite = () =>
+        {
+            using var writer = pool.Pin((PageId)0L, stream);
+            WriteVersion(writer, 0, 2);
+            writes++;
+        };
 
         // Act
         pool.FlushPage((PageId)0L, stream);
@@ -164,6 +176,7 @@ public sealed class StorageBufferPoolConcurrencyTests
         // Assert
         var buffer = new byte[Page.Size];
         stream.ReadPage((PageId)0L, buffer);
+        writes.ShouldBe(1);
         Should.NotThrow(() => PageChecksum.Verify(buffer, (PageId)0L));
     }
 

@@ -17,6 +17,23 @@ namespace Assimalign.Cohesion.Database.Storage.Tests;
 [Collection(StorageRaceCollection.Name)]
 public sealed class StorageCheckpointFlushTests
 {
+    [Fact(DisplayName = "Cohesion Test [Storage] - Checkpoint: a skipped dirty image cannot discard its recovery journal")]
+    public void Checkpoint_DirtyReadPinPreventsReservation_ShouldStoreAConfirmedImageBeforeTruncating()
+    {
+        // Arrange
+        using var storage = TornStorage.Create();
+        var location = storage.Insert("must survive the checkpoint");
+        using var pin = storage.PageManager.GetPage(location.PageId);
+
+        // Act: a sharp checkpoint also confirms stable copies held by read pins.
+        storage.Checkpoint();
+
+        // Assert: truncation is safe before the read pin has been released.
+        storage.DirtyPageCount.ShouldBe(0);
+        using var recovered = TornStorage.Open(storage.CaptureDurable());
+        recovered.Read(location.PageId, location.SlotIndex).ShouldBe("must survive the checkpoint");
+    }
+
     [Fact(DisplayName = "Cohesion Test [Storage] - Paced flush: an idle pass allocates no snapshot or write image (#1269)")]
     public void FlushSome_CleanPool_ShouldAllocateNothing()
     {
@@ -326,6 +343,8 @@ public sealed class StorageCheckpointFlushTests
         }
 
         pool.Capacity.ShouldBe(7);
+        pool.DirtyPageCount.ShouldBe(0);
+        using (var dirty = pool.Pin((PageId)11L, stream)) { dirty.MarkDirty(); }
         pool.FlushSome(stream, 2).ShouldBeGreaterThan(0);
         pool.FlushAll(stream);
         for (long id = 0; id < 12; id++)
@@ -395,7 +414,7 @@ public sealed class StorageCheckpointFlushTests
         stream.SetLength(Page.Size);
         using var pool = new StorageBufferPool(1);
         Initialize(pool, stream, 0, 11);
-        using var handle = pool.Pin((PageId)0L, stream);
+        StoragePageHandle? handle = null;
         using var entered = new ManualResetEventSlim();
         using var release = new ManualResetEventSlim();
         file.BeforeWrite = () =>
@@ -409,6 +428,8 @@ public sealed class StorageCheckpointFlushTests
         {
             // Act
             entered.Wait(TimeSpan.FromSeconds(10)).ShouldBeTrue();
+            // Retain the handle after the image copy's zero-pin reservation ends.
+            handle = pool.Pin((PageId)0L, stream);
             var disposeStarted = new TaskCompletionSource<Thread>(TaskCreationOptions.RunContinuationsAsynchronously);
             closing = Task.Factory.StartNew(() =>
             {
@@ -441,8 +462,11 @@ public sealed class StorageCheckpointFlushTests
 
         // Assert: disposal completed after the write and cleared the resident frames.
         pool.Count.ShouldBe(0);
-        handle.Page.AsBodySpan()[0].ShouldBe((byte)11);
-        handle.Entry.WriteInProgress.ShouldBeFalse();
+        using (handle)
+        {
+            handle.ShouldNotBeNull().Page.AsBodySpan()[0].ShouldBe((byte)11);
+            handle.Entry.WriteInProgress.ShouldBeFalse();
+        }
         Should.Throw<ObjectDisposedException>(() => pool.Pin((PageId)0L, stream));
     }
 

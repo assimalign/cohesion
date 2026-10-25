@@ -7,12 +7,12 @@ namespace Assimalign.Cohesion.Database.Storage.Tests;
 
 public sealed partial class StorageCompactionTests
 {
-    [Theory(DisplayName = "Cohesion Test [Storage] - Compaction: WAL repairs a stolen intermediate rewrite image (#1161)")]
+    [Theory(DisplayName = "Cohesion Test [Storage] - Compaction: WAL recovers a stolen compacted image (#1161)")]
     [InlineData(false, false)]
     [InlineData(false, true)]
     [InlineData(true, false)]
     [InlineData(true, true)]
-    public void Recovery_PageFlushedBeforeReplacementPublication_ShouldHonorThePhysicalCommit(bool insert, bool commit)
+    public void Recovery_PageFlushedAtCompactionNotification_ShouldHonorThePhysicalCommit(bool insert, bool commit)
     {
         var data = new CrashSimulationStream(writeThrough: true);
         var journal = new CrashSimulationStream();
@@ -39,15 +39,15 @@ public sealed partial class StorageCompactionTests
             int intermediateWrites = 0;
             storage.RecordPageCompacted = _ =>
             {
-                // Force a durable image after packing but before the new record is published.
-                // WAL permits fuzzy steals; it must repair this image on either outcome.
+                // Insert notifies after packing; update notifies after replacement.
+                // WAL permits fuzzy steals and must recover either image on both outcomes.
                 storage.PageManager.FlushAll();
                 intermediateWrites++;
             };
             using var bracket = storage.BeginTransaction();
             if (insert) { storage.Insert(bracket, ownerValue, changed).PageId.ShouldBe(target.PageId); }
             else { storage.Update(bracket, target.PageId, target.SlotIndex, changed); }
-            using (var pin = storage.PageManager.GetPage(target.PageId)) { pin.Entry.IsDirty.ShouldBeTrue(); }
+            using (var pin = storage.PageManager.GetPage(target.PageId)) { pin.Entry.IsDirty.ShouldBe(insert); }
             if (commit) { bracket.Commit(); }
             intermediateWrites.ShouldBe(1);
             crashedData = data.CaptureDurable();

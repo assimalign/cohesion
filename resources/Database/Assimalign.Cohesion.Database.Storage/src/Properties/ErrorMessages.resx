@@ -109,4 +109,6 @@
   <data name="ExceptionDescribeStorageOffline2" xml:space="preserve"><value>a durable flush of the data file</value></data>
   <data name="ExceptionDescribeStorageOffline3" xml:space="preserve"><value>a write of the file header</value></data>
   <data name="ExceptionDescribeStorageOffline4" xml:space="preserve"><value>a write</value></data>
+  <data name="MixedThreadMutableScopes" xml:space="preserve"><value>Nested mutable scopes for a page must use the same thread. Dispose the existing scopes before opening a writer on another thread.</value></data>
+  <data name="PinnedDirtyPages" xml:space="preserve"><value>Dirty pages remain pinned. Release their handles before a full flush or checkpoint.</value></data>
 </root>

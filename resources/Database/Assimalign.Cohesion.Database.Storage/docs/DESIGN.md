@@ -431,8 +431,10 @@ are `unsafe` overlays — the pool guarantees pointer stability for the handle's
   without PostgreSQL's global atomic sweep/allocation counters. No code copied.
 - **Buffers and clock nodes are reused.** Each frame owns one pinned 8 KiB array and
   one clock node. Eviction detaches the node and recycles the frame; fresh/overwrite
-  pages are zeroed before publication. Cold loads still allocate a small completion
-  record and a concurrent-map node. Cached pins allocate only their existing handle.
+  pages are zeroed before publication. Cold loads allocate a concurrent-map node;
+  a completion record and task are created only on the first waiter for that fault.
+  Completions are never reused across faults, so delayed waiters retain their own
+  result. Cached pins allocate only their existing handle.
 - **Failed loads never poison the cache**: a page that fails checksum verification is
   not cached; its buffer goes straight back to the recycle stack and the exception
   propagates. The same holds for a page whose header claims an overflow area that does
@@ -442,10 +444,12 @@ are `unsafe` overlays — the pool guarantees pointer stability for the handle's
   otherwise hand the B-tree a writable span past the buffer.
 - **Page I/O leaves mapping locks (#1541).** Concurrent lookup is separate from the
   short monitor protecting admission, the clock, recycled frames and pending faults.
-  One per-page fault completion coalesces cold readers; its awaitable task is created
-  only when there is a waiter. The synchronous pin API waits internally and retries
+  One lazily created per-page fault completion coalesces cold readers. The
+  synchronous pin API waits internally and retries
   lookup after completion. The original I/O/checksum exception is rethrown with its
-  identity intact. A new frame is published only after its read and validation finish.
+  identity intact for normal readers of that incoming page. Overwrite waiters retry without
+  inheriting a read failure; victim write/WAL failures and a loader's thread interrupt
+  belong to that loader alone, so waiters retry. A new frame is published only after its read and validation finish.
   A failed dirty-victim write leaves its old mapping and dirty bytes available; a failed
   incoming read recycles its unpublished buffer. Resident plus reserved loading frames
   never exceed Capacity. Independent cold pages can perform I/O concurrently.
@@ -480,10 +484,24 @@ are `unsafe` overlays — the pool guarantees pointer stability for the handle's
   the smallest capacity covering surviving residents. Disposal drains I/O before clearing
   bookkeeping; outstanding handles still keep their pinned-heap arrays alive.
   Every completion releases ownership and wakes waiters on success and failure. No
-  public async pin, format change, checkpoint time target or spread checkpoint is added.
-- **Write-back writes a private copy.** A pinned writer can change a page while the pool
-  writes it back — `FlushAll` and `FlushPage` write pinned pages, and until #1157 the
-  paced page writer did too. Write-back therefore copies the page first, stamps the
+  interrupt can abandon cleanup monitor entry: it retries acquisition, releases all
+  bookkeeping, then rethrows the interrupt. Maintenance admission is reopened in a
+  finally covering both the drain and subsequent work, including interrupted drains.
+  PostgreSQL `src/backend/storage/buffer/bufmgr.c:7290–7345` rechecks buffer validity
+  after shared I/O; Neo4j `MuninnPageCursor.java:345–398` retries lookup after its fault
+  latch completes. These informed failure ownership; no code copied.
+  No public async pin, format change, checkpoint time target or spread checkpoint is added.
+- **Write-back writes a private copy.** Every flush checks frame-I/O ownership and
+  atomically reserves a zero-pin frame before copying, including in Release where
+  cached pins never enter the mapping monitor. A failed reservation skips the page.
+  The reservation is released after the copy; writers can then pin and modify the
+  live page during physical I/O. A full flush also handles stable read-pinned pages:
+  it holds an extra pin and I/O lease while confirming a private copy against D1,
+  retrying any copy that crosses a writer boundary. A mutable image qualifies only
+  for the serialized owning scope, as an own read does. If dirty images still cannot be copied, the full flush refuses with
+  StorageIOException and preserves their journal recovery base. Read pins therefore
+  neither strand checkpoints nor allow truncation ahead of the data images.
+  Write-back stamps the
   checksum on the copy, and writes the copy: the bytes on the stream always verify. The
   write-ahead
   LSN is read from the copy as well. Since storage format 3 a bracket's changes are journaled
@@ -557,6 +575,12 @@ the cold-path cost of scalable cached lookup and fault coordination without rela
 an allocation assertion. The probe verifies the loaded assembly hashes; an initial
 stale copied-assembly run was discarded before the final measurements.
 
+The wave-11 review follow-up creates fault completions only for actual waiters.
+An isolated Release Windows ARM64 / .NET 10.0.13 regression cycles eight persisted
+pages through four recycled frames, with 4,096 warmups and twelve 4,096-read samples.
+Every sample changes from 128 to 96 bytes/read; the checked endpoint/id digest stays
+614400. This measures allocation only, with tiering disabled, and makes no throughput claim.
+
 ### Capacity (#1254)
 
 The pool holds `Storage.DefaultBufferPoolCapacity` pages, 4,096 (32 MiB), unless the
@@ -593,7 +617,7 @@ third of the 4,096-page rate ("Measurements").
   (`StreamFileHandle.SetLength`); before the #1254 review a `MemoryStream` kept it, so an
   in-memory database held up to twice the checkpoint size for its lifetime once its journal first
   reached it.
-- **Resizing.** Growing takes effect at once. Shrinking evicts clock-selected unpinned
+- **Resizing.** Growing and shrinking first drain in-flight pool I/O. Shrinking evicts clock-selected unpinned
   pages, writing dirty ones back through the write-ahead gate, until the resident set fits; if
   more pages than the new capacity are pinned, the resize throws `StorageIOException` and the
   pool keeps its capacity.
@@ -685,8 +709,11 @@ instead of dereferencing it:
   copied before any move. Rejected plans release their pin and mutable scope.
   First-touch journaling precedes these changes, and the existing dirty-page WAL
   barrier covers the entire packed layout, including stolen writes before commit.
-  Flushes may persist an intermediate rewrite image; recovery repairs it from WAL
-  on both abort and commit. A dedicated test forces this before replacement publication.
+  Paced flushes defer pinned rewrite scopes; an explicit full flush can confirm an
+  owning scope's stable intermediate image, which WAL repairs on recovery. The compaction notification runs after the
+  replacement slot and its final dirty mark are published, so a throwing notification
+  cannot leave a row absent until rollback. Reclaim likewise marks dirty after its
+  body, type, owner and slotted header have all changed.
   No format, public signature, diagnostic code or wire change is needed.
 
   PostgreSQL's `PageRepairFragmentation` requires exclusive cleanup access and checks
@@ -753,26 +780,34 @@ object ids, so a table scan stops decoding the whole database.
   Updating a measured node reorders it without allocating a replacement node. The
   current target remains the fast preference; a heap supplies a fitting older target
   without copying or walking the owner directory. Among older pages it prefers the
-  greatest available capacity, then the lower page id for a tie, and fills that target
-  before searching again. A sorted set would allocate nodes on ordinary updates;
+  first fitting node in heap traversal order (the root has greatest capacity, with
+  lower page id breaking a tie; exclusions can select a lower fitting subtree).
+  It fills that target before searching again. A sorted set would allocate nodes on ordinary updates;
   byte buckets could miss a fitting page at their rounding boundary.
 - **A hint never grants a write or establishes capacity.** Selection captures the
   allocation generation under owner-lock then free-map-lock order. Both locks close
   before pinning, first-touch registration, a callback or I/O. Registration confirms
   that generation under the transaction lock; a stale selection is excluded from
   this insert, including same-owner reuse. D1 writer ownership then protects the
-  physical capacity check and any compaction. A refused capacity is corrected before
+  physical capacity check and any compaction. Candidates locked by another bracket
+  are skipped, and a merely reserved allocation retains its hint for publication.
+  A refused capacity is corrected before
   another candidate is tried. No new process-wide atomic or public pin API is added.
 - **Open preserves its existing validation boundary.** The existing header scan
-  rebuilds data-page membership and seeds unmeasured capacities at the maximum record
-  size. An owned insertion probe measures actual slot geometry. There is no
+  rebuilds data-page membership and seeds capacity bounds from SlotCount/FreeDataEnd
+  (header offsets 22/24), retaining potential dead space until the directory is measured.
+  An unknown insertion candidate is measured from a D1-confirmed private header and
+  slot-directory copy under a read pin, before any write touch. Only a fitting target
+  acquires a write lock, pre-image and full-page journal base. There is no
   extra eager full-page scan, persisted map, journal record or format change. Cold
   searches may visit unmeasured full pages once before finding room; measured full
   pages cannot remain false candidates. Raw `OpenPageForWrite` (with or without a
   structure latch) invalidates its data page's hint. A nested typed probe leaves the
   hint unmeasured because the outer writable handle may still change geometry after
   it returns. Rollback invalidates restored hints without decoding damaged pre-images
-  during exception cleanup. The next owned probe validates them normally.
+  during exception cleanup. The next read-pin probe validates them normally. An
+  overflowing insert after reopen or rollback therefore creates O(1) pre-images and
+  full-page journal images even when it must read N full candidates.
 - **Reuse evidence and limits.** `StorageFreeBytesTests` keeps 1,024 live 500-byte
   records and performs 384 insert-before-purge replacements across partly full older
   pages. After each 32 replacements, twelve samples remain at 67 pages after a seed
@@ -1319,7 +1354,30 @@ does not take.
 - **Writer identity and lifetime.** A private frame gate tracks the physical transaction;
   it does not hold a thread-affine monitor across the handle's lifetime. Disposal remains
   idempotent and may run on another thread. A synchronous read on the writer's own thread sees
-  its forward changes; another thread waits. Rollback excludes that bypass before advancing
+  its forward changes; another thread waits. Nested mutable scopes for a page must
+  use one thread; cross-thread nesting throws before exposing mutable bytes. A sole
+  mutable handle can move to a serialized continuation. Public raw mutable handles
+  carry read permission through an AsyncLocal scope bound to the handle and epoch,
+  including reads before accessing Page on the continuation. Weak handle references
+  prevent a stale context after cross-thread disposal from retaining frames or pools.
+  Context transitions count active flows and invalidate read tokens without taking
+  locks. A forked reader cannot inherit bypass permission while its writer's context
+  remains active; a serialized awaited continuation is the sole active flow.
+  Each raw handle registers its current permission token on its pinned frame. Accessing
+  Page from a different context gives that handle a new token, revokes the previous
+  context's token and invalidates prior read tokens before exposing the memory. A fork
+  sharing an active token receives its own token at this handoff; its later awaited
+  continuation can read even before another Page access. A raw own-read always requires
+  its handle's current token. That token's writer thread can read while an unrelated
+  inherited task remains active; a fork on another thread cannot use its parent's token
+  concurrently. A physical thread id alone never grants raw read permission.
+  Registration adds no field to ordinary read
+  handles, and disposal removes it under the writer-release monitor acquisition;
+  ordinary read-pin disposal takes no writer monitor. Retired epochs cannot affect a later typed writer.
+  Callers must never use a handle or its borrowed memory
+  concurrently across threads; moving nested scopes to a continuation is refused.
+  Ordinary pins and typed synchronous record operations create no ambient scope.
+  Rollback excludes that bypass before advancing
   its sequence, and an own-thread reader captures its token before checking permission. A
   restore starting after permission therefore invalidates the copy. The wait loop rechecks
   permission after a nested restore ends, even with the outer handle still active. Completion
@@ -2062,10 +2120,10 @@ taken in `BeginTransaction` under the transaction lock and released exactly once
 commit/rollback: a begun-but-untouched transaction holds no page lock yet has already
 appended its begin record, and the whole checkpoint now runs *under* the transaction
 lock, so no transaction can slip between the emptiness check and the truncation.
-(Lock order is transaction lock → header → flush gate → buffer pool monitor, then journal
-medium → journal append; flush I/O releases the monitor, eviction never takes the flush gate,
-and waits on a frame lease release the monitor.
-no path takes them in reverse. In particular, never wait for the medium while holding the
+(Lock order is transaction lock → header → flush gate. Mapping snapshots briefly take the
+pool monitor; page I/O takes its stripe → journal medium → journal append with that monitor
+released. Eviction never takes the flush gate, and frame-lease waits release the monitor.
+No path takes these locks in reverse. In particular, never wait for the medium while holding the
 append lock. Medium owners briefly acquire the append lock to detach or publish a prefix,
 and latch failures before yielding the medium. The offline latch may then take the group-commit
 gate; gate owners release it before calling the journal. Offline notifications run outside both
@@ -2761,18 +2819,12 @@ written only when its start was, so a listener that attaches in the middle sees 
 `Stopwatch` timestamp is taken only when its event is enabled. The group-commit gate's wait
 already took a timestamp before this source existed. The pin path's hit branch is unchanged: its
 allocation-delta test (`StorageEventSourceTests`) asserts that a hit allocates exactly the
-`StoragePageHandle` it returns. Events on the pool's paths (13, 14, 16) are written under the pool
-lock, where the failures and the eviction happen; `BufferPoolResized` is written after it. An
-enabled listener's synchronous work therefore runs under that lock. `StorageOffline` (10) can also
-be written under a lock: under the transaction lock when a checkpoint's or shutdown flush's journal
-flush takes the storage offline (`RaiseOffline` writes it before `OnOffline`), and the hook that
-follows writes the Transactions source's `LockWaitsAbandoned` there too. For the Verbose
-`DirtyPageEvicted` that is deliberate: the eviction it reports has already run the write-ahead
-gate (which can flush the journal durably) and the page write under the same lock, so a listener
-adds work of the same kind to a path that already waits on a device. Writing it after the lock
-would take a `try`/`finally` around `Pin` and `PinForOverwrite`, hit branch included, so an
-eviction before a failed load is still reported, and a buffer of evictions in `Resize`'s shrink
-loop. That trade is open for owner review.
+`StoragePageHandle` it returns. BufferPoolExhausted (13) is raised while selecting under the mapping monitor.
+DirtyPageEvicted (14) and PageChecksumFailed (16), including synchronous listeners,
+run outside that monitor while the page's I/O stripe is owned. BufferPoolResized
+(15) is raised after maintenance releases the flush gate. StorageOffline (10) may
+run under the transaction lock when a checkpoint or shutdown journal flush fails;
+the following OnOffline hook also raises Transactions' LockWaitsAbandoned there.
 
 Counters, all maintained whether or not anyone listens, and only on paths that already wrote to or
 waited on a device (plan D6; nothing is counted per pin, per record or per statement):
