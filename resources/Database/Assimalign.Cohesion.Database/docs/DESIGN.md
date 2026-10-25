@@ -560,7 +560,7 @@ ordinary storage transaction contention is retried as busy.
   A separate elapsed inter-pass wait ends at the next pass entry, including settlement and
   pauses on either side of the trigger call.
   Lane timing includes monitor acquisition and runner dispatch, including a late parking runner.
-  The shared pace helper includes each healthy attempted visit, including a visit left running;
+  The failing-checkpoint pace helper (#1284) includes each healthy attempted visit, including a visit left running;
   request counts and requested durations remain strictly bounded per visit.
   For each measured wait category it collects at least 12 samples within the 30-second safety
   ceiling and requires the median and at least 75% of samples below the configured 100 ms budget.
@@ -581,9 +581,20 @@ ordinary storage transaction contention is retried as busy.
   with or without observation. DatabaseLaneWorker now owns publication and trigger/delay accounting for all lane workers;
   DatabaseWorkerPass carries the common identity, typed database outcome and lane wait evidence
   (#1279). Checkpoint due-state evidence remains optional checkpoint-specific data. Hung-work
-  tests require at least 12 healthy worker completions while the other database stays held;
-  median and 75-percent share judge waits, and slowdown mutants verify the evidence. There
-  are no per-pass process-wide atomics. The root failure ordering and _giveUpFaultPass retention
+  tests require K = 4 healthy positive-work completions while exactly one runner stays held,
+  assert lane-wait counters, then release the gate and require the held worker to complete.
+  Completion and violation evidence is cumulative; only the last 64 diagnostic passes are retained,
+  so skipped-work spin loops cannot grow the observer history or erase recorded progress.
+  Page-write setup gates dispatch before dirtying and arming device I/O, preventing a foreground
+  writer from waiting on its own deliberately stalled page. Their 30-second ceilings are hang guards;
+  elapsed durations are diagnostic only. A legitimate
+  stuck-lane advisory may appear while held, but operational failures/offline visits are refused
+  and collection must clear the advisory after release. The #1284
+  failing-checkpoint median rule above is retained. Root pump isolation likewise counts
+  healthy visits and database skips and rejects pump-wide backoff requests instead of a rate ratio.
+  Cancellation gates the observed backoff request, cancels it, and requires pump exit without a retry;
+  delayed observation cannot turn cancellation into a latency failure. There are no per-pass
+  process-wide atomics. The root failure ordering and _giveUpFaultPass retention
   are unchanged; purge refusals retain their observation-only reporting. Lane threads start
   without caller ExecutionContext and restore their clean context after each job, preventing an
   apply-gate reentrancy flag or other AsyncLocal state from crossing databases. Detached outcomes carry

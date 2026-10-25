@@ -58,12 +58,25 @@ spans model/apply/storage locks, failure reporting or observer callbacks.
 
 The shared DatabaseLaneWorker publishes opt-in DatabaseWorkerPass observations for all kinds.
 Checkpoint due evidence remains optional checkpoint-specific data. Resilience tests hold the actual
-page-write/fsync faults (purge/index use the internal dispatch hook), require at least 12 healthy
-worker completions while the other database is still held, and judge measured waits by median
-and 75-percent share under the budget. They do not credit committer self-help or a statement's
+page-write/fsync faults (purge/index use the internal dispatch hook), require K = 4 healthy
+positive-work completions while exactly one runner remains held, and assert lane-wait counters.
+Page-write setup holds dispatch while preparing the dirty page, then releases it into the device gate.
+A 30-second hang guard bounds each phase; elapsed durations are diagnostic only. After release,
+the held worker must complete and clear any stuck-lane advisory before a second stall exercises disposal. They do not credit
+committer self-help or a statement's
 checkpoint as worker progress. Cancellation, completion, failed thread start, capacity and disposal
 are exercised in the non-parallel lane stress tests. Each runner starts without caller ExecutionContext and restores a clean context after each job,
 preventing apply-gate reentrancy or other AsyncLocal state from crossing databases.
+SQL/Key-Value index compaction remains a stub: the test hook performs counted page write-back
+on its lane and pairs the result with collection. Grouped-commit resilience uses worker flush
+and self-help events; hung-checkpoint progress uses a 30-second hang guard instead of a short
+throughput window. Slow-cadence, producer and observer regressions cover runner pauses.
+Completion-wake regressions inspect the collected pass rather than live counters after an await;
+a paused observer cannot credit later regular ticks to that completion. Provisional-flush waits
+use the same 30-second hang guard, with self-help outside it; a controlled three-second pump
+pause covers provisional collection and publication.
+Large-definition reclamation stress retains every operationally failed visit and pump backoff
+request. A slow-lane regression allows a stuck advisory and requires it to clear after draining.
 No public type, visibility grant, project reference or storage format changed. Storage exposes
 its pending-commit and dirty-page scheduling hints without exposing buffer-pool frames.
 

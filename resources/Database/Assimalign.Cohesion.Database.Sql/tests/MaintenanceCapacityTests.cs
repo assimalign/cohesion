@@ -104,8 +104,10 @@ public sealed class MaintenanceCapacityTests
         finally { held.Set(); finite.Set(); worker.WaitForLanes(TimeSpan.FromSeconds(30)).ShouldBeTrue(); }
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Write-back pacing: completion wakes collect the held database without advancing its healthy peers")]
-    public async Task Run_DetachedWriteBackCompletes_ShouldKeepOtherDatabasesOnTheirInterval()
+    [Theory(DisplayName = "Cohesion Test [Database.Sql] - Write-back pacing: completion wakes collect the held database without advancing its healthy peers")]
+    [InlineData(0)]
+    [InlineData(1000)]
+    public async Task Run_DetachedWriteBackCompletes_ShouldKeepOtherDatabasesOnTheirInterval(int observerPauseMilliseconds)
     {
         // Arrange: observe the real pump, for at least six completion/interval races.
         var duration = Stopwatch.StartNew();
@@ -123,28 +125,38 @@ public sealed class MaintenanceCapacityTests
             var worker = engine.Workers.OfType<SqlPageWriteBackWorker>().Single();
             using var release = new ManualResetEventSlim();
             var passes = new ConcurrentQueue<DatabaseWorkerPass>();
-            int healthy = 0;
-            worker.PassCompleted = passes.Enqueue;
+            worker.PassCompleted = pass =>
+            {
+                passes.Enqueue(pass);
+                // Release on the pump, so the caller's scheduling delay cannot miss the wake.
+                if (pass.Visits.Any(visit => visit.Database == "held" && visit.Attempted
+                    && visit.Reason == DatabaseWorkerPass.VisitReason.Running)
+                    && pass.Visits.Count(visit => visit.Database.StartsWith("healthy", StringComparison.Ordinal)
+                        && visit.Attempted) == 2)
+                {
+                    release.Set();
+                }
+            };
             worker.BeforeDatabase = current =>
             {
                 if (ReferenceEquals(current, held)) { release.Wait(); }
-                else { Interlocked.Increment(ref healthy); }
             };
             try
             {
-                // Act: release after the interval pass, before the next interval is due.
+                // Act: wait for collection under a hang guard, including a descheduled observer.
                 var race = Stopwatch.StartNew();
-                while (passes.IsEmpty && race.Elapsed < TimeSpan.FromSeconds(30)) { await Task.Delay(5); }
-                passes.IsEmpty.ShouldBeFalse();
-                healthy.ShouldBe(2);
-                release.Set();
+                await Task.Delay(observerPauseMilliseconds);
                 while (!passes.Any(pass => pass.Visits.Any(visit => visit.Database == "held" && visit.Collected))
                     && race.Elapsed < TimeSpan.FromSeconds(30)) { await Task.Delay(5); }
 
                 // Assert: a completion pass only settles/follows up its completed database.
                 passes.Any(pass => pass.Visits.Any(visit => visit.Database == "held" && visit.Collected)).ShouldBeTrue();
-                healthy.ShouldBe(2);
-                rounds++;
+                var collected = passes.First(pass => pass.Visits.Any(visit => visit.Database == "held" && visit.Collected));
+                var healthy = collected.Visits.Where(visit => visit.Database.StartsWith("healthy", StringComparison.Ordinal)).ToArray();
+                healthy.Length.ShouldBe(2);
+                // If a regular tick actually became due before collection, exercise the race
+                // again. Count six completion wakes that did not dispatch healthy peers anew.
+                if (healthy.All(visit => !visit.Attempted)) { rounds++; }
             }
             finally { release.Set(); worker.BeforeDatabase = null; worker.PassCompleted = null; }
         }
