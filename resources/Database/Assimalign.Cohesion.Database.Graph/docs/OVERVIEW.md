@@ -189,13 +189,16 @@ adds a record-scoped constructor and nullable SlotIndex. Formats and wire frames
 
 Read LIMIT without ORDER BY can stop upstream expansion; grouping consumes rows incrementally,
 and ordered finite pages retain only OFFSET + LIMIT candidates. Final result rows/paths remain
-materialized until statement completion. QueryMemoryBudget defaults to 64 MiB and QueryWorkBudget
+materialized until statement completion. QueryMemoryBudget defaults to 256 MiB and QueryWorkBudget
 to 1,000,000 physical units after relationship type/direction selection; FOR elements also consume
 work. Engines can explicitly set higher positive ceilings. GraphQueryLimits supplies optional lower
 MemoryBytes/WorkUnits to the three-argument request constructors/factories or GraphTraversal.Limits.
 Remote Execute statements use server ceilings; wire payloads are unchanged. Memory exhaustion is
-CG05020, invalid limits CG08021, and work/hop exhaustion CG05004. Shared containers and large values are
-counted once across operators (small leaves use conservative per-reference estimates) and every ownership lease is released on completion or failure.
+CG05020, invalid limits CG08021, and work/hop exhaustion CG05004. The default admits 100,000
+one-property SET, FOR/INSERT, entity RETURN and QueryPaths rows; wider retained state reduces capacity.
+TraverseAsync also enforces these ceilings, including the newly bounded 1,000,000 work units.
+Containers and supported immutable leaves, including boxed scalars, are counted once across
+operators. Root bookkeeping uses one combined ledger grant. Every ownership lease is released on completion or failure.
 
 A bounded per-session cache reuses only cleared accounting buffers; large high-water workspaces
 are discarded and disposal drops the cache. Retained values and budget ownership do not escape

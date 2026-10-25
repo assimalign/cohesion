@@ -273,6 +273,7 @@ public class SqlClientTests
         await using var first = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout());
         await first.ExecuteAsync("BEGIN", cancellationToken: SqlClientTestHarness.Timeout());
         await first.ExecuteAsync("INSERT INTO users (id, name, score) VALUES (5, 'pending', 50)", cancellationToken: SqlClientTestHarness.Timeout());
+        var session = harness.Server.Sessions.ShouldHaveSingleItem().Id;
 
         // Act
         await first.DisposeAsync();
@@ -281,12 +282,39 @@ public class SqlClientTests
         {
             // Assert: the next renter sees no pending row and can start its own transaction.
             (await second.QueryAsync("SELECT id FROM users WHERE id = 5", cancellationToken: SqlClientTestHarness.Timeout())).Count.ShouldBe(0);
+            harness.Server.Sessions.ShouldHaveSingleItem().Id.ShouldBe(session);
             await second.ExecuteAsync("BEGIN", cancellationToken: SqlClientTestHarness.Timeout());
         }
         finally
         {
             await second.ExecuteAsync("ROLLBACK", cancellationToken: SqlClientTestHarness.Timeout());
         }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - Explicit rollback returns the same clean session for committed work (w11 review)")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ExecuteAsync_RollbackThenReuse_ShouldCommitOnlyNewWrites(bool tcp)
+    {
+        // Arrange
+        await using var harness = await SqlClientTestHarness.StartAsync(configureSettings: settings => settings.MaxPoolSize = 1, tcp: tcp);
+        await using var first = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout());
+        var session = harness.Server.Sessions.ShouldHaveSingleItem().Id;
+        await first.ExecuteAsync("BEGIN", cancellationToken: SqlClientTestHarness.Timeout());
+        await first.ExecuteAsync("INSERT INTO users (id) VALUES (5)", cancellationToken: SqlClientTestHarness.Timeout());
+
+        // Act
+        await first.ExecuteAsync("ROLLBACK", cancellationToken: SqlClientTestHarness.Timeout());
+        await first.DisposeAsync();
+        await using var second = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout());
+        await second.ExecuteAsync("BEGIN", cancellationToken: SqlClientTestHarness.Timeout());
+        await second.ExecuteAsync("INSERT INTO users (id) VALUES (6)", cancellationToken: SqlClientTestHarness.Timeout());
+        await second.ExecuteAsync("COMMIT", cancellationToken: SqlClientTestHarness.Timeout());
+
+        // Assert
+        harness.Server.Sessions.ShouldHaveSingleItem().Id.ShouldBe(session);
+        (await second.QueryAsync("SELECT id FROM users WHERE id = 5", cancellationToken: SqlClientTestHarness.Timeout())).Count.ShouldBe(0);
+        (await second.QueryAsync("SELECT id FROM users WHERE id = 6", cancellationToken: SqlClientTestHarness.Timeout())).Count.ShouldBe(1);
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Sql.Client] - Options: creation validates settings and factory")]

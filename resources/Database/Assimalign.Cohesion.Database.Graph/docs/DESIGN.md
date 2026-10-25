@@ -742,7 +742,7 @@ GQL patterns include quantified relationships and parenthesized subpaths; the su
 identity is used at most once within that path; a node may recur. Separate comma-separated paths
 have separate edge sets and share variable bindings. This makes a three-edge cycle a valid
 three-hop result but forbids reusing its first edge on a fourth hop. Intermediate read bindings stream;
-retained results and operator state share a 64 MiB default statement memory budget. Physical work
+retained results and operator state share a 256 MiB default statement memory budget. Physical work
 defaults to 1,000,000 selected node/edge candidates or FOR elements, including dead ends. Memory
 exhaustion is `CG05020`; work or the 64-hop trail limit is `CG05004`, never silent truncation.
 Cancellation is observed during expansion and materialization. Repeated node/relationship
@@ -751,14 +751,20 @@ variables enforce identity equality, and conflicting variable kinds fail before 
 
 ### Retained execution memory and explicit query limits (#1533, D4)
 
-`GraphDatabaseEngineOptions.QueryMemoryBudget` defaults to 67,108,864 bytes and
+`GraphDatabaseEngineOptions.QueryMemoryBudget` defaults to 268,435,456 bytes and
 `QueryWorkBudget` to 1,000,000 units. The engine snapshots both positive ceilings at construction.
-Applications may explicitly configure higher ceilings for a known workload without changing a
-process memory limit. `GraphQueryLimits` has optional `long? MemoryBytes` and `long? WorkUnits`;
+The default preserves the former 100,000-row envelope for one-property SET targets, FOR/INSERT,
+entity RETURN and QueryPaths, and the 30,000-node collect/SET fixture. Wider properties and retained
+intermediate stages reduce capacity; this is a memory limit, not a guaranteed row count for arbitrary
+queries. Ten times that envelope is refused by memory accounting. To admit larger workloads, raise
+QueryMemoryBudget on GraphDatabaseEngineOptions; raise QueryWorkBudget too when physical work
+would exceed its ceiling. This does not change a process memory limit. `GraphQueryLimits` has optional `long? MemoryBytes` and `long? WorkUnits`;
 omitted members use the engine ceiling, and a request may only lower it. Existing two-argument
 request constructors/factories remain; GraphQueryRequest and GraphPathsQueryRequest add
 three-argument `(statement/query, parameters, limits)` overloads. `GraphTraversal.Limits` applies
-the same policy to typed traversal. These lower-limit DTOs are currently an in-process request
+the same policy to typed traversal. TraverseAsync, previously uncapped, now refuses at the default
+1,000,000 selected-candidate work units (CG05004), and also uses the memory ceiling; configure the
+engine ceilings or lower per-traversal Limits explicitly. These lower-limit DTOs are currently an in-process request
 surface; Execute wire payloads and capabilities do not change. Remote statements receive their
 server engine's safe defaults. Plain EXPLAIN stays nonexecuting and reports the effective work
 ceiling in Expand details, with null actual counts.
@@ -771,9 +777,11 @@ Accounting is deterministic and statement-local: owned row/slot containers, grou
 DISTINCT state, ordered results, writer overlays, scan identity arrays, bounded cursor batches,
 merge heads and DFS state all consume the same grant. Constructed FOR lists and projected values
 remain charged while a downstream iterator holds them. Parameter/variable input lists are borrowed
-from their existing input scope. Reference-counted ownership charges shared containers and large
-immutable leaves once across operators; smaller leaves are conservatively charged per retained
-reference, avoiding a larger identity-table entry for each small scalar. Typed entity collections
+from their existing input scope. Reference-counted ownership charges containers and supported immutable leaves once across operators,
+including small strings, byte arrays and boxed scalars. Nested boxed scalars use a 48-byte identity
+entry; a root scalar acquires the combined 96-byte grant, including owner bookkeeping, once.
+Containers use that same 96-byte combined identity/root-owner grant;
+operators do not add a second 64-byte owner-entry grant for each retained container. Typed entity collections
 are traversed by index without boxing each node/relationship.
 Decoded anchors have lexical grants; each incident cursor owns one decoded target grant until
 that child's complete subtree finishes. Backtracking and iterator disposal release those grants.
@@ -1047,7 +1055,7 @@ WITH applies its WHERE after ordering/paging as before. All final rows and paths
 until statement completion; this is internal streaming, with unchanged wire result ownership.
 Mutation target tables and writes complete before final paging. The former 100,000-result/group/
 DISTINCT guard is replaced by retained-memory accounting; affordable complete results may exceed it.
-The 317-by-317 scalar-result test checks all 100,489 rows under the unchanged 64 MiB default.
+The 317-by-317 scalar-result test checks all 100,489 rows under the default budget.
 Each map key, including maps nested inside lists or
 maps, gets canonical ordinal key/value arrays during key materialization. Map comparisons use
 those arrays without re-sorting or allocating.
@@ -2684,6 +2692,10 @@ reattachment for Documents and Graph.
 
 ## Confirmed record decoding (D1, #1372)
 
+A graph record shorter than the 18-byte format header is located truncation corruption, preserving
+an EndOfStreamException cause. Only a readable unsupported version receives CG06017 and the
+recreate-database remedy.
+
 GraphStore open, format validation, cached identity reads and index/label/
 adjacency fetches pass the known page and slot into the record decoder. The decoder creates
 its corruption error with that location and preserves scalar/count/truncation parsing causes.
@@ -2731,6 +2743,11 @@ uses CG04022 and aborts the existing transaction; COMMIT/ROLLBACK without an ope
 uses CG04023. ExecutePaths refuses controls with CG05001 before any control takes effect.
 Disconnect and session teardown roll back. The shared negotiated transaction-status postamble
 also resets unfinished transactions before pool reuse; legacy peers are discarded on return.
+
+An idle open wire transaction holds the database writer lock once it has acquired it, until
+COMMIT, ROLLBACK, disconnect, pool return or IdleTimeout (30 minutes by default). Keep transactions
+short: an idle writer blocks other writers. New clients discard sessions against pre-#1540 servers
+that cannot negotiate transaction-status, so those servers are not pooled.
 
 The parser exposes GqlQueryExpression.TransactionCommand (GqlTransactionCommand None/Start/Commit/Rollback).
 The server owns the connection's existing transaction, following Neo4j's

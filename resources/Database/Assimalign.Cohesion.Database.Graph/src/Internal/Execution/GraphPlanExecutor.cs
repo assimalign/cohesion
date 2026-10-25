@@ -304,7 +304,7 @@ internal static partial class GraphPlanExecutor
         private long _physical;
         private long _viable;
         private int _candidates;
-        internal ExpansionBudget(long workLimit = PhysicalLimit, long memoryLimit = 64L * 1024 * 1024, GraphQueryMemoryPool? pool = null)
+        internal ExpansionBudget(long workLimit = PhysicalLimit, long memoryLimit = 256L * 1024 * 1024, GraphQueryMemoryPool? pool = null)
         {
             WorkLimit = workLimit;
             Memory = new(memoryLimit, pool);

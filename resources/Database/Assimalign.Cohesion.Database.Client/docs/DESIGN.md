@@ -217,10 +217,14 @@ SQL and Graph negotiate transaction-status. The connector consumes the terminal 
 before completing an Execute exchange, including complete statement errors. Pool return sends
 ROLLBACK for active or failed transactions, then requires a successful zero-count completion and
 Idle status before reuse. It performs this I/O outside the pool lock, after joining the last
-lease operation, with a five-second cleanup timeout. Failure, missing/invalid status, cancellation
+lease operation. The rollback reply and its Ready drain each have a five-second internal bound
+(up to ten seconds in total). Failure, missing/invalid status, cancellation
 or an unnegotiated transaction-capable peer discards the connector. Idle sessions need no reset
-exchange. No state is inferred from statement text; custom Execute exchanges opt into the status
-postamble with protected DatabaseProtocolExchange(ProtocolMessageFamily, bool transactionStatus).
+exchange. No state is inferred from statement text. The connector observes Execute (5) and
+ExecutePaths (64) frames and drains negotiated status even for application exchanges using the
+one-argument constructor. The explicit transactionStatus flag can still require a postamble.
+After a complete result or statement error, status is read with a bounded five-second internal
+token; caller cancellation in that window does not turn an acknowledged COMMIT into cancellation.
 Ping and other non-Execute exchanges retain their existing completion contract. The original
 statement exception survives a failure reading its status, and the connector is discarded.
 
@@ -499,7 +503,8 @@ Reference consulted: RavenDB test/StressTests/Voron/InvalidReleasesOfScratchPage
 SQL/Graph transaction-status negotiation adds an existing Ready I/T/E frame after Execute
 completion or a statement error. The shared client drains it before returning, rolls back open
 or failed transactions on pool return, and only reuses an Idle session. Cleanup runs outside the
-pool lock with a five-second timeout. Missing/invalid state or legacy transaction-capable peers
+pool lock. Rollback reply and Ready drain each have a five-second internal bound (up to ten
+seconds total). Missing/invalid state or legacy transaction-capable peers
 are discarded. SQL's formerly skipped pool-rollback regression is enabled. No new wire identifier,
 public interface, protocol version or persistent format is introduced.
 

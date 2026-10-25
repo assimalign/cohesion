@@ -28,7 +28,7 @@ GraphValueCodec is the sole public facade. The stateless internal GraphValueEnco
 The engine streams internal read bindings and applies deterministic retained-memory and physical-work
 budgets. Unordered read LIMIT may stop expansion (D4); final results stay materialized until statement
 completion. GraphQueryLimits carries optional lower MemoryBytes and WorkUnits, with positive engine
-ceilings of 64 MiB and 1,000,000 units by default. It is an in-process request contract; no grammar,
+ceilings of 256 MiB and 1,000,000 units by default. It is an in-process request contract; no grammar,
 Execute payload, capability, wire version or disk format changes. See the engine DESIGN for ownership,
 CG05020/CG08021 and the preserved 64-hop trail limit.
 

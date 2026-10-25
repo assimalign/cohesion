@@ -550,9 +550,15 @@ Reference consulted: RavenDB test/StressTests/Voron/InvalidReleasesOfScratchPage
 SQL/Graph transaction-status negotiation adds an existing Ready I/T/E frame after Execute
 completion or a statement error. The shared client drains it before returning, rolls back open
 or failed transactions on pool return, and only reuses an Idle session. Cleanup runs outside the
-pool lock with a five-second timeout. Missing/invalid state or legacy transaction-capable peers
+pool lock. Rollback reply and Ready drain each have a five-second internal bound (up to ten
+seconds total). Missing/invalid state or legacy transaction-capable peers
 are discarded. SQL's formerly skipped pool-rollback regression is enabled. No new wire identifier,
 public interface, protocol version or persistent format is introduced.
+
+An idle open wire transaction holds the database writer lock once it has acquired it, until
+COMMIT, ROLLBACK, disconnect, pool return or IdleTimeout (30 minutes by default). Keep transactions
+short: an idle writer blocks other writers. New clients discard sessions against pre-#1540 servers
+that cannot negotiate transaction-status, so those servers are not pooled.
 
 ## Sql diagnostic conventions (#1470)
 

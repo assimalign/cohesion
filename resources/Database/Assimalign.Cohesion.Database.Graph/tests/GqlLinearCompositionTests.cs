@@ -185,7 +185,7 @@ public sealed class GqlLinearCompositionTests
             Convert.ToInt64(row.GetValue(1)).ShouldBe(count % 317);
             count++;
         }
-        // Every result is verified; no hidden truncation or default memory-ceiling increase.
+        // Every result is verified and this scalar shape still fits within 64 MiB.
         count.ShouldBe(100489);
         session.LastStatementMetrics!.Memory.PeakRetainedBytes.ShouldBeLessThanOrEqualTo(64L * 1024 * 1024);
         session.LastStatementMetrics.Memory.RetainedBytes.ShouldBe(0);

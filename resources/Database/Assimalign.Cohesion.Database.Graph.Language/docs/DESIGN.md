@@ -165,7 +165,7 @@ The function table advertises the aggregates and core scalar functions listed be
 | `ORDER BY` | One or more expression keys with optional ASC/ASCENDING/DESC/DESCENDING and NULLS FIRST/LAST after RETURN or WITH | Orders projected rows and paths by the total order below, after DISTINCT |
 | `OFFSET` | Unsigned Int64 literal or named parameter after RETURN | Drops the first count rows after ordering |
 | `SKIP` | Cypher spelling of OFFSET | The same offset stage; cannot accompany another OFFSET/SKIP |
-| `LIMIT` | Unsigned Int64 literal or named parameter after RETURN | Truncates after full materialization, ordering and offset; never reduces mutations or the match cap |
+| `LIMIT` | Unsigned Int64 literal or named parameter after RETURN | Unordered reads can stop upstream expansion after OFFSET/LIMIT; ordered finite pages retain OFFSET + LIMIT rows; never reduces mutation inputs |
 | `CASE` | Simple and searched CASE, COALESCE and NULLIF case abbreviations | First matching alternative, lazy selected branch; absent ELSE yields NULL |
 | `INSERT` | Scalar value-expression node/path insertion, optionally following a match; a node takes a label conjunction (`:A&B`, `:A:B`), a relationship one type and a directed edge (`-[:T]->`, `<-[:T]-`) | Inserts nodes and relationships transactionally |
 | `CREATE` | Same insertion grammar as `INSERT`; compatibility extension | Same transactional insertion path |
@@ -315,8 +315,10 @@ an unbounded segment contributes its lower bound times that count. A text sum ab
 CG00005, including an unbounded lower bound above 64. Hand-built invalid bounds use CG05001.
 At runtime an unbounded segment continues until no unused relationship qualifies; needing a
 65th relationship after direction, type, bound identity and the hop's own property checks is
-CG05004. Endpoint predicates, LIMIT and the projection cannot suppress that failure. The shared 100,000-binding and 1,000,000-candidate
-budgets also apply, with no partial result output.
+CG05004. Endpoint predicates and projection cannot suppress exhaustion already encountered. An
+unordered read LIMIT may stop expansion before a later hop or work limit is reached. Retained
+state uses the statement memory budget in place of the former 100,000-binding guard; physical
+work still defaults to 1,000,000 selected candidates, with no partial result output on refusal.
 
 `(a) ((x)-[r:T]->(y)){2} (b)` joins the iterations at the same node: each y is the next x,
 and both endpoint constraints hold at the junction. Every repeated property map is evaluated
@@ -844,8 +846,10 @@ RETURN items. CASE, COALESCE and composite expressions are ordinary sort keys. A
 
 Mutations run for every matched binding before projection. DISTINCT precedes sorting, then
 OFFSET precedes LIMIT. LIMIT 0 returns no rows; large offsets return no rows without overflow.
-The owner default is full materialization: LIMIT 1 over more than 100,000 matches still fails
-CG05004. Sorting does not change wire or catalog formats. Standalone ORDER BY/page statements
+Read bindings stream. An unordered LIMIT 1 can complete before expanding all matches; ORDER BY
+consumes its required input and a finite page retains a stable top set of OFFSET + LIMIT rows.
+Final results remain materialized under the statement memory budget (CG05020); selected-candidate
+work and the 64-hop limit retain CG05004. Sorting does not change wire or catalog formats. Standalone ORDER BY/page statements
 before RETURN remain CK00001 naming STANDALONE ORDER BY AND PAGE STATEMENT (T2).
 WITH ordering/paging executes through the same stage, and aggregate aliases follow its grouping stage.
 
@@ -1267,7 +1271,7 @@ request factory shares this contract. Diagnostics remain plain Database.Types da
 The engine streams internal read bindings and applies deterministic retained-memory and physical-work
 budgets. Unordered read LIMIT may stop expansion (D4); final results stay materialized until statement
 completion. GraphQueryLimits carries optional lower MemoryBytes and WorkUnits, with positive engine
-ceilings of 64 MiB and 1,000,000 units by default. It is an in-process request contract; no grammar,
+ceilings of 256 MiB and 1,000,000 units by default. It is an in-process request contract; no grammar,
 Execute payload, capability, wire version or disk format changes. See the engine DESIGN for ownership,
 CG05020/CG08021 and the preserved 64-hop trail limit.
 
@@ -1282,6 +1286,11 @@ uses CG04022 and aborts the existing transaction; COMMIT/ROLLBACK without an ope
 uses CG04023. ExecutePaths refuses controls with CG05001 before any control takes effect.
 Disconnect and session teardown roll back. The shared negotiated transaction-status postamble
 also resets unfinished transactions before pool reuse; legacy peers are discarded on return.
+
+An idle open wire transaction holds the database writer lock once it has acquired it, until
+COMMIT, ROLLBACK, disconnect, pool return or IdleTimeout (30 minutes by default). Keep transactions
+short: an idle writer blocks other writers. New clients discard sessions against pre-#1540 servers
+that cannot negotiate transaction-status, so those servers are not pooled.
 
 The parser exposes GqlQueryExpression.TransactionCommand (GqlTransactionCommand None/Start/Commit/Rollback).
 The server owns the connection's existing transaction, following Neo4j's

@@ -1,12 +1,39 @@
 using System.Threading.Tasks;
-using Assimalign.Cohesion.Database.Client;
+
 using Shouldly;
 using Xunit;
+
+using Assimalign.Cohesion.Database.Client;
 
 namespace Assimalign.Cohesion.Database.Graph.Client.Tests;
 
 public sealed class GraphTransactionTextWireTests
 {
+    [Theory(DisplayName = "Cohesion Test [Graph.Client] - Another wire session cannot see writes until the open transaction commits (w11 review)")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ExecuteAsync_OpenWireTransaction_ShouldHideWritesFromAnotherSession(bool tcp)
+    {
+        // Arrange
+        await using var harness = await GraphClientTestHarness.StartAsync(tcp);
+        await using var peer = GraphClient.Create(new()
+        {
+            Settings = new DatabaseConnectionSettings
+            { Database = "graph", Principal = "peer", EndPoint = harness.Listener.EndPoint, MaxPoolSize = 1 },
+            ConnectionFactory = harness.ConnectionFactory,
+        });
+        await using var writer = await harness.Client.ConnectAsync(harness.Token);
+        await using var reader = await peer.ConnectAsync(harness.Token);
+
+        // Act / Assert
+        await writer.ExecuteAsync("START TRANSACTION", cancellationToken: harness.Token);
+        await writer.ExecuteAsync("INSERT (:Pending {k:1})", cancellationToken: harness.Token);
+        (await writer.QueryAsync("MATCH (n:Pending) RETURN count(*)", cancellationToken: harness.Token)).ShouldHaveSingleItem()[0].ShouldBe(1L);
+        (await reader.QueryAsync("MATCH (n:Pending) RETURN count(*)", cancellationToken: harness.Token)).ShouldHaveSingleItem()[0].ShouldBe(0L);
+        await writer.ExecuteAsync("COMMIT", cancellationToken: harness.Token);
+        (await reader.QueryAsync("MATCH (n:Pending) RETURN count(*)", cancellationToken: harness.Token)).ShouldHaveSingleItem()[0].ShouldBe(1L);
+    }
+
     [Theory(DisplayName = "Cohesion Test [Graph.Client] - Duplicate START aborts the existing transaction (#1540)")]
     [InlineData(false)]
     [InlineData(true)]

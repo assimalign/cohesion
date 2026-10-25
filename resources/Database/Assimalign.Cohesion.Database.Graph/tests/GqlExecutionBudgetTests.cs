@@ -8,11 +8,109 @@ using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Graph.Protocol;
 using Shouldly;
 using Xunit;
+using Xunit.Abstractions;
 
 namespace Assimalign.Cohesion.Database.Graph.Tests;
 
 public sealed class GqlExecutionBudgetTests
 {
+    private readonly ITestOutputHelper _output;
+
+    public GqlExecutionBudgetTests(ITestOutputHelper output) { _output = output; }
+    [Theory(DisplayName = "Cohesion Test [Graph] - Defaults preserve 100,000 one-property rows and refuse ten times it (w11 review)")]
+    [InlineData("set")]
+    [InlineData("insert")]
+    [InlineData("return")]
+    [InlineData("paths")]
+    public async Task ExecuteAsync_DefaultEnvelope_ShouldAdmitOneHundredThousandRowsAndRefuseTenTimes(string shape)
+    {
+        // Arrange: small seed statements test each shape independently on default options.
+        await using var engine = GraphDatabaseEngine.Create("graph-envelope", new());
+        var database = await engine.CreateDatabaseAsync("app", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        var parameters = new Dictionary<string, object?>
+        { ["xs"] = Enumerable.Range(0, 1000).ToArray(), ["ys"] = Enumerable.Range(0, 100).ToArray() };
+        if (shape != "insert")
+        {
+            for (int batch = 0; batch < 20; batch++)
+            {
+                await session.ExecuteAsync("FOR x IN $xs INSERT (:N {k:x})",
+                    new Dictionary<string, object?> { ["xs"] = Enumerable.Range(batch * 5000, 5000).ToArray() }, CancellationToken.None);
+            }
+        }
+        string source = shape switch
+        {
+            "set" => "MATCH (n:N) SET n.k=-1",
+            "insert" => "FOR x IN $xs FOR y IN $ys INSERT (:N {k:x})",
+            _ => "MATCH (n:N) RETURN n",
+        };
+
+        // Act / Assert: consume every result with no lower request limit.
+        await VerifyAsync(source, 100_000);
+        _output.WriteLine($"{shape}: 100,000 rows; peak={session.LastStatementMetrics!.Memory.PeakRetainedBytes} bytes");
+        session.LastStatementMetrics!.Memory.PeakRetainedBytes.ShouldBeLessThanOrEqualTo(new GraphDatabaseEngineOptions().QueryMemoryBudget);
+        session.LastStatementMetrics.Memory.ActiveLeases.ShouldBe(0);
+        session.LastStatementMetrics.Memory.RetainedBytes.ShouldBe(0);
+        parameters["ys"] = Enumerable.Range(0, 1000).ToArray();
+        parameters["copies"] = Enumerable.Range(0, 10).ToArray();
+        string excessive = shape switch
+        {
+            "set" => "MATCH (n:N) FOR copy IN $copies SET n.k=2",
+            "insert" => source,
+            _ => "MATCH (n:N) FOR copy IN $copies RETURN n",
+        };
+        var error = await Should.ThrowAsync<DatabaseException>(() => VerifyAsync(excessive, 1_000_000));
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG05020");
+        session.LastStatementMetrics!.Memory.RetainedBytes.ShouldBe(0);
+        session.LastStatementMetrics.Memory.ActiveLeases.ShouldBe(0);
+        await using var reused = (DatabaseResultSet)await session.ExecuteAsync("RETURN 7", cancellationToken: CancellationToken.None);
+
+        async Task VerifyAsync(string query, int expected)
+        {
+            if (shape == "paths")
+            {
+                var paths = (GraphPathsQueryResult)await session.ExecuteAsync(GraphPathsQueryRequest.FromGql(query, parameters), CancellationToken.None);
+                paths.Paths.Count.ShouldBe(expected);
+                paths.Paths[0].Nodes.ShouldHaveSingleItem().Properties.Count.ShouldBe(1);
+                return;
+            }
+            var result = await session.ExecuteAsync(query, parameters, CancellationToken.None);
+            if (result is DatabaseResultSet rows)
+            {
+                await using (rows)
+                {
+                    int count = 0;
+                    await foreach (var row in rows.GetRowsAsync(CancellationToken.None))
+                    { row.GetValue(0).ShouldBeOfType<GraphNode>().Properties.Count.ShouldBe(1); count++; }
+                    count.ShouldBe(expected);
+                }
+            }
+            else { result.AffectedCount.ShouldBe(expected); }
+        }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Graph] - Top N keeps source order for ties across the page boundary (w11 review)")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ExecuteAsync_TopPageBoundaryTies_ShouldKeepEarliestSourceRows(bool boundary)
+    {
+        // Arrange
+        await using var engine = GraphDatabaseEngine.Create("graph-tied-page", new());
+        var database = await engine.CreateDatabaseAsync("app", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        string page = " ORDER BY CASE WHEN x=0 THEN 9 ELSE 0 END OFFSET 2 LIMIT 3";
+        string query = "FOR x IN $xs " + (boundary ? "WITH x" + page + " RETURN x" : "RETURN x" + page);
+
+        // Act
+        await using var result = (DatabaseResultSet)await session.ExecuteAsync(query,
+            new Dictionary<string, object?> { ["xs"] = Enumerable.Range(0, 9).ToArray() }, CancellationToken.None);
+        var actual = new List<long>();
+        await foreach (var row in result.GetRowsAsync(CancellationToken.None)) { actual.Add(Convert.ToInt64(row.GetValue(0))); }
+
+        // Assert
+        actual.ShouldBe(new long[] { 3, 4, 5 });
+    }
+
     [Fact(DisplayName = "Cohesion Test [Graph] - Refused deep expansion releases every ancestor cursor's target grant (#1533)")]
     public async Task ExecuteAsync_DeepPathWorkRefusal_ShouldReleaseAncestorTargetGrants()
     {

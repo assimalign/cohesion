@@ -49,8 +49,23 @@ internal sealed class GraphQueryMemory
                     continue;
                 }
                 if (values.TryGetValue(current, out var retained))
-                { values[current] = (checked(retained.References + 1), retained.Bytes); journal.Add(current); continue; }
-                long bytes = 96 + GraphValueMemory.Shallow(current);
+                {
+                    int references = checked(retained.References + 1);
+                    long retainedBytes = retained.Bytes;
+                    if (current is ValueType && ReferenceEquals(current, value))
+                    {
+                        // A scalar first retained inside a container may later become an
+                        // operator root. Include that owner entry once, without recharging storage.
+                        long rootBytes = 96 + GraphValueMemory.Shallow(current);
+                        if (rootBytes > retainedBytes) { Add(rootBytes - retainedBytes); retainedBytes = rootBytes; }
+                    }
+                    values[current] = (references, retainedBytes);
+                    journal.Add(current);
+                    continue;
+                }
+                // Nested boxed scalars need only the identity entry. Root grants also cover
+                // owner-map bookkeeping; containers keep the conservative combined grant.
+                long bytes = (current is ValueType && !ReferenceEquals(current, value) ? 48 : 96) + GraphValueMemory.Shallow(current);
                 Add(bytes);
                 values.Add(current, (1, bytes));
                 journal.Add(current);

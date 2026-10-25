@@ -371,6 +371,11 @@ uses CG04023. ExecutePaths refuses controls with CG05001 before any control take
 Disconnect and session teardown roll back. The shared negotiated transaction-status postamble
 also resets unfinished transactions before pool reuse; legacy peers are discarded on return.
 
+An idle open wire transaction holds the database writer lock once it has acquired it, until
+COMMIT, ROLLBACK, disconnect, pool return or IdleTimeout (30 minutes by default). Keep transactions
+short: an idle writer blocks other writers. New clients discard sessions against pre-#1540 servers
+that cannot negotiate transaction-status, so those servers are not pooled.
+
 The parser exposes GqlQueryExpression.TransactionCommand (GqlTransactionCommand None/Start/Commit/Rollback).
 The server owns the connection's existing transaction, following Neo4j's
 community/bolt/src/main/java/org/neo4j/bolt/protocol/common/fsm/transition/ready/CreateTransactionStateTransition.java:63-81
