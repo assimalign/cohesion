@@ -22,6 +22,100 @@ public sealed class StorageReviewTests
 
     public StorageReviewTests(ITestOutputHelper output) => _output = output;
 
+    [Theory(DisplayName = "Cohesion Test [Storage] - Mutable handoff: the original context cannot read the new owner's partial record")]
+    [InlineData("direct", false)]
+    [InlineData("try", false)]
+    [InlineData("scan", false)]
+    [InlineData("direct", true)]
+    public async Task OpenPageForWrite_IndependentContextHandoff_ShouldFollowTheHandle(string kind, bool continuation)
+    {
+        // Arrange
+        using var storage = TornStorage.Create();
+        (PageId PageId, int SlotIndex) target;
+        using (var seed = storage.BeginTransaction())
+        {
+            target = storage.Insert(seed, 7, Enumerable.Repeat((byte)0x11, 64).ToArray());
+            seed.Commit();
+        }
+        using var transaction = storage.BeginTransaction();
+        using var writer = storage.OpenPageForWrite(transaction, target.PageId);
+        using var halfway = new ManualResetEventSlim();
+        using var waiting = new ManualResetEventSlim();
+        using var completed = new ManualResetEventSlim();
+        int signal = -1;
+        writer.Entry.ReadWaitStarted = waiting.Set;
+        Task mutation;
+        using (ExecutionContext.SuppressFlow())
+        {
+            mutation = Task.Factory.StartNew(async () =>
+            {
+                writer.Page.AsBodySpan().Slice(0, 64).Fill(0x22);
+                if (continuation)
+                {
+                    int originalThread = Environment.CurrentManagedThreadId;
+                    await Task.Yield();
+                    Environment.CurrentManagedThreadId.ShouldNotBe(originalThread);
+                    // Permission must flow with the new owner even before its next Page access.
+                    storage.ReadBytes(target.PageId, target.SlotIndex).ShouldAllBe(value => value == 0x22);
+                }
+                writer.Page.AsBodySpan().Slice(0, 32).Fill(0x33);
+                halfway.Set();
+                signal = WaitHandle.WaitAny([waiting.WaitHandle, completed.WaitHandle], TimeSpan.FromSeconds(30));
+                writer.Page.AsBodySpan().Slice(32, 32).Fill(0x33);
+                writer.MarkDirty();
+                writer.Dispose();
+            }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default).Unwrap();
+        }
+        byte[] bytes = [];
+        try
+        {
+            // Act: this context retains the original ambient scope throughout the handoff.
+            halfway.Wait(TimeSpan.FromSeconds(10)).ShouldBeTrue();
+            if (kind == "direct") { bytes = storage.ReadBytes(target.PageId, target.SlotIndex); }
+            else if (kind == "try")
+            {
+                storage.TryReadRecord(target.PageId, target.SlotIndex, 7, out var data).ShouldBeTrue();
+                bytes = data.ToArray();
+            }
+            else { bytes = storage.ScanOwner(7).Single(); }
+        }
+        finally
+        {
+            completed.Set();
+            writer.Dispose();
+            await mutation.WaitAsync(TimeSpan.FromSeconds(30));
+            writer.Entry.ReadWaitStarted = null;
+        }
+
+        // Assert
+        _output.WriteLine($"Handoff {kind}; continuation={continuation}; wait signal={signal}; first={bytes[0]:X2}; last={bytes[^1]:X2}.");
+        signal.ShouldBe(0, "the original context must wait for the new owner to finish");
+        bytes.ShouldAllBe(value => value == 0x33);
+        transaction.Commit();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Storage] - Mutable handoff: repeat every original-context read and continuation window")]
+    public async Task OpenPageForWrite_RepeatedContextHandoffs_ShouldExerciseEveryWindow()
+    {
+        // Arrange
+        var elapsed = Stopwatch.StartNew();
+        var counts = new int[4];
+
+        // Act
+        do
+        {
+            elapsed.Elapsed.ShouldBeLessThan(TimeSpan.FromMinutes(2));
+            await OpenPageForWrite_IndependentContextHandoff_ShouldFollowTheHandle("direct", false); counts[0]++;
+            await OpenPageForWrite_IndependentContextHandoff_ShouldFollowTheHandle("try", false); counts[1]++;
+            await OpenPageForWrite_IndependentContextHandoff_ShouldFollowTheHandle("scan", false); counts[2]++;
+            await OpenPageForWrite_IndependentContextHandoff_ShouldFollowTheHandle("direct", true); counts[3]++;
+        }
+        while (elapsed.Elapsed < TimeSpan.FromSeconds(1) || counts[0] < 5);
+
+        // Assert
+        counts.ShouldAllBe(count => count >= 5);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Storage] - Writer rendezvous: repeat all read paths and serialized continuation")]
     public async Task OpenPageForWrite_RepeatedThreadChanges_ShouldExerciseEveryReadPath()
     {

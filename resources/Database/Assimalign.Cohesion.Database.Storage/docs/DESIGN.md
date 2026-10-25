@@ -1363,8 +1363,14 @@ does not take.
   Context transitions count active flows and invalidate read tokens without taking
   locks. A forked reader cannot inherit bypass permission while its writer's context
   remains active; a serialized awaited continuation is the sole active flow.
-  Accessing Page transfers writer-thread ownership and invalidates prior read tokens
-  before exposing the memory. Callers must never use a handle or its borrowed memory
+  Each raw handle registers its current permission token on its pinned frame. Accessing
+  Page from a different context gives that handle a new token, revokes the previous
+  context's token and invalidates prior read tokens before exposing the memory. A fork
+  sharing an active token receives its own token at this handoff; its later awaited
+  continuation can read even before another Page access. Raw own-read permission never
+  falls back to a physical thread id. Registration adds no field to ordinary read
+  handles, and disposal removes it; retired epochs cannot affect a later typed writer.
+  Callers must never use a handle or its borrowed memory
   concurrently across threads; moving nested scopes to a continuation is refused.
   Ordinary pins and typed synchronous record operations create no ambient scope.
   Rollback excludes that bypass before advancing

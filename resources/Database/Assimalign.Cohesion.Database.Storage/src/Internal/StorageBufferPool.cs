@@ -973,6 +973,8 @@ internal sealed unsafe class StorageBufferPool : IDisposable
         internal bool HasNestedWriter => _writeDepth > 1;
         internal bool HasWriter => Volatile.Read(ref _writeDepth) > 0;
         private int _writeEpoch;
+        private StoragePageHandle.MutableScopeOwner? _mutableScopes;
+        internal bool HasMutableScopes => Volatile.Read(ref _mutableScopes) is not null;
         private int _restoring;
         private int _restoreEpoch;
         // Allocated only if a bracket completes while a mutable handle is still
@@ -1054,6 +1056,47 @@ internal sealed unsafe class StorageBufferPool : IDisposable
 
         internal int BeginWrite(object owner) => BeginWriteCore(owner, restoring: false);
         internal void InvalidateReadPermission() => Interlocked.Add(ref _restoreSequence, 2);
+
+        internal StoragePageHandle.MutableScopeOwner RegisterMutableScope(StoragePageHandle handle)
+        {
+            lock (_dirtySync)
+            {
+                var owner = new StoragePageHandle.MutableScopeOwner(handle, _mutableScopes);
+                Volatile.Write(ref _mutableScopes, owner);
+                return owner;
+            }
+        }
+
+        internal StoragePageHandle.MutableScopeOwner? FindMutableScope(StoragePageHandle handle)
+        {
+            lock (_dirtySync)
+            {
+                for (var owner = _mutableScopes; owner is not null; owner = owner.Next)
+                {
+                    if (owner.Matches(handle)) { return owner; }
+                }
+                return null;
+            }
+        }
+
+        internal void RemoveMutableScope(StoragePageHandle handle)
+        {
+            lock (_dirtySync)
+            {
+                StoragePageHandle.MutableScopeOwner? previous = null;
+                for (var owner = _mutableScopes; owner is not null; owner = owner.Next)
+                {
+                    if (owner.Matches(handle))
+                    {
+                        if (previous is null) { Volatile.Write(ref _mutableScopes, owner.Next); }
+                        else { previous.Next = owner.Next; }
+                        owner.Next = null;
+                        return;
+                    }
+                    previous = owner;
+                }
+            }
+        }
 
         private int BeginWriteCore(object owner, bool restoring)
         {
@@ -1193,11 +1236,24 @@ internal sealed unsafe class StorageBufferPool : IDisposable
 
         private bool CanReadOwnWrite()
         {
-            if (Volatile.Read(ref _writerThread) == Environment.CurrentManagedThreadId) { return true; }
+            // Raw handle permission belongs to its current scope, never to a
+            // physical thread that a suspended or transferred handle used earlier.
+            bool rawScope = false;
+            lock (_dirtySync)
+            {
+                for (var owner = _mutableScopes; owner is not null; owner = owner.Next)
+                {
+                    if (owner.IsEpoch(_writeEpoch)) { rawScope = true; break; }
+                }
+            }
+            if (!rawScope && Volatile.Read(ref _writerThread) == Environment.CurrentManagedThreadId) { return true; }
             if (!StoragePageHandle.OwnsReadScope(this, Volatile.Read(ref _writeEpoch))) { return false; }
             int depth = Volatile.Read(ref _writeDepth);
-            if (depth > 1) { throw new StorageTransactionException(ErrorMessages.MixedThreadMutableScopes); }
-            return depth == 1;
+            if (depth > 1 && Volatile.Read(ref _writerThread) != Environment.CurrentManagedThreadId)
+            {
+                throw new StorageTransactionException(ErrorMessages.MixedThreadMutableScopes);
+            }
+            return depth > 0;
         }
 
         private sealed class DebugView

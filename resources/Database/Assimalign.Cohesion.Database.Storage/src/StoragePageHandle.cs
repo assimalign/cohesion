@@ -23,7 +23,9 @@ using Assimalign.Cohesion.Database.Storage.Units;
 /// is a read pin; its native page view must not be used to bypass transactional writes.
 /// Nested mutable handles for one page must stay on the same thread. A sole mutable
 /// handle may move to a continuation thread; its scope also permits reads through
-/// Storage there. Never use a mutable handle or its borrowed page memory
+/// Storage there. Accessing Page from another execution context transfers that
+/// permission with the handle and revokes it in the previous context.
+/// Never use a mutable handle or its borrowed page memory
 /// concurrently on multiple threads. Disposal may run on another thread.
 ///
 /// <example>
@@ -76,7 +78,11 @@ public sealed class StoragePageHandle : IDisposable
             // reference through a released handle is a use-after-unpin.
             ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
 #endif
-            if (_writeEpoch != 0) { Entry.AccessWriter(_writeEpoch); }
+            if (_writeEpoch != 0)
+            {
+                Entry.AccessWriter(_writeEpoch);
+                if (Entry.HasMutableScopes && Entry.FindMutableScope(this) is { } owner) { EnterMutableScope(owner); }
+            }
             return Entry.Page;
         }
     }
@@ -108,14 +114,28 @@ public sealed class StoragePageHandle : IDisposable
 
     // Only public raw mutable handles need permission to flow through an await.
     // Typed synchronous record writes and ordinary pins allocate no ambient scope.
-    internal void EnterMutableScope() => _mutableScope.Value = new MutableScope(this, ActiveScope(_mutableScope.Value));
+    internal void EnterMutableScope() => EnterMutableScope(Entry.RegisterMutableScope(this));
+
+    private static void EnterMutableScope(MutableScopeOwner owner)
+    {
+        for (var scope = _mutableScope.Value; scope is not null; scope = scope.Previous)
+        {
+            if (ReferenceEquals(scope.Owner, owner) && scope.IsCurrent && scope.IsSoleContext) { return; }
+        }
+        // A disjoint context, or a fork still sharing the old node, takes a new
+        // permission token. Revocation belongs to the handle, so the old context
+        // cannot retain its bypass while the new owner exposes writable memory.
+        var current = new MutableScope(owner, ActiveScope(_mutableScope.Value));
+        owner.SetCurrent(current);
+        _mutableScope.Value = current;
+    }
 
     internal static bool OwnsReadScope(StorageBufferPool.BufferEntry entry, int epoch)
     {
         var scope = _mutableScope.Value;
         while (scope is not null)
         {
-            if (scope.IsSoleContext && scope.TryGetHandle(out var handle)
+            if (scope.IsCurrent && scope.IsSoleContext && scope.TryGetHandle(out var handle)
                 && ReferenceEquals(handle.Entry, entry) && handle._writeEpoch == epoch) { return true; }
             scope = scope.Previous;
         }
@@ -124,7 +144,7 @@ public sealed class StoragePageHandle : IDisposable
 
     private static MutableScope? ActiveScope(MutableScope? scope)
     {
-        while (scope is not null && !scope.TryGetHandle(out _)) { scope = scope.Previous; }
+        while (scope is not null && (!scope.IsCurrent || !scope.TryGetHandle(out _))) { scope = scope.Previous; }
         return scope;
     }
 
@@ -147,6 +167,7 @@ public sealed class StoragePageHandle : IDisposable
         if (Interlocked.Exchange(ref _disposed, 1) == 0)
         {
             if (_writeEpoch != 0) { Entry.EndWrite(_writeEpoch); }
+            if (Entry.HasMutableScopes) { Entry.RemoveMutableScope(this); }
             _pool.Unpin(Entry);
             var scope = _mutableScope.Value;
             var active = ActiveScope(scope);
@@ -156,35 +177,74 @@ public sealed class StoragePageHandle : IDisposable
 
     [global::System.Diagnostics.DebuggerDisplay("MutableScope")]
     [global::System.Diagnostics.DebuggerTypeProxy(typeof(MutableScope.DebugView))]
-    private sealed class MutableScope
+    internal sealed class MutableScope
     {
-        private readonly WeakReference<StoragePageHandle> _handle;
         private int _activeContexts;
+        internal readonly MutableScopeOwner Owner;
         internal readonly MutableScope? Previous;
         internal bool IsSoleContext => Volatile.Read(ref _activeContexts) == 1;
+        internal bool IsCurrent => Owner.IsCurrent(this);
 
-        internal MutableScope(StoragePageHandle handle, MutableScope? previous)
+        internal MutableScope(MutableScopeOwner owner, MutableScope? previous)
         {
-            _handle = new(handle);
+            Owner = owner;
             Previous = previous;
         }
 
         // Cross-thread disposal can leave this context's old node in place. Keep
         // no strong reference to its handle/frame/pool while awaiting the next access.
         internal bool TryGetHandle(out StoragePageHandle handle)
-            => _handle.TryGetTarget(out handle!) && Volatile.Read(ref handle._disposed) == 0;
+            => Owner.TryGetHandle(out handle);
 
         internal void ChangeContexts(int difference)
         {
             Interlocked.Add(ref _activeContexts, difference);
             // Invalidate a copy that crossed a change in permission. This callback
             // takes no monitor and cannot wait or throw during context transitions.
-            if (_handle.TryGetTarget(out var handle)) { handle.Entry.InvalidateReadPermission(); }
+            if (TryGetHandle(out var handle)) { handle.Entry.InvalidateReadPermission(); }
         }
 
         private sealed class DebugView
         {
             public DebugView(MutableScope value) { _ = value; }
+        }
+    }
+
+    // Registered on the pinned frame rather than adding a field to every read
+    // handle. Ordinary pins and synchronous typed writes keep their allocation size.
+    [global::System.Diagnostics.DebuggerDisplay("MutableScopeOwner")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(MutableScopeOwner.DebugView))]
+    internal sealed class MutableScopeOwner
+    {
+        private readonly WeakReference<StoragePageHandle> _handle;
+        private MutableScope? _current;
+        internal MutableScopeOwner? Next;
+
+        internal MutableScopeOwner(StoragePageHandle handle, MutableScopeOwner? next)
+        {
+            _handle = new(handle);
+            Next = next;
+        }
+
+        internal bool Matches(StoragePageHandle handle)
+            => _handle.TryGetTarget(out var target) && ReferenceEquals(target, handle);
+
+        internal bool TryGetHandle(out StoragePageHandle handle)
+            => _handle.TryGetTarget(out handle!) && Volatile.Read(ref handle._disposed) == 0;
+
+        internal bool IsEpoch(int epoch) => TryGetHandle(out var handle) && handle._writeEpoch == epoch;
+
+        internal bool IsCurrent(MutableScope scope) => ReferenceEquals(Volatile.Read(ref _current), scope);
+
+        internal void SetCurrent(MutableScope scope)
+        {
+            Volatile.Write(ref _current, scope);
+            if (TryGetHandle(out var handle)) { handle.Entry.InvalidateReadPermission(); }
+        }
+
+        private sealed class DebugView
+        {
+            public DebugView(MutableScopeOwner value) { _ = value; }
         }
     }
 
