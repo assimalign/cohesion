@@ -526,7 +526,7 @@ The keyword-disposition corpus covers these identifiers both with and without th
 | `CD00005` | Expression nesting exceeds the supported depth |
 | `CD00006` | Invalid function argument count or star operand; only COUNT accepts * |
 | `CD00007` | Invalid LIMIT/OFFSET operand or value; same clause-specific message at parse and plan time, located at the operand |
-| `CD00008` | Unknown function name, reported once at its name after argument parsing |
+| `CD00008` | Unknown function name; standalone parsing or deferred engine binding |
 | `CD00009` | More than 32 index key paths, at the 33rd path |
 | `CD00010` | A duplicate variable within one FROM/UNNEST or quantifier binding list, at the repeated name |
 

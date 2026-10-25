@@ -95,7 +95,7 @@ one captured UTC instant per statement. Their date/instant values sort without n
 Function and CAST value failures, including floating underflow, arrive as CG02013 ExecutionFailure
 before ResultHeader and retain the same authenticated pooled session. Proven incompatible kinds
 (non-integral toBoolean, Boolean numeric CAST and temporal property maps) arrive as plan-time
-CG03003 before writes. Unknown calls are CG00010 ParseFailure. GraphFunctionWireTests
+CG03003 before writes. Engine-resolved unknown calls are CG00010 ExecutionFailure. GraphFunctionWireTests
 pins exact values, types, raw-frame ordering, entity rejection before mutation, capability
 refusal and pooled-session reuse over InMemory and TCP.
 
@@ -409,7 +409,7 @@ registration object or engine reference. Existing planned entity/composite admis
 negotiated composite encoding and pooled-session cleanup apply. CG05021 callback diagnostics
 round-trip through the existing carrier. GraphRegisteredFunctionWireTests covers both InMemory
 and TCP, custom scalar and DISTINCT aggregate values, failure diagnostics and exact-session reuse.
-No protocol bytes, capabilities or version change.
+No frame layout, capability or version changes.
 
 Unknown engine-resolved function names use ExecutionFailure rather than ParseFailure, with
 no StatementParseFailed event. Application callback timeout and I/O errors use the model

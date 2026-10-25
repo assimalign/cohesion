@@ -323,7 +323,7 @@ Existing result headers preserve declared types, including empty results. CD0501
 failures use the existing Failure exchange with one message prefix and structured spans; the
 connection remains reusable under the existing policy. DocumentRegisteredFunctionWireTests
 covers registered scalars, aggregates and NULL/MISSING-aware calls over InMemory and loopback TCP.
-No client production API, protocol bytes, format version or dependencies change.
+No client production API, frame layout, format version or dependency changes.
 
 
 The model client NativeAOT sample independently registers lower_tag, rank_total and the
