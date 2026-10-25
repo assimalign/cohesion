@@ -4,7 +4,7 @@ LogSpaceResource wraps a manifest snapshot and typed LogSpaceResourceOptions, an
 
 The planner requires otlp https/tcp (SDK port 4318), alongside query https/tcp:8443, StatefulSet, and the data Volume at /data with 10Gi. The planner requires the sized data mount; deployer Storage.Size may override capacity. The control plane does not implement telemetry ingestion (item 31b).
 
-This package describes resource manifests, dependencies and deployment plans. Its only direct Cohesion dependency is ApplicationModel, whose contracts depend only on Core. Sdk.ApplicationModel generates control-plane registration in the enabled resource executable; Hosting.Resources and the resource host own local state handlers. The gateway owns infrastructure observation and management reconciliation.
+This package describes resource manifests, dependencies and deployment plans. Its only direct Cohesion dependency is ApplicationModel, whose contracts depend only on Core. Sdk.ApplicationModel generates control-plane registration in the enabled resource executable; Hosting.Resources and the resource host own the runtime surface and apply the deployment record. The gateway observes infrastructure and delivers the record.
 
 ## Runtime-independent dependency direction
 

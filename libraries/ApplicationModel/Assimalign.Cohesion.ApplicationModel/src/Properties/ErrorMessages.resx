@@ -14,7 +14,6 @@
   <data name="LiteralMountKindInvalid" xml:space="preserve"><value>Mount '{0}' uses literal:, which is allowed only for Configuration mounts.</value></data>
   <data name="ProviderMountSourceInvalid" xml:space="preserve"><value>Resource '{0}' mount '{1}' source must use parameter:&lt;name&gt;, literal:&lt;value&gt;, or &lt;source&gt;:&lt;key&gt;.</value></data>
   <data name="ApplicationNameJsonString" xml:space="preserve"><value>An application name must be a JSON string.</value></data>
-  <data name="ResourceRuntimeObjectRequired" xml:space="preserve"><value>A resource runtime manifest must be a JSON object when present.</value></data>
   <data name="TrustedIssuerKeyObjectRequired" xml:space="preserve"><value>A trusted issuer key must be a JSON object.</value></data>
   <data name="TrustedIssuerKeyMemberInvalid" xml:space="preserve"><value>A trusted issuer key contains unsupported or duplicate member '{0}'.</value></data>
   <data name="TrustedIssuerSigningKeyRequired" xml:space="preserve"><value>A trusted issuer key must be an EC P-256 key for ES256 signatures.</value></data>

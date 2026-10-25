@@ -12,20 +12,6 @@ namespace Assimalign.Cohesion.ApplicationModel.Tests;
 
 public class GenericPlannerTests
 {
-    [Fact(DisplayName = "Cohesion Test [ApplicationModel] - CreatePlan: opaque producer runtime metadata survives direct planning")]
-    public void CreatePlan_WithOpaqueRuntimeManifest_ShouldPreserveWithoutInterpretation()
-    {
-        // Arrange
-        using JsonDocument runtime = JsonDocument.Parse("""{"schema":"producer-owned/future","unknown":{"value":42}}""");
-        ResourceManifest manifest = CreateWebManifest() with { Runtime = runtime.RootElement.Clone() };
-
-        // Act
-        ResourcePlan plan = GenericPlanner.CreatePlan(CreateContext(manifest));
-
-        // Assert
-        JsonElement.DeepEquals(plan.Runtime!.Value, manifest.Runtime!.Value).ShouldBeTrue();
-    }
-
     [Fact(DisplayName = "Cohesion Test [ApplicationModel] - CreatePlan: Should map a Web manifest to endpoint, probe, exposure, and contract environment specs")]
     public void CreatePlan_ForWebManifest_ShouldMapEndpointsProbesExposureAndContractEnvironment()
     {

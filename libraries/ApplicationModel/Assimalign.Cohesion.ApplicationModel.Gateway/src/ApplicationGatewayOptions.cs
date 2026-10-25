@@ -22,15 +22,6 @@ public class ApplicationGatewayOptions
     /// </summary>
     public string? ExportDirectory { get; set; }
 
-    /// <summary>Gets or sets durable management storage. Local gateways default to a protected file store; platforms may provide native conditional storage.</summary>
-    public IResourceManagementStore? ManagementStore { get; set; }
-
-    /// <summary>Gets or sets the interval for continuing state and instance reconciliation.</summary>
-    public TimeSpan ManagementReconcileInterval { get; set; } = TimeSpan.FromSeconds(1);
-
-    /// <summary>Gets or sets an optional state protocol transport. The default uses authenticated direct HTTP targets.</summary>
-    public IResourceStateProtocolClient? StateProtocolClient { get; set; }
-
     /// <summary>
     /// Gets or sets the application version published in export documents. Defaults to
     /// <c>1</c> when the composition root does not provide a release version.
@@ -148,7 +139,6 @@ public class ApplicationGatewayOptions
         }
 
         ArgumentNullException.ThrowIfNull(TimeProvider);
-        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(ManagementReconcileInterval, TimeSpan.Zero);
 
         ValidateLifetime(
             BootstrapCredentialLifetime,

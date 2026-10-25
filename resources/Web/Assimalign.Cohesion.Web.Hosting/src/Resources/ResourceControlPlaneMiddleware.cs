@@ -59,7 +59,11 @@ public static class ResourceControlPlaneMiddleware
     private const string EndpointsPath = "/cohesion/v1/endpoints";
     private const string StopPath = "/cohesion/v1/stop";
     private const string CommandsPath = "/cohesion/v1/commands";
+    private const string ConfigurationPath = "/cohesion/v1/configuration";
+    private const string ConfigurationStatusPath = "/cohesion/v1/configuration/status";
+    private const string ActionsPathPrefix = "/cohesion/v1/actions/";
     private const string HostReadinessContributionName = "cohesion.host";
+    private const int MaximumActionInputLength = 1024 * 1024;
 
     /// <summary>Serves a control-plane route or forwards the request to the next middleware.</summary>
     /// <param name="controlPlane">The resource's registered control plane.</param>
@@ -94,7 +98,6 @@ public static class ResourceControlPlaneMiddleware
         ArgumentNullException.ThrowIfNull(next);
         if (controlPlanePort is int port && context.ConnectionInfo.LocalPort != port)
         {
-            if (!controlPlane.IsManagementReady) { context.Response.StatusCode = HttpStatusCode.ServiceUnavailable; return; }
             await next.Invoke(context).ConfigureAwait(false);
             return;
         }
@@ -102,9 +105,7 @@ public static class ResourceControlPlaneMiddleware
         string path = context.Request.Path.Value;
         bool isRead = context.Request.Method == HttpMethod.Get || context.Request.Method == HttpMethod.Head;
 
-        string? runtimePath = controlPlane.RuntimeManagement?.Path.Value.TrimEnd('/');
-        bool isNamespacedControlPlanePath = IsNamespacedControlPlanePath(path) ||
-            (runtimePath is not null && (path == runtimePath || path.StartsWith(runtimePath + "/", StringComparison.Ordinal)));
+        bool isNamespacedControlPlanePath = IsNamespacedControlPlanePath(path);
         if (isNamespacedControlPlanePath)
         {
             context.Response.Headers[HttpHeaderKey.CacheControl] = "no-store";
@@ -160,7 +161,7 @@ public static class ResourceControlPlaneMiddleware
                 await controlPlane.CheckReadinessAsync(context.RequestCancelled).ConfigureAwait(false);
             await WriteHealthAsync(
                 context,
-                isApplicationReady && controlPlane.IsManagementReady ? report : MarkHostAsStarting(report));
+                isApplicationReady ? report : MarkHostAsStarting(report));
             return;
         }
 
@@ -269,8 +270,39 @@ public static class ResourceControlPlaneMiddleware
             return;
         }
 
-        if (await ResourceStateHttpEndpoint.TryHandleAsync(controlPlane, resourceContext, context, context.RequestCancelled).ConfigureAwait(false))
+        if (path == ConfigurationPath)
         {
+            if (!isRead)
+            {
+                SetMethodNotAllowed(context, "GET, HEAD");
+                return;
+            }
+
+            await WriteJsonAsync(context, controlPlane.Surface.WriteTo).ConfigureAwait(false);
+            return;
+        }
+
+        if (path == ConfigurationStatusPath)
+        {
+            if (!isRead)
+            {
+                SetMethodNotAllowed(context, "GET, HEAD");
+                return;
+            }
+
+            await WriteConfigurationStatusAsync(controlPlane, resourceContext, context).ConfigureAwait(false);
+            return;
+        }
+
+        if (path.StartsWith(ActionsPathPrefix, StringComparison.Ordinal))
+        {
+            if (context.Request.Method != HttpMethod.Post)
+            {
+                SetMethodNotAllowed(context, "POST");
+                return;
+            }
+
+            await InvokeActionAsync(controlPlane, context, path[ActionsPathPrefix.Length..]).ConfigureAwait(false);
             return;
         }
 
@@ -280,11 +312,6 @@ public static class ResourceControlPlaneMiddleware
             return;
         }
 
-        if (!controlPlane.IsManagementReady)
-        {
-            context.Response.StatusCode = HttpStatusCode.ServiceUnavailable;
-            return;
-        }
         await next.Invoke(context).ConfigureAwait(false);
     }
 
@@ -476,6 +503,89 @@ public static class ResourceControlPlaneMiddleware
             writer.WriteString("detail", detail);
             writer.WriteEndObject();
         });
+
+    private static Task WriteConfigurationStatusAsync(
+        IResourceControlPlane controlPlane,
+        ResourceContext resource,
+        IHttpContext context)
+    {
+        // The status names the platform instance and the surface the process runs, so the gateway can
+        // attribute each instance's applied record and detect a process whose build differs from the plan.
+        string? instance = resource.TryGetEnvironmentValue(AppEnvironment.Variables.ResourceInstance, out string? value)
+            ? value
+            : null;
+        string surfaceDigest = controlPlane.Surface.Digest;
+        ResourceConfigurationStatus status = controlPlane.ConfigurationStatus;
+        return WriteJsonAsync(context, writer =>
+        {
+            writer.WriteStartObject();
+            if (instance is not null)
+            {
+                writer.WriteString("instance", instance);
+            }
+            writer.WriteString("surfaceDigest", surfaceDigest);
+            writer.WritePropertyName("configuration");
+            status.WriteTo(writer);
+            writer.WriteEndObject();
+        });
+    }
+
+    private static async Task InvokeActionAsync(IResourceControlPlane controlPlane, IHttpContext context, string segment)
+    {
+        if (!ResourceActionName.TryCreate(segment, out ResourceActionName name))
+        {
+            context.Response.StatusCode = HttpStatusCode.NotFound;
+            return;
+        }
+
+        byte[]? input = await ReadBodyAsync(context, MaximumActionInputLength).ConfigureAwait(false);
+        if (input is null)
+        {
+            context.Response.StatusCode = HttpStatusCode.RequestEntityTooLarge;
+            return;
+        }
+
+        ReadOnlyMemory<byte> result;
+        try
+        {
+            result = await controlPlane.InvokeActionAsync(name, input, context.RequestCancelled).ConfigureAwait(false);
+        }
+        catch (NotSupportedException)
+        {
+            context.Response.StatusCode = HttpStatusCode.NotFound;
+            return;
+        }
+        catch (ArgumentException)
+        {
+            context.Response.StatusCode = HttpStatusCode.BadRequest;
+            return;
+        }
+
+        context.Response.StatusCode = HttpStatusCode.Ok;
+        context.Response.Headers[HttpHeaderKey.ContentType] = "application/json; charset=utf-8";
+        await context.Response.Body.WriteAsync(result, context.RequestCancelled).ConfigureAwait(false);
+    }
+
+    // Returns null when the body is longer than the limit.
+    private static async ValueTask<byte[]?> ReadBodyAsync(IHttpContext context, int limit)
+    {
+        var buffer = new ArrayBufferWriter<byte>();
+        while (true)
+        {
+            int read = await context.Request.Body.ReadAsync(buffer.GetMemory(8192), context.RequestCancelled)
+                .ConfigureAwait(false);
+            if (read == 0)
+            {
+                return buffer.WrittenSpan.ToArray();
+            }
+
+            buffer.Advance(read);
+            if (buffer.WrittenCount > limit)
+            {
+                return null;
+            }
+        }
+    }
 
     private static string GetRequiredString(JsonElement element, string name)
     {

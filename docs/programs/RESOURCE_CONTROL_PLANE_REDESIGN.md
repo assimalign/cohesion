@@ -1,195 +1,239 @@
-# Resource control plane redesign
+# Resource control plane redesign: the deployment record
 
-Status: **APPROVED — implemented outside Database; Database source remains frozen for separate branch migration, 2026-10-24.** No compatibility or Database build workaround is retained. See the [current implementation contract](../libraries/ApplicationModel/RESOURCE_MANAGEMENT.md) and [validation record](resource-control-plane/VALIDATION.md).
+Status: **APPROVED by the owner, 2026-10-24 (decisions D1–D8 below). P0 and the resource side of P1
+are implemented on `feature/deployment-record-control-plane`; P1b–P5 are not built.** This design
+supersedes the codex refactor parked on `feature/resource-runtime-manifests` (commit `376f022a8` in
+`cohesion`, `f678395` in `cohesion-platforms`), which remains there for reference. The wire contract
+is the [deployment record](../RUNTIME_CONTRACT.md#deployment-record) section of the runtime contract.
 
-- [Implemented contracts](resource-control-plane/CONTRACTS.md)
-- [CORS and Kubernetes walkthrough](resource-control-plane/CORS_WALKTHROUGH.md)
+Code is the source of truth. A resource's desired runtime configuration lives in the deployment
+record the platform already keeps: the code-first deploy writes the record and the platform delivers
+it. The management API adjusts the record until that resource's next deployment. Resource processes
+keep no desired state. Gateways keep platform-specific APIs; the management API never shows the
+platform.
 
-## Boundary to review
+## Why not the parked design
 
-[Likely] The manifest is the integration boundary. Hosting.Resources describes the runtime state
-a resource exposes. Application Model consolidates resource documents and dependency descriptors.
-The gateway interprets the runtime contract, deploys infrastructure, resolves live addresses and
-coordinates management changes across that infrastructure.
+- "Stateless" cannot be literal: a live CORS edit has to be stored somewhere, or a restarted or
+  scaled-out instance comes up without it. The requirement is that Cohesion owns no state store, so a
+  control-plane change lives in the current deployment's record until the next deployment replaces it.
+- The parked work built the opposite: a gateway-owned intent store with receipts, an idempotency
+  ledger, leases, fences and a per-process admission handshake. Its overrides outlived deployments.
+- Its state contracts were discovered from live processes, so a gateway with no reachable instance
+  refused every management write, and a portal showed an empty blade exactly when it was needed.
+- Worth keeping, and kept: health contracts folded into Hosting.Resources, resource groups,
+  ApplicationModel staying off Hosting.Resources, commands out of `resource.json`, and per-instance
+  inventory (repurposed for status and every-instance actions).
 
-Application Model has **no reference to Hosting.Resources, resource implementations, or a new
-shared Resources package**. Its public contracts contain no state handlers, mutation types,
-instance inventories, desired-state stores or management coordinators. New gateway contracts
-belong in the gateway family. The previous shared-foundation-package proposal is removed.
+## Three owners, no shared runtime types
 
-The [implementation contract](../libraries/ApplicationModel/RESOURCE_MANAGEMENT.md) shows the current
-assembly dependency diagram. Manifest exchange does not imply an assembly reference. Health
-contracts now live in Hosting.Resources. The gateway requires no reference to area runtime
-assemblies. A separately opted-in in-process host may still
-load resource executables; manifest composition never requires that mode.
+The resource, the model and the gateway exchange JSON documents and HTTP calls; none references
+another's runtime types. Arrows are references; the dotted edge is data the gateway reads from each
+resource's build output without loading its code.
 
-| Owner | Responsibility | Output |
-| --- | --- | --- |
-| Resource through Hosting.Resources | Advertise supported state; validate, read and apply it locally | Runtime manifest and local control plane |
-| Application Model | Import documents; assign application identities; consolidate deployment requirements, bindings and dependencies | Consolidated application manifest |
-| Gateway family | Interpret contracts; deploy infrastructure; observe hosts; maintain desired state and distribute changes | Deployment observations, management API and operation status |
-
-Feature libraries continue to own business behavior. Hosting adapters bridge that behavior to
-Hosting.Resources: Web.Cors owns policy validation/evaluation; the optional Web.Hosting.Management
-package owns the CORS management adapter. Web.Cors does not acquire a Hosting.Resources dependency.
-
-## Three distinct documents
-
-| Document | Producer | Contents | Reader |
-| --- | --- | --- | --- |
-| Resource runtime manifest | Hosting.Resources at resource startup | Logical management binding; discovered state names, schemas and delivery semantics; effective configured baselines | Gateway protocol adapter |
-| Consolidated application manifest | Application Model | Resource artifacts/deployment requirements; dependency graph; opaque producer management bindings | Selected gateway |
-| Deployment observation | Gateway/platform observation path | Deployment incarnation; actual consumer addresses; current instances and management addresses; progress | Management API and diagnostics |
-
-The runtime manifest describes **what is manageable**, not a dump of current values. Current CORS
-values come from the local control plane. Pod IPs, credentials and operation receipts are gateway
-runtime data. They do not get written back into the portable application manifest.
-
-The application's resource entries retain a generic deployment envelope and an opaque `runtime`
-JSON member. Application Model validates its own envelope and graph, preserves the runtime document
-and its integrity digest, and does not interpret CORS, state schemas or delivery semantics. The
-gateway checks runtime schema versions and live capability compatibility before accepting deployment
-or management. Unknown required protocols fail explicitly at the gateway.
-
-This remains a versioned **wire contract** between producer and gateway. Hosting.Resources owns its
-runtime schema/exporter; gateway protocol adapters own their wire DTOs/serializers. Application
-Model owns its generic envelope. No shared runtime contract assembly connects these layers.
-
-## Generation and composition
-
-[Certain] The SDK emits `resource.json` through `CohesionCreateResourceManifest`. New non-Database
-resources use `cohesion/resource/v2`, without commands, static state definitions or initial values.
-Its opaque runtime fragment contains only the management binding. The old resource/v1 manifest
-path is retired; frozen Database sources may fail to build until separately migrated.
-
-Implemented flow after the 2026-10-24 refinement:
-
-1. SDK packaging combines the management binding with artifact, endpoint, probe, mount and setting
-   declarations, without starting the executable or inferring feature configuration.
-2. ApplicationModel imports resource documents and composes identities, logical resource groups,
-   generic bindings and dependency edges. Group membership does not define infrastructure ownership.
-3. Startup handlers own their schemas, canonical digests and effective configured baselines.
-   Hosting.Resources freezes this catalog before attaching the host. The obsolete MSBuild state
-   and initial-state items and generated registration slots are removed.
-4. The selected gateway deploys infrastructure and discovers the authenticated runtime catalog
-   from starting instances before readiness. Kubernetes object types and current hosts stay in
-   the gateway layer; runtime capability discovery does not modify the portable application model.
-
-Deployment metadata is available without evaluating callbacks or loading resource assemblies.
-Feature configuration is a startup concern: adapters capture configuration after appsettings and
-environment precedence have been applied. Later remote overrides leave that baseline intact.
-Secrets remain provider references, not embedded values. General appsettings binding for every
-area builder API is a separate planned change.
-
-Application Model composes the dependency without learning about CORS:
-
-```text
-AddResource("database", importedDatabaseDocument)
-AddResource("api", importedApiDocument)
-DependsOn("api", "database")
-Build() -> consolidated application manifest
+```mermaid
+flowchart LR
+    Exe["Resource Program.cs"] --> WebHosting["Web.Hosting"]
+    WebHosting --> HR["Hosting.Resources"]
+    Mgmt["Web.Hosting.Management"] --> HR
+    Mgmt --> Cors["Web.Cors"]
+    Gw["Gateway Program.cs"] --> WebAM["Web.ApplicationModel"]
+    Gw --> K8s["ApplicationModel.Gateway.Kubernetes"]
+    WebAM --> AM["ApplicationModel"]
+    K8s --> GW["ApplicationModel.Gateway"]
+    GW --> AM
+    Gw -.->|"resource.json and resource.runtime.json, data only"| Exe
 ```
 
-There is no model-level `WithCors`, resource handler or Kubernetes inventory. Optional area authoring
-packages may supply deployment descriptors, but generic manifest import never requires area runtimes.
-
-## Runtime management
-
-The resource-side `IResourceControlPlane` exposes its manifest and validate/read/apply dispatch.
-It owns no command history, cluster inventory, orchestration policy or distribution algorithm.
-Feature adapters retain actual state and the current applied revision atomically, so stale writes
-can be rejected. Current applied state is distinct from a past-request ledger.
-
-The gateway owns the logical operation:
-
-1. Authenticate and authorize the caller for a resource and state slot.
-2. Interpret the runtime document, validate the payload/schema and check live compatibility.
-3. Atomically persist desired state, a monotonic revision and operation receipt with a conditional
-   write. Return `202 Accepted` only after persistence succeeds.
-4. Discover instances through the platform adapter and deliver directly through verified management
-   transports. Reconcile failures and newly observed processes to the latest revision.
-5. Report desired state and per-instance observations separately. One successful reply does not
-   establish resource-wide completion.
-
-| Manifest semantic | Example | Gateway behavior |
+| Owner | Declares | Never knows about |
 | --- | --- | --- |
-| `everyInstance` | Replace CORS configuration | Reconcile every current and future process |
-| `sharedState` | Ensure a database exists in shared storage | Coordinate one capable instance at a time; require backend idempotency/fencing |
+| Resource (Hosting.Resources) | The runtime surface: configuration sections (path, schema generated from the options type with UI metadata, mutability, scope, claimable), actions, tools, and a status route | Gateways, platforms, generations, other applications |
+| Model (ApplicationModel) | The consolidated application manifest: dependencies, groups, each resource's deployment layer (merge patches validated against the surface at `Build()`), platform extensions stored as data | Hosting.Resources types; Kubernetes or Docker types |
+| Gateway and platform package | The record store, the plan compiler, the management API, and convergence derived from what instances report; typed platform extensions such as `ConfigureHpa` and their manageable surfaces | Any area package |
 
-The producer fixes that semantic. Callers cannot broadcast shared storage mutations or select one
-pod for logical CORS state. Non-idempotent actions need a separate action contract. Request IDs alone
-do not establish exactly-once side effects.
+Web.Cors references nothing in the hosting or management families. The CORS section is the opt-in
+`Web.Hosting.Management` package's `CorsPolicyStore.AsResourceConfiguration()`, so the feature keeps
+its options type, its JSON context and its atomic replace.
 
-Gateway persistence owns authorized management overrides relative to declared initial state.
-Reapplying the application manifest preserves overrides. Clearing one reveals the current declared
-baseline; a missing baseline does not imply a destructive reset. Reset/absence semantics must be
-declared before accepting them. Application Model preserves these declarations as data and does not
-enforce management policy.
+## The deployment record
 
-## Kubernetes and ten API instances
+Each resource has one record of three layers. Every layer maps a section path to an RFC 7396 merge
+patch, and each layer is its own file so each writer owns exactly one.
 
-Kubernetes orchestration creates workloads, Services, bindings and mounts from the consolidated
-deployment requirements. Observation supplies ordinary Service/Ingress endpoints and individually
-addressable management instances. Management delivery uses the latter.
+| Layer | Written by | Lives |
+| --- | --- | --- |
+| `deployment.json` | The code-first deploy: what the gateway's `Program.cs` declares for the resource | One generation |
+| `claims.<owner>.json` | Each claiming application's code: keyed entries it adds to claimable sections (replaces cross-application commands) | The resource's lifetime, until the owner withdraws |
+| `override.json` | The management API: operator changes; deleting one returns the code value | Until the next deployment |
 
-Instance identity includes platform identity **and process incarnation**. A container restart can
-create a fresh process on the same platform host; a previous acknowledgement cannot represent it.
-Inventory includes starting/not-ready instances to allow bootstrap before serving traffic. Management
-channels verify resource/process binding and trust. They are not arbitrary caller-supplied addresses.
+Effective value = the resource's own configuration (code and appsettings, the baseline) ⊕ deployment ⊕
+claims ⊕ override, merged as JSON documents. Arrays replace. The layers cannot go through the
+flat-key configuration merge: the JSON provider flattens arrays into `Origins:0`, `Origins:1` keys, so
+a one-origin override over a three-origin baseline would leave two stale origins in force.
 
-A CORS update is accepted once and reconciled to ten instances. Nine successes plus one failure is
-degraded progress. When HPA adds an eleventh instance, the same desired revision is applied before
-that process is admitted to traffic. Desired replica count comes from the live scale target; state
-reconciliation preserves HPA ownership of scaling fields. Convergence is dated against a complete
-inventory and checked again on membership changes.
+Convergence is derived on read and never stored. Each instance reports the digest of the record it
+applied and each section's outcome; the gateway compares those reports with the record it reads from
+the platform.
 
-Continuous reconciliation needs a surviving gateway/controller or equivalent platform mechanism.
-A deployment command that exits cannot itself deliver future updates to HPA instances. A platform
-must supply ongoing execution before advertising that guarantee. The implementation uses a running gateway reconciliation loop, protected bootstrap projections and readiness gating. Live-cluster validation remains separate from hermetic tests.
+## Override lifetime
 
-Instance state and applied revision/digest commit atomically. Older revisions are rejected; equal
-revision/digest is already current; equal revision with different content conflicts. Gateway recovery
-re-observes processes and resumes latest intent. Shared storage additionally enforces a backend
-fence. This provides eventual convergence; simultaneous fleet cutover requires another design.
+A **generation** is a hash of one resource's deployment content: its plan plus its deployment layer.
+Overrides belong to a generation, which follows Kubernetes: an unchanged spec changes nothing.
 
-## Management surface
-
-```http
-GET /cohesion/v2/resources/{resource}/state-contracts
-GET /cohesion/v2/resources/{resource}/state/{name}/{key}
-PUT /cohesion/v2/resources/{resource}/state/{name}/{key}
-GET /cohesion/v2/resources/{resource}/operations/{operationId}
-GET /cohesion/v2/resources/{resource}/instances
-```
-
-Writes require a conditional revision and stable client request ID. Bodies contain state, never
-hosts. Reads show effective desired state and convergence; individual observations require diagnostic
-authorization. Gateway capability/read/write grants must be explicit. Existing command grants must
-not silently acquire broader management access.
-
-## Approved refactor scope
-
-| Area | Change |
+| Event | What happens to overrides |
 | --- | --- |
-| Hosting.Resources | Runtime manifest/export; immutable handler registry; local dispatch |
-| Resource hosting adapters | Explicit state declarations and feature-to-control-plane bridge |
-| SDK/build integration | Matching metadata/registration generation; resource packaging |
-| Application Model | Generic manifest preservation/composition and dependency descriptors; retain Core-only boundary |
-| Gateway family | Protocol interpretation, management coordination, persistence and live deployment observations |
-| Platform gateways | Deployment, inventory, direct delivery, continuous reconciliation and admission |
-| Existing commands | Classify desired state versus actions; choose compatibility migration explicitly |
+| Operator PATCH | Stored in the current generation; every instance sees it, including restarts and scale-out |
+| Identical re-apply of the same build | Same generation; overrides kept |
+| This resource's deployment changed | New generation without overrides; `--mode plan` and apply list each discarded override first |
+| Another resource deployed | No effect |
+| PATCH on a `backend` section | 409 not-overridable (D7); change it in code, through a claim, or with an action |
+| Claims | Not overrides: they survive the target's redeploys; new code that collides with one gets 409 claim-conflict |
 
-`ResourceMount` remains an input/storage abstraction. Health and stop remain host lifecycle concerns.
-The state protocol is independent of explicit programmatic command delivery. Producer command
-catalogs and the resource/v1 manifest are retired. Database source remains untouched for separate
-branch integration, without a compatibility shim or build allowance.
+## Per platform
 
-## Review validation
+| Platform | Where the record lives | Concurrency | In-generation delivery | New generation |
+| --- | --- | --- | --- | --- |
+| Kubernetes | `<resource>-config-<generation>` (deployment and override keys; a Secret for sensitive sections) plus `<resource>-claims`, projected into one directory volume; one server-side-apply field manager per key | `resourceVersion` | kubelet refreshes the volume, typically within a minute; never `subPath` or `envFrom` | Pod template points at the new ConfigMap: a rolling update; a restart-class override rolls through a `cohesion.io/restart-digest` annotation |
+| Docker | `config/<generation>/` plus `claims/`, bind-mounted from the gateway's state root | Content hash and file lock | The resource's 2-second poll | Container recreate |
+| Local / on-premises | The same layout under `.cohesion/<app>/<resource>/` | Content hash and file lock | The resource's poll | Supervisor restarts the process |
+| InProcess | The same files | Same | The resource's poll | Entry re-invocation |
 
-The probe compiles Hosting.Resources notation, Application Model notation and gateway notation as
-separate assemblies. The model probe has no project references; gateway references the model only.
-This checks CLR ownership and signatures, not behavior or NativeAOT publishing.
+A scale-out instance mounts the current record when it starts, so it needs no admission handshake. A
+gateway restart loses nothing, because the gateway holds no desired state.
 
-Implementation acceptance must cover catalog/handler consistency, manifest preservation, unknown
-protocols, deployment observation, ten-instance partial failure, HPA growth, process restart,
-gateway recovery, revision races and mixed-version deployments.
+## Resource side (P1, implemented)
+
+`Assimalign.Cohesion.Hosting.Resources` owns the surface and applies the record:
+
+- `ResourceConfigurationSection.Create<T>(path, typeInfo, mutability, baseline, apply, scope, claimable)`
+  binds through the feature's source-generated `JsonTypeInfo<T>`, which also produces the section's
+  JSON schema (`JsonSchemaExporter`, with `DisplayName`/`Description` attributes as `title` and
+  `description`). `ResourceAction.Create` and `ResourceTool.Create` declare actions and tools.
+- The application registers sections, actions and tools as singletons in its services; the area
+  builder hands them to the control plane before the host is attached, which freezes the surface.
+- `COHESION_CONFIG_DIRECTORY` wraps the host runner: the record applies in the Startup phase before
+  the host starts, then the runner polls. A startup rejection holds readiness, not liveness; the
+  `cohesion.configuration` health contribution is Degraded while a section is rejected or pending
+  a restart.
+- `COHESION_DESCRIBE_PATH` makes the built host write its `cohesion/runtime/v1` surface and exit.
+  The SDK step that runs it and writes `resource.runtime.json` beside the build output is P1b, not
+  built: `resource.json` is embedded before compile, so the surface cannot live inside it.
+- Web serves `GET /cohesion/v1/configuration`, `GET /cohesion/v1/configuration/status` and
+  `POST /cohesion/v1/actions/{name}` through its control-plane middleware, as do the area hosts that
+  delegate to it. ConfigurationStore, IdentityHub and SecretStore route their control planes
+  themselves and do not serve these three routes yet.
+
+```csharp
+// A Web resource's Program.cs
+WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
+CorsPolicyStore cors = CorsPolicyStore.Create(configuredCors);
+builder.Services.AddSingleton<ResourceConfigurationSection>(cors.AsResourceConfiguration()); // Web:Cors, live
+WebApplication app = builder.Build();
+app.UseDynamicCors(cors);
+await app.RunAsync();
+```
+
+## Gateway `Program.cs`: platform APIs allowed here, and only here (P2, P3)
+
+```csharp
+IApplicationBuilder builder = Gateway.CreateBuilder(args);
+IDatabaseResourceDescriptor database = builder.AddDatabase(Manifests.OrdersDb)
+    .ConfigureHpa(hpa => hpa.MaxReplicas = 3);               // Gateway.Kubernetes
+IWebResourceDescriptor api = builder.AddWeb(Manifests.OrdersApi)
+    .Configure("Web:Cors", """{"defaultPolicy":{"origins":["https://portal.example.com"]}}""")
+    .ConfigureHpa(hpa => { hpa.MinReplicas = 2; hpa.MaxReplicas = 10; })
+    .DependsOn(database);
+builder.UseGateway(args);
+await builder.Build().RunAsync();
+```
+
+- `ConfigureHpa` is a generic C# 14 extension block in the Kubernetes package over any
+  `IApplicationResourceDescriptor`, so area verbs still chain after it and it never references an
+  area package.
+- Extensions are stored as JSON under a platform-qualified key (`kubernetes/hpa`), not as callbacks,
+  so they survive describe and export round trips. The selected compiler owns its keys and fails on
+  an unknown one; other platforms ignore them. Neutral replica bounds go in the plan.
+- `Build()` validates each deployment patch against the surface: an unknown member, a wrong type, or
+  an unknown section fails the build with the resource and path named.
+- This amends signed decision O29 (D5); platform code still lives only in the domain gateway, and
+  `KubernetesGatewayOptions.Patch<T>` stays the raw escape hatch.
+
+## Management API (P2)
+
+Same shape on every platform. A write is a conditional edit of the current generation's record and
+returns 200 with the new ETag and the generation the override expires with; `If-Match` on the
+platform version replaces any operation resource or idempotency key.
+
+| Method | Route (`/cohesion/v2/resources/{resource}…`) | Effect |
+| --- | --- | --- |
+| GET | `/configuration` | Surface, all layers with provenance, current generation, ETag |
+| PATCH | `/configuration/{section}` | Merges into `override.json`; a `null` is stored as a tombstone |
+| PUT | `/configuration/{section}` | Replaces the section's override |
+| DELETE | `/configuration/{section}` | Drops the override; the code value returns |
+| GET | `/configuration/status` | Each instance's record digest and outcome, converged n/m |
+| GET, PATCH | `/platform/{platform}/{extension}` | A platform-published surface such as `kubernetes/hpa` |
+| PUT | `/claims/{owner}` | The owner's whole entry set; empty withdraws |
+| POST | `/actions/{action}` | Forwarded to any or every instance; nothing stored |
+| GET | `/instances` | Platform inventory, for diagnostics |
+
+Refusals: 400 invalid-configuration, 404 unknown-section, 409 deployment-only, 409 not-overridable,
+409 claim-conflict, 412 version-moved. Grants are per section on the trusted-issuer model
+(`TrustedIssuer.AllowedManagementOperations`). Every write emits a management event to the
+application's telemetry sink (D8).
+
+## Portal and tools (later; hooks in P1 and P2)
+
+A portal sits on the management API and needs no platform code; platform controls arrive as platform
+surfaces. It renders from the static surface, so a resource with no running instance still has a
+working configuration blade. History is the telemetry sink's data, not control-plane state. Tools
+such as a SQL editor reach a resource through a gateway-terminated WebSocket tunnel over extended
+CONNECT (browsers cannot send CONNECT themselves); control-plane permission never implies data access.
+
+## Commands, retired (P4)
+
+| Today | Becomes |
+| --- | --- |
+| `database.add-database` | `Database:Databases`, a backend-scoped claimable section (after #1709) |
+| `configurationstore.add-namespace`, `set-value` | A claimable `ConfigurationStore:Namespaces` section |
+| IdentityHub audiences and clients, Rezolvr records | Claimable sections |
+| `secretstore.issue-certificate` | A desired `SecretStore:Certificates` entry the store issues and renews |
+| `secretstore.add-secret` | A data-plane write through the Orchestration client; secret values never enter a ConfigMap |
+| Web TLS certificate selection | A Secret-backed mount update the listener reloads for new handshakes |
+| Backup now, rotate now, flush cache | Actions |
+
+## Phases
+
+| Phase | Scope | State |
+| --- | --- | --- |
+| P0 | Park codex's uncommitted work on a branch in each repository | Done |
+| P1 | Hosting.Resources surface (UI metadata, tools), status and describe; the Web CORS section; codex's state machinery removed | Done, resource side |
+| P1b | SDK describe step writing `resource.runtime.json` | Not started |
+| P2 | Model parses the surface, `Configure` and `Build()` validation, extensions as data; gateway record manager over a store with generations, Local and InProcess stores, the routes, management events | Not started |
+| P3 | cohesion-platforms: Kubernetes and Docker stores, per-generation and claims ConfigMaps, restart digest, platform surfaces, `ConfigureHpa` | Not started |
+| P4 | Claims for ConfigurationStore, IdentityHub, Rezolvr, SecretStore; commands deleted; Database after #1709 | Not started |
+| P5 | Sdk.Gateway generates typed configuration accessors from surface schemas | Not started |
+| Later | Portal, tool tunnel and SQL editor, groups as permission scopes, watch API | Not started |
+
+## Limits accepted knowingly
+
+- Live updates are eventual: kubelet refreshes mounted ConfigMaps on its sync period, typically within
+  a minute or two. Nothing gives a fleet-wide atomic cutover.
+- A configuration-only code change rolls the instances: it is a new generation.
+- The describe run executes `Program.cs` up to `Build()`, so side effects before `Build()` run too.
+- A schema-valid but domain-invalid value is accepted by the gateway and refused by every instance,
+  which keeps its last good value and reports the rejection.
+- An override that must survive belongs in code; the plan output shows what a deployment discards.
+  A ConfigMap's 1 MiB limit bounds each layer.
+
+## Decisions
+
+| Id | Decision | State |
+| --- | --- | --- |
+| D1 | The platform's deployment record is the only desired state; the gateway store, the coordinator and process admission are deleted | Approved |
+| D2 | The surface is static, produced by describe at build, never discovered from live instances | Approved |
+| D3 | Overrides last until that resource's next deployment; an identical re-apply keeps them, and plan and apply list what a deployment discards | Approved (revised) |
+| D4 | Commands are removed entirely; claims and actions replace them; Database follows after #1709 | Approved |
+| D5 | Amend O29: platform extensions attach to descriptors as data and publish manageable surfaces; neutral scale bounds go in the plan | Approved (extended) |
+| D6 | Before refactoring, park codex's uncommitted work on a branch in each repository | Approved, done |
+| D7 | Data-shaping (`backend`) sections accept no overrides: code, claims or actions only | Approved |
+| D8 | Portal hooks ship now: UI metadata and tools in the surface (P1), management events to the telemetry sink (P2) | Approved |

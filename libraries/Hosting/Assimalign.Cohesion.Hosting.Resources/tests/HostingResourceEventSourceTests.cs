@@ -2,6 +2,7 @@ using System;
 using System.Diagnostics.CodeAnalysis;
 using System.Diagnostics.Tracing;
 using System.Linq;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -435,6 +436,49 @@ public sealed class HostingResourceEventSourceTests
             => Failure is { } exception
                 ? ValueTask.FromException<ReadOnlyMemory<byte>>(exception)
                 : Callback?.Invoke(cancellationToken) ?? ValueTask.FromResult(ReadOnlyMemory<byte>.Empty);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Hosting.Resources] - Event source: configuration outcomes name the section, never its values, and count exactly")]
+    public async Task ApplyConfigurationAsync_Outcomes_ShouldEmitSectionPathsAndCountEveryOutcome()
+    {
+        // Arrange
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        await Task.Delay(TimeSpan.FromMilliseconds(1100), cancellation.Token);
+        const string secret = "https://secret-origin.example";
+        ResourceControlPlane plane = ResourceControlPlane.Create();
+        plane.AddConfiguration(ResourceConfigurationSection.Create(
+            "Events:Policy",
+            TestSurfaceJsonContext.Default.TestPolicyOptions,
+            ResourceConfigurationMutability.Live,
+            new TestPolicyOptions(),
+            static value => value.AllowCredentials ? "refused" : null));
+        plane.AddConfiguration(ResourceConfigurationSection.Create(
+            "Events:Limits",
+            TestSurfaceJsonContext.Default.TestLimitsOptions,
+            ResourceConfigurationMutability.Restart,
+            new TestLimitsOptions(),
+            static _ => null));
+        using var recorder = new EventSourceRecorder(HostingResourceEventSource.Log, EventLevel.Verbose, TimeSpan.FromMilliseconds(100));
+        long applied = HostingResourceEventSource.Log.ConfigurationSectionsApplied;
+        long rejected = HostingResourceEventSource.Log.ConfigurationSectionsRejected;
+        string startup = "{\"Events:Policy\":{\"origins\":[\"" + secret + "\"]},\"Events:Limits\":{\"maxConnections\":5}}";
+        string running = "{\"Events:Policy\":{\"origins\":[\"" + secret + "\"],\"allowCredentials\":true},\"Events:Limits\":{\"maxConnections\":9}}";
+
+        // Act
+        await plane.ApplyConfigurationAsync(ResourceConfigurationRecord.Create(Encoding.UTF8.GetBytes(startup), [], null), ResourceConfigurationPhase.Startup, cancellation.Token);
+        await plane.ApplyConfigurationAsync(ResourceConfigurationRecord.Create(Encoding.UTF8.GetBytes(running), [], null), ResourceConfigurationPhase.Running, cancellation.Token);
+
+        // Assert
+        HostingResourceEventSource.Log.ConfigurationSectionsApplied.ShouldBe(applied + 2);
+        HostingResourceEventSource.Log.ConfigurationSectionsRejected.ShouldBe(rejected + 1);
+        recorder.Events.Count(item => item.EventId == 6 && Equals(item.Payload![0], "Events:Policy")).ShouldBe(1);
+        recorder.Events.Count(item => item.EventId == 6 && Equals(item.Payload![0], "Events:Limits")).ShouldBe(1);
+        EventWrittenEventArgs rejection = recorder.Events.Where(item => item.EventId == 7 && Equals(item.Payload![0], "Events:Policy")).ShouldHaveSingleItem();
+        rejection.PayloadNames.ShouldBe(["section", "suppressedCount"]);
+        recorder.Events.Where(item => item.EventId == 8 && Equals(item.Payload![0], "Events:Limits")).ShouldHaveSingleItem();
+        recorder.Events.SelectMany(item => item.Payload ?? []).ShouldNotContain(secret);
+        recorder.Events.ShouldNotContain(item => item.EventId == 0);
+        await recorder.WaitForCountersAsync(["configuration-sections-applied", "configuration-sections-rejected", "configuration-records-unreadable"], cancellation.Token);
     }
 
     private static IResourceControlPlane CreateFailingPlane(string contributorName, Exception exception)

@@ -24,10 +24,11 @@ canonical prose lives in `resources/Web/README.md`; this file is the working rul
   consumer and pushes users toward container-driven design.
 - `Web.Hosting` integrates `Hosting.Resources`, including its consolidated health contracts (owner decision 57,
   2026-10-13). Its public integrations live in `src/Health/` and `src/Resources/`, keeping the
-  `Assimalign.Cohesion.Web.Hosting.Health` and `.Resources` namespaces. No separate Web
-  hosting-family package exists. A future `Web.Hosting.<Suffix>` package is permitted only for
-  an integration that must not land in every framework carrying `Web.Hosting`; it retains the
-  family constraints in `resource-areas.md`. Roots and features may not reference the hosting
+  `Assimalign.Cohesion.Web.Hosting.Health` and `.Resources` namespaces. A `Web.Hosting.<Suffix>`
+  package is permitted only for an integration that must not land in every framework carrying
+  `Web.Hosting`; it retains the family constraints in `resource-areas.md`. The one such package is
+  the NuGet-only `Web.Hosting.Management`, whose deployment-record configuration sections need
+  Web.Cors, which would otherwise join every framework that carries `Web.Hosting`. Roots and features may not reference the hosting
   module, its family (COHRES001) or shared Hosting libraries (COHRES004).
 - **`Web.Hosting` references a Web library only when the runtime itself needs it** — runtime
   machinery it composes, such as a router it drives or a server package. COHRES002 permits any
@@ -130,8 +131,8 @@ by kind, and decision 39 of 2026-10-10 (#1395) settled the registration verbs' s
 A new `resources/Web/Assimalign.Cohesion.Web.<Feature>/` project (precedents: `Web.Routing`,
 `Web.Server`) is not done until all of these are updated (each has bitten before). A future
 `Web.Hosting.<Suffix>` integration must first meet decision 57's condition (it must not land in
-every framework carrying `Web.Hosting`); no current Web package is a precedent for a separate
-hosting-family package:
+every framework carrying `Web.Hosting`); `Web.Hosting.Management` is the precedent, NuGet-only and
+kept out of App.Web:
 
 1. **csproj** — references per the dependency rule above; `CohesionProjectReference` only. A
    package that registers an `IHttpFeature` declares its `builder.Services.Add<Feature>` verb as a

@@ -1,8 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Security.Cryptography;
-using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -106,8 +104,7 @@ public sealed class LocalGateway : ApplicationGateway, IApplicationGatewayRender
         {
             targets.Add(target!);
         }
-        byte[] identity = SHA256.HashData(Encoding.UTF8.GetBytes(model.Name.Value + "\0" + descriptor.Resource.Name.Value));
-        return ValueTask.FromResult(new ResourceInstanceInventory(new Guid(identity.AsSpan(0, 16)),
+        return ValueTask.FromResult(new ResourceInstanceInventory(CreateIncarnation(model, descriptor),
             targets.Count == 0 ? "pending" : targets[0].Generation, 1, targets.Count == 1, targets));
     }
 

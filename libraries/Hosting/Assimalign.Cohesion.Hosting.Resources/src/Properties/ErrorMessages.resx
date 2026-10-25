@@ -4,18 +4,18 @@
   <resheader name="version"><value>2.0</value></resheader>
   <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms</value></resheader>
   <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
-  <data name="ManagementEndpointNameInvalid" xml:space="preserve"><value>A management endpoint name must contain one to 128 ASCII letters, digits, periods, underscores, or hyphens, and cannot be '.' or '..'.</value></data>
-  <data name="ManagementMethodsInvalid" xml:space="preserve"><value>A management endpoint must support one or more distinct, defined management methods.</value></data>
-  <data name="ManagementRegistrationUnsupported" xml:space="preserve"><value>This resource control plane does not support management endpoints.</value></data>
-  <data name="ManagementEndpointDuplicate" xml:space="preserve"><value>A resource management endpoint named '{0}' is already registered.</value></data>
-  <data name="ResourceStateNameInvalid" xml:space="preserve"><value>A state name must contain one to 128 ASCII letters, digits, dots, underscores or hyphens, excluding '.' and '..'.</value></data>
-  <data name="ResourceStateKeyInvalid" xml:space="preserve"><value>A state key must contain one to 256 non-control characters and cannot be whitespace.</value></data>
-  <data name="ResourceRuntimeInvalid" xml:space="preserve"><value>The resource runtime manifest has an invalid or unsupported envelope.</value></data>
-  <data name="ResourceStateDefinitionInvalid" xml:space="preserve"><value>A resource state definition is invalid or duplicated.</value></data>
-  <data name="ResourceStateDeclarationInvalid" xml:space="preserve"><value>An initial resource state is invalid, duplicated, or unsupported.</value></data>
-  <data name="ResourceStateUnsupported" xml:space="preserve"><value>The resource control plane does not support this state operation.</value></data>
-  <data name="ResourceStateCatalogMismatch" xml:space="preserve"><value>Runtime state handlers must match every advertised contract exactly before the host is attached.</value></data>
-  <data name="ResourceStateCatalogFrozen" xml:space="preserve"><value>The resource state catalog is frozen after host attachment.</value></data>
-<data name="ResourceManagementEndpointNameInvalid" xml:space="preserve"><value>A management endpoint name must contain one to 128 ASCII letters, digits, dots, hyphens or underscores and cannot be a relative path segment.</value></data>
-<data name="ResourceManagementPathInvalid" xml:space="preserve"><value>A management path must be absolute and cannot contain a query, fragment, backslash, whitespace or control characters.</value></data>
+  <data name="ResourceConfigurationPathInvalid" xml:space="preserve"><value>A configuration path is one or more segments of ASCII letters, digits, dots, hyphens or underscores separated by single colons, at most 256 characters.</value></data>
+  <data name="ResourceActionNameInvalid" xml:space="preserve"><value>An action name is lowercase ASCII letters and digits in hyphen-separated words, at most 64 characters.</value></data>
+  <data name="ResourceToolNameInvalid" xml:space="preserve"><value>A tool name is lowercase ASCII letters and digits in hyphen-separated words, at most 64 characters.</value></data>
+  <data name="ResourceToolSubprotocolInvalid" xml:space="preserve"><value>A tool subprotocol is an HTTP token and applies only to the WebSocket protocol.</value></data>
+  <data name="ResourceSurfaceUnsupported" xml:space="preserve"><value>This resource control plane has no runtime surface.</value></data>
+  <data name="ResourceSurfaceFrozen" xml:space="preserve"><value>The runtime surface cannot change after the resource host is built.</value></data>
+  <data name="ResourceConfigurationSectionDuplicate" xml:space="preserve"><value>A configuration section with this path is already registered.</value></data>
+  <data name="ResourceConfigurationClaimableNotObject" xml:space="preserve"><value>A claimable configuration section must bind to a JSON object whose members are the claimed entries.</value></data>
+  <data name="ResourceActionDuplicate" xml:space="preserve"><value>An action with this name is already registered.</value></data>
+  <data name="ResourceToolDuplicate" xml:space="preserve"><value>A tool with this name is already registered.</value></data>
+  <data name="ResourceActionUnknown" xml:space="preserve"><value>The resource exposes no action with this name.</value></data>
+  <data name="ResourceActionInputInvalid" xml:space="preserve"><value>The action input does not bind to the action's input type.</value></data>
+  <data name="ResourceConfigurationDirectoryMissing" xml:space="preserve"><value>The deployment record directory does not exist.</value></data>
+  <data name="ResourceConfigurationRecordInvalid" xml:space="preserve"><value>A deployment record layer is larger than 1 MiB or is not a JSON object, or a claim layer's owner is not a DNS label or appears twice.</value></data>
 </root>

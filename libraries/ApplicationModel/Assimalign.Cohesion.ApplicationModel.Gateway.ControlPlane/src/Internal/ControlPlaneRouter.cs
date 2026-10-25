@@ -12,7 +12,7 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane.Internal;
 /// </summary>
 /// <remarks>
 /// This replaces the former <c>Web.Routing</c> dependency: a library may not reference a
-/// <c>resources/**</c> package, and these fixed templates need no general router. Behaviour is the
+/// <c>resources/**</c> package, and five fixed templates need no general router. Behaviour is the
 /// subset of <c>Web.Routing</c> those templates exercised. The request path is trimmed of
 /// <c>/</c> and split without empty segments; routes are tried in table order; the first route
 /// whose path matches and whose method is accepted wins; a <c>HEAD</c> request is served by a

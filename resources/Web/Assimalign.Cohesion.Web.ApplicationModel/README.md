@@ -5,7 +5,7 @@ The Web area's AOT-compatible, dependency-guarded orchestration package. It turn
 and emits the platform-neutral `cohesion/plan/v1` realization plan consumed by
 the selected gateway compiler. It preserves producer-owned runtime metadata as opaque JSON.
 
-This package describes resource manifests, dependencies and deployment plans. Its only direct Cohesion dependency is ApplicationModel, whose contracts depend only on Core. Sdk.ApplicationModel generates control-plane registration in the enabled resource executable; Hosting.Resources and the resource host own local state handlers. The gateway owns infrastructure observation and management reconciliation.
+This package describes resource manifests, dependencies and deployment plans. Its only direct Cohesion dependency is ApplicationModel, whose contracts depend only on Core. Sdk.ApplicationModel generates control-plane registration in the enabled resource executable; Hosting.Resources and the resource host own the runtime surface and apply the deployment record. The gateway observes infrastructure and delivers the record.
 
 ## Planning a Web resource
 

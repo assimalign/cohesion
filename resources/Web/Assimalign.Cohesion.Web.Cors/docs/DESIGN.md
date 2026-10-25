@@ -181,14 +181,16 @@ for requests without endpoint CORS metadata. An output cache can have captured h
 earlier policy's response-starting callback corrected them; removing the default must not revive those
 stored grants. Explicit `DisableCors` remains an opt-out and permits an endpoint to own its headers.
 Policy validation and name-retention failures at this configuration boundary are `ArgumentException`,
-so a management transport can report invalid input separately from a server failure. Static builder
+so a caller such as the deployment-record section can report invalid input separately from a
+server failure. Static builder
 validation keeps its existing exception types.
 
 Inline endpoint policies and `DisableCors` keep their existing precedence; dynamic configuration
 controls only the default and named policies. The store deliberately has no HTTP, hosting, persistence,
-service-container or application-model dependency. Executable composition can share the store with an
-authenticated resource management handler. Store lifetime is one process; durable desired state and
-replica reconciliation belong to the management host. A browser may retain a preflight grant until its
+service-container or application-model dependency. A resource publishes the store as the live `Web:Cors`
+section of its deployment record through the opt-in Web.Hosting.Management package, which merges the
+record's layers over the store's initial configuration and calls `Replace`. Store lifetime is one
+process; the record, not the store, carries changes to restarted and new instances. A browser may retain a preflight grant until its
 advertised cache lifetime expires, so replacement is effective on subsequent server requests rather
 than an immediate revocation of browser cache entries.
 
@@ -521,9 +523,9 @@ headers on its `500`; streamed heads enforcing the policy after handler changes;
 `tests/CorsPolicyStoreTests.cs` covers normalized and detached configuration, complete failure rollback,
 named-policy retention, default-policy removal, JSON round trips and malformed input, dynamic named
 preflight changes, immutable policy retention through response commit, independent store isolation,
-inline/disabled metadata precedence and unchanged static `UseCors` capture semantics. Management HTTP
-integration is tested by the owning Web.Hosting composition, which shares the same store with its
-authenticated endpoint.
+inline/disabled metadata precedence and unchanged static `UseCors` capture semantics. The
+deployment-record section is tested in Web.Hosting.Management, and the record changing real requests
+is tested in Web.Hosting.
 
 ## HTTP interceptor consumer compatibility (#1465)
 

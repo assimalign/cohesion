@@ -47,43 +47,6 @@ public sealed class CorsPolicyStore
         return CopyConfiguration(Volatile.Read(ref _snapshot).Configuration);
     }
 
-    /// <summary>Reads policy and management version from one atomic snapshot.</summary>
-    /// <returns>The detached configuration and its committed management version.</returns>
-    public CorsPolicyState ReadState()
-    {
-        Snapshot snapshot = Volatile.Read(ref _snapshot);
-        return new CorsPolicyState(CopyConfiguration(snapshot.Configuration), snapshot.Authority, snapshot.Revision, snapshot.ValueDigest);
-    }
-
-    /// <summary>Atomically publishes policies together with an ordered authority revision.</summary>
-    /// <param name="configuration">The desired policy configuration.</param>
-    /// <param name="authority">The nonempty authority incarnation.</param>
-    /// <param name="revision">The positive desired revision.</param>
-    /// <param name="valueDigest">The desired-value digest.</param>
-    /// <returns>The publication outcome.</returns>
-    /// <exception cref="ArgumentException">The authority, digest, configuration or retained names are invalid.</exception>
-    /// <exception cref="ArgumentNullException">The configuration or one of its values is null.</exception>
-    /// <exception cref="ArgumentOutOfRangeException">The revision or a policy duration is invalid.</exception>
-    public CorsPolicyUpdateStatus ApplyVersioned(CorsConfiguration configuration, Guid authority, long revision, string valueDigest)
-    {
-        if (authority == Guid.Empty) { throw new ArgumentException(ErrorMessages.DynamicCorsAuthorityInvalid, nameof(authority)); }
-        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(revision);
-        ArgumentException.ThrowIfNullOrWhiteSpace(valueDigest);
-        Snapshot replacement = BuildSnapshot(configuration, authority, revision, valueDigest);
-        lock (_sync)
-        {
-            if (_snapshot.Authority != Guid.Empty && _snapshot.Authority != authority) { return CorsPolicyUpdateStatus.Conflict; }
-            if (revision < _snapshot.Revision) { return CorsPolicyUpdateStatus.Stale; }
-            if (revision == _snapshot.Revision)
-            {
-                return valueDigest == _snapshot.ValueDigest ? CorsPolicyUpdateStatus.AlreadyCurrent : CorsPolicyUpdateStatus.Conflict;
-            }
-            ValidateRetainedPolicies(replacement, configuration);
-            Volatile.Write(ref _snapshot, replacement);
-            return CorsPolicyUpdateStatus.Applied;
-        }
-    }
-
     /// <summary>Validates and atomically replaces the complete default and named policy configuration.</summary>
     /// <remarks>
     /// Existing named policies must be retained so endpoints that use those names keep resolving.
@@ -101,7 +64,6 @@ public sealed class CorsPolicyStore
 
         lock (_sync)
         {
-            if (_snapshot.Revision != 0) { throw new InvalidOperationException(ErrorMessages.DynamicCorsManagedReplacement); }
             ValidateRetainedPolicies(replacement, configuration);
 
             Volatile.Write(ref _snapshot, replacement);
@@ -125,7 +87,7 @@ public sealed class CorsPolicyStore
         }
     }
 
-    private static Snapshot BuildSnapshot(CorsConfiguration configuration, Guid authority = default, long revision = 0, string valueDigest = "")
+    private static Snapshot BuildSnapshot(CorsConfiguration configuration)
     {
         ArgumentNullException.ThrowIfNull(configuration);
         ArgumentNullException.ThrowIfNull(configuration.Policies);
@@ -144,9 +106,6 @@ public sealed class CorsPolicyStore
 
         return new Snapshot
         {
-            Authority = authority,
-            Revision = revision,
-            ValueDigest = valueDigest,
             Configuration = new CorsConfiguration
             {
                 DefaultPolicy = defaultPolicy is null ? null : DescribePolicy(defaultPolicy),
@@ -274,9 +233,6 @@ public sealed class CorsPolicyStore
 
     private sealed class Snapshot
     {
-        public Guid Authority { get; init; }
-        public long Revision { get; init; }
-        public string ValueDigest { get; init; } = string.Empty;
         public required CorsConfiguration Configuration { get; init; }
 
         public CorsPolicy? DefaultPolicy { get; init; }

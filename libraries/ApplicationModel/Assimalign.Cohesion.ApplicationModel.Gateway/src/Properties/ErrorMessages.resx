@@ -30,13 +30,13 @@
   <data name="StopGraceInvalid" xml:space="preserve">
     <value>StopGrace must be greater than zero.</value>
   </data>
-  <data name="ResourceStateNameInvalid" xml:space="preserve"><value>A state name must contain one to 128 ASCII letters, digits, dots, underscores or hyphens, excluding '.' and '..'.</value></data>
-  <data name="ResourceStateKeyInvalid" xml:space="preserve"><value>A state key must contain one to 256 non-control characters and cannot be whitespace.</value></data>
-  <data name="ManagementDirectoryRequired" xml:space="preserve"><value>A persistent management directory is required.</value></data>
-  <data name="ManagementStoreContention" xml:space="preserve"><value>The resource management store is locked by another writer.</value></data>
-  <data name="ManagementStateInvalid" xml:space="preserve"><value>The desired state request, resource runtime manifest, or stored management state is invalid.</value></data>
-  <data name="ManagementStateConflict" xml:space="preserve"><value>The desired state revision or request identity conflicts with stored state.</value></data>
-  <data name="ManagementResourceUnavailable" xml:space="preserve"><value>The resource has no current trusted management inventory.</value></data>
-  <data name="ManagementStateUnsupported" xml:space="preserve"><value>The resource does not advertise a supported state contract for this operation.</value></data>
-  <data name="ManagementBaselineRequired" xml:space="preserve"><value>Clearing a management override requires an explicitly declared baseline for the state slot.</value></data>
+  <data name="ResourceInstancesUnobservable" xml:space="preserve">
+    <value>The plan runs more than one instance of the resource, and this gateway cannot observe them individually.</value>
+  </data>
+  <data name="ResourceNotRealized" xml:space="preserve">
+    <value>This gateway does not realize a resource with that application and name.</value>
+  </data>
+  <data name="TrustedIssuerManagementOperationsInvalid" xml:space="preserve">
+    <value>Trusted issuer '{0}' allowedManagementOperations must be an array of nonblank strings.</value>
+  </data>
 </root>

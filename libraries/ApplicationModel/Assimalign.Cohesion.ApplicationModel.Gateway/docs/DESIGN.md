@@ -1068,3 +1068,28 @@ preserves those inputs locally. Existing validation guards remain in place. This
 public API and behavior are unchanged from 10.0.0-preview.1. Its updated dependency creation
 signatures require rebuilding; the source and binary breaks are recorded in the JWT and
 DataProtection package designs on decision 15's terms. Advisory: not applicable: API shape.
+
+## Instance inventory (deployment-record control plane, 2026-10-24)
+
+`GetInstancesAsync(application, resource)` lists the individually addressable control planes of a
+resource this gateway realizes, as a `ResourceInstanceInventory` of `ResourceManagementTarget`s. It
+is the seam the gateway management API of the
+[deployment-record program](../../../../docs/programs/RESOURCE_CONTROL_PLANE_REDESIGN.md) will use to
+read each instance's configuration status and to fan every-instance actions out; that API is not
+built yet, and nothing in this package stores desired configuration.
+
+- **Address.** A target's address is the instance's control-plane base: the observed endpoint named
+  by the plan's `ControlPlane.Endpoint` combined with `ControlPlane.Path`, the same construction
+  command delivery uses. `TryGetResourceManagementBinding` resolves that endpoint to its declared
+  plan port without area knowledge.
+- **Default hook.** `ObserveResourceInstancesAsync` reports the observed endpoint for a single
+  instance and throws `NotSupportedException` for a plan with more than one replica, because the
+  base gateway cannot tell instances apart. The Local gateway reports its supervised process while it
+  is still starting, so an instance whose record was rejected at startup stays reachable. Platform
+  gateways override the hook with their own inventory (pods, containers).
+- **Identity.** `CreateIncarnation` derives a stable identity from the application and resource
+  names; a platform with a native deployment identity reports that instead.
+
+The parked codex design hung a management coordinator, durable stores, a state protocol client and
+`/cohesion/v2` state routes off this hook. All of that is deleted; the hook and its two records are
+kept because the approved design needs per-instance status and actions.

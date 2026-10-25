@@ -27,7 +27,8 @@ they need.
 - `ResourceRuntime` supplies AsyncLocal scope, assembly-keyed generated registrations, entry
   invocation, and host surrender.
 - `IResourceControlPlane` owns host-local contributors, endpoint observations, accepted command
-  kinds, health aggregation, command dispatch, and named management endpoint registration.
+  kinds, health aggregation, command dispatch, and the runtime surface: configuration sections,
+  actions and tools, frozen when the host is built, and the deployment record applied over them.
 - `ResourceMount` reads file-backed or in-memory mount values, decrypting Windows DPAPI-backed
   file content for consumers.
 - The internal resource runner handles process signals, readiness protocol lines, shutdown budget,
@@ -39,7 +40,9 @@ they need.
 - `IResourceEntryInvocation`
 - `IResourceControlPlane`, `ResourceControlPlane` (public sealed implementation; create with `ResourceControlPlane.Create(kinds)`)
 - `ResourceCommand`
-- `ResourceRuntimeManifest`, `ResourceStateDefinition`, `IResourceStateHandler` and process-bound state observations
+- `ResourceConfigurationSection`, `ResourceAction`, `ResourceTool`, `ResourceRuntimeSurface`
+- `ResourceConfigurationRecord`, `ResourceConfigurationStatus`, `ResourceConfigurationSectionStatus`
+  and the `ResourceConfigurationPath`, `ResourceActionName`, `ResourceToolName` value objects
 - `IResourceCredentialVerifier`, `ResourceCredentialPresentation`, `ResourceCredentialVerification`,
   `ResourceCredentialStatus`, `ResourceCaller`, `ResourceCallerKind`, `ResourceCredentialProfile`
 

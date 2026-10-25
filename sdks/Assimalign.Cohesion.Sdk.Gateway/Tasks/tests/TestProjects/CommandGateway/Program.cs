@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using System.Linq;
 
 using Assimalign.Cohesion.ApplicationModel;
@@ -12,16 +11,15 @@ builder.AddSecretStore(Manifests.CommandSecrets);
 
 builder.UseGateway(args);
 var application = builder.Build();
-AssertRuntimeBinding(application.Model, "ConfigurationStore");
-AssertRuntimeBinding(application.Model, "SecretStore");
+AssertResourceV2(application.Model, "ConfigurationStore");
+AssertResourceV2(application.Model, "SecretStore");
 await application.RunAsync();
 
-static void AssertRuntimeBinding(IApplicationModel model, string kind)
+static void AssertResourceV2(IApplicationModel model, string kind)
 {
     ResourceManifest manifest = model.Manifests.Single(candidate => candidate.Kind == kind);
-    if (manifest.Schema != ResourceManifest.SchemaV2 ||
-        manifest.Runtime?.GetProperty("management").GetProperty("protocol").GetString() != "cohesion/resource-state/v1")
+    if (manifest.Schema != ResourceManifest.SchemaV2)
     {
-        throw new InvalidOperationException("A new resource manifest must publish its runtime management binding.");
+        throw new InvalidOperationException($"The {kind} manifest must use {ResourceManifest.SchemaV2}.");
     }
 }

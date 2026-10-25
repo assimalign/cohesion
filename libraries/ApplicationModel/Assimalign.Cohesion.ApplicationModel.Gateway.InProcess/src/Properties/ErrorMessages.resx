@@ -19,6 +19,4 @@
   <data name="MaximumRestartBackoffInvalid" xml:space="preserve">
     <value>MaximumRestartBackoff must be at least InitialRestartBackoff.</value>
   </data>
-<data name="RuntimeStateUnavailable" xml:space="preserve"><value>The resource process is no longer available for runtime state management.</value></data>
-<data name="RuntimeStateContractMismatch" xml:space="preserve"><value>The resource process does not expose the requested runtime state contract.</value></data>
 </root>

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
+using System.IO;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Runtime.ExceptionServices;
@@ -452,8 +453,13 @@ public static class ResourceRuntime
         {
             controlPlane.ObserveEndpoint(name, endpoint);
         }
-        if (context.GatewayName is not null && controlPlane.RuntimeManifest is not null) { controlPlane.RequireStateBootstrap(); }
         controlPlane.AttachHost(host);
+        if (TryDescribe(context, controlPlane))
+        {
+            // The SDK's describe step builds the host only to learn its runtime surface: nothing has
+            // started, so the process ends here, before Program.cs runs the host.
+            Environment.Exit(0);
+        }
         _hostControlPlanes.AddOrUpdate(host, controlPlane);
 
         int stopGraceSeconds = controlPlane is RegisteredResourceControlPlane registered
@@ -469,10 +475,46 @@ public static class ResourceRuntime
             runInvoked: isEntryInvocationHost
                 ? () => frame!.RunInvoked(host)
                 : null));
-        if (context.TryGetEnvironmentValue(AppEnvironment.Variables.ResourceStatePath, out string? statePath) && controlPlane.RuntimeManifest is not null)
+        if (context.TryGetEnvironmentValue(AppEnvironment.Variables.ConfigDirectory, out string? configDirectory))
         {
-            hostContext.Runner = new ResourceStateProjectionRunner(hostContext.Runner, controlPlane, new ResourceMount(statePath));
+            hostContext.Runner = new ResourceConfigurationRunner(
+                hostContext.Runner,
+                controlPlane,
+                configDirectory,
+                ResourceConfigurationRunner.DefaultPollInterval);
         }
+    }
+
+    /// <summary>
+    /// Writes the frozen runtime surface to <see cref="AppEnvironment.Variables.DescribePath"/> when the context sets it.
+    /// </summary>
+    /// <returns>Whether this invocation is the SDK's describe run, which must end without running the host.</returns>
+    internal static bool TryDescribe(ResourceContext context, IResourceControlPlane controlPlane)
+    {
+        if (!context.TryGetEnvironmentValue(AppEnvironment.Variables.DescribePath, out string? describePath))
+        {
+            return false;
+        }
+
+        WriteSurface(describePath, controlPlane.Surface);
+        return true;
+    }
+
+    /// <summary>Writes a runtime surface document atomically, as the SDK's describe step reads it.</summary>
+    /// <param name="path">The destination file.</param>
+    /// <param name="surface">The frozen surface.</param>
+    internal static void WriteSurface(string path, ResourceRuntimeSurface surface)
+    {
+        string fullPath = Path.GetFullPath(path);
+        string? directory = Path.GetDirectoryName(fullPath);
+        if (!string.IsNullOrEmpty(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
+
+        string temporary = fullPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        File.WriteAllBytes(temporary, surface.Export());
+        File.Move(temporary, fullPath, overwrite: true);
     }
 
     /// <summary>Finds the invocation-local control plane attached to a built host.</summary>
@@ -735,21 +777,29 @@ public static class ResourceRuntime
 
         public IReadOnlyList<string> AcceptedCommandKinds => _inner.AcceptedCommandKinds;
 
-        public ResourceRuntimeManifest? RuntimeManifest => _inner.RuntimeManifest;
-        public ResourceRuntimeManagement? RuntimeManagement => _inner.RuntimeManagement;
-        public Guid ProcessStartId => _inner.ProcessStartId;
-        public bool IsManagementReady => _inner.IsManagementReady;
-        public void RequireStateBootstrap() => _inner.RequireStateBootstrap();
-        public ValueTask<bool> AdmitStateAsync(ResourceStateAdmission admission, CancellationToken cancellationToken = default) => _inner.AdmitStateAsync(admission, cancellationToken);
-        public void ConfigureRuntimeManagement(ResourceRuntimeManagement management) => _inner.ConfigureRuntimeManagement(management);
-        public void RegisterStateHandler(IResourceStateHandler handler) => _inner.RegisterStateHandler(handler);
-        public void ValidateStateHandlers() => _inner.ValidateStateHandlers();
-        public ValueTask<ResourceStateValidation> ValidateStateAsync(ResourceStateName name, ResourceStateKey key, ResourceStateValue desired, CancellationToken cancellationToken = default) => _inner.ValidateStateAsync(name, key, desired, cancellationToken);
-        public ValueTask<ResourceStateObservation> ReadStateAsync(ResourceStateName name, ResourceStateKey key, CancellationToken cancellationToken = default) => _inner.ReadStateAsync(name, key, cancellationToken);
-        public ValueTask<ResourceStateApplyResult> ApplyStateAsync(ResourceStateApplyContext context, ResourceStateName name, ResourceStateKey key, ResourceStateValue desired, CancellationToken cancellationToken = default) => _inner.ApplyStateAsync(context, name, key, desired, cancellationToken);
+        public ResourceRuntimeSurface Surface => _inner.Surface;
+
+        public ResourceConfigurationStatus ConfigurationStatus => _inner.ConfigurationStatus;
+
+        public void AddConfiguration(ResourceConfigurationSection section) => _inner.AddConfiguration(section);
+
+        public void AddAction(ResourceAction action) => _inner.AddAction(action);
+
+        public void AddTool(ResourceTool tool) => _inner.AddTool(tool);
+
+        public ValueTask<ResourceConfigurationStatus> ApplyConfigurationAsync(
+            ResourceConfigurationRecord record,
+            ResourceConfigurationPhase phase,
+            CancellationToken cancellationToken = default) =>
+            _inner.ApplyConfigurationAsync(record, phase, cancellationToken);
+
+        public ValueTask<ReadOnlyMemory<byte>> InvokeActionAsync(
+            ResourceActionName name,
+            ReadOnlyMemory<byte> input,
+            CancellationToken cancellationToken = default) =>
+            _inner.InvokeActionAsync(name, input, cancellationToken);
 
         public IReadOnlyList<ResourceCommand> Commands => _inner.Commands;
-
 
         public void RegisterCommandHandler(IResourceCommandHandler handler) => _inner.RegisterCommandHandler(handler);
 

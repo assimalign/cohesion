@@ -44,7 +44,8 @@ public sealed class ResourceCommandSdkIntegrationTests
         source.ShouldNotContain("AddCommandConfiguration(", Case.Sensitive);
         source.ShouldNotContain("AddCommandSecrets(", Case.Sensitive);
 
-        // Assert: new resources carry only management bindings; Database keeps its legacy commands.
+        // Assert: v2 resources declare no command catalog and no runtime member; the runtime surface
+        // is a separate document. Database keeps its legacy commands.
         string secretsManifestPath = Directory.EnumerateFiles(
             Path.Combine(workspace.ProjectDirectory("CommandSecretStore"), "obj"), "resource.json", SearchOption.AllDirectories)
             .First();
@@ -52,7 +53,7 @@ public sealed class ResourceCommandSdkIntegrationTests
         {
             secretsManifest.RootElement.GetProperty("schema").GetString().ShouldBe("cohesion/resource/v2");
             secretsManifest.RootElement.TryGetProperty("commands", out _).ShouldBeFalse();
-            secretsManifest.RootElement.GetProperty("runtime").GetProperty("management").GetProperty("protocol").GetString().ShouldBe("cohesion/resource-state/v1");
+            secretsManifest.RootElement.TryGetProperty("runtime", out _).ShouldBeFalse();
         }
 
         // Assert: the SDK injects the referenced areas' ApplicationModel packages and no client.

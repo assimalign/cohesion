@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Text.Json;
 
 namespace Assimalign.Cohesion.Sdk.ApplicationModel.Tasks.Internal;
 
@@ -21,8 +20,6 @@ internal sealed class ResourceManifestModel
     public Dictionary<string, ResourceProbeModel> Probes { get; } = new(StringComparer.OrdinalIgnoreCase);
 
     public required ResourceControlPlaneModel ControlPlane { get; init; }
-
-    public JsonElement? Runtime { get; set; }
 
     public List<ResourceMountModel> Mounts { get; } = [];
 

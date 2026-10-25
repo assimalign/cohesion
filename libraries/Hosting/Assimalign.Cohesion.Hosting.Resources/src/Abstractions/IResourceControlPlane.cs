@@ -3,75 +3,67 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 
-using Assimalign.Cohesion.Hosting.Resources;
-
 namespace Assimalign.Cohesion.Hosting.Resources;
 
 /// <summary>
-/// Defines resource-local runtime state, lifecycle and compatible v1 command control.
+/// Defines a resource's local control plane: its runtime surface and configuration status, health,
+/// observed endpoints, graceful stop, and declarative commands.
 /// </summary>
+/// <remarks>
+/// The control plane holds no desired state. Configuration comes from the deployment record the platform
+/// delivers; the control plane applies it to the registered sections and reports what is in force.
+/// </remarks>
 public interface IResourceControlPlane
 {
-    /// <summary>Gets the producer-owned runtime manifest; null denotes a legacy-only resource.</summary>
-    ResourceRuntimeManifest? RuntimeManifest => null;
+    /// <summary>Gets the configuration sections, actions and tools this resource exposes.</summary>
+    /// <remarks>The surface is frozen when the resource's host is built.</remarks>
+    ResourceRuntimeSurface Surface => ResourceRuntimeSurface.Empty;
 
-    /// <summary>Gets the immutable transport binding without copying the runtime state catalog.</summary>
-    ResourceRuntimeManagement? RuntimeManagement => RuntimeManifest?.Management;
+    /// <summary>Gets which deployment record this instance applied and the outcome for each section.</summary>
+    ResourceConfigurationStatus ConfigurationStatus => ResourceConfigurationStatus.Empty;
 
-    /// <summary>Gets this invocation's process incarnation for verified direct delivery.</summary>
-    Guid ProcessStartId => Guid.Empty;
+    /// <summary>Registers a configuration section the deployment record may set.</summary>
+    /// <param name="section">The section.</param>
+    /// <exception cref="NotSupportedException">This control plane has no runtime surface.</exception>
+    void AddConfiguration(ResourceConfigurationSection section) =>
+        throw new NotSupportedException(ErrorMessages.ResourceSurfaceUnsupported);
 
-    /// <summary>Gets whether management bootstrap has admitted this process to serve traffic.</summary>
-    bool IsManagementReady => true;
+    /// <summary>Registers an action the gateway may invoke.</summary>
+    /// <param name="action">The action.</param>
+    /// <exception cref="NotSupportedException">This control plane has no runtime surface.</exception>
+    void AddAction(ResourceAction action) =>
+        throw new NotSupportedException(ErrorMessages.ResourceSurfaceUnsupported);
 
-    /// <summary>Holds traffic admission while a managed invocation receives its required state.</summary>
-    void RequireStateBootstrap() { }
+    /// <summary>Registers an operator tool a management portal may open.</summary>
+    /// <param name="tool">The tool.</param>
+    /// <exception cref="NotSupportedException">This control plane has no runtime surface.</exception>
+    void AddTool(ResourceTool tool) =>
+        throw new NotSupportedException(ErrorMessages.ResourceSurfaceUnsupported);
 
-    /// <summary>Admits this process only after all required state snapshots match.</summary>
-    /// <param name="admission">The process and required slot revisions.</param>
-    /// <param name="cancellationToken">Signals cancellation.</param>
-    /// <returns>Whether the process was admitted.</returns>
-    ValueTask<bool> AdmitStateAsync(ResourceStateAdmission admission, CancellationToken cancellationToken = default) => ValueTask.FromResult(false);
+    /// <summary>Applies a delivered deployment record to the registered configuration sections.</summary>
+    /// <param name="record">The deployment record.</param>
+    /// <param name="phase">Whether the host has started; while it runs, only live sections apply.</param>
+    /// <param name="cancellationToken">Cancels the request before the record is applied.</param>
+    /// <returns>The resulting configuration status.</returns>
+    /// <exception cref="NotSupportedException">This control plane has no runtime surface.</exception>
+    ValueTask<ResourceConfigurationStatus> ApplyConfigurationAsync(
+        ResourceConfigurationRecord record,
+        ResourceConfigurationPhase phase,
+        CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException(ErrorMessages.ResourceSurfaceUnsupported);
 
-    /// <summary>Installs the management binding before runtime handlers register their capabilities and configured baselines.</summary>
-    /// <param name="management">The logical endpoint and versioned protocol binding.</param>
-    /// <exception cref="NotSupportedException">This implementation does not support runtime state.</exception>
-    void ConfigureRuntimeManagement(ResourceRuntimeManagement management) => throw new NotSupportedException(ErrorMessages.ResourceStateUnsupported);
-
-    /// <summary>Registers a startup capability and its adapter over actual feature state.</summary>
-    /// <param name="handler">The hosting adapter over actual feature state.</param>
-    /// <exception cref="NotSupportedException">This implementation does not support runtime state.</exception>
-    void RegisterStateHandler(IResourceStateHandler handler) => throw new NotSupportedException(ErrorMessages.ResourceStateUnsupported);
-
-    /// <summary>Freezes and verifies the discovered runtime catalog before host readiness.</summary>
-    void ValidateStateHandlers() { }
-
-    /// <summary>Validates a state change without applying it.</summary>
-    /// <param name="name">The state contract.</param>
-    /// <param name="key">The state slot.</param>
-    /// <param name="desired">The desired value.</param>
-    /// <param name="cancellationToken">Signals cancellation.</param>
-    /// <returns>The domain validation result.</returns>
-    /// <exception cref="NotSupportedException">This implementation does not support runtime state.</exception>
-    ValueTask<ResourceStateValidation> ValidateStateAsync(ResourceStateName name, ResourceStateKey key, ResourceStateValue desired, CancellationToken cancellationToken = default) => throw new NotSupportedException(ErrorMessages.ResourceStateUnsupported);
-
-    /// <summary>Reads actual state from this process.</summary>
-    /// <param name="name">The state contract.</param>
-    /// <param name="key">The state slot.</param>
-    /// <param name="cancellationToken">Signals cancellation.</param>
-    /// <returns>The atomic state observation.</returns>
-    /// <exception cref="NotSupportedException">This implementation does not support runtime state.</exception>
-    ValueTask<ResourceStateObservation> ReadStateAsync(ResourceStateName name, ResourceStateKey key, CancellationToken cancellationToken = default) => throw new NotSupportedException(ErrorMessages.ResourceStateUnsupported);
-
-    /// <summary>Reconciles one verified desired revision against actual feature state.</summary>
-    /// <param name="context">The authenticated target and revision.</param>
-    /// <param name="name">The state contract.</param>
-    /// <param name="key">The state slot.</param>
-    /// <param name="desired">The desired value.</param>
-    /// <param name="cancellationToken">Signals cancellation.</param>
-    /// <returns>The actual application outcome.</returns>
-    /// <exception cref="NotSupportedException">This implementation does not support runtime state.</exception>
-    ValueTask<ResourceStateApplyResult> ApplyStateAsync(ResourceStateApplyContext context, ResourceStateName name, ResourceStateKey key, ResourceStateValue desired, CancellationToken cancellationToken = default) => throw new NotSupportedException(ErrorMessages.ResourceStateUnsupported);
+    /// <summary>Invokes a registered action with a UTF-8 JSON input.</summary>
+    /// <param name="name">The action name.</param>
+    /// <param name="input">The UTF-8 JSON input.</param>
+    /// <param name="cancellationToken">Cancels the action.</param>
+    /// <returns>The action's UTF-8 JSON result.</returns>
+    /// <exception cref="ArgumentException">The input does not bind to the action's input type.</exception>
+    /// <exception cref="NotSupportedException">The resource exposes no action with this name.</exception>
+    ValueTask<ReadOnlyMemory<byte>> InvokeActionAsync(
+        ResourceActionName name,
+        ReadOnlyMemory<byte> input,
+        CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException(ErrorMessages.ResourceActionUnknown);
 
     /// <summary>
     /// Gets the area-defined command kinds accepted by this control plane.
@@ -96,8 +88,6 @@ public interface IResourceControlPlane
     /// <exception cref="NotSupportedException">This control plane does not support registration.</exception>
     void RegisterCommandHandler(IResourceCommandHandler handler) =>
         throw new NotSupportedException("This resource control plane does not support command handlers.");
-
-
 
     /// <summary>Adds a contributor to health, readiness, and liveness aggregation.</summary>
     /// <param name="contributor">The contributor to add.</param>
@@ -129,7 +119,7 @@ public interface IResourceControlPlane
     /// <returns>The aggregate liveness report.</returns>
     ValueTask<ResourceHealthReport> CheckLivenessAsync(CancellationToken cancellationToken = default);
 
-    /// <summary>Attaches the built resource host used for graceful stop requests.</summary>
+    /// <summary>Attaches the built resource host used for graceful stop requests, and freezes the runtime surface.</summary>
     /// <param name="host">The resource host.</param>
     void AttachHost(IHost host);
 

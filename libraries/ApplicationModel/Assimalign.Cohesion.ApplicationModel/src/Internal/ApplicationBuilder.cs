@@ -745,7 +745,7 @@ internal sealed class ApplicationBuilder : IApplicationBuilder, IApplicationProv
                 ? plannedResource.CreatePlan(context)
                 : GenericPlanner.CreatePlan(context);
 
-            plan = plan with { Runtime = manifest.Runtime?.Clone(), ResourceGroup = descriptor.ResourceGroup };
+            plan = plan with { ResourceGroup = descriptor.ResourceGroup };
 
             ResourcePlanValidator.Validate(plan, context);
             WritePlanningDiagnostic(descriptor.Resource, plannedResource, gateway);

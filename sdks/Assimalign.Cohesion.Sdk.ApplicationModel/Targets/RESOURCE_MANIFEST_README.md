@@ -18,12 +18,12 @@ HTTPS endpoints with no Certificate metadata default to `Certificate="tls"`. The
 
 Composite lifting preserves the reserved `public` literal; named certificate mounts are prefixed together with their member endpoints.
 
-New resources use `cohesion/resource/v2`. The `runtime` object carries only the runtime schema
-and logical management binding (`endpoint`, `path`, and `protocol`). State definitions and initial
-values are discovered from handlers registered by the running resource after appsettings and
-environment configuration have been applied. V2 manifests contain no `commands`, runtime `states`,
-or `initialState` members. They do not generate a separate runtime catalog file or state accessors.
+Resources use `cohesion/resource/v2`, which contains resource facts only: no `commands` member and
+no runtime member. A resource's runtime surface (its configuration sections, actions and tools) is a
+separate `cohesion/runtime/v1` document the resource serves on its control plane and writes when its
+host is built under `COHESION_DESCRIBE_PATH`; its desired configuration arrives as a deployment record
+(`docs/RUNTIME_CONTRACT.md`, "Deployment record").
 
-The v1 manifest and command metadata are no longer supported. All area SDKs emit v2 and use the
-generic runtime control-plane factory. Register state handlers in the resource's startup code
-and configure their initial settings through appsettings and environment configuration.
+The v1 manifest and its command metadata are no longer supported. All area SDKs emit v2 and use the
+generic runtime control-plane factory, and a project that still declares `CohesionCommand` items
+fails the build instead of having them ignored.

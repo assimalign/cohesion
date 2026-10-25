@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
-using System.Text.Json;
 using System.Text.Json.Serialization;
 
 using Assimalign.Cohesion.ApplicationModel.Internal;
@@ -129,10 +128,6 @@ public sealed record ResourcePlan
 
     /// <summary>Gets the resource's default control-plane location.</summary>
     public ControlPlaneSpec ControlPlane { get; }
-
-    /// <summary>Gets producer-owned runtime metadata preserved opaquely for gateway interpretation.</summary>
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public JsonElement? Runtime { get; init; }
 
     /// <summary>Gets the immutable volume specifications.</summary>
     public IReadOnlyList<VolumeSpec> Volumes { get; }

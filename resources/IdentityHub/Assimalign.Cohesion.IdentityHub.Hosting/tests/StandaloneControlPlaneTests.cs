@@ -18,24 +18,6 @@ namespace Assimalign.Cohesion.IdentityHub.Hosting.Tests;
 
 public sealed class StandaloneControlPlaneTests
 {
-    [Theory(DisplayName = "Cohesion Test [IdentityHub.Hosting] - Runtime state protocol: catalog remains reachable while bootstrap gates tokens")]
-    [InlineData("/management/v1/runtime", "127.0.0.1", 200)]
-    [InlineData("/management/v1/runtime", "192.0.2.10", 403)]
-    [InlineData("/issuer/oauth2/token", "127.0.0.1", 503)]
-    [InlineData("/issuer/readyz", "127.0.0.1", 503)]
-    public async Task InvokeAsync_WithPendingBootstrap_ShouldExposeCatalogAndGateData(string path, string peer, int expected)
-    {
-        using var data = new TemporaryDirectory();
-        ResourceControlPlane plane = ResourceControlPlane.Create();
-        plane.ConfigureRuntimeManagement(new ResourceRuntimeManagement { Endpoint = "https", Path = "/management/v1" });
-        plane.RequireStateBootstrap();
-        using IdentityEndpointService endpoint = CreateEndpoint(data.Path, controlPlane: plane);
-        await using var exchange = CreateExchange(path, HttpMethod.Get, peer);
-        await endpoint.InvokeAsync(exchange, _ => throw new InvalidOperationException("Management routes are terminal."));
-        ((int)exchange.Response.StatusCode).ShouldBe(expected);
-        if (expected == 200) { exchange.Response.Body.Length.ShouldBeGreaterThan(0); }
-    }
-
     [Theory(DisplayName = "Cohesion Test [IdentityHub.Hosting] - Standalone control plane refuses remote management and namespaced probes")]
     [InlineData("/cohesion/v1", false)]
     [InlineData("/cohesion/v1/unknown", false)]
@@ -164,9 +146,9 @@ public sealed class StandaloneControlPlaneTests
         exchange.Response.StatusCode.ShouldBe(credential ? HttpStatusCode.Ok : HttpStatusCode.Unauthorized);
     }
 
-    private static IdentityEndpointService CreateEndpoint(string dataPath, ResourceContext? resource = null, IResourceControlPlane? controlPlane = null) =>
+    private static IdentityEndpointService CreateEndpoint(string dataPath, ResourceContext? resource = null) =>
         new(new Uri("http://127.0.0.1:8443/issuer"), dataPath, Array.Empty<string>(),
-            new Dictionary<string, IdentityHubClientRegistration>(), controlPlane ?? ResourceControlPlane.Create(),
+            new Dictionary<string, IdentityHubClientRegistration>(), ResourceControlPlane.Create(),
             resource ?? new ResourceContext(environmentName: AppEnvironment.Keys.Local),
             new IdentityHubApplicationContext(AppEnvironment.Keys.Local, contentRootPath: null));
 

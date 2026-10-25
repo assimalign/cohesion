@@ -10,7 +10,7 @@ namespace Assimalign.Cohesion.Sdk.ApplicationModel.Tests;
 
 public sealed class ResourceManifestSchemaTests
 {
-    [Theory(DisplayName = "Cohesion Test [Sdk] - Resource schema accepts v2 management bindings")]
+    [Theory(DisplayName = "Cohesion Test [Sdk] - Resource schema accepts the v2 contract")]
     [InlineData("cohesion/resource/v2")]
     public void Validate_WithSupportedVersion_ShouldAcceptContract(string version)
     {
@@ -42,17 +42,15 @@ public sealed class ResourceManifestSchemaTests
         Should.Throw<InvalidOperationException>(() => Validate(manifest));
     }
 
-    [Fact(DisplayName = "Cohesion Test [Sdk] - Resource schema preserves opaque producer runtime metadata")]
-    public void Validate_WithOpaqueRuntime_ShouldAcceptContract()
+    [Fact(DisplayName = "Cohesion Test [Sdk] - Resource v2 schema rejects a runtime member: the runtime surface is a separate document")]
+    public void Validate_WithRuntime_ShouldRejectContract()
     {
         // Arrange
         JsonObject manifest = CreateManifest("cohesion/resource/v2");
-        manifest["runtime"] = JsonNode.Parse("""
-            { "states": { "custom": true }, "initialState": "producer-owned", "extension": [1, 2] }
-            """);
+        manifest["runtime"] = new JsonObject();
 
         // Act / Assert
-        Should.NotThrow(() => Validate(manifest));
+        Should.Throw<InvalidOperationException>(() => Validate(manifest));
     }
 
     private static void Validate(JsonObject manifest)
@@ -72,8 +70,7 @@ public sealed class ResourceManifestSchemaTests
               "probes":{}, "controlPlane":{"endpoint":"http","path":"/cohesion/v1"},
               "mounts":[], "settings":[], "references":[], "environment":{},
               "lifecycle":{"workload":"Deployment","replicas":1,"maxReplicas":null,"stopGraceSeconds":30,"restartPolicy":"OnFailure","exitCodes":"cohesion/sysexits/v1"},
-              "properties":{},
-              "runtime":{"schema":"cohesion/resource-runtime/v1","management":{"endpoint":"http","path":"/cohesion/v1","protocol":"cohesion/resource-state/v1"}}
+              "properties":{}
             }
             """)!.AsObject();
         manifest["schema"] = version;

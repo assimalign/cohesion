@@ -88,12 +88,6 @@ internal static class ResourceManifestWriter
         writer.WriteString("path", manifest.ControlPlane.Path);
         writer.WriteEndObject();
 
-        if (manifest.Runtime is JsonElement runtime)
-        {
-            writer.WritePropertyName("runtime");
-            runtime.WriteTo(writer);
-        }
-
         writer.WriteStartArray("mounts");
         foreach (ResourceMountModel mount in manifest.Mounts)
         {

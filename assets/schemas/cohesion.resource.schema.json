@@ -116,11 +116,6 @@
         }
       }
     },
-    "runtime": {
-      "type": "object",
-      "description": "Producer-owned runtime metadata. The owning runtime protocol validates its contents.",
-      "additionalProperties": true
-    },
     "mounts": {
       "type": "array",
       "items": {

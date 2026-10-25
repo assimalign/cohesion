@@ -193,8 +193,8 @@ registers each one explicitly (for example `builder.UseSecretStore(secrets)` wit
 builder, or `member.UseSecretStore("secrets")` by name on a set member). `Build()`,
 or the set for a member, hands the model a frozen snapshot in `IApplicationModel.Providers`. A
 registered command-input resolver rewrites its matching programmatic command kind before delivery;
-commands without a resolver are delivered as declared. Producer manifests contain resource facts and
-a runtime management binding, with no accepted-command catalog or input-resolver requirements. The
+commands without a resolver are delivered as declared. Producer manifests contain resource facts
+only, with no accepted-command catalog or input-resolver requirements. The
 receiving control plane validates supported commands and payloads. See
 [docs/DESIGN.md](docs/DESIGN.md#provider-seams-explicit-registration).
 

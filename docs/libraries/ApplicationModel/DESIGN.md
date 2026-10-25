@@ -141,9 +141,8 @@ provider control plane; the [base package](../../../libraries/ApplicationModel/A
 and [ControlPlane package](../../../libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane/docs/DESIGN.md)
 own the contracts (items 23b/31c, `529d600b`, `81570328`). Landed wire kinds use
 `<area>.<verb-noun-kebab>` (B1–B5). Producer manifests use `cohesion/resource/v2` and contain no
-accepted-command catalog or input-resolver metadata. They bind runtime management discovery to
-the control-plane endpoint; registered resource handlers advertise and validate their runtime
-contracts. Programmatic command declarations retain graph ownership and canonical identity checks.
+accepted-command catalog or input-resolver metadata; the receiving control plane validates the kind
+and payload it is delivered. Programmatic command declarations retain graph ownership and canonical identity checks.
 
 Delivery is area-neutral. `ApplicationGatewayOptions.CommandClients` defaults to the public
 `ResourceControlPlaneCommandClient`, which POSTs and DELETEs the command envelope at the target's
@@ -319,7 +318,7 @@ packages are withdrawn.
 
 At the closing-pass baseline `67bbcf4b`, `resources/` has **18 areas**, **143 `src/`
 projects**, and **18 guarded `*.ApplicationModel` packages**, each with its own planner,
-typed resource and opaque runtime management binding. `IApplicationResource` is implemented;
+typed resource and planner. `IApplicationResource` is implemented;
 the old "implemented nowhere" inventory is obsolete. The [repository overview](../../OVERVIEW.md)
 lists the seven real hosts and eleven generic hosts, including LogSpace's item-31b promotion.
 
@@ -339,7 +338,7 @@ exercise the consumer's real entry point.
 ### 9.4 `<Area>.ApplicationModel`: declarative plane
 
 Every package is AOT-compatible and **COHAM001-guarded**: manifest-backed typed resource,
-platform-neutral planner, `Add<Area>(…)` graph verbs, and an opaque runtime management binding.
+platform-neutral planner, and `Add<Area>(…)` graph verbs.
 Its only direct Cohesion reference is `ApplicationModel`, which depends on Core. It never references
 the area's hosting runtime or `Hosting.Resources`.
 
@@ -348,8 +347,8 @@ These packages are **NuGet-only**, injected by `Sdk.<Area>` (its own area) and `
 members of `App.<Area>`. Every ApplicationModel package declares the shared
 `Assimalign.Cohesion.ApplicationModel` namespace with area-prefixed type names, so an apphost
 composes every area with one `using`. Generated consumer code registers the generic control
-plane through `ResourceRuntime` in the enabled executable. Configured runtime handlers provide
-state contracts and initial values after application configuration. The
+plane through `ResourceRuntime` in the enabled executable, and the application registers its runtime
+surface (configuration sections, actions and tools) there, after its own configuration. The
 [resource-area rule](../../../.claude/rules/resource-areas.md) owns enforcement.
 
 ### 9.5 `<Area>.ApplicationModel.Orchestration`: opt-in gateway providers
@@ -444,7 +443,7 @@ platform work is not a landed contract. B16 describes the committed item-34 beha
 | # | Decision | Landed in | Where it is written |
 |---|---|---|---|
 | B1 | wire-kind naming = `<area>.<verb-noun-kebab>`, not design §7/§4's illustrative `<area>.<noun>` | Item 23b / 31c: `529d600b`, `81570328` | `sdks/Assimalign.Cohesion.Sdk.Rezolvr/Targets/Sdk.Rezolvr.props:18` |
-| B2 | Historical manifest command catalog and resolver flags are superseded by `cohesion/resource/v2`: producer manifests contain resource facts and a runtime management binding; registered handlers supply runtime contracts. | Runtime management, 2026-10-24 | `assets/schemas/cohesion.resource.schema.json`; [Resource management](RESOURCE_MANAGEMENT.md) |
+| B2 | Historical manifest command catalog and resolver flags are superseded by `cohesion/resource/v2`: producer manifests contain resource facts only; the runtime surface is a separate document the resource exports and serves. | Deployment-record control plane, 2026-10-24 | `assets/schemas/cohesion.resource.schema.json`; [Resource management](RESOURCE_MANAGEMENT.md) |
 | B3 | `cohesion.trust.add` accepted by SecretStore's control plane but deliberately absent from its SDK manifest | Item 31c / 31s: `81570328`, `c49ee153` | `resources/SecretStore/Assimalign.Cohesion.SecretStore.ApplicationModel/src/SecretStoreResourceControlPlane.cs:14`; `Sdk.SecretStore.props:19` |
 | B4 | SecretStore owner = issuer for new kinds, `issuer@subject` for trust-add | Item 31c: `81570328` | `resources/SecretStore/Assimalign.Cohesion.SecretStore.Hosting/src/Internal/SecretsEndpointService.cs:448-460` |
 | B5 | `--allow` enforced on apply **and** delete | Item 31c: `81570328` | `libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane/src/Internal/GatewayControlPlaneServer.cs:596-601,678-683` |

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Text.Json;
 using System.Threading;
@@ -63,10 +64,16 @@ internal static class TrustedIssuerDocument
                 var management = new List<string>();
                 if (item.TryGetProperty("allowedManagementOperations", out JsonElement operations))
                 {
-                    if (operations.ValueKind != JsonValueKind.Array) { throw new InvalidDataException(ErrorMessages.ManagementStateInvalid); }
+                    if (operations.ValueKind != JsonValueKind.Array)
+                    {
+                        throw new InvalidDataException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.TrustedIssuerManagementOperationsInvalid, issuer));
+                    }
                     foreach (JsonElement operation in operations.EnumerateArray())
                     {
-                        if (operation.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(operation.GetString())) { throw new InvalidDataException(ErrorMessages.ManagementStateInvalid); }
+                        if (operation.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(operation.GetString()))
+                        {
+                            throw new InvalidDataException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.TrustedIssuerManagementOperationsInvalid, issuer));
+                        }
                         management.Add(operation.GetString()!);
                     }
                 }

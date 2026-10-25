@@ -360,10 +360,24 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
                     _controlPlane.AddHealthContributor(contributor);
                 }
 
-                foreach (IResourceStateHandler handler in
-                    _context.ServiceProvider.GetRequiredService<IEnumerable<IResourceStateHandler>>())
+                // The runtime surface closes when the host is attached, so every section, action and
+                // tool the application registered reaches the control plane first.
+                foreach (ResourceConfigurationSection section in
+                    _context.ServiceProvider.GetRequiredService<IEnumerable<ResourceConfigurationSection>>())
                 {
-                    _controlPlane.RegisterStateHandler(handler);
+                    _controlPlane.AddConfiguration(section);
+                }
+
+                foreach (ResourceAction action in
+                    _context.ServiceProvider.GetRequiredService<IEnumerable<ResourceAction>>())
+                {
+                    _controlPlane.AddAction(action);
+                }
+
+                foreach (ResourceTool tool in
+                    _context.ServiceProvider.GetRequiredService<IEnumerable<ResourceTool>>())
+                {
+                    _controlPlane.AddTool(tool);
                 }
 
                 ResourceRuntime.HostBuilt(app, _controlPlane);

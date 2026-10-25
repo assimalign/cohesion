@@ -17,7 +17,7 @@ namespace Assimalign.Cohesion.Sdk.ApplicationModel.Tasks;
 /// <summary>
 /// Creates a Cohesion resource manifest and the resource's strongly typed generated accessors.
 /// </summary>
-public sealed partial class CohesionCreateResourceManifest : Task
+public sealed class CohesionCreateResourceManifest : Task
 {
     private static readonly HashSet<string> _builtInMetadata = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -301,7 +301,6 @@ public sealed partial class CohesionCreateResourceManifest : Task
 
         try
         {
-            manifest.Runtime = CreateRuntimeBinding();
             ResourceManifestWriter.Write(ManifestOutputPath, manifest);
             ResourceSourceWriter.WriteResource(ResourceSourceOutputPath, RootNamespace, manifest);
             ResourceSourceWriter.WriteControlPlane(
@@ -309,11 +308,6 @@ public sealed partial class CohesionCreateResourceManifest : Task
                 RootNamespace,
                 ControlPlaneType.Trim(),
                 manifest);
-        }
-        catch (JsonException exception)
-        {
-            Log.LogErrorFromException(exception, showStackTrace: false);
-            return false;
         }
         catch (IOException exception)
         {

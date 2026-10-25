@@ -163,7 +163,10 @@ public sealed partial class ResourceControlPlane : IResourceControlPlane
     public async ValueTask<ResourceHealthReport> CheckReadinessAsync(CancellationToken cancellationToken = default)
     {
         ResourceHealthReport report = await CheckContributorsAsync(cancellationToken).ConfigureAwait(false);
-        return IsManagementReady ? report : report with { Status = HealthStatus.Unhealthy };
+
+        // A section that refused the deployment record at startup runs on a value nobody asked for, so the
+        // instance takes no traffic. Liveness is unaffected: restarting would only refuse the same record again.
+        return HasStartupRejections ? report with { Status = HealthStatus.Unhealthy } : report;
     }
 
     /// <inheritdoc />
@@ -180,7 +183,7 @@ public sealed partial class ResourceControlPlane : IResourceControlPlane
 
         lock (_sync)
         {
-            ValidateStateHandlers();
+            FreezeSurface();
             if (_host is not null && !ReferenceEquals(_host, host))
             {
                 throw new InvalidOperationException("The resource control plane is already attached to a host.");
@@ -412,7 +415,9 @@ public sealed partial class ResourceControlPlane : IResourceControlPlane
         }
 
         public IReadOnlyList<string> AcceptedCommandKinds => _target.AcceptedCommandKinds;
-        public ResourceRuntimeManifest? RuntimeManifest => _target.RuntimeManifest;
-        public Guid ProcessStartId => _target.ProcessStartId;
+
+        public ResourceRuntimeSurface Surface => _target.Surface;
+
+        public ResourceConfigurationStatus ConfigurationStatus => _target.ConfigurationStatus;
     }
 }

@@ -9,7 +9,7 @@ future work.
 ## Boundaries
 
 The assembly is NativeAOT-compatible and uses source-generated JSON. It composes
-`Http.Connections` and `Connections.Tcp` directly, routes fixed templates with an
+`Http.Connections` and `Connections.Tcp` directly, routes its five fixed templates with an
 internal matcher, and references nothing under `resources/**`: no Web package and no platform
 `*.Hosting` package. The reference to `Hosting.Resources` is limited to the owner-approved
 `ResourceCommand` envelope and `ResourceCommandRejectedException`, both used at the dispatcher
@@ -51,7 +51,7 @@ one-shot Apply invocations.
 
 ## Protocol and trust
 
-The `/cohesion/v1` routes are matched by the internal `ControlPlaneRouter`. The original five were
+The five `/cohesion/v1` routes are matched by the internal `ControlPlaneRouter`. They were
 first routed with `Web.Routing`. That reference was removed on 2026-09-25 because a library may
 not reference a `resources/**` package: libraries sit below the resource areas, and the COHLIB001
 guard now rejects such an edge. Five fixed templates never needed a general router, so the
@@ -64,9 +64,9 @@ behaviour:
   parameter that captures the raw segment text. The request must have exactly as many segments
   as the template. Optional, default, catch-all, constrained, and complex segments are not
   supported, and a template that uses them fails at construction.
-- Routes are tried in table order. The original templates retain the order `Web.Routing`'s
-  inbound-precedence sort gave them; named management templates follow. PUT precedes DELETE
-  on the command path.
+- Routes are tried in table order. The table lists the templates in the order `Web.Routing`'s
+  inbound-precedence sort gave them. Each template has a different segment count, so only PUT
+  and DELETE share a path, and PUT comes first.
 - The first route whose path matches and that accepts the method wins. A `GET` route also
   serves `HEAD`.
 - A path that matched with other methods returns `405` with `Allow` listing those methods in
@@ -156,22 +156,12 @@ identity provider's credentials for those purposes registers an `IApplicationCal
 validates the returned export and matches its public key to the trusted peer before the landed
 manifest-hash/drift policy consumes it.
 
-## Versioned resource state management
-
-The `/cohesion/v2/resources/{name}` surface exposes state-contracts, instances, state slots and
-resource-scoped operation receipts through `IResourceManagementGateway`. PUT requires a conditional
-revision and UUID Idempotency-Key; accepted intent is durable before 202. DELETE clears an override
-only when an explicit current baseline exists. Reads and writes require separate resource/state
-management grants; v1 command grants never imply them. Catalog reads omit initial desired values.
-The gateway reconciles current and future processes using platform inventory, rather than forwarding
-one incoming request through a load-balanced resource Service. The old endpoint-registry prototype
-has been replaced. See docs/libraries/ApplicationModel/RESOURCE_MANAGEMENT.md for wire and convergence
-semantics. V1 commands remain an explicitly separate compatibility surface.
-
 ## Commands
 
-PUT parses the `Hosting.Resources.ResourceCommand` wire envelope, checks that the resource
-manifest declares the command kind, and resolves an `IResourceCommandDispatcher`. It uses the
+PUT parses the `Hosting.Resources.ResourceCommand` wire envelope and resolves an
+`IResourceCommandDispatcher`. A `cohesion/resource/v2` manifest lists no command kinds, so the
+server no longer checks the kind against it; the target's control plane refuses a kind it does not
+handle. It uses the
 dispatcher whose kind equals the manifest kind, and otherwise the first dispatcher whose kind is
 `IGatewayResourceCommandClient.AnyKind` (`"*"`). The gateway selects its own command clients
 (`ApplicationGateway.Commands.cs`) the same way, so an area-specific dispatcher always overrides
@@ -187,7 +177,8 @@ The serving gateway supplies the target resource's `ResourceAccess` credential f
 application's credential issuer or the default ES256 issuer) to the dispatcher. Identical
 PUT retries return the recorded result without redispatch, while id reuse for different content
 and an already-applied key owned by another issuer are rejected. A missing dispatcher, unavailable
-endpoint, undeclared command, or dispatcher exception is recorded as `Rejected`. DELETE applies
+endpoint, or dispatcher exception is recorded as `Rejected`; so is a kind the target's control plane
+refuses. DELETE applies
 through the same dispatcher and removes the observation only after the area confirms deletion.
 An observation whose apply never reserved ownership is removed with `204` without dispatching
 an area deletion; a rejected deletion of an applied command retains its reservation.
@@ -236,7 +227,7 @@ existing overload and its unrestricted behavior.
 The serving gateway carries the matched issuer's list onto the authenticated principal and checks
 both apply and delete. A forbidden kind returns the existing 409 Rejected observation with a detail
 naming the issuer and kind. It does not dispatch the command or release existing ownership.
-Manifest advertisement, command-token scope and owner-equals-issuer checks remain in force.
+Command-token scope and owner-equals-issuer checks remain in force.
 
 The HTTP accept loop calls `HttpConnectionListener.AcceptAsync` and owns each returned `IHttpConnection` until its serving task disposes it. The listener exposes the common identity, live-connection observation and bind/accept lifecycle, while each HTTP connection preserves its transport features.
 
@@ -259,3 +250,13 @@ and contain no query or fragment. Relative values accepted by 10.0.0-preview.1 n
 validation with `InvalidDataException` before command dispatch. The IPv6 command-dispatch fixtures
 use an absolute `/cohesion/v1/` prefix while retaining the existing trailing-slash normalization
 and endpoint selection coverage. Wire routes and valid endpoint handling are unchanged.
+
+## Management grants and resource groups (2026-10-24)
+
+Trusted issuers and mapped callers carry `AllowedManagementOperations` beside
+`AllowedCommandKinds`: the server copies the matched issuer's list onto the authenticated principal
+and the caller. It is a separate grant list for the gateway management API of the
+[deployment-record control plane](../../../../docs/programs/RESOURCE_CONTROL_PLANE_REDESIGN.md),
+which is not built yet and serves no route here. Unlike the command rule, an empty list grants no
+management access, and command grants never imply it. Resource documents carry the resource's
+`resourceGroup` when the application placed it in one; groups have no authorization semantics.

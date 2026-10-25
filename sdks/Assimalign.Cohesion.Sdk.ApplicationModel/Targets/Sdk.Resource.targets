@@ -162,20 +162,22 @@
 	</Target>
 
 	<!--
+		cohesion/resource/v2 has no commands catalog, so a CohesionCommand item would be ignored silently.
+		A resource's control plane accepts the command kinds its handlers register at startup.
+	-->
+	<Target Name="CohesionValidateRetiredResourceInputs" BeforeTargets="CohesionCreateResourceManifest"
+		Condition="'$(_CohesionResourceEnabled)' == 'true'">
+		<Error Condition="'@(CohesionCommand)' != ''"
+			Text="CohesionCommand is no longer supported. cohesion/resource/v2 declares no command kinds; the resource's control plane accepts the kinds its registered command handlers handle." />
+	</Target>
+
+	<!--
 		Runs before BeforeCompile so the generated sources are part of the compile
 		dependency cache, and in design-time builds so Visual Studio compiles them after a
 		clean. ResolveProjectReferences is deliberately not a dependency: manifests are
 		evaluated project facts, and after a Clean this target regenerates them without
 		building the referenced projects.
 	-->
-	<Target Name="CohesionValidateRuntimeConfigurationInputs" BeforeTargets="CohesionCreateResourceManifest"
-		Condition="'$(_CohesionResourceEnabled)' == 'true'">
-		<Error Condition="'@(CohesionResourceState)' != '' or '@(CohesionResourceInitialState)' != '' or '$(CohesionResourceRuntimeManifestPath)' != ''"
-			Text="Build-time runtime state declarations are no longer supported. Register IResourceStateHandler implementations at startup; initial configuration comes from appsettings and environment." />
-		<Error Condition="'@(CohesionCommand)' != ''"
-			Text="CohesionCommand is no longer supported. Register runtime state handlers for resource/v2 management." />
-	</Target>
-
 	<Target
 		Name="CohesionCreateResourceManifest"
 		BeforeTargets="PrepareResourceNames;BeforeCompile;CoreCompile"

@@ -616,15 +616,11 @@ with no identity to check. `ApplicationCaller.AllowedCommandKinds` follows `Trus
 permits every command kind, so an authenticator that means "no commands" must forbid the caller
 rather than return an empty list.
 
-Registered resource management endpoints use explicit `management.<endpoint>` entries in the same
-caller/issuer grant list. Unlike the legacy command rule, an empty list grants no named management
-endpoint access, including GET/HEAD. Discovery of names and methods retains ordinary authenticated
-discovery access; mutations retain the existing peer/application requirement, so developer callers
-remain read-only even when explicitly granted an endpoint. These are application-wide endpoint
-grants. The serving gateway enforces them before forwarding with its resource-audience credential.
-See [Resource management endpoints](../../../../docs/libraries/ApplicationModel/RESOURCE_MANAGEMENT.md)
-for the runtime registration contract and CORS example. No feature-specific state or HTTP handler
-is added to this declarative model.
+Management grants are a separate list: `ApplicationCaller.AllowedManagementOperations` and
+`TrustedIssuer.AllowedManagementOperations`. Unlike the command rule, an empty list grants no
+management access. The gateway management API that checks them per configuration section is not
+built yet; see [Resource management](../../../../docs/libraries/ApplicationModel/RESOURCE_MANAGEMENT.md).
+No feature-specific state or HTTP handler is added to this declarative model.
 
 `TrustedIssuer` lives here (moved from `…ApplicationModel.Gateway`) because `ITrustedIssuerStore`
 and `IApplicationCallerAuthenticator` name it; it is BCL-only (ES256 JWK validation over
@@ -743,8 +739,9 @@ read-only command snapshots; built descriptors reject subsequent mutation.
 the declaring application's `ApplicationProviders.CommandInputs` rewrites its matching kind before
 delivery, including when the target belongs to another application. Producer manifests contain no
 command catalog or resolver metadata. A command without a registered resolver is delivered as
-declared; the receiving control plane validates the supported kind and payload. Runtime management
-catalogs are discovered from registered handlers through the resource's management binding.
+declared; the receiving control plane validates the supported kind and payload. A resource's
+runtime surface is static: the resource exports it at build time and serves it on its control
+plane, and nothing in this model discovers it from a running process.
 
 Dependency normalization accepts an older wrapper that exposes the exact registered `Resource`
 instance. This preserves unchanged SecretStore-style wrappers without requiring them to implement

@@ -17,7 +17,6 @@ internal static class ResourceManifestSnapshot
                 endpoint is null ? null! : endpoint with { }),
             Probes = Copy(source.Probes),
             ControlPlane = source.ControlPlane is null ? null! : source.ControlPlane with { },
-            Runtime = source.Runtime?.Clone(),
             Mounts = Copy(source.Mounts, static mount =>
                 mount is null ? null! : mount with { }),
             Settings = Copy(source.Settings, static setting =>

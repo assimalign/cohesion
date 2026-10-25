@@ -109,22 +109,18 @@ Disabled projects generate no manifest, resource API, control-plane registration
 or application-model diagnostic. The base guard handles the distinct error in
 which a project says `enabled` but never imports this SDK.
 
-Resources emit `cohesion/resource/v2`. Its `runtime` object contains only the
-runtime schema and logical management binding (`endpoint`, `path`, `protocol`); it has no
-command kinds, state definitions, initial values, or live instance addresses. Generated
-registration configures the management transport with that binding. Hosting.Resources builds
-the catalog from registered `IResourceStateHandler` implementations and captures their effective
-startup configuration after appsettings and environment have been applied. Adapters own their
-schemas; no `Resource.StateContracts` members or separate `resource.runtime.json` are generated.
+Resources emit `cohesion/resource/v2`, which contains resource facts only: no command kinds
+and no runtime member. A resource's runtime surface is a separate `cohesion/runtime/v1`
+document: Hosting.Resources freezes it from the sections, actions and tools the application
+registers, serves it on the control plane, and writes it when the host is built with
+`COHESION_DESCRIBE_PATH` set. The SDK step that runs that describe build and writes
+`resource.runtime.json` beside the output is not built yet (phase P1b of the deployment-record
+program); `resource.json` is embedded before compile, so the surface cannot live inside it.
 
-Build-time state items and external runtime-manifest injection have been removed. Supplying
-`CohesionResourceState`, `CohesionResourceInitialState`, or `CohesionResourceRuntimeManifestPath`
-reports a migration error instead of dropping the old declarations. Register handlers during
-resource startup and configure them using the normal resource configuration pipeline.
-
-The v1 manifest and command declaration surface have been removed. Every area SDK selects the
-generic runtime control-plane factory and emits the same v2 deployment contract. `CohesionCommand`
-items report a migration error. Register resource state handlers at startup instead.
+The v1 manifest and its command declaration surface have been removed. Every area SDK selects
+the generic runtime control-plane factory and emits the same v2 contract. A project that still
+declares `CohesionCommand` items fails the build (`CohesionValidateRetiredResourceInputs`)
+instead of having them ignored.
 
 ## Gateway composition contract
 

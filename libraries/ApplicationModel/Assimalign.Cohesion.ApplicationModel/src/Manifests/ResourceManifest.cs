@@ -14,7 +14,10 @@ namespace Assimalign.Cohesion.ApplicationModel;
 /// </summary>
 public sealed record ResourceManifest
 {
-    /// <summary>The deployment manifest schema whose runtime catalog is discovered at startup.</summary>
+    /// <summary>
+    /// The only resource-manifest schema version supported by this contract. Version 2 removed the
+    /// version 1 commands catalog.
+    /// </summary>
     public const string SchemaV2 = "cohesion/resource/v2";
 
     /// <summary>
@@ -65,15 +68,6 @@ public sealed record ResourceManifest
     /// Gets the resource area's default control-plane location.
     /// </summary>
     public ResourceManifestControlPlane ControlPlane { get; init; } = new();
-
-    /// <summary>Gets opaque, producer-owned runtime metadata.</summary>
-    /// <remarks>
-    /// Composition preserves this document without interpreting its protocol or state schemas.
-    /// The selected gateway validates protocol-specific deployment metadata; live values and
-    /// instance addresses belong to observations. This contract validates only the object envelope.
-    /// </remarks>
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public JsonElement? Runtime { get; init; }
 
     /// <summary>
     /// Gets the data mounts required by the resource.
@@ -174,11 +168,6 @@ public sealed record ResourceManifest
     /// <exception cref="InvalidDataException">The manifest violates the resource-manifest contract.</exception>
     public ResourceManifest Validate()
     {
-        if (Runtime is { ValueKind: not JsonValueKind.Object })
-        {
-            throw new InvalidDataException(ErrorMessages.ResourceRuntimeObjectRequired);
-        }
-
         if (!string.Equals(Schema, SchemaV2, StringComparison.Ordinal))
         {
             throw new InvalidDataException(string.Format(CultureInfo.CurrentCulture,

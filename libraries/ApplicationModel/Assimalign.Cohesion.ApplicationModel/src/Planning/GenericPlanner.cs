@@ -163,10 +163,7 @@ public static class GenericPlanner
             new Dictionary<string, string>(StringComparer.Ordinal),
             new ControlPlaneSpec(
                 manifest.ControlPlane.Endpoint,
-                manifest.ControlPlane.Path))
-        {
-            Runtime = manifest.Runtime?.Clone()
-        };
+                manifest.ControlPlane.Path));
     }
 
     private static bool HasVolumeMount(IReadOnlyList<ResourceManifestMount> mounts)

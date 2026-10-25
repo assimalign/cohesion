@@ -1,8 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Security.Cryptography;
-using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -52,8 +50,6 @@ public sealed class InProcessGateway : ApplicationGateway, IApplicationGatewayRe
 
         ResourceContext outerContext = ResourceRuntime.Current;
         _host = new ProcessHost(outerContext.EnvironmentName, _stateDirectory);
-        options.StateProtocolClient ??= new DirectResourceStateProtocolClient((application, resource) =>
-            _host.Context.TryGetControlPlane(application.Value, resource.Value, out IResourceControlPlane? plane) ? plane : null);
         var contexts = new InProcessContextFactory(_stateDirectory);
         var probes = new InProcessProbeRunner(options);
         var supervisor = new InProcessMemberSupervisor(
@@ -98,23 +94,6 @@ public sealed class InProcessGateway : ApplicationGateway, IApplicationGatewayRe
         IApplicationModel model, IApplicationResource resource,
         out IResourceControlPlane? controlPlane) =>
         _host.Context.TryGetControlPlane(model.Name.ToString(), resource.Name.ToString(), out controlPlane);
-
-    /// <inheritdoc/>
-    protected override ValueTask<ResourceInstanceInventory> ObserveResourceInstancesAsync(IApplicationModel model,
-        IApplicationResourceDescriptor descriptor, CancellationToken cancellationToken = default)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        var targets = new List<ResourceManagementTarget>();
-        if (TryGetResourceControlPlane(model, descriptor.Resource, out IResourceControlPlane? plane) && plane?.RuntimeManifest is not null)
-        {
-            targets.Add(new ResourceManagementTarget(descriptor.Resource.Name.Value, plane.ProcessStartId.ToString("N"),
-                new Uri("cohesion-inprocess://runtime/")));
-        }
-        byte[] identity = SHA256.HashData(Encoding.UTF8.GetBytes(_host.Id + "\0" + model.Name.Value + "\0" + descriptor.Resource.Name.Value));
-        int desired = descriptor.Plan!.Workload.Replicas;
-        return ValueTask.FromResult(new ResourceInstanceInventory(new Guid(identity.AsSpan(0, 16)),
-            targets.Count == 0 ? string.Empty : targets[0].Generation, desired, targets.Count == desired, targets));
-    }
 
     /// <inheritdoc/>
     protected override Task<IResourceArtifact> GatherAsync(

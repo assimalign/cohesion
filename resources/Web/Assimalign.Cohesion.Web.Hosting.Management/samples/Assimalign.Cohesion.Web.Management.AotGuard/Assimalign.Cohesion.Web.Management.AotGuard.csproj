@@ -11,7 +11,4 @@
   <ItemGroup>
     <CohesionProjectReference Include="Assimalign.Cohesion.Web.Hosting.Management" />
   </ItemGroup>
-  <ItemGroup>
-    <CohesionSharedSource Include="Assimalign.Cohesion.Hosting.Resources" Module="StateProtocol" />
-  </ItemGroup>
 </Project>

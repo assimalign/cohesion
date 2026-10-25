@@ -303,44 +303,11 @@ public class ResourceManifestTests
         Should.NotThrow(() => manifest.Validate());
     }
 
-    [Fact(DisplayName = "Cohesion Test [ApplicationModel] - Runtime: Preserves an unknown producer protocol without a runtime reference")]
-    public void Parse_WithRuntimeMetadata_ShouldPreserveOpaqueDocument()
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel] - Resource v2 omits command metadata and round-trips")]
+    public void Parse_WithV2Manifest_ShouldOmitCommandsAndRoundTrip()
     {
         // Arrange
-        using JsonDocument runtime = JsonDocument.Parse("""{"schema":"vendor/runtime/v9","management":{"protocol":"vendor/control/v9","endpoint":"db","path":"/vendor/control"}}""");
-        ResourceManifest manifest = CreateManifest() with { Runtime = runtime.RootElement.Clone() };
-
-        // Act
-        string json = JsonSerializer.Serialize(manifest, ResourceManifestJsonContext.Default.ResourceManifest);
-        ResourceManifest copy = ResourceManifest.Parse(json);
-
-        // Assert
-        copy.Runtime!.Value.GetRawText().ShouldBe(manifest.Runtime.Value.GetRawText());
-        ResourceManifestCanonicalizer.ComputeHash(copy).ShouldBe(ResourceManifestCanonicalizer.ComputeHash(manifest));
-        ResourceManifestCanonicalizer.ComputeHash(copy).ShouldNotBe(ResourceManifestCanonicalizer.ComputeHash(manifest with { Runtime = null }));
-    }
-
-    [Fact(DisplayName = "Cohesion Test [ApplicationModel] - Runtime: Rejects a non-object runtime envelope")]
-    public void Validate_WithScalarRuntime_ShouldRejectEnvelope()
-    {
-        // Arrange
-        using JsonDocument runtime = JsonDocument.Parse("42");
-        ResourceManifest manifest = CreateManifest() with { Runtime = runtime.RootElement.Clone() };
-
-        // Act / Assert
-        Should.Throw<InvalidDataException>(() => manifest.Validate());
-    }
-
-    [Fact(DisplayName = "Cohesion Test [ApplicationModel] - Resource v2 omits command metadata and preserves the management binding")]
-    public void Parse_WithV2Binding_ShouldOmitCommandsAndPreserveBinding()
-    {
-        // Arrange
-        using JsonDocument runtime = JsonDocument.Parse("""{"schema":"cohesion/resource-runtime/v1","management":{"endpoint":"db","path":"/cohesion/v1","protocol":"cohesion/resource-state/v1"}}""");
-        ResourceManifest manifest = CreateManifest() with
-        {
-            Schema = ResourceManifest.SchemaV2,
-            Runtime = runtime.RootElement.Clone()
-        };
+        ResourceManifest manifest = CreateManifest() with { Schema = ResourceManifest.SchemaV2 };
 
         // Act
         string json = JsonSerializer.Serialize(manifest, ResourceManifestJsonContext.Default.ResourceManifest);
@@ -349,32 +316,9 @@ public class ResourceManifestTests
         // Assert
         using JsonDocument document = JsonDocument.Parse(json);
         document.RootElement.TryGetProperty("commands", out _).ShouldBeFalse();
+        document.RootElement.TryGetProperty("runtime", out _).ShouldBeFalse();
         copy.Schema.ShouldBe(ResourceManifest.SchemaV2);
-        JsonElement.DeepEquals(copy.Runtime!.Value, runtime.RootElement).ShouldBeTrue();
         ResourceManifestCanonicalizer.ComputeHash(copy).ShouldBe(ResourceManifestCanonicalizer.ComputeHash(manifest));
-    }
-
-    [Fact(DisplayName = "Cohesion Test [ApplicationModel] - Runtime: arbitrary producer members survive detached snapshots and round trips")]
-    public void Parse_WithOpaqueRuntimeMembers_ShouldPreserveNestedValues()
-    {
-        // Arrange
-        const string metadata = """
-            {"states":{"vendor":[1,{"nested":[true,null,"value"]}]},"initialState":{"unrelated":{"revision":"vendor-defined"}}}
-            """;
-        ResourceManifest snapshot;
-        using (JsonDocument runtime = JsonDocument.Parse(metadata))
-        {
-            snapshot = Internal.ResourceManifestSnapshot.Create(CreateManifest() with { Runtime = runtime.RootElement });
-        }
-
-        // Act
-        string json = JsonSerializer.Serialize(snapshot, ResourceManifestJsonContext.Default.ResourceManifest);
-        ResourceManifest copy = ResourceManifest.Parse(json);
-
-        // Assert
-        using JsonDocument expected = JsonDocument.Parse(metadata);
-        JsonElement.DeepEquals(copy.Runtime!.Value, expected.RootElement).ShouldBeTrue();
-        ResourceManifestCanonicalizer.ComputeHash(copy).ShouldBe(ResourceManifestCanonicalizer.ComputeHash(snapshot));
     }
 
     [Fact(DisplayName = "Cohesion Test [ApplicationModel] - Resource manifests reject the retired v1 schema")]

@@ -94,7 +94,8 @@ and CORS continues to reject `*` and invalid or uninitialized names.
 
 ## Replace policies while the application runs
 
-Use one store per application and share it with the composition root's management handler:
+Use one store per application. To let the resource's gateway change it while the application runs,
+publish it as a deployment-record section with the opt-in Web.Hosting.Management package:
 
 ```csharp
 CorsPolicyStore cors = CorsPolicyStore.Create(new CorsConfiguration
@@ -109,22 +110,17 @@ CorsPolicyStore cors = CorsPolicyStore.Create(new CorsConfiguration
     },
 });
 
+builder.Services.AddSingleton<ResourceConfigurationSection>(cors.AsResourceConfiguration());
+WebApplication app = builder.Build();
 app.UseRouting();
 app.UseDynamicCors(cors);
 
-// Read from an authenticated management GET handler:
-byte[] current = JsonSerializer.SerializeToUtf8Bytes(
-    cors.GetConfiguration(), CorsJsonContext.Default.CorsConfiguration);
-
-// Deserialize a complete replacement in its PUT handler, then validate and publish:
-CorsConfiguration replacement = JsonSerializer.Deserialize(
-    requestBody, CorsJsonContext.Default.CorsConfiguration)
-    ?? throw new InvalidOperationException("A CORS configuration is required.");
+// Code can also publish a complete replacement directly:
 cors.Replace(replacement);
 ```
 
-`CorsPolicyStore` owns policy state; the executable owns management registration, authorization and
-transport. No endpoint is opened by this package. `GetConfiguration()` returns a detached normalized
+`CorsPolicyStore` owns policy state. No endpoint is opened by this package: the deployment record
+reaches the store through the resource's control plane, which owns authorization. `GetConfiguration()` returns a detached normalized
 copy, and mutating input or returned objects never changes the running pipeline. `Replace` validates
 every policy before publication; a failure preserves the previous configuration. Requests already
 processing a response keep the policy they selected, and subsequent requests select the replacement.
@@ -137,6 +133,6 @@ retain their precedence, and disabled endpoints can continue managing their own 
 Executable origin predicates remain in static `UseCors` configuration because a delegate cannot be
 round-tripped as JSON. Static `UseCors` behavior is unchanged.
 
-Configuration is process-local. The management host must own persistence and replica coordination
-when those are required. Already cached browser preflight grants remain usable until their cache
+Configuration is process-local. The deployment record carries a change to restarted and scaled-out
+instances, and the resource's next deployment replaces it unless the change was made in code. Already cached browser preflight grants remain usable until their cache
 lifetime expires; changing the server's policy cannot revoke those cached grants immediately.

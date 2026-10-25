@@ -133,46 +133,75 @@ contributor's own text and are reported as returned.
 The control plane is transport-neutral. Area Hosting packages decide how to expose health and
 commands over HTTP or another protocol.
 
-### Producer-owned runtime state
+### Runtime surface and the deployment record
 
-The producer exports the abstract management endpoint/path/protocol binding. The resource installs
-it through `ConfigureRuntimeManagement(ResourceRuntimeManagement)`; the runtime catalog is always
-discovered from registered `IResourceStateHandler` instances during startup. Resource builders
-register the handlers after effective code-first and
-configuration composition. Each handler supplies its versioned definition and reproducible
-`InitialState` baselines captured from that effective startup configuration. The control plane
-validates and snapshots those facts together, rather than requiring a second hand-authored state list
-in the project file. Duplicate names, mismatched initial-state names and incompatible contracts fail
-startup. `ValidateStateHandlers` freezes the discovered catalog before the host is admitted.
+A resource's manageable configuration is code it already has. A feature keeps its options type, its
+source-generated `JsonTypeInfo<T>`, and an atomic replace; `ResourceConfigurationSection.Create`
+turns those into a section: a `ResourceConfigurationPath` (`Web:Cors`), a JSON schema produced by
+`JsonSchemaExporter` from the same metadata (with `DisplayName` and `Description` attributes as
+`title` and `description`, the portal hooks of decision D8), a mutability (`Deployment`, `Restart`,
+`Live`), a scope (`Process`, or `Backend` for a section the resource converges into storage it owns),
+whether other applications may claim entries, the **baseline** value the resource configured itself
+with, and an apply callback that returns `null` or a short refusal. `ResourceAction.Create` and
+`ResourceTool.Create` complete the surface. The area builder hands every registered section, action
+and tool to the control plane before `AttachHost`, which freezes the `ResourceRuntimeSurface`; its
+`cohesion/runtime/v1` document and digest never change for the life of the process.
 
-The configuration API accepts only the binding, without a second static state catalog.
-`ResourceControlPlane` dispatches process-bound revisions to actual feature
-state; startup baselines describe the configured initial state rather than live platform placement.
-Canonical definition/value digests and
-the bounded JSON schema dialect are shared as a stateless `StateProtocol` source module with SDK
-generation and the gateway protocol interpreter. The resource state path holds no request ledger.
-`ResourceStateProjectionRunner` consumes a protected platform projection through ResourceMount and
-validates its entire catalog, scope, slot identity, schema, digest, and positive revision before
-applying any entry. Unknown or incompatible durable entries are never skipped to admit startup
-defaults. Every persisted required revision must actually apply and match before admission.
+The surface is static by decision D2. `COHESION_DESCRIBE_PATH` makes `ResourceRuntime.HostBuilt`
+write the frozen document and end the process before `Program.cs` runs the host, so a build can
+learn the surface without starting anything (the SDK step that uses it is not built yet). The
+rejected alternative, discovering contracts from running processes, leaves a gateway with no
+reachable instance unable to validate or render anything.
 
-An admission slot may use revision zero only for a locally frozen `InitialState` declaration whose
-actual observation remains at revision zero and whose actual content digest equals that configured
-baseline. The request cannot invent a default, hide an already managed revision, or replace a
-durable required slot with this exception. After a valid projected generation is processed, missing
-configured startup slots may be added to its admission check at zero; these are readiness proofs,
-not desired-state writes, operations, or persisted revisions. This lets an added configured feature
-start during a mixed rollout while management catalog disagreement still fails closed.
+The resource keeps no desired state. `ResourceConfigurationRecord.Load` reads the deployment record
+from `COHESION_CONFIG_DIRECTORY` (layout, limits and digest framing are the
+[runtime contract's deployment record](../../../../docs/RUNTIME_CONTRACT.md#deployment-record)), and
+`ApplyConfigurationAsync(record, phase)` computes each section's effective value: the baseline with
+every layer that names the section merged over it as an RFC 7396 merge patch, in precedence order.
+Values are compared after binding through the section's own metadata, so an absent member and its
+default, or members in another order, are the same value. The record cannot go through the flat-key
+configuration merge, which flattens arrays into indexed keys and would leave stale entries in force.
 
-Gateway persistence, leases,
-caller identity and fleet inventory are outside Hosting.Resources. Existing v1 command bookkeeping
-remains a compatibility path. See the area resource-management contract in docs/libraries/ApplicationModel.
+A section's state moves as records are applied:
+
+```mermaid
+stateDiagram-v2
+    [*] --> Baseline
+    Baseline --> Applied: effective value differs and applies
+    Applied --> Baseline: layers removed and baseline reapplied
+    Baseline --> Rejected: value does not bind or apply refuses
+    Applied --> Rejected: value does not bind or apply refuses
+    Rejected --> Applied: a later record applies
+    Baseline --> RestartRequired: running and a non-live section changed
+    Applied --> RestartRequired: running and a non-live section changed
+    RestartRequired --> Applied: the next startup applies it
+```
+
+- **Startup phase** (`ResourceConfigurationRunner`, before the inner host runner): every section
+  applies. A refused section keeps its baseline, and readiness reports Unhealthy while any startup
+  refusal stands, so a rollout stops at its first instance; liveness is unaffected.
+- **Running phase** (the runner's poll, every 2 seconds): an unchanged record digest is a no-op, and a
+  read is accepted only when two consecutive loads agree, because platforms replace files one at a
+  time. A `Live` section applies; another changed section becomes `RestartRequired` and keeps its
+  value. A section whose value is already in force settles without calling its apply callback.
+- The `cohesion.configuration` health contribution, registered on the first apply, is Degraded while
+  any section is rejected or waiting for a restart, and lists those sections in its data.
+- An apply callback is application code: whatever it throws becomes the refusal
+  `apply-failed: <exception type>`, and the previous value stays in force. Refusals are status text on
+  the authenticated control plane, never exception messages, and carry no configuration values.
+
+Gateways, generations, overrides and claims are invisible here: a layer is a file, and the resource
+merges what it finds. Polling instead of a file watcher is deliberate, because Kubernetes swaps a
+projected volume's symbolic links and Docker Desktop bind mounts can drop change events. The parked
+codex design (process-bound revisions, admission slots, a state projection through a mount, and a
+shared schema dialect) is deleted, not deprecated; see the
+[deployment-record program](../../../../docs/programs/RESOURCE_CONTROL_PLANE_REDESIGN.md).
 
 ## Diagnostics
 
 The internal `HostingResourceEventSource` is named `Assimalign.Cohesion.Hosting.Resources`.
-It reports contributor failures and command execution outcomes from every area that uses the
-shared control plane, including direct calls without an HTTP adapter. A tool can enable the provider by its assembly name;
+It reports contributor failures, command execution outcomes and deployment-record application
+from every area that uses the shared control plane, including direct calls without an HTTP adapter. A tool can enable the provider by its assembly name;
 an application can also configure its own event-source forwarder. Non-Web resource processes
 receive no default forwarding from a nested Web host. This provider is outside the default
 `Assimalign.Cohesion.Web.` prefix, so Web entry points also select it explicitly when forwarding.
@@ -185,6 +214,19 @@ No logging dependency is added here.
 | 3 | `CommandUnknownKind` | Warning | `kind` (empty), `operation`, `suppressedCount:int` | Once per second, process-wide |
 | 4 | `CommandConflict` | Warning | `kind`, `operation`, `suppressedCount:int` | Once per second, process-wide |
 | 5 | `CommandHandlerFailed` | Error | `kind`, `operation`, `exceptionType`, `suppressedCount:int` | Once per second, process-wide |
+| 6 | `ConfigurationApplied` | Informational | `section` | None |
+| 7 | `ConfigurationRejected` | Warning | `section`, `suppressedCount:int` | Once per second, process-wide |
+| 8 | `ConfigurationRestartRequired` | Informational | `section` | None |
+| 9 | `ConfigurationRecordUnreadable` | Warning | `exceptionType`, `suppressedCount:int` | Once per second, process-wide |
+
+Configuration events name the section by its `ResourceConfigurationPath`, which the resource's own
+code declares; no configuration value, refusal text, file path or exception message is written,
+because a record is operator input. `ConfigurationRecordUnreadable` reports a record the runner
+could not load (missing directory, unreadable file, or a layer that is not a JSON object within the
+size limit) and leaves the record in force unchanged. A rejected section and an unreadable record
+are repeatable on every poll, so both are throttled. Their exact counters are
+`configuration-sections-applied`, `configuration-sections-rejected` and
+`configuration-records-unreadable`, maintained like the command counters below.
 
 The `contributor-failures` polling counter is the exact total of contributor exceptions caught
 while aggregating health, readiness, and liveness. Its backing value increments even without a

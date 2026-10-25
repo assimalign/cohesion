@@ -24,8 +24,8 @@ internal sealed class LocalGatewayProcessSupervisor
     private IReadOnlyDictionary<ApplicationName, bool> _restartOrphansByApplication =
         new Dictionary<ApplicationName, bool>();
 
-    // Read the supervisor's starting process, rather than waiting for readiness:
-    // managed readiness itself depends on the initial state being applied.
+    // Reads the supervisor's starting process rather than waiting for readiness: an instance whose
+    // deployment record was rejected at startup stays unready, and its status must still be readable.
     public bool TryGetManagementTarget(ApplicationName application, ResourceId resource, string endpointName,
         string path, out ResourceManagementTarget? target)
     {

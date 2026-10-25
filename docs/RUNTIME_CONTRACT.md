@@ -23,8 +23,9 @@ its environment name as `COHESION_ENVIRONMENT ?? DOTNET_ENVIRONMENT ?? "Producti
 | --- | --- | --- | --- |
 | `COHESION_APPLICATION` | Application name | Every gateway-realized Cohesion resource | Local: environment; In-process: ambient context; Docker: environment; Kubernetes: ConfigMap |
 | `COHESION_RESOURCE` | Resource name | Every gateway-realized Cohesion resource | Local: environment; In-process: ambient context; Docker: environment; Kubernetes: ConfigMap |
-| `COHESION_RESOURCE_INSTANCE` | Immutable platform host identity for direct management verification | Platforms that provide per-instance management inventory | Kubernetes: Downward API `metadata.uid`; the runtime returns it with its process UUID |
-| `COHESION_RESOURCE_STATE_PATH` | Protected desired-state projection file | Platforms distributing persisted state to current and future instances | Kubernetes: selected key from the resource management Secret; never the private coordination document |
+| `COHESION_RESOURCE_INSTANCE` | Platform instance identity | Platforms that expose individual instances | Kubernetes: Downward API `metadata.uid`; the resource reports it with its configuration status |
+| `COHESION_CONFIG_DIRECTORY` | Absolute directory path holding the resource's deployment record (see [Deployment record](#deployment-record)) | When the gateway delivers a deployment record | Local/Docker: environment pointing at the record directory; In-process: ambient context; Kubernetes: ConfigMap value pointing into the projected record volume |
+| `COHESION_DESCRIBE_PATH` | Absolute file path | Only for the SDK's build-time describe run, never by a gateway | Set by the SDK on the describe process; the resource writes its runtime surface there and exits with code 0 when its host is built |
 | `COHESION_GATEWAY` | `local`, `inprocess`, `docker`, or `kubernetes` | Set by a gateway; unset means there is no gateway | Local/Docker: environment; In-process: ambient context; Kubernetes: ConfigMap |
 | `COHESION_ENVIRONMENT` | Environment name; `Local` identifies a developer machine and `Development` is deployable; falls back to `DOTNET_ENVIRONMENT`, then `Production` | Optional override | Local/Docker: environment; In-process: ambient context; Kubernetes: ConfigMap |
 | `COHESION_CONTENT_ROOT` | Absolute directory path | Set when the gateway assigns a resource content root | Local/Docker: environment; In-process: ambient context; Kubernetes: ConfigMap |
@@ -141,7 +142,16 @@ records as open follow-up O42.
 
 ## Declarative resource commands
 
-An enabled manifest's `commands` lists each accepted kind as a string or, for a kind whose declared
+**`cohesion/resource/v2` removed the manifest's command catalog** (2026-10-24). A v2 manifest has no
+`commands` member, the gateway no longer refuses a kind its target's manifest does not list, and
+`requiresInputResolver` went with the catalog: input resolvers are explicit registrations the
+declaring application makes, and the receiving handler validates the payload it is delivered. The
+target's control plane still lists the kinds it accepts at `GET <controlPlane>/commands`, and the
+envelope, routes and refusals below are unchanged. The owner's approved direction replaces commands
+with deployment-record claims and resource actions ([Deployment record](#deployment-record)); until
+that lands, the paragraph that follows describes v1 manifests only.
+
+A v1 manifest's `commands` lists each accepted kind as a string or, for a kind whose declared
 payload the delivering gateway must resolve before delivery, as the object
 `{ "kind": "…", "requiresInputResolver": true }`. A manifest that marks no kind is the same string
 array as before (`assets/schemas/cohesion.resource.schema.json`). When the target's manifest marks
@@ -190,3 +200,76 @@ mutation path. The commands route of `Web.Hosting`, the shared control-plane ter
 that Web, Database, and most other area hosts serve, admits only the resource's own gateway but does
 not yet require `owner` to equal the caller's application; the
 [developer-experience design](DEVELOPER_EXPERIENCE_DESIGN.md) records it as open follow-up O43.
+
+## Deployment record
+
+A gateway delivers a resource's desired configuration as a **deployment record**: the directory that
+`COHESION_CONFIG_DIRECTORY` names, holding up to three kinds of layer file. The resource reads the
+directory and never writes it, and it keeps no configuration anywhere else. Code stays the source of
+truth: each configuration section's **baseline** is the value the resource configured itself with
+(code and appsettings), and the record's layers merge over that baseline.
+
+| File | Written from | Lives until |
+| --- | --- | --- |
+| `deployment.json` | The application's code, through the gateway's composition | The resource's next deployment |
+| `claims.<owner>.json` | Another application's code; `<owner>` is that application's name, an RFC 1123 label | The owner withdraws the claim or the resource is deleted |
+| `override.json` | The gateway's management API | The next deployment that changes the resource's deployment content |
+
+Each file is a UTF-8 JSON object of at most 1 MiB. Its members are configuration paths (`Web:Cors`),
+and each value is an RFC 7396 merge patch for that section; a `null` value resets the section to its
+baseline. A section's effective value is its baseline with the deployment layer, each claim layer in
+ordinal order of owner, then the override layer merged over it. Any other file in the directory is
+ignored, and so is a `claims.*.json` whose owner is not a label. Re-applying identical deployment
+content keeps the override layer; deployment content that changed discards it.
+
+The record's identity is its digest, `sha256:<lowercase hex>`, over the exact bytes of every file
+present. For each file in the order deployment, claims by ordinal owner, override, the hash reads the
+file name in UTF-8, one zero byte, the file length as a big-endian 64-bit integer, then the file's
+bytes. Reformatting a file changes the digest; there is no canonical form, so the writer computes the
+digest from the bytes it writes.
+
+A resource applies the record in two phases:
+
+- **Startup.** Before its host starts, every section applies, whatever its mutability. A section the
+  resource refuses keeps its baseline and the resource stays unready (readiness 503, liveness
+  unaffected), so a rolling update stops at its first instance.
+- **Running.** The resource rereads the directory every 2 seconds and accepts a read only when two
+  consecutive reads agree, so a platform that replaces files one at a time is never seen half
+  written. A section whose mutability is `live` applies; any other changed section reports
+  `restartRequired` and keeps its value until the instance restarts.
+
+Every instance reports what it applied at `GET <controlPlane>/configuration/status`:
+
+```json
+{
+  "instance": "<COHESION_RESOURCE_INSTANCE, when set>",
+  "surfaceDigest": "sha256:…",
+  "configuration": {
+    "recordDigest": "sha256:…",
+    "sections": [ { "path": "Web:Cors", "state": "applied" } ]
+  }
+}
+```
+
+Section states are `baseline`, `applied`, `rejected` (with an `error`), and `restartRequired`;
+`recordDigest` is `null` until a record is applied. The health contribution `cohesion.configuration`
+is Degraded while any section is rejected or waiting for a restart.
+
+`GET <controlPlane>/configuration` returns the resource's **runtime surface**, a
+`cohesion/runtime/v1` document listing its configuration sections (path, mutability `deployment`,
+`restart` or `live`, scope `process` or `backend`, whether other applications may claim entries, and
+the JSON schema of the section's value), its actions, and its tools. The surface is fixed when the
+host is built; the SDK's describe run sets `COHESION_DESCRIBE_PATH` to have the resource write the
+same document at build time. `POST <controlPlane>/actions/{name}` runs an action with a
+JSON body and returns 200 with its JSON result, 400 for input that does not bind, and 404 for an
+unknown action. These routes are control-plane routes, authorized like every other namespaced route.
+
+Platforms deliver the directory without the resource knowing which platform it is on. A Local or
+Docker gateway writes the files into a directory it owns and passes (Docker bind-mounts it). A
+Kubernetes gateway projects the deployment's per-generation ConfigMap and the resource's claims
+ConfigMap into one directory volume, never with `subPath`, which would freeze the files at pod start.
+
+This is an amendment to v1 made in place on 2026-10-24 (owner decisions D1–D8 of the
+[deployment-record control plane](programs/RESOURCE_CONTROL_PLANE_REDESIGN.md)), not a v2: it adds
+`COHESION_CONFIG_DIRECTORY` and `COHESION_DESCRIBE_PATH`, and gives `COHESION_RESOURCE_INSTANCE` a
+defined use. Hosting.Resources implements the resource side; gateway delivery is not built yet.

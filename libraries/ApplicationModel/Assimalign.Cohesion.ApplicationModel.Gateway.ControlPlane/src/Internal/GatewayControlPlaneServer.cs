@@ -21,7 +21,7 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane.Internal;
 
 [global::System.Diagnostics.DebuggerDisplay("GatewayControlPlaneServer")]
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
-internal sealed partial class GatewayControlPlaneServer : IApplicationGatewayControlPlane
+internal sealed class GatewayControlPlaneServer : IApplicationGatewayControlPlane
 {
     private const long MaximumCommandBytes = 1024 * 1024;
 
@@ -47,7 +47,6 @@ internal sealed partial class GatewayControlPlaneServer : IApplicationGatewayCon
     private ITrustedIssuerProvider? _trustedIssuers;
     private IReadOnlyList<IApplicationCallerAuthenticator> _callers = Array.Empty<IApplicationCallerAuthenticator>();
     private IResourceCommandCredentialProvider? _commandCredentials;
-    private IResourceManagementGateway? _managementGateway;
     private IResourceTransportTrustProvider? _transportTrust;
     private TcpConnectionListener? _tcpListener;
     private HttpConnectionListener? _httpListener;
@@ -69,15 +68,9 @@ internal sealed partial class GatewayControlPlaneServer : IApplicationGatewayCon
         _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
         _dispatchers = dispatchers ?? throw new ArgumentNullException(nameof(dispatchers));
         // Tried in this order, which is the order Web.Routing's inbound-precedence sort gave these
-        // templates before the dependency was removed. PUT precedes DELETE on the shared command
-        // template, so its 405 lists "PUT, DELETE". Named management routes are additive.
+        // templates before the dependency was removed: each template has a distinct segment count,
+        // and PUT precedes DELETE on the shared command template, so a 405 lists "PUT, DELETE".
         _router = new ControlPlaneRouter(
-            new ControlPlaneRoute(CohesionHttpMethod.Get, "/cohesion/v2/resources/{name}/state-contracts", HandleResourceStateManagementAsync),
-            new ControlPlaneRoute(CohesionHttpMethod.Get, "/cohesion/v2/resources/{name}/instances", HandleResourceStateManagementAsync),
-            new ControlPlaneRoute(CohesionHttpMethod.Get, "/cohesion/v2/resources/{name}/state/{state}/{key}", HandleResourceStateManagementAsync),
-            new ControlPlaneRoute(CohesionHttpMethod.Put, "/cohesion/v2/resources/{name}/state/{state}/{key}", HandleResourceStateManagementAsync),
-            new ControlPlaneRoute(CohesionHttpMethod.Delete, "/cohesion/v2/resources/{name}/state/{state}/{key}", HandleResourceStateManagementAsync),
-            new ControlPlaneRoute(CohesionHttpMethod.Get, "/cohesion/v2/resources/{name}/operations/{operationId}", HandleResourceStateManagementAsync),
             new ControlPlaneRoute(
                 CohesionHttpMethod.Get,
                 "/cohesion/v1/application",
@@ -148,7 +141,6 @@ internal sealed partial class GatewayControlPlaneServer : IApplicationGatewayCon
                 _trustedIssuers = trustedIssuers;
                 _callers = SnapshotCallers(model);
                 _commandCredentials = trustedIssuers as IResourceCommandCredentialProvider;
-                _managementGateway = trustedIssuers as IResourceManagementGateway;
                 _transportTrust = trustedIssuers as IResourceTransportTrustProvider;
                 _tcpListener = tcpListener;
                 _httpListener = httpListener;
@@ -269,7 +261,6 @@ internal sealed partial class GatewayControlPlaneServer : IApplicationGatewayCon
                 _trustedIssuers = null;
                 _callers = Array.Empty<IApplicationCallerAuthenticator>();
                 _commandCredentials = null;
-                _managementGateway = null;
                 lock (_documentGate)
                 {
                     _document = null;

@@ -13,13 +13,6 @@
 		<CohesionPackageReference Include="System.Security.Cryptography.ProtectedData" />
 	</ItemGroup>
 	<ItemGroup>
-		<CohesionSharedSource Include="Assimalign.Cohesion.Hosting.Resources" Module="StateProtocol" />
-	</ItemGroup>
-	<ItemGroup>
-		<CohesionValueType Include="ValueObjects\ResourceStateName.cs" ObjectRuntimeType="String" ObjectNamespace="Assimalign.Cohesion.ApplicationModel.Gateway" ObjectAccessModifier="public" ObjectHasImplicitOperators="true" ObjectHasIsValidMethod="true" ObjectComparison="Ordinal" />
-		<CohesionValueType Include="ValueObjects\ResourceStateKey.cs" ObjectRuntimeType="String" ObjectNamespace="Assimalign.Cohesion.ApplicationModel.Gateway" ObjectAccessModifier="public" ObjectHasImplicitOperators="true" ObjectHasIsValidMethod="true" ObjectComparison="Ordinal" />
-	</ItemGroup>
-	<ItemGroup>
 		<None
 			Include="..\buildTransitive\Assimalign.Cohesion.ApplicationModel.Gateway.props"
 			Pack="true"
