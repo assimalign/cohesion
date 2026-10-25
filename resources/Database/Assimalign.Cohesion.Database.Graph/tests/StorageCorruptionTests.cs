@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -7,6 +8,7 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.Database.Execution;
+using Assimalign.Cohesion.Database.Graph.Internal;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Types;
 
@@ -14,6 +16,29 @@ namespace Assimalign.Cohesion.Database.Graph.Tests;
 
 public sealed class StorageCorruptionTests
 {
+    [Theory(DisplayName = "Cohesion Test [Database.Graph] - Short headers are located truncation, not unsupported formats (w11 review)")]
+    [InlineData(0)]
+    [InlineData(16)]
+    [InlineData(17)]
+    public void Decode_TruncatedHeader_ShouldPreserveLocationWithoutFormatRefusal(int length)
+    {
+        // Arrange
+        var bytes = new byte[length];
+        if (length > 16) { bytes[16] = 1; } // Readable node kind, missing version byte.
+        var page = (PageId)9L;
+
+        // Act
+        var failure = Should.Throw<StorageCorruptionException>(() => GraphRecordCodec.Decode(bytes, page, 3));
+
+        // Assert
+        failure.PageId.ShouldBe(page);
+        failure.SlotIndex.ShouldBe(3);
+        failure.Code.ShouldBe("CK06003");
+        failure.Message.ShouldContain("truncat");
+        failure.InnerException.ShouldBeOfType<EndOfStreamException>();
+        failure.Message.ShouldNotContain("recreate");
+    }
+
     [Theory(DisplayName = "Cohesion Test [Database.Graph] - Conformance: a corrupt page fails the operation with database, page and CK06003")]
     [InlineData(false, 0)]
     [InlineData(true, 0)]

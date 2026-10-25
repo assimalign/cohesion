@@ -20,7 +20,9 @@ internal static class GraphRecordCodec
     internal const byte FormatVersion = 4;
     internal static void EnsureFormat(ReadOnlySpan<byte> bytes, PageId? page = null, int slot = 0)
     {
-        if (bytes.Length < 18 || bytes[17] != FormatVersion)
+        if (bytes.Length < 18)
+        { throw Corrupt(page, slot, ErrorMessages.RecordTruncated, new EndOfStreamException(ErrorMessages.RecordTruncated)); }
+        if (bytes[17] != FormatVersion)
         { throw UnsupportedFormat(page, slot); }
     }
 

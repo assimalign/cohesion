@@ -2690,6 +2690,10 @@ reattachment for Documents and Graph.
 
 ## Confirmed record decoding (D1, #1372)
 
+A graph record shorter than the 18-byte format header is located truncation corruption, preserving
+an EndOfStreamException cause. Only a readable unsupported version receives CG06017 and the
+recreate-database remedy.
+
 GraphStore open, format validation, cached identity reads and index/label/
 adjacency fetches pass the known page and slot into the record decoder. The decoder creates
 its corruption error with that location and preserves scalar/count/truncation parsing causes.
