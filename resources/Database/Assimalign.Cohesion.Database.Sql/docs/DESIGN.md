@@ -7285,6 +7285,13 @@ for publication scope, callback isolation and the limits of the wait budgets.
 
 ## Structured failure codes (#1350)
 
+Hard lock deadlocks retain `DatabaseTransactionDeadlockException` with structured
+`CS04065`, mapped to SQLSTATE `40P01` (PostgreSQL `src/backend/utils/errcodes.txt:334`).
+Embedded and negotiated wire failures carry that diagnostic; SQLSTATE is the documented
+code mapping rather than an additional wire field. Under statement atomicity, earlier
+work and locks of an explicit victim remain until its caller rolls the transaction back.
+Auto-commit rolls its one-statement transaction back before translating the failure.
+
 The root statement-failure event reads `DatabaseException.Diagnostics`, preferring the first
 Error diagnostic and then the first entry. Offline refusals and unconfirmed commits carry the
 model's existing code there, with unprefixed Message detail and the original cause. The wire
@@ -7351,10 +7358,13 @@ six superseded exception-type assertions are strengthened to this contract, not 
 DELETE prepares its complete cascade and SET NULL/DEFAULT work before the coordinator's
 physical apply. Every preparation lock participates: table/adjacent intents, directly targeted
 and discovered rows, released-reference parent rows, and unique keys for deletions and
-replacement versions. Each is tried without waiting. A refusal releases every resource first
-granted after the current retry mark, waits through the normal lock manager, then takes a new
+replacement versions. Each is tried without waiting. The first two refusals release every resource first
+granted after the current retry mark, wait through the normal lock manager, then take a new
 mark retaining the waited grant. All completed wait grants remain retained across later
 back-offs, preventing two contenders from handing the same grant back and forth (#1668).
+From the third refusal of the same statement onward, new closure grants are retained too
+and each refused resource queues through the normal lock manager (owner decision, 2026-10-24).
+This bounds release/rebuild starvation from hot child inserts while retaining deadlock detection.
 The complete closure is reconstructed, including its targets, reference graph, cached live
 indexes and lock-coverage claims. No deletion, version, index mutation or RETURNING projection
 from the abandoned attempt has been applied. The private retry signal never becomes a user
@@ -7363,9 +7373,11 @@ diagnostic. Normal physical helpers only re-grant already owned locks and cannot
 The initial delete-preparation mark is immutable, as in #1668 arbitration. Resources already held
 before preparation, and their upgrades, survive that mark along with earlier transaction work. Any preparation failure releases every grant newer than the initial mark,
 including completed wait grants, while prior statements and their upgrades remain protected.
-Caller cancellation retains its exception/token; it now gives back new unapplied cascade grants,
+Caller cancellation retains its exception/token; it gives back new unapplied cascade grants,
 as upsert preparation already does. An offline owner retains all locks, and a started physical
-apply keeps its existing rollback/ownership contract. Statement timeouts span every retry;
+apply keeps its existing rollback/ownership contract. Apply starts only inside the admitted
+delegate, so cancellation while waiting for the apply gate still releases the new grants.
+Statement timeouts span every retry;
 individual lock waits retain their existing lock-timeout budgets. No key-share mode is added.
 Locks retained from earlier statements or completed waits can still form real hard deadlocks,
 which the shared manager resolves; soft queue cycles first attempt reordering.
@@ -7409,7 +7421,8 @@ Absolute default-shape victims increase from 1,095 to 1,401 while more work comm
 deletes increase from 8,261 to 12,693. Hot-shape victims decrease from 1,752 to 1,613 and parent
 deletes increase from zero to 24, but only four of twelve samples make parent-delete progress.
 Its median parent-delete rate remains zero. D2 therefore improves this measured shape without
-guaranteeing uniform cascade progress. Earlier grants and retained wait grants can still form
+guaranteeing uniform cascade progress in that historical unbounded-release implementation.
+The 2026-10-24 refusal bound above supersedes that release policy. Earlier grants and retained wait grants can still form
 hard cycles; this result does not authorize key-share modes or a different victim policy.
 
 A separate fixed operation deletes one parent with 32 children and rolls back outside the

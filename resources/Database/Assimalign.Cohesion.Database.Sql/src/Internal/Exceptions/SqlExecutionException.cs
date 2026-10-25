@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 
 using Assimalign.Cohesion.Database.Language;
+using Assimalign.Cohesion.Database.Transactions;
 using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
@@ -29,6 +30,7 @@ internal sealed class SqlExecutionException : DatabaseException
     internal const string IntervalOverflowCode = "CS02062";
     internal const string CollationMismatchCode = "CS02063";
     internal const string SerializationFailureCode = "CS04064";
+    internal const string DeadlockCode = "CS04065";
     internal const string DuplicateFunctionCode = "CS03065";
     internal const string InsufficientPrivilegeCode = "CS03066";
     internal const string StatementMemoryBudgetCode = "CS05067";
@@ -50,6 +52,14 @@ internal sealed class SqlExecutionException : DatabaseException
 
     internal SqlExecutionException At(Location? location) => Diagnostics[0].Start is not null || location is null
         ? this : new(Diagnostics[0].Code!, Message, InnerException ?? this, location);
+
+    internal static DatabaseTransactionDeadlockException Deadlock(TransactionDeadlockException cause)
+        => new(cause.Message, [new Diagnostic
+        {
+            Code = DeadlockCode,
+            Message = cause.Message,
+            Severity = DiagnosticSeverity.Error,
+        }], cause);
 
     internal SqlExecutionException WithContext(string context)
         => new(Diagnostics[0].Code!, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ServerSessionExecuteAsyncValueTask, context, Message), this, _location);

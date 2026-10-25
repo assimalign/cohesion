@@ -870,7 +870,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     private const string deferredCheckpointStorageOffline = "StorageOffline";
 
     /// <summary>
-    /// Refuses a checkpoint asked for from inside one of this coordinator's statement applies:
+    /// Refuses maintenance asked for from inside one of this coordinator's statement applies:
     /// the apply gate is not reentrant, so waiting for it there would never end.
     /// </summary>
     private void ThrowIfInsideApply()
@@ -906,8 +906,10 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     /// version page it cannot read (a failed checksum or an I/O error, #1342), which keeps
     /// that tombstone for the next pass.
     /// </remarks>
+    /// <exception cref="StorageTransactionException">Called inside this coordinator's statement apply.</exception>
     public long RunVersionPurgePass(CancellationToken cancellationToken)
     {
+        ThrowIfInsideApply();
         // Timed only while a listener takes the pass event (event-source.md, rule 9).
         bool timed = TransactionEventSource.Log.IsEnabled(EventLevel.Verbose, TransactionEventSource.Keywords.Purge);
         long started = timed ? Stopwatch.GetTimestamp() : 0;

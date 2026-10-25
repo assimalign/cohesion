@@ -22,6 +22,29 @@ namespace Assimalign.Cohesion.Database.Transactions.Tests;
 [Collection("Journal enrollment")]
 public class TransactionCoordinatorRecoveryTests
 {
+    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Version purge: apply callback refuses reentrancy before any work (w11 review)")]
+    public async Task RunVersionPurgePass_InsideApply_ShouldRefuseBeforePruning()
+    {
+        // Arrange: the escape token makes the base failure terminate instead of hanging.
+        using var storage = CoordinatorStorage.Create();
+        using var escape = new CancellationTokenSource(TimeSpan.FromSeconds(1));
+        int pruned = 0;
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records,
+            (_, _) => { pruned++; return new ValueTask<long>(0); });
+        var context = await coordinator.BeginAsync(IsolationLevel.ReadCommitted, CancellationToken.None);
+
+        // Act / Assert: reentrancy is a storage-transaction refusal, never cancellation.
+        await coordinator.ApplyStatementAsync(context, _ =>
+        {
+            Should.Throw<StorageTransactionException>(() => coordinator.RunVersionPurgePass(escape.Token));
+            pruned.ShouldBe(0);
+            return true;
+        }, CancellationToken.None);
+        await coordinator.RollbackAsync(context, CancellationToken.None);
+        coordinator.RunVersionPurgePass(CancellationToken.None).ShouldBe(0);
+        pruned.ShouldBe(1);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Index prune: its callback owns the apply gate and reports reclaimed work (#1195)")]
     public async Task RunVersionPurgePass_IndexCallback_ShouldHoldApplyGateAndReportItsWork()
     {

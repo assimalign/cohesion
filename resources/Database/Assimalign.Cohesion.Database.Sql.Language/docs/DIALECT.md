@@ -3479,6 +3479,7 @@ the diagnostic fixes introduce no persisted-format change beyond #1422's format-
 | `CS02062` | INTERVAL duration overflow in assignment, DEFAULT or CAST | 22015 (`interval_field_overflow`) |
 | `CS02063` | FOREIGN KEY columns have incompatible collations | 42P21 (`collation_mismatch`) |
 | `CS04064` | A bound table was replaced while DDL waited; retry the statement | 40001 (`serialization_failure`) |
+| `CS04065` | Hard lock deadlock; roll back the victim transaction before retrying | 40P01 (`deadlock_detected`) |
 | `CS03065` | Function signature already exists | 42723 (`duplicate_function`) |
 | `CS03066` | Compiled-schema ownership refuses session DDL | 42501 (`insufficient_privilege`) |
 
@@ -3558,15 +3559,22 @@ the copy before decoding; this adds no syntax, SQLSTATE or format version. Valid
 ## Cascading DELETE lock retries (#1420)
 
 DELETE's cascade, SET NULL and SET DEFAULT actions are prepared before physical mutation.
-A refused row, table-intent, parent-reference or unique-key lock releases new attempt grants,
-waits, keeps that waited grant and restarts preparation. Earlier transaction grants and their
+A refused row, table-intent, parent-reference or unique-key lock releases new attempt grants
+on the first two refusals, waits, keeps that waited grant and restarts preparation. From the
+third refusal of that statement onward, new closure grants are retained and refused resources
+queue normally with deadlock detection. Earlier transaction grants and their
 upgrades remain held. A failed unapplied preparation, including caller cancellation, releases
-its new statement grants; an offline owner or started physical apply keeps its existing lock
+its new statement grants, including cancellation at the apply gate before admission;
+an offline owner or started physical apply keeps its existing lock
 ownership. The statement deadline spans all retries. Fixed snapshots and first-updater-wins
 remain enforced, so rebuilding an undone child candidate can instead expose the direct parent's
 committed-replacement conflict. Soft queue cycles may be reordered without a victim; genuine
-held-lock cycles remain retryable deadlocks. No new SQL syntax, key-share mode or wire error is
-introduced. Results are returned only after the complete statement succeeds.
+held-lock cycles remain retryable deadlocks. Hard deadlocks carry structured `CS04065`, mapped
+to SQLSTATE `40P01` (PostgreSQL `src/backend/utils/errcodes.txt:334`). Under statement atomicity,
+the explicit victim transaction remains active with earlier work and locks; its caller must
+roll it back before retrying so surviving waiters can progress. Auto-commit rolls back its
+one-statement transaction. SQLSTATE remains a documented mapping of the diagnostic code,
+without a separate wire field. Results are returned only after the complete statement succeeds.
 
 ### Probe costs and SELECT analysis (#1522, D3)
 

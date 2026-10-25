@@ -153,6 +153,7 @@ structured-carrier messages remain unprefixed.
 | COHSQLE021 | CS04021 | Transactions/locking |
 | COHSQLE044 | CS04044 | Transactions/locking |
 | COHSQLE064 | CS04064 | Transactions/locking |
+| New (w11 review) | CS04065 | Transactions/locking — hard deadlock (`40P01`) |
 | COHSQLE004 | CS05004 | Execution/budgets |
 | COHSQLE007 | CS05007 | Execution/budgets |
 | COHSQLE013 | CS05013 | Execution/budgets |
