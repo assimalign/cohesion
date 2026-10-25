@@ -181,7 +181,16 @@ internal static class GatewaySourceWriter
                 .Append(manifest.MemberName)
                 .Append(" = global::Assimalign.Cohesion.ApplicationModel.ResourceManifest.Parse(")
                 .Append(Literal(manifest.RawJson))
-                .AppendLine(");");
+                .Append(')');
+            if (manifest.RawSurfaceJson is not null)
+            {
+                // The runtime surface is a separate document, so it is attached rather than parsed as a manifest member.
+                source.Append(" with { Surface = global::Assimalign.Cohesion.ApplicationModel.ResourceSurface.Parse(")
+                    .Append(Literal(manifest.RawSurfaceJson))
+                    .Append(") }");
+            }
+
+            source.AppendLine(";");
             source.AppendLine();
         }
         source.AppendLine("}");

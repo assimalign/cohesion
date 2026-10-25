@@ -106,6 +106,20 @@ public sealed record ResourceManifest
         = new Dictionary<string, string>();
 
     /// <summary>
+    /// Gets the runtime surface the resource's build described beside this manifest, or <see langword="null"/>
+    /// when the build wrote none.
+    /// </summary>
+    /// <remarks>
+    /// The surface is a separate <c>cohesion/runtime/v1</c> document (<c>resource.runtime.json</c>), not a member of
+    /// the <c>cohesion/resource/v2</c> manifest: the manifest is embedded before the resource compiles, and the
+    /// surface exists only once it has. Generated gateway code attaches it with
+    /// <c>ResourceManifest.Parse(...) with { Surface = ResourceSurface.Parse(...) }</c>, and application-model
+    /// documents carry it beside the manifest.
+    /// </remarks>
+    [JsonIgnore]
+    public ResourceSurface? Surface { get; init; }
+
+    /// <summary>
     /// Parses and validates a resource manifest from JSON text.
     /// </summary>
     /// <param name="json">The JSON document to parse.</param>

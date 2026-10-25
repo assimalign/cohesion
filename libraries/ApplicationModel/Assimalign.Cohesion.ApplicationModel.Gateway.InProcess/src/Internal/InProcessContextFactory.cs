@@ -63,6 +63,10 @@ internal sealed class InProcessContextFactory
             [AppEnvironment.Variables.Gateway] = "inprocess",
             [AppEnvironment.Variables.ContentRoot] = compilation.Artifact.ContentRootPath,
         };
+        if (compilation.Inputs.ConfigurationDirectory is string configurationDirectory)
+        {
+            ambientEnvironment[AppEnvironment.Variables.ConfigDirectory] = configurationDirectory;
+        }
         IReadOnlyList<ResourceEndpoint> allocated = await _localState
             .ResolveEndpointsAsync(
                 control.Model.Name,

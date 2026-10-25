@@ -23,6 +23,7 @@ public sealed class LocalGateway : ApplicationGateway, IApplicationGatewayRender
     private readonly IReadOnlyList<IApplicationResourceController> _controllers;
     private readonly LocalGatewayProcessSupervisor _supervisor;
     private readonly LocalPortStore _ports;
+    private readonly FileResourceRecordStore _records;
 
     /// <summary>
     /// Initializes a new <see cref="LocalGateway"/> with default options.
@@ -57,6 +58,7 @@ public sealed class LocalGateway : ApplicationGateway, IApplicationGatewayRender
         string stateDirectory = _options.StateDirectory
             ?? Path.Combine(Environment.CurrentDirectory, ".cohesion");
         _options.ExportDirectory ??= stateDirectory;
+        _records = FileResourceRecordStore.Create(stateDirectory);
         _ports = new LocalPortStore(stateDirectory);
         var mounts = new LocalMountMaterializer(stateDirectory);
         var processState = new LocalProcessStateStore(stateDirectory);
@@ -90,6 +92,10 @@ public sealed class LocalGateway : ApplicationGateway, IApplicationGatewayRender
 
     /// <inheritdoc/>
     protected override IApplicationResourceStateManager State => _state;
+
+    /// <inheritdoc/>
+    /// <remarks>Records live under the state directory, beside each resource's mounts and port allocations.</remarks>
+    protected override IResourceRecordStore? RecordStore => _records;
 
     internal IApplicationResourceStateManager ResourceStates => _state;
 

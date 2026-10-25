@@ -21,7 +21,7 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane.Internal;
 
 [global::System.Diagnostics.DebuggerDisplay("GatewayControlPlaneServer")]
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
-internal sealed class GatewayControlPlaneServer : IApplicationGatewayControlPlane
+internal sealed partial class GatewayControlPlaneServer : IApplicationGatewayControlPlane
 {
     private const long MaximumCommandBytes = 1024 * 1024;
 
@@ -67,9 +67,11 @@ internal sealed class GatewayControlPlaneServer : IApplicationGatewayControlPlan
             : GetMetadataPath(metadataDirectory, application);
         _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
         _dispatchers = dispatchers ?? throw new ArgumentNullException(nameof(dispatchers));
-        // Tried in this order, which is the order Web.Routing's inbound-precedence sort gave these
-        // templates before the dependency was removed: each template has a distinct segment count,
-        // and PUT precedes DELETE on the shared command template, so a 405 lists "PUT, DELETE".
+        // Tried in this order. The v1 routes keep the order Web.Routing's inbound-precedence sort gave
+        // them before the dependency was removed: each has a distinct segment count, and PUT precedes
+        // DELETE on the shared command template, so a 405 lists "PUT, DELETE". Among the v2 management
+        // routes a literal segment precedes the parameter in the same position: GET
+        // configuration/status is the status route, while PATCH configuration/status names a section.
         _router = new ControlPlaneRouter(
             new ControlPlaneRoute(
                 CohesionHttpMethod.Get,
@@ -90,7 +92,47 @@ internal sealed class GatewayControlPlaneServer : IApplicationGatewayControlPlan
             new ControlPlaneRoute(
                 CohesionHttpMethod.Delete,
                 "/cohesion/v1/resources/{name}/commands/{id}",
-                HandleDeleteCommandAsync));
+                HandleDeleteCommandAsync),
+            new ControlPlaneRoute(
+                CohesionHttpMethod.Get,
+                "/cohesion/v2/resources/{name}/configuration",
+                HandleGetConfigurationAsync),
+            new ControlPlaneRoute(
+                CohesionHttpMethod.Get,
+                "/cohesion/v2/resources/{name}/configuration/status",
+                HandleGetConfigurationStatusAsync),
+            new ControlPlaneRoute(
+                CohesionHttpMethod.Patch,
+                "/cohesion/v2/resources/{name}/configuration/{section}",
+                HandleMergeOverrideAsync),
+            new ControlPlaneRoute(
+                CohesionHttpMethod.Put,
+                "/cohesion/v2/resources/{name}/configuration/{section}",
+                HandleReplaceOverrideAsync),
+            new ControlPlaneRoute(
+                CohesionHttpMethod.Delete,
+                "/cohesion/v2/resources/{name}/configuration/{section}",
+                HandleRemoveOverrideAsync),
+            new ControlPlaneRoute(
+                CohesionHttpMethod.Put,
+                "/cohesion/v2/resources/{name}/claims/{owner}",
+                HandleReplaceClaimsAsync),
+            new ControlPlaneRoute(
+                CohesionHttpMethod.Post,
+                "/cohesion/v2/resources/{name}/actions/{action}",
+                HandleInvokeActionAsync),
+            new ControlPlaneRoute(
+                CohesionHttpMethod.Get,
+                "/cohesion/v2/resources/{name}/instances",
+                HandleGetInstancesAsync),
+            new ControlPlaneRoute(
+                CohesionHttpMethod.Get,
+                "/cohesion/v2/resources/{name}/platform/{platform}/{extension}",
+                HandleGetPlatformSurfaceAsync),
+            new ControlPlaneRoute(
+                CohesionHttpMethod.Patch,
+                "/cohesion/v2/resources/{name}/platform/{platform}/{extension}",
+                HandleChangePlatformSurfaceAsync));
     }
 
     public Uri Address => _address ?? throw new InvalidOperationException(
@@ -142,6 +184,7 @@ internal sealed class GatewayControlPlaneServer : IApplicationGatewayControlPlan
                 _callers = SnapshotCallers(model);
                 _commandCredentials = trustedIssuers as IResourceCommandCredentialProvider;
                 _transportTrust = trustedIssuers as IResourceTransportTrustProvider;
+                _management = trustedIssuers as IResourceManagementProvider;
                 _tcpListener = tcpListener;
                 _httpListener = httpListener;
                 _serverCancellation = new CancellationTokenSource();
@@ -261,6 +304,7 @@ internal sealed class GatewayControlPlaneServer : IApplicationGatewayControlPlan
                 _trustedIssuers = null;
                 _callers = Array.Empty<IApplicationCallerAuthenticator>();
                 _commandCredentials = null;
+                _management = null;
                 lock (_documentGate)
                 {
                     _document = null;

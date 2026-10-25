@@ -15,10 +15,11 @@ public abstract partial class ApplicationGateway
 
     // Resolves the telemetry one emitter exports, from the sink the application registered in
     // ApplicationProviders.Telemetry. Without a registration no AppEnvironment.Variables telemetry
-    // variable is injected; the gateway never discovers a sink by resource kind.
+    // variable is injected; the gateway never discovers a sink by resource kind. The emitter is a
+    // resource, or the gateway itself when it reports a management event.
     private async ValueTask<ResourceTelemetryInjection?> ResolveTelemetryAsync(
         IApplicationModel model,
-        IApplicationResource emitter,
+        ResourceName emitter,
         CancellationToken cancellationToken)
     {
         ResourceTelemetrySink? sink = GetProviders(model).Telemetry;
@@ -70,17 +71,17 @@ public abstract partial class ApplicationGateway
     // telemetry: no dependency is inferred.
     private async ValueTask<ResourceTelemetryInjection?> ResolveResourceTelemetryAsync(
         IApplicationModel model,
-        IApplicationResource emitter,
+        ResourceName emitter,
         ResourceName sink,
         string endpointName,
         CancellationToken cancellationToken)
     {
-        if (sink == emitter.Name || !TryGetTelemetrySinkEndpoint(model, sink, endpointName, out Uri? endpoint))
+        if (sink == emitter || !TryGetTelemetrySinkEndpoint(model, sink, endpointName, out Uri? endpoint))
         {
             return null;
         }
 
-        var key = (model.Name, sink, emitter.Name);
+        var key = (model.Name, sink, emitter);
         DateTimeOffset now = _options.TimeProvider.GetUtcNow();
         ApplicationCredential? credential;
         lock (_credentialGate)
@@ -96,7 +97,7 @@ public abstract partial class ApplicationGateway
             ApplicationCredential issued = await IssueCredentialAsync(
                     model,
                     sink.ToString(),
-                    emitter.Name.ToString(),
+                    emitter.ToString(),
                     ApplicationCredentialPurpose.Telemetry,
                     _options.BootstrapCredentialLifetime,
                     cancellationToken)

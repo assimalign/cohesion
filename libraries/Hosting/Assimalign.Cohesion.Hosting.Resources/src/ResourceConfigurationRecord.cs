@@ -114,13 +114,23 @@ public sealed class ResourceConfigurationRecord
             ReadLayer(Path.Combine(directory, OverrideLayerFileName)));
     }
 
-    /// <summary>Creates a record from layer contents; absent layers are null.</summary>
+    /// <summary>Creates a record from the contents of its layer files.</summary>
+    /// <param name="deployment">The bytes of <c>deployment.json</c>, or null when the record has none.</param>
+    /// <param name="claims">The bytes of each <c>claims.&lt;owner&gt;.json</c>, keyed by owner, in any order.</param>
+    /// <param name="override">The bytes of <c>override.json</c>, or null when the record has none.</param>
+    /// <returns>The record, whose <see cref="Digest"/> is the one an instance reports after applying these files.</returns>
+    /// <remarks>
+    /// A gateway uses this to compute the digest of the files it writes, so it compares an instance's report with
+    /// the record it delivered by the same rule the instance used.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="claims"/> is null.</exception>
     /// <exception cref="InvalidDataException">A layer is too large or not a JSON object, or a claim owner repeats or is not a DNS label.</exception>
-    internal static ResourceConfigurationRecord Create(
+    public static ResourceConfigurationRecord Create(
         byte[]? deployment,
         IReadOnlyList<KeyValuePair<string, byte[]>> claims,
         byte[]? @override)
     {
+        ArgumentNullException.ThrowIfNull(claims);
         var ordered = new List<KeyValuePair<string, byte[]>>(claims);
         ordered.Sort(static (left, right) => string.CompareOrdinal(left.Key, right.Key));
         for (int index = 0; index < ordered.Count; index++)

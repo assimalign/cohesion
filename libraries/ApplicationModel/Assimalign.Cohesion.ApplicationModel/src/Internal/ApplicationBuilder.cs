@@ -746,6 +746,16 @@ internal sealed class ApplicationBuilder : IApplicationBuilder, IApplicationProv
                 : GenericPlanner.CreatePlan(context);
 
             plan = plan with { ResourceGroup = descriptor.ResourceGroup };
+            if (descriptor.Resource is PlannedResource declared)
+            {
+                // The deployment layer and platform extensions are the application's declarations, not the
+                // planner's, so they join every plan here; the validator checks them against the surface.
+                plan = plan with
+                {
+                    Configuration = declared.GetConfiguration(),
+                    Extensions = declared.GetExtensions(),
+                };
+            }
 
             ResourcePlanValidator.Validate(plan, context);
             WritePlanningDiagnostic(descriptor.Resource, plannedResource, gateway);

@@ -218,6 +218,7 @@ public sealed class CohesionCreateResourceVerbs : Task
             Kind = RequiredString(root, "kind", path),
             ApplicationModel = RequiredString(root, "applicationModel", path),
             RawJson = root.GetRawText(),
+            RawSurfaceJson = ReadSurface(Value(item.GetMetadata("RuntimeSurfacePath"))),
             Composable = OptionalBoolean(artifact, "composable", path),
             ControlPlaneEndpoint = RequiredString(controlPlane, "endpoint", path),
             ControlPlanePath = RequiredString(controlPlane, "path", path),
@@ -282,6 +283,30 @@ public sealed class CohesionCreateResourceVerbs : Task
             throw new InvalidDataException($"Cohesion resource manifest '{path}' cannot declare commands.");
         }
         return manifest;
+    }
+
+    // The surface the resource's describe step wrote beside its build output (RuntimeSurfacePath on a project
+    // reference's manifest item) or packed beside its manifest (a package's buildTransitive props). A resource
+    // without one is still composable; Build() then refuses only deployment configuration for it.
+    private static string? ReadSurface(string? path)
+    {
+        if (path is null || !File.Exists(path))
+        {
+            return null;
+        }
+
+        string text = File.ReadAllText(path);
+        using JsonDocument document = JsonDocument.Parse(text);
+        JsonElement root = document.RootElement;
+        if (root.ValueKind != JsonValueKind.Object ||
+            !root.TryGetProperty("schema", out JsonElement schema) ||
+            schema.ValueKind != JsonValueKind.String ||
+            schema.GetString() != "cohesion/runtime/v1")
+        {
+            throw new InvalidDataException($"Cohesion runtime surface '{path}' must declare schema 'cohesion/runtime/v1'.");
+        }
+
+        return text;
     }
 
     private void MarkDirectReferences(IReadOnlyList<GatewayManifest> manifests)

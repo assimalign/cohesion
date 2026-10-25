@@ -29,8 +29,13 @@ internal sealed class ApplicationTrustState : IDisposable
         Application = application;
         Gateway = gateway;
         _key = key ?? throw new ArgumentNullException(nameof(key));
-        AddOrReplace(new TrustedIssuer(Application.ToString(), _key.PublicJwk));
+        AddOrReplace(CreateOwnIssuer(_key));
     }
+
+    // The application's own key grants every management operation: whoever holds it already mints any credential
+    // for the application, so the developer credentials it issues manage the application's resources.
+    private TrustedIssuer CreateOwnIssuer(GatewayTrustKey key) =>
+        new(Application.ToString(), key.PublicJwk, allowedCommandKinds: null, [ResourceManagementOperations.All]);
 
     public ApplicationName Application { get; }
 
@@ -148,9 +153,7 @@ internal sealed class ApplicationTrustState : IDisposable
         lock (_gate)
         {
             _issuers.Clear();
-            _issuers[Application.ToString()] = new TrustedIssuer(
-                Application.ToString(),
-                _key.PublicJwk);
+            _issuers[Application.ToString()] = CreateOwnIssuer(_key);
             for (int index = 0; index < issuers.Count; index++)
             {
                 TrustedIssuer issuer = issuers[index]
@@ -189,9 +192,7 @@ internal sealed class ApplicationTrustState : IDisposable
         {
             GatewayTrustKey previous = _key;
             _key = key;
-            _issuers[Application.ToString()] = new TrustedIssuer(
-                Application.ToString(),
-                key.PublicJwk);
+            _issuers[Application.ToString()] = CreateOwnIssuer(key);
             previous.Dispose();
         }
     }

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -27,6 +28,9 @@ public sealed class StandaloneControlPlaneTests
     [InlineData("/cohesion/v1/healthz", false)]
     [InlineData("/cohesion/v1/readyz", false)]
     [InlineData("/cohesion/v1/livez", false)]
+    [InlineData("/cohesion/v1/configuration", false)]
+    [InlineData("/cohesion/v1/configuration/status", false)]
+    [InlineData("/cohesion/v1/actions/ping", true)]
     public async Task InvokeAsync_StandaloneRemotePeer_ShouldRefuseNamespacedRoutes(string path, bool post)
     {
         // Arrange
@@ -146,9 +150,51 @@ public sealed class StandaloneControlPlaneTests
         exchange.Response.StatusCode.ShouldBe(credential ? HttpStatusCode.Ok : HttpStatusCode.Unauthorized);
     }
 
-    private static IdentityEndpointService CreateEndpoint(string dataPath, ResourceContext? resource = null) =>
+    [Fact(DisplayName = "Cohesion Test [IdentityHub.Hosting] - The runtime surface, its status and its actions are served on the control plane")]
+    public async Task InvokeAsync_RuntimeSurfaceRoutes_ShouldServeTheControlPlane()
+    {
+        // Arrange
+        using var data = new TemporaryDirectory();
+        using IdentityEndpointService endpoint = CreateEndpoint(data.Path, controlPlane: RuntimeSurfaceTestObjects.CreateControlPlane());
+        await using var surface = CreateExchange("/issuer/cohesion/v1/configuration", HttpMethod.Get, "127.0.0.1");
+        await using var status = CreateExchange("/issuer/cohesion/v1/configuration/status", HttpMethod.Get, "127.0.0.1");
+        await using var ping = CreateExchange("/issuer/cohesion/v1/actions/ping", HttpMethod.Post, "127.0.0.1");
+        await using var missing = CreateExchange("/issuer/cohesion/v1/actions/missing", HttpMethod.Post, "127.0.0.1");
+        await ping.Request.Body.WriteAsync("""{"text":"hi"}"""u8.ToArray());
+        ping.Request.Body.Position = 0;
+
+        // Act
+        await endpoint.InvokeAsync(surface, _ => Task.CompletedTask);
+        await endpoint.InvokeAsync(status, _ => Task.CompletedTask);
+        await endpoint.InvokeAsync(ping, _ => Task.CompletedTask);
+        await endpoint.InvokeAsync(missing, _ => Task.CompletedTask);
+
+        // Assert
+        surface.Response.StatusCode.ShouldBe(HttpStatusCode.Ok);
+        using (JsonDocument document = RuntimeSurfaceTestObjects.ReadBody(surface.Response.Body))
+        {
+            document.RootElement.GetProperty("schema").GetString().ShouldBe("cohesion/runtime/v1");
+            document.RootElement.GetProperty("actions")[0].GetProperty("name").GetString().ShouldBe("ping");
+        }
+
+        status.Response.StatusCode.ShouldBe(HttpStatusCode.Ok);
+        using (JsonDocument document = RuntimeSurfaceTestObjects.ReadBody(status.Response.Body))
+        {
+            document.RootElement.GetProperty("surfaceDigest").GetString().ShouldStartWith("sha256:");
+        }
+
+        ping.Response.StatusCode.ShouldBe(HttpStatusCode.Ok);
+        using (JsonDocument document = RuntimeSurfaceTestObjects.ReadBody(ping.Response.Body))
+        {
+            document.RootElement.GetProperty("text").GetString().ShouldBe("hi");
+        }
+
+        missing.Response.StatusCode.ShouldBe(HttpStatusCode.NotFound);
+    }
+
+    private static IdentityEndpointService CreateEndpoint(string dataPath, ResourceContext? resource = null, IResourceControlPlane? controlPlane = null) =>
         new(new Uri("http://127.0.0.1:8443/issuer"), dataPath, Array.Empty<string>(),
-            new Dictionary<string, IdentityHubClientRegistration>(), ResourceControlPlane.Create(),
+            new Dictionary<string, IdentityHubClientRegistration>(), controlPlane ?? ResourceControlPlane.Create(),
             resource ?? new ResourceContext(environmentName: AppEnvironment.Keys.Local),
             new IdentityHubApplicationContext(AppEnvironment.Keys.Local, contentRootPath: null));
 

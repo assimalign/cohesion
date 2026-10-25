@@ -13,6 +13,9 @@
 		<CohesionPackageReference Include="System.Security.Cryptography.ProtectedData" />
 	</ItemGroup>
 	<ItemGroup>
+		<CohesionSharedSource Include="Assimalign.Cohesion.ApplicationModel" Module="MergePatch" />
+	</ItemGroup>
+	<ItemGroup>
 		<None
 			Include="..\buildTransitive\Assimalign.Cohesion.ApplicationModel.Gateway.props"
 			Pack="true"

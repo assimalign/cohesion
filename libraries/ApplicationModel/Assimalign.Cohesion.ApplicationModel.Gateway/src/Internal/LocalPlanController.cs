@@ -123,6 +123,10 @@ internal sealed class LocalPlanController : IApplicationResourceController
         environment[AppEnvironment.Variables.Gateway] = "local";
         environment[AppEnvironment.Variables.ContentRoot] =
             Path.GetDirectoryName(artifact.ExecutablePath) ?? ".";
+        if (inputs.ConfigurationDirectory is string configurationDirectory)
+        {
+            environment[AppEnvironment.Variables.ConfigDirectory] = configurationDirectory;
+        }
 
         foreach (MountBinding mount in plan.Container.Mounts)
         {

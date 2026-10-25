@@ -162,6 +162,10 @@ every layer that names the section merged over it as an RFC 7396 merge patch, in
 Values are compared after binding through the section's own metadata, so an absent member and its
 default, or members in another order, are the same value. The record cannot go through the flat-key
 configuration merge, which flattens arrays into indexed keys and would leave stale entries in force.
+`ResourceConfigurationRecord.Create(deployment, claims, override)` builds the same record from layer
+bytes in memory. It is public so a gateway computes the digest of the files it writes by the
+instance's own rule and compares an instance's `configuration/status` report with what it
+delivered; the gateway never re-implements the framing.
 
 A section's state moves as records are applied:
 

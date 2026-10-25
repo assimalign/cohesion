@@ -17,6 +17,9 @@ internal sealed class GatewayManifest
 
     public required string RawJson { get; init; }
 
+    // The resource's resource.runtime.json, when its build described a runtime surface.
+    public string? RawSurfaceJson { get; init; }
+
     public required bool Composable { get; init; }
 
     public required string ControlPlaneEndpoint { get; init; }

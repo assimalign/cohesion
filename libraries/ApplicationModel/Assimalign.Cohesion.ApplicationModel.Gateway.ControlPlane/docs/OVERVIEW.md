@@ -9,7 +9,9 @@ The server is application-scoped. That keeps model, observed state, trusted issu
 observations, listener lifetime, and Local discovery metadata isolated when an
 `IMultiModelApplicationGateway` owns more than one application.
 
-Requests are matched by a small internal router for the five fixed `/cohesion/v1` templates.
+Requests are matched by a small internal router for the five fixed `/cohesion/v1` routes and
+the ten `/cohesion/v2` management routes, which serve the deployment record through the gateway's
+`IResourceManagementProvider` after a management-grant check.
 The package used to route with `Web.Routing` and dropped it because a library may not reference a
 `resources/**` package. Matching, `404`/`405` handling, `Allow` values, and route values did not
 change. DESIGN.md lists the exact rules.

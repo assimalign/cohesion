@@ -24,7 +24,11 @@ separate `cohesion/runtime/v1` document the resource serves on its control plane
 host is built under `COHESION_DESCRIBE_PATH`; its desired configuration arrives as a deployment record
 (`docs/RUNTIME_CONTRACT.md`, "Deployment record"). When the build that packed this package could
 describe the resource, the package also carries that surface as `cohesion/resource.runtime.json`, so a
-gateway can validate configuration for the resource without loading its code.
+gateway can validate configuration for the resource without loading its code. The `buildTransitive`
+props always give the `CohesionResourceManifest` item `RuntimeSurfacePath` metadata naming that file;
+`Sdk.Gateway` attaches the surface to the generated `Manifests.<Name>` member when the file exists
+and composes the resource without one when it does not, in which case the gateway's `Build()`
+refuses deployment configuration for it.
 
 The v1 manifest and its command metadata are no longer supported. All area SDKs emit v2 and use the
 generic runtime control-plane factory, and a project that still declares `CohesionCommand` items

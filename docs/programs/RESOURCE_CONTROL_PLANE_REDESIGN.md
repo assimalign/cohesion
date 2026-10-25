@@ -1,7 +1,8 @@
 # Resource control plane redesign: the deployment record
 
-Status: **APPROVED by the owner, 2026-10-24 (decisions D1–D8 below). P0, P1 and P1b are
-implemented on `feature/deployment-record-control-plane`; P2–P5 are not built.** This design
+Status: **APPROVED by the owner, 2026-10-24 (decisions D1–D8 below). P0, P1, P1b and P2 are
+implemented on `feature/deployment-record-control-plane`; P3–P5 are not built.** P2's choices that
+the design left open are listed for review in [P2 as built](#p2-as-built-choices-for-review). This design
 supersedes the codex refactor parked on `feature/resource-runtime-manifests` (commit `376f022a8` in
 `cohesion`, `f678395` in `cohesion-platforms`), which remains there for reference. The wire contract
 is the [deployment record](../RUNTIME_CONTRACT.md#deployment-record) section of the runtime contract.
@@ -123,7 +124,8 @@ gateway restart loses nothing, because the gateway holds no desired state.
 - Web serves `GET /cohesion/v1/configuration`, `GET /cohesion/v1/configuration/status` and
   `POST /cohesion/v1/actions/{name}` through its control-plane middleware, as do the area hosts that
   delegate to it. ConfigurationStore, IdentityHub and SecretStore route their control planes
-  themselves and do not serve these three routes yet.
+  themselves; since P2 they serve the same three routes through
+  `ResourceControlPlaneMiddleware.TryServeRuntimeSurfaceAsync`, after their own authorization.
 
 ```csharp
 // A Web resource's Program.cs
@@ -159,6 +161,11 @@ await builder.Build().RunAsync();
   an unknown section fails the build with the resource and path named.
 - This amends signed decision O29 (D5); platform code still lives only in the domain gateway, and
   `KubernetesGatewayOptions.Patch<T>` stays the raw escape hatch.
+- Built in P2: `Configure(section, patch)` and the extension data underneath `ConfigureHpa`
+  (`SetExtension(key, value)`, `TryGetExtension`) are `ResourceConfigurationExtensions` members in
+  ApplicationModel; `Build()` copies both into `ResourcePlan.Configuration` and `ResourcePlan.Extensions`.
+  Sdk.Gateway embeds each resource's `resource.runtime.json` beside its manifest
+  (`ResourceManifest.Surface`). `ConfigureHpa` and the neutral replica bounds are P3.
 
 ## Management API (P2)
 
@@ -182,6 +189,14 @@ Refusals: 400 invalid-configuration, 404 unknown-section, 409 deployment-only, 4
 409 claim-conflict, 412 version-moved. Grants are per section on the trusted-issuer model
 (`TrustedIssuer.AllowedManagementOperations`). Every write emits a management event to the
 application's telemetry sink (D8).
+
+As built in P2, the gateway control plane serves these routes over the gateway's
+`IResourceManagementProvider`, and records live in an `IResourceRecordStore`: the Local and in-process
+gateways keep them as files (`FileResourceRecordStore`), platform gateways bring their own in P3.
+Beyond the refusals above, the API answers 400 invalid-input (an action input), 404 unknown-resource,
+unknown-action and unknown-platform-surface, 409 not-claimable, 501 records-unsupported (a gateway
+with no record store), 503 unavailable (no record deployed yet, or no instance answered), and 403
+forbidden for a caller without the grant.
 
 ## Portal and tools (later; hooks in P1 and P2)
 
@@ -210,7 +225,7 @@ CONNECT (browsers cannot send CONNECT themselves); control-plane permission neve
 | P0 | Park codex's uncommitted work on a branch in each repository | Done |
 | P1 | Hosting.Resources surface (UI metadata, tools), status and describe; the Web CORS section; codex's state machinery removed | Done, resource side |
 | P1b | SDK describe step writing `resource.runtime.json` | Done |
-| P2 | Model parses the surface, `Configure` and `Build()` validation, extensions as data; gateway record manager over a store with generations, Local and InProcess stores, the routes, management events | Not started |
+| P2 | Model parses the surface, `Configure` and `Build()` validation, extensions as data; gateway record manager over a store with generations, Local and InProcess stores, the routes, management events | Done; `--mode plan` and neutral replica bounds deferred ([as built](#p2-as-built-choices-for-review)) |
 | P3 | cohesion-platforms: Kubernetes and Docker stores, per-generation and claims ConfigMaps, restart digest, platform surfaces, `ConfigureHpa` | Not started |
 | P4 | Claims for ConfigurationStore, IdentityHub, Rezolvr, SecretStore; commands deleted; Database after #1709 | Not started |
 | P5 | Sdk.Gateway generates typed configuration accessors from surface schemas | Not started |
@@ -224,8 +239,26 @@ CONNECT (browsers cannot send CONNECT themselves); control-plane permission neve
 - The describe run executes `Program.cs` up to `Build()`, so side effects before `Build()` run too.
 - A schema-valid but domain-invalid value is accepted by the gateway and refused by every instance,
   which keeps its last good value and reports the rejection.
-- An override that must survive belongs in code; the plan output shows what a deployment discards.
-  A ConfigMap's 1 MiB limit bounds each layer.
+- An override that must survive belongs in code; apply reports what a deployment discards. A
+  ConfigMap's 1 MiB limit bounds each layer.
+
+## P2 as built: choices for review
+
+P2 settled these points, which the design above left open. Each is a default the owner can revise.
+
+| Choice | As built |
+| --- | --- |
+| Generation | The first 16 hex digits of SHA-256 over the plan's JSON (which carries the deployment layer and extensions) and the build the artifact holds: an image digest, the apphost and its managed assembly, or an in-process entry assembly's module version id. A resource whose build output changed is a new deployment even when its plan is unchanged, which is how "identical re-apply of the same build" is read: re-applying the same build, or a deterministic rebuild of unchanged code, keeps the generation and its overrides. An image counts as changed whenever its digest does, so a non-reproducible image build starts a new generation every time. |
+| Grants | `configuration:read`, `configuration:write[:<section>]`, `claims:write`, `actions:invoke[:<action>]`, `platform:read[:<key>]`, `platform:write[:<key>]` and `*` (`ResourceManagementOperations`). The application's own trust key grants `*`, so the developer credentials `--mode trust-issue` mints manage the application; every other issuer needs explicit grants. |
+| Claims | A caller writes only its own application's claims, under `claims:write`. An entry conflicts when another owner claims the key or the resource's own deployment layer sets it. Claim entries are objects without null members, and claims survive generations. |
+| Local layout | One record directory per resource, `<state>/<application>/<resource>/.state/record/`, with the generation in `.state/record.json`, instead of the table's `config/<generation>/` plus `claims/`. A new generation is a new Local gateway session, which restarts the process; an orphan that a restarted gateway recovers keeps running and polls the new record (live sections apply, restart sections report `restartRequired`). |
+| Delivery | On a gateway with a record store, every realized resource receives `COHESION_CONFIG_DIRECTORY`, with or without deployment configuration, so a later management change reaches it. |
+| Discarded overrides | Reported on standard error and as a `configuration:discard` management event when a deployment starts a new generation. There is no `--mode plan` dry run yet; it is a follow-up. |
+| Patch composition | PATCH and repeated `Configure` calls compose merge patches and keep tombstones. A later object after an earlier null merges into the current value instead of replacing it; PUT states an exact override. |
+| Events | One OTLP/HTTP JSON log record per write, posted to the registered telemetry sink's `/v1/logs` with the gateway as the emitter, best effort within two seconds. It names the operation, target, caller subject and generation, never a value. |
+| Validation | The gateway checks the JSON-schema subset the exporter writes, and treats an object schema that lists its members as closed, so a member the resource's options type would silently drop is refused. |
+| Surface carriage | `ResourceManifest.Surface` is not part of `resource.json`; generated gateway code attaches it, and model documents carry it beside the manifest. Its digest covers the compact document, so reformatting keeps it equal to the digest an instance reports. |
+| Platform surfaces | The routes exist; `ApplicationGateway.ReadPlatformSurfaceAsync` and `WritePlatformSurfaceAsync` answer unknown-platform-surface until a platform gateway overrides them in P3. |
 
 ## Decisions
 

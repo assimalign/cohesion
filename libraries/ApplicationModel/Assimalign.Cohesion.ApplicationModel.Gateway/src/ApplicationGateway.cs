@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
+using System.Globalization;
 using System.IO;
 using System.Net.Http;
 using System.Security.Cryptography;
@@ -31,7 +32,8 @@ public abstract partial class ApplicationGateway :
     IApplicationGatewayCommandHandler,
     IApplicationTrustGateway,
     IResourceCommandCredentialProvider,
-    IResourceTransportTrustProvider
+    IResourceTransportTrustProvider,
+    IResourceManagementProvider
 {
     private const string LiteralPrefix = "literal:";
     private const string ParameterPrefix = "parameter:";
@@ -992,6 +994,7 @@ public abstract partial class ApplicationGateway :
                 }
 
                 ValidateResource(model, descriptor, plan);
+                ValidateDeploymentData(descriptor, plan);
                 ResolveController(plan);
             }
         }
@@ -1088,10 +1091,11 @@ public abstract partial class ApplicationGateway :
                     descriptor,
                     context,
                     cancellationToken)
-                .ConfigureAwait(false);
-            context.SetInputs(inputs ?? throw new InvalidOperationException(
-                $"Gateway '{Name}' returned null inputs for resource '{descriptor.Resource.Name}'."));
-            context.Telemetry = await ResolveTelemetryAsync(model, descriptor.Resource, cancellationToken)
+                .ConfigureAwait(false) ?? throw new InvalidOperationException(string.Format(
+                    CultureInfo.CurrentCulture, ErrorMessages.ResourceInputsNull, Name, descriptor.Resource.Name));
+            // The record is in place before the resource starts, so its Startup phase applies it.
+            context.SetInputs(await DeliverRecordAsync(item, inputs, cancellationToken).ConfigureAwait(false));
+            context.Telemetry = await ResolveTelemetryAsync(model, descriptor.Resource.Name, cancellationToken)
                 .ConfigureAwait(false);
 
             bool wasAdmitted = _admitted.Contains(item.Key);
@@ -2432,6 +2436,7 @@ public abstract partial class ApplicationGateway :
         _controlPlanes.Clear();
         _parameters.Clear();
         _artifacts.Clear();
+        _generations.Clear();
         _admitted.Clear();
         _appliedCommands.Clear();
         _realized.Clear();

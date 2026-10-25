@@ -1073,10 +1073,9 @@ DataProtection package designs on decision 15's terms. Advisory: not applicable:
 
 `GetInstancesAsync(application, resource)` lists the individually addressable control planes of a
 resource this gateway realizes, as a `ResourceInstanceInventory` of `ResourceManagementTarget`s. It
-is the seam the gateway management API of the
-[deployment-record program](../../../../docs/programs/RESOURCE_CONTROL_PLANE_REDESIGN.md) will use to
-read each instance's configuration status and to fan every-instance actions out; that API is not
-built yet, and nothing in this package stores desired configuration.
+is the seam the management API of the
+[deployment-record program](../../../../docs/programs/RESOURCE_CONTROL_PLANE_REDESIGN.md) uses to read
+each instance's configuration status and to fan every-instance actions out (next section).
 
 - **Address.** A target's address is the instance's control-plane base: the observed endpoint named
   by the plan's `ControlPlane.Endpoint` combined with `ControlPlane.Path`, the same construction
@@ -1093,3 +1092,63 @@ built yet, and nothing in this package stores desired configuration.
 The parked codex design hung a management coordinator, durable stores, a state protocol client and
 `/cohesion/v2` state routes off this hook. All of that is deleted; the hook and its two records are
 kept because the approved design needs per-instance status and actions.
+
+## Deployment records and the management API (phase P2)
+
+The gateway delivers each resource's deployment record (runtime contract, "Deployment record") and
+serves the management API over it. It stores nothing itself: the record lives in the platform's store,
+so a gateway restart reads it back.
+
+```mermaid
+sequenceDiagram
+    participant Operator as "Operator"
+    participant Plane as "Gateway control plane"
+    participant Gateway as "ApplicationGateway"
+    participant Store as "IResourceRecordStore"
+    participant Instance as "Resource instance"
+    Gateway->>Store: deploy the plan's layer for generation G
+    Gateway->>Instance: start with COHESION_CONFIG_DIRECTORY
+    Instance->>Store: apply at startup, then poll every 2 s
+    Operator->>Plane: PATCH .../configuration/Web:Cors
+    Plane->>Gateway: ChangeOverrideAsync after the grant check
+    Gateway->>Store: conditional write of override.json
+    Instance->>Store: the next poll applies the live section
+    Operator->>Plane: GET .../configuration/status
+    Plane->>Gateway: GetConfigurationStatusAsync
+    Gateway->>Instance: GET configuration/status on each instance
+```
+
+- **Store seam.** `IResourceRecordStore` reads a resource's `ResourceRecord` (its generation and layer
+  bytes), writes one conditionally on its version, deletes it, and names the directory instances read
+  (`GetInstanceDirectory`). `RecordStore` returns the gateway's store; the base returns null, the Local
+  and in-process gateways return a `FileResourceRecordStore` over their state directory, and P3's
+  platform gateways return ConfigMap- or volume-backed stores. A plan that carries deployment
+  configuration fails `Validate` on a gateway without a store.
+- **Generation.** The first 16 hex digits of SHA-256 over the plan's JSON and `DescribeArtifact`'s
+  description of the build: an image digest, a hash of the apphost and its managed assembly, or (in
+  process) the entry assembly's module version id. It is computed once per realized resource per
+  session.
+- **Delivery.** `DeliverRecordAsync` runs in every reconcile pass after `ResolveInputsAsync`. When the
+  stored generation equals the current one and the deployment layer is unchanged, it writes nothing,
+  which keeps the override; otherwise it writes the new layer, keeps claims, drops the override and
+  reports the drop on standard error and as a `configuration:discard` event. The record directory
+  reaches the controller as `ResourceInputs.ConfigurationDirectory`; Local sets it as an environment
+  variable and in-process as an ambient value. A write that loses a race with a management write is
+  retried on the newer version.
+- **Record digest.** `ResourceRecord.Digest` comes from Hosting.Resources'
+  `ResourceConfigurationRecord.Create`, the rule instances use, so convergence compares like with like.
+  `Version` hashes the generation with the digest; it is the management API's entity tag.
+- **Management provider.** `ApplicationGateway` implements `IResourceManagementProvider`. Overrides are
+  validated against the manifest's `ResourceSurface` (unknown section, deployment-only, backend scope,
+  schema), composed with `JsonMergePatchComposition` (shared from ApplicationModel) and written only if
+  the version still matches. Claims are validated against claimable sections and refused when another
+  owner or the deployment layer already sets an entry. Status and actions use the instance inventory,
+  or `TryGetResourceControlPlane` for an in-process resource; HTTP calls carry the gateway's
+  `ResourceAccess` credential under the usual transport rule (HTTPS, or loopback HTTP in Local).
+  `ReadPlatformSurfaceAsync` and `WritePlatformSurfaceAsync` are the P3 hooks for platform surfaces.
+- **Events.** `EmitManagementEventAsync` posts one OTLP/HTTP JSON log record to the registered telemetry
+  sink's `/v1/logs`, with the gateway as the emitter of its own telemetry credential. It is best effort
+  and bounded to two seconds, and it never carries a configuration value, an action input or a result.
+- **Grants.** `ResourceManagementOperations` names them; the application's own trust key grants `*`
+  (`ApplicationTrustState.CreateOwnIssuer`), because its holder can already mint any credential for the
+  application.

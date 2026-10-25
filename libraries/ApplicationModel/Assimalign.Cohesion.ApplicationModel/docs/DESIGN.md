@@ -775,3 +775,52 @@ enforces it on apply and delete. The CLI's --against option remains deferred.
 ## HTTPS certificate plan fact (31t)
 
 PortBinding carries optional `Certificate` after `Scheme`, retaining the original three-argument constructor and deconstruction. GenericPlanner copies the manifest value or an empty string. Validation is per endpoint: values must match, and nonempty values other than reserved `public` must identify a Secret MountBinding. ResourceManifest's existing Secret-only rule is unchanged. An HTTPS Secret mount adds no VolumeSpec and does not turn a Deployment into a StatefulSet. ResourceInputs additionally carries certificates-only transport trust bytes beside the bootstrap credential, outside the hashed plan.
+
+## Runtime surface and code-first deployment configuration (P2, 2026-10-25)
+
+Phase P2 of the [deployment-record program](../../../../docs/programs/RESOURCE_CONTROL_PLANE_REDESIGN.md)
+lets a gateway's `Program.cs` declare a resource's deployment configuration and checks it against
+what the resource's build said it accepts. This package owns the model half; the gateway owns the
+record (`…Gateway/docs/DESIGN.md`).
+
+- **The surface.** `ResourceSurface` parses `cohesion/runtime/v1`, the `resource.runtime.json` the
+  SDK's describe step writes after each build: `Configuration` sections (`ResourceSurfaceSection`:
+  path, mutability, scope, `Claimable`, JSON schema), `Actions` and `Tools`. Unknown members are
+  ignored and required ones are strict. `Digest` hashes the compact rewrite, so an indented and a
+  compact copy of one surface share it. `ResourceManifest.Surface` carries it in memory only
+  (`[JsonIgnore]`): `resource.json` stays `cohesion/resource/v2` and its digest does not move when
+  only the surface changes. Sdk.Gateway attaches it to each generated manifest, and a model
+  document carries it as the resource's sibling `surface` member.
+- **Declaring configuration.** `ResourceConfigurationExtensions` adds `Configure(section, patch)`
+  (a JSON string or a `JsonElement`), `SetExtension(key, value)` and `TryGetExtension(key, out
+  value)` to every descriptor through a generic `extension<TDescriptor>` block, so an area verb's
+  typed descriptor keeps chaining. Section paths and extension keys are the `ResourceSectionPath`
+  and `ResourceExtensionKey` value objects; the grammars match what Hosting.Resources lets a
+  resource declare (colon-separated segments; `<platform>/<name>`). Repeated `Configure` calls on
+  one section compose as RFC 7396 merge patches, through the `MergePatch` shared-source module
+  this package and the gateway compile.
+- **Where it lives.** The patches and extension data are stored on `PlannedResource`, which every
+  area's resource type derives from, so no area package changed (and the frozen Database model did
+  not have to). A built descriptor, an external resource, or a resource that is not a
+  `PlannedResource` refuses them.
+- **The plan.** `Build()` copies them into `ResourcePlan.Configuration` and `ResourcePlan.Extensions`
+  before validation. Both are omitted from the serialized plan when empty, so a resource that
+  declares nothing hashes exactly as before. `ResourcePlanValidator` requires a surface for any
+  configuration, a section the surface declares, and a patch its schema accepts, and names the
+  resource, section and JSON path on failure; extension keys must parse. A gateway validates which
+  of its own platform's keys it supports.
+- **Delivery input.** `ResourceInputs.ConfigurationDirectory` names the record directory a resource
+  reads as `COHESION_CONFIG_DIRECTORY`. Like the bootstrap credential it sits outside the hashed
+  plan, because it names a place, not deployment content.
+
+The schema validator is a deliberate subset of JSON Schema, enough for the schemas Hosting.Resources
+generates: local `$ref` pointers, boolean schemas, `type`, `enum`, `const`, `pattern` (with a
+250 ms match timeout), `anyOf`/`oneOf`, `properties`/`additionalProperties`, `required` and
+`items`. An object schema that lists `properties` is closed unless it says otherwise, so a
+misspelt member fails at `Build()` rather than being ignored by the resource. A merge patch skips
+`required`, because it changes only the members it names, but may not remove a required member.
+
+Two limits are accepted for now. Composition keeps a `null` tombstone, so a later object patch on
+the same member merges into nothing rather than replacing the earlier value. And configuration is
+validated against the surface the build described; a resource built without the describe step has
+no surface, and any `Configure` call on it fails `Build()`.

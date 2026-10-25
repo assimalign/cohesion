@@ -39,4 +39,100 @@
   <data name="TrustedIssuerManagementOperationsInvalid" xml:space="preserve">
     <value>Trusted issuer '{0}' allowedManagementOperations must be an array of nonblank strings.</value>
   </data>
+  <data name="ResourceRecordGenerationInvalid" xml:space="preserve">
+    <value>A deployment generation is a DNS label: 1 to 63 lowercase ASCII letters, digits or hyphens, not beginning or ending with a hyphen.</value>
+  </data>
+  <data name="ResourceRecordClaimEmpty" xml:space="preserve">
+    <value>A claim layer must not be empty; leave its owner out to withdraw the owner's claims.</value>
+  </data>
+  <data name="ResourceRecordPathInvalid" xml:space="preserve">
+    <value>An application or resource name cannot be used as a deployment-record directory name.</value>
+  </data>
+  <data name="ResourceRecordStoreMissing" xml:space="preserve">
+    <value>Gateway '{0}' keeps no deployment records, so resource '{1}' cannot carry deployment configuration.</value>
+  </data>
+  <data name="ResourceRecordContended" xml:space="preserve">
+    <value>The deployment record of '{0}/{1}' kept changing while the gateway deployed it.</value>
+  </data>
+  <data name="ResourceInputsNull" xml:space="preserve">
+    <value>Gateway '{0}' returned null inputs for resource '{1}'.</value>
+  </data>
+  <data name="ResourceExtensionUnsupported" xml:space="preserve">
+    <value>Gateway '{0}' does not support extension '{2}' on resource '{1}'.</value>
+  </data>
+  <data name="ResourceOverridesDiscarded" xml:space="preserve">
+    <value>{0}: deployment generation {1} discards the management overrides of {2}; a change that must survive belongs in code.</value>
+  </data>
+  <data name="ManagementResourceUnknown" xml:space="preserve">
+    <value>Application '{0}' has no resource '{1}' that this gateway realizes.</value>
+  </data>
+  <data name="ManagementRecordsUnsupported" xml:space="preserve">
+    <value>Gateway '{0}' keeps no deployment records.</value>
+  </data>
+  <data name="ManagementRecordMissing" xml:space="preserve">
+    <value>Resource '{0}' has no deployment record yet; the gateway writes it when it deploys the resource.</value>
+  </data>
+  <data name="ManagementSectionUnknown" xml:space="preserve">
+    <value>Resource '{0}' declares no configuration section '{1}'.</value>
+  </data>
+  <data name="ManagementSectionDeploymentOnly" xml:space="preserve">
+    <value>Section '{1}' of resource '{0}' is deployment-only; change it in the application's code.</value>
+  </data>
+  <data name="ManagementSectionNotOverridable" xml:space="preserve">
+    <value>Section '{1}' of resource '{0}' shapes shared backend data; change it in code, through a claim, or with an action.</value>
+  </data>
+  <data name="ManagementSectionNotClaimable" xml:space="preserve">
+    <value>Section '{1}' of resource '{0}' does not accept claims.</value>
+  </data>
+  <data name="ManagementBodyInvalid" xml:space="preserve">
+    <value>The request body must be a JSON document.</value>
+  </data>
+  <data name="ManagementPatchRejected" xml:space="preserve">
+    <value>Section '{0}': {1}</value>
+  </data>
+  <data name="ManagementLayerTooLarge" xml:space="preserve">
+    <value>The change would make a deployment-record layer larger than 1 MiB.</value>
+  </data>
+  <data name="ManagementVersionMoved" xml:space="preserve">
+    <value>The record of resource '{0}' changed since version '{1}'; read it again and retry.</value>
+  </data>
+  <data name="ManagementClaimsShape" xml:space="preserve">
+    <value>A claim set is a JSON object whose members are claimable section paths.</value>
+  </data>
+  <data name="ManagementClaimShape" xml:space="preserve">
+    <value>A claim on section '{0}' must be an object of keyed entries, none of them null.</value>
+  </data>
+  <data name="ManagementClaimConflictDeployment" xml:space="preserve">
+    <value>Entry '{1}' of section '{0}' is set by the resource's own deployment.</value>
+  </data>
+  <data name="ManagementClaimConflictOwner" xml:space="preserve">
+    <value>Entry '{1}' of section '{0}' is already claimed by application '{2}'.</value>
+  </data>
+  <data name="ManagementActionUnknown" xml:space="preserve">
+    <value>Resource '{0}' declares no action '{1}'.</value>
+  </data>
+  <data name="ManagementActionInputRejected" xml:space="preserve">
+    <value>Action '{0}': {1}</value>
+  </data>
+  <data name="ManagementInstanceRefused" xml:space="preserve">
+    <value>The instance answered HTTP {0}.</value>
+  </data>
+  <data name="ManagementInstanceInputRefused" xml:space="preserve">
+    <value>The instance refused the input.</value>
+  </data>
+  <data name="ManagementInstanceActionUnknown" xml:space="preserve">
+    <value>The instance declares no such action; it may run a different build than the gateway's surface describes.</value>
+  </data>
+  <data name="ManagementPlatformSurfaceUnknown" xml:space="preserve">
+    <value>Gateway '{0}' publishes no platform surface '{2}' for resource '{1}'.</value>
+  </data>
+  <data name="ManagementOverrideChanged" xml:space="preserve">
+    <value>{0} changed the override of section '{1}' on resource '{2}' in generation {3}.</value>
+  </data>
+  <data name="ManagementClaimsChanged" xml:space="preserve">
+    <value>{0} replaced the claims of application '{1}' on resource '{2}' ({3} sections).</value>
+  </data>
+  <data name="ManagementActionInvoked" xml:space="preserve">
+    <value>{0} ran action '{1}' on resource '{2}'; {3} of {4} instances succeeded.</value>
+  </data>
 </root>

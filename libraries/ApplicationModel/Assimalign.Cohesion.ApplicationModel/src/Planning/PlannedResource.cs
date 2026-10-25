@@ -1,6 +1,9 @@
 using System;
+using System.Buffers;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 
 using Assimalign.Cohesion.ApplicationModel.Internal;
 
@@ -11,12 +14,19 @@ namespace Assimalign.Cohesion.ApplicationModel;
 /// and mount capability surfaces while using <see cref="GenericPlanner"/> as the inherited
 /// realization-plan fallback.
 /// </summary>
+/// <remarks>
+/// The resource also keeps what the application's code declares about it through
+/// <see cref="ResourceConfigurationExtensions"/>: its deployment configuration and its platform extension data.
+/// <see cref="IApplicationBuilder.Build"/> copies both into the resource's <see cref="ResourcePlan"/>.
+/// </remarks>
 public abstract class PlannedResource :
     IPlannedResource,
     IExecutableResource,
     IEndpointResource,
     IMountResource
 {
+    private readonly Dictionary<ResourceSectionPath, JsonNode?> _configuration = new();
+    private readonly Dictionary<ResourceExtensionKey, JsonElement> _extensions = new();
     private IReadOnlyList<ResourceEndpoint> _endpoints = Array.Empty<ResourceEndpoint>();
     private IReadOnlyList<ResourceMount> _mounts = Array.Empty<ResourceMount>();
 
@@ -104,5 +114,59 @@ public abstract class PlannedResource :
         }
 
         return GenericPlanner.CreatePlan(context);
+    }
+
+    // Composes a section's patches in declaration order; a JSON null patch is kept, and resets the section.
+    internal void Configure(ResourceSectionPath section, JsonNode? patch)
+    {
+        _configuration[section] = _configuration.TryGetValue(section, out JsonNode? existing)
+            ? JsonMergePatchComposition.Compose(existing, patch)
+            : patch?.DeepClone();
+    }
+
+    internal void SetExtension(ResourceExtensionKey key, JsonElement value) => _extensions[key] = value.Clone();
+
+    internal bool TryGetExtension(ResourceExtensionKey key, out JsonElement value) => _extensions.TryGetValue(key, out value);
+
+    // The deployment layer as the plan carries it, keyed by section path in declaration order.
+    internal IReadOnlyDictionary<string, JsonElement> GetConfiguration()
+    {
+        var configuration = new Dictionary<string, JsonElement>(_configuration.Count, StringComparer.Ordinal);
+        foreach ((ResourceSectionPath section, JsonNode? patch) in _configuration)
+        {
+            configuration.Add(section.Value, ToElement(patch));
+        }
+
+        return configuration;
+    }
+
+    internal IReadOnlyDictionary<string, JsonElement> GetExtensions()
+    {
+        var extensions = new Dictionary<string, JsonElement>(_extensions.Count, StringComparer.Ordinal);
+        foreach ((ResourceExtensionKey key, JsonElement value) in _extensions)
+        {
+            extensions.Add(key.Value, value);
+        }
+
+        return extensions;
+    }
+
+    private static JsonElement ToElement(JsonNode? node)
+    {
+        var buffer = new ArrayBufferWriter<byte>();
+        using (var writer = new Utf8JsonWriter(buffer))
+        {
+            if (node is null)
+            {
+                writer.WriteNullValue();
+            }
+            else
+            {
+                node.WriteTo(writer);
+            }
+        }
+
+        using JsonDocument document = JsonDocument.Parse(buffer.WrittenMemory);
+        return document.RootElement.Clone();
     }
 }

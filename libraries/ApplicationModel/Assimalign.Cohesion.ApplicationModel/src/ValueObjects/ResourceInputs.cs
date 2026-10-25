@@ -100,4 +100,25 @@ public sealed class ResourceInputs
 
     /// <summary>Gets transport trust-anchor certificates as one PEM document, without private keys.</summary>
     public ReadOnlyMemory<byte> TrustBundle { get; }
+
+    /// <summary>
+    /// Gets the directory holding the resource's deployment record, as the resource's instances see it, or
+    /// <see langword="null"/> when the gateway delivers no record. A controller passes it to the resource as
+    /// <see cref="AppEnvironment.Variables.ConfigDirectory"/>.
+    /// </summary>
+    public string? ConfigurationDirectory { get; private init; }
+
+    /// <summary>Returns a copy of these inputs that delivers the deployment record in <paramref name="directory"/>.</summary>
+    /// <param name="directory">The record directory, as the resource's instances see it.</param>
+    /// <returns>The copy.</returns>
+    /// <exception cref="ArgumentException"><paramref name="directory"/> is blank.</exception>
+    /// <exception cref="ArgumentNullException"><paramref name="directory"/> is null.</exception>
+    public ResourceInputs WithConfigurationDirectory(string directory)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(directory);
+        return new ResourceInputs(Mounts, BootstrapCredential, ApplicationTrustKey, TrustBundle)
+        {
+            ConfigurationDirectory = directory,
+        };
+    }
 }

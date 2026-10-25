@@ -3011,6 +3011,10 @@
 		<Project Path="libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway/fixtures/Assimalign.Cohesion.Web.HttpsHost/Assimalign.Cohesion.Web.HttpsHost.csproj" />
 		<File Path="libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway/fixtures/Assimalign.Cohesion.Web.HttpsHost/README.md" />
 	</Folder>
+	<Folder Name="/libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway/fixtures/Assimalign.Cohesion.Web.ManagedHost/">
+		<Project Path="libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway/fixtures/Assimalign.Cohesion.Web.ManagedHost/Assimalign.Cohesion.Web.ManagedHost.csproj" />
+		<File Path="libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway/fixtures/Assimalign.Cohesion.Web.ManagedHost/README.md" />
+	</Folder>
 	<Folder Name="/cohesion/libraries/Hosting/Assimalign.Cohesion.Hosting.Telemetry/">
 		<File Path="libraries/Hosting/Assimalign.Cohesion.Hosting.Telemetry/README.md" />
 	</Folder>

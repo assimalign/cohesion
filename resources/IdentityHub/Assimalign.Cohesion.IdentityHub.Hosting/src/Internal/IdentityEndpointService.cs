@@ -18,6 +18,7 @@ using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Http.Connections;
 using Assimalign.Cohesion.Web;
 using Assimalign.Cohesion.Web.Hosting;
+using Assimalign.Cohesion.Web.Hosting.Resources;
 using Assimalign.Cohesion.Web.SecurityHeaders;
 
 using HttpStatusCode = Assimalign.Cohesion.Http.HttpStatusCode;
@@ -261,7 +262,14 @@ internal sealed class IdentityEndpointService : IHostService, IDisposable
         }
         else if (namespaced)
         {
-            context.Response.StatusCode = HttpStatusCode.NotFound;
+            // The runtime surface, configuration status and actions, served after this host's own authorization.
+            if (_controlPlane is null ||
+                !await ResourceControlPlaneMiddleware.TryServeRuntimeSurfaceAsync(
+                        _controlPlane, _resourceContext, path[_basePath.Length..], context)
+                    .ConfigureAwait(false))
+            {
+                context.Response.StatusCode = HttpStatusCode.NotFound;
+            }
         }
         else
         {

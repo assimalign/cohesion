@@ -21,6 +21,7 @@ public sealed class InProcessGateway : ApplicationGateway, IApplicationGatewayRe
     private readonly IReadOnlyList<IApplicationResourceController> _controllers;
     private readonly ProcessHost _host;
     private readonly string _stateDirectory;
+    private readonly FileResourceRecordStore _records;
 
     /// <summary>Initializes an in-process gateway with default options.</summary>
     public InProcessGateway()
@@ -47,6 +48,7 @@ public sealed class InProcessGateway : ApplicationGateway, IApplicationGatewayRe
             options.StateDirectory
             ?? Path.Combine(Environment.CurrentDirectory, ".cohesion"));
         options.ExportDirectory ??= _stateDirectory;
+        _records = FileResourceRecordStore.Create(_stateDirectory);
 
         ResourceContext outerContext = ResourceRuntime.Current;
         _host = new ProcessHost(outerContext.EnvironmentName, _stateDirectory);
@@ -85,7 +87,21 @@ public sealed class InProcessGateway : ApplicationGateway, IApplicationGatewayRe
     /// <inheritdoc/>
     protected override IApplicationResourceStateManager State => _state;
 
+    /// <inheritdoc/>
+    /// <remarks>Members read the same record files a Local process would, through their ambient context.</remarks>
+    protected override IResourceRecordStore? RecordStore => _records;
+
     internal IApplicationResourceStateManager ResourceStates => _state;
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// A member is its entry assembly, described by its module version identifier, which a deterministic build changes
+    /// only when the assembly's content changes.
+    /// </remarks>
+    protected override string DescribeArtifact(IResourceArtifact artifact) =>
+        artifact is InProcessResourceArtifact member
+            ? member.EntryAssembly.ManifestModule.ModuleVersionId.ToString("N")
+            : base.DescribeArtifact(artifact);
 
     internal ProcessHost Host => _host;
 

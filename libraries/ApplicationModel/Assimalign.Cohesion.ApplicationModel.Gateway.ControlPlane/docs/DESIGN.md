@@ -9,7 +9,7 @@ future work.
 ## Boundaries
 
 The assembly is NativeAOT-compatible and uses source-generated JSON. It composes
-`Http.Connections` and `Connections.Tcp` directly, routes its five fixed templates with an
+`Http.Connections` and `Connections.Tcp` directly, routes its fixed v1 and v2 templates with an
 internal matcher, and references nothing under `resources/**`: no Web package and no platform
 `*.Hosting` package. The reference to `Hosting.Resources` is limited to the owner-approved
 `ResourceCommand` envelope and `ResourceCommandRejectedException`, both used at the dispatcher
@@ -51,12 +51,12 @@ one-shot Apply invocations.
 
 ## Protocol and trust
 
-The five `/cohesion/v1` routes are matched by the internal `ControlPlaneRouter`. They were
-first routed with `Web.Routing`. That reference was removed on 2026-09-25 because a library may
-not reference a `resources/**` package: libraries sit below the resource areas, and the COHLIB001
-guard now rejects such an edge. Five fixed templates never needed a general router, so the
-matcher keeps only the part of `Web.Routing` those templates used, with the same observable
-behaviour:
+The five `/cohesion/v1` routes and the ten `/cohesion/v2` management routes are matched by the
+internal `ControlPlaneRouter`. The v1 routes were first routed with `Web.Routing`. That reference
+was removed on 2026-09-25 because a library may not reference a `resources/**` package: libraries
+sit below the resource areas, and the COHLIB001 guard now rejects such an edge. A fixed route table
+never needed a general router, so the matcher keeps only the part of `Web.Routing` those templates
+used, with the same observable behaviour:
 
 - The request path is trimmed of `/` and split with empty segments dropped, so `//a//b/` and
   `/a/b` match the same way.
@@ -64,9 +64,12 @@ behaviour:
   parameter that captures the raw segment text. The request must have exactly as many segments
   as the template. Optional, default, catch-all, constrained, and complex segments are not
   supported, and a template that uses them fails at construction.
-- Routes are tried in table order. The table lists the templates in the order `Web.Routing`'s
-  inbound-precedence sort gave them. Each template has a different segment count, so only PUT
-  and DELETE share a path, and PUT comes first.
+- Routes are tried in table order. The v1 templates keep the order `Web.Routing`'s
+  inbound-precedence sort gave them: each has a different segment count, so only PUT and DELETE
+  share a path, and PUT comes first. Among the v2 templates a literal segment precedes a parameter
+  in the same position, so `GET configuration/status` is the status route while
+  `PATCH configuration/status` writes a section named `status`. No route reads a single section,
+  so the literal shadows nothing.
 - The first route whose path matches and that accepts the method wins. A `GET` route also
   serves `HEAD`.
 - A path that matched with other methods returns `405` with `Allow` listing those methods in
@@ -256,7 +259,44 @@ and endpoint selection coverage. Wire routes and valid endpoint handling are unc
 Trusted issuers and mapped callers carry `AllowedManagementOperations` beside
 `AllowedCommandKinds`: the server copies the matched issuer's list onto the authenticated principal
 and the caller. It is a separate grant list for the gateway management API of the
-[deployment-record control plane](../../../../docs/programs/RESOURCE_CONTROL_PLANE_REDESIGN.md),
-which is not built yet and serves no route here. Unlike the command rule, an empty list grants no
-management access, and command grants never imply it. Resource documents carry the resource's
-`resourceGroup` when the application placed it in one; groups have no authorization semantics.
+[deployment-record control plane](../../../../docs/programs/RESOURCE_CONTROL_PLANE_REDESIGN.md)
+(next section). Unlike the command rule, an empty list grants no management access, and command
+grants never imply it. Resource documents carry the resource's `resourceGroup` when the application
+placed it in one; groups have no authorization semantics.
+
+## Management API (phase P2, 2026-10-25)
+
+The server serves the deployment record's management API and decides nothing about records:
+`GatewayControlPlaneServer.Management.cs` authenticates, authorizes and maps results, and the
+gateway, which implements `IResourceManagementProvider`, owns every record and instance decision.
+The server takes the provider from the served application's trusted-issuer provider when it starts
+(the guided gateway base is both); a gateway that is not a provider answers every management route
+with `501`.
+
+| Route under `/cohesion/v2/resources/{name}/` | Grant | Provider member |
+| --- | --- | --- |
+| `GET configuration` | `configuration:read` | `GetConfigurationAsync` |
+| `GET configuration/status` | `configuration:read` | `GetConfigurationStatusAsync` |
+| `PATCH`, `PUT`, `DELETE configuration/{section}` | `configuration:write[:<section>]` | `ChangeOverrideAsync` (merge, replace, remove) |
+| `PUT claims/{owner}` | `claims:write`, and the caller's application is `{owner}` | `ReplaceClaimsAsync` |
+| `POST actions/{action}` | `actions:invoke[:<action>]` | `InvokeActionAsync` |
+| `GET instances` | `configuration:read` | `GetInstanceInventoryAsync` |
+| `GET platform/{platform}/{extension}` | `platform:read[:<key>]` | `GetPlatformSurfaceAsync` |
+| `PATCH platform/{platform}/{extension}` | `platform:write[:<key>]` | `ChangePlatformSurfaceAsync` |
+
+- **Authorization.** A management route authenticates exactly as a v1 route does (`401`, `403
+  invalid_token`), then requires `ResourceManagementOperations.IsGranted` for the operation and its
+  target. A missing grant is `403` with `{"error":"forbidden"}` and `Bearer error="insufficient_scope"`.
+  Unlike a command route, a verified developer is not refused for being a developer; the grants
+  decide. The application's own trust key grants `*`, so the developer tokens its gateway issues
+  manage that application's resources, and a peer issuer holds only the list its trust document names.
+- **Claims.** A claim belongs to the application whose code declares it, so `PUT claims/{owner}`
+  requires the caller's application to be `{owner}`, and refuses anything else with `403`.
+- **Results.** The provider returns a `ResourceManagementResult`; the server writes its document and
+  maps its status: `Ok` is 200; invalid configuration or input 400; an unknown resource, section,
+  action or platform surface 404; deployment-only, not overridable, not claimable or a claim
+  conflict 409; a moved version 412; a gateway without records 501; an unreachable instance 503.
+  A result that carries a record version sets `ETag`, and a write's `If-Match` (strong or weak; `*`
+  writes unconditionally) names the version the caller expects.
+- **Route values** are raw segments unescaped once, so a client may percent-encode a section path's
+  colons. Request bodies are bounded by `MaximumCommandBytes`, which is also the record's layer limit.

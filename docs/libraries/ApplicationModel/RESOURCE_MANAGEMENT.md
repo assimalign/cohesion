@@ -74,22 +74,54 @@ and dependencies can cross groups. Changing membership does not change Kubernete
 authorization, ownership, lifecycle, or workload hashes and does not trigger a deployment. See
 [resource groups](RESOURCE_GROUPS.md) for the wire shape.
 
+## Code-first deployment configuration
+
+The gateway's `Program.cs` declares a resource's deployment layer next to the resource, validated
+against the surface its build described:
+
+```csharp
+IWebResourceDescriptor api = builder.AddWeb(Manifests.OrdersApi)
+    .Configure("Web:Cors", """{"defaultPolicy":{"origins":["https://portal.example.com"]}}""");
+```
+
+`Configure` and the platform-extension members beneath typed verbs such as `ConfigureHpa`
+(`SetExtension`, `TryGetExtension`) are `ResourceConfigurationExtensions` members, generic over the
+descriptor so area verbs still chain. Sdk.Gateway attaches each resource's `resource.runtime.json` to
+its generated manifest (`ResourceManifest.Surface`, parsed as `ResourceSurface`); `Build()` copies the
+patches into `ResourcePlan.Configuration` and the extension data into `ResourcePlan.Extensions`, and
+refuses an unknown section, an unknown member or a value of the wrong type with the resource and path
+named.
+
 ## Gateway side
 
-The gateway management API over the record (`/cohesion/v2/resources/{resource}/configuration…`,
-claims, platform surfaces and action fan-out) is phase P2 and is not built. Two pieces it will use
-exist now:
+The gateway owns the record and the management API (phase P2):
 
+- **Records.** `IResourceRecordStore` keeps each resource's record where the platform keeps its
+  deployments; the Local and in-process gateways use `FileResourceRecordStore`. Before a resource
+  starts, the gateway writes the plan's deployment layer for the current generation (a hash of the
+  plan and the build it deploys), keeps the override layer when the generation is unchanged, drops it
+  and reports the drop when it changed, and keeps claims either way.
+- **Management API.** The gateway control plane serves `/cohesion/v2/resources/{resource}/…`:
+  configuration with provenance, override PATCH, PUT and DELETE, convergence status, claims, actions,
+  instances and platform surfaces. It authorizes against management grants, then calls the gateway's
+  `IResourceManagementProvider`; the route table is in the
+  [program document](../../programs/RESOURCE_CONTROL_PLANE_REDESIGN.md#management-api-p2).
 - **Management grants.** `TrustedIssuer.AllowedManagementOperations` and
   `ApplicationCaller.AllowedManagementOperations` are a grant list separate from command kinds: an
   empty list grants no management access, unlike the command rule where an empty list permits every
-  kind. Trusted-issuer documents persist the list as `allowedManagementOperations`.
+  kind. Trusted-issuer documents persist the list as `allowedManagementOperations`, and
+  `ResourceManagementOperations` names the grants. The application's own trust key grants all of
+  them.
 - **Instance inventory.** `ApplicationGateway.GetInstancesAsync(application, resource)` lists a
   realized resource's individually addressable control planes. The default reports the plan's
   control-plane endpoint for a single instance and refuses a plan that runs several; the Local
   gateway reports its supervised process while it is still starting, and platform gateways override
-  `ObserveResourceInstancesAsync` with their own inventory. The gateway will read each instance's
-  configuration status and fan every-instance actions out through it.
+  `ObserveResourceInstancesAsync` with their own inventory. Status reads each instance's
+  `configuration/status`, and every-instance actions fan out through the same list; an in-process
+  resource is reached through its control plane directly.
+- **Events.** Every management write, and every override a deployment discards, is posted to the
+  application's registered telemetry sink as an OTLP log record naming the operation, target, caller
+  and generation, never a value.
 
 ## Programmatic commands
 

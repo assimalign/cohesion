@@ -316,7 +316,7 @@ public sealed class GatewayTelemetryTests
     {
         var pending = (ValueTask<ResourceTelemetryInjection?>)typeof(ApplicationGateway)
             .GetMethod("ResolveTelemetryAsync", BindingFlags.Instance | BindingFlags.NonPublic)!
-            .Invoke(gateway, [model, model.Resources.Single(resource => resource.Name.ToString() == emitter), CancellationToken.None])!;
+            .Invoke(gateway, [model, model.Resources.Single(resource => resource.Name.ToString() == emitter).Name, CancellationToken.None])!;
         return pending.AsTask().GetAwaiter().GetResult();
     }
 

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 using Assimalign.Cohesion.ApplicationModel.Internal;
@@ -14,6 +15,12 @@ public sealed record ResourcePlan
 {
     /// <summary>The schema identifier understood by this contract version.</summary>
     public const string CurrentSchema = "cohesion/plan/v1";
+
+    private static readonly IReadOnlyDictionary<string, JsonElement> _emptyMap =
+        new ReadOnlyDictionary<string, JsonElement>(new Dictionary<string, JsonElement>(StringComparer.Ordinal));
+
+    private readonly IReadOnlyDictionary<string, JsonElement> _configuration = _emptyMap;
+    private readonly IReadOnlyDictionary<string, JsonElement> _extensions = _emptyMap;
 
     /// <summary>Initializes a resource realization plan.</summary>
     /// <param name="schema">The plan schema identifier.</param>
@@ -140,6 +147,73 @@ public sealed record ResourcePlan
 
     /// <summary>Gets the immutable advisory compiler hints.</summary>
     public IReadOnlyDictionary<string, string> Hints { get; }
+
+    /// <summary>
+    /// Gets the resource's deployment layer: the RFC 7396 merge patch the application's code declares for each
+    /// configuration section, keyed by section path. The gateway delivers it as the deployment record's
+    /// <c>deployment.json</c>; an empty map delivers no deployment layer.
+    /// </summary>
+    /// <exception cref="ArgumentException">An assigned patch is not a JSON value.</exception>
+    [JsonIgnore]
+    public IReadOnlyDictionary<string, JsonElement> Configuration
+    {
+        get => _configuration;
+        init => _configuration = Freeze(value, ErrorMessages.ResourceConfigurationPatchInvalid);
+    }
+
+    /// <summary>
+    /// Gets platform extension data keyed by platform-qualified name, such as <c>kubernetes/hpa</c>. The gateway named
+    /// by a key's platform part compiles the data and refuses a key it does not know; every other gateway ignores it.
+    /// The data is plain JSON, so it survives describe and export round trips.
+    /// </summary>
+    /// <exception cref="ArgumentException">An assigned value is not a JSON value.</exception>
+    [JsonIgnore]
+    public IReadOnlyDictionary<string, JsonElement> Extensions
+    {
+        get => _extensions;
+        init => _extensions = Freeze(value, ErrorMessages.ResourceExtensionValueInvalid);
+    }
+
+    // The wire form omits both maps when they are empty, so a plan without configuration or extensions serializes
+    // exactly as before they existed.
+    [JsonInclude]
+    [JsonPropertyName("configuration")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    internal IReadOnlyDictionary<string, JsonElement>? ConfigurationDocument
+    {
+        get => _configuration.Count == 0 ? null : _configuration;
+        init => _configuration = Freeze(value, ErrorMessages.ResourceConfigurationPatchInvalid);
+    }
+
+    [JsonInclude]
+    [JsonPropertyName("extensions")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    internal IReadOnlyDictionary<string, JsonElement>? ExtensionsDocument
+    {
+        get => _extensions.Count == 0 ? null : _extensions;
+        init => _extensions = Freeze(value, ErrorMessages.ResourceExtensionValueInvalid);
+    }
+
+    private static IReadOnlyDictionary<string, JsonElement> Freeze(IReadOnlyDictionary<string, JsonElement>? source, string invalid)
+    {
+        if (source is null || source.Count == 0)
+        {
+            return _emptyMap;
+        }
+
+        var copy = new Dictionary<string, JsonElement>(source.Count, StringComparer.Ordinal);
+        foreach ((string key, JsonElement value) in source)
+        {
+            if (value.ValueKind == JsonValueKind.Undefined)
+            {
+                throw new ArgumentException(invalid, nameof(source));
+            }
+
+            copy.Add(key, value.Clone());
+        }
+
+        return new ReadOnlyDictionary<string, JsonElement>(copy);
+    }
 
     private static IReadOnlyList<T> Copy<T>(IReadOnlyList<T> source)
     {

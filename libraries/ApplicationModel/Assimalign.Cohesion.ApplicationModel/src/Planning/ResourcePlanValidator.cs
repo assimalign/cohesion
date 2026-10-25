@@ -109,6 +109,42 @@ public static class ResourcePlanValidator
         ValidateVolumes(plan, manifest);
         ValidateServicesAndExposures(plan, manifest);
         ValidateProbes(plan, manifest);
+        ValidateConfiguration(plan, manifest);
+        ValidateExtensions(plan);
+    }
+
+    // Every deployment patch names a section of the manifest's runtime surface and conforms to its schema.
+    private static void ValidateConfiguration(ResourcePlan plan, ResourceManifest manifest)
+    {
+        if (plan.Configuration.Count == 0)
+        {
+            return;
+        }
+
+        ResourceSurface surface = manifest.Surface ?? throw new InvalidOperationException(string.Format(
+            System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ResourceConfigurationSurfaceMissing, manifest.Name));
+        foreach ((string path, System.Text.Json.JsonElement patch) in plan.Configuration)
+        {
+            if (!ResourceSectionPath.IsValid(path, out _) || !surface.TryGetSection(path, out ResourceSurfaceSection? section))
+            {
+                throw new InvalidOperationException(string.Format(
+                    System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ResourceConfigurationSectionUnknown, manifest.Name, path));
+            }
+
+            if (!section.TryValidatePatch(patch, out string? error))
+            {
+                throw new InvalidOperationException(string.Format(
+                    System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ResourceConfigurationPatchRejected, manifest.Name, path, error));
+            }
+        }
+    }
+
+    private static void ValidateExtensions(ResourcePlan plan)
+    {
+        foreach (string key in plan.Extensions.Keys)
+        {
+            Require(ResourceExtensionKey.IsValid(key, out _), ErrorMessages.ResourceExtensionKeyInvalid);
+        }
     }
 
     private static void ValidateGate(WorkloadSpec workload)

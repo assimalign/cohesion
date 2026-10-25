@@ -121,3 +121,25 @@ prohibited in the descriptor verb.
 Certificate mounts remain ordinary single-file Secret inputs. Explicit `parameter:` or `<source>:<key>` sources are authoritative and unusable bundles return a named Unresolved result. A source-free certificate mount gets its leaf from the registered certificate authority (`ApplicationProviders.CertificateAuthority`, for example `UseSecretStore(store).AsCertificateAuthority()`) once its resource is Running. The authority resource's own leaf always comes from the gateway development authority. Without a registered authority only Local uses the development authority; every other environment fails loudly, naming the endpoint and the registration to add, and a registered authority that cannot issue falls back to the development authority in Local only. The development authority persists a P-256 root and protected PKCS#8 key under `<state>/<application>/.state/certs/`; leaf bundles cache by resource/endpoint with loopback and observed/declared host SANs. New bundles use leaf, intermediates if any, and one PKCS#8 key; readers preserve both existing producer orders and tolerate a supplied root.
 
 Certificates-only transport anchors are carried in ResourceInputs, materialized beside bootstrap.token as a protected `.state/trust.pem`, and exposed through AppEnvironment.Variables.TrustBundlePath. Local and in-process probes use the shared CustomRootTrust validator while preserving hostname checks. Providers receive the same trust policy as `ResourceProviderConnection.ServerCertificateValidator`. This transport root is distinct from the ES256 application trust-signing key.
+
+## Deployment records and management (P2)
+
+A gateway with an `IResourceRecordStore` (`RecordStore`; Local and in-process use
+`FileResourceRecordStore` under their state root) delivers each realized resource's deployment
+record. Before the resource starts, the gateway writes the deployment layer from the plan's
+`Configuration` (what `Program.cs` declared with `Configure(...)`), names the record directory in
+the resource's inputs, and keys the record to a generation: a hash of the plan and the build it
+deploys (`DescribeArtifact`). Re-applying the same generation keeps management overrides; a new
+generation drops them and reports which sections reverted, on standard error and as a telemetry
+event. Claims survive both. A gateway without a store refuses deployment configuration at
+`Build()`.
+
+The gateway also implements `IResourceManagementProvider`, which the control plane serves as
+`/cohesion/v2/resources/{name}/…`: configuration with each value's provenance, override changes
+validated against the resource's runtime surface, convergence status read from every instance,
+claims, actions fanned out to every instance when declared so, and platform surfaces through the
+protected `ReadPlatformSurfaceAsync`/`WritePlatformSurfaceAsync` hooks a platform gateway
+overrides. Each write is conditional on the record version (`ETag`/`If-Match`) and posted to the
+application's telemetry sink as an event that names the operation, never the value. Wire contract:
+[runtime contract](../../../../docs/RUNTIME_CONTRACT.md#deployment-record); routes and grants:
+[control plane design](../../Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane/docs/DESIGN.md).

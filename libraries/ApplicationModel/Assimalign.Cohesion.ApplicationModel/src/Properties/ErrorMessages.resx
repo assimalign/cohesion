@@ -29,4 +29,27 @@
   <data name="ResourceGroupNested" xml:space="preserve"><value>Resource groups are flat logical containers and cannot be nested.</value></data>
   <data name="ResourceGroupDuplicate" xml:space="preserve"><value>Resource group '{0}' is already declared.</value></data>
   <data name="ResourceGroupMembershipInvalid" xml:space="preserve"><value>Logical resource groups contain an invalid name, duplicate group, unknown member, duplicate membership, or inconsistent descriptor and plan membership.</value></data>
+  <data name="ResourceSectionPathInvalid" xml:space="preserve"><value>A configuration section path is one or more segments of ASCII letters, digits, '.', '_' or '-' separated by single colons, at most 256 characters, such as 'Web:Cors'.</value></data>
+  <data name="ResourceExtensionKeyInvalid" xml:space="preserve"><value>An extension key is '&lt;platform&gt;/&lt;name&gt;', each part lowercase ASCII letters and digits in hyphen-separated words of at most 64 characters, such as 'kubernetes/hpa'.</value></data>
+  <data name="ResourceExtensionValueInvalid" xml:space="preserve"><value>An extension value must be a JSON value.</value></data>
+  <data name="ResourceConfigurationPatchInvalid" xml:space="preserve"><value>A configuration patch must be a JSON document.</value></data>
+  <data name="ResourceActionInputInvalid" xml:space="preserve"><value>An action input must be a JSON value.</value></data>
+  <data name="ResourceConfigurationAfterBuild" xml:space="preserve"><value>A built application model is immutable; configure resources and their extensions before Build().</value></data>
+  <data name="ResourceConfigurationUnsupported" xml:space="preserve"><value>Resource '{0}' is not a manifest-backed resource this application realizes, so it has no deployment configuration or extensions here. A reference to another application's resource is configured by that application's code.</value></data>
+  <data name="ResourceConfigurationSurfaceMissing" xml:space="preserve"><value>Resource '{0}' configures sections, but its manifest carries no runtime surface. Build the resource with CohesionApplicationModel enabled so its describe step writes resource.runtime.json, then rebuild the gateway.</value></data>
+  <data name="ResourceConfigurationSectionUnknown" xml:space="preserve"><value>Resource '{0}' configures section '{1}', which its runtime surface does not declare.</value></data>
+  <data name="ResourceConfigurationPatchRejected" xml:space="preserve"><value>Resource '{0}' configures section '{1}' with an invalid patch: {2}</value></data>
+  <data name="ResourceSurfaceSchemaUnsupported" xml:space="preserve"><value>Runtime surface schema '{0}' is not supported. Expected '{1}'.</value></data>
+  <data name="ResourceSurfaceMemberInvalid" xml:space="preserve"><value>Runtime surface member '{0}' is missing or has the wrong JSON type.</value></data>
+  <data name="ResourceSurfaceValueInvalid" xml:space="preserve"><value>Runtime surface member '{0}' has the unsupported value '{1}'.</value></data>
+  <data name="ResourceSurfaceEntryDuplicate" xml:space="preserve"><value>The runtime surface declares '{0}' more than once.</value></data>
+  <data name="SurfaceValueTypeMismatch" xml:space="preserve"><value>The value at '{0}' must be of type {1}.</value></data>
+  <data name="SurfaceValueNotAllowed" xml:space="preserve"><value>The value at '{0}' is not one of the values the schema allows.</value></data>
+  <data name="SurfacePatternMismatch" xml:space="preserve"><value>The value at '{0}' does not match the pattern the schema requires.</value></data>
+  <data name="SurfaceMemberUnknown" xml:space="preserve"><value>'{0}' is not a member the schema declares.</value></data>
+  <data name="SurfaceMemberRequired" xml:space="preserve"><value>The value at '{0}' lacks the required member '{1}'.</value></data>
+  <data name="SurfaceMemberNotRemovable" xml:space="preserve"><value>The member at '{0}' is required and cannot be removed.</value></data>
+  <data name="SurfaceReferenceInvalid" xml:space="preserve"><value>The schema reference '{0}' cannot be resolved.</value></data>
+  <data name="SurfaceValueTooDeep" xml:space="preserve"><value>The value at '{0}' is nested more than 64 levels deep.</value></data>
+  <data name="SurfaceValueForbidden" xml:space="preserve"><value>The schema allows no value at '{0}'.</value></data>
 </root>

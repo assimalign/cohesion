@@ -270,39 +270,8 @@ public static class ResourceControlPlaneMiddleware
             return;
         }
 
-        if (path == ConfigurationPath)
+        if (await TryServeRuntimeSurfaceAsync(controlPlane, resourceContext, path, context).ConfigureAwait(false))
         {
-            if (!isRead)
-            {
-                SetMethodNotAllowed(context, "GET, HEAD");
-                return;
-            }
-
-            await WriteJsonAsync(context, controlPlane.Surface.WriteTo).ConfigureAwait(false);
-            return;
-        }
-
-        if (path == ConfigurationStatusPath)
-        {
-            if (!isRead)
-            {
-                SetMethodNotAllowed(context, "GET, HEAD");
-                return;
-            }
-
-            await WriteConfigurationStatusAsync(controlPlane, resourceContext, context).ConfigureAwait(false);
-            return;
-        }
-
-        if (path.StartsWith(ActionsPathPrefix, StringComparison.Ordinal))
-        {
-            if (context.Request.Method != HttpMethod.Post)
-            {
-                SetMethodNotAllowed(context, "POST");
-                return;
-            }
-
-            await InvokeActionAsync(controlPlane, context, path[ActionsPathPrefix.Length..]).ConfigureAwait(false);
             return;
         }
 
@@ -313,6 +282,72 @@ public static class ResourceControlPlaneMiddleware
         }
 
         await next.Invoke(context).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Serves the runtime-surface routes of a resource control plane, for a host that routes and authorizes its own
+    /// control plane: <c>GET /cohesion/v1/configuration</c>, <c>GET /cohesion/v1/configuration/status</c> and
+    /// <c>POST /cohesion/v1/actions/{name}</c>.
+    /// </summary>
+    /// <param name="controlPlane">The resource's registered control plane.</param>
+    /// <param name="resourceContext">The resource identity, which names the instance in the status; null when the host has none.</param>
+    /// <param name="path">The request path relative to the host's control-plane base, such as <c>/cohesion/v1/configuration</c>.</param>
+    /// <param name="context">The current HTTP exchange.</param>
+    /// <returns>Whether <paramref name="path"/> is one of the routes, in which case the response is complete.</returns>
+    /// <remarks>
+    /// This method authorizes nothing: call it only for a request the host has already admitted to its namespaced
+    /// control-plane routes. <see cref="InvokeAsync"/> serves the same routes after its own authorization. A route
+    /// requested with another method answers 405, an unknown action 404, an input that does not bind 400, and an
+    /// input over 1 MiB 413.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="controlPlane"/>, <paramref name="path"/> or <paramref name="context"/> is null.</exception>
+    public static async ValueTask<bool> TryServeRuntimeSurfaceAsync(
+        IResourceControlPlane controlPlane,
+        ResourceContext? resourceContext,
+        string path,
+        IHttpContext context)
+    {
+        ArgumentNullException.ThrowIfNull(controlPlane);
+        ArgumentNullException.ThrowIfNull(path);
+        ArgumentNullException.ThrowIfNull(context);
+        bool isRead = context.Request.Method == HttpMethod.Get || context.Request.Method == HttpMethod.Head;
+        if (path == ConfigurationPath)
+        {
+            if (!isRead)
+            {
+                SetMethodNotAllowed(context, "GET, HEAD");
+                return true;
+            }
+
+            await WriteJsonAsync(context, controlPlane.Surface.WriteTo).ConfigureAwait(false);
+            return true;
+        }
+
+        if (path == ConfigurationStatusPath)
+        {
+            if (!isRead)
+            {
+                SetMethodNotAllowed(context, "GET, HEAD");
+                return true;
+            }
+
+            await WriteConfigurationStatusAsync(controlPlane, resourceContext, context).ConfigureAwait(false);
+            return true;
+        }
+
+        if (path.StartsWith(ActionsPathPrefix, StringComparison.Ordinal))
+        {
+            if (context.Request.Method != HttpMethod.Post)
+            {
+                SetMethodNotAllowed(context, "POST");
+                return true;
+            }
+
+            await InvokeActionAsync(controlPlane, context, path[ActionsPathPrefix.Length..]).ConfigureAwait(false);
+            return true;
+        }
+
+        return false;
     }
 
     /// <summary>Validates the identity required by a gateway-managed resource during composition.</summary>
@@ -506,14 +541,15 @@ public static class ResourceControlPlaneMiddleware
 
     private static Task WriteConfigurationStatusAsync(
         IResourceControlPlane controlPlane,
-        ResourceContext resource,
+        ResourceContext? resource,
         IHttpContext context)
     {
         // The status names the platform instance and the surface the process runs, so the gateway can
         // attribute each instance's applied record and detect a process whose build differs from the plan.
-        string? instance = resource.TryGetEnvironmentValue(AppEnvironment.Variables.ResourceInstance, out string? value)
-            ? value
-            : null;
+        string? instance = resource is not null &&
+            resource.TryGetEnvironmentValue(AppEnvironment.Variables.ResourceInstance, out string? value)
+                ? value
+                : null;
         string surfaceDigest = controlPlane.Surface.Digest;
         ResourceConfigurationStatus status = controlPlane.ConfigurationStatus;
         return WriteJsonAsync(context, writer =>
