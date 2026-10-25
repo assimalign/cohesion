@@ -10,6 +10,45 @@ namespace Assimalign.Cohesion.Database.Graph.Tests;
 
 public sealed class GraphQueryMemoryTests
 {
+    [Fact(DisplayName = "Cohesion Test [Graph] - A boxed scalar shared between a container and a root releases every grant (w11 review)")]
+    public void RetainValue_SharedScalarBecomingRoot_ShouldReleaseOnlyAfterLastOwner()
+    {
+        // Arrange
+        var memory = new GraphQueryMemory(32768);
+        using var container = new GraphMemoryOwner(memory);
+        using var root = new GraphMemoryOwner(memory);
+        object shared = 7L;
+        var values = Enumerable.Repeat<object?>(shared, 1000).ToArray();
+
+        // Act
+        container.RetainValue(values, CancellationToken.None);
+        root.RetainValue(shared, CancellationToken.None);
+        container.Dispose();
+
+        // Assert
+        memory.RetainedBytes.ShouldBeGreaterThan(0);
+        root.ReleaseValue(shared);
+        memory.RetainedBytes.ShouldBe(0);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Graph] - Shared boxed scalar leaves consume one value grant (w11 review)")]
+    public void RetainValue_SharedBoxedScalar_ShouldAccountItsStorageOnce()
+    {
+        // Arrange
+        var memory = new GraphQueryMemory(32768);
+        using var owner = new GraphMemoryOwner(memory);
+        object shared = 7L;
+        var values = Enumerable.Repeat<object?>(shared, 1000).ToArray();
+
+        // Act
+        owner.RetainValue(values, CancellationToken.None);
+
+        // Assert
+        memory.PeakRetainedBytes.ShouldBeLessThan(32_000);
+        owner.ReleaseValue(values);
+        memory.RetainedBytes.ShouldBe(0);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Graph] - Shared small immutable leaves consume one value grant (w11 review)")]
     public void RetainValue_SharedSmallLeaves_ShouldAccountTheirStorageOnce()
     {

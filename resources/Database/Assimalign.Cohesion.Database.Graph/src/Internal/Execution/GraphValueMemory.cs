@@ -24,10 +24,11 @@ internal static class GraphValueMemory
     internal static bool IsTracked(object value)
         => value switch
         {
-            // Small strings and byte arrays can be shared by many retained rows too.
+            // Small reference leaves and boxed scalars can be shared by retained rows too.
             // Count their storage once, just like containers, rather than per reference.
             string or byte[] => true,
-            _ => value is IList or IReadOnlyList<GraphNode> or IReadOnlyList<GraphRelationship> or IReadOnlyDictionary<string, object?> or GraphPath or GraphOrderComparer.PreparedMap,
+            GraphNode or GraphRelationship => false, // Entity structs retain inline data per occurrence.
+            _ => value is ValueType or IList or IReadOnlyList<GraphNode> or IReadOnlyList<GraphRelationship> or IReadOnlyDictionary<string, object?> or GraphPath or GraphOrderComparer.PreparedMap,
         };
 
     internal static long Shallow(object value) => value switch

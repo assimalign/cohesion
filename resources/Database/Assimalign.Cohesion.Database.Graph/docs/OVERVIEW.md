@@ -197,8 +197,8 @@ Remote Execute statements use server ceilings; wire payloads are unchanged. Memo
 CG05020, invalid limits CG08021, and work/hop exhaustion CG05004. The default admits 100,000
 one-property SET, FOR/INSERT, entity RETURN and QueryPaths rows; wider retained state reduces capacity.
 TraverseAsync also enforces these ceilings, including the newly bounded 1,000,000 work units.
-Containers, strings and byte arrays are counted once across operators, with one combined ledger
-grant for bookkeeping. Every ownership lease is released on completion or failure.
+Containers and supported immutable leaves, including boxed scalars, are counted once across
+operators. Root bookkeeping uses one combined ledger grant. Every ownership lease is released on completion or failure.
 
 A bounded per-session cache reuses only cleared accounting buffers; large high-water workspaces
 are discarded and disposal drops the cache. Retained values and budget ownership do not escape

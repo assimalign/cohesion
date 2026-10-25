@@ -777,8 +777,10 @@ Accounting is deterministic and statement-local: owned row/slot containers, grou
 DISTINCT state, ordered results, writer overlays, scan identity arrays, bounded cursor batches,
 merge heads and DFS state all consume the same grant. Constructed FOR lists and projected values
 remain charged while a downstream iterator holds them. Parameter/variable input lists are borrowed
-from their existing input scope. Reference-counted ownership charges containers, strings and byte arrays once across operators,
-including small shared leaves. One 96-byte ledger grant covers identity and root-owner bookkeeping;
+from their existing input scope. Reference-counted ownership charges containers and supported immutable leaves once across operators,
+including small strings, byte arrays and boxed scalars. Nested boxed scalars use a 48-byte identity
+entry; a root scalar acquires the combined 96-byte grant, including owner bookkeeping, once.
+Containers use that same 96-byte combined identity/root-owner grant;
 operators do not add a second 64-byte owner-entry grant for each retained container. Typed entity collections
 are traversed by index without boxing each node/relationship.
 Decoded anchors have lexical grants; each incident cursor owns one decoded target grant until
