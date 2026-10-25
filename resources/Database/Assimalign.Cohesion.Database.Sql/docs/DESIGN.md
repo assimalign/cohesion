@@ -7549,7 +7549,8 @@ remains 4280 B/query in three runs, below its unchanged 4293.296 bound.
 SQL/Graph transaction-status negotiation adds an existing Ready I/T/E frame after Execute
 completion or a statement error. The shared client drains it before returning, rolls back open
 or failed transactions on pool return, and only reuses an Idle session. Cleanup runs outside the
-pool lock with a five-second timeout. Missing/invalid state or legacy transaction-capable peers
+pool lock. Rollback reply and Ready drain each have a five-second internal bound (up to ten
+seconds total). Missing/invalid state or legacy transaction-capable peers
 are discarded. SQL's formerly skipped pool-rollback regression is enabled. No new wire identifier,
 public interface, protocol version or persistent format is introduced.
 
