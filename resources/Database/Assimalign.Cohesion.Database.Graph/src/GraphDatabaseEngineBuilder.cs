@@ -66,6 +66,7 @@ public sealed class GraphDatabaseEngineBuilder
     internal GraphDatabaseEngineBuilder(string name)
     {
         _state = new(name, GraphDatabaseEngine.ModelName);
+        Functions = new GraphFunctionCollection(_state.EnsureMutable);
     }
 
     /// <summary>
@@ -84,6 +85,9 @@ public sealed class GraphDatabaseEngineBuilder
     /// engine.
     /// </remarks>
     public GraphDatabaseEngineOptions Options => _options;
+
+    /// <summary>Gets native and developer functions, mutable until this builder begins its one build attempt.</summary>
+    public GraphFunctionCollection Functions { get; }
 
     /// <summary>
     /// Declares a database the engine owns: the build opens it, or creates it when it does not
@@ -225,7 +229,8 @@ public sealed class GraphDatabaseEngineBuilder
 
         // Phases 2 and 3: the engine and its built-in workers, then the factories' products. A
         // failure here disposes what the engine and the composition hold.
-        var engine = GraphDatabaseEngine.CreateUncomposed(Name, options);
+        GraphFunctionCatalog functions = Functions.Freeze();
+        var engine = GraphDatabaseEngine.CreateUncomposed(Name, options, functions);
         _state.Complete(engine, engine.Compose, GraphDatabaseEngine.ReleaseRefusedWorkerAsync);
 
         // Phase 4: each declared database, in declaration order; a failure disposes the engine.
@@ -253,5 +258,6 @@ public sealed class GraphDatabaseEngineBuilder
 
         public string Name => _target.Name;
         public global::Assimalign.Cohesion.Database.Graph.GraphDatabaseEngineOptions Options => _target.Options;
+        public GraphFunctionCollection Functions => _target.Functions;
     }
 }

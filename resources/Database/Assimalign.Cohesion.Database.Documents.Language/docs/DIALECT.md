@@ -235,3 +235,38 @@ OQL syntax and evaluation are unchanged. Engine state and result-access refusals
 the existing wire formatter includes the code once and keeps exception detail code-free.
 Direct catalog failures preserve their concrete exception type and non-null Diagnostics.
 No SQLSTATE mapping, protocol version or storage format is added.
+
+## Engine-registered function calls
+
+An engine builder may register native application scalar and aggregate implementations through
+`Functions.Add`. Names follow unquoted identifier grammar and compare ordinally ignoring case.
+Registrations are engine-wide, frozen before startup, and cannot replace native or reserved names.
+Application overloads require disjoint arities. No CREATE FUNCTION syntax, scripting runtime,
+persistent function definitions or wire message type is introduced.
+
+Ordinary request/text/wire execution accepts named calls and resolves them against the executing
+engine. Standalone parser defaults retain unknown-call CD00008 and known native arity CD00006;
+the parser's explicit deferred-binding mode supports engine request parsing. Missing registrations
+still fail with CD00008 before reading rows. Scalar/aggregate placement, literal kinds and grouped
+expressions are validated from the function catalog, with declared result types retained for
+empty/paged results. Calls remain excluded from VALUES and index seek bounds.
+
+Native scalars and aggregates use the same validated invocation and protected-core family as
+application functions. META and lazy COALESCE/IFMISSING/IFNULL/IFMISSINGORNULL remain grammar
+forms. NULL/MISSING truth rules, Unicode operations, size limits, transaction clocks, native
+arithmetic/domain codes, index selection and rollback semantics retain the existing contract.
+External callback/result/accumulator failures use CD05017; structured diagnostic messages remain
+unprefixed and wire formatting adds the code once. DatabaseException, out-of-memory, insufficient
+stack and actual statement cancellation retain their identity; application I/O, storage and timeout
+exceptions use CD05017 and leave the wire session reusable. No SQLSTATE or format/version bump.
+
+Typed callback JSON parameters accept arrays and objects, not primitive JSON values. Wrong-kind
+literals fail planning, while incompatible stored values yield scalar NULL or skipped aggregate
+inputs. Typed integer input conversion uses CD02008 for fractional values and CD02007 for values
+outside the declared CLR integer range; the callback is not invoked. An overflow thrown by the
+callback itself remains the external-function diagnostic CD05017.
+
+Engine requests admit named calls and resolve them against the executing catalog. An unknown
+name retains CD00008 but now fails during binding/execution: the wire category is ExecutionFailure,
+and no StatementParseFailed event is raised. Standalone parsers retain unknown-name parse
+diagnostics. This changes error categorization, with no frame-layout or protocol-version change.

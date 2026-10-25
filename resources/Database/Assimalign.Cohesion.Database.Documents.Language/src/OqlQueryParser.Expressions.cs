@@ -283,11 +283,11 @@ public sealed partial class OqlQueryParser
 
                 Expect(TokenType.RightParen, "')'");
                 var definition = OqlFunctions.Find(function);
-                if (!Failed && definition is null)
+                if (!Failed && definition is null && !_allowUnregisteredFunctions)
                 {
                     Error("CD00008", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.OqlQueryParserParsePrimaryVoid4, name), start);
                 }
-                else if (!Failed && (!definition!.AcceptsArity(arguments.Count) ||
+                else if (!Failed && definition is not null && (!definition.AcceptsArity(arguments.Count) ||
                     function != "COUNT" && arguments.Any(argument => argument is OqlStarExpression)))
                 {
                     Error("CD00006", function != "COUNT" && arguments.Any(argument => argument is OqlStarExpression)

@@ -29,6 +29,7 @@ internal static partial class GraphExpressionEvaluator
             var result = expression switch
             {
                 GqlFunctionCallExpression call => Function(call, bindings, context, parameters),
+                GqlNamedFunctionCallExpression call => NamedFunction(call, bindings, context, parameters),
                 GqlCastExpression cast => Cast(Evaluate(cast.Operand, bindings, context, parameters), cast),
                 GqlLiteralExpression literal => literal.Value,
                 GqlParameterExpression parameter => Parameter(parameter, parameters),

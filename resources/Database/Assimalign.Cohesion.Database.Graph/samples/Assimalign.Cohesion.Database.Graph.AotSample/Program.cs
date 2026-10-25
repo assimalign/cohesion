@@ -8,12 +8,20 @@ using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Graph;
 using Assimalign.Cohesion.Database.Graph.Protocol;
 
-await using var engine = GraphDatabaseEngine.Create("graph-aot", new());
+var builder = GraphDatabaseEngine.CreateBuilder("graph-aot");
+builder.Functions.Add(GraphScalarFunction.Create<long, long>("developer_twice", value => checked(value * 2)));
+builder.Functions.Add(GraphAggregateFunction.Create<long, long, long>("developer_sum", () => 0L,
+    (state, value) => checked(state + value), state => state, _ => 8));
+await using var engine = await builder.BuildAsync();
 var database = await engine.CreateDatabaseAsync("app", CancellationToken.None);
 await using var session = await database.CreateSessionAsync(CancellationToken.None);
 var parameters = new Dictionary<string, object?> { ["xs"] = Enumerable.Range(0, 317).ToArray() };
 int checks = 0;
 
+await Check("RETURN developer_twice(21)", [[42L]]);
+await Check("FOR v IN [1,2,2,NULL] RETURN developer_sum(v), developer_sum(DISTINCT v), count(*)", [[5L,3L,4L]]);
+await Check("FOR v IN [] RETURN developer_sum(v),sum(v)", [[0L,0L]]);
+await Check("RETURN abs(-7),char_length('A😀B')", [[7L,3L]]);
 await Check("RETURN 7", [[7L]]);
 await Check("INSERT (a:W {k:1}) SET a.k=2 RETURN a.k", [[2L]]);
 await session.ExecuteAsync("MATCH (a:W) DELETE a", cancellationToken: CancellationToken.None);

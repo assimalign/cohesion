@@ -2,7 +2,7 @@
 
 ## Wire contract ownership
 
-`Assimalign.Cohesion.Database.KeyValuePair.Protocol` owns this model's wire messages, codecs, family singleton and transferred value shapes (5 public types). Both engine and remote client reference that one assembly. Its public namespace and RootNamespace equal its project name. Engine requests, planning, catalog, storage and server lifecycle stay in `Assimalign.Cohesion.Database.KeyValuePair`. This extraction preserves wire bytes and validation; moved public types intentionally change namespace and assembly identity with no forwarders.
+`Assimalign.Cohesion.Database.KeyValuePair.Protocol` owns this model's wire messages, codecs, family singleton and transferred value shapes (6 public top-level types). Both engine and remote client reference that one assembly. Its public namespace and RootNamespace equal its project name. Engine requests, planning, catalog, storage and server lifecycle stay in `Assimalign.Cohesion.Database.KeyValuePair`. This extraction preserves wire bytes and validation; moved public types intentionally change namespace and assembly identity with no forwarders.
 
 
 The key-value model engine: `KeyValueDatabaseEngine`, an ordered key space with
@@ -57,9 +57,10 @@ keys order by unsigned lexicographic byte comparison.
   the receiving session's database. Database/server administration stays on the
   host-owned engine and is absent from the command grammar.
 - The typed request family (`KeyValueGetRequest`, `KeyValuePutRequest`,
-  `KeyValueDeleteRequest`, `KeyValueExistsRequest`, `KeyValueScanRequest`) —
+  `KeyValueDeleteRequest`, `KeyValueExistsRequest`, `KeyValueScanRequest`,
+  `KeyValueKeySpacesRequest`, `KeyValueFunctionRequest`) —
   the model's members of the shared `Database.Execution` request family.
-- The text command grammar (`GET`/`PUT`/`DELETE`/`EXISTS`/`SCAN`) — the contract
+- The text command grammar (`GET`/`PUT`/`DELETE`/`EXISTS`/`SCAN`/`KEYSPACES`/`CALL`) — the contract
   in [COMMANDS.md](COMMANDS.md), parsed by the internal `ExecuteCommandTextAsync` wire entry so the
   wire protocol's Execute message serves the model with zero protocol changes.
 - `KeyValueDatabaseServer` (+ `KeyValueDatabaseServerOptions`) — the model's
@@ -292,3 +293,36 @@ protocol error categories. Authentication/version negotiation and refusal contro
 Key-value debugger inspection uses stored metadata and existing public memory values without reading or copying their contents or evaluating session/storage operations.
 
 Eligible types follow the [Database conventions](../../Assimalign.Cohesion.Database/docs/CONVENTIONS.md) debugger display/proxy rules. Views are private and read-only; inspection does not change the public API, execution paths, error contracts, storage formats or protocol bytes.
+
+## Application scalar functions
+
+Register stateless/thread-safe callbacks before build. The engine freezes the catalog before
+I/O and shares it across its databases; direct `Create` registers none.
+
+```csharp
+var builder = KeyValueDatabaseEngine.CreateBuilder("app-functions");
+builder.Functions.Add(KeyValueFunction.Create<long, long>("increment", value => value + 1));
+builder.AddDatabase("app");
+await using var engine = await builder.BuildAsync();
+var database = await engine.OpenDatabaseAsync("app");
+await using var session = await database.CreateSessionAsync();
+await using var result = (DatabaseResultSet)await session.ExecuteAsync(
+    new KeyValueFunctionRequest("increment", [41L]));
+```
+
+`KeyValueFunction.Create` supports statically compiled delegates with 0–4 primitive arguments;
+subclass `KeyValueFunction` and override protected `InvokeCore` for another fixed arity.
+The metadata uses exact native primitive types, not numeric widening. Strict NULL input skips
+the callback; nullable delegates can explicitly opt into `CalledOnNullInput`. Trusted callbacks
+can have external effects; the context supplies only database identity and cancellation.
+Binary input/output buffers are detached. CALL uses existing Execute/result frames, returning
+one nullable `value` column and one row. [COMMANDS.md](COMMANDS.md) defines overload ambiguity,
+errors and parameter-only grammar. No built-in scalar library or aggregates are introduced.
+
+Binary argument snapshots are deduplicated per request by original backing-buffer and range
+identity, including repeated CALL references to one decoded parameter. Each unique input range
+is copied once, and argument slots share that detached snapshot; equal bytes in independent
+buffers and distinct slices remain separate. Thus owned payload bytes follow unique supplied
+ranges plus the argument slots, rather than multiplying a payload by its alias count. Typed
+`byte[]` delegate access still returns a defensive copy, and binary results remain detached.
+No arity limit, message limit, public API, disk format or wire version is added by this ownership rule.

@@ -29,9 +29,9 @@ using Assimalign.Cohesion.Database.Transactions;
 /// <para>
 /// <b>A command is statement-atomic.</b> Inside an explicit transaction, a command that fails
 /// writes nothing and leaves the transaction active, as a failed SQL statement does; the session
-/// never aborts its transaction for a failed command (DESIGN.md, "Failed commands in explicit
-/// transactions"). Commands do not hold the session (the base's operation hold): an auto-commit
-/// command and a BEGIN may run side by side, as before the bases.
+/// never aborts its transaction for an ordinary failed command (DESIGN.md, "Failed commands in explicit
+/// transactions"). CALL holds the session until completion and refuses other commands before
+/// execution. Ordinary data commands retain their existing admission behavior.
 /// </para>
 /// <para>
 /// <b>Typed requests only.</b> The key-value model has no query language. Its one execute member
@@ -55,6 +55,7 @@ public sealed class KeyValueDatabaseSession : DatabaseExecutionSession<KeyValueR
     private readonly KeyValueDatabase _database;
     private readonly TransactionCoordinator _coordinator;
     private readonly KeyValueOperationExecutor _executor;
+    private int _invokingFunction;
 
     internal KeyValueDatabaseSession(KeyValueDatabase database, TransactionCoordinator coordinator, KeyValueOperationExecutor executor)
         : base(database)
@@ -142,7 +143,7 @@ public sealed class KeyValueDatabaseSession : DatabaseExecutionSession<KeyValueR
     /// <summary>
     /// Runs one command of the key-value command grammar (<c>docs/COMMANDS.md</c>:
     /// <c>GET</c>/<c>PUT</c>/<c>DELETE</c>/<c>EXISTS</c>/<c>SCAN</c> with parameter operands, and
-    /// <c>KEYSPACES</c>), the wire encoding of the typed requests: the wire server's entry, which
+    /// <c>KEYSPACES</c>/<c>CALL</c>), the wire encoding of the typed requests: the wire server's entry, which
     /// lets it carry key-value commands in the protocol's existing Execute message.
     /// </summary>
     /// <param name="commandText">The command text.</param>
@@ -184,6 +185,19 @@ public sealed class KeyValueDatabaseSession : DatabaseExecutionSession<KeyValueR
     private async ValueTask<DatabaseResult> ExecuteRequestAsync(KeyValueRequest request, CancellationToken cancellationToken)
     {
         _database.ThrowIfOffline();
+        if (Volatile.Read(ref _invokingFunction) != 0)
+        {
+            throw DatabaseException.CreateKeyValuePairFailure("CK07003", ErrorMessages.SessionOperationActive);
+        }
+        bool invokesFunction = request is KeyValueFunctionRequest;
+        if (invokesFunction)
+        {
+            if (!TryEnterOperation())
+            {
+                throw DatabaseException.CreateKeyValuePairFailure("CK07003", ErrorMessages.SessionOperationActive);
+            }
+            Volatile.Write(ref _invokingFunction, 1);
+        }
 
         try
         {
@@ -196,6 +210,14 @@ public sealed class KeyValueDatabaseSession : DatabaseExecutionSession<KeyValueR
             // unconfirmed when a storage commit record was written before the flush failed; the
             // unconfirmed commit that took it offline keeps its own type.
             throw await AbortStorageFailureAsync(translated).ConfigureAwait(false);
+        }
+        finally
+        {
+            if (invokesFunction)
+            {
+                Volatile.Write(ref _invokingFunction, 0);
+                ExitOperation();
+            }
         }
     }
 

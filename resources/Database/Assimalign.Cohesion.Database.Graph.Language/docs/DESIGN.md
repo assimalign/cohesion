@@ -1312,3 +1312,25 @@ standard .NET argument guards retain their own contracts.
 Language debugger views expose stored AST properties and reviewed source-text/location getters on sealed leaves. They omit Stages, SetItems, RemoveItems and Segments materialization, Matches/Predicate list-pattern access, parse Diagnostics sorting and parser Profile initialization. Source text is not included in debugger summaries.
 
 Eligible types follow the [Database conventions](../../Assimalign.Cohesion.Database/docs/CONVENTIONS.md) debugger display/proxy rules. Views are private and read-only; inspection does not change the public API, execution paths, error contracts, storage formats or protocol bytes.
+
+## Deferred engine function names
+
+The default standalone GqlQueryParser retains CG00010 for an unknown call.
+The explicit allowCustomFunctions constructor admits ordinary identifier calls as immutable
+GqlNamedFunctionCallExpression nodes with generated GraphFunctionName identifiers, copied
+arguments, DISTINCT metadata and source spans. GraphQueryRequest.FromGql opts in automatically;
+the engine resolves scalar/aggregate kind and arity before any execution. The parser does not
+invoke a callback or receive an engine catalog. Native enum-based AST construction remains valid.
+COUNT is still the only star form; CASE/COALESCE/NULLIF/CAST keep their grammar and laziness,
+and window/HAVING and other unsupported forms remain refused. Invocation-shaped OVER is
+recognized as WINDOW OVER (CK00001), including inside a deferred custom call; outside an
+invocation, over remains a legal variable, label, alias and property name. The builder rejects
+OVER as a function name through the same syntax-only admission probe.
+
+This follows the separation of signature resolution and borrowed execution values in Neo4j
+community/procedure/src/main/java/org/neo4j/procedure/impl/ProcedureRegistry.java:127-201 and
+community/kernel/src/main/java/org/neo4j/kernel/api/procedure/CallableUserFunction.java:27-37.
+
+Engine request parsing admits unknown named calls for engine-local catalog binding. Unknown names
+retain CG00010 but ordinary requests fail during execution (wire ExecutionFailure, without
+StatementParseFailed); standalone parser diagnostics are unchanged. See DIALECT.md.

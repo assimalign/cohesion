@@ -46,6 +46,9 @@ internal sealed class GraphExpressionShape : IEqualityComparer<GqlExpression>
             switch (step.Expression)
             {
                 case GqlFunctionCallExpression call: hash.Add(call.Function); break;
+                // Application callbacks have no purity promise. Each syntactic occurrence
+                // owns its evaluation, including aggregate calls and their scalar arguments.
+                case GqlNamedFunctionCallExpression call: hash.Add(RuntimeHelpers.GetHashCode(call)); break;
                 case GqlCastExpression cast: hash.Add(cast.Target); break;
                 case GqlAggregateExpression aggregate: hash.Add(aggregate.Function); hash.Add(aggregate.Distinct); hash.Add(aggregate.Operand is null); break;
                 case GqlLiteralExpression literal:
@@ -87,6 +90,7 @@ internal sealed class GraphExpressionShape : IEqualityComparer<GqlExpression>
         bool same = (left, right) switch
         {
             (GqlFunctionCallExpression a, GqlFunctionCallExpression b) => a.Function == b.Function && a.Arguments is not null && b.Arguments is not null,
+            (GqlNamedFunctionCallExpression, GqlNamedFunctionCallExpression) => false,
             (GqlCastExpression a, GqlCastExpression b) => a.Target == b.Target,
             (GqlAggregateExpression a, GqlAggregateExpression b) => a.Function == b.Function && a.Distinct == b.Distinct && (a.Operand is null) == (b.Operand is null),
             (GqlLiteralExpression a, GqlLiteralExpression b) => a.Value?.GetType() == b.Value?.GetType() && object.Equals(a.Value, b.Value),

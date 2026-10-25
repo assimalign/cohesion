@@ -103,4 +103,25 @@
   <data name="DatabaseNotFound" xml:space="preserve"><value>The server's engine has no database named '{0}'.</value></data>
   <data name="AuthenticationResponseExpected" xml:space="preserve"><value>Expected an authenticate response but received {0}.</value></data>
   <data name="AuthenticationFailed" xml:space="preserve"><value>Authentication failed for principal '{0}'.</value></data>
+  <data name="FunctionNameRequired" xml:space="preserve"><value>A function name must be initialized.</value></data>
+  <data name="FunctionParameterTypeUnsupported" xml:space="preserve"><value>Function parameters must use a supported native primitive type.</value></data>
+  <data name="FunctionReturnTypeUnsupported" xml:space="preserve"><value>A function result must use a supported native primitive type.</value></data>
+  <data name="FunctionNullBehaviorInvalid" xml:space="preserve"><value>The function NULL behavior is not defined.</value></data>
+  <data name="FunctionValueUnsupported" xml:space="preserve"><value>The CLR type '{0}' is not a supported function primitive.</value></data>
+  <data name="FunctionBinaryRequired" xml:space="preserve"><value>The function value is not binary.</value></data>
+  <data name="FunctionClrTypeUnsupported" xml:space="preserve"><value>The CLR type '{0}' is not a supported function primitive.</value></data>
+  <data name="FunctionNullParameterInvalid" xml:space="preserve"><value>A function called on NULL input must use nullable CLR argument types.</value></data>
+  <data name="FunctionArgumentCount" xml:space="preserve"><value>Function '{0}' expects {1} arguments but received {2}.</value></data>
+  <data name="FunctionArgumentType" xml:space="preserve"><value>Function '{0}' argument {1} must have exact type {2}.</value></data>
+  <data name="FunctionCallbackFailed" xml:space="preserve"><value>Function '{0}' failed: {1}</value></data>
+  <data name="FunctionResultType" xml:space="preserve"><value>Function '{0}' returned {1}, but declares {2}.</value></data>
+  <data name="FunctionNameReserved" xml:space="preserve"><value>Function name '{0}' is reserved for a key-value command.</value></data>
+  <data name="FunctionSignatureDuplicate" xml:space="preserve"><value>Function '{0}' already has an overload with this exact signature.</value></data>
+  <data name="FunctionUnknown" xml:space="preserve"><value>Unknown function '{0}'.</value></data>
+  <data name="FunctionArityMismatch" xml:space="preserve"><value>Function '{0}' has no overload accepting {1} arguments.</value></data>
+  <data name="FunctionTypesMismatch" xml:space="preserve"><value>Function '{0}' has no overload accepting these exact primitive types.</value></data>
+  <data name="FunctionAmbiguous" xml:space="preserve"><value>Function '{0}' has more than one NULL-compatible overload.</value></data>
+  <data name="CallFormInvalid" xml:space="preserve"><value>CALL requires a function name followed by zero or more named parameters.</value></data>
+  <data name="FunctionNullValueRequired" xml:space="preserve"><value>A NULL function argument cannot be read as a non-nullable primitive.</value></data>
+  <data name="SessionOperationActive" xml:space="preserve"><value>Another command or transaction begin is already active on this session.</value></data>
 </root>

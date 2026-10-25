@@ -10,6 +10,7 @@ internal sealed record GraphProjectionPlan(GqlExpression Expression, string Name
     internal string? BindingName { get; init; }
     internal bool MayBeComposite { get; init; }
     internal DatabaseType Type { get; init; }
+    internal bool? ResultNullable { get; init; }
     internal bool Optional { get; init; }
 
     private sealed class DebugView

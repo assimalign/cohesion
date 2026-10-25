@@ -47,7 +47,7 @@ retains the collection and index definitions; EXPLAIN UPDATE/DELETE includes the
 index seek. UPSERT inserts or wholly replaces using INSERT's KEY/VALUE grammar and reports
 written-document count; EXPLAIN UPSERT describes its VALUES or SELECT source. A path-rule failure preserves its diagnostic and leaves the connection reusable.
 
-`DocumentClientException.Code` describes the wire failure; its inherited `DatabaseException.Diagnostics`
+`DocumentClientException.Code` describes the wire failure; its locally declared `Diagnostics`
 retains the server's codes and source locations, and its message preserves the composed `CODE: message`
 text. A rejected statement leaves the session usable. A malformed or
 unfinished exchange invalidates it. Cancellation of a write does not establish whether it committed.
@@ -85,3 +85,16 @@ standard .NET argument guards retain their own contracts.
 Client debugger inspection shows captured metadata and owned-array counts without transport work or result enumeration.
 
 Eligible types follow the [Database conventions](../../Assimalign.Cohesion.Database/docs/CONVENTIONS.md) debugger display/proxy rules. Views are private and read-only; inspection does not change the public API, execution paths, error contracts, storage formats or protocol bytes.
+
+## Engine-registered functions
+
+QueryAsync and ExecuteAsync can call scalar and aggregate functions registered on the server's
+engine builder. The client sends ordinary OQL text and receives the existing typed rows and
+structured errors. CD05017 identifies an external callback/result/accumulator failure; its code
+appears once in the composed wire message. No client registration or new protocol is required.
+
+
+The existing NativeAOT consumer sample registers typed scalar/aggregate functions and a derived
+NULL/MISSING-aware scalar on its real server, then asserts their values and declared column types
+through both InMemory and TCP. These six additional checks run in the client sample itself,
+independently of the engine's crash-recovery fixture.

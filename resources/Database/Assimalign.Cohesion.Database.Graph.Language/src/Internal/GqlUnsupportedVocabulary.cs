@@ -44,7 +44,8 @@ internal static class GqlUnsupportedVocabulary
         new("ROLLBACK", "ROLLBACK", GqlWordPosition.Clause),
         new("FINISH", "FINISH", GqlWordPosition.Clause),
         new("HAVING", "HAVING", GqlWordPosition.Clause),
-        // Function-only words remain legal variables and property names.
+        // Invocation-only words remain legal variables and property names.
+        new("OVER", "WINDOW OVER", GqlWordPosition.FunctionCall),
         new("CARDINALITY", "FUNCTION cardinality", GqlWordPosition.FunctionCall),
         new("LTRIM", "FUNCTION ltrim", GqlWordPosition.FunctionCall),
         new("RTRIM", "FUNCTION rtrim", GqlWordPosition.FunctionCall),

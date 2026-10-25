@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 
+using Assimalign.Cohesion.Database.KeyValuePair.Protocol;
 using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.KeyValuePair.Internal;
@@ -11,7 +12,7 @@ namespace Assimalign.Cohesion.Database.KeyValuePair.Internal;
 /// into typed requests: <c>GET @k</c>, <c>PUT @k @v [IF ABSENT | IF @etag]</c>,
 /// <c>DELETE @k [IF @etag]</c>, <c>EXISTS @k</c>,
 /// <c>SCAN [FROM @start] [TO @end] [PREFIX @p] [LIMIT n|@n]</c>, and
-/// <c>KEYSPACES</c>. Keywords are
+/// <c>KEYSPACES</c> and <c>CALL name @arg ...</c>. Keywords are
 /// case-insensitive; every data operand is a named parameter (<c>@name</c>)
 /// riding the session's parameter map — the grammar itself never carries values,
 /// which is what keeps it trivially injection-proof and wire-compatible with the
@@ -58,6 +59,7 @@ internal static class KeyValueCommandParser
                 "EXISTS" => ParseExists(tokens, parameters),
                 "SCAN" => ParseScan(tokens, parameters),
                 "KEYSPACES" => ParseKeySpaces(tokens),
+                "CALL" => ParseCall(tokens, parameters),
                 var verb => throw Error("CV00003", string.Format(CultureInfo.CurrentCulture, ErrorMessages.CommandUnknown, verb)),
             };
         }
@@ -67,6 +69,18 @@ internal static class KeyValueCommandParser
             // conditions) is a command error at this boundary.
             throw Error("CV00004", exception.Message);
         }
+    }
+
+    private static KeyValueFunctionRequest ParseCall(string[] tokens, IReadOnlyDictionary<string, object?>? parameters)
+    {
+        if (tokens.Length < 2) { throw Error("CV00019", ErrorMessages.CallFormInvalid); }
+        var name = new KeyValueFunctionName(tokens[1]);
+        var arguments = new object?[tokens.Length - 2];
+        for (int index = 0; index < arguments.Length; index++)
+        {
+            arguments[index] = BindParameter(tokens[index + 2], parameters);
+        }
+        return new KeyValueFunctionRequest(name, arguments);
     }
 
     private static KeyValueKeySpacesRequest ParseKeySpaces(string[] tokens)

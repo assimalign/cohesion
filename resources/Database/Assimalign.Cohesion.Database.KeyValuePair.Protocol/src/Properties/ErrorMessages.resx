@@ -8,4 +8,5 @@
   <data name="ProtocolExecuteMessageDecodeProtocol2" xml:space="preserve"><value>Malformed payload: invalid parameter length.</value></data>
   <data name="ResultHeaderMessageDecodeProtocol" xml:space="preserve"><value>Malformed payload: negative column count.</value></data>
   <data name="ResultHeaderMessageDecodeProtocol2" xml:space="preserve"><value>Malformed payload: truncated column type.</value></data>
+  <data name="FunctionNameInvalid" xml:space="preserve"><value>A function name must start with an ASCII letter or underscore and contain only ASCII letters, digits, and underscores.</value></data>
 </root>

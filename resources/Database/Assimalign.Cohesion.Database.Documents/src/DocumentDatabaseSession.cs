@@ -418,7 +418,7 @@ public sealed class DocumentDatabaseSession : DatabaseLanguageSession<DocumentQu
                 cancellationToken.ThrowIfCancellationRequested();
                 new DocumentExpressionEvaluator(null, parameters, cancellationToken).ValidateInputs(explain.Statement);
                 var plan = new DocumentPlanner(_database.Catalog, operation.Context.Snapshot, parameters, cancellationToken,
-                    estimateSinglePath: true).Plan((OqlExpression)explain.Statement);
+                    estimateSinglePath: true, functions: _database.Engine.Functions).Plan((OqlExpression)explain.Statement);
                 return ValueTask.FromResult<DatabaseResult>(DocumentPlanner.Describe(plan, request.Statement.Diagnostics));
             }
             new DocumentExpressionEvaluator(null, parameters, cancellationToken).ValidateInputs(request.Statement.OqlExpression);

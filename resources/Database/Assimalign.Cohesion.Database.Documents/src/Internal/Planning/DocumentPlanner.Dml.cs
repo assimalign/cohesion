@@ -17,7 +17,7 @@ internal sealed partial class DocumentPlanner
         {
             Add(assignment.Path, assignment.Value);
             ValidateMetadata(assignment.Value, update.Alias, storedSource: true);
-            Validate(assignment.Value, allowAggregate: false);
+            Validate(assignment.Value, allowAggregate: false, functions: _functions);
         }
         foreach (var path in update.Unset) { Add(path, null); }
         if (targets.Count == 0)
@@ -27,7 +27,7 @@ internal sealed partial class DocumentPlanner
         if (update.Predicate is { } predicate)
         {
             ValidateMetadata(predicate, update.Alias, storedSource: true);
-            Validate(predicate, allowAggregate: false);
+            Validate(predicate, allowAggregate: false, functions: _functions);
         }
         return new DocumentUpdatePlan(collection, update, targets.AsReadOnly(),
             ChooseAccess(update.Predicate, update.Alias, _catalog.GetIndexes(collection.Id, _snapshot)));
@@ -97,7 +97,7 @@ internal sealed partial class DocumentPlanner
         if (delete.Predicate is { } predicate)
         {
             ValidateMetadata(predicate, delete.Alias, storedSource: true);
-            Validate(predicate, allowAggregate: false);
+            Validate(predicate, allowAggregate: false, functions: _functions);
         }
         return new DocumentDeletePlan(collection, delete,
             ChooseAccess(delete.Predicate, delete.Alias, _catalog.GetIndexes(collection.Id, _snapshot)));
@@ -124,7 +124,7 @@ internal sealed partial class DocumentPlanner
                     {
                         throw new DocumentPlanningException("CD05001", string.Format(CultureInfo.CurrentCulture, ErrorMessages.WriteValuesContext, verb), expression.Location);
                     }
-                    Validate(expression, allowAggregate: false);
+                    Validate(expression, allowAggregate: false, functions: _functions);
                 }
             }
             return statement is OqlUpsertExpression upsert

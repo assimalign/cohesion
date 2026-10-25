@@ -95,7 +95,7 @@ one captured UTC instant per statement. Their date/instant values sort without n
 Function and CAST value failures, including floating underflow, arrive as CG02013 ExecutionFailure
 before ResultHeader and retain the same authenticated pooled session. Proven incompatible kinds
 (non-integral toBoolean, Boolean numeric CAST and temporal property maps) arrive as plan-time
-CG03003 before writes. Unknown calls are CG00010 ParseFailure. GraphFunctionWireTests
+CG03003 before writes. Engine-resolved unknown calls are CG00010 ExecutionFailure. GraphFunctionWireTests
 pins exact values, types, raw-frame ordering, entity rejection before mutation, capability
 refusal and pooled-session reuse over InMemory and TCP.
 
@@ -400,3 +400,17 @@ standard .NET argument guards retain their own contracts.
 Client debugger views expose the captured database name, owned-row counts and stored result/diagnostic references. They omit live connection state, transport settings and row-value buffers. Inspecting a path result never enumerates its single-use stream or completes the exchange.
 
 Eligible types follow the [Database conventions](../../Assimalign.Cohesion.Database/docs/CONVENTIONS.md) debugger display/proxy rules. Views are private and read-only; inspection does not change the public API, execution paths, error contracts, storage formats or protocol bytes.
+
+## Engine-registered function calls
+
+QueryAsync and ExecuteAsync send ordinary named scalar/aggregate calls through the existing
+GQL request encoding. The server's engine-local catalog resolves them; the client needs no
+registration object or engine reference. Existing planned entity/composite admission,
+negotiated composite encoding and pooled-session cleanup apply. CG05021 callback diagnostics
+round-trip through the existing carrier. GraphRegisteredFunctionWireTests covers both InMemory
+and TCP, custom scalar and DISTINCT aggregate values, failure diagnostics and exact-session reuse.
+No frame layout, capability or version changes.
+
+Unknown engine-resolved function names use ExecutionFailure rather than ParseFailure, with
+no StatementParseFailed event. Application callback timeout and I/O errors use the model
+callback diagnostic and leave the exact wire session reusable after a completed failure.

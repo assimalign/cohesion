@@ -490,3 +490,21 @@ The result-header size guard uses the same `CG02013` value-limit diagnostic as r
 validation, retaining the existing limit detail and ExecutionFailure category. A synthetic
 header regression exercises the guard directly through the existing runtime test seam;
 ordinary projection admission and the 16 MiB cap are unchanged.
+
+## Registered developer functions
+
+Graph engine requests admit identifier calls registered in that engine builder's Functions
+collection, including aggregate DISTINCT/ALL arguments. Disjoint argument-count overloads are
+supported; same-count type overloads and scalar/aggregate name sharing are refused. Star is
+still COUNT-only. Unknown deferred names retain CG00010 and unsupported registered arities are refused by planning with
+CG05001; the default standalone parser keeps CG00010. Unexpected callback/contract failures
+use CG05021, without altering native CG03003/CG02013 behavior. No window, HAVING, persisted
+function catalog, new message or format version is added. OVER followed by parentheses is
+recognized as unsupported WINDOW OVER (CK00001), even inside a custom call; over remains a
+legal binding, label, alias or property name. Result-shape declarations participate
+in pre-write admission and aggregate retained-state declarations in the statement memory budget.
+
+Engine requests admit named calls and resolve them against the executing catalog. An unknown
+name retains CG00010 but now fails during binding/execution: the wire category is ExecutionFailure,
+and no StatementParseFailed event is raised. Standalone parsers retain unknown-name parse
+diagnostics. This changes error categorization, with no frame-layout or protocol-version change.

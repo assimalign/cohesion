@@ -25,3 +25,12 @@ consumer against installed framework packs: KeyValuePair, Graph and Blob compose
 authenticate and answer Ping. Its evaluated compiler references include Database.Tcp and exclude
 Connections.Tcp, while the latter remains present in the runtime closure. No SQL grammar, wire
 message, storage format, public API or error-code change is needed for this delivery completion.
+
+
+## Native function dispatch canary
+
+After the five-model handshake/Ping checks, the TCP NativeAOT sample registers a typed delegate
+and a protected-core key-value function on an engine builder. A real TCP connection invokes both
+through parameterized CALL over the existing Execute/result frames and checks each Int64 result
+and its metadata. This covers application callback dispatch in a trimmed native server without
+adding a wire message, protocol version or project reference.

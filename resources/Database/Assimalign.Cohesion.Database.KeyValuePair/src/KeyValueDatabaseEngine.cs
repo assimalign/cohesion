@@ -107,10 +107,11 @@ public sealed class KeyValueDatabaseEngine : DatabaseEngine
     // How the model's messages start: "Key-value engine '{name}' …".
     internal const string ModelName = "Key-value";
 
-    private KeyValueDatabaseEngine(string name, KeyValueDatabaseEngineOptions options)
+    private KeyValueDatabaseEngine(string name, KeyValueDatabaseEngineOptions options, KeyValueFunctionCatalog functions)
         : base(name, EngineModel.KeyValueStore, options.WorkerFailureWindow, options.WorkerFailureMinimumPasses, options.TimeProvider)
     {
         _options = options;
+        Functions = functions;
         _signalCommitPending = _commitPendingSignal.Set;
         _bufferPoolPages = Assimalign.Cohesion.Database.Storage.Storage.GetBufferPoolPageCount(options.BufferPoolCapacity, nameof(options.BufferPoolCapacity));
         JournalSizeLimit = DatabaseWorkerLimits.GetJournalSizeLimit(options.JournalSizeLimit, options.CheckpointJournalSize);
@@ -137,6 +138,9 @@ public sealed class KeyValueDatabaseEngine : DatabaseEngine
         AttachWorker(new KeyValueVersionPurgeWorker(this));
         AttachWorker(new KeyValueIndexMaintenanceWorker(this));
     }
+
+    /// <summary>Gets the immutable scalar catalog shared by every database of this engine.</summary>
+    public KeyValueFunctionCatalog Functions { get; }
 
     /// <inheritdoc />
     public override IReadOnlyList<DatabaseName> OfflineDatabases
@@ -273,11 +277,12 @@ public sealed class KeyValueDatabaseEngine : DatabaseEngine
     /// Engine creation options, already a copy the caller does not change again
     /// (<see cref="KeyValueDatabaseEngineOptions.Snapshot"/>): the engine keeps this object.
     /// </param>
+    /// <param name="functions">The already-frozen scalar catalog, or null for no functions.</param>
     /// <returns>A new engine instance.</returns>
-    internal static KeyValueDatabaseEngine CreateUncomposed(string name, KeyValueDatabaseEngineOptions options)
+    internal static KeyValueDatabaseEngine CreateUncomposed(string name, KeyValueDatabaseEngineOptions options, KeyValueFunctionCatalog? functions = null)
     {
         ValidateOptions(name, options);
-        return new KeyValueDatabaseEngine(name, options);
+        return new KeyValueDatabaseEngine(name, options, functions ?? KeyValueFunctionCatalog.Empty);
     }
 
     /// <summary>
@@ -909,5 +914,6 @@ public sealed class KeyValueDatabaseEngine : DatabaseEngine
 
         public string Name => _target.Name;
         public global::Assimalign.Cohesion.Database.EngineModel Model => _target.Model;
+        public KeyValueFunctionCatalog Functions => _target.Functions;
     }
 }

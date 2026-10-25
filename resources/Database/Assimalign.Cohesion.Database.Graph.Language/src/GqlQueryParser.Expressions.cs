@@ -132,6 +132,8 @@ public sealed partial class GqlQueryParser
             { return ParseAggregate(); }
             return ParseFunction();
         }
+        if (_allowCustomFunctions && Current.Type == TokenType.Identifier && _tokens[_position + 1].Type == TokenType.LeftParen)
+        { return ParseNamedFunction(); }
         if (Current.Type == TokenType.LeftBracket) { return ParseList(); }
         if (Current.Type == TokenType.LeftBrace) { return ParseMap(); }
         if (IsVariableToken)

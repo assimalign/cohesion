@@ -572,7 +572,7 @@ ORDER BY ties preserve baseline ordinal order, so pages concatenate without gaps
 data. Writes between separate statements may shift pages; use a shared snapshot for repeatability.
 EXPLAIN's select detail includes resolved limit (none when absent) and offset (zero when absent).
 Unsorted, ungrouped, non-DISTINCT queries whose projections have fixed static result types stop reads
-once the page is complete, including scalar functions from OqlFunctions, unary and binary operators,
+once the page is complete, including registered scalar functions, unary and binary operators,
 META, literals and constructors. LIMIT 0 evaluates no row predicates; a completed window never
 evaluates the next predicate, following PostgreSQL src/backend/executor/nodeLimit.c:153-159.
 Paths and lone stars can observe heterogeneous scalar roots and
@@ -581,9 +581,10 @@ This preserves the metadata contract while making early termination safe where t
 
 #### SQL++ functions and transaction clock (#1137)
 
-Documents.Language's public immutable OqlFunctions table owns the 40 executable names (META,
-five aggregates and 34 scalars), arities, kind constraints, aggregate classification and static
-result types. There is no duplicate engine table or new visibility grant. Scalar validation
+Documents.Language's public immutable OqlFunctions table declares the 40 standard executable
+names (META, five aggregates and 34 scalars), arities, kind constraints and static result types.
+Native registrations use that metadata; the frozen engine function catalog also contains application
+registrations and supplies planning and execution binding. No visibility grant is added. Scalar validation
 passes aggregate permission into its arguments, while aggregates forbid nested aggregates.
 Grouping equivalence is checked before recursing through scalar arguments, so GROUP BY LOWER(x)
 and UPPER(MIN(x)) bind correctly. Literal kinds, including JsonElement numbers and unary minus,
@@ -2648,3 +2649,111 @@ the first Error code once. Duplicate wire parameter keys reuse `CD01009` before 
 Documents debugger views expose stored collection identities, request/result metadata and reviewed owned-stream flags/lengths. They omit query parameters, content, synchronized current-transaction getters and engine/session snapshots. Internal helpers with no safe public or protected data have empty views.
 
 Eligible types follow the [Database conventions](../../Assimalign.Cohesion.Database/docs/CONVENTIONS.md) debugger display/proxy rules. Views are private and read-only; inspection does not change the public API, execution paths, error contracts, storage formats or protocol bytes.
+
+## Engine-registered document functions
+
+`DocumentDatabaseEngineBuilder.Functions.Add(DocumentFunction)` registers functions for every
+database of that engine. Build freezes an immutable `DocumentFunctionCatalog` before filesystem
+work or worker startup; later registration is refused, including after a failed build attempt.
+`DocumentDatabaseEngine.Functions` exposes that catalog, and direct `Create` uses the standard
+catalog. Registrations are configuration, never persisted schema or dynamically loaded code.
+
+The public family is `DocumentFunction`, `DocumentScalarFunction`,
+`DocumentAggregateFunction` and `DocumentAggregateAccumulator`, with
+`DocumentValue`, borrowed `DocumentArguments`, and `DocumentFunctionContext`.
+Scalar `Invoke`, aggregate `CreateAccumulator`, accumulator `Add` and `Finish` are
+nonvirtual validation boundaries over protected abstract cores. Native functions use those
+same boundaries. The standard catalog contains 30 scalar registrations and six aggregate
+registrations: COUNT has separate value and star signatures; SUM, AVG, MIN and MAX have one
+each. META and the four lazy conditional forms remain grammar forms, like SQL CASE, rather
+than eager callbacks.
+
+`DocumentFunctionName` is a generated identifier value with implicit string conversion and
+ordinal case-insensitive equality. Its validity rule follows the shared lexer's letter/underscore,
+then letter/digit/underscore grammar (`Database.Language/src/Lexer/TokenLexer.cs:113,331`).
+Function constructors and catalog name boundaries refuse default. Collection registration
+refuses all native names, grammar forms, keywords and reserved nonexecuting function names.
+Application overloads require disjoint arity ranges and one scalar/aggregate kind per name.
+The function metadata owns copies of accepted valued-kind masks. DocumentFunctionArgumentKind
+supports Boolean, Number, String, Array and Object, their unions, Json (Array | Object), and Any.
+None and unknown bits are refused in signatures; an empty mask list means Any. NULL/MISSING
+policy is independent of these masks. Typed JsonElement parameters require the Json union, so
+wrong-kind literals fail binding and primitive stored values do not reach JSON callbacks.
+Adapter-owned fractional or out-of-range integer input conversions retain CD02008 or CD02007
+before the application delegate runs; an overflow thrown by the actual callback remains CD05017. All result collections are
+non-null and read-only.
+
+Typed scalar factories support one through four inputs. The aggregate factory accepts a
+per-group seed, step and finish. Supported CLR values are Boolean, Int32, Int64, Decimal,
+String, nullable Boolean/Int32/Int64/Decimal, DocumentValue, and JSON arrays/objects as JsonElement.
+Int64 results retain Int64 metadata; Int32 and Decimal results use Decimal. A typed callback
+that receives unknown inputs must accept nullable/reference values or DocumentValue.
+An application function instance is shared across sessions and must be stateless or thread-safe;
+each aggregate call creates a fresh accumulator for each group. Reusing an accumulator fails.
+
+Default scalar policy propagates MISSING before NULL without invoking a core. The default
+aggregate policy skips both. Incompatible valued stored inputs give scalar NULL or are skipped
+by typed aggregates; known incompatible literals fail planning before reads. Native SUM and AVG
+retain their established CD02008 numeric-input refusal rather than silently skipping valued
+nonnumbers. TYPE opts into receiving unknown values. Full-control application implementations
+can use DocumentValue to distinguish NULL and MISSING. JSON passed to DocumentValue.FromJson
+is normalized and copied; borrowed arguments and contexts must not be retained beyond a call.
+
+The context carries the database name, statement cancellation token and transaction-start
+timestamp. Native date functions and application functions receive the same transaction clock.
+DatabaseException, out-of-memory, insufficient stack and statement-cancellation exceptions retain
+their identity at the function boundary, following SQL IsFunctionFailure. Application storage,
+I/O, timeout, unrelated cancellation and other external faults fail with
+CD05017, an unprefixed resource-backed message and the original inner exception. Invalid return
+types, null accumulators and reused accumulators use that external-function failure contract.
+Native scalar/aggregate overflow is translated to existing CD02007 before crossing the common
+boundary; other existing native domain/type codes and located spans remain unchanged.
+The existing statement bracket preserves rollback and explicit-transaction failure behavior.
+No Documents SQLSTATE mapping is added.
+
+Ordinary FromOql, session text execution and wire Execute admit named-call ASTs and bind them
+against the executing engine. No caller supplies a catalog argument. The standalone OqlQueryParser
+default still reports CD00008 for unknown calls; its opt-in allowUnregisteredFunctions mode
+defers that binding. Known native arity checks retain CD00006. A request can be reused with
+another engine: the second engine independently validates its own registrations.
+
+Planning resolves kinds, arities, grouping and output metadata from the catalog before reading
+rows. Executing evaluators create their reference-keyed function cache only for the first
+executed call, then reuse resolved function objects per statement to avoid per-row name lookup.
+Metadata overload lookup uses indexed reads without allocating an interface enumerator. Validation,
+paging and index-constant evaluators that execute no calls allocate no function cache. Calls remain nonconstant, including immutable-looking application callbacks: they do
+not become VALUES expressions or index seek bounds. Existing equality/range probes and identity
+intersections still select candidates, and complete predicates remain residual filters.
+EXPLAIN binds metadata without invoking callbacks. Empty and paged results retain declared
+types; no catalog format, storage format, protocol version or frame layout changes.
+
+The call preparation and strict invocation split follows PostgreSQL
+`src/backend/executor/execExpr.c:2696-2730` and
+`src/backend/executor/execExprInterp.c:944-965`; strict aggregate input skipping follows
+`src/backend/executor/nodeAgg.c:717-730`. These local reference-engine behaviors informed the
+design; no code was copied. RavenDB's case-insensitive declaration dictionary
+(`src/Raven.Server/Documents/Queries/AST/Query.cs:39-44`) is a naming comparison, while its
+JavaScript runner (`CollectionQueryEnumerable.cs:88-98`) is deliberately not adopted for
+this statically compiled NativeAOT seam.
+
+DocumentRegisteredFunctionTests covers registration, overloads, context, values, grouping,
+empty inputs, indexed residuals, DML atomicity, callback errors and native-call contracts.
+DocumentRegisteredFunctionWireTests repeats scalar, aggregate, unknown-value and failure
+behavior over InMemory and TCP. The existing recovery fixture registers typed and derived
+functions and executes them after reopening, including NativeAOT publication.
+DocumentFunctionDispatchMeasurementTests retains its existing-API twelve-sample Release
+measurement, with exact values checked and descriptive allocation/time distributions.
+
+Callbacks must not reenter an engine: another session can wait indefinitely for a lock held
+by the invoking statement, without a lock-wait timeout or detected wait-for cycle. Same-session
+reentry is refused before a nested operation executes. Typed delegates do not receive the
+statement cancellation token; derived implementations can observe the borrowed context.
+An aggregate is evaluated once per appearance in projection, HAVING and ORDER BY, including
+its arguments; identical-looking appearances are independent. Unknown names keep CD00008 but
+ordinary engine requests report ExecutionFailure at binding, without StatementParseFailed.
+
+Callback timeouts and I/O leave a completed execution failure on a reusable session.
+Protocol layout and version stay unchanged.
+
+Interleaved same-process Release comparisons did not reproduce the reported native-call
+slowdown; dispatch retains bounded per-statement allocation overhead.

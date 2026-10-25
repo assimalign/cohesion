@@ -6,6 +6,24 @@ namespace Assimalign.Cohesion.Database.Graph.Language;
 
 public sealed partial class GqlQueryParser
 {
+    private GqlExpression ParseNamedFunction()
+    {
+        var start = Current;
+        if (!HasStackToNest(start)) { return new GqlLiteralExpression(null, Span(start, start)); }
+        string name = Current.Text;
+        Advance();
+        Expect(TokenType.LeftParen, "'('");
+        bool distinct = Take("DISTINCT");
+        if (!distinct) { Take("ALL"); }
+        var arguments = new System.Collections.Generic.List<GqlExpression>();
+        if (Current.Type != TokenType.RightParen)
+        {
+            do { arguments.Add(ParsePredicate()); } while (Take(TokenType.Comma));
+        }
+        Expect(TokenType.RightParen, "')'");
+        return new GqlNamedFunctionCallExpression(name, arguments, distinct, Span(start, Previous));
+    }
+
     private GqlExpression ParseFunction()
     {
         var start = Current;

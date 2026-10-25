@@ -14,6 +14,7 @@ namespace Assimalign.Cohesion.Database.Documents.Language;
 public sealed partial class OqlQueryParser : QueryParser
 {
     private readonly object _gate = new();
+    private readonly bool _allowUnregisteredFunctions;
     private string _source = string.Empty;
     private readonly List<Lexeme> _tokens = [];
     private readonly List<Diagnostic> _diagnostics = [];
@@ -23,7 +24,15 @@ public sealed partial class OqlQueryParser : QueryParser
 
     /// <summary>Initializes an OQL parser.</summary>
     /// <param name="options">Optional shared analyzer configuration.</param>
-    public OqlQueryParser(QueryParserOptions? options = null) : base(options ?? new QueryParserOptions()) { }
+    public OqlQueryParser(QueryParserOptions? options = null) : this(false, options) { }
+
+    /// <summary>Initializes a parser which can defer named function resolution to an engine.</summary>
+    /// <param name="allowUnregisteredFunctions">Defers unknown function binding to an engine catalog; the default keeps standalone unknown-name diagnostics.</param>
+    /// <param name="options">Optional shared analyzer configuration.</param>
+    public OqlQueryParser(bool allowUnregisteredFunctions, QueryParserOptions? options = null) : base(options ?? new QueryParserOptions())
+    {
+        _allowUnregisteredFunctions = allowUnregisteredFunctions;
+    }
 
     /// <inheritdoc />
     protected override QueryLanguageProfile Profile => OqlLanguageProfile.Instance;

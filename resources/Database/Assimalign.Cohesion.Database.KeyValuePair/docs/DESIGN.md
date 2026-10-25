@@ -91,7 +91,7 @@ diagnosis or its exception type.
 
 ## Wire contract ownership
 
-`Assimalign.Cohesion.Database.KeyValuePair.Protocol` owns this model's wire messages, codecs, family singleton and transferred value shapes (5 public types). Both engine and remote client reference that one assembly. Its public namespace and RootNamespace equal its project name. Engine requests, planning, catalog, storage and server lifecycle stay in `Assimalign.Cohesion.Database.KeyValuePair`. This extraction preserves wire bytes and validation; moved public types intentionally change namespace and assembly identity with no forwarders.
+`Assimalign.Cohesion.Database.KeyValuePair.Protocol` owns this model's wire messages, codecs, family singleton and transferred value shapes (6 public top-level types). Both engine and remote client reference that one assembly. Its public namespace and RootNamespace equal its project name. Engine requests, planning, catalog, storage and server lifecycle stay in `Assimalign.Cohesion.Database.KeyValuePair`. This extraction preserves wire bytes and validation; moved public types intentionally change namespace and assembly identity with no forwarders.
 
 
 ## Model component boundaries
@@ -1681,3 +1681,63 @@ protocol error categories. Authentication/version negotiation and refusal contro
 Key-value debugger views expose fixed operation kinds, stored request/result metadata and reviewed identities. Existing public memory values are returned without reading or copying their contents; private buffers, parameters, synchronized current-transaction getters and engine/session snapshots are omitted. Internal helpers with no safe public or protected data have empty views.
 
 Eligible types follow the [Database conventions](../../Assimalign.Cohesion.Database/docs/CONVENTIONS.md) debugger display/proxy rules. Views are private and read-only; inspection does not change the public API, execution paths, error contracts, storage formats or protocol bytes.
+
+## Engine-registered scalar functions
+
+The builder owns a `KeyValueFunctionCollection`; build admission freezes mutation, validates
+options and cancellation, then copies registrations to `KeyValueFunctionCatalog` before
+creating storage or worker pumps. Direct `KeyValueDatabaseEngine.Create` has an empty catalog.
+The immutable catalog retains the same function instances for every engine database/session;
+a function must be stateless or thread-safe. Fixed signatures are primitive `DatabaseType`
+sequences; names use the shared, generated, ordinal-ignore-case `KeyValueFunctionName`.
+The exact primitive resolution/NULL policy and additive CALL grammar are specified in
+[COMMANDS.md](COMMANDS.md). There is no implicit numeric conversion or persisted metadata.
+
+`KeyValueFunction` is an abstract NVI extension seam: immutable metadata and nonvirtual
+`Invoke(scoped in KeyValueArguments)` own validation, strict NULL handling, cancellation,
+callback-fault coding and declared-result validation; `InvokeCore` supplies only the body.
+`Create` wraps statically compiled delegates of arity 0–4 without reflection or dynamic code;
+manual subclasses support arbitrary fixed arity. `KeyValueArguments` and context are readonly
+ref structs. The context exposes database identity and cancellation only. Callbacks remain
+trusted application code with potentially external effects; the engine cannot sandbox or
+roll those effects back. Strict calls with a NULL argument skip the body; every other valid
+CALL enters it once. There is no optimizer folding or repeated evaluation.
+
+The strict-function dispatch principle follows PostgreSQL's
+`C:/Source/repos/postgres/postgres/src/backend/executor/execExprInterp.c:944–1027`:
+strict NULL input skips callback evaluation. No code was copied. KV deliberately uses exact
+native primitive signatures rather than SQL overload casts; its six commands are not functions.
+No built-in scalar functions or aggregate framework is invented for this model.
+
+Requests snapshot argument lists and binary bytes. Manual access exposes binary as read-only
+memory; a typed `byte[]` delegate argument is copied, and binary return values are copied
+before materialization. A result has one nullable `value` column with the declared primitive
+type, one row and affected count -1. All existing CRUD paths retain their executors and
+transaction behavior. `Invoke` follows SQL IsFunctionFailure: DatabaseException, out-of-memory, insufficient stack
+and actual statement cancellation keep their identity; all other callback failures, including
+I/O, storage and timeout, retain their inner cause under CV05003. Function resolution, result
+and callback codes are retained before storage classification, even with an I/O inner cause.
+Only actual engine storage failures receive storage classification and transaction abort.
+CV01018–21 own resolution and CV02016 owns declared-result violations; codes and grammar
+are listed in COMMANDS. No public interface, project reference, event, format or wire version
+changes. Generated names use the existing value-type generator and trimming-safe codecs;
+client code continues to reference only the shared Protocol contract, never the engine.
+
+Binary argument snapshots are deduplicated per request by original backing-buffer and range
+identity, including repeated CALL references to one decoded parameter. Each unique input range
+is copied once, and argument slots share that detached snapshot; equal bytes in independent
+buffers and distinct slices remain separate. Thus owned payload bytes follow unique supplied
+ranges plus the argument slots, rather than multiplying a payload by its alias count. Typed
+`byte[]` delegate access still returns a defensive copy, and binary results remain detached.
+No arity limit, message limit, public API, disk format or wire version is added by this ownership rule.
+
+CALL holds its session through completion, excluding other commands and BEGIN during callback
+execution. Ordinary data commands retain their existing admission behavior.
+A callback capturing that session cannot run a nested PUT: CK07003 precedes nested execution,
+so a failed CALL contributes no writes to a later COMMIT. Callbacks must not reenter an engine
+on another session either: a nested command can wait indefinitely for a held lock, without a
+lock-wait timeout or detected wait-for cycle. Typed delegates do not receive the statement token;
+a derived implementation can observe its borrowed context.
+
+Interleaved same-process Release comparisons preserve GET/EXISTS allocations. CALL admission
+uses session state so ordinary reads avoid taking a session operation hold.

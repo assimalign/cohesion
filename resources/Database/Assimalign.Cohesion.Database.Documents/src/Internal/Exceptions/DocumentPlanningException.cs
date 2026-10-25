@@ -19,6 +19,13 @@ internal sealed class DocumentPlanningException : DatabaseException
     {
     }
 
+    internal static bool IsExternalFunctionFailure(Exception error, System.Threading.CancellationToken cancellationToken)
+        => error is not (DatabaseException or OutOfMemoryException or InsufficientExecutionStackException)
+            && !(error is OperationCanceledException && cancellationToken.IsCancellationRequested);
+
+    internal static DocumentPlanningException FunctionFailed(DocumentFunctionName name, Exception error)
+        => new("CD05017", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.FunctionFailed, name, error.Message), innerException: error);
+
     internal static Diagnostic CreateDiagnostic(string code, string? message, Location? location) => new()
     {
         Code = code,

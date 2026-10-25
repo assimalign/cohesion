@@ -56,6 +56,8 @@ internal static partial class GraphPlanExecutor
             // another sigil from an unused key such as "$$unused" and can invent a collision.
             plan = new GraphPlanner(database, operation.Context.Snapshot).Plan(statement.GqlExpression, parameters, paths, token, normalizedParameters: true);
         }
+        operation.FunctionBindings = plan.FunctionBindings;
+        operation.FunctionCancellation = token;
         if (!plan.Writes)
         {
             return await ExecuteReadAsync(database, operation, plan, parameters, token,

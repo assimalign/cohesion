@@ -414,7 +414,7 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
                 }
                 var result = await _databaseSession!.ExecuteStatementAsync(() =>
                 {
-                    var statement = (OqlQueryStatement)new OqlQueryParser().Parse(execute.Statement);
+                    var statement = (OqlQueryStatement)new OqlQueryParser(allowUnregisteredFunctions: true).Parse(execute.Statement);
                     var diagnostics = statement.Diagnostics.ToArray();
                     if (string.IsNullOrWhiteSpace(execute.Statement) || diagnostics.Any(d => d.Severity == DiagnosticSeverity.Error))
                     {

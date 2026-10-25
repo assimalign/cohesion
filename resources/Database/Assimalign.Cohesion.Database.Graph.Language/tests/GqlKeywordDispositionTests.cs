@@ -107,6 +107,7 @@ public sealed class GqlKeywordDispositionTests
         ["NEXT"] = Parses("MATCH (a) RETURN a NEXT MATCH (b) RETURN b"),
         ["FOR"] = Parses("FOR x IN [1, 2] RETURN x"),
         ["HAVING"] = Rejects("MATCH (a) RETURN a HAVING a.x = 1", "HAVING"),
+        ["OVER"] = Rejects("RETURN count(*) OVER ()", "WINDOW OVER"),
         ["STDDEV_SAMP"] = Rejects("MATCH (a) RETURN STDDEV_SAMP(a.age)", "STDDEV_SAMP"),
         ["STDDEV_POP"] = Rejects("MATCH (a) RETURN STDDEV_POP(a.age)", "STDDEV_POP"),
         ["PERCENTILE_CONT"] = Rejects("MATCH (a) RETURN PERCENTILE_CONT(a.age, 0.5)", "PERCENTILE_CONT"),

@@ -14,4 +14,7 @@
   <data name="DecodeWriteOutcomeKeyValueClient" xml:space="preserve"><value>expected one [applied, etag] outcome row</value></data>
   <data name="ExecuteCoreAsyncDatabaseClient" xml:space="preserve"><value>The server closed the connection mid-exchange.</value></data>
   <data name="ExecuteCoreAsyncDatabaseClient2" xml:space="preserve"><value>Unexpected {0} frame in a KeyValue execute exchange.</value></data>
+  <data name="FunctionNameRequired" xml:space="preserve"><value>A function name must be initialized.</value></data>
+  <data name="FunctionArgumentUnsupported" xml:space="preserve"><value>Function arguments must use supported native primitive CLR values.</value></data>
+  <data name="FunctionResultInvalid" xml:space="preserve"><value>A function result must contain one nullable primitive value column and exactly one row.</value></data>
 </root>

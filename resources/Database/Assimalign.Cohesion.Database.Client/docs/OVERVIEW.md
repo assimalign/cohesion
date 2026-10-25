@@ -120,6 +120,15 @@ state; existing inherited display/proxy pairs are reused. See the shared
 Lease getters that take locks or enforce disposal, delegated stream state and transport callbacks are omitted. Stored connection metadata is exposed without I/O or exchange activity.
 Runtime APIs, methods, allocation budgets, persistent formats and wire behavior are unchanged.
 
+
+## Function exchange canary
+
+The client-only NativeAOT sample exercises `KeyValueConnection.InvokeFunctionAsync` against an
+in-memory protocol peer for an Int64 value, NULL, and binary data. It verifies parameterized CALL
+text, typed component encoding, result headers and materialized values through the existing
+Execute/result frames. The pre-trim reference-closure guard still excludes engine, parser,
+storage and transaction assemblies; the canary gains no engine reference.
+
 ## Lease cancellation completion
 
 Disposing or aborting an active rental joins its queued cancellation callbacks before exchange

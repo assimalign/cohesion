@@ -14,6 +14,7 @@ namespace Assimalign.Cohesion.Database.Graph.Language;
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Language.GqlQueryParser.DebugView))]
 public sealed partial class GqlQueryParser : QueryParser
 {
+    private readonly bool _allowCustomFunctions;
     private readonly object _gate = new();
     private readonly List<Lexeme> _tokens = [];
     private readonly List<Diagnostic> _diagnostics = [];
@@ -33,7 +34,13 @@ public sealed partial class GqlQueryParser : QueryParser
 
     /// <summary>Initializes a GQL parser.</summary>
     /// <param name="options">Optional shared analyzer configuration.</param>
-    public GqlQueryParser(QueryParserOptions? options = null) : base(options ?? new QueryParserOptions()) { }
+    public GqlQueryParser(QueryParserOptions? options = null) : this(false, options) { }
+
+    /// <summary>Initializes a parser which can defer named function resolution to an engine.</summary>
+    /// <param name="allowCustomFunctions">Whether ordinary named calls are admitted.</param>
+    /// <param name="options">Optional shared analyzer configuration.</param>
+    public GqlQueryParser(bool allowCustomFunctions, QueryParserOptions? options = null) : base(options ?? new QueryParserOptions())
+    { _allowCustomFunctions = allowCustomFunctions; }
 
     /// <inheritdoc />
     protected override QueryLanguageProfile Profile => GqlLanguageProfile.Instance;
@@ -313,13 +320,13 @@ public sealed partial class GqlQueryParser : QueryParser
             }
             if (valuePosition && token.Type is TokenType.Identifier or TokenType.Function &&
                 i + 1 < _tokens.Count && _tokens[i + 1].Type == TokenType.LeftParen &&
-                !GqlUnsupportedVocabulary.TryFind(value, out _) && token.Type != TokenType.Function)
+                !GqlUnsupportedVocabulary.TryFind(value, out _) && token.Type != TokenType.Function && !_allowCustomFunctions)
             {
                 Error("CG00010", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.GqlQueryParserFindUnsupportedVoid, token.Text), token);
                 continue;
             }
             if (value == "WITH" && valuePosition && i > 0 && (IsWordAt(i - 1, "STARTS") || IsWordAt(i - 1, "ENDS"))) { continue; }
-            if (value == "ALL" && i > 0 && (IsWordAt(i - 1, "RETURN") || IsWordAt(i - 1, "WITH") || _tokens[i - 1].Type == TokenType.LeftParen && i > 1 && _tokens[i - 2].Type == TokenType.Function)) { continue; }
+            if (value == "ALL" && i > 0 && (IsWordAt(i - 1, "RETURN") || IsWordAt(i - 1, "WITH") || _tokens[i - 1].Type == TokenType.LeftParen && i > 1 && (_tokens[i - 2].Type == TokenType.Function || _allowCustomFunctions && _tokens[i - 2].Type == TokenType.Identifier))) { continue; }
             if (patternDepth != 0 && !valuePosition) { continue; }
             if (!GqlUnsupportedVocabulary.TryFind(value, out var word)) { continue; }
 

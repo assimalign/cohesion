@@ -103,9 +103,10 @@ public sealed class DocumentDatabaseEngine : DatabaseEngine
     // The databases the builder declared (owner decision 56): set once, before they are opened.
     private DatabaseName[] _declaredDatabases = [];
 
-    private DocumentDatabaseEngine(string name, DocumentDatabaseEngineOptions options)
+    private DocumentDatabaseEngine(string name, DocumentDatabaseEngineOptions options, DocumentFunctionCatalog functions)
         : base(name, EngineModel.Document, options.WorkerFailureWindow, options.WorkerFailureMinimumPasses, options.TimeProvider)
     {
+        Functions = functions;
         _options = options;
         JournalSizeLimit = DatabaseWorkerLimits.GetJournalSizeLimit(options.JournalSizeLimit, options.CheckpointJournalSize);
         _rootPath = options.StorageStrategy is null && options.RootPath is { IsEmpty: false } root ? Path.GetFullPath(root) : null;
@@ -142,6 +143,9 @@ public sealed class DocumentDatabaseEngine : DatabaseEngine
             return offline is null ? [] : offline.AsReadOnly();
         }
     }
+
+    /// <summary>Gets the immutable function catalog shared by every database and session.</summary>
+    public DocumentFunctionCatalog Functions { get; }
 
     internal DocumentDatabaseEngineOptions EngineOptions => _options;
 
@@ -238,10 +242,10 @@ public sealed class DocumentDatabaseEngine : DatabaseEngine
     /// (<see cref="DocumentDatabaseEngineOptions.Snapshot"/>): the engine keeps this object.
     /// </param>
     /// <returns>The running engine.</returns>
-    internal static DocumentDatabaseEngine CreateUncomposed(string name, DocumentDatabaseEngineOptions options)
+    internal static DocumentDatabaseEngine CreateUncomposed(string name, DocumentDatabaseEngineOptions options, DocumentFunctionCatalog? functions = null)
     {
         ValidateOptions(name, options);
-        return new DocumentDatabaseEngine(name, options);
+        return new DocumentDatabaseEngine(name, options, functions ?? DocumentFunctionCatalog.Standard);
     }
 
     /// <summary>

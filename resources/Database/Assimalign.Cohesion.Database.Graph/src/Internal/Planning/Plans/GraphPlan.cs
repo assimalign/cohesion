@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Collections.Frozen;
 using Assimalign.Cohesion.Database.Graph.Language;
 using Assimalign.Cohesion.Database.Types;
 
@@ -11,6 +12,7 @@ namespace Assimalign.Cohesion.Database.Graph.Internal;
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Internal.GraphPlan.DebugView))]
 internal sealed record GraphPlan(GqlQueryExpression Query, IReadOnlyList<GraphMatchClausePlan> MatchClauses)
 {
+    internal IReadOnlyDictionary<GqlNamedFunctionCallExpression, GraphFunction> FunctionBindings { get; init; } = FrozenDictionary<GqlNamedFunctionCallExpression, GraphFunction>.Empty;
     internal IReadOnlyList<GraphProjectionPlan> Projections { get; init; } = [];
     internal IReadOnlyList<GraphStagePlan> Stages { get; init; } = [];
     internal bool Writes { get; init; }

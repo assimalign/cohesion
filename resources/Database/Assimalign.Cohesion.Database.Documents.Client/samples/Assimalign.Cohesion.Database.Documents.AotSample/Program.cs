@@ -55,8 +55,13 @@ internal static class Program
             listener = memory;
             factory = memory.CreateFactory();
         }
-        await using var engine = await DocumentDatabaseEngine.CreateBuilder("native-documents")
-            .AddDatabase("documents").AddServer(options => options.Listener = listener).BuildAsync(token);
+        var builder = DocumentDatabaseEngine.CreateBuilder("native-documents")
+            .AddDatabase("documents").AddServer(options => options.Listener = listener);
+        builder.Functions.Add(DocumentScalarFunction.Create<string, string>("lower_tag", value => value.ToLowerInvariant()));
+        builder.Functions.Add(DocumentAggregateFunction.Create<decimal, decimal, decimal>("rank_total",
+            () => 0m, (state, value) => state + value, state => state));
+        builder.Functions.Add(new HasValueFunction());
+        await using var engine = await builder.BuildAsync(token);
         var server = (DocumentDatabaseServer)engine.Servers.Single();
         await server.StartAsync(token);
         await using var client = DocumentClient.Create(new()
@@ -82,6 +87,16 @@ internal static class Program
             Check(functions["l"] is long length && length == 2, "scalar code points Int64");
             var count = await connection.QueryAsync("SELECT COUNT(*) AS n FROM items", cancellationToken: token);
             Check(count.Columns[0].Type == Assimalign.Cohesion.Database.Types.DatabaseType.Int64 && count.Single()[0] is long number && number == 1, "COUNT Int64");
+            var registered = await connection.QueryAsync(
+                "SELECT lower_tag('READY') AS tag, has_value(absent) AS missing_value, has_value(NULL) AS null_value, has_value(score) AS valued FROM items",
+                cancellationToken: token);
+            Check(registered.Count == 1 && registered.Columns[0].Type == Assimalign.Cohesion.Database.Types.DatabaseType.String &&
+                registered[0][0] is "ready", "registered typed scalar");
+            Check(registered.Columns.Skip(1).All(column => column.Type == Assimalign.Cohesion.Database.Types.DatabaseType.Boolean) &&
+                registered[0][1] is false && registered[0][2] is false && registered[0][3] is true, "registered MISSING-aware scalar");
+            var registeredTotal = await connection.QueryAsync("SELECT rank_total(score) AS total FROM items", cancellationToken: token);
+            Check(registeredTotal.Count == 1 && registeredTotal.Columns[0].Type == Assimalign.Cohesion.Database.Types.DatabaseType.Decimal &&
+                registeredTotal[0][0] is 3m, "registered typed aggregate");
             Check((await connection.GetAsync("items", "one", token))?.Version == saved.Version, "get version");
             var rows = await connection.QueryAsync("SELECT name, score + @offset AS n FROM items WHERE score >= 2 ORDER BY n DESC",
                 new Dictionary<string, object?> { ["offset"] = 4 }, token);

@@ -60,4 +60,5 @@
   <data name="GqlQueryParserParseCaseVoid" xml:space="preserve"><value>Expected WHEN in CASE.</value></data>
   <data name="QueryParserParseCaseAbbreviationVoid" xml:space="preserve"><value>COALESCE requires at least two operands.</value></data>
   <data name="QueryParserParseCaseAbbreviationVoid2" xml:space="preserve"><value>NULLIF requires two operands.</value></data>
+  <data name="FunctionNameInvalid" xml:space="preserve"><value>A function name must be a letter or underscore followed by letters, digits or underscores.</value></data>
 </root>

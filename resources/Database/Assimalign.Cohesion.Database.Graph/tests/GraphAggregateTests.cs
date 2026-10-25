@@ -233,7 +233,7 @@ public sealed class GraphAggregateTests
     public void Accumulate_LargeFloatingAverage_ShouldAvoidConversionExceptions()
     {
         // Arrange
-        var accumulator = new GraphAggregateAccumulator(new GqlAggregateExpression(GqlAggregateFunction.Avg, new GqlLiteralExpression(1.0e30)));
+        var accumulator = new GraphBuiltinAggregateState(new GqlAggregateExpression(GqlAggregateFunction.Avg, new GqlLiteralExpression(1.0e30)));
         int threadId = Environment.CurrentManagedThreadId;
         int overflows = 0;
         EventHandler<System.Runtime.ExceptionServices.FirstChanceExceptionEventArgs> observe = (_, args) =>
@@ -369,7 +369,7 @@ public sealed class GraphAggregateTests
     public void Accumulate_OversizedList_ShouldReportValueDiagnostic(int bound)
     {
         // Arrange
-        var accumulator = new GraphAggregateAccumulator(new GqlAggregateExpression(GqlAggregateFunction.CollectList, new GqlLiteralExpression(1L)));
+        var accumulator = new GraphBuiltinAggregateState(new GqlAggregateExpression(GqlAggregateFunction.CollectList, new GqlLiteralExpression(1L)));
         object value = bound switch
         {
             0 => new object?[GraphValueCodec.MaxValueCount - 1],

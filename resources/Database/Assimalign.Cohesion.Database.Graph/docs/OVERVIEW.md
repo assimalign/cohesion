@@ -286,3 +286,17 @@ invariant formatting and published limits remain unchanged.
 Graph debugger inspection uses stored metadata without traversing bindings, enumerating results or expanding query/session state.
 
 Eligible types follow the [Database conventions](../../Assimalign.Cohesion.Database/docs/CONVENTIONS.md) debugger display/proxy rules. Views are private and read-only; inspection does not change the public API, execution paths, error contracts, storage formats or protocol bytes.
+
+## Developer functions
+
+Add immutable scalar and aggregate functions through `GraphDatabaseEngine.CreateBuilder(...).Functions`
+before BuildAsync. The engine's frozen Functions catalog contains native and developer functions,
+with immutable GetOverloads results. Typed factories support NativeAOT; protected cores support
+context-aware callbacks and multiple aggregate inputs without new interfaces.
+
+Ordinary GQL requests and wire calls resolve registered names automatically. Function result
+metadata declares nested entity/list/map shapes before writes; aggregate retained-state reports
+participate in the existing statement memory budget. Unexpected callback failures use CG05021,
+while native error behavior and infrastructure exception identity remain intact. Registrations
+are engine-local composition only; disk and wire formats are unchanged. Named-call planning
+maps are allocated lazily; native enum-only statements share immutable empty binding maps.
