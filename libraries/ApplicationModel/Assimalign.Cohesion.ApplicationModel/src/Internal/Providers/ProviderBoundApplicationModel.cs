@@ -56,6 +56,8 @@ internal sealed class ProviderBoundApplicationModel : IApplicationModel
 
     public IReadOnlyList<ResourcePlan> Plans => _model.Plans;
 
+    public IReadOnlyList<ApplicationResourceGroup> ResourceGroups => _model.ResourceGroups;
+
     public IReadOnlyList<IResourceCommand> Commands => _model.Commands;
 
     public ApplicationProviders Providers { get; }
@@ -80,6 +82,7 @@ internal sealed class ProviderBoundApplicationModel : IApplicationModel
         public IReadOnlyList<IApplicationResource> Resources => _target.Resources;
         public IReadOnlyList<ResourceManifest> Manifests => _target.Manifests;
         public IReadOnlyList<ResourcePlan> Plans => _target.Plans;
+        public IReadOnlyList<ApplicationResourceGroup> ResourceGroups => _target.ResourceGroups;
         public IReadOnlyList<IResourceCommand> Commands => _target.Commands;
         public ApplicationProviders Providers => _target.Providers;
     }

@@ -20,6 +20,7 @@ public sealed class ApplicationModelResourceDocument
     /// <param name="manifest">The resource manifest.</param>
     /// <param name="plan">The platform-neutral realization plan.</param>
     /// <param name="external">The external declaration and binding, when this is an external resource.</param>
+    /// <param name="resourceGroup">The optional application-owned logical group.</param>
     /// <exception cref="ArgumentException"><paramref name="name"/> is empty.</exception>
     /// <exception cref="ArgumentNullException">
     /// <paramref name="name"/>, <paramref name="dependencies"/>, <paramref name="manifest"/>,
@@ -31,7 +32,8 @@ public sealed class ApplicationModelResourceDocument
         IReadOnlyList<string> dependencies,
         ResourceManifest manifest,
         ResourcePlan plan,
-        ApplicationModelExternalDocument? external = null)
+        ApplicationModelExternalDocument? external = null,
+        string? resourceGroup = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         ArgumentNullException.ThrowIfNull(dependencies);
@@ -49,6 +51,7 @@ public sealed class ApplicationModelResourceDocument
         Manifest = ResourceManifestSnapshot.Create(manifest);
         Plan = plan;
         External = external;
+        ResourceGroup = resourceGroup;
     }
 
     /// <summary>Gets the resource name.</summary>
@@ -65,4 +68,8 @@ public sealed class ApplicationModelResourceDocument
 
     /// <summary>Gets the external declaration and binding, when this is an external resource.</summary>
     public ApplicationModelExternalDocument? External { get; }
+
+    /// <summary>Gets the optional logical resource group.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ResourceGroup { get; }
 }

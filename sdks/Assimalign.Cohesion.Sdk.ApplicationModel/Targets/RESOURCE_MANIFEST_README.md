@@ -18,35 +18,12 @@ HTTPS endpoints with no Certificate metadata default to `Certificate="tls"`. The
 
 Composite lifting preserves the reserved `public` literal; named certificate mounts are prefixed together with their member endpoints.
 
-The `commands` array lists the command kinds the resource's default control plane accepts, one
-entry per distinct `CohesionCommand` kind. An entry takes one of two forms:
+New resources use `cohesion/resource/v2`. The `runtime` object carries only the runtime schema
+and logical management binding (`endpoint`, `path`, and `protocol`). State definitions and initial
+values are discovered from handlers registered by the running resource after appsettings and
+environment configuration have been applied. V2 manifests contain no `commands`, runtime `states`,
+or `initialState` members. They do not generate a separate runtime catalog file or state accessors.
 
-```json
-"commands": [
-  { "kind": "secretstore.add-secret", "requiresInputResolver": true },
-  "secretstore.issue-certificate"
-]
-```
-
-A kind is a string unless its item sets `RequiresInputResolver="true"`; only then is it written as
-the object. `RequiresInputResolver` is the one metadata `CohesionCommand` accepts: `true` or
-`false`, empty meaning `false`. Other metadata, or any other flag value, fails the build. Kinds are trimmed,
-deduplicated ordinally, and sorted, and a kind declared more than once must carry the same
-`RequiresInputResolver` value each time. Because only a set flag changes the written form, a
-manifest that flags no command is the same string array it was before the object form existed.
-Readers (`ResourceManifest` and the `Sdk.Gateway` manifest reader) accept both forms and reject an
-object with any other property, a missing, empty, or non-string `kind`, or a non-boolean
-`requiresInputResolver`.
-
-The flag means the resource accepts the command only in resolved form: the delivering gateway must
-rewrite the declared payload through an `IResourceCommandInputResolver` for that kind, for example
-replacing a `parameter:<name>` or `<store>:<key>` source with the value it names. An application
-that declares a flagged command therefore needs a resolver for the kind in its
-`Providers.CommandInputs`, and `Build()` (or an application set starting that member) fails
-without one. The error names the command, its key, and the target resource; for the application's
-own resource it names the `Assimalign.Cohesion.<Kind>.ApplicationModel.Orchestration` package and
-its `Use<Kind>(...)` verb, and for another application's resource it asks for a resolver in
-`Providers.CommandInputs`. `Sdk.SecretStore` flags `secretstore.add-secret`, which
-`UseSecretStore(...)` satisfies. A command whose kind is not flagged is still delivered as declared
-when no resolver is registered. The SecretStore runtime still rejects an unresolved `add-secret`
-at delivery, as defense in depth.
+The v1 manifest and command metadata are no longer supported. All area SDKs emit v2 and use the
+generic runtime control-plane factory. Register state handlers in the resource's startup code
+and configure their initial settings through appsettings and environment configuration.

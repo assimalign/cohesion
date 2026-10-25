@@ -1,20 +1,21 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Globalization;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
-using Assimalign.Cohesion.Hosting.Health;
+using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.Hosting.Resources.Internal;
 
 namespace Assimalign.Cohesion.Hosting.Resources;
 
-/// <summary>Provides the transport-neutral control plane configured by a resource area.</summary>
+/// <summary>Provides the transport-neutral control plane configured by a resource executable.</summary>
 /// <remarks>Create isolated instances with <see cref="Create"/> and use them through <see cref="IResourceControlPlane"/>.</remarks>
 [global::System.Diagnostics.DebuggerDisplay("ResourceControlPlane")]
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
-public sealed class ResourceControlPlane : IResourceControlPlane
+public sealed partial class ResourceControlPlane : IResourceControlPlane
 {
     /// <summary>
     /// The description of the unhealthy contribution recorded for a contributor that threw.
@@ -159,8 +160,11 @@ public sealed class ResourceControlPlane : IResourceControlPlane
 
     /// <inheritdoc />
     /// <exception cref="OperationCanceledException">Cancellation was requested.</exception>
-    public ValueTask<ResourceHealthReport> CheckReadinessAsync(CancellationToken cancellationToken = default)
-        => CheckContributorsAsync(cancellationToken);
+    public async ValueTask<ResourceHealthReport> CheckReadinessAsync(CancellationToken cancellationToken = default)
+    {
+        ResourceHealthReport report = await CheckContributorsAsync(cancellationToken).ConfigureAwait(false);
+        return IsManagementReady ? report : report with { Status = HealthStatus.Unhealthy };
+    }
 
     /// <inheritdoc />
     /// <exception cref="OperationCanceledException">Cancellation was requested.</exception>
@@ -176,6 +180,7 @@ public sealed class ResourceControlPlane : IResourceControlPlane
 
         lock (_sync)
         {
+            ValidateStateHandlers();
             if (_host is not null && !ReferenceEquals(_host, host))
             {
                 throw new InvalidOperationException("The resource control plane is already attached to a host.");
@@ -407,5 +412,7 @@ public sealed class ResourceControlPlane : IResourceControlPlane
         }
 
         public IReadOnlyList<string> AcceptedCommandKinds => _target.AcceptedCommandKinds;
+        public ResourceRuntimeManifest? RuntimeManifest => _target.RuntimeManifest;
+        public Guid ProcessStartId => _target.ProcessStartId;
     }
 }

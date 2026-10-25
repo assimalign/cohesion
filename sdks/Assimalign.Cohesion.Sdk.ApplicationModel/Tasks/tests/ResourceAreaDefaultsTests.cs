@@ -34,6 +34,7 @@ public sealed class ResourceAreaDefaultsTests
 
     [Theory(DisplayName = "Cohesion Test [Sdk] - Generic area defaults register their control plane and probes")]
     [InlineData("ApiManager", "http")]
+    [InlineData("Database", "admin")]
     [InlineData("EmailHub", "http")]
     [InlineData("EventHub", "http")]
     [InlineData("IoTHub", "http")]
@@ -59,7 +60,7 @@ public sealed class ResourceAreaDefaultsTests
         XElement model = defaults.Descendants("CohesionResourceApplicationModel").Single();
         XElement factory = defaults.Descendants("CohesionResourceControlPlaneType").Single();
         model.Value.ShouldBe($"Assimalign.Cohesion.{area}.ApplicationModel");
-        factory.Value.ShouldBe($"Assimalign.Cohesion.ApplicationModel.{area}ResourceControlPlane");
+        factory.Value.ShouldBe("Assimalign.Cohesion.Hosting.Resources.ResourceControlPlane");
         model.Attribute("Condition")!.Value.ShouldBe("'$(CohesionResourceApplicationModel)' == ''");
         factory.Attribute("Condition")!.Value.ShouldBe("'$(CohesionResourceControlPlaneType)' == ''");
         defaults.Descendants("CohesionControlPlaneEndpoint").Single().Value.ShouldBe(endpoint);
@@ -72,15 +73,6 @@ public sealed class ResourceAreaDefaultsTests
             probe.Attribute("Endpoint")!.Value.ShouldBe(endpoint);
             probe.Attribute("Http")!.Value.ShouldBe(path);
         }
-        if (area == "Rezolvr")
-        {
-            XElement command = defaults.Descendants("CohesionCommand").Single();
-            command.Attributes().Select(static attribute => attribute.Name.LocalName).ShouldBe(["Include"]);
-            command.Attribute("Include")!.Value.ShouldBe("rezolvr.add-a-record;rezolvr.add-cname-record");
-        }
-        else
-        {
-            defaults.Descendants("CohesionCommand").ShouldBeEmpty();
-        }
+        defaults.Descendants("CohesionCommand").ShouldBeEmpty();
     }
 }

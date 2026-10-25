@@ -27,7 +27,6 @@
 
         resources/<Name>/Assimalign.Cohesion.<Name>.ApplicationModel/
             src/Assimalign.Cohesion.<Name>.ApplicationModel.csproj
-            src/<Name>ResourceControlPlane.cs
 
     The two framework producers follow the naming convention in
     .claude/rules/build-system.md ("Framework producer projects"): the
@@ -142,7 +141,7 @@ $DomainPropsTemplate = @'
 <Project>
 	<PropertyGroup>
 		<CohesionResourceApplicationModel Condition="'$(CohesionResourceApplicationModel)' == ''">Assimalign.Cohesion.{NAME}.ApplicationModel</CohesionResourceApplicationModel>
-		<CohesionResourceControlPlaneType Condition="'$(CohesionResourceControlPlaneType)' == ''">Assimalign.Cohesion.{NAME}.ApplicationModel.{NAME}ResourceControlPlane</CohesionResourceControlPlaneType>
+		<CohesionResourceControlPlaneType Condition="'$(CohesionResourceControlPlaneType)' == ''">Assimalign.Cohesion.Hosting.Resources.ResourceControlPlane</CohesionResourceControlPlaneType>
 	</PropertyGroup>
 </Project>
 '@
@@ -266,30 +265,8 @@ $ApplicationModelCsprojTemplate = @'
 	</PropertyGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Resources" />
 	</ItemGroup>
 </Project>
-'@
-
-$ResourceControlPlaneTemplate = @'
-using Assimalign.Cohesion.Hosting.Resources;
-
-namespace Assimalign.Cohesion.{NAME}.ApplicationModel;
-
-/// <summary>
-/// Creates the default control plane shared by enabled {NAME} resources.
-/// </summary>
-public static class {NAME}ResourceControlPlane
-{
-    /// <summary>
-    /// Creates a new isolated {NAME} resource control plane.
-    /// </summary>
-    /// <returns>The {NAME} area's default resource control plane.</returns>
-    public static IResourceControlPlane Create()
-    {
-        return ResourceControlPlane.Create();
-    }
-}
 '@
 
 function Write-IfNotExists {
@@ -356,8 +333,6 @@ foreach ($n in $Name) {
     Write-IfNotExists -Path (Join-Path $applicationModelRoot "src\Assimalign.Cohesion.$n.ApplicationModel.csproj") `
                      -Content $ApplicationModelCsprojTemplate.Replace('{NAME}', $n)
 
-    Write-IfNotExists -Path (Join-Path $applicationModelRoot "src\${n}ResourceControlPlane.cs") `
-                     -Content $ResourceControlPlaneTemplate.Replace('{NAME}', $n)
 }
 
 Write-Host ""

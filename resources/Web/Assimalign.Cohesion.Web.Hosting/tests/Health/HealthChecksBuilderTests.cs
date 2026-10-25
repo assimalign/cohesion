@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
-using Assimalign.Cohesion.Hosting.Health;
+using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.Web.Health;
 using WebHealthStatus = Assimalign.Cohesion.Web.Health.HealthStatus;
 
@@ -18,11 +18,11 @@ namespace Assimalign.Cohesion.Web.Hosting.Tests;
 public class HealthChecksBuilderTests
 {
     [Theory(DisplayName = "Cohesion Test [Web.Hosting] - Builder: maps Hosting contributor results and applies probe tags")]
-    [InlineData(Assimalign.Cohesion.Hosting.Health.HealthStatus.Healthy, WebHealthStatus.Healthy)]
-    [InlineData(Assimalign.Cohesion.Hosting.Health.HealthStatus.Degraded, WebHealthStatus.Degraded)]
-    [InlineData(Assimalign.Cohesion.Hosting.Health.HealthStatus.Unhealthy, WebHealthStatus.Unhealthy)]
+    [InlineData(Assimalign.Cohesion.Hosting.Resources.HealthStatus.Healthy, WebHealthStatus.Healthy)]
+    [InlineData(Assimalign.Cohesion.Hosting.Resources.HealthStatus.Degraded, WebHealthStatus.Degraded)]
+    [InlineData(Assimalign.Cohesion.Hosting.Resources.HealthStatus.Unhealthy, WebHealthStatus.Unhealthy)]
     public async Task AddContributor_WhenEvaluated_ShouldMapResultAndApplyDefaultProbeTags(
-        Assimalign.Cohesion.Hosting.Health.HealthStatus contributorStatus,
+        Assimalign.Cohesion.Hosting.Resources.HealthStatus contributorStatus,
         WebHealthStatus expectedStatus)
     {
         var data = new Dictionary<string, object>

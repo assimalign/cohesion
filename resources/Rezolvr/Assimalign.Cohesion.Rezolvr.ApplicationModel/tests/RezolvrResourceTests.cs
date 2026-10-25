@@ -6,7 +6,6 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.ApplicationModel;
-using Assimalign.Cohesion.Hosting.Resources;
 
 namespace Assimalign.Cohesion.Rezolvr.ApplicationModel.Tests;
 
@@ -45,17 +44,6 @@ public sealed class RezolvrResourceTests
         first.Resource.ShouldBeOfType<RezolvrResource>();
         second.Dependencies.ShouldContain(first);
         Should.Throw<ArgumentNullException>(() => builder.AddRezolvr(null!));
-    }
-
-    [Fact(DisplayName = "Cohesion Test [Rezolvr.ApplicationModel] - Control plane: isolates record command sets")]
-    public void CreateControlPlane_ShouldReturnIsolatedRecordPlanes()
-    {
-        IResourceControlPlane first = RezolvrResourceControlPlane.Create();
-        IResourceControlPlane second = RezolvrResourceControlPlane.Create();
-        first.ShouldNotBeSameAs(second);
-        first.AcceptedCommandKinds.ShouldBe(["rezolvr.add-a-record", "rezolvr.add-cname-record"]);
-        first.Commands.ShouldBeEmpty();
-        first.ObservedEndpoints.ShouldBeEmpty();
     }
 
     [Theory(DisplayName = "Cohesion Test [Rezolvr.ApplicationModel] - Planning: rejects incompatible area facts")]

@@ -19,7 +19,6 @@ using Assimalign.Cohesion.FileSystem;
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Http.Connections;
 using Assimalign.Cohesion.Hosting;
-using Assimalign.Cohesion.Hosting.Health;
 using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.Hosting.Telemetry;
 using Assimalign.Cohesion.Internal;
@@ -359,6 +358,12 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
                     _context.ServiceProvider.GetRequiredService<IEnumerable<IHealthContributor>>())
                 {
                     _controlPlane.AddHealthContributor(contributor);
+                }
+
+                foreach (IResourceStateHandler handler in
+                    _context.ServiceProvider.GetRequiredService<IEnumerable<IResourceStateHandler>>())
+                {
+                    _controlPlane.RegisterStateHandler(handler);
                 }
 
                 ResourceRuntime.HostBuilt(app, _controlPlane);

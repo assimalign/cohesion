@@ -12,9 +12,8 @@ namespace Assimalign.Cohesion.ApplicationModel.Internal;
 /// <c>&lt;source&gt;:&lt;key&gt;</c> mount source of the application's own manifests has a
 /// registered provider, every provider bound to a model resource names an existing resource of
 /// the application with the kind the provider requires, no source or binding reaches into
-/// another application, and every declared command whose target manifest marks it
-/// <see cref="ResourceManifestCommand.RequiresInputResolver"/> has a registered
-/// <see cref="IResourceCommandInputResolver"/> for its kind.
+/// another application. Command input resolvers are explicit optional registrations and are not
+/// declared by producer manifests.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -60,8 +59,7 @@ internal static class ApplicationProviderValidation
     /// A mount source has no provider, names a resource of another application, or is malformed;
     /// or a provider binding names a missing resource, a resource of another application, or a
     /// resource whose kind differs from the provider's <c>ResourceKind</c>; or the telemetry sink
-    /// resource does not declare its endpoint; or a declared command requires an input resolver
-    /// that is not registered.
+    /// resource does not declare its endpoint.
     /// </exception>
     internal static void Validate(IApplicationModel model, bool applicationSetMember = false)
     {
@@ -70,7 +68,6 @@ internal static class ApplicationProviderValidation
 
         ValidateMountSources(model, providers, applicationSetMember);
         ValidateSourceBindings(model, providers);
-        ValidateCommandInputs(model, providers, applicationSetMember);
 
         if (providers.CertificateAuthority is { } authority)
         {
@@ -164,110 +161,6 @@ internal static class ApplicationProviderValidation
                 }
             }
         }
-    }
-
-    // Mirrors delivery: the gateway resolves a command's inputs with the resolvers of the application
-    // that declares it (ApplicationGateway.ResolveCommandInputAsync), whether the target is its own
-    // resource or another application's. The target's manifest says whether the resolved form is
-    // required, so the check names no area and reads only the manifest.
-    private static void ValidateCommandInputs(
-        IApplicationModel model,
-        ApplicationProviders providers,
-        bool applicationSetMember)
-    {
-        IReadOnlyList<IResourceCommand> commands = model.Commands;
-        if (commands.Count == 0)
-        {
-            return;
-        }
-
-        IReadOnlyList<IApplicationResourceDescriptor> descriptors = model.Descriptors;
-        IReadOnlyList<ResourceManifest> manifests = model.Manifests;
-        foreach (IResourceCommand command in commands)
-        {
-            ResourceManifest? target = null;
-            for (int index = 0; index < descriptors.Count && index < manifests.Count; index++)
-            {
-                if (ReferenceEquals(descriptors[index].Resource, command.Target))
-                {
-                    target = manifests[index];
-                    break;
-                }
-            }
-
-            if (target is null || !RequiresInputResolver(target, command.Kind) ||
-                HasCommandInputResolver(providers, command.Kind))
-            {
-                continue;
-            }
-
-            throw new InvalidOperationException(
-                $"Application '{model.Name}' declares command '{command.Kind}' (key '{command.Key}') for resource " +
-                $"'{target.Name}', which requires the declaring application to resolve that command's inputs " +
-                $"before delivery, but no {nameof(IResourceCommandInputResolver)} is registered for " +
-                $"'{command.Kind}'. " + DescribeCommandInputHint(model, target, command.Kind, applicationSetMember));
-        }
-    }
-
-    private static bool RequiresInputResolver(ResourceManifest manifest, string commandKind)
-    {
-        foreach (ResourceManifestCommand declared in manifest.Commands)
-        {
-            if (declared.RequiresInputResolver &&
-                string.Equals(declared.Kind, commandKind, StringComparison.Ordinal))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private static bool HasCommandInputResolver(ApplicationProviders providers, string commandKind)
-    {
-        foreach (IResourceCommandInputResolver resolver in providers.CommandInputs)
-        {
-            if (string.Equals(resolver.CommandKind, commandKind, StringComparison.Ordinal))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private static string DescribeCommandInputHint(
-        IApplicationModel model,
-        ResourceManifest target,
-        string commandKind,
-        bool applicationSetMember)
-    {
-        string kind = target.Kind;
-        string package = string.IsNullOrWhiteSpace(kind)
-            ? "the target area's Assimalign.Cohesion.<Area>.ApplicationModel.Orchestration package"
-            : $"Assimalign.Cohesion.{kind}.ApplicationModel.Orchestration";
-        string surface = applicationSetMember ? "application" : "builder";
-
-        if (target.Application != model.Name)
-        {
-            // Use<Area>(...) would bind a store of another application, which provider validation
-            // rejects, so the resolver is registered on its own.
-            return $"'{target.Name}' is a resource of application '{target.Application}': add an " +
-                $"{nameof(IResourceCommandInputResolver)} for '{commandKind}' to {surface}.Providers.CommandInputs " +
-                $"(the resolver {package} ships).";
-        }
-
-        string verb = string.IsNullOrWhiteSpace(kind) ? "Use<Area>" : $"Use{kind}";
-        if (applicationSetMember)
-        {
-            return $"Reference {package} and register it where the set adds the application, " +
-                $"set.AddApplication(Applications.<Member>, application => application.{verb}(\"{target.Name}\")), " +
-                $"or add an {nameof(IResourceCommandInputResolver)} for '{commandKind}' to " +
-                "application.Providers.CommandInputs inside that callback.";
-        }
-
-        return $"Reference {package} and call builder.{verb}(...) for '{target.Name}', or add an " +
-            $"{nameof(IResourceCommandInputResolver)} for '{commandKind}' to builder.Providers.CommandInputs.";
     }
 
     private static void ValidateSourceBindings(IApplicationModel model, ApplicationProviders providers)

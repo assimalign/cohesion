@@ -154,6 +154,10 @@ public sealed class EventHubApplicationBuilder : IEventHubApplicationBuilder
             var application = new EventHubApplication(new EventHubApplicationOptions(), _context);
             if (_controlPlane is not null)
             {
+                foreach (IResourceStateHandler handler in _context.ServiceProvider.GetRequiredService<global::System.Collections.Generic.IEnumerable<IResourceStateHandler>>())
+                {
+                    _controlPlane.RegisterStateHandler(handler);
+                }
                 ResourceRuntime.HostBuilt(application, _controlPlane);
             }
 

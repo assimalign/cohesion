@@ -18,7 +18,6 @@ using Xunit;
 
 using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Hosting.Resources;
-using RezolvrResourceControlPlane = Assimalign.Cohesion.ApplicationModel.RezolvrResourceControlPlane;
 
 namespace Assimalign.Cohesion.Rezolvr.Hosting.Tests;
 
@@ -32,13 +31,12 @@ public sealed class RezolvrCommandProtocolTests
     private const string applicationName = "appa";
     private const string resourceName = "resolver";
 
-    // An orchestration-enabled executable registers the Rezolvr ApplicationModel's default control
-    // plane for its entry assembly. The ApplicationModel assembly stands in for that entry assembly
-    // here, so the registration leaves the test assembly's own control-plane registration unchanged.
-    private static readonly Assembly _resourceAssembly = typeof(RezolvrResourceControlPlane).Assembly;
+    // Use a distinct assembly as the executable identity so command registration cannot change
+    // the plain-host and default-protocol fixtures in this test assembly.
+    private static readonly Assembly _resourceAssembly = typeof(IRezolvrApplication).Assembly;
 
     static RezolvrCommandProtocolTests() => ResourceRuntime.RegisterControlPlane(
-        _resourceAssembly, RezolvrResourceControlPlane.Create);
+        _resourceAssembly, () => ResourceControlPlane.Create(["rezolvr.add-a-record", "rezolvr.add-cname-record"]));
 
     [Fact(DisplayName = "Cohesion Test [Rezolvr.Hosting] - Commands: authenticated apply, replay, owner refusal, and delete survive a restart")]
     public async Task Commands_ManagedHost_ShouldApplyReplayRefuseAndDeleteAcrossRestart()

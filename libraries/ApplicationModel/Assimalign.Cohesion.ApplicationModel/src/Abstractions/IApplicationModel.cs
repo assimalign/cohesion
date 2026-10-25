@@ -78,6 +78,9 @@ public interface IApplicationModel
     /// </summary>
     IReadOnlyList<ResourcePlan> Plans { get; }
 
+    /// <summary>Gets logical groups and their resource membership in declaration order.</summary>
+    IReadOnlyList<ApplicationResourceGroup> ResourceGroups => System.Array.Empty<ApplicationResourceGroup>();
+
     /// <summary>Gets the immutable commands claimed by this application in declaration order.</summary>
     IReadOnlyList<IResourceCommand> Commands => System.Array.Empty<IResourceCommand>();
 

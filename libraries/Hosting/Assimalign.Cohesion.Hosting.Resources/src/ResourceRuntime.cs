@@ -8,7 +8,7 @@ using System.Runtime.ExceptionServices;
 using System.Threading;
 using System.Threading.Tasks;
 
-using Assimalign.Cohesion.Hosting.Health;
+using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.Hosting.Resources.Internal;
 
 namespace Assimalign.Cohesion.Hosting.Resources;
@@ -452,6 +452,7 @@ public static class ResourceRuntime
         {
             controlPlane.ObserveEndpoint(name, endpoint);
         }
+        if (context.GatewayName is not null && controlPlane.RuntimeManifest is not null) { controlPlane.RequireStateBootstrap(); }
         controlPlane.AttachHost(host);
         _hostControlPlanes.AddOrUpdate(host, controlPlane);
 
@@ -468,6 +469,10 @@ public static class ResourceRuntime
             runInvoked: isEntryInvocationHost
                 ? () => frame!.RunInvoked(host)
                 : null));
+        if (context.TryGetEnvironmentValue(AppEnvironment.Variables.ResourceStatePath, out string? statePath) && controlPlane.RuntimeManifest is not null)
+        {
+            hostContext.Runner = new ResourceStateProjectionRunner(hostContext.Runner, controlPlane, new ResourceMount(statePath));
+        }
     }
 
     /// <summary>Finds the invocation-local control plane attached to a built host.</summary>
@@ -730,7 +735,21 @@ public static class ResourceRuntime
 
         public IReadOnlyList<string> AcceptedCommandKinds => _inner.AcceptedCommandKinds;
 
+        public ResourceRuntimeManifest? RuntimeManifest => _inner.RuntimeManifest;
+        public ResourceRuntimeManagement? RuntimeManagement => _inner.RuntimeManagement;
+        public Guid ProcessStartId => _inner.ProcessStartId;
+        public bool IsManagementReady => _inner.IsManagementReady;
+        public void RequireStateBootstrap() => _inner.RequireStateBootstrap();
+        public ValueTask<bool> AdmitStateAsync(ResourceStateAdmission admission, CancellationToken cancellationToken = default) => _inner.AdmitStateAsync(admission, cancellationToken);
+        public void ConfigureRuntimeManagement(ResourceRuntimeManagement management) => _inner.ConfigureRuntimeManagement(management);
+        public void RegisterStateHandler(IResourceStateHandler handler) => _inner.RegisterStateHandler(handler);
+        public void ValidateStateHandlers() => _inner.ValidateStateHandlers();
+        public ValueTask<ResourceStateValidation> ValidateStateAsync(ResourceStateName name, ResourceStateKey key, ResourceStateValue desired, CancellationToken cancellationToken = default) => _inner.ValidateStateAsync(name, key, desired, cancellationToken);
+        public ValueTask<ResourceStateObservation> ReadStateAsync(ResourceStateName name, ResourceStateKey key, CancellationToken cancellationToken = default) => _inner.ReadStateAsync(name, key, cancellationToken);
+        public ValueTask<ResourceStateApplyResult> ApplyStateAsync(ResourceStateApplyContext context, ResourceStateName name, ResourceStateKey key, ResourceStateValue desired, CancellationToken cancellationToken = default) => _inner.ApplyStateAsync(context, name, key, desired, cancellationToken);
+
         public IReadOnlyList<ResourceCommand> Commands => _inner.Commands;
+
 
         public void RegisterCommandHandler(IResourceCommandHandler handler) => _inner.RegisterCommandHandler(handler);
 

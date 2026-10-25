@@ -18,6 +18,7 @@ public sealed class ApplicationExportResource
     /// <param name="kind">The resource-area kind.</param>
     /// <param name="manifestHash">The canonical manifest hash.</param>
     /// <param name="endpoints">The resource's observed endpoints.</param>
+    /// <param name="resourceGroup">The optional application-owned logical group.</param>
     /// <exception cref="ArgumentNullException">
     /// <paramref name="name"/>, <paramref name="kind"/>, <paramref name="manifestHash"/>,
     /// or <paramref name="endpoints"/> is <see langword="null"/>.
@@ -27,7 +28,8 @@ public sealed class ApplicationExportResource
         string name,
         string kind,
         string manifestHash,
-        IReadOnlyList<ApplicationExportEndpoint> endpoints)
+        IReadOnlyList<ApplicationExportEndpoint> endpoints,
+        string? resourceGroup = null)
     {
         ArgumentNullException.ThrowIfNull(name);
         ArgumentNullException.ThrowIfNull(kind);
@@ -44,6 +46,7 @@ public sealed class ApplicationExportResource
         Kind = kind;
         ManifestHash = manifestHash;
         Endpoints = new ReadOnlyCollection<ApplicationExportEndpoint>(endpointCopy);
+        ResourceGroup = resourceGroup;
     }
 
     /// <summary>Gets the resource name.</summary>
@@ -57,6 +60,10 @@ public sealed class ApplicationExportResource
 
     /// <summary>Gets the resource's observed endpoints.</summary>
     public IReadOnlyList<ApplicationExportEndpoint> Endpoints { get; }
+
+    /// <summary>Gets the optional logical resource group.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ResourceGroup { get; }
 
     internal void Validate()
     {

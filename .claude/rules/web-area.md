@@ -22,7 +22,7 @@ canonical prose lives in `resources/Web/README.md`; this file is the working rul
 - **Never reference `Assimalign.Cohesion.Web.Hosting`** from a feature library. Hosting composes
   DI, configuration, logging, and transports; a reference to it drags that surface into every
   consumer and pushes users toward container-driven design.
-- `Web.Hosting` integrates `Hosting.Health` and `Hosting.Resources` itself (owner decision 57,
+- `Web.Hosting` integrates `Hosting.Resources`, including its consolidated health contracts (owner decision 57,
   2026-10-13). Its public integrations live in `src/Health/` and `src/Resources/`, keeping the
   `Assimalign.Cohesion.Web.Hosting.Health` and `.Resources` namespaces. No separate Web
   hosting-family package exists. A future `Web.Hosting.<Suffix>` package is permitted only for

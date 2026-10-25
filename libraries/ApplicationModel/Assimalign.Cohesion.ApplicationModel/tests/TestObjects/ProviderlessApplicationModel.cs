@@ -36,6 +36,8 @@ internal sealed class ProviderlessApplicationModel : IApplicationModel
 
     public IReadOnlyList<IApplicationResource> Resources => _inner.Resources;
 
+    public IReadOnlyList<ApplicationResourceGroup> ResourceGroups => _inner.ResourceGroups;
+
     public IReadOnlyList<ResourceManifest> Manifests => _inner.Manifests;
 
     public IReadOnlyList<ResourcePlan> Plans => _inner.Plans;

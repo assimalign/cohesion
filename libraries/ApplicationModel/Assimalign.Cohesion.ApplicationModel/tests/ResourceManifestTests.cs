@@ -17,7 +17,7 @@ public class ResourceManifestTests
     {
         const string json = """
             {
-              "schema": "cohesion/resource/v1",
+              "schema": "cohesion/resource/v2",
               "name": "appa-api",
               "kind": "Web",
               "application": "appa",
@@ -72,7 +72,6 @@ public class ResourceManifestTests
                   "manifest": "Example.AppA.Database"
                 }
               ],
-              "commands": ["rezolvr.record"],
               "environment": { "EXAMPLE_MODE": "test" },
               "lifecycle": {
                 "workload": "Deployment",
@@ -101,7 +100,6 @@ public class ResourceManifestTests
         manifest.Mounts[1].Source.ShouldBe("appa-secretstore:certs/appa-api");
         manifest.Settings[0].Type.ShouldBe("int");
         manifest.References[0].Endpoints.ShouldContain("db");
-        manifest.Commands[0].Kind.ShouldBe("rezolvr.record");
         manifest.EnvironmentVariables["EXAMPLE_MODE"].ShouldBe("test");
         manifest.Lifecycle.Workload.ShouldBe(WorkloadKind.Deployment);
         manifest.Properties["web.kind"].ShouldBe("Api");
@@ -111,14 +109,14 @@ public class ResourceManifestTests
     public void Parse_WithNewerSchema_ShouldThrowClearError()
     {
         const string json = """
-            { "schema": "cohesion/resource/v2", "kind": "Web" }
+            { "schema": "cohesion/resource/v3", "kind": "Web" }
             """;
 
         InvalidDataException exception = Should.Throw<InvalidDataException>(
             () => ResourceManifest.Parse(json));
 
-        exception.Message.ShouldContain("cohesion/resource/v2", Case.Sensitive);
-        exception.Message.ShouldContain(ResourceManifest.SchemaV1, Case.Sensitive);
+        exception.Message.ShouldContain("cohesion/resource/v3", Case.Sensitive);
+        exception.Message.ShouldContain(ResourceManifest.SchemaV2, Case.Sensitive);
     }
 
     [Fact(DisplayName = "Cohesion Test [ApplicationModel] - Parse: Should require an explicit resource-manifest schema")]
@@ -133,12 +131,12 @@ public class ResourceManifestTests
         exception.Message.ShouldContain("schema", Case.Insensitive);
     }
 
-    [Fact(DisplayName = "Cohesion Test [ApplicationModel] - Parse: Should reject unknown v1 manifest fields")]
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel] - Parse: Should reject unknown manifest fields")]
     public void Parse_WithUnknownField_ShouldThrowJsonError()
     {
         const string json = """
             {
-              "schema": "cohesion/resource/v1",
+              "schema": "cohesion/resource/v2",
               "name": "appa-api",
               "kind": "Web",
               "application": "appa",
@@ -159,8 +157,8 @@ public class ResourceManifestTests
         exception.Message.ShouldContain("platformObject", Case.Sensitive);
     }
 
-    [Fact(DisplayName = "Cohesion Test [ApplicationModel] - JSON context: Should round-trip manifests with scalar commands and string enums")]
-    public void JsonContext_WithFullManifest_ShouldRoundTripStringEnumsAndScalarCommands()
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel] - JSON context: Should round-trip manifests with string enums")]
+    public void JsonContext_WithFullManifest_ShouldRoundTripStringEnums()
     {
         ResourceManifest expected = CreateManifest();
 
@@ -177,74 +175,13 @@ public class ResourceManifestTests
         actual.Application.ShouldBe(expected.Application);
         actual.Mounts[0].Kind.ShouldBe(ResourceMountKind.Volume);
         actual.Lifecycle.Workload.ShouldBe(WorkloadKind.StatefulSet);
-        actual.Commands[0].Kind.ShouldBe("rezolvr.record");
-        json.ShouldContain("\"commands\":[\"rezolvr.record\"]", Case.Sensitive);
+        json.ShouldNotContain("\"commands\":", Case.Sensitive);
         json.ShouldContain("\"workload\":\"StatefulSet\"", Case.Sensitive);
         json.ShouldContain("\"kind\":\"Volume\"", Case.Sensitive);
         json.ShouldContain("\"environment\":", Case.Sensitive);
         json.ShouldNotContain("environmentVariables", Case.Sensitive);
         json.ShouldContain("\"image\":null", Case.Sensitive);
         json.ShouldContain("\"maxReplicas\":null", Case.Sensitive);
-    }
-
-    [Fact(DisplayName = "Cohesion Test [ApplicationModel] - JSON context: a command that requires an input resolver round-trips as an object and others stay strings")]
-    public void JsonContext_WithInputResolverCommand_ShouldRoundTripObjectForm()
-    {
-        // Arrange
-        ResourceManifest expected = CreateManifest() with
-        {
-            Commands =
-            [
-                new ResourceManifestCommand("rezolvr.record"),
-                new ResourceManifestCommand("rezolvr.resolve") { RequiresInputResolver = true },
-            ],
-        };
-
-        // Act
-        string json = JsonSerializer.Serialize(expected, ResourceManifestJsonContext.Default.ResourceManifest);
-        ResourceManifest actual = ResourceManifest.Parse(json);
-
-        // Assert
-        json.ShouldContain(
-            "\"commands\":[\"rezolvr.record\",{\"kind\":\"rezolvr.resolve\",\"requiresInputResolver\":true}]",
-            Case.Sensitive);
-        actual.Commands.Count.ShouldBe(2);
-        actual.Commands[0].ShouldBe(new ResourceManifestCommand("rezolvr.record"));
-        actual.Commands[1].ShouldBe(new ResourceManifestCommand("rezolvr.resolve") { RequiresInputResolver = true });
-    }
-
-    [Theory(DisplayName = "Cohesion Test [ApplicationModel] - Parse: a command object must have a string kind, a boolean flag, and no other property")]
-    [InlineData("{\"requiresInputResolver\":true}", "requires a 'kind' property")]
-    [InlineData("{\"kind\":\"\"}", "must not be empty")]
-    [InlineData("{\"kind\":42}", "'kind' must be a JSON string")]
-    [InlineData("{\"kind\":\"rezolvr.resolve\",\"requiresInputResolver\":\"yes\"}", "'requiresInputResolver' must be true or false")]
-    [InlineData("{\"kind\":\"rezolvr.resolve\",\"resolver\":true}", "unknown property 'resolver'")]
-    [InlineData("42", "must be a JSON string or an object")]
-    public void Parse_MalformedCommand_ShouldThrow(string command, string expected)
-    {
-        // Arrange
-        string json = JsonSerializer.Serialize(CreateManifest(), ResourceManifestJsonContext.Default.ResourceManifest)
-            .Replace("\"commands\":[\"rezolvr.record\"]", $"\"commands\":[{command}]", StringComparison.Ordinal);
-
-        // Act
-        JsonException exception = Should.Throw<JsonException>(() => ResourceManifest.Parse(json));
-
-        // Assert
-        exception.Message.ShouldContain(expected, Case.Sensitive);
-    }
-
-    [Fact(DisplayName = "Cohesion Test [ApplicationModel] - Parse: an object command without the flag reads as not requiring an input resolver")]
-    public void Parse_CommandObjectWithoutFlag_ShouldNotRequireInputResolver()
-    {
-        // Arrange
-        string json = JsonSerializer.Serialize(CreateManifest(), ResourceManifestJsonContext.Default.ResourceManifest)
-            .Replace("\"commands\":[\"rezolvr.record\"]", "\"commands\":[{\"kind\":\"rezolvr.record\"}]", StringComparison.Ordinal);
-
-        // Act
-        ResourceManifest manifest = ResourceManifest.Parse(json);
-
-        // Assert
-        manifest.Commands.ShouldHaveSingleItem().ShouldBe(new ResourceManifestCommand("rezolvr.record"));
     }
 
     [Fact(DisplayName = "Cohesion Test [ApplicationModel] - Validate: Should reject a property owned by another resource kind")]
@@ -351,19 +288,6 @@ public class ResourceManifestTests
         ResourceManifest.Parse(JsonSerializer.Serialize(manifest, ResourceManifestJsonContext.Default.ResourceManifest)).Endpoints[0].Certificate.ShouldBe("tls");
     }
 
-    [Fact(DisplayName = "Cohesion Test [ApplicationModel] - Validate: Should reject an empty command kind")]
-    public void Validate_WithEmptyCommandKind_ShouldThrow()
-    {
-        ResourceManifest manifest = CreateManifest() with
-        {
-            Commands = new[] { new ResourceManifestCommand(" ") }
-        };
-
-        InvalidDataException exception = Should.Throw<InvalidDataException>(() => manifest.Validate());
-
-        exception.Message.ShouldContain("command", Case.Sensitive);
-    }
-
     [Fact(DisplayName = "Cohesion Test [ApplicationModel] - Validate: Should allow non-network probes without an endpoint")]
     public void Validate_WithExecAndDisabledProbesWithoutEndpoints_ShouldSucceed()
     {
@@ -379,9 +303,106 @@ public class ResourceManifestTests
         Should.NotThrow(() => manifest.Validate());
     }
 
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel] - Runtime: Preserves an unknown producer protocol without a runtime reference")]
+    public void Parse_WithRuntimeMetadata_ShouldPreserveOpaqueDocument()
+    {
+        // Arrange
+        using JsonDocument runtime = JsonDocument.Parse("""{"schema":"vendor/runtime/v9","management":{"protocol":"vendor/control/v9","endpoint":"db","path":"/vendor/control"}}""");
+        ResourceManifest manifest = CreateManifest() with { Runtime = runtime.RootElement.Clone() };
+
+        // Act
+        string json = JsonSerializer.Serialize(manifest, ResourceManifestJsonContext.Default.ResourceManifest);
+        ResourceManifest copy = ResourceManifest.Parse(json);
+
+        // Assert
+        copy.Runtime!.Value.GetRawText().ShouldBe(manifest.Runtime.Value.GetRawText());
+        ResourceManifestCanonicalizer.ComputeHash(copy).ShouldBe(ResourceManifestCanonicalizer.ComputeHash(manifest));
+        ResourceManifestCanonicalizer.ComputeHash(copy).ShouldNotBe(ResourceManifestCanonicalizer.ComputeHash(manifest with { Runtime = null }));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel] - Runtime: Rejects a non-object runtime envelope")]
+    public void Validate_WithScalarRuntime_ShouldRejectEnvelope()
+    {
+        // Arrange
+        using JsonDocument runtime = JsonDocument.Parse("42");
+        ResourceManifest manifest = CreateManifest() with { Runtime = runtime.RootElement.Clone() };
+
+        // Act / Assert
+        Should.Throw<InvalidDataException>(() => manifest.Validate());
+    }
+
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel] - Resource v2 omits command metadata and preserves the management binding")]
+    public void Parse_WithV2Binding_ShouldOmitCommandsAndPreserveBinding()
+    {
+        // Arrange
+        using JsonDocument runtime = JsonDocument.Parse("""{"schema":"cohesion/resource-runtime/v1","management":{"endpoint":"db","path":"/cohesion/v1","protocol":"cohesion/resource-state/v1"}}""");
+        ResourceManifest manifest = CreateManifest() with
+        {
+            Schema = ResourceManifest.SchemaV2,
+            Runtime = runtime.RootElement.Clone()
+        };
+
+        // Act
+        string json = JsonSerializer.Serialize(manifest, ResourceManifestJsonContext.Default.ResourceManifest);
+        ResourceManifest copy = ResourceManifest.Parse(json);
+
+        // Assert
+        using JsonDocument document = JsonDocument.Parse(json);
+        document.RootElement.TryGetProperty("commands", out _).ShouldBeFalse();
+        copy.Schema.ShouldBe(ResourceManifest.SchemaV2);
+        JsonElement.DeepEquals(copy.Runtime!.Value, runtime.RootElement).ShouldBeTrue();
+        ResourceManifestCanonicalizer.ComputeHash(copy).ShouldBe(ResourceManifestCanonicalizer.ComputeHash(manifest));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel] - Runtime: arbitrary producer members survive detached snapshots and round trips")]
+    public void Parse_WithOpaqueRuntimeMembers_ShouldPreserveNestedValues()
+    {
+        // Arrange
+        const string metadata = """
+            {"states":{"vendor":[1,{"nested":[true,null,"value"]}]},"initialState":{"unrelated":{"revision":"vendor-defined"}}}
+            """;
+        ResourceManifest snapshot;
+        using (JsonDocument runtime = JsonDocument.Parse(metadata))
+        {
+            snapshot = Internal.ResourceManifestSnapshot.Create(CreateManifest() with { Runtime = runtime.RootElement });
+        }
+
+        // Act
+        string json = JsonSerializer.Serialize(snapshot, ResourceManifestJsonContext.Default.ResourceManifest);
+        ResourceManifest copy = ResourceManifest.Parse(json);
+
+        // Assert
+        using JsonDocument expected = JsonDocument.Parse(metadata);
+        JsonElement.DeepEquals(copy.Runtime!.Value, expected.RootElement).ShouldBeTrue();
+        ResourceManifestCanonicalizer.ComputeHash(copy).ShouldBe(ResourceManifestCanonicalizer.ComputeHash(snapshot));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel] - Resource manifests reject the retired v1 schema")]
+    public void Parse_WithRetiredV1_ShouldRefuseSchema()
+    {
+        // Arrange
+        string json = JsonSerializer.Serialize(CreateManifest() with { Schema = "cohesion/resource/v1" },
+            ResourceManifestJsonContext.Default.ResourceManifest);
+
+        // Act / Assert
+        Should.Throw<InvalidDataException>(() => ResourceManifest.Parse(json));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel] - Resource manifests reject retired command metadata")]
+    public void Parse_WithCommandMetadata_ShouldRefuseUnknownMember()
+    {
+        // Arrange
+        string json = JsonSerializer.Serialize(CreateManifest(), ResourceManifestJsonContext.Default.ResourceManifest);
+        json = json.Replace("\"schema\":", "\"commands\":[],\"schema\":", StringComparison.Ordinal);
+
+        // Act / Assert
+        Should.Throw<JsonException>(() => ResourceManifest.Parse(json)).Message.ShouldContain("commands", Case.Sensitive);
+    }
+
     private static ResourceManifest CreateManifest()
         => new()
         {
+            Schema = ResourceManifest.SchemaV2,
             Name = "appa-database",
             Kind = "Web",
             Application = "appa",
@@ -443,7 +464,6 @@ public class ResourceManifestTests
                     Manifest = "Example.AppA.SecretStore"
                 }
             },
-            Commands = new[] { new ResourceManifestCommand("rezolvr.record") },
             EnvironmentVariables = new Dictionary<string, string>
             {
                 ["EXAMPLE_MODE"] = "test"

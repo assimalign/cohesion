@@ -31,7 +31,8 @@ public abstract partial class ApplicationGateway :
     IApplicationGatewayCommandHandler,
     IApplicationTrustGateway,
     IResourceCommandCredentialProvider,
-    IResourceTransportTrustProvider
+    IResourceTransportTrustProvider,
+    IResourceManagementGateway
 {
     private const string LiteralPrefix = "literal:";
     private const string ParameterPrefix = "parameter:";
@@ -991,6 +992,7 @@ public abstract partial class ApplicationGateway :
                         $"the application plan supplied to gateway '{Name}'.");
                 }
 
+                ValidateManagementManifest(model.Manifests[IndexOfDescriptor(model.Descriptors, descriptor)]);
                 ValidateResource(model, descriptor, plan);
                 ResolveController(plan);
             }
@@ -1035,6 +1037,7 @@ public abstract partial class ApplicationGateway :
 
             await StartObserverAsync(_activeModels, cancellationToken).ConfigureAwait(false);
             _observerStarted = true;
+            StartResourceManagement();
         }
         catch
         {
@@ -1463,6 +1466,7 @@ public abstract partial class ApplicationGateway :
             {
                 try
                 {
+                    await StopResourceManagementAsync().ConfigureAwait(false);
                     await StopObserverAsync(cancellationToken).ConfigureAwait(false);
                     _observerStarted = false;
                 }
@@ -1561,6 +1565,7 @@ public abstract partial class ApplicationGateway :
             {
                 try
                 {
+                    await StopResourceManagementAsync().ConfigureAwait(false);
                     await StopObserverAsync(cancellationToken).ConfigureAwait(false);
                     _observerStarted = false;
                 }
@@ -1681,6 +1686,7 @@ public abstract partial class ApplicationGateway :
         {
             try
             {
+                await StopResourceManagementAsync().ConfigureAwait(false);
                 await StopObserverAsync(cancellationToken).ConfigureAwait(false);
                 _observerStarted = false;
             }

@@ -19,6 +19,9 @@ public interface IApplicationResourceDescriptor
     /// </summary>
     ResourcePlan? Plan { get; }
 
+    /// <summary>Gets the optional logical group containing this resource.</summary>
+    ResourceGroupName? ResourceGroup => Plan?.ResourceGroup;
+
     /// <summary>
     /// The resources this resource must be realized after, in declaration order.
     /// </summary>

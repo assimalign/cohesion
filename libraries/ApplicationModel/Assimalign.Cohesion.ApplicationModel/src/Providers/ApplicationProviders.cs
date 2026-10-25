@@ -126,10 +126,8 @@ public sealed class ApplicationProviders
     /// <summary>
     /// Gets the resolvers that rewrite declared command payloads before delivery, each keyed by
     /// its <see cref="IResourceCommandInputResolver.CommandKind"/>. A command kind with no
-    /// resolver is delivered exactly as declared, unless the target resource's manifest marks the
-    /// kind <see cref="ResourceManifestCommand.RequiresInputResolver"/>: then
-    /// <see cref="IApplicationBuilder.Build"/>, or an application set starting the member, rejects
-    /// the application and names the registration to add.
+    /// resolver is delivered exactly as declared. Registrations are explicit application code;
+    /// producer manifests declare no command or input-resolver catalog.
     /// </summary>
     /// <remarks>
     /// <see langword="null"/> entries are rejected with <see cref="ArgumentNullException"/>. The

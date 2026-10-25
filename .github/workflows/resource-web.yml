@@ -82,6 +82,7 @@ jobs:
             'Assimalign.Cohesion.Web.Health',
             'Assimalign.Cohesion.Web.HostFiltering',
             'Assimalign.Cohesion.Web.Hosting',
+            'Assimalign.Cohesion.Web.Hosting.Management',
             'Assimalign.Cohesion.Web.HttpsPolicy',
             'Assimalign.Cohesion.Web.OpenApi',
             'Assimalign.Cohesion.Web.ProblemDetails',
@@ -174,3 +175,7 @@ jobs:
           echo "EventSourceSupport delta: $delta bytes ($without_events without, $with_events with)."
       - name: Run the smoke checks against the native binary
         run: '"${{ runner.temp }}/web-aot-guard/Assimalign.Cohesion.Web.AotGuard" --smoke'
+      - name: Publish and run resource state adapters with NativeAOT
+        run: |
+          dotnet publish resources/Web/Assimalign.Cohesion.Web.Hosting.Management/samples/Assimalign.Cohesion.Web.Management.AotGuard/Assimalign.Cohesion.Web.Management.AotGuard.csproj -c Release -r linux-x64 -o "${{ runner.temp }}/web-management-aot-guard"
+          "${{ runner.temp }}/web-management-aot-guard/Assimalign.Cohesion.Web.Management.AotGuard"

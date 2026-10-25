@@ -3,8 +3,8 @@
 ## Summary
 
 Provides Cohesion's opt-in runtime context and supervisor boundary for enabled resource
-executables. It composes the plain Hosting run seam with the transport-neutral Health contracts;
-neither sibling depends back on Resources.
+executables. It owns the transport-neutral health contracts and composes the plain Hosting run seam;
+plain Hosting does not depend back on Resources.
 
 ## Dependencies
 
@@ -12,12 +12,10 @@ neither sibling depends back on Resources.
 | --- | --- |
 | `Assimalign.Cohesion.Core` | Environment contract (`AppEnvironment`, `AppEnvironment.Variables`), paths, URI helpers, and common primitives |
 | `Assimalign.Cohesion.Hosting` | Host lifecycle and `IHostRunner`/`IHostRunObserver` seam |
-| `Assimalign.Cohesion.Hosting.Health` | Contributor registration and aggregate health reports |
 | `System.Security.Cryptography.ProtectedData` | Windows CurrentUser DPAPI mount payloads |
 
 The base `Assimalign.Cohesion.App` framework delivers Resources because every opt-in resource SDK
-generates `ResourceRuntime` calls. It delivers Health transitively beside Resources and plain
-Hosting. Assembly presence does not activate this runtime; the generated registration exists only
+generates `ResourceRuntime` calls. Assembly presence does not activate this runtime; the generated registration exists only
 when `CohesionApplicationModel=enabled`. Direct package consumers can still select the packages
 they need.
 
@@ -29,7 +27,7 @@ they need.
 - `ResourceRuntime` supplies AsyncLocal scope, assembly-keyed generated registrations, entry
   invocation, and host surrender.
 - `IResourceControlPlane` owns host-local contributors, endpoint observations, accepted command
-  kinds, health aggregation, and command dispatch.
+  kinds, health aggregation, command dispatch, and named management endpoint registration.
 - `ResourceMount` reads file-backed or in-memory mount values, decrypting Windows DPAPI-backed
   file content for consumers.
 - The internal resource runner handles process signals, readiness protocol lines, shutdown budget,
@@ -41,16 +39,27 @@ they need.
 - `IResourceEntryInvocation`
 - `IResourceControlPlane`, `ResourceControlPlane` (public sealed implementation; create with `ResourceControlPlane.Create(kinds)`)
 - `ResourceCommand`
+- `ResourceRuntimeManifest`, `ResourceStateDefinition`, `IResourceStateHandler` and process-bound state observations
 - `IResourceCredentialVerifier`, `ResourceCredentialPresentation`, `ResourceCredentialVerification`,
   `ResourceCredentialStatus`, `ResourceCaller`, `ResourceCallerKind`, `ResourceCredentialProfile`
 
-Health value types are owned by `Assimalign.Cohesion.Hosting.Health`; host lifecycle types are
-owned by `Assimalign.Cohesion.Hosting`.
+Health value types and `IHealthContributor` are owned by this assembly under its
+`Assimalign.Cohesion.Hosting.Resources` namespace. Host lifecycle types are owned by
+`Assimalign.Cohesion.Hosting`. There is no separate Health package or compatibility shim.
+
+## Health contracts
+
+`HealthStatus` is ordered `Unhealthy = 0`, `Degraded = 1`, `Healthy = 2`. Default values fail closed.
+`HealthContribution` carries status, an optional description and optional diagnostic data; its
+Healthy/Degraded/Unhealthy factories preserve those fields. `IHealthContributor` exposes a stable
+`Name` and cancellable `ValueTask<HealthContribution> CheckAsync`. `ResourceHealthCheck` is the
+corresponding delegate and `ResourceHealthReport` carries the aggregate status and named snapshots.
+Contributor registration and aggregation live in the same Resources package as these contracts.
 
 ## Invocation model
 
 Generated module initializers register the resource assembly's compiler-rooted entry point and an
-area-specific control-plane factory. Each builder obtains a new control plane. When the area builder
+generic control-plane factory. Each builder obtains a new control plane. When the area builder
 calls `ResourceRuntime.HostBuilt`, the runtime observes the invocation endpoints, attaches the host,
 installs the resource runner, and completes `IResourceEntryInvocation.HostReady` when applicable.
 

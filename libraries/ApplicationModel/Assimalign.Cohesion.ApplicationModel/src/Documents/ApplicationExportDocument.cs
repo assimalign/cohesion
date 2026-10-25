@@ -161,7 +161,8 @@ public sealed class ApplicationExportDocument
                 manifest.Name.ToString(),
                 manifest.Kind,
                 ResourceManifestCanonicalizer.ComputeHash(manifest),
-                observedEndpoints));
+                observedEndpoints,
+                model.Descriptors[index].ResourceGroup?.Value));
             exportedNames.Add(manifest.Name);
         }
 
@@ -488,6 +489,11 @@ public sealed class ApplicationExportDocument
             {
                 throw new InvalidDataException(
                     $"Application-export resource '{resource.Name}' kind '{resource.Kind}' does not match model kind '{modelResource.Manifest.Kind}'.");
+            }
+
+            if (!string.Equals(resource.ResourceGroup, modelResource.ResourceGroup, StringComparison.Ordinal))
+            {
+                throw new InvalidDataException(ErrorMessages.ResourceGroupMembershipInvalid);
             }
 
             var declaredEndpoints = new HashSet<string>(StringComparer.Ordinal);

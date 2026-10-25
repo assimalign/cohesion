@@ -6,7 +6,6 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.ApplicationModel;
-using Assimalign.Cohesion.Hosting.Resources;
 
 namespace Assimalign.Cohesion.IoTHub.ApplicationModel.Tests;
 
@@ -45,17 +44,6 @@ public sealed class IoTHubResourceTests
         first.Resource.ShouldBeOfType<IoTHubResource>();
         second.Dependencies.ShouldContain(first);
         Should.Throw<ArgumentNullException>(() => builder.AddIoTHub(null!));
-    }
-
-    [Fact(DisplayName = "Cohesion Test [IoTHub.ApplicationModel] - Control plane: isolates empty command sets")]
-    public void CreateControlPlane_ShouldReturnIsolatedEmptyPlanes()
-    {
-        IResourceControlPlane first = IoTHubResourceControlPlane.Create();
-        IResourceControlPlane second = IoTHubResourceControlPlane.Create();
-        first.ShouldNotBeSameAs(second);
-        first.AcceptedCommandKinds.ShouldBeEmpty();
-        first.Commands.ShouldBeEmpty();
-        first.ObservedEndpoints.ShouldBeEmpty();
     }
 
     [Theory(DisplayName = "Cohesion Test [IoTHub.ApplicationModel] - Planning: rejects incompatible area facts")]

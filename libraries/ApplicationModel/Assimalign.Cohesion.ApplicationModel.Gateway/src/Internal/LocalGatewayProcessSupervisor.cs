@@ -24,6 +24,28 @@ internal sealed class LocalGatewayProcessSupervisor
     private IReadOnlyDictionary<ApplicationName, bool> _restartOrphansByApplication =
         new Dictionary<ApplicationName, bool>();
 
+    // Read the supervisor's starting process, rather than waiting for readiness:
+    // managed readiness itself depends on the initial state being applied.
+    public bool TryGetManagementTarget(ApplicationName application, ResourceId resource, string endpointName,
+        string path, out ResourceManagementTarget? target)
+    {
+        target = null;
+        if (!_resources.TryGetValue(new LocalResourceKey(application, resource), out SupervisedResource? supervised) || supervised.StopRequested) { return false; }
+        ProcessAttempt? attempt = supervised.GetAttempt();
+        if (attempt is null || HasExited(attempt.Process)) { return false; }
+        foreach (ResourceEndpoint endpoint in supervised.Configuration.ObservedEndpoints)
+        {
+            if (endpoint.Name == endpointName && Uri.TryCreateEndpoint(endpoint.Scheme, endpoint.Host, endpoint.Port, path, out Uri? address))
+            {
+                LocalProcessRegistration process = attempt.Registration;
+                string generation = FormattableString.Invariant($"{process.ProcessId}:{process.StartTimeUtcTicks}");
+                target = new ResourceManagementTarget(supervised.Configuration.Resource.Name.Value, generation, address);
+                return true;
+            }
+        }
+        return false;
+    }
+
     public LocalGatewayProcessSupervisor(
         LocalGatewayOptions options,
         LocalProcessStateStore processState,

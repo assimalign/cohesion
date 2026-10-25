@@ -390,168 +390,72 @@ public sealed class ApplicationProviderValidationTests
         Should.Throw<ArgumentNullException>(() => ApplicationProviderValidation.Validate(null!));
     }
 
-    [Fact(DisplayName = "Cohesion Test [ApplicationModel] - Provider validation: a command whose manifest requires an input resolver fails Build() without one")]
-    public void Build_CommandRequiringInputResolverWithoutResolver_ShouldNamePackageAndVerb()
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel] - Provider validation: command input resolvers are optional explicit registrations")]
+    public void Build_ProgrammaticCommandWithoutResolver_ShouldReachGatewayValidation()
     {
-        // Arrange
         var gateway = new FakeGateway();
         IApplicationBuilder builder = CreateBuilder(gateway);
-        IApplicationResourceDescriptor store = builder.AddResource(ResolvingStore("secrets", requiresInputResolver: true));
+        IApplicationResourceDescriptor store = builder.AddResource(ResolvingStore("secrets"));
         DeclareResolveCommand(builder, store);
 
-        // Act
-        InvalidOperationException exception = Should.Throw<InvalidOperationException>(() => builder.Build());
-
-        // Assert
-        exception.Message.ShouldContain("command 'test.resolve' (key 'tls')", Case.Sensitive);
-        exception.Message.ShouldContain("resource 'secrets'", Case.Sensitive);
-        exception.Message.ShouldContain("Assimalign.Cohesion.KeyStore.ApplicationModel.Orchestration", Case.Sensitive);
-        exception.Message.ShouldContain("builder.UseKeyStore(...)", Case.Sensitive);
-        exception.Message.ShouldContain("builder.Providers.CommandInputs", Case.Sensitive);
-        gateway.ValidatedModel.ShouldBeNull();
-    }
-
-    [Fact(DisplayName = "Cohesion Test [ApplicationModel] - Provider validation: a registered input resolver satisfies a command that requires one")]
-    public void Build_CommandRequiringInputResolverWithResolver_ShouldSucceed()
-    {
-        // Arrange
-        var gateway = new FakeGateway();
-        IApplicationBuilder builder = CreateBuilder(gateway);
-        IApplicationResourceDescriptor store = builder.AddResource(ResolvingStore("secrets", requiresInputResolver: true));
-        DeclareResolveCommand(builder, store);
-        builder.Providers.CommandInputs.Add(new FakeCommandInputResolver());
-
-        // Act
         IApplicationModel model = builder.Build().Model;
 
-        // Assert
         gateway.ValidatedModel.ShouldBeSameAs(model);
-        model.Providers.CommandInputs.ShouldHaveSingleItem().CommandKind.ShouldBe("test.resolve");
-    }
-
-    [Fact(DisplayName = "Cohesion Test [ApplicationModel] - Provider validation: a command whose manifest does not require an input resolver builds without one")]
-    public void Build_CommandNotRequiringInputResolver_ShouldSucceedWithoutResolver()
-    {
-        // Arrange
-        var gateway = new FakeGateway();
-        IApplicationBuilder builder = CreateBuilder(gateway);
-        IApplicationResourceDescriptor store = builder.AddResource(ResolvingStore("secrets", requiresInputResolver: false));
-        DeclareResolveCommand(builder, store);
-
-        // Act
-        IApplicationModel model = builder.Build().Model;
-
-        // Assert
-        gateway.ValidatedModel.ShouldBeSameAs(model);
+        model.Commands.ShouldHaveSingleItem().Kind.ShouldBe("test.resolve");
         model.Providers.CommandInputs.ShouldBeEmpty();
     }
 
-    [Fact(DisplayName = "Cohesion Test [ApplicationModel] - Provider validation: a set member missing an input resolver is told to register it in its callback")]
-    public void Validate_SetMemberCommandRequiringInputResolver_ShouldNameSetCallback()
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel] - Provider validation: explicit command resolvers are frozen with application providers")]
+    public void Build_ExplicitCommandResolver_ShouldPreserveRegistration()
     {
-        // Arrange
         IApplicationBuilder builder = CreateBuilder();
-        IApplicationResourceDescriptor store = builder.AddResource(ResolvingStore("secrets", requiresInputResolver: true));
+        IApplicationResourceDescriptor store = builder.AddResource(ResolvingStore("secrets"));
+        DeclareResolveCommand(builder, store);
+        var resolver = new FakeCommandInputResolver();
+        builder.Providers.CommandInputs.Add(resolver);
+
+        IApplicationModel model = builder.Build().Model;
+        builder.Providers.CommandInputs.Add(new FakeCommandInputResolver("test.other"));
+
+        model.Providers.CommandInputs.ShouldHaveSingleItem().ShouldBeSameAs(resolver);
+        Should.Throw<NotSupportedException>(() => model.Providers.CommandInputs.Clear());
+    }
+
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel] - Provider validation: imported commands create no implicit manifest resolver dependency")]
+    public void Validate_ImportedSetMemberWithoutResolver_ShouldAcceptProgrammaticCommand()
+    {
+        IApplicationBuilder builder = CreateBuilder();
+        IApplicationResourceDescriptor store = builder.AddResource(ResolvingStore("secrets"));
         DeclareResolveCommand(builder, store);
         builder.Providers.CommandInputs.Add(new FakeCommandInputResolver());
         var member = new ProviderlessApplicationModel(builder.Build().Model);
 
-        // Act
-        InvalidOperationException exception = Should.Throw<InvalidOperationException>(
-            () => ApplicationProviderValidation.Validate(member, applicationSetMember: true));
-
-        // Assert
-        exception.Message.ShouldContain("command 'test.resolve'", Case.Sensitive);
-        exception.Message.ShouldContain(
-            "set.AddApplication(Applications.<Member>, application => application.UseKeyStore(\"secrets\"))",
-            Case.Sensitive);
-        exception.Message.ShouldContain("application.Providers.CommandInputs", Case.Sensitive);
+        Should.NotThrow(() => ApplicationProviderValidation.Validate(member, applicationSetMember: true));
+        ((IApplicationModel)member).Providers.CommandInputs.ShouldBeEmpty();
     }
 
-    [Fact(DisplayName = "Cohesion Test [ApplicationModel] - Provider validation: a command for another application's resource that requires an input resolver names the resolver registration")]
-    public void Build_RemoteCommandRequiringInputResolverWithoutResolver_ShouldNameCommandInputs()
+    [Theory(DisplayName = "Cohesion Test [ApplicationModel] - Provider validation: remote command input resolution is explicitly optional")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Build_RemoteCommandWithOptionalResolver_ShouldRetainCallerRegistrations(bool registerResolver)
     {
-        // Arrange
         IApplicationBuilder builder = CreateBuilder();
         builder.AddResource(Consumer("api"));
-        IApplicationResourceDescriptor remote = AddRemoteResolvingStore(builder);
-        DeclareResolveCommand(builder, remote);
+        DeclareResolveCommand(builder, AddRemoteResolvingStore(builder));
+        if (registerResolver)
+        {
+            builder.Providers.CommandInputs.Add(new FakeCommandInputResolver());
+        }
 
-        // Act
-        InvalidOperationException exception = Should.Throw<InvalidOperationException>(() => builder.Build());
-
-        // Assert
-        exception.Message.ShouldContain("'platform-secrets' is a resource of application 'platform'", Case.Sensitive);
-        exception.Message.ShouldContain("builder.Providers.CommandInputs", Case.Sensitive);
-        exception.Message.ShouldNotContain("UseKeyStore", Case.Sensitive);
-    }
-
-    [Fact(DisplayName = "Cohesion Test [ApplicationModel] - Provider validation: the declaring application's input resolver satisfies a command for another application's resource that requires one")]
-    public void Build_RemoteCommandRequiringInputResolverWithResolver_ShouldSucceed()
-    {
-        // Arrange
-        var gateway = new FakeGateway();
-        IApplicationBuilder builder = CreateBuilder(gateway);
-        builder.AddResource(Consumer("api"));
-        IApplicationResourceDescriptor remote = AddRemoteResolvingStore(builder);
-        DeclareResolveCommand(builder, remote);
-        builder.Providers.CommandInputs.Add(new FakeCommandInputResolver());
-
-        // Act
         IApplicationModel model = builder.Build().Model;
 
-        // Assert
-        gateway.ValidatedModel.ShouldBeSameAs(model);
-        model.Providers.CommandInputs.ShouldHaveSingleItem().CommandKind.ShouldBe("test.resolve");
-    }
-
-    [Fact(DisplayName = "Cohesion Test [ApplicationModel] - Provider validation: a set member missing an input resolver for another application's resource is told to add one to application.Providers.CommandInputs")]
-    public void Validate_SetMemberRemoteCommandRequiringInputResolver_ShouldNameApplicationCommandInputs()
-    {
-        // Arrange
-        IApplicationBuilder builder = CreateBuilder();
-        builder.AddResource(Consumer("api"));
-        IApplicationResourceDescriptor remote = AddRemoteResolvingStore(builder);
-        DeclareResolveCommand(builder, remote);
-        builder.Providers.CommandInputs.Add(new FakeCommandInputResolver());
-        var member = new ProviderlessApplicationModel(builder.Build().Model);
-
-        // Act
-        InvalidOperationException exception = Should.Throw<InvalidOperationException>(
-            () => ApplicationProviderValidation.Validate(member, applicationSetMember: true));
-
-        // Assert
-        exception.Message.ShouldContain("'platform-secrets' is a resource of application 'platform'", Case.Sensitive);
-        exception.Message.ShouldContain(
-            "IResourceCommandInputResolver for 'test.resolve' to application.Providers.CommandInputs", Case.Sensitive);
-        exception.Message.ShouldNotContain("UseKeyStore", Case.Sensitive);
-        exception.Message.ShouldNotContain("set.AddApplication", Case.Sensitive);
-    }
-
-    [Theory(DisplayName = "Cohesion Test [ApplicationModel] - Provider validation: a resolver registered for another command kind does not satisfy a command that requires one")]
-    [InlineData("test.other")]
-    [InlineData("TEST.RESOLVE")]
-    public void Build_CommandRequiringInputResolverWithResolverForOtherKind_ShouldThrow(string registeredKind)
-    {
-        // Arrange
-        var gateway = new FakeGateway();
-        IApplicationBuilder builder = CreateBuilder(gateway);
-        IApplicationResourceDescriptor store = builder.AddResource(ResolvingStore("secrets", requiresInputResolver: true));
-        DeclareResolveCommand(builder, store);
-        builder.Providers.CommandInputs.Add(new FakeCommandInputResolver(registeredKind));
-
-        // Act
-        InvalidOperationException exception = Should.Throw<InvalidOperationException>(() => builder.Build());
-
-        // Assert
-        exception.Message.ShouldContain("no IResourceCommandInputResolver is registered for 'test.resolve'", Case.Sensitive);
-        exception.Message.ShouldContain("builder.UseKeyStore(...)", Case.Sensitive);
-        gateway.ValidatedModel.ShouldBeNull();
+        model.Commands.ShouldHaveSingleItem().Owner.ShouldBe((ApplicationName)"appa");
+        model.Providers.CommandInputs.Count.ShouldBe(registerResolver ? 1 : 0);
     }
 
     private static IApplicationResourceDescriptor AddRemoteResolvingStore(IApplicationBuilder builder)
     {
-        ResourceManifest manifest = ResolvingStore("platform-secrets", requiresInputResolver: true) with
+        ResourceManifest manifest = ResolvingStore("platform-secrets") with
         {
             Application = "platform",
         };
@@ -575,12 +479,8 @@ public sealed class ApplicationProviderValidationTests
     private static ResourceManifest Store(string name, string kind) =>
         TestManifestFactory.Create(name) with { Kind = kind };
 
-    private static ResourceManifest ResolvingStore(string name, bool requiresInputResolver) =>
-        TestManifestFactory.Create(name) with
-        {
-            Kind = "KeyStore",
-            Commands = [new ResourceManifestCommand("test.resolve") { RequiresInputResolver = requiresInputResolver }],
-        };
+    private static ResourceManifest ResolvingStore(string name) =>
+        TestManifestFactory.Create(name) with { Kind = "KeyStore" };
 
     private static void DeclareResolveCommand(IApplicationBuilder builder, IApplicationResourceDescriptor target)
     {

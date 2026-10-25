@@ -193,7 +193,6 @@ public sealed class AreaCommandLocalTests
             Assembly = "Assimalign.Cohesion.ApplicationModel.Gateway.TestHost.dll",
             AppHost = Path.Combine(AppContext.BaseDirectory, "Assimalign.Cohesion.ApplicationModel.Gateway.TestHost" + (OperatingSystem.IsWindows() ? ".exe" : string.Empty)),
         },
-        Commands = commands.Select(kind => new ResourceManifestCommand(kind)).ToArray(),
         Endpoints = [new ResourceManifestEndpoint { Name = endpoint, Scheme = "http", Protocol = "tcp", ContainerPort = 8080 }],
         ControlPlane = new ResourceManifestControlPlane { Endpoint = endpoint, Path = "/cohesion/v1" },
         EnvironmentVariables = new Dictionary<string, string> { ["TEST_RESOURCE_AREA"] = kind, ["TEST_COMMAND_DATA"] = Path.Combine(root, name) },

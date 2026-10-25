@@ -10,9 +10,10 @@
 
   <ItemGroup>
     <CohesionProjectReference Include="Assimalign.Cohesion.Web.Hosting" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Web.Cors" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Web.Hosting.Management" />
     <CohesionProjectReference Include="Assimalign.Cohesion.Web.Testing" />
     <CohesionProjectReference Include="Assimalign.Cohesion.Web.Testing.TestHost" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Health" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Resources" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Connections" />

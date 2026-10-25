@@ -7,7 +7,7 @@
 	-->
 	<PropertyGroup>
 		<CohesionResourceApplicationModel Condition="'$(CohesionResourceApplicationModel)' == ''">Assimalign.Cohesion.IdentityHub.ApplicationModel</CohesionResourceApplicationModel>
-		<CohesionResourceControlPlaneType Condition="'$(CohesionResourceControlPlaneType)' == ''">Assimalign.Cohesion.ApplicationModel.IdentityHubResourceControlPlane</CohesionResourceControlPlaneType>
+		<CohesionResourceControlPlaneType Condition="'$(CohesionResourceControlPlaneType)' == ''">Assimalign.Cohesion.Hosting.Resources.ResourceControlPlane</CohesionResourceControlPlaneType>
 		<CohesionResourceKind Condition="'$(CohesionResourceKind)' == ''">IdentityHub</CohesionResourceKind>
 		<CohesionControlPlaneEndpoint Condition="'$(CohesionControlPlaneEndpoint)' == ''">https</CohesionControlPlaneEndpoint>
 		<CohesionControlPlanePath Condition="'$(CohesionControlPlanePath)' == ''">/cohesion/v1</CohesionControlPlanePath>
@@ -17,10 +17,13 @@
 	</PropertyGroup>
 
 	<ItemGroup>
-		<CohesionCommand Include="identityhub.add-audience;identityhub.add-client" />
 		<CohesionEndpoint Include="https" Scheme="https" Certificate="tls" ContainerPort="8443" Public="false" />
+	</ItemGroup>
+	<ItemGroup>
 		<CohesionProbe Include="readiness" Endpoint="https" Http="/readyz" />
 		<CohesionProbe Include="liveness" Endpoint="https" Http="/livez" />
+	</ItemGroup>
+	<ItemGroup>
 		<CohesionMount Include="tls" Kind="Secret" ContainerPath="/cohesion/mounts/tls" />
 		<CohesionMount Include="data" Kind="Volume" ContainerPath="/data" Size="10Gi" />
 	</ItemGroup>

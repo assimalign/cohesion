@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 
 using Assimalign.Cohesion.ApplicationModel;
-using Assimalign.Cohesion.Hosting.Resources;
 
 using Shouldly;
 using Xunit;
@@ -36,16 +35,6 @@ public sealed class SchedulerResourceTests
         IApplicationBuilder builder = Application.CreateBuilder();
         IApplicationResourceDescriptor descriptor = builder.AddScheduler(CreateManifest());
         descriptor.Resource.ShouldBeOfType<SchedulerResource>();
-    }
-
-    [Fact(DisplayName = "Cohesion Test [Scheduler.ApplicationModel] - Control plane: creates isolated defaults")]
-    public void CreateControlPlane_ShouldReturnIsolatedDefaultPlanes()
-    {
-        IResourceControlPlane first = SchedulerResourceControlPlane.Create();
-        IResourceControlPlane second = SchedulerResourceControlPlane.Create();
-        first.ShouldNotBeSameAs(second);
-        first.AcceptedCommandKinds.ShouldBeEmpty();
-        first.ObservedEndpoints.ShouldBeEmpty();
     }
 
     [Fact(DisplayName = "Cohesion Test [Scheduler.ApplicationModel] - Planning: rejects stateful workloads")]

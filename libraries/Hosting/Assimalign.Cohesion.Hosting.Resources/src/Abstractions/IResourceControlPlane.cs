@@ -3,20 +3,90 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 
-using Assimalign.Cohesion.Hosting.Health;
+using Assimalign.Cohesion.Hosting.Resources;
 
 namespace Assimalign.Cohesion.Hosting.Resources;
 
 /// <summary>
-/// Defines the Core-only surface every enabled resource exposes to its gateway.
+/// Defines resource-local runtime state, lifecycle and compatible v1 command control.
 /// </summary>
 public interface IResourceControlPlane
 {
-    /// <summary>Gets the area-defined command kinds accepted by this control plane.</summary>
+    /// <summary>Gets the producer-owned runtime manifest; null denotes a legacy-only resource.</summary>
+    ResourceRuntimeManifest? RuntimeManifest => null;
+
+    /// <summary>Gets the immutable transport binding without copying the runtime state catalog.</summary>
+    ResourceRuntimeManagement? RuntimeManagement => RuntimeManifest?.Management;
+
+    /// <summary>Gets this invocation's process incarnation for verified direct delivery.</summary>
+    Guid ProcessStartId => Guid.Empty;
+
+    /// <summary>Gets whether management bootstrap has admitted this process to serve traffic.</summary>
+    bool IsManagementReady => true;
+
+    /// <summary>Holds traffic admission while a managed invocation receives its required state.</summary>
+    void RequireStateBootstrap() { }
+
+    /// <summary>Admits this process only after all required state snapshots match.</summary>
+    /// <param name="admission">The process and required slot revisions.</param>
+    /// <param name="cancellationToken">Signals cancellation.</param>
+    /// <returns>Whether the process was admitted.</returns>
+    ValueTask<bool> AdmitStateAsync(ResourceStateAdmission admission, CancellationToken cancellationToken = default) => ValueTask.FromResult(false);
+
+    /// <summary>Installs the management binding before runtime handlers register their capabilities and configured baselines.</summary>
+    /// <param name="management">The logical endpoint and versioned protocol binding.</param>
+    /// <exception cref="NotSupportedException">This implementation does not support runtime state.</exception>
+    void ConfigureRuntimeManagement(ResourceRuntimeManagement management) => throw new NotSupportedException(ErrorMessages.ResourceStateUnsupported);
+
+    /// <summary>Registers a startup capability and its adapter over actual feature state.</summary>
+    /// <param name="handler">The hosting adapter over actual feature state.</param>
+    /// <exception cref="NotSupportedException">This implementation does not support runtime state.</exception>
+    void RegisterStateHandler(IResourceStateHandler handler) => throw new NotSupportedException(ErrorMessages.ResourceStateUnsupported);
+
+    /// <summary>Freezes and verifies the discovered runtime catalog before host readiness.</summary>
+    void ValidateStateHandlers() { }
+
+    /// <summary>Validates a state change without applying it.</summary>
+    /// <param name="name">The state contract.</param>
+    /// <param name="key">The state slot.</param>
+    /// <param name="desired">The desired value.</param>
+    /// <param name="cancellationToken">Signals cancellation.</param>
+    /// <returns>The domain validation result.</returns>
+    /// <exception cref="NotSupportedException">This implementation does not support runtime state.</exception>
+    ValueTask<ResourceStateValidation> ValidateStateAsync(ResourceStateName name, ResourceStateKey key, ResourceStateValue desired, CancellationToken cancellationToken = default) => throw new NotSupportedException(ErrorMessages.ResourceStateUnsupported);
+
+    /// <summary>Reads actual state from this process.</summary>
+    /// <param name="name">The state contract.</param>
+    /// <param name="key">The state slot.</param>
+    /// <param name="cancellationToken">Signals cancellation.</param>
+    /// <returns>The atomic state observation.</returns>
+    /// <exception cref="NotSupportedException">This implementation does not support runtime state.</exception>
+    ValueTask<ResourceStateObservation> ReadStateAsync(ResourceStateName name, ResourceStateKey key, CancellationToken cancellationToken = default) => throw new NotSupportedException(ErrorMessages.ResourceStateUnsupported);
+
+    /// <summary>Reconciles one verified desired revision against actual feature state.</summary>
+    /// <param name="context">The authenticated target and revision.</param>
+    /// <param name="name">The state contract.</param>
+    /// <param name="key">The state slot.</param>
+    /// <param name="desired">The desired value.</param>
+    /// <param name="cancellationToken">Signals cancellation.</param>
+    /// <returns>The actual application outcome.</returns>
+    /// <exception cref="NotSupportedException">This implementation does not support runtime state.</exception>
+    ValueTask<ResourceStateApplyResult> ApplyStateAsync(ResourceStateApplyContext context, ResourceStateName name, ResourceStateKey key, ResourceStateValue desired, CancellationToken cancellationToken = default) => throw new NotSupportedException(ErrorMessages.ResourceStateUnsupported);
+
+    /// <summary>
+    /// Gets the area-defined command kinds accepted by this control plane.
+    /// </summary>
     IReadOnlyList<string> AcceptedCommandKinds { get; }
 
-    /// <summary>Gets accepted declarations, including their owners, without transport state.</summary>
+    /// <summary>
+    /// Gets accepted declarations, including their owners, without transport state.
+    /// </summary>
     IReadOnlyList<ResourceCommand> Commands => Array.Empty<ResourceCommand>();
+
+    /// <summary>
+    /// Gets the latest observed endpoint snapshot keyed by endpoint name.
+    /// </summary>
+    IReadOnlyDictionary<string, Uri> ObservedEndpoints { get; }
 
     /// <summary>Registers the runtime implementation of an advertised command kind.</summary>
     /// <param name="handler">The area-owned mutation handler.</param>
@@ -27,8 +97,7 @@ public interface IResourceControlPlane
     void RegisterCommandHandler(IResourceCommandHandler handler) =>
         throw new NotSupportedException("This resource control plane does not support command handlers.");
 
-    /// <summary>Gets the latest observed endpoint snapshot keyed by endpoint name.</summary>
-    IReadOnlyDictionary<string, Uri> ObservedEndpoints { get; }
+
 
     /// <summary>Adds a contributor to health, readiness, and liveness aggregation.</summary>
     /// <param name="contributor">The contributor to add.</param>

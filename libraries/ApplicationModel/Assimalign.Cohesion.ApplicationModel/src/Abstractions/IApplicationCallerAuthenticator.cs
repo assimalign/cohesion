@@ -26,7 +26,9 @@ namespace Assimalign.Cohesion.ApplicationModel;
 /// discovery routes admit any authenticated caller; command routes require a
 /// <see cref="ApplicationCallerKind.Peer"/> caller with an <see cref="ApplicationCaller.Application"/>,
 /// which owns every command it sends or reads, limited to
-/// <see cref="ApplicationCaller.AllowedCommandKinds"/> (empty permits every kind).
+/// <see cref="ApplicationCaller.AllowedCommandKinds"/> (empty permits every command kind).
+/// Named management endpoints require explicit <c>management.&lt;endpoint&gt;</c> entries even for
+/// reads; an empty list grants no management endpoint access. Developer callers remain read-only.
 /// </para>
 /// </remarks>
 public interface IApplicationCallerAuthenticator

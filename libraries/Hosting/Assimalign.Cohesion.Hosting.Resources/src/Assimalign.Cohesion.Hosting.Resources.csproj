@@ -1,17 +1,23 @@
 <Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
 		<RootNamespace>Assimalign.Cohesion.Hosting.Resources</RootNamespace>
-		<Description>Cohesion opt-in resource hosting context, runtime, control plane, lifecycle wrapper, commands, and protected mount access.</Description>
+		<Description>Cohesion resource hosting context, health contracts and aggregation, runtime, control plane, lifecycle wrapper, commands, and protected mount access.</Description>
 	</PropertyGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Core" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Health" />
 	</ItemGroup>
 	<ItemGroup>
 		<CohesionPackageReference Include="System.Security.Cryptography.ProtectedData" />
 	</ItemGroup>
 	<ItemGroup>
 		<CohesionSharedSource Include="Assimalign.Cohesion.Hosting.Resources" Module="CommandDiagnostics" />
+		<CohesionSharedSource Include="Assimalign.Cohesion.Hosting.Resources" Module="StateProtocol" />
+	</ItemGroup>
+	<ItemGroup>
+		<CohesionValueType Include="ValueObjects\ResourceStateName.cs" ObjectRuntimeType="String" ObjectNamespace="Assimalign.Cohesion.Hosting.Resources" ObjectAccessModifier="public" ObjectHasImplicitOperators="true" ObjectHasIsValidMethod="true" ObjectComparison="Ordinal" />
+		<CohesionValueType Include="ValueObjects\ResourceStateKey.cs" ObjectRuntimeType="String" ObjectNamespace="Assimalign.Cohesion.Hosting.Resources" ObjectAccessModifier="public" ObjectHasImplicitOperators="true" ObjectHasIsValidMethod="true" ObjectComparison="Ordinal" />
+		<CohesionValueType Include="ValueObjects\ResourceManagementEndpointName.cs" ObjectRuntimeType="String" ObjectNamespace="Assimalign.Cohesion.Hosting.Resources" ObjectAccessModifier="public" ObjectHasImplicitOperators="true" ObjectHasIsValidMethod="true" ObjectComparison="Ordinal" />
+		<CohesionValueType Include="ValueObjects\ResourceManagementPath.cs" ObjectRuntimeType="String" ObjectNamespace="Assimalign.Cohesion.Hosting.Resources" ObjectAccessModifier="public" ObjectHasImplicitOperators="true" ObjectHasIsValidMethod="true" ObjectComparison="Ordinal" />
 	</ItemGroup>
 </Project>

@@ -14,4 +14,9 @@ public enum ApplicationCallerKind
     /// A developer or tool acting for one.
     /// </summary>
     Developer,
+
+    /// <summary>
+    /// An operator using explicit management grants without peer command privileges.
+    /// </summary>
+    Operator,
 }

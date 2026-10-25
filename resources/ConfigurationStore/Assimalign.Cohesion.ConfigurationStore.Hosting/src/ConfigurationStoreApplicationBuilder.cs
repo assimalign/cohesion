@@ -223,6 +223,10 @@ public sealed class ConfigurationStoreApplicationBuilder : IConfigurationStoreAp
                 _context);
             if (_controlPlane is not null)
             {
+                foreach (IResourceStateHandler handler in _context.ServiceProvider.GetRequiredService<global::System.Collections.Generic.IEnumerable<IResourceStateHandler>>())
+                {
+                    _controlPlane.RegisterStateHandler(handler);
+                }
                 ResourceRuntime.HostBuilt(application, _controlPlane);
             }
 

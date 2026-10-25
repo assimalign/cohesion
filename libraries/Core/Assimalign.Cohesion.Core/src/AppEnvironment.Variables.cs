@@ -29,6 +29,12 @@ public static partial class AppEnvironment
         /// <summary>Gets the resource identity variable.</summary>
         public const string Resource = "COHESION_RESOURCE";
 
+        /// <summary>Gets the platform-injected immutable host identity used to verify direct management targets.</summary>
+        public const string ResourceInstance = "COHESION_RESOURCE_INSTANCE";
+
+        /// <summary>Gets the protected file containing platform-distributed desired runtime state.</summary>
+        public const string ResourceStatePath = "COHESION_RESOURCE_STATE_PATH";
+
         /// <summary>Gets the gateway topology variable.</summary>
         public const string Gateway = "COHESION_GATEWAY";
 

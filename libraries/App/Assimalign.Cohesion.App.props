@@ -20,7 +20,7 @@
              FrameworkList.xml and RuntimeList.xml generation - no DLL
              inspection needed.
 
-        The App ItemGroup below is conditioned on $(CohesionFrameworkName),
+        The App ItemGroups below are conditioned on $(CohesionFrameworkName),
         which every Refs/Runtime csproj sets in its PropertyGroup BEFORE
         importing this file, so App's items exist only in App's producers.
         Property-based conditions on top-level ItemGroups are MSBuild-legal
@@ -136,7 +136,6 @@
         <!-- This is the sole policy list for the hosting kernel. App.targets derives
              every transitive Assimalign.Cohesion dependency from these roots. -->
         <CohesionAppKernelRoot Include="Assimalign.Cohesion.Hosting" />
-        <CohesionAppKernelRoot Include="Assimalign.Cohesion.Hosting.Health" />
         <CohesionAppKernelRoot Include="Assimalign.Cohesion.Hosting.Resources" />
         <!-- Generated resource accessors and every area hosting module depend on Connections. -->
         <CohesionAppKernelRoot Include="Assimalign.Cohesion.Connections" />
@@ -154,14 +153,20 @@
         <CohesionAppKernelRoot Include="Assimalign.Cohesion.DependencyInjection" />
         <CohesionAppKernelRoot Include="Assimalign.Cohesion.FileSystem.Physical" />
 
+    </ItemGroup>
+    <ItemGroup Condition="'$(CohesionFrameworkName)' == 'Assimalign.Cohesion.App'">
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App" />
 
+    </ItemGroup>
+    <ItemGroup Condition="'$(CohesionFrameworkName)' == 'Assimalign.Cohesion.App'">
         <!-- The kernel's package-delivered assemblies: the closure above walks project
              references only, so these are App's one explicit list. Private (runtime-only):
              Hosting.Resources decrypts Windows mount files with ProtectedData, which is not
              part of Microsoft.NETCore.App, and exposes none of its types. -->
         <CohesionFrameworkPrivateAssembly Include="System.Security.Cryptography.ProtectedData" />
 
+    </ItemGroup>
+    <ItemGroup Condition="'$(CohesionFrameworkName)' == 'Assimalign.Cohesion.App'">
         <!--
             Roslyn analyzers / source generators shipped INSIDE this framework's
             Ref pack at analyzers/dotnet/cs/. SDK-path consumers (i.e. anyone

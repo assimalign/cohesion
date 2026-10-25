@@ -21,16 +21,20 @@ internal sealed class ApplicationResourceDescriptor : IResourceCommandDescriptor
     private readonly List<IResourceCommand> _commands = new();
 
     public ApplicationResourceDescriptor(IApplicationResource resource,
-        Func<ApplicationName>? owner = null, Action<IResourceCommand>? register = null)
+        Func<ApplicationName>? owner = null, Action<IResourceCommand>? register = null,
+        ResourceGroupName? resourceGroup = null)
     {
         Resource = resource ?? throw new ArgumentNullException(nameof(resource));
         _owner = owner;
         _register = register;
+        ResourceGroup = resourceGroup;
     }
 
     public IApplicationResource Resource { get; }
 
     public ResourcePlan? Plan => null;
+
+    public ResourceGroupName? ResourceGroup { get; }
 
     public IReadOnlyList<IResourceCommand> Commands => _commands.AsReadOnly();
 
@@ -91,6 +95,7 @@ internal sealed class ApplicationResourceDescriptor : IResourceCommandDescriptor
 
         public IApplicationResource Resource => _target.Resource;
         public ResourcePlan? Plan => _target.Plan;
+        public ResourceGroupName? ResourceGroup => _target.ResourceGroup;
         public IReadOnlyList<IApplicationResourceDescriptor> Dependencies => _target.Dependencies;
     }
 }

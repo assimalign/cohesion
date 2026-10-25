@@ -2,7 +2,7 @@
 
 This package is the hosting-free HTTP control plane shared by Cohesion gateways. It serves the
 gateway's canonical `ApplicationExportDocument`, live resource observations, and desired resource
-commands over `Http.Connections` + TCP, with an internal matcher for its five fixed routes. It
+commands and resource management endpoints over `Http.Connections` + TCP, with an internal route matcher. It
 references nothing under `resources/**`, so it uses no Web package (not even `Web.Routing`) and no
 platform Hosting package.
 
@@ -18,6 +18,9 @@ The authenticated surface is:
 - `GET /cohesion/v1/resources/{name}/commands`
 - `PUT /cohesion/v1/resources/{name}/commands/{id}`
 - `DELETE /cohesion/v1/resources/{name}/commands/{id}`
+- `GET /cohesion/v2/resources/{name}/state-contracts` and `/instances`
+- `GET`, `PUT`, `DELETE` at `/cohesion/v2/resources/{name}/state/{state}/{key}`
+- `GET /cohesion/v2/resources/{name}/operations/{id}`
 
 Every request requires an ES256 Bearer token with audience `cohesion-export`. Verification uses
 the served application's live `ITrustedIssuerProvider` snapshot. A missing credential is `401`;
@@ -43,3 +46,5 @@ authenticated by the built-in ES256 trusted-issuer check and then by the applica
 are idempotent, and a command key already applied for another owner is rejected. A factory with
 neither a matching nor a catch-all dispatcher still records commands for that kind as `Rejected`
 with a named reason; they are never silently discarded.
+
+State management requires explicit per-resource read/write grants in AllowedManagementOperations. Conditional writes and UUID retry identities are durably accepted before background reconciliation. The gateway supplies trusted instance targets, credentials and transport trust; it reports dated fleet convergence. Command grants do not imply management access. See [resource state management](../../../docs/libraries/ApplicationModel/RESOURCE_MANAGEMENT.md).

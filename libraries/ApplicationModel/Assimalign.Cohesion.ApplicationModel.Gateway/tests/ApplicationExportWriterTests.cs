@@ -76,7 +76,7 @@ public class ApplicationExportWriterTests
     public async Task StartAsync_SecondExportFails_ShouldWithdrawPublishedModels()
     {
         // Arrange
-        var gateway = new FaultingExportGateway(failPublishFor: "appb");
+        using var gateway = new FaultingExportGateway(failPublishFor: "appb");
         IReadOnlyList<IApplicationModel> models =
         [
             BuildModel("appa", gateway),
@@ -96,7 +96,7 @@ public class ApplicationExportWriterTests
     public async Task StopAsync_ExportRemovalFailsOnce_ShouldRetryActiveModels()
     {
         // Arrange
-        var gateway = new FaultingExportGateway(failRemovalOnceFor: "appa");
+        using var gateway = new FaultingExportGateway(failRemovalOnceFor: "appa");
         IReadOnlyList<IApplicationModel> models =
         [
             BuildModel("appa", gateway),
@@ -244,8 +244,9 @@ public class ApplicationExportWriterTests
         public ResourceId Resource { get; }
     }
 
-    private sealed class FaultingExportGateway : ApplicationGateway
+    private sealed class FaultingExportGateway : ApplicationGateway, IDisposable
     {
+        private readonly string _testRoot;
         private readonly string? _failPublishFor;
         private readonly string? _failRemovalOnceFor;
         private readonly InMemoryResourceStateManager _state = new();
@@ -256,10 +257,19 @@ public class ApplicationExportWriterTests
         public FaultingExportGateway(
             string? failPublishFor = null,
             string? failRemovalOnceFor = null)
+            : this(Directory.CreateTempSubdirectory("cohesion-export-tests-").FullName, failPublishFor, failRemovalOnceFor)
         {
+        }
+
+        private FaultingExportGateway(string testRoot, string? failPublishFor, string? failRemovalOnceFor)
+            : base(new ApplicationGatewayOptions { ExportDirectory = testRoot })
+        {
+            _testRoot = testRoot;
             _failPublishFor = failPublishFor;
             _failRemovalOnceFor = failRemovalOnceFor;
         }
+
+        public void Dispose() => Directory.Delete(_testRoot, recursive: true);
 
         public override ResourceName Name => "export-test";
 

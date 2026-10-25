@@ -14,16 +14,14 @@ namespace Assimalign.Cohesion.ApplicationModel;
 /// </summary>
 public sealed record ResourceManifest
 {
-    /// <summary>
-    /// The only resource-manifest schema version supported by this contract.
-    /// </summary>
-    public const string SchemaV1 = "cohesion/resource/v1";
+    /// <summary>The deployment manifest schema whose runtime catalog is discovered at startup.</summary>
+    public const string SchemaV2 = "cohesion/resource/v2";
 
     /// <summary>
     /// Gets the resource-manifest schema identifier.
     /// </summary>
     [JsonRequired]
-    public string Schema { get; init; } = SchemaV1;
+    public string Schema { get; init; } = SchemaV2;
 
     /// <summary>
     /// Gets the resource's stable name.
@@ -68,6 +66,15 @@ public sealed record ResourceManifest
     /// </summary>
     public ResourceManifestControlPlane ControlPlane { get; init; } = new();
 
+    /// <summary>Gets opaque, producer-owned runtime metadata.</summary>
+    /// <remarks>
+    /// Composition preserves this document without interpreting its protocol or state schemas.
+    /// The selected gateway validates protocol-specific deployment metadata; live values and
+    /// instance addresses belong to observations. This contract validates only the object envelope.
+    /// </remarks>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public JsonElement? Runtime { get; init; }
+
     /// <summary>
     /// Gets the data mounts required by the resource.
     /// </summary>
@@ -85,12 +92,6 @@ public sealed record ResourceManifest
     /// </summary>
     public IReadOnlyList<ResourceManifestReference> References { get; init; }
         = Array.Empty<ResourceManifestReference>();
-
-    /// <summary>
-    /// Gets the command kinds accepted by the resource's default control plane.
-    /// </summary>
-    public IReadOnlyList<ResourceManifestCommand> Commands { get; init; }
-        = Array.Empty<ResourceManifestCommand>();
 
     /// <summary>
     /// Gets additional environment variables declared by the resource.
@@ -173,10 +174,15 @@ public sealed record ResourceManifest
     /// <exception cref="InvalidDataException">The manifest violates the resource-manifest contract.</exception>
     public ResourceManifest Validate()
     {
-        if (!string.Equals(Schema, SchemaV1, StringComparison.Ordinal))
+        if (Runtime is { ValueKind: not JsonValueKind.Object })
         {
-            throw new InvalidDataException(
-                $"Resource manifest schema '{Schema}' is not supported. Expected '{SchemaV1}'.");
+            throw new InvalidDataException(ErrorMessages.ResourceRuntimeObjectRequired);
+        }
+
+        if (!string.Equals(Schema, SchemaV2, StringComparison.Ordinal))
+        {
+            throw new InvalidDataException(string.Format(CultureInfo.CurrentCulture,
+                ErrorMessages.ResourceManifestSchemaUnsupported, Schema, SchemaV2));
         }
 
         if (string.IsNullOrWhiteSpace(Name.ToString()))
@@ -359,19 +365,6 @@ public sealed record ResourceManifest
         foreach (ResourceManifestReference reference in References)
         {
             ValidateReference(reference);
-        }
-
-        if (Commands is null)
-        {
-            throw new InvalidDataException("Resource manifest commands must not be null.");
-        }
-
-        foreach (ResourceManifestCommand command in Commands)
-        {
-            if (command is null || string.IsNullOrWhiteSpace(command.Kind))
-            {
-                throw new InvalidDataException("Resource manifest command kinds must not be empty.");
-            }
         }
 
         if (EnvironmentVariables is null)

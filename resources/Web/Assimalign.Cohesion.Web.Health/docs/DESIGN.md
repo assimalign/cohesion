@@ -10,7 +10,7 @@ explicit API without introducing a DI-specific hosting layer.
 ## Public application composition
 
 Web application and resource authors can register typed checks, inline probes, or
-`Hosting.Health` contributors through Web.Hosting's adapter in the
+`Hosting.Resources` contributors through Web.Hosting's adapter in the
 `Assimalign.Cohesion.Web.Hosting.Health` namespace:
 
 ```csharp
@@ -39,7 +39,7 @@ service location is unnecessary.
 
 The `AddContributor` adapter ships in `Assimalign.Cohesion.Web.Hosting`, keeping the
 `Assimalign.Cohesion.Web.Hosting.Health` namespace (owner decision 57, 2026-10-13). That module
-references this model and `Hosting.Health`; this package references only the Web root. No Web
+references this model and `Hosting.Resources` (which owns the shared health contracts); this package references only the Web root. No Web
 root or feature library may reference the hosting module. The adapter is included with hosting,
 not supplied by an optional package.
 
@@ -157,7 +157,7 @@ but that is not the only consumption model and does not change App.Web's public 
 ## Diagnostics
 
 The internal `HealthCheckEventSource` is named `Assimalign.Cohesion.Web.Health`. It also reports
-`Hosting.Health` contributors adapted by Web.Hosting; the adapter raises no second report.
+`Hosting.Resources` contributors adapted by Web.Hosting; the adapter raises no second report.
 
 | Id | Event | Level | Payload |
 | --- | --- | --- | --- |

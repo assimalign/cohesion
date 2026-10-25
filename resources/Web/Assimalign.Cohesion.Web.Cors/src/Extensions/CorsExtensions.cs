@@ -62,5 +62,27 @@ public static class CorsExtensions
 
             return builder.Use(new CorsMiddleware(options));
         }
+
+        /// <summary>
+        /// Adds CORS middleware whose default and named policies can be replaced atomically through
+        /// the supplied store while the application runs.
+        /// </summary>
+        /// <remarks>
+        /// Register after routing and before middleware that can reject a preflight or return a cached
+        /// response, as for <see cref="UseCors"/>. Inline endpoint policies and <c>DisableCors</c> retain
+        /// their precedence. Each request keeps its selected policy through response-head commit.
+        /// This method exposes no management endpoint; the composition root may share the store with
+        /// an authenticated control-plane handler.
+        /// </remarks>
+        /// <param name="store">The store containing this pipeline's replaceable policies.</param>
+        /// <returns>The same pipeline builder, for chaining.</returns>
+        /// <exception cref="ArgumentNullException">The builder or store is null.</exception>
+        public IWebApplicationPipelineBuilder UseDynamicCors(CorsPolicyStore store)
+        {
+            ArgumentNullException.ThrowIfNull(builder);
+            ArgumentNullException.ThrowIfNull(store);
+
+            return builder.Use(new CorsMiddleware(store));
+        }
     }
 }

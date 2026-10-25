@@ -47,6 +47,8 @@
 			Include="$(CohesionRepositoryDirectory)resources\**\src\$(CohesionResourceApplicationModel).csproj"
 			Condition="'$(CohesionRepositoryDirectory)' != ''" />
 
+	</ItemGroup>
+	<ItemGroup Condition="'$(_CohesionResourceEnabled)' == 'true' and '$(CohesionResourceApplicationModel)' != '' and '$(CohesionSkipResourceApplicationModelReference)' != 'true'">
 		<CohesionProjectReference
 			Include="$(CohesionResourceApplicationModel)"
 			Condition="'@(_CohesionResourceApplicationModelProject)' != ''">
@@ -54,6 +56,8 @@
 			<CohesionSdkApplicationModel>true</CohesionSdkApplicationModel>
 		</CohesionProjectReference>
 
+	</ItemGroup>
+	<ItemGroup Condition="'$(_CohesionResourceEnabled)' == 'true' and '$(CohesionResourceApplicationModel)' != '' and '$(CohesionSkipResourceApplicationModelReference)' != 'true'">
 		<CohesionPackageReference
 			Include="$(CohesionResourceApplicationModel)"
 			Version="$(CohesionVersion)"
@@ -79,7 +83,11 @@
 
 	<ItemGroup Condition="'$(_CohesionResourceEnabled)' == 'true'">
 		<_CohesionResourceProjectReference Include="@(CohesionResourceReference->WithMetadataValue('Extension', '.csproj'))" />
+	</ItemGroup>
+	<ItemGroup Condition="'$(_CohesionResourceEnabled)' == 'true'">
 		<_CohesionResourcePackageReference Include="@(CohesionResourceReference)" Exclude="@(_CohesionResourceProjectReference)" />
+	</ItemGroup>
+	<ItemGroup Condition="'$(_CohesionResourceEnabled)' == 'true'">
 		<ProjectReference
 			Include="@(_CohesionResourceProjectReference)"
 			ReferenceOutputAssembly="false"
@@ -97,10 +105,14 @@
 			PrivateAssets="all"
 			ExcludeAssets="all"
 			Condition="'$(CohesionResourceReferencesAreRuntime)' == 'true'" />
+	</ItemGroup>
+	<ItemGroup Condition="'$(_CohesionResourceEnabled)' == 'true'">
 		<PackageReference
 			Include="@(_CohesionResourcePackageReference)"
 			PrivateAssets="all" />
 
+	</ItemGroup>
+	<ItemGroup Condition="'$(_CohesionResourceEnabled)' == 'true'">
 		<!--
 			The generated sources and the embedded manifest are build outputs, so their items are
 			added by the targets that produce them (CohesionCreateResourceManifest and
@@ -156,6 +168,14 @@
 		evaluated project facts, and after a Clean this target regenerates them without
 		building the referenced projects.
 	-->
+	<Target Name="CohesionValidateRuntimeConfigurationInputs" BeforeTargets="CohesionCreateResourceManifest"
+		Condition="'$(_CohesionResourceEnabled)' == 'true'">
+		<Error Condition="'@(CohesionResourceState)' != '' or '@(CohesionResourceInitialState)' != '' or '$(CohesionResourceRuntimeManifestPath)' != ''"
+			Text="Build-time runtime state declarations are no longer supported. Register IResourceStateHandler implementations at startup; initial configuration comes from appsettings and environment." />
+		<Error Condition="'@(CohesionCommand)' != ''"
+			Text="CohesionCommand is no longer supported. Register runtime state handlers for resource/v2 management." />
+	</Target>
+
 	<Target
 		Name="CohesionCreateResourceManifest"
 		BeforeTargets="PrepareResourceNames;BeforeCompile;CoreCompile"
@@ -191,7 +211,6 @@
 			Probes="@(CohesionProbe)"
 			Mounts="@(CohesionMount)"
 			Settings="@(CohesionSetting)"
-			Commands="@(CohesionCommand)"
 			ResourceReferences="@(CohesionResourceReference)"
 			ReferencedManifests="@(_CohesionReferencedManifest);@(CohesionResourceManifest)"
 			ResourceProperties="@(CohesionResourceProperty)">
@@ -203,6 +222,8 @@
 		<ItemGroup>
 			<Compile Include="$(CohesionResourceSourcePath)" />
 			<Compile Include="$(CohesionResourceControlPlaneSourcePath)" />
+		</ItemGroup>
+		<ItemGroup>
 			<FileWrites Include="$(CohesionResourceManifestPath);$(CohesionResourceSourcePath);$(CohesionResourceControlPlaneSourcePath)" />
 		</ItemGroup>
 	</Target>
@@ -247,6 +268,8 @@
 				Include="$(CohesionContainerArchiveOutputPath)"
 				PackagePath="cohesion/images/$([System.IO.Path]::GetFileName('$(CohesionContainerArchiveOutputPath)'))"
 				Condition="'$(CohesionPackImageArchive)' == 'true' and '$(CohesionContainerArchiveOutputPath)' != '' and Exists('$(CohesionContainerArchiveOutputPath)')" />
+		</ItemGroup>
+		<ItemGroup>
 			<TfmSpecificPackageFile Include="@(CohesionResourcePackAsset)" />
 			<TfmSpecificPackageFile Include="$(MSBuildThisFileDirectory)Assimalign.Cohesion.Sdk.ResourceManifest.props">
 				<PackagePath>buildTransitive/$(PackageId).props</PackagePath>
@@ -254,6 +277,8 @@
 			<TfmSpecificPackageFile Include="$(MSBuildThisFileDirectory)RESOURCE_MANIFEST_README.md">
 				<PackagePath>README.md</PackagePath>
 			</TfmSpecificPackageFile>
+		</ItemGroup>
+		<ItemGroup>
 			<FileWrites Include="$(CohesionPackResourceManifestPath)" />
 		</ItemGroup>
 	</Target>
@@ -328,9 +353,13 @@
 			<_CohesionInProcessContentCandidate
 				Include="@(_NoneWithTargetPath)"
 				Condition="'%(_NoneWithTargetPath.CopyToOutputDirectory)' == 'Always' or '%(_NoneWithTargetPath.CopyToOutputDirectory)' == 'PreserveNewest' or '%(_NoneWithTargetPath.CopyToOutputDirectory)' == 'IfDifferent' or '%(_NoneWithTargetPath.CopyToPublishDirectory)' == 'Always' or '%(_NoneWithTargetPath.CopyToPublishDirectory)' == 'PreserveNewest' or '%(_NoneWithTargetPath.CopyToPublishDirectory)' == 'IfDifferent'" />
+		</ItemGroup>
+		<ItemGroup>
 			<_CohesionInProcessCompileCandidate
 				Include="@(Compile)"
 				Condition="'%(Compile.CopyToOutputDirectory)' == 'Always' or '%(Compile.CopyToOutputDirectory)' == 'PreserveNewest' or '%(Compile.CopyToOutputDirectory)' == 'IfDifferent' or '%(Compile.CopyToPublishDirectory)' == 'Always' or '%(Compile.CopyToPublishDirectory)' == 'PreserveNewest' or '%(Compile.CopyToPublishDirectory)' == 'IfDifferent'" />
+		</ItemGroup>
+		<ItemGroup>
 			<!-- Apphost is a generated build artifact, not project-declared resource content. -->
 			<_CohesionInProcessContentCandidate
 				Remove="@(_CohesionInProcessContentCandidate)"
@@ -343,6 +372,8 @@
 
 		<ItemGroup>
 			<_CohesionInProcessContentCandidate Include="@(_CohesionInProcessCompileWithTargetPath)" />
+		</ItemGroup>
+		<ItemGroup>
 			<_CohesionInProcessContentResult
 				Include="@(_CohesionInProcessContentCandidate->'%(FullPath)')"
 				KeepMetadata="CopyToOutputDirectory;CopyToPublishDirectory;TargetPath">

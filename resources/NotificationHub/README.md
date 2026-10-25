@@ -44,7 +44,7 @@ collapsed above, is in [docs/DEPENDENCIES.md](../../docs/DEPENDENCIES.md).
 - `Assimalign.Cohesion.NotificationHub.Hosting` provides the concrete creation entry point and the caller-configurable host-service lifecycle.
 - `Assimalign.Cohesion.NotificationHub.Client` contains the existing client-side contract surface and remains an early implementation.
 
-- `Assimalign.Cohesion.NotificationHub.ApplicationModel` supplies the typed manifest, planner, descriptor, and default control-plane factory as a NuGet-only package.
+- `Assimalign.Cohesion.NotificationHub.ApplicationModel` supplies the typed manifest, planner, dependency descriptor and opaque runtime metadata as a NuGet-only package.
 
 ## Layering and dependencies
 

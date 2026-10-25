@@ -423,10 +423,7 @@ public sealed class GatewayCredentialIssuerTests : IDisposable
     }
 
     private static ResourceManifest CreatePeerManifest() =>
-        CreateManifest("remote-api", "peer", "https", "https", 443) with
-        {
-            Commands = [new ResourceManifestCommand("test.apply")],
-        };
+        CreateManifest("remote-api", "peer", "https", "https", 443);
 
     private static ResourceManifest CreateManifest(
         string name,

@@ -7,7 +7,7 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
-using Assimalign.Cohesion.Hosting.Health;
+using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.Testing;
 using Assimalign.Cohesion.Web.Health;
 

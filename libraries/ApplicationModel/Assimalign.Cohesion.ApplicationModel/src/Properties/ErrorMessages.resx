@@ -14,4 +14,20 @@
   <data name="LiteralMountKindInvalid" xml:space="preserve"><value>Mount '{0}' uses literal:, which is allowed only for Configuration mounts.</value></data>
   <data name="ProviderMountSourceInvalid" xml:space="preserve"><value>Resource '{0}' mount '{1}' source must use parameter:&lt;name&gt;, literal:&lt;value&gt;, or &lt;source&gt;:&lt;key&gt;.</value></data>
   <data name="ApplicationNameJsonString" xml:space="preserve"><value>An application name must be a JSON string.</value></data>
+  <data name="ResourceRuntimeObjectRequired" xml:space="preserve"><value>A resource runtime manifest must be a JSON object when present.</value></data>
+  <data name="TrustedIssuerKeyObjectRequired" xml:space="preserve"><value>A trusted issuer key must be a JSON object.</value></data>
+  <data name="TrustedIssuerKeyMemberInvalid" xml:space="preserve"><value>A trusted issuer key contains unsupported or duplicate member '{0}'.</value></data>
+  <data name="TrustedIssuerSigningKeyRequired" xml:space="preserve"><value>A trusted issuer key must be an EC P-256 key for ES256 signatures.</value></data>
+  <data name="TrustedIssuerCoordinatesEncoding" xml:space="preserve"><value>A trusted issuer key has invalid base64url coordinates.</value></data>
+  <data name="TrustedIssuerCoordinatesLength" xml:space="preserve"><value>A trusted issuer P-256 key must have 32-byte coordinates.</value></data>
+  <data name="TrustedIssuerCurvePointInvalid" xml:space="preserve"><value>A trusted issuer key has coordinates that are not a valid P-256 point.</value></data>
+  <data name="TrustedIssuerThumbprintMismatch" xml:space="preserve"><value>A trusted issuer key identifier must equal its RFC 7638 thumbprint.</value></data>
+  <data name="TrustedIssuerKeyMemberRequired" xml:space="preserve"><value>A trusted issuer key requires string member '{0}'.</value></data>
+  <data name="ResourceManifestSchemaUnsupported" xml:space="preserve"><value>Resource manifest schema '{0}' is not supported. Expected '{1}'.</value></data>
+  <data name="ResourceManifestV2BuildStateUnsupported" xml:space="preserve"><value>Resource/v2 manifests contain deployment bindings only. State catalogs and initial values are supplied by the running resource.</value></data>
+  <data name="ResourceGroupNameInvalid" xml:space="preserve"><value>A resource group name must contain one to 128 ASCII letters, digits, periods, underscores, or hyphens, and cannot be '.' or '..'.</value></data>
+  <data name="ResourceGroupMembersInvalid" xml:space="preserve"><value>Resource group members must have nonempty, unique resource names.</value></data>
+  <data name="ResourceGroupNested" xml:space="preserve"><value>Resource groups are flat logical containers and cannot be nested.</value></data>
+  <data name="ResourceGroupDuplicate" xml:space="preserve"><value>Resource group '{0}' is already declared.</value></data>
+  <data name="ResourceGroupMembershipInvalid" xml:space="preserve"><value>Logical resource groups contain an invalid name, duplicate group, unknown member, duplicate membership, or inconsistent descriptor and plan membership.</value></data>
 </root>

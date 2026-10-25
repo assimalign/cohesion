@@ -19,13 +19,13 @@ public sealed class CommandVerbTests
     /// <summary>Every command uses canonical metadata and a stable identity.</summary>
     [Theory(DisplayName = "Cohesion Test [ConfigurationStore.ApplicationModel] - Commands: deterministic canonical declarations pass Build")]
     [InlineData(0)]
-    public void Build_AdvertisedCommand_ShouldPreserveCanonicalIdentity(int verb)
+    public void Build_ExplicitCommand_ShouldPreserveCanonicalIdentity(int verb)
     {
         IApplicationBuilder first = CreateBuilder();
-        IConfigurationStoreResourceDescriptor descriptor = first.AddConfigurationStore(Manifest() with { Commands = [new ResourceManifestCommand(Kind(verb))] });
+        IConfigurationStoreResourceDescriptor descriptor = first.AddConfigurationStore(Manifest());
         Declare(descriptor, verb, false);
         IApplicationBuilder second = CreateBuilder();
-        IConfigurationStoreResourceDescriptor copy = second.AddConfigurationStore(Manifest() with { Commands = [new ResourceManifestCommand(Kind(verb))] });
+        IConfigurationStoreResourceDescriptor copy = second.AddConfigurationStore(Manifest());
         Declare(copy, verb, false);
 
         descriptor.DependsOn(Array.Empty<IApplicationResourceDescriptor>()).ShouldBeSameAs(descriptor);
@@ -39,15 +39,14 @@ public sealed class CommandVerbTests
         Encoding.UTF8.GetString(command.Payload.Span).ShouldBe(Payload(verb));
     }
 
-    /// <summary>Manifest support is checked by the shared build validator.</summary>
-    [Theory(DisplayName = "Cohesion Test [ConfigurationStore.ApplicationModel] - Commands: Build rejects an unadvertised kind")]
+    /// <summary>Explicit command authoring does not require a producer command catalog.</summary>
+    [Theory(DisplayName = "Cohesion Test [ConfigurationStore.ApplicationModel] - Commands: Build accepts explicit authoring without manifest command metadata")]
     [InlineData(0)]
-    public void Build_UnadvertisedCommand_ShouldNameKind(int verb)
+    public void Build_CommandWithoutManifestCatalog_ShouldBuild(int verb)
     {
         IApplicationBuilder builder = CreateBuilder();
         Declare(builder.AddConfigurationStore(Manifest()), verb, false);
-        Should.Throw<InvalidOperationException>(() => builder.Build()).Message
-            .ShouldContain($"does not accept command kind '{Kind(verb)}'", Case.Sensitive);
+        builder.Build().Model.Commands.Single().Kind.ShouldBe(Kind(verb));
     }
 
     /// <summary>One target key cannot carry two different desired commands.</summary>
@@ -56,7 +55,7 @@ public sealed class CommandVerbTests
     public void Build_DuplicateKey_ShouldNameConflict(int verb)
     {
         IApplicationBuilder builder = CreateBuilder();
-        IConfigurationStoreResourceDescriptor descriptor = builder.AddConfigurationStore(Manifest() with { Commands = [new ResourceManifestCommand(Kind(verb))] });
+        IConfigurationStoreResourceDescriptor descriptor = builder.AddConfigurationStore(Manifest());
         Declare(descriptor, verb, false);
         Declare(descriptor, verb, true);
 

@@ -26,8 +26,10 @@ public sealed partial class GatewayControlPlaneTests
 {
     private static readonly TimeSpan _testTimeout = TimeSpan.FromSeconds(30);
 
-    [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway.ControlPlane] - GET: Should enforce trusted issuers and serve the shared export and observed resource")]
-    public async Task Get_WithLoopbackListener_ShouldEnforceTrustAndServeDiscovery()
+    [Theory(DisplayName = "Cohesion Test [ApplicationModel.Gateway.ControlPlane] - GET: Should enforce trusted issuers and serve export and observed resource group membership")]
+    [InlineData(null)]
+    [InlineData("frontend")]
+    public async Task Get_WithLoopbackListener_ShouldEnforceTrustAndServeDiscovery(string? resourceGroup)
     {
         string root = CreateTestDirectory();
         using var cancellation = new CancellationTokenSource(_testTimeout);
@@ -38,7 +40,7 @@ public sealed partial class GatewayControlPlaneTests
                 controlPlane.MetadataDirectory = root),
         };
         var gateway = new TestGateway(options);
-        IApplicationModel model = BuildModel(gateway, "appa", includeUnsupportedResource: false);
+        IApplicationModel model = BuildModel(gateway, "appa", includeUnsupportedResource: false, resourceGroup);
         var peerGateway = new TestGateway(new ApplicationGatewayOptions { ExportDirectory = root });
         IApplicationModel peerModel = BuildModel(peerGateway, "appb", includeUnsupportedResource: false);
         IApplicationGateway control = gateway;
@@ -98,12 +100,20 @@ public sealed partial class GatewayControlPlaneTests
                     cancellation.Token);
                 export.Application.ShouldBe("appa");
                 export.Model.Resources.Count.ShouldBe(1);
+                export.Resources[0].ResourceGroup.ShouldBe(resourceGroup);
+                export.Model.Resources[0].ResourceGroup.ShouldBe(resourceGroup);
+                export.Model.ResourceGroups.Count.ShouldBe(resourceGroup is null ? 0 : 1);
             }
 
             resource.StatusCode.ShouldBe(NetHttpStatusCode.OK);
             string resourceJson = await resource.Content.ReadAsStringAsync(cancellation.Token);
             resourceJson.ShouldContain("\"state\": \"Running\"");
             resourceJson.ShouldContain("http://127.0.0.1:43110");
+            using (JsonDocument resourceBody = JsonDocument.Parse(resourceJson))
+            {
+                resourceBody.RootElement.TryGetProperty("resourceGroup", out JsonElement group).ShouldBe(resourceGroup is not null);
+                if (resourceGroup is not null) { group.GetString().ShouldBe(resourceGroup); }
+            }
 
             var issuer = new TrustedIssuer("appa", trustKey);
             IControlPlaneClient resolverClient = GatewayControlPlane.CreateClient(peerToken, issuer);
@@ -317,14 +327,22 @@ public sealed partial class GatewayControlPlaneTests
     private static IApplicationModel BuildModel(
         IApplicationGateway gateway,
         string application,
-        bool includeUnsupportedResource)
+        bool includeUnsupportedResource,
+        string? resourceGroup = null)
     {
         IApplicationBuilder builder = Application
             .CreateBuilder(
                 ApplicationName.Parse(application),
                 ["--environment", AppEnvironment.Keys.Local])
             .UseGateway(gateway);
-        builder.AddResource(CreateManifest(application, "api", "test", 43110));
+        if (resourceGroup is null)
+        {
+            builder.AddResource(CreateManifest(application, "api", "test", 43110));
+        }
+        else
+        {
+            builder.AddResourceGroup(resourceGroup, group => group.AddResource(CreateManifest(application, "api", "test", 43110)));
+        }
         if (includeUnsupportedResource)
         {
             builder.AddResource(CreateManifest(application, "worker", "unsupported", 43111));
@@ -365,7 +383,6 @@ public sealed partial class GatewayControlPlaneTests
                 Endpoint = "http",
                 Path = "/cohesion/v1",
             },
-            Commands = [new ResourceManifestCommand("test.apply")],
             Lifecycle = new ResourceManifestLifecycle
             {
                 Workload = WorkloadKind.Deployment,

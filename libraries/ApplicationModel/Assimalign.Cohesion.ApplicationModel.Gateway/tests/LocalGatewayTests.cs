@@ -722,16 +722,21 @@ public class LocalGatewayTests
     [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - Local gateway: direct plain executable is rejected")]
     public async Task RunAsync_DirectPlainExecutable_RequiresAddExecutable()
     {
-        IApplicationBuilder builder = Assimalign.Cohesion.ApplicationModel.Application
-            .CreateBuilder(ApplicationName.Parse(ApplicationNameValue), [])
-            .UseLocalGateway();
-        builder.AddResource(new TestExecutableResource("svc", "does-not-matter"));
-        IApplication application = builder.Build();
+        string root = CreateTestDirectory();
+        try
+        {
+            IApplicationBuilder builder = Assimalign.Cohesion.ApplicationModel.Application
+                .CreateBuilder(ApplicationName.Parse(ApplicationNameValue), [])
+                .UseLocalGateway(options => options.StateDirectory = root);
+            builder.AddResource(new TestExecutableResource("svc", "does-not-matter"));
+            IApplication application = builder.Build();
 
-        InvalidOperationException exception = await Should.ThrowAsync<InvalidOperationException>(
-            async () => await application.RunAsync().WaitAsync(_testTimeout));
+            InvalidOperationException exception = await Should.ThrowAsync<InvalidOperationException>(
+                async () => await application.RunAsync().WaitAsync(_testTimeout));
 
-        exception.Message.ShouldContain("AddExecutable");
+            exception.Message.ShouldContain("AddExecutable");
+        }
+        finally { DeleteTestDirectory(root); }
     }
 
     [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - Local gateway: ports persist across gateway instances")]

@@ -30,6 +30,7 @@ public sealed class ApplicationModelDocument
     /// <param name="restartOrphans">Whether orphaned local resources may be restarted.</param>
     /// <param name="resources">The model resources in declaration order.</param>
     /// <param name="commands">Optional declarative commands; absent documents retain an empty collection.</param>
+    /// <param name="resourceGroups">Optional logical group declarations and their membership.</param>
     /// <exception cref="ArgumentNullException">
     /// A required string or <paramref name="resources"/> is <see langword="null"/>.
     /// </exception>
@@ -45,7 +46,8 @@ public sealed class ApplicationModelDocument
         bool adopt,
         bool restartOrphans,
         IReadOnlyList<ApplicationModelResourceDocument> resources,
-        IReadOnlyList<ApplicationModelCommandDocument>? commands = null)
+        IReadOnlyList<ApplicationModelCommandDocument>? commands = null,
+        IReadOnlyList<ApplicationModelResourceGroupDocument>? resourceGroups = null)
     {
         ArgumentNullException.ThrowIfNull(schema);
         ArgumentNullException.ThrowIfNull(application);
@@ -81,6 +83,14 @@ public sealed class ApplicationModelDocument
             commandCopy[index] = command with { Payload = command.Payload.ToArray() };
         }
         Commands = Array.AsReadOnly(commandCopy);
+        var groupCopy = new ApplicationModelResourceGroupDocument[resourceGroups?.Count ?? 0];
+        for (int index = 0; index < groupCopy.Length; index++)
+        {
+            ApplicationModelResourceGroupDocument group = resourceGroups![index]
+                ?? throw new InvalidDataException(ErrorMessages.ResourceGroupMembershipInvalid);
+            groupCopy[index] = new ApplicationModelResourceGroupDocument(group.Name, group.Resources);
+        }
+        ResourceGroups = Array.AsReadOnly(groupCopy);
     }
 
     /// <summary>Gets the application-model schema.</summary>
@@ -112,6 +122,9 @@ public sealed class ApplicationModelDocument
 
     /// <summary>Gets portable desired commands; command payloads must contain no secrets.</summary>
     public IReadOnlyList<ApplicationModelCommandDocument> Commands { get; }
+
+    /// <summary>Gets logical resource group declarations and their membership.</summary>
+    public IReadOnlyList<ApplicationModelResourceGroupDocument> ResourceGroups { get; }
 
     /// <summary>
     /// Creates a portable document from a built application model.
@@ -152,7 +165,8 @@ public sealed class ApplicationModelDocument
                 model.Plans[index],
                 descriptor.Resource is ExternalResource external
                     ? ExternalResourceDocumentConverter.Create(external)
-                    : null);
+                    : null,
+                descriptor.ResourceGroup?.Value);
         }
 
         var commands = new ApplicationModelCommandDocument[model.Commands.Count];
@@ -172,7 +186,8 @@ public sealed class ApplicationModelDocument
             model.RunMode.ToString().ToLowerInvariant(),
             model.Adopt,
             model.RestartOrphans,
-            new ReadOnlyCollection<ApplicationModelResourceDocument>(resources), commands);
+            new ReadOnlyCollection<ApplicationModelResourceDocument>(resources), commands,
+            CreateResourceGroupDocuments(model.ResourceGroups));
     }
 
     /// <summary>
@@ -363,6 +378,7 @@ public sealed class ApplicationModelDocument
             descriptors[index].SetDependencies(dependencies);
         }
 
+        IReadOnlyList<ApplicationResourceGroup> resourceGroups = ValidateResourceGroups();
         ValidateDependencyGraph(descriptors);
         var commands = new IResourceCommand[Commands.Count];
         for (int index = 0; index < commands.Length; index++)
@@ -412,7 +428,68 @@ public sealed class ApplicationModelDocument
             effectiveRunMode,
             effectiveGatewayIdentity,
             Adopt,
-            RestartOrphans, commands);
+            RestartOrphans, commands, resourceGroups: resourceGroups);
+    }
+
+    private static IReadOnlyList<ApplicationModelResourceGroupDocument> CreateResourceGroupDocuments(
+        IReadOnlyList<ApplicationResourceGroup> source)
+    {
+        var groups = new ApplicationModelResourceGroupDocument[source.Count];
+        for (int index = 0; index < groups.Length; index++)
+        {
+            ApplicationResourceGroup group = source[index];
+            var resources = new string[group.Resources.Count];
+            for (int member = 0; member < resources.Length; member++)
+            {
+                resources[member] = group.Resources[member].Value;
+            }
+            groups[index] = new ApplicationModelResourceGroupDocument(group.Name.Value, resources);
+        }
+        return Array.AsReadOnly(groups);
+    }
+
+    private IReadOnlyList<ApplicationResourceGroup> ValidateResourceGroups()
+    {
+        var knownResources = new HashSet<string>(StringComparer.Ordinal);
+        foreach (ApplicationModelResourceDocument resource in Resources)
+        {
+            knownResources.Add(resource.Name);
+        }
+        var names = new HashSet<string>(StringComparer.Ordinal);
+        var membership = new Dictionary<string, ResourceGroupName>(StringComparer.Ordinal);
+        var groups = new ApplicationResourceGroup[ResourceGroups.Count];
+        for (int index = 0; index < groups.Length; index++)
+        {
+            ApplicationModelResourceGroupDocument group = ResourceGroups[index];
+            if (!ResourceGroupName.IsValid(group.Name, out _) || !names.Add(group.Name))
+            {
+                throw new InvalidDataException(ErrorMessages.ResourceGroupMembershipInvalid);
+            }
+            ResourceGroupName name = group.Name;
+            var members = new ResourceName[group.Resources.Count];
+            for (int member = 0; member < members.Length; member++)
+            {
+                string resource = group.Resources[member];
+                if (resource is null || !knownResources.Contains(resource) || !membership.TryAdd(resource, name))
+                {
+                    throw new InvalidDataException(ErrorMessages.ResourceGroupMembershipInvalid);
+                }
+                members[member] = resource;
+            }
+            groups[index] = new ApplicationResourceGroup(name, members);
+        }
+        foreach (ApplicationModelResourceDocument resource in Resources)
+        {
+            ResourceGroupName? expected = membership.TryGetValue(resource.Name, out ResourceGroupName name)
+                ? (ResourceGroupName?)name : null;
+            if ((resource.ResourceGroup is not null && !ResourceGroupName.IsValid(resource.ResourceGroup, out _)) ||
+                !string.Equals(resource.ResourceGroup, expected?.Value, StringComparison.Ordinal) ||
+                resource.Plan.ResourceGroup != expected)
+            {
+                throw new InvalidDataException(ErrorMessages.ResourceGroupMembershipInvalid);
+            }
+        }
+        return Array.AsReadOnly(groups);
     }
 
     private static ApplicationModelDocument ValidateDeserialized(ApplicationModelDocument? document)

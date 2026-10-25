@@ -21,7 +21,7 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane.Internal;
 
 [global::System.Diagnostics.DebuggerDisplay("GatewayControlPlaneServer")]
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
-internal sealed class GatewayControlPlaneServer : IApplicationGatewayControlPlane
+internal sealed partial class GatewayControlPlaneServer : IApplicationGatewayControlPlane
 {
     private const long MaximumCommandBytes = 1024 * 1024;
 
@@ -47,6 +47,7 @@ internal sealed class GatewayControlPlaneServer : IApplicationGatewayControlPlan
     private ITrustedIssuerProvider? _trustedIssuers;
     private IReadOnlyList<IApplicationCallerAuthenticator> _callers = Array.Empty<IApplicationCallerAuthenticator>();
     private IResourceCommandCredentialProvider? _commandCredentials;
+    private IResourceManagementGateway? _managementGateway;
     private IResourceTransportTrustProvider? _transportTrust;
     private TcpConnectionListener? _tcpListener;
     private HttpConnectionListener? _httpListener;
@@ -68,9 +69,15 @@ internal sealed class GatewayControlPlaneServer : IApplicationGatewayControlPlan
         _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
         _dispatchers = dispatchers ?? throw new ArgumentNullException(nameof(dispatchers));
         // Tried in this order, which is the order Web.Routing's inbound-precedence sort gave these
-        // templates before the dependency was removed: each template has a distinct segment count,
-        // and PUT precedes DELETE on the shared command template, so a 405 lists "PUT, DELETE".
+        // templates before the dependency was removed. PUT precedes DELETE on the shared command
+        // template, so its 405 lists "PUT, DELETE". Named management routes are additive.
         _router = new ControlPlaneRouter(
+            new ControlPlaneRoute(CohesionHttpMethod.Get, "/cohesion/v2/resources/{name}/state-contracts", HandleResourceStateManagementAsync),
+            new ControlPlaneRoute(CohesionHttpMethod.Get, "/cohesion/v2/resources/{name}/instances", HandleResourceStateManagementAsync),
+            new ControlPlaneRoute(CohesionHttpMethod.Get, "/cohesion/v2/resources/{name}/state/{state}/{key}", HandleResourceStateManagementAsync),
+            new ControlPlaneRoute(CohesionHttpMethod.Put, "/cohesion/v2/resources/{name}/state/{state}/{key}", HandleResourceStateManagementAsync),
+            new ControlPlaneRoute(CohesionHttpMethod.Delete, "/cohesion/v2/resources/{name}/state/{state}/{key}", HandleResourceStateManagementAsync),
+            new ControlPlaneRoute(CohesionHttpMethod.Get, "/cohesion/v2/resources/{name}/operations/{operationId}", HandleResourceStateManagementAsync),
             new ControlPlaneRoute(
                 CohesionHttpMethod.Get,
                 "/cohesion/v1/application",
@@ -141,6 +148,7 @@ internal sealed class GatewayControlPlaneServer : IApplicationGatewayControlPlan
                 _trustedIssuers = trustedIssuers;
                 _callers = SnapshotCallers(model);
                 _commandCredentials = trustedIssuers as IResourceCommandCredentialProvider;
+                _managementGateway = trustedIssuers as IResourceManagementGateway;
                 _transportTrust = trustedIssuers as IResourceTransportTrustProvider;
                 _tcpListener = tcpListener;
                 _httpListener = httpListener;
@@ -261,6 +269,7 @@ internal sealed class GatewayControlPlaneServer : IApplicationGatewayControlPlan
                 _trustedIssuers = null;
                 _callers = Array.Empty<IApplicationCallerAuthenticator>();
                 _commandCredentials = null;
+                _managementGateway = null;
                 lock (_documentGate)
                 {
                     _document = null;
@@ -474,6 +483,7 @@ internal sealed class GatewayControlPlaneServer : IApplicationGatewayControlPlan
         {
             Name = descriptor.Resource.Name.ToString(),
             Kind = manifest!.Kind,
+            ResourceGroup = descriptor.ResourceGroup?.Value,
             State = lifecycle.ToString(),
             Endpoints = endpoints,
         };
@@ -832,15 +842,6 @@ internal sealed class GatewayControlPlaneServer : IApplicationGatewayControlPlan
         ResourceCommand command,
         CancellationToken cancellationToken)
     {
-        if (!AcceptsCommand(manifest, command.Kind))
-        {
-            return CreateObservation(
-                command,
-                "Rejected",
-                $"Resource '{manifest.Name}' does not declare command kind '{command.Kind}'.",
-                result: null);
-        }
-
         IResourceCommandDispatcher? dispatcher = FindDispatcher(manifest.Kind);
         if (dispatcher is null)
         {
@@ -1181,19 +1182,6 @@ internal sealed class GatewayControlPlaneServer : IApplicationGatewayControlPlan
         }
 
         return fallback;
-    }
-
-    private static bool AcceptsCommand(ResourceManifest manifest, string kind)
-    {
-        for (int index = 0; index < manifest.Commands.Count; index++)
-        {
-            if (string.Equals(manifest.Commands[index].Kind, kind, StringComparison.Ordinal))
-            {
-                return true;
-            }
-        }
-
-        return false;
     }
 
     private static bool CommandMatches(

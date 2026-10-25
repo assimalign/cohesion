@@ -541,6 +541,5 @@ public class ResourceCommandTests
         Artifact = new ResourceManifestArtifact { Assembly = "Example.Database.dll" },
         Endpoints = [new ResourceManifestEndpoint { Name = "admin", Scheme = "http", Protocol = "tcp", ContainerPort = 5000 }],
         ControlPlane = new ResourceManifestControlPlane { Endpoint = "admin", Path = "/custom/control" },
-        Commands = [new ResourceManifestCommand("database.add-database")],
     };
 }

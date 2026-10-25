@@ -60,7 +60,17 @@ internal static class TrustedIssuerDocument
                         allowedKinds.Add(kind.GetString()!);
                     }
                 }
-                result.Add(new TrustedIssuer(issuer, keyProperty, allowedKinds));
+                var management = new List<string>();
+                if (item.TryGetProperty("allowedManagementOperations", out JsonElement operations))
+                {
+                    if (operations.ValueKind != JsonValueKind.Array) { throw new InvalidDataException(ErrorMessages.ManagementStateInvalid); }
+                    foreach (JsonElement operation in operations.EnumerateArray())
+                    {
+                        if (operation.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(operation.GetString())) { throw new InvalidDataException(ErrorMessages.ManagementStateInvalid); }
+                        management.Add(operation.GetString()!);
+                    }
+                }
+                result.Add(new TrustedIssuer(issuer, keyProperty, allowedKinds, management));
             }
             catch (ArgumentException exception)
             {
@@ -96,6 +106,12 @@ internal static class TrustedIssuerDocument
                 {
                     writer.WriteStartArray("allowedCommandKinds");
                     foreach (string kind in issuer.AllowedCommandKinds) { writer.WriteStringValue(kind); }
+                    writer.WriteEndArray();
+                }
+                if (issuer.AllowedManagementOperations.Count > 0)
+                {
+                    writer.WriteStartArray("allowedManagementOperations");
+                    foreach (string operation in issuer.AllowedManagementOperations) { writer.WriteStringValue(operation); }
                     writer.WriteEndArray();
                 }
                 writer.WriteEndObject();

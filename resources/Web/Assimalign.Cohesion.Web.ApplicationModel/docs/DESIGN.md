@@ -2,21 +2,7 @@
 
 ## Intent
 
-This project owns the Web resource area's typed orchestration model, portable planner,
-and default control-plane factory. An enabled Web executable is a composition root:
-generated `ResourceControlPlane.g.cs` references `WebResourceControlPlane.Create()`
-and registers the factory against that executable's assembly through the
-`Assimalign.Cohesion.Hosting.Resources` `ResourceRuntime` seam.
-
-## Boundaries
-
-- The project references only `Assimalign.Cohesion.ApplicationModel` and
-  `Assimalign.Cohesion.Hosting.Resources`.
-- It never references `Web.Hosting`, Web feature packages, or a platform package.
-- `Web.Hosting` discovers the assembly-keyed registration through the
-  `Hosting.Resources` `ResourceRuntime`; it does not reference this project.
-- Each factory call returns a new control plane so in-process resources cannot share
-  health contributors, endpoints, or lifecycle state.
+This package describes resource manifests, dependencies and deployment plans. Its only direct Cohesion dependency is ApplicationModel, whose contracts depend only on Core. Sdk.ApplicationModel generates control-plane registration in the enabled resource executable; Hosting.Resources and the resource host own local state handlers. The gateway owns infrastructure observation and management reconciliation.
 
 ## Manifest-backed resource and options
 
@@ -47,13 +33,14 @@ Docker port publication, local bindings, and certificate resolution are owned by
 selected platform compiler and its gateway inputs. The Web planner neither references
 nor identifies a platform.
 
-## Default control plane
+## Runtime manifest boundary
 
-The default Web plane aggregates `Hosting.Health` `IHealthContributor` instances, reports observed
-endpoints, accepts graceful-stop requests, and advertises the Web command kinds. The
-command-kind set is empty until the declarative-command work adds the area-specific
-handlers. `Web.Hosting` serves health probes at `/healthz`, `/readyz`, and `/livez`,
-and management operations below `/cohesion/v1` on the ambient `http` endpoint.
+The producer supplies runtime metadata; this package preserves it without referencing runtime types. The SDK registers the generic control plane in the executable. Producer manifests contain no command catalog or state declarations; configured runtime handlers provide the live state contracts.
+
+The generic plane aggregates `Hosting.Resources` `IHealthContributor` instances, reports observed
+endpoints, and accepts graceful-stop requests. Runtime state contracts come from registered handlers
+after application configuration. `Web.Hosting` serves health probes at `/healthz`, `/readyz`, and
+`/livez`, and the private state protocol below `/cohesion/v2` on the management binding.
 
 ## AOT posture
 
@@ -82,3 +69,11 @@ preserves the existing exception text and input-disclosure rules, including any 
 type-only exclusions. EventSource templates, log messages and response bodies retain their
 existing ownership. This is a conventions change with no public API or behavior break against
 10.0.0-preview.1.
+
+## Runtime-independent dependency direction
+
+```mermaid
+flowchart LR
+    Area["Web.ApplicationModel"] --> Model["ApplicationModel"]
+    Model --> Core["Core"]
+```

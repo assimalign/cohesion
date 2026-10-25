@@ -41,7 +41,7 @@ generated code in an opted-in consumer executable joins the two sides at run tim
 `Assimalign.Cohesion.Hosting.Resources.ResourceRuntime` instead. `COHRES004`: the area root and its
 feature libraries, the opt-in `.ApplicationModel.Orchestration` package included, reference no
 `Assimalign.Cohesion.Hosting*` library at all — which is also why the Orchestration package never
-references `.ApplicationModel` (whose `Hosting.Resources` reference it would inherit).
+references `.ApplicationModel`; runtime registration is generated into the executable.
 
 The full reference graph for every Cohesion assembly, including the exact external dependencies
 collapsed above, is in [docs/DEPENDENCIES.md](../../docs/DEPENDENCIES.md).
@@ -49,7 +49,7 @@ collapsed above, is in [docs/DEPENDENCIES.md](../../docs/DEPENDENCIES.md).
 ## Projects
 
 - `Assimalign.Cohesion.ConfigurationStore` defines the public area-root application and builder contracts alongside the existing loader abstraction.
-- `Assimalign.Cohesion.ConfigurationStore.ApplicationModel` supplies the manifest-backed typed resource, strict StatefulSet planner, and default control plane.
+- `Assimalign.Cohesion.ConfigurationStore.ApplicationModel` supplies the manifest-backed typed resource, strict StatefulSet planner and opaque runtime metadata.
 - `Assimalign.Cohesion.ConfigurationStore.ApplicationModel.Orchestration` is the opt-in gateway provider package: `builder.UseConfigurationStore(store)` registers a `ConfigurationStoreSourceProvider` that resolves `<store>:<namespace>` Configuration mounts through the store's control plane. It references only `Assimalign.Cohesion.ApplicationModel` and the client, and is NuGet-only.
 - `Assimalign.Cohesion.ConfigurationStore.Client` is the thin, Core-only HTTP protocol client that the opt-in orchestration package uses on a gateway's behalf to read configuration namespace snapshots. A gateway never references it directly.
 - `Assimalign.Cohesion.ConfigurationStore.Hosting` provides the concrete creation entry point, durable store, ES256 bootstrap verification, and HTTP protocol host.

@@ -18,6 +18,32 @@ namespace Assimalign.Cohesion.SecretStore.Hosting.Tests;
 
 public sealed class StandaloneControlPlaneTests
 {
+    [Theory(DisplayName = "Cohesion Test [SecretStore.Hosting] - Runtime state protocol: catalog remains reachable while bootstrap gates secrets")]
+    [InlineData("/management/v1/runtime", "127.0.0.1", 200)]
+    [InlineData("/management/v1/runtime", "192.0.2.10", 403)]
+    [InlineData("/cohesion/v1/secrets", "127.0.0.1", 503)]
+    [InlineData("/readyz", "127.0.0.1", 503)]
+    public async Task InvokeAsync_WithPendingBootstrap_ShouldExposeCatalogAndGateData(string path, string peer, int expected)
+    {
+        using var data = new TemporaryDirectory();
+        ResourceContext resource = CreateStandaloneContext(data.Path);
+        using IDisposable scope = ResourceRuntime.CreateScope(resource);
+        await using SecretStoreApplication application = SecretStoreTestHost.CreateBuilder().Build();
+        ResourceControlPlane plane = ResourceControlPlane.Create();
+        plane.ConfigureRuntimeManagement(new ResourceRuntimeManagement { Endpoint = "api", Path = "/management/v1" });
+        plane.RequireStateBootstrap();
+        IServiceProvider services = application.Context.ServiceProvider;
+        using var endpoint = new SecretsEndpointService(new Uri("http://127.0.0.1:8443"),
+            (SecretStoreRepository)services.GetService(typeof(SecretStoreRepository))!,
+            (TrustedIssuerStore)services.GetService(typeof(TrustedIssuerStore))!,
+            (CertificateAuthorityManager)services.GetService(typeof(CertificateAuthorityManager))!,
+            plane, resource, application.Context);
+        await using var exchange = new ControlPlaneExchange(path, HttpMethod.Get, new IPEndPoint(IPAddress.Parse(peer), 12345));
+        await endpoint.InvokeAsync(exchange, _ => throw new InvalidOperationException("Management routes are terminal."));
+        ((int)exchange.Response.StatusCode).ShouldBe(expected);
+        if (expected == 200) { exchange.Response.Body.Length.ShouldBeGreaterThan(0); }
+    }
+
     [Theory(DisplayName = "Cohesion Test [SecretStore.Hosting] - Standalone: non-loopback peers cannot reach namespaced routes")]
     [InlineData("/cohesion/v1", "GET")]
     [InlineData("/cohesion/v1/healthz", "GET")]

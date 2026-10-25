@@ -18,6 +18,23 @@ namespace Assimalign.Cohesion.ConfigurationStore.Hosting.Tests;
 
 public sealed class StandaloneControlPlaneTests
 {
+    [Theory(DisplayName = "Cohesion Test [ConfigurationStore.Hosting] - Runtime state protocol: authenticated catalog remains reachable while bootstrap gates data")]
+    [InlineData("/management/v1/runtime", "127.0.0.1", 200)]
+    [InlineData("/management/v1/runtime", "192.0.2.10", 403)]
+    [InlineData("/cohesion/v1/namespaces", "127.0.0.1", 503)]
+    [InlineData("/readyz", "127.0.0.1", 503)]
+    public async Task InvokeAsync_WithPendingBootstrap_ShouldExposeCatalogAndGateData(string path, string peer, int expected)
+    {
+        ResourceControlPlane plane = ResourceControlPlane.Create();
+        plane.ConfigureRuntimeManagement(new ResourceRuntimeManagement { Endpoint = "api", Path = "/management/v1" });
+        plane.RequireStateBootstrap();
+        using ConfigurationEndpointService service = CreateService(controlPlane: plane);
+        await using var exchange = new ConfigurationControlPlaneExchange(path, HttpMethod.Get, new IPEndPoint(IPAddress.Parse(peer), 12345));
+        await service.InvokeAsync(exchange, UnexpectedNext);
+        ((int)exchange.Response.StatusCode).ShouldBe(expected);
+        if (expected == 200) { exchange.Response.Body.Length.ShouldBeGreaterThan(0); }
+    }
+
     [Theory(DisplayName = "Cohesion Test [ConfigurationStore.Hosting] - Invoke: standalone non-loopback callers are forbidden on the complete control-plane namespace")]
     [InlineData("192.0.2.10", "")]
     [InlineData("2001:db8::10", "")]
@@ -164,7 +181,8 @@ public sealed class StandaloneControlPlaneTests
         string basePath = "",
         ResourceContext? resourceContext = null,
         Uri? endpoint = null,
-        string? dataPath = null)
+        string? dataPath = null,
+        IResourceControlPlane? controlPlane = null)
     {
         var repository = new ConfigurationStoreRepository(
             dataPath ?? Path.Combine(Path.GetTempPath(), "cohesion-configuration-control-plane", Guid.NewGuid().ToString("N")),
@@ -172,7 +190,7 @@ public sealed class StandaloneControlPlaneTests
         return new ConfigurationEndpointService(
             endpoint ?? new Uri("http://127.0.0.1:8080" + basePath),
             repository,
-            ResourceControlPlane.Create(),
+            controlPlane ?? ResourceControlPlane.Create(),
             resourceContext ?? new ResourceContext(environmentName: "test"),
             new ConfigurationStoreApplicationContext("test", null));
     }

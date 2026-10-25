@@ -24,6 +24,7 @@ internal sealed class EmailHubResourceDescriptor : IEmailHubResourceDescriptor
     IApplicationResource IApplicationResourceDescriptor.Resource => Resource;
 
     public ResourcePlan? Plan => _inner.Plan;
+    public ResourceGroupName? ResourceGroup => _inner.ResourceGroup;
 
     public IReadOnlyList<IApplicationResourceDescriptor> Dependencies => _inner.Dependencies;
 
@@ -51,6 +52,7 @@ internal sealed class EmailHubResourceDescriptor : IEmailHubResourceDescriptor
 
         public EmailHubResource Resource => _target.Resource;
         public ResourcePlan? Plan => _target.Plan;
+        public ResourceGroupName? ResourceGroup => _target.ResourceGroup;
         public IReadOnlyList<IApplicationResourceDescriptor> Dependencies => _target.Dependencies;
     }
 }

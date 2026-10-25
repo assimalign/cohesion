@@ -2,14 +2,9 @@
 
 ## Intent
 
-This project is the ConfigurationStore area's AOT-compatible, dependency-guarded
-orchestration package. It gives a gateway a typed configuration-store resource, a
-platform-neutral realization planner, and the default control-plane factory that
-every orchestration-enabled configuration-store executable registers. It never
-references `ConfigurationStore.Hosting`, a gateway implementation, or a platform
-object model.
+This package describes resource manifests, dependencies and deployment plans. Its only direct Cohesion dependency is ApplicationModel, whose contracts depend only on Core. Sdk.ApplicationModel generates control-plane registration in the enabled resource executable; Hosting.Resources and the resource host own local state handlers. The gateway owns infrastructure observation and management reconciliation.
 
-An enabled `Sdk.ConfigurationStore` executable produces `cohesion/resource/v1` at
+An enabled `Sdk.ConfigurationStore` executable produces `cohesion/resource/v2` at
 build time. Generated gateway code passes that `ResourceManifest` to
 `AddConfigurationStore(...)`; this package does not reconstruct endpoint, mount,
 artifact, or lifecycle facts from conventions.
@@ -74,14 +69,9 @@ IConfigurationStoreResourceDescriptor configuration = builder.AddConfigurationSt
 Generated gateway verbs supply the manifest and expose the same optional typed
 options; application authors normally do not load the JSON themselves.
 
-## Default control plane
+## Runtime manifest boundary
 
-`ConfigurationStoreResourceControlPlane.Create()` returns a fresh
-`Hosting.Resources.IResourceControlPlane`. The enabled resource's generated
-`ResourceControlPlane.g.cs` registers that factory with `ResourceRuntime` and seeds it
-with the invocation's observed endpoints. `ConfigurationStore.Hosting` reads the
-registration through the shared seam and serves it on the manifest's `api` endpoint;
-neither package references the other.
+The producer supplies runtime metadata; this package preserves it without referencing runtime types. The SDK registers the generic control plane in the executable. Producer manifests contain no command catalog or state declarations; configured runtime handlers provide the live state contracts.
 
 The hosting terminal provides `GET`/`HEAD` health, readiness, liveness, endpoint, and
 command-discovery routes under `/cohesion/v1`, plus `POST /cohesion/v1/stop` and
@@ -95,14 +85,6 @@ SetValue, and RemoveValue descriptor verbs declare these kinds. AddNamespace sup
 separate namespace-ownership contract described below.
 
 ## Dependency and AOT posture
-
-COHAM001 constrains the complete production dependency closure to
-`Assimalign.Cohesion.Core`, `Assimalign.Cohesion.ApplicationModel`,
-`Assimalign.Cohesion.Hosting`, `Assimalign.Cohesion.Hosting.Health`,
-`Assimalign.Cohesion.Hosting.Resources`, and the permitted BCL surface. The planner
-uses typed records and ordinary loops only. Golden serialization uses
-`ResourcePlanJsonContext`; there is no reflection, runtime code generation,
-ConfigurationStore runtime dependency, or platform SDK dependency.
 
 ## Non-goals
 
@@ -137,7 +119,7 @@ These declarations carry ordinary configuration, never secrets, because model ex
 
 Kinds use verb-noun kebab under the area prefix. The examples `rezolvr.record` and
 `identityhub.audience` in developer-experience design section 7 are illustrative; item 27's design
-rewrite should reflect the landed convention. Manifest commands remain bare JSON strings.
+rewrite should reflect the landed convention. Producer manifests no longer carry command catalogs; the existing command delivery surface is separate from runtime state management.
 Typed verbs validate argument shape and use source-generated JSON metadata. Build validates the
 advertised kind, canonical payload, deterministic id, and uniqueness of the target ownership key.
 The default control plane handles id replay and owner isolation; each area handler also accepts
@@ -149,3 +131,11 @@ contents. A different seed or foreign owner is rejected with a named detail. Res
 are not implicitly adopted. Deletion removes the owned namespace; callers should remove its value
 commands first. Existing SetValue and RemoveValue behavior remains unchanged, including 404 for
 unknown namespaces.
+
+## Runtime-independent dependency direction
+
+```mermaid
+flowchart LR
+    Area["ConfigurationStore.ApplicationModel"] --> Model["ApplicationModel"]
+    Model --> Core["Core"]
+```

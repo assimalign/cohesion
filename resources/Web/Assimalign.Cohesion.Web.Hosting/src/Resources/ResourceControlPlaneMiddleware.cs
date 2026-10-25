@@ -11,7 +11,6 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Hosting;
-using Assimalign.Cohesion.Hosting.Health;
 using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Web.Hosting.Internal;
@@ -95,6 +94,7 @@ public static class ResourceControlPlaneMiddleware
         ArgumentNullException.ThrowIfNull(next);
         if (controlPlanePort is int port && context.ConnectionInfo.LocalPort != port)
         {
+            if (!controlPlane.IsManagementReady) { context.Response.StatusCode = HttpStatusCode.ServiceUnavailable; return; }
             await next.Invoke(context).ConfigureAwait(false);
             return;
         }
@@ -102,7 +102,13 @@ public static class ResourceControlPlaneMiddleware
         string path = context.Request.Path.Value;
         bool isRead = context.Request.Method == HttpMethod.Get || context.Request.Method == HttpMethod.Head;
 
-        bool isNamespacedControlPlanePath = IsNamespacedControlPlanePath(path);
+        string? runtimePath = controlPlane.RuntimeManagement?.Path.Value.TrimEnd('/');
+        bool isNamespacedControlPlanePath = IsNamespacedControlPlanePath(path) ||
+            (runtimePath is not null && (path == runtimePath || path.StartsWith(runtimePath + "/", StringComparison.Ordinal)));
+        if (isNamespacedControlPlanePath)
+        {
+            context.Response.Headers[HttpHeaderKey.CacheControl] = "no-store";
+        }
         if (isNamespacedControlPlanePath && resourceContext.GatewayName is null &&
             !IsLoopbackPeer(context))
         {
@@ -154,7 +160,7 @@ public static class ResourceControlPlaneMiddleware
                 await controlPlane.CheckReadinessAsync(context.RequestCancelled).ConfigureAwait(false);
             await WriteHealthAsync(
                 context,
-                isApplicationReady ? report : MarkHostAsStarting(report));
+                isApplicationReady && controlPlane.IsManagementReady ? report : MarkHostAsStarting(report));
             return;
         }
 
@@ -263,12 +269,22 @@ public static class ResourceControlPlaneMiddleware
             return;
         }
 
+        if (await ResourceStateHttpEndpoint.TryHandleAsync(controlPlane, resourceContext, context, context.RequestCancelled).ConfigureAwait(false))
+        {
+            return;
+        }
+
         if (isNamespacedControlPlanePath)
         {
             context.Response.StatusCode = HttpStatusCode.NotFound;
             return;
         }
 
+        if (!controlPlane.IsManagementReady)
+        {
+            context.Response.StatusCode = HttpStatusCode.ServiceUnavailable;
+            return;
+        }
         await next.Invoke(context).ConfigureAwait(false);
     }
 

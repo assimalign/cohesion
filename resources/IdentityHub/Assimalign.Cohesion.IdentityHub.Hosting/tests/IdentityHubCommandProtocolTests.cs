@@ -16,7 +16,6 @@ using Xunit;
 
 using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Hosting.Resources;
-using IdentityHubResourceControlPlane = Assimalign.Cohesion.ApplicationModel.IdentityHubResourceControlPlane;
 
 namespace Assimalign.Cohesion.IdentityHub.Hosting.Tests;
 
@@ -29,13 +28,12 @@ public sealed class IdentityHubCommandProtocolTests
 {
     private const string resourceName = "identity";
 
-    // An orchestration-enabled executable registers the IdentityHub ApplicationModel's default
-    // control plane for its entry assembly. The ApplicationModel assembly stands in for that entry
-    // assembly here, so the registration leaves every other test in this assembly unchanged.
-    private static readonly Assembly _resourceAssembly = typeof(IdentityHubResourceControlPlane).Assembly;
+    // Use a distinct assembly as the executable identity so command registration cannot change
+    // the standalone lifecycle fixtures in this test assembly.
+    private static readonly Assembly _resourceAssembly = typeof(IIdentityHubApplication).Assembly;
 
     static IdentityHubCommandProtocolTests() => ResourceRuntime.RegisterControlPlane(
-        _resourceAssembly, IdentityHubResourceControlPlane.Create);
+        _resourceAssembly, () => ResourceControlPlane.Create(["identityhub.add-audience", "identityhub.add-client"]));
 
     [Fact(DisplayName = "Cohesion Test [IdentityHub.Hosting] - Commands: authenticated apply, replay, owner refusal, and delete survive a restart")]
     public async Task Commands_ManagedHost_ShouldApplyReplayRefuseAndDeleteAcrossRestart()

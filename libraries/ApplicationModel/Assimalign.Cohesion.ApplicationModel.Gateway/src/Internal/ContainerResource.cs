@@ -63,7 +63,7 @@ internal sealed class ContainerResource : PlannedResource
                 Startup = CreateProbe(options.StartupProbe),
                 Liveness = CreateProbe(options.LivenessProbe),
             },
-            // cohesion/resource/v1 requires a control-plane location. An opaque container
+            // The resource manifest requires a control-plane location. An opaque container
             // always has an explicit readiness probe, so gateways do not use this fallback.
             ControlPlane = new ResourceManifestControlPlane
             {

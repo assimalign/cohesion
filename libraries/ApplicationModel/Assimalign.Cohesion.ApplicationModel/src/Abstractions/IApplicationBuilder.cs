@@ -52,6 +52,17 @@ public interface IApplicationBuilder
     /// <returns>This builder.</returns>
     IApplicationBuilder UseName(ApplicationName name);
 
+    /// <summary>Declares a logical group and adds resources through the existing application-builder verbs.</summary>
+    /// <param name="name">The application-local logical group name.</param>
+    /// <param name="configure">The resource declarations belonging to this group.</param>
+    /// <returns>This builder.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="configure"/> is null.</exception>
+    /// <exception cref="ArgumentException">The group name is invalid.</exception>
+    /// <exception cref="InvalidOperationException">The group is already declared or groups are nested.</exception>
+    /// <remarks>Groups are flat presentation containers. Resource names remain unique across the application.</remarks>
+    IApplicationBuilder AddResourceGroup(ResourceGroupName name, Action<IApplicationBuilder> configure) =>
+        throw new NotSupportedException();
+
     /// <summary>
     /// Adds a resource to the model and returns its descriptor so dependency edges can
     /// be chained fluently (for example <c>builder.AddWebApp("admin").DependsOn(identity)</c>).
@@ -114,7 +125,7 @@ public interface IApplicationBuilder
         ExternalResourceDeclaration declaration,
         IExternalResourceResolver? resolver = null);
 
-    /// <summary>Registers a command whose graph membership and manifest support are validated at Build.</summary>
+    /// <summary>Registers a command whose graph membership, ownership, and canonical identity are validated at Build.</summary>
     /// <param name="command">The declaration owned by this application.</param>
     /// <returns>This builder.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="command"/> is null.</exception>

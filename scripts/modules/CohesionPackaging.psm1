@@ -127,7 +127,6 @@ $script:CohesionReleaseLibrary = @(
 
     # libraries/Hosting
     'libraries/Hosting/Assimalign.Cohesion.Hosting'
-    'libraries/Hosting/Assimalign.Cohesion.Hosting.Health'
     'libraries/Hosting/Assimalign.Cohesion.Hosting.Resources'
     'libraries/Hosting/Assimalign.Cohesion.Hosting.Telemetry'
 
@@ -345,6 +344,7 @@ $script:CohesionReleaseLibrary = @(
     'resources/Web/Assimalign.Cohesion.Web.Health'
     'resources/Web/Assimalign.Cohesion.Web.HostFiltering'
     'resources/Web/Assimalign.Cohesion.Web.Hosting'
+    'resources/Web/Assimalign.Cohesion.Web.Hosting.Management'
     'resources/Web/Assimalign.Cohesion.Web.HttpsPolicy'
     'resources/Web/Assimalign.Cohesion.Web.OpenApi'
     'resources/Web/Assimalign.Cohesion.Web.ProblemDetails'

@@ -65,7 +65,6 @@ The stop-begun marker belongs to the run handle, so a later run starts with fres
 | Package | Owns |
 | --- | --- |
 | `Assimalign.Cohesion.Hosting` | Plain host lifetime and service execution |
-| `Assimalign.Cohesion.Hosting.Health` | Health vocabulary shared by resource and delivery packages |
 | `Assimalign.Cohesion.Hosting.Resources` | Opt-in resource runtime and supervisor-facing process behavior |
 
 Consumers can reference Health without Hosting, while Resources composes both siblings explicitly.

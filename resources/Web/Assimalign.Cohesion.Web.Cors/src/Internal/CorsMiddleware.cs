@@ -53,14 +53,31 @@ internal sealed class CorsMiddleware : IWebApplicationMiddleware
         HttpHeaderKey.Vary,
     ];
 
+    private static readonly HttpHeaderKey[] _grantHeaders =
+    [
+        HttpHeaderKey.AccessControlAllowOrigin,
+        HttpHeaderKey.AccessControlAllowCredentials,
+        HttpHeaderKey.AccessControlAllowMethods,
+        HttpHeaderKey.AccessControlAllowHeaders,
+        HttpHeaderKey.AccessControlMaxAge,
+        HttpHeaderKey.AccessControlExposeHeaders,
+    ];
+
     private readonly CorsPolicy? _defaultPolicy;
     private readonly FrozenDictionary<string, CorsPolicy> _policies;
+    private readonly CorsPolicyStore? _store;
 
     public CorsMiddleware(CorsOptions options)
     {
         // A private copy: options changed after UseCors returns cannot change a running pipeline.
         _defaultPolicy = options.DefaultPolicy;
         _policies = options.Policies.ToFrozenDictionary(StringComparer.Ordinal);
+    }
+
+    public CorsMiddleware(CorsPolicyStore store)
+    {
+        _store = store;
+        _policies = FrozenDictionary<string, CorsPolicy>.Empty;
     }
 
     public Task InvokeAsync(IHttpContext context, WebApplicationMiddleware next)
@@ -80,9 +97,12 @@ internal sealed class CorsMiddleware : IWebApplicationMiddleware
             return InvokePreflight(context, next, match, requestedMethod);
         }
 
-        CorsPolicy? policy = ResolvePolicy(match is { IsPreflight: false } ? match.Metadata.GetMetadata<CorsMetadata>() : null);
+        CorsMetadata? metadata = match is { IsPreflight: false } ? match.Metadata.GetMetadata<CorsMetadata>() : null;
+        CorsPolicy? policy = ResolvePolicy(metadata);
 
-        return policy is null ? next.Invoke(context) : InvokeActualAsync(context, next, policy);
+        return policy is null
+            ? InvokeWithoutPolicyAsync(context, next, metadata)
+            : InvokeActualAsync(context, next, policy);
     }
 
     private Task InvokePreflight(IHttpContext context, WebApplicationMiddleware next, IRouteMatchFeature? match, string requestedMethod)
@@ -109,7 +129,7 @@ internal sealed class CorsMiddleware : IWebApplicationMiddleware
             // CORS is disabled for the endpoint, or no policy applies: the pipeline answers the preflight as
             // the plain OPTIONS request it is, and the browser fails it.
             CorsEventSource.Log.PreflightPassedThrough(context, metadata is { IsDisabled: true } ? "CorsDisabled" : "NoPolicy", requestedMethod);
-            return next.Invoke(context);
+            return InvokeWithoutPolicyAsync(context, next, metadata);
         }
 
         CorsResponseHeaders.WritePreflight(context, policy, requestedMethod);
@@ -143,11 +163,37 @@ internal sealed class CorsMiddleware : IWebApplicationMiddleware
         return next.Invoke(context);
     }
 
+    private Task InvokeWithoutPolicyAsync(IHttpContext context, WebApplicationMiddleware next, CorsMetadata? metadata)
+    {
+        if (_store is not null && metadata is null)
+        {
+            // An omitted dynamic default grants no cross-origin reads, even when a cache replays
+            // headers stored before the previous policy stamped its authoritative decision. Explicit
+            // DisableCors remains an opt-out for endpoints that manage their own CORS headers.
+            IWebResponseStartingFeature starting = context.Features.Get<IWebResponseStartingFeature>()
+                ?? throw new InvalidOperationException(ErrorMessages.CorsResponseStartingFeatureRequired);
+            starting.OnStarting(static state =>
+            {
+                IHttpContext exchange = (IHttpContext)state!;
+                foreach (HttpHeaderKey header in _grantHeaders)
+                {
+                    exchange.Response.Headers.Remove(header);
+                }
+                return Task.CompletedTask;
+            }, context, preservedHeaders: _grantHeaders);
+        }
+
+        return next.Invoke(context);
+    }
+
     private CorsPolicy? ResolvePolicy(CorsMetadata? metadata)
     {
+        (CorsPolicy? defaultPolicy, FrozenDictionary<string, CorsPolicy> policies) = _store is null
+            ? (_defaultPolicy, _policies) : _store.GetPolicies();
+
         if (metadata is null)
         {
-            return _defaultPolicy;
+            return defaultPolicy;
         }
 
         if (metadata.IsDisabled)
@@ -160,7 +206,7 @@ internal sealed class CorsMiddleware : IWebApplicationMiddleware
             return inline;
         }
 
-        if (_policies.TryGetValue(metadata.PolicyName!, out CorsPolicy? named))
+        if (policies.TryGetValue(metadata.PolicyName!, out CorsPolicy? named))
         {
             return named;
         }

@@ -11,10 +11,12 @@ internal sealed class BuiltApplicationResourceDescriptor : IResourceCommandDescr
 {
     private IReadOnlyList<IApplicationResourceDescriptor>? _dependencies;
 
-    public BuiltApplicationResourceDescriptor(IApplicationResource resource, ResourcePlan? plan, IReadOnlyList<IResourceCommand>? commands = null)
+    public BuiltApplicationResourceDescriptor(IApplicationResource resource, ResourcePlan? plan, IReadOnlyList<IResourceCommand>? commands = null,
+        ResourceGroupName? resourceGroup = null)
     {
         Resource = resource ?? throw new ArgumentNullException(nameof(resource));
         Plan = plan;
+        ResourceGroup = resourceGroup ?? plan?.ResourceGroup;
         var targetCommands = new List<IResourceCommand>();
         foreach (IResourceCommand command in commands ?? Array.Empty<IResourceCommand>())
         {
@@ -29,6 +31,8 @@ internal sealed class BuiltApplicationResourceDescriptor : IResourceCommandDescr
     public IApplicationResource Resource { get; }
 
     public ResourcePlan? Plan { get; }
+
+    public ResourceGroupName? ResourceGroup { get; }
 
     public IReadOnlyList<IResourceCommand> Commands { get; }
 
@@ -76,6 +80,7 @@ internal sealed class BuiltApplicationResourceDescriptor : IResourceCommandDescr
 
         public IApplicationResource Resource => _target.Resource;
         public ResourcePlan? Plan => _target.Plan;
+        public ResourceGroupName? ResourceGroup => _target.ResourceGroup;
         public IReadOnlyList<IResourceCommand> Commands => _target.Commands;
     }
 }

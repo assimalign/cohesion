@@ -17,6 +17,7 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane.Internal;
 [JsonSerializable(typeof(ControlPlaneCommandObservation[]))]
 [JsonSerializable(typeof(ControlPlaneMetadataDocument))]
 [JsonSerializable(typeof(ControlPlaneErrorDocument))]
+[JsonSerializable(typeof(ResourceDesiredValue))]
 internal sealed partial class ControlPlaneJsonContext : JsonSerializerContext
 {
     private sealed class DebugView
@@ -38,6 +39,9 @@ internal sealed class ControlPlaneResourceDocument
     public required string Name { get; init; }
 
     public required string Kind { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ResourceGroup { get; init; }
 
     public required string State { get; init; }
 

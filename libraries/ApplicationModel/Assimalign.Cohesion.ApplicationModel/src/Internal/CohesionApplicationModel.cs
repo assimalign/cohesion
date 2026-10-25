@@ -21,7 +21,8 @@ internal sealed class CohesionApplicationModel : IApplicationModel
         bool adopt,
         bool restartOrphans,
         IReadOnlyList<IResourceCommand>? commands = null,
-        ApplicationProviders? providers = null)
+        ApplicationProviders? providers = null,
+        IReadOnlyList<ApplicationResourceGroup>? resourceGroups = null)
     {
         Name = name;
         Environment = environment ?? throw new ArgumentNullException(nameof(environment));
@@ -45,6 +46,13 @@ internal sealed class CohesionApplicationModel : IApplicationModel
 
         Manifests = Copy(manifests);
         Plans = Copy(plans);
+        var groups = new ApplicationResourceGroup[resourceGroups?.Count ?? 0];
+        for (int index = 0; index < groups.Length; index++)
+        {
+            ApplicationResourceGroup group = resourceGroups![index];
+            groups[index] = new ApplicationResourceGroup(group.Name, group.Resources);
+        }
+        ResourceGroups = Array.AsReadOnly(groups);
         var commandCopies = new IResourceCommand[commands?.Count ?? 0];
         for (int index = 0; index < commandCopies.Length; index++)
         {
@@ -94,6 +102,8 @@ internal sealed class CohesionApplicationModel : IApplicationModel
     public IReadOnlyList<ResourceManifest> Manifests { get; }
 
     public IReadOnlyList<ResourcePlan> Plans { get; }
+
+    public IReadOnlyList<ApplicationResourceGroup> ResourceGroups { get; }
 
     public IReadOnlyList<IResourceCommand> Commands { get; }
 
@@ -154,7 +164,7 @@ internal sealed class CohesionApplicationModel : IApplicationModel
         }
 
         descriptorPlans.TryGetValue(source, out ResourcePlan? plan);
-        var copy = new BuiltApplicationResourceDescriptor(source.Resource, plan, commands);
+        var copy = new BuiltApplicationResourceDescriptor(source.Resource, plan, commands, source.ResourceGroup);
         copies.Add(source, copy);
 
         var dependencies = new IApplicationResourceDescriptor[source.Dependencies.Count];

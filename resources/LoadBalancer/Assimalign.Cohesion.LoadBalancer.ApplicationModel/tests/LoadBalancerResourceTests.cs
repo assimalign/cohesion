@@ -6,7 +6,6 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.ApplicationModel;
-using Assimalign.Cohesion.Hosting.Resources;
 
 namespace Assimalign.Cohesion.LoadBalancer.ApplicationModel.Tests;
 
@@ -45,17 +44,6 @@ public sealed class LoadBalancerResourceTests
         first.Resource.ShouldBeOfType<LoadBalancerResource>();
         second.Dependencies.ShouldContain(first);
         Should.Throw<ArgumentNullException>(() => builder.AddLoadBalancer(null!));
-    }
-
-    [Fact(DisplayName = "Cohesion Test [LoadBalancer.ApplicationModel] - Control plane: isolates empty command sets")]
-    public void CreateControlPlane_ShouldReturnIsolatedEmptyPlanes()
-    {
-        IResourceControlPlane first = LoadBalancerResourceControlPlane.Create();
-        IResourceControlPlane second = LoadBalancerResourceControlPlane.Create();
-        first.ShouldNotBeSameAs(second);
-        first.AcceptedCommandKinds.ShouldBeEmpty();
-        first.Commands.ShouldBeEmpty();
-        first.ObservedEndpoints.ShouldBeEmpty();
     }
 
     [Theory(DisplayName = "Cohesion Test [LoadBalancer.ApplicationModel] - Planning: rejects incompatible area facts")]

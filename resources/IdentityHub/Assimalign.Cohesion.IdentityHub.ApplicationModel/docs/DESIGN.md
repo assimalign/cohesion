@@ -20,19 +20,11 @@ defines a replication protocol.
 `IdentityHubResourceOptions.Storage.Size` may replace the manifest claim size. Endpoint
 ports, paths, exposure, mounts, and lifecycle defaults remain manifest facts.
 
-## Default control plane
+## Runtime manifest boundary
 
-`IdentityHubResourceControlPlane.Create()` returns a fresh
-`Hosting.Resources.IResourceControlPlane`. Generated `ResourceControlPlane.g.cs` registers
-the factory for enabled executables, and IdentityHub.Hosting serves it through the shared
-runtime seam without either package referencing the other. Accepted command kinds are `identityhub.add-audience` and `identityhub.add-client`, declared through the typed descriptor.
+The producer supplies runtime metadata; this package preserves it without referencing runtime types. The SDK registers the generic control plane in the executable. Producer manifests contain no command catalog or state declarations; configured runtime handlers provide the live state contracts.
 
-## AOT and dependency posture
-
-COHAM001 restricts the closure to Core, ApplicationModel, plain Hosting, Hosting.Health,
-Hosting.Resources, ProtectedData, and BCL assemblies. Planning uses typed records and
-ordinary loops; golden serialization uses `ResourcePlanJsonContext`. There is no runtime
-reflection, dynamic generation, gateway dependency, or platform-specific model.
+This package describes resource manifests, dependencies and deployment plans. Its only direct Cohesion dependency is ApplicationModel, whose contracts depend only on Core. Sdk.ApplicationModel generates control-plane registration in the enabled resource executable; Hosting.Resources and the resource host own local state handlers. The gateway owns infrastructure observation and management reconciliation.
 
 ## Non-goals
 
@@ -50,7 +42,7 @@ reflection, dynamic generation, gateway dependency, or platform-specific model.
 
 Kinds use verb-noun kebab under the area prefix. The examples `rezolvr.record` and
 `identityhub.audience` in developer-experience design section 7 are illustrative; item 27's design
-rewrite should reflect the landed convention. Manifest commands remain bare JSON strings.
+rewrite should reflect the landed convention. Producer manifests no longer carry command catalogs; the existing command delivery surface is separate from runtime state management.
 Typed verbs validate argument shape and use source-generated JSON metadata. Build validates the
 advertised kind, canonical payload, deterministic id, and uniqueness of the target ownership key.
 The default control plane handles id replay and owner isolation; each area handler also accepts
@@ -71,3 +63,11 @@ declaration stores the mount name, never credential bytes. Hosting reads and has
 credential when initializing or updating the registry, so restart requires the mount again.
 Clients must reference existing audiences; add the audience before the client. Conflicting resource
 seeds or changed client declarations are rejected until the owning declaration is deleted.
+
+## Runtime-independent dependency direction
+
+```mermaid
+flowchart LR
+    Area["IdentityHub.ApplicationModel"] --> Model["ApplicationModel"]
+    Model --> Core["Core"]
+```

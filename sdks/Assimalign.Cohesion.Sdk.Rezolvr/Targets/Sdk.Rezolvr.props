@@ -7,7 +7,7 @@
 	-->
 	<PropertyGroup>
 		<CohesionResourceApplicationModel Condition="'$(CohesionResourceApplicationModel)' == ''">Assimalign.Cohesion.Rezolvr.ApplicationModel</CohesionResourceApplicationModel>
-		<CohesionResourceControlPlaneType Condition="'$(CohesionResourceControlPlaneType)' == ''">Assimalign.Cohesion.ApplicationModel.RezolvrResourceControlPlane</CohesionResourceControlPlaneType>
+		<CohesionResourceControlPlaneType Condition="'$(CohesionResourceControlPlaneType)' == ''">Assimalign.Cohesion.Hosting.Resources.ResourceControlPlane</CohesionResourceControlPlaneType>
 		<CohesionResourceKind Condition="'$(CohesionResourceKind)' == ''">Rezolvr</CohesionResourceKind>
 		<CohesionControlPlaneEndpoint Condition="'$(CohesionControlPlaneEndpoint)' == ''">admin</CohesionControlPlaneEndpoint>
 		<CohesionControlPlanePath Condition="'$(CohesionControlPlanePath)' == ''">/cohesion/v1</CohesionControlPlanePath>
@@ -15,10 +15,11 @@
 	</PropertyGroup>
 
 	<ItemGroup>
-		<CohesionCommand Include="rezolvr.add-a-record;rezolvr.add-cname-record" />
 		<CohesionEndpoint Include="dns" Scheme="dns" Protocol="udp" ContainerPort="53" Public="false" />
 		<CohesionEndpoint Include="dns-tcp" Scheme="dns" Protocol="tcp" ContainerPort="53" Public="false" />
 		<CohesionEndpoint Include="admin" Scheme="http" ContainerPort="8081" Public="false" />
+	</ItemGroup>
+	<ItemGroup>
 		<CohesionProbe Include="readiness" Endpoint="admin" Http="/readyz" />
 		<CohesionProbe Include="liveness" Endpoint="admin" Http="/livez" />
 	</ItemGroup>

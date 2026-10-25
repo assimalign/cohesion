@@ -104,7 +104,18 @@ internal static class ResourceSourceWriter
         builder.AppendLine();
         builder.AppendLine("    private static global::Assimalign.Cohesion.Hosting.Resources.IResourceControlPlane CreateControlPlane()");
         builder.AppendLine("    {");
-        builder.AppendLine($"        global::Assimalign.Cohesion.Hosting.Resources.IResourceControlPlane controlPlane = global::{controlPlaneType}.Create();");
+        string creation = controlPlaneType == "Assimalign.Cohesion.Hosting.Resources.ResourceControlPlane"
+            ? "global::Assimalign.Cohesion.Hosting.Resources.ResourceControlPlane.Create()"
+            : $"global::{controlPlaneType}.Create()";
+        builder.AppendLine($"        global::Assimalign.Cohesion.Hosting.Resources.IResourceControlPlane controlPlane = {creation};");
+        if (manifest.Runtime is not null)
+        {
+            builder.AppendLine("        controlPlane.ConfigureRuntimeManagement(new global::Assimalign.Cohesion.Hosting.Resources.ResourceRuntimeManagement");
+            builder.AppendLine("        {");
+            builder.AppendLine($"            Endpoint = {Quote(manifest.ControlPlane.Endpoint)},");
+            builder.AppendLine($"            Path = {Quote(manifest.ControlPlane.Path)},");
+            builder.AppendLine("        });");
+        }
         builder.AppendLine("        global::Assimalign.Cohesion.Hosting.Resources.ResourceContext context = global::Assimalign.Cohesion.Hosting.Resources.ResourceRuntime.Current;");
         for (int index = 0; index < manifest.Endpoints.Count; index++)
         {

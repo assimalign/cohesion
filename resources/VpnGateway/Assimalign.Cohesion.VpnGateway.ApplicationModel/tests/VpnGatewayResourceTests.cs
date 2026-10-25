@@ -6,7 +6,6 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.ApplicationModel;
-using Assimalign.Cohesion.Hosting.Resources;
 
 namespace Assimalign.Cohesion.VpnGateway.ApplicationModel.Tests;
 
@@ -45,17 +44,6 @@ public sealed class VpnGatewayResourceTests
         first.Resource.ShouldBeOfType<VpnGatewayResource>();
         second.Dependencies.ShouldContain(first);
         Should.Throw<ArgumentNullException>(() => builder.AddVpnGateway(null!));
-    }
-
-    [Fact(DisplayName = "Cohesion Test [VpnGateway.ApplicationModel] - Control plane: isolates empty command sets")]
-    public void CreateControlPlane_ShouldReturnIsolatedEmptyPlanes()
-    {
-        IResourceControlPlane first = VpnGatewayResourceControlPlane.Create();
-        IResourceControlPlane second = VpnGatewayResourceControlPlane.Create();
-        first.ShouldNotBeSameAs(second);
-        first.AcceptedCommandKinds.ShouldBeEmpty();
-        first.Commands.ShouldBeEmpty();
-        first.ObservedEndpoints.ShouldBeEmpty();
     }
 
     [Theory(DisplayName = "Cohesion Test [VpnGateway.ApplicationModel] - Planning: rejects incompatible area facts")]

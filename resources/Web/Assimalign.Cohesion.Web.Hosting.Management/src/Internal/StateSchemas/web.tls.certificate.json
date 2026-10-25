@@ -1,0 +1,47 @@
+{
+  "name": "web.tls.certificate",
+  "payloadSchemaId": "urn:cohesion:web:tls-certificate:v1",
+  "keySchema": {
+    "enum": [
+      "https"
+    ]
+  },
+  "payloadSchema": {
+    "type": "object",
+    "required": [
+      "certificateRef"
+    ],
+    "properties": {
+      "certificateRef": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "version": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "provider": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "provider",
+          "key",
+          "version"
+        ]
+      }
+    },
+    "additionalProperties": false
+  },
+  "scope": "everyInstance",
+  "uses": [
+    "orchestration",
+    "management"
+  ],
+  "supportsAbsence": false
+}

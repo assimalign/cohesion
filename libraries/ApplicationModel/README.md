@@ -47,6 +47,7 @@ outside resource-area packages. That prohibition has no opt-out and no exemption
 
 ## Further reading
 
+- [Resource management endpoints](../../docs/libraries/ApplicationModel/RESOURCE_MANAGEMENT.md) — registered REST operations, gateway authorization, and a live CORS configuration example
 - [docs/libraries/ApplicationModel/DESIGN.md](../../docs/libraries/ApplicationModel/DESIGN.md) — the area architecture record
 - [docs/APPLICATION_MODEL_BUILD_AND_DEPLOY.md](../../docs/APPLICATION_MODEL_BUILD_AND_DEPLOY.md) — the build and deploy flow drawn: SDK generation, gateway selection, and the in-process, Local, and Kubernetes realizations side by side
 - [docs/programs/REALIZATION_PLAN.md](../../docs/programs/REALIZATION_PLAN.md) — the platform-neutral realization plan contract

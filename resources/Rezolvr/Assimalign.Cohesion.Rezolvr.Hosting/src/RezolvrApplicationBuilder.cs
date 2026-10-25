@@ -181,6 +181,10 @@ public sealed class RezolvrApplicationBuilder : IRezolvrApplicationBuilder
                     _controlPlane.RegisterCommandHandler(handler);
                 }
 
+                foreach (IResourceStateHandler handler in _context.ServiceProvider.GetRequiredService<global::System.Collections.Generic.IEnumerable<IResourceStateHandler>>())
+                {
+                    _controlPlane.RegisterStateHandler(handler);
+                }
                 ResourceRuntime.HostBuilt(application, _controlPlane);
             }
 

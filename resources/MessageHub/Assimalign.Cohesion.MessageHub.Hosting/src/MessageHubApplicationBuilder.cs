@@ -154,6 +154,10 @@ public sealed class MessageHubApplicationBuilder : IMessageHubApplicationBuilder
             var application = new MessageHubApplication(new MessageHubApplicationOptions(), _context);
             if (_controlPlane is not null)
             {
+                foreach (IResourceStateHandler handler in _context.ServiceProvider.GetRequiredService<global::System.Collections.Generic.IEnumerable<IResourceStateHandler>>())
+                {
+                    _controlPlane.RegisterStateHandler(handler);
+                }
                 ResourceRuntime.HostBuilt(application, _controlPlane);
             }
 

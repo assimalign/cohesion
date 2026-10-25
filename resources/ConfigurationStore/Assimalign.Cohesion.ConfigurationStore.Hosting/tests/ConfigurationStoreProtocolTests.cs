@@ -16,7 +16,6 @@ using Xunit;
 using Assimalign.Cohesion.ConfigurationStore;
 using Assimalign.Cohesion.ConfigurationStore.Client;
 using Assimalign.Cohesion.Hosting;
-using Assimalign.Cohesion.Hosting.Health;
 using Assimalign.Cohesion.Hosting.Resources;
 
 namespace Assimalign.Cohesion.ConfigurationStore.Hosting.Tests;

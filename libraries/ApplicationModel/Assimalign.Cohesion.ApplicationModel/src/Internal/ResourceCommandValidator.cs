@@ -37,17 +37,6 @@ internal static class ResourceCommandValidator
                 throw new InvalidOperationException($"Command '{command.Kind}' targets resource '{command.Target.Name}', which is not owned or referenced by this graph.");
             }
 
-            bool accepted = false;
-            foreach (ResourceManifestCommand acceptedCommand in manifest.Commands)
-            {
-                accepted |= string.Equals(acceptedCommand.Kind, command.Kind, StringComparison.Ordinal);
-            }
-
-            if (!accepted)
-            {
-                throw new InvalidOperationException($"Resource '{manifest.Name}' does not accept command kind '{command.Kind}'; declare a kind advertised by its manifest.");
-            }
-
             if (string.IsNullOrWhiteSpace(command.Id) || !ids.Add(command.Id))
             {
                 throw new InvalidOperationException($"Command '{command.Kind}' has a blank or duplicate command id '{command.Id}'.");

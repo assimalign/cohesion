@@ -12,10 +12,9 @@ namespace Assimalign.Cohesion.ApplicationModel;
 /// <remarks>
 /// Declared payloads are portable desired state and never carry secret material; a resolver
 /// produces the delivered payload at delivery time. A command kind with no registered resolver is
-/// delivered exactly as declared, unless the target resource's manifest marks the kind
-/// <see cref="ResourceManifestCommand.RequiresInputResolver"/>: then
-/// <see cref="IApplicationBuilder.Build"/>, or an application set starting the member, rejects the
-/// application instead of letting the resource refuse the unresolved payload at delivery.
+/// delivered exactly as declared. Resolver registration is explicit application composition;
+/// producer manifests declare no command catalog or required input-resolver metadata. The
+/// receiving runtime handler validates the delivered payload.
 /// </remarks>
 public interface IResourceCommandInputResolver
 {

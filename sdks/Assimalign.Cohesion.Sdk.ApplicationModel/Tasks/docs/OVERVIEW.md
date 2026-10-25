@@ -64,7 +64,7 @@ resource defaults for `SelfContained`, `RuntimeIdentifier`, and
 
 An enabled executable produces:
 
-- `resource.json`, the frozen `cohesion/resource/v1` manifest;
+- `resource.json`, the `cohesion/resource/v2` deployment manifest;
 - `Resource.g.cs`, typed accessors for endpoints, mounts, settings, references,
   and resource properties;
 - `ResourceControlPlane.g.cs`, registration for the area's default control

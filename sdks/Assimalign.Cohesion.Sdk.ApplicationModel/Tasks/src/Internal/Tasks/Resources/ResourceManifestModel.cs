@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Text.Json;
 
 namespace Assimalign.Cohesion.Sdk.ApplicationModel.Tasks.Internal;
 
@@ -21,11 +22,11 @@ internal sealed class ResourceManifestModel
 
     public required ResourceControlPlaneModel ControlPlane { get; init; }
 
+    public JsonElement? Runtime { get; set; }
+
     public List<ResourceMountModel> Mounts { get; } = [];
 
     public List<ResourceSettingModel> Settings { get; } = [];
-
-    public List<ResourceCommandModel> Commands { get; } = [];
 
     public List<ResourceReferenceModel> References { get; } = [];
 
@@ -67,8 +68,6 @@ internal sealed record ResourceMountModel(
     string? Size);
 
 internal sealed record ResourceSettingModel(string Key, string? Default, string Type);
-
-internal sealed record ResourceCommandModel(string Kind, bool RequiresInputResolver);
 
 internal sealed class ResourceReferenceModel
 {

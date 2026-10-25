@@ -6,7 +6,6 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.ApplicationModel;
-using Assimalign.Cohesion.Hosting.Resources;
 
 namespace Assimalign.Cohesion.EventHub.ApplicationModel.Tests;
 
@@ -45,17 +44,6 @@ public sealed class EventHubResourceTests
         first.Resource.ShouldBeOfType<EventHubResource>();
         second.Dependencies.ShouldContain(first);
         Should.Throw<ArgumentNullException>(() => builder.AddEventHub(null!));
-    }
-
-    [Fact(DisplayName = "Cohesion Test [EventHub.ApplicationModel] - Control plane: isolates empty command sets")]
-    public void CreateControlPlane_ShouldReturnIsolatedEmptyPlanes()
-    {
-        IResourceControlPlane first = EventHubResourceControlPlane.Create();
-        IResourceControlPlane second = EventHubResourceControlPlane.Create();
-        first.ShouldNotBeSameAs(second);
-        first.AcceptedCommandKinds.ShouldBeEmpty();
-        first.Commands.ShouldBeEmpty();
-        first.ObservedEndpoints.ShouldBeEmpty();
     }
 
     [Theory(DisplayName = "Cohesion Test [EventHub.ApplicationModel] - Planning: rejects incompatible area facts")]

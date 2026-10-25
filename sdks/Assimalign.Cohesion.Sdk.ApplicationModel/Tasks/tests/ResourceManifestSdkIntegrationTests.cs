@@ -97,7 +97,7 @@ public sealed class ResourceManifestSdkIntegrationTests
         webControlPlaneSource.ShouldContain(
             "global::Assimalign.Cohesion.Hosting.Resources.ResourceContext context = global::Assimalign.Cohesion.Hosting.Resources.ResourceRuntime.Current;");
         webControlPlaneSource.ShouldContain(
-            "global::Assimalign.Cohesion.ApplicationModel.WebResourceControlPlane.Create()");
+            "global::Assimalign.Cohesion.Hosting.Resources.ResourceControlPlane.Create()");
         webControlPlaneSource.ShouldContain("context.TryGetEndpoint(\"http\", \"http\", 18080");
         webControlPlaneSource.ShouldContain("out global::System.Uri? endpoint0");
         webControlPlaneSource.ShouldNotContain("global::Assimalign.Cohesion.Core.Endpoint" + "Address");
@@ -106,8 +106,9 @@ public sealed class ResourceManifestSdkIntegrationTests
         webControlPlaneSource.ShouldNotContain("#if");
 
         string databaseControlPlaneSource = File.ReadAllText(GeneratedOutput(databaseProject, "ResourceControlPlane.g.cs"));
+        // Generic SDK output intentionally advances ahead of the frozen Database source migration.
         databaseControlPlaneSource.ShouldContain(
-            "global::Assimalign.Cohesion.ApplicationModel.DatabaseResourceControlPlane.Create()");
+            "global::Assimalign.Cohesion.Hosting.Resources.ResourceControlPlane.Create()");
         databaseControlPlaneSource.ShouldContain("context.TryGetEndpoint(\"db\", \"cohesion-db\", 15740");
         databaseControlPlaneSource.ShouldContain("context.TryGetEndpoint(\"admin\", \"http\", null");
         string databaseResourceSource = File.ReadAllText(GeneratedOutput(databaseProject, "Resource.g.cs"));
@@ -133,8 +134,8 @@ public sealed class ResourceManifestSdkIntegrationTests
         validateDatabaseManifest.ShouldNotThrow();
 
         JsonElement web = webManifest.RootElement;
-        web.GetProperty("commands").GetArrayLength().ShouldBe(0);
-        web.GetProperty("schema").GetString().ShouldBe("cohesion/resource/v1");
+        web.TryGetProperty("commands", out _).ShouldBeFalse();
+        web.GetProperty("schema").GetString().ShouldBe("cohesion/resource/v2");
         web.GetProperty("name").GetString().ShouldBe("inventory-web");
         web.GetProperty("kind").GetString().ShouldBe("Web");
         web.GetProperty("application").GetString().ShouldBe("inventory");
@@ -182,8 +183,8 @@ public sealed class ResourceManifestSdkIntegrationTests
         reference.GetProperty("manifest").GetString().ShouldBe("EnabledDatabase");
 
         JsonElement database = databaseManifest.RootElement;
-        database.GetProperty("commands").EnumerateArray().Select(command => command.GetString())
-            .ShouldBe(new[] { "database.add-database", "database.add-principal" });
+        database.TryGetProperty("commands", out _).ShouldBeFalse();
+        database.GetProperty("schema").GetString().ShouldBe("cohesion/resource/v2");
         database.GetProperty("kind").GetString().ShouldBe("Database");
         database.GetProperty("applicationModel").GetString().ShouldBe("Assimalign.Cohesion.Database.ApplicationModel");
         database.GetProperty("artifact").GetProperty("composable").GetBoolean().ShouldBeTrue();

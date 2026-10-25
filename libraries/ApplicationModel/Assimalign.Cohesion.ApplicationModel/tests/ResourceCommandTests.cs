@@ -62,8 +62,7 @@ public sealed class ResourceCommandTests
             .AddCommand("test.create", "orders", payload.RootElement, CommandTestJsonContext.Default.JsonElement));
     }
 
-    [Theory(DisplayName = "Cohesion Test [ApplicationModel] - Build: validates command ownership, membership, kind, key and duplicate identity")]
-    [InlineData("unknown-kind", "does not accept")]
+    [Theory(DisplayName = "Cohesion Test [ApplicationModel] - Build: validates command ownership, membership, key and canonical identity")]
     [InlineData("foreign-target", "not owned or referenced")]
     [InlineData("foreign-owner", "declaring application")]
     [InlineData("blank-key", "nonblank")]
@@ -80,7 +79,7 @@ public sealed class ResourceCommandTests
         IApplicationResource selectedTarget = scenario == "foreign-target"
             ? AddTarget(CreateBuilder()).Resource : target;
         var command = new TestResourceCommand(scenario == "bad-id" ? "forged-id" : valid.Id,
-            scenario == "unknown-kind" ? "test.unknown" : valid.Kind,
+            valid.Kind,
             scenario == "blank-key" ? " " : valid.Key, selectedTarget,
             scenario == "foreign-owner" ? (ApplicationName)"another" : valid.Owner,
             scenario == "noncanonical" ? Encoding.UTF8.GetBytes(" { } ")
@@ -96,6 +95,22 @@ public sealed class ResourceCommandTests
 
         // Assert
         error.Message.ShouldContain(message, Case.Sensitive);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel] - Commands: programmatic kinds need no producer manifest catalog")]
+    public void Build_CommandKindWithoutManifestCatalog_ShouldRemainPortable()
+    {
+        IApplicationBuilder builder = CreateBuilder();
+        IApplicationResourceDescriptor target = AddTarget(builder);
+        using JsonDocument payload = JsonDocument.Parse("{}");
+        IResourceCommand command = ResourceCommands.Create("custom.runtime-operation", "key", target.Resource,
+            (ApplicationName)"appa", payload.RootElement, CommandTestJsonContext.Default.JsonElement);
+        builder.AddCommand(command);
+
+        IApplicationModel model = builder.Build().Model;
+
+        model.Commands.ShouldHaveSingleItem().Kind.ShouldBe("custom.runtime-operation");
+        model.Manifests[0].Schema.ShouldBe(ResourceManifest.SchemaV2);
     }
 
     [Fact(DisplayName = "Cohesion Test [ApplicationModel] - Commands: portable documents reject null entries with a named error")]
@@ -122,10 +137,7 @@ public sealed class ResourceCommandTests
     {
         // Arrange
         IApplicationBuilder builder = CreateBuilder();
-        IResourceCommandDescriptor target = (IResourceCommandDescriptor)builder.AddResource(TestManifestFactory.Create("config") with
-        {
-            Commands = [new ResourceManifestCommand("configurationstore.set-value"), new ResourceManifestCommand("configurationstore.remove-value")],
-        });
+        IResourceCommandDescriptor target = (IResourceCommandDescriptor)builder.AddResource(TestManifestFactory.Create("config"));
         using JsonDocument first = JsonDocument.Parse("{\"namespace\":\"orders\",\"key\":\"title\",\"value\":\"first\"}");
         using JsonDocument second = JsonDocument.Parse("{\"namespace\":\"orders\",\"key\":\"title\",\"value\":\"second\"}");
         target.AddCommand("configurationstore.set-value", "orders/title", first.RootElement, CommandTestJsonContext.Default.JsonElement);
@@ -183,10 +195,7 @@ public sealed class ResourceCommandTests
         // Arrange
         IApplicationBuilder builder = CreateBuilder();
         AddTarget(builder, "local");
-        ResourceManifest remote = TestManifestFactory.Create("remote", "provider") with
-        {
-            Commands = [new ResourceManifestCommand("test.create")],
-        };
+        ResourceManifest remote = TestManifestFactory.Create("remote", "provider");
         var declaration = new ExternalResourceDeclaration(remote.Name, remote.Application, ["control"], false, remote);
         IApplicationResourceDescriptor target = builder.RemoteReference(declaration, options => options.Endpoint("control", "https://provider.example"));
         builder.AddCommand(CreateCommand(target.Resource, "{}"));
@@ -221,7 +230,7 @@ public sealed class ResourceCommandTests
         .UseGateway(new FakeGateway());
 
     private static IApplicationResourceDescriptor AddTarget(IApplicationBuilder builder, string name = "target") =>
-        builder.AddResource(TestManifestFactory.Create(name) with { Commands = [new ResourceManifestCommand("test.create")] });
+        builder.AddResource(TestManifestFactory.Create(name));
 
     private static IResourceCommand CreateCommand(IApplicationResource target, string json)
     {

@@ -1,0 +1,123 @@
+{
+  "name": "web.cors",
+  "payloadSchemaId": "urn:cohesion:web:cors-configuration:v1",
+  "keySchema": {
+    "const": "configuration"
+  },
+  "payloadSchema": {
+    "type": "object",
+    "properties": {
+      "defaultPolicy": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "properties": {
+          "allowAnyOrigin": {
+            "type": "boolean"
+          },
+          "origins": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "allowAnyMethod": {
+            "type": "boolean"
+          },
+          "methods": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "allowAnyHeader": {
+            "type": "boolean"
+          },
+          "headers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "exposedHeaders": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "allowCredentials": {
+            "type": "boolean"
+          },
+          "preflightMaxAgeSeconds": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "policies": {
+        "additionalProperties": {
+          "type": "object",
+          "properties": {
+            "allowAnyOrigin": {
+              "type": "boolean"
+            },
+            "origins": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "allowAnyMethod": {
+              "type": "boolean"
+            },
+            "methods": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "allowAnyHeader": {
+              "type": "boolean"
+            },
+            "headers": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "exposedHeaders": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "allowCredentials": {
+              "type": "boolean"
+            },
+            "preflightMaxAgeSeconds": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false
+        },
+        "type": "object"
+      }
+    },
+    "additionalProperties": false
+  },
+  "scope": "everyInstance",
+  "uses": [
+    "orchestration",
+    "management"
+  ],
+  "supportsAbsence": false
+}

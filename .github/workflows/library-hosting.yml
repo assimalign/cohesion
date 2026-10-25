@@ -53,7 +53,6 @@ jobs:
         # that .github/actions/build receives whole. The release inventory guard reads this list.
         projects: [[
             "Assimalign.Cohesion.Hosting",
-            "Assimalign.Cohesion.Hosting.Health",
             "Assimalign.Cohesion.Hosting.Resources",
             "Assimalign.Cohesion.Hosting.Telemetry"
           ]]

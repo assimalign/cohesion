@@ -85,7 +85,8 @@ internal static class ControlPlaneCallerAuthentication
             ApplicationName.Parse(principal.Issuer),
             principal.Subject,
             principal.CanDispatchCommands ? ApplicationCallerKind.Peer : ApplicationCallerKind.Developer,
-            principal.AllowedCommandKinds);
+            principal.AllowedCommandKinds,
+            principal.AllowedManagementOperations);
 
     // Command routes need a peer gateway acting for a named application: the owner of every
     // command it sends or reads is that application.

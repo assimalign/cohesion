@@ -13,12 +13,12 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Connections.Security;
 using Assimalign.Cohesion.Hosting;
-using Assimalign.Cohesion.Hosting.Health;
 using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Http.Connections;
 using Assimalign.Cohesion.Web;
 using Assimalign.Cohesion.Web.Hosting;
+using Assimalign.Cohesion.Web.Hosting.Resources;
 using Assimalign.Cohesion.Web.SecurityHeaders;
 
 using HttpStatusCode = Assimalign.Cohesion.Http.HttpStatusCode;
@@ -204,6 +204,15 @@ internal sealed class IdentityEndpointService : IHostService, IDisposable
     internal async Task InvokeAsync(IHttpContext context, WebApplicationMiddleware next)
     {
         string path = context.Request.Path.Value;
+        string? managementPath = _controlPlane?.RuntimeManagement?.Path.Value.TrimEnd('/');
+        if (managementPath is not null &&
+            (path == managementPath + "/runtime" || path == managementPath + "/admit" ||
+             path.StartsWith(managementPath + "/state/", StringComparison.Ordinal)))
+        {
+            await ResourceControlPlaneMiddleware.InvokeAsync(_controlPlane!, _resourceContext,
+                _applicationContext.State is HostState.Started, null, context, next).ConfigureAwait(false);
+            return;
+        }
         bool namespaced = path == Route("/cohesion/v1") ||
             path.StartsWith(Route("/cohesion/v1/"), StringComparison.Ordinal);
         if (namespaced)
@@ -216,6 +225,15 @@ internal sealed class IdentityEndpointService : IHostService, IDisposable
             }
         }
 
+        if (_controlPlane?.IsManagementReady is false &&
+            path != Route("/healthz") && path != Route("/readyz") && path != Route("/livez") &&
+            path != Route("/cohesion/v1/healthz") && path != Route("/cohesion/v1/readyz") &&
+            path != Route("/cohesion/v1/livez") && path != Route("/cohesion/v1/endpoints") &&
+            path != Route("/cohesion/v1/commands") && path != Route("/cohesion/v1/stop"))
+        {
+            context.Response.StatusCode = HttpStatusCode.ServiceUnavailable;
+            return;
+        }
         if (path == Route("/.well-known/openid-configuration"))
         {
             await HandleDiscoveryAsync(context).ConfigureAwait(false);

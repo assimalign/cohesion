@@ -44,7 +44,8 @@ internal static class ControlPlaneTokenVerifier
                 token.Claims.GetString(ResourceCredentialProfile.TokenUseClaim),
                 ResourceCredentialProfile.GatewayTokenUse,
                 StringComparison.Ordinal),
-            issuer.AllowedCommandKinds);
+            issuer.AllowedCommandKinds,
+            issuer.AllowedManagementOperations);
         return true;
     }
 
@@ -69,4 +70,5 @@ internal readonly record struct ControlPlanePrincipal(
     string Issuer,
     string Subject,
     bool CanDispatchCommands,
-    IReadOnlyList<string> AllowedCommandKinds);
+    IReadOnlyList<string> AllowedCommandKinds,
+    IReadOnlyList<string>? AllowedManagementOperations = null);

@@ -16,6 +16,11 @@ was omitted from both command-line options and process variables; explicit value
 
 ## Build and run one model
 
+Use `builder.AddResourceGroup("frontend", group => group.AddResource(apiManifest))` to organize
+resources into logical containers. Existing area extension members work in the group callback.
+Groups preserve globally unique resource names and have no deployment or authorization semantics;
+see [logical resource groups](../../../docs/libraries/ApplicationModel/RESOURCE_GROUPS.md).
+
 ```csharp
 IApplicationBuilder builder = Application
     .CreateBuilder(ApplicationName.Parse("appa"), args)
@@ -187,10 +192,10 @@ builder implements both. This package defines those seams; opt-in
 registers each one explicitly (for example `builder.UseSecretStore(secrets)` with the descriptor on a
 builder, or `member.UseSecretStore("secrets")` by name on a set member). `Build()`,
 or the set for a member, hands the model a frozen snapshot in `IApplicationModel.Providers`. A
-command kind the target's manifest marks `requiresInputResolver` — SecretStore's
-`secretstore.add-secret`, declared by `AddSecret` — needs a command-input resolver in the declaring
-application (`UseSecretStore(...)` registers it); without one, `Build()` or the set fails naming the
-package and verb. Unflagged kinds are delivered as declared. See
+registered command-input resolver rewrites its matching programmatic command kind before delivery;
+commands without a resolver are delivered as declared. Producer manifests contain resource facts and
+a runtime management binding, with no accepted-command catalog or input-resolver requirements. The
+receiving control plane validates supported commands and payloads. See
 [docs/DESIGN.md](docs/DESIGN.md#provider-seams-explicit-registration).
 
 See [docs/DESIGN.md](docs/DESIGN.md) for lifecycle rationale and package boundaries.

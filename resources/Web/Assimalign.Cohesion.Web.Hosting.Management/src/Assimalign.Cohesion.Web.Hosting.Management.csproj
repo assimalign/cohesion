@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>Assimalign.Cohesion.Web.Hosting.Management</RootNamespace>
+    <Description>Opt-in resource state adapters for CORS configuration and versioned TLS certificate updates.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Resources" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Web.Cors" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Connections.Security" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Internal/StateSchemas/*.json" LogicalName="ResourceStates/%(Filename)%(Extension)" />
+  </ItemGroup>
+  <ItemGroup>
+    <CohesionValueType Include="ValueObjects/ResourceCertificateProvider.cs" ObjectRuntimeType="String" ObjectNamespace="Assimalign.Cohesion.Web.Hosting.Management" ObjectAccessModifier="public" ObjectHasImplicitOperators="true" ObjectHasIsValidMethod="true" ObjectComparison="Ordinal" />
+    <CohesionValueType Include="ValueObjects/ResourceCertificateKey.cs" ObjectRuntimeType="String" ObjectNamespace="Assimalign.Cohesion.Web.Hosting.Management" ObjectAccessModifier="public" ObjectHasImplicitOperators="true" ObjectHasIsValidMethod="true" ObjectComparison="Ordinal" />
+    <CohesionValueType Include="ValueObjects/ResourceCertificateVersion.cs" ObjectRuntimeType="String" ObjectNamespace="Assimalign.Cohesion.Web.Hosting.Management" ObjectAccessModifier="public" ObjectHasImplicitOperators="true" ObjectHasIsValidMethod="true" ObjectComparison="Ordinal" />
+  </ItemGroup>
+</Project>

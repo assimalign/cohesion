@@ -35,11 +35,10 @@ payloads for application-set composition, so command payloads must never contain
 Configuration-store verbs carry ordinary configuration values; SecretStore's `AddSecret` carries only
 a `parameter:<name>` or `<store>:<key>` source, which the gateway resolves at delivery.
 
-A target's manifest can mark a command kind `ResourceManifestCommand.RequiresInputResolver`
-(`resource.json` then holds `{ "kind": "...", "requiresInputResolver": true }` instead of the plain
-kind string); SecretStore marks `secretstore.add-secret`. `Build()` fails when the declaring
-application declares such a command without an `IResourceCommandInputResolver` for its kind (see
-below). An unflagged kind with no resolver is delivered as declared.
+A registered `IResourceCommandInputResolver` rewrites its matching command kind before delivery.
+Resolvers are optional application composition code; a command without one is delivered as declared
+and validated by its receiving control plane. Producer manifests contain no command catalog or
+resolver requirements. Runtime management contracts come from registered resource handlers.
 
 See [DESIGN.md](DESIGN.md) for identity, validation, ownership, external references, lifecycle,
 and NativeAOT boundaries; see the [package README](../README.md) for model and set composition.

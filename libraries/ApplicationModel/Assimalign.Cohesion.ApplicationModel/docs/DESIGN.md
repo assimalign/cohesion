@@ -8,6 +8,34 @@
 
 ## What this library is
 
+### Logical resource groups
+
+`IApplicationBuilder.AddResourceGroup(name, configure)` scopes resource declarations to one
+flat, application-local group. Its callback receives the same `IApplicationBuilder`, so existing
+`AddWeb`, `AddResource`, `RemoteReference`, and other extension members remain usable. Resource
+names remain globally unique within the application, and dependencies may cross groups. Empty
+groups are retained; duplicate group declarations and nested groups are rejected. The scope is
+restored even when the callback throws; declarations made before a failure remain on the builder,
+as with other composition calls.
+
+The model exposes immutable `ApplicationResourceGroup` snapshots, and descriptors and plans carry
+optional `ResourceGroupName` membership. Group identity is ordinal and case-sensitive, using one
+to 128 ASCII letters, digits, periods, underscores, or hyphens (excluding `.` and `..`). Names are
+logical labels, not infrastructure namespace names. The group's name and members are serialized
+in `ApplicationModelDocument.ResourceGroups`; each resource document and plan repeats its
+membership. Imports reject unknown members, multiple membership, duplicate names, and any
+disagreement between these representations. Export summaries retain membership too. Documents
+without group metadata remain ungrouped.
+
+Grouping is owned by application composition. Producer `resource.json`, manifest hashes,
+resource identity, dependencies, workload specifications, services, storage, and environment
+variables are unchanged. Groups introduce no deployment namespace, authorization boundary,
+ownership rule, lifecycle dependency, or delete cascade. Application-set provider wrappers
+preserve the resolved model's groups.
+
+See [logical group composition](../../../../docs/libraries/ApplicationModel/RESOURCE_GROUPS.md)
+for the code-first usage and wire shape.
+
 `Assimalign.Cohesion.ApplicationModel` is the **declarative + control-plane
 contract package**: a `Core`-only set of interfaces and value objects that let an
 author *declare a graph of resources* (the desired state) and hand it to a
@@ -173,7 +201,7 @@ JSON remains string-shaped, and optional source omission and legacy plan omissio
   descriptor also carries its immutable `Plan`; an authoring descriptor has no plan until
   `Build()` completes planning.
 - **Facts in manifests; realization in plans.** `ResourceManifest` mirrors the
-  `cohesion/resource/v1` build artifact and contains resource facts only. At
+  `cohesion/resource/v2` build artifact and contains resource facts only. At
   `Build()`, every resource produces a `cohesion/plan/v1` `ResourcePlan` from its
   manifest, deployer options, environment, and references. `GenericPlanner` is the
   inherited default: workload kind is explicit, volume mounts produce per-replica
@@ -420,9 +448,8 @@ resource's own leaf always comes from the gateway CA, because it cannot issue it
 Unbound trust store: the Local-only `trusted-issuers.json` file under the application's state
 directory; trust grants fail elsewhere. No telemetry sink: no telemetry variables are injected. No
 credential issuer (or an issuer returning `null`): the default ES256 application-key issuer. No
-command-input resolver for a kind: the payload is delivered as declared — unless the target's
-manifest marks that kind `RequiresInputResolver`, in which case `Build()` (or the set, for a member)
-fails first (rule 5 below).
+command-input resolver for a kind: the payload is delivered as declared and validated by its
+receiving control plane. Producer manifests impose no resolver prerequisites.
 
 **Freeze semantics.** `IApplicationBuilder.Providers` is mutable while authoring. `Build()` copies
 it into the model as a frozen snapshot (`IApplicationModel.Providers`): `Sources`,
@@ -505,16 +532,11 @@ gateway design, *Imported models and provider registrations*).
    into another application, a remote reference, or an external. Cross-application store sources
    are rejected for now (owner decision 4) and return as a follow-up once the store resources
    support cross-application callers;
-4. a resource telemetry sink belongs to the application and declares the named endpoint;
-5. every declared command whose **target's** manifest marks its kind
-   `ResourceManifestCommand.RequiresInputResolver` has an `IResourceCommandInputResolver` for that
-   kind in the **declaring** application's `CommandInputs` — the resolvers the gateway uses at
-   delivery whether the target is the application's own resource or another application's. For an
-   own target of kind `K` the error names the command, its key, and the target, and says to reference
-   `Assimalign.Cohesion.K.ApplicationModel.Orchestration` and call `builder.UseK(...)`; for another
-   application's target, where `UseK` would be a cross-application binding (rule 3), it asks for an
-   `IResourceCommandInputResolver` in `Providers.CommandInputs` instead. A kind the target does not
-   flag needs no resolver and is still delivered as declared (see *Declarative resource commands*).
+4. a resource telemetry sink belongs to the application and declares the named endpoint.
+
+Command input resolvers are optional explicit registrations. Producer manifests do not declare
+command kinds or resolver requirements; a registered resolver rewrites its matching programmatic
+commands before delivery, and commands without a resolver are delivered as declared.
 
 Every failure is an `InvalidOperationException`. `Build()` runs the validation after the graph,
 manifests, commands, and plans validate and before it asks the selected gateway to validate the
@@ -593,6 +615,16 @@ treats that as a defect (`500`), so no authenticator can pass the gateway an aut
 with no identity to check. `ApplicationCaller.AllowedCommandKinds` follows `TrustedIssuer`: an empty list
 permits every command kind, so an authenticator that means "no commands" must forbid the caller
 rather than return an empty list.
+
+Registered resource management endpoints use explicit `management.<endpoint>` entries in the same
+caller/issuer grant list. Unlike the legacy command rule, an empty list grants no named management
+endpoint access, including GET/HEAD. Discovery of names and methods retains ordinary authenticated
+discovery access; mutations retain the existing peer/application requirement, so developer callers
+remain read-only even when explicitly granted an endpoint. These are application-wide endpoint
+grants. The serving gateway enforces them before forwarding with its resource-audience credential.
+See [Resource management endpoints](../../../../docs/libraries/ApplicationModel/RESOURCE_MANAGEMENT.md)
+for the runtime registration contract and CORS example. No feature-specific state or HTTP handler
+is added to this declarative model.
 
 `TrustedIssuer` lives here (moved from `…ApplicationModel.Gateway`) because `ITrustedIssuerStore`
 and `IApplicationCallerAuthenticator` name it; it is BCL-only (ES256 JWK validation over
@@ -701,28 +733,18 @@ logical key fields in the payload. Payloads are copied when created and again wh
 `IResourceCommandDescriptor` is an additive authoring seam. Area-owned descriptor interfaces
 extend it and internal wrappers delegate command accumulation to the original descriptor.
 `IApplicationBuilder.AddCommand` also accepts an explicit declaration. `Build()` checks the
-owner against the declaring model, exact target graph membership, accepted manifest command
-kinds, nonblank keys, duplicate ids, and conflicting declarations for the same target/key,
+owner against the declaring model, exact target graph membership, canonical payload and identity,
+nonblank keys, duplicate ids, and conflicting declarations for the same target/key,
 regardless of command kind. One desired graph declares one operation per provider ownership
 key; a subsequent model can replace or withdraw that operation. The model and each built command descriptor expose
 read-only command snapshots; built descriptors reject subsequent mutation.
 
-**Commands resolved before delivery (owner decision, 2026-09-28).** A resource that accepts a
-command only in its resolved form says so in its own manifest:
-`ResourceManifestCommand.RequiresInputResolver`. In `resource.json` a command is still a string
-holding its kind; only a flagged command is the object `{ "kind": "...", "requiresInputResolver": true }`,
-so a manifest without the flag serializes byte-identically to before. The reader accepts both forms
-and rejects unknown properties, a missing, empty, or non-string `kind`, and a non-boolean flag;
-`assets/schemas/cohesion.resource.schema.json` declares the same two forms as a `oneOf`. The SDK
-writes the flag from `RequiresInputResolver` metadata on a `CohesionCommand` item:
-`Assimalign.Cohesion.Sdk.SecretStore` sets it on `secretstore.add-secret`, whose payload names a
-`parameter:<name>` or `<store>:<key>` source, and leaves `secretstore.issue-certificate` unflagged.
-Provider validation rule 5 (*Provider seams*) turns a flagged command whose declaring application
-registered no resolver for its kind into a `Build()` or set-start error that names the package and
-verb, where it used to surface only as a Rejected observation at delivery. The requirement is the
-accepting resource's fact, so the check reads only the target's manifest and this package names no
-area command kind. An unflagged kind with no resolver is still delivered as declared, and a
-resource's own rejection of an unresolved payload stays as defense in depth.
+**Commands resolved before delivery.** An `IResourceCommandInputResolver` registered explicitly in
+the declaring application's `ApplicationProviders.CommandInputs` rewrites its matching kind before
+delivery, including when the target belongs to another application. Producer manifests contain no
+command catalog or resolver metadata. A command without a registered resolver is delivered as
+declared; the receiving control plane validates the supported kind and payload. Runtime management
+catalogs are discovered from registered handlers through the resource's management binding.
 
 Dependency normalization accepts an older wrapper that exposes the exact registered `Resource`
 instance. This preserves unchanged SecretStore-style wrappers without requiring them to implement

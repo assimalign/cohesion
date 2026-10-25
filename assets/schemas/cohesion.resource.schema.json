@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "cohesion/resource/v1",
-  "title": "Cohesion resource manifest v1",
+  "$id": "cohesion/resource/v2",
+  "title": "Cohesion resource deployment manifest v2",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -17,14 +17,13 @@
     "mounts",
     "settings",
     "references",
-    "commands",
     "environment",
     "lifecycle",
     "properties"
   ],
   "properties": {
     "schema": {
-      "const": "cohesion/resource/v1"
+      "const": "cohesion/resource/v2"
     },
     "name": {
       "$ref": "#/definitions/resourceName"
@@ -43,7 +42,13 @@
     "artifact": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["assembly", "composable", "project", "apphost", "image"],
+      "required": [
+        "assembly",
+        "composable",
+        "project",
+        "apphost",
+        "image"
+      ],
       "properties": {
         "assembly": {
           "type": "string",
@@ -53,13 +58,22 @@
           "type": "boolean"
         },
         "project": {
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "apphost": {
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "image": {
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         }
       }
     },
@@ -87,7 +101,10 @@
     "controlPlane": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["endpoint", "path"],
+      "required": [
+        "endpoint",
+        "path"
+      ],
       "properties": {
         "endpoint": {
           "type": "string",
@@ -98,6 +115,11 @@
           "pattern": "^/"
         }
       }
+    },
+    "runtime": {
+      "type": "object",
+      "description": "Producer-owned runtime metadata. The owning runtime protocol validates its contents.",
+      "additionalProperties": true
     },
     "mounts": {
       "type": "array",
@@ -115,34 +137,6 @@
       "type": "array",
       "items": {
         "$ref": "#/definitions/reference"
-      }
-    },
-    "commands": {
-      "type": "array",
-      "items": {
-        "oneOf": [
-          {
-            "type": "string",
-            "minLength": 1
-          },
-          {
-            "type": "object",
-            "description": "A command whose declared payload the delivering gateway must resolve through a registered command-input resolver before delivery.",
-            "required": [
-              "kind"
-            ],
-            "additionalProperties": false,
-            "properties": {
-              "kind": {
-                "type": "string",
-                "minLength": 1
-              },
-              "requiresInputResolver": {
-                "type": "boolean"
-              }
-            }
-          }
-        ]
       }
     },
     "environment": {
@@ -181,7 +175,13 @@
     "endpoint": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "scheme", "protocol", "containerPort", "public"],
+      "required": [
+        "name",
+        "scheme",
+        "protocol",
+        "containerPort",
+        "public"
+      ],
       "properties": {
         "name": {
           "$ref": "#/definitions/logicalName"
@@ -191,7 +191,10 @@
           "minLength": 1
         },
         "protocol": {
-          "enum": ["tcp", "udp"]
+          "enum": [
+            "tcp",
+            "udp"
+          ]
         },
         "containerPort": {
           "$ref": "#/definitions/port"
@@ -237,23 +240,51 @@
         }
       },
       "oneOf": [
-        { "required": ["http"] },
-        { "required": ["tcp"] },
-        { "required": ["exec"] },
-        { "required": ["grpc"] },
-        { "required": ["none"] }
+        {
+          "required": [
+            "http"
+          ]
+        },
+        {
+          "required": [
+            "tcp"
+          ]
+        },
+        {
+          "required": [
+            "exec"
+          ]
+        },
+        {
+          "required": [
+            "grpc"
+          ]
+        },
+        {
+          "required": [
+            "none"
+          ]
+        }
       ]
     },
     "mount": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "kind", "containerPath"],
+      "required": [
+        "name",
+        "kind",
+        "containerPath"
+      ],
       "properties": {
         "name": {
           "$ref": "#/definitions/logicalName"
         },
         "kind": {
-          "enum": ["Volume", "Configuration", "Secret"]
+          "enum": [
+            "Volume",
+            "Configuration",
+            "Secret"
+          ]
         },
         "containerPath": {
           "type": "string",
@@ -272,12 +303,18 @@
         {
           "if": {
             "properties": {
-              "kind": { "const": "Volume" }
+              "kind": {
+                "const": "Volume"
+              }
             },
-            "required": ["kind"]
+            "required": [
+              "kind"
+            ]
           },
           "then": {
-            "required": ["size"]
+            "required": [
+              "size"
+            ]
           }
         }
       ]
@@ -285,7 +322,9 @@
     "setting": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["key"],
+      "required": [
+        "key"
+      ],
       "properties": {
         "key": {
           "type": "string",
@@ -303,7 +342,13 @@
     "reference": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["resource", "application", "endpoints", "optional", "manifest"],
+      "required": [
+        "resource",
+        "application",
+        "endpoints",
+        "optional",
+        "manifest"
+      ],
       "properties": {
         "resource": {
           "$ref": "#/definitions/resourceName"
@@ -329,17 +374,32 @@
     "lifecycle": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["workload", "replicas", "maxReplicas", "stopGraceSeconds", "restartPolicy", "exitCodes"],
+      "required": [
+        "workload",
+        "replicas",
+        "maxReplicas",
+        "stopGraceSeconds",
+        "restartPolicy",
+        "exitCodes"
+      ],
       "properties": {
         "workload": {
-          "enum": ["Deployment", "StatefulSet", "Job", "DaemonSet"]
+          "enum": [
+            "Deployment",
+            "StatefulSet",
+            "Job",
+            "DaemonSet"
+          ]
         },
         "replicas": {
           "type": "integer",
           "minimum": 1
         },
         "maxReplicas": {
-          "type": ["integer", "null"],
+          "type": [
+            "integer",
+            "null"
+          ],
           "minimum": 1
         },
         "stopGraceSeconds": {
@@ -347,7 +407,11 @@
           "minimum": 1
         },
         "restartPolicy": {
-          "enum": ["OnFailure", "Always", "Never"]
+          "enum": [
+            "OnFailure",
+            "Always",
+            "Never"
+          ]
         },
         "exitCodes": {
           "const": "cohesion/sysexits/v1"

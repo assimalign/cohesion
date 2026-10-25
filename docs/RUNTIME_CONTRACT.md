@@ -23,6 +23,8 @@ its environment name as `COHESION_ENVIRONMENT ?? DOTNET_ENVIRONMENT ?? "Producti
 | --- | --- | --- | --- |
 | `COHESION_APPLICATION` | Application name | Every gateway-realized Cohesion resource | Local: environment; In-process: ambient context; Docker: environment; Kubernetes: ConfigMap |
 | `COHESION_RESOURCE` | Resource name | Every gateway-realized Cohesion resource | Local: environment; In-process: ambient context; Docker: environment; Kubernetes: ConfigMap |
+| `COHESION_RESOURCE_INSTANCE` | Immutable platform host identity for direct management verification | Platforms that provide per-instance management inventory | Kubernetes: Downward API `metadata.uid`; the runtime returns it with its process UUID |
+| `COHESION_RESOURCE_STATE_PATH` | Protected desired-state projection file | Platforms distributing persisted state to current and future instances | Kubernetes: selected key from the resource management Secret; never the private coordination document |
 | `COHESION_GATEWAY` | `local`, `inprocess`, `docker`, or `kubernetes` | Set by a gateway; unset means there is no gateway | Local/Docker: environment; In-process: ambient context; Kubernetes: ConfigMap |
 | `COHESION_ENVIRONMENT` | Environment name; `Local` identifies a developer machine and `Development` is deployable; falls back to `DOTNET_ENVIRONMENT`, then `Production` | Optional override | Local/Docker: environment; In-process: ambient context; Kubernetes: ConfigMap |
 | `COHESION_CONTENT_ROOT` | Absolute directory path | Set when the gateway assigns a resource content root | Local/Docker: environment; In-process: ambient context; Kubernetes: ConfigMap |

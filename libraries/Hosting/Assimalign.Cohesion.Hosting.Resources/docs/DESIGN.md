@@ -8,20 +8,36 @@ observes the public run transitions defined by `Assimalign.Cohesion.Hosting`.
 
 ## Dependency direction
 
-The assembly directly references Core, Hosting, and Hosting.Health. Hosting owns lifecycle;
-Hosting.Health owns the shared health vocabulary; Resources owns ambient resource state and process
-policy. The Windows ProtectedData reference is used only for protected mount files. It is an
+The assembly directly references Core and Hosting. Hosting owns lifecycle; Resources owns the shared
+health vocabulary, contributor aggregation, ambient resource state and process policy. The Windows
+ProtectedData reference is used only for protected mount files. It is an
 out-of-band package, not part of `Microsoft.NETCore.App`, so the `Assimalign.Cohesion.App`
 framework ships it as a private (runtime-only) member for `Sdk.<Area>` applications.
 
 This direction keeps plain hosts free of resource environment parsing, signals, process output,
-exit codes, and protected mount behavior. It also lets non-host health consumers use the Health
-package independently.
+exit codes, and protected mount behavior. Health consumers now reference this consolidated package.
 
 The base `Assimalign.Cohesion.App` framework delivers Resources because all opt-in resource SDKs
 generate `ResourceRuntime` calls. Resources therefore travels beside the already-shared Hosting
-assembly, and Health follows transitively. Delivery is not activation: only an enabled
+assembly. Delivery is not activation: only an enabled
 `CohesionApplicationModel` registration causes an area builder to install resource behavior.
+
+### Consolidated health ownership
+
+This assembly defines `HealthStatus`, `HealthContribution`, `IHealthContributor`,
+`ResourceHealthCheck` and `ResourceHealthReport` in its own root namespace,
+`Assimalign.Cohesion.Hosting.Resources`. The former Health project, package, framework member and
+namespace are removed. There are no type forwarders, compatibility aliases or duplicate definitions.
+Health behavior tests are owned by Resources. Database files remain frozen for separate branch
+integration; their old references are intentionally not accommodated here.
+
+`HealthStatus` remains ordered `Unhealthy = 0`, `Degraded = 1`, `Healthy = 2`, so default values fail
+closed and aggregation selects the least healthy contribution. `HealthContribution` is an immutable
+readonly record struct carrying status, optional description and optional diagnostic data. Its
+factory methods preserve those values. `IHealthContributor` keeps a stable name and cancellable
+`ValueTask<HealthContribution> CheckAsync`; composing runtimes own uniqueness, lifetime and failure
+policy. `ResourceHealthCheck` names that callable shape and `ResourceHealthReport` is its aggregate
+snapshot. All contracts remain statically typed and NativeAOT-compatible.
 
 ## Ambient invocation context
 
@@ -49,7 +65,7 @@ path remains available to path-only tools.
 An enabled resource's generated module initializer registers two assembly-keyed facts:
 
 - its compiler-rooted executable entry point; and
-- a factory that creates a fresh area control plane with immutable `stopGraceSeconds` metadata.
+- a factory that creates a fresh generic control plane with immutable `stopGraceSeconds` metadata.
 
 Registration contains no invocation state. Each builder receives an isolated control plane, adds
 host-local health contributors, and calls `ResourceRuntime.HostBuilt`. That method records realized
@@ -116,6 +132,41 @@ contributor's own text and are reported as returned.
 
 The control plane is transport-neutral. Area Hosting packages decide how to expose health and
 commands over HTTP or another protocol.
+
+### Producer-owned runtime state
+
+The producer exports the abstract management endpoint/path/protocol binding. The resource installs
+it through `ConfigureRuntimeManagement(ResourceRuntimeManagement)`; the runtime catalog is always
+discovered from registered `IResourceStateHandler` instances during startup. Resource builders
+register the handlers after effective code-first and
+configuration composition. Each handler supplies its versioned definition and reproducible
+`InitialState` baselines captured from that effective startup configuration. The control plane
+validates and snapshots those facts together, rather than requiring a second hand-authored state list
+in the project file. Duplicate names, mismatched initial-state names and incompatible contracts fail
+startup. `ValidateStateHandlers` freezes the discovered catalog before the host is admitted.
+
+The configuration API accepts only the binding, without a second static state catalog.
+`ResourceControlPlane` dispatches process-bound revisions to actual feature
+state; startup baselines describe the configured initial state rather than live platform placement.
+Canonical definition/value digests and
+the bounded JSON schema dialect are shared as a stateless `StateProtocol` source module with SDK
+generation and the gateway protocol interpreter. The resource state path holds no request ledger.
+`ResourceStateProjectionRunner` consumes a protected platform projection through ResourceMount and
+validates its entire catalog, scope, slot identity, schema, digest, and positive revision before
+applying any entry. Unknown or incompatible durable entries are never skipped to admit startup
+defaults. Every persisted required revision must actually apply and match before admission.
+
+An admission slot may use revision zero only for a locally frozen `InitialState` declaration whose
+actual observation remains at revision zero and whose actual content digest equals that configured
+baseline. The request cannot invent a default, hide an already managed revision, or replace a
+durable required slot with this exception. After a valid projected generation is processed, missing
+configured startup slots may be added to its admission check at zero; these are readiness proofs,
+not desired-state writes, operations, or persisted revisions. This lets an added configured feature
+start during a mixed rollout while management catalog disagreement still fails closed.
+
+Gateway persistence, leases,
+caller identity and fleet inventory are outside Hosting.Resources. Existing v1 command bookkeeping
+remains a compatibility path. See the area resource-management contract in docs/libraries/ApplicationModel.
 
 ## Diagnostics
 
@@ -292,7 +343,7 @@ unclassified requested stop use 143 when their drain budget is cancelled.
 ## Non-goals
 
 - Resources does not define the host lifecycle or service execution model.
-- Resources does not define the health value types.
+- Resources owns health value types but does not define an application health-probe transport.
 - Resources does not choose an HTTP or other control-plane transport.
 - Resources performs no assembly scanning, dynamic loading, or runtime code generation.
 

@@ -19,7 +19,6 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Health" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Health" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Resources" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Telemetry" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Logging" />

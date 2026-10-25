@@ -8,7 +8,7 @@
 	<PropertyGroup>
 		<EventSourceSupport Condition="'$(EventSourceSupport)' == ''">true</EventSourceSupport>
 		<CohesionResourceApplicationModel Condition="'$(CohesionResourceApplicationModel)' == ''">Assimalign.Cohesion.Web.ApplicationModel</CohesionResourceApplicationModel>
-		<CohesionResourceControlPlaneType Condition="'$(CohesionResourceControlPlaneType)' == ''">Assimalign.Cohesion.ApplicationModel.WebResourceControlPlane</CohesionResourceControlPlaneType>
+		<CohesionResourceControlPlaneType Condition="'$(CohesionResourceControlPlaneType)' == ''">Assimalign.Cohesion.Hosting.Resources.ResourceControlPlane</CohesionResourceControlPlaneType>
 		<CohesionResourceKind Condition="'$(CohesionResourceKind)' == ''">Web</CohesionResourceKind>
 		<CohesionControlPlaneEndpoint Condition="'$(CohesionControlPlaneEndpoint)' == ''">http</CohesionControlPlaneEndpoint>
 		<CohesionControlPlanePath Condition="'$(CohesionControlPlanePath)' == ''">/cohesion/v1</CohesionControlPlanePath>
@@ -18,6 +18,8 @@
 
 	<ItemGroup>
 		<CohesionEndpoint Include="http" Scheme="http" ContainerPort="8080" Public="false" />
+	</ItemGroup>
+	<ItemGroup>
 		<CohesionProbe Include="readiness" Endpoint="http" Http="/readyz" />
 		<CohesionProbe Include="liveness" Endpoint="http" Http="/livez" />
 	</ItemGroup>

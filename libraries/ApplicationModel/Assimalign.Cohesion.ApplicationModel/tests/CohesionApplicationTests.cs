@@ -92,7 +92,7 @@ public class CohesionApplicationTests
             JsonElement resource = root.GetProperty("resources")[0];
             resource.GetProperty("name").GetString().ShouldBe("worker");
             resource.GetProperty("manifest").GetProperty("schema").GetString()
-                .ShouldBe(ResourceManifest.SchemaV1);
+                .ShouldBe(ResourceManifest.SchemaV2);
             resource.GetProperty("plan").GetProperty("schema").GetString()
                 .ShouldBe(ResourcePlan.CurrentSchema);
         }

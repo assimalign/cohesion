@@ -175,7 +175,7 @@ internal sealed class ApplicationTrustState : IDisposable
             for (int index = 0; index < result.Length; index++)
             {
                 TrustedIssuer issuer = _issuers[names[index]];
-                result[index] = new TrustedIssuer(issuer.Issuer, issuer.PublicKey, issuer.AllowedCommandKinds);
+                result[index] = new TrustedIssuer(issuer.Issuer, issuer.PublicKey, issuer.AllowedCommandKinds, issuer.AllowedManagementOperations);
             }
 
             return new ReadOnlyCollection<TrustedIssuer>(result);

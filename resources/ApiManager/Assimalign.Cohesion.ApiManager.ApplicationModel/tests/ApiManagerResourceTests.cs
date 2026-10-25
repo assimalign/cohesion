@@ -6,7 +6,6 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.ApplicationModel;
-using Assimalign.Cohesion.Hosting.Resources;
 
 namespace Assimalign.Cohesion.ApiManager.ApplicationModel.Tests;
 
@@ -45,17 +44,6 @@ public sealed class ApiManagerResourceTests
         first.Resource.ShouldBeOfType<ApiManagerResource>();
         second.Dependencies.ShouldContain(first);
         Should.Throw<ArgumentNullException>(() => builder.AddApiManager(null!));
-    }
-
-    [Fact(DisplayName = "Cohesion Test [ApiManager.ApplicationModel] - Control plane: isolates empty command sets")]
-    public void CreateControlPlane_ShouldReturnIsolatedEmptyPlanes()
-    {
-        IResourceControlPlane first = ApiManagerResourceControlPlane.Create();
-        IResourceControlPlane second = ApiManagerResourceControlPlane.Create();
-        first.ShouldNotBeSameAs(second);
-        first.AcceptedCommandKinds.ShouldBeEmpty();
-        first.Commands.ShouldBeEmpty();
-        first.ObservedEndpoints.ShouldBeEmpty();
     }
 
     [Theory(DisplayName = "Cohesion Test [ApiManager.ApplicationModel] - Planning: rejects incompatible area facts")]

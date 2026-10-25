@@ -9,7 +9,8 @@ The server is application-scoped. That keeps model, observed state, trusted issu
 observations, listener lifetime, and Local discovery metadata isolated when an
 `IMultiModelApplicationGateway` owns more than one application.
 
-Requests are matched by a small internal router for the five fixed `/cohesion/v1` templates.
+Requests are matched by a small internal router for fixed `/cohesion/v1` discovery/command
+templates and `/cohesion/v2` runtime-state management templates.
 The package used to route with `Web.Routing` and dropped it because a library may not reference a
 `resources/**` package. Matching, `404`/`405` handling, `Allow` values, and route values did not
 change. DESIGN.md lists the exact rules.
@@ -25,6 +26,13 @@ application-set member, in that member's `AddApplication(..., configure)` callba
 peer or developer can present an identity provider's credential. Discovery and command
 authorization apply to the mapped `ApplicationCaller`; with nothing registered, every response is
 unchanged.
+
+Management exposes producer state contracts, trusted platform inventory, conditional desired-state
+writes and durable operation progress. Grants are explicit per resource/state/read/write and are
+independent of command grants. An Operator caller can manage state without legacy command access;
+Developer writes remain refused. Mutations require a revision condition and UUID idempotency key.
+The gateway persists intent before returning 202, then reconciles it to current and future instances.
+Callers cannot supply delivery addresses. See the [runtime state contract](../../RESOURCE_MANAGEMENT.md).
 
 See [DESIGN.md](DESIGN.md) for lifecycle, authentication, and command-dispatch details.
 

@@ -107,9 +107,8 @@ write the same `ApplicationProviders` through each interface's `Providers`. For 
 `Build()` freezes the registrations into `IApplicationModel.Providers` and validates them — every
 `<source>:<key>` mount of the application's own resources has a provider, every bound resource is
 a resource of the application with the provider's kind, no source or binding reaches another
-application, and every declared command whose target's manifest marks its kind
-`requiresInputResolver` has an `IResourceCommandInputResolver` for that kind in
-`ApplicationProviders.CommandInputs` (§4.8).
+application. Command input resolvers are optional explicit registrations in
+`ApplicationProviders.CommandInputs`; producer manifests declare no command catalog (§4.8).
 
 ### 4.5 Executable artifacts **[R]**
 
@@ -141,12 +140,10 @@ Commands are declared on descriptors, scheduled by the gateway and authorized by
 provider control plane; the [base package](../../../libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel/docs/DESIGN.md)
 and [ControlPlane package](../../../libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane/docs/DESIGN.md)
 own the contracts (items 23b/31c, `529d600b`, `81570328`). Landed wire kinds use
-`<area>.<verb-noun-kebab>` (B1–B5). Manifest `commands` lists each accepted kind as a string, or,
-for a kind whose payload the gateway must resolve before delivery, as the object
-`{ "kind": "…", "requiresInputResolver": true }` (`ResourceManifestCommand.RequiresInputResolver`,
-written from the area SDK's `CohesionCommand` `RequiresInputResolver="true"` metadata); a manifest
-with no marked kind is byte-identical to the string-array form (B2, amended by the owner decision
-of 2026-09-28, R11 in the signed design).
+`<area>.<verb-noun-kebab>` (B1–B5). Producer manifests use `cohesion/resource/v2` and contain no
+accepted-command catalog or input-resolver metadata. They bind runtime management discovery to
+the control-plane endpoint; registered resource handlers advertise and validate their runtime
+contracts. Programmatic command declarations retain graph ownership and canonical identity checks.
 
 Delivery is area-neutral. `ApplicationGatewayOptions.CommandClients` defaults to the public
 `ResourceControlPlaneCommandClient`, which POSTs and DELETEs the command envelope at the target's
@@ -158,18 +155,10 @@ behind two of them are retired by owner decision 7 of 2026-09-25. A command whos
 rewritten by an `IResourceCommandInputResolver` registered for its kind in
 `ApplicationProviders.CommandInputs` (`secretstore.add-secret` by `UseSecretStore`). The gateway
 uses the resolvers of the application that declares the command, whether the target is its own
-resource or another application's, and `Build()` — or an application set, when it starts the
-member — checks the same pairing: a declared command whose target's manifest marks its kind
-`requiresInputResolver` fails unless the declaring application registers a resolver for that kind.
-The SecretStore SDK marks `secretstore.add-secret`, whose payload names a `parameter:<name>` or
-`<store>:<key>` source. The error names the command, its key and the target; for the application's
-own target it names `Assimalign.Cohesion.<Kind>.ApplicationModel.Orchestration` and
-`builder.Use<Kind>(...)` (a set member:
-`set.AddApplication(Applications.<Member>, application => application.Use<Kind>("<target>"))`), and
-for another application's target it asks for an `IResourceCommandInputResolver` in
-`Providers.CommandInputs`, since `Use<Kind>(...)` would bind a store of another application. An
-unmarked kind with no registered resolver is still delivered as declared, and the store's own
-rejection of an unresolved `add-secret` payload remains as defense in depth.
+resource or another application's. A command without a registered resolver is delivered as
+declared. The receiving control plane rejects unsupported kinds and unresolved or invalid payloads.
+Resolvers are application composition code; producer manifests impose no resolver prerequisites
+at `Build()` or application-set start.
 
 ## 5. Gateway lifecycle
 
@@ -330,7 +319,7 @@ packages are withdrawn.
 
 At the closing-pass baseline `67bbcf4b`, `resources/` has **18 areas**, **143 `src/`
 projects**, and **18 guarded `*.ApplicationModel` packages**, each with its own planner,
-typed resource and default-control-plane factory. `IApplicationResource` is implemented;
+typed resource and opaque runtime management binding. `IApplicationResource` is implemented;
 the old "implemented nowhere" inventory is obsolete. The [repository overview](../../OVERVIEW.md)
 lists the seven real hosts and eleven generic hosts, including LogSpace's item-31b promotion.
 
@@ -343,23 +332,24 @@ introducing runtime dependencies into declarative packages.
 ### 9.2 Hosting and testing
 
 `<Area>.Hosting` implements the area's application builder and lifecycle over Hosting,
-Resources, Health and Telemetry. Consumer executables own composition. `<Area>.Testing`
+Resources (including health contracts) and Telemetry. Consumer executables own composition. `<Area>.Testing`
 is the sole standing hosting-isolation exemption holder; non-packable `samples/`
 exercise the consumer's real entry point.
 
-### 9.4 `<Area>.ApplicationModel`: declarative plane and default control plane
+### 9.4 `<Area>.ApplicationModel`: declarative plane
 
 Every package is AOT-compatible and **COHAM001-guarded**: manifest-backed typed resource,
-platform-neutral planner, `Add<Area>(…)` graph verbs, and the **area's default-control-plane
-contract/factory**. Its direct Cohesion references are `ApplicationModel` and
-`Hosting.Resources` only. It never references the area's hosting runtime.
+platform-neutral planner, `Add<Area>(…)` graph verbs, and an opaque runtime management binding.
+Its only direct Cohesion reference is `ApplicationModel`, which depends on Core. It never references
+the area's hosting runtime or `Hosting.Resources`.
 
 These packages are **NuGet-only**, injected by `Sdk.<Area>` (its own area) and `Sdk.Gateway`
 (the areas of the resource projects a gateway names in `CohesionResourceReference`), never
 members of `App.<Area>`. Every ApplicationModel package declares the shared
 `Assimalign.Cohesion.ApplicationModel` namespace with area-prefixed type names, so an apphost
-composes every area with one `using`. Generated consumer code registers the default control
-plane through `ResourceRuntime` when orchestration is enabled. The
+composes every area with one `using`. Generated consumer code registers the generic control
+plane through `ResourceRuntime` in the enabled executable. Configured runtime handlers provide
+state contracts and initial values after application configuration. The
 [resource-area rule](../../../.claude/rules/resource-areas.md) owns enforcement.
 
 ### 9.5 `<Area>.ApplicationModel.Orchestration`: opt-in gateway providers
@@ -368,10 +358,10 @@ Owner decision 1 of 2026-09-25 adds a second, optional package kind beside the d
 plane. An Orchestration package implements the provider seams of `Assimalign.Cohesion.ApplicationModel`
 (`IResourceSourceProvider`, `IResourceCertificateAuthority`, `ITrustedIssuerStore`,
 `IResourceCommandInputResolver`) over its area's `<Area>.Client`, and ships the `Use<Area>(...)`
-registration verbs. An area whose command payloads carry source expressions marks those kinds
-`RequiresInputResolver="true"` on its `CohesionCommand` items in `Sdk.<Area>`, so a gateway that
-omits the `Use<Area>(...)` call registering the resolver fails at `Build()` rather than at delivery
-(§4.8). An Orchestration package references `Assimalign.Cohesion.ApplicationModel` and the area
+registration verbs. An area whose programmatic command payloads carry source expressions registers
+an `IResourceCommandInputResolver` through its `Use<Area>(...)` composition verb. A command without
+one is delivered as declared and validated by its receiving control plane (§4.8).
+An Orchestration package references `Assimalign.Cohesion.ApplicationModel` and the area
 client only — never Hosting, the Gateway family, or its area's declarative
 `<Area>.ApplicationModel` — and it is NuGet-only and injected by no SDK: the gateway project
 references it and registers it in `Program.cs`. It holds no planner and no control plane and is
@@ -454,7 +444,7 @@ platform work is not a landed contract. B16 describes the committed item-34 beha
 | # | Decision | Landed in | Where it is written |
 |---|---|---|---|
 | B1 | wire-kind naming = `<area>.<verb-noun-kebab>`, not design §7/§4's illustrative `<area>.<noun>` | Item 23b / 31c: `529d600b`, `81570328` | `sdks/Assimalign.Cohesion.Sdk.Rezolvr/Targets/Sdk.Rezolvr.props:18` |
-| B2 | manifest `commands` stays a bare string array **(amended by the signed design's R11, 2026-09-28:** a kind stays a string unless its area's SDK sets `RequiresInputResolver="true"` on the `CohesionCommand`; that kind is written as `{ "kind": "…", "requiresInputResolver": true }`, the readers accept both forms, and a manifest with no marked kind is byte-identical to before**)** | Item 23b / 31c: `529d600b` | `assets/schemas/cohesion.resource.schema.json:120-126`; `ResourceManifestWriter.cs:145` — now `cohesion.resource.schema.json:120-147` (`oneOf` string / object); `ResourceManifestWriter.cs:145-161`; `libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel/src/Manifests/ResourceManifestCommand.cs` |
+| B2 | Historical manifest command catalog and resolver flags are superseded by `cohesion/resource/v2`: producer manifests contain resource facts and a runtime management binding; registered handlers supply runtime contracts. | Runtime management, 2026-10-24 | `assets/schemas/cohesion.resource.schema.json`; [Resource management](RESOURCE_MANAGEMENT.md) |
 | B3 | `cohesion.trust.add` accepted by SecretStore's control plane but deliberately absent from its SDK manifest | Item 31c / 31s: `81570328`, `c49ee153` | `resources/SecretStore/Assimalign.Cohesion.SecretStore.ApplicationModel/src/SecretStoreResourceControlPlane.cs:14`; `Sdk.SecretStore.props:19` |
 | B4 | SecretStore owner = issuer for new kinds, `issuer@subject` for trust-add | Item 31c: `81570328` | `resources/SecretStore/Assimalign.Cohesion.SecretStore.Hosting/src/Internal/SecretsEndpointService.cs:448-460` |
 | B5 | `--allow` enforced on apply **and** delete | Item 31c: `81570328` | `libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane/src/Internal/GatewayControlPlaneServer.cs:596-601,678-683` |

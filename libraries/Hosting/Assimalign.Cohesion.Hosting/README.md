@@ -11,12 +11,11 @@ package consumers can add the sibling packages only when those capabilities are 
 | Package | Responsibility | Direct dependencies |
 | --- | --- | --- |
 | `Assimalign.Cohesion.Hosting` | Host lifecycle, contexts, services, runners, and observers | Core |
-| `Assimalign.Cohesion.Hosting.Health` | Transport-neutral health contracts and snapshots | Core |
-| `Assimalign.Cohesion.Hosting.Resources` | Ambient resource context, control plane, entry invocation, and resource-process runner | Core, Hosting, Hosting.Health, ProtectedData |
+| `Assimalign.Cohesion.Hosting.Resources` | Health contracts and aggregation, ambient resource context, control plane, entry invocation, and resource-process runner | Core, Hosting, ProtectedData |
 
-The base `Assimalign.Cohesion.App` framework delivers both siblings because every opt-in resource
+The base `Assimalign.Cohesion.App` framework delivers Resources because every opt-in resource
 SDK generates calls to `Hosting.Resources.ResourceRuntime`; Resources travels beside plain Hosting,
-and Health follows as its dependency. Delivery is not activation: resource behavior remains disabled
+including the consolidated health contracts. Delivery is not activation: resource behavior remains disabled
 until `CohesionApplicationModel=enabled` generates the registration used by an area builder.
 
 Set `HostContext.Runner` to an `IHostRunner` to wrap future calls to `IHost.RunAsync`. A runner

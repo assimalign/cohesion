@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Diagnostics.CodeAnalysis;
+using System.Globalization;
 using System.IO;
 using System.Reflection;
 
@@ -27,6 +28,8 @@ internal sealed class ApplicationBuilder : IApplicationBuilder, IApplicationProv
         _externals = new();
     private readonly List<IResourceCommand> _commands = new();
     private readonly ApplicationProviders _providers = new();
+    private readonly List<ResourceGroupName> _resourceGroups = new();
+    private ResourceGroupName? _resourceGroup;
     private ApplicationName? _name;
     private IApplicationGateway? _gateway;
 
@@ -85,6 +88,34 @@ internal sealed class ApplicationBuilder : IApplicationBuilder, IApplicationProv
         return this;
     }
 
+    public IApplicationBuilder AddResourceGroup(ResourceGroupName name, Action<IApplicationBuilder> configure)
+    {
+        ArgumentNullException.ThrowIfNull(configure);
+        if (!ResourceGroupName.IsValid(name.Value, out _))
+        {
+            throw new ArgumentException(ErrorMessages.ResourceGroupNameInvalid, nameof(name));
+        }
+        if (_resourceGroup is not null)
+        {
+            throw new InvalidOperationException(ErrorMessages.ResourceGroupNested);
+        }
+        if (_resourceGroups.Contains(name))
+        {
+            throw new InvalidOperationException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.ResourceGroupDuplicate, name));
+        }
+        _resourceGroups.Add(name);
+        _resourceGroup = name;
+        try
+        {
+            configure(this);
+        }
+        finally
+        {
+            _resourceGroup = null;
+        }
+        return this;
+    }
+
     public IApplicationResourceDescriptor AddResource(IApplicationResource resource)
     {
         ArgumentNullException.ThrowIfNull(resource);
@@ -92,7 +123,7 @@ internal sealed class ApplicationBuilder : IApplicationBuilder, IApplicationProv
         // Enforces resource-name uniqueness; throws before the descriptor is created.
         _resources.Add(resource);
 
-        var descriptor = new ApplicationResourceDescriptor(resource, () => ResolveName(_environment), command => AddCommand(command));
+        var descriptor = new ApplicationResourceDescriptor(resource, () => ResolveName(_environment), command => AddCommand(command), _resourceGroup);
         _descriptors.Add(descriptor);
         return descriptor;
     }
@@ -554,7 +585,27 @@ internal sealed class ApplicationBuilder : IApplicationBuilder, IApplicationProv
             _options.Adopt,
             _options.RestartOrphans,
             _commands,
-            _providers);
+            _providers,
+            CreateResourceGroups(descriptors));
+    }
+
+    private IReadOnlyList<ApplicationResourceGroup> CreateResourceGroups(IReadOnlyList<ApplicationResourceDescriptor> descriptors)
+    {
+        var groups = new ApplicationResourceGroup[_resourceGroups.Count];
+        for (int index = 0; index < groups.Length; index++)
+        {
+            ResourceGroupName name = _resourceGroups[index];
+            var resources = new List<ResourceName>();
+            foreach (ApplicationResourceDescriptor descriptor in descriptors)
+            {
+                if (descriptor.ResourceGroup == name)
+                {
+                    resources.Add(descriptor.Resource.Name);
+                }
+            }
+            groups[index] = new ApplicationResourceGroup(name, resources);
+        }
+        return Array.AsReadOnly(groups);
     }
 
     private static void ValidateManifests(
@@ -597,7 +648,7 @@ internal sealed class ApplicationBuilder : IApplicationBuilder, IApplicationProv
 
         for (int index = 0; index < descriptors.Count; index++)
         {
-            var copy = new ApplicationResourceDescriptor(descriptors[index].Resource);
+            var copy = new ApplicationResourceDescriptor(descriptors[index].Resource, resourceGroup: descriptors[index].ResourceGroup);
             copies.Add(descriptors[index], copy);
             byResource.Add(descriptors[index].Resource, copy);
             merged[index] = copy;
@@ -693,6 +744,8 @@ internal sealed class ApplicationBuilder : IApplicationBuilder, IApplicationProv
             ResourcePlan plan = plannedResource is not null
                 ? plannedResource.CreatePlan(context)
                 : GenericPlanner.CreatePlan(context);
+
+            plan = plan with { Runtime = manifest.Runtime?.Clone(), ResourceGroup = descriptor.ResourceGroup };
 
             ResourcePlanValidator.Validate(plan, context);
             WritePlanningDiagnostic(descriptor.Resource, plannedResource, gateway);
@@ -798,7 +851,7 @@ internal sealed class ApplicationBuilder : IApplicationBuilder, IApplicationProv
     {
         if (resource is not IEndpointResource endpointResource || endpointResource.Endpoints.Count == 0)
         {
-            // cohesion/resource/v1 requires every manifest to bind a control plane to a
+            // cohesion/resource/v2 requires every manifest to bind a control plane to a
             // declared endpoint. This sentinel exists only for the temporary legacy-resource
             // compatibility path; it is not added to the original resource descriptor.
             return

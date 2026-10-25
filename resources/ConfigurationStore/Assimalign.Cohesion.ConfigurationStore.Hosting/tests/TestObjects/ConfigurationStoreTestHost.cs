@@ -78,7 +78,7 @@ internal static class ConfigurationStoreTestHost
         ResourceRuntime.RegisterControlPlane(
             assembly,
             static () => _controlPlaneDecorator.Value is { } decorate
-                ? decorate(ConfigurationStoreResourceControlPlane.Create())
-                : ConfigurationStoreResourceControlPlane.Create());
+                ? decorate(global::Assimalign.Cohesion.Hosting.Resources.ResourceControlPlane.Create([ "configurationstore.add-namespace", "configurationstore.set-value", "configurationstore.remove-value", ]))
+                : global::Assimalign.Cohesion.Hosting.Resources.ResourceControlPlane.Create([ "configurationstore.add-namespace", "configurationstore.set-value", "configurationstore.remove-value", ]));
     }
 }

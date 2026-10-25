@@ -52,12 +52,18 @@ public static class ResourcePlanValidator
         ArgumentNullException.ThrowIfNull(plan);
         ArgumentNullException.ThrowIfNull(manifest);
 
+        if (plan.ResourceGroup is ResourceGroupName group && !ResourceGroupName.IsValid(group.Value, out _))
+        {
+            throw new InvalidOperationException(ErrorMessages.ResourceGroupNameInvalid);
+        }
+
         Require(
             string.Equals(plan.Schema, ResourcePlan.CurrentSchema, StringComparison.Ordinal),
             $"Plan schema '{plan.Schema}' is not supported. Expected '{ResourcePlan.CurrentSchema}'.");
         Require(
-            string.Equals(manifest.Schema, ResourceManifest.SchemaV1, StringComparison.Ordinal),
-            $"Manifest schema '{manifest.Schema}' is not supported. Expected '{ResourceManifest.SchemaV1}'.");
+            string.Equals(manifest.Schema, ResourceManifest.SchemaV2, StringComparison.Ordinal),
+            string.Format(System.Globalization.CultureInfo.CurrentCulture,
+                ErrorMessages.ResourceManifestSchemaUnsupported, manifest.Schema, ResourceManifest.SchemaV2));
         Require(
             plan.Resource.Equals(manifest.Name),
             $"Plan resource '{plan.Resource}' does not match manifest resource '{manifest.Name}'.");

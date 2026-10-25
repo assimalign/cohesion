@@ -2,6 +2,7 @@ using System;
 using System.Buffers;
 using System.Buffers.Text;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text.Json;
@@ -23,17 +24,28 @@ public sealed class TrustedIssuer
     {
     }
 
-    /// <summary>Initializes a trusted issuer with an optional command-kind restriction.</summary>
+    /// <summary>Initializes a trusted issuer with an optional command-kind restriction and no management grants.</summary>
     /// <param name="issuer">The exact JWT issuer value.</param>
     /// <param name="publicKey">The public EC P-256 signing JWK.</param>
     /// <param name="allowedCommandKinds">Allowed wire kinds; null or empty permits every kind.</param>
-    /// <exception cref="ArgumentException">The issuer, key, or a command kind is invalid.</exception>
+    /// <exception cref="ArgumentException">The issuer, key or a command kind is invalid.</exception>
     public TrustedIssuer(string issuer, JsonElement publicKey, IReadOnlyList<string>? allowedCommandKinds)
+        : this(issuer, publicKey, allowedCommandKinds, null)
+    {
+    }
+
+    /// <summary>Initializes a trusted issuer with separate command and management grants.</summary>
+    /// <param name="issuer">The exact JWT issuer value.</param>
+    /// <param name="publicKey">The public EC P-256 signing JWK.</param>
+    /// <param name="allowedCommandKinds">Allowed wire kinds; null or empty permits every kind.</param>
+    /// <param name="allowedManagementOperations">Explicit management grants; null or empty grants none.</param>
+    /// <exception cref="ArgumentException">The issuer, key, or a command kind is invalid.</exception>
+    public TrustedIssuer(string issuer, JsonElement publicKey, IReadOnlyList<string>? allowedCommandKinds, IReadOnlyList<string>? allowedManagementOperations)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(issuer);
         if (publicKey.ValueKind != JsonValueKind.Object)
         {
-            throw new ArgumentException("A trusted issuer key must be a JSON object.", nameof(publicKey));
+            throw new ArgumentException(ErrorMessages.TrustedIssuerKeyObjectRequired, nameof(publicKey));
         }
 
         var members = new HashSet<string>(StringComparer.Ordinal);
@@ -43,7 +55,7 @@ public sealed class TrustedIssuer
                 property.Name is not ("kty" or "crv" or "x" or "y" or "kid" or "alg" or "use"))
             {
                 throw new ArgumentException(
-                    $"A trusted issuer key contains unsupported or duplicate member '{property.Name}'.",
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.TrustedIssuerKeyMemberInvalid, property.Name),
                     nameof(publicKey));
             }
         }
@@ -61,7 +73,7 @@ public sealed class TrustedIssuer
             !string.Equals(use, "sig", StringComparison.Ordinal))
         {
             throw new ArgumentException(
-                "A trusted issuer key must be an EC P-256 key for ES256 signatures.",
+                ErrorMessages.TrustedIssuerSigningKeyRequired,
                 nameof(publicKey));
         }
 
@@ -75,7 +87,7 @@ public sealed class TrustedIssuer
         catch (FormatException exception)
         {
             throw new ArgumentException(
-                "A trusted issuer key has invalid base64url coordinates.",
+                ErrorMessages.TrustedIssuerCoordinatesEncoding,
                 nameof(publicKey),
                 exception);
         }
@@ -85,7 +97,7 @@ public sealed class TrustedIssuer
             if (x.Length != 32 || y.Length != 32)
             {
                 throw new ArgumentException(
-                    "A trusted issuer P-256 key must have 32-byte coordinates.",
+                    ErrorMessages.TrustedIssuerCoordinatesLength,
                     nameof(publicKey));
             }
 
@@ -106,7 +118,7 @@ public sealed class TrustedIssuer
                 exception is ArgumentException or CryptographicException or PlatformNotSupportedException)
             {
                 throw new ArgumentException(
-                    "A trusted issuer key has coordinates that are not a valid P-256 point.",
+                    ErrorMessages.TrustedIssuerCurvePointInvalid,
                     nameof(publicKey),
                     exception);
             }
@@ -115,7 +127,7 @@ public sealed class TrustedIssuer
             if (!string.Equals(keyId, expectedKeyId, StringComparison.Ordinal))
             {
                 throw new ArgumentException(
-                    "A trusted issuer key identifier must equal its RFC 7638 thumbprint.",
+                    ErrorMessages.TrustedIssuerThumbprintMismatch,
                     nameof(publicKey));
             }
         }
@@ -127,6 +139,11 @@ public sealed class TrustedIssuer
 
         Issuer = issuer;
         PublicKey = publicKey.Clone();
+        AllowedManagementOperations = Array.AsReadOnly((allowedManagementOperations ?? []).Select(static operation =>
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(operation);
+            return operation;
+        }).Distinct(StringComparer.Ordinal).ToArray());
         AllowedCommandKinds = Array.AsReadOnly((allowedCommandKinds ?? []).Select(static kind =>
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(kind);
@@ -140,8 +157,14 @@ public sealed class TrustedIssuer
     /// <summary>Gets the issuer's public JSON Web Key.</summary>
     public JsonElement PublicKey { get; }
 
-    /// <summary>Gets the permitted command kinds. An absent or empty restriction permits every kind.</summary>
+    /// <summary>
+    /// Gets the permitted command kinds. An absent or empty restriction permits every command kind.
+    /// Resource state management uses a separate explicit grant list.
+    /// </summary>
     public IReadOnlyList<string> AllowedCommandKinds { get; }
+
+    /// <summary>Gets explicit gateway management operation grants; an empty list grants none.</summary>
+    public IReadOnlyList<string> AllowedManagementOperations { get; }
 
     private static string RequiredString(JsonElement key, string name)
     {
@@ -150,7 +173,7 @@ public sealed class TrustedIssuer
             string.IsNullOrWhiteSpace(property.GetString()))
         {
             throw new ArgumentException(
-                $"A trusted issuer key requires string member '{name}'.",
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.TrustedIssuerKeyMemberRequired, name),
                 nameof(key));
         }
 

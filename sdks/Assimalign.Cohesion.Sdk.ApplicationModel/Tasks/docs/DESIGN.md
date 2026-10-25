@@ -109,19 +109,22 @@ Disabled projects generate no manifest, resource API, control-plane registration
 or application-model diagnostic. The base guard handles the distinct error in
 which a project says `enabled` but never imports this SDK.
 
-`CohesionCommand` items become the manifest's deterministic `commands` array.
-Names are trimmed, deduplicated ordinally, and sorted. The item accepts one
-metadata, `RequiresInputResolver` (`true` or `false`, empty meaning `false`); a
-kind declared more than once must carry the same value. An unflagged kind is
-written as a string and a flagged one as
-`{ "kind": "...", "requiresInputResolver": true }`, so a manifest that flags
-nothing is unchanged. The flag tells a gateway that the resource accepts the
-command only after an `IResourceCommandInputResolver` has rewritten its declared
-payload; `Build()` fails when the declaring application registers no resolver
-for the kind, while unflagged kinds are still delivered as declared.
-`Sdk.SecretStore` flags `secretstore.add-secret`. The packed manifest's
-`RESOURCE_MANIFEST_README.md` states the full contract. Command declaration and
-execution remain runtime application-model concerns.
+Resources emit `cohesion/resource/v2`. Its `runtime` object contains only the
+runtime schema and logical management binding (`endpoint`, `path`, `protocol`); it has no
+command kinds, state definitions, initial values, or live instance addresses. Generated
+registration configures the management transport with that binding. Hosting.Resources builds
+the catalog from registered `IResourceStateHandler` implementations and captures their effective
+startup configuration after appsettings and environment have been applied. Adapters own their
+schemas; no `Resource.StateContracts` members or separate `resource.runtime.json` are generated.
+
+Build-time state items and external runtime-manifest injection have been removed. Supplying
+`CohesionResourceState`, `CohesionResourceInitialState`, or `CohesionResourceRuntimeManifestPath`
+reports a migration error instead of dropping the old declarations. Register handlers during
+resource startup and configure them using the normal resource configuration pipeline.
+
+The v1 manifest and command declaration surface have been removed. Every area SDK selects the
+generic runtime control-plane factory and emits the same v2 deployment contract. `CohesionCommand`
+items report a migration error. Register resource state handlers at startup instead.
 
 ## Gateway composition contract
 
