@@ -1079,22 +1079,19 @@ internal sealed unsafe class StorageBufferPool : IDisposable
             }
         }
 
-        internal void RemoveMutableScope(StoragePageHandle handle)
+        private void RemoveMutableScopeLocked(StoragePageHandle handle)
         {
-            lock (_dirtySync)
+            StoragePageHandle.MutableScopeOwner? previous = null;
+            for (var owner = _mutableScopes; owner is not null; owner = owner.Next)
             {
-                StoragePageHandle.MutableScopeOwner? previous = null;
-                for (var owner = _mutableScopes; owner is not null; owner = owner.Next)
+                if (owner.Matches(handle))
                 {
-                    if (owner.Matches(handle))
-                    {
-                        if (previous is null) { Volatile.Write(ref _mutableScopes, owner.Next); }
-                        else { previous.Next = owner.Next; }
-                        owner.Next = null;
-                        return;
-                    }
-                    previous = owner;
+                    if (previous is null) { Volatile.Write(ref _mutableScopes, owner.Next); }
+                    else { previous.Next = owner.Next; }
+                    owner.Next = null;
+                    return;
                 }
+                previous = owner;
             }
         }
 
@@ -1160,10 +1157,13 @@ internal sealed unsafe class StorageBufferPool : IDisposable
             }
         }
 
-        internal void EndWrite(int epoch)
+        internal void EndWrite(int epoch, StoragePageHandle? handle = null)
         {
             lock (_dirtySync)
             {
+                // Registration belongs to this handle's release, under the same
+                // monitor acquisition. Read-pin disposal adds no writer lock.
+                if (handle is not null) { RemoveMutableScopeLocked(handle); }
                 if (_writer is not null && epoch == _writeEpoch)
                 {
                     if (--_writeDepth == 0) { FinishWriter(); }
@@ -1246,10 +1246,14 @@ internal sealed unsafe class StorageBufferPool : IDisposable
                     if (owner.IsEpoch(_writeEpoch)) { rawScope = true; break; }
                 }
             }
-            if (!rawScope && Volatile.Read(ref _writerThread) == Environment.CurrentManagedThreadId) { return true; }
-            if (!StoragePageHandle.OwnsReadScope(this, Volatile.Read(ref _writeEpoch))) { return false; }
+            bool writerThread = Volatile.Read(ref _writerThread) == Environment.CurrentManagedThreadId;
+            if (!rawScope && writerThread) { return true; }
+            // An inherited task must not strand the current token's writer. The
+            // thread can relax the shared-context count only after token validation;
+            // it can never authorize the old context of a transferred handle.
+            if (!StoragePageHandle.OwnsReadScope(this, Volatile.Read(ref _writeEpoch), writerThread)) { return false; }
             int depth = Volatile.Read(ref _writeDepth);
-            if (depth > 1 && Volatile.Read(ref _writerThread) != Environment.CurrentManagedThreadId)
+            if (depth > 1 && !writerThread)
             {
                 throw new StorageTransactionException(ErrorMessages.MixedThreadMutableScopes);
             }

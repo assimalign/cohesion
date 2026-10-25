@@ -1367,9 +1367,13 @@ does not take.
   Page from a different context gives that handle a new token, revokes the previous
   context's token and invalidates prior read tokens before exposing the memory. A fork
   sharing an active token receives its own token at this handoff; its later awaited
-  continuation can read even before another Page access. Raw own-read permission never
-  falls back to a physical thread id. Registration adds no field to ordinary read
-  handles, and disposal removes it; retired epochs cannot affect a later typed writer.
+  continuation can read even before another Page access. A raw own-read always requires
+  its handle's current token. That token's writer thread can read while an unrelated
+  inherited task remains active; a fork on another thread cannot use its parent's token
+  concurrently. A physical thread id alone never grants raw read permission.
+  Registration adds no field to ordinary read
+  handles, and disposal removes it under the writer-release monitor acquisition;
+  ordinary read-pin disposal takes no writer monitor. Retired epochs cannot affect a later typed writer.
   Callers must never use a handle or its borrowed memory
   concurrently across threads; moving nested scopes to a continuation is refused.
   Ordinary pins and typed synchronous record operations create no ambient scope.
@@ -2116,10 +2120,10 @@ taken in `BeginTransaction` under the transaction lock and released exactly once
 commit/rollback: a begun-but-untouched transaction holds no page lock yet has already
 appended its begin record, and the whole checkpoint now runs *under* the transaction
 lock, so no transaction can slip between the emptiness check and the truncation.
-(Lock order is transaction lock → header → flush gate → buffer pool monitor, then journal
-medium → journal append; flush I/O releases the monitor, eviction never takes the flush gate,
-and waits on a frame lease release the monitor.
-no path takes them in reverse. In particular, never wait for the medium while holding the
+(Lock order is transaction lock → header → flush gate. Mapping snapshots briefly take the
+pool monitor; page I/O takes its stripe → journal medium → journal append with that monitor
+released. Eviction never takes the flush gate, and frame-lease waits release the monitor.
+No path takes these locks in reverse. In particular, never wait for the medium while holding the
 append lock. Medium owners briefly acquire the append lock to detach or publish a prefix,
 and latch failures before yielding the medium. The offline latch may then take the group-commit
 gate; gate owners release it before calling the journal. Offline notifications run outside both

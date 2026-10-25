@@ -22,6 +22,49 @@ public sealed class StorageReviewTests
 
     public StorageReviewTests(ITestOutputHelper output) => _output = output;
 
+    [Fact(DisplayName = "Cohesion Test [Storage] - Mutable scope: an unrelated inherited task does not block the current owner's own read")]
+    public async Task OpenPageForWrite_UnrelatedForkRemainsActive_ShouldAllowTheCurrentOwnerToRead()
+    {
+        // Arrange
+        using var storage = TornStorage.Create();
+        (PageId PageId, int SlotIndex) target;
+        using (var seed = storage.BeginTransaction())
+        {
+            target = storage.Insert(seed, 7, new byte[64]);
+            seed.Commit();
+        }
+        using var transaction = storage.BeginTransaction();
+        using var writer = storage.OpenPageForWrite(transaction, target.PageId);
+        using var entered = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
+        int waits = 0;
+        writer.Entry.ReadWaitStarted = () => { waits++; release.Set(); };
+        var fork = DedicatedTestTask.Run(() =>
+        {
+            entered.Set();
+            release.Wait(TimeSpan.FromSeconds(30)).ShouldBeTrue();
+        });
+        byte[] bytes;
+        try
+        {
+            // Act: retain two active contexts, but expose no mutable bytes on the fork.
+            entered.Wait(TimeSpan.FromSeconds(30)).ShouldBeTrue();
+            bytes = storage.ReadBytes(target.PageId, target.SlotIndex);
+        }
+        finally
+        {
+            release.Set();
+            await fork.WaitAsync(TimeSpan.FromSeconds(30));
+            writer.Entry.ReadWaitStarted = null;
+        }
+
+        // Assert: an own read must not depend on that unrelated task returning.
+        waits.ShouldBe(0);
+        bytes.ShouldAllBe(value => value == 0);
+        writer.Dispose();
+        transaction.Commit();
+    }
+
     [Theory(DisplayName = "Cohesion Test [Storage] - Mutable handoff: the original context cannot read the new owner's partial record")]
     [InlineData("direct", false)]
     [InlineData("try", false)]
@@ -99,7 +142,7 @@ public sealed class StorageReviewTests
     {
         // Arrange
         var elapsed = Stopwatch.StartNew();
-        var counts = new int[4];
+        var counts = new int[5];
 
         // Act
         do
@@ -109,6 +152,7 @@ public sealed class StorageReviewTests
             await OpenPageForWrite_IndependentContextHandoff_ShouldFollowTheHandle("try", false); counts[1]++;
             await OpenPageForWrite_IndependentContextHandoff_ShouldFollowTheHandle("scan", false); counts[2]++;
             await OpenPageForWrite_IndependentContextHandoff_ShouldFollowTheHandle("direct", true); counts[3]++;
+            await OpenPageForWrite_UnrelatedForkRemainsActive_ShouldAllowTheCurrentOwnerToRead(); counts[4]++;
         }
         while (elapsed.Elapsed < TimeSpan.FromSeconds(1) || counts[0] < 5);
 

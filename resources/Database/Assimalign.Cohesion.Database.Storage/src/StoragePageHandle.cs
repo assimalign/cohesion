@@ -130,12 +130,12 @@ public sealed class StoragePageHandle : IDisposable
         _mutableScope.Value = current;
     }
 
-    internal static bool OwnsReadScope(StorageBufferPool.BufferEntry entry, int epoch)
+    internal static bool OwnsReadScope(StorageBufferPool.BufferEntry entry, int epoch, bool writerThread)
     {
         var scope = _mutableScope.Value;
         while (scope is not null)
         {
-            if (scope.IsCurrent && scope.IsSoleContext && scope.TryGetHandle(out var handle)
+            if (scope.IsCurrent && (scope.IsSoleContext || writerThread) && scope.TryGetHandle(out var handle)
                 && ReferenceEquals(handle.Entry, entry) && handle._writeEpoch == epoch) { return true; }
             scope = scope.Previous;
         }
@@ -166,8 +166,7 @@ public sealed class StoragePageHandle : IDisposable
         // Exactly one release per handle, even when two threads dispose it at once.
         if (Interlocked.Exchange(ref _disposed, 1) == 0)
         {
-            if (_writeEpoch != 0) { Entry.EndWrite(_writeEpoch); }
-            if (Entry.HasMutableScopes) { Entry.RemoveMutableScope(this); }
+            if (_writeEpoch != 0) { Entry.EndWrite(_writeEpoch, this); }
             _pool.Unpin(Entry);
             var scope = _mutableScope.Value;
             var active = ActiveScope(scope);
