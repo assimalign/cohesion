@@ -36,11 +36,11 @@ public sealed partial class DocumentRegisteredFunctionTests
         (await RowsAsync(session, DocumentQueryRequest.FromOql("SELECT COUNT(*) FROM items"))).ShouldHaveSingleItem().GetValue(0).ShouldBe(3L);
     }
 
-    [Theory(DisplayName = "Cohesion Test [Documents] - Functions: database IO and timeout exceptions cross the call boundary unchanged")]
+    [Theory(DisplayName = "Cohesion Test [Documents] - Functions: database failures retain identity while application IO and timeout failures are coded")]
     [InlineData("database")]
     [InlineData("io")]
     [InlineData("timeout")]
-    public void Invoke_OwnedFailure_ShouldPreserveExceptionIdentity(string kind)
+    public void Invoke_CallbackFailure_ShouldPreserveDatabaseOrCodeApplicationFault(string kind)
     {
         Exception cause = kind switch
         {
@@ -50,7 +50,8 @@ public sealed partial class DocumentRegisteredFunctionTests
         };
         var function = DocumentScalarFunction.Create<decimal, decimal>("owned_failure", _ => throw cause);
         var error = Should.Throw<Exception>(() => Invoke(function, [DocumentValue.FromDecimal(1)], CancellationToken.None));
-        error.ShouldBeSameAs(cause);
+        if (cause is DatabaseException) { error.ShouldBeSameAs(cause); }
+        else { var coded = error.ShouldBeAssignableTo<DatabaseException>(); coded.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD05017"); coded.InnerException.ShouldBeSameAs(cause); }
     }
 
     [Fact(DisplayName = "Cohesion Test [Documents] - Functions: statement cancellation is preserved while foreign cancellation is coded")]

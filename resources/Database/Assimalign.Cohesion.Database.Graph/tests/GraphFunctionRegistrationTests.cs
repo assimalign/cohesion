@@ -70,7 +70,7 @@ public sealed class GraphFunctionRegistrationTests
     {
         var builder = GraphDatabaseEngine.CreateBuilder("duplicate");
         builder.Functions.Add(GraphScalarFunction.Create<long, long>("developer_echo", value => value));
-        Should.Throw<ArgumentException>(() => builder.Functions.Add(GraphScalarFunction.Create<long, long>("DEVELOPER_ECHO", value => value)));
+        Should.Throw<InvalidOperationException>(() => builder.Functions.Add(GraphScalarFunction.Create<long, long>("DEVELOPER_ECHO", value => value)));
         Should.Throw<ArgumentException>(() => GraphScalarFunction.Create<long, long>(default, value => value));
         GraphFunctionName.IsValid("bad-name", out _).ShouldBeFalse();
         GraphFunctionName.IsValid("Δ_echo42", out _).ShouldBeTrue();
@@ -287,8 +287,8 @@ public sealed class GraphFunctionRegistrationTests
         var builder = GraphDatabaseEngine.CreateBuilder("overloads");
         builder.Functions.Add(GraphScalarFunction.Create<long, long>("developer_arity", value => value));
         builder.Functions.Add(GraphScalarFunction.Create<long, long, long>("developer_arity", (left, right) => left + right));
-        Should.Throw<ArgumentException>(() => builder.Functions.Add(GraphScalarFunction.Create<string, string>("developer_arity", value => value)));
-        Should.Throw<ArgumentException>(() => builder.Functions.Add(GraphAggregateFunction.Create<long, long, long>("developer_arity",
+        Should.Throw<InvalidOperationException>(() => builder.Functions.Add(GraphScalarFunction.Create<string, string>("developer_arity", value => value)));
+        Should.Throw<InvalidOperationException>(() => builder.Functions.Add(GraphAggregateFunction.Create<long, long, long>("developer_arity",
             () => 0, (state, value) => state + value, state => state, _ => 8)));
         await using var engine = await builder.BuildAsync();
         var overloads = engine.Functions.GetOverloads("DEVELOPER_ARITY");
@@ -334,11 +334,11 @@ public sealed class GraphFunctionRegistrationTests
         }
     }
 
-    [Theory(DisplayName = "Cohesion Test [Graph] - Functions: Execute Infrastructure Failure Should Preserve Existing Boundary And Original Cause")]
+    [Theory(DisplayName = "Cohesion Test [Graph] - Functions: Execute Application Infrastructure Failure Should Retain Callback Code And Cause")]
     [InlineData(0)]
     [InlineData(1)]
     [InlineData(2)]
-    public async Task Execute_InfrastructureFailure_ShouldPreserveExistingBoundaryAndOriginalCauseAsync(int kind)
+    public async Task Execute_ApplicationInfrastructureFailure_ShouldRetainCallbackCodeAndCauseAsync(int kind)
     {
         Exception failure = kind switch
         {
@@ -355,14 +355,10 @@ public sealed class GraphFunctionRegistrationTests
         Exception? caught = null;
         try { await Rows(session, "RETURN developer_infrastructure(1)"); }
         catch (Exception error) { caught = error; }
-        if (kind == 1) { caught.ShouldBeSameAs(failure); }
-        else
-        {
-            var boundary = caught.ShouldBeOfType<DatabaseException>();
-            boundary.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG06006");
-            boundary.InnerException.ShouldBeSameAs(failure);
-            boundary.Message.ShouldBe(failure.Message);
-        }
+        var boundary = caught.ShouldBeAssignableTo<DatabaseException>()!;
+        boundary.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG05021");
+        boundary.InnerException.ShouldBeSameAs(failure);
+        boundary.Message.ShouldContain(failure.Message, Case.Sensitive);
         session.LastStatementMetrics!.Memory.RetainedBytes.ShouldBe(0);
         var aborted = await Should.ThrowAsync<DatabaseException>(() => Rows(session, "RETURN 1"));
         aborted.Diagnostics[0].Code.ShouldBe("CG04007");
@@ -598,11 +594,11 @@ public sealed class GraphFunctionRegistrationTests
     }
 
 
-    [Theory(DisplayName = "Cohesion Test [Graph] - Functions: Invoke Infrastructure Failure Should Preserve Exact Identity")]
+    [Theory(DisplayName = "Cohesion Test [Graph] - Functions: Invoke Application Infrastructure Failure Should Retain Callback Code And Cause")]
     [InlineData(0)]
     [InlineData(1)]
     [InlineData(2)]
-    public void Invoke_InfrastructureFailure_ShouldPreserveExactIdentity(int kind)
+    public void Invoke_ApplicationInfrastructureFailure_ShouldRetainCallbackCodeAndCause(int kind)
     {
         Exception failure = kind switch
         {
@@ -614,7 +610,9 @@ public sealed class GraphFunctionRegistrationTests
         var arguments = new GraphArguments(new object?[] { 1L });
         Exception? caught = null;
         try { function.Invoke(in arguments); } catch (Exception error) { caught = error; }
-        caught.ShouldBeSameAs(failure);
+        var coded = caught.ShouldBeAssignableTo<DatabaseException>()!;
+        coded.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG05021");
+        coded.InnerException.ShouldBeSameAs(failure);
     }
 
     [Fact(DisplayName = "Cohesion Test [Graph] - Functions: Invoke Canceled Callback Should Preserve Exact Identity")]

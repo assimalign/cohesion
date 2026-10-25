@@ -75,13 +75,16 @@ public sealed class KeyValueFunctionClientTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Database.KeyValuePair.Client] - Functions: coded execution errors preserve a healthy reusable connection")]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task InvokeFunctionAsync_ResolutionAndBodyFault_ShouldKeepConnectionAsync(bool bodyFault)
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task InvokeFunctionAsync_ResolutionAndBodyFault_ShouldKeepConnectionAsync(bool bodyFault, bool tcp)
     {
-        await using var harness = await KeyValueClientTestHarness.StartAsync(configureFunctions: functions =>
-            functions.Add(KeyValueFunction.Create<long>("fault", () => throw new InvalidOperationException("body-fault"))));
+        await using var harness = await KeyValueClientTestHarness.StartAsync(tcp: tcp, configureFunctions: functions =>
+            functions.Add(KeyValueFunction.Create<long>("fault", () => throw new TimeoutException("body-fault"))));
         await using var connection = await harness.Client.ConnectAsync(KeyValueClientTestHarness.Timeout());
+        Guid session = harness.Server.Sessions.ShouldHaveSingleItem().Id;
         var error = await Should.ThrowAsync<KeyValueClientException>(async () =>
             await connection.InvokeFunctionAsync(bodyFault ? "fault" : "missing", [], KeyValueClientTestHarness.Timeout()));
         error.Kind.ShouldBe(KeyValueClientErrorKind.ExecutionFailure);
@@ -90,6 +93,7 @@ public sealed class KeyValueFunctionClientTests
         error.ConnectionUsable.ShouldBeTrue();
         connection.IsOpen.ShouldBeTrue();
         (await connection.ExistsAsync(new byte[] { 42 }, KeyValueClientTestHarness.Timeout())).ShouldBeFalse();
+        harness.Server.Sessions.ShouldHaveSingleItem().Id.ShouldBe(session);
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair.Client] - Functions: a canceled CALL is not invoked and the pool accepts a later rental")]

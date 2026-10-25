@@ -184,8 +184,8 @@ public sealed class KeyValueFunctionTests
         error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CV02016");
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Functions: cancellation and existing database/storage/timeout exceptions retain identity")]
-    public void Invoke_RecognizedFailures_ShouldPreserveIdentity()
+    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Functions: database and statement cancellation retain identity; application faults are coded")]
+    public void Invoke_CallbackFailures_ShouldPreserveDatabaseOrCancellationAndCodeApplicationFaults()
     {
         Exception[] failures = [new DatabaseException("original"), new StorageCorruptionException("storage"), new IOException("device"), new TimeoutException("timeout")];
         foreach (Exception failure in failures)
@@ -193,7 +193,12 @@ public sealed class KeyValueFunctionTests
             var function = new ConstantKeyValueFunction("fault", DatabaseType.Int64, () => throw failure);
             var arguments = new KeyValueArguments([]);
             try { function.Invoke(in arguments); }
-            catch (Exception actual) { actual.ShouldBeSameAs(failure); continue; }
+            catch (Exception actual)
+            {
+                if (failure is DatabaseException) { actual.ShouldBeSameAs(failure); }
+                else { var coded = actual.ShouldBeOfType<DatabaseException>(); coded.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CV05003"); coded.InnerException.ShouldBeSameAs(failure); }
+                continue;
+            }
             false.ShouldBeTrue("The callback failure was not propagated.");
         }
         using var cancellation = new CancellationTokenSource();
