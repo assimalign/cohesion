@@ -281,6 +281,11 @@ public sealed class ResourceManifestSdkIntegrationTests
         controlPlaneSource.ShouldNotContain("ModuleInitializer");
         controlPlaneSource.ShouldNotContain("RegisterControlPlane");
         AssetsContainPackage(projectDirectory, "Assimalign.Cohesion.Worker.ApplicationModel").ShouldBeFalse();
+
+        // It builds no resource host, so its describe run finds no surface and reports nothing.
+        result.Output.ShouldNotContain("COHSDK012");
+        Directory.EnumerateFiles(Path.Combine(projectDirectory, "bin"), "resource.runtime.json", SearchOption.AllDirectories)
+            .ShouldBeEmpty();
     }
 
     [Fact(DisplayName = "Cohesion Test [Sdk] - disabled application model produces no resource outputs")]

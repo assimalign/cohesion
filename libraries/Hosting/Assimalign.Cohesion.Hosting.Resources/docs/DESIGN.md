@@ -149,7 +149,8 @@ and tool to the control plane before `AttachHost`, which freezes the `ResourceRu
 
 The surface is static by decision D2. `COHESION_DESCRIBE_PATH` makes `ResourceRuntime.HostBuilt`
 write the frozen document and end the process before `Program.cs` runs the host, so a build can
-learn the surface without starting anything (the SDK step that uses it is not built yet). The
+learn the surface without starting anything; the SDK's describe step uses it to keep
+`resource.runtime.json` beside every build's output. The
 rejected alternative, discovering contracts from running processes, leaves a gateway with no
 reachable instance unable to validate or render anything.
 

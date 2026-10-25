@@ -1,7 +1,7 @@
 # Resource control plane redesign: the deployment record
 
-Status: **APPROVED by the owner, 2026-10-24 (decisions D1–D8 below). P0 and the resource side of P1
-are implemented on `feature/deployment-record-control-plane`; P1b–P5 are not built.** This design
+Status: **APPROVED by the owner, 2026-10-24 (decisions D1–D8 below). P0, P1 and P1b are
+implemented on `feature/deployment-record-control-plane`; P2–P5 are not built.** This design
 supersedes the codex refactor parked on `feature/resource-runtime-manifests` (commit `376f022a8` in
 `cohesion`, `f678395` in `cohesion-platforms`), which remains there for reference. The wire contract
 is the [deployment record](../RUNTIME_CONTRACT.md#deployment-record) section of the runtime contract.
@@ -116,8 +116,10 @@ gateway restart loses nothing, because the gateway holds no desired state.
   `cohesion.configuration` health contribution is Degraded while a section is rejected or pending
   a restart.
 - `COHESION_DESCRIBE_PATH` makes the built host write its `cohesion/runtime/v1` surface and exit.
-  The SDK step that runs it and writes `resource.runtime.json` beside the build output is P1b, not
-  built: `resource.json` is embedded before compile, so the surface cannot live inside it.
+  After each build, the SDK's describe step (P1b) runs the executable that way, with placeholder
+  reference endpoints, and keeps `resource.runtime.json` beside the build output and in the manifest
+  package: `resource.json` is embedded before compile, so the surface cannot live inside it. A run
+  that fails is warning COHSDK012, never a failed build.
 - Web serves `GET /cohesion/v1/configuration`, `GET /cohesion/v1/configuration/status` and
   `POST /cohesion/v1/actions/{name}` through its control-plane middleware, as do the area hosts that
   delegate to it. ConfigurationStore, IdentityHub and SecretStore route their control planes
@@ -207,7 +209,7 @@ CONNECT (browsers cannot send CONNECT themselves); control-plane permission neve
 | --- | --- | --- |
 | P0 | Park codex's uncommitted work on a branch in each repository | Done |
 | P1 | Hosting.Resources surface (UI metadata, tools), status and describe; the Web CORS section; codex's state machinery removed | Done, resource side |
-| P1b | SDK describe step writing `resource.runtime.json` | Not started |
+| P1b | SDK describe step writing `resource.runtime.json` | Done |
 | P2 | Model parses the surface, `Configure` and `Build()` validation, extensions as data; gateway record manager over a store with generations, Local and InProcess stores, the routes, management events | Not started |
 | P3 | cohesion-platforms: Kubernetes and Docker stores, per-generation and claims ConfigMaps, restart digest, platform surfaces, `ConfigureHpa` | Not started |
 | P4 | Claims for ConfigurationStore, IdentityHub, Rezolvr, SecretStore; commands deleted; Database after #1709 | Not started |

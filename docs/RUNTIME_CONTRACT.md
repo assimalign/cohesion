@@ -259,8 +259,13 @@ is Degraded while any section is rejected or waiting for a restart.
 `cohesion/runtime/v1` document listing its configuration sections (path, mutability `deployment`,
 `restart` or `live`, scope `process` or `backend`, whether other applications may claim entries, and
 the JSON schema of the section's value), its actions, and its tools. The surface is fixed when the
-host is built; the SDK's describe run sets `COHESION_DESCRIBE_PATH` to have the resource write the
-same document at build time. `POST <controlPlane>/actions/{name}` runs an action with a
+host is built. After each build, the SDK's describe run sets `COHESION_DESCRIBE_PATH` so the
+resource writes the same document and exits as soon as its host is built; the SDK keeps it as
+`resource.runtime.json` beside the build output and in the resource's manifest package. The run
+removes inherited `COHESION_*` variables and gives each declared reference endpoint a placeholder
+`COHESION_DEPENDENCY_<RES>_<EP>_URL` at the reserved host `cohesion-describe.invalid`, so a resource
+that reads its references while composing can be described without reaching anything.
+`POST <controlPlane>/actions/{name}` runs an action with a
 JSON body and returns 200 with its JSON result, 400 for input that does not bind, and 404 for an
 unknown action. These routes are control-plane routes, authorized like every other namespaced route.
 
@@ -272,4 +277,5 @@ ConfigMap into one directory volume, never with `subPath`, which would freeze th
 This is an amendment to v1 made in place on 2026-10-24 (owner decisions D1–D8 of the
 [deployment-record control plane](programs/RESOURCE_CONTROL_PLANE_REDESIGN.md)), not a v2: it adds
 `COHESION_CONFIG_DIRECTORY` and `COHESION_DESCRIBE_PATH`, and gives `COHESION_RESOURCE_INSTANCE` a
-defined use. Hosting.Resources implements the resource side; gateway delivery is not built yet.
+defined use. Hosting.Resources implements the resource side and the SDK the describe run; gateway
+delivery is not built yet.

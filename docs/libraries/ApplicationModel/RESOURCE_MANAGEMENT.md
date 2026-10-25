@@ -41,8 +41,10 @@ application.UseDynamicCors(cors);
 package and creates the live `Web:Cors` section. Any application can create its own sections with
 `ResourceConfigurationSection.Create`, and actions and tools with `ResourceAction.Create` and
 `ResourceTool.Create`; registered as singletons, they reach the control plane before the host is
-attached, which fixes the surface. The resource serves the surface, its configuration status and its
-actions on its own control plane (`/cohesion/v1/configuration`, `/cohesion/v1/configuration/status`,
+attached, which fixes the surface. After every build the SDK's describe step runs the executable
+until its host is built and keeps that surface as `resource.runtime.json` beside the output and in the
+manifest package, so a gateway knows it without a running instance. The resource serves the surface,
+its configuration status and its actions on its own control plane (`/cohesion/v1/configuration`, `/cohesion/v1/configuration/status`,
 `/cohesion/v1/actions/{name}`), and applies the record it finds in `COHESION_CONFIG_DIRECTORY`.
 
 A resource keeps no desired state. A management change lives in the record's override layer until the

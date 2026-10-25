@@ -230,6 +230,62 @@
 		</ItemGroup>
 	</Target>
 
+	<!--
+		Describes the built resource: runs it with COHESION_DESCRIBE_PATH set, so its host writes the
+		frozen cohesion/runtime/v1 surface and exits before Program.cs runs it, and keeps the result as
+		resource.runtime.json beside the build output. Only a build for this machine's runtime can run,
+		so a build for another runtime identifier (an image publish, for one) keeps the surface of the
+		build that could. A failed run is warning COHSDK012 and leaves no surface; the stamp makes the run
+		incremental whether or not it produced one, and records which, so a surface deleted from the
+		output directory is described again. CohesionDescribeResource=false skips it.
+	-->
+	<PropertyGroup>
+		<_CohesionDescribeEnabled Condition="'$(_CohesionResourceEnabled)' == 'true' and '$(CohesionDescribeResource)' == 'true' and '$(DesignTimeBuild)' != 'true' and ('$(RuntimeIdentifier)' == '' or '$(RuntimeIdentifier)' == '$(NETCoreSdkRuntimeIdentifier)')">true</_CohesionDescribeEnabled>
+	</PropertyGroup>
+
+	<Target
+		Name="_CohesionInvalidateDescribeStamp"
+		Condition="'$(_CohesionDescribeEnabled)' == 'true' and Exists('$(_CohesionDescribeStampPath)') and !Exists('$(CohesionResourceRuntimeSurfacePath)')">
+		<ReadLinesFromFile File="$(_CohesionDescribeStampPath)">
+			<Output TaskParameter="Lines" PropertyName="_CohesionDescribeStampState" />
+		</ReadLinesFromFile>
+		<Delete Files="$(_CohesionDescribeStampPath)" Condition="'$(_CohesionDescribeStampState)' == 'described'" />
+	</Target>
+
+	<Target
+		Name="CohesionDescribeResource"
+		AfterTargets="Build"
+		DependsOnTargets="_CohesionInvalidateDescribeStamp"
+		Inputs="@(IntermediateAssembly);@(ReferenceCopyLocalPaths);$(MSBuildProjectFullPath);$(CohesionResourceManifestPath)"
+		Outputs="$(_CohesionDescribeStampPath)"
+		Condition="'$(_CohesionDescribeEnabled)' == 'true'">
+		<CohesionDescribeResource
+			ProjectPath="$(MSBuildProjectFullPath)"
+			AssemblyPath="$(TargetPath)"
+			AppHostPath="$(TargetDir)$(TargetName)$(_NativeExecutableExtension)"
+			DotNetHostPath="$(DOTNET_HOST_PATH)"
+			ManifestPath="$(CohesionResourceManifestPath)"
+			ReferencedManifests="@(_CohesionReferencedManifest);@(CohesionResourceManifest)"
+			SurfacePath="$(CohesionResourceRuntimeSurfacePath)"
+			WorkingDirectory="$(TargetDir)"
+			TimeoutSeconds="$(CohesionDescribeTimeoutSeconds)">
+			<Output TaskParameter="Described" PropertyName="_CohesionDescribed" />
+		</CohesionDescribeResource>
+		<WriteLinesToFile
+			File="$(_CohesionDescribeStampPath)"
+			Lines="described"
+			Overwrite="true"
+			Condition="'$(_CohesionDescribed)' == 'true'" />
+		<WriteLinesToFile
+			File="$(_CohesionDescribeStampPath)"
+			Lines="none"
+			Overwrite="true"
+			Condition="'$(_CohesionDescribed)' != 'true'" />
+		<ItemGroup>
+			<FileWrites Include="$(_CohesionDescribeStampPath);$(CohesionResourceRuntimeSurfacePath)" />
+		</ItemGroup>
+	</Target>
+
 	<Target
 		Name="CohesionValidateManifestPackageImage"
 		Condition="'$(_CohesionPackManifest)' == 'true'">
@@ -270,6 +326,11 @@
 				Include="$(CohesionContainerArchiveOutputPath)"
 				PackagePath="cohesion/images/$([System.IO.Path]::GetFileName('$(CohesionContainerArchiveOutputPath)'))"
 				Condition="'$(CohesionPackImageArchive)' == 'true' and '$(CohesionContainerArchiveOutputPath)' != '' and Exists('$(CohesionContainerArchiveOutputPath)')" />
+			<!-- Present when the build's describe run produced a surface; a gateway reads it without the resource's code. -->
+			<CohesionResourcePackAsset
+				Include="$(CohesionResourceRuntimeSurfacePath)"
+				PackagePath="cohesion/resource.runtime.json"
+				Condition="Exists('$(CohesionResourceRuntimeSurfacePath)')" />
 		</ItemGroup>
 		<ItemGroup>
 			<TfmSpecificPackageFile Include="@(CohesionResourcePackAsset)" />
@@ -305,6 +366,8 @@
 				Include="$(_CohesionResourceManifestFullPath)"
 				Condition="'$(_CohesionResourceEnabled)' == 'true'">
 				<ManifestPath>$(_CohesionResourceManifestFullPath)</ManifestPath>
+				<!-- Where the build's describe run writes the runtime surface; the file exists only after a build that produced one. -->
+				<RuntimeSurfacePath>$(_CohesionResourceRuntimeSurfaceFullPath)</RuntimeSurfacePath>
 				<ApplicationModel>enabled</ApplicationModel>
 				<ProjectName>$(MSBuildProjectName)</ProjectName>
 				<ProjectFullPath>$(MSBuildProjectFullPath)</ProjectFullPath>

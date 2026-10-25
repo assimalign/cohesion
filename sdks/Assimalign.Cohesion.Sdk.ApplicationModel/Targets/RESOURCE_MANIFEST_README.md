@@ -22,7 +22,9 @@ Resources use `cohesion/resource/v2`, which contains resource facts only: no `co
 no runtime member. A resource's runtime surface (its configuration sections, actions and tools) is a
 separate `cohesion/runtime/v1` document the resource serves on its control plane and writes when its
 host is built under `COHESION_DESCRIBE_PATH`; its desired configuration arrives as a deployment record
-(`docs/RUNTIME_CONTRACT.md`, "Deployment record").
+(`docs/RUNTIME_CONTRACT.md`, "Deployment record"). When the build that packed this package could
+describe the resource, the package also carries that surface as `cohesion/resource.runtime.json`, so a
+gateway can validate configuration for the resource without loading its code.
 
 The v1 manifest and its command metadata are no longer supported. All area SDKs emit v2 and use the
 generic runtime control-plane factory, and a project that still declares `CohesionCommand` items

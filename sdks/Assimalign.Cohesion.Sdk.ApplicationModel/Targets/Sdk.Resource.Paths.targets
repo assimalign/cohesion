@@ -12,8 +12,12 @@
 		<CohesionImageManifestPath Condition="'$(CohesionImageManifestPath)' == ''">$(IntermediateOutputPath)cohesion/image.json</CohesionImageManifestPath>
 		<CohesionPackResourceManifestPath Condition="'$(CohesionPackResourceManifestPath)' == ''">$(IntermediateOutputPath)cohesion/pack/resource.json</CohesionPackResourceManifestPath>
 		<_CohesionPackImageManifestPath>$(IntermediateOutputPath)cohesion/pack/image.json</_CohesionPackImageManifestPath>
+		<!-- The describe run's output sits beside the build output; its stamp keeps the run incremental. -->
+		<CohesionResourceRuntimeSurfacePath Condition="'$(CohesionResourceRuntimeSurfacePath)' == ''">$(OutDir)resource.runtime.json</CohesionResourceRuntimeSurfacePath>
+		<_CohesionDescribeStampPath>$(IntermediateOutputPath)cohesion/describe.stamp</_CohesionDescribeStampPath>
 		<!-- [MSBuild]::NormalizePath is available to Visual Studio's .NET Framework MSBuild. -->
 		<_CohesionResourceManifestFullPath>$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', '$(CohesionResourceManifestPath)'))</_CohesionResourceManifestFullPath>
+		<_CohesionResourceRuntimeSurfaceFullPath>$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', '$(CohesionResourceRuntimeSurfacePath)'))</_CohesionResourceRuntimeSurfaceFullPath>
 	</PropertyGroup>
 
 	<ItemGroup Condition="'$(_CohesionResourceEnabled)' == 'true'">
