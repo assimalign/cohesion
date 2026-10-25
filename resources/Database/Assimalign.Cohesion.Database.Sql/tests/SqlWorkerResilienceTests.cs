@@ -2,6 +2,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Diagnostics.Tracing;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -16,6 +17,8 @@ using Assimalign.Cohesion.Database.Sql.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Tests;
+
+using Assimalign.Cohesion.Testing;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
@@ -197,8 +200,10 @@ public sealed class SqlWorkerResilienceTests
     /// the hung fsync stopped every checkpoint of the engine until it returned: a device that took
     /// seconds to answer, or to fail, stalled every other database's journal truncation for as long.
     /// </summary>
-    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Workers: a database whose checkpoint fsync hangs does not hold back the other database's checkpoints")]
-    public async Task CheckpointWorker_OneDatabaseFsyncHangs_ShouldKeepCheckpointingTheOthers()
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Workers: a database whose checkpoint fsync hangs does not hold back the other database's checkpoints")]
+    [InlineData(0)]
+    [InlineData(6000)]
+    public async Task CheckpointWorker_OneDatabaseFsyncHangs_ShouldKeepCheckpointingTheOthers(int producerPauseMilliseconds)
     {
         // Arrange: checkpoints by journal size; nothing else writes pages back.
         var strategy = new FaultInjectingJournalSqlStorageStrategy(durable: true);
@@ -229,7 +234,9 @@ public sealed class SqlWorkerResilienceTests
             // Act: while the fsync hangs, the healthy database's journal passes the size again and again.
             long checkpoints = healthyFaults.HeaderWrites;
             var watch = Stopwatch.StartNew();
-            for (int id = 0; healthyFaults.HeaderWrites - checkpoints < 3 && watch.Elapsed < _stallWindow; id += 10)
+            // Simulate descheduling after observation starts, before producing due work.
+            await Task.Delay(producerPauseMilliseconds);
+            for (int id = 0; healthyFaults.HeaderWrites - checkpoints < 3 && watch.Elapsed < _timeout; id += 10)
             {
                 await InsertAsync(healthy, id, 10);
             }
@@ -239,7 +246,7 @@ public sealed class SqlWorkerResilienceTests
             long stalledJournalDuringTheHang = stalled.DataStorage.JournalLength;
 
             stalledFaults.ReleaseDataFlushes();
-            bool stalledCheckpointed = await Eventually(() => stalled.DataStorage.JournalLength < stalledJournal);
+            bool stalledCheckpointed = await Eventually(() => stalled.DataStorage.JournalLength < stalledJournal && worker.Fault is null);
 
             // Assert: the healthy database was checkpointed while the other's checkpoint hung, and
             // the hung checkpoint completed once its device answered.
@@ -309,12 +316,13 @@ public sealed class SqlWorkerResilienceTests
     /// records no failure of its own and keeps flushing the other database (#1268).
     /// </summary>
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - Workers: a group-commit drain or fsync failure takes only its database offline, and the flush worker keeps serving the others")]
-    [InlineData(DeviceFault.JournalFlush)]
-    [InlineData(DeviceFault.JournalWrite)]
-    public async Task WriteAheadFlushWorker_JournalFails_ShouldTakeOnlyItsDatabaseOfflineAndKeepFlushing(DeviceFault fault)
+    [InlineData(DeviceFault.JournalFlush, 0)]
+    [InlineData(DeviceFault.JournalWrite, 0)]
+    [InlineData(DeviceFault.JournalFlush, 2100)]
+    public async Task WriteAheadFlushWorker_JournalFails_ShouldTakeOnlyItsDatabaseOfflineAndKeepFlushing(DeviceFault fault, int completionPauseMilliseconds)
     {
-        // Arrange: grouped commits wait up to two seconds for the flush worker before they flush
-        // themselves, so a commit that returns sooner was flushed by the worker.
+        // Arrange: event 8 proves a worker flush; event 9 identifies committer self-help.
+        // Construction keeps its short window, then commits get a generous hang guard.
         var window = TimeSpan.FromSeconds(2);
         var strategy = new FaultInjectingJournalSqlStorageStrategy(durable: true);
         var options = Options(strategy);
@@ -323,6 +331,12 @@ public sealed class SqlWorkerResilienceTests
         await using var engine = SqlDatabaseEngine.Create("sql-engine", options);
         var failing = await CreateAsync(engine, failingDatabaseName);
         var healthy = await CreateAsync(engine, healthyDatabaseName);
+        failing.DataStorage.GroupCommitWindow = healthy.DataStorage.GroupCommitWindow = _timeout + TimeSpan.FromSeconds(5);
+        using var commits = new EventSourceRecorder(EventSource.GetSources().Single(source =>
+            source.Name == "Assimalign.Cohesion.Database.Storage"), EventLevel.Verbose);
+        int EventsFor(string database, int id) => commits.Events.Count(item => item.EventId == id
+            && item.Payload is { Count: > 0 } payload
+            && (Equals(payload[0], database) || Equals(payload[0], database + "/catalog")));
         var worker = WorkerOf(engine, DatabaseEngineWorkerKind.WriteAheadFlush);
         var faults = strategy.Faults(failingDatabaseName);
         await using var session = await failing.CreateSessionAsync();
@@ -330,23 +344,26 @@ public sealed class SqlWorkerResilienceTests
         // Act: the failing database's journal drain, or its fsync, fails under the worker's group
         // flush.
         faults.SwitchOn(fault);
-        var watch = Stopwatch.StartNew();
         var error = await Record.ExceptionAsync(async () => await session.ExecuteAsync("INSERT INTO t (id, payload) VALUES (1, 'lost')"));
-        var failedCommit = watch.Elapsed;
+        // Exercise a caller continuation delayed by a busy runner after the worker has answered.
+        await Task.Delay(completionPauseMilliseconds);
         var refusal = await Should.ThrowAsync<DatabaseOfflineException>(async () => await failing.CreateSessionAsync());
 
         // The worker keeps flushing the other database's grouped commits.
-        var latencies = await TimedInsertsAsync(healthy, 5);
+        await WriteGroupedInsertsAsync(healthy, 5);
 
+        int failingSelfHelp = EventsFor(failingDatabaseName, 9);
+        int healthyFlushes = EventsFor(healthyDatabaseName, 8);
+        int healthySelfHelp = EventsFor(healthyDatabaseName, 9);
         faults.Clear();
         var reopened = await engine.OpenDatabaseAsync(failingDatabaseName);
 
-        // Assert: the commit failed fast (the worker's flush failed and released it), only its
+        // Assert: the worker's flush failed and released the commit, only its
         // database went offline, and the worker reported no failure of its own. A failed drain
         // ends the flush before its fsync.
         bool drain = fault == DeviceFault.JournalWrite;
         StorageOfflineException.Find(error.ShouldNotBeNull()).ShouldNotBeNull();
-        (failedCommit / window).ShouldBeLessThan(1.0);
+        failingSelfHelp.ShouldBe(0, "the failed flush must be worker-owned");
         (drain ? faults.JournalWriteFailures : faults.JournalFlushFailures).ShouldBeGreaterThanOrEqualTo(1);
         (drain ? faults.JournalWriteFailureThread : faults.JournalFlushFailureThread).ShouldBe(worker.Name + " lane");
         (drain ? faults.JournalFlushFailures : faults.JournalWriteFailures).ShouldBe(0);
@@ -354,7 +371,8 @@ public sealed class SqlWorkerResilienceTests
         refusal.Message.ShouldContain("a write or flush of the journal");
         StorageOfflineException.Find(refusal)!.Cause.ShouldBe(StorageOfflineCause.JournalFlush);
         StorageOfflineException.Find(refusal)!.Message.ShouldContain(drain ? "a write of the journal" : "a durable flush of the journal");
-        (latencies.Max() / window).ShouldBeLessThan(1.0, $"grouped commit latencies {string.Join(", ", latencies)}");
+        healthyFlushes.ShouldBeGreaterThanOrEqualTo(5);
+        healthySelfHelp.ShouldBe(0, "healthy grouped commits must be flushed by the worker");
         worker.Fault.ShouldBeNull();
         worker.FailureCount.ShouldBe(0);
         engine.State.ShouldBe(EngineState.Running);
@@ -971,19 +989,21 @@ public sealed class SqlWorkerResilienceTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Database.Sql] - Workers: one stalled database leaves healthy lane passes at full pace")]
-    [InlineData(DatabaseEngineWorkerKind.PageWriteBack)]
-    [InlineData(DatabaseEngineWorkerKind.WriteAheadFlush)]
-    [InlineData(DatabaseEngineWorkerKind.VersionPurge)]
-    [InlineData(DatabaseEngineWorkerKind.IndexMaintenance)]
-    public async Task Run_OneDatabaseStalls_ShouldKeepOtherDatabasesAtFullPace(DatabaseEngineWorkerKind kind)
+    [InlineData(DatabaseEngineWorkerKind.PageWriteBack, 20)]
+    [InlineData(DatabaseEngineWorkerKind.WriteAheadFlush, 20)]
+    [InlineData(DatabaseEngineWorkerKind.VersionPurge, 20)]
+    [InlineData(DatabaseEngineWorkerKind.IndexMaintenance, 20)]
+    [InlineData(DatabaseEngineWorkerKind.PageWriteBack, 150)]
+    [InlineData(DatabaseEngineWorkerKind.VersionPurge, 150)]
+    public async Task Run_OneDatabaseStalls_ShouldKeepOtherDatabasesAtFullPace(DatabaseEngineWorkerKind kind, int cadenceMilliseconds)
     {
         // Arrange: only the chosen worker has a short cadence. Checkpoints cannot supply progress.
         var strategy = new FaultInjectingJournalSqlStorageStrategy(durable: true);
         var options = Options(strategy);
-        options.PageWriteBackInterval = kind == DatabaseEngineWorkerKind.PageWriteBack ? TimeSpan.FromMilliseconds(20) : TimeSpan.FromHours(1);
-        options.MaintenanceInterval = TimeSpan.FromMilliseconds(20);
+        options.PageWriteBackInterval = kind == DatabaseEngineWorkerKind.PageWriteBack ? TimeSpan.FromMilliseconds(cadenceMilliseconds) : TimeSpan.FromHours(1);
+        options.MaintenanceInterval = TimeSpan.FromMilliseconds(cadenceMilliseconds);
         options.Durability = kind == DatabaseEngineWorkerKind.WriteAheadFlush ? StorageCommitDurability.Grouped : StorageCommitDurability.Synchronous;
-        options.GroupCommitWindow = TimeSpan.FromMilliseconds(20);
+        options.GroupCommitWindow = TimeSpan.FromMilliseconds(cadenceMilliseconds);
         await using var engine = SqlDatabaseEngine.Create("isolated-lanes", options);
         var failing = await CreateAsync(engine, failingDatabaseName);
         var healthy = await CreateAsync(engine, healthyDatabaseName);
@@ -992,6 +1012,20 @@ public sealed class SqlWorkerResilienceTests
         Task? disposal = null;
         async Task InspectDisposalAsync()
         {
+            // First prove resumption, then re-arm the same gate to retain the disposal/join proof.
+            await blockedWrite.WaitAsync(_timeout);
+            if (kind == DatabaseEngineWorkerKind.PageWriteBack)
+            {
+                await CheckpointPace.HoldPageWritesAsync((SqlPageWriteBackWorker)WorkerOf(engine, kind),
+                    failing, faults, () => InsertAsync(failing, -1, 1));
+            }
+            else if (kind == DatabaseEngineWorkerKind.WriteAheadFlush)
+            {
+                faults.StallJournalFlushes();
+                blockedWrite = DedicatedTestTask.Run(() => InsertAsync(failing, -1, 1));
+            }
+            else { faults.StallPurges(); }
+            (await Eventually(() => faults.StalledPageWrites + faults.StalledJournalFlushes + faults.StalledPurges == 1)).ShouldBeTrue();
             disposal = DedicatedTestTask.Run(async () => await engine.DisposeAsync());
             (await Eventually(() => engine.State == EngineState.Disposed)).ShouldBeTrue();
             disposal.IsCompleted.ShouldBeFalse("engine disposal must join the held lane before closing storage");
@@ -1003,9 +1037,8 @@ public sealed class SqlWorkerResilienceTests
             // the dispatch hook, modeling an unbounded apply/storage latch without a new API.
             if (kind == DatabaseEngineWorkerKind.PageWriteBack)
             {
-                faults.StallPageWrites();
-                await InsertAsync(failing, 0, 1);
                 var worker = (SqlPageWriteBackWorker)WorkerOf(engine, kind);
+                await CheckpointPace.HoldPageWritesAsync(worker, failing, faults, () => InsertAsync(failing, 0, 1));
                 await CheckpointPace.VerifyIsolationAsync(worker, failingDatabaseName, healthyDatabaseName, faults,
                     () => faults.StalledPageWrites, id => InsertAsync(healthy, id, 1), InspectDisposalAsync);
                 strategy.Faults(healthyDatabaseName).PageWrites.ShouldBeGreaterThan(written);
@@ -1030,9 +1063,17 @@ public sealed class SqlWorkerResilienceTests
             {
                 faults.StallPurges();
                 var worker = (SqlIndexMaintenanceWorker)WorkerOf(engine, kind);
-                worker.BeforeDatabase = database => { if (ReferenceEquals(database, failing)) { faults.BeforePurge(); } };
+                var work = new ConcurrentQueue<int>();
+                // Compaction is a documented stub. Exercise real I/O on its dispatched lane
+                // through the existing hook, then pair each result with its collected visit.
+                worker.BeforeDatabase = database =>
+                {
+                    if (ReferenceEquals(database, failing)) { faults.BeforePurge(); }
+                    else if (ReferenceEquals(database, healthy)) { work.Enqueue(healthy.DataStorage.WriteBackDirtyPages(128)); }
+                };
                 await CheckpointPace.VerifyIsolationAsync(worker, failingDatabaseName, healthyDatabaseName, faults,
-                    () => faults.StalledPurges, id => InsertAsync(healthy, id, 1), InspectDisposalAsync);
+                    () => faults.StalledPurges, id => InsertAsync(healthy, id, 1), InspectDisposalAsync,
+                    () => work.TryDequeue(out int units) ? units : 0);
             }
         }
         finally
@@ -1122,9 +1163,6 @@ public sealed class SqlWorkerResilienceTests
     // Journal size used to exercise checkpoint lanes and failure retries.
     private const long paceJournalSize = 64 * 1024;
 
-    // How long the hung-fsync test writes to the healthy database while the other one's fsync hangs.
-    private static readonly TimeSpan _stallWindow = TimeSpan.FromSeconds(5);
-
     // The worker failure minimum of passes and the journal cap are out of reach unless a test sets
     // them (owner decisions 25 and 42): the retry tests keep a database failing for seconds on purpose, and the pace
     // pace test observes its failures, retries and backoff skips.
@@ -1158,18 +1196,14 @@ public sealed class SqlWorkerResilienceTests
         }
     }
 
-    private static async Task<List<TimeSpan>> TimedInsertsAsync(SqlDatabase database, int count)
+    private static async Task WriteGroupedInsertsAsync(SqlDatabase database, int count)
     {
-        var latencies = new List<TimeSpan>();
         await using var session = await database.CreateSessionAsync();
         for (int id = 0; id < count; id++)
         {
-            var watch = Stopwatch.StartNew();
             await session.ExecuteAsync($"INSERT INTO t (id, payload) VALUES ({id}, 'grouped')");
-            latencies.Add(watch.Elapsed);
         }
 
-        return latencies;
     }
 
     private static async Task<long> CountAsync(SqlDatabase database)

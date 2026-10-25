@@ -19,14 +19,16 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 [Collection(nameof(SqlWorkerResilienceTests))]
 public sealed class ProvisionalFlushLaneTests
 {
-    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Provisional flush: collection rechecks commits and publication preserves file-set lane ownership")]
-    public async Task Run_CommitAfterDetachedProvisionalFlush_ShouldRecheckWithoutOverlappingPublication()
+    [Theory(DisplayName = "Cohesion Test [Database.Sql] - Provisional flush: collection rechecks commits and publication preserves file-set lane ownership")]
+    [InlineData(0)]
+    [InlineData(3000)]
+    public async Task Run_CommitAfterDetachedProvisionalFlush_ShouldRecheckWithoutOverlappingPublication(int pumpPauseMilliseconds)
     {
-        await VerifyTransitionAsync(publish: false);
-        await VerifyTransitionAsync(publish: true);
+        await VerifyTransitionAsync(publish: false, pumpPauseMilliseconds);
+        await VerifyTransitionAsync(publish: true, pumpPauseMilliseconds);
     }
 
-    private static async Task VerifyTransitionAsync(bool publish)
+    private static async Task VerifyTransitionAsync(bool publish, int pumpPauseMilliseconds)
     {
         // Arrange: hold publication after construction's normal commits. The real WAL pump
         // still sees the provisional storage snapshot while the engine registry lock is held.
@@ -34,7 +36,8 @@ public sealed class ProvisionalFlushLaneTests
         await using var engine = SqlDatabaseEngine.Create("provisional-lane", new SqlDatabaseEngineOptions
         {
             StorageStrategy = strategy, Durability = StorageCommitDurability.Grouped,
-            GroupCommitWindow = TimeSpan.FromSeconds(5), CheckpointInterval = TimeSpan.FromHours(1),
+            // Self-help must remain beyond the 30 s hang guard, including a paused pump.
+            GroupCommitWindow = TimeSpan.FromSeconds(35), CheckpointInterval = TimeSpan.FromHours(1),
             PageWriteBackInterval = TimeSpan.FromHours(1), MaintenanceInterval = TimeSpan.FromHours(1),
         });
         using var publicationEntered = new ManualResetEventSlim();
@@ -46,7 +49,19 @@ public sealed class ProvisionalFlushLaneTests
         strategy.BeforeCreationComplete = () => { publicationEntered.Set(); publishRelease.Wait(); };
         var worker = engine.Workers.OfType<SqlWriteAheadFlushWorker>().Single();
         var passes = new ConcurrentQueue<DatabaseWorkerPass>();
-        worker.PassCompleted = passes.Enqueue;
+        int pauseNextRunning = 0;
+        int paused = 0;
+        worker.PassCompleted = pass =>
+        {
+            passes.Enqueue(pass);
+            if (Volatile.Read(ref pauseNextRunning) != 0
+                && pass.Visits.Any(visit => visit.Reason == DatabaseWorkerPass.VisitReason.Running)
+                && Interlocked.CompareExchange(ref paused, 1, 0) == 0)
+            {
+                // A busy runner may pause after publishing the held visit, before collection.
+                Thread.Sleep(pumpPauseMilliseconds);
+            }
+        };
         var create = DedicatedTestTask.Run(async () => await engine.CreateDatabaseAsync("constructing"));
         Task first = Task.CompletedTask;
         Task second = Task.CompletedTask;
@@ -84,6 +99,7 @@ public sealed class ProvisionalFlushLaneTests
             var pending = storage.OnCommitPending;
             storage.OnCommitPending = () => { pending?.Invoke(); registered.Set(); };
             int before = passes.Count;
+            Volatile.Write(ref pauseNextRunning, 1);
             second = DedicatedTestTask.Run(CommitEmpty);
             registered.Wait(TimeSpan.FromSeconds(30)).ShouldBeTrue();
             string expectedVisit = publish ? "constructing" : "constructing (provisional)";
@@ -91,7 +107,7 @@ public sealed class ProvisionalFlushLaneTests
             while (!passes.Skip(before).Any(pass => pass.Visits.Any(visit =>
                 visit.Database == expectedVisit && !visit.Attempted
                 && visit.Reason == DatabaseWorkerPass.VisitReason.Running))
-                && duration.Elapsed < TimeSpan.FromSeconds(2)) { await Task.Delay(5); }
+                && duration.Elapsed < TimeSpan.FromSeconds(30)) { await Task.Delay(5); }
 
             // Assert: publication cannot start a second flusher for the same file set.
             publishedAttempts.ShouldBe(0);
@@ -99,7 +115,8 @@ public sealed class ProvisionalFlushLaneTests
                 && !visit.Attempted && visit.Reason == DatabaseWorkerPass.VisitReason.Running)).ShouldBeTrue();
             second.IsCompleted.ShouldBeFalse();
             flushRelease.Set();
-            await second.WaitAsync(TimeSpan.FromSeconds(2));
+            await second.WaitAsync(TimeSpan.FromSeconds(30));
+            Volatile.Read(ref paused).ShouldBe(1);
             commits.MissedCount("constructing").ShouldBe(0);
         }
         finally

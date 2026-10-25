@@ -158,80 +158,161 @@ internal static class CheckpointPace
             laneBudget, "healthy lane wait");
     }
 
-    // Observe real pump passes while a device or apply-gate surrogate stays held. Physical
-    // progress alone could come from committer self-help; attempted/collected worker visits
-    // prove this worker made progress. Aggregate timing catches persistent scheduling mutants.
-    internal static async Task VerifyIsolationAsync<TResult>(DatabaseLaneWorker<TResult> worker,
-        string failingName, string healthyName, DeviceFaults faults, Func<int> stalled,
-        Func<int, Task> writeHealthy, Func<Task>? beforeRelease = null)
+    // Hold dispatch before dirtying the database. Arming device I/O first can leave the
+    // foreground writer waiting on the page latch that the deliberately stalled lane owns.
+    internal static async Task HoldPageWritesAsync<TDatabase>(DatabaseWriteWorker<TDatabase> worker,
+        TDatabase database, DeviceFaults faults, Func<Task> write)
+        where TDatabase : class
     {
-        var passes = new ConcurrentQueue<DatabaseWorkerPass>();
-        worker.PumpBackoffObserved = true;
-        using var pump = WorkerPumpObservation.Create(worker, worker.RecordPumpBackoff, worker.RecordTriggerElapsed);
-        worker.PassCompleted = passes.Enqueue;
+        var hangGuard = TimeSpan.FromSeconds(30);
         var duration = Stopwatch.StartNew();
-        int writes = 0;
+        Task writing = Task.CompletedTask;
+        bool armed = false;
+        faults.StallPurges();
+        worker.BeforeDatabase = current => { if (ReferenceEquals(current, database)) { faults.BeforePurge(); } };
         try
         {
-            while (stalled() == 0 && duration.Elapsed < TimeSpan.FromSeconds(30)) { await Task.Delay(5); }
-            stalled().ShouldBe(1, "the fault must hold actual work");
-            do
-            {
-                await writeHealthy(writes++).WaitAsync(TimeSpan.FromSeconds(30));
-                await Task.Delay(5);
-            }
-            while ((duration.Elapsed < TimeSpan.FromMilliseconds(250)
-                || passes.Count(pass => pass.Visits.Any(visit => visit.Database == failingName
-                    && visit.Reason == DatabaseWorkerPass.VisitReason.Running)) < minimumSamples
-                || passes.Count(pass => pass.Visits.Any(visit => visit.Database == healthyName
-                    && (visit.Attempted || visit.Collected) && visit.Reason == DatabaseWorkerPass.VisitReason.Completed)) < minimumSamples
-                || (worker.Kind != DatabaseEngineWorkerKind.IndexMaintenance
-                    && passes.Count(pass => pass.Visits.Any(visit => visit.Database == failingName
-                        && visit.Reason == DatabaseWorkerPass.VisitReason.Running)
-                        && pass.Visits.Any(visit => visit.Database == healthyName && visit.WorkUnits > 0)) < 4)
-                || passes.Count(pass => pass.TriggerMeasured && pass.PumpElapsed.HasValue) < minimumSamples)
-                && duration.Elapsed < TimeSpan.FromSeconds(30));
-
-            stalled().ShouldBe(1, "healthy work must progress before releasing the stalled database");
-            var recorded = passes.ToArray();
-            var isolated = recorded.Where(pass => pass.Visits.Any(visit => visit.Database == failingName
-                && visit.Reason == DatabaseWorkerPass.VisitReason.Running)).ToArray();
-            isolated.Length.ShouldBeGreaterThanOrEqualTo(minimumSamples);
-            isolated.Count(pass => pass.Visits.Any(visit => visit.Database == healthyName
-                && (visit.Attempted || visit.Collected) && visit.Reason == DatabaseWorkerPass.VisitReason.Completed))
-                .ShouldBeGreaterThanOrEqualTo(minimumSamples);
-            foreach (var pass in isolated)
-            {
-                pass.PassThrew.ShouldBeFalse();
-                pass.PumpBackoff.ShouldBe(TimeSpan.Zero);
-                var healthy = pass.Visits.Single(visit => visit.Database == healthyName);
-                healthy.Backoff.ShouldBe(TimeSpan.Zero);
-                if (healthy.Reason == DatabaseWorkerPass.VisitReason.NotDue)
-                {
-                    healthy.WorkDue.ShouldBe(false, "the pump must provide its due decision for an idle visit");
-                }
-                else { (healthy.Attempted || healthy.Collected || healthy.Reason == DatabaseWorkerPass.VisitReason.Running).ShouldBeTrue(); }
-            }
-            if (worker.Kind != DatabaseEngineWorkerKind.IndexMaintenance)
-            {
-                isolated.Count(pass => pass.Visits.Any(visit => visit.Database == healthyName && visit.WorkUnits > 0))
-                    .ShouldBeGreaterThanOrEqualTo(4, "actual worker I/O or full purge, not committer self-help");
-            }
-            var budget = TimeSpan.FromMilliseconds(100);
-            VerifyDurations(isolated.Select(pass => pass.Elapsed), budget, "isolated whole pass");
-            VerifyDurations(isolated.Where(pass => pass.PumpElapsed.HasValue).Select(pass => pass.PumpElapsed!.Value), budget, "isolated pump pace");
-            VerifyDurations(isolated.Where(pass => pass.TriggerMeasured).Select(pass => pass.TriggerElapsed), budget, "isolated trigger wait");
-            VerifyDurations(isolated.SelectMany(pass => pass.Visits).Where(visit => visit.Database == healthyName)
-                .Select(visit => visit.LaneWait), budget, "isolated healthy lane wait");
-            pump.Failure.ShouldBeNull();
-            worker.PassObserverFailure.ShouldBeNull();
-            worker.FailureCount.ShouldBe(0);
-            if (beforeRelease is not null) { await beforeRelease(); }
+            while (faults.StalledPurges == 0 && duration.Elapsed < hangGuard) { await Task.Delay(5); }
+            faults.StalledPurges.ShouldBe(1, "hold the dispatched runner before touching storage");
+            writing = DedicatedTestTask.Run(write);
+            await writing.WaitAsync(hangGuard);
+            faults.StallPageWrites();
+            faults.ReleasePurges();
+            while ((faults.StalledPurges != 0 || faults.StalledPageWrites == 0) && duration.Elapsed < hangGuard) { await Task.Delay(5); }
+            faults.StalledPurges.ShouldBe(0);
+            faults.StalledPageWrites.ShouldBe(1, "the prepared dirty page must reach the held device");
+            armed = true;
         }
         finally
         {
-            worker.PassCompleted = null;
+            if (!armed) { faults.Clear(); }
+            await writing.WaitAsync(hangGuard);
+        }
+    }
+
+    // K = 4 positive-work completions, each published while exactly one device/lane runner
+    // remains behind the test's gate. The 30 s ceiling is only a hang guard, never a pace floor.
+    // Measured durations are diagnostic; scheduling decisions are checked through wait counters.
+    internal static async Task VerifyIsolationAsync<TResult>(DatabaseLaneWorker<TResult> worker,
+        string failingName, string healthyName, DeviceFaults faults, Func<int> stalled,
+        Func<int, Task> writeHealthy, Func<Task>? afterResume = null, Func<int>? completedHealthyWork = null)
+    {
+        const int requiredCompletions = 4;
+        var hangGuard = TimeSpan.FromSeconds(30);
+        var passes = new ConcurrentQueue<(DatabaseWorkerPass Pass, int HealthyUnits)>();
+        int pumpBackoffRequests = 0;
+        int positiveCompletions = 0;
+        int observedIsolation = 0;
+        int counting = 0;
+        int resumed = 0;
+        long releasedAfter = long.MaxValue;
+        string? isolationFailure = null;
+        bool IsIsolated(DatabaseWorkerPass pass) => pass.Visits.Any(visit => visit.Database == failingName
+            && !visit.Attempted && visit.Reason == DatabaseWorkerPass.VisitReason.Running);
+        worker.PumpBackoffObserved = true;
+        using var pump = WorkerPumpObservation.Create(worker, requested =>
+        {
+            Interlocked.Increment(ref pumpBackoffRequests);
+            worker.RecordPumpBackoff(requested);
+        }, worker.RecordTriggerElapsed);
+        worker.PassCompleted = pass =>
+        {
+            var healthy = pass.Visits.SingleOrDefault(visit => visit.Database == healthyName);
+            // Index compaction is a documented stub. Its fixture performs real page write-back
+            // in BeforeDatabase and supplies that lane's FIFO result only after it is collected.
+            int units = healthy?.Reason == DatabaseWorkerPass.VisitReason.Completed
+                ? completedHealthyWork?.Invoke() ?? healthy.WorkUnits : 0;
+            passes.Enqueue((pass, units));
+            // A skipped-work mutant can spin the pump. Bound diagnostics independently of
+            // cumulative progress so neither memory nor assertion cost grows with pass count.
+            while (passes.Count > 64) { passes.TryDequeue(out _); }
+            if (IsIsolated(pass))
+            {
+                Volatile.Write(ref observedIsolation, 1);
+                if (Volatile.Read(ref counting) != 0)
+                {
+                    var held = pass.Visits.Single(visit => visit.Database == failingName);
+                    bool invalid = pass.PassThrew || pass.Cancelled
+                        || pass.Visits.Any(visit => visit.Reason == DatabaseWorkerPass.VisitReason.Failed
+                            || visit.Offline || visit.GiveUpRequested)
+                        || held.LaneWaits != 0 || healthy is null
+                        || healthy.LaneWaits > (healthy.Attempted ? 1 : 0)
+                        || healthy.Reason is DatabaseWorkerPass.VisitReason.BackingOff or DatabaseWorkerPass.VisitReason.Capacity
+                        || (healthy.Reason == DatabaseWorkerPass.VisitReason.NotDue && healthy.WorkDue != false);
+                    if (invalid && Volatile.Read(ref isolationFailure) is null)
+                    {
+                        Interlocked.CompareExchange(ref isolationFailure, $"invalid isolated pass {pass.Number}: "
+                            + string.Join(", ", pass.Visits.Select(visit =>
+                                $"{visit.Database} {visit.Reason} waits={visit.LaneWaits} offline={visit.Offline} giveUp={visit.GiveUpRequested}")), null);
+                    }
+                    if (units > 0 && healthy is { Reason: DatabaseWorkerPass.VisitReason.Completed }
+                        && (healthy.Attempted || healthy.Collected))
+                    {
+                        Interlocked.Increment(ref positiveCompletions);
+                    }
+                }
+            }
+            if (pass.Number > Volatile.Read(ref releasedAfter) && pass.Visits.Any(visit => visit.Database == failingName
+                && (visit.Attempted || visit.Collected) && visit.Reason == DatabaseWorkerPass.VisitReason.Completed))
+            {
+                Volatile.Write(ref resumed, 1);
+            }
+        };
+        var duration = Stopwatch.StartNew();
+        Task writing = Task.CompletedTask;
+        int writes = 0;
+        int Progress() => Volatile.Read(ref positiveCompletions);
+        string Evidence() => $"{worker.Kind}: {Progress()}/{requiredCompletions} positive-work completions; "
+            + $"held runners {stalled()}; elapsed {duration.Elapsed}; "
+            + string.Join("; ", passes.TakeLast(8).Select(sample => $"pass {sample.Pass.Number} ({sample.Pass.Elapsed}): "
+                + string.Join(", ", sample.Pass.Visits.Select(visit => $"{visit.Database} {visit.Reason} units={visit.WorkUnits} waits={visit.LaneWaits}"))));
+        try
+        {
+            // Act: keep the fault held until progress is proved, even on a slow scheduler/device.
+            while (stalled() == 0 && duration.Elapsed < hangGuard) { await Task.Delay(5); }
+            stalled().ShouldBe(1, Evidence());
+            // Let one complete pass collect any outcome left over from database creation.
+            // Every subsequent positive completion then belongs to work performed under the gate.
+            while (Volatile.Read(ref observedIsolation) == 0 && duration.Elapsed < hangGuard) { await Task.Delay(5); }
+            Volatile.Read(ref observedIsolation).ShouldBe(1, Evidence());
+            passes.Clear();
+            Volatile.Write(ref counting, 1);
+            do
+            {
+                stalled().ShouldBe(1, Evidence());
+                int id = writes++;
+                writing = DedicatedTestTask.Run(() => writeHealthy(id));
+                await writing.WaitAsync(hangGuard);
+                await Task.Delay(5);
+            }
+            while (Progress() < requiredCompletions && duration.Elapsed < hangGuard);
+
+            // Assert before releasing: only this worker's completed, positive work counts.
+            Volatile.Write(ref counting, 0);
+            stalled().ShouldBe(1, Evidence());
+            Progress().ShouldBeGreaterThanOrEqualTo(requiredCompletions, Evidence());
+            Volatile.Read(ref isolationFailure).ShouldBeNull(Evidence());
+            pump.Failure.ShouldBeNull();
+            worker.PassObserverFailure.ShouldBeNull();
+            Volatile.Read(ref pumpBackoffRequests).ShouldBe(0, Evidence());
+
+            Volatile.Write(ref releasedAfter, passes.Last().Pass.Number);
             faults.Clear();
+            duration.Restart();
+            // A long-held gate can legitimately report a stuck-lane advisory. Collection and
+            // root settlement must clear it; its lifetime count is not an operational failure.
+            while ((Volatile.Read(ref resumed) == 0 || stalled() != 0 || worker.Fault is not null) && duration.Elapsed < hangGuard) { await Task.Delay(5); }
+            Volatile.Read(ref resumed).ShouldBe(1, "the held worker must complete after release; " + Evidence());
+            stalled().ShouldBe(0);
+            worker.Fault.ShouldBeNull(Evidence());
+            Volatile.Read(ref pumpBackoffRequests).ShouldBe(0, Evidence());
+            if (afterResume is not null) { await afterResume(); }
+        }
+        finally
+        {
+            faults.Clear();
+            await writing.WaitAsync(hangGuard);
+            worker.PassCompleted = null;
         }
     }
 
