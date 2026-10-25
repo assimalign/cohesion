@@ -1,5 +1,7 @@
 using System;
 
+using Assimalign.Cohesion.Database.Graph.Internal;
+
 namespace Assimalign.Cohesion.Database.Graph;
 
 /// <summary>A borrowed, typed view of one callback's query arguments.</summary>
@@ -27,6 +29,14 @@ public readonly ref struct GraphArguments
         object? value = _values[index];
         if (value is null && default(T) is not null) { throw new InvalidCastException(ErrorMessages.FunctionTypeUnsupported); }
         return (T)value!;
+    }
+    // Adapter-owned conversion precedes the application delegate. A cast failure here is
+    // an input value failure; an InvalidCastException from the delegate remains CG05021.
+    internal T GetParameter<T>(int index)
+    {
+        try { return Get<T>(index); }
+        catch (InvalidCastException error)
+        { throw new GraphPlanningException("CG02013", ErrorMessages.FunctionArgumentConversion, innerException: error); }
     }
     /// <summary>Gets whether an argument is NULL.</summary><param name="index">The ordinal.</param><returns>Whether NULL.</returns>
     public bool IsNull(int index) => _values[index] is null;

@@ -11,7 +11,7 @@ internal sealed class GraphTypedScalarFunction<T1, T2, T3, TResult> : GraphScala
     internal GraphTypedScalarFunction(GraphFunctionName name, Func<T1, T2, T3, TResult> body, GraphNullBehavior nullBehavior)
         : base(name, [GraphFunctionType.Parameter<T1>(nullBehavior), GraphFunctionType.Parameter<T2>(nullBehavior), GraphFunctionType.Parameter<T3>(nullBehavior)], GraphFunctionType.Of<TResult>(), nullBehavior)
     { ArgumentNullException.ThrowIfNull(body); _body = body; }
-    protected override object? InvokeCore(scoped in GraphArguments arguments) => _body(arguments.Get<T1>(0), arguments.Get<T2>(1), arguments.Get<T3>(2));
+    protected override object? InvokeCore(scoped in GraphArguments arguments) => _body(arguments.GetParameter<T1>(0), arguments.GetParameter<T2>(1), arguments.GetParameter<T3>(2));
     private sealed class DebugView
     {
         private readonly GraphTypedScalarFunction<T1, T2, T3, TResult> _target;

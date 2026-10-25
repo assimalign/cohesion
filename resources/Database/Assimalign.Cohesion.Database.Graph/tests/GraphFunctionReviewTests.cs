@@ -144,6 +144,45 @@ public sealed class GraphFunctionReviewTests
         calls.ShouldBe(0);
     }
 
+    [Theory(DisplayName = "Cohesion Test [Graph] - Functions: adapter conversions fail with a value code before scalar or aggregate delegates run")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Invoke_TypedArrayConversion_ShouldUseValueCodeBeforeDelegate(bool aggregate)
+    {
+        // Arrange
+        int calls = 0;
+        GraphFunction function = aggregate
+            ? GraphAggregateFunction.Create<long, object[], long>("array_input", () => 0L, (total, _) => { calls++; return total; }, total => total, _ => 8)
+            : GraphScalarFunction.Create<object[], long>("array_input", _ => ++calls);
+
+        // Act
+        var failure = Should.Throw<DatabaseException>(() => InvokeArray(function));
+
+        // Assert
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG02013");
+        failure.InnerException.ShouldBeOfType<InvalidCastException>();
+        calls.ShouldBe(0);
+
+        var bodyFailure = new InvalidCastException("application cast failed");
+        GraphFunction failingBody = aggregate
+            ? GraphAggregateFunction.Create<long, object[], long>("array_body", () => 0L, (_, _) => throw bodyFailure, total => total, _ => 8)
+            : GraphScalarFunction.Create<object[], long>("array_body", _ => throw bodyFailure);
+        var callbackFailure = Should.Throw<DatabaseException>(() => InvokeArray(failingBody, valid: true));
+        callbackFailure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG05021");
+        callbackFailure.InnerException.ShouldBeSameAs(bodyFailure);
+    }
+
+    private static void InvokeArray(GraphFunction function, bool valid = false)
+    {
+        // A query list is a valid shape, but List<object> cannot be read as the typed object[] parameter.
+        object value = valid ? new object?[] { 1L } : new List<object?> { 1L };
+        var arguments = new GraphArguments(new object?[] { value });
+        if (function is GraphScalarFunction scalar) { scalar.Invoke(in arguments); return; }
+        GraphFunctionContext context = default;
+        using var state = ((GraphAggregateFunction)function).CreateAccumulator(in context);
+        state.Add(in arguments);
+    }
+
     private static async Task<object?[]> Rows(GraphDatabaseSession session, string text)
     {
         await using var result = (DatabaseResultSet)await session.ExecuteAsync(text, cancellationToken: CancellationToken.None);

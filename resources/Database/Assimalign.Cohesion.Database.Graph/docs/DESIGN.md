@@ -2979,7 +2979,7 @@ Graph registration Add returns its collection and duplicate application signatur
 InvalidOperationException. ReturnsNullOnNullInput is the shared NULL-policy spelling. Typed numeric
 adapters accept Int64, Double and Decimal (including nullable forms); small, unsigned and Single
 CLR types are refused at creation. CalledOnNullInput rejects nonnullable value arguments at creation.
-Dynamic argument mismatches use CG02013 before callback entry. Result-contract validation rejects
+Dynamic argument mismatches, including adapter-owned CLR casts, use CG02013 before callback entry. Result-contract validation rejects
 non-finite numeric leaves, including in nested values, and Any retains arbitrary container depth.
 Application call appearances are never merged by structural grouping/projection reuse: each
 aggregate appearance evaluates its arguments once per input row and owns its group state.

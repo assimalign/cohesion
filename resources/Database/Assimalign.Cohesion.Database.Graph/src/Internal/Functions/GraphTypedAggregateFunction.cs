@@ -31,7 +31,7 @@ internal sealed class GraphTypedAggregateFunction<TState, T1, TResult> : GraphAg
         private readonly Func<TState, long> _retainedBytes;
         internal Accumulator(TState state, Func<TState, T1, TState> step, Func<TState, TResult> finish, Func<TState, long> retainedBytes)
         { _state = state; _step = step; _finish = finish; _retainedBytes = retainedBytes; }
-        protected override void AddCore(scoped in GraphArguments arguments) => _state = _step(_state, arguments.Get<T1>(0));
+        protected override void AddCore(scoped in GraphArguments arguments) => _state = _step(_state, arguments.GetParameter<T1>(0));
         protected override object? FinishCore() => _finish(_state);
         protected override long RetainedBytesCore => _retainedBytes(_state);
         protected override void DisposeCore() { _state = default!; }
