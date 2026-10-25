@@ -63,7 +63,10 @@ reports through the existing cache result vocabulary rather than an exception di
 
 ## Sql migration
 
-SQL syntax uses `CS00001`–`CS00099`; `CS00100` retains the recognized-unsupported profile condition.
+SQL syntax uses `CS00001`–`CS00099`. `CS00009` is the informational note for an omitted
+statement semicolon; it does not refuse parsing or execution. `CS00100` is retired and reserved:
+the migration described it as a profile refusal, but the parser used it for this note.
+Recognized unsupported clauses use `CK00001`.
 Within category 03, condition bands 000–099 cover catalog/DDL, 100–199 provisioning,
 200–299 declared scripts, 300–399 registered definitions, and 400–499 generic constraint failures.
 These bands make allocation predictable while callers continue to match the complete identity.
@@ -80,7 +83,7 @@ structured-carrier messages remain unprefixed.
 | SQL0006 | CS00006 | Language/syntax |
 | SQL0007 | CS00007 | Language/syntax |
 | SQL0008 | CS00008 | Language/syntax |
-| SQL0100 | CS00100 | Language/syntax |
+| SQL0100 / CS00100 (retired) | CS00009 | Language/syntax — omitted semicolon (Information) |
 | COHSQLE005 | CS01005 | Binding/names |
 | COHSQLE006 | CS01006 | Binding/names |
 | COHSQLE008 | CS01008 | Binding/names |

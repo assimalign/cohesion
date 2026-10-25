@@ -85,7 +85,12 @@ internal sealed partial class SqlPlanExecutor
         }
         if (plan.Steps.Count == 0)
         {
-            foreach (var row in ReadInput(0)) { yield return row; }
+            var work = statement.Metrics.Analysis(plan);
+            foreach (var row in ReadInput(0))
+            {
+                if (work is not null) { work.Candidates++; }
+                yield return row;
+            }
             yield break;
         }
         var accesses = new SqlJoinIndexPath?[plan.Steps.Count];

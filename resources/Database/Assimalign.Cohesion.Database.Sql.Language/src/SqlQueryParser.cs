@@ -257,7 +257,7 @@ public sealed partial class SqlQueryParser : QueryParser
         {
             statement.AddDiagnostic(new Diagnostic
             {
-                Code = "CS00100",
+                Code = "CS00009",
                 Message = ErrorMessages.SqlQueryParserParseCoreDiagnostic3,
                 Start = _lastTokenEnd,
                 End = _lastTokenEnd,

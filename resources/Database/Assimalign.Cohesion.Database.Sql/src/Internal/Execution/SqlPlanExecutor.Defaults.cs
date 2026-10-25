@@ -46,10 +46,10 @@ internal sealed partial class SqlPlanExecutor
     /// <param name="deleter">The record's deleter stamp.</param>
     /// <returns>The row's values.</returns>
     /// <exception cref="StorageCorruptionException">The confirmed record does not decode through the table's definition.</exception>
-    private object?[]? DecodeRow(ReadOnlyMemory<byte> record, PageId pageId, int slotIndex, SqlCatalogTable table,
+    private object?[] DecodeRow(ReadOnlyMemory<byte> record, PageId pageId, int slotIndex, SqlCatalogTable table,
         IReadOnlyList<SqlBoundExpression?> defaults, out TransactionSequence writer, out TransactionSequence deleter)
     {
-        object?[]? values;
+        object?[] values;
         int storedColumnCount;
 
         try

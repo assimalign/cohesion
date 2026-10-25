@@ -115,7 +115,6 @@ internal sealed partial class SqlPlanExecutor
                     var (pageId, slotIndex) = SqlRecordLocation.Unpack(reference);
                     if (!_storage.TryReadRecord(pageId, slotIndex, table.ObjectId, out var record)) { throw DamagedRow(); }
                     var oldValues = DecodeRow(record, pageId, slotIndex, table, bound.MissingValues, out var writer, out _);
-                    if (oldValues is null) { throw DamagedRow(); }
                     if (statement.Transaction.IsolationLevel != IsolationLevel.ReadCommitted && !statement.Snapshot.IsVisible(writer))
                     { throw SnapshotConflict(); }
                     if (!plan.DoUpdate) { continue; }

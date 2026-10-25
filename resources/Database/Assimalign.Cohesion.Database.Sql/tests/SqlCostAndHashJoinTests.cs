@@ -145,8 +145,16 @@ public sealed class SqlCostAndHashJoinTests
     [InlineData(0)]
     [InlineData(-1)]
     public void Create_NonpositiveMemoryBudget_ShouldRefuse(long bytes)
-        => Should.Throw<ArgumentOutOfRangeException>(() => SqlDatabaseEngine.Create("invalid-budget", new() { StatementMemoryBudget = bytes }))
-            .ParamName.ShouldBe(nameof(SqlDatabaseEngineOptions.StatementMemoryBudget));
+    {
+        // Arrange / Act
+        var failure = Should.Throw<ArgumentOutOfRangeException>(() => SqlDatabaseEngine.Create("invalid-budget", new() { StatementMemoryBudget = bytes }));
+
+        // Assert
+        failure.ParamName.ShouldBe(nameof(SqlDatabaseEngineOptions.StatementMemoryBudget));
+        failure.Message.ShouldContain("invalid-budget", Case.Sensitive);
+        failure.Message.ShouldContain("SQL", Case.Sensitive);
+        failure.ActualValue.ShouldBe(bytes);
+    }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - Join costing: a smaller indexed driver wins independently of index name (#1522)")]
     public async Task ExecuteAsync_BothSidesIndexed_ShouldDriveTheSmallerInput()

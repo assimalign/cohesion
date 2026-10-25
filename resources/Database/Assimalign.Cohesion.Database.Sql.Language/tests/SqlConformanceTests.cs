@@ -171,8 +171,8 @@ public class SqlConformanceTests
     {
         Parse("MERGE INTO t;").Diagnostics.ShouldContain(d => d.Code == "CS00002");
         Parse("").Diagnostics.ShouldContain(d => d.Code == "CS00001");
-        Parse("SELECT 1").Diagnostics.ShouldContain(d => d.Code == "CS00100");
-        Parse("SELECT 1;").Diagnostics.ShouldNotContain(d => d.Code == "CS00100");
+        Parse("SELECT 1").Diagnostics.ShouldContain(d => d.Code == "CS00009");
+        Parse("SELECT 1;").Diagnostics.ShouldNotContain(d => d.Code == "CS00009");
     }
 
     // ── Literal handling (#174) ────────────────────────────────────────
