@@ -156,6 +156,48 @@ internal static class ResourceManagementDocuments
             writer.WriteEndObject();
         });
 
+    // A platform surface with its provenance: the value code declares, the generation's override when there is one,
+    // the value in force, and what the platform observes, such as an autoscaler's current replica count.
+    public static byte[] WritePlatformSurface(
+        ApplicationName application,
+        ResourceName resource,
+        ResourcePlatformSurface surface,
+        ResourceRecord? record,
+        JsonElement? @override,
+        JsonElement value,
+        JsonElement? observed) =>
+        Write(writer =>
+        {
+            writer.WriteStartObject();
+            writer.WriteString("application", application.ToString());
+            writer.WriteString("resource", resource.ToString());
+            writer.WriteString("surface", surface.Key.Value);
+            WriteRecordIdentity(writer, record);
+            writer.WritePropertyName("schema");
+            surface.Schema.WriteTo(writer);
+            writer.WritePropertyName("declared");
+            surface.Value.WriteTo(writer);
+            writer.WritePropertyName("override");
+            if (@override is JsonElement patch)
+            {
+                patch.WriteTo(writer);
+            }
+            else
+            {
+                writer.WriteNullValue();
+            }
+
+            writer.WritePropertyName("value");
+            value.WriteTo(writer);
+            if (observed is JsonElement platform)
+            {
+                writer.WritePropertyName("observed");
+                platform.WriteTo(writer);
+            }
+
+            writer.WriteEndObject();
+        });
+
     public static byte[] WriteClaims(ApplicationName owner, IReadOnlyList<string> sections, ResourceRecord record) =>
         Write(writer =>
         {

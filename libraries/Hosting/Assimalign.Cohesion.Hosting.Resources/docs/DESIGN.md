@@ -165,7 +165,10 @@ configuration merge, which flattens arrays into indexed keys and would leave sta
 `ResourceConfigurationRecord.Create(deployment, claims, override)` builds the same record from layer
 bytes in memory. It is public so a gateway computes the digest of the files it writes by the
 instance's own rule and compares an instance's `configuration/status` report with what it
-delivered; the gateway never re-implements the framing.
+delivered; the gateway never re-implements the framing. A layer holding an object with no members
+counts as absent in both, and is neither framed nor a claim owner: the Docker gateway withdraws a
+layer by writing `{}`, because the engine's archive API it delivers through cannot delete a file
+(phase P3).
 
 A section's state moves as records are applied:
 

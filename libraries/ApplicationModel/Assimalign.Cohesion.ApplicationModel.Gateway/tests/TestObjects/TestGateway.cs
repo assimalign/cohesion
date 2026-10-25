@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Security.Cryptography;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -30,6 +31,56 @@ internal sealed class TestGateway : ApplicationGateway
     public Func<IApplicationModel, IApplicationResource, IResourceControlPlane?>? DirectControlPlane { get; set; }
 
     public Func<ResourcePlan, TimeSpan>? ResourceReadinessBudget { get; set; }
+
+    public IResourceRecordStore? Records { get; set; }
+
+    public Func<IApplicationModel, IApplicationResourceDescriptor, IReadOnlyList<ResourcePlatformSurface>>? Surfaces { get; set; }
+
+    public Func<ResourcePlatformSurface, JsonElement?>? ObservedSurface { get; set; }
+
+    public Exception? ApplyFailure { get; set; }
+
+    public List<(ResourceExtensionKey Surface, string Value)> AppliedSurfaces { get; } = new();
+
+    public List<(ResourceRecord Previous, ResourceRecord Current)> RecordChanges { get; } = new();
+
+    protected override IResourceRecordStore? RecordStore => Records;
+
+    protected override IReadOnlyList<ResourcePlatformSurface> GetPlatformSurfaces(
+        IApplicationModel model, IApplicationResourceDescriptor descriptor) =>
+        Surfaces?.Invoke(model, descriptor) ?? base.GetPlatformSurfaces(model, descriptor);
+
+    protected override ValueTask ApplyPlatformSurfaceAsync(
+        IApplicationModel model,
+        IApplicationResourceDescriptor descriptor,
+        ResourcePlatformSurface surface,
+        JsonElement value,
+        CancellationToken cancellationToken)
+    {
+        AppliedSurfaces.Add((surface.Key, value.GetRawText()));
+        return ApplyFailure is null ? ValueTask.CompletedTask : ValueTask.FromException(ApplyFailure);
+    }
+
+    protected override ValueTask<JsonElement?> ObservePlatformSurfaceAsync(
+        IApplicationModel model,
+        IApplicationResourceDescriptor descriptor,
+        ResourcePlatformSurface surface,
+        CancellationToken cancellationToken) =>
+        ValueTask.FromResult(ObservedSurface?.Invoke(surface));
+
+    protected override ValueTask OnRecordChangedAsync(
+        IApplicationModel model,
+        IApplicationResourceDescriptor descriptor,
+        ResourceRecord previous,
+        ResourceRecord current,
+        CancellationToken cancellationToken)
+    {
+        RecordChanges.Add((previous, current));
+        return ValueTask.CompletedTask;
+    }
+
+    public static ResourceSurface? RuntimeSurfaceOf(IApplicationModel model, IApplicationResourceDescriptor descriptor) =>
+        GetRuntimeSurface(model, descriptor);
 
     protected override TimeSpan GetReadinessBudget(ResourcePlan plan) =>
         ResourceReadinessBudget?.Invoke(plan) ?? base.GetReadinessBudget(plan);

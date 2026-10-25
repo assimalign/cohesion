@@ -135,4 +135,16 @@
   <data name="ManagementActionInvoked" xml:space="preserve">
     <value>{0} ran action '{1}' on resource '{2}'; {3} of {4} instances succeeded.</value>
   </data>
+  <data name="ManagementPlatformPatchRejected" xml:space="preserve">
+    <value>Platform surface '{0}': {1}</value>
+  </data>
+  <data name="ManagementPlatformOverrideChanged" xml:space="preserve">
+    <value>{0} changed the override of platform surface '{1}' on resource '{2}' in generation {3}.</value>
+  </data>
+  <data name="ManagementDeliveryFailed" xml:space="preserve">
+    <value>The gateway stored a change to the {1} of resource '{0}', but the platform did not take it ({2}); it applies at the resource's next start or reconcile.</value>
+  </data>
+  <data name="ResourceRecordPlatformOverrideInvalid" xml:space="preserve">
+    <value>A platform override must name a platform surface and hold JSON of at most 1 MiB.</value>
+  </data>
 </root>

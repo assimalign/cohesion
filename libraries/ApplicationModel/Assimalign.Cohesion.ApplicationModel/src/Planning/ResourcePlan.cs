@@ -21,6 +21,7 @@ public sealed record ResourcePlan
 
     private readonly IReadOnlyDictionary<string, JsonElement> _configuration = _emptyMap;
     private readonly IReadOnlyDictionary<string, JsonElement> _extensions = _emptyMap;
+    private readonly WorkloadSpec _workload;
 
     /// <summary>Initializes a resource realization plan.</summary>
     /// <param name="schema">The plan schema identifier.</param>
@@ -97,7 +98,7 @@ public sealed record ResourcePlan
         Schema = schema;
         Resource = resource;
         Kind = kind;
-        Workload = workload;
+        _workload = workload;
         Container = container;
         ControlPlane = controlPlane ?? new ControlPlaneSpec();
         Volumes = Copy(volumes);
@@ -128,7 +129,12 @@ public sealed record ResourcePlan
     public ResourceGroupName? ResourceGroup { get; init; }
 
     /// <summary>Gets the workload specification.</summary>
-    public WorkloadSpec Workload { get; }
+    /// <exception cref="ArgumentNullException">An assigned workload is null.</exception>
+    public WorkloadSpec Workload
+    {
+        get => _workload;
+        init => _workload = value ?? throw new ArgumentNullException(nameof(value));
+    }
 
     /// <summary>Gets the resource container specification.</summary>
     public ContainerSpec Container { get; }

@@ -52,4 +52,10 @@
   <data name="SurfaceReferenceInvalid" xml:space="preserve"><value>The schema reference '{0}' cannot be resolved.</value></data>
   <data name="SurfaceValueTooDeep" xml:space="preserve"><value>The value at '{0}' is nested more than 64 levels deep.</value></data>
   <data name="SurfaceValueForbidden" xml:space="preserve"><value>The schema allows no value at '{0}'.</value></data>
+  <data name="ScaleBoundsUnsupported" xml:space="preserve"><value>Resource '{0}' declares scale bounds, but its workload kind '{1}' does not autoscale. Only Deployment and StatefulSet workloads accept bounds.</value></data>
+  <data name="ScaleBoundsInvalid" xml:space="preserve"><value>Resource '{0}' declares scale bounds {1} to {2}; the minimum must be at least 1 and the maximum at least the minimum.</value></data>
+  <data name="ScaleBoundsAboveCeiling" xml:space="preserve"><value>Resource '{0}' declares a scale maximum of {1}, above its manifest's maxReplicas of {2}.</value></data>
+  <data name="PlatformSurfaceSchemaInvalid" xml:space="preserve"><value>A platform surface schema must be a JSON object or a boolean schema.</value></data>
+  <data name="PlatformSurfaceValueInvalid" xml:space="preserve"><value>A platform surface value must be a JSON value.</value></data>
+  <data name="PlatformSurfaceValueRejected" xml:space="preserve"><value>The value code declares for platform surface '{0}' does not conform to its schema: {1}</value></data>
 </root>

@@ -132,6 +132,23 @@ public sealed class ResourceConfigurationRecordTests : IDisposable
         Should.Throw<InvalidDataException>(() => ResourceConfigurationRecord.Create(null, claims, null));
     }
 
+    [Fact(DisplayName = DisplayPrefix + "A layer holding an empty object sets nothing, so it counts as absent")]
+    public void Load_EmptyObjectLayers_ShouldMatchARecordWithoutThem()
+    {
+        // Arrange
+        Write("deployment.json", """{"Test:Policy":{"origins":["https://a.example"]}}""");
+        string without = ResourceConfigurationRecord.Load(_directory).Digest;
+        Write("override.json", "{}");
+        Write("claims.billing.json", " { } ");
+
+        // Act
+        ResourceConfigurationRecord record = ResourceConfigurationRecord.Load(_directory);
+
+        // Assert
+        record.Digest.ShouldBe(without);
+        record.ClaimOwners.ShouldBeEmpty();
+    }
+
     private void Write(string name, string content) =>
         File.WriteAllText(Path.Combine(_directory, name), content, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
 }

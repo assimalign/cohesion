@@ -748,12 +748,13 @@ internal sealed class ApplicationBuilder : IApplicationBuilder, IApplicationProv
             plan = plan with { ResourceGroup = descriptor.ResourceGroup };
             if (descriptor.Resource is PlannedResource declared)
             {
-                // The deployment layer and platform extensions are the application's declarations, not the
-                // planner's, so they join every plan here; the validator checks them against the surface.
+                // The deployment layer, platform extensions and scale bounds are the application's declarations, not
+                // the planner's, so they join every plan here; the validator checks them against the surface.
                 plan = plan with
                 {
                     Configuration = declared.GetConfiguration(),
                     Extensions = declared.GetExtensions(),
+                    Workload = declared.GetScale() is ScaleBounds scale ? plan.Workload with { Scale = scale } : plan.Workload,
                 };
             }
 

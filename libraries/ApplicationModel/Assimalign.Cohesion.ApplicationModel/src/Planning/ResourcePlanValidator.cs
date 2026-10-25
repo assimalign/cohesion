@@ -111,6 +111,34 @@ public static class ResourcePlanValidator
         ValidateProbes(plan, manifest);
         ValidateConfiguration(plan, manifest);
         ValidateExtensions(plan);
+        ValidateScale(plan, manifest);
+    }
+
+    // Bounds describe autoscaling a continuously running, replicated workload, under the manifest's ceiling.
+    private static void ValidateScale(ResourcePlan plan, ResourceManifest manifest)
+    {
+        if (plan.Workload.Scale is not ScaleBounds scale)
+        {
+            return;
+        }
+
+        if (plan.Workload.Kind is not (WorkloadKind.Deployment or WorkloadKind.StatefulSet))
+        {
+            throw new InvalidOperationException(string.Format(
+                System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ScaleBoundsUnsupported, manifest.Name, plan.Workload.Kind));
+        }
+
+        if (scale.Minimum < 1 || scale.Maximum < scale.Minimum)
+        {
+            throw new InvalidOperationException(string.Format(
+                System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ScaleBoundsInvalid, manifest.Name, scale.Minimum, scale.Maximum));
+        }
+
+        if (manifest.Lifecycle.MaxReplicas is int ceiling && scale.Maximum > ceiling)
+        {
+            throw new InvalidOperationException(string.Format(
+                System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ScaleBoundsAboveCeiling, manifest.Name, scale.Maximum, ceiling));
+        }
     }
 
     // Every deployment patch names a section of the manifest's runtime surface and conforms to its schema.

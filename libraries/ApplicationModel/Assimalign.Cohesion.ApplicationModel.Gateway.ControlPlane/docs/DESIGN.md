@@ -292,6 +292,10 @@ with `501`.
   manage that application's resources, and a peer issuer holds only the list its trust document names.
 - **Claims.** A claim belongs to the application whose code declares it, so `PUT claims/{owner}`
   requires the caller's application to be `{owner}`, and refuses anything else with `403`.
+- **Platform surfaces.** The body of `PATCH platform/{platform}/{extension}` is an RFC 7396 merge
+  patch that the gateway composes into the surface's stored override; a body of JSON `null` drops
+  the override, so the value code declares returns. The response carries the declared value, the
+  override, the value in force and what the platform observes.
 - **Results.** The provider returns a `ResourceManagementResult`; the server writes its document and
   maps its status: `Ok` is 200; invalid configuration or input 400; an unknown resource, section,
   action or platform surface 404; deployment-only, not overridable, not claimable or a claim

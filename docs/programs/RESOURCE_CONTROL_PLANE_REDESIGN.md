@@ -1,8 +1,10 @@
 # Resource control plane redesign: the deployment record
 
-Status: **APPROVED by the owner, 2026-10-24 (decisions D1–D8 below). P0, P1, P1b and P2 are
-implemented on `feature/deployment-record-control-plane`; P3–P5 are not built.** P2's choices that
-the design left open are listed for review in [P2 as built](#p2-as-built-choices-for-review). This design
+Status: **APPROVED by the owner, 2026-10-24 (decisions D1–D8 below). P0, P1, P1b, P2 and P3 are
+implemented on `feature/deployment-record-control-plane` in `cohesion` and `cohesion-platforms`;
+P4 and P5 are not built.** The choices each phase made where the design left room are listed for
+review in [P2 as built](#p2-as-built-choices-for-review) and
+[P3 as built](#p3-as-built-choices-for-review). This design
 supersedes the codex refactor parked on `feature/resource-runtime-manifests` (commit `376f022a8` in
 `cohesion`, `f678395` in `cohesion-platforms`), which remains there for reference. The wire contract
 is the [deployment record](../RUNTIME_CONTRACT.md#deployment-record) section of the runtime contract.
@@ -102,6 +104,9 @@ Overrides belong to a generation, which follows Kubernetes: an unchanged spec ch
 A scale-out instance mounts the current record when it starts, so it needs no admission handshake. A
 gateway restart loses nothing, because the gateway holds no desired state.
 
+As built, the Local layout ([P2](#p2-as-built-choices-for-review)) and the Kubernetes and Docker rows
+([P3](#p3-as-built-choices-for-review)) differ from this table where those sections say.
+
 ## Resource side (P1, implemented)
 
 `Assimalign.Cohesion.Hosting.Resources` owns the surface and applies the record:
@@ -165,7 +170,10 @@ await builder.Build().RunAsync();
   (`SetExtension(key, value)`, `TryGetExtension`) are `ResourceConfigurationExtensions` members in
   ApplicationModel; `Build()` copies both into `ResourcePlan.Configuration` and `ResourcePlan.Extensions`.
   Sdk.Gateway embeds each resource's `resource.runtime.json` beside its manifest
-  (`ResourceManifest.Surface`). `ConfigureHpa` and the neutral replica bounds are P3.
+  (`ResourceManifest.Surface`).
+- Built in P3: the neutral bounds are `ScaleBetween(minimum, maximum)` (`WorkloadSpec.Scale`), and
+  the Kubernetes package ships `ConfigureHpa` and `ConfigurePodDisruptionBudget`, each published as
+  a manageable platform surface (`kubernetes/hpa`, `kubernetes/pod-disruption-budget`).
 
 ## Management API (P2)
 
@@ -192,7 +200,8 @@ application's telemetry sink (D8).
 
 As built in P2, the gateway control plane serves these routes over the gateway's
 `IResourceManagementProvider`, and records live in an `IResourceRecordStore`: the Local and in-process
-gateways keep them as files (`FileResourceRecordStore`), platform gateways bring their own in P3.
+gateways keep them as files (`FileResourceRecordStore`); since P3 the Docker gateway keeps files on
+the gateway machine and the Kubernetes gateway keeps ConfigMaps.
 Beyond the refusals above, the API answers 400 invalid-input (an action input), 404 unknown-resource,
 unknown-action and unknown-platform-surface, 409 not-claimable, 501 records-unsupported (a gateway
 with no record store), 503 unavailable (no record deployed yet, or no instance answered), and 403
@@ -225,8 +234,8 @@ CONNECT (browsers cannot send CONNECT themselves); control-plane permission neve
 | P0 | Park codex's uncommitted work on a branch in each repository | Done |
 | P1 | Hosting.Resources surface (UI metadata, tools), status and describe; the Web CORS section; codex's state machinery removed | Done, resource side |
 | P1b | SDK describe step writing `resource.runtime.json` | Done |
-| P2 | Model parses the surface, `Configure` and `Build()` validation, extensions as data; gateway record manager over a store with generations, Local and InProcess stores, the routes, management events | Done; `--mode plan` and neutral replica bounds deferred ([as built](#p2-as-built-choices-for-review)) |
-| P3 | cohesion-platforms: Kubernetes and Docker stores, per-generation and claims ConfigMaps, restart digest, platform surfaces, `ConfigureHpa` | Not started |
+| P2 | Model parses the surface, `Configure` and `Build()` validation, extensions as data; gateway record manager over a store with generations, Local and InProcess stores, the routes, management events | Done; `--mode plan` deferred, neutral replica bounds built in P3 ([as built](#p2-as-built-choices-for-review)) |
+| P3 | cohesion-platforms: Kubernetes and Docker stores, record and claims ConfigMaps, restart digest, platform surfaces, `ConfigureHpa` | Done; hermetic tests only, no live cluster or daemon run ([as built](#p3-as-built-choices-for-review)) |
 | P4 | Claims for ConfigurationStore, IdentityHub, Rezolvr, SecretStore; commands deleted; Database after #1709 | Not started |
 | P5 | Sdk.Gateway generates typed configuration accessors from surface schemas | Not started |
 | Later | Portal, tool tunnel and SQL editor, groups as permission scopes, watch API | Not started |
@@ -258,7 +267,29 @@ P2 settled these points, which the design above left open. Each is a default the
 | Events | One OTLP/HTTP JSON log record per write, posted to the registered telemetry sink's `/v1/logs` with the gateway as the emitter, best effort within two seconds. It names the operation, target, caller subject and generation, never a value. |
 | Validation | The gateway checks the JSON-schema subset the exporter writes, and treats an object schema that lists its members as closed, so a member the resource's options type would silently drop is refused. |
 | Surface carriage | `ResourceManifest.Surface` is not part of `resource.json`; generated gateway code attaches it, and model documents carry it beside the manifest. Its digest covers the compact document, so reformatting keeps it equal to the digest an instance reports. |
-| Platform surfaces | The routes exist; `ApplicationGateway.ReadPlatformSurfaceAsync` and `WritePlatformSurfaceAsync` answer unknown-platform-surface until a platform gateway overrides them in P3. |
+| Platform surfaces | The routes existed and answered unknown-platform-surface; P3 replaced the two placeholder hooks with the generic surface flow ([P3 as built](#p3-as-built-choices-for-review)). |
+
+## P3 as built: choices for review
+
+P3 settled these points, which the design above left open or stated differently. Each is a default
+the owner can revise.
+
+| Choice | As built |
+| --- | --- |
+| Surface flow | Generic in the Gateway base. A platform gateway publishes `ResourcePlatformSurface` values (`GetPlatformSurfaces`: key, closed JSON schema, the value code declares, an optional rule) and applies and observes them (`ApplyPlatformSurfaceAsync`, `ObservePlatformSurfaceAsync`). A PATCH composes an RFC 7396 merge patch into the stored override and validates the value it produces; a JSON `null` body drops the override. |
+| Where platform overrides live | In the record, as `ResourceRecord.PlatformOverrides`, for the current generation, not on the platform objects. They count in the record version (the ETag) but not in the digest instances report, because no instance reads them. A new generation drops them and reports it, like configuration overrides. Compilers receive them as `ResourceInputs.PlatformOverrides`, so every reconcile in the generation keeps them. |
+| Apply race | The gateway applies an override to the platform object at once, and every later compile applies it again. A management write that lands while a reconcile of the same resource applies its objects can be overwritten by that reconcile's older value until the next reconcile. |
+| Neutral scale bounds | `ScaleBetween(minimum, maximum)` sets `WorkloadSpec.Scale`. `Build()` refuses bounds on a Job or DaemonSet and a maximum above the manifest's `maxReplicas`. Kubernetes autoscales between them; Docker, Local and InProcess ignore them and run the plan's replica count. |
+| `ConfigureHpa` | Writes its bounds as `ScaleBounds` and its targets as `kubernetes/hpa` data; calls compose. Bounds without a target give an autoscaler at 80 % CPU. The workload's `replicas` is left to the autoscaler and readiness waits for its minimum. `ConfigurePodDisruptionBudget` was added beside it as the second Kubernetes surface. |
+| No pod restarts for platform objects | A code change to the bounds, the autoscaler or the budget is a new generation, so it discards overrides (D3), but it restarts no pod: the Kubernetes plan hash leaves those out, and the record ConfigMap is named for the pod template (the first 16 hex digits of the plan hash), not for the generation as the table above says. A generation that changes nothing the pods read rewrites their ConfigMap in place; one that changes what they run is a new name and a rollout. |
+| Kubernetes record | `<resource>-record-<key>` and `<resource>-claims`, labelled `cohesion.io/record` so pruning ignores them. Writes are server-side applies at the read `resourceVersion` under the gateway's one field manager, not one manager per key, serialized per resource in process. The previous record ConfigMap is kept for a rollout in progress and older ones are deleted. There is no Secret for sensitive sections: the runtime surface has no way to mark a section sensitive yet. Platform overrides are keys of the record ConfigMap that pods never project. |
+| Restart digest | `ResourceRecord.GetRestartDigest(surface)` hashes what overrides and claims set for restart-class sections. Each deployment stamps it on the pod template (`ResourceInputs.RestartDigest`, `cohesion.io/restart-digest`, `none` when nothing sets one), so a deployment that discards a restart-class override still rolls the pods; between deployments a management write that moves it JSON-patches the same annotation under the `cohesion-restart` field manager. Jobs carry none. |
+| Instance identity | Every pod receives `COHESION_RESOURCE_INSTANCE` from `metadata.uid`. The inventory addresses pods by IP, which needs the in-cluster gateway. |
+| Empty layer | A layer file holding `{}` counts as absent: it is not framed into the digest and names no claim owner (a runtime contract amendment). Docker needs it because the engine's archive API cannot delete a file. |
+| Docker record | Files on the gateway machine under `DockerGatewayOptions.StateDirectory`, copied into the container's `/var/run/cohesion-config` through the archive API before it starts and after each management change, instead of the table's bind mount, so a remote engine works. A withdrawn layer is written as `{}`. What each container last received is remembered in memory only, so after a gateway restart a withdrawn layer can stay in the container until it is recreated. Docker restarts nothing for restart-class sections: they wait for the next start. The control-plane binding is always published on loopback, and the plan hash leaves out scale bounds and extensions. |
+| Teardown | Uninstall deletes each resource's record, which P2 left behind. |
+| Delivery failures | A failed platform apply or record copy is reported on standard error and as a `record:deliver` management event naming the exception type, never its message; the stored change converges at the next reconcile or start. |
+| Verification | Hermetic tests with fakes cover every row. Nothing ran against a live Kind cluster or a Docker daemon. |
 
 ## Decisions
 

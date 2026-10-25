@@ -1549,6 +1549,11 @@ public abstract partial class ApplicationGateway :
                     await DeleteResourceCommandsAsync(item, cancellationToken).ConfigureAwait(false);
                     state.SetState(descriptor.Resource.Id, ResourceLifecycle.Stopping);
                     await controller.DeleteAsync(context, cancellationToken).ConfigureAwait(false);
+                    // Teardown removes the resource, so its deployment record, claims included, goes with it.
+                    if (RecordStore is IResourceRecordStore records && !IsExternalPlan(descriptor.Plan!))
+                    {
+                        await records.DeleteAsync(item.Model.Name, descriptor.Resource.Name, cancellationToken).ConfigureAwait(false);
+                    }
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {

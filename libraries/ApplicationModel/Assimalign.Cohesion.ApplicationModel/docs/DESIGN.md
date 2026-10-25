@@ -618,8 +618,8 @@ rather than return an empty list.
 
 Management grants are a separate list: `ApplicationCaller.AllowedManagementOperations` and
 `TrustedIssuer.AllowedManagementOperations`. Unlike the command rule, an empty list grants no
-management access. The gateway management API that checks them per configuration section is not
-built yet; see [Resource management](../../../../docs/libraries/ApplicationModel/RESOURCE_MANAGEMENT.md).
+management access. The gateway management API checks them per operation and target (a section, an
+action or a platform surface); see [Resource management](../../../../docs/libraries/ApplicationModel/RESOURCE_MANAGEMENT.md).
 No feature-specific state or HTTP handler is added to this declarative model.
 
 `TrustedIssuer` lives here (moved from `…ApplicationModel.Gateway`) because `ITrustedIssuerStore`
@@ -809,9 +809,13 @@ record (`…Gateway/docs/DESIGN.md`).
   configuration, a section the surface declares, and a patch its schema accepts, and names the
   resource, section and JSON path on failure; extension keys must parse. A gateway validates which
   of its own platform's keys it supports.
-- **Delivery input.** `ResourceInputs.ConfigurationDirectory` names the record directory a resource
-  reads as `COHESION_CONFIG_DIRECTORY`. Like the bootstrap credential it sits outside the hashed
-  plan, because it names a place, not deployment content.
+- **Delivery input.** `ResourceInputs.WithDeploymentRecord(directory, generation, platformOverrides,
+  restartDigest)` hands a controller the record directory a resource reads as
+  `COHESION_CONFIG_DIRECTORY`, the generation the record belongs to, the generation's platform
+  surface overrides (phase P3, below) and the record's restart digest, which a platform that
+  restarts instances for restart-class sections stamps on what its instances start from. Like the
+  bootstrap credential they sit outside the hashed plan: they name a place or carry operator state,
+  not deployment content.
 
 The schema validator is a deliberate subset of JSON Schema, enough for the schemas Hosting.Resources
 generates: local `$ref` pointers, boolean schemas, `type`, `enum`, `const`, `pattern` (with a
@@ -824,3 +828,32 @@ Two limits are accepted for now. Composition keeps a `null` tombstone, so a late
 the same member merges into nothing rather than replacing the earlier value. And configuration is
 validated against the surface the build described; a resource built without the describe step has
 no surface, and any `Configure` call on it fails `Build()`.
+
+### Scale bounds and platform surfaces (phase P3)
+
+Phase P3 adds the two model pieces platform gateways build their typed verbs and manageable
+settings on (decision D5):
+
+- **Scale bounds.** `ScaleBetween(minimum, maximum)` and `TryGetScale` join the generic
+  `ResourceConfigurationExtensions` block; the bounds are stored on `PlannedResource` and `Build()`
+  copies them into `WorkloadSpec.Scale` (`ScaleBounds`), which is omitted from the serialized plan
+  when absent, so a plan without bounds hashes as before. `ResourcePlanValidator` refuses bounds on a
+  workload that does not run continuously and replicate (a Job or a DaemonSet), a minimum below one
+  or a maximum below the minimum, and a maximum above the manifest's `maxReplicas`. The bounds are
+  neutral: a platform that autoscales keeps the replica count between them, and one that does not
+  ignores them. Platform verbs such as Kubernetes' `ConfigureHpa` write their bounds here and keep
+  only what is platform-specific in extension data, so the bounds survive a change of platform.
+- **Platform surfaces.** `ResourcePlatformSurface` is one manageable setting of a platform object: a
+  `ResourceExtensionKey`, a JSON schema in the subset above, the value code declares, and an
+  optional rule. `Create` checks the schema and the declared value, `TryValidatePatch` checks an
+  operator's merge patch, then the value it produces, then the rule, and `Apply` merges an override
+  over the declared value (`JsonMergePatchComposition.Apply`, the shared `MergePatch` module's RFC
+  7396 application). It is a public sealed type with a static `Create` because platform packages
+  construct it, and it lives here because both the gateway base and the platform packages need it,
+  and this package is the one both reference.
+- **Why data with a schema, not a typed contract per platform.** The management API, and a later
+  portal, serve and validate a surface without loading platform code: a platform adds a surface by
+  publishing a key, a schema and a value. The rule covers what the schema subset cannot state, such
+  as a minimum that may not exceed a maximum. The cost is that a platform's object model is restated
+  as a schema, and the schema and the platform's compiler can drift apart unless the platform's
+  tests cover both.

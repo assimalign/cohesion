@@ -122,11 +122,12 @@ Certificate mounts remain ordinary single-file Secret inputs. Explicit `paramete
 
 Certificates-only transport anchors are carried in ResourceInputs, materialized beside bootstrap.token as a protected `.state/trust.pem`, and exposed through AppEnvironment.Variables.TrustBundlePath. Local and in-process probes use the shared CustomRootTrust validator while preserving hostname checks. Providers receive the same trust policy as `ResourceProviderConnection.ServerCertificateValidator`. This transport root is distinct from the ES256 application trust-signing key.
 
-## Deployment records and management (P2)
+## Deployment records and management (P2, P3)
 
 A gateway with an `IResourceRecordStore` (`RecordStore`; Local and in-process use
-`FileResourceRecordStore` under their state root) delivers each realized resource's deployment
-record. Before the resource starts, the gateway writes the deployment layer from the plan's
+`FileResourceRecordStore` under their state root, and the Docker and Kubernetes gateways bring their
+own) delivers each realized resource's deployment record. Before the resource starts, the gateway
+writes the deployment layer from the plan's
 `Configuration` (what `Program.cs` declared with `Configure(...)`), names the record directory in
 the resource's inputs, and keys the record to a generation: a hash of the plan and the build it
 deploys (`DescribeArtifact`). Re-applying the same generation keeps management overrides; a new
@@ -137,9 +138,12 @@ event. Claims survive both. A gateway without a store refuses deployment configu
 The gateway also implements `IResourceManagementProvider`, which the control plane serves as
 `/cohesion/v2/resources/{name}/…`: configuration with each value's provenance, override changes
 validated against the resource's runtime surface, convergence status read from every instance,
-claims, actions fanned out to every instance when declared so, and platform surfaces through the
-protected `ReadPlatformSurfaceAsync`/`WritePlatformSurfaceAsync` hooks a platform gateway
-overrides. Each write is conditional on the record version (`ETag`/`If-Match`) and posted to the
-application's telemetry sink as an event that names the operation, never the value. Wire contract:
+claims, actions fanned out to every instance when declared so, and platform surfaces. A platform
+gateway publishes its surfaces with `GetPlatformSurfaces` and puts an operator's override in force
+with `ApplyPlatformSurfaceAsync`; the base stores the override with the record for the current
+generation, and `OnRecordChangedAsync` lets the platform deliver a record change its instances
+cannot read for themselves. Each write is conditional on the record version (`ETag`/`If-Match`)
+and posted to the application's telemetry sink as an event that names the operation, never the
+value. Wire contract:
 [runtime contract](../../../../docs/RUNTIME_CONTRACT.md#deployment-record); routes and grants:
 [control plane design](../../Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane/docs/DESIGN.md).

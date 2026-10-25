@@ -1121,9 +1121,10 @@ sequenceDiagram
 - **Store seam.** `IResourceRecordStore` reads a resource's `ResourceRecord` (its generation and layer
   bytes), writes one conditionally on its version, deletes it, and names the directory instances read
   (`GetInstanceDirectory`). `RecordStore` returns the gateway's store; the base returns null, the Local
-  and in-process gateways return a `FileResourceRecordStore` over their state directory, and P3's
-  platform gateways return ConfigMap- or volume-backed stores. A plan that carries deployment
-  configuration fails `Validate` on a gateway without a store.
+  and in-process gateways return a `FileResourceRecordStore` over their state directory, the Docker
+  gateway one over its own state directory, and the Kubernetes gateway a ConfigMap-backed store. A
+  plan that carries deployment configuration fails `Validate` on a gateway without a store, and
+  uninstall deletes each realized resource's record.
 - **Generation.** The first 16 hex digits of SHA-256 over the plan's JSON and `DescribeArtifact`'s
   description of the build: an image digest, a hash of the apphost and its managed assembly, or (in
   process) the entry assembly's module version id. It is computed once per realized resource per
@@ -1131,13 +1132,16 @@ sequenceDiagram
 - **Delivery.** `DeliverRecordAsync` runs in every reconcile pass after `ResolveInputsAsync`. When the
   stored generation equals the current one and the deployment layer is unchanged, it writes nothing,
   which keeps the override; otherwise it writes the new layer, keeps claims, drops the override and
-  reports the drop on standard error and as a `configuration:discard` event. The record directory
-  reaches the controller as `ResourceInputs.ConfigurationDirectory`; Local sets it as an environment
-  variable and in-process as an ambient value. A write that loses a race with a management write is
-  retried on the newer version.
+  the platform overrides, and reports the drop on standard error and as a `configuration:discard`
+  event. The controller receives the record through `ResourceInputs.WithDeploymentRecord`: the
+  directory, the generation, the platform overrides in force and the record's restart digest; Local
+  sets the directory as an environment variable and in-process as an ambient value. A write that
+  loses a race with a management write is retried on the newer version.
 - **Record digest.** `ResourceRecord.Digest` comes from Hosting.Resources'
   `ResourceConfigurationRecord.Create`, the rule instances use, so convergence compares like with like.
-  `Version` hashes the generation with the digest; it is the management API's entity tag.
+  `Version` hashes the generation with the digest, and with the platform overrides when there are
+  any; it is the management API's entity tag. `GetRestartDigest(surface)` hashes what the override and
+  claims set for restart-class sections, for platforms that restart instances when it changes.
 - **Management provider.** `ApplicationGateway` implements `IResourceManagementProvider`. Overrides are
   validated against the manifest's `ResourceSurface` (unknown section, deployment-only, backend scope,
   schema), composed with `JsonMergePatchComposition` (shared from ApplicationModel) and written only if
@@ -1145,7 +1149,21 @@ sequenceDiagram
   owner or the deployment layer already sets an entry. Status and actions use the instance inventory,
   or `TryGetResourceControlPlane` for an in-process resource; HTTP calls carry the gateway's
   `ResourceAccess` credential under the usual transport rule (HTTPS, or loopback HTTP in Local).
-  `ReadPlatformSurfaceAsync` and `WritePlatformSurfaceAsync` are the P3 hooks for platform surfaces.
+- **Platform surfaces (P3).** The base runs the whole flow and a platform gateway supplies three
+  hooks: `GetPlatformSurfaces` publishes `ResourcePlatformSurface` values for a resource,
+  `ApplyPlatformSurfaceAsync` puts a changed value in force on the platform's objects, and
+  `ObservePlatformSurfaceAsync` reports what the platform observes. `ChangePlatformSurfaceAsync`
+  composes the operator's merge patch into the stored override (a JSON `null` drops it), validates
+  the value it produces, writes `ResourceRecord.PlatformOverrides` conditionally, then applies. The
+  override is stored before the platform sees it, so a failed apply is reported (standard error and a
+  `record:deliver` event naming the exception type, never its message) and the next reconcile applies
+  it from `ResourceInputs.PlatformOverrides`. `SupportedExtensions` names the extension keys of the
+  gateway's own platform its compiler reads; any other key of that platform fails `Validate`.
+- **Record changes (P3).** After an override or claims write, `OnRecordChangedAsync` receives both
+  records so a platform can deliver what its instances cannot read for themselves: Docker copies the
+  files into the running container, and Kubernetes rolls the workload when the restart digest moved.
+  A failure is reported the same way as a failed apply, and the record reaches the instances at
+  their next start.
 - **Events.** `EmitManagementEventAsync` posts one OTLP/HTTP JSON log record to the registered telemetry
   sink's `/v1/logs`, with the gateway as the emitter of its own telemetry credential. It is best effort
   and bounded to two seconds, and it never carries a configuration value, an action input or a result.

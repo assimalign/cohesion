@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -6,7 +7,8 @@ using System.Text.Json.Nodes;
 namespace Assimalign.Cohesion.ApplicationModel;
 
 /// <summary>
-/// Declares a resource's deployment configuration and its platform extension data on the resource's descriptor.
+/// Declares a resource's deployment configuration, its platform extension data and its scale bounds on the
+/// resource's descriptor.
 /// </summary>
 /// <remarks>
 /// The members are generic over the descriptor type, so an area descriptor such as <c>IWebResourceDescriptor</c> keeps
@@ -130,6 +132,50 @@ public static class ResourceConfigurationExtensions
 
             value = default;
             return false;
+        }
+
+        /// <summary>Lets a platform that autoscales keep the resource's replica count between two bounds.</summary>
+        /// <param name="minimum">The fewest replicas, at least one.</param>
+        /// <param name="maximum">The most replicas, at least <paramref name="minimum"/>.</param>
+        /// <returns>The descriptor, for chaining.</returns>
+        /// <remarks>
+        /// <para>
+        /// The bounds are platform-neutral and land in the plan as <see cref="WorkloadSpec.Scale"/>, so they survive a
+        /// change of platform; platform verbs such as <c>ConfigureHpa</c> set them too and add only what is
+        /// platform-specific. A later call replaces the bounds.
+        /// </para>
+        /// <para>
+        /// <see cref="IApplicationBuilder.Build"/> refuses bounds for a workload that does not run continuously and
+        /// replicate (a job or a per-node daemon) and a maximum above the manifest's <c>maxReplicas</c>.
+        /// </para>
+        /// </remarks>
+        /// <exception cref="ArgumentNullException">The descriptor is null.</exception>
+        /// <exception cref="ArgumentOutOfRangeException">
+        /// <paramref name="minimum"/> is less than one, or <paramref name="maximum"/> is less than <paramref name="minimum"/>.
+        /// </exception>
+        /// <exception cref="InvalidOperationException">
+        /// The descriptor belongs to a built model, or its resource is not a manifest-backed resource this application realizes.
+        /// </exception>
+        public TDescriptor ScaleBetween(int minimum, int maximum)
+        {
+            ArgumentOutOfRangeException.ThrowIfLessThan(minimum, 1);
+            ArgumentOutOfRangeException.ThrowIfLessThan(maximum, minimum);
+            Authoring(descriptor).SetScale(new ScaleBounds(minimum, maximum));
+            return descriptor;
+        }
+
+        /// <summary>Reads the resource's scale bounds.</summary>
+        /// <param name="scale">The bounds, when the resource has them.</param>
+        /// <returns>Whether the resource has scale bounds.</returns>
+        /// <remarks>A built descriptor reads its plan's bounds; an authoring descriptor reads what has been declared so far.</remarks>
+        /// <exception cref="ArgumentNullException">The descriptor is null.</exception>
+        public bool TryGetScale([NotNullWhen(true)] out ScaleBounds? scale)
+        {
+            ArgumentNullException.ThrowIfNull(descriptor);
+            scale = descriptor.Plan is ResourcePlan plan
+                ? plan.Workload.Scale
+                : (descriptor.Resource as PlannedResource)?.GetScale();
+            return scale is not null;
         }
     }
 

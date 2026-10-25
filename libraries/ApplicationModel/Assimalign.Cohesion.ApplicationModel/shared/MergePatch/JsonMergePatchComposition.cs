@@ -4,9 +4,9 @@ using System.Text.Json.Nodes;
 namespace Assimalign.Cohesion.ApplicationModel.Internal;
 
 /// <summary>
-/// Composes RFC 7396 merge patches, so one patch states the effect of applying two in order. The model composes
-/// repeated <c>Configure</c> calls for a section this way, and a gateway composes a management PATCH into the
-/// stored override.
+/// Composes RFC 7396 merge patches, so one patch states the effect of applying two in order, and applies a patch to a
+/// value. The model composes repeated <c>Configure</c> calls for a section this way, a gateway composes a management
+/// PATCH into the stored override, and a platform surface applies its override over the value code declares.
 /// </summary>
 /// <remarks>
 /// A null member is kept as a tombstone, so the composed patch still removes the member. Two sequences have no
@@ -39,5 +39,32 @@ internal static class JsonMergePatchComposition
         }
 
         return composed;
+    }
+
+    /// <summary>Applies a merge patch to a value, by RFC 7396 section 2.</summary>
+    /// <param name="target">The value, or null for a JSON null.</param>
+    /// <param name="patch">The patch, or null for a JSON null.</param>
+    /// <returns>A new value that neither argument shares nodes with; a null member of the patch removes the member.</returns>
+    public static JsonNode? Apply(JsonNode? target, JsonNode? patch)
+    {
+        if (patch is not JsonObject members)
+        {
+            return patch?.DeepClone();
+        }
+
+        JsonObject result = target is JsonObject existing ? (JsonObject)existing.DeepClone() : new JsonObject();
+        foreach (KeyValuePair<string, JsonNode?> member in members)
+        {
+            if (member.Value is null)
+            {
+                result.Remove(member.Key);
+            }
+            else
+            {
+                result[member.Key] = Apply(result[member.Key], member.Value);
+            }
+        }
+
+        return result;
     }
 }

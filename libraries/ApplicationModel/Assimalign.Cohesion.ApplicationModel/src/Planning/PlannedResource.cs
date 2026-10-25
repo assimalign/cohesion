@@ -16,8 +16,8 @@ namespace Assimalign.Cohesion.ApplicationModel;
 /// </summary>
 /// <remarks>
 /// The resource also keeps what the application's code declares about it through
-/// <see cref="ResourceConfigurationExtensions"/>: its deployment configuration and its platform extension data.
-/// <see cref="IApplicationBuilder.Build"/> copies both into the resource's <see cref="ResourcePlan"/>.
+/// <see cref="ResourceConfigurationExtensions"/>: its deployment configuration, its platform extension data and its
+/// scale bounds. <see cref="IApplicationBuilder.Build"/> copies them into the resource's <see cref="ResourcePlan"/>.
 /// </remarks>
 public abstract class PlannedResource :
     IPlannedResource,
@@ -29,6 +29,7 @@ public abstract class PlannedResource :
     private readonly Dictionary<ResourceExtensionKey, JsonElement> _extensions = new();
     private IReadOnlyList<ResourceEndpoint> _endpoints = Array.Empty<ResourceEndpoint>();
     private IReadOnlyList<ResourceMount> _mounts = Array.Empty<ResourceMount>();
+    private ScaleBounds? _scale;
 
     /// <summary>Initializes a manifest-backed resource with optional deployer overrides.</summary>
     /// <param name="manifest">The build-produced resource manifest.</param>
@@ -127,6 +128,10 @@ public abstract class PlannedResource :
     internal void SetExtension(ResourceExtensionKey key, JsonElement value) => _extensions[key] = value.Clone();
 
     internal bool TryGetExtension(ResourceExtensionKey key, out JsonElement value) => _extensions.TryGetValue(key, out value);
+
+    internal void SetScale(ScaleBounds scale) => _scale = scale;
+
+    internal ScaleBounds? GetScale() => _scale;
 
     // The deployment layer as the plan carries it, keyed by section path in declaration order.
     internal IReadOnlyDictionary<string, JsonElement> GetConfiguration()

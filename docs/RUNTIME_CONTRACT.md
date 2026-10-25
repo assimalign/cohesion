@@ -219,16 +219,18 @@ Each file is a UTF-8 JSON object of at most 1 MiB. Its members are configuration
 and each value is an RFC 7396 merge patch for that section; a `null` value resets the section to its
 baseline. A section's effective value is its baseline with the deployment layer, each claim layer in
 ordinal order of owner, then the override layer merged over it. Any other file in the directory is
-ignored, and so is a `claims.*.json` whose owner is not a label. Re-applying identical deployment
-content keeps the override layer; deployment content that changed discards it. A resource's deployment
-content is its realization plan, which carries the deployment layer, and the build it deploys; the
-gateway names each distinct content a generation.
+ignored, and so is a `claims.*.json` whose owner is not a label. A file holding an object with no
+members (`{}`) counts as absent: it is no layer and names no claim owner, so a platform that cannot
+delete a file withdraws its layer by writing `{}`. Re-applying identical deployment content keeps the
+override layer; deployment content that changed discards it. A resource's deployment content is its
+realization plan, which carries the deployment layer, and the build it deploys; the gateway names
+each distinct content a generation.
 
-The record's identity is its digest, `sha256:<lowercase hex>`, over the exact bytes of every file
-present. For each file in the order deployment, claims by ordinal owner, override, the hash reads the
-file name in UTF-8, one zero byte, the file length as a big-endian 64-bit integer, then the file's
-bytes. Reformatting a file changes the digest; there is no canonical form, so the writer computes the
-digest from the bytes it writes.
+The record's identity is its digest, `sha256:<lowercase hex>`, over the exact bytes of every layer
+file present; a `{}` file is not one. For each file in the order deployment, claims by ordinal owner,
+override, the hash reads the file name in UTF-8, one zero byte, the file length as a big-endian 64-bit
+integer, then the file's bytes. Reformatting a file changes the digest; there is no canonical form, so
+the writer computes the digest from the bytes it writes.
 
 A resource applies the record in two phases:
 
@@ -271,18 +273,21 @@ that reads its references while composing can be described without reaching anyt
 JSON body and returns 200 with its JSON result, 400 for input that does not bind, and 404 for an
 unknown action. These routes are control-plane routes, authorized like every other namespaced route.
 
-Platforms deliver the directory without the resource knowing which platform it is on. A Local or
-Docker gateway writes the files into a directory it owns and passes (Docker bind-mounts it); the Local
-and in-process gateways keep each resource's record in
-`<state>/<application>/<resource>/.state/record/` and pass it to every resource they realize, with or
-without deployment configuration, so a later management change reaches it. A Kubernetes gateway
-projects the deployment's per-generation ConfigMap and the resource's claims ConfigMap into one
-directory volume, never with `subPath`, which would freeze the files at pod start.
+Platforms deliver the directory without the resource knowing which platform it is on, and every
+gateway with a record store passes it to every resource it realizes, with or without deployment
+configuration, so a later management change reaches it:
+
+| Gateway | Record kept in | Directory the resource reads |
+| --- | --- | --- |
+| Local, in-process | `<state>/<application>/<resource>/.state/record/` | The same directory |
+| Docker | Files under the gateway's state directory, on the gateway machine | `/var/run/cohesion-config`, copied into the container before it starts and after each management change; a layer the record no longer has becomes `{}` |
+| Kubernetes | A record ConfigMap named for the pod template that reads it, and the resource's claims ConfigMap | `/var/run/cohesion-config`, both projected into one volume, never with `subPath`, which would freeze the files at pod start |
 
 This is an amendment to v1 made in place on 2026-10-24 (owner decisions D1–D8 of the
 [deployment-record control plane](programs/RESOURCE_CONTROL_PLANE_REDESIGN.md)), not a v2: it adds
 `COHESION_CONFIG_DIRECTORY` and `COHESION_DESCRIBE_PATH`, and gives `COHESION_RESOURCE_INSTANCE` a
-defined use. Hosting.Resources implements the resource side and the SDK the describe run; the Local
-and in-process gateways deliver records, and platform gateways follow in the program's phase P3. The
-gateway computes a record's digest with Hosting.Resources' own `ResourceConfigurationRecord.Create`,
-so the digest it compares with an instance's report is computed by the instance's rule.
+defined use. Phase P3 (2026-10-25) added the `{}` rule above for platforms that cannot delete a
+delivered file. Hosting.Resources implements the resource side and the SDK the describe run; the
+Local, in-process, Docker and Kubernetes gateways deliver records. The gateway computes a record's
+digest with Hosting.Resources' own `ResourceConfigurationRecord.Create`, so the digest it compares
+with an instance's report is computed by the instance's rule.

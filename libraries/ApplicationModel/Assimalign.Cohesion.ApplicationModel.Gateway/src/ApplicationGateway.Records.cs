@@ -95,6 +95,7 @@ public abstract partial class ApplicationGateway
         ResourceName resource = item.Descriptor.Resource.Name;
         string generation = GetGeneration(item, plan);
         byte[] deployment = WriteDeploymentLayer(plan.Configuration);
+        ResourceRecord inForce;
         for (int attempt = 0; ; attempt++)
         {
             ResourceRecord? current = await store.ReadAsync(application, resource, cancellationToken).ConfigureAwait(false);
@@ -102,6 +103,7 @@ public abstract partial class ApplicationGateway
                 string.Equals(current.Generation, generation, StringComparison.Ordinal) &&
                 current.Deployment.Span.SequenceEqual(deployment))
             {
+                inForce = current;
                 break;
             }
 
@@ -110,15 +112,17 @@ public abstract partial class ApplicationGateway
                 generation,
                 deployment,
                 current?.Claims ?? _noClaims,
-                sameGeneration ? current!.Override : ReadOnlyMemory<byte>.Empty);
+                sameGeneration ? current!.Override : ReadOnlyMemory<byte>.Empty,
+                sameGeneration ? current!.PlatformOverrides : null);
             // A management write that lands between the read and this write moves the version; read it again.
             if (await store.TryWriteAsync(application, resource, next, current?.Version, cancellationToken).ConfigureAwait(false))
             {
-                if (!sameGeneration && current is not null && !current.Override.IsEmpty)
+                if (!sameGeneration && current is not null && (!current.Override.IsEmpty || current.PlatformOverrides.Count > 0))
                 {
                     await ReportDiscardedOverridesAsync(item, current, generation, cancellationToken).ConfigureAwait(false);
                 }
 
+                inForce = next;
                 break;
             }
 
@@ -129,11 +133,16 @@ public abstract partial class ApplicationGateway
             }
         }
 
-        return inputs.WithConfigurationDirectory(store.GetInstanceDirectory(application, resource));
+        return inputs.WithDeploymentRecord(
+            store.GetInstanceDirectory(application, resource),
+            generation,
+            ToElements(inForce.PlatformOverrides),
+            inForce.GetRestartDigest(GetRuntimeSurface(item.Model, item.Descriptor)));
     }
 
     // Overrides last until the resource's next deployment (decision D3), so a new generation discards them; the
-    // operator learns which sections reverted to code, on standard error and in the application's telemetry.
+    // operator learns which sections and platform surfaces reverted to code, on standard error and in the
+    // application's telemetry.
     private async ValueTask ReportDiscardedOverridesAsync(
         ModelResource item,
         ResourceRecord discarded,
@@ -141,12 +150,18 @@ public abstract partial class ApplicationGateway
         CancellationToken cancellationToken)
     {
         var sections = new List<string>();
-        using (JsonDocument layer = JsonDocument.Parse(discarded.Override))
+        if (!discarded.Override.IsEmpty)
         {
+            using JsonDocument layer = JsonDocument.Parse(discarded.Override);
             foreach (JsonProperty section in layer.RootElement.EnumerateObject())
             {
                 sections.Add(section.Name);
             }
+        }
+
+        foreach (ResourceExtensionKey surface in discarded.PlatformOverrides.Keys)
+        {
+            sections.Add(surface.Value);
         }
 
         string detail = string.Format(
@@ -237,6 +252,18 @@ public abstract partial class ApplicationGateway
                     CultureInfo.CurrentCulture, ErrorMessages.ResourceExtensionUnsupported, Name, descriptor.Resource.Name, key));
             }
         }
+    }
+
+    private static Dictionary<ResourceExtensionKey, JsonElement> ToElements(IReadOnlyDictionary<ResourceExtensionKey, ReadOnlyMemory<byte>> patches)
+    {
+        var elements = new Dictionary<ResourceExtensionKey, JsonElement>(patches.Count);
+        foreach ((ResourceExtensionKey key, ReadOnlyMemory<byte> patch) in patches)
+        {
+            using JsonDocument document = JsonDocument.Parse(patch);
+            elements.Add(key, document.RootElement.Clone());
+        }
+
+        return elements;
     }
 
     private static bool Contains(IReadOnlyCollection<ResourceExtensionKey> keys, ResourceExtensionKey key)

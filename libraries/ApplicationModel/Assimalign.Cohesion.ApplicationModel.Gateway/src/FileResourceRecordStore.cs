@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -19,8 +20,8 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway;
 /// <para>
 /// A resource's record is the directory <c>&lt;state&gt;/&lt;application&gt;/&lt;resource&gt;/.state/record/</c>, holding
 /// only layer files, so instances read it directly as <see cref="AppEnvironment.Variables.ConfigDirectory"/>. The
-/// generation is kept beside
-/// it in <c>record.json</c>, written after the layers, so an interrupted write is redone by the next deployment.
+/// generation and the platform surface overrides, which instances never read, are kept beside it in
+/// <c>record.json</c>, written after the layers, so an interrupted write is redone by the next deployment.
 /// Each file is replaced atomically, and an instance accepts a read only when two consecutive reads agree, so it
 /// never applies a record half written.
 /// </para>
@@ -126,7 +127,7 @@ public sealed class FileResourceRecordStore : IResourceRecordStore
 
             await WriteLayerAsync(state, directory, ResourceConfigurationRecord.OverrideLayerFileName, record.Override, cancellationToken)
                 .ConfigureAwait(false);
-            await WriteFileAsync(state, Path.Combine(state, metadataFileName), WriteMetadata(record.Generation), cancellationToken)
+            await WriteFileAsync(state, Path.Combine(state, metadataFileName), WriteMetadata(record), cancellationToken)
                 .ConfigureAwait(false);
             return true;
         }
@@ -184,45 +185,80 @@ public sealed class FileResourceRecordStore : IResourceRecordStore
             }
         }
 
+        (string generation, Dictionary<ResourceExtensionKey, ReadOnlyMemory<byte>> platformOverrides) = ReadMetadata(metadata);
         return ResourceRecord.Create(
-            ReadGeneration(metadata),
+            generation,
             ReadLayer(Path.Combine(directory, ResourceConfigurationRecord.DeploymentLayerFileName)),
             claims,
-            ReadLayer(Path.Combine(directory, ResourceConfigurationRecord.OverrideLayerFileName)));
+            ReadLayer(Path.Combine(directory, ResourceConfigurationRecord.OverrideLayerFileName)),
+            platformOverrides);
     }
 
     private static byte[] ReadLayer(string path) => File.Exists(path) ? File.ReadAllBytes(path) : Array.Empty<byte>();
 
-    private static string ReadGeneration(string metadata)
+    // A missing or unreadable metadata file has no generation a deployment computes, so the next deployment rewrites
+    // the record, and no platform overrides, which a new generation would drop anyway.
+    private static (string Generation, Dictionary<ResourceExtensionKey, ReadOnlyMemory<byte>> PlatformOverrides) ReadMetadata(string metadata)
     {
+        var platformOverrides = new Dictionary<ResourceExtensionKey, ReadOnlyMemory<byte>>();
         if (!File.Exists(metadata))
         {
-            return unknownGeneration;
+            return (unknownGeneration, platformOverrides);
         }
 
         try
         {
             using JsonDocument document = JsonDocument.Parse(File.ReadAllBytes(metadata));
-            return document.RootElement.ValueKind == JsonValueKind.Object &&
-                document.RootElement.TryGetProperty("generation", out JsonElement generation) &&
-                generation.ValueKind == JsonValueKind.String &&
-                generation.GetString() is { Length: > 0 } value
-                    ? value
-                    : unknownGeneration;
+            JsonElement root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object ||
+                !root.TryGetProperty("generation", out JsonElement generation) ||
+                generation.ValueKind != JsonValueKind.String ||
+                generation.GetString() is not { Length: > 0 } value)
+            {
+                return (unknownGeneration, platformOverrides);
+            }
+
+            if (root.TryGetProperty("platform", out JsonElement platform) && platform.ValueKind == JsonValueKind.Object)
+            {
+                foreach (JsonProperty surface in platform.EnumerateObject())
+                {
+                    if (ResourceExtensionKey.IsValid(surface.Name, out _))
+                    {
+                        platformOverrides[surface.Name] = Encoding.UTF8.GetBytes(surface.Value.GetRawText());
+                    }
+                }
+            }
+
+            return (value, platformOverrides);
         }
         catch (JsonException)
         {
-            return unknownGeneration;
+            return (unknownGeneration, new Dictionary<ResourceExtensionKey, ReadOnlyMemory<byte>>());
         }
     }
 
-    private static byte[] WriteMetadata(string generation)
+    private static byte[] WriteMetadata(ResourceRecord record)
     {
+        var keys = new List<ResourceExtensionKey>(record.PlatformOverrides.Keys);
+        keys.Sort(static (left, right) => string.CompareOrdinal(left.Value, right.Value));
         using var stream = new MemoryStream();
         using (var writer = new Utf8JsonWriter(stream, new JsonWriterOptions { Indented = true }))
         {
             writer.WriteStartObject();
-            writer.WriteString("generation", generation);
+            writer.WriteString("generation", record.Generation);
+            if (keys.Count > 0)
+            {
+                writer.WriteStartObject("platform");
+                foreach (ResourceExtensionKey key in keys)
+                {
+                    writer.WritePropertyName(key.Value);
+                    using JsonDocument patch = JsonDocument.Parse(record.PlatformOverrides[key]);
+                    patch.RootElement.WriteTo(writer);
+                }
+
+                writer.WriteEndObject();
+            }
+
             writer.WriteEndObject();
         }
 

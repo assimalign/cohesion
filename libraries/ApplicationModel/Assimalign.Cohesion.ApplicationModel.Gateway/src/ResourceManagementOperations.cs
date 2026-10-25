@@ -48,6 +48,12 @@ public static class ResourceManagementOperations
     /// </summary>
     public const string DiscardOverrides = "configuration:discard";
 
+    /// <summary>
+    /// Reported by a management event, never granted: the gateway stored a management change but the platform did not
+    /// take it, so the instances or the platform's objects receive it only at their next start or reconcile.
+    /// </summary>
+    public const string DeliverRecord = "record:deliver";
+
     /// <summary>Decides whether a caller's grants allow an operation.</summary>
     /// <param name="grants">The caller's management grants.</param>
     /// <param name="operation">The operation, one of this class's names.</param>

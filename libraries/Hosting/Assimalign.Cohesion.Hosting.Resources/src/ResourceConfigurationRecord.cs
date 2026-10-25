@@ -25,8 +25,9 @@ namespace Assimalign.Cohesion.Hosting.Resources;
 ///   <item><description><c>override.json</c>, written by the management API; it lasts until the resource's next deployment.</description></item>
 /// </list>
 /// <para>
-/// Every file is optional. <see cref="Digest"/> covers the exact bytes of every file present, so the gateway
-/// that wrote them computes the same digest without agreeing on any JSON canonical form.
+/// Every file is optional, and a file holding an empty object counts as absent: it sets nothing. <see cref="Digest"/>
+/// covers the exact bytes of every file that sets something, so the gateway that wrote them computes the same digest
+/// without agreeing on any JSON canonical form.
 /// </para>
 /// </remarks>
 [DebuggerDisplay("{Digest,nq}")]
@@ -145,11 +146,14 @@ public sealed class ResourceConfigurationRecord
         JsonObject? deploymentLayer = deployment is not null
             ? Parse(hash, DeploymentLayerFileName, deployment)
             : null;
-        var claimLayers = new KeyValuePair<string, JsonObject>[ordered.Count];
+        var claimLayers = new List<KeyValuePair<string, JsonObject>>(ordered.Count);
         for (int index = 0; index < ordered.Count; index++)
         {
             string fileName = ClaimLayerFilePrefix + ordered[index].Key + layerFileExtension;
-            claimLayers[index] = KeyValuePair.Create(ordered[index].Key, Parse(hash, fileName, ordered[index].Value));
+            if (Parse(hash, fileName, ordered[index].Value) is JsonObject layer)
+            {
+                claimLayers.Add(KeyValuePair.Create(ordered[index].Key, layer));
+            }
         }
 
         JsonObject? overrideLayer = @override is not null
@@ -158,7 +162,7 @@ public sealed class ResourceConfigurationRecord
         return new ResourceConfigurationRecord(
             "sha256:" + Convert.ToHexStringLower(hash.GetHashAndReset()),
             deploymentLayer,
-            claimLayers,
+            claimLayers.ToArray(),
             overrideLayer);
     }
 
@@ -195,12 +199,30 @@ public sealed class ResourceConfigurationRecord
             : throw new InvalidDataException(ErrorMessages.ResourceConfigurationRecordInvalid);
     }
 
-    // The digest frames every file as: UTF-8 name, a zero byte, the big-endian 64-bit length, the bytes.
-    private static JsonObject Parse(IncrementalHash hash, string fileName, byte[] content)
+    // The digest frames every file that sets something as: UTF-8 name, a zero byte, the big-endian 64-bit length, the
+    // bytes. A file holding an empty object sets nothing, so it counts as absent and returns null: a platform that can
+    // overwrite an instance's files but not delete them, such as Docker's archive API, withdraws a layer by writing {}.
+    private static JsonObject? Parse(IncrementalHash hash, string fileName, byte[] content)
     {
         if (content.Length > MaximumLayerLength)
         {
             throw new InvalidDataException(ErrorMessages.ResourceConfigurationRecordInvalid);
+        }
+
+        JsonObject layer;
+        try
+        {
+            layer = JsonNode.Parse(content) as JsonObject
+                ?? throw new InvalidDataException(ErrorMessages.ResourceConfigurationRecordInvalid);
+        }
+        catch (JsonException exception)
+        {
+            throw new InvalidDataException(ErrorMessages.ResourceConfigurationRecordInvalid, exception);
+        }
+
+        if (layer.Count == 0)
+        {
+            return null;
         }
 
         hash.AppendData(Encoding.UTF8.GetBytes(fileName));
@@ -209,16 +231,7 @@ public sealed class ResourceConfigurationRecord
         BinaryPrimitives.WriteInt64BigEndian(length, content.Length);
         hash.AppendData(length);
         hash.AppendData(content);
-
-        try
-        {
-            return JsonNode.Parse(content) as JsonObject
-                ?? throw new InvalidDataException(ErrorMessages.ResourceConfigurationRecordInvalid);
-        }
-        catch (JsonException exception)
-        {
-            throw new InvalidDataException(ErrorMessages.ResourceConfigurationRecordInvalid, exception);
-        }
+        return layer;
     }
 
     // An RFC 1123 label, the grammar of a Cohesion application name.

@@ -38,6 +38,13 @@ public sealed record WorkloadSpec(
     {
     }
 
+    /// <summary>
+    /// Gets the range a platform that autoscales may keep the replica count in, or <see langword="null"/> when the
+    /// workload does not autoscale. Omitted from the plan document when null, so a plan without bounds is unchanged.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public ScaleBounds? Scale { get; init; }
+
     /// <summary>Deconstructs a workload using the original version 1 field set.</summary>
     /// <param name="Kind">Receives the controller kind.</param>
     /// <param name="Replicas">Receives the replica count.</param>

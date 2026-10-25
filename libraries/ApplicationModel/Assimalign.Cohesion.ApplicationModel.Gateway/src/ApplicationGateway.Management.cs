@@ -153,7 +153,8 @@ public abstract partial class ApplicationGateway
         ResourceRecord next;
         try
         {
-            next = ResourceRecord.Create(current.Generation, current.Deployment, current.Claims, ResourceManagementDocuments.WriteLayer(layer));
+            next = ResourceRecord.Create(
+                current.Generation, current.Deployment, current.Claims, ResourceManagementDocuments.WriteLayer(layer), current.PlatformOverrides);
         }
         catch (InvalidDataException)
         {
@@ -165,6 +166,7 @@ public abstract partial class ApplicationGateway
             return Refuse(ResourceManagementStatus.VersionMoved, ErrorMessages.ManagementVersionMoved, resource, current.Version);
         }
 
+        await NotifyRecordChangedAsync(item, current, next, cancellationToken).ConfigureAwait(false);
         bool overridden = layer.TryGetPropertyValue(section.Value, out JsonNode? stored);
         await EmitManagementEventAsync(
                 item.Model,
@@ -281,7 +283,7 @@ public abstract partial class ApplicationGateway
         ResourceRecord next;
         try
         {
-            next = ResourceRecord.Create(current.Generation, current.Deployment, layers, current.Override);
+            next = ResourceRecord.Create(current.Generation, current.Deployment, layers, current.Override, current.PlatformOverrides);
         }
         catch (InvalidDataException)
         {
@@ -292,6 +294,8 @@ public abstract partial class ApplicationGateway
         {
             return Refuse(ResourceManagementStatus.VersionMoved, ErrorMessages.ManagementVersionMoved, resource, current.Version);
         }
+
+        await NotifyRecordChangedAsync(item, current, next, cancellationToken).ConfigureAwait(false);
 
         await EmitManagementEventAsync(
                 item.Model,
@@ -463,86 +467,6 @@ public abstract partial class ApplicationGateway
         {
             return ResourceManagementResult.Refuse(ResourceManagementStatus.Unavailable, exception.Message);
         }
-    }
-
-    /// <inheritdoc />
-    public ValueTask<ResourceManagementResult> GetPlatformSurfaceAsync(
-        ApplicationName application,
-        ResourceName resource,
-        ResourceExtensionKey surface,
-        CancellationToken cancellationToken = default)
-    {
-        if (!TryFindRealizedResource(application, resource, out ModelResource item))
-        {
-            return ValueTask.FromResult(UnknownResource(application, resource));
-        }
-
-        return ReadPlatformSurfaceAsync(item.Model, item.Descriptor, surface, cancellationToken);
-    }
-
-    /// <inheritdoc />
-    public ValueTask<ResourceManagementResult> ChangePlatformSurfaceAsync(
-        ApplicationName application,
-        ResourceName resource,
-        ResourceExtensionKey surface,
-        ReadOnlyMemory<byte> patch,
-        string? expectedVersion,
-        ApplicationCaller caller,
-        CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(caller);
-        if (!TryFindRealizedResource(application, resource, out ModelResource item))
-        {
-            return ValueTask.FromResult(UnknownResource(application, resource));
-        }
-
-        return WritePlatformSurfaceAsync(item.Model, item.Descriptor, surface, patch, expectedVersion, caller, cancellationToken);
-    }
-
-    /// <summary>
-    /// Reads a surface this gateway's platform publishes for a resource, such as a Kubernetes autoscaler's bounds. The
-    /// default publishes none.
-    /// </summary>
-    /// <param name="model">The resource's application.</param>
-    /// <param name="descriptor">The resource's built descriptor.</param>
-    /// <param name="surface">The platform-qualified surface key.</param>
-    /// <param name="cancellationToken">Cancels the read.</param>
-    /// <returns>The surface document, or <see cref="ResourceManagementStatus.UnknownPlatformSurface"/>.</returns>
-    protected virtual ValueTask<ResourceManagementResult> ReadPlatformSurfaceAsync(
-        IApplicationModel model,
-        IApplicationResourceDescriptor descriptor,
-        ResourceExtensionKey surface,
-        CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(descriptor);
-        return ValueTask.FromResult(Refuse(
-            ResourceManagementStatus.UnknownPlatformSurface, ErrorMessages.ManagementPlatformSurfaceUnknown, Name, descriptor.Resource.Name, surface.Value ?? string.Empty));
-    }
-
-    /// <summary>
-    /// Changes a surface this gateway's platform publishes for a resource. The platform stores the change in its own
-    /// deployment objects, under the same lifetime rule as configuration overrides. The default publishes none.
-    /// </summary>
-    /// <param name="model">The resource's application.</param>
-    /// <param name="descriptor">The resource's built descriptor.</param>
-    /// <param name="surface">The platform-qualified surface key.</param>
-    /// <param name="patch">The UTF-8 JSON merge patch.</param>
-    /// <param name="expectedVersion">The version the caller read, or null to write unconditionally.</param>
-    /// <param name="caller">The authenticated caller.</param>
-    /// <param name="cancellationToken">Cancels the write.</param>
-    /// <returns>The changed surface document, or <see cref="ResourceManagementStatus.UnknownPlatformSurface"/>.</returns>
-    protected virtual ValueTask<ResourceManagementResult> WritePlatformSurfaceAsync(
-        IApplicationModel model,
-        IApplicationResourceDescriptor descriptor,
-        ResourceExtensionKey surface,
-        ReadOnlyMemory<byte> patch,
-        string? expectedVersion,
-        ApplicationCaller caller,
-        CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(descriptor);
-        return ValueTask.FromResult(Refuse(
-            ResourceManagementStatus.UnknownPlatformSurface, ErrorMessages.ManagementPlatformSurfaceUnknown, Name, descriptor.Resource.Name, surface.Value ?? string.Empty));
     }
 
     /// <summary>Observes the resource's individually addressable control planes. A platform that runs several instances overrides this hook.</summary>

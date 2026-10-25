@@ -94,13 +94,17 @@ named.
 
 ## Gateway side
 
-The gateway owns the record and the management API (phase P2):
+The gateway owns the record and the management API (phases P2 and P3):
 
 - **Records.** `IResourceRecordStore` keeps each resource's record where the platform keeps its
-  deployments; the Local and in-process gateways use `FileResourceRecordStore`. Before a resource
-  starts, the gateway writes the plan's deployment layer for the current generation (a hash of the
-  plan and the build it deploys), keeps the override layer when the generation is unchanged, drops it
-  and reports the drop when it changed, and keeps claims either way.
+  deployments: the Local and in-process gateways use `FileResourceRecordStore`, the Docker gateway
+  keeps files on the gateway machine and copies them into the container, and the Kubernetes gateway
+  keeps ConfigMaps. Before a resource starts, the gateway writes the plan's deployment layer for the
+  current generation (a hash of the plan and the build it deploys), keeps the override layer and the
+  platform overrides when the generation is unchanged, drops them and reports the drop when it
+  changed, and keeps claims either way. Teardown deletes the record. After an override or claims
+  write, `OnRecordChangedAsync` lets a platform deliver what its instances cannot read for
+  themselves, such as a copy into a container or a restart for a restart-class section.
 - **Management API.** The gateway control plane serves `/cohesion/v2/resources/{resource}/…`:
   configuration with provenance, override PATCH, PUT and DELETE, convergence status, claims, actions,
   instances and platform surfaces. It authorizes against management grants, then calls the gateway's
@@ -119,9 +123,39 @@ The gateway owns the record and the management API (phase P2):
   `ObserveResourceInstancesAsync` with their own inventory. Status reads each instance's
   `configuration/status`, and every-instance actions fan out through the same list; an in-process
   resource is reached through its control plane directly.
-- **Events.** Every management write, and every override a deployment discards, is posted to the
-  application's registered telemetry sink as an OTLP log record naming the operation, target, caller
-  and generation, never a value.
+- **Events.** Every management write, every override a deployment discards, and every failure to
+  deliver a stored change to the platform is posted to the application's registered telemetry sink
+  as an OTLP log record naming the operation, target, caller and generation, never a value.
+
+## Platform surfaces and scale bounds (phase P3)
+
+Platform code stays in the gateway's `Program.cs`, beside the platform-neutral bounds:
+
+```csharp
+IWebResourceDescriptor api = builder.AddWeb(Manifests.OrdersApi)
+    .ScaleBetween(2, 10)                                              // ApplicationModel, any platform
+    .ConfigureHpa(hpa => hpa.TargetCpuUtilizationPercentage = 70)     // Gateway.Kubernetes
+    .ConfigurePodDisruptionBudget(budget => budget.MinAvailable = 1); // Gateway.Kubernetes
+```
+
+- **Scale bounds.** `ScaleBetween(minimum, maximum)` puts `ScaleBounds` in the plan
+  (`WorkloadSpec.Scale`). `Build()` refuses bounds on a Job or a DaemonSet, and a maximum above the
+  manifest's `maxReplicas`. A platform that autoscales keeps the replica count between them; the
+  Docker, Local and in-process gateways run the plan's replica count and ignore them.
+- **Platform surfaces.** A platform gateway publishes the manageable settings of its own objects as
+  `ResourcePlatformSurface` values (`GetPlatformSurfaces`): a `<platform>/<name>` key, a closed JSON
+  schema, the value code declares, and an optional rule. The management API serves each at
+  `platform/{platform}/{name}`. GET returns the declared value, the override, the value in force and
+  what the platform observes. PATCH composes an RFC 7396 merge patch into the override, validates the
+  value it produces, stores the override in the record for the current generation, and applies the
+  value to the platform at once (`ApplyPlatformSurfaceAsync`); a JSON `null` body drops the override.
+  Compilers receive the overrides as `ResourceInputs.PlatformOverrides`, so every reconcile in the
+  generation keeps them. Instances never see them, so they count in the record's version but not in
+  its digest.
+- **Kubernetes** publishes `kubernetes/hpa` and `kubernetes/pod-disruption-budget`. Changing either in
+  code or through the API restarts no pod; a change in code is still a new generation, which
+  discards the resource's overrides. The objects, the record ConfigMaps and the restart rules are in
+  the Kubernetes gateway's `docs/DESIGN.md` in cohesion-platforms.
 
 ## Programmatic commands
 
