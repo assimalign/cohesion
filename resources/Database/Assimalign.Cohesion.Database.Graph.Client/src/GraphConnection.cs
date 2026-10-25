@@ -14,7 +14,11 @@ namespace Assimalign.Cohesion.Database.Graph.Client;
 
 /// <summary>One authenticated graph connection supporting one active exchange at a time.</summary>
 /// <remarks>Value results are materialized. Paths stream until enumeration completes or is disposed.
-/// An unfinished path exchange is discarded. Explicit graph transactions are not supported.
+/// An unfinished path exchange is discarded. ExecuteAsync accepts START TRANSACTION, COMMIT and
+/// ROLLBACK on this connection; pool return rolls back an unfinished transaction before reuse.
+/// After acquiring the database writer lock, an idle transaction holds it until completion,
+/// disconnect, pool return or server IdleTimeout (30 minutes by default).
+/// Servers without negotiated transaction-status (pre-#1540) are not pooled.
 /// Lists materialize as <c>object?[]</c>; maps as read-only <c>IReadOnlyDictionary&lt;string, object?&gt;</c>.
 /// Values permit depth 64, 65,536 total values including the root, and 16 MiB encoded bytes.
 /// Pattern property maps remain scalar-only. Without graph.composite-values, composite parameters

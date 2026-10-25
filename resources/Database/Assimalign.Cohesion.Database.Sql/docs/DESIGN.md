@@ -7553,6 +7553,11 @@ pool lock with a five-second timeout. Missing/invalid state or legacy transactio
 are discarded. SQL's formerly skipped pool-rollback regression is enabled. No new wire identifier,
 public interface, protocol version or persistent format is introduced.
 
+An idle open wire transaction holds the database writer lock once it has acquired it, until
+COMMIT, ROLLBACK, disconnect, pool return or IdleTimeout (30 minutes by default). Keep transactions
+short: an idle writer blocks other writers. New clients discard sessions against pre-#1540 servers
+that cannot negotiate transaction-status, so those servers are not pooled.
+
 ## Shared server options and TCP composition (#1391, D7 B)
 
 The five sealed model server-options types derive from root DatabaseServerOptions. The base owns
