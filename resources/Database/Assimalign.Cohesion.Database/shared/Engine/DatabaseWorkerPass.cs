@@ -30,6 +30,8 @@ internal sealed class DatabaseWorkerPass
     internal TimeSpan? PumpElapsed { get; }
     internal TimeSpan TriggerTimeout { get; }
     internal TimeSpan TriggerElapsed { get; }
+    internal int TriggerWaits { get; set; }
+    internal TimeSpan TriggerWaitRequested { get; set; }
     internal bool TriggerSignaled { get; }
     internal bool TriggerMeasured { get; }
     internal TimeSpan Elapsed { get; set; }
@@ -55,6 +57,9 @@ internal sealed class DatabaseWorkerPass
         internal bool? WorkDue { get; set; }
         internal bool Attempted { get; set; }
         internal bool Collected { get; set; }
+        internal bool? RunnerAvailable { get; set; }
+        internal bool UndoRetried { get; set; }
+        internal bool UndoPending { get; set; }
         internal int WorkUnits { get; set; }
         internal bool GiveUpRequested { get; set; }
         internal bool Offline { get; set; }

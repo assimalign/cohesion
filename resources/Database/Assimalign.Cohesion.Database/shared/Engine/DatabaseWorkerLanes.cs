@@ -86,7 +86,7 @@ internal sealed class DatabaseWorkerLanes<TResult> : IDisposable
     /// <param name="Result">The result, meaningful when Failure is null.</param>
     /// <param name="Failure">The exception the work threw, or null.</param>
     /// <param name="CancellationRequested">Whether the originating pass token was cancelled.</param>
-    internal readonly record struct Outcome(TResult Result, Exception? Failure, bool CancellationRequested = false);
+    internal readonly record struct Outcome(TResult Result, Exception? Failure, bool CancellationRequested = false, bool? RunnerAvailable = null);
 
     /// <summary>
     /// Begins a pass of the worker: the lanes the pass collects or starts are the ones it visited.
@@ -198,7 +198,7 @@ internal sealed class DatabaseWorkerLanes<TResult> : IDisposable
                 outcome = default;
                 return false;
             }
-            lane = new Lane(work, signal, cancellationToken, databaseName ?? database.ToString()!);
+            lane = new Lane(work, signal, cancellationToken, databaseName ?? database.ToString()!, visit is not null);
             lane.Pass = _pass;
             _lanes.Add(database, lane);
             _running++;
@@ -423,6 +423,9 @@ internal sealed class DatabaseWorkerLanes<TResult> : IDisposable
             // Publish availability with Ended. A collecting pass can reuse this runner immediately.
             runner.Next = null;
             if (!_disposed) { _idle.Add(runner); }
+            // Record availability at publication, before Park can run. A later collecting
+            // pass must not disguise a completion published before its runner was reusable.
+            if (lane.Observed) { lane.Outcome = lane.Outcome with { RunnerAvailable = _idle.Contains(runner) }; }
             Monitor.PulseAll(_sync);
         }
 
@@ -463,8 +466,9 @@ internal sealed class DatabaseWorkerLanes<TResult> : IDisposable
     /// <summary>One work on a lane.</summary>
     private sealed class Lane
     {
-        public Lane(Func<TResult> work, ManualResetEventSlim signal, CancellationToken cancellationToken, string name)
+        public Lane(Func<TResult> work, ManualResetEventSlim signal, CancellationToken cancellationToken, string name, bool observed)
         {
+            Observed = observed;
             Work = work;
             Name = name;
             Started = Stopwatch.GetTimestamp();
@@ -472,6 +476,7 @@ internal sealed class DatabaseWorkerLanes<TResult> : IDisposable
             CancellationToken = cancellationToken;
         }
 
+        public bool Observed { get; }
         public string Name { get; }
         public long Started { get; }
         public bool Stuck { get; set; }

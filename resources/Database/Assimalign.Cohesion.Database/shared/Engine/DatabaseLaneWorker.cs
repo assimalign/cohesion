@@ -96,7 +96,7 @@ internal abstract class DatabaseLaneWorker<TResult> : DatabaseEngineWorker
         var timeout = Lanes.LimitWait(TriggerTimeout);
         try
         {
-            signaled = LaneSignal.Wait(timeout, cancellationToken);
+            signaled = WaitForSignal(LaneSignal, timeout, cancellationToken);
             _triggerThread = Environment.CurrentManagedThreadId;
         }
         catch (OperationCanceledException)
@@ -117,6 +117,15 @@ internal abstract class DatabaseLaneWorker<TResult> : DatabaseEngineWorker
                 observation.Signaled = signaled;
             }
         }
+    }
+
+    // Keep each requested signal wait with its blocking operation. Additional pauses through
+    // this path remain visible even when a signal wakes early or the runner is descheduled.
+    private bool WaitForSignal(ManualResetEventSlim signal, TimeSpan timeout, CancellationToken cancellationToken)
+    {
+        var observation = PassCompleted is null ? null : _pumpWait!.Value;
+        if (observation is not null) { observation.Requests++; observation.Requested += timeout; }
+        return signal.Wait(timeout, cancellationToken);
     }
 
     /// <inheritdoc />
@@ -140,6 +149,7 @@ internal abstract class DatabaseLaneWorker<TResult> : DatabaseEngineWorker
             PumpBackoffObserved ? pumpWait!.Backoff : null,
             pumpWait!.PassEnded == 0 ? null : Stopwatch.GetElapsedTime(pumpWait.PassEnded),
             pumpWait.Timeout, pumpWait.Elapsed, pumpWait.Signaled, pumpWait.Measured);
+        if (pass is not null) { pass.TriggerWaits = pumpWait!.Requests; pass.TriggerWaitRequested = pumpWait.Requested; }
         pumpWait?.Reset();
         bool lanesBegun = false;
         try
@@ -180,6 +190,8 @@ internal abstract class DatabaseLaneWorker<TResult> : DatabaseEngineWorker
 
     private sealed class PumpWait
     {
+        internal int Requests;
+        internal TimeSpan Requested;
         internal TimeSpan Backoff;
         internal TimeSpan Timeout;
         internal TimeSpan Elapsed;
@@ -189,7 +201,8 @@ internal abstract class DatabaseLaneWorker<TResult> : DatabaseEngineWorker
 
         internal void Reset()
         {
-            Backoff = Timeout = Elapsed = TimeSpan.Zero;
+            Requests = 0;
+            Requested = Backoff = Timeout = Elapsed = TimeSpan.Zero;
             Signaled = false;
             Measured = false;
         }
