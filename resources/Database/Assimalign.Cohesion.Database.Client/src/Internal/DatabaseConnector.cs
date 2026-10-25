@@ -26,6 +26,7 @@ internal sealed class DatabaseConnector
     private IDuplexConnection? _connection;
     private ProtocolFrameReader? _reader;
     private ProtocolFrameWriter? _writer;
+    private ClientFrameWriter? _exchangeWriter;
     private volatile bool _isOpen;
     private bool _isClosed;
     private int _opened;
@@ -106,6 +107,7 @@ internal sealed class DatabaseConnector
             var channel = new ProtocolChannel(stream, Family, leaveOpen: true);
             _reader = channel.Reader;
             _writer = channel.Writer;
+            _exchangeWriter = new ClientFrameWriter(_writer);
 
             var startup = new ProtocolStartupMessage(ProtocolVersion.Current, Database, Principal)
             { Capabilities = Family.Capabilities.Select(capability => capability.Name).ToArray() };
@@ -275,19 +277,20 @@ internal sealed class DatabaseConnector
                 throw FromErrorFrame(terminal.Value);
             }
             TResult result;
+            _exchangeWriter!.BeginExchange();
             try
             {
-                result = await exchange.ExecuteAsync(_reader!, _writer!, cancellationToken).ConfigureAwait(false);
+                result = await exchange.ExecuteAsync(_reader!, _exchangeWriter, cancellationToken).ConfigureAwait(false);
             }
-            catch when (exchange.IsResponseComplete && exchange.ExpectsTransactionStatus && Capabilities.Contains(ProtocolCapability.TransactionStatus.Name))
+            catch when (exchange.IsResponseComplete && (_exchangeWriter.RequiresTransactionStatus || exchange.ExpectsTransactionStatus) && Capabilities.Contains(ProtocolCapability.TransactionStatus.Name))
             {
                 // Preserve the original statement exception, even if its trailing status is broken.
-                try { await ReadTransactionStatusAsync(cancellationToken).ConfigureAwait(false); }
+                try { await ReadTransactionStatusAsync().ConfigureAwait(false); }
                 catch { _isOpen = false; }
                 throw;
             }
-            if (exchange.ExpectsTransactionStatus && Capabilities.Contains(ProtocolCapability.TransactionStatus.Name))
-            { await ReadTransactionStatusAsync(cancellationToken).ConfigureAwait(false); }
+            if ((_exchangeWriter.RequiresTransactionStatus || exchange.ExpectsTransactionStatus) && Capabilities.Contains(ProtocolCapability.TransactionStatus.Name))
+            { await ReadTransactionStatusAsync().ConfigureAwait(false); }
             return result;
         }
         catch (DatabaseClientException exception) when (exception.Code == ProtocolErrorCode.ConnectionFailure)
@@ -333,10 +336,13 @@ internal sealed class DatabaseConnector
         }
     }
 
-    private async ValueTask ReadTransactionStatusAsync(CancellationToken cancellationToken)
+    private async ValueTask ReadTransactionStatusAsync()
     {
+        // Result/terminal error already arrived. Caller cancellation can no longer cancel
+        // the statement; finish protocol bookkeeping with a bounded cleanup token.
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         _transactionStatus = null;
-        var frame = await _reader!.ReadFrameAsync(cancellationToken).ConfigureAwait(false);
+        var frame = await _reader!.ReadFrameAsync(timeout.Token).ConfigureAwait(false);
         if (frame is null || frame.Value.Type != ProtocolMessageType.Ready)
         { throw new ProtocolException(ErrorMessages.TransactionStatusMissing); }
         _transactionStatus = ProtocolTransactionStatusMessage.Decode(frame.Value.Payload.Span).Status;

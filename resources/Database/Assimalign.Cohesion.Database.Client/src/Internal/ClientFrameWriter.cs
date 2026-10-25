@@ -13,6 +13,10 @@ internal sealed class ClientFrameWriter : ProtocolFrameWriter
 {
     private readonly ProtocolFrameWriter _writer;
 
+    internal bool RequiresTransactionStatus { get; private set; }
+
+    internal void BeginExchange() => RequiresTransactionStatus = false;
+
     /// <summary>
     /// Initializes a new instance of the <see cref="ClientFrameWriter"/> class.
     /// </summary>
@@ -27,6 +31,9 @@ internal sealed class ClientFrameWriter : ProtocolFrameWriter
         try
         {
             await _writer.WriteFrameAsync(frame, cancellationToken).ConfigureAwait(false);
+            // The transaction-status contract covers Execute (5) and Graph ExecutePaths (64).
+            // Observe the request, including application exchanges using the default constructor.
+            if ((byte)frame.Type is 5 or 64) { RequiresTransactionStatus = true; }
         }
         catch (InvalidOperationException exception)
         {

@@ -219,8 +219,11 @@ ROLLBACK for active or failed transactions, then requires a successful zero-coun
 Idle status before reuse. It performs this I/O outside the pool lock, after joining the last
 lease operation, with a five-second cleanup timeout. Failure, missing/invalid status, cancellation
 or an unnegotiated transaction-capable peer discards the connector. Idle sessions need no reset
-exchange. No state is inferred from statement text; custom Execute exchanges opt into the status
-postamble with protected DatabaseProtocolExchange(ProtocolMessageFamily, bool transactionStatus).
+exchange. No state is inferred from statement text. The connector observes Execute (5) and
+ExecutePaths (64) frames and drains negotiated status even for application exchanges using the
+one-argument constructor. The explicit transactionStatus flag can still require a postamble.
+After a complete result or statement error, status is read with a bounded five-second internal
+token; caller cancellation in that window does not turn an acknowledged COMMIT into cancellation.
 Ping and other non-Execute exchanges retain their existing completion contract. The original
 statement exception survives a failure reading its status, and the connector is discarded.
 
