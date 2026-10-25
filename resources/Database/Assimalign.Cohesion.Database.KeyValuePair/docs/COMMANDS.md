@@ -227,9 +227,11 @@ body executes once per CALL. Typed called-on-NULL delegates require nullable arg
 
 These execution refusals use ExecutionFailure and keep the connection usable; the existing
 parse failures still use ParseFailure. No new SQLSTATE mapping is introduced. Ordinary
-callback errors leave an explicit transaction active. Existing database, storage, timeout
-and actual cancellation exceptions retain their identity at `Invoke`; the session applies
-its existing storage/offline/abort classification. External callback effects are not rolled
+callback errors, including application timeout, I/O and storage exceptions, use CV05003 and leave
+an explicit transaction active. DatabaseException, out-of-memory, insufficient stack and actual
+statement cancellation retain their identity at Invoke. Function codes are preserved before
+storage classification, even with an I/O inner cause. Commands attempted during a CALL
+are refused with CK07003 before the nested command executes. External callback effects are not rolled
 back. Callbacks are trusted application code, not sandboxed, and must be stateless or thread-safe.
 The context supplies only database identity and statement cancellation, with no storage handle.
 The six existing CRUD/discovery commands remain commands, with unchanged semantics; this model

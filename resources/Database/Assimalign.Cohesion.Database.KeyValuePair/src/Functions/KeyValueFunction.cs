@@ -2,11 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Globalization;
-using System.IO;
 
 using Assimalign.Cohesion.Database.KeyValuePair.Internal;
 using Assimalign.Cohesion.Database.KeyValuePair.Protocol;
-using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.KeyValuePair;
@@ -18,6 +16,7 @@ namespace Assimalign.Cohesion.Database.KeyValuePair;
 /// implement only InvokeCore. The context exposes no storage/session mutation capability.
 /// Callbacks are trusted application code; external side effects and captured state are not sandboxed.
 /// A non-strict call enters the body exactly once; strict NULL input skips it.
+/// Callbacks must not call back into an engine: a nested operation on another session can wait indefinitely for a lock held by the invoking statement, without a lock-wait timeout or detected wait-for cycle. Same-session operations are refused before execution. Typed delegates do not receive the statement cancellation token; use a derived implementation and the borrowed context to observe it.
 /// </remarks>
 // Deviates from the repo interface-first rule per design decision: Database engines are concrete-first — abstract bases with protected cores and sealed model leaves (owner, 2026-10-04; database-area.md).
 public abstract partial class KeyValueFunction
@@ -75,9 +74,6 @@ public abstract partial class KeyValueFunction
     /// <exception cref="ArgumentException">The direct call has a different count or non-NULL argument type.</exception>
     /// <exception cref="OperationCanceledException">The statement's own token is canceled.</exception>
     /// <exception cref="DatabaseException">The callback failed (CV05003), returned another type (CV02016), or supplied its own database failure.</exception>
-    /// <exception cref="IOException">The callback's original device failure; engine execution applies its existing classification.</exception>
-    /// <exception cref="StorageException">The callback's original storage failure.</exception>
-    /// <exception cref="TimeoutException">The callback's original timeout.</exception>
     public object? Invoke(scoped in KeyValueArguments arguments)
     {
         if (arguments.Count != _parameters.Length)
@@ -103,8 +99,7 @@ public abstract partial class KeyValueFunction
         {
             result = InvokeCore(in arguments);
         }
-        catch (Exception error) when (error is not (DatabaseException or StorageException or IOException
-            or TimeoutException or InsufficientExecutionStackException or OutOfMemoryException)
+        catch (Exception error) when (error is not (DatabaseException or InsufficientExecutionStackException or OutOfMemoryException)
             && !(error is OperationCanceledException && arguments.Context.CancellationToken.IsCancellationRequested))
         {
             string message = string.Format(CultureInfo.CurrentCulture, ErrorMessages.FunctionCallbackFailed, Name, error.Message);

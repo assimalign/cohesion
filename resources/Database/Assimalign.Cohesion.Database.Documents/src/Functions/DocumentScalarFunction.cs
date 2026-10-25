@@ -6,6 +6,7 @@ using Assimalign.Cohesion.Database.Types;
 namespace Assimalign.Cohesion.Database.Documents;
 
 /// <summary>A native or application scalar function driven by the engine through one validated call.</summary>
+/// <remarks>Callbacks must not call back into an engine: a nested operation on another session can wait indefinitely for a lock held by the invoking statement, without a lock-wait timeout or detected wait-for cycle. Same-session operations are refused before execution. Typed delegates do not receive the statement cancellation token; use a derived implementation and the borrowed context to observe it.</remarks>
 // Deviates from the repo interface-first rule per design decision: Database engines are concrete-first — abstract bases with protected cores and sealed model leaves (owner, 2026-10-04; database-area.md).
 public abstract class DocumentScalarFunction : DocumentFunction
 {

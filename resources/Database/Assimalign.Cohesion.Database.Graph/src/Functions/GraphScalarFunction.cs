@@ -6,6 +6,7 @@ using Assimalign.Cohesion.Database.Graph.Language;
 namespace Assimalign.Cohesion.Database.Graph;
 
 /// <summary>A native or developer scalar function with one checked invocation pipeline.</summary>
+/// <remarks>Callbacks must not call back into an engine: a nested operation on another session can wait indefinitely for a lock held by the invoking statement, without a lock-wait timeout or detected wait-for cycle. Same-session operations are refused before execution. Typed delegates do not receive the statement cancellation token; use a derived implementation and the borrowed context to observe it. Typed numeric adapters accept Int64, Double and Decimal, and their nullable forms; other numeric CLR types are refused at creation. Called-on-NULL input requires nullable or reference arguments.</remarks>
 // Deviates from the repo interface-first rule per design decision: Database engines are concrete-first — abstract bases with protected cores and sealed model leaves (owner, 2026-10-04; database-area.md).
 public abstract class GraphScalarFunction : GraphFunction
 {
@@ -16,7 +17,7 @@ public abstract class GraphScalarFunction : GraphFunction
     /// <exception cref="ArgumentNullException">Parameter metadata or return metadata is null.</exception>
     /// <exception cref="ArgumentOutOfRangeException">The NULL behavior is unknown.</exception>
     protected GraphScalarFunction(GraphFunctionName name, IEnumerable<GraphFunctionType> parameters, GraphFunctionType returnType,
-        GraphNullBehavior nullBehavior = GraphNullBehavior.Strict) : base(name, parameters, returnType, nullBehavior, scalar: true) { }
+        GraphNullBehavior nullBehavior = GraphNullBehavior.ReturnsNullOnNullInput) : base(name, parameters, returnType, nullBehavior, scalar: true) { }
     /// <summary>Invokes this function after checking arity, cancellation, NULLs and declared value shapes.</summary>
     /// <param name="arguments">Borrowed arguments and context.</param><returns>The result.</returns>
     /// <exception cref="DatabaseException">The arguments or callback violate the function contract.</exception>
@@ -25,10 +26,10 @@ public abstract class GraphScalarFunction : GraphFunction
     {
         arguments.Context.CancellationToken.ThrowIfCancellationRequested();
         if (!AcceptsArity(arguments.Count)) { throw GraphPlanningException.FunctionContract(Name); }
-        if (NullBehavior == GraphNullBehavior.Strict)
+        if (NullBehavior == GraphNullBehavior.ReturnsNullOnNullInput)
         { for (int i = 0; i < arguments.Count; i++) { if (arguments[i] is null) { return null; } } }
         if (!IsNative)
-        { for (int i = 0; i < arguments.Count; i++) { GraphPlanningException.ValidateFunctionValue(this, arguments[i], Parameters[i]); } }
+        { for (int i = 0; i < arguments.Count; i++) { GraphPlanningException.ValidateFunctionValue(this, arguments[i], Parameters[i], argument: true); } }
         try
         {
             object? result = InvokeCore(in arguments);
@@ -53,7 +54,7 @@ public abstract class GraphScalarFunction : GraphFunction
     /// <param name="name">The name.</param><param name="body">The callback.</param><param name="nullBehavior">The NULL contract.</param><returns>The immutable function.</returns>
     /// <exception cref="ArgumentException">The name is default/invalid, or a CLR type is unsupported.</exception>
     /// <exception cref="ArgumentNullException">The callback is null.</exception>
-    public static GraphScalarFunction Create<T1, TResult>(GraphFunctionName name, Func<T1, TResult> body, GraphNullBehavior nullBehavior = GraphNullBehavior.Strict)
+    public static GraphScalarFunction Create<T1, TResult>(GraphFunctionName name, Func<T1, TResult> body, GraphNullBehavior nullBehavior = GraphNullBehavior.ReturnsNullOnNullInput)
         => new GraphTypedScalarFunction<T1, TResult>(name, body, nullBehavior);
     /// <summary>Creates a typed scalar with 2 argument(s).</summary>
     /// <typeparam name="T1">A query argument CLR type.</typeparam>
@@ -62,7 +63,7 @@ public abstract class GraphScalarFunction : GraphFunction
     /// <param name="name">The name.</param><param name="body">The callback.</param><param name="nullBehavior">The NULL contract.</param><returns>The immutable function.</returns>
     /// <exception cref="ArgumentException">The name is default/invalid, or a CLR type is unsupported.</exception>
     /// <exception cref="ArgumentNullException">The callback is null.</exception>
-    public static GraphScalarFunction Create<T1, T2, TResult>(GraphFunctionName name, Func<T1, T2, TResult> body, GraphNullBehavior nullBehavior = GraphNullBehavior.Strict)
+    public static GraphScalarFunction Create<T1, T2, TResult>(GraphFunctionName name, Func<T1, T2, TResult> body, GraphNullBehavior nullBehavior = GraphNullBehavior.ReturnsNullOnNullInput)
         => new GraphTypedScalarFunction<T1, T2, TResult>(name, body, nullBehavior);
     /// <summary>Creates a typed scalar with 3 argument(s).</summary>
     /// <typeparam name="T1">A query argument CLR type.</typeparam>
@@ -72,7 +73,7 @@ public abstract class GraphScalarFunction : GraphFunction
     /// <param name="name">The name.</param><param name="body">The callback.</param><param name="nullBehavior">The NULL contract.</param><returns>The immutable function.</returns>
     /// <exception cref="ArgumentException">The name is default/invalid, or a CLR type is unsupported.</exception>
     /// <exception cref="ArgumentNullException">The callback is null.</exception>
-    public static GraphScalarFunction Create<T1, T2, T3, TResult>(GraphFunctionName name, Func<T1, T2, T3, TResult> body, GraphNullBehavior nullBehavior = GraphNullBehavior.Strict)
+    public static GraphScalarFunction Create<T1, T2, T3, TResult>(GraphFunctionName name, Func<T1, T2, T3, TResult> body, GraphNullBehavior nullBehavior = GraphNullBehavior.ReturnsNullOnNullInput)
         => new GraphTypedScalarFunction<T1, T2, T3, TResult>(name, body, nullBehavior);
     /// <summary>Creates a typed scalar with 4 argument(s).</summary>
     /// <typeparam name="T1">A query argument CLR type.</typeparam>
@@ -83,6 +84,6 @@ public abstract class GraphScalarFunction : GraphFunction
     /// <param name="name">The name.</param><param name="body">The callback.</param><param name="nullBehavior">The NULL contract.</param><returns>The immutable function.</returns>
     /// <exception cref="ArgumentException">The name is default/invalid, or a CLR type is unsupported.</exception>
     /// <exception cref="ArgumentNullException">The callback is null.</exception>
-    public static GraphScalarFunction Create<T1, T2, T3, T4, TResult>(GraphFunctionName name, Func<T1, T2, T3, T4, TResult> body, GraphNullBehavior nullBehavior = GraphNullBehavior.Strict)
+    public static GraphScalarFunction Create<T1, T2, T3, T4, TResult>(GraphFunctionName name, Func<T1, T2, T3, T4, TResult> body, GraphNullBehavior nullBehavior = GraphNullBehavior.ReturnsNullOnNullInput)
         => new GraphTypedScalarFunction<T1, T2, T3, T4, TResult>(name, body, nullBehavior);
 }

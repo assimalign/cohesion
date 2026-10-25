@@ -264,3 +264,8 @@ literals fail planning, while incompatible stored values yield scalar NULL or sk
 inputs. Typed integer input conversion uses CD02008 for fractional values and CD02007 for values
 outside the declared CLR integer range; the callback is not invoked. An overflow thrown by the
 callback itself remains the external-function diagnostic CD05017.
+
+Engine requests admit named calls and resolve them against the executing catalog. An unknown
+name retains CD00008 but now fails during binding/execution: the wire category is ExecutionFailure,
+and no StatementParseFailed event is raised. Standalone parsers retain unknown-name parse
+diagnostics. This changes error categorization, with no frame-layout or protocol-version change.

@@ -115,7 +115,7 @@ internal static class GraphGrouping
                 {
                     var function = _context.Operation!.FunctionBindings[(GqlNamedFunctionCallExpression)expression];
                     bool skip = false;
-                    if (function.NullBehavior == GraphNullBehavior.Strict)
+                    if (function.NullBehavior == GraphNullBehavior.ReturnsNullOnNullInput)
                     { for (int j = 0; j < values.Length; j++) { skip |= values[j] is null; } }
                     if (skip) { continue; }
                     object?[] keyValues = values.ToArray();

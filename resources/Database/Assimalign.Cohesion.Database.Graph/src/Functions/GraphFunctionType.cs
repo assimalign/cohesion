@@ -74,7 +74,7 @@ public sealed class GraphFunctionType
     /// <summary>Creates this shape with a non-NULL contract.</summary><returns>The nonnullable shape.</returns>
     public GraphFunctionType NotNull() => new(Kind, DatabaseType, ClrType, Element, false);
     /// <summary>Gets metadata for a supported CLR query type without runtime code generation.</summary>
-    /// <typeparam name="T">The exact query type, or object for any query value.</typeparam><returns>The metadata.</returns>
+    /// <typeparam name="T">A canonical query type (numeric: Int64, Double or Decimal, including nullable forms), or object for any query value.</typeparam><returns>The metadata.</returns>
     /// <exception cref="ArgumentException">The CLR type is unsupported.</exception>
     public static GraphFunctionType Of<T>()
     {
@@ -88,20 +88,18 @@ public sealed class GraphFunctionType
         (GraphFunctionKind kind, DatabaseType databaseType) = type == typeof(string) ? (GraphFunctionKind.String, DatabaseType.String)
             : type == typeof(bool) ? (GraphFunctionKind.Boolean, DatabaseType.Boolean)
             : type == typeof(long) ? (GraphFunctionKind.Integral, DatabaseType.Int64)
-            : type == typeof(int) ? (GraphFunctionKind.Integral, DatabaseType.Int32)
-            : type == typeof(short) ? (GraphFunctionKind.Integral, DatabaseType.Int16)
-            : type == typeof(sbyte) ? (GraphFunctionKind.Integral, DatabaseType.Int8)
-            : type == typeof(byte) ? (GraphFunctionKind.Integral, DatabaseType.Null)
-            : type == typeof(ushort) ? (GraphFunctionKind.Integral, DatabaseType.Null)
-            : type == typeof(uint) ? (GraphFunctionKind.Integral, DatabaseType.Null)
-            : type == typeof(ulong) ? (GraphFunctionKind.Integral, DatabaseType.Null)
-            : type == typeof(float) ? (GraphFunctionKind.NonIntegral, DatabaseType.Float32)
             : type == typeof(double) ? (GraphFunctionKind.NonIntegral, DatabaseType.Float64)
             : type == typeof(decimal) ? (GraphFunctionKind.NonIntegral, DatabaseType.Decimal)
             : type == typeof(DateOnly) ? (GraphFunctionKind.Date, DatabaseType.Date)
             : type == typeof(DateTimeOffset) ? (GraphFunctionKind.Timestamp, DatabaseType.DateTimeOffset)
             : throw new ArgumentException(ErrorMessages.FunctionTypeUnsupported);
         return new(kind, databaseType, type);
+    }
+    internal static GraphFunctionType Parameter<T>(GraphNullBehavior nullBehavior)
+    {
+        if (nullBehavior == GraphNullBehavior.CalledOnNullInput && default(T) is not null)
+        { throw new ArgumentException(ErrorMessages.FunctionNullParameterInvalid); }
+        return Of<T>();
     }
     private static void ValidateDepth(GraphFunctionType shape)
     {
@@ -115,6 +113,9 @@ public sealed class GraphFunctionType
         GraphFunctionType? shape = this;
         while (depth-- > 0 && shape is not null)
         {
+            // Any includes both entities and containers. Access may still yield an arbitrary
+            // nested container; the entity-only property shortcut cannot narrow this union.
+            if ((shape.Kind & (GraphFunctionKind.List | GraphFunctionKind.Map)) != 0 && shape.Element is null) { shape = Any; continue; }
             if ((shape.Kind & (GraphFunctionKind.Node | GraphFunctionKind.Relationship)) != 0) { return depth == 0 ? new(GraphFunctionKind.Scalar) : null; }
             shape = shape.Element ?? ((shape.Kind & (GraphFunctionKind.List | GraphFunctionKind.Map)) != 0 ? Any : null);
         }

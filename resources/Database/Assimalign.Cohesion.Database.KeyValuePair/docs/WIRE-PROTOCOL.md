@@ -148,5 +148,7 @@ ResultComplete affected count -1, then return to the ready loop without an extra
 
 Missing names use CV00019/ParseFailure; resolution CV01018–21, callback CV05003 and declared
 result CV02016 use ExecutionFailure. Error text carries the code once. Ordinary callback
-failures keep the connection usable; cancellation/storage failures retain existing behavior.
+failures, including application timeout and I/O, keep the same session usable. Only DatabaseException,
+out-of-memory, insufficient stack and actual statement cancellation bypass callback wrapping;
+application I/O is CV05003 rather than a storage fault.
 See [COMMANDS.md](COMMANDS.md) for overload and NULL semantics.

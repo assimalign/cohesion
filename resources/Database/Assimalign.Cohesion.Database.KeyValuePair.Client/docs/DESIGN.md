@@ -252,3 +252,6 @@ construction, binary copying, telemetry or exchange admission. Its OperationCanc
 retains the caller's token and leaves the rental healthy. Once an exchange is admitted,
 existing linked-token, cancellation and pool policy applies. The six existing client command
 methods and the shared client core are unchanged.
+
+Application callback timeouts and I/O failures are CV05003/ExecutionFailure and retain the
+exact reusable server session. They are not transport or engine-storage failures.

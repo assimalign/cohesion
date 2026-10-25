@@ -2953,10 +2953,11 @@ stable supported query values. There is no process-wide hot-path accounting or s
 
 Unexpected developer failures and invalid callback contracts use CG05021, with the original
 cause and source span in the diagnostics carrier and no code prefix in the message.
-The callback pipeline preserves database, storage, I/O and timeout exception identity;
-the existing engine boundary still classifies storage/I/O failures as CG06006 with the original
-exception as InnerException. It preserves timeout identity and the established transaction
-abort behavior. Cancellation keeps its identity when the statement token is canceled. Native leaves retain their original coded
+The callback filter follows SQL IsFunctionFailure: only DatabaseException, out-of-memory,
+insufficient stack and actual statement cancellation keep their identity. Application timeout,
+I/O and storage exceptions are CG05021, with the original cause and its message, and use
+ExecutionFailure without closing the wire session. The established Graph transaction-abort
+behavior remains. Native leaves retain their original coded
 arithmetic/type failures before the common callback filter.
 
 Reference behavior was compared with Neo4j
@@ -2968,3 +2969,24 @@ Reference behavior was compared with Neo4j
 (group-local state creation). PostgreSQL's
 `src/backend/utils/fmgr/fmgr.c:149-189` likewise installs builtin and catalog function
 metadata into one invocation descriptor. No reference code is copied.
+
+Function callbacks must not reenter an engine. In particular, a Graph write acquires the database
+writer lock before invoking callbacks; a nested write on another session can wait indefinitely
+without a lock-wait timeout or detected wait-for cycle. Same-session reentry is refused before
+execution. Typed delegates cannot observe the statement token; a derived core can use the context.
+
+Graph registration Add returns its collection and duplicate application signatures throw
+InvalidOperationException. ReturnsNullOnNullInput is the shared NULL-policy spelling. Typed numeric
+adapters accept Int64, Double and Decimal (including nullable forms); small, unsigned and Single
+CLR types are refused at creation. CalledOnNullInput rejects nonnullable value arguments at creation.
+Dynamic argument mismatches use CG02013 before callback entry. Result-contract validation rejects
+non-finite numeric leaves, including in nested values, and Any retains arbitrary container depth.
+Application call appearances are never merged by structural grouping/projection reuse: each
+aggregate appearance evaluates its arguments once per input row and owns its group state.
+
+Unknown names keep CG00010 but ordinary engine requests now resolve them during execution,
+producing ExecutionFailure and no StatementParseFailed event. Standalone parsing still rejects
+unknown calls; no frame layout or version changes.
+
+Interleaved same-process Release comparisons retain bounded native-dispatch allocation overhead;
+elapsed-time distributions remain descriptive rather than an acceptance gate.

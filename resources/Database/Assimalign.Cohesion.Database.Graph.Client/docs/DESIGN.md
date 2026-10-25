@@ -410,3 +410,7 @@ negotiated composite encoding and pooled-session cleanup apply. CG05021 callback
 round-trip through the existing carrier. GraphRegisteredFunctionWireTests covers both InMemory
 and TCP, custom scalar and DISTINCT aggregate values, failure diagnostics and exact-session reuse.
 No protocol bytes, capabilities or version change.
+
+Unknown engine-resolved function names use ExecutionFailure rather than ParseFailure, with
+no StatementParseFailed event. Application callback timeout and I/O errors use the model
+callback diagnostic and leave the exact wire session reusable after a completed failure.

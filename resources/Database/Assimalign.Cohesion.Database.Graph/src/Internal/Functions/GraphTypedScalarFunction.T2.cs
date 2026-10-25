@@ -9,7 +9,7 @@ internal sealed class GraphTypedScalarFunction<T1, TResult> : GraphScalarFunctio
 {
     private readonly Func<T1, TResult> _body;
     internal GraphTypedScalarFunction(GraphFunctionName name, Func<T1, TResult> body, GraphNullBehavior nullBehavior)
-        : base(name, [GraphFunctionType.Of<T1>()], GraphFunctionType.Of<TResult>(), nullBehavior)
+        : base(name, [GraphFunctionType.Parameter<T1>(nullBehavior)], GraphFunctionType.Of<TResult>(), nullBehavior)
     { ArgumentNullException.ThrowIfNull(body); _body = body; }
     protected override object? InvokeCore(scoped in GraphArguments arguments) => _body(arguments.Get<T1>(0));
     private sealed class DebugView

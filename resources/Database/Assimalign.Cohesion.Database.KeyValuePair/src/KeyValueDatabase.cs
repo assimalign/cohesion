@@ -474,6 +474,8 @@ public sealed class KeyValueDatabase : DatabaseInstance
         if (error is DatabaseException { Diagnostics: [{ Code: "CK06003" }, ..] }) { return error; }
         // A transaction refusal owns its diagnostic even when its cause is storage corruption.
         if (error is DatabaseException { Diagnostics: [{ Code: "CV04101" }, ..] }) { return error; }
+        // Function failures own their identity; an application's inner I/O failure is not storage I/O.
+        if (error is DatabaseException { Diagnostics: [{ Code: "CV05003" or "CV02016" or "CV01018" or "CV01019" or "CV01020" or "CV01021" }, ..] }) { return error; }
         var translated = TranslateOffline(error);
         if (!ReferenceEquals(translated, error)) { return translated; }
         if (error is DatabaseException { Diagnostics: [{ Code: "CV06105" }, ..] }) { return error; }

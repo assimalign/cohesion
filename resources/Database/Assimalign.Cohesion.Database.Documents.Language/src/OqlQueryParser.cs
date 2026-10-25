@@ -24,8 +24,12 @@ public sealed partial class OqlQueryParser : QueryParser
 
     /// <summary>Initializes an OQL parser.</summary>
     /// <param name="options">Optional shared analyzer configuration.</param>
+    public OqlQueryParser(QueryParserOptions? options = null) : this(false, options) { }
+
+    /// <summary>Initializes a parser which can defer named function resolution to an engine.</summary>
     /// <param name="allowUnregisteredFunctions">Defers unknown function binding to an engine catalog; the default keeps standalone unknown-name diagnostics.</param>
-    public OqlQueryParser(QueryParserOptions? options = null, bool allowUnregisteredFunctions = false) : base(options ?? new QueryParserOptions())
+    /// <param name="options">Optional shared analyzer configuration.</param>
+    public OqlQueryParser(bool allowUnregisteredFunctions, QueryParserOptions? options = null) : base(options ?? new QueryParserOptions())
     {
         _allowUnregisteredFunctions = allowUnregisteredFunctions;
     }

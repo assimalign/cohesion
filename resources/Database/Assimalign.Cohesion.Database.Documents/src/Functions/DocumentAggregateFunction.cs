@@ -6,6 +6,7 @@ using Assimalign.Cohesion.Database.Types;
 namespace Assimalign.Cohesion.Database.Documents;
 
 /// <summary>A group function whose fresh accumulator is driven by the engine.</summary>
+/// <remarks>An aggregate and its arguments are evaluated independently at each appearance in projection, HAVING and ORDER BY. Typed seed/step/finish delegates do not receive the statement cancellation token; a derived core can observe the borrowed context. Callbacks must not reenter an engine: another session can wait indefinitely for a lock held by the invoking statement, without a lock-wait timeout or detected wait-for cycle.</remarks>
 // Deviates from the repo interface-first rule per design decision: Database engines are concrete-first — abstract bases with protected cores and sealed model leaves (owner, 2026-10-04; database-area.md).
 public abstract class DocumentAggregateFunction : DocumentFunction
 {

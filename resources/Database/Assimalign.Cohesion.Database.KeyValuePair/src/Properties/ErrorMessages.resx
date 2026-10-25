@@ -123,4 +123,5 @@
   <data name="FunctionAmbiguous" xml:space="preserve"><value>Function '{0}' has more than one NULL-compatible overload.</value></data>
   <data name="CallFormInvalid" xml:space="preserve"><value>CALL requires a function name followed by zero or more named parameters.</value></data>
   <data name="FunctionNullValueRequired" xml:space="preserve"><value>A NULL function argument cannot be read as a non-nullable primitive.</value></data>
+  <data name="SessionOperationActive" xml:space="preserve"><value>Another command or transaction begin is already active on this session.</value></data>
 </root>

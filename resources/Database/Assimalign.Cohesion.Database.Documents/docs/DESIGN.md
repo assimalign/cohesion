@@ -2701,8 +2701,9 @@ is normalized and copied; borrowed arguments and contexts must not be retained b
 
 The context carries the database name, statement cancellation token and transaction-start
 timestamp. Native date functions and application functions receive the same transaction clock.
-Database, storage, I/O, timeout and statement-cancellation exceptions retain their identity at
-the function boundary. Unrelated callback cancellation and other external faults fail with
+DatabaseException, out-of-memory, insufficient stack and statement-cancellation exceptions retain
+their identity at the function boundary, following SQL IsFunctionFailure. Application storage,
+I/O, timeout, unrelated cancellation and other external faults fail with
 CD05017, an unprefixed resource-backed message and the original inner exception. Invalid return
 types, null accumulators and reused accumulators use that external-function failure contract.
 Native scalar/aggregate overflow is translated to existing CD02007 before crossing the common
@@ -2742,3 +2743,17 @@ behavior over InMemory and TCP. The existing recovery fixture registers typed an
 functions and executes them after reopening, including NativeAOT publication.
 DocumentFunctionDispatchMeasurementTests retains its existing-API twelve-sample Release
 measurement, with exact values checked and descriptive allocation/time distributions.
+
+Callbacks must not reenter an engine: another session can wait indefinitely for a lock held
+by the invoking statement, without a lock-wait timeout or detected wait-for cycle. Same-session
+reentry is refused before a nested operation executes. Typed delegates do not receive the
+statement cancellation token; derived implementations can observe the borrowed context.
+An aggregate is evaluated once per appearance in projection, HAVING and ORDER BY, including
+its arguments; identical-looking appearances are independent. Unknown names keep CD00008 but
+ordinary engine requests report ExecutionFailure at binding, without StatementParseFailed.
+
+Callback timeouts and I/O leave a completed execution failure on a reusable session.
+Protocol layout and version stay unchanged.
+
+Interleaved same-process Release comparisons did not reproduce the reported native-call
+slowdown; dispatch retains bounded per-statement allocation overhead.

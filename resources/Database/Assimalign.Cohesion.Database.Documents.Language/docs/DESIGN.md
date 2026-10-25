@@ -764,7 +764,8 @@ The default parser retains the built-in OqlFunctions metadata table and standalo
 and arity diagnostics. The optional allowUnregisteredFunctions constructor argument admits arbitrary
 named-call ASTs for engine binding; the language package takes no engine or catalog dependency.
 Ordinary DocumentQueryRequest.FromOql and wire execution select this mode automatically. Native
-arity checks and recognized unsupported constructs remain unchanged. OqlFunction.ArgumentKinds
-exposes the immutable metadata used to construct native registrations; execution uses the owning
-engine's frozen function catalog. Runtime binding, MISSING/NULL, grouping and error contracts are
-specified in the [engine design](../../Assimalign.Cohesion.Database.Documents/docs/DESIGN.md#engine-registered-document-functions).
+arity checks and recognized unsupported constructs remain unchanged. Native argument metadata remains private; engine adapters use OqlFunction.AcceptsArgument.
+OqlQueryParser retains its original optional QueryParserOptions constructor and adds a bool-first
+overload for deferred binding. Ordinary engine requests defer unknown names to binding and
+report CD00008 as ExecutionFailure without StatementParseFailed; standalone parsing still
+reports ParseFailure for unknown names. No protocol layout or version changes.

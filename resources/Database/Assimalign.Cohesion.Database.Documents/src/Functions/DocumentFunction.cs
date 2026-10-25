@@ -8,7 +8,7 @@ using Assimalign.Cohesion.Database.Types;
 namespace Assimalign.Cohesion.Database.Documents;
 
 /// <summary>Immutable metadata shared by native and application document functions.</summary>
-/// <remarks>One instance serves all sessions; implementations must be stateless or thread-safe. Per-group state belongs to an accumulator.</remarks>
+/// <remarks>One instance serves all sessions; implementations must be stateless or thread-safe. Per-group state belongs to an accumulator. Callbacks must not call back into an engine: a nested operation on another session can wait indefinitely for a lock held by the invoking statement, without a lock-wait timeout or detected wait-for cycle. Same-session operations are refused before execution. Typed delegates do not receive the statement cancellation token; use a derived implementation and the borrowed context to observe it. Aggregate calls are evaluated independently at each appearance in projection, HAVING and ORDER BY, including argument evaluation.</remarks>
 // Deviates from the repo interface-first rule per design decision: Database engines are concrete-first — abstract bases with protected cores and sealed model leaves (owner, 2026-10-04; database-area.md).
 public abstract class DocumentFunction
 {

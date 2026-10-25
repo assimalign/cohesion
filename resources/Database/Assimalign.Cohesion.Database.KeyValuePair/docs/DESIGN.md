@@ -1713,9 +1713,11 @@ Requests snapshot argument lists and binary bytes. Manual access exposes binary 
 memory; a typed `byte[]` delegate argument is copied, and binary return values are copied
 before materialization. A result has one nullable `value` column with the declared primitive
 type, one row and affected count -1. All existing CRUD paths retain their executors and
-transaction behavior. `Invoke` preserves DatabaseException, StorageException, IOException,
-TimeoutException and actual statement cancellation; other callback failures retain their
-inner cause under CV05003. Existing session classification still aborts storage failures.
+transaction behavior. `Invoke` follows SQL IsFunctionFailure: DatabaseException, out-of-memory, insufficient stack
+and actual statement cancellation keep their identity; all other callback failures, including
+I/O, storage and timeout, retain their inner cause under CV05003. Function resolution, result
+and callback codes are retained before storage classification, even with an I/O inner cause.
+Only actual engine storage failures receive storage classification and transaction abort.
 CV01018–21 own resolution and CV02016 owns declared-result violations; codes and grammar
 are listed in COMMANDS. No public interface, project reference, event, format or wire version
 changes. Generated names use the existing value-type generator and trimming-safe codecs;
@@ -1728,3 +1730,14 @@ buffers and distinct slices remain separate. Thus owned payload bytes follow uni
 ranges plus the argument slots, rather than multiplying a payload by its alias count. Typed
 `byte[]` delegate access still returns a defensive copy, and binary results remain detached.
 No arity limit, message limit, public API, disk format or wire version is added by this ownership rule.
+
+CALL holds its session through completion, excluding other commands and BEGIN during callback
+execution. Ordinary data commands retain their existing admission behavior.
+A callback capturing that session cannot run a nested PUT: CK07003 precedes nested execution,
+so a failed CALL contributes no writes to a later COMMIT. Callbacks must not reenter an engine
+on another session either: a nested command can wait indefinitely for a held lock, without a
+lock-wait timeout or detected wait-for cycle. Typed delegates do not receive the statement token;
+a derived implementation can observe its borrowed context.
+
+Interleaved same-process Release comparisons preserve GET/EXISTS allocations. CALL admission
+uses session state so ordinary reads avoid taking a session operation hold.

@@ -1,5 +1,5 @@
 using System;
-using System.Linq;
+using System.Text.Json;
 
 using Assimalign.Cohesion.Database.Documents.Language;
 
@@ -12,7 +12,21 @@ internal sealed class DocumentBuiltinScalarFunction : DocumentScalarFunction
     internal DocumentBuiltinScalarFunction(OqlFunction definition)
         : base(definition.Name, definition.MinimumArguments, definition.MaximumArguments, definition.ResultType,
             definition.Name == "TYPE" ? DocumentNullBehavior.CalledOnNullOrMissingInput : DocumentNullBehavior.PropagateMissingOrNull,
-            definition.ArgumentKinds.Select(ClassifyArgumentKind).ToArray()) { }
+            ArgumentKindsFor(definition)) { }
+
+    // Reuse the language's existing public predicate rather than exporting its private array
+    // just to construct the engine's registration metadata. Variadic native calls repeat kinds.
+    private static DocumentFunctionArgumentKind[] ArgumentKindsFor(OqlFunction definition)
+    {
+        var result = new DocumentFunctionArgumentKind[definition.MaximumArguments == int.MaxValue ? definition.MinimumArguments : definition.MaximumArguments];
+        ReadOnlySpan<JsonValueKind> valuedKinds = [JsonValueKind.True, JsonValueKind.Number, JsonValueKind.String, JsonValueKind.Array, JsonValueKind.Object];
+        for (int index = 0; index < result.Length; index++)
+        {
+            foreach (var kind in valuedKinds)
+            { if (definition.AcceptsArgument(index, kind)) { result[index] |= ClassifyArgumentKind(kind); } }
+        }
+        return result;
+    }
     protected override DocumentValue InvokeCore(scoped in DocumentArguments arguments)
     {
         try { return new(new DocumentBuiltinCall(arguments.Context).Invoke(Name.ToString(), in arguments)); }

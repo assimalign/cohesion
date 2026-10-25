@@ -6,6 +6,7 @@ using Assimalign.Cohesion.Database.Graph.Language;
 namespace Assimalign.Cohesion.Database.Graph;
 
 /// <summary>A per-group aggregate factory sharing the native and developer invocation contract.</summary>
+/// <remarks>Callbacks must not call back into an engine: a nested operation on another session can wait indefinitely for a lock held by the invoking statement, without a lock-wait timeout or detected wait-for cycle. Same-session operations are refused before execution. Typed delegates do not receive the statement cancellation token; use a derived implementation and the borrowed context to observe it. Each call appearance owns an accumulator per group; callbacks have no purity promise.</remarks>
 // Deviates from the repo interface-first rule per design decision: Database engines are concrete-first — abstract bases with protected cores and sealed model leaves (owner, 2026-10-04; database-area.md).
 public abstract class GraphAggregateFunction : GraphFunction
 {
@@ -15,7 +16,7 @@ public abstract class GraphAggregateFunction : GraphFunction
     /// <exception cref="ArgumentNullException">Parameter metadata or return metadata is null.</exception>
     /// <exception cref="ArgumentOutOfRangeException">The NULL behavior is unknown.</exception>
     protected GraphAggregateFunction(GraphFunctionName name, IEnumerable<GraphFunctionType> parameters, GraphFunctionType returnType,
-        GraphNullBehavior nullBehavior = GraphNullBehavior.Strict) : base(name, parameters, returnType, nullBehavior) { }
+        GraphNullBehavior nullBehavior = GraphNullBehavior.ReturnsNullOnNullInput) : base(name, parameters, returnType, nullBehavior) { }
     /// <summary>Creates fresh state for exactly one group.</summary><param name="context">The borrowed statement context.</param><returns>New state.</returns>
     /// <exception cref="DatabaseException">The callback fails, returns null or reuses attached state (CG05021).</exception>
     /// <exception cref="OperationCanceledException">Statement cancellation was requested.</exception>
@@ -44,6 +45,6 @@ public abstract class GraphAggregateFunction : GraphFunction
     /// <exception cref="ArgumentNullException">A callback is null.</exception>
     public static GraphAggregateFunction Create<TState, T1, TResult>(GraphFunctionName name, Func<TState> seed,
         Func<TState, T1, TState> step, Func<TState, TResult> finish, Func<TState, long> retainedBytes,
-        GraphNullBehavior nullBehavior = GraphNullBehavior.Strict)
+        GraphNullBehavior nullBehavior = GraphNullBehavior.ReturnsNullOnNullInput)
         => new GraphTypedAggregateFunction<TState, T1, TResult>(name, seed, step, finish, retainedBytes, nullBehavior);
 }

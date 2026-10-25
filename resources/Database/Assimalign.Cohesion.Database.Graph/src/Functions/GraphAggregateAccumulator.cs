@@ -50,10 +50,10 @@ public abstract class GraphAggregateAccumulator : IDisposable
         var function = _function ?? throw new InvalidOperationException(ErrorMessages.FunctionAccumulatorUnattached);
         _token.ThrowIfCancellationRequested();
         if (!function.AcceptsArity(arguments.Count)) { throw GraphPlanningException.FunctionContract(function.Name); }
-        if (function.NullBehavior == GraphNullBehavior.Strict)
+        if (function.NullBehavior == GraphNullBehavior.ReturnsNullOnNullInput)
         { for (int i = 0; i < arguments.Count; i++) { if (arguments[i] is null) { return; } } }
         if (!function.IsNative)
-        { for (int i = 0; i < arguments.Count; i++) { GraphPlanningException.ValidateFunctionValue(function, arguments[i], function.Parameters[i]); } }
+        { for (int i = 0; i < arguments.Count; i++) { GraphPlanningException.ValidateFunctionValue(function, arguments[i], function.Parameters[i], argument: true); } }
         try { AddCore(in arguments); Charge(); _token.ThrowIfCancellationRequested(); }
         catch (Exception error) when (GraphPlanningException.IsExternalFunctionFailure(error, _token)) { throw GraphPlanningException.FunctionFailed(function.Name, error); }
     }

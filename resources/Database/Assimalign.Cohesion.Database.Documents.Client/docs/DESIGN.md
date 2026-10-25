@@ -332,3 +332,7 @@ executes three additional checks: exact string/metadata for the typed scalar, Bo
 and metadata for MISSING/NULL/valued inputs through the protected core, and exact Decimal
 aggregate result/metadata. This client/server sample is separate from the engine recovery fixture;
 both require their own publish/execution evidence. No sample project reference changes are needed.
+
+Unknown engine-resolved function names use ExecutionFailure rather than ParseFailure, with
+no StatementParseFailed event. Application callback timeout and I/O errors use the model
+callback diagnostic and leave the exact wire session reusable after a completed failure.

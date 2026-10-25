@@ -13,7 +13,7 @@ internal sealed class GraphTypedAggregateFunction<TState, T1, TResult> : GraphAg
     private readonly Func<TState, long> _retainedBytes;
     internal GraphTypedAggregateFunction(GraphFunctionName name, Func<TState> seed, Func<TState, T1, TState> step,
         Func<TState, TResult> finish, Func<TState, long> retainedBytes, GraphNullBehavior nullBehavior)
-        : base(name, [GraphFunctionType.Of<T1>()], GraphFunctionType.Of<TResult>(), nullBehavior)
+        : base(name, [GraphFunctionType.Parameter<T1>(nullBehavior)], GraphFunctionType.Of<TResult>(), nullBehavior)
     {
         ArgumentNullException.ThrowIfNull(seed); ArgumentNullException.ThrowIfNull(step);
         ArgumentNullException.ThrowIfNull(finish); ArgumentNullException.ThrowIfNull(retainedBytes);

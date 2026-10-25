@@ -20,7 +20,7 @@ internal sealed class DocumentPlanningException : DatabaseException
     }
 
     internal static bool IsExternalFunctionFailure(Exception error, System.Threading.CancellationToken cancellationToken)
-        => error is not (DatabaseException or OutOfMemoryException or InsufficientExecutionStackException or TimeoutException or System.IO.IOException or Assimalign.Cohesion.Database.Storage.StorageException)
+        => error is not (DatabaseException or OutOfMemoryException or InsufficientExecutionStackException)
             && !(error is OperationCanceledException && cancellationToken.IsCancellationRequested);
 
     internal static DocumentPlanningException FunctionFailed(DocumentFunctionName name, Exception error)

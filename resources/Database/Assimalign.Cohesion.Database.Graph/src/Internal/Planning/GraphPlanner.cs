@@ -695,7 +695,7 @@ internal sealed partial class GraphPlanner
                             registered is GraphScalarFunction && call.Distinct ||
                             registered is GraphNativeAggregateFunction && call.Arguments.Count == 0 && call.Distinct)
                         { throw new GraphPlanningException("CG05001", ErrorMessages.AggregatePlacement, call.Location); }
-                        if (!(registered.NullBehavior == GraphNullBehavior.Strict && call.Arguments.Any(argument => argument is GqlLiteralExpression { Value: null })))
+                        if (!(registered.NullBehavior == GraphNullBehavior.ReturnsNullOnNullInput && call.Arguments.Any(argument => argument is GqlLiteralExpression { Value: null })))
                         {
                             for (int i = 0; i < call.Arguments.Count; i++)
                             {

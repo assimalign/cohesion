@@ -28,21 +28,25 @@ public sealed class GraphFunctionCollection : IReadOnlyCollection<GraphFunction>
     /// <summary>Gets the registration count, including built-ins.</summary>
     public int Count => _functions.Count;
     /// <summary>Registers one scalar or aggregate before the build begins.</summary><param name="function">The immutable function.</param>
-    /// <exception cref="ArgumentException">The name is reserved or already registered, ignoring case.</exception>
-    /// <exception cref="InvalidOperationException">The builder has begun construction.</exception>
-    public void Add(GraphFunction function)
+    /// <returns>This collection for chaining registrations.</returns>
+    /// <exception cref="ArgumentNullException">The function is null.</exception>
+    /// <exception cref="ArgumentException">The name is reserved.</exception>
+    /// <exception cref="InvalidOperationException">The builder has begun construction, or the signature is already registered.</exception>
+    public GraphFunctionCollection Add(GraphFunction function)
     {
         ArgumentNullException.ThrowIfNull(function); _ensureMutable?.Invoke();
         if (_frozen) { throw new InvalidOperationException(ErrorMessages.FunctionCatalogFrozen); }
+        if (_functions.Any(existing => !existing.IsNative && existing.Name == function.Name &&
+            ((existing is GraphAggregateFunction) != (function is GraphAggregateFunction) || existing.Parameters.Count == function.Parameters.Count)))
+        { throw new InvalidOperationException(ErrorMessages.FunctionSignatureDuplicate); }
         // Probe only grammar admission, never a callback or an engine: recognized unsupported
         // words outside the lexical keyword table must not become uncallable registrations.
         var admission = new GqlQueryParser(allowCustomFunctions: true).Parse("RETURN " + function.Name + "()");
         if (admission.Diagnostics.Any(diagnostic => diagnostic.Severity == Assimalign.Cohesion.Database.Types.DiagnosticSeverity.Error) ||
-            _names.Contains(function.Name.ToString()) || _functions.Any(existing => existing.Name == function.Name &&
-            ((existing is GraphAggregateFunction) != (function is GraphAggregateFunction) ||
-                existing.Parameters.Count == function.Parameters.Count)))
+            _names.Contains(function.Name.ToString()))
         { throw new ArgumentException(ErrorMessages.FunctionNameReserved, nameof(function)); }
         _functions.Add(function);
+        return this;
     }
     internal GraphFunctionCatalog Freeze() { _frozen = true; return new(_functions.ToArray()); }
     /// <summary>Enumerates registered function metadata.</summary><returns>The enumerator.</returns>

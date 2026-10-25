@@ -75,6 +75,4 @@ Eligible types follow the [Database conventions](../../Assimalign.Cohesion.Datab
 
 OqlQueryParser's optional allowUnregisteredFunctions mode admits named-call ASTs for engine
 binding while its default retains standalone CD00008 behavior. Document requests and wire execution
-select deferred binding automatically. OqlFunction.ArgumentKinds supplies immutable native
-signature metadata; custom scalar/aggregate registration and execution belong to the engine.
-There is no language-to-engine dependency, new scripting syntax or persisted function definition.
+select deferred binding automatically. Native metadata remains private; engine adapters use the existing AcceptsArgument predicate.

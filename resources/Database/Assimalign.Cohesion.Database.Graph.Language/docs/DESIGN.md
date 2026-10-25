@@ -1330,3 +1330,7 @@ OVER as a function name through the same syntax-only admission probe.
 This follows the separation of signature resolution and borrowed execution values in Neo4j
 community/procedure/src/main/java/org/neo4j/procedure/impl/ProcedureRegistry.java:127-201 and
 community/kernel/src/main/java/org/neo4j/kernel/api/procedure/CallableUserFunction.java:27-37.
+
+Engine request parsing admits unknown named calls for engine-local catalog binding. Unknown names
+retain CG00010 but ordinary requests fail during execution (wire ExecutionFailure, without
+StatementParseFailed); standalone parser diagnostics are unchanged. See DIALECT.md.

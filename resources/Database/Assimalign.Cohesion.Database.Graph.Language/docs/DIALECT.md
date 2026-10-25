@@ -503,3 +503,8 @@ function catalog, new message or format version is added. OVER followed by paren
 recognized as unsupported WINDOW OVER (CK00001), even inside a custom call; over remains a
 legal binding, label, alias or property name. Result-shape declarations participate
 in pre-write admission and aggregate retained-state declarations in the statement memory budget.
+
+Engine requests admit named calls and resolve them against the executing catalog. An unknown
+name retains CG00010 but now fails during binding/execution: the wire category is ExecutionFailure,
+and no StatementParseFailed event is raised. Standalone parsers retain unknown-name parse
+diagnostics. This changes error categorization, with no frame-layout or protocol-version change.
