@@ -7608,9 +7608,9 @@ seconds total). Missing/invalid state or legacy transaction-capable peers
 are discarded. SQL's formerly skipped pool-rollback regression is enabled. No new wire identifier,
 public interface, protocol version or persistent format is introduced.
 
-An idle open wire transaction holds the database writer lock once it has acquired it, until
+An idle open wire transaction keeps the table-intent and row/key locks it has acquired until
 COMMIT, ROLLBACK, disconnect, pool return or IdleTimeout (30 minutes by default). Keep transactions
-short: an idle writer blocks other writers. New clients discard sessions against pre-#1540 servers
+short: an idle transaction blocks writers that need the same rows or keys. New clients discard sessions against pre-#1540 servers
 that cannot negotiate transaction-status, so those servers are not pooled.
 
 ## Shared server options and TCP composition (#1391, D7 B)
