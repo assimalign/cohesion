@@ -1582,6 +1582,9 @@ caller that tells the causes apart reads the enum, never the message:
   commit waiting on it wakes at once instead of waiting out its window for a flush that will
   never come, and its own durability request then gets the offline refusal, unless its LSN was
   already durable before the failure.
+  The offline group-flush regression waits for an actual monitor waiter, then verifies a signalled,
+  abandoned wait and the offline refusal. Opt-in internal wait records distinguish this from a
+  timed-out self-help window; elapsed time is diagnostic and the join has a 30-second hang guard.
 - **Several file sets of one database go offline together.** `Storage.OnOffline` is raised
   exactly once, with the error, by the call that took the storage offline, before that call
   returns or throws; `Storage.TakeOffline(error)` takes another storage offline. An engine whose

@@ -2,6 +2,7 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -22,6 +23,7 @@ namespace Assimalign.Cohesion.Database.Storage.Tests;
 /// <c>xlog.c:9877-9937</c>) and, with <c>data_sync_retry</c> off, on a failed data-file fsync
 /// (<c>data_sync_elevel</c>, <c>fd.c:3966-3987</c>).
 /// </summary>
+[Collection(StorageRaceCollection.Name)]
 public sealed class StorageOfflineTests
 {
     /// <summary>
@@ -175,39 +177,56 @@ public sealed class StorageOfflineTests
 
     /// <summary>
     /// Under grouped durability the flush worker's group flush fails. The committers waiting for it
-    /// are released at once with the offline error, not after their self-help window.
+    /// wake from their registered monitor wait with the offline error, without a timeout.
     /// </summary>
-    [Fact(DisplayName = "Cohesion Test [Storage] - Offline: a failed group flush releases its waiting committers at once")]
-    public void FlushPendingCommits_GroupFlushFails_ShouldReleaseWaitingCommittersAtOnce()
+    [Fact(DisplayName = "Cohesion Test [Storage] - Offline: a failed group flush signals registered waiting committers")]
+    public void FlushPendingCommits_GroupFlushFails_ShouldWakeRegisteredWaitersWithoutTimeout()
     {
-        // Arrange: a window far longer than the test, so only the release can end the wait. The
-        // committer has a thread of its own and the waits block this one: parallel test classes can
-        // keep a pool work item, or an await's continuation, waiting for seconds
-        // (StorageWorkerSupportTests.AssertGroupedCommitCompletesOnWorkerFlush).
-        var storage = TornStorage.Create(journalWriteThrough: false);
+        // Arrange: wait for the committer to enter the actual group wait, before failing the
+        // flush. Registration alone can race the offline latch and never exercise a wakeup.
+        using var storage = TornStorage.Create(journalWriteThrough: false);
         storage.CommitDurability = StorageCommitDurability.Grouped;
         storage.GroupCommitWindow = TimeSpan.FromMinutes(5);
+        var gate = GroupCommitGate(storage);
+        gate.WaitObservations = [];
         using var pending = new ManualResetEventSlim();
         storage.OnCommitPending = pending.Set;
-        var transaction = storage.BeginTransaction();
+        using var transaction = storage.BeginTransaction();
         storage.Insert(transaction, "grouped");
         var watch = Stopwatch.StartNew();
         var commit = Task.Factory.StartNew(transaction.Commit, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
-        pending.Wait(TimeSpan.FromSeconds(30)).ShouldBeTrue();
-        storage.JournalFaults.FailNextFlush();
+        try
+        {
+            pending.Wait(TimeSpan.FromSeconds(30)).ShouldBeTrue();
+            SpinWait.SpinUntil(() => gate.WaitingCount > 0, TimeSpan.FromSeconds(30)).ShouldBeTrue("exercise an actual monitor waiter");
+            storage.JournalFaults.FailNextFlush();
 
-        // Act: the worker's pass.
-        bool flushed = storage.FlushPendingCommits();
-        ((IAsyncResult)commit).AsyncWaitHandle.WaitOne(TimeSpan.FromSeconds(30)).ShouldBeTrue();
-        var error = Should.Throw<StorageOfflineException>(() => commit.GetAwaiter().GetResult());
+            // Act: the worker's failed flush abandons the group gate and wakes the waiter.
+            bool flushed = storage.FlushPendingCommits();
+            ((IAsyncResult)commit).AsyncWaitHandle.WaitOne(TimeSpan.FromSeconds(30)).ShouldBeTrue($"committer must wake; elapsed {watch.Elapsed}");
+            var error = Should.Throw<StorageOfflineException>(() => commit.GetAwaiter().GetResult());
         watch.Stop();
 
-        // Assert: released long before the window would have run out.
-        flushed.ShouldBeFalse();
-        error.InnerException.ShouldBeOfType<IOException>();
-        (watch.Elapsed / storage.GroupCommitWindow).ShouldBeLessThan(0.1);
-        storage.IsOffline.ShouldBeTrue();
+            // Assert: the recorded monitor wait was signalled by abandonment, never timed out.
+            flushed.ShouldBeFalse();
+            error.InnerException.ShouldBeOfType<IOException>();
+            gate.WaitObservations.ShouldNotBeEmpty();
+            gate.WaitObservations.ShouldAllBe(wait => wait.Signaled && wait.Abandoned, $"elapsed {watch.Elapsed}");
+            gate.WaitObservations.ShouldAllBe(wait => wait.Requested > TimeSpan.Zero && wait.Requested <= storage.GroupCommitWindow);
+            storage.IsOffline.ShouldBeTrue();
+        }
+        finally
+        {
+            // Also join the committer when a missing-pulse mutant reaches the hang guard.
+            gate.PublishDurable(long.MaxValue);
+            ((IAsyncResult)commit).AsyncWaitHandle.WaitOne(TimeSpan.FromSeconds(30)).ShouldBeTrue();
+            storage.OnCommitPending = null;
+            gate.WaitObservations = null;
+        }
     }
+
+    [UnsafeAccessor(UnsafeAccessorKind.Field, Name = "_groupCommitGate")]
+    private static extern ref StorageGroupCommitGate GroupCommitGate(Storage storage);
 
     /// <summary>
     /// An LSN that was durable before the failure is still confirmed: its durability was
