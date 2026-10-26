@@ -191,7 +191,7 @@ No wire or client API changes.
 LEFT null values, N-way, CROSS, comma and USING results use the existing SQL frames and
 production materializer. No nullability field or frame-writing change is introduced.
 Wire tests run every join case over InMemory and loopback TCP, pin exact values and
-multiplicities, and retain RIGHT/FULL/NATURAL and qualified-wildcard exclusions. USING
+multiplicities, and retain FULL/NATURAL and qualified-wildcard exclusions. RIGHT [OUTER] and RIGHT USING (#1525) carry null-extended written-left values, merged right spelling, coerced decimal values, original column ordinals and cleared lengths on both transports; direct joined-DML refusals carry CS05069 and keep the connection usable. Engine nullability remains engine metadata; no nullability field is added to the wire. USING
 wildcard alias/ordinal ordering, decimal common-type values in both input orders, qualified
 types and cleared character lengths use the same production frames and materializer.
 

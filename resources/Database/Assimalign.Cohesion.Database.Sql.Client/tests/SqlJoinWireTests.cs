@@ -91,8 +91,6 @@ public sealed class SqlJoinWireTests
     /// <summary>Unimplemented join forms produce the capability diagnostic before planning over the wire.</summary>
     /// <param name="statement">The excluded join form.</param>
     [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - JOIN: excluded forms report CK00001 over the wire")]
-    [InlineData(false, "SELECT u.id FROM users u RIGHT OUTER JOIN users v ON u.id = v.id")]
-    [InlineData(true, "SELECT u.id FROM users u RIGHT OUTER JOIN users v ON u.id = v.id")]
     [InlineData(false, "SELECT u.id FROM users u FULL OUTER JOIN users v ON u.id = v.id")]
     [InlineData(true, "SELECT u.id FROM users u FULL OUTER JOIN users v ON u.id = v.id")]
     [InlineData(false, "SELECT u.id FROM users u NATURAL JOIN users v")]
@@ -168,7 +166,9 @@ public sealed class SqlJoinWireTests
         row[1].ShouldBe(1L);
     }
 
-    [Theory(DisplayName = "Cohesion Test [Sql.Client] - JOIN: LEFT, CROSS, comma, USING and N-way execute on production frames")]
+    [Theory(DisplayName = "Cohesion Test [Sql.Client] - JOIN: LEFT, RIGHT, CROSS, comma, USING and N-way execute on production frames")]
+    [InlineData(false, "SELECT u.id, v.id FROM users u RIGHT OUTER JOIN users v ON u.id = v.id AND u.id = 1 ORDER BY v.id", "1|1;|2")]
+    [InlineData(true, "SELECT u.id, v.id FROM users u RIGHT OUTER JOIN users v ON u.id = v.id AND u.id = 1 ORDER BY v.id", "1|1;|2")]
     [InlineData(false, "SELECT u.id, v.id FROM users u LEFT JOIN users v ON u.id = v.id AND v.id = 1 ORDER BY u.id", "1|1;2|")]
     [InlineData(true, "SELECT u.id, v.id FROM users u LEFT JOIN users v ON u.id = v.id AND v.id = 1 ORDER BY u.id", "1|1;2|")]
     [InlineData(false, "SELECT u.id, v.id FROM users u CROSS JOIN users v ORDER BY u.id, v.id", "1|1;1|2;2|1;2|2")]
@@ -193,6 +193,44 @@ public sealed class SqlJoinWireTests
         // Assert
         string.Join(";", result.Select(row => $"{row[0]}|{row[1]}")).ShouldBe(expected);
         result.Columns[0].Type.ShouldBe(DatabaseType.Int32);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql.Client] - RIGHT USING retains written slots, merged right values and coded DML refusal (#1525)")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task QueryAsync_RightJoin_ShouldPreserveWrittenOutputs(bool tcp)
+    {
+        // Arrange
+        await using var harness = await SqlClientTestHarness.StartAsync(tcp: tcp);
+        await using var connection = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout());
+        foreach (string sql in new[]
+        {
+            "CREATE TABLE a (extra TEXT, id DECIMAL NOT NULL, name VARCHAR(8) COLLATE case_insensitive)",
+            "CREATE TABLE b (id INT NOT NULL, name VARCHAR(12) COLLATE case_insensitive, tail TEXT)",
+            "INSERT INTO a VALUES ('L', 1, 'Ada')",
+            "INSERT INTO b VALUES (1, 'ADA', 'R'), (2, 'Grace', 'unmatched')",
+        })
+        {
+            await connection.ExecuteAsync(sql, cancellationToken: SqlClientTestHarness.Timeout());
+        }
+
+        // Act
+        var result = await connection.QueryAsync("SELECT *, a.id, b.id FROM a RIGHT JOIN b USING(name,id) ORDER BY id",
+            cancellationToken: SqlClientTestHarness.Timeout());
+
+        // Assert
+        result.Columns.Select(column => column.Name).ShouldBe(new[] { "name", "id", "extra", "tail", "id", "id" });
+        result.Columns.Select(column => column.Type).ShouldBe(new[] { DatabaseType.String, DatabaseType.Decimal, DatabaseType.String,
+            DatabaseType.String, DatabaseType.Decimal, DatabaseType.Int32 });
+        result.Columns[0].MaxLength.ShouldBeNull();
+        result.Count.ShouldBe(2);
+        Enumerable.Range(0, 6).Select(index => result[0][index]).ShouldBe(new object?[] { "ADA", 1m, "L", "R", 1m, 1 });
+        Enumerable.Range(0, 6).Select(index => result[1][index]).ShouldBe(new object?[] { "Grace", 2m, null, "unmatched", null, 2 });
+        var refusal = await Should.ThrowAsync<SqlClientException>(async () => await connection.ExecuteAsync(
+            "UPDATE a SET id = 9 FROM a x RIGHT JOIN b ON x.id = b.id", cancellationToken: SqlClientTestHarness.Timeout()));
+        refusal.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
+        refusal.Message.ShouldContain("CS05069", Case.Sensitive);
+        (await connection.QueryAsync("SELECT id FROM a", cancellationToken: SqlClientTestHarness.Timeout())).ShouldHaveSingleItem()[0].ShouldBe(1m);
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql.Client] - USING: wildcard aliases and ordinals use visible wire outputs")]
