@@ -234,6 +234,7 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
 
     internal void ScheduleProvisioning(SqlDeferredMigration migration) => _provisioningWorker.Enqueue(migration);
     internal void ScheduleProvisioning(SqlTableRewrite rewrite) => _provisioningWorker.Enqueue(rewrite);
+    internal void UnscheduleProvisioning(SqlTableRewrite rewrite) => _provisioningWorker.Remove(rewrite);
 
     private int _provisioningBuildComplete;
     internal bool ProvisioningBuildComplete => Volatile.Read(ref _provisioningBuildComplete) != 0;

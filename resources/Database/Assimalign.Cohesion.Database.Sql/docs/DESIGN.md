@@ -6718,6 +6718,11 @@ Schema application and maintenance share fail-fast admission; session DDL is exc
 the operation. Ordinary readers remain snapshot readers; writers wait for table X. The lock
 and latch order is established in SqlPlanExecutor.RewriteTableAsync. Database disposal cancels
 queued work, claims it if the pump stopped, and joins in-flight cleanup before storage closes.
+The provisioning FIFO uses a short queue monitor and removable rewrite nodes: cancellation
+unlinks queued work immediately, so a stalled peer cannot retain canceled database graphs or
+accumulate canceled queue entries. The queue monitor never spans job or cancellation cleanup;
+enqueue may follow the rewrite admission monitor, while removal releases the queue monitor
+before returning admission. Failed enqueue discards the unpublished cancellation source.
 
 TRUNCATE and rewrite use one ReplaceTableStorageAsync preparation/publication path and one
 catalog reservation/publication transaction. Rewrite decodes the old physical layout, including
