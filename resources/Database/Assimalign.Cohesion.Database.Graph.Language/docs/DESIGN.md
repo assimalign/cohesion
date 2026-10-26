@@ -318,7 +318,7 @@ The 64-hop, physical-work, memory and cancellation contracts remain in force.
 
 Owner decisions 2026-10-25 require all four modes, including SIMPLE beyond Neo4j's grammar.
 Local Neo4j references, relative to `C:/Source/repos/neo4j/neo4j` (behavior consulted, no code copied):
-`community/cypher/front-end/parser/v25/parser/src/main/antlr4/org/neo4j/cypher/internal/parser/v25/Cypher25Parser.g4:400-425`
+`community/cypher/front-end/parser/v25/parser/src/main/antlr4/org/neo4j/cypher/internal/parser/v25/Cypher25Parser.g4:374,401-425`
 places a mode after the path assignment and allows PATH/PATHS; its mode set has WALK/TRAIL/ACYCLIC.
 `community/cypher/front-end/parser/v25/ast-factory/src/main/scala/org/neo4j/cypher/internal/parser/v25/ast/factory/ExpressionBuilder.scala:226-245`
 rejects an explicit mode or selector inside a parenthesized or quantified path.
