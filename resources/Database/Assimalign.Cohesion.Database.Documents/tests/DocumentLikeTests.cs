@@ -25,6 +25,10 @@ public sealed class DocumentLikeTests
     [InlineData("SELECT COUNT(*) FROM items GROUP BY @input LIKE @pattern")]
     [InlineData("INSERT INTO items (KEY, VALUE) VALUES ('two', {'match':@input LIKE @pattern})")]
     [InlineData("EXPLAIN SELECT 1 FROM items WHERE score = CASE WHEN @input LIKE @pattern THEN 1 ELSE 0 END")]
+    [InlineData("EXPLAIN SELECT 1 FROM items WHERE score = ANY x IN [1] SATISFIES @input LIKE @pattern END")]
+    [InlineData("EXPLAIN SELECT 1 FROM items WHERE score = EVERY x IN [1] SATISFIES @input LIKE @pattern END")]
+    [InlineData("EXPLAIN SELECT 1 FROM items WHERE score = ARRAY @input LIKE @pattern FOR x IN [1] END")]
+    [InlineData("EXPLAIN SELECT 1 FROM items WHERE score = FIRST @input LIKE @pattern FOR x IN [1] END")]
     public async Task Execute_LongLikeSuffix_ShouldStopAtTheCancelledMatcherCheckpointAsync(string statement)
     {
         // Arrange
