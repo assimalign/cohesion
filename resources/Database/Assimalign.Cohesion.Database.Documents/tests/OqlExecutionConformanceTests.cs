@@ -139,6 +139,8 @@ public sealed class OqlExecutionConformanceTests
             ],
             [OqlClauses.Where] =
             [
+                new("SELECT 1 FROM items WHERE FALSE AND amount = (ANY x IN [0] SATISFIES 1 / x > 0 END)", []),
+                new("SELECT 1 FROM items WHERE FALSE AND amount BETWEEN 0 AND (FIRST 1 / x FOR x IN [0] END)", []),
                 new("SELECT name FROM items WHERE (amount >= @minimum AND amount < 6) OR amount IS NULL",
                     [["gamma"], ["delta"]], Parameters: new Dictionary<string, object?> { ["minimum"] = 3 }),
                 new("SELECT name FROM items WHERE details.score IS NULL AND NOT (amount IS NOT NULL)", []),

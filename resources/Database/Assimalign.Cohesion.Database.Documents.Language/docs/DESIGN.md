@@ -423,6 +423,10 @@ refused; a comprehension may be an aggregate argument. Closed comprehensions and
 predicates are constant for VALUES/constructor validation when all paths bind local variables;
 registered calls remain nonconstant. No rendering, wire or storage contract changes.
 
+Constant classification does not make evaluation eager. Failed speculative seek bounds are
+discarded, leaving ordinary row/branch evaluation to report OQL errors; cancellation propagates.
+VALUES and constructors retain the same short-circuit rules for closed bindings.
+
 ## Grammar, statement, and expression trees
 
 ```text

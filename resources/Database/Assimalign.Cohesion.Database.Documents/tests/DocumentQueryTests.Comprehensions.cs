@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
 using System.Threading;
@@ -15,6 +16,83 @@ namespace Assimalign.Cohesion.Database.Documents.Tests;
 
 public sealed partial class DocumentQueryTests
 {
+    public static IEnumerable<object[]> SpeculativeComprehensionCases()
+    {
+        foreach (string expression in new[]
+        {
+            "ANY x IN [0] SATISFIES 1 / x > 0 END",
+            "EVERY x IN [0] SATISFIES 1 / x > 0 END",
+            "ARRAY 1 / x FOR x IN [0] END",
+            "FIRST 1 / x FOR x IN [0] END",
+        })
+        {
+            foreach (string predicate in new[]
+            {
+                "FALSE AND n = ({0})", "FALSE AND ({0}) = n",
+                "FALSE AND n BETWEEN ({0}) AND 2", "FALSE AND n BETWEEN 0 AND ({0})",
+                "n < 0 AND n = ({0})", "n = ({0}) LIMIT 0",
+            })
+            {
+                yield return [expression, predicate, false];
+                yield return [expression, predicate, true];
+            }
+        }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Documents] - Comprehensions: speculative bounds defer errors to visited rows")]
+    [MemberData(nameof(SpeculativeComprehensionCases))]
+    public async Task Execute_FailingConstantSeekCandidate_ShouldPreserveSkippedEvaluationAsync(string expression, string predicate, bool indexed)
+    {
+        // Arrange
+        await using var engine = DocumentDatabaseEngine.Create("comprehension-speculation", new());
+        var database = await engine.CreateDatabaseAsync("test", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        var collection = await session.CreateCollectionAsync("items", CancellationToken.None);
+        await PutAsync(collection, session, "a", "{\"n\":1}");
+        if (indexed) { await session.ExecuteAsync("CREATE INDEX by_n ON items (n)", cancellationToken: CancellationToken.None); }
+
+        // Act
+        var rows = await RowsAsync(session, "SELECT 1 FROM items WHERE " + string.Format(System.Globalization.CultureInfo.InvariantCulture, predicate, expression));
+
+        // Assert
+        rows.ShouldBeEmpty();
+        var failure = await Should.ThrowAsync<DatabaseException>(async () =>
+            await session.ExecuteAsync($"SELECT 1 FROM items WHERE n = ({expression})", cancellationToken: CancellationToken.None));
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD02006");
+        (await RowsAsync(session, "SELECT n FROM items")).ShouldHaveSingleItem().GetValue(0).ShouldBe(1m);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Documents] - Comprehensions: VALUES short circuit closed quantified and mapped expressions")]
+    [InlineData("ANY x IN [0] SATISFIES 1 / x > 0 END", false)]
+    [InlineData("ANY x IN [0] SATISFIES 1 / x > 0 END", true)]
+    [InlineData("EVERY x IN [0] SATISFIES 1 / x > 0 END", false)]
+    [InlineData("EVERY x IN [0] SATISFIES 1 / x > 0 END", true)]
+    [InlineData("ARRAY 1 / x FOR x IN [0] END", false)]
+    [InlineData("ARRAY 1 / x FOR x IN [0] END", true)]
+    [InlineData("FIRST 1 / x FOR x IN [0] END", false)]
+    [InlineData("FIRST 1 / x FOR x IN [0] END", true)]
+    public async Task Execute_SkippedConstantValues_ShouldPreserveShortCircuitingAsync(string expression, bool indexed)
+    {
+        // Arrange
+        await using var engine = DocumentDatabaseEngine.Create("comprehension-values-skipped", new());
+        var database = await engine.CreateDatabaseAsync("test", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.CreateCollectionAsync("items", CancellationToken.None);
+        if (indexed) { await session.ExecuteAsync("CREATE INDEX by_n ON items (n)", cancellationToken: CancellationToken.None); }
+
+        // Act
+        await session.ExecuteAsync($"INSERT INTO items (KEY, VALUE) VALUES ('a', {{n:CASE WHEN TRUE THEN 1 ELSE ({expression}) END, skipped:FALSE AND ({expression})}})", cancellationToken: CancellationToken.None);
+
+        // Assert
+        var row = (await RowsAsync(session, "SELECT n, skipped FROM items")).ShouldHaveSingleItem();
+        row.GetValue(0).ShouldBe(1m);
+        row.GetValue(1).ShouldBe(false);
+        var failure = await Should.ThrowAsync<DatabaseException>(async () =>
+            await session.ExecuteAsync($"INSERT INTO items (KEY, VALUE) VALUES ('b', {expression})", cancellationToken: CancellationToken.None));
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD02006");
+        (await RowsAsync(session, "SELECT n FROM items")).Count.ShouldBe(1);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Documents] - Comprehensions: closed VALUES and UNNEST retain owned JSON")]
     public async Task Execute_ComprehensionWriteAndUnnest_ShouldComposeAsync()
     {

@@ -322,9 +322,7 @@ internal sealed partial class DocumentPlanner
                 IsConstant(between.Lower) && IsConstant(between.Upper))
             {
                 if (IsVariablePath(rangePath, variables)) { return; }
-                var rangeEvaluator = new DocumentExpressionEvaluator(alias, _parameters, _cancellationToken);
-                var lower = rangeEvaluator.Evaluate(between.Lower, default);
-                var upper = rangeEvaluator.Evaluate(between.Upper, default);
+                if (!TryEvaluateBound(between.Lower, out var lower) || !TryEvaluateBound(between.Upper, out var upper)) { return; }
                 string? name = IndexPath(rangePath, alias);
                 if (name is not null && lower is bool or decimal or string && upper is bool or decimal or string)
                 {
@@ -347,12 +345,28 @@ internal sealed partial class DocumentPlanner
                 operation = operation switch { ">" => "<", ">=" => "<=", "<" => ">", "<=" => ">=", _ => operation };
             }
             if (path is null || IsVariablePath(path, variables) || !IsConstant(constant)) { return; }
-            var evaluator = new DocumentExpressionEvaluator(alias, _parameters, _cancellationToken);
-            var value = evaluator.Evaluate(constant, default);
+            if (!TryEvaluateBound(constant, out var value)) { return; }
             string? pathName = IndexPath(path, alias);
             if (pathName is not null && value is bool or decimal or string)
             {
                 predicates.Add((pathName, LegacyIndexPath(path, alias), operation, value));
+            }
+        }
+
+        bool TryEvaluateBound(OqlExpression expression, out object? value)
+        {
+            try
+            {
+                value = new DocumentExpressionEvaluator(alias, _parameters, _cancellationToken).Evaluate(expression, default);
+                return true;
+            }
+            catch (DocumentPlanningException)
+            {
+                // Bounds are speculative: a skipped branch or empty candidate set may never
+                // evaluate this expression. Leave its error to the full residual predicate.
+                // Cancellation and infrastructure failures still propagate.
+                value = null;
+                return false;
             }
         }
     }

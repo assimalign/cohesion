@@ -108,6 +108,10 @@ Closed mappings using only local paths also execute in INSERT/UPSERT VALUES. Cal
 retain their existing refusal. Aggregates inside a comprehension retain the quantifier
 restriction (CD05001); collection, mapping and WHEN are all validated even on empty inputs.
 
+Closed comprehensions and quantified predicates preserve ordinary short-circuit evaluation in
+WHERE, VALUES and constructors. A failed speculative index-bound evaluation is discarded; its
+OQL error occurs only if execution visits that expression. Cancellation still propagates.
+
 ARRAY keeps input order and omits mapped MISSING values; NULL mappings remain array elements.
 An empty input or no retained mappings returns []. WHEN keeps only SQL++ Truth true, so NULL
 and MISSING conditions exclude the element. FIRST stops at the first qualifying element and
