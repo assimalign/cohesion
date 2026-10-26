@@ -733,8 +733,11 @@ public sealed class SqlTruncateTests
         await ExecAsync(session, "TRUNCATE t", timeout.Token);
     }
 
-    [Fact(DisplayName = "Cohesion Test [SqlEngine] - TRUNCATE: concurrent writer and reclamation races exercise prepared-owner fences")]
-    public async Task ExecuteAsync_ConcurrentReplacementAndMaintenance_ShouldKeepPublishedOwnersAlive()
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - TRUNCATE: concurrent replacement history detects lost and resurrected writes")]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    public async Task ExecuteAsync_ConcurrentReplacementAndMaintenance_ShouldKeepPublishedOwnersAlive(int corruption)
     {
         // Arrange
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(90));
@@ -747,6 +750,27 @@ public sealed class SqlTruncateTests
         int inserts = 0;
         int written = 0;
         int snapshots = 0;
+        // Commit/BEGIN history is independent of observed rows. Take the history gate
+        // after INSERT's table intent or TRUNCATE's X locks, never before a table wait.
+        // This orders publication, commit and snapshot capture without serializing reads
+        // or preparation, or creating a gate -> table-lock cycle.
+        using var historyGate = new SemaphoreSlim(1, 1);
+        var writes = new List<(long Commit, int Id)>();
+        var truncates = new List<long>();
+        var reads = new List<(long Snapshot, int[] Rows)>();
+        long commitSequence = 0;
+        bool truncateOwnsHistory = false;
+        SqlPlanExecutor.TruncateReserved = () =>
+        {
+            historyGate.Wait(timeout.Token);
+            truncateOwnsHistory = true;
+        };
+        SqlPlanExecutor.TruncatePublished = () =>
+        {
+            truncates.Add(++commitSequence);
+            truncateOwnsHistory = false;
+            historyGate.Release();
+        };
         SqlPlanExecutor.TruncatePrepared = () =>
         {
             database.TableReclamation.Request();
@@ -762,8 +786,17 @@ public sealed class SqlTruncateTests
             {
                 try
                 {
-                    await ExecAsync(concurrent, $"INSERT INTO t VALUES ({Interlocked.Increment(ref inserts)})", stop.Token);
-                    Interlocked.Increment(ref written);
+                    await using var transaction = await concurrent.BeginTransactionAsync(IsolationLevel.ReadCommitted, stop.Token);
+                    int id = Interlocked.Increment(ref inserts);
+                    await ExecAsync(concurrent, $"INSERT INTO t VALUES ({id})", stop.Token);
+                    await historyGate.WaitAsync(stop.Token);
+                    try
+                    {
+                        await transaction.CommitAsync(stop.Token);
+                        writes.Add((++commitSequence, id));
+                        Interlocked.Increment(ref written);
+                    }
+                    finally { historyGate.Release(); }
                 }
                 catch (OperationCanceledException) when (stop.IsCancellationRequested) { break; }
                 catch (DatabaseException error) when (error.Diagnostics.Any(diagnostic => diagnostic.Code is "CS04064" or "CS04006")) { }
@@ -776,10 +809,21 @@ public sealed class SqlTruncateTests
             {
                 try
                 {
-                    await using var snapshot = await concurrent.BeginTransactionAsync(stop.Token);
-                    var before = (await RowsAsync(concurrent, "SELECT id FROM t ORDER BY id", stop.Token)).Select(row => row[0]).ToArray();
+                    SqlDatabaseTransaction snapshot;
+                    long captured;
+                    await historyGate.WaitAsync(stop.Token);
+                    try
+                    {
+                        snapshot = await concurrent.BeginTransactionAsync(stop.Token);
+                        captured = commitSequence;
+                    }
+                    finally { historyGate.Release(); }
+                    await using var pinned = snapshot;
+                    var before = (await RowsAsync(concurrent, "SELECT id FROM t ORDER BY id", stop.Token)).Select(row => (int)row[0]!).ToArray();
+                    reads.Add((captured, before));
                     await Task.Yield();
-                    var after = (await RowsAsync(concurrent, "SELECT id FROM t ORDER BY id", stop.Token)).Select(row => row[0]).ToArray();
+                    var after = (await RowsAsync(concurrent, "SELECT id FROM t ORDER BY id", stop.Token)).Select(row => (int)row[0]!).ToArray();
+                    reads.Add((captured, after));
                     after.ShouldBe(before);
                     Interlocked.Increment(ref snapshots);
                 }
@@ -799,6 +843,9 @@ public sealed class SqlTruncateTests
         finally
         {
             SqlPlanExecutor.TruncatePrepared = null;
+            SqlPlanExecutor.TruncateReserved = null;
+            SqlPlanExecutor.TruncatePublished = null;
+            if (truncateOwnsHistory) { historyGate.Release(); }
             stop.Cancel();
             await Task.WhenAll(writer, reader);
         }
@@ -809,11 +856,46 @@ public sealed class SqlTruncateTests
         written.ShouldBeGreaterThanOrEqualTo(100);
         snapshots.ShouldBeGreaterThanOrEqualTo(100);
         truncations.ShouldBeGreaterThanOrEqualTo(100);
+        writes.Count.ShouldBe(written);
+        truncates.Count.ShouldBe(truncations);
+        reads.Count.ShouldBeGreaterThanOrEqualTo(2 * snapshots);
+        foreach (var read in reads)
+        {
+            read.Rows.ShouldBe(ExpectedRows(read.Snapshot), $"snapshot at commit {read.Snapshot}");
+        }
+        // Ensure the final suffix contains a committed write even if the last racing
+        // operation was TRUNCATE. Fault modes prove that the oracle catches a missing
+        // write and an equal-count substitution of a pre-TRUNCATE write.
+        int finalId = Interlocked.Increment(ref inserts);
+        await ExecAsync(session, $"INSERT INTO t VALUES ({finalId})", timeout.Token);
+        writes.Add((++commitSequence, finalId));
+        Interlocked.Increment(ref written);
+        if (corruption != 0)
+        {
+            await ExecAsync(session, $"DELETE FROM t WHERE id={finalId}", timeout.Token);
+            if (corruption == 2)
+            {
+                int resurrected = writes.First(write => write.Commit < truncates[^1]).Id;
+                await ExecAsync(session, $"INSERT INTO t VALUES ({resurrected})", timeout.Token);
+            }
+        }
+        var finalRows = (await RowsAsync(session, "SELECT id FROM t ORDER BY id", timeout.Token)).Select(row => (int)row[0]!).ToArray();
+        var expectedFinal = ExpectedRows(commitSequence);
+        if (corruption == 0) { finalRows.ShouldBe(expectedFinal, "exact writes committed after the last TRUNCATE"); }
+        else { Should.Throw<ShouldAssertException>(() => finalRows.ShouldBe(expectedFinal)); }
+        if (corruption == 2) { finalRows.Length.ShouldBe(expectedFinal.Length); }
         await ReclaimAsync(database, timeout.Token);
         await ExecAsync(session, "TRUNCATE t", timeout.Token);
         await ExecAsync(session, "INSERT INTO t VALUES (-1)", timeout.Token);
         (await RowsAsync(session, "SELECT * FROM t WHERE id=-1", timeout.Token)).ShouldHaveSingleItem()[0].ShouldBe(-1);
         _output.WriteLine($"truncations={truncations}; writer attempts={inserts}; committed writes={written}; stable snapshots={snapshots}; prepared-owner maintenance passes={preparedPasses}");
+
+        int[] ExpectedRows(long snapshot)
+        {
+            long lastTruncate = truncates.LastOrDefault(sequence => sequence <= snapshot);
+            return writes.Where(write => write.Commit > lastTruncate && write.Commit <= snapshot)
+                .Select(write => write.Id).Order().ToArray();
+        }
     }
 
     private static ulong Id(SqlDatabase database, string name) => database.Catalog.Tables.Single(table => table.Name == name).ObjectId;
