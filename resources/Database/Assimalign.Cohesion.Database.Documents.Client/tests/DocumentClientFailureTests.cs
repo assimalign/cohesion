@@ -75,10 +75,8 @@ public sealed class DocumentClientFailureTests
             foreach (var (statement, code, diagnostic) in new[]
             {
                 ("MERGE INTO items", ProtocolErrorCode.ParseFailure, "CK00001"),
-                ("BEGIN", ProtocolErrorCode.ExecutionFailure, "CD07002"),
-                ("START WORK", ProtocolErrorCode.ExecutionFailure, "CD07002"),
-                ("COMMIT", ProtocolErrorCode.ExecutionFailure, "CD07002"),
-                ("ROLLBACK", ProtocolErrorCode.ExecutionFailure, "CD07002"),
+                ("COMMIT", ProtocolErrorCode.ExecutionFailure, "CD04104"),
+                ("ROLLBACK", ProtocolErrorCode.ExecutionFailure, "CD04104"),
             })
             {
                 var error = await Should.ThrowAsync<DocumentClientException>(async () => await connection.QueryAsync(statement, cancellationToken: harness.Token));

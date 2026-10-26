@@ -4,6 +4,10 @@ Shared Documents wire contracts for the remote client and engine. The package ow
 
 See [DESIGN.md](DESIGN.md) for ownership and dependency boundaries.
 
+Documents negotiates the shared transaction-status capability. Ready follows Execute and Command
+terminal responses when agreed; pooled reset uses the existing ROLLBACK Execute and two-count
+Complete payload. No new message identifiers or protocol version are needed (#1725).
+
 ## Documents diagnostic conventions (#1470)
 
 Exception and diagnostic templates use the project's build-generated `ErrorMessages` resources.

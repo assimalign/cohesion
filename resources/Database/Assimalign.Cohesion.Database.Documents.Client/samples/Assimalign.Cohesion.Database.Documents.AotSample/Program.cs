@@ -82,15 +82,8 @@ internal static class Program
         });
         await using (var connection = await client.ConnectAsync(token))
         {
-            try
-            {
-                await connection.ExecuteAsync("BEGIN", cancellationToken: token);
-                throw new InvalidOperationException("Wire text transactions must await safe pooled reset.");
-            }
-            catch (DocumentClientException error)
-            {
-                Check(error.Diagnostics.Single().Code == "CD07002", "wire text transaction gate");
-            }
+            Check(await connection.ExecuteAsync("BEGIN", cancellationToken: token) == 0, "wire begin");
+            Check(await connection.ExecuteAsync("ROLLBACK", cancellationToken: token) == 0, "wire rollback");
             Check(await connection.ExecuteAsync("CREATE COLLECTION items", cancellationToken: token) == 0, "create collection");
             Check(await connection.ExecuteAsync("CREATE COLLECTION IF NOT EXISTS items", cancellationToken: token) == 0, "existing collection");
             Check(await connection.GetCollectionAsync("items", token) == "items", "get collection");
@@ -265,11 +258,21 @@ internal static class Program
             Check(unaffected[0]["n"] is 200L, "intersection EXPLAIN has no effects");
             await connection.ExecuteAsync("DROP COLLECTION intersection", cancellationToken: token);
             Check((await connection.GetCollectionsAsync(token)).Count == 0, "drop collection");
+            await connection.CreateCollectionAsync("reset", token);
+            await connection.ExecuteAsync("BEGIN", cancellationToken: token);
+            await connection.PutAsync("reset", "pending", "{}"u8.ToArray(), cancellationToken: token);
         }
         var sessionId = server.Sessions.Single().Id;
         await using (var rented = await client.ConnectAsync(token))
         {
-            Check((await rented.GetCollectionsAsync(token)).Count == 0 && server.Sessions.Single().Id == sessionId, "pooled connection");
+            Check(server.Sessions.Single().Id == sessionId && server.Sessions.Single().DatabaseSession!.CurrentTransaction is null, "pooled transaction reset");
+            Check(await rented.GetAsync("reset", "pending", token) is null, "pooled rollback removed writes");
+            await rented.ExecuteAsync("START TRANSACTION ISOLATION LEVEL READ COMMITTED", cancellationToken: token);
+            await rented.PutAsync("reset", "committed", "{}"u8.ToArray(), cancellationToken: token);
+            await rented.ExecuteAsync("COMMIT", cancellationToken: token);
+            Check(await rented.GetAsync("reset", "committed", token) is not null, "wire commit retained writes");
+            await rented.DropCollectionAsync("reset", token);
+            Check((await rented.GetCollectionsAsync(token)).Count == 0, "pooled connection");
         }
     }
 

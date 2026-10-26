@@ -376,6 +376,15 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
                     // Executions run on the session lifetime token, not the soft-stop
                     // token: a drain lets in-flight statements finish.
                     await ExecuteAsync(frame.Value, _lifetimeSource.Token).ConfigureAwait(false);
+                    if (_channel!.Capabilities.Contains(ProtocolCapability.TransactionStatus.Name))
+                    {
+                        var transaction = _databaseSession!.CurrentTransaction;
+                        var status = transaction is null ? ProtocolTransactionStatus.Idle
+                            : transaction.State == Assimalign.Cohesion.Database.Transactions.TransactionState.Faulted
+                                ? ProtocolTransactionStatus.Failed : ProtocolTransactionStatus.Active;
+                        await WriteFrameAsync(ProtocolMessageType.Ready,
+                            new ProtocolTransactionStatusMessage(status).Encode(), _lifetimeSource.Token).ConfigureAwait(false);
+                    }
                     break;
 
                 case ProtocolMessageType.Ping:
@@ -422,12 +431,6 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
                         var error = new DatabaseParseException(detail.Length == 0 ? ErrorMessages.StatementInvalid : detail, diagnostics);
                         DocumentDatabaseEventSource.Log.StatementParseFailed(this, _databaseSession!.Database.Name, error);
                         throw error;
-                    }
-                    // Until Documents negotiates transaction status and pooled reset is family-aware,
-                    // no wire borrower may leave an explicit transaction on a pooled session (#1725 T2).
-                    if (statement.OqlExpression is OqlTransactionExpression transaction)
-                    {
-                        throw new DocumentPlanningException("CD07002", ErrorMessages.TextTransactionWireUnavailable, transaction.Location);
                     }
                     return new DocumentQueryRequest(statement, parameters);
                 }, cancellationToken).ConfigureAwait(false);

@@ -1,8 +1,8 @@
 # OQL SQL++ dialect
 
-## Text transactions (#1725 T1)
+## Text transactions (#1725)
 
-In-process Documents sessions accept `BEGIN [WORK | TRAN | TRANSACTION]`,
+In-process and wire Documents sessions accept `BEGIN [WORK | TRAN | TRANSACTION]`,
 `START (WORK | TRAN | TRANSACTION)`, `COMMIT [WORK | TRAN | TRANSACTION]`, and
 `ROLLBACK [WORK | TRAN | TRANSACTION]`. A start optionally takes
 `ISOLATION LEVEL SNAPSHOT` or `ISOLATION LEVEL READ COMMITTED`. Snapshot is the default,
@@ -22,9 +22,13 @@ SAVEPOINT, ROLLBACK TO SAVEPOINT and SET TRANSACTION remain CK00001; the rollbac
 the unsupported clause at `TO`. EXPLAIN accepts no
 transaction control. Unsupported isolation spellings are CD00002.
 
-Until OQ-T2 adds negotiated transaction status and safe pooled reset, Documents server sessions
-refuse every text transaction command with CD07002 over InMemory and TCP. In-process sessions
-accept them. T1 changes neither wire identifiers nor persisted formats.
+On InMemory and TCP, controls run on the connection-owned session. Documents negotiates
+transaction-status and sends Ready after Execute and Command, including complete failures.
+Returning a pooled connection rolls back active or faulted work and requires Idle before reuse;
+legacy peers without negotiated status are discarded. Cancellation or disconnect before a terminal
+response discards the session and leaves an unacknowledged commit's outcome unknown. Once Complete
+has arrived, bounded status cleanup ignores caller cancellation. No request identifier, protocol
+version or persisted format changes. CD07002, the temporary wire gate, is retired and reserved.
 
 ## Quoted identifiers
 

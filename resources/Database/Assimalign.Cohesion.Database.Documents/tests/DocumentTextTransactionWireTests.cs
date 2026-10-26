@@ -17,10 +17,12 @@ namespace Assimalign.Cohesion.Database.Documents.Tests;
 
 public sealed class DocumentTextTransactionWireTests
 {
-    [Theory(DisplayName = "Cohesion Test [Documents] - Text transactions: wire control is refused until status and pooled reset are safe")]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task Server_TextTransactionControl_ShouldRefuseWithoutOpeningTransaction(bool tcp)
+    [Theory(DisplayName = "Cohesion Test [Documents] - Transaction Ready status is negotiated and legacy peers retain terminal framing")]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task Server_TextTransactionControl_ShouldReportNegotiatedState(bool tcp, bool legacy)
     {
         // Arrange
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(40));
@@ -44,34 +46,49 @@ public sealed class DocumentTextTransactionWireTests
         await server.StartAsync(token);
         await using var transport = await factory.ConnectAsync(listener.EndPoint, token);
         await using var channel = new ProtocolChannel(transport.AsStream(), DocumentProtocol.Family, leaveOpen: true);
-        await WriteAsync(ProtocolMessageType.Startup, new ProtocolStartupMessage(ProtocolVersion.Current, "documents", "tester").Encode());
+        await WriteAsync(ProtocolMessageType.Startup, new ProtocolStartupMessage(legacy ? new ProtocolVersion(2, 0) : ProtocolVersion.Current, "documents", "tester")
+            { Capabilities = legacy ? [] : [ProtocolCapability.TransactionStatus.Name] }.Encode());
         (await channel.Reader.ReadFrameAsync(token)).ShouldNotBeNull().Type.ShouldBe(ProtocolMessageType.Authenticate);
         await WriteAsync(ProtocolMessageType.AuthenticateResponse, []);
-        (await channel.Reader.ReadFrameAsync(token)).ShouldNotBeNull().Type.ShouldBe(ProtocolMessageType.Ready);
+        var ready = (await channel.Reader.ReadFrameAsync(token)).ShouldNotBeNull();
+        ready.Type.ShouldBe(ProtocolMessageType.Ready);
+        var agreement = ProtocolReadyMessage.Decode(ready.Payload.Span);
+        agreement.Capabilities.ShouldBe(legacy ? [] : new[] { ProtocolCapability.TransactionStatus.Name });
         var session = server.Sessions.ShouldHaveSingleItem();
 
-        // Act / Assert: every spelling is parsed, then refused by the server before dispatch.
-        foreach (string source in new[] { "BEGIN", "BEGIN WORK", "BEGIN TRAN", "BEGIN TRANSACTION ISOLATION LEVEL SNAPSHOT",
-            "START WORK", "START TRAN", "START TRANSACTION ISOLATION LEVEL READ COMMITTED",
-            "COMMIT", "COMMIT WORK", "COMMIT TRAN", "COMMIT TRANSACTION",
-            "ROLLBACK", "ROLLBACK WORK", "ROLLBACK TRAN", "ROLLBACK TRANSACTION" })
-        {
-            await WriteAsync((ProtocolMessageType)DocumentProtocolMessageType.Execute,
-                new DocumentProtocolExecuteMessage(source, "{}"u8.ToArray()).Encode());
-            var response = (await channel.Reader.ReadFrameAsync(token)).ShouldNotBeNull();
-            response.Type.ShouldBe((ProtocolMessageType)DocumentProtocolMessageType.Failure);
-            var failure = DocumentProtocolFailureMessage.Decode(response.Payload.Span);
-            failure.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
-            var diagnostic = failure.Diagnostics.ShouldHaveSingleItem();
-            diagnostic.Code.ShouldBe("CD07002");
-            diagnostic.Start.ShouldBe(0);
-            diagnostic.End.ShouldBe(source.Length);
-            session.DatabaseSession.ShouldNotBeNull().CurrentTransaction.ShouldBeNull();
-        }
-        await WriteAsync((ProtocolMessageType)DocumentProtocolMessageType.Execute,
-            new DocumentProtocolExecuteMessage("CREATE COLLECTION reusable", "{}"u8.ToArray()).Encode());
+        // Act / Assert: commands and failures share the same negotiated status contract.
+        await ExecuteAsync("CREATE COLLECTION items", false, 'I');
+        await ExecuteAsync("BEGIN", false, 'T');
+        session.DatabaseSession.ShouldNotBeNull().CurrentTransaction.ShouldNotBeNull().IsolationLevel
+            .ShouldBe(Transactions.IsolationLevel.Snapshot);
+        await WriteAsync((ProtocolMessageType)DocumentProtocolMessageType.Command,
+            new DocumentProtocolCommandMessage(DocumentProtocolOperation.ListCollections, "", "", null, default).Encode());
+        (await channel.Reader.ReadFrameAsync(token)).ShouldNotBeNull().Type.ShouldBe((ProtocolMessageType)DocumentProtocolMessageType.Collection);
         (await channel.Reader.ReadFrameAsync(token)).ShouldNotBeNull().Type.ShouldBe((ProtocolMessageType)DocumentProtocolMessageType.Complete);
+        await StatusAsync('T');
+        await ExecuteAsync("SELECT * FROM absent", true, 'E');
+        await ExecuteAsync("ROLLBACK", false, 'I');
+        await ExecuteAsync("START WORK ISOLATION LEVEL READ COMMITTED", false, 'T');
+        await ExecuteAsync("COMMIT TRAN", false, 'I');
+        await WriteAsync(ProtocolMessageType.Ping, []);
+        (await channel.Reader.ReadFrameAsync(token)).ShouldNotBeNull().Type.ShouldBe(ProtocolMessageType.Pong);
         server.Sessions.ShouldHaveSingleItem().Id.ShouldBe(session.Id);
+
+        async Task ExecuteAsync(string source, bool failure, char status)
+        {
+            await WriteAsync((ProtocolMessageType)DocumentProtocolMessageType.Execute, DocumentProtocolExecuteMessage.Create(source).Encode());
+            var response = (await channel.Reader.ReadFrameAsync(token)).ShouldNotBeNull();
+            response.Type.ShouldBe((ProtocolMessageType)(failure ? DocumentProtocolMessageType.Failure : DocumentProtocolMessageType.Complete));
+            await StatusAsync(status);
+        }
+
+        async Task StatusAsync(char status)
+        {
+            if (legacy) { return; }
+            var response = (await channel.Reader.ReadFrameAsync(token)).ShouldNotBeNull();
+            response.Type.ShouldBe(ProtocolMessageType.Ready);
+            response.Payload.ToArray().ShouldBe([(byte)status]);
+        }
 
         async Task WriteAsync(ProtocolMessageType type, byte[] payload)
         {

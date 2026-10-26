@@ -19,14 +19,14 @@ internal sealed class DocumentExchange : DatabaseProtocolExchange<DocumentExchan
     private readonly ProtocolFrame _request;
     private readonly DocumentProtocolCommandMessage? _command;
 
-    internal DocumentExchange(string statement, IReadOnlyDictionary<string, object?>? parameters) : base(DocumentProtocol.Family)
+    internal DocumentExchange(string statement, IReadOnlyDictionary<string, object?>? parameters) : base(DocumentProtocol.Family, transactionStatus: true)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(statement);
         _request = new((ProtocolMessageType)DocumentProtocolMessageType.Execute,
             new DocumentProtocolExecuteMessage(statement, DocumentJsonValues.Parameters(parameters)).Encode());
     }
 
-    internal DocumentExchange(DocumentProtocolCommandMessage command) : base(DocumentProtocol.Family)
+    internal DocumentExchange(DocumentProtocolCommandMessage command) : base(DocumentProtocol.Family, transactionStatus: true)
     {
         _command = command;
         _request = new((ProtocolMessageType)DocumentProtocolMessageType.Command, command.Encode());

@@ -160,19 +160,26 @@ failure over InMemory and TCP (#1135).
 
 ## Failures and pooling
 
-### Text transaction gate (#1725 T1)
+### Text transactions and pool return (#1725)
 
-The OQL parser now recognizes BEGIN/START, COMMIT and ROLLBACK for in-process sessions.
-Until OQ-T2 supplies negotiated Ready transaction status and family-aware pooled reset, the
-Documents server refuses these commands with ExecutionFailure and CD07002 before opening a
-transaction. A decoded refusal leaves the same pooled session reusable. MERGE and other
-unsupported syntax retain ParseFailure with CK00001. Client failure tests verify both
-classifications, source locations and the same session after the next rental over InMemory and TCP.
-The telemetry parse-refusal test uses MERGE so it still exercises StatementParseFailed.
+BEGIN/START, COMMIT and ROLLBACK use ordinary Execute on the connection-owned session.
+Snapshot is the default and READ COMMITTED is explicit. Command CRUD and collection operations
+share that transaction. OQL DDL retains CD04105; failed work retains CD04101 until ROLLBACK,
+or a failed COMMIT that ends it without committing. The temporary CD07002 gate is retired.
 
-The NativeAOT sample checks in-process default Snapshot and explicit READ COMMITTED control,
-then checks the wire refusal on both transports. No client runtime member, shared-client reset
-logic, protocol layout or capability advertisement changes in T1.
+Documents advertises transaction-status. Every Execute and Command terminal response is followed
+by negotiated Ready (Idle, Active or Failed), including decoded Failure. The shared client observes
+both request identifiers, drains status before completing the operation, and rolls back active or
+failed transactions before pooling. Reset validates Execute 64 / Complete 66 with two zero counts
+and Idle status. Missing, malformed, unnegotiated or failed reset evidence discards the session.
+A 2.0 or unnegotiated 2.1 peer remains usable for its rental but cannot be pooled.
+
+Status bookkeeping after Complete uses the shared bounded cleanup token, so caller cancellation
+cannot turn acknowledged COMMIT into cancellation. A missing acknowledgement leaves outcome unknown;
+disconnect cleanup never retries COMMIT. Abandoning an unfinished exchange discards the connection.
+InMemory and TCP tests cover visibility, isolation, failed commands, pooled rollback, disconnect,
+cancellation/disposal races, invalid status/reset and cancellation after COMMIT acknowledgement.
+The NativeAOT sample exercises wire controls and reset on both transports.
 
 ### Terminal response ownership
 
@@ -259,7 +266,7 @@ The sample executes every scalar category and verifies code-point LENGTH and Int
 both InMemory and TCP (#1137), alongside the existing advertised-clause checks.
 
 Documents.Client is inventoried and built in the Database workflow, but remains NuGet-only like
-Graph.Client. Model-specific Documents security remains deferred within the engine. Transactions, remote database administration,
+Graph.Client. Model-specific Documents security remains deferred within the engine. Remote database administration,
 replication and model-specific security policies are outside this wire slice. OQL INSERT, UPSERT, UPDATE and DELETE
 return their affected counts through the existing completion field. Wire negotiation remains
 the shared protocol's responsibility, with no model-specific version exchange. The startup version
@@ -298,7 +305,7 @@ JSON uses fixed, one-level objects and cannot carry arbitrary nested content.
 
 ## Shared startup 2.1 (#1105)
 
-The shared client reads the negotiated Ready version and capability intersection. Documents agrees 2.1 with an empty list and retains its existing structured Failure payload; it does not adopt the core Diagnostics frame. A negotiated 2.0 peer still sends empty Ready.
+The shared client reads the negotiated Ready version and capability intersection. Documents agrees 2.1 with transaction-status and retains its existing structured Failure payload; it does not adopt the core Diagnostics frame. A negotiated 2.0 peer still sends empty Ready.
 
 ## Dedicated test actors (#1285)
 

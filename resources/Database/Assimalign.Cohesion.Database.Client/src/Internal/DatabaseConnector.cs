@@ -107,7 +107,7 @@ internal sealed class DatabaseConnector
             var channel = new ProtocolChannel(stream, Family, leaveOpen: true);
             _reader = channel.Reader;
             _writer = channel.Writer;
-            _exchangeWriter = new ClientFrameWriter(_writer);
+            _exchangeWriter = new ClientFrameWriter(_writer, Family);
 
             var startup = new ProtocolStartupMessage(ProtocolVersion.Current, Database, Principal)
             { Capabilities = Family.Capabilities.Select(capability => capability.Name).ToArray() };
@@ -381,18 +381,31 @@ internal sealed class DatabaseConnector
         protected override async ValueTask<bool> ExecuteCoreAsync(ProtocolFrameReader reader, ProtocolFrameWriter writer,
             CancellationToken cancellationToken)
         {
-            // transaction-status defines this common parameterless Execute/reset envelope. The
-            // shared client has no model assembly dependency and never infers state from SQL text.
+            // Select the existing envelope by family identifiers, without referencing model
+            // assemblies or inferring transaction state from statement text. SQL/Graph use 5/8;
+            // Documents has no Execute 5 and uses 64/66 with two zero completion counts.
+            bool documents = !Family.Supports((ProtocolMessageType)5);
+            byte execute = documents ? (byte)64 : (byte)5;
+            byte complete = documents ? (byte)66 : (byte)8;
+            if (!Family.Supports((ProtocolMessageType)execute) || !Family.Supports((ProtocolMessageType)complete))
+            { throw new ProtocolException(ErrorMessages.TransactionResetInvalid); }
             var payload = new List<byte>();
             ProtocolPayload.WriteString(payload, "ROLLBACK");
-            ProtocolPayload.WriteInt32(payload, 0);
-            await writer.WriteFrameAsync(new ProtocolFrame((ProtocolMessageType)5, payload.ToArray()), cancellationToken).ConfigureAwait(false);
+            if (documents)
+            {
+                ProtocolPayload.WriteInt32(payload, 2);
+                payload.Add((byte)'{');
+                payload.Add((byte)'}');
+            }
+            else { ProtocolPayload.WriteInt32(payload, 0); }
+            await writer.WriteFrameAsync(new ProtocolFrame((ProtocolMessageType)execute, payload.ToArray()), cancellationToken).ConfigureAwait(false);
             await writer.FlushAsync(cancellationToken).ConfigureAwait(false);
             var frame = await reader.ReadFrameAsync(cancellationToken).ConfigureAwait(false);
-            if (frame is null || (byte)frame.Value.Type != 8 || frame.Value.Payload.Length != sizeof(long))
+            if (frame is null || (byte)frame.Value.Type != complete || frame.Value.Payload.Length != (documents ? 2 : 1) * sizeof(long))
             { throw new ProtocolException(ErrorMessages.TransactionResetInvalid); }
             int position = 0;
-            if (ProtocolPayload.ReadInt64(frame.Value.Payload.Span, ref position) != 0)
+            if (ProtocolPayload.ReadInt64(frame.Value.Payload.Span, ref position) != 0 ||
+                (documents && ProtocolPayload.ReadInt64(frame.Value.Payload.Span, ref position) != 0))
             { throw new ProtocolException(ErrorMessages.TransactionResetInvalid); }
             return true;
         }

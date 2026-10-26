@@ -8,7 +8,8 @@ package, outside the `App.Database` shared framework.
 The application chooses a transport factory and endpoint. `DocumentClient` owns a shared
 `Database.Client` pool; disposing a `DocumentConnection` returns its healthy session to that
 pool. One database is selected during authentication and remains bound for the connection's
-lifetime. Operations are serialized; explicit wire transactions are outside this API.
+lifetime. Operations are serialized. OQL BEGIN/START, COMMIT and ROLLBACK control this session;
+returning it rolls back open or failed work and requires negotiated Idle status before reuse.
 
 ```csharp
 await using var client = DocumentClient.Create(new()
