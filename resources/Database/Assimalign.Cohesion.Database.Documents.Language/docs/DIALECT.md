@@ -67,8 +67,9 @@ Every projection executes before the statement transaction completes. A failure 
 rolls back the statement; in an explicit transaction the existing whole-transaction abort rule
 applies. No partial RETURNING result reaches the caller. Returned JSON values own their data.
 `DocumentDatabaseEngineOptions.StatementMemoryBudget` defaults to 64 MiB and must be positive.
-RETURNING charges retained row/array storage, scalar values, conservative JSON ownership and
-whole-image bytes to this per-statement budget; exhaustion gives CD05018 at the clause span
+RETURNING charges retained row/array storage, scalar values, JSON clones (128 bytes plus UTF-8
+length plus 12 bytes per token), and preserved whole-image bytes once per representation to
+this per-statement budget; exhaustion gives CD05018 at the clause span
 and rolls back the writes. Serialized rows are preflighted in the same transaction: the existing
 CD05016 covers the 16 MiB frame cap, and CD05019 covers values deeper than 256 levels including
 the named projection wrapper. This is a retained-result estimate, not a managed-heap measurement;
