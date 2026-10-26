@@ -1278,7 +1278,8 @@ CG05020/CG08021 and the preserved 64-hop trail limit.
 ## Explicit transaction text (#1540, D5)
 
 START TRANSACTION, COMMIT and ROLLBACK are standalone ISO statements on Execute, using the
-existing session transaction objects. START uses Snapshot. BEGIN, savepoints, transaction options,
+existing session transaction objects. BEGIN is a standalone alias of START TRANSACTION (#1725,
+owner decision 2026-10-25); both use Snapshot. BEGIN TRANSACTION, savepoints, transaction options,
 statement composition and EXPLAIN of transaction controls remain outside this profile.
 A failed statement aborts the transaction; subsequent work is refused with CG04007 until
 ROLLBACK. Failed COMMIT rolls back and reports failure, never silently commits. Duplicate START

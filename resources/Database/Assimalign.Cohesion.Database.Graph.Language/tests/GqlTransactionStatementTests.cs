@@ -9,6 +9,8 @@ public sealed class GqlTransactionStatementTests
 {
     [Theory(DisplayName = "Cohesion Test [Graph.Language] - Transaction controls retain the standalone command and source span (#1540)")]
     [InlineData("START TRANSACTION", GqlTransactionCommand.Start)]
+    [InlineData("BEGIN", GqlTransactionCommand.Start)]
+    [InlineData("/* open */ begin;", GqlTransactionCommand.Start)]
     [InlineData("/* open */ start transaction;", GqlTransactionCommand.Start)]
     [InlineData("COMMIT;", GqlTransactionCommand.Commit)]
     [InlineData("ROLLBACK", GqlTransactionCommand.Rollback)]

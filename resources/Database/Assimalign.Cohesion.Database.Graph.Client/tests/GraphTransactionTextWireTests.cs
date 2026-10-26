@@ -10,9 +10,11 @@ namespace Assimalign.Cohesion.Database.Graph.Client.Tests;
 public sealed class GraphTransactionTextWireTests
 {
     [Theory(DisplayName = "Cohesion Test [Graph.Client] - Another wire session cannot see writes until the open transaction commits (w11 review)")]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task ExecuteAsync_OpenWireTransaction_ShouldHideWritesFromAnotherSession(bool tcp)
+    [InlineData(false, "START TRANSACTION")]
+    [InlineData(true, "START TRANSACTION")]
+    [InlineData(false, "BEGIN")]
+    [InlineData(true, "BEGIN")]
+    public async Task ExecuteAsync_OpenWireTransaction_ShouldHideWritesFromAnotherSession(bool tcp, string begin)
     {
         // Arrange
         await using var harness = await GraphClientTestHarness.StartAsync(tcp);
@@ -26,7 +28,7 @@ public sealed class GraphTransactionTextWireTests
         await using var reader = await peer.ConnectAsync(harness.Token);
 
         // Act / Assert
-        await writer.ExecuteAsync("START TRANSACTION", cancellationToken: harness.Token);
+        await writer.ExecuteAsync(begin, cancellationToken: harness.Token);
         await writer.ExecuteAsync("INSERT (:Pending {k:1})", cancellationToken: harness.Token);
         (await writer.QueryAsync("MATCH (n:Pending) RETURN count(*)", cancellationToken: harness.Token)).ShouldHaveSingleItem()[0].ShouldBe(1L);
         (await reader.QueryAsync("MATCH (n:Pending) RETURN count(*)", cancellationToken: harness.Token)).ShouldHaveSingleItem()[0].ShouldBe(0L);
@@ -44,7 +46,7 @@ public sealed class GraphTransactionTextWireTests
         await connection.ExecuteAsync("START TRANSACTION", cancellationToken: harness.Token);
         await connection.ExecuteAsync("INSERT (:Pending)", cancellationToken: harness.Token);
         var duplicate = await Should.ThrowAsync<GraphClientException>(async () =>
-            await connection.ExecuteAsync("START TRANSACTION", cancellationToken: harness.Token));
+            await connection.ExecuteAsync("BEGIN", cancellationToken: harness.Token));
         duplicate.Diagnostics.ShouldContain(item => item.Code == "CG04022");
         var refused = await Should.ThrowAsync<GraphClientException>(async () =>
             await connection.ExecuteAsync("INSERT (:Escaped)", cancellationToken: harness.Token));

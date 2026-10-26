@@ -100,7 +100,7 @@ public sealed class GqlKeywordDispositionTests
         ["ALTER"] = Rejects("ALTER GRAPH g", "ALTER"),
         ["GRANT"] = Rejects("GRANT READ ON GRAPH g TO u", "GRANT"),
         ["REVOKE"] = Rejects("REVOKE READ ON GRAPH g FROM u", "REVOKE"),
-        ["BEGIN"] = Rejects("BEGIN TRANSACTION", "BEGIN"),
+        ["BEGIN"] = Parses("BEGIN"),
         ["COMMIT"] = Parses("COMMIT"),
         ["ROLLBACK"] = Parses("ROLLBACK"),
         ["FINISH"] = Rejects("MATCH (a) FINISH", "FINISH"),

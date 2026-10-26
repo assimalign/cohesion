@@ -459,8 +459,9 @@ the copy before decoding; this adds no syntax, SQLSTATE or format version. Valid
 ## Transaction control (#1540)
 
 `START TRANSACTION`, `COMMIT` and `ROLLBACK` are standalone ISO statements, including over Execute.
-START uses Snapshot; embedded callers retain typed Snapshot/ReadCommitted transaction APIs.
-A failed explicit transaction refuses work until rollback. BEGIN, savepoints, transaction options,
+BEGIN is a standalone alias of START TRANSACTION (#1725, owner decision 2026-10-25).
+Both use Snapshot; embedded callers retain typed Snapshot/ReadCommitted transaction APIs.
+A failed explicit transaction refuses work until rollback. BEGIN TRANSACTION, savepoints, transaction options,
 EXPLAIN controls and multi-statement text are unsupported. ExecutePaths cannot control transactions.
 
 An idle open wire transaction holds the database writer lock once it has acquired it, until

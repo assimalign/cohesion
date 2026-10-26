@@ -17,14 +17,16 @@ namespace Assimalign.Cohesion.Database.Graph.Tests;
 
 public sealed class GraphServerProtocolTests
 {
-    [Fact(DisplayName = "Cohesion Test [Database.Graph] - Peer termination rolls back a text-started wire transaction (#1540)")]
-    public async Task Terminate_TextTransaction_ShouldRollbackBeforeSessionCompletes()
+    [Theory(DisplayName = "Cohesion Test [Database.Graph] - Peer termination rolls back a text-started wire transaction (#1540, #1725)")]
+    [InlineData("START TRANSACTION")]
+    [InlineData("BEGIN")]
+    public async Task Terminate_TextTransaction_ShouldRollbackBeforeSessionCompletes(string begin)
     {
         await WithServerAsync(async (server, channel, token) =>
         {
             var session = (Internal.GraphDatabaseServerSession)server.Sessions.ShouldHaveSingleItem();
             var databaseSession = session.DatabaseSession.ShouldNotBeNull();
-            foreach (var statement in new[] { "START TRANSACTION", "INSERT (:Pending)" })
+            foreach (var statement in new[] { begin, "INSERT (:Pending)" })
             {
                 await WriteAsync(channel, (ProtocolMessageType)GraphProtocolMessageType.Execute,
                     GraphProtocolExecuteMessage.Create(statement).Encode(), token);
@@ -103,7 +105,7 @@ public sealed class GraphServerProtocolTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Database.Graph] - Server: rejected text and missing transactions keep the session reusable")]
-    [InlineData("BEGIN", ProtocolErrorCode.ParseFailure)]
+    [InlineData("BEGIN TRANSACTION", ProtocolErrorCode.ParseFailure)]
     [InlineData("COMMIT", ProtocolErrorCode.ExecutionFailure)]
     [InlineData("ROLLBACK", ProtocolErrorCode.ExecutionFailure)]
     [InlineData("MATCH (a)->{3,1}(b) RETURN a.name", ProtocolErrorCode.ParseFailure)]

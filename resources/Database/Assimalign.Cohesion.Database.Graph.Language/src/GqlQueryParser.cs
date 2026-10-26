@@ -104,7 +104,7 @@ public sealed partial class GqlQueryParser : QueryParser
         // SHOW has a deliberately separate grammar: catalog definitions are not graph elements.
         // Check attempted composition before generic capability errors (SET, DROP, etc.).
         bool catalogStatement = Is("SHOW");
-        bool transactionStatement = Is("START") || Is("COMMIT") || Is("ROLLBACK");
+        bool transactionStatement = Is("START") || Is("BEGIN") || Is("COMMIT") || Is("ROLLBACK");
         if (catalogStatement) { FindCatalogMutation(); }
         else if (!transactionStatement) { FindUnsupported(); }
         GqlQueryExpression expression;
@@ -117,10 +117,10 @@ public sealed partial class GqlQueryParser : QueryParser
         else if (transactionStatement)
         {
             var first = Current;
-            var command = Is("START") ? GqlTransactionCommand.Start
+            var command = Is("START") || Is("BEGIN") ? GqlTransactionCommand.Start
                 : Is("COMMIT") ? GqlTransactionCommand.Commit : GqlTransactionCommand.Rollback;
             _position++;
-            if (command == GqlTransactionCommand.Start) { Expect("TRANSACTION"); }
+            if (first.Text.Equals("START", StringComparison.OrdinalIgnoreCase)) { Expect("TRANSACTION"); }
             expression = new GqlQueryExpression(Array.Empty<GqlStage>(), Span(first, _tokens[_position - 1]))
             { TransactionCommand = command };
         }
