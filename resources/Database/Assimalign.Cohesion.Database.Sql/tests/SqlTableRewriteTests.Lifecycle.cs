@@ -16,6 +16,34 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed partial class SqlTableRewriteTests
 {
+    [Fact(DisplayName = "Cohesion Test [Sql] - Rewrite: enqueue failure releases the new item's cancellation and admission ownership")]
+    public async Task RewriteTableAsync_EnqueueFailure_ShouldReleaseAdmissionAndAllowRetry()
+    {
+        // Arrange
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(timeout.Token);
+        await using var engine = SqlDatabaseEngine.Create("rewrite-enqueue-failure", new());
+        var database = await engine.CreateDatabaseAsync("db", timeout.Token);
+        await using var session = await database.CreateSessionAsync(timeout.Token);
+        await PrepareAsync(session, timeout.Token);
+        var worker = engine.Workers.OfType<SqlProvisioningWorker>().Single();
+        var expected = new InvalidOperationException("Injected enqueue failure");
+        worker.BeforeEnqueue = () => throw expected;
+        try
+        {
+            // Act
+            var failure = await Should.ThrowAsync<InvalidOperationException>(() => database.RewriteTableAsync(Table(database), cancellation.Token).AsTask());
+
+            // Assert
+            failure.ShouldBeSameAs(expected);
+            worker.PendingRewriteCount.ShouldBe(0);
+            cancellation.Cancel();
+            await ExecAsync(session, "ALTER TABLE t ADD n INT", timeout.Token);
+        }
+        finally { worker.BeforeEnqueue = null; }
+        await database.RewriteTableAsync(Table(database), timeout.Token);
+    }
+
     [Theory(DisplayName = "Cohesion Test [Sql] - Rewrite: the public maintenance API resolves decoded delimited names")]
     [InlineData("t")]
     [InlineData("a.b")]
@@ -143,6 +171,7 @@ public sealed partial class SqlTableRewriteTests
         await using var secondSession = await second.CreateSessionAsync(timeout.Token);
         await PrepareAsync(firstSession, timeout.Token);
         await PrepareAsync(secondSession, timeout.Token);
+        var worker = engine.Workers.OfType<SqlProvisioningWorker>().Single();
         SqlPlanExecutor.RewriteStage = (stage, _) =>
         {
             if (stage == "Reserved") { entered.Set(); release.Wait(timeout.Token); }
@@ -153,6 +182,7 @@ public sealed partial class SqlTableRewriteTests
         {
             entered.Wait(timeout.Token);
             queued = second.RewriteTableAsync(Table(second), cancel.Token).AsTask();
+            worker.PendingRewriteCount.ShouldBe(1);
 
             // Act
             if (dispose) { await second.DisposeAsync(); }
@@ -161,11 +191,21 @@ public sealed partial class SqlTableRewriteTests
 
             // Assert: ordinary DDL proves the canceled database's global admission ended.
             active.IsCompleted.ShouldBeFalse();
+            worker.PendingRewriteCount.ShouldBe(0);
             if (dispose) { second.IsClosed.ShouldBeTrue(); }
             else
             {
                 await ExecAsync(secondSession, "ALTER TABLE t ADD n INT", timeout.Token);
                 second.Catalog.GetPendingTableReclamations().ShouldBeEmpty();
+                for (int iteration = 0; iteration < 32; iteration++)
+                {
+                    using var repeatedCancellation = CancellationTokenSource.CreateLinkedTokenSource(timeout.Token);
+                    var repeated = second.RewriteTableAsync(Table(second), repeatedCancellation.Token).AsTask();
+                    worker.PendingRewriteCount.ShouldBe(1);
+                    repeatedCancellation.Cancel();
+                    await Should.ThrowAsync<OperationCanceledException>(async () => await repeated);
+                    worker.PendingRewriteCount.ShouldBe(0);
+                }
             }
         }
         finally
