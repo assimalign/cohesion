@@ -82,26 +82,6 @@ internal sealed partial class SqlPlanExecutor
 
     internal Task<DatabaseResult> ExecuteAsync(SqlPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
-        // Refuse before materializing CTEs or WHERE children, including volatile source calls.
-        var input = plan;
-        while (true)
-        {
-            if (input is SqlWithPlan with) { input = with.Input; }
-            else if (input is SqlSubqueryPlan subquery) { input = subquery.Input; }
-            else if (input is SqlCorrelatedSubqueryPlan correlated) { input = correlated.Input; }
-            else { break; }
-        }
-        string? clause = input switch
-        {
-            SqlUpdatePlan { Source: not null } => "UPDATE ... FROM",
-            SqlDeletePlan { Source: not null } => "DELETE ... USING",
-            _ => null,
-        };
-        if (clause is not null)
-        {
-            throw new SqlUnsupportedQueryException(string.Format(CultureInfo.CurrentCulture,
-                ErrorMessages.DmlSourcesExecutionUnavailable, clause));
-        }
         return statement.Metrics.IsAnalyzing ? ExecuteAnalyzedAsync(plan, statement, cancellationToken)
             : ExecuteCoreAsync(plan, statement, cancellationToken);
     }
@@ -552,21 +532,47 @@ internal sealed partial class SqlPlanExecutor
         return await ExecuteInsertRowsAsync(plan.Table, plan.TargetOrdinals, values, statement, cancellationToken, plan.Returning, plan.Rows, plan.OnConflict).ConfigureAwait(false);
     }
 
-    private async Task<DatabaseResult> ExecuteUpdateAsync(SqlUpdatePlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
+    private Task<DatabaseResult> ExecuteUpdateAsync(SqlUpdatePlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
+        => plan.Source is null ? ExecuteUpdateCoreAsync(plan, statement, cancellationToken)
+            : ExecuteJoinedUpdateAsync(plan, statement, cancellationToken);
+
+    private async Task<DatabaseResult> ExecuteJoinedUpdateAsync(SqlUpdatePlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
+    {
+        var locks = statement.Coordinator.LockManager;
+        var mark = locks.MarkStatement(statement.Transaction.Sequence);
+        try { return await ExecuteUpdateCoreAsync(plan, statement, cancellationToken).ConfigureAwait(false); }
+        catch when (!_storage.IsOffline)
+        {
+            locks.ReleaseSince(mark);
+            throw;
+        }
+    }
+
+    private async Task<DatabaseResult> ExecuteUpdateCoreAsync(SqlUpdatePlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
         await AcquireReferenceIntentLocksAsync(plan.Table, statement, cancellationToken).ConfigureAwait(false);
-        var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken);
+        var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken,
+            plan.Source is null ? null : Enumerable.Repeat(true, plan.Source.Associations.Columns.Count).ToArray());
         var indexes = GetLiveIndexes(plan.Table, statement);
         var targets = new List<(PageId PageId, int SlotIndex, object?[] Values)>();
 
+        var associations = plan.Source is null ? null : await CollectDmlAssociationsAsync(
+            plan.Source, statement, cancellationToken, rejectMultiple: true).ConfigureAwait(false);
         // Fully drain and dispose the candidate cursor before row-lock waits or writes.
         // This materialization also prevents Halloween revisits when SET moves an index key.
-        foreach (var (location, values) in EnumerateRows(plan.Table, plan.Access, statement, cancellationToken))
+        if (associations is not null)
         {
-            await PrepareSubqueriesAsync(plan.Where, values, statement, cancellationToken).ConfigureAwait(false);
-            if (evaluator.Matches(plan.Where, values))
+            targets.AddRange(associations.Values.Select(row => (row.PageId, row.SlotIndex, row.TargetValues)));
+        }
+        else
+        {
+            foreach (var (location, values) in EnumerateRows(plan.Table, plan.Access, statement, cancellationToken))
             {
-                targets.Add((location.PageId, location.SlotIndex, values));
+                await PrepareSubqueriesAsync(plan.Where, values, statement, cancellationToken).ConfigureAwait(false);
+                if (evaluator.Matches(plan.Where, values))
+                {
+                    targets.Add((location.PageId, location.SlotIndex, values));
+                }
             }
         }
 
@@ -578,14 +584,16 @@ internal sealed partial class SqlPlanExecutor
         int[]? assigned = bound.Domains.Count > 0 ? plan.Assignments.Select(static assignment => assignment.Ordinal).ToArray() : null;
         foreach (var (pageId, slotIndex, values) in targets)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var updated = (object?[])values.Clone();
+            var input = associations is null ? values : associations[SqlRecordLocation.Pack(pageId, slotIndex)].Values;
 
             foreach (var (ordinal, expression) in plan.Assignments)
             {
                 // Assignments evaluate against the ORIGINAL row (SQL semantics).
                 updated[ordinal] = expression.Kind == SqlBoundExpressionKind.DefaultItem
                     ? ResolveColumnDefault(plan.Table, ordinal, bound.DefaultValues[ordinal], statement, cancellationToken)
-                    : CoerceForColumn(evaluator.Evaluate(expression, values, copySharedBinary: true), plan.Table.Columns[ordinal]);
+                    : CoerceForColumn(evaluator.Evaluate(expression, input, copySharedBinary: true), plan.Table.Columns[ordinal]);
             }
 
             if (assigned is not null)
@@ -643,6 +651,7 @@ internal sealed partial class SqlPlanExecutor
         {
             return await statement.Coordinator.ApplyStatementAsync(statement.Transaction, async bracket =>
             {
+                if (associations is not null) { RecheckDmlTargets(plan.Table, associations, statement, cancellationToken); }
                 int applied = 0;
                 foreach (var (pageId, slotIndex, oldValues, _, _) in replacements)
                 {
@@ -663,14 +672,19 @@ internal sealed partial class SqlPlanExecutor
                 // Release every replaced unique mapping before inserting replacements,
                 // so statement-consistent key swaps do not fail on an old live entry.
                 applied = 0;
-                foreach (var (_, _, _, newValues, newVersion) in replacements)
+                foreach (var (pageId, slotIndex, _, newValues, newVersion) in replacements)
                 {
                     if ((applied++ & 63) == 0) { cancellationToken.ThrowIfCancellationRequested(); }
                     var location = _storage.InsertRow(bracket, plan.Table.ObjectId, newVersion);
                     statement.Coordinator.VersionStore.RecordCreated(statement.Transaction.Sequence, location.PageId, location.SlotIndex);
                     await InsertIndexEntriesAsync(
                         statement, indexes, plan.Table, newValues, SqlRecordLocation.Pack(location.PageId, location.SlotIndex), cancellationToken).ConfigureAwait(false);
-                    if (returned is not null) { returned.Add(ProjectRow(newValues, plan.Returning!, evaluator, cancellationToken)); }
+                    if (returned is not null)
+                    {
+                        var output = associations is null ? newValues : DmlReturningRow(
+                            associations[SqlRecordLocation.Pack(pageId, slotIndex)].Values, newValues);
+                        returned.Add(ProjectRow(output, plan.Returning!, evaluator, cancellationToken));
+                    }
                 }
 
                 return await statement.PrepareResultAsync(returned is null ? new SqlQueryResult(DatabaseResultStatus.Success, replacements.Count)
@@ -691,6 +705,7 @@ internal sealed partial class SqlPlanExecutor
         const int retainedWaitThreshold = 3;
         int refusals = 0;
         bool applyStarted = false;
+        Dictionary<ulong, DmlAssociation>? associations = null;
         try
         {
             while (true)
@@ -698,12 +713,25 @@ internal sealed partial class SqlPlanExecutor
                 try
                 {
                     await AcquireReferenceIntentLocksAsync(plan.Table, statement, cancellationToken, outgoing: false, cascade: true).ConfigureAwait(false);
-                    var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken);
+                    var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken,
+                        plan.Source is null ? null : Enumerable.Repeat(true, plan.Source.Associations.Columns.Count).ToArray());
                     var targets = new List<((PageId PageId, int SlotIndex) Location, object?[] Values)>();
-                    foreach (var row in EnumerateRows(plan.Table, plan.Access, statement, cancellationToken))
+                    if (plan.Source is not null)
                     {
-                        await PrepareSubqueriesAsync(plan.Where, row.Values, statement, cancellationToken).ConfigureAwait(false);
-                        if (evaluator.Matches(plan.Where, row.Values)) { targets.Add(row); }
+                        associations ??= await CollectDmlAssociationsAsync(
+                            plan.Source, statement, cancellationToken, rejectMultiple: false).ConfigureAwait(false);
+                    }
+                    if (associations is not null)
+                    {
+                        targets.AddRange(associations.Values.Select(row => ((row.PageId, row.SlotIndex), row.TargetValues)));
+                    }
+                    else
+                    {
+                        foreach (var row in EnumerateRows(plan.Table, plan.Access, statement, cancellationToken))
+                        {
+                            await PrepareSubqueriesAsync(plan.Where, row.Values, statement, cancellationToken).ConfigureAwait(false);
+                            if (evaluator.Matches(plan.Where, row.Values)) { targets.Add(row); }
+                        }
                     }
 
                     // Lock the directly targeted rows as one sorted batch before the cascade
@@ -737,6 +765,7 @@ internal sealed partial class SqlPlanExecutor
                     return await statement.Coordinator.ApplyStatementAsync(statement.Transaction, async bracket =>
                     {
                         applyStarted = true;
+                        if (associations is not null) { RecheckDmlTargets(plan.Table, associations, statement, cancellationToken); }
                         // Revalidate every target before applying anything. The bracket makes all
                         // tombstones, versions and index changes one rollback unit.
                         foreach (var update in updates.Values)
@@ -755,7 +784,9 @@ internal sealed partial class SqlPlanExecutor
                             if (returned is not null && deletion.Table.ObjectId == plan.Table.ObjectId &&
                                 returningTargets!.Contains(SqlRecordLocation.Pack(deletion.Location.PageId, deletion.Location.SlotIndex)))
                             {
-                                returned.Add(ProjectRow(deletion.Values, plan.Returning!, evaluator, cancellationToken));
+                                var output = associations is null ? deletion.Values : associations[
+                                    SqlRecordLocation.Pack(deletion.Location.PageId, deletion.Location.SlotIndex)].Values;
+                                returned.Add(ProjectRow(output, plan.Returning!, evaluator, cancellationToken));
                             }
                         }
                         foreach (var update in updates.Values)

@@ -51,6 +51,8 @@ public class SqlConformanceTests
     [InlineData("UPDATE dbo.users SET name = 'Ada', age = age + 1 WHERE id = @id;", SqlQueryCommandType.Update)]
     [InlineData("UPDATE dbo.users AS u SET age = age + 1 WHERE u.id BETWEEN 1 AND 10 RETURNING id, age;", SqlQueryCommandType.Update)]
     [InlineData("UPDATE dbo.users SET name = DEFAULT WHERE id = 1;", SqlQueryCommandType.Update)]
+    [InlineData("UPDATE t SET v=s.v FROM s WHERE t.id=s.id RETURNING t.v,s.v;", SqlQueryCommandType.Update)]
+    [InlineData("DELETE FROM t USING s WHERE t.id=s.id RETURNING t.id,s.v;", SqlQueryCommandType.Delete)]
     [InlineData("DELETE FROM users WHERE id = $1;", SqlQueryCommandType.Delete)]
     [InlineData("DELETE FROM dbo.users AS u WHERE u.id = @id AND EXISTS (SELECT a.id FROM admins a WHERE a.id = u.id) RETURNING id;", SqlQueryCommandType.Delete)]
     [InlineData("DELETE FROM users;", SqlQueryCommandType.Delete)]

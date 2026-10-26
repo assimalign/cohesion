@@ -62,6 +62,14 @@ still starts with the engine code. The connection and explicit transaction remai
 Both-transport tests assert rollback of earlier rows in multi-row INSERT, INSERT SELECT and
 upsert failures. There is no API or wire-format change.
 
+## Joined DML (#1714)
+
+UPDATE FROM and DELETE USING use the existing command/result exchange. Both InMemory and TCP
+cover source SET/WHERE/RETURNING, visible star metadata and LEFT null extension, affected counts,
+empty results, DELETE deduplication, constraint rollback and CS05068 before writes. Multiple UPDATE
+source matches leave the connection and earlier explicit-transaction work usable. No client API,
+protocol version, frame or metadata format changes.
+
 ## UPDATE final foreign-key state (#1667)
 
 Both transports pin dangling-reference rejection without writes, moving self-references,

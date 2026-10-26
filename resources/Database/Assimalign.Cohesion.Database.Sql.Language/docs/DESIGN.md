@@ -6,8 +6,8 @@ SqlUpdateExpression.From and SqlDeleteExpression.Using retain comma items and ex
 variants without adding a public construction bridge. Shared parsing and canonical source rendering
 preserve SELECT behavior and DML round trips, including WITH, derived bodies and RETURNING. The
 capability scan admits read-source queries while keeping SET/RETURNING subquery exclusions.
-Visible source OLD/NEW names mask pseudo-relations. DIALECT.md distinguishes parsed/bound support
-from execution: no clause/profile declaration is added until SQ-UF2 executes the forms.
+Visible source OLD/NEW names mask pseudo-relations. The profile now advertises UPDATE FROM and
+DELETE USING; DIALECT.md records pre-write CS05068 and physical-target DELETE deduplication.
 DELETE's top-level USING source position recognizes keyword-spelled CTE references, while actual
 WITH RECURSIVE remains refused. Canonical rendering delimits ordinary OLD/NEW column qualifiers
 so a quoted identifier cannot become a RETURNING pseudo-relation on reparse.
