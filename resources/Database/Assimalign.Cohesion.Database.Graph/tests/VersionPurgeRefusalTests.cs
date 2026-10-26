@@ -21,7 +21,8 @@ public sealed class VersionPurgeRefusalTests
     [Fact(DisplayName = "Cohesion Test [Graph] - Purge: refused undo reports once per episode without taking the database offline")]
     public async Task RunIteration_UndoRemainsRefused_ShouldReportOnceAndRecoverForEachEpisode()
     {
-        // Arrange: timers wait an hour. These explicit full passes retry the undo on another thread.
+        // Arrange: timers wait an hour. Only explicit passes drive this unowned worker,
+        // so the engine pump cannot add attempts to its refusal episodes.
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         var token = timeout.Token;
         var clock = new ManualTimeProvider();
@@ -30,7 +31,9 @@ public sealed class VersionPurgeRefusalTests
         var healthy = await engine.CreateDatabaseAsync("healthy", token);
         await using var session = await database.CreateSessionAsync(token);
         await SetupAsync(session, token);
-        var worker = engine.Workers.OfType<GraphVersionPurgeWorker>().Single();
+        var worker = new GraphVersionPurgeWorker(engine);
+        await using var lifetime = CheckpointPace.Own(worker);
+        var engineWorker = engine.Workers.OfType<GraphVersionPurgeWorker>().Single();
         int healthyPasses = 0;
         worker.BeforeFullPass = current =>
         {
@@ -78,6 +81,14 @@ public sealed class VersionPurgeRefusalTests
             CheckpointPace.RunSettled(worker, token);
             database.Coordinator.VersionStore.PendingAbortedPurges.ShouldBeEmpty();
             worker.Fault.ShouldBeNull();
+            // The engine pump may still be collecting a refusal from before the locks were
+            // released. Settle its recovery too, without counting its passes as this worker's.
+            do
+            {
+                clock.Advance(TimeSpan.FromHours(1));
+                CheckpointPace.RunSettled(engineWorker, token);
+            }
+            while (engineWorker.Fault is not null);
             engine.State.ShouldBe(EngineState.Running);
             database.Coordinator.PairedTransactionCount.ShouldBe(0);
             database.Coordinator.Checkpoint();
@@ -102,7 +113,8 @@ public sealed class VersionPurgeRefusalTests
         var clock = new ManualTimeProvider();
         await using var engine = CreateEngine(clock);
         var database = await engine.CreateDatabaseAsync("test", CancellationToken.None);
-        var worker = engine.Workers.OfType<GraphVersionPurgeWorker>().Single();
+        var worker = new GraphVersionPurgeWorker(engine);
+        await using var lifetime = CheckpointPace.Own(worker);
         int owner = 0;
         worker.BeforeFullPass = _ =>
         {
@@ -192,7 +204,8 @@ public sealed class VersionPurgeRefusalTests
         var clock = new ManualTimeProvider();
         await using var engine = CreateEngine(clock);
         var database = await engine.CreateDatabaseAsync("test", CancellationToken.None);
-        var worker = engine.Workers.OfType<GraphVersionPurgeWorker>().Single();
+        var worker = new GraphVersionPurgeWorker(engine);
+        await using var lifetime = CheckpointPace.Own(worker);
         int attempts = 0;
         worker.BeforeFullPass = current =>
         {
@@ -222,7 +235,8 @@ public sealed class VersionPurgeRefusalTests
         var clock = new ManualTimeProvider();
         await using var engine = CreateEngine(clock);
         await engine.CreateDatabaseAsync("test", CancellationToken.None);
-        var worker = engine.Workers.OfType<GraphVersionPurgeWorker>().Single();
+        var worker = new GraphVersionPurgeWorker(engine);
+        await using var lifetime = CheckpointPace.Own(worker);
         int attempts = 0;
         worker.BeforeFullPass = _ =>
         {
@@ -308,7 +322,8 @@ public sealed class VersionPurgeRefusalTests
             using (var page = database.DataStorage.AllocatePageForWrite(allocation, PageType.Index)) { traffic = page.Id; }
             allocation.Commit();
         }
-        var worker = engine.Workers.OfType<GraphVersionPurgeWorker>().Single();
+        var worker = new GraphVersionPurgeWorker(engine);
+        await using var lifetime = CheckpointPace.Own(worker);
         using (var blocker = database.DataStorage.BeginTransaction())
         {
             for (long page = 1; page < database.DataStorage.PageManager.PageCount; page++)
