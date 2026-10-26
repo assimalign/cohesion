@@ -207,6 +207,10 @@ Blank OQL collection names return `CD05001` at the quoted name's span; empty quo
 return the parser's `CD00002`. Both preserve the connection. The typed command API rejects blank
 names locally with its existing argument guard. A peer sending one through Command (69) receives
 an unlocated `CD05001` Failure and can continue using the same server session.
+Within an explicit transaction, that semantic command failure aborts pending work and requires
+an end control before further statements. Oversized Put response preflight and query response
+serialization failures follow the same rule, retaining CD05016 for the original failure and
+CD04101 for later statements.
 
 Collection refusals preserve `CD01002` (missing DROP), `CD03010` (duplicate CREATE), and
 `CD03011` (schema-owned DROP) through both OQL and Command exchanges. Their OQL diagnostics

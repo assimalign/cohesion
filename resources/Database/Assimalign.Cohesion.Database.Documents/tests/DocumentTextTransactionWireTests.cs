@@ -71,6 +71,18 @@ public sealed class DocumentTextTransactionWireTests
         await ExecuteAsync("ROLLBACK", false, 'I', duplicateParameters: true);
         await ExecuteAsync("START WORK ISOLATION LEVEL READ COMMITTED", false, 'T');
         await ExecuteAsync("COMMIT TRAN", false, 'I', duplicateParameters: true);
+        foreach (var operation in Enum.GetValues<DocumentProtocolOperation>().Where(item => item != DocumentProtocolOperation.ListCollections))
+        {
+            await ExecuteAsync("BEGIN", false, 'T');
+            await ExecuteAsync("INSERT INTO items (KEY, VALUE) VALUES ('pending', {})", false, 'T');
+            await InvalidCommandAsync(operation, "CD05001");
+            session.DatabaseSession!.CurrentTransaction.ShouldNotBeNull().State.ShouldBe(Transactions.TransactionState.Faulted);
+            await InvalidCommandAsync(operation, "CD04101");
+            await ExecuteAsync("COMMIT", true, 'I', code: "CD04101");
+            await using var observer = await ((DocumentDatabaseSession)session.DatabaseSession!).Database.CreateSessionAsync(token);
+            var items = await observer.GetCollectionAsync("items", token);
+            (await items.GetAsync(observer, "pending", token)).ShouldBeNull();
+        }
         await WriteAsync(ProtocolMessageType.Ping, []);
         (await channel.Reader.ReadFrameAsync(token)).ShouldNotBeNull().Type.ShouldBe(ProtocolMessageType.Pong);
         server.Sessions.ShouldHaveSingleItem().Id.ShouldBe(session.Id);
@@ -91,6 +103,26 @@ public sealed class DocumentTextTransactionWireTests
             var response = (await channel.Reader.ReadFrameAsync(token)).ShouldNotBeNull();
             response.Type.ShouldBe(ProtocolMessageType.Ready);
             response.Payload.ToArray().ShouldBe([(byte)status]);
+        }
+
+        async Task InvalidCommandAsync(DocumentProtocolOperation operation, string code)
+        {
+            // The codec leaves blank collection names to semantic server validation.
+            var payload = new System.Collections.Generic.List<byte> { (byte)operation };
+            ProtocolPayload.WriteString(payload, " ");
+            if (operation is DocumentProtocolOperation.Get or DocumentProtocolOperation.Put or DocumentProtocolOperation.Delete)
+            { ProtocolPayload.WriteString(payload, "pending"); }
+            if (operation is DocumentProtocolOperation.Put or DocumentProtocolOperation.Delete) { payload.Add(0); }
+            if (operation == DocumentProtocolOperation.Put)
+            {
+                ProtocolPayload.WriteInt32(payload, 2);
+                payload.AddRange("{}"u8.ToArray());
+            }
+            await WriteAsync((ProtocolMessageType)DocumentProtocolMessageType.Command, payload.ToArray());
+            var response = (await channel.Reader.ReadFrameAsync(token)).ShouldNotBeNull();
+            response.Type.ShouldBe((ProtocolMessageType)DocumentProtocolMessageType.Failure);
+            DocumentProtocolFailureMessage.Decode(response.Payload.Span).Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(code);
+            await StatusAsync('E');
         }
 
         async Task WriteAsync(ProtocolMessageType type, byte[] payload)

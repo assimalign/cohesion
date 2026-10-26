@@ -325,14 +325,23 @@ public sealed class DocumentDatabaseSession : DatabaseLanguageSession<DocumentQu
         ThrowIfClosed();
     }
 
+    /// <summary>Checks command admission before semantic validation or response preflight.</summary>
+    internal void ThrowIfCommandRefuses()
+    {
+        ThrowIfNotOpen();
+        _database.ThrowIfOffline();
+        ThrowIfTransactionRefuses();
+    }
+
     /// <summary>
-    /// Aborts the explicit transaction for a statement that failed before it reached an operation
-    /// (parsing). A statement running concurrently on the session (a caller contract violation)
+    /// Aborts the explicit transaction for a statement that failed outside an engine operation
+    /// (parsing, command preflight or wire serialization). A statement running concurrently on
+    /// the session (a caller contract violation)
     /// owns the session; its own outcome decides the transaction's.
     /// </summary>
     /// <param name="cause">The failure the caller observes.</param>
     /// <returns>A task that completes once the transaction is aborted, or at once.</returns>
-    private async ValueTask AbortTransactionAsync(Exception cause)
+    internal async ValueTask AbortTransactionAsync(Exception cause)
     {
         if (CurrentTransaction is not { AcceptsStatements: true } transaction)
         {

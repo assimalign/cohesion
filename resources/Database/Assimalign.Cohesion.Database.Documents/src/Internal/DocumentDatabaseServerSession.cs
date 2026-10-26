@@ -448,6 +448,10 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
         }
         catch (Exception exception) when (exception is DatabaseException or DatabaseTypeException or JsonException)
         {
+            // Preflight and response encoding can fail outside an engine operation. Abort active
+            // explicit work before reporting Failure; an already faulted or ended transaction
+            // keeps its original cause/outcome. The single pump owns this session access.
+            await _databaseSession!.AbortTransactionAsync(exception).ConfigureAwait(false);
             ProtocolErrorCode code = exception is DatabaseParseException ? ProtocolErrorCode.ParseFailure :
                 exception is DatabaseOfflineException ? ProtocolErrorCode.Unavailable : ProtocolErrorCode.ExecutionFailure;
             IReadOnlyList<Diagnostic> diagnostics = exception is DatabaseException databaseException ? databaseException.Diagnostics : [];
@@ -530,11 +534,12 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
 
     private async Task RunCommandAsync(DocumentProtocolCommandMessage command, CancellationToken cancellationToken)
     {
+        var session = _databaseSession!;
+        session.ThrowIfCommandRefuses();
         if (command.Operation != DocumentProtocolOperation.ListCollections && string.IsNullOrWhiteSpace(command.Collection))
         {
             throw new DocumentPlanningException("CD05001", ErrorMessages.CollectionNameMissing);
         }
-        var session = _databaseSession!;
         long count = 0;
         long affected = -1;
         switch (command.Operation)

@@ -289,6 +289,12 @@ duplicate-name validation runs inside statement admission: CD01009 faults an exp
 and later work retains CD04101 until an end control recovers it. Malformed wire JSON still terminates
 the connection before statement admission.
 
+Semantic Command validation and wire response encoding also belong to the failed-statement
+contract. A blank command collection, an oversized Put response preflight, or a query serialization
+failure aborts active explicit work before Failure and Ready E are sent. Command admission checks
+an already failed transaction before preflight, preserving CD04101. The server reuses the session's
+internal failure cleanup; no public API or assembly boundary changes.
+
 The single server pump owns session access. On the client, lock order is the typed wrapper's
 operation lock then shared lease admission lock; pool locks and storage latches are never taken
 there. The lease releases its lock before I/O, cancellation, joining and pool return. Return joins

@@ -18,6 +18,8 @@ COMMIT or ROLLBACK without an open transaction gives CD04104. Nested BEGIN gives
 aborts the existing transaction. A failed statement preserves CD04101 until rollback;
 text ROLLBACK recovers the session. COMMIT on a faulted transaction gives CD04101 and ends it
 without committing. Malformed text in a faulted transaction also preserves CD04101.
+Wire command validation and response serialization failures also abort explicit work; a response
+size failure retains CD05016 before later statements receive CD04101.
 OQL CREATE/DROP COLLECTION/INDEX in an explicit transaction gives CD04105 and aborts it,
 including conditional no-ops. C# collection operations retain their existing transaction contract.
 SAVEPOINT, ROLLBACK TO SAVEPOINT and SET TRANSACTION remain CK00001; the rollback form reports

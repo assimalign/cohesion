@@ -6,6 +6,7 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.Database.Client;
+using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Documents.Client.Tests;
@@ -180,6 +181,52 @@ public sealed class DocumentTransactionTextWireTests
         (await first.GetAsync("items", "later", harness.Token)).HasValue.ShouldBe(readCommitted);
         await first.ExecuteAsync("COMMIT", cancellationToken: harness.Token);
         (await first.GetAsync("items", "later", harness.Token)).ShouldNotBeNull();
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Documents.Client] - Wire response size failures abort explicit transactions before sending Failure (#1725)")]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task ExecuteAsync_ResponseSizeFailure_ShouldAbortPendingWrites(bool tcp, bool putPreflight)
+    {
+        // Arrange: a one-character collection makes the maximum Put request's response one byte larger.
+        await using var harness = await DocumentClientTestHarness.StartAsync(tcp);
+        await using var connection = await harness.Client.ConnectAsync(harness.Token);
+        await connection.CreateCollectionAsync("c", harness.Token);
+        byte[] content = new byte[putPreflight ? (int)ProtocolFrameHeader.MaxPayloadLength - 16 : 9 * 1024 * 1024];
+        Array.Fill(content, (byte)'x');
+        "{\"text\":\""u8.CopyTo(content);
+        "\"}"u8.CopyTo(content.AsSpan(content.Length - 2));
+        if (!putPreflight) { await connection.PutAsync("c", "x", content, cancellationToken: harness.Token); }
+        await connection.ExecuteAsync("BEGIN", cancellationToken: harness.Token);
+        await connection.PutAsync("c", "pending", "{}"u8.ToArray(), cancellationToken: harness.Token);
+        var session = harness.Server.Sessions.ShouldHaveSingleItem();
+
+        // Act
+        var failure = await Should.ThrowAsync<DocumentClientException>(async () =>
+        {
+            if (putPreflight) { await connection.PutAsync("c", "x", content, cancellationToken: harness.Token); }
+            else { await connection.QueryAsync("SELECT text, text AS copy FROM c", cancellationToken: harness.Token); }
+        });
+
+        // Assert: response preflight and serialization retain the same failed-statement contract.
+        failure.Diagnostics.ShouldContain(item => item.Code == "CD05016");
+        session.DatabaseSession!.CurrentTransaction.ShouldNotBeNull().State.ShouldBe(TransactionState.Faulted);
+        var refused = await Should.ThrowAsync<DocumentClientException>(async () => await connection.GetCollectionsAsync(harness.Token));
+        refused.Diagnostics.ShouldContain(item => item.Code == "CD04101");
+        if (putPreflight)
+        {
+            var commit = await Should.ThrowAsync<DocumentClientException>(async () => await connection.ExecuteAsync("COMMIT", cancellationToken: harness.Token));
+            commit.Diagnostics.ShouldContain(item => item.Code == "CD04101");
+        }
+        else { await connection.ExecuteAsync("ROLLBACK", cancellationToken: harness.Token); }
+        (await connection.GetAsync("c", "pending", harness.Token)).ShouldBeNull();
+        (await connection.GetAsync("c", "x", harness.Token)).HasValue.ShouldBe(!putPreflight);
+        await connection.DisposeAsync();
+        await using var next = await harness.Client.ConnectAsync(harness.Token);
+        harness.Server.Sessions.ShouldHaveSingleItem().Id.ShouldBe(session.Id);
+        (await next.GetCollectionsAsync(harness.Token)).ShouldBe(["c"]);
     }
 
     private static DocumentClient CreatePeer(DocumentClientTestHarness harness) => DocumentClient.Create(new()
