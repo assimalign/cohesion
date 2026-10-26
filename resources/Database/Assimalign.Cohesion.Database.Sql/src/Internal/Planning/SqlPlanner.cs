@@ -244,7 +244,11 @@ internal sealed partial class SqlPlanner
 
     private SqlRelationSource ResolveRelationCore(SqlRelationReference reference, SqlSelectExpression? owner)
     {
-        if (reference is SqlJoinedTableReference group) { return ResolveRelation(group.Item.Table, owner); }
+        if (reference is SqlJoinedTableReference group)
+        {
+            RuntimeHelpers.EnsureSufficientExecutionStack();
+            return ResolveRelation(group.Item.Table, owner);
+        }
         if (reference is SqlDerivedTableReference derived)
         {
             return BindDerivedTable(derived, owner);

@@ -148,7 +148,11 @@ internal sealed partial class SqlPlanner
     private void ValidateRelationFunctionCalls(SqlRelationReference relation)
     {
         if (relation is SqlDerivedTableReference derived) { ValidateFunctionCalls(derived.Query); }
-        else if (relation is SqlJoinedTableReference group) { ValidateSourceFunctionCalls([group.Item]); }
+        else if (relation is SqlJoinedTableReference group)
+        {
+            RuntimeHelpers.EnsureSufficientExecutionStack();
+            ValidateSourceFunctionCalls([group.Item]);
+        }
     }
 
     private void ValidateFunctionCalls(SqlSelectExpression select)

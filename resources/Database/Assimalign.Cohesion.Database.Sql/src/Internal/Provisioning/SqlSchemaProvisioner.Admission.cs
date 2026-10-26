@@ -248,6 +248,7 @@ internal sealed partial class SqlSchemaProvisioner
         if (relation is SqlTableReference table) { yield return table; }
         else if (relation is SqlJoinedTableReference group)
         {
+            RuntimeHelpers.EnsureSufficientExecutionStack();
             foreach (var nested in SourceReferences([group.Item])) { yield return nested; }
         }
         else if (relation is SqlDerivedTableReference derived)
