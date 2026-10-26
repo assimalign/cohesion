@@ -127,10 +127,16 @@ public sealed class OqlExecutionConformanceTests
             [
                 new("SELECT ARRAY x FOR x IN [1,2] WHEN x > 1 END AS a FROM items WHERE name = 'alpha'", [[Json("[2]")]]),
                 new("SELECT ARRAY x.a FOR x IN [{},{a:null},{a:2}] END AS a FROM items WHERE name = 'alpha'", [[Json("[null,2]")]]),
+                new("SELECT ARRAY (x) + CASE WHEN TRUE THEN 1 ELSE 2 END FOR x IN [1] WHEN CASE WHEN TRUE THEN TRUE ELSE FALSE END END AS result FROM items WHERE name = 'alpha'", [[Json("[2]")]]),
+                new("SELECT ARRAY (x) IN ARRAY y FOR y IN [x] END FOR x IN [1] WHEN ARRAY y FOR y IN [x] END END AS result FROM items WHERE name = 'alpha'", [[Json("[true]")]]),
+                new("SELECT ARRAY (x) + FIRST y FOR y IN [x] END FOR x IN [1] WHEN FIRST y FOR y IN [x] END END AS result FROM items WHERE name = 'alpha'", [[Json("[2]")]]),
+                new("SELECT ARRAY (x = 1) = ANY y IN [x] SATISFIES y END FOR x IN [1] WHEN ANY y IN [x] SATISFIES y END END AS result FROM items WHERE name = 'alpha'", [[Json("[true]")]]),
+                new("SELECT ARRAY (x = 1) = EVERY y IN [x] SATISFIES y END FOR x IN [1] WHEN EVERY y IN [x] SATISFIES y END END AS result FROM items WHERE name = 'alpha'", [[Json("[true]")]]),
             ],
             [OqlClauses.FirstComprehension] =
             [
                 new("SELECT FIRST x FOR x IN [1,2] WHEN x > 1 END AS f FROM items WHERE name = 'alpha'", [[2m]]),
+                new("SELECT FIRST (x) + CASE WHEN TRUE THEN 1 ELSE 2 END FOR x IN [1] END AS result FROM items WHERE name = 'alpha'", [[2m]]),
             ],
             [OqlClauses.From] =
             [

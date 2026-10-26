@@ -564,7 +564,11 @@ public sealed partial class OqlQueryParser : QueryParser
         {
             var token = _tokens[index];
             int next = index + 1;
-            if (token.Type is TokenType.RightParen or TokenType.RightBracket or TokenType.RightBrace) { delimiters.Push(index); }
+            // Reserved words can still name dotted members, AS labels and object keys.
+            bool expressionWord = (index == 0 || _tokens[index - 1].Type != TokenType.Dot && !IsWord(_tokens[index - 1], "AS")) &&
+                (next >= _tokens.Count || _tokens[next].Type != TokenType.Colon);
+            if (token.Type is TokenType.RightParen or TokenType.RightBracket or TokenType.RightBrace ||
+                expressionWord && IsWord(token, "END")) { delimiters.Push(index); }
             else if (token.Type is TokenType.LeftParen or TokenType.LeftBracket or TokenType.LeftBrace)
             {
                 TokenType close = token.Type switch
@@ -575,8 +579,16 @@ public sealed partial class OqlQueryParser : QueryParser
                 };
                 next = delimiters.TryPeek(out int end) && _tokens[end].Type == close ? delimiters.Pop() + 1 : _tokens.Count;
             }
+            else if (expressionWord && (IsWord(token, "CASE") ||
+                (IsWord(token, "ARRAY") || IsWord(token, "FIRST")) && IsComprehension(index) ||
+                (IsWord(token, "ANY") || IsWord(token, "SOME") || IsWord(token, "EVERY")) && IsQuantifierBinding(next)))
+            {
+                // Skip the entire nested expression, including its FOR/WHEN, before looking
+                // for this comprehension's binding. The reverse pass already classified it.
+                next = delimiters.TryPeek(out int end) && IsWord(_tokens[end], "END") ? delimiters.Pop() + 1 : _tokens.Count;
+            }
             bool stop = token.Type is TokenType.Comma or TokenType.Semicolon or TokenType.Eof or TokenType.RightParen ||
-                IsWord(token, "FROM") || IsWord(token, "AS") || IsWord(token, "END");
+                expressionWord && (IsWord(token, "FROM") || IsWord(token, "AS") || IsWord(token, "END"));
             _comprehensionTails[index] = !stop && (IsWord(token, "FOR") || next < _tokens.Count && _comprehensionTails[next]);
         }
     }
