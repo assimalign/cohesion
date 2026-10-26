@@ -270,6 +270,12 @@ written ordinals and RIGHT USING's coerced right representative while normalizin
 children to LEFT. Direct RIGHT/grouped DML sources fail CS05069 at binding; derived SELECT
 sources can contain RIGHT. No clause, keyword, format or protocol count changes.
 
+Relation lookahead checks the token after each leading query wrapper's matching close.
+An alias there starts a derived first relation inside a joined group; SELECT itself and
+query continuations retain the query grammar. This follows PostgreSQL
+src/backend/parser/gram.y:13938-13965,14000-14022 and applies to INNER/LEFT/RIGHT/CROSS,
+including nested groups and the derived SELECT introduced by canonical group-alias rendering.
+
 ## Design intent
 
 Decision 49a adds `SqlAlterColumnAction`, a full column-definition action:

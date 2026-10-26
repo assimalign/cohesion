@@ -1178,6 +1178,9 @@ src/backend/parser/parse_clause.c:370-386 (the ON scope contains only its join i
 Unparenthesized joins associate left to right. Parenthesized groups preserve that explicit
 association and expose their constituent namespaces. An alias on a group hides those namespaces
 and lowers to an aliased SELECT * derived relation, including optional complete column-alias lists and the existing 32-level derived-query binding limit.
+Groups may begin with an aliased derived query for INNER, LEFT, RIGHT or CROSS JOIN,
+including nested groups. Their canonical text remains parseable when group aliases introduce
+derived SELECTs, so CREATE VIEW and reopening the view preserve the same association.
 RIGHT swaps physical children and executes LEFT null extension; its written left subtree
 becomes nullable, while its written right side is preserved. Written SELECT * ordinals and
 qualified references remain left-then-right. EXPLAIN identifies "normalized RIGHT to LEFT"
