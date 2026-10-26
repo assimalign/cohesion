@@ -6643,7 +6643,11 @@ Deterministic tests read pinned snapshots after publication and run an explicit 
 that frees nothing until they end, in process and on both transports. Every recorded crash image
 under Synchronous, Grouped and None is reopened; None models process loss. A nonparallel stress
 case runs for a minimum interval and until successful writer and prepared-owner maintenance
-counters prove the race was exercised, under a 90-second guard.
+counters prove the race was exercised, under a 90-second guard. Its independent monotonic
+history orders writer commits, TRUNCATE publications and BEGIN snapshots. Every pinned read
+must equal its committed row prefix after the preceding TRUNCATE, and the final table must
+equal the committed suffix after the last TRUNCATE. Fault modes delete a committed write or
+substitute a pre-TRUNCATE write at the same row count to verify that this oracle detects both.
 
 | Code | Condition | SQLSTATE |
 |---|---|---|
