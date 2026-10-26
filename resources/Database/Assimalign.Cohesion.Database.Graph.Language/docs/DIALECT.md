@@ -444,8 +444,10 @@ postings=(type_id,relationship). Its posting edge has no Expand row. Available a
 populate estimated_rows; actual_rows stays NULL. Type estimates sum retained publications and
 double for unconstrained direction; property seeks use a count bounded to 512 physical entries
 and 32 page visits, falling back conservatively to the label population when incomplete.
-One posting visit consumes one physical work unit, including both undirected orientations;
-each accepted hop consumes one viable unit. Statement-local additions/replacements and MVCC
+One posting head consumes one physical work unit, including union priming and resumed reads,
+shared by both undirected orientations. A work refusal occurs before inspecting an unadmitted
+head; LIMIT does not read ahead to the following posting, and cancellation stops at the current head.
+Each accepted hop consumes one viable unit. Statement-local additions/replacements and MVCC
 snapshots follow the same semantics as other access paths. The engine's GqlProfileExecutionTests
 EXPLAIN corpus and GraphRelationshipTypeAnchorTests cover this behavior.
 
