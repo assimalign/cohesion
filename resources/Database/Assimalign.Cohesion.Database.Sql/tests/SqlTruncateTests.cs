@@ -881,8 +881,9 @@ public sealed class SqlTruncateTests
         }
         var finalRows = (await RowsAsync(session, "SELECT id FROM t ORDER BY id", timeout.Token)).Select(row => (int)row[0]!).ToArray();
         var expectedFinal = ExpectedRows(commitSequence);
-        if (corruption == 0) { finalRows.ShouldBe(expectedFinal, "exact writes committed after the last TRUNCATE"); }
-        else { Should.Throw<ShouldAssertException>(() => finalRows.ShouldBe(expectedFinal)); }
+        void VerifyFinalRows() => finalRows.ShouldBe(expectedFinal, "exact writes committed after the last TRUNCATE");
+        if (corruption == 0) { VerifyFinalRows(); }
+        else { Should.Throw<ShouldAssertException>(VerifyFinalRows); }
         if (corruption == 2) { finalRows.Length.ShouldBe(expectedFinal.Length); }
         await ReclaimAsync(database, timeout.Token);
         await ExecAsync(session, "TRUNCATE t", timeout.Token);
