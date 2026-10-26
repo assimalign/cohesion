@@ -58,7 +58,7 @@ public sealed partial class GraphStore
             var ordered = new List<Reference> { versions.Head };
             for (var older = versions.Older; older is not null; older = older.Next) { ordered.Add(older.Reference); }
             ordered.Sort((left, right) => right.Revision.CompareTo(left.Revision));
-            versions = new VersionChain { Head = ordered[0] };
+            versions = new VersionChain { Head = ordered[0], RelationshipType = versions.RelationshipType };
             for (int i = ordered.Count - 1; i > 0; i--) { versions.Older = new History(ordered[i], versions.Older); }
             _records[key] = versions;
         }
@@ -441,6 +441,7 @@ public sealed partial class GraphStore
                 versions.Older = new History(versions.Head, versions.Older);
                 versions.Head = next;
             }
+            versions.RelationshipType = record.Relationship?.Type;
             _records[(record.Kind, record.Id)] = versions;
             if (record.Kind == 3) { _definitionIds.Add(record.Id); }
         }
@@ -534,6 +535,8 @@ public sealed partial class GraphStore
         internal Reference Head;
         internal History? Older;
         internal History? SweepPrevious;
+        // A relationship's type is immutable across all versions of its identity.
+        internal string? RelationshipType;
 
         private sealed class DebugView
         {
