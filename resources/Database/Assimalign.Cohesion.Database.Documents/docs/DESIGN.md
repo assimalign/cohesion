@@ -88,7 +88,8 @@ The internal begin fault seam exercises both begin callers without widening the 
 
 After ungraceful fixture termination, the verifier's actual open and the parent's raw-index
 open use Blob's linked test-only `CrashReopen` source (#1713). Only native sharing/lock failures
-(0x80070020/0x80070021), including coded storage wrappers, retry. Open success decides readiness;
+(0x80070020/0x80070021, or EWOULDBLOCK/EAGAIN errno 11 on Linux and 35 on macOS), including
+coded storage wrappers, retry. Open success decides readiness;
 25 ms pacing avoids spinning and a 30-second hang guard names the file and last error.
 The engine still reports CD06104 immediately for a sharing violation; production behavior is unchanged.
 

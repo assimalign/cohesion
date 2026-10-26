@@ -89,7 +89,12 @@ DatabaseException with structured CB06005 diagnostics (#1364). Open releases any
 file set and publishes no database, so callers may resolve the I/O condition and retry.
 
 The process-crash harness retries that actual open only for an underlying sharing or lock
-violation (HRESULT 0x80070020/0x80070021), including coded wrappers (#1713). The test-only
+violation (HRESULT 0x80070020/0x80070021, or the current platform's EWOULDBLOCK/EAGAIN errno:
+11 on Linux, 35 on macOS), including coded wrappers (#1713). .NET 10's Unix FileShare advisory
+lock path stores the raw errno in IOException.HResult (see .NET 10's
+[advisory lock handling](https://github.com/dotnet/runtime/blob/v10.0.0/src/libraries/System.Private.CoreLib/src/Microsoft/Win32/SafeHandles/SafeFileHandle.Unix.cs#L312-L325)
+and [errno translation](https://github.com/dotnet/runtime/blob/v10.0.0/src/libraries/Common/src/Interop/Unix/Interop.IOErrors.cs#L133-L136)).
+Classification tests cover each platform's codes and reject foreign Unix errnos. The test-only
 `CrashReopen` source is linked into the Blob.Client tests and Documents/Graph verifier fixtures
 through the existing Compile/Link mechanism. A successful open decides readiness; retries are
 paced at 25 ms with a 30-second hang guard naming the file and last error. Each attempt runs on

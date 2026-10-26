@@ -84,7 +84,12 @@ internal static class CrashReopen
 
     private static bool IsFileContention(Exception exception)
     {
-        if (exception is IOException && exception.HResult is unchecked((int)0x80070020) or unchecked((int)0x80070021))
+        // .NET's Unix FileShare emulation reports EWOULDBLOCK/EAGAIN as the raw errno
+        // in IOException.HResult: 11 on Linux, 35 on macOS. Other errnos must not retry.
+        if (exception is IOException &&
+            (exception.HResult is unchecked((int)0x80070020) or unchecked((int)0x80070021) ||
+             (OperatingSystem.IsLinux() && exception.HResult == 11) ||
+             (OperatingSystem.IsMacOS() && exception.HResult == 35)))
         {
             return true;
         }
