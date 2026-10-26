@@ -72,7 +72,8 @@ its pending-commit and dirty-page scheduling hints without exposing buffer-pool 
 ## Runtime child-root diagnostics (#1247, #1364)
 
 The process-recovery verifier uses Blob's linked test-only `CrashReopen` source for its actual
-open after fixture termination (#1713). Only native sharing/lock failures (0x80070020/0x80070021),
+open after fixture termination (#1713). Only native sharing/lock failures (0x80070020/0x80070021,
+or EWOULDBLOCK/EAGAIN errno 11 on Linux and 35 on macOS),
 including coded storage wrappers, retry. A successful open decides readiness; 25 ms pacing and
 a 30-second hang guard bound the wait and name the file and last error on timeout. The engine
 continues to return CG06006 immediately for a sharing violation; no production retry is added.
