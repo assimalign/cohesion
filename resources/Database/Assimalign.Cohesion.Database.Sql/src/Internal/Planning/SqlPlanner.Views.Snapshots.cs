@@ -56,9 +56,18 @@ internal sealed partial class SqlPlanner
     }
 
     private static bool SameImage(SqlCatalogSnapshot left, SqlCatalogSnapshot right)
-        => left.DefaultCollation == right.DefaultCollation && left.Tables.SequenceEqual(right.Tables) &&
-            left.Views.SequenceEqual(right.Views) && left.Functions.SequenceEqual(right.Functions) &&
-            left.Domains.SequenceEqual(right.Domains) && left.Namespaces.SequenceEqual(right.Namespaces);
+    {
+        if (left.DefaultCollation != right.DefaultCollation || !left.Tables.SequenceEqual(right.Tables) ||
+            !left.Views.SequenceEqual(right.Views) || !left.Functions.SequenceEqual(right.Functions) ||
+            !left.Domains.SequenceEqual(right.Domains) || !left.Namespaces.SequenceEqual(right.Namespaces)) { return false; }
+        // Retained access paths use this image's index descriptions too. Index DDL
+        // changes those without replacing its table or view description instances.
+        foreach (var table in left.Tables)
+        {
+            if (!left.GetIndexes(table.ObjectId).SequenceEqual(right.GetIndexes(table.ObjectId))) { return false; }
+        }
+        return true;
+    }
 
     private bool TryReadView(string schema, string name, out SqlCatalogView view)
     {
