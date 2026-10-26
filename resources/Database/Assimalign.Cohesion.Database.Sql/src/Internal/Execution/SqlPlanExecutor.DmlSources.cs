@@ -118,6 +118,32 @@ internal sealed partial class SqlPlanExecutor
         }
     }
 
+    private async ValueTask PrepareJoinedUpdateIntentsAsync(SqlUpdatePlan plan, SqlStatementContext statement,
+        CancellationToken cancellationToken)
+    {
+        var locks = statement.Coordinator.LockManager;
+        var owner = statement.Transaction.Sequence;
+        var scope = statement.Metrics.JoinedDmlStatement!.Value;
+        while (true)
+        {
+            try
+            {
+                await AcquireDmlSourceIntentLocksAsync(scope.Plan, statement, cancellationToken, cascade: true).ConfigureAwait(false);
+                await AcquireReferenceIntentLocksAsync(plan.Table, statement, cancellationToken, cascade: true).ConfigureAwait(false);
+                return;
+            }
+            catch (SqlCascadeLockRetry refused)
+            {
+                // All metadata intents form one preparation unit. A reference-table wait
+                // must release source and wrapper grants too, including target read intents.
+                locks.ReleaseSince(scope.Mark);
+                await locks.AcquireAsync(owner, refused.Resource, refused.Mode, cancellationToken).ConfigureAwait(false);
+                locks.ReleaseSince(scope.Mark);
+                statement.References.ClearAfterCascadeRetry();
+            }
+        }
+    }
+
     private sealed record DmlAssociation(PageId PageId, int SlotIndex, TransactionSequence Writer,
         object?[] TargetValues, object?[] Values);
 

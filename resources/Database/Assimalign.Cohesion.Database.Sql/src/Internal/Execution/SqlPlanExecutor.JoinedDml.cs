@@ -15,8 +15,7 @@ internal sealed partial class SqlPlanExecutor
     // Keep association state out of the ordinary DML async state machines and apply closures.
     private async Task<DatabaseResult> ExecuteJoinedUpdateAsync(SqlUpdatePlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
-        await AcquireDmlSourceIntentLocksAsync(plan.Source!.Associations, statement, cancellationToken).ConfigureAwait(false);
-        await AcquireReferenceIntentLocksAsync(plan.Table, statement, cancellationToken).ConfigureAwait(false);
+        await PrepareJoinedUpdateIntentsAsync(plan, statement, cancellationToken).ConfigureAwait(false);
         var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken,
             Enumerable.Repeat(true, plan.Source!.Associations.Columns.Count).ToArray());
         var indexes = GetLiveIndexes(plan.Table, statement);

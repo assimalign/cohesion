@@ -276,19 +276,22 @@ public sealed class SqlDmlSourceReviewTests
         }
     }
 
-    [Theory(DisplayName = "Cohesion Test [Sql] - Joined DML: source intent waits release new target grants for FK DDL (#1714)")]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task ExecuteAsync_SourceIntentWait_ShouldAllowReferencedTargetDdlLock(bool delete)
+    [Theory(DisplayName = "Cohesion Test [Sql] - Joined DML: source and reference waits release new target grants for FK DDL (#1714)")]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task ExecuteAsync_SourceIntentWait_ShouldAllowReferencedTargetDdlLock(bool delete, bool reference)
     {
         // Arrange: reproduce FK DDL's own-source-X then referenced-target-X order.
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         await using var engine = SqlDatabaseEngine.Create("dml-intent-order", new());
         var database = await engine.CreateDatabaseAsync("db", timeout.Token);
         await using var setup = await database.CreateSessionAsync(timeout.Token);
-        foreach (string sql in new[] { "CREATE TABLE t(id INT PRIMARY KEY,v INT)", "CREATE TABLE s(id INT)", "INSERT INTO t VALUES(1,0)", "INSERT INTO s VALUES(1)" })
+        foreach (string sql in new[] { "CREATE TABLE t(id INT PRIMARY KEY,v INT)", "CREATE TABLE s(id INT)",
+            "CREATE TABLE c(pid INT REFERENCES t(id))", "INSERT INTO t VALUES(1,0)", "INSERT INTO s VALUES(1)" })
         { await setup.ExecuteAsync(sql, cancellationToken: timeout.Token); }
-        database.Catalog.TryGetTable("dbo", "s", out var source).ShouldBeTrue();
+        database.Catalog.TryGetTable("dbo", reference ? "c" : "s", out var source).ShouldBeTrue();
         database.Catalog.TryGetTable("dbo", "t", out var target).ShouldBeTrue();
         var locks = database.Coordinator.LockManager;
         var ddl = new TransactionSequence(ulong.MaxValue - 1714);
@@ -296,8 +299,10 @@ public sealed class SqlDmlSourceReviewTests
         await using var session = await database.CreateSessionAsync(timeout.Token);
         await using var transaction = await session.BeginTransactionAsync(timeout.Token);
         using var waits = new LockWaitListener(database.Name);
-        var pending = session.ExecuteAsync(delete ? "DELETE FROM t USING s WHERE t.id=s.id"
-            : "UPDATE t SET v=s.id FROM s WHERE t.id=s.id", cancellationToken: timeout.Token).AsTask();
+        string prefix = reference ? "WITH q AS (SELECT s.id FROM s JOIN t AS z ON z.id=s.id) " : string.Empty;
+        string input = reference ? "q" : "s";
+        var pending = session.ExecuteAsync(prefix + (delete ? $"DELETE FROM t USING {input} WHERE t.id={input}.id"
+            : $"UPDATE t SET v={input}.id FROM {input} WHERE t.id={input}.id"), cancellationToken: timeout.Token).AsTask();
 
         // Act
         try

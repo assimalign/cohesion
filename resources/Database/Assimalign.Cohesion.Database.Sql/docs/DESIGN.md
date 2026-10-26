@@ -42,6 +42,8 @@ precede target write intents and use release-before-wait preparation. DELETE re-
 intents at every bounded cascade retry while reusing its collected volatile associations.
 The same outer mark and root plan cover wrapper grants during cascade back-off; the optional
 joined scope uses the existing join-only state slot, without growing ordinary statement objects.
+Joined UPDATE prepares source, wrapper and reference intents as one try/release/wait unit, so a
+reference-table wait also releases new target read intents before FK DDL requests target X.
 Plain UPDATE and DELETE keep separate async state machines and apply closures without association
 state, preserving their ordinary allocation budget.
 Scans/cursors dispose before row-lock waits; row/parent/key locks precede the apply gate and
