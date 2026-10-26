@@ -249,6 +249,12 @@ and event 4 from a scripted listing whose worker fails after the consumer stoppe
 
 ## Scope and verification
 
+The process-crash cases (#1713) kill a fixture after it records committed content and flushes
+unfinished upload pages. The parent uses Blob's linked test-only `CrashReopen` helper for the
+actual database open (sharing/lock violations only, 30-second guard, 25 ms retry pacing), then
+verifies committed bytes and absent unfinished content through both InMemory and loopback TCP.
+No client or engine retry policy changes; failed production opens retain their coded error.
+
 This package does not provision databases or containers, expose SQL commands, multiplex
 requests, retry operations, resume content, introduce transport-specific convenience APIs,
 or expose a buffered byte-array content API. Tests use `Connections.InMemory`, including

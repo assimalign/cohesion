@@ -87,5 +87,6 @@ public static class GqlLanguageProfile
         "GQL",
         _keywords,
         _functions,
-        _clauses);
+        _clauses,
+        recognizeLeftArrow: true);
 }

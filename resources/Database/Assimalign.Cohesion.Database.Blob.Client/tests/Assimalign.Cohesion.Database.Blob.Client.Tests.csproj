@@ -4,6 +4,9 @@
     <IsPackable>false</IsPackable>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="$(CohesionRepositoryDirectory)resources\Database\Assimalign.Cohesion.Database.Blob\tests\TestObjects\CrashReopen.cs" Link="TestObjects\CrashReopen.cs" />
+  </ItemGroup>
+  <ItemGroup>
     <CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
     <CohesionPackageReference Include="xunit" />
     <CohesionPackageReference Include="xunit.runner.visualstudio" />

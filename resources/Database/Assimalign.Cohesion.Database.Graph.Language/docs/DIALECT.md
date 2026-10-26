@@ -4,6 +4,10 @@ The target is ISO/IEC 39075:2024 with the subset and extensions recorded in [DES
 The supported-clause matrix there is authoritative; RETURN projects value expressions,
 named bindings or all bindings with `*`.
 
+GQL retains `<-` as its incoming relationship arrow (#1647), enabled explicitly by its
+language profile. `<-[r]-` and `<-` are incoming; `<-[r]->` and `<->` are left-or-right;
+`-[r]->` and `->` are outgoing. `GqlLeftArrowConformanceTests` pins these forms.
+
 Double-quoted identifiers double an embedded `"`: `"a""b"` names `a"b` in variables,
 labels, relationship types, property keys and aliases. Rendered label expressions and
 source-free projection names use the same escape. A missing closing quote is CG00003.
@@ -17,6 +21,10 @@ runtime types on the wire, while unnegotiated projections fail with CG07016. Thi
 documented owner default for #1235, preserving #1146's value contract.
 
 ## Storage integrity errors (#1160)
+
+Opening files still reports CG06006 immediately for a sharing/lock violation. Process-crash
+conformance tests alone retry the actual open until success with a 30-second hang guard (#1713);
+this changes no GQL syntax, execution semantics or production retry policy.
 
 A read that detects storage corruption fails with `CK06003`, naming the database and
 page and recommending a verified backup. It never succeeds with the damaged data omitted.

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Buffers;
 using System.Collections;
 using System.Collections.Generic;
@@ -25,6 +25,7 @@ public ref struct TokenLexer
     private readonly ReadOnlySpan<string> _keywords;
     private readonly ReadOnlySpan<string> _functions;
     private readonly bool _caseSensitive;
+    private readonly bool _recognizeLeftArrow;
 
     private int _pos;
     private Token _current;
@@ -38,6 +39,7 @@ public ref struct TokenLexer
         _keywords = options.Keywords;
         _functions = options.Functions;
         _caseSensitive = options.IsCaseSensitive;
+        _recognizeLeftArrow = options.RecognizeLeftArrow;
         _pos = 0;
         _current = default;
     }
@@ -472,7 +474,7 @@ public ref struct TokenLexer
                     _pos += 2;
                     return new Token(TokenType.NotEquals, _source[start.._pos], start);
                 }
-                if (next == '-')
+                if (next == '-' && _recognizeLeftArrow)
                 {
                     _pos += 2;
                     return new Token(TokenType.LeftArrow, _source[start.._pos], start);

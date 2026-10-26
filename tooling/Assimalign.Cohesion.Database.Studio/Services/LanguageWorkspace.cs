@@ -59,7 +59,7 @@ internal abstract class LanguageWorkspace : ModelWorkspace
             var outcomes = new List<StatementOutcome>();
             bool failed = false;
 
-            foreach (ScriptStatement statement in ScriptSplitter.Split(script))
+            foreach (ScriptStatement statement in ScriptSplitter.Split(script, Model))
             {
                 var outcome = new StatementOutcome { Statement = statement.Text, StatementOffset = start + statement.Offset };
                 outcomes.Add(outcome);

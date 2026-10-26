@@ -35,7 +35,10 @@ exe, and exits non-zero when a step fails. It covers, per model, the declared `s
 over loopback TCP, transactions, the catalog, and every Samples script; for SQL also the declared
 database's provisioned schema and its CHECK, and the registered functions embedded and over the
 wire; and, on a scratch root of its own, that a declaration failing its build stops only its own
-model. A run over a fresh temporary root gives 100 passed, 0 failed, 0 skipped, including Documents TCP OQL, whole documents, versioned CRUD, collection/catalog reads and reusable coded failures.
+model. A run over a fresh temporary root gives 104 passed, 0 failed, 0 skipped, including Documents TCP OQL, whole documents, versioned CRUD, collection/catalog reads and reusable coded failures.
+The splitter smoke cases pin SQL/OQL comment boundaries and GQL left-arrow boundaries, statement
+text and editor offsets. A refused `MATCH (a)<-->(b) RETURN a;` followed by `RETURN 1;` must still
+execute the independent second statement with `StopOnError=false` (#1647).
 Unhandled MAUI crashes are logged to `studio-crash.log` next to the exe; the UI marks them handled and keeps
 running.
 
@@ -84,7 +87,8 @@ The Documents editor remains **embedded only**. Its smoke run separately exercis
 - **SQL / Documents (OQL) / Graph (GQL)**: editor (F5 or Ctrl+Enter runs the selection, or
   everything), statement-by-statement execution (the script is cut at each `;` the engines' shared
   `TokenLexer` reads, so comments and quotes end where the engines end them, and the text is sent as
-  typed, CR line breaks included), result grid (tap a row for full values, Copy TSV),
+  typed, CR line breaks included; GQL enables left-arrow recognition while SQL/OQL retain the
+  default comment boundaries), result grid (tap a row for full values, Copy TSV),
   Messages with status, affected count, elapsed ms and every diagnostic (click one to select it in the
   editor), catalog explorer (click a highlighted entry to insert a query; SQL also lists the
   registered functions from `COHESION_SCHEMA.FUNCTIONS`), session history, Samples (SQL's

@@ -15,6 +15,13 @@ The OQL name is retained, but the language basis is SQL++ for JSON, following Co
 SQL++ for Query. The executable subset below is the dialect contract; it does not claim
 complete SQL++ support. MISSING and NULL are separate values (#1126, owner D2/D2a).
 
+## Less-than followed by minus (#1647)
+
+OQL leaves the shared profile's `RecognizeLeftArrow` option disabled. `a<-1` and `a <- 1` parse
+as a less-than comparison with unary minus. `a<--1` leaves the comparison operand missing
+because `--1` is a comment (CD00002). `OqlLeftArrowConformanceTests` pins both forms;
+Database.Language DESIGN records the shared configuration and scanner reference.
+
 ## Family and pipeline
 
 `Database.Documents.Language` references only `Assimalign.Cohesion.Database.Language`.
