@@ -357,8 +357,9 @@ in process and over InMemory/TCP. Tables receive fresh physical owner identities
 storage descriptions, index seeks and dependent view bindings retain the retired owners.
 Direct joins, joining views and joins with untouched tables use that same snapshot. A statement snapshot
 retains its owner even when auto-commit or ReadCommitted binding starts after publication.
-DML targeting a retired owner is refused with retryable CS04006 before writes; end that
-transaction and retry against a fresh snapshot. Other table ALTER
+DML targeting or joining a retired owner as a source is refused with retryable CS04006 before
+writes, including INSERT SELECT and joins inside DML subqueries, views and WITH bodies; end
+that transaction and retry against a fresh snapshot. Other table ALTER
 binding retains its existing behavior. Current readers see empty replacements. Deferred
 reclamation frees old rows and indexes only after all older transaction and statement pins end.
 Prepared storage is also durably reclaimable if cancellation, an exception or a crash prevents

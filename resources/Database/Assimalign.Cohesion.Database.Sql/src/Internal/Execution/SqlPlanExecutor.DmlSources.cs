@@ -15,6 +15,9 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 internal sealed partial class SqlPlanExecutor
 {
     private static bool JoinedDml(SqlPlan plan)
+        => StatementInput(plan) is SqlUpdatePlan { Source: not null } or SqlDeletePlan { Source: not null };
+
+    private static SqlPlan StatementInput(SqlPlan plan)
     {
         while (true)
         {
@@ -23,7 +26,7 @@ internal sealed partial class SqlPlanExecutor
                 case SqlWithPlan with: plan = with.Input; break;
                 case SqlSubqueryPlan query: plan = query.Input; break;
                 case SqlCorrelatedSubqueryPlan query: plan = query.Input; break;
-                default: return plan is SqlUpdatePlan { Source: not null } or SqlDeletePlan { Source: not null };
+                default: return plan;
             }
         }
     }

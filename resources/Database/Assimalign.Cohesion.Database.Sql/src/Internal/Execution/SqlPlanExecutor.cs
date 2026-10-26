@@ -46,6 +46,7 @@ internal sealed partial class SqlPlanExecutor
     /// </summary>
     private SqlSubqueryValues? _subqueryValues;
     private bool _containsLike;
+    private bool _isDml;
     private SqlStatementMetrics? _metrics;
 
     /// <summary>Initializes an executor for one statement.</summary>
@@ -82,6 +83,8 @@ internal sealed partial class SqlPlanExecutor
 
     internal Task<DatabaseResult> ExecuteAsync(SqlPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
+        // Set before WITH and subquery materialization, and retain it in every child read.
+        _isDml |= StatementInput(plan) is SqlInsertPlan or SqlInsertSelectPlan or SqlUpdatePlan or SqlDeletePlan;
         return JoinedDml(plan) && statement.Metrics.JoinedDmlStatement is null
             ? ExecuteJoinedStatementAsync(plan, statement, cancellationToken)
             : statement.Metrics.IsAnalyzing ? ExecuteAnalyzedAsync(plan, statement, cancellationToken)

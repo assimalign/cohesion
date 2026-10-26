@@ -32,6 +32,7 @@ public sealed class SqlLanguageConformanceTests
         await using var reader = await database.CreateSessionAsync(timeout.Token);
         await ExecuteAsync(writer, "CREATE TABLE p (id INT PRIMARY KEY)");
         await ExecuteAsync(writer, "CREATE TABLE c (id INT PRIMARY KEY, pid INT REFERENCES p(id))");
+        await ExecuteAsync(writer, "CREATE TABLE destination (id INT)");
         await ExecuteAsync(writer, "INSERT INTO p VALUES (1)");
         await ExecuteAsync(writer, "INSERT INTO c VALUES (2,1)");
         await ExecuteAsync(writer, "CREATE VIEW v AS SELECT c.id AS cid, p.id AS pid FROM c JOIN p ON c.pid=p.id");
@@ -46,6 +47,10 @@ public sealed class SqlLanguageConformanceTests
         reader.LastStatementMetrics!.RecordsExamined.ShouldBe(1);
         reader.LastStatementMetrics.AccessPath.ShouldStartWith("seek:");
         await ExpectRowsAsync(writer, "SELECT cid, pid FROM v", []);
+        var staleSource = await Should.ThrowAsync<DatabaseTransactionAbortedException>(async () =>
+            await ExecuteAsync(reader, "INSERT INTO destination SELECT cid FROM v"));
+        staleSource.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS04006");
+        await ExpectRowsAsync(writer, "SELECT id FROM destination", []);
     }
 
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Conformance: embedded identifier quotes survive tables, columns and persisted views (#1235)")]
