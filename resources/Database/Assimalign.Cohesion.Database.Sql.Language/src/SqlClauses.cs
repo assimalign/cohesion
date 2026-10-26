@@ -78,6 +78,9 @@ public static class SqlClauses
     /// <summary>A scalar, predicate, or insert-source subquery.</summary>
     public const string Subquery = "SUBQUERY";
 
+    /// <summary>A scalar ANY, SOME or ALL comparison over a subquery.</summary>
+    public const string QuantifiedComparison = "QUANTIFIED COMPARISON";
+
     /// <summary>A <c>WITH</c> common-table-expression clause.</summary>
     public const string Cte = "WITH";
 

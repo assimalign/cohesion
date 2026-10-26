@@ -77,6 +77,10 @@ Recognized unsupported clauses use `CK00001`.
 SQL UPDATE ... FROM and DELETE ... USING retain this identity at execution after syntax and
 source binding succeed (#1714, SQ-UF1). Their association plans may be described by EXPLAIN;
 execution remains unavailable until SQ-UF2. No new identity is allocated for this staged refusal.
+Quantified comparisons (#1718) reuse CS01015 for name binding, CS02055 for incompatible
+compared non-NULL values, and CS05013 for the existing single-column scalar/IN/ANY/SOME/ALL
+subquery shape condition. No new diagnostic identity is allocated.
+
 Within category 03, condition bands 000–099 cover catalog/DDL, 100–199 provisioning,
 200–299 declared scripts, 300–399 registered definitions, and 400–499 generic constraint failures.
 These bands make allocation predictable while callers continue to match the complete identity.

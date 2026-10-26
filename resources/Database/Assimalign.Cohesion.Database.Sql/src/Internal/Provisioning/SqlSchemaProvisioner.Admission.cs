@@ -260,6 +260,7 @@ internal sealed partial class SqlSchemaProvisioner
             SqlSubqueryExpression scalar => scalar.Select,
             SqlExistsExpression exists => exists.Subquery,
             SqlInExpression member => member.Subquery,
+            SqlQuantifiedComparisonExpression quantified => quantified.Subquery,
             _ => null,
         };
         if (query is not null)

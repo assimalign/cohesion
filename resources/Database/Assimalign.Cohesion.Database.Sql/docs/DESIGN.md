@@ -587,6 +587,32 @@ CORRESPONDING remains a contextual exclusion. UNION/INTERSECT/EXCEPT were profil
 so identifier canonicalization and the storage format are unchanged. No public interface,
 visibility grant, project reference, dynamic code or wire-format change is introduced.
 
+## Quantified scalar subqueries (#1718)
+
+SqlQuantifiedComparisonExpression retains its scalar operand, comparison operator,
+ANY/SOME/ALL spelling and query body. Planning registers the body as an existing typed
+set slot; SqlBoundQuantifiedComparison folds the ordinary comparer over that slot.
+ANY/SOME uses OR and ALL uses AND with UNKNOWN preserved and the empty-set identity
+FALSE/TRUE (PostgreSQL src/backend/executor/nodeSubplan.c:244-269,399-427).
+Scalar folding evaluates the operand once for a nonempty set and skips it for an empty
+one; preparation also skips correlated scalar children of that operand. Independent
+subqueries retain eager statement preparation.
+Comparison folding stops at a deciding result; the existing set materializer still
+reads child output first, once per statement for independent children and per frame
+for correlated children. Lazy correlated preparation follows CASE/COALESCE/Boolean
+branches as before. No query, transaction or read view is opened by scalar evaluation.
+
+Ordinary value comparison and CHAR comparand binding are reused, including CS02055
+for compared incompatible non-NULL values and left explicit COLLATE precedence.
+The Boolean result carries no text collation. Child width validation reuses CS05013;
+name errors retain CS01015. No diagnostic identity is allocated.
+Query walkers include the body for functions, aggregate levels, CTE reachability,
+view equivalence and provisioning admission. Row values, arrays and the previously
+excluded expression positions stay excluded. ANY/SOME retain their contextual
+vocabulary rows for array refusals and stable persisted identifier quoting, so
+no persisted contract or wire version changes. No public interface, construction
+bridge, assembly grant or project reference is added.
+
 ## Subquery and insert-source operators (#1021)
 
 Non-recursive WITH (#1116) binds every definition in declaration order and resolves
@@ -657,6 +683,16 @@ while the enclosing plan runs, as PostgreSQL stores an init plan's output in a
 transaction, or read view. Grouping's expression-ordinal bindings hold for
 subqueries in HAVING and aggregate arguments, because the slot binding runs first.
 
+Repeated scalar-subquery, EXISTS and quantified-comparison group keys match by complete
+query-body structure through the persisted-view `SameQuery` comparer, never node identity.
+Operators, quantifiers and negation must agree; scalar operands retain the ordinary bound-column
+grouping rules. IN keys also compare their bodies. Identically written correlations in the same
+scope match. Correlation binding recognizes the complete repeated key before checking grouped
+outer columns, so SELECT, HAVING and ORDER BY read its retained group value; an identical child
+inside a different expression does not suffice. Unproven or different keys stay distinct and
+ungrouped references retain CS05017. This follows PostgreSQL's whole-expression `equal()` check
+in `src/backend/parser/parse_agg.c:1451` before its ungrouped-column walk. No persisted format changes.
+
 Scalar children require one output column and at most one row; an empty result
 is a typed null. IN children require one column and preserve SQL three-valued
 membership, including unknown for nonmatches against a null-containing set and
@@ -710,7 +746,7 @@ evaluator layout and synchronous execution path, preserving its allocation budge
 PostgreSQL's source references and SQL-visible errors are recorded in DIALECT.md.
 Parsing and planning enforce at most 32
 subquery levels, counting derived bodies too. UPDATE SET, VALUES, CHECK/DEFAULT and LIMIT/OFFSET expression
-subqueries, quantified comparisons, recursive/nested CTEs and lateral joins remain
+subqueries, recursive/nested CTEs and lateral joins remain
 outside the profile. Every FROM-less SELECT uses one implicit row, with ordinary filters, aggregation and row windows. Subquery resolution binds
 each use site to its slot number when the statement is planned; it needs no
 language-assembly friend access or public AST constructors. See [DIALECT.md](../../Assimalign.Cohesion.Database.Sql.Language/docs/DIALECT.md#subqueries-and-query-source-inserts-1021)

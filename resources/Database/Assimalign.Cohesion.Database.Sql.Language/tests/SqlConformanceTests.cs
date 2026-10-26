@@ -82,7 +82,13 @@ public class SqlConformanceTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - Conformance: executable subqueries parse without errors")]
+    [InlineData("SELECT id = (SELECT 2), COUNT(*) FROM candidates GROUP BY id = (SELECT 2) HAVING id = (SELECT 2) ORDER BY id = (SELECT 2);", SqlQueryCommandType.Select)]
+    [InlineData("SELECT EXISTS (SELECT 2 WHERE id = 2), COUNT(*) FROM candidates GROUP BY EXISTS (SELECT 2 WHERE id = 2) HAVING EXISTS (SELECT 2 WHERE id = 2) ORDER BY EXISTS (SELECT 2 WHERE id = 2);", SqlQueryCommandType.Select)]
+    [InlineData("SELECT id = ANY (SELECT 2), COUNT(*) FROM candidates GROUP BY id = ANY (SELECT 2) HAVING id = ANY (SELECT 2) ORDER BY id = ANY (SELECT 2);", SqlQueryCommandType.Select)]
     [InlineData("SELECT id FROM users WHERE id IN (SELECT user_id FROM admins);", SqlQueryCommandType.Select)]
+    [InlineData("SELECT id FROM users WHERE id = ANY (SELECT user_id FROM admins);", SqlQueryCommandType.Select)]
+    [InlineData("SELECT id FROM users WHERE id <> SOME (SELECT user_id FROM admins);", SqlQueryCommandType.Select)]
+    [InlineData("SELECT id FROM users u WHERE id >= ALL (SELECT a.user_id FROM admins a WHERE a.user_id = u.id);", SqlQueryCommandType.Select)]
     [InlineData("INSERT INTO archive SELECT * FROM users WHERE inactive = TRUE;", SqlQueryCommandType.Insert)]
     [InlineData("WITH a AS (SELECT id FROM users), b AS (SELECT id FROM a) SELECT * FROM b;", SqlQueryCommandType.Select)]
     [InlineData("WITH a AS (SELECT id FROM users) INSERT INTO archive SELECT id FROM a;", SqlQueryCommandType.Insert)]

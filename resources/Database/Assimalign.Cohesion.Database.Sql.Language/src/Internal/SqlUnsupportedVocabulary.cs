@@ -56,8 +56,8 @@ internal static class SqlUnsupportedVocabulary
         new("GROUPING_ID", "GROUPING_ID", SqlWordPosition.Rule),
         new("FILTER", "FILTER", SqlWordPosition.Rule),
         new("WITHIN", "WITHIN GROUP", SqlWordPosition.Rule),
-        new("ANY", "ANY quantified comparison", SqlWordPosition.Rule),
-        new("SOME", "SOME quantified comparison", SqlWordPosition.Rule),
+        new("ANY", "ANY array comparison", SqlWordPosition.Rule),
+        new("SOME", "SOME array comparison", SqlWordPosition.Rule),
         new("LATERAL", "LATERAL subquery", SqlWordPosition.Rule),
         // Window functions awaiting execution.
         new("ROW_NUMBER", "ROW_NUMBER", SqlWordPosition.WindowFunction),

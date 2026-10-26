@@ -1114,7 +1114,7 @@ internal sealed partial class SqlPlanner
     private void ValidateDefaultSyntax(SqlExpression expression, string column)
     {
         RuntimeHelpers.EnsureSufficientExecutionStack();
-        if (expression is SqlColumnReferenceExpression or SqlParameterExpression or SqlSubqueryExpression or SqlExistsExpression or SqlStarExpression ||
+        if (expression is SqlColumnReferenceExpression or SqlParameterExpression or SqlSubqueryExpression or SqlExistsExpression or SqlQuantifiedComparisonExpression or SqlStarExpression ||
             expression is SqlFunctionCallExpression call && _functions.Catalog.IsAggregate(call.FunctionName))
         {
             throw new SqlPlanningException("CS05013", string.Format(CultureInfo.CurrentCulture,
@@ -1505,7 +1505,7 @@ internal sealed partial class SqlPlanner
             case SqlCastExpression cast:
                 ValidateCast(cast, evaluator, boundSubqueries, boundValues);
                 break;
-            case SqlSubqueryExpression or SqlExistsExpression when !isBound:
+            case SqlSubqueryExpression or SqlExistsExpression or SqlQuantifiedComparisonExpression when !isBound:
                 throw new SqlPlanningException("CK00001", ErrorMessages.ValidateExpressionCoreSqlPlanning, expression.Location);
             case SqlColumnReferenceExpression reference:
                 evaluator.ResolveColumn(reference); // resolves innermost first, then enclosing query scopes
@@ -1760,7 +1760,7 @@ internal sealed partial class SqlPlanner
             SqlBinaryExpression { Operator: SqlBinaryOperator.Concat } => DatabaseType.String,
             SqlBinaryExpression { Operator: not (SqlBinaryOperator.Add or SqlBinaryOperator.Subtract or SqlBinaryOperator.Multiply
                 or SqlBinaryOperator.Divide or SqlBinaryOperator.Modulo) } => DatabaseType.Boolean,
-            SqlDistinctExpression or SqlBooleanTestExpression or SqlIsNullExpression or SqlBetweenExpression or SqlInExpression or SqlLikeExpression or SqlExistsExpression => DatabaseType.Boolean,
+            SqlDistinctExpression or SqlBooleanTestExpression or SqlIsNullExpression or SqlBetweenExpression or SqlInExpression or SqlQuantifiedComparisonExpression or SqlLikeExpression or SqlExistsExpression => DatabaseType.Boolean,
             SqlSubqueryExpression when boundSubqueries is not null && boundSubqueries.TryGetValue(expression, out var type) => type,
             // A scalar call's resolved result type: UPPER and LOWER take their argument's type, so
             // UPPER over text is text. CAST's binder fallback also types aggregate results.
@@ -1900,7 +1900,7 @@ internal sealed partial class SqlPlanner
         SqlFunctionCallExpression function => function.OrderBy.Count == 0 ? function.Arguments :
             function.Arguments.Concat(function.OrderBy.Select(key => key.Expression)),
         SqlCollateExpression or SqlBinaryExpression or SqlUnaryExpression or SqlDistinctExpression or SqlBooleanTestExpression or SqlIsNullExpression or SqlBetweenExpression
-            or SqlInExpression or SqlLikeExpression or SqlCaseExpression or SqlCastExpression => Operands(expression),
+            or SqlInExpression or SqlQuantifiedComparisonExpression or SqlLikeExpression or SqlCaseExpression or SqlCastExpression => Operands(expression),
         _ => [],
     };
 
@@ -1933,6 +1933,9 @@ internal sealed partial class SqlPlanner
                 yield return between.Operand;
                 yield return between.Low;
                 yield return between.High;
+                break;
+            case SqlQuantifiedComparisonExpression quantified:
+                yield return quantified.Operand;
                 break;
             case SqlInExpression inExpression:
                 yield return inExpression.Operand;

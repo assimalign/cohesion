@@ -71,7 +71,7 @@ public sealed partial class SqlQueryParser
                 null, null, false, null, null);
         }
 
-        // The subquery node (scalar, IN or EXISTS) encloses the query's clauses, so they parse
+        // The subquery node (scalar, IN, EXISTS or quantified) encloses the query's clauses, so they parse
         // one level deeper; the expression limit spans the whole statement (#1151).
         if (!TryEnterOperand(ref lexer))
         {
@@ -126,15 +126,7 @@ public sealed partial class SqlQueryParser
         }
 
         string token = CurrentText(ref lexer);
-        if ((token.Equals("ANY", StringComparison.OrdinalIgnoreCase) ||
-             token.Equals("ALL", StringComparison.OrdinalIgnoreCase) ||
-             token.Equals("SOME", StringComparison.OrdinalIgnoreCase)) &&
-            previousToken is "=" or "<>" or "!=" or "<" or ">" or "<=" or ">=" &&
-            TryPeekToken(lexer, out string next, out _) && next == "(")
-        {
-            clause = $"{token.ToUpperInvariant()} quantified comparison";
-        }
-        else if (token.Equals("LATERAL", StringComparison.OrdinalIgnoreCase) &&
+        if (token.Equals("LATERAL", StringComparison.OrdinalIgnoreCase) &&
                  (string.Equals(previousToken, "FROM", StringComparison.OrdinalIgnoreCase) ||
                   string.Equals(previousToken, "JOIN", StringComparison.OrdinalIgnoreCase) || previousToken == "," && followsFromComma))
         {

@@ -124,6 +124,8 @@ internal sealed partial class SqlExpressionEvaluator
                 return BindIsNull(isNull, out collation);
             case SqlBetweenExpression between:
                 return BindBetween(between, out collation);
+            case SqlQuantifiedComparisonExpression quantified:
+                return BindQuantifiedComparison(quantified, out collation);
             case SqlInExpression membership:
                 return BindIn(membership, out collation);
             case SqlLikeExpression like:
@@ -505,6 +507,23 @@ internal sealed partial class SqlExpressionEvaluator
         {
             return sign;
         }
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private SqlBoundExpression BindQuantifiedComparison(SqlQuantifiedComparisonExpression expression,
+        out SqlCollationCandidate collation)
+    {
+        var operand = Bind(expression.Operand, out SqlCollationCandidate operandCollation);
+        collation = default; // The predicate produces BOOLEAN; collation belongs to its comparison.
+        if (_subquerySlots is null || !_subquerySlots.TryGetValue(expression, out var slot))
+        {
+            return NotMaterialized(expression.Location);
+        }
+        operand = BindCharacterComparand(expression.Operand, operand, slot.Type);
+        return new SqlBoundQuantifiedComparison(operand, slot.Id, expression.Operator,
+            expression.Quantifier == SqlComparisonQuantifier.All,
+            SqlBoundCollation.Of(operandCollation, new SqlCollationCandidate(slot.Collation, 2), _defaultCollation),
+            expression.Location);
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]

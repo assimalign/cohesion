@@ -282,9 +282,9 @@ public sealed class SqlSubqueryWireTests
     /// <summary>Excluded forms have the capability diagnostic through the server rather than a late executor rejection.</summary>
     /// <param name="statement">The unsupported form.</param>
     [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - Subquery: excluded forms report CK00001 over the wire")]
-    [InlineData("SELECT id FROM users WHERE id = ANY (SELECT id FROM users)")]
-    [InlineData("SELECT id FROM users WHERE id = ALL (SELECT id FROM users)")]
-    [InlineData("SELECT id FROM users WHERE id = SOME (SELECT id FROM users)")]
+    [InlineData("SELECT id FROM users WHERE id = ANY (1, 2)")]
+    [InlineData("SELECT id FROM users WHERE id = ALL (1, 2)")]
+    [InlineData("SELECT id FROM users WHERE id = SOME (1, 2)")]
 
     [InlineData("WITH RECURSIVE picked AS (SELECT id FROM users) SELECT id FROM picked")]
     [InlineData("WITH d AS (DELETE FROM users RETURNING *) SELECT * FROM d")]

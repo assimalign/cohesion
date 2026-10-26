@@ -16,6 +16,14 @@ abort, and idle eviction must release the sole session slot for a fresh client a
 
 Direct references are Database.Client, Sql.Protocol, Database.Types, Database.Protocol and Connections. Wire contracts live in each model Protocol assembly, shared by client and engine. This client has no engine, area-root, storage, transaction, indexing, model parser or schema reference. Cache.Client remains an empty placeholder. Engine-free trimming and NativeAOT coverage lives in Database.Client/samples/Assimalign.Cohesion.Database.Client.AotSample.
 
+## Quantified comparisons (#1718)
+
+The existing execute exchange carries scalar ANY/SOME/ALL subqueries without a
+protocol change. InMemory and TCP tests measure all comparison operators against
+empty, TRUE/FALSE/UNKNOWN and mixed sets, NULL operands, correlated scopes,
+CS01015/CS02055/CS05013 failures and connection reuse. UNKNOWN is delivered as a
+NULL Boolean cell through the ordinary result codec.
+
 ## Client exception ownership
 
 `SqlClientException` derives directly from `System.Exception`. It preserves constructors, wire codes, inner exception and connection-usability behavior. Its locally declared Diagnostics is never null: explicit diagnostics are defensively copied into a read-only snapshot, stably ordered by offset with unlocated entries last. SQL and Graph wrappers copy from DatabaseClientException or their own nested client exception. Documents retains its explicit diagnostics parameter and returns an empty collection when none was supplied. Engine-side DatabaseException remains in the area root; catching it intentionally no longer catches remote client failures.

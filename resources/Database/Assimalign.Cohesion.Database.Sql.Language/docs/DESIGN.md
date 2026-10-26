@@ -1,5 +1,12 @@
 # Assimalign.Cohesion.Database.Sql.Language — Design
 
+## Repeated subquery grouping keys (#1718)
+
+DIALECT.md records structural matching of complete scalar-subquery, EXISTS and quantified
+group keys across SELECT, HAVING and ORDER BY, including identical correlations. Operators,
+quantifiers, negation, scalar operands and query bodies remain significant; IN keys also compare
+bodies. This is an engine binding rule; syntax and persisted representations are unchanged.
+
 ## Joined DML syntax and binding (#1714, SQ-UF1)
 
 SqlUpdateExpression.From and SqlDeleteExpression.Using retain comma items and existing relation/join
@@ -200,6 +207,21 @@ statement's nesting measure remains subject to the engine's existing limit. SqlC
 the statement corpus and the live conformance case change together; DIALECT.md is the contract.
 The engine's deferred-provisioning admission walks the wrapped statement before binding, just
 as it does for an ordinary data statement; an EXPLAIN cannot bypass a pending table reservation.
+
+## Quantified comparison AST (#1718)
+
+SqlQuantifiedComparisonExpression and SqlComparisonQuantifier retain the written
+scalar operator, ANY/SOME/ALL spelling and query body. The parser admits subquery
+operands after all six comparisons (including !=), preserves completed-sublink
+precedence, and uses the existing subquery and expression depth accounting.
+The query-operand grammar and SOME alias follow PostgreSQL
+src/backend/parser/gram.y:15677-15688,17022-17024.
+Rendering and tree dumps retain the whole body, including set operations.
+SqlClauses.QuantifiedComparison adds one measured profile clause beside Subquery.
+ANY/SOME remain contextual words in the recognized vocabulary for array refusals;
+their existing canonical identifier quoting stays stable. Row values retain the
+existing syntax refusal and excluded subquery positions keep CK00001. DIALECT.md
+specifies truth tables, comparison rules and materialization. No format changes.
 
 ## Derived relation AST (#1113, part b)
 

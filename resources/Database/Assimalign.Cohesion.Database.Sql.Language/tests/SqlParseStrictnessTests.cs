@@ -216,9 +216,6 @@ public sealed class SqlParseStrictnessTests
     /// <param name="marked">The statement; the reported span sits between '«' and '»'.</param>
     /// <param name="construct">The construct the message names.</param>
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - Strictness: a recognized construct is one CK00001 and its text is skipped")]
-    [InlineData("SELECT a FROM t WHERE a = «ANY» (SELECT b FROM u);", "ANY quantified comparison")]
-    [InlineData("SELECT a FROM t WHERE a <> «SOME» (SELECT b FROM u) AND a > 1;", "SOME quantified comparison")]
-    [InlineData("SELECT a FROM t WHERE a >= «ALL» (SELECT b FROM u);", "ALL quantified comparison")]
     [InlineData("SELECT * FROM t JOIN «LATERAL» (SELECT 1) x ON TRUE;", "LATERAL subquery")]
     [InlineData("SELECT * FROM «LATERAL» (SELECT b FROM u) AS x;", "LATERAL subquery")]
     [InlineData("SELECT PERCENTILE_CONT(0.5) «WITHIN GROUP» (ORDER BY a) FROM t;", "WITHIN GROUP")]
@@ -244,7 +241,7 @@ public sealed class SqlParseStrictnessTests
     public void Parse_SecondSkippedConstruct_ShouldReportEachOnce()
     {
         // Arrange: the preflight scan reports only the first clause, ANY.
-        const string sql = "SELECT a FROM t WHERE a = ANY (SELECT b FROM u) AND b = ALL (SELECT c FROM v);";
+        const string sql = "SELECT a FROM t WHERE a = ANY (1) AND b = ALL (2);";
 
         // Act
         var errors = Errors(Parse(sql));
@@ -252,8 +249,8 @@ public sealed class SqlParseStrictnessTests
         // Assert
         errors.Select(error => (error.Code, error.Message)).ShouldBe(
         [
-            ("CK00001", "The ALL quantified comparison clause is not supported by the SQL surface of this database model."),
-            ("CK00001", "The ANY quantified comparison clause is not supported by the SQL surface of this database model."),
+            ("CK00001", "The ALL array comparison clause is not supported by the SQL surface of this database model."),
+            ("CK00001", "The ANY array comparison clause is not supported by the SQL surface of this database model."),
         ], ignoreOrder: true);
     }
 

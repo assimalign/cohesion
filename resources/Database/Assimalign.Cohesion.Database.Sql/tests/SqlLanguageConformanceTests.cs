@@ -129,8 +129,8 @@ public sealed class SqlLanguageConformanceTests
     {
         // The profile drives enumeration. A newly advertised clause cannot silently escape this test.
         var cases = CreateCases();
-        // #1118 adds ON CONFLICT: exactly one over #1117's 50.
-        SqlLanguageProfile.Instance.Clauses.Count().ShouldBe(51);
+        // #1718 adds quantified comparisons: exactly one over #1118's 51.
+        SqlLanguageProfile.Instance.Clauses.Count().ShouldBe(52);
         RequireExecutionCases(SqlLanguageProfile.Instance.Clauses, cases);
         cases.Keys.Except(SqlLanguageProfile.Instance.Clauses).ShouldBeEmpty("Cases must describe the current profile.");
 
@@ -625,6 +625,8 @@ public sealed class SqlLanguageConformanceTests
                 (await session.ExecuteAsync("WITH a AS (SELECT id FROM t WHERE age > 40) DELETE FROM t WHERE id IN (SELECT id FROM a);", cancellationToken: CancellationToken.None)).AffectedCount.ShouldBe(2);
                 await ExpectRowsAsync(session, "SELECT id FROM t;", [[1]]);
             }),
+        [SqlClauses.QuantifiedComparison] = Query("SELECT id FROM t WHERE age >= ALL (SELECT age FROM t) AND id = SOME (SELECT id FROM t) AND id = ANY (SELECT id FROM t) ORDER BY id;",
+            expression => expression is SqlSelectExpression { Where: SqlLogicalExpression }, [[2]]),
         [SqlClauses.Subquery] = new("SELECT id, (SELECT MAX(age) FROM t) AS oldest FROM t WHERE id IN (SELECT id FROM t WHERE age > 40) AND EXISTS (SELECT id FROM t WHERE age = 36) ORDER BY id;", _seed,
             expression => expression is SqlSelectExpression select && select.Columns.Any(column => column.Expression is SqlSubqueryExpression),
             async (session, result) =>
