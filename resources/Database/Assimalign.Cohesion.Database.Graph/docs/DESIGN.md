@@ -973,6 +973,63 @@ GQL's projected `a,r,b` values expose the actual frozen `GraphNode`/`GraphRelati
 through `DatabaseRow.GetValue`. Property projections return scalars. This does not add a path member
 to the frozen traversal contract.
 
+### Typed shortest distance and path (#1536, GQ-SP1)
+
+`GraphDatabase.FindShortestDistanceAsync(session, GraphShortestPathSearch, token)` returns
+`int?`; `FindShortestPathAsync` returns `GraphShortestPathResult?`, with `Distance` and an
+ordered `GraphPath`. A null result means no path, or an endpoint absent from the statement's
+snapshot. A visible start equal to the target returns zero and a singleton path, even with
+an unknown type. Default direction is Outgoing; Both supplies the undirected KNOWS benchmark
+operation. A null type accepts all types; a supplied name compares ordinally and case-sensitively.
+Unknown, empty and whitespace type names accept no edges and produce no warning, matching the
+typed traversal's diagnostic surface. Identities are database-local and the session must belong
+to this exact database. Default/zero identities are absent nodes.
+
+The search runs as one ordinary read statement, using Snapshot or a pinned ReadCommitted
+horizon and seeing earlier own writes. It has no GQL 64-hop limit. Identity-based BFS retains
+one predecessor and distance per visited vertex and a FIFO frontier; cycles, self-loops and
+parallel relationships cannot create path-history states. Equal-length ties use the
+lexicographically smallest complete relationship-identity sequence from start to target,
+deliberately strengthening Neo4j's arbitrary single-path choice. Stored relationship directions
+remain intact when traversed backwards. Only the selected path's entities are materialized;
+the distance-only call retains no explored entity payloads.
+
+Adjacency ranges stream sequentially through one bounded cursor. For each expanded vertex,
+new neighbors keep their smallest relationship identity, then enter the FIFO in that order
+through a priority queue. This keeps search memory O(visited vertices + frontier), plus a
+constant cursor/key batch and one decoded record, even for arbitrarily many types or parallel
+edges between two nodes. It avoids the general executor's one-merge-head-per-type storage.
+CPU work is O(selected candidates + sum of k log k), where k is each vertex's newly discovered
+neighbors, plus index seeks/batches. The complete selected incident range of an expanded vertex
+is read before accepting its target, so range order cannot change ties. A budget can therefore
+refuse even after a target edge was seen. Bidirectional search remains an optional optimization.
+
+`GraphShortestPathSearch.Limits` uses existing engine ceilings: 256 MiB of accounted retained
+memory and 1,000,000 physical work units by default; per-search limits may only lower them.
+Endpoint probes consume work (one for an equal/absent start, otherwise two); selected adjacency
+candidates consume work before decoding, including dead ends and the second stored adjacency
+entry of a self-loop. Path reconstruction additionally charges its node and relationship reads.
+Container growth, cursor buffers, current edge properties and returned path payloads share the
+memory grant. Cancellation is checked at frontier dispatch, candidate reads, neighbor ordering
+and reconstruction. All owners/cursors unwind on success, refusal or cancellation. Work and
+memory exhaustion raise existing CG05004/CG05020, never a partial path or a false no-path result;
+invalid limits use CG08021. Invalid direction uses structured CG05001 before admission;
+pre-cancellation also precedes admission. Admitted failures abort an explicit transaction under
+the normal Graph statement contract. The APIs add no interfaces or boundary grants.
+
+Deterministic tests compare the existing reachability traversal's retained wide entity payloads
+with distance search over the same reachable set, and prove unchanged peak state for one versus
+128 parallel relationship types, using the minimum of three rounds. External benchmark digests
+and SF10 measurements remain integration gates. GQL selectors, all-shortest output and richer
+predicate/path-history searches belong to GQ-SP2/SP3, with separately budgeted retained state;
+neither Graph.Language nor query planning changes here. No wire or disk format changes.
+
+Local reference behavior consulted, no code copied: Neo4j
+`community/cypher/slotted-runtime/src/main/scala/org/neo4j/cypher/internal/runtime/slotted/pipes/ShortestPathSlottedPipe.scala:90-120`
+checks endpoint presence and supplies type, direction, maximum depth, memory tracking and
+single-path selection to its BFS factory. Cohesion exposes these typed search results directly,
+and selects the stable identity tie policy approved by the owner on 2026-10-25.
+
 `GraphPathsQueryRequest.FromGql` selects real path execution through the existing
 `GraphDatabaseSession.ExecuteAsync(GraphRequest)` capability. Both row and path requests derive
 from `GraphRequest`, whose private protected constructor fixes their result shape. The returned `GraphPathsQueryResult.Paths` contains

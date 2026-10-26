@@ -141,6 +141,7 @@
   <data name="FileNamesThrowIfInvalidArgument" xml:space="preserve"><value>{0} {1}</value></data>
   <data name="DatabaseMemoryFilesTryOpenFailure" xml:space="preserve"><value>The in-memory file set '{0}' was opened or created again while an open copied it.</value></data>
   <data name="DatabaseMemoryFilesThrowIfOpenFailure" xml:space="preserve"><value>The in-memory file set '{0}' is still open: its database's storage has not closed, so it cannot be opened again.</value></data>
+  <data name="ShortestPathDirectionInvalid" xml:space="preserve"><value>A shortest-path search requires a defined graph direction.</value></data>
   <data name="GraphDatabaseTraverseAsyncDatabase" xml:space="preserve"><value>CG05001: Traversal depth and direction must be valid.</value></data>
   <data name="DatabaseRequireOwnSessionDatabase" xml:space="preserve"><value>CG07005: The session belongs to another database or engine.</value></data>
   <data name="ValidatePropertiesAsyncDatabase" xml:space="preserve"><value>CG03003: Property '{0}' does not match the graph definition.</value></data>

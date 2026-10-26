@@ -63,6 +63,27 @@ await session.ExecuteAsync("INSERT (:AliasPending)", cancellationToken: Cancella
 await Check("MATCH (n:AliasPending) RETURN count(*)", [[1L]]);
 await session.ExecuteAsync("ROLLBACK", cancellationToken: CancellationToken.None);
 await Check("MATCH (n:AliasPending) RETURN count(*)", [[0L]]);
+var shortestStart = await database.CreateNodeAsync(session, ["Shortest"], cancellationToken: CancellationToken.None);
+var shortestMiddle = await database.CreateNodeAsync(session, ["Shortest"], cancellationToken: CancellationToken.None);
+var shortestEnd = await database.CreateNodeAsync(session, ["Shortest"], cancellationToken: CancellationToken.None);
+var shortestIsolated = await database.CreateNodeAsync(session, ["Shortest"], cancellationToken: CancellationToken.None);
+await database.CreateRelationshipAsync(session, shortestStart.Id, shortestMiddle.Id, "KNOWS", cancellationToken: CancellationToken.None);
+await database.CreateRelationshipAsync(session, shortestEnd.Id, shortestMiddle.Id, "KNOWS", cancellationToken: CancellationToken.None);
+var shortestSearch = new GraphShortestPathSearch(shortestStart.Id, shortestEnd.Id, GraphDirection.Both, "KNOWS");
+if (await database.FindShortestDistanceAsync(session, shortestSearch, CancellationToken.None) != 2)
+{ throw new InvalidOperationException("Shortest distance smoke mismatch."); }
+checks++;
+var shortestPath = await database.FindShortestPathAsync(session, shortestSearch, CancellationToken.None);
+if (shortestPath?.Distance != 2 || shortestPath.Path.Nodes[2].Id != shortestEnd.Id ||
+    shortestPath.Path.Relationships[1].From != shortestEnd.Id)
+{ throw new InvalidOperationException("Shortest path smoke mismatch."); }
+checks++;
+if (await database.FindShortestDistanceAsync(session, shortestSearch with { Target = shortestIsolated.Id }, CancellationToken.None) is not null)
+{ throw new InvalidOperationException("Disconnected shortest distance smoke mismatch."); }
+checks++;
+if (await database.FindShortestDistanceAsync(session, shortestSearch with { Target = shortestStart.Id }, CancellationToken.None) != 0)
+{ throw new InvalidOperationException("Zero shortest distance smoke mismatch."); }
+checks++;
 Console.WriteLine($"Graph NativeAOT: {checks}/{checks} checks passed.");
 
 async Task Check(string query, long[][] expected)
