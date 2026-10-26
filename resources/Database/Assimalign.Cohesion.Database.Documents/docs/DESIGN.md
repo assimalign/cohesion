@@ -1125,6 +1125,12 @@ and projection, so its normal failure path rolls back all writes and indexes bef
 Explicit transactions retain the existing abort-until-rollback contract. A result is returned only
 after all projections, frame-size/depth serialization preflight and metadata normalization succeed; JSON cells are cloned before their
 image JsonDocument is disposed, and no unprojected image is retained by the result context.
+Constructor-depth CD05015 names RETURNING and carries the constructor expression span. Token
+enumeration checks serialized depth explicitly, including a named projection's wrapper, for
+CD05019; serialization preflight does not relabel unrelated InvalidOperationException failures.
+DELETE reports its staged count and checks the actual deletion count against it inside the
+transaction. Divergence is an InvalidOperationException invariant failure before commit, so
+the normal rollback path restores every write and no inconsistent completion can escape.
 
 DocumentQueryResult stores an affected count (default -1 for reads) with the owned result rows.
 SELECT's result construction also supplies RETURNING's fixed names, empty-input static types,

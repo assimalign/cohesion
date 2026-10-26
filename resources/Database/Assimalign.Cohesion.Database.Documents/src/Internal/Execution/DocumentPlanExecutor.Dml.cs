@@ -82,7 +82,8 @@ internal static partial class DocumentPlanExecutor
             if (await collection.DeleteAsync(operation.Context, id, null, cancellationToken).ConfigureAwait(false)) { affected++; }
         }
         cancellationToken.ThrowIfCancellationRequested();
-        return returning?.Complete(affected) ?? (DatabaseResult)new DocumentCommandResult(affected);
+        if (affected != pending.Count) { throw new InvalidOperationException(ErrorMessages.DeleteCountMismatch); }
+        return returning?.Complete(pending.Count) ?? (DatabaseResult)new DocumentCommandResult(pending.Count);
     }
 
     private static async ValueTask<DatabaseResult> ExecuteWriteAsync(DocumentDatabase database, DocumentOperation operation,

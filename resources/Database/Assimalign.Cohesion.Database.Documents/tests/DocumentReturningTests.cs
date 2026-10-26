@@ -360,6 +360,75 @@ public sealed class DocumentReturningTests
         Should.Throw<ArgumentOutOfRangeException>(() => DocumentDatabaseEngine.Create("invalid", options)).ParamName.ShouldBe("StatementMemoryBudget");
     }
 
+    [Theory(DisplayName = "Cohesion Test [Documents] - RETURNING: deep constructors name RETURNING and locate the failing expression")]
+    [InlineData("[$deep]", "array")]
+    [InlineData("{value:$deep}", "object")]
+    public async Task ExecuteAsync_ReturningConstructorDepth_ShouldNameClauseAndRollback(string expression, string constructor)
+    {
+        // Arrange
+        await using var engine = DocumentDatabaseEngine.Create("returning", new());
+        var database = await engine.CreateDatabaseAsync("test", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        var collection = await SeedAsync(session);
+        var original = (await collection.GetAsync(session, "a", CancellationToken.None)).ShouldNotBeNull();
+        using var deep = JsonDocument.Parse(new string('[', 256) + "0" + new string(']', 256), new JsonDocumentOptions { MaxDepth = 256 });
+        string statement = "UPDATE items SET n = 99 RETURNING " + expression + " AS value";
+
+        // Act
+        var failure = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(statement,
+            new Dictionary<string, object?> { ["deep"] = deep.RootElement }, CancellationToken.None));
+
+        // Assert
+        var diagnostic = failure.Diagnostics.ShouldHaveSingleItem();
+        diagnostic.Code.ShouldBe("CD05015");
+        diagnostic.Message.ShouldBe("RETURNING " + constructor + " constructor values must be nested no deeper than 256 levels.");
+        diagnostic.Start.ShouldBe(statement.IndexOf(expression, StringComparison.Ordinal));
+        diagnostic.End.ShouldBe(statement.IndexOf(expression, StringComparison.Ordinal) + expression.Length);
+        (await collection.GetAsync(session, "a", CancellationToken.None)).ShouldNotBeNull().Version.ShouldBe(original.Version);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Documents] - RETURNING: DELETE membership divergence is refused inside the transaction")]
+    public async Task ExecuteAsync_DeleteCountDiverges_ShouldFailInvariantAndRollback()
+    {
+        // Arrange: violate executor ownership through existing test-only internal access.
+        // Removing b while projecting a leaves two staged images but only one later deletion.
+        DocumentCollection? collection = null;
+        DocumentDatabaseTransaction? transaction = null;
+        int injected = 0;
+        var builder = DocumentDatabaseEngine.CreateBuilder("returning");
+        builder.Functions.Add(DocumentScalarFunction.Create<decimal, decimal>("remove_peer", value =>
+        {
+            if (value == 1)
+            {
+                collection!.DeleteAsync(transaction!.Context, "b", null, CancellationToken.None).AsTask().GetAwaiter().GetResult().ShouldBeTrue();
+                injected++;
+            }
+            return value;
+        }));
+        await using var engine = await builder.BuildAsync(CancellationToken.None);
+        var database = await engine.CreateDatabaseAsync("test", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        collection = await SeedAsync(session);
+        var before = await ImagesAsync(collection, session);
+        transaction = await session.BeginTransactionAsync(cancellationToken: CancellationToken.None);
+
+        // Act
+        var failure = await Should.ThrowAsync<InvalidOperationException>(async () =>
+            await session.ExecuteAsync("DELETE FROM items RETURNING remove_peer(n)", cancellationToken: CancellationToken.None));
+
+        // Assert
+        injected.ShouldBe(1);
+        failure.Message.ShouldBe("DELETE affected count disagrees with its staged document count.");
+        var refused = await Should.ThrowAsync<DatabaseException>(async () =>
+            await session.ExecuteAsync("SELECT * FROM items", cancellationToken: CancellationToken.None));
+        refused.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD04101");
+        await transaction.RollbackAsync(CancellationToken.None);
+        await transaction.DisposeAsync();
+        var after = await ImagesAsync(collection, session);
+        after.Keys.ShouldBe(before.Keys);
+        foreach (var pair in before) { after[pair.Key].Version.ShouldBe(pair.Value.Version); }
+    }
+
     internal static string Write(string verb) => verb switch
     {
         "INSERT" => "INSERT INTO items AS d (KEY, VALUE) VALUES ('c', {n:1,nested:[1]}), ('d', {n:2,nested:[2]})",

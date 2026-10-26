@@ -74,6 +74,8 @@ and rolls back the writes. Serialized rows are preflighted in the same transacti
 CD05016 covers the 16 MiB frame cap, and CD05019 covers values deeper than 256 levels including
 the named projection wrapper. This is a retained-result estimate, not a managed-heap measurement;
 pre-existing source and mutation staging allocations are outside this new charge.
+An over-deep array/object constructor gives CD05015 naming RETURNING at its expression span;
+other serialization failures retain their own diagnostic identity.
 
 The existing Complete payload carries both result and affected counts, without negotiation,
 a capability flag, a frame-layout change or a disk-format change. With RETURNING the counts
