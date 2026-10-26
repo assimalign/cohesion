@@ -6619,8 +6619,10 @@ existing ALTER behavior. The volatile
 association lasts until reclamation retires its owner; no snapshot survives reopen. Retired tree
 handles leave the mutable manager after publication but remain in the catalog alongside their
 exact immutable index descriptions until reclamation. Retained reads bind those descriptions
-and resolve those handles, preserving index seeks. Join read validation accepts only these
-protected retired definitions; all DML target/source definition checks remain unchanged.
+and resolve those handles, preserving index seeks. Join read validation accepts these
+protected retired definitions only for read-only statements. The outer statement's DML status
+propagates through WITH, INSERT SELECT sources, derived/view bodies and subquery materialization,
+so every DML join source retains its CS04006 definition check before reading retired rows.
 Catalog-image equivalence includes each table's index descriptions, so a cached view image
 cannot hide an index created before retirement while table and view descriptions stay identical.
 Retirements are published as an ordered immutable array. A snapshot seeing its maximum marker
