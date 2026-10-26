@@ -123,6 +123,15 @@ public sealed class OqlExecutionConformanceTests
             [
                 new("SELECT [name, amount] AS pair FROM items WHERE name = 'beta'", [[Json("[\"beta\",6]")]]),
             ],
+            [OqlClauses.ArrayComprehension] =
+            [
+                new("SELECT ARRAY x FOR x IN [1,2] WHEN x > 1 END AS a FROM items WHERE name = 'alpha'", [[Json("[2]")]]),
+                new("SELECT ARRAY x.a FOR x IN [{},{a:null},{a:2}] END AS a FROM items WHERE name = 'alpha'", [[Json("[null,2]")]]),
+            ],
+            [OqlClauses.FirstComprehension] =
+            [
+                new("SELECT FIRST x FOR x IN [1,2] WHEN x > 1 END AS f FROM items WHERE name = 'alpha'", [[2m]]),
+            ],
             [OqlClauses.From] =
             [
                 new("SELECT d.name FROM items d", [["alpha"], ["beta"], ["gamma"], ["delta"]]),
@@ -481,6 +490,8 @@ public sealed class OqlExecutionConformanceTests
         OqlClauses.SelectValue => expression is OqlSelectExpression { IsValue: true },
         OqlClauses.ObjectConstructor => expression is OqlSelectExpression objectQuery && objectQuery.Projections.Any(p => p.Expression is OqlObjectExpression),
         OqlClauses.ArrayConstructor => expression is OqlSelectExpression arrayQuery && arrayQuery.Projections.Any(p => p.Expression is OqlArrayExpression),
+        OqlClauses.ArrayComprehension => expression is OqlSelectExpression arrays && arrays.Projections.Any(p => p.Expression is OqlComprehensionExpression { IsFirst: false }),
+        OqlClauses.FirstComprehension => expression is OqlSelectExpression first && first.Projections.Any(p => p.Expression is OqlComprehensionExpression { IsFirst: true }),
         OqlClauses.From => expression is OqlSelectExpression { Collection.Length: > 0 },
         OqlClauses.Unnest => expression is OqlSelectExpression unnestQuery && unnestQuery.Unnest.Any(binding => !binding.IsLeft),
         OqlClauses.LeftUnnest => expression is OqlSelectExpression leftQuery && leftQuery.Unnest.Any(binding => binding.IsLeft),

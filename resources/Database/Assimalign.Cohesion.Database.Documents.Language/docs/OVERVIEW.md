@@ -22,6 +22,10 @@ Chainable INNER/LEFT UNNEST, ANY/SOME/EVERY ... SATISFIES ... END and array-valu
 `OqlSelectExpression.Unnest`, `OqlUnnestExpression` and `OqlQuantifiedExpression` retain the
 bindings. The new words remain contextual; END retains its existing reservation. See the
 [array contract](DESIGN.md#array-bindings-and-quantified-predicates-1136) for scope and truth rules.
+ARRAY/FIRST comprehensions retain one lexical IN binding in `OqlComprehensionExpression`, with
+optional WHEN filtering. ARRAY omits mapped MISSING values; FIRST returns the first qualifying
+mapping or MISSING. They compose with current scalar contexts, including RETURNING and registered
+arguments; the [comprehension contract](DIALECT.md#array-and-first-comprehensions-1728) lists defaults.
 
 ```csharp
 var parser = new OqlQueryParser();
@@ -44,8 +48,7 @@ SELECT, INSERT, UPSERT, UPDATE and DELETE. UPDATE accepts SET and/or UNSET over 
 array indexes; SET-to-MISSING removes a property. RETURNING named expressions or RAW/VALUE return each affected image with the mutation count.
 DELETE returns the pre-image; the other writes return the stored post-image. Projection,
 serialization or budget failure rolls back writes before any results are exposed.
-USE KEYS, FOR comprehensions and
-UPDATE/DELETE LIMIT remain deferred.
+USE KEYS, OBJECT transformations, multiple bindings, position variables, WITHIN and UPDATE/DELETE LIMIT remain deferred.
 `DEFINE` is recognized statement-initially, and `ELEMENT` / `FLATTEN` in call position, to
 produce `CK00001`; all three remain usable field names. Subqueries remain unsupported.
 MISSING has its own AST node, distinct from NULL, and `IS [NOT] MISSING` / `IS [NOT] VALUED`

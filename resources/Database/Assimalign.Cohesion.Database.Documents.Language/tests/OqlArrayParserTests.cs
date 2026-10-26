@@ -108,7 +108,6 @@ public sealed class OqlArrayParserTests
     [InlineData("SELECT * FROM items d UNNEST d.tags UNNEST d[«'tags'»] WHERE TRUE", "CD00010", null)]
     [InlineData("SELECT ANY x IN [1], «x» IN [2] SATISFIES TRUE END FROM c", "CD00010", null)]
     [InlineData("SELECT ANY x IN [1]«,» y IN [2] SATISFIES TRUE END FROM c", "CK00001", "multi-binding quantifier")]
-    [InlineData("SELECT «ARRAY» t FOR t IN d.tags END FROM c d", "CK00001", "ARRAY")]
     [InlineData("SELECT * FROM c d «NEST» e ON TRUE", "CK00001", "NEST")]
     [InlineData("SELECT * FROM c d LEFT «JOIN» e ON TRUE", "CK00001", "JOIN")]
     [InlineData("SELECT «ANY» AND EVERY x IN a SATISFIES TRUE END FROM c", "CK00001", "ANY AND EVERY")]
