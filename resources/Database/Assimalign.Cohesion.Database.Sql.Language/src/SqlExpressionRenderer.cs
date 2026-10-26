@@ -372,7 +372,11 @@ public static class SqlExpressionRenderer
         }
         if (column.TableAlias is not null)
         {
-            builder.Append(Identifier(column.TableAlias)).Append('.');
+            // OLD/NEW are contextual RETURNING pseudo-relations. The AST keeps ordinary
+            // identifier values, so delimit these qualifiers to preserve that meaning.
+            builder.Append(column.TableAlias.Equals("old", StringComparison.OrdinalIgnoreCase) ||
+                column.TableAlias.Equals("new", StringComparison.OrdinalIgnoreCase)
+                ? "\"" + column.TableAlias + "\"" : Identifier(column.TableAlias)).Append('.');
         }
         return builder.Append(Identifier(column.ColumnName)).ToString();
     }

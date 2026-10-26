@@ -1206,6 +1206,8 @@ public sealed partial class SqlQueryParser : QueryParser
                     (inWithDefinitions && fromScopes.Count == 0 &&
                         (string.Equals(previousToken, "WITH", StringComparison.OrdinalIgnoreCase) || previousToken == ",") ||
                      string.Equals(previousToken, "FROM", StringComparison.OrdinalIgnoreCase) ||
+                     string.Equals(previousToken, "USING", StringComparison.OrdinalIgnoreCase) &&
+                        fromScopes.Count == 0 && firstToken.Equals("DELETE", StringComparison.OrdinalIgnoreCase) ||
                      string.Equals(previousToken, "JOIN", StringComparison.OrdinalIgnoreCase) ||
                      string.Equals(previousToken, "AS", StringComparison.OrdinalIgnoreCase) ||
                      inFrom && previousToken == "," || previousToken == "." ||

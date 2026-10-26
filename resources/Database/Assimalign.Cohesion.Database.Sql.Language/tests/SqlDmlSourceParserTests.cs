@@ -22,6 +22,8 @@ public sealed class SqlDmlSourceParserTests
     [InlineData("UPDATE \"t\"\"x\" AS \"target\" SET \"v\"\"x\" = \"old\".\"v\"\"x\" FROM \"s\"\"x\" AS \"old\" RETURNING \"old\".\"v\"\"x\"")]
     [InlineData("UPDATE t SET v = old.v FROM s AS old RETURNING old.v")]
     [InlineData("DELETE FROM t USING s AS new RETURNING new.v")]
+    [InlineData("UPDATE t SET id = s.id FROM s RETURNING \"old\".id")]
+    [InlineData("DELETE FROM t USING s RETURNING \"new\".id")]
     public void Render_SourceCorpus_ShouldRoundTrip(string sql)
     {
         // Arrange
@@ -35,6 +37,20 @@ public sealed class SqlDmlSourceParserTests
         Shape(second).ShouldBe(Shape(first));
         Render(second).ShouldBe(rendered);
         rendered.ShouldContain(first is SqlUpdateExpression ? " FROM " : " USING ", Case.Sensitive);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql.Language] - DML sources: keyword CTE names remain identifiers after USING (#1714)")]
+    [InlineData("WITH \"recursive\" AS (SELECT id FROM s) DELETE FROM t USING recursive WHERE t.id=recursive.id")]
+    [InlineData("WITH \"recursive\" AS (SELECT id FROM s) DELETE FROM t USING s, recursive WHERE t.id=recursive.id")]
+    [InlineData("WITH \"recursive\" AS (SELECT id FROM s) UPDATE t SET id=recursive.id FROM recursive")]
+    public void Parse_KeywordCteSource_ShouldPreserveReference(string sql)
+    {
+        // Arrange / Act
+        var query = Parse(sql);
+        var sources = query is SqlDeleteExpression delete ? delete.Using : ((SqlUpdateExpression)query).From;
+
+        // Assert
+        sources.Last().Table.ShouldBeOfType<SqlTableReference>().TableName.ShouldBe("recursive");
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - DML sources: malformed lists fail syntax parsing (#1714)")]
@@ -59,6 +75,8 @@ public sealed class SqlDmlSourceParserTests
     [InlineData("UPDATE t SET v = (SELECT v FROM s) FROM s")]
     [InlineData("UPDATE t SET v = s.v FROM s RETURNING (SELECT s.v)")]
     [InlineData("DELETE FROM t USING s RETURNING (SELECT s.id)")]
+    [InlineData("WITH RECURSIVE q AS (SELECT id FROM s) DELETE FROM t USING q WHERE t.id=q.id")]
+    [InlineData("WITH RECURSIVE q AS (SELECT id FROM s) UPDATE t SET id=q.id FROM q")]
     public void Parse_ExcludedSources_ShouldReportUnsupported(string sql)
     {
         // Arrange / Act

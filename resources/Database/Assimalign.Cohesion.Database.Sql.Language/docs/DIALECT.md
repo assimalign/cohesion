@@ -141,6 +141,8 @@ retain type, length, collation and outer-join nullability. By a Cohesion default
 expands only the target (unlike local PostgreSQL parse_target.c:1301-1321, which expands all visible
 relations). Explicit source columns are supported by binding. A real visible source named/aliased OLD or NEW
 masks that pseudo-relation refusal. SET and RETURNING subqueries retain CK00001.
+Delimited OLD/NEW qualifiers remain ordinary identifiers through canonical rendering.
+Keyword-spelled CTE names are accepted after DELETE USING; actual WITH RECURSIVE remains unsupported.
 
 Namespace behavior follows the local PostgreSQL `src/backend/parser/analyze.c:602-621,2560-2578`.
 SQ-UF2 will collect physical target identities per association, reject multiple source matches

@@ -8,6 +8,9 @@ preserve SELECT behavior and DML round trips, including WITH, derived bodies and
 capability scan admits read-source queries while keeping SET/RETURNING subquery exclusions.
 Visible source OLD/NEW names mask pseudo-relations. DIALECT.md distinguishes parsed/bound support
 from execution: no clause/profile declaration is added until SQ-UF2 executes the forms.
+DELETE's top-level USING source position recognizes keyword-spelled CTE references, while actual
+WITH RECURSIVE remains refused. Canonical rendering delimits ordinary OLD/NEW column qualifiers
+so a quoted identifier cannot become a RETURNING pseudo-relation on reparse.
 
 ## Cascade progress and deadlock diagnostics (w11 review)
 
