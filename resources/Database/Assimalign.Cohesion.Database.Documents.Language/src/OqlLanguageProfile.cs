@@ -63,6 +63,8 @@ public static class OqlLanguageProfile
         OqlClauses.SelectValue,
         OqlClauses.ObjectConstructor,
         OqlClauses.ArrayConstructor,
+        OqlClauses.ArrayComprehension,
+        OqlClauses.FirstComprehension,
         OqlClauses.Explain,
         OqlClauses.From,
         OqlClauses.Unnest,

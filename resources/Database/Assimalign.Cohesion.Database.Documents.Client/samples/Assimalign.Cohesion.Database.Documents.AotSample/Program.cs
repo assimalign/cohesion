@@ -134,6 +134,13 @@ internal static class Program
             Check(unnested.Count == 2 && unnested[0].IsNull(0) && unnested[1][0] is 1m && unnested[1][1] is 1L, "UNNEST grouped rows");
             var quantified = await connection.QueryAsync("SELECT ANY x IN nested SATISFIES x = 1 END AS a, EVERY x IN nested SATISFIES x = 1 END AS e, 1 IN nested AS i FROM items", cancellationToken: token);
             Check(quantified[0][0] is true && quantified[0][1] is false && quantified[0][2] is true, "ANY EVERY array IN");
+            var comprehensions = await connection.QueryAsync("SELECT ARRAY x FOR x IN nested WHEN x IS VALUED END AS a, FIRST x FOR x IN [] END AS f, ARRAY lower_tag(x) FOR x IN ['READY'] END AS s FROM items", cancellationToken: token);
+            Check(comprehensions[0][0] is System.Text.Json.JsonElement array && array.GetArrayLength() == 1 && array[0].GetInt32() == 1, "ARRAY comprehension");
+            Check(comprehensions[0].IsMissing(1), "FIRST empty MISSING");
+            Check(comprehensions[0][2] is System.Text.Json.JsonElement mapped && mapped[0].GetString() == "ready", "comprehension registered mapping");
+            var comprehensionReturning = await connection.QueryAsync("INSERT INTO items (KEY, VALUE) VALUES ('comprehension', {nested:[1]}) RETURNING FIRST x FOR x IN nested END AS f", cancellationToken: token);
+            Check(comprehensionReturning.AffectedCount == 1 && comprehensionReturning[0][0] is 1m, "FIRST RETURNING");
+            Check(await connection.ExecuteAsync("DELETE FROM items WHERE META().id = 'comprehension'", cancellationToken: token) == 1, "comprehension cleanup");
             var synthetic = await connection.QueryAsync("SELECT * FROM items d UNNEST d.nested t", cancellationToken: token);
             Check(synthetic.IsDocumentQuery && synthetic.Documents.Count == 2 && synthetic.Documents[0].GetProperty("d").GetProperty("name").GetString() == "東京" &&
                 synthetic.Documents[0].GetProperty("t").GetInt32() == 1, "UNNEST synthetic documents");
