@@ -137,8 +137,9 @@ visible names. Unknown or ambiguous columns use located CS01015, absent tables C
 duplicate visible relation names CS01019. Each source JOIN ON sees only its own comma item's
 join tree, excluding the target and other comma items. Derived source bodies cannot reference
 the target or sibling inputs; explicit LATERAL remains excluded. Source columns in RETURNING
-retain type, length, collation and outer-join nullability. Bare RETURNING * expands only the target;
-explicit source columns are supported by binding. A real visible source named/aliased OLD or NEW
+retain type, length, collation and outer-join nullability. By a Cohesion default, bare RETURNING *
+expands only the target (unlike local PostgreSQL parse_target.c:1301-1321, which expands all visible
+relations). Explicit source columns are supported by binding. A real visible source named/aliased OLD or NEW
 masks that pseudo-relation refusal. SET and RETURNING subqueries retain CK00001.
 
 Namespace behavior follows the local PostgreSQL `src/backend/parser/analyze.c:602-621,2560-2578`.

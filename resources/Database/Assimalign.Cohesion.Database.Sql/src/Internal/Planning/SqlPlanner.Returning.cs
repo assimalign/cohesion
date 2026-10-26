@@ -40,7 +40,7 @@ internal sealed partial class SqlPlanner
             }
         }
         var evaluator = DmlEvaluator(associations.Columns, associations.Bindings, target, foldConstants: false);
-        // A bare RETURNING * expands only the target row, as in PostgreSQL analyze.c.
+        // Cohesion keeps bare RETURNING * target-only; explicit source columns use the joined namespace.
         return BindProjections(returning, associations.Columns, evaluator,
             Enumerable.Range(0, associations.Bindings[0].Source.Columns.Count).ToArray());
     }
