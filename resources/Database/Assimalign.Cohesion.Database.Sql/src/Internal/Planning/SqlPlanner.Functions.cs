@@ -193,6 +193,9 @@ internal sealed partial class SqlPlanner
             case SqlInExpression { Subquery: not null } membership:
                 ValidateFunctionCalls(membership.Subquery);
                 break;
+            case SqlQuantifiedComparisonExpression quantified:
+                ValidateFunctionCalls(quantified.Subquery);
+                break;
         }
 
         foreach (var child in Children(expression))

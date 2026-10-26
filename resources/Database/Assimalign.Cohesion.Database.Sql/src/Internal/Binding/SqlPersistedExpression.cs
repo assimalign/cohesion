@@ -226,7 +226,7 @@ internal static class SqlPersistedExpression
             case SqlCastExpression { TargetTypeInfo: null } cast:
                 SqlPlanner.ResolveCastTarget(cast, evaluator.Functions.Types);
                 break;
-            case SqlParameterExpression or SqlSubqueryExpression or SqlExistsExpression or SqlStarExpression or SqlInExpression { Values: null }:
+            case SqlParameterExpression or SqlSubqueryExpression or SqlExistsExpression or SqlQuantifiedComparisonExpression or SqlStarExpression or SqlInExpression { Values: null }:
                 throw new SqlExecutionException(SqlExecutionException.InvalidDefinitionCode, ErrorMessages.PersistedRowExpressionInvalid);
             case SqlFunctionCallExpression call when evaluator.Functions.Catalog.IsAggregate(call.FunctionName):
                 throw new SqlExecutionException(SqlExecutionException.InvalidDefinitionCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.PersistedAggregateInvalid, call.FunctionName));
@@ -403,6 +403,8 @@ internal static class SqlPersistedExpression
             : a.TargetTypeInfo is null && b.TargetTypeInfo is null && SqlTypeRules.SameTypeName(a.TargetType, b.TargetType),
         (SqlExistsExpression a, SqlExistsExpression b) => a.IsNegated == b.IsNegated && SameQuery(a.Subquery, b.Subquery),
         (SqlSubqueryExpression a, SqlSubqueryExpression b) => SameQuery(a.Select, b.Select),
+        (SqlQuantifiedComparisonExpression a, SqlQuantifiedComparisonExpression b) => a.Operator == b.Operator &&
+            a.Quantifier == b.Quantifier && SameQuery(a.Subquery, b.Subquery),
         _ => false,
     };
 

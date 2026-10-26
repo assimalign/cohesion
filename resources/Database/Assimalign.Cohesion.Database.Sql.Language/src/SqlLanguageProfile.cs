@@ -104,6 +104,7 @@ public static class SqlLanguageProfile
         SqlClauses.Intersect,
         SqlClauses.Except,
         SqlClauses.Subquery,
+        SqlClauses.QuantifiedComparison,
         SqlClauses.Cte,
         SqlClauses.Case,
         SqlClauses.Cast,

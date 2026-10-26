@@ -97,7 +97,7 @@ public sealed class SqlSetOperationParserTests
     [InlineData("SELECT a FROM t UNION CORRESPONDING SELECT a FROM u", "CK00001")]
     [InlineData("SELECT a FROM t EXCEPT ALL CORRESPONDING SELECT a FROM u", "CK00001")]
     [InlineData("SELECT id FROM t UNION SELECT id FROM u WINDOW w AS ();", "CK00001")]
-    [InlineData("SELECT a FROM t WHERE a = ALL (SELECT a FROM u UNION SELECT a FROM v)", "CK00001")]
+    [InlineData("SELECT a FROM t WHERE a = ALL (1, 2)", "CK00001")]
     public void Parse_RejectedSetForm_ShouldReportCode(string sql, string code)
     {
         // Arrange / Act
@@ -111,6 +111,7 @@ public sealed class SqlSetOperationParserTests
 
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - Set operations: canonical text preserves associativity and operand windows")]
     [InlineData("SELECT a FROM t UNION ALL (SELECT a FROM u UNION SELECT a FROM v)")]
+    [InlineData("SELECT a FROM t WHERE a = ALL (SELECT a FROM u UNION SELECT a FROM v)")]
     [InlineData("(SELECT a FROM t UNION SELECT a FROM u) INTERSECT SELECT a FROM v")]
     [InlineData("(SELECT a FROM t ORDER BY a LIMIT 1) UNION ALL (SELECT a FROM u ORDER BY a LIMIT 1) ORDER BY 1")]
     [InlineData("WITH q AS (SELECT 1 AS a UNION ALL SELECT 2) SELECT a FROM q EXCEPT SELECT a FROM t OFFSET 1 ROWS FETCH NEXT 2 ROWS ONLY")]

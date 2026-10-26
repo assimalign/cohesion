@@ -40,11 +40,14 @@ internal sealed partial class SqlPlanExecutor
         cancellationToken.ThrowIfCancellationRequested();
         var frame = _subqueryValues!;
         var evaluator = ExecutionEvaluator(frame, cancellationToken);
-        int? slot = expression switch { SqlBoundSubquery query => query.Slot, SqlBoundInSubquery member => member.Slot, _ => null };
+        int? slot = expression switch { SqlBoundSubquery query => query.Slot, SqlBoundInSubquery member => member.Slot, SqlBoundQuantifiedComparison quantified => quantified.Slot, _ => null };
         if (slot is int id && frame.Queries.TryGetValue(id, out var binding) && !frame.TryGet(id, out _))
         {
             frame.Set(id, await MaterializeSubqueryAsync(binding, statement, cancellationToken).ConfigureAwait(false));
         }
+        // An empty quantified set decides the predicate without visiting its scalar operand.
+        if (expression is SqlBoundQuantifiedComparison comparison &&
+            SqlSubqueryValues.Get(frame, comparison.Slot).Length == 0) { return; }
         // Branch predicates are cached by the frame so volatile functions still run once.
         if (expression is SqlBoundLogical logical)
         {
@@ -123,6 +126,7 @@ internal sealed partial class SqlPlanExecutor
                 foreach (var candidate in member.Candidates) { yield return candidate; }
                 break;
             case SqlBoundInSubquery member: yield return member.Operand; break;
+            case SqlBoundQuantifiedComparison quantified: yield return quantified.Operand; break;
             case SqlBoundLike like: yield return like.Operand; yield return like.Pattern; yield return like.Escape; break;
             case SqlBoundCall call:
                 foreach (var argument in call.Arguments) { yield return argument; }

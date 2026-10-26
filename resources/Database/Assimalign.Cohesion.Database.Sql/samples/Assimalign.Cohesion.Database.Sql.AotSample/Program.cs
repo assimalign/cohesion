@@ -278,6 +278,7 @@ internal static class Program
         Check("in process: comma and CROSS", await RowsAsync(session, crossJoin), [[8L]]);
         Check("in process: set operations", await RowsAsync(session, setOperations), [[2L]]);
         Check("in process: set subquery", await RowsAsync(session, "SELECT Id FROM customers WHERE Id IN (SELECT Id FROM customers EXCEPT SELECT Id FROM customers WHERE Id = 1)"), [[2L]]);
+        Check("in process: quantified comparisons", await RowsAsync(session, "SELECT 1 = ANY (SELECT 1 UNION ALL SELECT NULL), NULL <> SOME (SELECT 1 WHERE FALSE), NULL < ALL (SELECT 1 WHERE FALSE), 1 > ALL (SELECT NULL)"), [[true, false, true, null]]);
         Check("in process: renamed derived join", await RowsAsync(session, derivedJoin), [[1L]]);
         Check("in process: correlated scalar EXISTS and IN", await RowsAsync(session, correlatedRows), [[1L, 100L], [2L, 200L]]);
         CheckFailure("in process: correlated cardinality", await FailureAsync(() => RowsAsync(session, correlatedCardinality)), "one row");
@@ -500,6 +501,7 @@ internal static class Program
         Check("over the wire: comma and CROSS", await RowsAsync(connection, crossJoin, timeout.Token), [[8L]]);
         Check("over the wire: set operations", await RowsAsync(connection, setOperations, timeout.Token), [[2L]]);
         Check("over the wire: set subquery", await RowsAsync(connection, "SELECT Id FROM customers WHERE Id IN (SELECT Id FROM customers EXCEPT SELECT Id FROM customers WHERE Id = 1)", timeout.Token), [[2L]]);
+        Check("over the wire: quantified correlation", await RowsAsync(connection, "SELECT c.Id, c.Id >= ALL (SELECT d.Id FROM customers d WHERE d.Id <= c.Id), c.Id = SOME (SELECT d.Id FROM customers d WHERE d.Id > c.Id), (SELECT 1 / (c.Id - c.Id)) = ANY (SELECT d.Id FROM customers d WHERE d.Id = c.Id AND FALSE) FROM customers c ORDER BY c.Id", timeout.Token), [[1L, true, false, false], [2L, true, false, false]]);
         Check("over the wire: renamed derived join", await RowsAsync(connection, derivedJoin, timeout.Token), [[1L]]);
         Check("over the wire: chained CTEs", await RowsAsync(connection,
             "WITH a AS (SELECT Id FROM customers), b AS (SELECT Id FROM a) SELECT Id FROM b ORDER BY Id", timeout.Token), [[1L], [2L]]);

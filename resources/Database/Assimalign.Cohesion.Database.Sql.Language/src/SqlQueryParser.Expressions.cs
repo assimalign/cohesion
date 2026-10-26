@@ -249,9 +249,18 @@ public sealed partial class SqlQueryParser
                 if (minimum > 2) { break; }
                 if (previous == 2) { AddSyntaxDiagnostic(ref lexer, ErrorMessages.SqlQueryParserParsePredicatesVoid2); SkipQueryRemainder(ref lexer); break; }
                 Advance(ref lexer);
-                var right = SkipQuantifiedComparison(ref lexer) ?? ParseOperand(ref lexer, restricted ? OperandRule.RestrictedPredicate : OperandRule.PredicateOperand);
-                left = Nest(ref lexer, new SqlBinaryExpression(left, op.Value, right, Location.Create(1, 1, pos, pos)));
-                previous = 2;
+                if ((IsWord(ref lexer, "ANY") || IsWord(ref lexer, "SOME") || IsWord(ref lexer, "ALL")) &&
+                    TryPeekToken(lexer, out string quantifierNext, out _) && quantifierNext == "(")
+                {
+                    left = ParseQuantifiedComparison(ref lexer, left, op.Value, pos);
+                    previous = 0; // A parenthesized sublink is complete, like IN (query).
+                }
+                else
+                {
+                    var right = ParseOperand(ref lexer, restricted ? OperandRule.RestrictedPredicate : OperandRule.PredicateOperand);
+                    left = Nest(ref lexer, new SqlBinaryExpression(left, op.Value, right, Location.Create(1, 1, pos, pos)));
+                    previous = 2;
+                }
                 continue;
             }
 
@@ -383,26 +392,26 @@ public sealed partial class SqlQueryParser
         return Nest(ref lexer, new SqlInExpression(left, Array.Empty<SqlExpression>(), null, notBefore, Location.Create(1, 1, pos, pos)));
     }
 
-    /// <summary>
-    /// Skips the quantified operand of <c>op ANY|SOME|ALL (subquery)</c> after reporting the
-    /// construct once. It used to parse as a call to a function named ANY whose argument was a
-    /// SELECT, so it also reported "Expected ')' after the ANY arguments" (#1101).
-    /// </summary>
-    /// <returns>A placeholder that never executes, or <see langword="null"/> when no quantifier is current.</returns>
-    private SqlLiteralExpression? SkipQuantifiedComparison(ref TokenLexer lexer)
+    private SqlExpression ParseQuantifiedComparison(ref TokenLexer lexer, SqlExpression operand,
+        SqlBinaryOperator comparison, int position)
     {
-        if (!(IsWord(ref lexer, "ANY") || IsWord(ref lexer, "SOME") || IsWord(ref lexer, "ALL")) ||
-            !TryPeekToken(lexer, out string next, out _) || next != "(")
-        {
-            return null;
-        }
-
         int start = lexer.Current.Position;
-        string quantifier = CurrentText(ref lexer).ToUpperInvariant();
-        RequireSkippedConstruct(start, start + quantifier.Length, $"{quantifier} quantified comparison");
+        string word = CurrentText(ref lexer).ToUpperInvariant();
+        var quantifier = IsWord(ref lexer, "ALL") ? SqlComparisonQuantifier.All :
+            IsWord(ref lexer, "SOME") ? SqlComparisonQuantifier.Some : SqlComparisonQuantifier.Any;
         Advance(ref lexer);
-        SkipParenthesized(ref lexer);
-        return new SqlLiteralExpression("NULL", SqlLiteralType.Null, Location.Create(1, 1, start, start));
+        Expect(ref lexer, TokenType.LeftParen, "'(' after comparison quantifier");
+        if (IsAtEnd(ref lexer) || !StartsQuery(lexer, queryExpected: true))
+        {
+            RequireSkippedConstruct(start, start + word.Length, $"{word} array comparison");
+            SkipQueryRemainder(ref lexer);
+            Expect(ref lexer, TokenType.RightParen, _errorSubqueryClosingParenthesisExpected);
+            return operand;
+        }
+        var query = ParseSubquery(ref lexer);
+        Expect(ref lexer, TokenType.RightParen, _errorSubqueryClosingParenthesisExpected);
+        return Nest(ref lexer, new SqlQuantifiedComparisonExpression(operand, comparison, quantifier, query,
+            Location.Create(1, 1, position, _lastTokenEnd)));
     }
 
     private static SqlBinaryOperator? GetComparisonOperator(ref TokenLexer lexer)

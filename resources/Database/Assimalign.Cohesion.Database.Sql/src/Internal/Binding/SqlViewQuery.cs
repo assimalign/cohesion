@@ -57,6 +57,7 @@ internal static class SqlViewQuery
             SqlSubqueryExpression scalar => scalar.Select,
             SqlExistsExpression exists => exists.Subquery,
             SqlInExpression member => member.Subquery,
+            SqlQuantifiedComparisonExpression quantified => quantified.Subquery,
             _ => null,
         };
         if (queries && query is not null)

@@ -54,6 +54,9 @@ internal enum SqlBoundExpressionKind : byte
     /// <summary><see cref="SqlBoundInSubquery"/>: <c>[NOT] IN</c> over a subquery's materialized values.</summary>
     InSubquery,
 
+    /// <summary>A scalar ANY, SOME or ALL subquery comparison.</summary>
+    QuantifiedComparison,
+
     /// <summary><see cref="SqlBoundLike"/>: <c>[NOT] LIKE</c>.</summary>
     Like,
 

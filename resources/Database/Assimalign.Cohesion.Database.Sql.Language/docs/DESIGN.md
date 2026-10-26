@@ -201,6 +201,21 @@ the statement corpus and the live conformance case change together; DIALECT.md i
 The engine's deferred-provisioning admission walks the wrapped statement before binding, just
 as it does for an ordinary data statement; an EXPLAIN cannot bypass a pending table reservation.
 
+## Quantified comparison AST (#1718)
+
+SqlQuantifiedComparisonExpression and SqlComparisonQuantifier retain the written
+scalar operator, ANY/SOME/ALL spelling and query body. The parser admits subquery
+operands after all six comparisons (including !=), preserves completed-sublink
+precedence, and uses the existing subquery and expression depth accounting.
+The query-operand grammar and SOME alias follow PostgreSQL
+src/backend/parser/gram.y:15677-15688,17022-17024.
+Rendering and tree dumps retain the whole body, including set operations.
+SqlClauses.QuantifiedComparison adds one measured profile clause beside Subquery.
+ANY/SOME remain contextual words in the recognized vocabulary for array refusals;
+their existing canonical identifier quoting stays stable. Row values retain the
+existing syntax refusal and excluded subquery positions keep CK00001. DIALECT.md
+specifies truth tables, comparison rules and materialization. No format changes.
+
 ## Derived relation AST (#1113, part b)
 
 The public `SqlRelationReference` variant set has sealed named-table and derived

@@ -105,10 +105,6 @@ public sealed class SqlSubqueryParserTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Database.Sql.Language] - Subquery: Excludes unsupported forms")]
-    [InlineData("SELECT id FROM t WHERE id = ANY (SELECT id FROM u);", "ANY quantified comparison")]
-    [InlineData("SELECT id FROM t WHERE id >= ALL (SELECT id FROM u);", "ALL quantified comparison")]
-    [InlineData("SELECT id FROM t WHERE id <> SOME (SELECT id FROM u);", "SOME quantified comparison")]
-    [InlineData("SELECT id FROM t WHERE id = any /* trivia */ (SELECT id FROM u);", "ANY quantified comparison")]
     [InlineData("SELECT * FROM LATERAL (SELECT id FROM u) q;", "LATERAL")]
 
 
