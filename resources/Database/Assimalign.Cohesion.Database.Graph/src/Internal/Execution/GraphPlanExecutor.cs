@@ -323,6 +323,11 @@ internal static partial class GraphPlanExecutor
         internal long Viable => _viable;
         internal void ConsumeViable() => _viable++;
         internal Action<int>? OnConsume { get; init; }
+        internal void EnsureAvailable()
+        {
+            if (_physical >= WorkLimit)
+            { throw new GraphPlanningException("CG05004", string.Format(CultureInfo.CurrentCulture, ErrorMessages.ExpansionLimitExceeded, Physical, Viable, WorkLimit)); }
+        }
         internal void Consume()
         {
             bool overflow = _physical == long.MaxValue;

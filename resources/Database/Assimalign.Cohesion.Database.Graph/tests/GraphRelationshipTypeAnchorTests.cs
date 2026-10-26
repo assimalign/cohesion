@@ -14,7 +14,7 @@ using Assimalign.Cohesion.Database.Graph.Protocol;
 
 namespace Assimalign.Cohesion.Database.Graph.Tests;
 
-public sealed class GraphRelationshipTypeAnchorTests
+public sealed partial class GraphRelationshipTypeAnchorTests
 {
     private readonly ITestOutputHelper _output;
 

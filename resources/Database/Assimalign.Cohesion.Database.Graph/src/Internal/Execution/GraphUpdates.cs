@@ -231,7 +231,14 @@ internal sealed class GraphUpdates : IDisposable
         }
         await Task.CompletedTask.ConfigureAwait(false);
 
-        void Visit() { budget.VisitCandidate(); budget.Consume(); token.ThrowIfCancellationRequested(); }
+        void Visit()
+        {
+            token.ThrowIfCancellationRequested();
+            budget.EnsureAvailable();
+            budget.VisitCandidate();
+            budget.Consume();
+            token.ThrowIfCancellationRequested();
+        }
         StoredGraphRelationship? Created(ulong id)
         {
             token.ThrowIfCancellationRequested();

@@ -710,7 +710,12 @@ Quantified edges (including zero-length matches), wildcards, negations, mixed Bo
 expressions and WHERE-only relationship type predicates retain the existing safe access paths.
 An outer fixed edge can anchor a pattern that also contains quantified segments.
 
-The posting visit consumes one physical work unit, shared by both undirected orientations;
+Each posting head consumes one physical work unit before its key or record is inspected,
+including union priming and resumed cursor reads, shared by both undirected orientations.
+An exhausted work budget refuses the next head without charging an attempted overrun;
+empty cursor exhaustion adds no unit. Read-ahead resumes after yielding, so LIMIT stops
+without visiting the following posting. Cancellation is checked at every admitted head.
+Cursor staging uses the shared B-tree's bounded owned batches, as other access paths do;
 each accepted hop consumes one viable unit. Endpoint lookups do not add physical units, matching
 existing incident-hop accounting. Cursor batches, pending identities and retained relationship
 properties use the statement memory ledger and unwind on LIMIT, cancellation and failure.
