@@ -62,16 +62,16 @@ public sealed class SqlDmlSourceBindingTests
             Settings = new DatabaseConnectionSettings { Database = ServerTestHarness.DatabaseName, Principal = "dml-sources", EndPoint = harness.Listener.EndPoint },
             ConnectionFactory = harness.Listener.CreateFactory(),
         });
-        await using var connection = await client.ConnectAsync(TestTimeout.Token());
+        await using var connection = await client.ConnectAsync(TestTimeout.Token(30));
 
         // Act
         var failure = await Should.ThrowAsync<SqlClientException>(async () =>
-            await connection.ExecuteAsync(sql, cancellationToken: TestTimeout.Token()));
+            await connection.ExecuteAsync(sql, cancellationToken: TestTimeout.Token(30)));
 
         // Assert
         failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CK00001");
         failure.ConnectionUsable.ShouldBeTrue();
-        (await connection.QueryAsync("SELECT id FROM users ORDER BY id", cancellationToken: TestTimeout.Token()))
+        (await connection.QueryAsync("SELECT id FROM users ORDER BY id", cancellationToken: TestTimeout.Token(30)))
             .Select(row => row["id"]).ShouldBe([1, 2]);
     }
 
@@ -84,7 +84,7 @@ public sealed class SqlDmlSourceBindingTests
         await using var engine = SqlDatabaseEngine.Create("dml-binding", new());
         var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
-        await session.ExecuteAsync("CREATE TABLE t (id INT, v INT)", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("CREATE TABLE t (id INT, v INT NOT NULL)", cancellationToken: CancellationToken.None);
         await session.ExecuteAsync("CREATE TABLE s (id INT, label VARCHAR(23))", cancellationToken: CancellationToken.None);
         string sql = delete
             ? "DELETE FROM t AS x USING s LEFT JOIN t AS y ON s.id=y.id WHERE x.id=s.id RETURNING *, s.label AS source_label, y.v"
@@ -109,6 +109,7 @@ public sealed class SqlDmlSourceBindingTests
         join.Where.ShouldNotBeNull();
         returning.ShouldNotBeNull();
         returning.Select(column => column.Name).ShouldBe(["id", "v", "source_label", "v"]);
+        returning[1].IsNullable.ShouldBeFalse();
         returning[2].ColumnOrdinal.ShouldBe(3);
         returning[2].Type.ShouldBe(DatabaseType.String);
         returning[2].MaxLength.ShouldBe(23);
