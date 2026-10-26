@@ -2596,6 +2596,11 @@ cleanup as label postings. Instance-local posting counters and mutation/read hoo
 deterministic storage tests without new EventSource events or public surface. Tests cover split
 ranges, long names, multiple replacements, old snapshots, rollback, detach, recovery images,
 missing registration and interrupted mutation/cursor cleanup.
+The nonparallel scripted reader/writer test pauses each selected type posting before its
+record recheck across multiple cursor batches, then replaces or deletes that relationship,
+commits or rolls back, and purges while the reader's snapshot stays pinned. Pruning tests
+also count removed entries: each dead relationship version contributes two adjacency entries
+and one type posting, so two replacements and one deletion remove nine entries.
 
 GQ-R2 supplies planner anchors, estimates and large-graph scan-avoidance evidence. This run
 adds no planner use or language behavior. Neo4j token-scan behavior was consulted at
