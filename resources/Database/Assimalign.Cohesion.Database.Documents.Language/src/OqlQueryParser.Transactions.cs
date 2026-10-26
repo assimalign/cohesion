@@ -1,3 +1,5 @@
+using Assimalign.Cohesion.Database.Language;
+
 namespace Assimalign.Cohesion.Database.Documents.Language;
 
 public sealed partial class OqlQueryParser
@@ -13,6 +15,11 @@ public sealed partial class OqlQueryParser
         if (requiresKind && !hasKind)
         {
             Error("CD00002", ErrorMessages.TransactionKindRequired, Current);
+        }
+
+        if (command == OqlTransactionCommand.Rollback && Is("TO"))
+        {
+            _diagnostics.Add(QueryDiagnostics.UnsupportedClause("TO", Profile.Language, Span(Current, Current)));
         }
 
         var isolation = OqlTransactionIsolation.Snapshot;

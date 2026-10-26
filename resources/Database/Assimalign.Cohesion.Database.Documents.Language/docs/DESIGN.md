@@ -604,7 +604,9 @@ engine-side C# operations.
 `OqlTransactionExpression` carries a validated `OqlTransactionCommand`, an
 `OqlTransactionIsolation`, and the complete command span. Transaction controls bypass planning
 and execute on the owning Documents session after diagnostics are checked. The language package
-adds no dependency on the transaction kernel. All transaction words remain contextual identifiers.
+adds no dependency on the transaction kernel. All transaction words remain contextual identifiers,
+including implicit FROM, DELETE and UPDATE aliases named `savepoint`. SAVEPOINT is recognized
+as unsupported only at statement start; ROLLBACK reports its unsupported `TO` clause in the parser.
 
 The grammar is `(BEGIN [WORK | TRAN | TRANSACTION] | START (WORK | TRAN | TRANSACTION))
 [ISOLATION LEVEL (SNAPSHOT | READ COMMITTED)]`, `COMMIT [WORK | TRAN | TRANSACTION]`, and

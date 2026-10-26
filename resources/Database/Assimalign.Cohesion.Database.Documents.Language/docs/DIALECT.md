@@ -8,7 +8,8 @@ In-process Documents sessions accept `BEGIN [WORK | TRAN | TRANSACTION]`,
 `ISOLATION LEVEL SNAPSHOT` or `ISOLATION LEVEL READ COMMITTED`. Snapshot is the default,
 intentionally differing from Couchbase SQL++'s READ COMMITTED default. Bare BEGIN and explicit
 SNAPSHOT extend the [SQL++ grammar](https://github.com/couchbaselabs/docs-devex/blob/c3bb1549af4887019b9983e371d9e8b4f569052c/modules/n1ql/partials/grammar/tcl.ebnf#L9-L28).
-Transaction words remain contextual, and each command returns Success with affected count zero.
+Transaction words remain contextual, including implicit FROM and DML aliases named `savepoint`,
+and each command returns Success with affected count zero.
 
 Commands use the session's existing transaction, including one begun through its C# API.
 COMMIT or ROLLBACK without an open transaction gives CD04104. Nested BEGIN gives CK04004 and
@@ -17,12 +18,15 @@ text ROLLBACK recovers the session. COMMIT on a faulted transaction gives CD0410
 without committing. Malformed text in a faulted transaction also preserves CD04101.
 OQL CREATE/DROP COLLECTION/INDEX in an explicit transaction gives CD04105 and aborts it,
 including conditional no-ops. C# collection operations retain their existing transaction contract.
-SAVEPOINT, ROLLBACK TO SAVEPOINT and SET TRANSACTION remain CK00001. EXPLAIN accepts no
+SAVEPOINT, ROLLBACK TO SAVEPOINT and SET TRANSACTION remain CK00001; the rollback form reports
+the unsupported clause at `TO`. EXPLAIN accepts no
 transaction control. Unsupported isolation spellings are CD00002.
 
 Until OQ-T2 adds negotiated transaction status and safe pooled reset, Documents server sessions
 refuse every text transaction command with CD07002 over InMemory and TCP. In-process sessions
 accept them. T1 changes neither wire identifiers nor persisted formats.
+
+## Quoted identifiers
 
 Double-quoted collection, property and alias names accept doubled `""` as one embedded
 double quote: `"a""b"` names `a"b`. This extends the existing double-quoted identifier syntax;

@@ -62,7 +62,7 @@ internal static class OqlUnsupportedVocabulary
         new("START", OqlClauses.Begin, OqlWordPosition.Statement),
         new("COMMIT", OqlClauses.Commit, OqlWordPosition.Clause),
         new("ROLLBACK", OqlClauses.Rollback, OqlWordPosition.Clause),
-        new("SAVEPOINT", "SAVEPOINT", OqlWordPosition.Clause),
+        new("SAVEPOINT", "SAVEPOINT", OqlWordPosition.Statement),
         new("WITH", "WITH", OqlWordPosition.Clause),
         new("JOIN", "JOIN", OqlWordPosition.Clause),
         new("NEST", "NEST", OqlWordPosition.Clause),

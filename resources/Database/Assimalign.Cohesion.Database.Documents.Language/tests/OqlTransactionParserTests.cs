@@ -76,6 +76,45 @@ public sealed class OqlTransactionParserTests
         statement.Diagnostics.ShouldBeEmpty();
     }
 
+    [Theory(DisplayName = "Cohesion Test [Documents.Language] - Transactions: SAVEPOINT remains an implicit source alias")]
+    [InlineData("SELECT * FROM items savepoint")]
+    [InlineData("DELETE FROM items savepoint WHERE savepoint.n = 1")]
+    [InlineData("UPDATE items savepoint SET n = 2 WHERE savepoint.n = 1")]
+    public void Parse_SavepointAsSourceAlias_ShouldKeepIdentifier(string source)
+    {
+        // Arrange / Act
+        var statement = new OqlQueryParser().Parse(source).ShouldBeOfType<OqlQueryStatement>();
+
+        // Assert
+        statement.Diagnostics.ShouldBeEmpty();
+        string? alias = statement.OqlExpression switch
+        {
+            OqlSelectExpression select => select.Alias,
+            OqlDeleteExpression delete => delete.Alias,
+            OqlUpdateExpression update => update.Alias,
+            _ => null,
+        };
+        alias.ShouldBe("savepoint");
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Documents.Language] - Transactions: rollback to a savepoint is refused at TO")]
+    [InlineData("ROLLBACK TO SAVEPOINT point")]
+    [InlineData("ROLLBACK WORK TO SAVEPOINT point")]
+    [InlineData("ROLLBACK TRAN TO SAVEPOINT point")]
+    [InlineData("ROLLBACK TRANSACTION TO SAVEPOINT point")]
+    public void Parse_RollbackToSavepoint_ShouldReportUnsupportedTo(string source)
+    {
+        // Arrange / Act
+        var statement = new OqlQueryParser().Parse(source);
+
+        // Assert
+        var diagnostic = statement.Diagnostics.ShouldHaveSingleItem();
+        diagnostic.Code.ShouldBe("CK00001");
+        diagnostic.Start.ShouldBe(source.IndexOf("TO", StringComparison.Ordinal));
+        diagnostic.End.ShouldBe(diagnostic.Start + 2);
+        diagnostic.Message.ShouldNotBeNull().ShouldContain("TO", Case.Sensitive);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Documents.Language] - Transactions: invalid direct AST enums are refused")]
     public void Construct_UndefinedEnums_ShouldRefuseValues()
     {
