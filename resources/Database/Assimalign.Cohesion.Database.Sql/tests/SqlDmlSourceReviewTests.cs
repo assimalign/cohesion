@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -57,8 +58,10 @@ public sealed class SqlDmlSourceReviewTests
         => Path.GetFullPath(Path.Combine(Path.GetDirectoryName(source)!, "..", ".."));
 
 #if !DEBUG
-    [Fact(DisplayName = "Cohesion Test [Sql] - Plain UPDATE: joined association state adds no allocation (#1714)")]
-    public async Task ExecuteAsync_PlainUpdate_ShouldKeepBaseAllocationBudget()
+    [Theory(DisplayName = "Cohesion Test [Sql] - Plain DML: joined association state adds no allocation (#1714)")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ExecuteAsync_PlainDml_ShouldKeepBaseAllocationBudget(bool delete)
     {
         // Arrange: an empty seek keeps the measurement independent of version retention.
         await using var engine = SqlDatabaseEngine.Create("dml-plain-allocation", new());
@@ -66,17 +69,18 @@ public sealed class SqlDmlSourceReviewTests
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         await session.ExecuteAsync("CREATE TABLE t(id INT PRIMARY KEY,v INT)", cancellationToken: CancellationToken.None);
         await using var transaction = await session.BeginTransactionAsync(IsolationLevel.ReadCommitted, CancellationToken.None);
-        var request = SqlQueryRequest.FromSql("UPDATE t SET v = 1 WHERE id = 1");
+        var request = SqlQueryRequest.FromSql(delete ? "DELETE FROM t WHERE id = 1" : "UPDATE t SET v = 1 WHERE id = 1");
         Measure(1000);
 
         // Act
         long allocated = long.MaxValue;
         for (int round = 0; round < 3; round++) { allocated = Math.Min(allocated, Measure(1000)); }
-        _output.WriteLine($"plain UPDATE bytes/1000={allocated}");
+        _output.WriteLine($"plain {(delete ? "DELETE" : "UPDATE")} {RuntimeInformation.ProcessArchitecture} bytes/1000={allocated}");
 
-        // Assert: e33bb46c1 plain executor measured 11,408,000 bytes on this full session
-        // path; ad1649de6 measured 11,416,000. An extra captured reference costs 8/execute.
-        allocated.ShouldBeLessThanOrEqualTo(11_408_000);
+        // Assert: e33bb46c1, Release .NET 10.0.13, win-arm64 and --arch x64 both measured
+        // UPDATE 11,408,000 and DELETE 10,832,000 bytes/1000 on this full session path.
+        // Allow 4,000 bytes of headroom, below one extra captured reference (8,000/1000).
+        allocated.ShouldBeLessThanOrEqualTo(delete ? 10_836_000 : 11_412_000);
 
         long Measure(int count)
         {
@@ -112,15 +116,80 @@ public sealed class SqlDmlSourceReviewTests
         var explain = await RowsAsync(session, "EXPLAIN " + sql);
         (await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None)).AffectedCount.ShouldBe(100);
         var metrics = session.LastStatementMetrics.ShouldNotBeNull();
-        _output.WriteLine($"records={metrics.RecordsExamined}; pairs={metrics.JoinCandidatePairs}; peak_hash={metrics.PeakHashMemoryBytes}");
+        _output.WriteLine($"records={metrics.RecordsExamined}; association_reads={metrics.DmlAssociationRowReads}; total_reads={metrics.RowReads}; pairs={metrics.JoinCandidatePairs}; peak_hash={metrics.PeakHashMemoryBytes}");
 
         // Assert
         metrics.RecordsExamined.ShouldBe(200);
+        metrics.DmlAssociationRowReads.ShouldBe(200);
+        metrics.PeakDmlTargetRows.ShouldBe(100);
+        metrics.RowReads.ShouldBeGreaterThan(metrics.DmlAssociationRowReads);
         metrics.JoinCandidatePairs.ShouldBe(100);
         metrics.JoinAccessPaths.ShouldBe(["join-hash"]);
         metrics.PeakHashMemoryBytes.ShouldBeGreaterThan(0);
         metrics.HashMemoryBytes.ShouldBe(0);
         explain.Any(row => row.OfType<string>().Any(text => text.Contains("HashJoin", StringComparison.Ordinal))).ShouldBeTrue();
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql] - Joined DML: unindexed target filter retains only qualifying identities (#1714)")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ExecuteAsync_TargetFilter_ShouldRetainOneIdentity(bool delete)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("dml-target-filter", new());
+        var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.ExecuteAsync("CREATE TABLE t(id INT,flag INT,v INT)", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("CREATE TABLE s(id INT,v INT)", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("INSERT INTO t VALUES " + string.Join(',', Enumerable.Range(1, 1000)
+            .Select(i => $"({i},{(i == 501 ? 1 : 0)},0)")), cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("INSERT INTO s VALUES(501,7)", cancellationToken: CancellationToken.None);
+
+        // Act
+        var result = await session.ExecuteAsync(delete ? "DELETE FROM t USING s WHERE t.flag=1 AND t.id=s.id"
+            : "UPDATE t SET v=s.v FROM s WHERE t.flag=1 AND t.id=s.id", cancellationToken: CancellationToken.None);
+        var metrics = session.LastStatementMetrics.ShouldNotBeNull();
+        _output.WriteLine($"records={metrics.RecordsExamined}; association_reads={metrics.DmlAssociationRowReads}; retained={metrics.PeakDmlTargetRows}; total_reads={metrics.RowReads}");
+
+        // Assert
+        result.AffectedCount.ShouldBe(1);
+        metrics.PeakDmlTargetRows.ShouldBe(1);
+        metrics.RecordsExamined.ShouldBe(1001);
+        metrics.DmlAssociationRowReads.ShouldBe(1001);
+        metrics.JoinCandidatePairs.ShouldBe(1);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Sql] - Joined DML: written source order and workaround are documented (#1714)")]
+    public void Documentation_SourceOrder_ShouldDescribeCurrentExecution()
+    {
+        // Arrange
+        string root = DatabaseDirectory();
+        string[] documents = [Path.Combine(root, "Assimalign.Cohesion.Database.Sql", "docs", "DESIGN.md"),
+            Path.Combine(root, "Assimalign.Cohesion.Database.Sql.Language", "docs", "DIALECT.md")];
+
+        // Act / Assert
+        foreach (string path in documents)
+        {
+            string text = File.ReadAllText(path);
+            text.ShouldContain("#1629", Case.Sensitive);
+            text.ShouldContain("FROM a, b", Case.Sensitive);
+            text.ShouldContain("FROM b, a", Case.Sensitive);
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Sql] - Joined DML: retry comment names all preparation catch sites (#1714)")]
+    public void Documentation_CascadeRetry_ShouldNameAllCatchSites()
+    {
+        // Arrange
+        string path = Path.Combine(DatabaseDirectory(), "Assimalign.Cohesion.Database.Sql", "src", "Internal", "Execution", "SqlPlanExecutor.CascadeRetry.cs");
+
+        // Act
+        string retries = File.ReadAllText(path);
+
+        // Assert
+        retries.ShouldContain("ExecutePlainDeleteAsync", Case.Sensitive);
+        retries.ShouldContain("PrepareJoinedUpdateIntentsAsync", Case.Sensitive);
+        retries.ShouldContain("ExecuteJoinedDeleteAsync", Case.Sensitive);
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - Joined DML: a primary-key target restriction seeks once with target outer (#1714)")]
@@ -146,6 +215,8 @@ public sealed class SqlDmlSourceReviewTests
 
         // Assert: one target fetch and one source fetch, no target scan.
         metrics.RecordsExamined.ShouldBe(2);
+        metrics.DmlAssociationRowReads.ShouldBe(2);
+        metrics.PeakDmlTargetRows.ShouldBe(1);
         metrics.JoinCandidatePairs.ShouldBe(1);
         explain.Count(row => row.Contains("IndexSeek")).ShouldBe(2);
     }

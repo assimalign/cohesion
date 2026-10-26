@@ -151,6 +151,7 @@ internal sealed partial class SqlPlanExecutor
         SqlStatementContext statement, CancellationToken cancellationToken, bool rejectMultiple)
     {
         var plan = source.Associations;
+        long readsBefore = statement.Metrics.RowReads;
         var target = plan.Bindings[source.TargetBinding].Source.Table!;
         Dictionary<SqlDerivedRelation, List<object?[]>>? derivedRows = null;
         foreach (var binding in plan.Bindings)
@@ -163,11 +164,22 @@ internal sealed partial class SqlPlanExecutor
         // All scans/cursors drain before row-lock waits and the physical apply gate.
         if (plan.Bindings.Any(binding => binding.Source.View is not null)) { _ = statement.RequireCatalogSnapshot(); }
 
+        var input = plan.Inputs[source.TargetBinding];
+        var targetFilter = ExecutionEvaluator(null, cancellationToken);
+        var frame = input.Filter is null ? null : new object?[plan.Columns.Count];
+        var targetWork = statement.Metrics.Analysis(plan.Bindings[source.TargetBinding]);
         var identities = new Dictionary<object?[], DmlAssociation>(ReferenceEqualityComparer.Instance);
-        foreach (var (location, values) in EnumerateRows(target, plan.Inputs[source.TargetBinding].Access, statement, cancellationToken))
+        foreach (var (location, values, writer) in EnumerateDmlTargetRows(target, input.Access, statement, cancellationToken))
         {
-            identities.Add(values, new(location.PageId, location.SlotIndex,
-                ReadVersionStamps(target, location.PageId, location.SlotIndex).Writer, values, values));
+            cancellationToken.ThrowIfCancellationRequested();
+            if (targetWork is not null) { targetWork.Candidates++; }
+            if (frame is not null)
+            {
+                values.CopyTo(frame, plan.Bindings[source.TargetBinding].Offset);
+                if (!targetFilter.Matches(input.Filter, frame)) { continue; }
+            }
+            identities.Add(values, new(location.PageId, location.SlotIndex, writer, values, values));
+            statement.Metrics.RecordDmlTargetRows(identities.Count);
         }
         var result = new Dictionary<ulong, DmlAssociation>();
         var sharedColumns = new bool[plan.Columns.Count];
@@ -195,7 +207,44 @@ internal sealed partial class SqlPlanExecutor
             // source buffers. Their evaluators request detached binary values on delivery.
             result.Add(key, identity with { Values = row });
         }
+        statement.Metrics.DmlAssociationRowReads = statement.Metrics.RowReads - readsBefore;
         return result;
+    }
+
+    // Joined collection needs the decoded writer as well as values. Keep this richer cursor
+    // separate so ordinary DML's iterator state and allocation budget do not grow by a stamp.
+    private IEnumerable<((PageId PageId, int SlotIndex) Location, object?[] Values, TransactionSequence Writer)> EnumerateDmlTargetRows(
+        SqlCatalogTable table, SqlAccessPath access, SqlStatementContext statement, CancellationToken cancellationToken)
+    {
+        var snapshot = statement.Snapshot;
+        if (access is SqlIndexSeekPath seek && TryResolveSeekTree(table, seek.Index, out var index))
+        {
+            statement.Metrics.AccessPath = $"seek:{seek.Index.Name}";
+            var bound = _definitions.Get(table, cancellationToken);
+            var range = BuildSeekRange(table, seek, bound.GetKey(seek.Index.ColumnNames).Ordinals);
+            var cursor = index.OpenCursor(snapshot, range, cancellationToken: cancellationToken);
+            try
+            {
+                while (cursor.MoveNextAsync(cancellationToken).GetAwaiter().GetResult())
+                {
+                    statement.Metrics.RecordsExamined++;
+                    var (pageId, slotIndex) = SqlRecordLocation.Unpack(cursor.CurrentEntryReference);
+                    if (!_storage.TryReadRecord(pageId, slotIndex, table.ObjectId, out var record)) { continue; }
+                    var values = DecodeRow(record, pageId, slotIndex, table, bound.MissingValues, out var writer, out var deleter);
+                    if (!snapshot.IsVisible(writer) || deleter != TransactionSequence.None && snapshot.IsVisible(deleter)) { continue; }
+                    yield return ((pageId, slotIndex), values, writer);
+                }
+            }
+            finally { cursor.DisposeAsync().GetAwaiter().GetResult(); }
+            yield break;
+        }
+
+        statement.Metrics.AccessPath = "scan";
+        foreach (var row in ScanVersions(table, cancellationToken, statement.Metrics))
+        {
+            if (!snapshot.IsVisible(row.Writer) || row.Deleter != TransactionSequence.None && snapshot.IsVisible(row.Deleter)) { continue; }
+            yield return (row.Location, row.Values, row.Writer);
+        }
     }
 
     private void RecheckDmlTargets(SqlCatalogTable table, Dictionary<ulong, DmlAssociation> associations,

@@ -49,6 +49,7 @@ internal sealed partial class SqlPlanExecutor
     private object?[] DecodeRow(ReadOnlyMemory<byte> record, PageId pageId, int slotIndex, SqlCatalogTable table,
         IReadOnlyList<SqlBoundExpression?> defaults, out TransactionSequence writer, out TransactionSequence deleter)
     {
+        _metrics?.RecordRowRead();
         object?[] values;
         int storedColumnCount;
 

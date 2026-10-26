@@ -20,6 +20,16 @@ before evaluating SET or writing. Association plans use SELECT predicate pushdow
 costing with the target pinned as the outer input. Safe target-only WHERE terms select target
 seeks; mandatory target/source equalities drive source index probes or the existing budgeted
 hash build. EXPLAIN exposes those access paths and algorithms. The full WHERE remains a residual.
+Equality-driven hash or seek steps are formed one at a time in written source order. For example,
+`UPDATE t SET v = b.v FROM a, b WHERE t.id = b.tid AND b.aid = a.id` visits |t| * |a|
+pairs before reaching b's hash. Write `FROM b, a` to make these equality joins linear in the
+input sizes. Both orders return correct results; general join-order search belongs to #1629.
+The pushed target filter runs before retaining target identities. Collection keeps the writer
+stamp from the original decode, avoiding a second whole-row read. Internal statement counters
+record association reads separately from total row reads, which also include stamp checks and
+tombstone pre-images, and record peak retained target identities. Target/association collections
+follow plain UPDATE/DELETE's existing unbudgeted retention; StatementMemoryBudget currently
+accounts for join hash builds, not these DML collections.
 Costing rewrites source-derived relations through the same identity map as WITH definitions, so
 volatile CTE sources materialize once. A private join-frame identity slot retains the original decoded
 target array by reference; a local map associates it with physical location and writer stamp.

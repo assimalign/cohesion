@@ -898,6 +898,7 @@ internal sealed partial class SqlPlanExecutor
             return;
         }
 
+        statement.Metrics.RecordRowRead();
         if (!_storage.TryReadRecord(location.PageId, location.SlotIndex, table.ObjectId, out var record))
         {
             throw new TransactionAbortedException(

@@ -217,8 +217,10 @@ internal sealed partial class SqlPlanExecutor
 
         IEnumerable<object?[]> ReadInput(int binding)
         {
+            // Joined DML already applied this binding's pushed filter before retaining identities.
+            if (dmlTarget?.Binding == binding) { return dmlTarget.Value.Rows; }
             var source = plan.Bindings[binding].Source;
-            var rows = dmlTarget?.Binding == binding ? dmlTarget.Value.Rows : inputIndexes[binding] is { } tree && plan.Inputs[binding].Access is SqlIndexSeekPath seek
+            var rows = inputIndexes[binding] is { } tree && plan.Inputs[binding].Access is SqlIndexSeekPath seek
                 ? SeekRows(source.Table!, seek, tree, statement, cancellationToken).Select(row => row.Values)
                 : ReadRelation(source, statement, cancellationToken, derivedRows);
             return FilterInput(rows, binding);

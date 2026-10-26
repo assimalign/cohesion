@@ -96,6 +96,29 @@ internal sealed class SqlStatementMetrics
         }
     }
 
+    /// <summary>All row reads during joined DML, including stamp checks and tombstone pre-images.</summary>
+    internal long RowReads => (_accessPath as JoinedDmlWork)?.RowReads ?? 0;
+
+    internal void RecordRowRead()
+    {
+        if (_accessPath is JoinedDmlWork work) { work.RowReads++; }
+    }
+
+    /// <summary>Row reads while collecting target/source associations, before validation and apply.</summary>
+    internal long DmlAssociationRowReads
+    {
+        get => (_accessPath as JoinedDmlWork)?.AssociationRowReads ?? 0;
+        set { if (_accessPath is JoinedDmlWork work) { work.AssociationRowReads = value; } }
+    }
+
+    /// <summary>Peak target identities retained after the pushed target filter.</summary>
+    internal int PeakDmlTargetRows => (_accessPath as JoinedDmlWork)?.PeakTargetRows ?? 0;
+
+    internal void RecordDmlTargetRows(int count)
+    {
+        if (_accessPath is JoinedDmlWork work) { work.PeakTargetRows = Math.Max(work.PeakTargetRows, count); }
+    }
+
     /// <summary>
     /// Gets or sets the access path the executor drove ("scan", or
     /// "seek:&lt;index&gt;", or one "join-scan"/"join-seek:&lt;index&gt;" entry per join step separated by semicolons), empty for
@@ -236,6 +259,9 @@ internal sealed class SqlStatementMetrics
         internal JoinedDmlWork() : base([]) { }
 
         internal (SqlPlan Plan, LockStatementMark Mark)? DmlStatement;
+        internal long RowReads;
+        internal long AssociationRowReads;
+        internal int PeakTargetRows;
     }
 
     [global::System.Diagnostics.DebuggerDisplay("AnalysisState")]

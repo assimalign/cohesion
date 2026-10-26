@@ -17,8 +17,9 @@ internal sealed partial class SqlPlanExecutor
         return ValueTask.CompletedTask;
     }
 
-    // Private control flow, caught only by ExecuteDeleteAsync before any apply can
-    // use this acquisition path. This never becomes a user diagnostic or wire error.
+    // Private preparation control flow, caught by ExecutePlainDeleteAsync,
+    // PrepareJoinedUpdateIntentsAsync and ExecuteJoinedDeleteAsync before apply.
+    // This never becomes a user diagnostic or wire error.
     private sealed class SqlCascadeLockRetry : Exception
     {
         internal SqlCascadeLockRetry(LockResource resource, LockMode mode)

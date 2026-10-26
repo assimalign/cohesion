@@ -1084,6 +1084,7 @@ internal sealed partial class SqlPlanExecutor
     /// </exception>
     private (TransactionSequence Writer, TransactionSequence Deleter) ReadVersionStamps(SqlCatalogTable table, PageId pageId, int slotIndex)
     {
+        _metrics?.RecordRowRead();
         var record = _storage.ReadRow(pageId, slotIndex);
 
         if (record.Length < SqlRowCodec.StampHeaderSize)
@@ -1103,6 +1104,7 @@ internal sealed partial class SqlPlanExecutor
     /// </summary>
     private void TombstoneVersion(SqlStatementContext statement, StorageTransaction bracket, PageId pageId, int slotIndex)
     {
+        statement.Metrics.RecordRowRead();
         var current = _storage.ReadRow(pageId, slotIndex);
         byte[] tombstoned = SqlRowCodec.WithDeleter(current.Span, statement.Transaction.Sequence);
         _storage.UpdateRow(bracket, pageId, slotIndex, tombstoned);

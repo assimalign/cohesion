@@ -128,6 +128,12 @@ INNER, LEFT and CROSS joins. RIGHT/FULL joins retain their CK00001 refusal.
 These forms execute and are advertised as UPDATE FROM and DELETE USING in the SQL profile.
 Plain EXPLAIN describes the target/source association plan without applying the mutation.
 
+Equality-driven hash or seek steps follow written source order. For example,
+`UPDATE t SET v = b.v FROM a, b WHERE t.id = b.tid AND b.aid = a.id` visits |t| * |a|
+pairs before b's hash; write `FROM b, a` to make these equality joins linear in the input sizes.
+Results are correct in either order. General join-order search is deferred to #1629; place a
+source connected by equality to the target before sources that depend on it.
+
 SET values, WHERE and RETURNING resolve against the target plus source namespace. SET destinations
 remain target columns. An alias hides the original relation name; self-joins require distinct
 visible names. Unknown or ambiguous columns use located CS01015, absent tables CS01014, and
