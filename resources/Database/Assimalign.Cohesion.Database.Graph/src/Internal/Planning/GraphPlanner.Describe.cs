@@ -25,6 +25,7 @@ internal sealed partial class GraphPlanner
         GraphGroupingPlan => "GroupAggregate",
         GraphSortKeyPlan => "SortKey",
         GraphSortPagePlan => "SortPage",
+        GraphAnchor { RelationshipTypes: not null } => "RelationshipTypeScan",
         GraphAnchor { Property: not null } => "IndexSeek",
         GraphAnchor { Label: not null } => "LabelScan",
         GraphAnchor => "NodeScan",
@@ -87,13 +88,17 @@ internal sealed partial class GraphPlanner
                             .Where(candidate => candidate.PropertyKey == anchor.Property)
                             .OrderBy(candidate => candidate.Name, StringComparer.Ordinal).FirstOrDefault().Name ?? index;
                     }
-                    int parent = Add(DescribeOperator(anchor),
-                        pathId, anchor.UnionLabels is { } union ? string.Join("|", union) : anchor.Label, index,
-                        $"node={anchor.NodeIndex}; property={anchor.Property}; value={Value(anchor.Value)}" +
-                        (anchor.UnionLabels is null ? "" : "; combine=union"));
-                    // The executor expands right of the anchor, then left, in this exact order.
                     var shape = path.Shape ?? GraphPathShape.Create(path.Pattern);
-                    foreach (int edge in Enumerable.Range(anchor.NodeIndex, shape.Segments.Count - anchor.NodeIndex)
+                    int parent = anchor.RelationshipTypes is { } types
+                        ? Add(DescribeOperator(anchor), pathId, string.Join("|", types),
+                            detail: $"edge={anchor.NodeIndex}; direction={shape.Segments[anchor.NodeIndex].Body.Edge!.Direction}; postings=(type_id,relationship); combine=union; physical=visited_postings; viable=accepted_hops; physical_limit={budget?.WorkLimit ?? GraphPlanExecutor.ExpansionBudget.PhysicalLimit}",
+                            estimate: anchor.EstimatedRows)
+                        : Add(DescribeOperator(anchor), pathId, anchor.UnionLabels is { } union ? string.Join("|", union) : anchor.Label, index,
+                            $"node={anchor.NodeIndex}; property={anchor.Property}; value={Value(anchor.Value)}" +
+                            (anchor.UnionLabels is null ? "" : "; combine=union"), anchor.EstimatedRows);
+                    // The posting supplies its edge directly; only the remaining edges expand.
+                    int rightStart = anchor.NodeIndex + (anchor.RelationshipTypes is null ? 0 : 1);
+                    foreach (int edge in Enumerable.Range(rightStart, shape.Segments.Count - rightStart)
                         .Concat(Enumerable.Range(0, anchor.NodeIndex).Reverse()))
                     {
                         var segment = shape.Segments[edge];
@@ -137,10 +142,10 @@ internal sealed partial class GraphPlanner
             }
         }
 
-        int Add(string name, int? parent, string? target = null, string? index = null, string? detail = null)
+        int Add(string name, int? parent, string? target = null, string? index = null, string? detail = null, long? estimate = null)
         {
             int id = nodes.Count;
-            nodes.Add(new DatabasePlanNode { NodeId = id, ParentId = parent, Operator = name, Target = target, Index = index, Detail = detail });
+            nodes.Add(new DatabasePlanNode { NodeId = id, ParentId = parent, Operator = name, Target = target, Index = index, Detail = detail, EstimatedRows = estimate });
             return id;
         }
     }
