@@ -450,11 +450,10 @@ public sealed class GqlLabelChainExecutionTests
     /// <summary>
     /// Anchor selection reads the visible indexes once and each variable's equalities once, so 20
     /// indexes against a 100-label conjunction and 10,000 equalities plan in linear time, where a
-    /// lookup per label, equality and index took minutes. The choice is unchanged: the first label
-    /// with an index on a key the node has a value for, then that label's key whose value comes
-    /// first, inline properties before WHERE equalities.
+    /// lookup per label, equality and index took minutes. Candidate counts choose between labels'
+    /// seeks; within each label, its key whose value comes first still wins, inline before WHERE.
     /// </summary>
-    [Fact(DisplayName = "Cohesion Test [Graph] - Planner: anchor selection is linear in labels, equalities and indexes and chooses as before")]
+    [Fact(DisplayName = "Cohesion Test [Graph] - Planner: anchor selection is linear in labels, equalities and indexes and costs competing seeks")]
     public async Task Plan_ManyLabelsEqualitiesAndIndexes_ShouldChooseAnchorInLinearTimeAsync()
     {
         // Arrange
@@ -475,21 +474,22 @@ public sealed class GqlLabelChainExecutionTests
             string.Join(" AND ", Enumerable.Range(0, chainLength).Select(i => "n.k" + i.ToString(CultureInfo.InvariantCulture) + " = 1")) + " RETURN n.name";
 
         // Act
-        var timer = Stopwatch.StartNew();
+        long definitionReads = 0;
+        database.Store.OnIndexDefinitionRead = () => definitionReads++;
         var same = await ColumnAsync(session, sameKey);
         var distinct = await ColumnAsync(session, distinctKeys);
-        timer.Stop();
         var labelOrder = (await PlanAsync(database, session, "MATCH (n:A&B {p: 1}) WHERE n.q = 2 RETURN n.name")).MatchClauses.Single().Paths.Single().Anchor;
         var reversed = (await PlanAsync(database, session, "MATCH (n:B&A {q: 2}) WHERE n.p = 1 RETURN n.name")).MatchClauses.Single().Paths.Single().Anchor;
         var inlineFirst = (await PlanAsync(database, session, "MATCH (n:A {q: 2, p: 1}) RETURN n.name")).MatchClauses.Single().Paths.Single().Anchor;
         var nullInline = (await PlanAsync(database, session, "MATCH (n:A {p: null}) WHERE n.q = 3 AND n.p = 1 RETURN n.name")).MatchClauses.Single().Paths.Single().Anchor;
         var unindexed = (await PlanAsync(database, session, "MATCH (n:" + conjunction + ") WHERE n.name = 'all' RETURN n.name")).MatchClauses.Single().Paths.Single().Anchor;
+        database.Store.OnIndexDefinitionRead = null;
 
         // Assert
-        timer.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(15));
+        definitionReads.ShouldBe(7 * 23); // Each of seven clauses reads its 23 index definitions once.
         same.ShouldBe(["all"]);
         distinct.ShouldBeEmpty();
-        (labelOrder.Label, labelOrder.Property, labelOrder.Value).ShouldBe(("A", "p", (object?)1L));
+        (labelOrder.Label, labelOrder.Property, labelOrder.Value).ShouldBe(("B", "p", (object?)1L));
         (reversed.Label, reversed.Property, reversed.Value).ShouldBe(("B", "p", (object?)1L));
         (inlineFirst.Label, inlineFirst.Property, inlineFirst.Value).ShouldBe(("A", "q", (object?)2L));
         (nullInline.Label, nullInline.Property, nullInline.Value).ShouldBe(("A", "q", (object?)3L));

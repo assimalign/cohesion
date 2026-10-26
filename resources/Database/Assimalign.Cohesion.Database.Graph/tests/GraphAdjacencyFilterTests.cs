@@ -156,7 +156,8 @@ public sealed class GraphAdjacencyFilterTests
         var database = await engine.CreateDatabaseAsync("graph", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         // Act
-        await using var result = (await session.ExecuteAsync("EXPLAIN MATCH (a)-[:T]->" + quantifier + "(b) RETURN a", cancellationToken: CancellationToken.None)).ShouldBeAssignableTo<DatabaseResultSet>();
+        // Bind the endpoint so this corpus continues to exercise adjacency rather than a type leaf.
+        await using var result = (await session.ExecuteAsync("EXPLAIN MATCH (a) WITH a MATCH (a)-[:T]->" + quantifier + "(b) RETURN a", cancellationToken: CancellationToken.None)).ShouldBeAssignableTo<DatabaseResultSet>();
         var details = new List<string>();
         await foreach (var row in result.GetRowsAsync(CancellationToken.None))
         { if (Equals(row.GetValue(2), "Expand")) { details.Add((string)row.GetValue(5)!); } }
