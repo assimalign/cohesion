@@ -173,6 +173,8 @@ internal sealed partial class SqlPlanExecutor
                 return await ExecuteDropViewAsync(dropView, statement, cancellationToken).ConfigureAwait(false);
             case SqlCreateSchemaPlan createSchema:
                 return await ExecuteCreateSchemaAsync(createSchema, statement, cancellationToken).ConfigureAwait(false);
+            case SqlTruncatePlan truncate:
+                return await ExecuteTruncateAsync(truncate, statement, cancellationToken).ConfigureAwait(false);
             case SqlDropTablePlan drop:
                 return await ExecuteDropTableAsync(drop, statement, cancellationToken).ConfigureAwait(false);
             case SqlDropSchemaPlan dropSchema:

@@ -52,6 +52,19 @@ public static class SqlExpressionRenderer
     // in some position: the LIKE escape clause, IS UNKNOWN, and NULLS FIRST/LAST.
     private static readonly string[] _positionalWords = ["ESCAPE", "UNKNOWN", "BOTH", "LEADING", "TRAILING", "NULLS"];
 
+    /// <summary>Renders TRUNCATE as canonical SQL without a terminator.</summary>
+    /// <param name="query">The parsed statement.</param>
+    /// <returns>The table list and explicit effective identity and dependency policies.</returns>
+    /// <exception cref="ArgumentNullException">The query is null.</exception>
+    public static string Render(SqlTruncateExpression query)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        return "TRUNCATE TABLE " + string.Join(", ", query.Tables.Select(target =>
+            (target.Only ? "ONLY " : "") + (target.Table.SchemaName is { } schema ? Identifier(schema) + "." : "") +
+            Identifier(target.Table.TableName))) + (query.RestartIdentity ? " RESTART IDENTITY" : " CONTINUE IDENTITY") +
+            (query.Cascade ? " CASCADE" : " RESTRICT");
+    }
+
     // Builtin window functions. An accepted quoted uppercase or mixed-case spelling is a
     // distinct name: keep it delimited so rendering cannot turn it into an unquoted built-in.
     private static readonly string[] _windowFunctions =

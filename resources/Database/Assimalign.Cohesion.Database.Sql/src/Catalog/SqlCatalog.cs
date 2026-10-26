@@ -174,8 +174,11 @@ public sealed partial class SqlCatalog
 
     // The catalog owns committed reclamation state and its retirement, as it owns pending
     // migrations and script receipts; the reclamation worker receives identities only.
-    /// <summary>Captures the retired table identities whose storage reclamation is pending.</summary>
-    /// <returns>A read-only snapshot unaffected by later drops or completed reclamations.</returns>
+    /// <summary>Captures the unpublished table-owner identities whose storage reclamation is pending.</summary>
+    /// <returns>A read-only snapshot unaffected by later publications or completed reclamations.</returns>
+    /// <remarks>Prepared TRUNCATE owners can become live by removing their intent atomically with
+    /// publication. Reclamation must wait for transaction and statement pins and then recheck that
+    /// the identity still has a committed intent before freeing any owner pages.</remarks>
     /// <exception cref="StorageOfflineException">The catalog is offline.</exception>
     public IReadOnlyList<ulong> GetPendingTableReclamations()
     {
@@ -212,6 +215,8 @@ public sealed partial class SqlCatalog
             _storage.DeleteRow(transaction, location.PageId, location.SlotIndex);
             transaction.Commit();
             _pendingReclamations.Remove(objectId);
+            _truncatedTables.Remove(objectId);
+            Volatile.Write(ref _truncatedTableCount, _truncatedTables.Count);
             return default;
         }
     }

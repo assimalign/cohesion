@@ -227,6 +227,9 @@ internal sealed partial class SqlSchemaProvisioner
             case SqlDropTableExpression drop:
                 yield return drop.Table;
                 break;
+            case SqlTruncateExpression truncate:
+                foreach (var target in truncate.Tables) { yield return target.Table; }
+                break;
         }
     }
 

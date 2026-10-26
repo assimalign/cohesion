@@ -48,6 +48,9 @@ public static class SqlClauses
     /// <summary>A <c>DROP TABLE</c> statement.</summary>
     public const string DropTable = "DROP TABLE";
 
+    /// <summary>Empty one or more tables, with identity and foreign-key policies.</summary>
+    public const string Truncate = "TRUNCATE";
+
     /// <summary>A <c>DROP SCHEMA</c> SQL namespace removal.</summary>
     public const string DropSchema = "DROP SCHEMA";
 

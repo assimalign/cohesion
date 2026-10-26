@@ -82,7 +82,16 @@ internal sealed class SqlTableReclamation
                 foreach (var pending in _pending.Values.ToArray())
                 {
                     token.ThrowIfCancellationRequested();
+                    // A prepared TRUNCATE owner can become live atomically with removal of
+                    // its intent. Its statement/transaction pins prevent any free before that
+                    // decision. Recheck after the pins clear, before touching owner pages.
                     if (!CanReclaim(pending)) { continue; }
+                    if (!_database.Catalog.IsTableReclamationPending(pending.ObjectId))
+                    {
+                        _pending.Remove(pending.ObjectId);
+                        Volatile.Write(ref _pendingCount, _pending.Count);
+                        continue;
+                    }
                     if (!pending.Started)
                     {
                         pending.Started = true;

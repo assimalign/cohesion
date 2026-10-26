@@ -53,6 +53,7 @@ internal sealed class SqlDeclaredScript
         SqlCreateSchemaExpression schema => SqlObjectIdentity.Schema(schema.Name),
         SqlAlterTableExpression table => SqlObjectIdentity.Table(table.Table.SchemaName ?? SqlPlanner.DefaultSchema, table.Table.TableName),
         SqlDropTableExpression table => SqlObjectIdentity.Table(table.Table.SchemaName ?? SqlPlanner.DefaultSchema, table.Table.TableName),
+        SqlTruncateExpression truncate => SqlObjectIdentity.Table(truncate.Tables[0].Table.SchemaName ?? SqlPlanner.DefaultSchema, truncate.Tables[0].Table.TableName),
         SqlDropSchemaExpression schema => SqlObjectIdentity.Schema(schema.Name),
         SqlCreateIndexExpression index => SqlObjectIdentity.Index(index.Table.SchemaName ?? SqlPlanner.DefaultSchema, index.Table.TableName, index.IndexName),
         SqlDropIndexExpression index => SqlObjectIdentity.Index(index.Table.SchemaName ?? SqlPlanner.DefaultSchema, index.Table.TableName, index.IndexName),

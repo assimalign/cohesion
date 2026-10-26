@@ -47,6 +47,7 @@ public sealed class SqlKeywordDispositionTests
         ["CREATE"] = Parses("CREATE TABLE t (a INT)"),
         ["TABLE"] = Parses("CREATE TABLE t (a INT)"),
         ["DROP"] = Parses("DROP TABLE t"),
+        ["TRUNCATE"] = Parses("TRUNCATE TABLE t"),
         ["IF"] = Parses("DROP TABLE IF EXISTS t"),
         ["ALTER"] = Parses("ALTER TABLE t ADD COLUMN c INT"),
         ["ADD"] = Parses("ALTER TABLE t ADD COLUMN c INT"),

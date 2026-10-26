@@ -321,9 +321,49 @@ MySQL ON DUPLICATE KEY UPDATE and SQLite INSERT OR IGNORE/REPLACE report one CK0
 suggesting ON CONFLICT and execute nothing. These spellings and CONFLICT, DO, NOTHING,
 EXCLUDED remain contextual, so stored identifier quoting is unchanged. MERGE remains CS00002.
 
+## TRUNCATE (#1716, SQ-T1)
+
+`TRUNCATE [TABLE] [ONLY] name [, [ONLY] name ...] [RESTART IDENTITY | CONTINUE IDENTITY] [CASCADE | RESTRICT]`
+empties the complete table set in one catalog publication, returning an affected count of zero.
+Omitted policies mean CONTINUE IDENTITY and RESTRICT. Repeated references to a table are
+ignored. ONLY is retained in the AST and canonical rendering; there is no table inheritance.
+Targets must be stored tables; persisted and system views remain read-only. Schema-owned
+tables may be truncated because this changes their data, preserving ownership and definitions.
+Foreign keys, defaults, checks, collations, dropped-column layout, frozen missing values and
+all indexes remain defined. Neither row DELETE actions nor row scans run.
+
+RESTRICT refuses CS03067 (0A000) unless every referencing table is included, regardless of
+whether it contains rows. Self-references are allowed. CASCADE computes the recursive incoming
+foreign-key closure, including cycles and tables in other SQL namespaces, independent of
+ON DELETE action. The entire set is validated before publication. A concurrent identity or
+definition replacement retains retryable CS04064/CS04006; no partial table list is published.
+RESTART IDENTITY resets every identity in the resulting set to its declared START, including
+its declared INCREMENT. CONTINUE preserves the allocator's exact in-process next value and
+unused reservation block. Reopen still skips reserved values under the existing identity
+contract. General sequences remain outside this run.
+
+TRUNCATE inside BEGIN is refused with structured CS04066 (25001); prior transaction work
+and its active state remain usable. This deliberately differs from PostgreSQL's transaction-safe
+TRUNCATE (local reference: src/backend/commands/tablecmds.c:2225-2258). CTAS remains refused
+with the existing CS00003 parser diagnostic until SQ-T2.
+
+A snapshot captured before publication can read the same old rows after TRUNCATE commits,
+in process and over InMemory/TCP. Tables receive fresh physical owner identities; pinned
+storage descriptions and dependent view bindings retain the retired owners. A statement snapshot
+retains its owner even when auto-commit or ReadCommitted binding starts after publication. Other table ALTER
+binding retains its existing behavior. Current readers see empty replacements. Deferred
+reclamation frees old rows and indexes only after all older transaction and statement pins end.
+Prepared storage is also durably reclaimable if cancellation, an exception or a crash prevents
+publication; recovery sees either the complete original set or the complete replacement set.
+No disk layout, record kind or wire framing changes.
+
+Grammar/defaults and duplicate handling follow PostgreSQL src/backend/parser/gram.y:7239-7256
+and src/backend/commands/tablecmds.c:1915-1917; closure/refusal follows
+src/backend/commands/tablecmds.c:2033-2090 and src/backend/catalog/heap.c:3701-3782.
+
 ## Statement matrix
 
-With INSERT ... ON CONFLICT (#1118), DML RETURNING (#1117), persisted CREATE/DROP VIEW (#1124), CREATE/DROP SCHEMA (#1030), set operations (#1114), quantified comparisons (#1718) and UPDATE ... FROM / DELETE ... USING (#1714), the profile measures **54 of 60 declared clauses** against the live SQL engine.
+With INSERT ... ON CONFLICT (#1118), DML RETURNING (#1117), persisted CREATE/DROP VIEW (#1124), CREATE/DROP SCHEMA (#1030), set operations (#1114), quantified comparisons (#1718) and UPDATE ... FROM / DELETE ... USING (#1714), TRUNCATE (#1716) brings the profile to **55 of 61 declared clauses** against the live SQL engine.
 Phase 22 measured 33 of 49.
 The earlier 32/48 figure included `JOIN`, `GROUP BY`, `HAVING`, and `SUBQUERY`,
 removed in Phase 12e (#1019–#1021), plus a no-op `CAST` removed in Phase 13.
@@ -360,6 +400,7 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | `DELETE` | Supported | optional `WHERE`, including correlated and uncorrelated subqueries; aggregates outside a child query are rejected; qualified references use the target name or its alias, which hides the base name (PostgreSQL `parse_relation.c:3759`); hidden/unknown qualifiers fail with located `CS01015` before any write and leave an explicit transaction active |
 | `CREATE TABLE` | Supported | Identity columns use GENERATED ALWAYS/BY DEFAULT AS IDENTITY or the SQL Server IDENTITY alias (see identity contract above). `IF NOT EXISTS`, column definitions with parameterized types, `COLLATE <name>`, `NOT NULL`/`NULL`, `DEFAULT <expression>`, column and table `PRIMARY KEY`, `REFERENCES`/`FOREIGN KEY`, `CHECK`, and `UNIQUE`; optional `CONSTRAINT <name>` |
 | `ALTER TABLE` | Supported subset, measured | ADD/DROP COLUMN and ADD/DROP CONSTRAINT execute. Full-definition `ALTER COLUMN c <type> [NULL | NOT NULL] [DEFAULT expression]` accepts nullability, length and precision changes that preserve storage type, scale, collation, domain and DEFAULT; tightening and every CHAR length change check existing live values and refuse changes requiring a rewrite. RENAME TO, RENAME [COLUMN], ALTER [COLUMN] SET/DROP DEFAULT and SET/DROP NOT NULL also execute (#1122). PostgreSQL TYPE/SET DATA TYPE and TYPE ... USING remain unsupported. ADD COLUMN nonvolatile defaults backfill old-row reads and apply to subsequent inserts that omit the column; explicit NULL follows nullability. Nullable additions without a default read NULL. NOT NULL additions to populated tables require a non-null default. Invalid defaults reject before mutation; expression defaults follow the fast-default contract below. Column COLLATE persists and governs default comparisons. See the default, atomicity and MVCC contract below (#1023). DROP COLUMN changes only the catalog: it rewrites no row, survives a crash at any point on one definition, and SELECTs running beside it read every value in its own column; see the DROP COLUMN contract below (#1241). |
+| `TRUNCATE` | Supported | Table lists, per-table ONLY, CONTINUE/RESTART IDENTITY and CASCADE/RESTRICT; auto-commit only; old snapshots retain their rows and defer storage reclamation. See the contract below. |
 | `DROP TABLE` | Supported | `IF EXISTS`; returns after catalog unpublication, with page reclamation asynchronous after older readers finish; the name may be recreated immediately |
 | `CREATE SCHEMA` | Supported subset, measured | `CREATE SCHEMA [IF NOT EXISTS] name` persists an empty SQL namespace; AUTHORIZATION and nested schema elements report named `CK00001` errors. Namespace names compare without case and keep their stored spelling. |
 | `DROP SCHEMA` | Supported subset, measured | `DROP SCHEMA [IF EXISTS] name [RESTRICT \| CASCADE]`; omission means RESTRICT. CASCADE removes contained tables/indexes and incoming foreign keys atomically, retaining external child tables. Compiled ownership blocks the operation. `dbo` cannot be dropped. |
@@ -385,7 +426,7 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | `ON DELETE CASCADE` / `RESTRICT` / `NO ACTION` / `SET NULL` / `SET DEFAULT` | Supported | omitted deletion action defaults to `NO ACTION`; a cascade deletes its whole transitive closure with no depth limit, so a self-referencing chain deletes however long it is (#1164), and a cycle deletes each row once; `DROP TABLE ... CASCADE` is not supported |
 | `ON UPDATE` | Recognized, not supported | absent from the profile; rejected with `CK00001` |
 | `START TRANSACTION` / `BEGIN [WORK\|TRANSACTION]` / `COMMIT [WORK\|TRANSACTION]` / `END` / `ROLLBACK [WORK\|TRANSACTION]` | Supported | Spellings map to the existing BEGIN/COMMIT/ROLLBACK session commands (+0 clauses). Like every SQL statement, a valid spelling without `;` receives informational CS00009, with no error or warning; with `;` it has no parser diagnostics. START and WORK are contextual, so columns named start/work remain valid. END takes no suffix; without a transaction its CS04002 message names COMMIT. Commit and rollback observe caller cancellation only before their end starts (#1246); a pre-canceled explicit end leaves the transaction usable. Once execution completes, automatic commit ignores caller cancellation and delivers the committed result; real append and durability failures retain their normal errors. Catalog DDL that self-committed finishes mandatory cleanup with CancellationToken.None and delivers its committed result even if the caller canceled; a successful CREATE TABLE requires no retry and exists once after reopen. `SqlCommitCancellationConformanceTests` covers the end boundary and committed rows after reopen. END WORK/TRANSACTION, AND [NO] CHAIN, modes, ROLLBACK [WORK] TO [SAVEPOINT], BEGIN TRAN/named transactions and COMMIT PREPARED stay CS00003. ABORT [WORK\|TRANSACTION], SAVEPOINT, RELEASE, SET TRANSACTION and PREPARE TRANSACTION stay CS00002 (#1012); TRANSACTION alone is not a statement. |
-| `MERGE`, `TRUNCATE`, `GRANT` | Not in the dialect | `CS00002` |
+| `MERGE`, `GRANT` | Not in the dialect | `CS00002` |
 
 ## Unique-build failure order (#1444)
 
@@ -3582,8 +3623,10 @@ the diagnostic fixes introduce no persisted-format change beyond #1422's format-
 | `CS02062` | INTERVAL duration overflow in assignment, DEFAULT or CAST | 22015 (`interval_field_overflow`) |
 | `CS02063` | FOREIGN KEY columns have incompatible collations | 42P21 (`collation_mismatch`) |
 | `CS04064` | A bound table was replaced while DDL waited; retry the statement | 40001 (`serialization_failure`) |
+| `CS04066` | TRUNCATE inside an explicit transaction | 25001 (`active_sql_transaction`) |
 | `CS04065` | Hard lock deadlock; roll back the victim transaction before retrying | 40P01 (`deadlock_detected`) |
 | `CS03065` | Function signature already exists | 42723 (`duplicate_function`) |
+| `CS03067` | TRUNCATE omits a required referencing table | 0A000 (`feature_not_supported`) |
 | `CS03066` | Compiled-schema ownership refuses session DDL | 42501 (`insufficient_privilege`) |
 
 Definition dependency refusals retain `CS03302` (2BP01), and engine-registered

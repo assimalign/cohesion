@@ -169,7 +169,7 @@ public class SqlDatabaseServerTests
 
         // Act: a command outside the declared dialect (the parser is total — only
         // unknown commands and empty input carry error-severity diagnostics)
-        await client.SendAsync(ProtocolMessageType.Execute, ProtocolExecuteMessage.Create("TRUNCATE TABLE users;").Encode());
+        await client.SendAsync(ProtocolMessageType.Execute, ProtocolExecuteMessage.Create("MERGE INTO users;").Encode());
 
         // Assert: parse failure, then the session still executes
         var errorFrame = await client.ExpectAsync(ProtocolMessageType.Error);

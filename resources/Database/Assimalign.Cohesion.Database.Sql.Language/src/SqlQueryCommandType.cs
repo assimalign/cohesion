@@ -15,6 +15,8 @@ public enum SqlQueryCommandType
     Create,
     Alter,
     Drop,
+    /// <summary>Empty a set of tables through deferred storage replacement.</summary>
+    Truncate,
     /// <summary>Begin a session transaction.</summary>
     Begin,
     /// <summary>Commit the session transaction.</summary>

@@ -153,6 +153,10 @@ public sealed partial class SqlQueryParser : QueryParser
             {
                 expression = ParseAlterTable(ref lexer);
             }
+            else if (keyword.Equals("TRUNCATE", StringComparison.OrdinalIgnoreCase))
+            {
+                expression = ParseTruncate(ref lexer);
+            }
             else if (keyword.Equals("DROP", StringComparison.OrdinalIgnoreCase))
             {
                 expression = ParseDrop(ref lexer);
@@ -629,6 +633,7 @@ public sealed partial class SqlQueryParser : QueryParser
         SqlCreateViewExpression => "CREATE VIEW",
         SqlCreateIndexExpression => "CREATE INDEX",
         SqlDropTableExpression => "DROP TABLE",
+        SqlTruncateExpression => "TRUNCATE",
         SqlDropSchemaExpression => "DROP SCHEMA",
         SqlDropViewExpression => "DROP VIEW",
         SqlDropIndexExpression => "DROP INDEX",
