@@ -51,7 +51,8 @@
     <value>SELECT VALUE requires exactly one expression without an alias or star.</value>
   </data>
   <data name="RowBytesInvalid" xml:space="preserve"><value>Field {0} is not JSON or a string.</value></data>
-  <data name="SelectConstructorDepthExceeded" xml:space="preserve"><value>SELECT {0} constructor values must be nested no deeper than 256 levels.</value></data>
+  <data name="ResultConstructorDepthExceeded" xml:space="preserve"><value>{0} {1} constructor values must be nested no deeper than 256 levels.</value></data>
+  <data name="DeleteCountMismatch" xml:space="preserve"><value>DELETE affected count disagrees with its staged document count.</value></data>
   <data name="ReturningNameInvalid" xml:space="preserve"><value>RETURNING projection names must not be empty.</value></data>
   <data name="ReturningDepthExceeded" xml:space="preserve"><value>RETURNING values must be nested no deeper than 256 levels, including the named projection object.</value></data>
   <data name="ReturningMemoryExceeded" xml:space="preserve"><value>RETURNING exceeds the statement memory budget of {0} bytes.</value></data>

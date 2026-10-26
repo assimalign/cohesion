@@ -24,6 +24,7 @@ internal sealed partial class DocumentExpressionEvaluator
     private readonly string? _alias;
     private readonly string? _starSourceName;
     private readonly string? _writeVerb;
+    private readonly string _resultClause;
     private readonly DateTimeOffset? _transactionStart;
     private int _constructorMaxDepth = 256;
     private readonly CancellationToken _cancellationToken;
@@ -41,13 +42,15 @@ internal sealed partial class DocumentExpressionEvaluator
     /// <param name="writeVerb">INSERT or UPSERT when constructors target the storage depth limit; otherwise null.</param>
     /// <param name="transactionStart">The UTC instant captured before the executing transaction began.</param>
     /// <param name="starSourceName">The FROM object member name for a synthetic UNNEST star, or null for a stored star.</param>
-    public DocumentExpressionEvaluator(string? alias, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken = default, string? writeVerb = null, DateTimeOffset? transactionStart = null, string? starSourceName = null, DocumentFunctionCatalog? functions = null, DatabaseName databaseName = default)
+    /// <param name="resultClause">The result clause named by constructor-depth diagnostics.</param>
+    public DocumentExpressionEvaluator(string? alias, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken = default, string? writeVerb = null, DateTimeOffset? transactionStart = null, string? starSourceName = null, DocumentFunctionCatalog? functions = null, DatabaseName databaseName = default, string resultClause = "SELECT")
     {
         _functions = functions ?? DocumentFunctionCatalog.Standard;
         _databaseName = databaseName;
         _alias = alias;
         _starSourceName = starSourceName;
         _writeVerb = writeVerb;
+        _resultClause = resultClause;
         _transactionStart = transactionStart;
         _cancellationToken = cancellationToken;
         _parameters = parameters;
@@ -192,9 +195,9 @@ internal sealed partial class DocumentExpressionEvaluator
         if (known && cached.Constant) { return cached.Value!; }
         bool constant = known ? cached.Constant : DocumentPlanner.IsConstant(expression);
         object value = expression is OqlArrayExpression array
-            ? DocumentJsonValue.Array(array.Elements.Select(element => Evaluate(element, document, group)), _writeVerb, _constructorMaxDepth)
+            ? DocumentJsonValue.Array(array.Elements.Select(element => Evaluate(element, document, group)), _writeVerb, _constructorMaxDepth, _resultClause)
             : DocumentJsonValue.Object(((OqlObjectExpression)expression).Members.Select(member =>
-                new KeyValuePair<string, object?>(member.Key, Evaluate(member.Value, document, group))), _writeVerb, _constructorMaxDepth);
+                new KeyValuePair<string, object?>(member.Key, Evaluate(member.Value, document, group))), _writeVerb, _constructorMaxDepth, _resultClause);
         if (!known) { _constructors.Add(key, (constant, constant ? value : null)); }
         return value;
     }
