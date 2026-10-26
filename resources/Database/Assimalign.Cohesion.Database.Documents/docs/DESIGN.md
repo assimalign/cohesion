@@ -1134,8 +1134,14 @@ bytes. EXPLAIN emits Returning or ReturningValue child nodes without evaluating 
 Documents previously had no statement memory budget. The new positive StatementMemoryBudget
 engine option defaults to SQL's existing 64 MiB convention and is snapshotted at construction.
 It bounds retained RETURNING results: metadata, row/value arrays (including normalization/result
-copies), scalar objects/strings, conservative cloned-JSON text/token estimates and whole-image
-bytes. Charges accumulate before rows enter the result list; CD05018 at the clause span rolls
+copies), scalar objects/strings, cloned JSON and whole-image bytes. Each JSON clone costs
+128 bytes of ownership overhead plus its raw UTF-8 length plus 12 bytes per JSON token
+(including property names and both container delimiters). JsonMarshal.GetRawUtf8Value and
+struct enumerators measure this without allocating a UTF-16 text copy. This accounts for dense
+arrays by token count while large strings pay for their bytes. A lone star retains one clone
+and one original raw image; each representation is charged once. A 1,024-byte ASCII object
+with one string property costs 2,448 bytes per row (224 row storage + 1,200 clone + 1,024 raw),
+plus 208 bytes of statement metadata. Charges accumulate before rows enter the result list; CD05018 at the clause span rolls
 back the statement on exhaustion. This does not retrofit accounting onto existing SELECT or
 mutation/source staging and is not a process-heap cap. The public option is a model configuration
 capability, not an assembly-visibility bridge. No new public interface or dependency is added.

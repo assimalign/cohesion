@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
@@ -73,13 +74,13 @@ internal static partial class DocumentPlanExecutor
                 Charge(value switch
                 {
                     string text => 32L + text.Length * 2L,
-                    // Cloned JSON owns both text and token metadata. A conservative charge
-                    // also bounds arrays of tiny scalars and deeply nested values.
-                    JsonElement element => 64L + element.GetRawText().Length * 16L,
+                    JsonElement element => JsonBytes(element),
                     _ => 32L,
                 });
                 values[index] = value is JsonElement owned ? owned.Clone() : value;
             }
+            // Star retains the original image in addition to the independently owned JSON
+            // cell. Charge that byte array once, separately from the clone's text/metadata.
             if (_wholeDocument) { Charge(document.Content.Length); }
             var rawContent = _wholeDocument ? document.Content : default;
             try
@@ -104,6 +105,28 @@ internal static partial class DocumentPlanExecutor
             => CreateResult(_plan, _rows, _cancellationToken, affectedCount);
 
         public void Dispose() => _writer.Dispose();
+
+        private long JsonBytes(JsonElement element)
+            // JsonDocument clones keep UTF-8 text and 12 bytes of metadata per token.
+            // Include 128 bytes for the document/arrays/boxed element; enumerate structs
+            // without allocating a UTF-16 copy or a depth-dependent reader stack.
+            => 128L + JsonMarshal.GetRawUtf8Value(element).Length + 12L * JsonTokens(element);
+
+        private long JsonTokens(JsonElement element)
+        {
+            _cancellationToken.ThrowIfCancellationRequested();
+            long tokens = 2; // containers retain a start and an end token
+            if (element.ValueKind == JsonValueKind.Object)
+            {
+                foreach (var property in element.EnumerateObject()) { tokens += 1 + JsonTokens(property.Value); }
+            }
+            else if (element.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in element.EnumerateArray()) { tokens += JsonTokens(item); }
+            }
+            else { return 1; }
+            return tokens;
+        }
 
         private void Charge(long bytes)
         {
