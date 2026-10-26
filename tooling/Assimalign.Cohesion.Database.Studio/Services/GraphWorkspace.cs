@@ -91,7 +91,7 @@ internal sealed partial class GraphWorkspace : LanguageWorkspace
     /// <summary>Path execution needs a read-only MATCH that returns exactly one bare variable.</summary>
     public static bool LooksLikePathQuery(string statement)
     {
-        if (ScriptSplitter.FirstKeyword(statement) != "MATCH")
+        if (ScriptSplitter.FirstKeyword(statement, StudioModel.Graph) != "MATCH")
         {
             return false;
         }
