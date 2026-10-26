@@ -264,7 +264,7 @@ Sql.Catalog has its own SQL-independent facet.
 The profile admits RIGHT [OUTER] JOIN with ON or ordered USING columns; FULL retains CK00001.
 SqlJoinedTableReference preserves an unaliased parenthesized item and its constituent
 namespaces. A group alias lowers to SqlDerivedTableReference over SELECT *, hiding the
-constituents and retaining optional column aliases. Parser parenthesis guards, expression
+constituents and retaining optional complete column-alias lists and the existing 32-level derived binding limit. Parser parenthesis guards, expression
 depth, canonical rendering and the conformance corpus cover both forms. The engine keeps
 written ordinals and RIGHT USING's coerced right representative while normalizing physical
 children to LEFT. Direct RIGHT/grouped DML sources fail CS05069 at binding; derived SELECT

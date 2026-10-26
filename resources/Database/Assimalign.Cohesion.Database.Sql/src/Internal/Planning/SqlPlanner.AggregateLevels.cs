@@ -132,6 +132,7 @@ internal sealed partial class SqlPlanner
         {
             if (relation is SqlJoinedTableReference group)
             {
+                RuntimeHelpers.EnsureSufficientExecutionStack();
                 Match(group.Item.Table, hidden);
                 foreach (var join in group.Item.Joins)
                 {
