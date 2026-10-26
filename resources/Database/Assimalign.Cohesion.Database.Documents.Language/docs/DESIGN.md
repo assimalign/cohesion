@@ -427,6 +427,11 @@ Constant classification does not make evaluation eager. Failed speculative seek 
 discarded, leaving ordinary row/branch evaluation to report OQL errors; cancellation propagates.
 VALUES and constructors retain the same short-circuit rules for closed bindings.
 
+Comprehension lookahead memoizes punctuation and END-delimited scopes in one reverse token pass.
+CASE, nested ARRAY/FIRST and ANY/SOME/EVERY are skipped as complete expressions while locating
+the enclosing FOR, including within WHEN. Dotted members, AS labels and object keys are names;
+they do not open or close expression scopes. ARRAY()/FIRST() retain their dedicated CK00001 refusal.
+
 ## Grammar, statement, and expression trees
 
 ```text

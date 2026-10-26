@@ -46,6 +46,28 @@ public sealed class OqlComprehensionParserTests
         statement.Diagnostics.ShouldBeEmpty();
     }
 
+    [Theory(DisplayName = "Cohesion Test [OQL] - Comprehensions: lookahead balances END-delimited mapping and WHEN expressions")]
+    [InlineData("(x) + CASE WHEN TRUE THEN 1 ELSE 2 END", "CASE WHEN TRUE THEN TRUE ELSE FALSE END")]
+    [InlineData("(x) IN ARRAY y FOR y IN [x] END", "ARRAY y FOR y IN [x] END")]
+    [InlineData("(x) + FIRST y FOR y IN [x] END", "FIRST y FOR y IN [x] END")]
+    [InlineData("(x) = ANY y IN [x] SATISFIES y END", "ANY y IN [x] SATISFIES y END")]
+    [InlineData("(x) = EVERY y IN [x] SATISFIES y END", "EVERY y IN [x] SATISFIES y END")]
+    [InlineData("(x) + x.end + x.from + x.as", "x.case")]
+    public void Parse_EndDelimitedChildren_ShouldBalanceLookahead(string mapping, string condition)
+    {
+        // Arrange / Act
+        foreach (string keyword in new[] { "ARRAY", "FIRST" })
+        {
+            var statement = Parse($"SELECT {keyword} {mapping} FOR x IN [1] WHEN {condition} END AS result FROM items");
+            // Assert
+            statement.Diagnostics.ShouldBeEmpty();
+            var node = statement.OqlExpression.ShouldBeOfType<OqlSelectExpression>().Projections[0].Expression.ShouldBeOfType<OqlComprehensionExpression>();
+            node.IsFirst.ShouldBe(keyword == "FIRST");
+            node.Variable.ShouldBe("x");
+            node.Predicate.ShouldNotBeNull();
+        }
+    }
+
     [Theory(DisplayName = "Cohesion Test [OQL] - Comprehensions: malformed and deferred forms locate one diagnostic")]
     [InlineData("SELECT ARRAY «FOR» x IN [1] END FROM c", "CD00002")]
     [InlineData("SELECT ARRAY «FROM» c", "CD00002")]
@@ -71,6 +93,25 @@ public sealed class OqlComprehensionParserTests
         diagnostic.Code.ShouldBe(code);
         diagnostic.Start.ShouldBe(start);
         diagnostic.End.ShouldBe(end);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [OQL] - Comprehensions: retired ARRAY and FIRST functions retain CK00001")]
+    [InlineData("ARRAY", "(1)")]
+    [InlineData("FIRST", "(1)")]
+    [InlineData("ARRAY", "(FIRST x FOR x IN [1] END)")]
+    [InlineData("FIRST", "(ARRAY x FOR x IN [1] END)")]
+    [InlineData("ARRAY", "(1) + FIRST y FOR y IN [1] END")]
+    [InlineData("FIRST", "(1) + ARRAY y FOR y IN [1] END")]
+    public void Parse_RetiredComprehensionCalls_ShouldRefuseFunctions(string keyword, string arguments)
+    {
+        // Arrange / Act
+        var statement = Parse($"SELECT {keyword}{arguments} FROM c");
+        // Assert
+        var diagnostic = statement.Diagnostics.ShouldHaveSingleItem();
+        diagnostic.Code.ShouldBe("CK00001");
+        diagnostic.Message.ShouldNotBeNull().ShouldContain($"The {keyword} clause", Case.Sensitive);
+        diagnostic.Start.ShouldBe(7);
+        diagnostic.End.ShouldBe(7 + keyword.Length);
     }
 
     [Theory(DisplayName = "Cohesion Test [OQL] - Comprehensions: parser depth guard covers nested mappings")]
