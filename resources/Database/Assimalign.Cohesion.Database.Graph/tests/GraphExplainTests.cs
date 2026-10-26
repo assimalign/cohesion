@@ -30,14 +30,14 @@ public sealed class GraphExplainTests
         // Act
         var rows = await RowsAsync(session, "EXPLAIN MATCH (a:Person {name:'Ada'})-[:KNOWS]->(b)-[:KNOWS]->(c) RETURN a");
         // Assert
-        rows.Count(row => Equals(row[2], "Expand")).ShouldBe(2);
+        rows.Count(row => Equals(row[2], "Expand")).ShouldBe(index ? 2 : 1);
         var anchor = rows[2];
-        anchor[2].ShouldBe(index ? "IndexSeek" : "LabelScan");
-        anchor[3].ShouldBe("Person");
+        anchor[2].ShouldBe(index ? "IndexSeek" : "RelationshipTypeScan");
+        anchor[3].ShouldBe(index ? "Person" : "KNOWS");
         anchor[4].ShouldBe(index ? "by_name" : null);
         if (index) { anchor[5].ShouldBe("node=0; property=name; value='Ada'"); }
         rows[3][1].ShouldBe(2);
-        rows[4][1].ShouldBe(3);
+        if (index) { rows[4][1].ShouldBe(3); }
     }
 
     [Theory(DisplayName = "Cohesion Test [Graph] - EXPLAIN: writes change neither nodes nor relationships after commit")]

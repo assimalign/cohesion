@@ -203,7 +203,7 @@ internal sealed partial class GraphPlanner
                 foreach (var path in clause.Paths)
                 {
                     var shape = pathShapes[path];
-                    paths.Add(new GraphPathPlan(path, ChooseAnchor(shape, anchors, boundVariables)) { Shape = shape });
+                    paths.Add(new GraphPathPlan(path, ChooseAnchor(shape, anchors, boundVariables, token)) { Shape = shape });
                     foreach (var binding in shape.Bindings())
                     { if (!groupVariables.Contains(binding.Name)) { boundVariables.Add(binding.Name); } }
                 }
@@ -1099,17 +1099,16 @@ internal sealed partial class GraphPlanner
     // Positive label conjunctions in the clause's top-level WHERE
     // AND chain supply the same required labels. Other label expressions remain residuals.
     //
-    // The choice is the first distinct required label, pattern before WHERE, with an index on a key the node
-    // has a value for, and of that label's indexed keys the one whose first non-null value comes
+    // Within each distinct required label, choose its indexed key whose first non-null value comes
     // first, inline properties before WHERE equalities. Selection costs the node's labels and values
     // plus the indexes its labels own, never their product: Neo4j's leaf planner likewise groups the
     // predicates once and visits only each label's own index descriptors
     // (cypher-planner .../leafplanner/index/NodeIndexLeafPlanner.scala:184, :201, :248-261, :279-296).
-    // Without a seek, choose the smallest retained-posting estimate across required labels and
-    // pure pattern unions at every node position; ties keep source order, pattern before WHERE.
+    // Compare bounded equality-range estimates with retained label and type-publication estimates
+    // at every eligible position. Equality seeks win ties, then source-ordered node/type candidates.
     // Neo4j's labelScanLeafPlanner reads HasLabels selections for pattern nodes
     // (labelScanLeafPlanner.scala:45-46, :73-78).
-    private GraphAnchor ChooseAnchor(GraphPathShape shape, AnchorSources sources, IReadOnlySet<string> boundVariables)
+    private GraphAnchor ChooseAnchor(GraphPathShape shape, AnchorSources sources, IReadOnlySet<string> boundVariables, CancellationToken token)
     {
         for (int i = 0; i < shape.Nodes.Count; i++)
         {
@@ -1157,22 +1156,51 @@ internal sealed partial class GraphPlanner
                 {
                     if (!tried.Add(label) || !indexes.TryGetValue(label, out var keys)) { continue; }
                     string? bestKey = null;
+                    ulong bestIndex = 0;
                     FirstValue best = new(int.MaxValue, null!);
-                    foreach (string key in keys)
+                    foreach (var index in keys)
                     {
+                        string key = index.Key;
                         // Inline positions precede every equality position, as the properties precede
                         // the WHERE clause.
                         FirstValue candidate;
                         if (inline.TryGetValue(key, out var property)) { candidate = property; }
                         else if (equalities.TryGetValue(key, out var equality)) { candidate = new(inline.Count + equality.Position, equality.Value); }
                         else { continue; }
-                        if (candidate.Position < best.Position) { best = candidate; bestKey = key; }
+                        if (candidate.Position < best.Position) { best = candidate; bestKey = key; bestIndex = index.Id; }
                     }
-                    if (bestKey is not null) { return new GraphAnchor(i, label, bestKey, best.Value); }
+                    if (bestKey is not null)
+                    {
+                        long cost = _database.Store.EstimateIndexCount(bestIndex, label, best.Value, _snapshot, token);
+                        // Prefer an equality seek on a tie, preserving the established preference
+                        // for a seek over its own label scan. Other ties retain source order.
+                        if (scan is null || cost < scanCost || cost == scanCost && scan.Property is null)
+                        { scan = new GraphAnchor(i, label, bestKey, best.Value); scanCost = cost; }
+                    }
                 }
             }
         }
-        return scan ?? new GraphAnchor(0, null, null, null);
+        // Only outer singleton edges can seed a path. Repeated bodies may match zero times;
+        // anchoring on one of their postings would lose those matches.
+        for (int i = 0; i < shape.Segments.Count; i++)
+        {
+            token.ThrowIfCancellationRequested();
+            if (shape.Segments[i] is not { Quantifier: null, Body.Edge: { } edge }) { continue; }
+            IReadOnlyList<string>? types = edge.LabelExpression is GqlLabelName name ? [name.Name]
+                : UnionLabels(edge.LabelExpression) ?? (edge.Type is { } typeName ? [typeName] : null);
+            if (types is not { Count: > 0 }) { continue; }
+            long cost = 0;
+            foreach (string type in types)
+            {
+                long count = _database.Store.EstimateRelationshipTypeCount(type);
+                cost = count > long.MaxValue - cost ? long.MaxValue : cost + count;
+            }
+            if (edge.Direction is GqlPatternDirection.Undirected or GqlPatternDirection.LeftOrRight)
+            { cost = cost > long.MaxValue / 2 ? long.MaxValue : cost * 2; }
+            if (scan is null || cost < scanCost)
+            { scan = new GraphAnchor(i, null, null, null) { RelationshipTypes = types }; scanCost = cost; }
+        }
+        return scan is null ? new GraphAnchor(0, null, null, null) : scan with { EstimatedRows = scanCost };
     }
 
     private static IReadOnlyList<string>? UnionLabels(GqlLabelExpression? expression)
@@ -1223,7 +1251,7 @@ internal sealed partial class GraphPlanner
         private readonly TransactionSnapshot _snapshot;
         private readonly IReadOnlyDictionary<string, object?>? _parameters;
         private readonly GqlExpression? _predicate;
-        private Dictionary<string, List<string>>? _indexedKeys;
+        private Dictionary<string, List<(string Key, ulong Id)>>? _indexedKeys;
         private Dictionary<string, Dictionary<string, FirstValue>>? _equalities;
         private readonly Dictionary<string, List<string>> _labels = new(StringComparer.Ordinal);
 
@@ -1241,14 +1269,14 @@ internal sealed partial class GraphPlanner
         }
 
         /// <summary>The indexed property keys of each label with at least one visible index.</summary>
-        internal Dictionary<string, List<string>> GetIndexedKeys()
+        internal Dictionary<string, List<(string Key, ulong Id)>> GetIndexedKeys()
         {
             if (_indexedKeys is not null) { return _indexedKeys; }
-            var indexed = new Dictionary<string, List<string>>(StringComparer.Ordinal);
-            foreach (var index in _database.Store.GetIndexes(_snapshot))
+            var indexed = new Dictionary<string, List<(string Key, ulong Id)>>(StringComparer.Ordinal);
+            foreach (var index in _database.Store.GetIndexIdentities(_snapshot))
             {
                 if (!indexed.TryGetValue(index.Label, out var keys)) { indexed.Add(index.Label, keys = []); }
-                keys.Add(index.PropertyKey);
+                keys.Add((index.Property, index.Id));
             }
             return _indexedKeys = indexed;
         }

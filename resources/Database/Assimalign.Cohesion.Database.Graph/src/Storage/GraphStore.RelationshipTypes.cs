@@ -29,6 +29,7 @@ public sealed partial class GraphStore
         if (!_relationshipTypeTokens.TryGetValue(relationship.Type, out var tokens))
         { _relationshipTypeTokens.Add(relationship.Type, tokens = []); }
         tokens.Add(record.TypeId);
+        _relationshipTypeCardinalities[relationship.Type] = _relationshipTypeCardinalities.GetValueOrDefault(relationship.Type) + 1;
     }
 
     private async ValueTask EnsureRelationshipTypesAsync(TransactionContext context, CancellationToken token)

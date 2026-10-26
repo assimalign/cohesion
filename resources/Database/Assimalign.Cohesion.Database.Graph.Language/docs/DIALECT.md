@@ -417,8 +417,10 @@ A non-negated labeled predicate in a MATCH clause's top-level AND chain supplies
 labels when its label expression is a pure conjunction: `MATCH (n) WHERE n:Keep RETURN n` and
 `MATCH (n) WHERE n IS LABELED Keep RETURN n` anchor like `(n:Keep)`. Required labels also enable
 property index seeks with inline or conjunctive WHERE equalities. Bound entities take precedence,
-then property seeks; otherwise the smallest retained-posting estimate across required labels
-and pure pattern unions chooses the anchor, breaking ties by source position. Estimates include
+then the smallest candidate estimate across property seeks, required labels,
+pure pattern unions and fixed relationship-type anchors chooses the access path. Ties prefer
+an equality seek, then node candidates in source order, then relationship candidates in source
+order. Estimates include
 history and affect plan cost only.
 Any node position can anchor, including `(a)->(b) WHERE b:Keep`; EXPLAIN shows the chosen label
 and node ordinal. The complete predicate still filters candidates. MVCC label postings limit
@@ -431,6 +433,21 @@ required labels. Requirements remain local to their MATCH clause. Pure pattern u
 estimate with other positions, including `m:C` in `(n:A|B)->(m:C)`. EXPLAIN describes a union as
 LabelScan with entity `A|B` and detail `combine=union`. Negation, wildcard and mixed expressions
 keep their existing safe scan behavior. No result ordering is guaranteed without ORDER BY.
+
+Fixed outer relationship patterns such as `(a)-[r:T]->(b)` and `(a)-[r:T|U]-(b)` can start from
+the persistent relationship-type postings (#1633). Only selected types are read; all endpoint,
+binding, property and path-mode checks still apply. Undirected/left-or-right patterns return both
+orientations, with one orientation for a self-loop. Quantified edges, wildcard/negated/mixed
+type expressions and WHERE-only relationship type predicates retain their existing safe paths.
+EXPLAIN reports RelationshipTypeScan with selected names, edge ordinal, direction and
+postings=(type_id,relationship). Its posting edge has no Expand row. Available anchor estimates
+populate estimated_rows; actual_rows stays NULL. Type estimates sum retained publications and
+double for unconstrained direction; property seeks use a count bounded to 512 physical entries
+and 32 page visits, falling back conservatively to the label population when incomplete.
+One posting visit consumes one physical work unit, including both undirected orientations;
+each accepted hop consumes one viable unit. Statement-local additions/replacements and MVCC
+snapshots follow the same semantics as other access paths. The engine's GqlProfileExecutionTests
+EXPLAIN corpus and GraphRelationshipTypeAnchorTests cover this behavior.
 
 Precedence from weakest to strongest; binary runs associate left:
 

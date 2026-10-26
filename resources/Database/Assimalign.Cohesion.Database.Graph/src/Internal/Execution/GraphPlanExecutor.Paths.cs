@@ -20,7 +20,8 @@ internal static partial class GraphPlanExecutor
     // Continuations and the DFS frontier live on the heap. A long trail never grows the CLR stack.
     private abstract record PathTask;
     private sealed record NodeTask(IReadOnlyList<GqlNodePattern> Patterns, PathTask? Next) : PathTask;
-    private sealed record EdgeTask(GqlRelationshipPattern Pattern, bool Forward, PathTask? Next) : PathTask;
+    private sealed record EdgeTask(GqlRelationshipPattern Pattern, bool Forward, PathTask? Next,
+        StoredGraphRelationship? Seed = null) : PathTask;
     [global::System.Diagnostics.DebuggerDisplay("IncidentTask")]
     [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Internal.GraphPlanExecutor.IncidentTask.DebugView))]
     private sealed record IncidentTask(EdgeTask Hop, IAsyncEnumerator<StoredGraphRelationship> Edges) : PathTask
@@ -132,7 +133,7 @@ internal static partial class GraphPlanExecutor
             if (value is null) { yield break; }
             if (value is not GraphRelationship) { throw new GraphPlanningException("CG02013", ErrorMessages.EntityBindingRequired); }
         }
-        IAsyncEnumerable<StoredGraphNode> candidates;
+        IAsyncEnumerable<StoredGraphNode>? candidates;
         var anchorNode = shape.Nodes[anchor.NodeIndex].FirstOrDefault(node => node.Variable is { } name && input.ContainsKey(name));
         if (anchorNode?.Variable is { } variable && input[variable] is GraphNode bound)
         { candidates = StreamBoundNodesAsync(operation.Updates.FindNode(bound.Id.Value) is { } node ? [node] : [], budget, token); }
@@ -148,12 +149,12 @@ internal static partial class GraphPlanExecutor
             { endpoints.Add(other); }
             candidates = StreamBoundNodesAsync(endpoints, budget, token);
         }
-        else { candidates = operation.Updates.StreamAnchorAsync(anchor, budget, token); }
+        else { candidates = anchor.RelationshipTypes is null ? operation.Updates.StreamAnchorAsync(anchor, budget, token) : null; }
 
-        await foreach (var candidate in candidates.ConfigureAwait(false))
+        await foreach (var candidate in StreamPathSeedsAsync(operation, anchor, shape, candidates, budget, token).ConfigureAwait(false))
         {
             token.ThrowIfCancellationRequested();
-            var node = GraphDatabase.Materialize(candidate);
+            var node = GraphDatabase.Materialize(candidate.Node);
             using var anchorMemory = budget.Memory.Reserve(GraphValueMemory.Node(node, token));
             PathTask? left = null;
             // Prepend continuations in reverse execution order: right, then left from the anchor.
@@ -161,7 +162,12 @@ internal static partial class GraphPlanExecutor
             { left = SegmentTasks(shape.Segments[i], false, new NodeTask(shape.Nodes[i], left)); }
             PathTask? tasks = new StartLeftTask(node, left);
             for (int i = shape.Segments.Count - 1; i >= anchor.NodeIndex; i--)
-            { tasks = SegmentTasks(shape.Segments[i], true, new NodeTask(shape.Nodes[i + 1], tasks)); }
+            {
+                var next = new NodeTask(shape.Nodes[i + 1], tasks);
+                tasks = i == anchor.NodeIndex && candidate.Edge is { } seed
+                    ? new EdgeTask(shape.Segments[i].Body.Edge!, true, next, seed)
+                    : SegmentTasks(shape.Segments[i], true, next);
+            }
             using var frontier = new PathFrontier(budget.Memory);
             frontier.Push(new PathState(node, new(input, StringComparer.Ordinal), [node], [], [], new(StringComparer.Ordinal), null,
                 new NodeTask(shape.Nodes[anchor.NodeIndex], tasks)));
@@ -242,9 +248,10 @@ internal static partial class GraphPlanExecutor
                             // The same rule works when the right side runs before the left.
                             if (plan.Mode == GqlPathMode.Simple && state.Nodes.Count > 1 && state.Nodes[0].Id == state.Nodes[^1].Id)
                             { break; }
-                            var incident = operation.Updates.StreamIncidentAsync(state.Current.Id.Value,
+                            var incident = (edgeTask.Seed is { } seedEdge ? StreamSeedEdgeAsync(seedEdge, token)
+                                : operation.Updates.StreamIncidentAsync(state.Current.Id.Value,
                                 GraphLabelEvaluator.IncidentDirection(edgeTask.Pattern, edgeTask.Forward),
-                                operation.Updates.SelectTypes(edgeTask.Pattern), token, budget).GetAsyncEnumerator(token);
+                                operation.Updates.SelectTypes(edgeTask.Pattern), token, budget)).GetAsyncEnumerator(token);
                             var incidentTask = new IncidentTask(edgeTask, incident);
                             incidents.Add(incident, incidentTask);
                             frontier.Push(state with { Task = incidentTask });
@@ -307,6 +314,35 @@ internal static partial class GraphPlanExecutor
                 finally { await GraphUpdates.DisposeIncidentStreamsAsync(incidents.Keys).ConfigureAwait(false); }
             }
         }
+    }
+
+    private static async IAsyncEnumerable<(StoredGraphNode Node, StoredGraphRelationship? Edge)> StreamPathSeedsAsync(
+        GraphOperation operation, GraphAnchor anchor, GraphPathShape shape, IAsyncEnumerable<StoredGraphNode>? nodes,
+        ExpansionBudget budget, [EnumeratorCancellation] CancellationToken token)
+    {
+        if (nodes is not null)
+        {
+            await foreach (var node in nodes.ConfigureAwait(false)) { yield return (node, null); }
+            yield break;
+        }
+        var direction = shape.Segments[anchor.NodeIndex].Body.Edge!.Direction;
+        await foreach (var edge in operation.Updates.StreamTypeAnchorAsync(anchor.RelationshipTypes!, budget, token).ConfigureAwait(false))
+        {
+            token.ThrowIfCancellationRequested();
+            ulong left = direction == GqlPatternDirection.Incoming ? edge.TargetId : edge.SourceId;
+            if (operation.Updates.FindNode(left) is { } node) { yield return (node, edge); }
+            if (direction is GqlPatternDirection.Undirected or GqlPatternDirection.LeftOrRight && edge.SourceId != edge.TargetId &&
+                operation.Updates.FindNode(edge.TargetId) is { } other)
+            { yield return (other, edge); }
+        }
+    }
+
+    private static async IAsyncEnumerable<StoredGraphRelationship> StreamSeedEdgeAsync(StoredGraphRelationship edge,
+        [EnumeratorCancellation] CancellationToken token)
+    {
+        token.ThrowIfCancellationRequested();
+        yield return edge; // Its posting/overlay visit already consumed the physical unit.
+        await Task.CompletedTask.ConfigureAwait(false);
     }
 
     private static bool ContainsNodeIdentity(List<GraphNode> nodes, ulong id)
