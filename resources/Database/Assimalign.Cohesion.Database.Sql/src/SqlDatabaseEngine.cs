@@ -233,6 +233,7 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
     internal ManualResetEventSlim UndoDeferredSignal => _undoDeferredSignal;
 
     internal void ScheduleProvisioning(SqlDeferredMigration migration) => _provisioningWorker.Enqueue(migration);
+    internal void ScheduleProvisioning(SqlTableRewrite rewrite) => _provisioningWorker.Enqueue(rewrite);
 
     private int _provisioningBuildComplete;
     internal bool ProvisioningBuildComplete => Volatile.Read(ref _provisioningBuildComplete) != 0;

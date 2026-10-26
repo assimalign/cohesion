@@ -2644,7 +2644,7 @@ utility.c:1480-1483 and namespace.c:526-531.
 
 AUTHORIZATION and nested schema elements are rejected with CK00001. Atomic nested statements
 would require a separate DDL execution contract because each existing statement self-commits.
-Record-space format 26 has no upgrade reader: export older databases, recreate and explicitly
+Record-space format 27 has no upgrade reader: export older databases, recreate and explicitly
 CREATE SCHEMA for non-dbo table namespaces before importing. Namespace records are not synthesized.
 
 The area root carries only the model-independent ownership contracts (`DatabaseObjectOwner`,
@@ -3286,16 +3286,16 @@ project reference or InternalsVisibleTo change is required.
   construction, versions are WAL-covered like all record writes (restart keeps
   them correct for free), and aborted stamps revert physically with the page
   images. Deletes tombstone (older snapshots keep the row until the purge
-  worker reclaims below every live horizon). No DDL rewrites a row (ADD and
-  DROP COLUMN change only the catalog, #1023 and #1241): **no statement ever
-  moves a version**, so a location (page, slot) is a version's identity for its
-  whole life — what index entries, row locks and the version store's ledger all
+  worker reclaims below every live horizon). ADD and DROP COLUMN change only the
+  catalog (#1023 and #1241). A rewrite copies live versions into a fresh owner and
+  rebuilds its indexes atomically (#1265); existing versions never move within an
+  owner, so a location (page, slot) remains a version's identity for its whole life — what index entries, row locks and the version store's ledger all
   key on.
 - **Format rule (data-storage format version, catalog-persisted): exactly one
   format, no upgrade path.** The catalog stores the format version of the whole
   data file set, rows and the index trees that ride it (a kind-4 record for
   versions 1–3, a kind-8 record from version 4). The engine reads and writes
-  format 26 only: format 6's stamped rows in per-object page chains whose index keys use the
+  format 27 only: format 6's stamped rows in per-object page chains whose index keys use the
   temporal identity encoding (#1099, below), in index trees of B-tree page format
   2, which order entries by key, entry reference and writer (#1194,
   `Database.Indexing` DESIGN), decoded through each table's physical column
@@ -3490,7 +3490,7 @@ project reference or InternalsVisibleTo change is required.
     each dropped ordinal costs the table record one five-byte integer component,
     and a definition that outgrows one record is refused (`EnsureStorable`). For a
     table with dropped columns the refusal counts them and names the remedy,
-    recreating the table and copying its rows, since only a new table starts
+    calling RewriteTableAsync (or recreating the table and copying its rows), since a fresh owner starts
     without dropped ordinals (`SqlCatalogDroppedColumnTests`: a two-column table
     reaches the bound after 1,588 ADD/DROP cycles, where PostgreSQL stops at
     "tables can have at most 1600 columns", `tablecmds.c:7445-7452`).
@@ -6686,7 +6686,7 @@ All columns, constraints, ownership, physical ordinals
 and frozen missing values are copied. CONTINUE moves the exact volatile cursor/block and the
 durable last reservation; RESTART removes the counter so allocation resumes at START. No new
 record layout, durable record kind, public catalog member, interface or format version is needed:
-SQL remains format 26. Failed preparation and crash recovery use kind 14 unchanged.
+SQL is now format 27 (#1265). Failed preparation and crash recovery use kind 14 unchanged.
 
 A short-lived coordinator snapshot pin brackets catalog publication: it is active before the
 swap and rolled back just afterwards. Its sequence is a visibility marker, with no persisted
@@ -6752,6 +6752,51 @@ row count, verifying that the shared oracle detects both.
 Reference behavior was re-derived from local PostgreSQL gram.y:7239-7256,
 tablecmds.c:1915-1917,2033-2090,2225-2258 and heap.c:3701-3782. The snapshot preservation
 and explicit-transaction refusal are the owner's deliberate departures from PostgreSQL.
+
+#### Catalog: Recoverable table rewrite and ordinal compaction (#1265)
+
+SqlDatabase.RewriteTableAsync accepts validated SqlObjectName schema/table components,
+resolves the current immutable description and runs physical maintenance on the existing
+provisioning worker, including for an empty table.
+Schema-owned tables are supported because the operation preserves the logical definition,
+DDL generation and applied-schema hash. It always replaces the physical owner, even when
+there are no dropped columns. The internal description-based entry refuses stale bindings
+with existing CS04064 before reservation.
+Schema application and maintenance share fail-fast admission; session DDL is excluded for
+the operation. Ordinary readers remain snapshot readers; writers wait for table X. The lock
+and latch order is established in SqlPlanExecutor.RewriteTableAsync. Database disposal cancels
+queued work, claims it if the pump stopped, and joins in-flight cleanup before storage closes.
+
+TRUNCATE and rewrite use one ReplaceTableStorageAsync preparation/publication path and one
+catalog reservation/publication transaction. Rewrite decodes the old physical layout, including
+frozen missing values, then writes currently live rows with dense ordinals into the reserved
+owner. Historical versions remain available through the retired owner for old snapshots;
+they do not need copying. Existing committed writer stamps are retained. A batch holds at most
+64 decoded rows and durably inserts its rows and all index entries together, releasing the
+apply gate between batches. Unique indexes are validated before publication. Identity cursors,
+constraints, collation, defaults, missing values, ownership and dependent view identities follow
+the same catalog swap as TRUNCATE CONTINUE IDENTITY. Prepared owners and failures retain
+kind-14 reclamation intents. Every publication or cleanup requests reclamation after its
+statement pin ends. A crash therefore exposes either the complete original layout/index set
+or the complete compact layout/index set, and abandoned/retired owners converge through the
+existing reclamation worker. Interrupted preparation is abandoned; the caller retries explicitly.
+
+The shared copier accepts an internal replacement-definition function and row transform for
+#1447. TYPE syntax, conversion binding, dependency rebinding and its deferred schema intent
+are later runs; there is no second type-only copier. This operation adds no SQL syntax, wire
+message, public interface, visibility grant or project reference. The maintenance API uses a
+generated SqlObjectName value object for decoded schema and table components, preserving case-insensitive
+catalog identity and delimited-name punctuation; default names are refused at admission.
+Existing codes retain their conditions. SQL record-space format advances once, 26 to 27, fencing the new physical-layout
+publication semantics. Compiled-schema v8 and catalog record shapes stay unchanged. The
+existing coded open gate refuses all earlier files; no upgrade or legacy reader is added.
+
+Crash tests reopen every write/flush/length image under Synchronous, Grouped and None;
+None models process loss. Snapshot/index, missing-tail, duplicate-row, cancellation, exception,
+lock wait, stale-description, disposal and counter-driven nonparallel stress tests exercise
+admission and every acquired owner. NativeAOT smoke executes compaction and a rebuilt seek.
+The exclusive rewrite follows local PostgreSQL tablecmds.c:4681-4691,6049,6186; preserving old
+snapshot layouts through owner replacement follows the owner's deliberate TRUNCATE policy.
 
 #### Catalog: Durable table reclamation (decision 77, #1443)
 
@@ -6825,7 +6870,7 @@ would tell every caller the value is changeable and then guard that promise at
 runtime.
 
 Table metadata extension version 2 introduced one collation identifier per column
-after the existing constraints. Current format 26 requires the complete table extension 6 record,
+after the existing constraints. Current format 27 requires the complete table extension 6 record,
 including resolved-call vectors, identity facets and frozen missing-value literals described below. Column additions,
 drops, and restart preserve explicit overrides. An index inherits its key
 columns' effective collations; the SQL engine verifies index eligibility and
@@ -6858,19 +6903,17 @@ dropped list.
   `relnatts + 1`, `src/backend/commands/tablecmds.c:7445-7446`), so a column
   re-added under a dropped column's name never shares the dropped column's
   component.
-- **Ordinals are never reclaimed.** Reusing a dropped ordinal would decode the
+- **Ordinals are retained within one physical owner.** Reusing a dropped ordinal would decode the
   dropped value, still stored in older versions, into another column. PostgreSQL
   keeps a dropped attribute's number for good and counts it against its column limit
   (`doc/src/sgml/limits.sgml:133-134`); here each dropped ordinal costs the table
   record one five-byte integer component and counts against the one-record limit
   below. When a table that has dropped columns outgrows the record, the refusal
-  counts them and says that recreating the table and copying its rows reclaims them,
-  since only a new table starts without dropped ordinals (`EncodeTable`; a
+  counts them and recommends RewriteTableAsync or recreating and copying the table;
+  both publish a fresh physical owner without dropped ordinals (`EncodeTable`; a
   two-column table reaches the limit after 1,588 ADD/DROP cycles).
-  Compacting the layout would take a table rewrite that moves every row version and
-  rebuilds its indexes; none exists, and one added later must replace the layout in
-  the same recoverable unit as the versions (the SQL engine's DESIGN, "DROP COLUMN
-  marks the column dropped").
+  RewriteTableAsync compacts the layout through the recoverable replacement described
+  below; older snapshots retain the original physical owner and layout.
 - **Every alteration carries the layout.** ADD/DROP COLUMN and ADD/DROP CONSTRAINT
   copy the dropped ordinals into the replacement, and `PublishTableAsync` refuses,
   with `SqlCatalogException`, a replacement that does not keep the current layout as
@@ -6905,7 +6948,7 @@ codec, the key encoding and every comparison read, so they do not consult the do
   column (the primary key's implicit NOT NULL).
 - **Persistence: table extension version 4** (data-storage format 7). After the dropped
   ordinals, one optional string per live column, NULL for a column of a built-in type,
-  which this catalog always writes. Current format 26 also requires the call vectors, identity facets and extension 6 missing-value literals;
+  which this catalog always writes. Current format 27 also requires the call vectors, identity facets and extension 6 missing-value literals;
   the format gate refuses earlier databases rather than loading their definitions. A persisted blank
   name fails the load with `SqlCatalogException`, as does a blank `domainName` at the
   column's constructor (`ArgumentException`).
@@ -7459,7 +7502,7 @@ The internal stateless SqlCatalogCreation predicate owns the creation-only recor
 initial counter constraints. SQL uses it directly from Internal/Catalog,
 so recovery decisions use catalog vocabulary without a public API or friend-assembly grant.
 Creation commits collation, dbo and the format marker in that order. Completion changes no
-catalog record layout or record-space format 26. SQL requires its sql.create claim only when
+catalog record layout or record-space format 27. SQL requires its sql.create claim only when
 adopting a marker-free interrupted file set; an empty data scan alone is no proof. The predicate
 receives the default namespace from SQL's shared SqlNamespaceNames constant, avoiding a new
 catalog dependency on the language assembly.

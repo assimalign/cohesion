@@ -315,6 +315,12 @@ internal static class Program
         await session.ExecuteAsync("ALTER TABLE altered_guard ALTER value DROP NOT NULL");
         await session.ExecuteAsync("ALTER TABLE altered_guard ALTER value SET NOT NULL");
         Check("in process: ALTER rename and frozen missing values", await RowsAsync(session, "SELECT value FROM altered_guard ORDER BY id"), [[7], [-9]]);
+        await session.ExecuteAsync("ALTER TABLE altered_guard ADD gone INT", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("ALTER TABLE altered_guard DROP COLUMN gone", cancellationToken: CancellationToken.None);
+        await database.RewriteTableAsync("dbo", "altered_guard", CancellationToken.None);
+        Check("in process: rewritten rows and index seek", await RowsAsync(session, "SELECT value FROM altered_guard WHERE id=1"), [[7]]);
+        Check("in process: rewritten index plan", (await RowsAsync(session, "EXPLAIN SELECT value FROM altered_guard WHERE id=1"))
+            .Any(row => Equals(row[2], "IndexSeek")), true);
         await session.ExecuteAsync("CREATE TABLE aggregate_guard (id INT, g INT)", cancellationToken: CancellationToken.None);
         await session.ExecuteAsync("INSERT INTO aggregate_guard VALUES (2, 1), (1, 1), (2, 1)", cancellationToken: CancellationToken.None);
         foreach (string grouping in new[] { "", " GROUP BY g" })

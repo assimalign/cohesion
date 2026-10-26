@@ -79,16 +79,16 @@ public sealed partial class SqlCatalog
     // Internal engine operations: no new cross-assembly catalog seam. Callers hold table X
     // locks in ascending identity order, then enter this metadata lock. No data apply gate
     // or tree/page latch is held here. Catalog storage brackets are strictly innermost.
-    internal SqlCatalogTable[] ReserveTruncate(IReadOnlyList<SqlCatalogTable> expected,
-        IReadOnlyList<SqlCatalogTable> named, CancellationToken cancellationToken)
+    internal SqlCatalogTable[] ReserveStorageReplacement(IReadOnlyList<SqlCatalogTable> expected,
+        IReadOnlyList<SqlCatalogTable>? named, Func<SqlCatalogTable, ulong, SqlCatalogTable>? describe, CancellationToken cancellationToken)
     {
         lock (_sync)
         {
             ThrowIfOffline();
             cancellationToken.ThrowIfCancellationRequested();
-            ValidateTruncateSet(expected, named);
+            ValidateStorageReplacement(expected, named);
             ulong next = _nextObjectId;
-            var replacements = expected.Select(table => new SqlCatalogTable(checked(next++), table.Schema, table.Name,
+            var replacements = expected.Select(table => describe is not null ? describe(table, checked(next++)) : new SqlCatalogTable(checked(next++), table.Schema, table.Name,
                 table.Columns, table.PrimaryKeyColumns, table.Owner, table.OwningSchema, table.Constraints,
                 table.DroppedColumnOrdinals)).ToArray();
             using var transaction = _storage.BeginTransaction();
@@ -110,7 +110,7 @@ public sealed partial class SqlCatalog
         }
     }
 
-    internal ValueTask PublishTruncateAsync(IReadOnlyList<SqlCatalogTable> expected, IReadOnlyList<SqlCatalogTable> named,
+    internal ValueTask PublishStorageReplacementAsync(IReadOnlyList<SqlCatalogTable> expected, IReadOnlyList<SqlCatalogTable>? named,
         IReadOnlyList<SqlCatalogTable> replacements, IReadOnlyList<SqlCatalogIndex> indexes,
         IReadOnlyList<BTreeIndexRegistration> registrations, IReadOnlyDictionary<SqlCatalogIndex, BTreeIndex> retiredIndexes,
         bool restartIdentity, TransactionSequence marker, string actualObject, SqlCatalogScriptPublication? publication, CancellationToken cancellationToken)
@@ -119,7 +119,7 @@ public sealed partial class SqlCatalog
         {
             ThrowIfOffline();
             cancellationToken.ThrowIfCancellationRequested();
-            ValidateTruncateSet(expected, named);
+            ValidateStorageReplacement(expected, named);
             ulong bindingGeneration = checked(_storageBindingGeneration + 1);
             var ids = expected.Select(table => table.ObjectId).ToHashSet();
             var mapping = expected.Select((table, index) => (table.ObjectId, Replacement: replacements[index]))
@@ -271,7 +271,7 @@ public sealed partial class SqlCatalog
         Volatile.Write(ref _orderedTruncations, next);
     }
 
-    private void ValidateTruncateSet(IReadOnlyList<SqlCatalogTable> expected, IReadOnlyList<SqlCatalogTable> named)
+    private void ValidateStorageReplacement(IReadOnlyList<SqlCatalogTable> expected, IReadOnlyList<SqlCatalogTable>? named)
     {
         foreach (var table in expected)
         {
@@ -281,6 +281,7 @@ public sealed partial class SqlCatalog
                     ErrorMessages.TableIdentityReplaced, table.Schema, table.Name));
             }
         }
+        if (named is null) { return; } // A rewrite preserves contents and needs no FK closure.
         // Recompute from the written targets, not the formerly expanded set. A dropped
         // FK can shrink CASCADE while its child keeps the same owner id during the wait.
         // Both reservation and publication must reject growth AND shrinkage of that set.
