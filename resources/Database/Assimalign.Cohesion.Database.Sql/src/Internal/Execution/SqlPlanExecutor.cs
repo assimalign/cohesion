@@ -46,6 +46,7 @@ internal sealed partial class SqlPlanExecutor
     /// </summary>
     private SqlSubqueryValues? _subqueryValues;
     private bool _containsLike;
+    private bool _isDml;
     private SqlStatementMetrics? _metrics;
 
     /// <summary>Initializes an executor for one statement.</summary>
@@ -82,6 +83,8 @@ internal sealed partial class SqlPlanExecutor
 
     internal Task<DatabaseResult> ExecuteAsync(SqlPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
+        // Set before WITH and subquery materialization, and retain it in every child read.
+        _isDml |= StatementInput(plan) is SqlInsertPlan or SqlInsertSelectPlan or SqlUpdatePlan or SqlDeletePlan;
         return JoinedDml(plan) && statement.Metrics.JoinedDmlStatement is null
             ? ExecuteJoinedStatementAsync(plan, statement, cancellationToken)
             : statement.Metrics.IsAnalyzing ? ExecuteAnalyzedAsync(plan, statement, cancellationToken)
@@ -173,6 +176,8 @@ internal sealed partial class SqlPlanExecutor
                 return await ExecuteDropViewAsync(dropView, statement, cancellationToken).ConfigureAwait(false);
             case SqlCreateSchemaPlan createSchema:
                 return await ExecuteCreateSchemaAsync(createSchema, statement, cancellationToken).ConfigureAwait(false);
+            case SqlTruncatePlan truncate:
+                return await ExecuteTruncateAsync(truncate, statement, cancellationToken).ConfigureAwait(false);
             case SqlDropTablePlan drop:
                 return await ExecuteDropTableAsync(drop, statement, cancellationToken).ConfigureAwait(false);
             case SqlDropSchemaPlan dropSchema:
@@ -1578,8 +1583,9 @@ internal sealed partial class SqlPlanExecutor
 
     /// <summary>Never applies a planned key shape to a detached or same-name replacement tree.</summary>
     private bool TryResolveSeekTree(SqlCatalogTable table, SqlCatalogIndex planned, out BTreeIndex index)
-        => _indexManager.TryGetIndex(table.ObjectId, planned.Name, out index!) &&
-            _catalog.TryGetIndex(table.ObjectId, planned.Name, out var current) && ReferenceEquals(current, planned);
+        => (_indexManager.TryGetIndex(table.ObjectId, planned.Name, out index!) &&
+            _catalog.TryGetIndex(table.ObjectId, planned.Name, out var current) && ReferenceEquals(current, planned)) ||
+            _catalog.TryGetTruncatedIndex(table, planned, out index!);
 
     /// <summary>
     /// Drives an index seek: incrementally reads visible entries in the seek's key

@@ -38,6 +38,7 @@ internal sealed partial class SqlPlanner
         SqlCreateViewPlan => "CreateView",
         SqlDropViewPlan => "DropView",
         SqlDropTablePlan => "DropTable",
+        SqlTruncatePlan => "Truncate",
         SqlDropSchemaPlan => "DropSchema",
         SqlAddColumnPlan => "AddColumn",
         SqlRenamePlan => "Rename",

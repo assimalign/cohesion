@@ -21,6 +21,38 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 /// </summary>
 public sealed class SqlLanguageConformanceTests
 {
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Conformance: TRUNCATE retains joining views and indexed snapshot access (#1716)")]
+    public async Task ExecuteAsync_TruncateSnapshot_ShouldRetainJoiningViewAndSeek()
+    {
+        // Arrange
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        await using var engine = SqlDatabaseEngine.Create("truncate-conformance", new());
+        var database = await engine.CreateDatabaseAsync("db", timeout.Token);
+        await using var writer = await database.CreateSessionAsync(timeout.Token);
+        await using var reader = await database.CreateSessionAsync(timeout.Token);
+        await ExecuteAsync(writer, "CREATE TABLE p (id INT PRIMARY KEY)");
+        await ExecuteAsync(writer, "CREATE TABLE c (id INT PRIMARY KEY, pid INT REFERENCES p(id))");
+        await ExecuteAsync(writer, "CREATE TABLE destination (id INT)");
+        await ExecuteAsync(writer, "INSERT INTO p VALUES (1)");
+        await ExecuteAsync(writer, "INSERT INTO c VALUES (2,1)");
+        await ExecuteAsync(writer, "CREATE VIEW v AS SELECT c.id AS cid, p.id AS pid FROM c JOIN p ON c.pid=p.id");
+        await using var snapshot = await reader.BeginTransactionAsync(timeout.Token);
+
+        // Act
+        await ExecuteAsync(writer, "TRUNCATE p CASCADE");
+
+        // Assert
+        await ExpectRowsAsync(reader, "SELECT cid, pid FROM v", [[2, 1]]);
+        await ExpectRowsAsync(reader, "SELECT id FROM p WHERE id=1", [[1]]);
+        reader.LastStatementMetrics!.RecordsExamined.ShouldBe(1);
+        reader.LastStatementMetrics.AccessPath.ShouldStartWith("seek:");
+        await ExpectRowsAsync(writer, "SELECT cid, pid FROM v", []);
+        var staleSource = await Should.ThrowAsync<DatabaseTransactionAbortedException>(async () =>
+            await ExecuteAsync(reader, "INSERT INTO destination SELECT cid FROM v"));
+        staleSource.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS04006");
+        await ExpectRowsAsync(writer, "SELECT id FROM destination", []);
+    }
+
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Conformance: embedded identifier quotes survive tables, columns and persisted views (#1235)")]
     public async Task ExecuteAsync_DoubledIdentifierQuotes_ShouldPreserveCatalogAndViewNames()
     {
@@ -130,8 +162,8 @@ public sealed class SqlLanguageConformanceTests
         // The profile drives enumeration. A newly advertised clause cannot silently escape this test.
         var cases = CreateCases();
         // #1714 adds UPDATE FROM and DELETE USING and #1718 adds quantified comparisons:
-        // exactly three over #1118's 51.
-        SqlLanguageProfile.Instance.Clauses.Count().ShouldBe(54);
+        // exactly three over #1118's 51. TRUNCATE (#1716) adds one more.
+        SqlLanguageProfile.Instance.Clauses.Count().ShouldBe(55);
         RequireExecutionCases(SqlLanguageProfile.Instance.Clauses, cases);
         cases.Keys.Except(SqlLanguageProfile.Instance.Clauses).ShouldBeEmpty("Cases must describe the current profile.");
 
@@ -803,6 +835,15 @@ public sealed class SqlLanguageConformanceTests
                 (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "SELECT * FROM t;")))
                     .Message.ShouldContain("does not exist", Case.Sensitive);
                 (await ExecuteAsync(session, "DROP TABLE IF EXISTS t;")).Status.ShouldBe(DatabaseResultStatus.Success);
+            }),
+        [SqlClauses.Truncate] = new("TRUNCATE TABLE ONLY t CONTINUE IDENTITY RESTRICT;", _seed,
+            expression => expression is SqlTruncateExpression,
+            async (session, result) =>
+            {
+                result.AffectedCount.ShouldBe(0);
+                await ExpectRowsAsync(session, "SELECT * FROM t;", []);
+                await ExecuteAsync(session, "INSERT INTO t VALUES (9, 'after', 99);");
+                await ExpectRowsAsync(session, "SELECT id FROM t;", [[9]]);
             }),
         [SqlClauses.CreateView] = new("CREATE VIEW v AS SELECT id FROM t;", _seed,
             expression => expression is SqlCreateViewExpression,

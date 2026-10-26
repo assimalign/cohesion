@@ -19,7 +19,7 @@ public static class SqlLanguageProfile
         "SET", "VALUES", "INTO", "RETURNING",
         "FUNCTION", "DOMAIN", "RETURNS", "RETURN", "IMMUTABLE", "STABLE", "VOLATILE", "STRICT", "CALLED", "INPUT",
         // DDL
-        "CREATE", "DROP", "ALTER", "TABLE", "INDEX", "VIEW", "IF",
+        "CREATE", "DROP", "TRUNCATE", "ALTER", "TABLE", "INDEX", "VIEW", "IF",
         "ADD", "COLUMN",
         "PRIMARY", "KEY", "FOREIGN", "REFERENCES",
         "CONSTRAINT", "DEFAULT", "CHECK", "UNIQUE", "COLLATE",
@@ -86,6 +86,7 @@ public static class SqlLanguageProfile
         SqlClauses.CreateIndex,
         SqlClauses.AlterTable,
         SqlClauses.DropTable,
+        SqlClauses.Truncate,
         SqlClauses.CreateView,
         SqlClauses.DropView,
         SqlClauses.DropSchema,

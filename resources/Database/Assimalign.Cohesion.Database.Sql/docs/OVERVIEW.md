@@ -1,5 +1,9 @@
 # Assimalign.Cohesion.Database.Sql — Overview
 
+TRUNCATE table lists execute through atomic storage replacement, with recursive FK closure,
+identity restart/continuation and deferred reclamation that preserves older snapshots (#1716).
+CTAS remains deferred to SQ-T2.
+
 ## Wire contract ownership
 
 `Assimalign.Cohesion.Database.Sql.Protocol` owns this model's wire messages, codecs, family singleton and transferred value shapes (5 public types). Both engine and remote client reference that one assembly. Its public namespace and RootNamespace equal its project name. Engine requests, planning, catalog, storage and server lifecycle stay in `Assimalign.Cohesion.Database.Sql`. This extraction preserves wire bytes and validation; moved public types intentionally change namespace and assembly identity with no forwarders.

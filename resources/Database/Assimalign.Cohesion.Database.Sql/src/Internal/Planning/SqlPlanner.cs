@@ -8,6 +8,7 @@ using System.Threading;
 using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Language;
 using Assimalign.Cohesion.Database.Types;
+using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
@@ -64,19 +65,27 @@ internal sealed partial class SqlPlanner
         _statementMetrics = previous._statementMetrics;
     }
 
-    internal SqlPlan Plan(SqlQueryExpression expression)
+    internal SqlPlan Plan(SqlQueryExpression expression, TransactionSnapshot? snapshot = null)
     {
         var planner = this;
         while (true)
         {
             _cancellationToken.ThrowIfCancellationRequested();
-            ulong generation = _catalog.DdlGeneration;
+            var generation = _catalog.BindingGeneration;
             try
             {
+                // Carry visibility on the planning call stack, preserving the ordinary
+                // planner's allocation budget. Retry uses this same fixed statement snapshot.
+                // DML targets retain the read image too, so definition validation refuses
+                // stale writers before they can mutate a replacement owner.
+                if (expression is SqlQueryBodyExpression or SqlInsertExpression or SqlUpdateExpression or SqlDeleteExpression)
+                {
+                    planner.UseTruncateSnapshot(snapshot);
+                }
                 var plan = planner.PlanOnce(expression);
-                if (_catalog.DdlGeneration == generation) { return plan; }
+                if (_catalog.BindingGeneration == generation) { return plan; }
             }
-            catch (DatabaseException) when (_catalog.DdlGeneration != generation)
+            catch (DatabaseException) when (_catalog.BindingGeneration != generation)
             {
                 // A concurrent publication may pair an old table with new index key names.
                 // Discard both successful and failed mixed-generation plans before execution.
@@ -134,6 +143,7 @@ internal sealed partial class SqlPlanner
             SqlCreateTableExpression create => PlanCreateTable(create),
             SqlCreateSchemaExpression create => new SqlCreateSchemaPlan(create.Name, create.IfNotExists),
             SqlDropTableExpression drop => PlanDropTable(drop),
+            SqlTruncateExpression truncate => new SqlTruncatePlan(truncate),
             SqlDropSchemaExpression drop => new SqlDropSchemaPlan(drop.Name, drop.IfExists, drop.Cascade),
             SqlAlterTableExpression alter => PlanAlterTable(alter),
             SqlCreateIndexExpression createIndex => PlanCreateIndex(createIndex),
@@ -358,7 +368,7 @@ internal sealed partial class SqlPlanner
             return SqlScanPath.Instance;
         }
 
-        var indexes = _catalog.GetIndexes(table.ObjectId);
+        var indexes = ReadIndexes(table.ObjectId);
 
         if (indexes.Count == 0)
         {
@@ -385,7 +395,7 @@ internal sealed partial class SqlPlanner
         {
             return SqlScanPath.Instance;
         }
-        indexes ??= _catalog.GetIndexes(table.ObjectId);
+        indexes ??= ReadIndexes(table.ObjectId);
         SqlIndexSeekPath? best = null;
         List<SqlIndexSeekPath>? alternatives = null;
         SqlIndexSeekPath? firstCandidate = null;

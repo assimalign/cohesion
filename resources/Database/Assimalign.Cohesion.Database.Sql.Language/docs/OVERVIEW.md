@@ -11,7 +11,7 @@ binding SQL DDL/CAST type names to the shared type system (`Database.Types`).
 - **Parser** — UNION/INTERSECT/EXCEPT with ALL or DISTINCT in every query position, non-recursive `WITH` before SELECT/INSERT/UPDATE/DELETE, plus `SELECT` (INNER/LEFT/RIGHT/CROSS joins, parenthesized join groups, derived tables, grouping, ordering, limits, subqueries), `INSERT`
   (multi-row, whole-item `DEFAULT`, `DEFAULT VALUES`, `INSERT ... SELECT`), `UPDATE`
   (including parsed/bound FROM sources, `SET c = DEFAULT` and correlated and uncorrelated WHERE subqueries), `DELETE`
-  (including parsed/bound USING sources and correlated and uncorrelated WHERE subqueries), `CREATE/ALTER/DROP TABLE`,
+  (including parsed/bound USING sources and correlated and uncorrelated WHERE subqueries), `CREATE/ALTER/DROP TABLE`, `TRUNCATE` table lists with identity and FK policies,
   `CREATE/DROP FUNCTION`, `CREATE/DROP DOMAIN`, and a full expression grammar (precedence, `CASE`, `CAST`, predicates,
   parameters). Error-tolerant: malformed input yields diagnostics, never
   exceptions.

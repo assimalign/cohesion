@@ -82,7 +82,18 @@ internal sealed class SqlTableReclamation
                 foreach (var pending in _pending.Values.ToArray())
                 {
                     token.ThrowIfCancellationRequested();
+                    // A prepared TRUNCATE owner can become live atomically with removal of
+                    // its intent, then later retire with a NEW intent for that same identity.
+                    // Recheck the incarnation after the pins clear, before touching pages;
+                    // an old prepared fence cannot protect readers of its later live owner.
                     if (!CanReclaim(pending)) { continue; }
+                    if (!_database.Catalog.IsCurrentTableReclamation(pending.ObjectId, pending.Intent))
+                    {
+                        _pending.Remove(pending.ObjectId);
+                        Volatile.Write(ref _pendingCount, _pending.Count);
+                        Volatile.Write(ref _discover, 1);
+                        continue;
+                    }
                     if (!pending.Started)
                     {
                         pending.Started = true;
@@ -111,7 +122,7 @@ internal sealed class SqlTableReclamation
                         // Data durability precedes intent removal. A crash in between just
                         // visits the remaining owner directory again; freed pages have no owner.
                         token.ThrowIfCancellationRequested();
-                        _database.Catalog.CompleteTableReclamationAsync(pending.ObjectId, token).GetAwaiter().GetResult();
+                        _database.Catalog.CompleteTableReclamationAsync(pending.ObjectId, pending.Intent, token).GetAwaiter().GetResult();
                         _pending.Remove(pending.ObjectId);
                         Volatile.Write(ref _pendingCount, _pending.Count);
                         SqlDatabaseEventSource.Log.TableReclamationCompleted(_database, pending.ObjectId, pending.Pages);
@@ -126,14 +137,20 @@ internal sealed class SqlTableReclamation
     {
         // The catalog copies committed identities under its publication lock. Discovery
         // never reads mutable slotted pages, and no catalog lock covers fencing or data I/O.
-        foreach (ulong objectId in _database.Catalog.GetPendingTableReclamations())
+        foreach (var (objectId, intent) in _database.Catalog.CaptureTableReclamations())
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (_pending.ContainsKey(objectId)) { continue; }
+            if (_pending.TryGetValue(objectId, out var existing))
+            {
+                if (ReferenceEquals(existing.Intent, intent)) { continue; }
+                _pending.Remove(objectId);
+                Volatile.Write(ref _pendingCount, _pending.Count);
+            }
 
             // Allocate the fence AFTER observing the committed unpublication, never
             // use the DROP transaction's earlier begin sequence. Every possible old
-            // reader is at or below it, including snapshots begun during the DROP.
+            // reader is at or below it, including snapshots begun during DROP or the
+            // TRUNCATE visibility marker. The catalog hides retirement until that marker ends.
             var fence = _database.Coordinator.BeginSnapshotPinAsync(cancellationToken)
                 .AsTask().GetAwaiter().GetResult();
             long epoch;
@@ -145,7 +162,7 @@ internal sealed class SqlTableReclamation
             {
                 _database.Coordinator.RollbackAsync(fence, CancellationToken.None).AsTask().GetAwaiter().GetResult();
             }
-            _pending.Add(objectId, new Pending(objectId, fence.Sequence, epoch));
+            _pending.Add(objectId, new Pending(objectId, intent, fence.Sequence, epoch));
             Volatile.Write(ref _pendingCount, _pending.Count);
         }
     }
@@ -170,13 +187,15 @@ internal sealed class SqlTableReclamation
     [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlTableReclamation.Pending.DebugView))]
     private sealed class Pending
     {
-        internal Pending(ulong objectId, TransactionSequence fence, long epoch)
+        internal Pending(ulong objectId, SqlReclamationIntent intent, TransactionSequence fence, long epoch)
         {
             ObjectId = objectId;
+            Intent = intent;
             Fence = fence;
             Epoch = epoch;
         }
         internal ulong ObjectId { get; }
+        internal SqlReclamationIntent Intent { get; }
         internal TransactionSequence Fence { get; }
         internal long Epoch { get; }
         internal bool Started { get; set; }

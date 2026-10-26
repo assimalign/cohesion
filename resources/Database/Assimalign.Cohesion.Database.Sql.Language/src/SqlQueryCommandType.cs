@@ -21,4 +21,6 @@ public enum SqlQueryCommandType
     Commit,
     /// <summary>Roll back the session transaction.</summary>
     Rollback,
+    /// <summary>Empty a set of tables through deferred storage replacement.</summary>
+    Truncate,
 }

@@ -157,6 +157,9 @@
   <data name="ColumnNameMissing" xml:space="preserve"><value>Table '{0}.{1}' has no column named '{2}'.</value></data>
   <data name="WriteIndexUnavailable" xml:space="preserve"><value>Index '{0}' on '{1}.{2}' is unavailable; writes cannot bypass its constraints.</value></data>
   <data name="TableProvisioningCollision" xml:space="preserve"><value>Table '{0}.{1}' already exists; schema provisioning cannot adopt it.</value></data>
+  <data name="TruncateClosureChanged" xml:space="preserve"><value>The foreign-key set of TRUNCATE changed while the statement was waiting. Retry the statement.</value></data>
+  <data name="TruncateForeignKeyDependent" xml:space="preserve"><value>TRUNCATE must also include referencing table '{0}.{1}'; include it explicitly or specify CASCADE.</value></data>
+  <data name="TruncateExplicitTransaction" xml:space="preserve"><value>TRUNCATE cannot execute inside an explicit transaction.</value></data>
   <data name="TableForeignKeyDependent" xml:space="preserve"><value>Table '{0}' is referenced by a foreign key and cannot be dropped.</value></data>
   <data name="IndexProvisioningCollision" xml:space="preserve"><value>Index '{0}' already exists on '{1}.{2}'; schema provisioning cannot adopt it.</value></data>
   <data name="ExecutionIndexExists" xml:space="preserve"><value>An index named '{0}' already exists on '{1}.{2}'.</value></data>

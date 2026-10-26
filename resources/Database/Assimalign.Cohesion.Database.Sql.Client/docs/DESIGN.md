@@ -16,6 +16,14 @@ abort, and idle eviction must release the sole session slot for a fresh client a
 
 Direct references are Database.Client, Sql.Protocol, Database.Types, Database.Protocol and Connections. Wire contracts live in each model Protocol assembly, shared by client and engine. This client has no engine, area-root, storage, transaction, indexing, model parser or schema reference. Cache.Client remains an empty placeholder. Engine-free trimming and NativeAOT coverage lives in Database.Client/samples/Assimalign.Cohesion.Database.Client.AotSample.
 
+## TRUNCATE (#1716, SQ-T1)
+
+The existing execute exchange carries table lists, FK policies and identity policies with zero
+completion count. InMemory and TCP tests pin old rows after publication, CS03067 for incomplete
+FK sets, CS04066 inside BEGIN, identity continuity/restart, and usable connections after refusal.
+Engine-owned wire tests also run reclamation while the old snapshot remains active and verify
+no frees until it ends. No client surface, result shape or protocol version changes.
+
 ## Quantified comparisons (#1718)
 
 The existing execute exchange carries scalar ANY/SOME/ALL subqueries without a

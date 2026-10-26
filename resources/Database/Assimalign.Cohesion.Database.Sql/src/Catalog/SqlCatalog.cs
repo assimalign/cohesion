@@ -93,7 +93,7 @@ public sealed partial class SqlCatalog
     private readonly SqlStorage _storage;
     private readonly Dictionary<(string Schema, string Name), TableSlot> _tables = new(TableNameComparer.Instance);
     private readonly Dictionary<(ulong TableObjectId, string Name), IndexSlot> _indexes = new(IndexNameComparer.Instance);
-    private readonly Dictionary<ulong, (PageId PageId, int SlotIndex)> _pendingReclamations = new();
+    private readonly Dictionary<ulong, SqlReclamationIntent> _pendingReclamations = new();
     private readonly object _sync = new();
     private ulong _nextObjectId = 1;
     private ulong _ddlGeneration;
@@ -173,16 +173,20 @@ public sealed partial class SqlCatalog
     }
 
     // The catalog owns committed reclamation state and its retirement, as it owns pending
-    // migrations and script receipts; the reclamation worker receives identities only.
-    /// <summary>Captures the retired table identities whose storage reclamation is pending.</summary>
-    /// <returns>A read-only snapshot unaffected by later drops or completed reclamations.</returns>
+    // migrations and script receipts; the worker captures immutable intent incarnations.
+    /// <summary>Captures permanently retired table-owner identities whose storage reclamation is pending.</summary>
+    /// <returns>A read-only snapshot unaffected by later publications or completed reclamations.</returns>
+    /// <remarks>Prepared TRUNCATE owners remain internal because they can become live.
+    /// Reclamation must wait for transaction and statement pins before freeing owner pages. Retired owners become
+    /// discoverable after the TRUNCATE visibility marker ends, so the fence covers every old reader.</remarks>
     /// <exception cref="StorageOfflineException">The catalog is offline.</exception>
     public IReadOnlyList<ulong> GetPendingTableReclamations()
     {
         lock (_sync)
         {
             ThrowIfOffline();
-            return Array.AsReadOnly(_pendingReclamations.Keys.ToArray());
+            return Array.AsReadOnly(_pendingReclamations.Keys.Where(id =>
+                !_preparedTruncateOwners.Contains(id) && !_truncateRetirementsPublishing.Contains(id)).ToArray());
         }
     }
 
@@ -200,6 +204,12 @@ public sealed partial class SqlCatalog
     /// <exception cref="OperationCanceledException">Cancellation was requested before retirement began.</exception>
     /// <exception cref="StorageOfflineException">The catalog is offline or the retirement commit is unconfirmed.</exception>
     public ValueTask CompleteTableReclamationAsync(ulong objectId, CancellationToken cancellationToken = default)
+        => CompleteTableReclamationCoreAsync(objectId, null, cancellationToken);
+
+    internal ValueTask CompleteTableReclamationAsync(ulong objectId, SqlReclamationIntent intent, CancellationToken cancellationToken)
+        => CompleteTableReclamationCoreAsync(objectId, intent, cancellationToken);
+
+    private ValueTask CompleteTableReclamationCoreAsync(ulong objectId, SqlReclamationIntent? intent, CancellationToken cancellationToken)
     {
         ArgumentOutOfRangeException.ThrowIfZero(objectId);
         cancellationToken.ThrowIfCancellationRequested();
@@ -208,10 +218,19 @@ public sealed partial class SqlCatalog
             ThrowIfOffline();
             cancellationToken.ThrowIfCancellationRequested();
             if (!_pendingReclamations.TryGetValue(objectId, out var location)) { return default; }
+            if (_truncateRetirementsPublishing.Contains(objectId) ||
+                (intent is null ? _preparedTruncateOwners.Contains(objectId) : !ReferenceEquals(intent, location))) { return default; }
             using var transaction = _storage.BeginTransaction();
             _storage.DeleteRow(transaction, location.PageId, location.SlotIndex);
             transaction.Commit();
             _pendingReclamations.Remove(objectId);
+            _truncateRetirementsPublishing.Remove(objectId);
+            _preparedTruncateOwners.Remove(objectId);
+            if (_truncatedTables.Remove(objectId, out var retired))
+            {
+                foreach (var index in retired.Before.GetIndexes(objectId)) { _truncatedIndexes.Remove(index); }
+                RemoveOrderedTruncation(objectId);
+            }
             return default;
         }
     }
@@ -302,12 +321,12 @@ public sealed partial class SqlCatalog
     }
 
     /// <summary>
-    /// Gets the durable generation of committed catalog changes. Schema application state
+    /// Gets the durable generation of committed logical catalog definitions. Schema application state
     /// records this value to detect later DDL, including changes to ad-hoc objects.
     /// </summary>
     /// <remarks>
     /// The counter and the metadata change share one transaction. Recording applied-schema
-    /// state or saving an unchanged index directory does not advance the generation.
+    /// state, saving an unchanged index directory or replacing storage with TRUNCATE does not advance it.
     /// </remarks>
     /// <exception cref="StorageOfflineException">The catalog storage is offline; reopen the database before reading or changing its metadata.</exception>
     public ulong DdlGeneration
@@ -589,7 +608,7 @@ public sealed partial class SqlCatalog
 
                 CommitCatalogChange(transaction, publication: publication, actualObject: SqlObjectIdentity.Table(schema, name));
                 _registrationsLocation = registrationsLocation;
-                _pendingReclamations.Add(slot.Table.ObjectId, reclamationLocation);
+                _pendingReclamations.Add(slot.Table.ObjectId, new SqlReclamationIntent(reclamationLocation.PageId, reclamationLocation.SlotIndex));
             }
 
             _tables.Remove((schema, name));
@@ -1312,7 +1331,7 @@ public sealed partial class SqlCatalog
                         break;
                     case SqlReclamationRecord.Kind:
                         var intent = SqlReclamationRecord.Decode(ref reader);
-                        if (!_pendingReclamations.TryAdd(intent.ObjectId, (unit.PageId, unit.SlotIndex))) { throw new System.IO.InvalidDataException(); }
+                        if (!_pendingReclamations.TryAdd(intent.ObjectId, new SqlReclamationIntent(unit.PageId, unit.SlotIndex))) { throw new System.IO.InvalidDataException(); }
                         _nextObjectId = Math.Max(_nextObjectId, intent.ObjectId + 1);
                         break;
                     case identityCounterRecordKind:
