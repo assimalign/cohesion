@@ -92,7 +92,11 @@ The process-crash harness retries that actual open only for an underlying sharin
 violation (HRESULT 0x80070020/0x80070021), including coded wrappers (#1713). The test-only
 `CrashReopen` source is linked into the Blob.Client tests and Documents/Graph verifier fixtures
 through the existing Compile/Link mechanism. A successful open decides readiness; retries are
-paced at 25 ms with a 30-second cancellation hang guard naming the file and last error. Other
+paced at 25 ms with a 30-second hang guard naming the file and last error. Each attempt runs on
+the thread pool and is raced against both guard and caller cancellation, including an open
+that blocks synchronously or ignores its token. A detached observer consumes a late failure or
+disposes a late successful database/engine (asynchronously when supported). Mid-open regressions
+hold both synchronous and asynchronous opens past cancellation and verify late disposal. Other
 I/O, corruption, permission and mixed aggregate failures propagate immediately. Engine open
 behavior and CB06005 are unchanged; a held-file regression proves refusal before release and
 successful retry after release, while a persistent-failure test pins timeout diagnostics.
