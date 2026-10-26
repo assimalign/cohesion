@@ -165,7 +165,10 @@ failure over InMemory and TCP (#1135).
 BEGIN/START, COMMIT and ROLLBACK use ordinary Execute on the connection-owned session.
 Snapshot is the default and READ COMMITTED is explicit. Command CRUD and collection operations
 share that transaction. OQL DDL retains CD04105; failed work retains CD04101 until ROLLBACK,
-or a failed COMMIT that ends it without committing. The temporary CD07002 gate is retired.
+or a failed COMMIT that ends it without committing. CD07002 refuses every text control when
+transaction-status was not negotiated, before touching any transaction; ordinary autocommit
+work remains available. Capability-free pooled-driver regressions verify refusal and clean reuse
+over InMemory and TCP, including after a statement failure.
 
 Documents advertises transaction-status. Every Execute and Command terminal response is followed
 by negotiated Ready (Idle, Active or Failed), including decoded Failure. The shared client observes

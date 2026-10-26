@@ -18,11 +18,15 @@ namespace Assimalign.Cohesion.Database.Documents.Tests;
 public sealed class DocumentTextTransactionWireTests
 {
     [Theory(DisplayName = "Cohesion Test [Documents] - Transaction Ready status is negotiated and legacy peers retain terminal framing")]
-    [InlineData(false, false)]
-    [InlineData(true, false)]
-    [InlineData(false, true)]
-    [InlineData(true, true)]
-    public async Task Server_TextTransactionControl_ShouldReportNegotiatedState(bool tcp, bool legacy)
+    [InlineData(false, false, true)]
+    [InlineData(true, false, true)]
+    [InlineData(false, true, true)]
+    [InlineData(true, true, true)]
+    [InlineData(false, false, false)]
+    [InlineData(true, false, false)]
+    [InlineData(false, true, false)]
+    [InlineData(true, true, false)]
+    public async Task Server_TextTransactionControl_ShouldReportNegotiatedState(bool tcp, bool legacy, bool advertise)
     {
         // Arrange
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(40));
@@ -47,17 +51,38 @@ public sealed class DocumentTextTransactionWireTests
         await using var transport = await factory.ConnectAsync(listener.EndPoint, token);
         await using var channel = new ProtocolChannel(transport.AsStream(), DocumentProtocol.Family, leaveOpen: true);
         await WriteAsync(ProtocolMessageType.Startup, new ProtocolStartupMessage(legacy ? new ProtocolVersion(2, 0) : ProtocolVersion.Current, "documents", "tester")
-            { Capabilities = legacy ? [] : [ProtocolCapability.TransactionStatus.Name] }.Encode());
+            { Capabilities = advertise ? [ProtocolCapability.TransactionStatus.Name] : [] }.Encode());
         (await channel.Reader.ReadFrameAsync(token)).ShouldNotBeNull().Type.ShouldBe(ProtocolMessageType.Authenticate);
         await WriteAsync(ProtocolMessageType.AuthenticateResponse, []);
         var ready = (await channel.Reader.ReadFrameAsync(token)).ShouldNotBeNull();
         ready.Type.ShouldBe(ProtocolMessageType.Ready);
         var agreement = ProtocolReadyMessage.Decode(ready.Payload.Span);
-        agreement.Capabilities.ShouldBe(legacy ? [] : new[] { ProtocolCapability.TransactionStatus.Name });
+        bool negotiated = !legacy && advertise;
+        agreement.Capabilities.ShouldBe(negotiated ? new[] { ProtocolCapability.TransactionStatus.Name } : []);
         var session = server.Sessions.ShouldHaveSingleItem();
 
         // Act / Assert: commands and failures share the same negotiated status contract.
         await ExecuteAsync("CREATE COLLECTION items", false, 'I');
+        if (!negotiated)
+        {
+            foreach (string control in new[] { "BEGIN", "START WORK ISOLATION LEVEL READ COMMITTED", "COMMIT TRAN", "ROLLBACK" })
+            {
+                await ExecuteAsync(control, true, 'I', code: "CD07002");
+                session.DatabaseSession!.CurrentTransaction.ShouldBeNull();
+            }
+            // Even a transaction opened by the server-side API must remain untouched by refusal.
+            await using var transaction = await session.DatabaseSession!.BeginTransactionAsync(token);
+            foreach (string control in new[] { "BEGIN", "START TRANSACTION", "COMMIT", "ROLLBACK" })
+            {
+                await ExecuteAsync(control, true, 'I', code: "CD07002");
+                session.DatabaseSession.CurrentTransaction.ShouldBeSameAs(transaction);
+                transaction.State.ShouldBe(Transactions.TransactionState.Active);
+            }
+            await transaction.RollbackAsync(token);
+            await WriteAsync(ProtocolMessageType.Ping, []);
+            (await channel.Reader.ReadFrameAsync(token)).ShouldNotBeNull().Type.ShouldBe(ProtocolMessageType.Pong);
+            return;
+        }
         await ExecuteAsync("BEGIN", false, 'T', duplicateParameters: true);
         session.DatabaseSession.ShouldNotBeNull().CurrentTransaction.ShouldNotBeNull().IsolationLevel
             .ShouldBe(Transactions.IsolationLevel.Snapshot);
@@ -99,7 +124,7 @@ public sealed class DocumentTextTransactionWireTests
 
         async Task StatusAsync(char status)
         {
-            if (legacy) { return; }
+            if (!negotiated) { return; }
             var response = (await channel.Reader.ReadFrameAsync(token)).ShouldNotBeNull();
             response.Type.ShouldBe(ProtocolMessageType.Ready);
             response.Payload.ToArray().ShouldBe([(byte)status]);

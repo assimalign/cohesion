@@ -27,13 +27,15 @@ SAVEPOINT, ROLLBACK TO SAVEPOINT and SET TRANSACTION remain CK00001; the rollbac
 the unsupported clause at `TO`. EXPLAIN accepts no
 transaction control. Unsupported isolation spellings are CD00002.
 
-On InMemory and TCP, controls run on the connection-owned session. Documents negotiates
+On InMemory and TCP, controls require the negotiated transaction-status capability; every control
+from a 2.0 or unnegotiated 2.1 peer receives CD07002 before touching a transaction. The session
+remains usable for ordinary autocommit work. Controls run on the connection-owned session. Documents negotiates
 transaction-status and sends Ready after Execute and Command, including complete failures.
 Returning a pooled connection rolls back active or faulted work and requires Idle before reuse;
 legacy peers without negotiated status are discarded. Cancellation or disconnect before a terminal
 response discards the session and leaves an unacknowledged commit's outcome unknown. Once Complete
 has arrived, bounded status cleanup ignores caller cancellation. No request identifier, protocol
-version or persisted format changes. CD07002, the temporary wire gate, is retired and reserved.
+version or persisted format changes. CD07002 remains live for this capability requirement.
 
 ## Quoted identifiers
 

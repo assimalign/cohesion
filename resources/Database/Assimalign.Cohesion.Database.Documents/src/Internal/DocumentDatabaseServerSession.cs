@@ -412,10 +412,22 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
         {
             if (execute is not null)
             {
+                var statement = (OqlQueryStatement)new OqlQueryParser(allowUnregisteredFunctions: true).Parse(execute.Statement);
+                if (statement.OqlExpression is OqlTransactionExpression &&
+                    !_channel!.Capabilities.Contains(ProtocolCapability.TransactionStatus.Name))
+                {
+                    // Refuse before statement admission or failure cleanup can touch a transaction.
+                    // Capability-free drivers cannot certify a clean session on pool return.
+                    var diagnostic = new Diagnostic { Code = "CD07002", Message = ErrorMessages.TextTransactionStatusRequired, Severity = DiagnosticSeverity.Error };
+                    string message = string.Format(System.Globalization.CultureInfo.CurrentCulture,
+                        ErrorMessages.ServerSessionExecuteAsyncFailure, diagnostic.Code, diagnostic.Message);
+                    await WriteFrameAsync((ProtocolMessageType)DocumentProtocolMessageType.Failure,
+                        CreateFailure(ProtocolErrorCode.ExecutionFailure, message, [diagnostic]).Encode(), cancellationToken).ConfigureAwait(false);
+                    return;
+                }
                 using var parametersJson = JsonDocument.Parse(execute.Parameters, new JsonDocumentOptions { MaxDepth = 256 });
                 var result = await _databaseSession!.ExecuteStatementAsync(() =>
                 {
-                    var statement = (OqlQueryStatement)new OqlQueryParser(allowUnregisteredFunctions: true).Parse(execute.Statement);
                     var diagnostics = statement.Diagnostics.ToArray();
                     if (string.IsNullOrWhiteSpace(execute.Statement) || diagnostics.Any(d => d.Severity == DiagnosticSeverity.Error))
                     {

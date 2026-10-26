@@ -280,9 +280,13 @@ SAVEPOINT and SET TRANSACTION remain deferred. The language's DIALECT records ex
 The wire server dispatches the same controls on its connection-owned session (#1725 OQ-T2).
 Documents negotiates transaction-status and sends Ready with Idle (I), Active (T), or Failed (E)
 after each Execute or Command terminal response, including Failure. Legacy 2.0 and unnegotiated
-2.1 peers retain the terminal framing; the shared client discards them on return. Pooled rollback
+2.1 peers retain the terminal framing, but every text transaction control is refused with CD07002
+before transaction admission or cleanup touches the session's transaction. The session remains
+usable for ordinary autocommit work. This prevents capability-free drivers from leaking active or
+failed transactions across pooled rentals. The shared status-capable client discards an
+unnegotiated peer on return. Pooled rollback
 uses Execute 64 with an empty JSON parameter object and Complete 66 with two zero Int64 counts,
-then requires Idle before reuse. CD07002, the temporary wire gate, is retired and reserved.
+then requires Idle before reuse. CD07002 remains live for the negotiated-capability requirement.
 No new request identifier, protocol version or disk format is needed.
 Controls ignore the supplied parameter object, including duplicate names. For ordinary statements,
 duplicate-name validation runs inside statement admission: CD01009 faults an explicit transaction,
@@ -311,7 +315,7 @@ COMMIT outcome unknown; cleanup never retries COMMIT or promises to undo committ
 | --- | --- |
 | CD04104 | COMMIT or ROLLBACK without an explicit transaction |
 | CD04105 | OQL DDL inside an explicit transaction |
-| CD07002 | Retired and reserved: temporary wire text transaction gate |
+| CD07002 | Text transaction control requires the negotiated transaction-status capability |
 
 Transaction cleanup continues to follow PostgreSQL's interruption protection in
 `src/backend/access/transam/xact.c:2854-2861`. RavenDB's

@@ -10,6 +10,7 @@ The application chooses a transport factory and endpoint. `DocumentClient` owns 
 pool. One database is selected during authentication and remains bound for the connection's
 lifetime. Operations are serialized. OQL BEGIN/START, COMMIT and ROLLBACK control this session;
 returning it rolls back open or failed work and requires negotiated Idle status before reuse.
+The server refuses text controls without negotiated transaction-status with CD07002.
 
 ```csharp
 await using var client = DocumentClient.Create(new()

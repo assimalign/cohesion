@@ -46,7 +46,8 @@ In-process and wire OQL accept BEGIN/START, COMMIT and ROLLBACK on the session's
 Snapshot by default and optional SNAPSHOT or READ COMMITTED isolation. Text ROLLBACK recovers
 a faulted session. COMMIT/ROLLBACK without an open transaction gives CD04104; nested BEGIN gives
 CK04004 and faults the transaction. Documents negotiates Ready status after Execute and Command;
-legacy peers without status are discarded on pool return. The language DIALECT lists spellings.
+text controls without negotiated status receive CD07002 and leave the session usable for
+autocommit work. The shared client discards unnegotiated peers on pool return. The language DIALECT lists spellings.
 
 OQL INSERT creates externally keyed documents from VALUES pairs or SELECT output names and
 reports the number inserted. META([alias]).id and .version read stored identity and version;

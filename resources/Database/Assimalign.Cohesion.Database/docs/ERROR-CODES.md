@@ -347,7 +347,7 @@ and invariant exceptions and lower child-root typed failures retain their docume
 | CD04105 | OQL collection/index DDL inside an explicit transaction (#1725) | — |
 | CD05016 | Result byte/frame limit exceeded | — |
 | CD07001 | Session belongs to another database | — |
-| CD07002 | Retired and reserved: temporary Documents wire text transaction gate (#1725 T1–T2) | — |
+| CD07002 | Text transaction control requires the negotiated transaction-status capability (#1725) | — |
 | CD09001 | Collection handle is stale | — |
 | CB01001 | Container is absent | — |
 | CB01002 | Blob is absent | — |
