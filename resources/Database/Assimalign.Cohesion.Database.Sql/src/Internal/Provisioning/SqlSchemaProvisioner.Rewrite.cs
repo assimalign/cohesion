@@ -20,7 +20,7 @@ internal sealed partial class SqlSchemaProvisioner
 
     internal ValueTask RewriteAsync(SqlCatalogTable table, CancellationToken cancellationToken)
     {
-        SqlTableRewrite rewrite;
+        SqlTableRewrite? rewrite = null;
         lock (_rewriteSync)
         {
             ObjectDisposedException.ThrowIf(_database.IsClosed, _database);
@@ -38,6 +38,9 @@ internal sealed partial class SqlSchemaProvisioner
             }
             catch
             {
+                // Enqueue either publishes completely or removes its node under the
+                // queue monitor. No observer has been armed for this unpublished item.
+                rewrite?.DiscardUnqueued();
                 admission?.Dispose();
                 _rewrite = null;
                 _applyGate.Release();
@@ -49,6 +52,8 @@ internal sealed partial class SqlSchemaProvisioner
         rewrite.ObserveCancellation();
         return new ValueTask(rewrite.Completion);
     }
+
+    internal void UnqueueRewrite(SqlTableRewrite rewrite) => _database.Engine.UnscheduleProvisioning(rewrite);
 
     internal void ReleaseRewrite()
     {

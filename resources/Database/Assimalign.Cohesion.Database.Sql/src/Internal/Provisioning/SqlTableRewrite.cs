@@ -32,6 +32,15 @@ internal sealed class SqlTableRewrite
     internal Task Completion => _completion.Task;
     internal bool IsCancellationRequested => _stopping.IsCancellationRequested;
 
+    internal void DiscardUnqueued()
+    {
+        lock (_stopping)
+        {
+            _finished = true;
+            _stopping.Dispose();
+        }
+    }
+
     internal void ObserveCancellation()
     {
         lock (_stopping)
@@ -51,6 +60,9 @@ internal sealed class SqlTableRewrite
         Exception? error = null;
         try
         {
+            // Cancellation can win while the pump is blocked on another database.
+            // Unlink before cleanup so completed items retain no queue ownership.
+            _owner.UnqueueRewrite(this);
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _stopping.Token);
             _owner.RunRewriteAsync(_table, linked.Token).GetAwaiter().GetResult();
         }
