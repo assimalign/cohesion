@@ -123,13 +123,21 @@ internal sealed partial class SqlPlanner
                 case SqlJoinPlan join:
                     if (join.Tree is { } root)
                     {
-                        var pending = new Stack<(SqlJoinTree Node, int Parent)>();
-                        pending.Push((root, id));
+                        var pending = new Stack<(SqlJoinTree Node, int Parent, bool AfterOuter)>();
+                        pending.Push((root, id, false));
                         while (pending.TryPop(out var next))
                         {
                             if (next.Node.Step is not { } treeStep)
                             {
                                 JoinInput(next.Node.Binding, next.Parent);
+                                continue;
+                            }
+                            if (next.AfterOuter)
+                            {
+                                var treeSeek = treeStep.Access!;
+                                string bounds = string.Join(" AND ", treeSeek.InnerColumns.Select((column, i) =>
+                                    $"{column.Name} = {JoinProbeReference(join.Bindings, treeSeek.OuterOrdinals[i])}"));
+                                Add("IndexSeek", next.Parent, Target(join.Bindings[treeSeek.InnerBinding].Source), treeSeek.Index.Name, bounds);
                                 continue;
                             }
                             int treeId = nodes.Count;
@@ -138,14 +146,13 @@ internal sealed partial class SqlPlanner
                             Add("JoinStep", next.Parent, Target(join.Bindings[treeStep.Binding].Source),
                                 detail: $"{treeStep.Kind}; {algorithm}{normalization}; hash_budget=no_spill",
                                 actual: metrics?.ActualCandidates(treeStep));
-                            if (treeStep.Access is { } treeSeek)
+                            if (treeStep.Access is not null)
                             {
-                                string bounds = string.Join(" AND ", treeSeek.InnerColumns.Select((column, i) =>
-                                    $"{column.Name} = {JoinProbeReference(join.Bindings, treeSeek.OuterOrdinals[i])}"));
-                                Add("IndexSeek", treeId, Target(join.Bindings[treeSeek.InnerBinding].Source), treeSeek.Index.Name, bounds);
+                                // Emit the inner probe only after the complete physical outer subtree.
+                                pending.Push((next.Node, treeId, true));
                             }
-                            else { pending.Push((next.Node.Right!, treeId)); }
-                            pending.Push((next.Node.Left!, treeId));
+                            else { pending.Push((next.Node.Right!, treeId, false)); }
+                            pending.Push((next.Node.Left!, treeId, false));
                         }
                         break;
                     }
