@@ -16,6 +16,50 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed class SqlDmlSourceBindingTests
 {
+    [Theory(DisplayName = "Cohesion Test [Sql] - DML sources: bare RETURNING star expands visible target and source columns in namespace order (#1714)")]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task Plan_ReturningStar_ShouldPreserveVisibleColumnsAndMetadata(bool delete, bool usingJoin)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("dml-star", new());
+        var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.ExecuteAsync("CREATE TABLE t (id INT NOT NULL, v INT)", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("CREATE TABLE s (label VARCHAR(23) COLLATE case_insensitive NOT NULL, id INT NOT NULL)", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("CREATE TABLE u (id INT NOT NULL, amount DECIMAL(9,2) NOT NULL)", cancellationToken: CancellationToken.None);
+        string sources = usingJoin ? "s LEFT JOIN u USING (id), s AS q" : "s, u, s AS q";
+        string sql = (delete ? "DELETE FROM t USING " : "UPDATE t SET v=s.id FROM ") + sources + " RETURNING *";
+
+        // Act
+        var plan = new SqlPlanner(database.Catalog, null).Plan(SqlQueryRequest.FromSql(sql).Statement.SqlExpression);
+        var returning = (delete ? plan.ShouldBeOfType<SqlDeletePlan>().Returning : plan.ShouldBeOfType<SqlUpdatePlan>().Returning).ShouldNotBeNull();
+        await using var explanation = (await session.ExecuteAsync("EXPLAIN " + sql, cancellationToken: CancellationToken.None)).ShouldBeAssignableTo<DatabaseResultSet>();
+        var details = new List<string?>();
+        await foreach (var row in explanation.GetRowsAsync(CancellationToken.None)) { details.Add(row.GetString(5)); }
+
+        // Assert: USING exposes the merged key first and hides the physical right key.
+        string[] names = usingJoin ? ["id", "v", "id", "label", "amount", "label", "id"]
+            : ["id", "v", "label", "id", "id", "amount", "label", "id"];
+        returning.Select(column => column.Name).ShouldBe(names);
+        var source = (delete ? ((SqlDeletePlan)plan).Source : ((SqlUpdatePlan)plan).Source).ShouldNotBeNull();
+        source.Associations.Columns.Count.ShouldBe(8);
+        source.VisibleOrdinals.ShouldBe(usingJoin ? [0, 1, 3, 2, 5, 6, 7] : [0, 1, 2, 3, 4, 5, 6, 7]);
+        if (usingJoin) { returning[2].Value.ShouldBeOfType<SqlBoundColumn>().Ordinal.ShouldBe(3); }
+        returning.Select(column => column.Type).ShouldBe(usingJoin
+            ? [DatabaseType.Int32, DatabaseType.Int32, DatabaseType.Int32, DatabaseType.String, DatabaseType.Decimal, DatabaseType.String, DatabaseType.Int32]
+            : [DatabaseType.Int32, DatabaseType.Int32, DatabaseType.String, DatabaseType.Int32, DatabaseType.Int32, DatabaseType.Decimal, DatabaseType.String, DatabaseType.Int32]);
+        var label = returning[usingJoin ? 3 : 2];
+        label.MaxLength.ShouldBe(23);
+        label.IsNullable.ShouldBeFalse();
+        label.Collation.Resolve(null).ShouldBeSameAs(Collation.CaseInsensitive);
+        var amount = returning[usingJoin ? 4 : 5];
+        amount.IsNullable.ShouldBe(usingJoin);
+        details.ShouldContain(detail => detail != null && detail.Contains($"returning={names.Length}; columns={string.Join(", ", names)}"));
+    }
+
     [Theory(DisplayName = "Cohesion Test [Sql] - DML sources: refusal precedes source and RETURNING callbacks and preserves the transaction (#1714)")]
     [InlineData(false)]
     [InlineData(true)]
@@ -108,13 +152,15 @@ public sealed class SqlDmlSourceBindingTests
         join.Projections.Count.ShouldBe(6);
         join.Where.ShouldNotBeNull();
         returning.ShouldNotBeNull();
-        returning.Select(column => column.Name).ShouldBe(["id", "v", "source_label", "v"]);
+        returning.Select(column => column.Name).ShouldBe(["id", "v", "id", "label", "id", "v", "source_label", "v"]);
         returning[1].IsNullable.ShouldBeFalse();
-        returning[2].ColumnOrdinal.ShouldBe(3);
-        returning[2].Type.ShouldBe(DatabaseType.String);
-        returning[2].MaxLength.ShouldBe(23);
-        returning[3].ColumnOrdinal.ShouldBe(5);
-        returning[3].IsNullable.ShouldBeTrue();
+        returning[3].ColumnOrdinal.ShouldBe(3);
+        returning[3].Type.ShouldBe(DatabaseType.String);
+        returning[3].MaxLength.ShouldBe(23);
+        returning[5].ColumnOrdinal.ShouldBe(5);
+        returning[5].IsNullable.ShouldBeTrue();
+        returning[6].ColumnOrdinal.ShouldBe(3);
+        returning[7].ColumnOrdinal.ShouldBe(5);
         if (!delete)
         {
             var assignment = ((SqlUpdatePlan)plan).Assignments.ShouldHaveSingleItem();

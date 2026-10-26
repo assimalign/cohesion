@@ -7,8 +7,10 @@ at physical slot zero. SqlDmlSource retains the association SqlJoinPlan and Targ
 SQ-UF2 must carry that binding's storage row location and version per association rather than infer
 identity from projected values or a user key. Physical columns remain target-then-source, including
 hidden USING inputs. SET destinations stay target-only; SET values, WHERE and explicit RETURNING
-source references bind to combined slots. Bare RETURNING * deliberately remains target-only;
-local PostgreSQL instead expands every visible relation (parse_target.c:1301-1321). Source metadata
+source references bind to combined slots. Bare RETURNING * follows PostgreSQL by expanding the
+target, then each source in namespace order (parse_target.c:1301-1321), allowing duplicate names.
+SqlDmlSource retains visible output ordinals separately from physical association slots so USING
+emits its merged keys first and hides duplicate right keys. Source metadata
 preserves type modifiers, collation and LEFT nullability. ON excludes the target/other comma items;
 WHERE children receive the combined correlation scope. CTE reachability, function validation and
 provisioning admission visit sources, and EXPLAIN descends into the association plan.

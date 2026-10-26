@@ -1,5 +1,4 @@
 using System.Collections.Generic;
-using System.Linq;
 
 using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Language;
@@ -29,7 +28,7 @@ internal sealed partial class SqlPlanner
     }
 
     private IReadOnlyList<SqlProjection>? BindSourceReturning(IReadOnlyList<SqlSelectColumn>? returning,
-        SqlJoinPlan associations, SqlTableReference target)
+        SqlDmlSource source, SqlTableReference target)
     {
         if (returning is null) { return null; }
         foreach (var column in returning)
@@ -39,10 +38,11 @@ internal sealed partial class SqlPlanner
                 throw new SqlPlanningException("CS05017", ErrorMessages.ReturningAggregate, column.Expression.Location);
             }
         }
+        var associations = source.Associations;
         var evaluator = DmlEvaluator(associations.Columns, associations.Bindings, target, foldConstants: false);
-        // Cohesion keeps bare RETURNING * target-only; explicit source columns use the joined namespace.
-        return BindProjections(returning, associations.Columns, evaluator,
-            Enumerable.Range(0, associations.Bindings[0].Source.Columns.Count).ToArray());
+        // PostgreSQL parse_target.c:1301-1321 expands the visible namespace, preserving
+        // merged USING output order rather than exposing every physical association slot.
+        return BindProjections(returning, associations.Columns, evaluator, source.VisibleOrdinals);
     }
 
     private List<SqlProjection> BindProjections(IReadOnlyList<SqlSelectColumn> selectColumns,

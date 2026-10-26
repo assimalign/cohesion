@@ -50,7 +50,7 @@ internal sealed partial class SqlPlanner
             queries.AddRange(BindSubqueries(WalkSubqueries(where), dml: target,
                 scope: new SqlCorrelationScope(scopeId, evaluator, OuterScope)));
         }
-        bindings = BindJoinSources(sources, statement, first, out columns, out var steps, out _, target: target);
+        bindings = BindJoinSources(sources, statement, first, out columns, out var steps, out var visibleOrdinals, target: target);
         evaluator = DmlEvaluator(columns, bindings, target);
         // Association slots retain every physical input column, including hidden USING inputs.
         var projections = new SqlProjection[columns.Count];
@@ -59,7 +59,7 @@ internal sealed partial class SqlPlanner
             projections[ordinal] = PassThrough(columns[ordinal].Name, ordinal, columns, evaluator);
         }
         var associations = new SqlJoinPlan(bindings, columns, steps, projections, null, [], null, null, false);
-        return (targetTable, evaluator, new SqlDmlSource(associations, 0), queries);
+        return (targetTable, evaluator, new SqlDmlSource(associations, 0, visibleOrdinals), queries);
     }
 
     private SqlExpressionEvaluator DmlEvaluator(IReadOnlyList<SqlCatalogColumn> columns,

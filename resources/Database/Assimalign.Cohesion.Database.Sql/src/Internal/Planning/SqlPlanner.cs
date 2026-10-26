@@ -945,7 +945,7 @@ internal sealed partial class SqlPlanner
         {
             Source = source is null ? null : source with { Associations = source.Associations with { Where = where } },
             Returning = source is null ? BindReturning(update.Returning, table, update.Table)
-                : BindSourceReturning(update.Returning, source.Associations, update.Table),
+                : BindSourceReturning(update.Returning, source, update.Table),
         };
         return WrapSubqueries(input, queries);
     }
@@ -970,7 +970,7 @@ internal sealed partial class SqlPlanner
         {
             Source = source is null ? null : source with { Associations = source.Associations with { Where = where } },
             Returning = source is null ? BindReturning(delete.Returning, table, delete.Table)
-                : BindSourceReturning(delete.Returning, source.Associations, delete.Table),
+                : BindSourceReturning(delete.Returning, source, delete.Table),
         };
         return WrapSubqueries(input, queries);
     }

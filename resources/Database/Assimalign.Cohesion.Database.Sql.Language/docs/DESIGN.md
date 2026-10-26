@@ -11,6 +11,9 @@ from execution: no clause/profile declaration is added until SQ-UF2 executes the
 DELETE's top-level USING source position recognizes keyword-spelled CTE references, while actual
 WITH RECURSIVE remains refused. Canonical rendering delimits ordinary OLD/NEW column qualifiers
 so a quoted identifier cannot become a RETURNING pseudo-relation on reparse.
+Bare RETURNING * follows PostgreSQL's visible namespace expansion: target columns, then sources
+in FROM/USING order with USING merges preserved and duplicate output names allowed. The engine
+retains visible output ordinals separately from physical association slots; plain DML is unchanged.
 
 ## Cascade progress and deadlock diagnostics (w11 review)
 
