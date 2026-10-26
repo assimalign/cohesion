@@ -270,6 +270,7 @@ transaction-state diagnostics; it allocates no new identity. These changes add n
 | COHDBG004 | CG05004 | Execution/budgets |
 | COHDBG008 | CG05008 | Execution/budgets |
 | COHDBG020 | CG05020 | Execution/budgets |
+| New (#1536) | CG05022 | Execution — selected shortest-path record is absent while reconstruction's operation remains active |
 | COHDBG006 | CG06006 | Storage/durability |
 | COHDBG012 | CG06012 | Storage/durability |
 | COHDBG017 | CG06017 | Storage/durability |

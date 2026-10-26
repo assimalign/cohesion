@@ -1017,6 +1017,17 @@ invalid limits use CG08021. Invalid direction uses structured CG05001 before adm
 pre-cancellation also precedes admission. Admitted failures abort an explicit transaction under
 the normal Graph statement contract. The APIs add no interfaces or boundary grants.
 
+Expansion and reconstruction check the operation's database, session and transaction lifecycle,
+including after record reads. A close during the search reports the existing CK07004 session
+refusal; an ended operation reports CK04002. Reconstruction handles absent node and relationship
+records explicitly: lifecycle refusals take precedence, and an absent selected record while the
+operation remains active raises structured CG05022, never an unchecked nullable lookup or partial
+path. Deterministic teardown, rollback and record-removal tests exercise both reconstruction reads
+under Snapshot and ReadCommitted and assert released memory leases. This follows Neo4j's
+closed/terminated transaction check before operations
+(`community/kernel/src/main/java/org/neo4j/kernel/impl/coreapi/TransactionImpl.java:529-537,550-552`
+in `C:/Source/repos/neo4j/neo4j`); no reference code is copied.
+
 Deterministic tests compare the existing reachability traversal's retained wide entity payloads
 with distance search over the same reachable set, and prove unchanged peak state for one versus
 128 parallel relationship types, using the minimum of three rounds. External benchmark digests
@@ -1435,6 +1446,7 @@ to exercise that enforcement path; compiled provisioning is not included.
 | `CG06018` | Missing or unrecoverable files; preserve the complete file set for recovery and restore missing sidecars from backup |
 | `CG09019` | The database or a resource used by a statement was disposed. ExecutionFailure on the wire; the session remains ready. Pre-statement direct-API lifetime guards retain ObjectDisposedException |
 | `CG05020` | Accounted retained execution memory exceeds the statement limit; no partial result escapes and every owned cursor/lease is released |
+| `CG05022` | A selected shortest-path node or relationship is absent from the statement snapshot while the operation remains active; reconstruction fails without a partial path |
 | `CG08021` | Query limits are nonpositive or exceed the configured engine ceilings; invalid engine ceilings use the same code in the configuration exception message |
 | `CK06101` | `Database.Indexing`'s code, carried unchanged: opening a database whose property-index pages are in a B-tree page format this engine does not read (format 1, written before #1194) fails with "Database 'x' cannot be opened. CK06101: …", checked before recovery's scrub, so a cleanly closed database's files stay as they were (a crashed one has had only the storage layer's journal redo and undo, and keeps its journal) |
 | `CK06001` | `Database.Storage`'s code, carried unchanged: opening a database whose file set is in another storage format (#1251) fails with "Database 'x' cannot be opened. CK06001: …", the storage's `StorageFormatException` as its inner exception, refused before its journal is read, so the files stay as they were |

@@ -14,21 +14,25 @@ internal static class GraphShortestPathFinder
         GraphOperation operation, GraphShortestPathSearch search, GraphPlanExecutor.ExpansionBudget budget,
         bool includePath, CancellationToken token)
     {
-        token.ThrowIfCancellationRequested();
+        CheckActive();
         using var memory = new GraphMemoryOwner(budget.Memory);
         memory.Add(9216); // Search containers and one bounded adjacency cursor/key batch.
         var snapshot = operation.Context.Snapshot;
         budget.Consume();
-        token.ThrowIfCancellationRequested();
-        if (database.Store.FindNode(search.Start.Value, snapshot) is null) { return (null, null); }
+        CheckActive();
+        bool startVisible = database.Store.FindNode(search.Start.Value, snapshot) is not null;
+        CheckActive();
+        if (!startVisible) { return (null, null); }
         if (search.Start == search.Target) { return Complete(0, null); }
         budget.Consume();
-        token.ThrowIfCancellationRequested();
-        if (database.Store.FindNode(search.Target.Value, snapshot) is null) { return (null, null); }
+        CheckActive();
+        bool targetVisible = database.Store.FindNode(search.Target.Value, snapshot) is not null;
+        CheckActive();
+        if (!targetVisible) { return (null, null); }
 
         IReadOnlyCollection<Guid>? types = search.RelationshipType is { } name
             ? database.Catalog.FindRelationshipType(name, snapshot) is { } type ? new[] { type.Id } : [] : null;
-        token.ThrowIfCancellationRequested();
+        CheckActive();
         if (types is { Count: 0 }) { return (null, null); }
         var direction = search.Direction switch
         {
@@ -48,9 +52,9 @@ internal static class GraphShortestPathFinder
         frontier.Enqueue(search.Start.Value);
         while (frontier.TryDequeue(out ulong current))
         {
-            token.ThrowIfCancellationRequested();
+            CheckActive();
             budget.OnFrontier?.Invoke(frontier.Count + 1);
-            token.ThrowIfCancellationRequested();
+            CheckActive();
             int distance = visited[current].Distance + 1;
             neighbors.Clear();
             // Typed searches start their own read statement. Earlier own writes are already in
@@ -58,7 +62,7 @@ internal static class GraphShortestPathFinder
             await foreach (var edge in database.Store.StreamIncidentRangeAsync(current, direction, types,
                 snapshot, Reserve, token).ConfigureAwait(false))
             {
-                token.ThrowIfCancellationRequested();
+                CheckActive();
                 using var edgeMemory = new GraphMemoryOwner(budget.Memory);
                 edgeMemory.RetainValue(GraphDatabase.Materialize(edge), token);
                 ulong next = edge.SourceId == current ? edge.TargetId : edge.SourceId;
@@ -70,34 +74,43 @@ internal static class GraphShortestPathFinder
                 }
                 memory.Add(160); // Reserve before growing either retained collection.
                 visited.Add(next, (current, edge.Id, distance));
-                if (database.Store.FindNode(next, snapshot) is null) { continue; }
+                bool nodeVisible = database.Store.FindNode(next, snapshot) is not null;
+                CheckActive();
+                if (!nodeVisible) { continue; }
                 budget.ConsumeViable();
                 neighbors.Add(next);
             }
+            CheckActive();
             if (visited.ContainsKey(search.Target.Value)) { return Complete(distance, visited); }
             foreach (ulong next in neighbors)
             {
-                token.ThrowIfCancellationRequested();
+                CheckActive();
                 ordered.Enqueue(next, visited[next].Edge);
             }
             while (ordered.TryDequeue(out ulong next, out _))
             {
-                token.ThrowIfCancellationRequested();
+                CheckActive();
                 frontier.Enqueue(next);
             }
         }
         return (null, null);
 
+        void CheckActive()
+        {
+            token.ThrowIfCancellationRequested();
+            operation.EnsureActive();
+        }
+
         void Reserve(ulong edgeId)
         {
             budget.VisitCandidate();
             budget.Consume();
-            token.ThrowIfCancellationRequested();
+            CheckActive();
         }
 
         (int?, GraphPath?) Complete(int distance, Dictionary<ulong, (ulong Parent, ulong Edge, int Distance)>? predecessors)
         {
-            token.ThrowIfCancellationRequested();
+            CheckActive();
             if (!includePath) { return (distance, null); }
             // Arrays, wrappers and returned entity payloads share the statement grant.
             memory.Add(192 + (distance + 1L) * 64 + distance * 80L);
@@ -106,17 +119,27 @@ internal static class GraphShortestPathFinder
             ulong nodeId = search.Target.Value;
             for (int i = distance; i >= 0; i--)
             {
-                token.ThrowIfCancellationRequested();
+                CheckActive();
                 budget.Consume();
-                token.ThrowIfCancellationRequested();
-                var node = GraphDatabase.Materialize(database.Store.FindNode(nodeId, snapshot)!.Value);
+                CheckActive();
+                var storedNode = database.Store.FindNode(nodeId, snapshot);
+                // Teardown can roll back own writes between the state check and the read.
+                // Prefer its lifecycle refusal; an active operation still needs a coded failure.
+                CheckActive();
+                if (storedNode is not { } foundNode)
+                { throw DatabaseException.CreateGraphFailure("CG05022", ErrorMessages.ShortestPathNodeMissing); }
+                var node = GraphDatabase.Materialize(foundNode);
                 memory.RetainValue(node, token);
                 nodes[i] = node;
                 if (i == 0) { break; }
                 var predecessor = predecessors![nodeId];
                 budget.Consume();
-                token.ThrowIfCancellationRequested();
-                var relationship = GraphDatabase.Materialize(database.Store.FindRelationship(predecessor.Edge, snapshot)!.Value);
+                CheckActive();
+                var storedRelationship = database.Store.FindRelationship(predecessor.Edge, snapshot);
+                CheckActive();
+                if (storedRelationship is not { } foundRelationship)
+                { throw DatabaseException.CreateGraphFailure("CG05022", ErrorMessages.ShortestPathRelationshipMissing); }
+                var relationship = GraphDatabase.Materialize(foundRelationship);
                 memory.RetainValue(relationship, token);
                 relationships[i - 1] = relationship;
                 nodeId = predecessor.Parent;
