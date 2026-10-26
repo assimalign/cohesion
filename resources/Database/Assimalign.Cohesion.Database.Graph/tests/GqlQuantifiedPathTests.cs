@@ -247,8 +247,13 @@ public sealed class GqlQuantifiedPathTests
         session.LastStatementMetrics.Memory.ActiveLeases.ShouldBe(0);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Graph] - Quantified paths: cancellation is observed after expansion has started")]
-    public async Task MatchAsync_MidExpansionCancellation_ShouldObserveTokenAsync()
+    [Theory(DisplayName = "Cohesion Test [Graph] - Quantified paths: every mode observes cancellation after expansion has started")]
+    [InlineData("")]
+    [InlineData("WALK")]
+    [InlineData("TRAIL")]
+    [InlineData("SIMPLE")]
+    [InlineData("ACYCLIC")]
+    public async Task MatchAsync_MidExpansionCancellation_ShouldObserveTokenAsync(string mode)
     {
         // Arrange
         using var cancellation = new CancellationTokenSource();
@@ -260,14 +265,69 @@ public sealed class GqlQuantifiedPathTests
         // Act
         await database.RunAsync(session, async operation =>
         {
-            var plan = new GraphPlanner(database, operation.Context.Snapshot).Plan(GraphQueryRequest.FromGql("MATCH (a:V {name:'A'})-[:T]->+(b) RETURN b").Statement.GqlExpression);
+            var plan = new GraphPlanner(database, operation.Context.Snapshot).Plan(GraphQueryRequest.FromGql("MATCH " + mode + " (a:V {name:'A'})-[:T]->{1,3}(b) RETURN b").Statement.GqlExpression);
             await Should.ThrowAsync<OperationCanceledException>(async () => await GraphPlanExecutor.MatchAsync(database, operation,
                 plan.MatchClauses[0].Paths[0], new(StringComparer.Ordinal), [], budget, null, cancellation.Token));
             return true;
         }, CancellationToken.None);
         // Assert
         budget.Consumed.ShouldBe(4);
+        budget.Memory.RetainedBytes.ShouldBe(0);
+        budget.Memory.ActiveLeases.ShouldBe(0);
         cancellation.IsCancellationRequested.ShouldBeTrue();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Graph] - Quantified paths: unbounded default TRAIL observes cancellation in the expansion dispatcher (#1733)")]
+    public async Task MatchAsync_UnboundedTrailCancellation_ShouldStopBeforeNextFrontierAsync()
+    {
+        // Arrange
+        using var cancellation = new CancellationTokenSource();
+        await using var engine = GraphDatabaseEngine.Create("quantified", new());
+        var database = await engine.CreateDatabaseAsync("graph");
+        await using var session = await database.CreateSessionAsync();
+        await session.ExecuteAsync("FOR k IN [" + string.Join(',', Enumerable.Range(0, 12)) + "] INSERT (:V {k:k})");
+        await session.ExecuteAsync("MATCH (a:V),(b:V) INSERT (a)-[:T]->(b)");
+        int frontierVisits = 0;
+        int visitsAtCancellation = 0;
+        GraphPlanExecutor.ExpansionBudget? budget = null;
+        budget = new()
+        {
+            OnFrontier = _ =>
+            {
+                // A successful quantified hop queues EndIterationTask. Cancel before that
+                // continuation is dispatched: without its own check it would queue RepeatTask
+                // and reach this hook again, before any storage/materialization token check.
+                cancellation.IsCancellationRequested.ShouldBeFalse();
+                frontierVisits++;
+                if (budget!.Viable == 32)
+                {
+                    visitsAtCancellation = frontierVisits;
+                    cancellation.Cancel();
+                }
+            },
+        };
+
+        // Act
+        await database.RunAsync(session, async operation =>
+        {
+            var plan = new GraphPlanner(database, operation.Context.Snapshot).Plan(
+                GraphQueryRequest.FromGql("MATCH (a:V {k:0})-[:T]->+(b) RETURN b").Statement.GqlExpression);
+            plan.MatchClauses[0].Paths[0].Mode.ShouldBe(GqlPathMode.Trail);
+            var error = await Should.ThrowAsync<OperationCanceledException>(async () =>
+                await GraphPlanExecutor.MatchAsync(database, operation, plan.MatchClauses[0].Paths[0],
+                    new(StringComparer.Ordinal), [], budget, null, cancellation.Token));
+            error.CancellationToken.ShouldBe(cancellation.Token);
+            return true;
+        }, CancellationToken.None);
+
+        // Assert
+        cancellation.IsCancellationRequested.ShouldBeTrue();
+        visitsAtCancellation.ShouldBeGreaterThan(0);
+        frontierVisits.ShouldBe(visitsAtCancellation);
+        budget.Viable.ShouldBe(32);
+        budget.Consumed.ShouldBeGreaterThan(32);
+        budget.Memory.RetainedBytes.ShouldBe(0);
+        budget.Memory.ActiveLeases.ShouldBe(0);
     }
 
     [Fact(DisplayName = "Cohesion Test [Graph] - Quantified paths: malformed and deeply nested direct ASTs fail before execution")]

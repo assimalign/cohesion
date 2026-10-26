@@ -62,12 +62,12 @@ public sealed class GqlParseStrictnessTests
     [InlineData("MATCH (a)«~>»(b) RETURN a", "UNDIRECTED EDGE")]
     [InlineData("INSERT (a:P)«~>»(b:P)", "UNDIRECTED EDGE")]
     [InlineData("MATCH (a)-[r]->(b)«~»(c) RETURN a", "UNDIRECTED EDGE")]
-    // Path mode prefixes (pins)
-    [InlineData("MATCH «TRAIL» (a)-[]->(b)", "TRAIL PATH MODE")]
-    [InlineData("MATCH p = «ACYCLIC» (a)-[]->(b)", "ACYCLIC PATH MODE")]
-    [InlineData("MATCH «WALK» (a)-[]->(b)", "WALK PATH MODE")]
-    [InlineData("MATCH p = «SIMPLE» (a)-[]->(b) RETURN p", "SIMPLE PATH MODE")]
-    [InlineData("MATCH «TRAIL PATH» (a)-[]->(b) RETURN a", "TRAIL PATH MODE")]
+    // Modes remain refused inside parenthesized subpaths; unbounded WALK is also refused.
+    [InlineData("MATCH («TRAIL» (a)-[]->(b))", "TRAIL")]
+    [InlineData("MATCH p = («ACYCLIC» (a)-[]->(b))", "ACYCLIC")]
+    [InlineData("MATCH «WALK» (a)-[]->+(b)", "UNBOUNDED WALK")]
+    [InlineData("MATCH p = («SIMPLE» (a)-[]->(b)) RETURN p", "SIMPLE")]
+    [InlineData("MATCH «WALK PATH» (a)-[]->+(b) RETURN a", "UNBOUNDED WALK")]
     // Path search prefixes (pins): one prefix, not ALL or ANY plus SHORTEST PATH
     [InlineData("MATCH «ALL SHORTEST» (a)-[]->(b)", "ALL SHORTEST")]
     [InlineData("MATCH «ANY SHORTEST» (a)-[]->(b)", "ANY SHORTEST")]

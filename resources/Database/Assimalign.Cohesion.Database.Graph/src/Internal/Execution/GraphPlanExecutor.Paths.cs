@@ -238,6 +238,10 @@ internal static partial class GraphPlanExecutor
                             frontier.Push(state with { Task = end.Repeat with { Count = end.Repeat.Count + 1 } });
                             break;
                         case EdgeTask edgeTask:
+                            // Once SIMPLE closes its two endpoints, no side may extend it.
+                            // The same rule works when the right side runs before the left.
+                            if (plan.Mode == GqlPathMode.Simple && state.Nodes.Count > 1 && state.Nodes[0].Id == state.Nodes[^1].Id)
+                            { break; }
                             var incident = operation.Updates.StreamIncidentAsync(state.Current.Id.Value,
                                 GraphLabelEvaluator.IncidentDirection(edgeTask.Pattern, edgeTask.Forward),
                                 operation.Updates.SelectTypes(edgeTask.Pattern), token, budget).GetAsyncEnumerator(token);
@@ -261,8 +265,14 @@ internal static partial class GraphPlanExecutor
                             ulong from = state.Current.Id.Value;
                             bool outgoing = hop.Pattern.Direction == GqlPatternDirection.Outgoing && hop.Forward || hop.Pattern.Direction == GqlPatternDirection.Incoming && !hop.Forward;
                             bool incoming = hop.Pattern.Direction == GqlPatternDirection.Incoming && hop.Forward || hop.Pattern.Direction == GqlPatternDirection.Outgoing && !hop.Forward;
-                            if (state.Used.Contains(edge.Id) || !GraphLabelEvaluator.Accepts(hop.Pattern, edge.Type) ||
+                            if (plan.Mode == GqlPathMode.Trail && state.Used.Contains(edge.Id) || !GraphLabelEvaluator.Accepts(hop.Pattern, edge.Type) ||
                                 outgoing && edge.SourceId != from || incoming && edge.TargetId != from) { break; }
+                            ulong next = edge.SourceId == from ? edge.TargetId : edge.SourceId;
+                            // Nodes is the accounted, source-ordered identity state (at most 65
+                            // entries). SIMPLE can repeat only the opposite endpoint, then stops.
+                            if (plan.Mode is GqlPathMode.Acyclic or GqlPathMode.Simple && ContainsNodeIdentity(state.Nodes, next) &&
+                                (plan.Mode == GqlPathMode.Acyclic || next != (hop.Forward ? state.Nodes[0] : state.Nodes[^1]).Id.Value))
+                            { break; }
                             var bindings = new Dictionary<string, object?>(state.Bindings, StringComparer.Ordinal);
                             var relationship = GraphDatabase.Materialize(edge);
                             if (!Accept(hop.Pattern.Variable, relationship, bindings) ||
@@ -270,7 +280,6 @@ internal static partial class GraphPlanExecutor
                             // The hop's own checks precede the cap; deferred references still qualify.
                             // A qualifying 65th edge fails before any target constraints can hide it.
                             if (state.Relationships.Count == 64) { throw new GraphPlanningException("CG05004", ErrorMessages.PathHopLimitExceeded); }
-                            ulong next = edge.SourceId == from ? edge.TargetId : edge.SourceId;
                             if (operation.Updates.FindNode(next) is not { } target) { break; }
                             var nextNode = GraphDatabase.Materialize(target);
                             if (hop.Next is NodeTask targetNodes && targetNodes.Patterns.Any(pattern =>
@@ -278,7 +287,7 @@ internal static partial class GraphPlanExecutor
                             budget.ConsumeViable();
                             var copy = state.Fork(bindings);
                             cursor.TargetMemory = budget.Memory.Reserve(GraphValueMemory.Node(nextNode, token));
-                            copy.Used.Add(edge.Id);
+                            if (plan.Mode == GqlPathMode.Trail) { copy.Used.Add(edge.Id); }
                             if (hop.Forward) { copy.Nodes.Add(nextNode); copy.Relationships.Add(relationship); }
                             else { copy.Nodes.Insert(0, nextNode); copy.Relationships.Insert(0, relationship); }
                             frontier.Push(copy with { Current = nextNode, Task = hop.Next,
@@ -298,6 +307,12 @@ internal static partial class GraphPlanExecutor
                 finally { await GraphUpdates.DisposeIncidentStreamsAsync(incidents.Keys).ConfigureAwait(false); }
             }
         }
+    }
+
+    private static bool ContainsNodeIdentity(List<GraphNode> nodes, ulong id)
+    {
+        foreach (var node in nodes) { if (node.Id.Value == id) { return true; } }
+        return false;
     }
 
     private static async IAsyncEnumerable<StoredGraphNode> StreamBoundNodesAsync(IEnumerable<StoredGraphNode> nodes,

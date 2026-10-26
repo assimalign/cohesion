@@ -7,6 +7,7 @@ namespace Assimalign.Cohesion.Database.Graph.Internal;
 internal sealed record GraphPathPlan(GqlPathPattern Pattern, GraphAnchor Anchor)
 {
     internal GraphPathShape? Shape { get; init; }
+    internal GqlPathMode Mode => Pattern.Mode ?? GqlPathMode.Trail;
 
     private sealed class DebugView
     {

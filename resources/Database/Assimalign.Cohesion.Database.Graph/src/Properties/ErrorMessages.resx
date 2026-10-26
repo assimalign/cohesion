@@ -65,10 +65,12 @@
   <data name="MemberBindingRequired" xml:space="preserve">
     <value>Member access requires a binding that may contain a map, node or relationship.</value>
   </data>
-  <data name="PathShapeInvalid" xml:space="preserve"><value>A path requires consistent elements, valid non-nested quantifiers and a sum of repetition bounds at most 64 relationships; INSERT patterns cannot be quantified or parenthesized.</value></data>
+  <data name="PathShapeInvalid" xml:space="preserve"><value>A path requires consistent elements, a defined outer mode, valid non-nested quantifiers and a sum of repetition bounds at most 64 relationships; INSERT patterns cannot carry modes, quantifiers or parenthesized paths.</value></data>
   <data name="GroupBindingConflict" xml:space="preserve"><value>A group variable cannot also bind a singleton or another quantified segment.</value></data>
   <data name="GroupPropertyReference" xml:space="preserve"><value>A property map inside a quantified segment cannot reference a group variable.</value></data>
-  <data name="PathHopLimitExceeded" xml:space="preserve"><value>The query requires a trail exceeding 64 relationships.</value></data>
+  <data name="PathHopLimitExceeded" xml:space="preserve"><value>The query requires a path exceeding 64 relationships.</value></data>
+  <data name="NestedPathModeUnsupported" xml:space="preserve"><value>A path mode inside a parenthesized or quantified subpath is not supported.</value></data>
+  <data name="UnboundedWalkUnsupported" xml:space="preserve"><value>Unbounded WALK is not supported; every quantified segment must have a finite upper bound.</value></data>
   <data name="ExpansionLimitExceeded" xml:space="preserve"><value>The query exceeded {2} candidate expansions (physical={0}, viable={1}).</value></data>
   <data name="FunctionArity" xml:space="preserve"><value>Function {0} has an invalid identity or argument count.</value></data>
   <data name="FunctionKind" xml:space="preserve"><value>Function {0} argument {1} has an incompatible kind.</value></data>

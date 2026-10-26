@@ -116,7 +116,7 @@ recorded types and names, empty input, capability refusal and session reuse.
 ## Quantified paths (#1144)
 
 QueryAsync accepts ISO quantified edges/subpaths and Cypher bracketed lengths; QueryPathsAsync
-returns the complete source-ordered trail in the existing Path frame, including intermediate
+returns the complete source-ordered path under WALK/TRAIL/SIMPLE/ACYCLIC (implicit TRAIL) in the existing Path frame, including intermediate
 nodes, stored relationship directions and zero-length paths. Right index anchors preserve that
 order. Group lists flow through FOR/UNWIND with their entity kinds; scalar projections after
 expansion use the existing result codec. Unnegotiated possible composite final projections
@@ -242,8 +242,8 @@ through GraphDatabaseServer over Connections.InMemory without a codec change.
 
 GraphResultSet.Diagnostics exposes negotiated success warnings, including CG01010 and CG01011 for unknown names. QueryPathsAsync returns a sealed GraphPathResult implementing IAsyncEnumerable<GraphPath>. Its Diagnostics property exposes the same ProtocolDiagnostic values as scalar results, finalized after EOF. Each result permits one enumeration. Terminal statement rejections before path output preserve diagnostics on GraphClientException and retain the rental after EOF; later stream failures discard it.
 
-Graph transaction control uses Execute text START TRANSACTION, COMMIT and ROLLBACK;
-BEGIN and the reserved Transaction message remain unsupported. Mutations retain
+Graph transaction control uses Execute text BEGIN [TRANSACTION] / START TRANSACTION, COMMIT and ROLLBACK;
+the reserved Transaction message remains unsupported. Mutations retain
 the engine's existing execution and validation semantics. Database binding remains fixed at
 handshake and catalog SHOW keeps its existing read-only and scoping diagnostics.
 
@@ -362,8 +362,13 @@ QueryAsync executes LET, FILTER, FOR/UNWIND, WITH and RETURN ... NEXT using the 
 ## Explicit transaction text (#1540, D5)
 
 START TRANSACTION, COMMIT and ROLLBACK are standalone ISO statements on Execute, using the
-existing session transaction objects. START uses Snapshot. BEGIN, savepoints, transaction options,
+existing session transaction objects. BEGIN [TRANSACTION] aliases START TRANSACTION (#1725); both use
+Snapshot. Savepoints, transaction options,
 statement composition and EXPLAIN of transaction controls remain outside this profile.
+WORK, TRAN, access modes, isolation levels and deferrability retain CG00002 / ParseFailure
+without starting a transaction or replacing the authenticated session. The transaction corpus
+checks both aliases' commit, rollback, snapshot retention, duplicate-start refusal and
+ExecutePaths refusal over InMemory and TCP.
 A failed statement aborts the transaction; subsequent work is refused with CG04007 until
 ROLLBACK. Failed COMMIT rolls back and reports failure, never silently commits. Duplicate START
 uses CG04022 and aborts the existing transaction; COMMIT/ROLLBACK without an open transaction

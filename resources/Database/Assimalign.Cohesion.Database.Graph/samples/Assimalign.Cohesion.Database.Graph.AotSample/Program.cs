@@ -44,7 +44,12 @@ await Refuse(new() { WorkUnits = 3 }, "CG05004");
 await Refuse(new() { MemoryBytes = 1024 }, "CG05020");
 await Refuse(new() { WorkUnits = 0 }, "CG08021");
 await Check("RETURN 7", [[7L]]);
-await session.ExecuteAsync("START TRANSACTION", cancellationToken: CancellationToken.None);
+await session.ExecuteAsync("INSERT (s:ModeLoop)-[:LOOP]->(s)", cancellationToken: CancellationToken.None);
+await Check("MATCH WALK (a:ModeLoop)-[:LOOP]->{0,3}(b) RETURN count(*)", [[4L]]);
+await Check("MATCH TRAIL (a:ModeLoop)-[:LOOP]->{0,3}(b) RETURN count(*)", [[2L]]);
+await Check("MATCH SIMPLE (a:ModeLoop)-[:LOOP]->{0,3}(b) RETURN count(*)", [[2L]]);
+await Check("MATCH ACYCLIC (a:ModeLoop)-[:LOOP]->{0,3}(b) RETURN count(*)", [[1L]]);
+await session.ExecuteAsync("BEGIN", cancellationToken: CancellationToken.None);
 await session.ExecuteAsync("INSERT (:Uncommitted)", cancellationToken: CancellationToken.None);
 await Check("MATCH (n:Uncommitted) RETURN count(*)", [[1L]]);
 await session.ExecuteAsync("ROLLBACK", cancellationToken: CancellationToken.None);
@@ -53,6 +58,11 @@ await session.ExecuteAsync("START TRANSACTION", cancellationToken: CancellationT
 await session.ExecuteAsync("INSERT (:Committed)", cancellationToken: CancellationToken.None);
 await session.ExecuteAsync("COMMIT", cancellationToken: CancellationToken.None);
 await Check("MATCH (n:Committed) RETURN count(*)", [[1L]]);
+await session.ExecuteAsync("BEGIN TRANSACTION", cancellationToken: CancellationToken.None);
+await session.ExecuteAsync("INSERT (:AliasPending)", cancellationToken: CancellationToken.None);
+await Check("MATCH (n:AliasPending) RETURN count(*)", [[1L]]);
+await session.ExecuteAsync("ROLLBACK", cancellationToken: CancellationToken.None);
+await Check("MATCH (n:AliasPending) RETURN count(*)", [[0L]]);
 Console.WriteLine($"Graph NativeAOT: {checks}/{checks} checks passed.");
 
 async Task Check(string query, long[][] expected)

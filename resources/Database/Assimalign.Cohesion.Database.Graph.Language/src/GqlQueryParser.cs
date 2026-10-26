@@ -104,7 +104,8 @@ public sealed partial class GqlQueryParser : QueryParser
         // SHOW has a deliberately separate grammar: catalog definitions are not graph elements.
         // Check attempted composition before generic capability errors (SET, DROP, etc.).
         bool catalogStatement = Is("SHOW");
-        bool transactionStatement = Is("START") || Is("COMMIT") || Is("ROLLBACK");
+        bool transactionStatement = Is(GqlTransactionVocabulary.Start) || Is(GqlTransactionVocabulary.Begin) ||
+            Is(GqlTransactionVocabulary.Commit) || Is(GqlTransactionVocabulary.Rollback);
         if (catalogStatement) { FindCatalogMutation(); }
         else if (!transactionStatement) { FindUnsupported(); }
         GqlQueryExpression expression;
@@ -117,10 +118,13 @@ public sealed partial class GqlQueryParser : QueryParser
         else if (transactionStatement)
         {
             var first = Current;
-            var command = Is("START") ? GqlTransactionCommand.Start
-                : Is("COMMIT") ? GqlTransactionCommand.Commit : GqlTransactionCommand.Rollback;
+            var command = Is(GqlTransactionVocabulary.Start) || Is(GqlTransactionVocabulary.Begin) ? GqlTransactionCommand.Start
+                : Is(GqlTransactionVocabulary.Commit) ? GqlTransactionCommand.Commit : GqlTransactionCommand.Rollback;
             _position++;
-            if (command == GqlTransactionCommand.Start) { Expect("TRANSACTION"); }
+            if (first.Text.Equals(GqlTransactionVocabulary.Start, StringComparison.OrdinalIgnoreCase))
+            { Expect(GqlTransactionVocabulary.Transaction); }
+            else if (first.Text.Equals(GqlTransactionVocabulary.Begin, StringComparison.OrdinalIgnoreCase))
+            { Take(GqlTransactionVocabulary.Transaction); }
             expression = new GqlQueryExpression(Array.Empty<GqlStage>(), Span(first, _tokens[_position - 1]))
             { TransactionCommand = command };
         }
@@ -341,10 +345,6 @@ public sealed partial class GqlQueryParser : QueryParser
                 case GqlWordPosition.ValueExpression:
                     // ParseOperand owns niladic expressions so binding sites fail as syntax.
                     continue;
-                case GqlWordPosition.PathMode:
-                    // TRAIL (a)... is a path mode; trail = (a)... names a path.
-                    if (patternDepth != 0 || valuePosition || !StartsPathPattern(i + 1, ref end)) { continue; }
-                    break;
                 case GqlWordPosition.BeforeDelete:
                     if (!IsWordAt(i + 1, "DELETE")) { continue; }
                     end = _tokens[i + 1];
@@ -411,9 +411,7 @@ public sealed partial class GqlQueryParser : QueryParser
         if (head != "SHORTEST" && shortest) { next++; }
         if (head != "ALL" && next < _tokens.Count && _tokens[next].Type == TokenType.Integer) { next++; }
 
-        if (next < _tokens.Count && _tokens[next].Type is TokenType.Identifier or TokenType.Keyword &&
-            GqlUnsupportedVocabulary.TryFind(_tokens[next].Text.ToUpperInvariant(), out var mode) &&
-            mode.Position == GqlWordPosition.PathMode)
+        if (TryPathModeAt(next, out _))
         {
             next++;
         }

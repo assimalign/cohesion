@@ -119,7 +119,6 @@ public class GqlQueryParserTests
     [InlineData("ALTER SCHEMA other")]
     [InlineData("SHOW DATABASES")]
     [InlineData("SESSION SET GRAPH other")]
-    [InlineData("BEGIN TRANSACTION")]
     public void OutsideProfileCorpus_ReportsUnsupportedClause(string source)
     {
         Parse(source).Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CK00001");

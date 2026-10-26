@@ -78,7 +78,7 @@ internal sealed partial class GraphPlanner
                     : Add(DescribeOperator(clause), rootId, detail: $"filter={clause.Predicate is not null}; matches_nothing={clause.MatchesNothing}; nulls={string.Join(",", clause.Optional ? clause.NewVariables : [])}");
                 foreach (var path in clause.Paths)
                 {
-                    int pathId = Add(DescribeOperator(path), clauseId, path.Pattern.Variable);
+                    int pathId = Add(DescribeOperator(path), clauseId, path.Pattern.Variable, detail: $"mode={path.Mode}");
                     var anchor = path.Anchor;
                     string? index = anchor.Property is null ? null : $"{anchor.Label}({anchor.Property})";
                     if (anchor.Property is not null && _database.Catalog.FindLabel(anchor.Label!, _snapshot) is { } label)
@@ -100,7 +100,7 @@ internal sealed partial class GraphPlanner
                         if (segment.Quantifier is { } quantifier)
                         {
                             parent = Add("Expand", parent, segment.Body.Edge?.Type,
-                                detail: $"edge={edge}; quantifier={{{quantifier.Min},{quantifier.Max?.ToString(CultureInfo.InvariantCulture) ?? ""}}}; body_hops={segment.Body.Bound}; trail=True; {AdjacencyDetail(segment.Body, edge >= anchor.NodeIndex, budget?.WorkLimit ?? GraphPlanExecutor.ExpansionBudget.PhysicalLimit)}");
+                                detail: $"edge={edge}; quantifier={{{quantifier.Min},{quantifier.Max?.ToString(CultureInfo.InvariantCulture) ?? ""}}}; body_hops={segment.Body.Bound}; mode={path.Mode}; {AdjacencyDetail(segment.Body, edge >= anchor.NodeIndex, budget?.WorkLimit ?? GraphPlanExecutor.ExpansionBudget.PhysicalLimit)}");
                         }
                         else
                         {
