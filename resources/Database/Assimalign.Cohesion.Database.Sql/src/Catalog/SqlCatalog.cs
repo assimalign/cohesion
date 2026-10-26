@@ -229,7 +229,7 @@ public sealed partial class SqlCatalog
             if (_truncatedTables.Remove(objectId, out var retired))
             {
                 foreach (var index in retired.Before.GetIndexes(objectId)) { _truncatedIndexes.Remove(index); }
-                PublishOrderedTruncations();
+                RemoveOrderedTruncation(objectId);
             }
             return default;
         }

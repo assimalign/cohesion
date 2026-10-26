@@ -6625,8 +6625,12 @@ propagates through WITH, INSERT SELECT sources, derived/view bodies and subquery
 so every DML join source retains its CS04006 definition check before reading retired rows.
 Catalog-image equivalence includes each table's index descriptions, so a cached view image
 cannot hide an index created before retirement while table and view descriptions stay identical.
-Retirements are published as an ordered immutable array. A snapshot seeing its maximum marker
-sees every earlier serialized marker and returns without locking, collecting or sorting.
+Retirements are published as an ordered immutable array. Serialized monotonic markers let
+publication append owners and completion remove an owner with one replacement array, without sorting
+the whole set. A snapshot seeing its maximum marker sees every earlier serialized marker and
+returns without locking, collecting or sorting. Join retirement lookups return without taking
+the catalog lock when this array is empty; exact-owner lookup uses a plain loop and allocates
+nothing, including when retirements exist. Retained-index lookup takes the catalog lock once.
 
 The lock/latch order is documented at ExecuteTruncateAsync: metadata admission, ascending table
 X, apply gate, tree/page latches; no apply gate or data latch spans catalog publication. Final
