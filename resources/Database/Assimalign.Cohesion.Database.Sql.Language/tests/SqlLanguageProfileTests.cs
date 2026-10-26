@@ -25,6 +25,8 @@ public class SqlLanguageProfileTests
     [InlineData(SqlClauses.OnConflict, "INSERT INTO t (id) VALUES (1) ON CONFLICT DO NOTHING;")]
     [InlineData(SqlClauses.Returning, "INSERT INTO t (id) VALUES (1) RETURNING id;")]
     [InlineData(SqlClauses.Update, "UPDATE t SET id = 1;")]
+    [InlineData(SqlClauses.UpdateFrom, "UPDATE t SET id=s.id FROM s WHERE t.id=s.id;")]
+    [InlineData(SqlClauses.DeleteUsing, "DELETE FROM t USING s WHERE t.id=s.id;")]
     [InlineData(SqlClauses.Delete, "DELETE FROM t;")]
     [InlineData(SqlClauses.Identity, "CREATE TABLE t (id INT IDENTITY);")]
     [InlineData(SqlClauses.CreateTable, "CREATE TABLE t (id INT);")]

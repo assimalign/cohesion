@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 
 using Assimalign.Cohesion.Database.Sql.Catalog;
+using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
@@ -76,6 +77,47 @@ internal sealed class SqlStatementMetrics
 
     // Keep wire-only state in the shared statement object, rather than every context copy.
     internal SqlResultPreparation? ResultPreparation { get; set; }
+
+    // Joined execution shares its outer mark/root with WITH, subqueries and cascade retries.
+    // The existing join-only state slot keeps ordinary statement instance sizes unchanged.
+    internal (SqlPlan Plan, LockStatementMark Mark)? JoinedDmlStatement
+    {
+        get => (_accessPath as JoinedDmlWork)?.DmlStatement;
+        set
+        {
+            if (_accessPath is not JoinedDmlWork work)
+            {
+                if (value is null) { return; }
+                // Installed before WITH/subqueries or association enumeration do any work.
+                work = new();
+                _accessPath = work;
+            }
+            work.DmlStatement = value;
+        }
+    }
+
+    /// <summary>All row reads during joined DML, including stamp checks and tombstone pre-images.</summary>
+    internal long RowReads => (_accessPath as JoinedDmlWork)?.RowReads ?? 0;
+
+    internal void RecordRowRead()
+    {
+        if (_accessPath is JoinedDmlWork work) { work.RowReads++; }
+    }
+
+    /// <summary>Row reads while collecting target/source associations, before validation and apply.</summary>
+    internal long DmlAssociationRowReads
+    {
+        get => (_accessPath as JoinedDmlWork)?.AssociationRowReads ?? 0;
+        set { if (_accessPath is JoinedDmlWork work) { work.AssociationRowReads = value; } }
+    }
+
+    /// <summary>Peak target identities retained after the pushed target filter.</summary>
+    internal int PeakDmlTargetRows => (_accessPath as JoinedDmlWork)?.PeakTargetRows ?? 0;
+
+    internal void RecordDmlTargetRows(int count)
+    {
+        if (_accessPath is JoinedDmlWork work) { work.PeakTargetRows = Math.Max(work.PeakTargetRows, count); }
+    }
 
     /// <summary>
     /// Gets or sets the access path the executor drove ("scan", or
@@ -187,7 +229,7 @@ internal sealed class SqlStatementMetrics
     // exactly their previous instance layout and allocate no new telemetry object.
     [global::System.Diagnostics.DebuggerDisplay("JoinWork")]
     [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlStatementMetrics.JoinWork.DebugView))]
-    private sealed class JoinWork
+    private class JoinWork
     {
         internal JoinWork(IReadOnlyList<string> paths)
         {
@@ -208,6 +250,18 @@ internal sealed class SqlStatementMetrics
                 _ = value;
             }
         }
+    }
+
+    // Inherits the base's effective debugger display/proxy. Ordinary joins retain their
+    // original instance layout; only joined DML carries the execution scope.
+    private sealed class JoinedDmlWork : JoinWork
+    {
+        internal JoinedDmlWork() : base([]) { }
+
+        internal (SqlPlan Plan, LockStatementMark Mark)? DmlStatement;
+        internal long RowReads;
+        internal long AssociationRowReads;
+        internal int PeakTargetRows;
     }
 
     [global::System.Diagnostics.DebuggerDisplay("AnalysisState")]

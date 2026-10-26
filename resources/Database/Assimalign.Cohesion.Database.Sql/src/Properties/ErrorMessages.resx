@@ -597,7 +597,8 @@
   <data name="SqlPlannerPlanInsertSqlPlanning2" xml:space="preserve"><value>INSERT target column '{0}' is specified more than once.</value></data>
   <data name="ScopelessExpressionSqlPlanning" xml:space="preserve"><value>Aggregate functions are not allowed in {0}.</value></data>
   <data name="ScopelessExpressionSqlPlanning2" xml:space="preserve"><value>'*' is not allowed in {0}.</value></data>
-  <data name="DmlSourcesExecutionUnavailable" xml:space="preserve"><value>{0} is parsed and bound, but execution is not implemented yet. Target/source collection, cardinality checks and mutation support are required.</value></data>
+  <data name="DmlMultipleSourceMatches" xml:space="preserve"><value>UPDATE target '{0}.{1}' matched more than one source row.</value></data>
+  <data name="DmlTargetVersionChanged" xml:space="preserve"><value>Target row version in '{0}.{1}' changed after source association collection.</value></data>
   <data name="SqlPlannerPlanUpdateSqlPlanning" xml:space="preserve"><value>Aggregate functions are not allowed in UPDATE SET.</value></data>
   <data name="RejectAggregateInDmlWhereSqlPlanning" xml:space="preserve"><value>Aggregate functions are not allowed in WHERE.</value></data>
   <data name="ResolveDefaultLiteralSqlPlanning" xml:space="preserve"><value>Column '{0}': typed DEFAULT {1} does not match {2}.</value></data>

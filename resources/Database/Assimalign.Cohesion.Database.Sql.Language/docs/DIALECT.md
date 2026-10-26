@@ -119,17 +119,20 @@ ON CONFLICT ... RETURNING returns inserted and updated rows, excluding skipped p
 EXPLAIN reports the expanded RETURNING projection count and names for INSERT,
 INSERT SELECT, UPDATE and DELETE without applying the write or evaluating the projection.
 
-### UPDATE FROM and DELETE USING binding (#1714, SQ-UF1)
+### UPDATE FROM and DELETE USING (#1714)
 
 The parser and canonical renderer accept `UPDATE t [AS alias] SET ... FROM s1, s2 ... WHERE ... RETURNING ...`
 and `DELETE FROM t [AS alias] USING s1, s2 ... WHERE ... RETURNING ...`. Sources use the SELECT
 relation grammar: stored tables, views, system relations, CTEs and aliased derived queries, with
 INNER, LEFT and CROSS joins. RIGHT/FULL joins retain their CK00001 refusal.
-These forms are **parsed and bound only** and are absent from the executable language profile.
-A bound statement refuses at execution with structured `CK00001`, naming the clause and explaining
-that target/source collection, cardinality checking and mutation are not implemented yet.
-The refusal precedes CTE/source/WHERE-child execution and writes, including for empty inputs.
+These forms execute and are advertised as UPDATE FROM and DELETE USING in the SQL profile.
 Plain EXPLAIN describes the target/source association plan without applying the mutation.
+
+Equality-driven hash or seek steps follow written source order. For example,
+`UPDATE t SET v = b.v FROM a, b WHERE t.id = b.tid AND b.aid = a.id` visits |t| * |a|
+pairs before b's hash; write `FROM b, a` to make these equality joins linear in the input sizes.
+Results are correct in either order. General join-order search is deferred to #1629; place a
+source connected by equality to the target before sources that depend on it.
 
 SET values, WHERE and RETURNING resolve against the target plus source namespace. SET destinations
 remain target columns. An alias hides the original relation name; self-joins require distinct
@@ -143,17 +146,31 @@ columns in FROM/USING order. JOIN USING preserves its visible output order (merg
 then remaining left and right columns), omitting hidden duplicate keys rather than exposing every
 physical association slot. Duplicate result names are allowed; client name lookup selects the
 first match and ordinal access distinguishes them. Plain UPDATE/DELETE without sources are unchanged.
-Explicit source columns are supported by binding. A real visible source named/aliased OLD or NEW
+Explicit source columns execute. A real visible source named/aliased OLD or NEW
 masks that pseudo-relation refusal. SET and RETURNING subqueries retain CK00001.
 Delimited OLD/NEW qualifiers remain ordinary identifiers through canonical rendering.
 Keyword-spelled CTE names are accepted after DELETE USING; actual WITH RECURSIVE remains unsupported.
 
 Namespace behavior follows the local PostgreSQL `src/backend/parser/analyze.c:602-621,2560-2578`.
-SQ-UF2 will collect physical target identities per association, reject multiple source matches
-for one UPDATE target before any write, and deduplicate DELETE targets. This deliberately differs
-from PostgreSQL's first-update behavior at `src/backend/executor/nodeModifyTable.c:2599-2608`.
+Target/source associations are collected before SET evaluation or writes. Multiple matching
+source associations for one UPDATE target fail with structured CS05068 before any row is written,
+even for equal source values. DELETE deduplicates physical targets and retains one source association
+for RETURNING; which source is retained and result order are unspecified. Unkeyed equal target rows
+remain distinct. UPDATE RETURNING sees new target values and collected source values; DELETE sees
+old target values and collected source values. Concurrent committed target changes fail through the
+existing first-updater-wins conflict, preserving the original physical identity rather than following
+a replacement row. Constraint and statement-rollback behavior is the same as plain UPDATE/DELETE.
+This deliberately differs from PostgreSQL's first-update behavior at
+`src/backend/executor/nodeModifyTable.c:2599-2608`.
 
-UPDATE and DELETE choose the same indexed equality-prefix and range access paths as SELECT,
+Joined associations keep the target outer. Safe target-only WHERE restrictions can seek the target;
+mandatory target/source equalities use source index probes or budgeted hash joins. EXPLAIN shows
+the chosen paths and algorithms. WITH definitions and source references share one materialization,
+including volatile expressions. Failure/cancellation unwinds new statement locks after undo,
+including locks taken by WITH/subqueries, while earlier transaction grants remain held. DELETE
+retries retain collected source values and re-acquire source intents before resuming preparation.
+
+UPDATE and DELETE without source clauses choose the same indexed equality-prefix and range access paths as SELECT,
 including target aliases and qualified columns. EXPLAIN shows the chosen IndexSeek and bounds
 or TableScan below the mutation. The complete WHERE remains a residual predicate, including
 subqueries. Targets are collected through one statement snapshot before any write, so changing
@@ -339,7 +356,7 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | `INSERT` / `VALUES` | Supported subset, measured | Optional column list, multi-row literal/scalar `VALUES` including whole-item `DEFAULT`, `INSERT ... DEFAULT VALUES` (one row of defaults, with an optional column list), and transactional `INSERT ... SELECT` with the same destination coercion, defaults, and constraints. `VALUES` expressions have no columns in scope: a column reference reports `CS01005` before anything executes (see [VALUES and counts have no column scope](#values-and-counts-have-no-column-scope-1165)). Subqueries inside `VALUES` are excluded; use `INSERT ... SELECT`. |
 | `INSERT ... ON CONFLICT` | Supported subset, measured | Column-set inference, ON CONSTRAINT unique-index names, untargeted DO NOTHING, and targeted DO UPDATE SET/WHERE with target and EXCLUDED scope; inserted/updated RETURNING rows and counts. See the upsert contract above. |
 | `UPDATE` | Supported | multi-column `SET`, including `c = DEFAULT`, and `WHERE` (including correlated and uncorrelated subqueries); qualified references in both use the target name or its alias, which hides the base name (PostgreSQL `parse_relation.c:3759`); hidden/unknown qualifiers fail with located `CS01015` before any write and leave an explicit transaction active; aggregates in SET and outside child queries in WHERE are rejected; aggregates inside WHERE subqueries execute (see [Grouping and aggregate functions](#grouping-and-aggregate-functions-1020)) |
-| `UPDATE ... FROM` / `DELETE ... USING` | Parsed and bound, execution unavailable | Source namespaces and association plans are inspected by EXPLAIN; execution reports CK00001 until SQ-UF2. These clauses are absent from the executable profile. |
+| `UPDATE ... FROM` / `DELETE ... USING` | Supported | Collected source associations feed SET, WHERE and RETURNING; UPDATE rejects multiple matches with CS05068 before writes, DELETE deduplicates physical targets. EXPLAIN shows sources. |
 | `DELETE` | Supported | optional `WHERE`, including correlated and uncorrelated subqueries; aggregates outside a child query are rejected; qualified references use the target name or its alias, which hides the base name (PostgreSQL `parse_relation.c:3759`); hidden/unknown qualifiers fail with located `CS01015` before any write and leave an explicit transaction active |
 | `CREATE TABLE` | Supported | Identity columns use GENERATED ALWAYS/BY DEFAULT AS IDENTITY or the SQL Server IDENTITY alias (see identity contract above). `IF NOT EXISTS`, column definitions with parameterized types, `COLLATE <name>`, `NOT NULL`/`NULL`, `DEFAULT <expression>`, column and table `PRIMARY KEY`, `REFERENCES`/`FOREIGN KEY`, `CHECK`, and `UNIQUE`; optional `CONSTRAINT <name>` |
 | `ALTER TABLE` | Supported subset, measured | ADD/DROP COLUMN and ADD/DROP CONSTRAINT execute. Full-definition `ALTER COLUMN c <type> [NULL | NOT NULL] [DEFAULT expression]` accepts nullability, length and precision changes that preserve storage type, scale, collation, domain and DEFAULT; tightening and every CHAR length change check existing live values and refuse changes requiring a rewrite. RENAME TO, RENAME [COLUMN], ALTER [COLUMN] SET/DROP DEFAULT and SET/DROP NOT NULL also execute (#1122). PostgreSQL TYPE/SET DATA TYPE and TYPE ... USING remain unsupported. ADD COLUMN nonvolatile defaults backfill old-row reads and apply to subsequent inserts that omit the column; explicit NULL follows nullability. Nullable additions without a default read NULL. NOT NULL additions to populated tables require a non-null default. Invalid defaults reject before mutation; expression defaults follow the fast-default contract below. Column COLLATE persists and governs default comparisons. See the default, atomicity and MVCC contract below (#1023). DROP COLUMN changes only the catalog: it rewrites no row, survives a crash at any point on one definition, and SELECTs running beside it read every value in its own column; see the DROP COLUMN contract below (#1241). |
@@ -1226,7 +1243,7 @@ copied on delivery, as are unmatched LEFT outer values used in multiple results.
 
 Capability preflight skips advertised clauses and reports the first unadvertised
 one. Thus USING cannot mask a later NATURAL, WINDOW or OVER. MERGE INTO ... USING
-remains CS00002; DELETE ... USING and CREATE INDEX ... USING are syntax errors.
+remains CS00002; DELETE ... USING executes; CREATE INDEX ... USING remains a syntax error.
 
 ## Value comparison (#1029)
 
@@ -3560,6 +3577,7 @@ the diagnostic fixes introduce no persisted-format change beyond #1422's format-
 | `CS06060` | Unsupported SQL catalog metadata format or version; earlier/future metadata is refused without an upgrade reader | 0A000 (`feature_not_supported`) |
 | `CS03059` | Expression cannot be stored as a valid deterministic row definition | 42P17 (`invalid_object_definition`) |
 | `CS05060` | Executor/catalog invariant failure, including unavailable constraint indexes or freshly rendered CREATE VIEW text that cannot reload | XX000 (`internal_error`) |
+| `CS05068` | UPDATE target matched by multiple source associations; refused before writes | 21000 (`cardinality_violation`) |
 | `CS03061` | Column already exists | 42701 (`duplicate_column`) |
 | `CS02062` | INTERVAL duration overflow in assignment, DEFAULT or CAST | 22015 (`interval_field_overflow`) |
 | `CS02063` | FOREIGN KEY columns have incompatible collations | 42P21 (`collation_mismatch`) |

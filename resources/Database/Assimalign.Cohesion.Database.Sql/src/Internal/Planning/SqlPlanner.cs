@@ -943,7 +943,7 @@ internal sealed partial class SqlPlanner
         var input = new SqlUpdatePlan(table, assignments, where,
             source is null ? SelectAccessPath(table, update.Where, evaluator) : SqlScanPath.Instance)
         {
-            Source = source is null ? null : source with { Associations = source.Associations with { Where = where } },
+            Source = source is null ? null : source with { Associations = PlanDmlAssociations(source.Associations, where) },
             Returning = source is null ? BindReturning(update.Returning, table, update.Table)
                 : BindSourceReturning(update.Returning, source, update.Table),
         };
@@ -968,7 +968,7 @@ internal sealed partial class SqlPlanner
         var input = new SqlDeletePlan(table, where,
             source is null ? SelectAccessPath(table, delete.Where, evaluator) : SqlScanPath.Instance)
         {
-            Source = source is null ? null : source with { Associations = source.Associations with { Where = where } },
+            Source = source is null ? null : source with { Associations = PlanDmlAssociations(source.Associations, where) },
             Returning = source is null ? BindReturning(delete.Returning, table, delete.Table)
                 : BindSourceReturning(delete.Returning, source, delete.Table),
         };

@@ -82,27 +82,9 @@ internal sealed partial class SqlPlanExecutor
 
     internal Task<DatabaseResult> ExecuteAsync(SqlPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
-        // Refuse before materializing CTEs or WHERE children, including volatile source calls.
-        var input = plan;
-        while (true)
-        {
-            if (input is SqlWithPlan with) { input = with.Input; }
-            else if (input is SqlSubqueryPlan subquery) { input = subquery.Input; }
-            else if (input is SqlCorrelatedSubqueryPlan correlated) { input = correlated.Input; }
-            else { break; }
-        }
-        string? clause = input switch
-        {
-            SqlUpdatePlan { Source: not null } => "UPDATE ... FROM",
-            SqlDeletePlan { Source: not null } => "DELETE ... USING",
-            _ => null,
-        };
-        if (clause is not null)
-        {
-            throw new SqlUnsupportedQueryException(string.Format(CultureInfo.CurrentCulture,
-                ErrorMessages.DmlSourcesExecutionUnavailable, clause));
-        }
-        return statement.Metrics.IsAnalyzing ? ExecuteAnalyzedAsync(plan, statement, cancellationToken)
+        return JoinedDml(plan) && statement.Metrics.JoinedDmlStatement is null
+            ? ExecuteJoinedStatementAsync(plan, statement, cancellationToken)
+            : statement.Metrics.IsAnalyzing ? ExecuteAnalyzedAsync(plan, statement, cancellationToken)
             : ExecuteCoreAsync(plan, statement, cancellationToken);
     }
 
@@ -552,7 +534,15 @@ internal sealed partial class SqlPlanExecutor
         return await ExecuteInsertRowsAsync(plan.Table, plan.TargetOrdinals, values, statement, cancellationToken, plan.Returning, plan.Rows, plan.OnConflict).ConfigureAwait(false);
     }
 
-    private async Task<DatabaseResult> ExecuteUpdateAsync(SqlUpdatePlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
+    private Task<DatabaseResult> ExecuteUpdateAsync(SqlUpdatePlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
+        => plan.Source is null ? ExecutePlainUpdateAsync(plan, statement, cancellationToken)
+            : ExecuteJoinedUpdateAsync(plan, statement, cancellationToken);
+
+    private Task<DatabaseResult> ExecuteDeleteAsync(SqlDeletePlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
+        => plan.Source is null ? ExecutePlainDeleteAsync(plan, statement, cancellationToken)
+            : ExecuteJoinedDeleteAsync(plan, statement, cancellationToken);
+
+    private async Task<DatabaseResult> ExecutePlainUpdateAsync(SqlUpdatePlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
         await AcquireReferenceIntentLocksAsync(plan.Table, statement, cancellationToken).ConfigureAwait(false);
         var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken);
@@ -578,6 +568,7 @@ internal sealed partial class SqlPlanExecutor
         int[]? assigned = bound.Domains.Count > 0 ? plan.Assignments.Select(static assignment => assignment.Ordinal).ToArray() : null;
         foreach (var (pageId, slotIndex, values) in targets)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var updated = (object?[])values.Clone();
 
             foreach (var (ordinal, expression) in plan.Assignments)
@@ -683,7 +674,7 @@ internal sealed partial class SqlPlanExecutor
         }
     }
 
-    private async Task<DatabaseResult> ExecuteDeleteAsync(SqlDeletePlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
+    private async Task<DatabaseResult> ExecutePlainDeleteAsync(SqlDeletePlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
         var locks = statement.Coordinator.LockManager;
         var statementMark = locks.MarkStatement(statement.Transaction.Sequence);
@@ -1093,6 +1084,7 @@ internal sealed partial class SqlPlanExecutor
     /// </exception>
     private (TransactionSequence Writer, TransactionSequence Deleter) ReadVersionStamps(SqlCatalogTable table, PageId pageId, int slotIndex)
     {
+        _metrics?.RecordRowRead();
         var record = _storage.ReadRow(pageId, slotIndex);
 
         if (record.Length < SqlRowCodec.StampHeaderSize)
@@ -1112,6 +1104,7 @@ internal sealed partial class SqlPlanExecutor
     /// </summary>
     private void TombstoneVersion(SqlStatementContext statement, StorageTransaction bracket, PageId pageId, int slotIndex)
     {
+        statement.Metrics.RecordRowRead();
         var current = _storage.ReadRow(pageId, slotIndex);
         byte[] tombstoned = SqlRowCodec.WithDeleter(current.Span, statement.Transaction.Sequence);
         _storage.UpdateRow(bracket, pageId, slotIndex, tombstoned);

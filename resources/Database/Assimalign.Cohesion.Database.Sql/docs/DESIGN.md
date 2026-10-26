@@ -1,10 +1,10 @@
 # Assimalign.Cohesion.Database.Sql — Design
 
-## Joined DML syntax and binding (#1714, SQ-UF1)
+## Joined DML planning and execution (#1714, SQ-UF2)
 
 The DML binder reuses SELECT's source namespace and join rules, seeding a distinct target binding
 at physical slot zero. SqlDmlSource retains the association SqlJoinPlan and TargetBinding index;
-SQ-UF2 must carry that binding's storage row location and version per association rather than infer
+Execution carries that binding's storage row location and writer stamp per association rather than inferring
 identity from projected values or a user key. Physical columns remain target-then-source, including
 hidden USING inputs. SET destinations stay target-only; SET values, WHERE and explicit RETURNING
 source references bind to combined slots. Bare RETURNING * follows PostgreSQL by expanding the
@@ -15,12 +15,57 @@ preserves type modifiers, collation and LEFT nullability. ON excludes the target
 WHERE children receive the combined correlation scope. CTE reachability, function validation and
 provisioning admission visit sources, and EXPLAIN descends into the association plan.
 
-Execution unwraps WITH/subquery wrappers and refuses a source-bearing DML plan with CK00001 before
-any materialization or write. The executor deliberately cannot apply these plans yet. The profile
-is unchanged. SQ-UF2 owns collection/apply/rechecks, pre-write UPDATE cardinality errors and DELETE
-deduplication. No new diagnostic identity, interface, visibility grant, reference or persisted format
-is needed. Namespace rules follow PostgreSQL analyze.c:602-621,2560-2578; the owner's future
-cardinality rule deliberately differs from nodeModifyTable.c:2599-2608.
+Execution drains source relations and target/source associations through one statement snapshot
+before evaluating SET or writing. Association plans use SELECT predicate pushdown and transient
+costing with the target pinned as the outer input. Safe target-only WHERE terms select target
+seeks; mandatory target/source equalities drive source index probes or the existing budgeted
+hash build. EXPLAIN exposes those access paths and algorithms. The full WHERE remains a residual.
+Equality-driven hash or seek steps are formed one at a time in written source order. For example,
+`UPDATE t SET v = b.v FROM a, b WHERE t.id = b.tid AND b.aid = a.id` visits |t| * |a|
+pairs before reaching b's hash. Write `FROM b, a` to make these equality joins linear in the
+input sizes. Both orders return correct results; general join-order search belongs to #1629.
+The pushed target filter runs before retaining target identities. Collection keeps the writer
+stamp from the original decode, avoiding a second whole-row read. Internal statement counters
+record association reads separately from total row reads, which also include stamp checks and
+tombstone pre-images, and record peak retained target identities. Target/association collections
+follow plain UPDATE/DELETE's existing unbudgeted retention; StatementMemoryBudget currently
+accounts for join hash builds, not these DML collections.
+Costing rewrites source-derived relations through the same identity map as WITH definitions, so
+volatile CTE sources materialize once. A private join-frame identity slot retains the original decoded
+target array by reference; a local map associates it with physical location and writer stamp.
+Equal unkeyed rows and self joins therefore retain distinct identities. UPDATE rejects a second
+association for any target with CS05068 before SET evaluation, even when source values are equal.
+DELETE keeps the first enumerated source association per physical target; the chosen source and
+RETURNING order are unspecified. Cascade retries reuse this collected set rather than rerunning
+volatile sources. Source values remain from collection; UPDATE RETURNING substitutes only the
+new target columns, while DELETE RETURNING uses the old target columns.
+
+Target rows take sorted exclusive locks before constraint preparation. The apply gate rechecks
+every collected target's original location and writer before writes; a concurrent committed
+change fails with the existing first-updater-wins transaction conflict rather than following a
+replacement row. Snapshot retention prevents reclamation while collection waits. The existing
+UPDATE final-state, domain, CHECK, foreign-key, unique-index and DELETE cascade helpers enforce
+constraints; all effects and RETURNING preparation stay in the existing statement undo bracket.
+The joined statement mark precedes WITH/subquery materialization; failures release only new grants
+after undo, preserving earlier transaction grants. Offline storage retains locks. Source intents
+precede target write intents and use release-before-wait preparation. DELETE re-acquires source
+intents at every bounded cascade retry while reusing its collected volatile associations.
+The same outer mark and root plan cover wrapper grants during cascade back-off; the optional
+joined scope uses the existing join-only state slot, without growing ordinary statement objects.
+Joined UPDATE prepares source, wrapper and reference intents as one try/release/wait unit, so a
+reference-table wait also releases new target read intents before FK DDL requests target X.
+Plain UPDATE and DELETE keep separate async state machines and apply closures without association
+state, preserving their ordinary allocation budget.
+Scans/cursors dispose before row-lock waits; row/parent/key locks precede the apply gate and
+storage/index latches. Cancellation, callback failures and result preparation unwind these owners.
+No new interface, visibility grant, reference, persistent format or wire message is introduced.
+
+| Code | Condition |
+| --- | --- |
+| CS05068 | An UPDATE target has more than one matching source association; no row is written. |
+
+Namespace rules follow PostgreSQL analyze.c:602-621,2560-2578; the owner's cardinality rule
+deliberately differs from nodeModifyTable.c:2599-2608 (first-update behavior).
 
 ## Fixed-pass worker tests (found during #1365)
 

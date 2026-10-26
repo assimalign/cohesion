@@ -7,20 +7,24 @@ group keys across SELECT, HAVING and ORDER BY, including identical correlations.
 quantifiers, negation, scalar operands and query bodies remain significant; IN keys also compare
 bodies. This is an engine binding rule; syntax and persisted representations are unchanged.
 
-## Joined DML syntax and binding (#1714, SQ-UF1)
+## Joined DML planning and execution (#1714, SQ-UF2)
 
 SqlUpdateExpression.From and SqlDeleteExpression.Using retain comma items and existing relation/join
 variants without adding a public construction bridge. Shared parsing and canonical source rendering
 preserve SELECT behavior and DML round trips, including WITH, derived bodies and RETURNING. The
 capability scan admits read-source queries while keeping SET/RETURNING subquery exclusions.
-Visible source OLD/NEW names mask pseudo-relations. DIALECT.md distinguishes parsed/bound support
-from execution: no clause/profile declaration is added until SQ-UF2 executes the forms.
+Visible source OLD/NEW names mask pseudo-relations. The profile now advertises UPDATE FROM and
+DELETE USING; DIALECT.md records pre-write CS05068 and physical-target DELETE deduplication.
+Joined execution uses target-outer predicate pushdown/costing, one materialization per CTE, and
+statement unwind before WITH/subquery wrappers. Both project overviews reflect executable support.
 DELETE's top-level USING source position recognizes keyword-spelled CTE references, while actual
 WITH RECURSIVE remains refused. Canonical rendering delimits ordinary OLD/NEW column qualifiers
 so a quoted identifier cannot become a RETURNING pseudo-relation on reparse.
 Bare RETURNING * follows PostgreSQL's visible namespace expansion: target columns, then sources
 in FROM/USING order with USING merges preserved and duplicate output names allowed. The engine
 retains visible output ordinals separately from physical association slots; plain DML is unchanged.
+Equality-driven steps follow written source order; DIALECT.md documents the dependence and the
+source-order workaround pending general join-order search in #1629. No reordering is introduced.
 
 ## Cascade progress and deadlock diagnostics (w11 review)
 
