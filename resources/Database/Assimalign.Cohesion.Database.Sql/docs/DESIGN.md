@@ -6683,8 +6683,9 @@ case runs for a minimum interval and until successful writer and prepared-owner 
 counters prove the race was exercised, under a 90-second guard. Its independent monotonic
 history orders writer commits, TRUNCATE publications and BEGIN snapshots. Every pinned read
 must equal its committed row prefix after the preceding TRUNCATE, and the final table must
-equal the committed suffix after the last TRUNCATE. Fault modes delete a committed write or
-substitute a pre-TRUNCATE write at the same row count to verify that this oracle detects both.
+equal the committed suffix after the last TRUNCATE. Fault modes exercise that same final-row
+assertion after deleting a committed write or substituting a pre-TRUNCATE write at the same
+row count, verifying that the shared oracle detects both.
 
 | Code | Condition | SQLSTATE |
 |---|---|---|
