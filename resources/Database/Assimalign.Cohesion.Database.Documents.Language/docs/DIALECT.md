@@ -82,6 +82,11 @@ a capability flag, a frame-layout change or a disk-format change. With RETURNING
 are equal and nonnegative; read-only results keep affected count -1. Updated clients accept
 this combination. Older clients that require -1 for every result header reject it, as accepted
 by owner decision 8 (2026-10-25).
+Their rejection is a client-side ProtocolViolation that closes the connection after an
+autocommit statement has already committed. Retrying a non-idempotent write can apply it
+again: `SET n = n + 10` can change 1 to 11 despite that client error, then 11 to 21 on retry.
+In an explicit transaction the disconnect rolls back the uncommitted work. Use an updated
+client for RETURNING; an old client's rejection does not prove an autocommit rollback.
 
 The image/projection basis follows Couchbase's [INSERT RETURNING](https://docs.couchbase.com/server/current/n1ql/n1ql-language-reference/insert.html#returning-clause),
 [UPDATE](https://docs.couchbase.com/server/current/n1ql/n1ql-language-reference/update.html#returning-clause)

@@ -191,6 +191,7 @@ public sealed class DocumentClientProtocolTests
     [InlineData("query-affected-count")]
     [InlineData("negative-affected-count")]
     [InlineData("returning-count-mismatch")]
+    [InlineData("returning-zero-affected-count")]
     [InlineData("duplicate-header")]
     [InlineData("invalid-json")]
     public async Task QueryAsync_MalformedResponse_ShouldDiscardConnection(string scenario)
@@ -214,6 +215,12 @@ public sealed class DocumentClientProtocolTests
         // Assert
         failure.Code.ShouldBe(ProtocolErrorCode.ProtocolViolation);
         connection.IsOpen.ShouldBeFalse();
+        if (scenario == "returning-zero-affected-count")
+        {
+            // Complete.Decode accepts (1, 0), and its result count matches the row.
+            // Only ValidateCompletion's affected-count predicate can reject it.
+            failure.Message.ShouldContain(ErrorMessages.CompletionUnexpected, Case.Sensitive);
+        }
         await connection.DisposeAsync();
         await peer;
 
@@ -242,6 +249,10 @@ public sealed class DocumentClientProtocolTests
                 case "returning-count-mismatch":
                     await WriteAsync(channel, 65, "{\"n\":1}"u8.ToArray(), token);
                     await WriteAsync(channel, 66, new DocumentProtocolCompleteMessage(1, 2).Encode(), token);
+                    break;
+                case "returning-zero-affected-count":
+                    await WriteAsync(channel, 65, "{\"n\":1}"u8.ToArray(), token);
+                    await WriteAsync(channel, 66, new DocumentProtocolCompleteMessage(1, 0).Encode(), token);
                     break;
                 case "query-affected-count": await WriteAsync(channel, 66, new DocumentProtocolCompleteMessage(0, 1).Encode(), token); break;
                 case "duplicate-header": await WriteAsync(channel, 67, header, token); break;

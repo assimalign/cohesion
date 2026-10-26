@@ -9,6 +9,7 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.Connections;
+using Assimalign.Cohesion.Database.Client;
 using Assimalign.Cohesion.Database.Documents.Protocol;
 using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Types;
@@ -17,6 +18,80 @@ namespace Assimalign.Cohesion.Database.Documents.Client.Tests;
 
 public sealed class DocumentReturningWireTests
 {
+    [Theory(DisplayName = "Cohesion Test [Documents.Client] - RETURNING: UPDATE and DELETE see earlier writes in their explicit transaction")]
+    [InlineData(false, "UPDATE")]
+    [InlineData(true, "UPDATE")]
+    [InlineData(false, "DELETE")]
+    [InlineData(true, "DELETE")]
+    public async Task QueryAsync_ReturningOwnWrite_ShouldUseTransactionImage(bool tcp, string verb)
+    {
+        // Arrange
+        await using var harness = await DocumentClientTestHarness.StartAsync(tcp);
+        await using var connection = await harness.Client.ConnectAsync(harness.Token);
+        await connection.CreateCollectionAsync("items", harness.Token);
+        await connection.ExecuteAsync("BEGIN", cancellationToken: harness.Token);
+        await connection.ExecuteAsync("INSERT INTO items (KEY, VALUE) VALUES ('prior', {n:1})", cancellationToken: harness.Token);
+        var inserted = (await connection.GetAsync("items", "prior", harness.Token)).ShouldNotBeNull();
+
+        // Act
+        var result = await connection.QueryAsync((verb == "UPDATE" ? "UPDATE items SET n = n + 10" : "DELETE FROM items") +
+            " RETURNING META().id AS id, META().version AS version, n", cancellationToken: harness.Token);
+
+        // Assert
+        result.AffectedCount.ShouldBe(1);
+        var row = result.ShouldHaveSingleItem();
+        row.GetString(0).ShouldBe("prior");
+        row[2].ShouldBe(verb == "UPDATE" ? 11m : 1m);
+        if (verb == "DELETE") { row[1].ShouldBe((decimal)inserted.Version.Value); }
+        else
+        {
+            var updated = (await connection.GetAsync("items", "prior", harness.Token)).ShouldNotBeNull();
+            row[1].ShouldBe((decimal)updated.Version.Value);
+            updated.Version.ShouldNotBe(inserted.Version);
+        }
+        await connection.ExecuteAsync("COMMIT", cancellationToken: harness.Token);
+        (await connection.GetAsync("items", "prior", harness.Token)).HasValue.ShouldBe(verb == "UPDATE");
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Documents.Client] - RETURNING: legacy completion rejection follows autocommit but disconnect rolls back explicit work")]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task QueryAsync_LegacyCompletionRejected_ShouldPreserveCommitBoundary(bool tcp, bool explicitTransaction)
+    {
+        // Arrange
+        await using var harness = await DocumentClientTestHarness.StartAsync(tcp);
+        await using var observer = await harness.Client.ConnectAsync(harness.Token);
+        await observer.CreateCollectionAsync("items", harness.Token);
+        await observer.PutAsync("items", "a", "{\"n\":1}"u8.ToArray(), cancellationToken: harness.Token);
+        await using var legacy = DatabaseClient.Create(new()
+        {
+            Settings = new DatabaseConnectionSettings { Database = "documents", Principal = "legacy", EndPoint = harness.Listener.EndPoint },
+            ConnectionFactory = harness.Factory,
+            Family = DocumentProtocol.Family,
+        });
+        await using var connection = await legacy.RentAsync(harness.Token);
+        var serverSession = harness.Server.Sessions.Single(session => session.Principal == "legacy");
+        if (explicitTransaction) { await connection.ExecuteAsync(new LegacyDocumentExchange("BEGIN"), harness.Token); }
+
+        // Act
+        var failure = await Should.ThrowAsync<DatabaseClientException>(async () => await connection.ExecuteAsync(
+            new LegacyDocumentExchange("UPDATE items SET n = n + 10 RETURNING n"), harness.Token));
+
+        // Assert: join that closed session's cleanup before reading the rollback outcome.
+        failure.Code.ShouldBe(ProtocolErrorCode.ProtocolViolation);
+        connection.IsOpen.ShouldBeFalse();
+        await serverSession.DisposeAsync().AsTask().WaitAsync(harness.Token);
+        var observed = await observer.QueryAsync("SELECT n FROM items", cancellationToken: harness.Token);
+        observed.ShouldHaveSingleItem()[0].ShouldBe(explicitTransaction ? 1m : 11m);
+        if (!explicitTransaction)
+        {
+            var retried = await observer.QueryAsync("UPDATE items SET n = n + 10 RETURNING n", cancellationToken: harness.Token);
+            retried.ShouldHaveSingleItem()[0].ShouldBe(21m);
+        }
+    }
+
     [Theory(DisplayName = "Cohesion Test [Documents.Client] - RETURNING: oversized serialized projections fail before any header and roll back writes")]
     [InlineData(false)]
     [InlineData(true)]
