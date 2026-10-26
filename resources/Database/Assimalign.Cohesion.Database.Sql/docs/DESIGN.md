@@ -357,6 +357,8 @@ Unaliased parenthesized joins retain their component namespaces. An aliased grou
 a derived SELECT * with the same bag and visible columns, hiding its components. Canonical
 rendering spells that alias as a derived query, with the existing complete column-alias-list rule and 32-level derived binding limit. Group walks retain stack guards. No existing identifier quoting changes, public
 bridge, interface, project reference, disk format or wire message is introduced.
+Derived-first groups retain their association through canonical rendering, CREATE VIEW and
+database reopen, including when nested aliased groups render as derived SELECTs.
 
 Direct RIGHT or grouped join trees in UPDATE FROM / DELETE USING fail CS05069 before reads
 or mutation: this run preserves the target-outer identity invariant. A derived SELECT source

@@ -340,7 +340,9 @@ public sealed partial class SqlQueryParser
         int groupStart = lexer.Current.Position;
         Advance(ref lexer);
         SqlQueryBodyExpression query;
-        if (!StartsQuery(lexer, queryExpected: true))
+        // A leading parenthesized SELECT can be the first relation of a joined group.
+        // Check its closing continuation, including the derived alias (PostgreSQL gram.y:13938-14022).
+        if (!StartsQuery(lexer))
         {
             if (!TryEnterParenthesis(ref lexer, groupStart)) { return new SqlTableReference("?", null, null); }
             SqlFromItem item;

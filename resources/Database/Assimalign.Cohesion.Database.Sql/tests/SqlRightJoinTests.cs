@@ -15,6 +15,65 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed class SqlRightJoinTests
 {
+    [Theory(DisplayName = "Cohesion Test [Sql] - Derived-first groups execute their written join and nested association (#1525)")]
+    [InlineData("((SELECT * FROM t0) d RIGHT JOIN t1 ON d.k = t1.k)", true, null, null, 2, 3)]
+    [InlineData("(((SELECT * FROM t0)) AS d RIGHT OUTER JOIN t1 ON d.k = t1.k)", false, null, null, 2, 3)]
+    [InlineData("(((SELECT * FROM t0) d RIGHT JOIN t1 ON d.k = t1.k))", false, null, null, 2, 3)]
+    [InlineData("((SELECT * FROM t0) d INNER JOIN t1 ON TRUE)", false, 1, 10, 2, 3)]
+    [InlineData("((SELECT * FROM t0) d LEFT JOIN t1 ON d.k = t1.k)", false, 1, 10, null, null)]
+    [InlineData("((SELECT * FROM t0) d CROSS JOIN t1)", false, 1, 10, 2, 3)]
+    public async Task Join_DerivedFirstGroup_ShouldPreserveRows(string from, bool emptyLeft, int? leftKey, int? leftValue, int? rightKey, int? rightValue)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("derived-first", new());
+        var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await ExecAsync(session, "CREATE TABLE t0 (k INT, v0 INT); CREATE TABLE t1 (k INT, v1 INT); INSERT INTO t1 VALUES (2, 3);");
+        if (!emptyLeft) { await ExecAsync(session, "INSERT INTO t0 VALUES (1, 10);"); }
+
+        // Act
+        var rows = await RowsAsync(session, "SELECT * FROM " + from);
+
+        // Assert
+        Check(rows, [[leftKey, leftValue, rightKey, rightValue]]);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql] - Derived-first and nested grouped views round trip through creation and reopen (#1525)")]
+    [InlineData("SELECT id FROM ((SELECT id FROM a) d RIGHT JOIN b USING (id))")]
+    [InlineData("SELECT id FROM ((a RIGHT JOIN b USING (id)) q RIGHT JOIN c USING (id))")]
+    [InlineData("SELECT id FROM (((SELECT id FROM a) d RIGHT JOIN b USING (id)) q RIGHT JOIN c USING (id))")]
+    public async Task Open_DerivedFirstGroupView_ShouldRetainRowsAndMetadata(string body)
+    {
+        // Arrange
+        string root = Path.Combine(AppContext.BaseDirectory, "derived-first-views-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            await using (var engine = SqlDatabaseEngine.Create("files", new() { RootPath = root }))
+            {
+                var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+                await using var session = await database.CreateSessionAsync(CancellationToken.None);
+                await ExecAsync(session, "CREATE TABLE a (id INT NOT NULL); CREATE TABLE b (id INT NOT NULL); CREATE TABLE c (id INT NOT NULL); INSERT INTO b VALUES (2); INSERT INTO c VALUES (2);");
+                Check(await RowsAsync(session, body), [[2]]);
+                await ExecAsync(session, "CREATE VIEW v AS " + body);
+                Check(await RowsAsync(session, "SELECT * FROM v;"), [[2]]);
+            }
+
+            // Act
+            await using var reopened = SqlDatabaseEngine.Create("files", new() { RootPath = root });
+            var next = await reopened.OpenDatabaseAsync("db", CancellationToken.None);
+            await using var reader = await next.CreateSessionAsync(CancellationToken.None);
+            await using var result = (await reader.ExecuteAsync("SELECT * FROM v;", cancellationToken: CancellationToken.None)).ShouldBeAssignableTo<DatabaseResultSet>();
+            var rows = await ReadAsync(result);
+
+            // Assert
+            Check(rows, [[2]]);
+            result.Columns.Select(column => column.Name).ShouldBe(["id"]);
+            result.Columns.Select(column => column.IsNullable).ShouldBe([false]);
+            next.Catalog.Views.Single(view => view.Name == "v").Definition.ShouldNotContain("*", Case.Sensitive);
+        }
+        finally { if (Directory.Exists(root)) { Directory.Delete(root, true); } }
+    }
+
     [Theory(DisplayName = "Cohesion Test [Sql] - RIGHT: duplicate, NULL and empty bags equal reversed LEFT (#1525)")]
     [InlineData(false, "a.id = b.id")]
     [InlineData(true, "a.id = b.id")]

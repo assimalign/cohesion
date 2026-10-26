@@ -18,6 +18,10 @@ public sealed class SqlRightJoinParserTests
     [InlineData("SELECT * FROM a, (b RIGHT JOIN c USING (id)), d")]
     [InlineData("SELECT g.id FROM (a RIGHT JOIN b USING (id)) AS g")]
     [InlineData("SELECT g.x FROM (a RIGHT JOIN b USING (id)) AS g (x)")]
+    [InlineData("SELECT * FROM ((SELECT * FROM a) d RIGHT JOIN b ON d.id = b.id)")]
+    [InlineData("SELECT * FROM (((SELECT * FROM a)) AS d (id) RIGHT OUTER JOIN b USING (id))")]
+    [InlineData("SELECT * FROM (((SELECT * FROM a) d RIGHT JOIN b USING (id)) RIGHT JOIN c USING (id))")]
+    [InlineData("SELECT id FROM ((a RIGHT JOIN b USING (id)) q RIGHT JOIN c USING (id))")]
     public void Render_RightJoinTree_ShouldRoundTrip(string sql)
     {
         // Arrange
@@ -49,6 +53,28 @@ public sealed class SqlRightJoinParserTests
         group.Item.Table.ShouldBeOfType<SqlTableReference>().TableName.ShouldBe("b");
         group.Item.Joins.Single().JoinType.ShouldBe(SqlJoinType.RightOuter);
         group.Item.Joins.Single().UsingColumns.ShouldBe(["id"]);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Derived-first groups retain their relation and join shape (#1525)")]
+    [InlineData("INNER JOIN b ON d.id = b.id", SqlJoinType.Inner)]
+    [InlineData("LEFT JOIN b ON d.id = b.id", SqlJoinType.LeftOuter)]
+    [InlineData("RIGHT JOIN b ON d.id = b.id", SqlJoinType.RightOuter)]
+    [InlineData("CROSS JOIN b", SqlJoinType.Cross)]
+    public void Parse_DerivedFirstGroup_ShouldRetainJoinShape(string join, SqlJoinType kind)
+    {
+        // Arrange / Act
+        var statement = (SqlQueryStatement)new SqlQueryParser().Parse($"SELECT * FROM ((SELECT * FROM a) /* relation */ AS d {join})");
+
+        // Assert
+        statement.Diagnostics.ShouldNotContain(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
+        var select = statement.SqlExpression.ShouldBeOfType<SqlSelectExpression>();
+        var group = select.From.Single().Table.ShouldBeOfType<SqlJoinedTableReference>();
+        group.Item.Table.ShouldBeOfType<SqlDerivedTableReference>().Alias.ShouldBe("d");
+        group.Item.Joins.Single().JoinType.ShouldBe(kind);
+        string canonical = SqlExpressionRenderer.Render(select);
+        var reloaded = (SqlQueryStatement)new SqlQueryParser().Parse(canonical);
+        reloaded.Diagnostics.ShouldNotContain(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
+        SqlTreeDump.Dump(reloaded.SqlExpression.ShouldBeOfType<SqlSelectExpression>()).ShouldBe(SqlTreeDump.Dump(select));
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - RIGHT groups retain syntax and nesting guards (#1525)")]
