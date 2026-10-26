@@ -335,8 +335,8 @@ all indexes remain defined. Neither row DELETE actions nor row scans run.
 RESTRICT refuses CS03067 (0A000) unless every referencing table is included, regardless of
 whether it contains rows. Self-references are allowed. CASCADE computes the recursive incoming
 foreign-key closure, including cycles and tables in other SQL namespaces, independent of
-ON DELETE action. The entire set is validated before publication. A concurrent identity or
-definition replacement retains retryable CS04064/CS04006; no partial table list is published.
+ON DELETE action. The entire set is validated before publication. A concurrent identity,
+definition or foreign-key closure change retains retryable CS04064/CS04006; no partial table list is published.
 RESTART IDENTITY resets every identity in the resulting set to its declared START, including
 its declared INCREMENT. CONTINUE preserves the allocator's exact in-process next value and
 unused reservation block. Reopen still skips reserved values under the existing identity
@@ -350,7 +350,9 @@ with the existing CS00003 parser diagnostic until SQ-T2.
 A snapshot captured before publication can read the same old rows after TRUNCATE commits,
 in process and over InMemory/TCP. Tables receive fresh physical owner identities; pinned
 storage descriptions and dependent view bindings retain the retired owners. A statement snapshot
-retains its owner even when auto-commit or ReadCommitted binding starts after publication. Other table ALTER
+retains its owner even when auto-commit or ReadCommitted binding starts after publication.
+DML targeting a retired owner is refused with retryable CS04006 before writes; end that
+transaction and retry against a fresh snapshot. Other table ALTER
 binding retains its existing behavior. Current readers see empty replacements. Deferred
 reclamation frees old rows and indexes only after all older transaction and statement pins end.
 Prepared storage is also durably reclaimable if cancellation, an exception or a crash prevents

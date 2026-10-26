@@ -6582,7 +6582,8 @@ TRUNCATE resolves and deduplicates its list, computes the incoming FK closure (o
 CS03067 under default RESTRICT), and holds ascending table-exclusive locks. RESTART IDENTITY
 and CASCADE are independent; omission means CONTINUE IDENTITY and RESTRICT. Schema ownership
 is preserved and does not forbid this data operation. An explicit transaction is refused with
-CS04066, leaving its earlier work active. CTAS remains outside SQ-T1.
+CS04066, leaving its earlier work active. A child FK published while the statement waits
+invalidates the closed set with retryable CS04064, including CASCADE. CTAS remains outside SQ-T1.
 
 The catalog internally reserves fresh owner identities with existing kind-14 reclamation
 intents, without changing the logical generation. Prepared empty B-trees commit durably before
@@ -6604,7 +6605,9 @@ record. A statement whose fixed MVCC snapshot cannot see that marker retains the
 table descriptions, indexes and directly dependent views, even when binding starts after
 publication. This covers BEGIN, auto-commit and ReadCommitted statements without allocating a
 catalog capture on ordinary stored reads. Multiple truncations choose the earliest owner the
-snapshot predates. Unrelated current definitions retain existing ALTER behavior. The volatile
+snapshot predates. DML targets use the same retained image, so existing target-definition
+validation refuses stale writes with CS04006 before apply. Unrelated current definitions retain
+existing ALTER behavior. The volatile
 association lasts until reclamation retires its owner; no snapshot survives reopen. Retired tree
 handles leave the manager after publication, so a new
 old-snapshot seek falls back to its owner scan while existing cursors retain their safe handles.
