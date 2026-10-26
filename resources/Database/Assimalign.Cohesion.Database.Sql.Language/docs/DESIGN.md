@@ -31,6 +31,13 @@ repeated FOREIGN KEY child columns is stricter than PostgreSQL. Existing-table C
 IF NOT EXISTS skips key declaration validation and preserves the table. DIALECT.md records
 these execution rules; parser shapes and advertised clauses are unchanged.
 
+## Less-than followed by minus (#1647)
+
+The shared profile leaves `RecognizeLeftArrow` disabled. `a<-1` and `a <- 1` parse as `a < -1`;
+`a<--1` starts a line comment after `<` and reports the existing missing-operand syntax error.
+`SqlLeftArrowConformanceTests` pins the comparison tree and error. See Database.Language DESIGN
+for the PostgreSQL scanner reference and configuration contract.
+
 ## Delimited identifiers (#1235)
 
 The shared lexer keeps `"a""b"` as one identifier token; CurrentIdentifierText decodes it to

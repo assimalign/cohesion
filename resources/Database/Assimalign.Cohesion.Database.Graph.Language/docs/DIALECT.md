@@ -4,6 +4,10 @@ The target is ISO/IEC 39075:2024 with the subset and extensions recorded in [DES
 The supported-clause matrix there is authoritative; RETURN projects value expressions,
 named bindings or all bindings with `*`.
 
+GQL retains `<-` as its incoming relationship arrow (#1647), enabled explicitly by its
+language profile. `<-[r]-` and `<-` are incoming; `<-[r]->` and `<->` are left-or-right;
+`-[r]->` and `->` are outgoing. `GqlLeftArrowConformanceTests` pins these forms.
+
 Double-quoted identifiers double an embedded `"`: `"a""b"` names `a"b` in variables,
 labels, relationship types, property keys and aliases. Rendered label expressions and
 source-free projection names use the same escape. A missing closing quote is CG00003.

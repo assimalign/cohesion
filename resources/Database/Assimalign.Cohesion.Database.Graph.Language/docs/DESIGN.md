@@ -1,5 +1,12 @@
 # Assimalign.Cohesion.Database.Graph.Language — Design
 
+## Left-arrow tokenization (#1647)
+
+`GqlLanguageProfile` explicitly enables the shared `RecognizeLeftArrow` option. Incoming
+`<-`/`<-[r]-`, left-or-right `<->`/`<-[r]->`, and outgoing `->`/`-[r]->` keep their existing
+pattern directions, pinned by `GqlLeftArrowConformanceTests`. SQL/OQL profiles leave the option
+disabled; no language-name check or alternate lexer is introduced.
+
 ## Named scalar parameters (#1102, #1138)
 
 The [shared parameter contract](../../Assimalign.Cohesion.Database.Language/docs/DESIGN.md#parameter-contract-1102)

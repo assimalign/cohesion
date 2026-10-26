@@ -4,6 +4,10 @@ Double-quoted collection, property and alias names accept doubled `""` as one em
 double quote: `"a""b"` names `a"b`. This extends the existing double-quoted identifier syntax;
 it does not add backtick quoting. A missing closing delimiter is CD00003 (#1235).
 
+`a<-1` and `a <- 1` mean `a < -1`; `<-` is not an OQL arrow (#1647).
+`a<--1` is `<` followed by comment `--1`, leaving a missing right operand (CD00002).
+`OqlLeftArrowConformanceTests` pins this shared-lexer boundary.
+
 ## Storage integrity errors (#1160)
 
 A read that detects storage corruption fails with `CK06003`, naming the database and

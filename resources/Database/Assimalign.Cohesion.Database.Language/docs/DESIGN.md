@@ -19,6 +19,17 @@ public virtual surface remain for the separate #1264 API audit. `QueryAnalyzerCo
 sealed leaf constructed internally by the parser; its existing read-only `Statement` member and
 analyzer behavior are unchanged. No new overridable analyzer or parser member is introduced.
 
+## Left-arrow configuration (#1647)
+
+`QueryLanguageProfile.RecognizeLeftArrow` projects into `TokenLexerOptions` and defaults to
+false. SQL and OQL therefore tokenize `a<-1` as `a`, `<`, `-`, `1`; GQL explicitly enables the
+option for incoming and left-or-right relationship patterns. This is configuration, not a
+language-name check in the lexer. The right-arrow token is unchanged. PostgreSQL's local
+`src/backend/parser/scan.l:861-932` stops operators at comment starts and splits trailing signs
+from SQL operators. Accordingly `a<--1` in SQL/OQL contains `<` followed by comment `--1`,
+leaving a missing comparison operand; it is not double negation. Shared token/offset tests and
+each language's left-arrow conformance corpus pin these rules without a new diagnostic.
+
 ## Delimited identifiers (#1235)
 
 The shared lexer consumes `"a""b"` as one QuotedIdentifier token, retaining the raw text and

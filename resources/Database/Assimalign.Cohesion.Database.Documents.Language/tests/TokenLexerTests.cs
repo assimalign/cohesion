@@ -223,13 +223,22 @@ public class TokenLexerTests
     [InlineData("::", TokenType.ColonColon)]
     [InlineData("..", TokenType.DotDot)]
     [InlineData("->", TokenType.RightArrow)]
-    [InlineData("<-", TokenType.LeftArrow)]
     public void MoveNext_MultiCharOperator_ReturnsCorrectToken(string input, TokenType expected)
     {
         var tokens = Tokenize(input);
 
         tokens.ShouldHaveSingleItem()
             .Type.ShouldBe(expected);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Documents.Language] - Lexer: less-than and minus stay separate (#1647)")]
+    public void MoveNext_LeftArrowSpelling_ShouldReturnComparisonAndMinus()
+    {
+        // Arrange / Act
+        var tokens = Tokenize("<-");
+
+        // Assert
+        tokens.ShouldBe(new[] { (TokenType.LessThan, "<", 0), (TokenType.Minus, "-", 1) });
     }
 
     // ── Punctuation ────────────────────────────────────────────────────

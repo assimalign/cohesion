@@ -582,6 +582,11 @@ reports `CS00003` at the literal; it also used to fail only at execution.
 | `SELECT 1e FROM t`, `WHERE a = 2.5E-` | A numeric literal whose exponent has no digits | the literal |
 | `SELECT 1; SELECT 2`, `BEGIN; DELETE FROM t`, `COMMIT;;` | A request accepts exactly one statement | the first token after `;` |
 
+`a<-1` and `a <- 1` mean `a < -1`: `<-` is not a SQL arrow (#1647).
+`a<--1` is `<` followed by the line comment `--1`, so a missing right operand reports CS00003.
+This follows PostgreSQL `src/backend/parser/scan.l:861-932` (comment boundaries and trailing-sign
+splitting); `SqlLeftArrowConformanceTests` pins it.
+
 A `--` comment ends before the first line terminator: line feed (LF), carriage
 return (CR), next line (NEL, U+0085), line separator (LS, U+2028) or paragraph
 separator (PS, U+2029); CR LF is one line break (#1150). The terminator set is the
