@@ -86,7 +86,7 @@ public sealed partial class GraphStoreTests
         }
         byte[] original = unit.Data.ToArray();
         byte[] malformed = original.AsSpan().ToArray();
-        // Graph format 4's node label count follows the fixed 34-byte header.
+        // Graph format 5's node label count follows the fixed 34-byte header.
         if (operation == "format") { malformed[17] = byte.MaxValue; }
         else { BinaryPrimitives.WriteInt32LittleEndian(malformed.AsSpan(34, 4), -1); }
         using (var bracket = fixture.Storage.BeginTransaction())

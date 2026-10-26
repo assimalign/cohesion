@@ -13,7 +13,7 @@ using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Graph.Storage;
 
-/// <summary>Transactional graph records, label postings, adjacency, and exact node-property indexes over a shared coordinator.</summary>
+/// <summary>Transactional graph records, label and relationship-type postings, adjacency, and exact node-property indexes over a shared coordinator.</summary>
 /// <remarks>
 /// <b>Shape (concrete-types plan, phase 4, #1260).</b> One sealed type with a private constructor
 /// behind <see cref="Open"/>: it replaces the former <c>IGraphStore</c> interface, the
@@ -78,7 +78,7 @@ public sealed partial class GraphStore
     }
 
     /// <summary>
-    /// Checks graph record format 4 and that every index tree the storage registers is in the B-tree page format
+    /// Checks graph record format 5 and that every index tree the storage registers is in the B-tree page format
     /// this engine reads (<see cref="BTreeIndexManager.FormatVersion"/>), reading record
     /// headers, registrations and each tree's root page. An engine calls it before the
     /// coordinator's recovery scrub, so a database whose indexes it cannot read is
@@ -184,7 +184,7 @@ public sealed partial class GraphStore
         }
     }
 
-    /// <summary>Atomically creates a relationship and both endpoint adjacency entries.</summary>
+    /// <summary>Atomically creates a relationship, its type posting and both endpoint adjacency entries.</summary>
     /// <param name="relationship">The complete relationship with an identity reserved from the backing storage.</param>
     /// <param name="typeId">The stable catalog identity of the relationship type; never a name hash. The store does not verify that this identity matches <c>relationship.Type</c>; the engine resolves it from the catalog.</param>
     /// <param name="context">Owning transaction.</param><param name="cancellationToken">Cancellation token.</param><returns>The created relationship.</returns>
@@ -220,8 +220,10 @@ public sealed partial class GraphStore
         var inserted = await ApplyAsync(context, async bracket =>
         {
             await EnsureAdjacencyAsync(context, cancellationToken).ConfigureAwait(false);
+            await EnsureRelationshipTypesAsync(context, cancellationToken).ConfigureAwait(false);
             var location = Insert(bracket, bytes, context);
             await InsertAdjacencyAsync(record, location, context, cancellationToken).ConfigureAwait(false);
+            await InsertRelationshipTypeAsync(record, location, context, cancellationToken).ConfigureAwait(false);
             SaveRegistrations(bracket);
             return location;
         }, cancellationToken).ConfigureAwait(false);
@@ -371,7 +373,7 @@ public sealed partial class GraphStore
         }, cancellationToken).ConfigureAwait(false);
     }
 
-    /// <summary>Deletes a relationship and its adjacency entries atomically.</summary>
+    /// <summary>Deletes a relationship, its type posting and its adjacency entries atomically.</summary>
     /// <param name="id">Relationship identity.</param><param name="context">Owning transaction.</param><param name="cancellationToken">Cancellation token.</param><returns>A task representing deletion.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="context"/> is null.</exception>
     /// <exception cref="InvalidOperationException"><paramref name="context"/> is not active.</exception>
@@ -397,6 +399,7 @@ public sealed partial class GraphStore
         var relationship = found.Record.Relationship!.Value;
         await DeleteIndexEntryAsync(adjacencyId, AdjacencyKey(relationship.SourceId, GraphIncidentDirection.Outgoing, found.Record.TypeId, relationship.Id), found.Reference.Location, context, cancellationToken).ConfigureAwait(false);
         await DeleteIndexEntryAsync(adjacencyId, AdjacencyKey(relationship.TargetId, GraphIncidentDirection.Incoming, found.Record.TypeId, relationship.Id), found.Reference.Location, context, cancellationToken).ConfigureAwait(false);
+        await DeleteRelationshipTypeAsync(found.Record, found.Reference.Location, context, cancellationToken).ConfigureAwait(false);
         Tombstone(bracket, found.Reference, context);
     }
 
@@ -428,6 +431,7 @@ public sealed partial class GraphStore
         lock (_sync)
         {
             RememberLabels(record);
+            RememberRelationshipType(record);
             var next = new Reference(page, slot, writer, record.Revision);
             if (!_records.TryGetValue((record.Kind, record.Id), out var versions))
             { versions = new VersionChain { Head = next }; }
