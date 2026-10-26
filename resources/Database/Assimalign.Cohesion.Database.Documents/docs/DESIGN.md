@@ -639,6 +639,11 @@ the quantifier prohibition. Closed locally bound expressions qualify as VALUES c
 keep their existing nonconstant rule. CD01027 refuses an empty direct-AST variable. No interface,
 assembly reference, storage or wire contract is added.
 
+Seek-bound evaluation is speculative for every constant expression, including closed comprehensions
+and quantifiers. An OQL evaluation failure discards that bound; the full residual predicate retains
+the error only for rows and branches that execute it. Cancellation and infrastructure failures
+propagate. VALUES and constructor evaluation keep their ordinary short-circuit semantics.
+
 Cancellation is checked before evaluation and per visited element. ARRAY uses the existing
 constructor depth/decimal/encoding rules and does not cache variable-dependent mappings.
 Surrounding retained-result charging includes comprehension JSON, notably RETURNING's CD05018
