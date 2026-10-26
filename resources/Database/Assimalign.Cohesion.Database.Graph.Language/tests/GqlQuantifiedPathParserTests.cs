@@ -99,7 +99,6 @@ public sealed class GqlQuantifiedPathParserTests
     [InlineData("MATCH (ANY SHORTEST (a)->(b)){1,3} RETURN a", "ANY SHORTEST", "ANY")]
     [InlineData("MATCH ((a)->(b)) (WALK (c)->(d)){2} RETURN a", "WALK", "WALK")]
     [InlineData("MATCH (a) ((x)~[:T]~(y)){1,3} (b) RETURN a", "UNDIRECTED EDGE", "~")]
-    [InlineData("MATCH p = TRAIL (a)-[:T]->{1,3}(b) RETURN p", "TRAIL", "TRAIL")]
     [InlineData("MATCH WALK (a)-[:T]->+(b) RETURN a", "WALK", "WALK")]
     [InlineData("MATCH ANY SHORTEST (a)-[:T]->+(b) RETURN a", "ANY SHORTEST", "ANY")]
     public void Parse_UnsupportedQuantifierConstruct_ShouldNameFirstToken(string source, string construct, string first)

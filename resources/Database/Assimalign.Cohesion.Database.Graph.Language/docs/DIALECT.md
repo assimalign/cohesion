@@ -38,7 +38,7 @@ matching rows; OPTIONAL MATCH also keeps each unmatched input row, preserving ea
 and binding every newly declared node, relationship and named path to NULL. Its WHERE filters
 inside that optional match. A leading optional starts from one empty binding, so an empty match
 returns one all-null row. Comma-separated paths belong to one clause and succeed or null-extend
-together. Trail uniqueness is per path, including every quantified repetition; another comma-separated
+together. The mode defaults to TRAIL and uniqueness is per path, including every quantified repetition; another comma-separated
 path or a later clause may reuse a relationship. This differs from Neo4j's clause-wide uniqueness.
 
 Quantified relationships accept ISO `->{m,n}`, `{m}`, `{m,}`, `{,n}`, `{,}`, `->+` and `->*` in every
@@ -65,8 +65,7 @@ expressions and container access. Project scalar values
 after FOR/UNWIND, or project a full named path through ExecutePaths. No wire format is added.
 
 Node and INSERT/CREATE quantifiers are CG00002. Questioned paths after an edge or subpath,
-subpath assignments, inner WHERE and nested quantifiers remain named CK00001. Explicit TRAIL
-remains CK00001. A touching `--` after `}`, `+`, `*` or a subpath's `)` is CG00008.
+subpath assignments, inner WHERE and nested quantifiers remain named CK00001. Outer path modes execute (#1733 below). A touching `--` after `}`, `+`, `*` or a subpath's `)` is CG00008.
 Subpath parsing uses CG00009 on stack exhaustion, with no separate text nesting cap; direct AST
 nesting beyond 128, cycles and repeated path instances in one walk are CG05001.
 
@@ -83,6 +82,29 @@ and optional filters/null extension. ISO `OPTIONAL { ... }` and `OPTIONAL ( ... 
 remain recognized but outside T1 (CK00001 naming OPTIONAL BLOCK OPERAND). MANDATORY MATCH
 remains CK00001. MATCH after INSERT or DELETE is a supported linear stage.
 
+## Path modes (#1733)
+
+Write `MATCH [p =] (WALK | TRAIL | SIMPLE | ACYCLIC) [PATH | PATHS] <path>`; the mode
+and optional PATH/PATHS follow any path assignment. For example,
+`MATCH p = WALK (a)->{1,3}(b) RETURN p`. An omitted mode defaults to TRAIL.
+
+| Mode | Reuse within one complete path |
+| --- | --- |
+| WALK | Nodes and relationships may repeat; all quantifiers must be bounded |
+| TRAIL | Relationships cannot repeat; nodes may repeat |
+| SIMPLE | Nodes cannot repeat except the final node closing onto the first |
+| ACYCLIC | Nodes cannot repeat |
+
+SIMPLE admits a self-loop and an out-and-back over the same relationship, then stops at closure.
+All modes allow zero hops. The same mode covers all fixed edges, quantified segments and
+parenthesized groups, independently of the chosen index anchor. Each comma-separated path may
+choose its own mode and reuse identities from another path. Mode words stay legal identifiers.
+An explicit mode or selector inside a parenthesized/quantified subpath is CK00001. Unbounded
+WALK (including `+`, `*`, `{m,}`, `{,}` and Cypher open upper bounds) is CK00001 even with LIMIT.
+Shortest selectors remain CK00001. INSERT/CREATE modes are CG00002; malformed direct AST mode
+values and insertion modes are CG05001. The existing 64-hop, memory, work and cancellation
+contracts still apply; WALK never silently becomes TRAIL. EXPLAIN shows the resolved mode.
+
 ## Adjacency work and EXPLAIN (#1532)
 
 Fixed and quantified hops select relationship direction and catalog type IDs before candidate
@@ -91,7 +113,7 @@ matches once in an either-direction hop. Safe relationship and endpoint constrai
 viable descent; deferred predicates retain their final checks. Physical work counts anchor
 candidates plus selected visible relationships and retains its 1,000,000 safety cap even for
 dead ends. CG05004 includes actual physical and viable totals when that cap is exceeded;
-The 64-hop trail limit remains. #1533 replaces the fixed binding count with a 256 MiB default retained-memory budget (CG05020); explicit engine ceilings and lower request limits are supported.
+The 64-hop path limit remains. #1533 replaces the fixed binding count with a 256 MiB default retained-memory budget (CG05020); explicit engine ceilings and lower request limits are supported.
 Incident ranges are read incrementally with cancellation, merging type/direction streams in
 relationship identity order. Reaching the expansion cap closes every active parent cursor;
 only bounded index batches and one decoded head per selected range are prefetched (#1542).

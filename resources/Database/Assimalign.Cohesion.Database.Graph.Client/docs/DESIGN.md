@@ -116,7 +116,7 @@ recorded types and names, empty input, capability refusal and session reuse.
 ## Quantified paths (#1144)
 
 QueryAsync accepts ISO quantified edges/subpaths and Cypher bracketed lengths; QueryPathsAsync
-returns the complete source-ordered trail in the existing Path frame, including intermediate
+returns the complete source-ordered path under WALK/TRAIL/SIMPLE/ACYCLIC (implicit TRAIL) in the existing Path frame, including intermediate
 nodes, stored relationship directions and zero-length paths. Right index anchors preserve that
 order. Group lists flow through FOR/UNWIND with their entity kinds; scalar projections after
 expansion use the existing result codec. Unnegotiated possible composite final projections

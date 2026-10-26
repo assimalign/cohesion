@@ -247,8 +247,13 @@ public sealed class GqlQuantifiedPathTests
         session.LastStatementMetrics.Memory.ActiveLeases.ShouldBe(0);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Graph] - Quantified paths: cancellation is observed after expansion has started")]
-    public async Task MatchAsync_MidExpansionCancellation_ShouldObserveTokenAsync()
+    [Theory(DisplayName = "Cohesion Test [Graph] - Quantified paths: every mode observes cancellation after expansion has started")]
+    [InlineData("")]
+    [InlineData("WALK")]
+    [InlineData("TRAIL")]
+    [InlineData("SIMPLE")]
+    [InlineData("ACYCLIC")]
+    public async Task MatchAsync_MidExpansionCancellation_ShouldObserveTokenAsync(string mode)
     {
         // Arrange
         using var cancellation = new CancellationTokenSource();
@@ -260,13 +265,15 @@ public sealed class GqlQuantifiedPathTests
         // Act
         await database.RunAsync(session, async operation =>
         {
-            var plan = new GraphPlanner(database, operation.Context.Snapshot).Plan(GraphQueryRequest.FromGql("MATCH (a:V {name:'A'})-[:T]->+(b) RETURN b").Statement.GqlExpression);
+            var plan = new GraphPlanner(database, operation.Context.Snapshot).Plan(GraphQueryRequest.FromGql("MATCH " + mode + " (a:V {name:'A'})-[:T]->{1,3}(b) RETURN b").Statement.GqlExpression);
             await Should.ThrowAsync<OperationCanceledException>(async () => await GraphPlanExecutor.MatchAsync(database, operation,
                 plan.MatchClauses[0].Paths[0], new(StringComparer.Ordinal), [], budget, null, cancellation.Token));
             return true;
         }, CancellationToken.None);
         // Assert
         budget.Consumed.ShouldBe(4);
+        budget.Memory.RetainedBytes.ShouldBe(0);
+        budget.Memory.ActiveLeases.ShouldBe(0);
         cancellation.IsCancellationRequested.ShouldBeTrue();
     }
 

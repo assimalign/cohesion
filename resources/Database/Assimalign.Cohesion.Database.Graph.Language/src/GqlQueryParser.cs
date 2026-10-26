@@ -341,10 +341,6 @@ public sealed partial class GqlQueryParser : QueryParser
                 case GqlWordPosition.ValueExpression:
                     // ParseOperand owns niladic expressions so binding sites fail as syntax.
                     continue;
-                case GqlWordPosition.PathMode:
-                    // TRAIL (a)... is a path mode; trail = (a)... names a path.
-                    if (patternDepth != 0 || valuePosition || !StartsPathPattern(i + 1, ref end)) { continue; }
-                    break;
                 case GqlWordPosition.BeforeDelete:
                     if (!IsWordAt(i + 1, "DELETE")) { continue; }
                     end = _tokens[i + 1];
@@ -411,9 +407,7 @@ public sealed partial class GqlQueryParser : QueryParser
         if (head != "SHORTEST" && shortest) { next++; }
         if (head != "ALL" && next < _tokens.Count && _tokens[next].Type == TokenType.Integer) { next++; }
 
-        if (next < _tokens.Count && _tokens[next].Type is TokenType.Identifier or TokenType.Keyword &&
-            GqlUnsupportedVocabulary.TryFind(_tokens[next].Text.ToUpperInvariant(), out var mode) &&
-            mode.Position == GqlWordPosition.PathMode)
+        if (TryPathModeAt(next, out _))
         {
             next++;
         }

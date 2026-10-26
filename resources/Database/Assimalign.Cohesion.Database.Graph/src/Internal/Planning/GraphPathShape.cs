@@ -15,6 +15,7 @@ internal sealed class GraphPathShape
     internal GqlRelationshipPattern? Edge { get; private init; }
     internal long Bound { get; private set; }
     internal bool HasQuantifier { get; private set; }
+    internal bool HasUnboundedQuantifier { get; private set; }
 
     internal static GraphPathShape Create(GqlPathPattern path, bool creating = false, bool parsed = false)
     {
@@ -32,6 +33,12 @@ internal sealed class GraphPathShape
             if (!item.Exit)
             {
                 if (!visited.Add(current)) { throw Invalid(); }
+                if (current.Mode is { } mode)
+                {
+                    if (mode is not (GqlPathMode.Walk or GqlPathMode.Trail or GqlPathMode.Simple or GqlPathMode.Acyclic) || creating)
+                    { throw Invalid(); }
+                    if (item.Depth != 0) { throw new GraphPlanningException("CK00001", ErrorMessages.NestedPathModeUnsupported); }
+                }
                 pending.Push((current, true, item.Depth));
                 if (current.Elements is { } elements)
                 {
@@ -88,6 +95,7 @@ internal sealed class GraphPathShape
                         shape.Nodes.Add([]);
                         shape.Bound += edge.Quantifier?.Max ?? edge.Quantifier?.Min ?? 1;
                         shape.HasQuantifier |= edge.Quantifier is not null;
+                        shape.HasUnboundedQuantifier |= edge.Quantifier is { Max: null };
                         needsNode = true;
                         break;
                     case GqlParenthesizedPathPattern group:
@@ -101,6 +109,7 @@ internal sealed class GraphPathShape
                             shape.Nodes.Add([]);
                             shape.Bound += body.Bound * (quantifier.Max ?? quantifier.Min);
                             shape.HasQuantifier = true;
+                            shape.HasUnboundedQuantifier |= quantifier.Max is null;
                         }
                         else
                         {
@@ -109,6 +118,7 @@ internal sealed class GraphPathShape
                             { shape.Segments.Add(body.Segments[i]); shape.Nodes.Add(new List<GqlNodePattern>(body.Nodes[i + 1])); }
                             shape.Bound += body.Bound;
                             shape.HasQuantifier |= body.HasQuantifier;
+                            shape.HasUnboundedQuantifier |= body.HasUnboundedQuantifier;
                         }
                         hasStart = true;
                         needsNode = false;
@@ -118,6 +128,8 @@ internal sealed class GraphPathShape
                 if (shape.Bound > 64) { throw Invalid(); }
             }
             if (!hasStart || needsNode) { throw Invalid(); }
+            if (current.Mode == GqlPathMode.Walk && shape.HasUnboundedQuantifier)
+            { throw new GraphPlanningException("CK00001", ErrorMessages.UnboundedWalkUnsupported); }
             shapes[current] = shape;
         }
         return shapes[path];

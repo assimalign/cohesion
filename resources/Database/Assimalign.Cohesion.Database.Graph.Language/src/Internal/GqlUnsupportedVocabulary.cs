@@ -87,12 +87,8 @@ internal static class GqlUnsupportedVocabulary
         new("SCHEMA", "SCHEMA", GqlWordPosition.Clause),
         new("INDEX", "INDEX", GqlWordPosition.Clause),
         new("CATALOG", "CATALOG", GqlWordPosition.Clause),
-        // ISO/IEC 39075 delete and path prefixes. These stay pins with no T1 item lifting them.
+        // ISO/IEC 39075 delete prefix. Path modes execute since #1733.
         new("NODETACH", "NODETACH DELETE", GqlWordPosition.BeforeDelete),
-        new("WALK", "WALK PATH MODE", GqlWordPosition.PathMode),
-        new("TRAIL", "TRAIL PATH MODE", GqlWordPosition.PathMode),
-        new("SIMPLE", "SIMPLE PATH MODE", GqlWordPosition.PathMode),
-        new("ACYCLIC", "ACYCLIC PATH MODE", GqlWordPosition.PathMode),
         // ISO/IEC 39075 undirected (tilde) edges: the engine stores only directed relationships
         // (#1139). The label-expression operators #1101 listed here are executable since #1139;
         // GqlLabelVocabulary lists them.

@@ -11,8 +11,11 @@ public static class GqlClauses
     /// <summary>Matches a graph pattern.</summary>
     public const string Match = "MATCH";
 
-    /// <summary>Matches quantified relationships and parenthesized paths under trail semantics.</summary>
+    /// <summary>Matches quantified relationships and parenthesized paths under the outer path mode.</summary>
     public const string QuantifiedPath = "QUANTIFIED PATH";
+
+    /// <summary>Applies WALK, TRAIL, SIMPLE or ACYCLIC identity rules to a complete matched path.</summary>
+    public const string PathMode = "PATH MODE";
 
     /// <summary>The Cohesion extension that describes a data statement without executing it.</summary>
     public const string Explain = "EXPLAIN";

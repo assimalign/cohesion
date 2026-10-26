@@ -749,16 +749,49 @@ chains, which this store's format does not yet have. Catalog discovery uses iden
 directories (#1229), so introducing N definitions takes O(N log N) catalog work or better,
 including property discovery. Neither physical size limit counts expression length.
 
-GQL patterns include quantified relationships and parenthesized subpaths; the sum of finite upper bounds (or unbounded lower bounds) is at most 64 relationships. Each matched path is a trail: an edge
+GQL patterns include quantified relationships and parenthesized subpaths; the sum of finite upper bounds (or unbounded lower bounds) is at most 64 relationships. The default matched path is a trail: an edge
 identity is used at most once within that path; a node may recur. Separate comma-separated paths
 have separate edge sets and share variable bindings. This makes a three-edge cycle a valid
 three-hop result but forbids reusing its first edge on a fourth hop. Intermediate read bindings stream;
 retained results and operator state share a 256 MiB default statement memory budget. Physical work
 defaults to 1,000,000 selected node/edge candidates or FOR elements, including dead ends. Memory
-exhaustion is `CG05020`; work or the 64-hop trail limit is `CG05004`, never silent truncation.
+exhaustion is `CG05020`; work or the 64-hop path limit is `CG05004`, never silent truncation.
 Cancellation is observed during expansion and materialization. Repeated node/relationship
 variables enforce identity equality, and conflicting variable kinds fail before execution.
 
+
+### GQL path modes (#1733)
+
+The outer `GqlPathPattern.Mode` flows into `GraphPathPlan.Mode`, resolving an omitted mode to
+TRAIL. WALK permits repeated nodes and relationships; TRAIL forbids repeated relationships;
+ACYCLIC forbids repeated nodes; SIMPLE permits only one closing repetition of the first node.
+SIMPLE may reuse a relationship to close a two-hop path, and a self-loop closes a one-hop path.
+All modes admit a zero-length path. Each separate path gets its own identity scope, including
+comma-separated paths in one MATCH; the typed TraverseAsync contract is unchanged.
+
+The existing accounted heap frontier carries source-ordered nodes and relationships. TRAIL
+retains its relationship identity set; other modes leave that set empty. SIMPLE/ACYCLIC inspect
+the already-accounted node list, bounded by 65 entries, avoiding another retained identity set.
+Every branch copies this state before descent, so backtracking cannot leak sibling identities.
+Right expansion runs before left expansion from an interior anchor. A SIMPLE candidate may
+equal only the opposite endpoint of the current partial path; once endpoints coincide, further
+edge tasks stop on either side. This gives the same complete-path rule for any anchor and
+across all parenthesized and quantified segments, including zero-repetition junctions.
+
+Shape validation rejects undefined modes and insertion modes with CG05001. Explicit nested
+modes and unbounded WALK are CK00001, independently of text parsing, empty data or LIMIT.
+WALK is never silently restricted to TRAIL. Shortest selectors remain deferred and must later
+define admission without changing these identity rules. All modes preserve cancellation,
+retained-memory accounting (CG05020), physical-work exhaustion and qualifying 65th-hop refusal
+(CG05004); the text-bound sum above 64 remains CG00005. EXPLAIN reports `mode=<Mode>` on
+ExpandPath and quantified Expand rows, including the default. No disk or wire format changes.
+
+This follows the owner decisions of 2026-10-25. The language DESIGN's
+[path-mode section](../../Assimalign.Cohesion.Database.Graph.Language/docs/DESIGN.md#path-modes-1733)
+records the rechecked Neo4j grammar, nested-prefix rejection, unbounded repeatability refusal
+and effective-mode references. SIMPLE is the owner's GQL requirement beyond Neo4j's mode set.
+GqlPathModeTests and GraphPathModeWireTests cover cycles, self-loops, repeated relationships,
+whole-path identity, interior anchors, backtracking, rows and path frames over InMemory and TCP.
 
 ### Retained execution memory and explicit query limits (#1533, D4)
 
@@ -834,10 +867,10 @@ their existing final checks. The statement ExpansionBudget has separate physical
 counters: physical includes visited anchor candidates and selected relationship candidates,
 including heads required to initialize the identity-ordered merge, after type/direction selection
 from storage or the overlay. A discovered type and its first stream head share one charge;
-returning a primed head does not charge it again. Viable counts hops passing trail, binding, relationship and safe node
+returning a primed head does not charge it again. Viable counts hops passing mode, binding, relationship and safe node
 checks before copying state. Physical work defaults to a 1,000,000-unit ceiling, including dead ends; explicit engine/query limits are described below.
 Its CG05004 message includes actual physical and viable totals; no EventSource counters are added.
-The 64-hop trail cap remains. TraverseAsync shares the configurable memory/work budgets and selected-range streaming;
+The 64-hop path cap remains. TraverseAsync shares the configurable memory/work budgets and selected-range streaming;
 its start lookup consumes one work unit, followed by selected merge heads. Its results remain materialized
 before the statement releases its snapshot. Genuine matching fan-out can still exhaust an explicit budget.
 
@@ -879,7 +912,7 @@ the insertion grammar and are refused before writes. No catalog/storage format c
 The executor's DFS frontier and continuations live on the heap. Each incident cursor resumes after
 one child, so live search states scale with depth rather than sibling fan-out; storage incident
 buffers and materialized results retain their existing budgets. For a fixed hop, target node checks
-precede copying the trail for descent. Each state carries the trail's relationship identity set, source-ordered entities, group lists and the actual pattern/property
+precede copying the trail for descent. Each state carries the source-ordered entities, the TRAIL relationship identity set when needed, group lists and the actual pattern/property
 pair for every occurrence. This mapping replaces positional indexing: repeated properties and
 anonymous elements are checked correctly after full-clause binding, including forward references.
 Fixed chains recheck node maps in source order, then relationship maps in source order, regardless
@@ -911,7 +944,7 @@ only the parent cursor plus one child, for fixed and quantified edges. This stru
 independent of whole-process heap accounting, JIT liveness and async thread hops.
 No partial wire output precedes failure.
 
-EXPLAIN emits Expand details `quantifier={min,max}; body_hops=n; trail=True` (empty max means
+EXPLAIN emits Expand details `quantifier={min,max}; body_hops=n; mode=Trail` (empty max means
 unbounded). The existing Path frame represents every length, including one node with no edges.
 The composite capability check precedes the existing Execute entity-result gate, so an unnegotiated
 group list receives static CG07016 even on an empty match. A Max=0 group is provably empty
@@ -1317,7 +1350,7 @@ to exercise that enforcement path; compiled provisioning is not included.
 | `CG05001` | Invalid hand-built function arity or unbound argument; invalid pattern, variable binding, label expression, predicate or traversal specification, including an insertion that names `\|`, `!`, `%` or an either-direction edge, a binary `AND`, and a chain with fewer than two operands |
 | `CG01002` | Unknown label or relationship type in a schema write (`CreateIndexAsync`, `DropLabelAsync`, `DropRelationshipTypeAsync`), a failed statement. A read never reports it; see `CG01010` and `CG01011` |
 | `CG03003` | Proven incompatible function argument kind; schema/data mismatch, restricted deletion or invalid graph mutation; deterministic catalog identity reuse/rename, identity mismatch, index retargeting or missing owner |
-| `CG05004` | Physical-work budget or 64-hop trail limit exceeded |
+| `CG05004` | Physical-work budget or 64-hop path limit exceeded |
 | `CG07005` | Session/database binding mismatch |
 | `CG06006` | Storage, index, or malformed catalog-record failure translated at the engine boundary |
 | `CG04007` | A retryable catalog conflict, or the session's explicit transaction is aborted by a failed statement: a statement, BEGIN or COMMIT is refused until a rollback completes; the message and `InnerException` name the original failure |

@@ -223,6 +223,12 @@ SQLSTATE meanings remain those in [the SQL dialect](../../Assimalign.Cohesion.Da
 
 ## Graph migration
 
+GQL path modes (#1733) retain the existing identities: malformed mode values or INSERT modes in
+hand-built ASTs use CG05001; text repetition bounds above 64 use CG00005; a visited qualifying
+65th hop or physical-work exhaustion uses CG05004; retained-memory exhaustion uses CG05020.
+Nested explicit modes and unbounded WALK use CK00001. BEGIN (#1725) shares START TRANSACTION's
+transaction-state diagnostics; it allocates no new identity. These changes add no disk or wire format.
+
 | Previous code | Code | Category |
 |---|---|---|
 | GQL0001 | CG00001 | Language/syntax |

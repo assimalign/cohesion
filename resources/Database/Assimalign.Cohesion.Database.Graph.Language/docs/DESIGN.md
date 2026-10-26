@@ -149,9 +149,10 @@ The function table advertises the aggregates and core scalar functions listed be
 
 | Clause | Accepted subset | Execution |
 | --- | --- | --- |
-| `MATCH` | Comma-separated paths with fixed/quantified edges and parenthesized segments; optional `variable =` path assignment, label expressions, scalar expression property maps; every ISO full and abbreviated edge except the tilde forms | Planner chooses an indexed anchor when available; executor matches bounded relationship-unique trails and binds named paths in traversal order |
+| `MATCH` | Comma-separated paths with fixed/quantified edges and parenthesized segments; optional `variable =` path assignment, label expressions, scalar expression property maps; every ISO full and abbreviated edge except the tilde forms | Planner chooses an indexed anchor when available; executor applies the outer path mode (implicit TRAIL) and binds named paths in traversal order |
 | `OPTIONAL MATCH` | The same graph patterns and clause-local WHERE, including a leading optional or several consecutive matching clauses | Left join against each running binding; an unmatched clause preserves that row and binds its new variables to NULL |
-| `QUANTIFIED PATH` | ISO edge/subpath `{m,n}`, `{m}`, `{m,}`, `{,n}`, `{,}`, `+`, `*`; Cypher bracketed `*m..n` | Enumerates distinct trails, including zero-length matches; group variables bind source-ordered lists |
+| `PATH MODE` | WALK, TRAIL, SIMPLE or ACYCLIC after an optional path assignment, with optional PATH/PATHS | Applies to the complete path; nested explicit modes and unbounded WALK remain CK00001 |
+| `QUANTIFIED PATH` | ISO edge/subpath `{m,n}`, `{m}`, `{m,}`, `{,n}`, `{,}`, `+`, `*`; Cypher bracketed `*m..n` | Enumerates paths under the outer mode, including zero-length matches; group variables bind source-ordered lists |
 | `WHERE` | Boolean and scalar expressions: comparisons, labels, AND/OR/XOR/NOT, IS null/truth tests, arithmetic, concatenation, IN lists and string predicates | Keeps TRUE only; see [DIALECT.md](DIALECT.md) and scalar expressions below |
 | `EXPLAIN` | One linear statement of the supported stages | Shared description rows without executing any read expansion or write; Cohesion extension |
 | `LET` | One or more `variable = expression` assignments | Adds new value bindings in assignment order; rebinding is CG03003 |
@@ -211,7 +212,7 @@ stage        := [OPTIONAL] MATCH match-paths [WHERE predicate]
               | [DETACH] DELETE variables
               | WITH projections return-tail [WHERE predicate]
 match-paths  := match-path (',' match-path)*
-match-path   := [ variable '=' ] path
+match-path   := [ variable '=' ] [ (WALK | TRAIL | SIMPLE | ACYCLIC) [PATH | PATHS] ] path
 paths        := path (',' path)*
 path         := path-primary ((edge [quantifier] path-primary) | parenthesized | node)*
 path-primary := node | parenthesized
@@ -288,7 +289,45 @@ length or nesting limit: a chain of one operator is one n-ary node of any length
 bounds parentheses and negations, as in Neo4j (see "Chain length and nesting" below). Match execution
 also imposes a materialized-binding limit, documented in the Graph engine design. Quantified paths
 enumerate bounded or unbounded repetitions with a runtime 64-hop backstop. The executor's
-trail rule permits repeated nodes but forbids repeated relationship identities within one path.
+default TRAIL rule permits repeated nodes but forbids repeated relationship identities within one path; explicit modes follow #1733 below.
+
+### Path modes (#1733)
+
+`MATCH [p =] <mode> [PATH | PATHS] <path>` accepts WALK, TRAIL, SIMPLE and ACYCLIC,
+case-insensitively. Modes stay contextual identifiers outside that prefix. Each comma-separated
+path has its own mode. `GqlPathPattern.Mode` is nullable: null preserves implicit TRAIL and an
+explicit enum value records the written mode. Inner paths retain null, so a hand-built explicit
+TRAIL inside a group is distinguishable from an omitted mode. INSERT/CREATE cannot carry modes.
+
+| Mode | Identity rule over the complete path |
+| --- | --- |
+| WALK | Nodes and relationships may repeat; every quantifier needs a finite upper bound |
+| TRAIL (default) | Relationship identities cannot repeat; nodes may repeat |
+| SIMPLE | Nodes cannot repeat except that the final node may equal the first, closing the path once |
+| ACYCLIC | Node identities cannot repeat |
+
+SIMPLE permits a self-loop and a two-hop out-and-back over the same relationship: it imposes
+node uniqueness, not an additional TRAIL rule. No hop may extend a closed SIMPLE path.
+All modes admit zero-length paths. Identity rules span fixed edges, parenthesized groups,
+quantified repetitions and both sides of an interior anchor. They reset for another path.
+The parser refuses an explicit nested mode or selector and any unbounded WALK with CK00001,
+including nested unbounded segments and statements with LIMIT. Shortest selectors remain refused.
+Malformed text retains CG00002/CG00004/CG00005; undefined enum values and insertion modes in
+direct ASTs use CG05001. Shape validation independently refuses nested modes and unbounded WALK.
+The 64-hop, physical-work, memory and cancellation contracts remain in force.
+
+Owner decisions 2026-10-25 require all four modes, including SIMPLE beyond Neo4j's grammar.
+Local Neo4j references, relative to `C:/Source/repos/neo4j/neo4j` (behavior consulted, no code copied):
+`community/cypher/front-end/parser/v25/parser/src/main/antlr4/org/neo4j/cypher/internal/parser/v25/Cypher25Parser.g4:400-425`
+places a mode after the path assignment and allows PATH/PATHS; its mode set has WALK/TRAIL/ACYCLIC.
+`community/cypher/front-end/parser/v25/ast-factory/src/main/scala/org/neo4j/cypher/internal/parser/v25/ast/factory/ExpressionBuilder.scala:226-245`
+rejects an explicit mode or selector inside a parenthesized or quantified path.
+`community/cypher/front-end/ast/src/main/scala/org/neo4j/cypher/internal/ast/Clause.scala:970-985`
+rejects unbounded REPEATABLE ELEMENTS with or without selective search.
+`community/cypher/front-end/expressions/src/main/scala/org/neo4j/cypher/internal/expressions/PathMode.scala:44-50`
+can make WALK effectively TRAIL under a different match mode. Cohesion has no such implicit
+override: WALK always allows repeats. Future shortest selectors must preserve this mode contract
+and define their admission separately.
 
 ### Quantified paths (#1144)
 
@@ -313,7 +352,7 @@ The Cypher bound sits after the label expression and before the property map. IS
 to the path sum; a bounded segment contributes its upper bound times its body's edge count;
 an unbounded segment contributes its lower bound times that count. A text sum above 64 is
 CG00005, including an unbounded lower bound above 64. Hand-built invalid bounds use CG05001.
-At runtime an unbounded segment continues until no unused relationship qualifies; needing a
+At runtime a TRAIL segment continues until no unused relationship qualifies; SIMPLE and ACYCLIC apply their node-identity rules; needing a
 65th relationship after direction, type, bound identity and the hop's own property checks is
 CG05004. Endpoint predicates and projection cannot suppress exhaustion already encountered. An
 unordered read LIMIT may stop expansion before a later hop or work limit is reached. Retained
@@ -344,8 +383,7 @@ provably empty and projects as `[]`; scalar projections after FOR/UNWIND use the
 INSERT/CREATE quantifiers and node quantifiers are CG00002 before writes. Questioned paths
 after an edge or parenthesized path, subpath assignments, WHERE inside a parenthesized path,
 and nested quantifiers each produce one named CK00001. Elsewhere `?` retains the stray-character
-or unsupported-parameter diagnostic. Explicit TRAIL and other path modes/search prefixes remain
-CK00001. A `--` touching a subpath's `)` or quantifier's `}`, `+` or `*` is CG00008, just as
+or unsupported-parameter diagnostic. Path search prefixes remain CK00001; explicit outer modes execute (#1733). A `--` touching a subpath's `)` or quantifier's `}`, `+` or `*` is CG00008, just as
 after a node or edge filler, including the bracketed Cypher star and its bounds. A nested `?`
 retains CK00001; path modes inside subpaths receive the same named capability diagnostic. Recursive
 subpath parsing uses the CG00009 stack guard. Hand-built subpath nesting beyond 128 levels, cycles and repeated path instances in one walk are refused
@@ -900,12 +938,13 @@ to the Graph planner, which knows the database schema.
 
 The capability scan reads one static recognized-unsupported table, `GqlUnsupportedVocabulary`.
 Each entry has a spelling, the construct its `CK00001` names, and a position. Each construct is
-reported once, at its own span:
+reported once, at its own span. The pattern parser separately owns nested-mode and unbounded
+WALK capability checks; executable mode words no longer occur in the unsupported table (#1733):
 
 | Written | Construct named | Span | Who lifts it |
 | --- | --- | --- | --- |
 | `(a)~[r]~(b)`, `<~[r]~`, `~[r]~>`, `(a)~(b)`, `<~`, `~>` | `UNDIRECTED EDGE` | the whole edge, from `~` or `<~` through its closing `~` or `~>` | pin until the engine stores undirected edges |
-| `MATCH TRAIL (a)-[]->(b)`, `MATCH p = ACYCLIC (...)`, `WALK`, `SIMPLE` | `<MODE> PATH MODE` | the mode word, plus `PATH`/`PATHS` | pin |
+| `MATCH (TRAIL (a)-[]->(b))`, nested WALK/SIMPLE/ACYCLIC | `<MODE>` | the inner mode word | CK00001; outer modes execute (#1733) |
 | `MATCH ALL SHORTEST (...)`, `MATCH ANY SHORTEST (...)` | `ALL SHORTEST`, `ANY SHORTEST` | the prefix, plus its path mode and `PATH`/`PATHS` | pin |
 | `MATCH SHORTEST 2 (...)`, `SHORTEST 2 GROUPS` | `SHORTEST PATH` | the prefix, plus its count, path mode and `PATH`/`PATHS` or `GROUP`/`GROUPS` | pin |
 | `MATCH ALL (...)`, `MATCH ALL TRAIL (...)`, `MATCH ANY 2 (...)` | `ALL PATH SEARCH`, `ANY PATH SEARCH` | the prefix, plus its count, path mode and `PATH`/`PATHS` | pin |
@@ -926,10 +965,10 @@ construct each, and a procedure's `YIELD` belongs to its `CALL`. A statement who
 unsupported, such as `SESSION SET GRAPH g` or `DROP GRAPH g`, is one construct: the scan
 reports that word and nothing after it.
 
-Path mode words and `NODETACH` are positional, not lexer keywords. Before a path pattern, or
-before `DELETE`, they name the construct. Elsewhere they are names, so `MATCH trail = (a)-[]->(b)`
+Path mode words and `NODETACH` are positional, not lexer keywords. Before a path pattern, modes
+select identity rules; before `DELETE`, NODETACH names its refused construct. Elsewhere they are names, so `MATCH trail = (a)-[]->(b)`
 and `MATCH (nodetach) DELETE nodetach` still parse.
-`GqlKeywordDispositionTests` enumerates the profile's keywords, the table, and the executable
+`GqlKeywordDispositionTests` enumerates the profile's keywords, the table, the path-mode enum, and the executable
 label-expression spellings `GqlLabelVocabulary` lists (`|`, `&`, `!`, `%` and the positional
 `LABELED`). Every word needs a supported parse case or a case with exactly one `CK00001` naming its
 construct, and for a table entry that diagnostic must also name the construct the table records. A
@@ -1273,7 +1312,7 @@ budgets. Unordered read LIMIT may stop expansion (D4); final results stay materi
 completion. GraphQueryLimits carries optional lower MemoryBytes and WorkUnits, with positive engine
 ceilings of 256 MiB and 1,000,000 units by default. It is an in-process request contract; no grammar,
 Execute payload, capability, wire version or disk format changes. See the engine DESIGN for ownership,
-CG05020/CG08021 and the preserved 64-hop trail limit.
+CG05020/CG08021 and the preserved 64-hop path limit.
 
 ## Explicit transaction text (#1540, D5)
 

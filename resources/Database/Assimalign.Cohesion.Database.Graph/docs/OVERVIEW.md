@@ -8,7 +8,7 @@
 `Assimalign.Cohesion.Database.Graph` is the embedded property-graph engine. It creates, opens,
 enumerates and drops logical databases, opens database-bound sessions, and implements the frozen
 node, relationship and traversal operations of `GraphDatabase`. A session executes the bounded GQL
-subset, including quantified paths under trail semantics with ISO {m,n}/+/* and Cypher *m..n, group lists, source-ordered MATCH/OPTIONAL MATCH with null extension, named scalar/list/map parameters, Boolean/arithmetic WHERE and RETURN expressions,
+subset, including WALK/TRAIL/SIMPLE/ACYCLIC path modes (implicit TRAIL), quantified paths with ISO {m,n}/+/* and Cypher *m..n, group lists, source-ordered MATCH/OPTIONAL MATCH with null extension, named scalar/list/map parameters, Boolean/arithmetic WHERE and RETURN expressions,
 core element/string/math functions, CAST, Cypher conversions, transaction-start CURRENT_DATE/CURRENT_TIMESTAMP,
 CASE, COALESCE, NULLIF, list/map constructors and field/index access,
 SET/REMOVE scalar properties and node labels through MVCC replacements, literal-map replacement and merge,
@@ -64,7 +64,7 @@ For real path results, pass `GraphPathsQueryRequest.FromGql(...)` to the existin
 one-node path, a single relationship includes its stored endpoints, and
 `MATCH p = (a)-[r:KNOWS]->(b) RETURN p` preserves the matched traversal order. Scalar and mutation
 requests continue to use ordinary execution. Explicit transactions remain available through the
-in-process session API and ISO START TRANSACTION / COMMIT / ROLLBACK over Execute. A statement that
+in-process session API and BEGIN / ISO START TRANSACTION / COMMIT / ROLLBACK over Execute. A statement that
 fails inside an explicit transaction aborts the whole transaction: the session refuses further
 statements with `CG04007` until the caller rolls back, and a commit fails without committing.
 A read that names a label or relationship type the database does not have is not a failure: as in
