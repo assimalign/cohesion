@@ -938,7 +938,11 @@ raises CG05004 before testing its endpoint. Failed filters do not trigger the ho
 An unordered read LIMIT may stop before an unvisited branch reaches it (D4); an ORDER BY or
 aggregate that needs the complete expansion still observes it. The shared memory/work budgets
 apply to every visited repeated branch. The internal per-budget OnConsume test hook cancels deterministically
-after expansion begins; tests assert the consumed count. The high-fan-out regression observes
+after expansion begins; tests assert the consumed count. The unbounded default-TRAIL regression
+uses OnFrontier to cancel after 32 viable hops in a dense graph, before dispatching the queued
+end-of-iteration continuation. It asserts cancellation before another frontier visit, so removing
+the dispatcher's cancellation check fails even when storage and materialization still check tokens.
+The high-fan-out regression observes
 all pending DFS states through a per-budget hook: 20,000 successful one-hop descents must retain
 only the parent cursor plus one child, for fixed and quantified edges. This structural bound is
 independent of whole-process heap accounting, JIT liveness and async thread hops.
