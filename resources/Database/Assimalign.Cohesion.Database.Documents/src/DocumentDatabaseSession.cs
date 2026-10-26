@@ -36,8 +36,9 @@ namespace Assimalign.Cohesion.Database.Documents;
 /// <para>
 /// <b>A failed statement aborts the explicit transaction (#1225, the contract #1188 set for
 /// Graph).</b> The transaction stays the session's transaction until the caller commits, rolls back
-/// or disposes it; the session then refuses every statement and BEGIN with <c>CD04101</c> until
-/// the caller rolls back. A failure never turns later statements into autocommit writes. A
+/// or disposes it; the session refuses ordinary statements and BEGIN with <c>CD04101</c>.
+/// Text ROLLBACK recovers it; text COMMIT reports <c>CD04101</c>, commits nothing and ends it.
+/// A failure never turns later statements into autocommit writes. A
 /// statement (an OQL statement, a collection operation of the session, or a document operation of
 /// a <see cref="DocumentCollection"/> run in the session) holds the session (the base's operation
 /// hold) from its start to its end, so a second statement on the session is refused meanwhile, and
@@ -452,8 +453,10 @@ public sealed class DocumentDatabaseSession : DatabaseLanguageSession<DocumentQu
                 await BeginTransactionAsync(expression.Isolation == OqlTransactionIsolation.ReadCommitted
                     ? IsolationLevel.ReadCommitted : IsolationLevel.Snapshot, cancellationToken).ConfigureAwait(false);
             }
-            catch (DatabaseException error)
+            catch (DatabaseException error) when (error.Diagnostics.Any(diagnostic => diagnostic.Code == "CK04004"))
             {
+                // Only a nested BEGIN aborts existing work. An overlapping BEGIN can fail
+                // with CK07003 before another BEGIN publishes its successful transaction.
                 await AbortTransactionAsync(error).ConfigureAwait(false);
                 throw;
             }

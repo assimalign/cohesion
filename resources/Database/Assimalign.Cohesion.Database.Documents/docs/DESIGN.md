@@ -221,7 +221,7 @@ executing OQL or CRUD never interprets it as session authority over other databa
 Each statement uses one `TransactionContext`. Automatic operations commit on
 success and roll back on failure. Explicit transaction operations leave commit
 to the caller; a failing operation aborts the whole explicit transaction, which
-then refuses every later statement until the caller rolls it back, as
+then refuses ordinary statements until the caller ends it, as
 [Failed statements in explicit transactions](#failed-statements-in-explicit-transactions-1225)
 describes.
 Snapshot isolation fixes the read horizon at transaction start. ReadCommitted
@@ -263,6 +263,8 @@ execute transaction control. Malformed text in an already faulted transaction re
 Valid ROLLBACK recovers it; COMMIT reports CD04101, commits nothing and ends it.
 
 Nested BEGIN reuses CK04004 and aborts existing work, following Graph's failed-control policy.
+Only that nested-BEGIN refusal aborts existing work. An overlapping BEGIN refused with CK07003
+leaves the successful BEGIN's transaction active, even if it registers before the refusal unwinds.
 COMMIT/ROLLBACK without a current transaction reports CD04104. OQL collection and index DDL,
 including conditional no-ops, reports CD04105 inside an explicit transaction and aborts it before
 catalog mutation. C# collection operations keep their existing transactional API contract.

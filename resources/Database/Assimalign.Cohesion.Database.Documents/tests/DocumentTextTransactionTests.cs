@@ -1,4 +1,6 @@
 using System;
+using System.Diagnostics;
+using System.Runtime.ExceptionServices;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -7,12 +9,93 @@ using Xunit;
 
 using Assimalign.Cohesion.Database.Documents.Language;
 using Assimalign.Cohesion.Database.Execution;
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Documents.Tests;
 
+[Collection("Document index concurrency")]
 public sealed class DocumentTextTransactionTests
 {
+    [Fact(DisplayName = "Cohesion Test [Documents] - Text transactions: a concurrent BEGIN refusal cannot abort the successful BEGIN")]
+    public async Task ExecuteAsync_ConcurrentBegin_ShouldPreserveSuccessfulTransaction()
+    {
+        // Arrange: stop A inside BEGIN, then stop B's refusal after the root lock unwinds.
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        await using var engine = DocumentDatabaseEngine.Create("text-concurrent-begin", new());
+        var database = await engine.CreateDatabaseAsync("documents", timeout.Token);
+        await using var session = await database.CreateSessionAsync(timeout.Token);
+        await session.CreateCollectionAsync("items", timeout.Token);
+        int exercised = 0;
+        var elapsed = Stopwatch.StartNew();
+        do
+        {
+            var beginning = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var refusing = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            using var releaseBegin = new ManualResetEventSlim();
+            using var releaseRefusal = new ManualResetEventSlim();
+            int beginCalls = 0, refusalThrows = 0, refusalThread = 0;
+            database.BeforeTransactionBegin = () =>
+            {
+                Interlocked.Increment(ref beginCalls);
+                beginning.TrySetResult();
+                releaseBegin.Wait(timeout.Token);
+            };
+            void OnFirstChance(object? sender, FirstChanceExceptionEventArgs args)
+            {
+                if (Environment.CurrentManagedThreadId != Volatile.Read(ref refusalThread) ||
+                    args.Exception is not DatabaseException error ||
+                    error.Diagnostics.Count != 1 || error.Diagnostics[0].Code != "CK07003") { return; }
+                // The initial throw owns DatabaseSession's lock. The await rethrow in the
+                // typed Documents BEGIN wrapper has released it, allowing A to register.
+                if (Interlocked.Increment(ref refusalThrows) != 2) { return; }
+                refusing.TrySetResult();
+                releaseRefusal.Wait(timeout.Token);
+            }
+            AppDomain.CurrentDomain.FirstChanceException += OnFirstChance;
+            var first = DedicatedTestTask.Run(async () => await session.ExecuteAsync("BEGIN", cancellationToken: timeout.Token), timeout.Token);
+            Task<DatabaseException>? second = null;
+            try
+            {
+                await beginning.Task.WaitAsync(timeout.Token);
+                second = DedicatedTestTask.Run(async () =>
+                {
+                    Volatile.Write(ref refusalThread, Environment.CurrentManagedThreadId);
+                    return await Should.ThrowAsync<DatabaseException>(async () =>
+                        await session.ExecuteAsync("BEGIN", cancellationToken: timeout.Token));
+                }, timeout.Token);
+                await refusing.Task.WaitAsync(timeout.Token);
+
+                // Act: A succeeds and clears _beginning before B handles its CK07003.
+                releaseBegin.Set();
+                (await first.WaitAsync(timeout.Token)).Status.ShouldBe(DatabaseResultStatus.Success);
+                var transaction = session.CurrentTransaction.ShouldNotBeNull();
+                releaseRefusal.Set();
+                (await second.WaitAsync(timeout.Token)).Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CK07003");
+
+                // Assert: B neither faults T nor changes its ownership; subsequent work commits.
+                beginCalls.ShouldBe(1);
+                refusalThrows.ShouldBeGreaterThanOrEqualTo(2);
+                session.CurrentTransaction.ShouldBeSameAs(transaction);
+                transaction.State.ShouldBe(TransactionState.Active);
+                await session.ExecuteAsync("DELETE FROM items", cancellationToken: timeout.Token);
+                await session.ExecuteAsync("COMMIT", cancellationToken: timeout.Token);
+                transaction.State.ShouldBe(TransactionState.Committed);
+                exercised++;
+            }
+            finally
+            {
+                releaseBegin.Set();
+                releaseRefusal.Set();
+                AppDomain.CurrentDomain.FirstChanceException -= OnFirstChance;
+                database.BeforeTransactionBegin = null;
+                await first;
+                if (second is not null) { await second; }
+            }
+        } while ((elapsed.Elapsed < TimeSpan.FromSeconds(1) || exercised < 2) && elapsed.Elapsed < TimeSpan.FromSeconds(20));
+        exercised.ShouldBeGreaterThanOrEqualTo(2);
+    }
+
     [Theory(DisplayName = "Cohesion Test [Documents] - Text transactions: Snapshot and ReadCommitted own writes commit and rollback")]
     [InlineData(false, false)]
     [InlineData(true, false)]
@@ -136,8 +219,8 @@ public sealed class DocumentTextTransactionTests
         session.CurrentTransaction.ShouldBeNull();
     }
 
-    [Fact(DisplayName = "Cohesion Test [Documents] - Text transactions: text and API share a transaction and canceled control preserves it")]
-    public async Task ExecuteAsync_ApiTransactionAndCanceledRollback_ShouldShareOwnershipAndPreserveState()
+    [Fact(DisplayName = "Cohesion Test [Documents] - Text transactions: pre-canceled text execution preserves the API transaction")]
+    public async Task ExecuteAsync_PreCanceledTextRollback_ShouldPreserveApiTransactionBeforeDispatch()
     {
         // Arrange
         await using var engine = DocumentDatabaseEngine.Create("text-api", new());
@@ -148,6 +231,7 @@ public sealed class DocumentTextTransactionTests
         cancellation.Cancel();
 
         // Act / Assert
+        // DatabaseLanguageSession rejects the token before parsing or control dispatch.
         await Should.ThrowAsync<OperationCanceledException>(async () =>
             await session.ExecuteAsync("ROLLBACK", cancellationToken: cancellation.Token));
         session.CurrentTransaction.ShouldBeSameAs(transaction);
