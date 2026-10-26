@@ -250,7 +250,6 @@ public sealed class SqlRightJoinTests
     [InlineData("SELECT * FROM a RIGHT JOIN b ON c.id = b.id JOIN a c ON TRUE", "CS01015")]
     [InlineData("SELECT * FROM a, b RIGHT JOIN a c ON a.id = c.id", "CS01015")]
     [InlineData("SELECT * FROM a RIGHT JOIN b a USING(id)", "CS01019")]
-    [InlineData("SELECT * FROM a FULL OUTER JOIN b USING(id)", "CK00001")]
     [InlineData("UPDATE a SET id = b.id FROM b RIGHT JOIN a c ON b.id = c.id", "CS05069")]
     [InlineData("DELETE FROM a USING b RIGHT JOIN a c ON b.id = c.id", "CS05069")]
     public async Task Join_InvalidNamespace_ShouldRefuseBeforeReads(string sql, string code)

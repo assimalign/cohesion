@@ -36,6 +36,8 @@ public class SqlConformanceTests
 
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - Conformance: supported statements parse without errors")]
     [InlineData("SELECT * FROM users;", SqlQueryCommandType.Select)]
+    [InlineData("SELECT * FROM a FULL JOIN b USING(id);", SqlQueryCommandType.Select)]
+    [InlineData("SELECT * FROM a LEFT OUTER JOIN b ON a.id = b.id FULL OUTER JOIN c ON b.id = c.id;", SqlQueryCommandType.Select)]
     [InlineData("SELECT * FROM ((SELECT * FROM a) d RIGHT JOIN b ON d.id = b.id);", SqlQueryCommandType.Select)]
     [InlineData("SELECT id FROM ((a RIGHT JOIN b USING (id)) q RIGHT JOIN c USING (id));", SqlQueryCommandType.Select)]
     [InlineData("SELECT a FROM t UNION SELECT a FROM u;", SqlQueryCommandType.Select)]
@@ -107,19 +109,6 @@ public class SqlConformanceTests
         statement.SqlExpression.CommandType.ShouldBe(expected);
         statement.Diagnostics.ShouldNotContain(d => d.Severity == DiagnosticSeverity.Error);
         statement.SqlExpression.Text.ShouldBe(sql);
-    }
-
-    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Conformance: unexecuted statements report model diagnostics")]
-    [InlineData("SELECT * FROM a LEFT OUTER JOIN b ON a.id = b.id FULL OUTER JOIN c ON b.id = c.id;", SqlQueryCommandType.Select)]
-    public void Parse_UnexecutedCorpus_ShouldReportModelDiagnostic(string sql, SqlQueryCommandType expected)
-    {
-        // Outer joins retain explicit unsupported diagnostics (#1019).
-        var statement = Parse(sql);
-
-        statement.SqlExpression.CommandType.ShouldBe(expected);
-        statement.Diagnostics.ShouldContain(d =>
-            d.Code == "CK00001" && d.Severity == DiagnosticSeverity.Error);
-        statement.SqlExpression.Text.ShouldBe(sql); // the raw text is stamped (#170)
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - Conformance: temporal suffix lookahead leaves modifier validation to the grammar")]

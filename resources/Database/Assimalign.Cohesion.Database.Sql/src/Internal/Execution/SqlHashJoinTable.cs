@@ -12,25 +12,39 @@ internal sealed class SqlHashJoinTable : IDisposable
     private readonly SqlHashJoinPath _keys;
     private readonly SqlStatementMetrics _metrics;
     private readonly long _budget;
+    private readonly bool _trackUnmatched;
+    private readonly SqlExpressionEvaluator? _evaluator;
+    private bool[] _matched = [];
     private int[] _buckets = [];
     private Entry[] _entries = [];
     private int _count;
     private long _reserved;
 
-    internal SqlHashJoinTable(SqlHashJoinPath keys, SqlStatementMetrics metrics, long budget)
+    internal SqlHashJoinTable(SqlHashJoinPath keys, SqlStatementMetrics metrics, long budget,
+        bool trackUnmatched = false, SqlExpressionEvaluator? evaluator = null)
     {
         _keys = keys;
         _metrics = metrics;
         _budget = budget;
-        Reserve(80); // conservative table object charge, including alignment and reference fields
+        _trackUnmatched = trackUnmatched;
+        _evaluator = evaluator;
+        Reserve(104); // aligned object, including tracking/evaluator fields
     }
 
     internal void Add(object?[] row, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (!TryHash(row, _keys.InnerOrdinals, out int hash)) { return; }
-        if (_count == _entries.Length) { Grow(); }
+        bool hasKey = TryHash(row, _keys.InnerOrdinals, _keys.InnerExpressions, out int hash);
+        if (!hasKey && !_trackUnmatched) { return; }
+        if (_count == _entries.Length) { Grow(cancellationToken); }
         Reserve(RowBytes(row));
+        if (!hasKey)
+        {
+            // -2 is outside every collision chain: NULL keys must be retained by FULL,
+            // but can never be probed or rehashed into a bucket.
+            _entries[_count++] = new(0, -2, row);
+            return;
+        }
         int bucket = (int)((uint)hash % (uint)_buckets.Length);
         _entries[_count] = new(hash, _buckets[bucket] - 1, row);
         _buckets[bucket] = ++_count;
@@ -38,7 +52,9 @@ internal sealed class SqlHashJoinTable : IDisposable
 
     internal IEnumerable<object?[]> Probe(object?[] outer, CancellationToken cancellationToken)
     {
-        if (_count == 0 || !TryHash(outer, _keys.OuterOrdinals, out int hash)) { yield break; }
+        // Keep the ordinary flat-join row iterator allocation unchanged. FULL's caller
+        // uses entry ordinals below so ON success can mark an individual duplicate.
+        if (_count == 0 || !TryHash(outer, _keys.OuterOrdinals, _keys.OuterExpressions, out int hash)) { yield break; }
         int at = _buckets[(int)((uint)hash % (uint)_buckets.Length)] - 1;
         while (at >= 0)
         {
@@ -49,38 +65,71 @@ internal sealed class SqlHashJoinTable : IDisposable
         }
     }
 
-    private bool TryHash(object?[] row, int[] ordinals, out int result)
+    internal object?[] RowAt(int entry) => _entries[entry].Row;
+
+    internal void MarkMatched(int entry) => _matched[entry] = true;
+
+    internal IEnumerable<object?[]> Unmatched(CancellationToken cancellationToken)
+    {
+        for (int i = 0; i < _count; i++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!_matched[i]) { yield return _entries[i].Row; }
+        }
+    }
+
+    internal IEnumerable<int> ProbeEntries(object?[] outer, CancellationToken cancellationToken)
+    {
+        if (_count == 0 || !TryHash(outer, _keys.OuterOrdinals, _keys.OuterExpressions, out int hash)) { yield break; }
+        int at = _buckets[(int)((uint)hash % (uint)_buckets.Length)] - 1;
+        while (at >= 0)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var entry = _entries[at];
+            if (entry.Hash == hash) { yield return at; }
+            at = entry.Next;
+        }
+    }
+
+    private bool TryHash(object?[] row, int[] ordinals, SqlBoundExpression[]? expressions, out int result)
     {
         var hash = new HashCode();
         for (int i = 0; i < ordinals.Length; i++)
         {
-            if (row[ordinals[i]] is not { } value) { result = 0; return false; }
+            if ((expressions is null ? row[ordinals[i]] : _evaluator!.Evaluate(expressions[i], row)) is not { } value) { result = 0; return false; }
             hash.Add(SqlValueComparer.GetHashCode(value, _keys.Collations[i]));
         }
         result = hash.ToHashCode();
         return true;
     }
 
-    private void Grow()
+    private void Grow(CancellationToken cancellationToken)
     {
         int capacity = _entries.Length == 0 ? 16 : checked(_entries.Length * 2);
-        long bytes = 48L + 20L * capacity; // two array headers + int buckets + 16-byte entries
+        long bytes = ArrayBytes(capacity);
         Reserve(bytes); // charge both old and new arrays during growth
         var buckets = new int[capacity];
         var entries = new Entry[capacity];
+        var matched = _trackUnmatched ? new bool[capacity] : [];
         Array.Copy(_entries, entries, _count);
+        if (_trackUnmatched) { Array.Copy(_matched, matched, _count); }
         for (int i = 0; i < _count; i++)
         {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (entries[i].Next == -2) { continue; }
             int bucket = (int)((uint)entries[i].Hash % (uint)capacity);
             entries[i] = entries[i] with { Next = buckets[bucket] - 1 };
             buckets[bucket] = i + 1;
         }
-        long old = _entries.Length == 0 ? 0 : 48L + 20L * _entries.Length;
+        long old = _entries.Length == 0 ? 0 : ArrayBytes(_entries.Length);
         _entries = entries;
         _buckets = buckets;
+        _matched = matched;
         _reserved -= old;
         _metrics.ReleaseHashMemory(old);
     }
+
+    private long ArrayBytes(int capacity) => 48L + 20L * capacity + (_trackUnmatched ? 24L + ((capacity + 7L) & ~7L) : 0);
 
     private static long RowBytes(object?[] row)
     {
@@ -112,6 +161,7 @@ internal sealed class SqlHashJoinTable : IDisposable
     {
         _entries = [];
         _buckets = [];
+        _matched = [];
         _metrics.ReleaseHashMemory(_reserved);
         _reserved = 0;
         _count = 0;

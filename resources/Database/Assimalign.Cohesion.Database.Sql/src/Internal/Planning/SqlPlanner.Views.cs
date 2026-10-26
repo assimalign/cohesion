@@ -151,7 +151,8 @@ internal sealed partial class SqlPlanner
         {
             if (column.Expression is SqlColumnReferenceExpression projected && column.Alias is null &&
                 binding.Edits.TryGetValue(projected.Location!.Start, out var rendered) &&
-                (rendered.Text.StartsWith("CAST(", StringComparison.Ordinal) || rendered.Text.StartsWith("CASE ", StringComparison.Ordinal)))
+                (rendered.Text.StartsWith("CAST(", StringComparison.Ordinal) || rendered.Text.StartsWith("CASE ", StringComparison.Ordinal) ||
+                    rendered.Text.StartsWith("COALESCE(", StringComparison.Ordinal)))
             { binding.Edits[projected.Location.Start] = (rendered.Length, rendered.Text + " AS " + SqlObjectIdentity.Quote(projected.ColumnName)); }
             if (column.Expression is not SqlStarExpression { Location: not null } star) { continue; }
             var names = new List<string>();
@@ -208,16 +209,21 @@ internal sealed partial class SqlPlanner
         return relation is SqlTableReference { Alias: null, SchemaName: { } schema }
             ? SqlObjectIdentity.Quote(schema) + "." + result : result;
 
-        string RenderValue(SqlBoundExpression value) => value switch
+        string RenderValue(SqlBoundExpression value)
         {
-            SqlBoundColumn column => RenderViewColumn(column.Ordinal, columns, bindings, relation, scope, merged: false),
-            // A CHAR typmod relabel must keep every character. Bare CAST AS CHAR
-            // means CHAR(1); this equivalent CASE clears only the output modifier.
-            SqlBoundCast { SourceType: DatabaseType.Character, Target.Storage: { Type: DatabaseType.Character, MaxLength: null } } cast
-                => "CASE WHEN TRUE THEN " + RenderValue(cast.Operand) + " ELSE NULL END",
-            SqlBoundCast cast => "CAST(" + RenderValue(cast.Operand) + " AS " + cast.TargetText + ")",
-            _ => throw ViewError(ErrorMessages.ViewRoundTrip),
-        };
+            RuntimeHelpers.EnsureSufficientExecutionStack();
+            return value switch
+            {
+                SqlBoundColumn column => RenderViewColumn(column.Ordinal, columns, bindings, relation, scope, merged: false),
+                // A CHAR typmod relabel must keep every character. Bare CAST AS CHAR
+                // means CHAR(1); this equivalent CASE clears only the output modifier.
+                SqlBoundCast { SourceType: DatabaseType.Character, Target.Storage: { Type: DatabaseType.Character, MaxLength: null } } cast
+                    => "CASE WHEN TRUE THEN " + RenderValue(cast.Operand) + " ELSE NULL END",
+                SqlBoundCast cast => "CAST(" + RenderValue(cast.Operand) + " AS " + cast.TargetText + ")",
+                SqlBoundCoalesce coalesce => "COALESCE(" + string.Join(", ", coalesce.Arguments.Select(RenderValue)) + ")",
+                _ => throw ViewError(ErrorMessages.ViewRoundTrip),
+            };
+        }
     }
 
     private void RecordViewColumn(SqlRelationSource source, int ordinal)

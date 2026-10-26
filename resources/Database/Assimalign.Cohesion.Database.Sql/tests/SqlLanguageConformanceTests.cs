@@ -682,6 +682,8 @@ public sealed class SqlLanguageConformanceTests
                 await ExpectRowsAsync(session, "SELECT t.id, p.email FROM profiles p RIGHT OUTER JOIN t ON p.user_id = t.id ORDER BY t.id;",
                     [[1, "ada@example.test"], [2, null], [3, "alan@example.test"]]);
                 await ExpectRowsAsync(session, "SELECT id FROM (t RIGHT JOIN t copy USING (id)) ORDER BY id;", [[1], [2], [3]]);
+                await ExpectRowsAsync(session, "SELECT id FROM t FULL OUTER JOIN t copy USING (id) ORDER BY id;", [[1], [2], [3]]);
+                await ExpectRowsAsync(session, "SELECT id FROM t FULL JOIN (SELECT 4 AS id) copy USING (id) ORDER BY id;", [[1], [2], [3], [4]]);
                 await ExpectRowsAsync(session, "SELECT d.id, p.email FROM ((SELECT id FROM t) d LEFT JOIN profiles p ON d.id = p.user_id) ORDER BY d.id;",
                     [[1, "ada@example.test"], [2, null], [3, "alan@example.test"]]);
                 await ExpectRowsAsync(session, "SELECT c.COLUMN_NAME FROM INFORMATION_SCHEMA.TABLES t " +

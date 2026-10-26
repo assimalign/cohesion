@@ -626,7 +626,8 @@
   <data name="SqlPlannerPlanInsertSelectSqlPlanning" xml:space="preserve"><value>INSERT SELECT source column {0} of type {1} is incompatible with target column '{2}' of type {3}.</value></data>
   <data name="SqlPlannerBindJoinSqlPlanning" xml:space="preserve"><value>Aggregate functions are not allowed in JOIN ON.</value></data>
   <data name="SqlPlannerBindJoinSqlPlanning2" xml:space="preserve"><value>Column '{0}' appears more than once in USING.</value></data>
-  <data name="RightJoinDmlSource" xml:space="preserve"><value>RIGHT or parenthesized joins in a joined DML source are not supported; the mutation target must remain the outer input.</value></data>
+  <data name="FullJoinCondition" xml:space="preserve"><value>FULL JOIN requires a hash-compatible mandatory equality between its inputs and a proven non-throwing ON condition.</value></data>
+  <data name="RightJoinDmlSource" xml:space="preserve"><value>RIGHT, FULL or parenthesized joins in a joined DML source are not supported; the mutation target must remain the outer input.</value></data>
   <data name="SqlPlannerBindJoinSqlPlanning3" xml:space="preserve"><value>INNER, LEFT and RIGHT JOIN require ON or USING; CROSS JOIN accepts neither.</value></data>
   <data name="SqlPlannerBindJoinSqlPlanning4" xml:space="preserve"><value>USING column '{0}' is {1} on the {2} input.</value></data>
   <data name="SqlPlannerBindJoinSqlPlanning5" xml:space="preserve"><value>Duplicate table name or alias '{0}'; use distinct aliases for a self join.</value></data>

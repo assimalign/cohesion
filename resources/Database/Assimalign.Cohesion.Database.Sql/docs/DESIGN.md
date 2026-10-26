@@ -63,7 +63,8 @@ No new interface, visibility grant, reference, persistent format or wire message
 | Code | Condition |
 | --- | --- |
 | CS05068 | An UPDATE target has more than one matching source association; no row is written. |
-| CS05069 | Direct RIGHT or parenthesized joined DML source requires an unsupported target-outer execution tree; no row is read or written. |
+| CS05069 | Direct RIGHT, FULL or parenthesized joined DML source requires an unsupported target-outer execution tree; no row is read or written. |
+| CS05070 | FULL JOIN requires a safe mandatory hash equality; refused during binding before either input is read. |
 
 Namespace rules follow PostgreSQL analyze.c:602-621,2560-2578; the owner's cardinality rule
 deliberately differs from nodeModifyTable.c:2599-2608 (first-update behavior).
@@ -365,7 +366,49 @@ database reopen, including when nested aliased groups render as derived SELECTs.
 Direct RIGHT or grouped join trees in UPDATE FROM / DELETE USING fail CS05069 before reads
 or mutation: this run preserves the target-outer identity invariant. A derived SELECT source
 containing RIGHT executes through the existing materialization path with the target pinned.
-FULL stays CK00001; its physical execution remains SQ-J2.
+FULL follows the physical and eligibility contract below.
+
+## FULL physical joins (#1525, SQ-J2)
+
+FULL [OUTER] JOIN uses the normalized tree without swapping its written children. Binding
+requires at least one mandatory hash equality between the children and proves the complete
+ON condition non-throwing with the existing hash-safety rules. CS05070 refuses other forms
+before reading either input, even when an input is empty. This includes inequality-only/OR
+conditions, unproven calls, arithmetic, subqueries, CHAR-only keys and derived text without
+a stored-codec Unicode guarantee. No merge executor, nested-loop FULL fallback or spill is
+introduced. Computed USING COALESCE and proven identity/widening casts can supply hash keys
+in later joins or grouped inner subtrees. PostgreSQL optimizer/path/joinrels.c:1157-1180
+likewise refuses FULL when it cannot produce a merge/hash path.
+
+Both physical sides become nullable. USING keeps one output in written USING order, with
+COALESCE of both common-typed inputs, the resolved equality collation for text, and retained
+identical domain identity. The merged column is nonnullable only when both inputs were
+nonnullable before this FULL; qualified inputs remain separate nullable physical columns.
+PostgreSQL parser/parse_clause.c:1739-1756 supplies the COALESCE rule.
+
+The existing chained hash table retains each build row independently, including duplicate and
+NULL-key rows. NULL keys stay outside bucket chains. A separate bool array tracks matches,
+with one flag per retained entry; growth copies flags and reserves old plus new arrays before
+allocation. A flag is set only after complete ON evaluation is TRUE. After every outer row is
+matched or null-extended, unmatched build entries are emitted once with the outer slots NULL.
+An empty outer still builds and drains the inner. WHERE remains above both null extensions.
+PostgreSQL executor/nodeHashjoin.c:578-592,634-679,729-756 uses the same ON-match distinction
+and separate unmatched/null-key drain; no code was copied.
+
+The statement grant charges the table object (104 bytes including new tracking/evaluator
+fields), bucket/entry arrays, the aligned tracking array header/payload and retained rows.
+Nested tables share the live grant. Success, budget refusal, evaluation failure and cancellation
+release every reservation. CS05067 is unchanged. Only hash-build state is bounded: existing
+outer/intermediate/result materialization retains its existing contract. The build side is
+always the written right child, including when an index exists. EXPLAIN names FullHashJoin and
+unmatched=both in JoinStep detail; ANALYZE retains candidate-pair counts rather than emitted
+unmatched-row counts. Deterministic 64/640-row fixtures compare 4096/409600 loop candidates
+with 64/640 FULL hash candidates, with identical paired values and 128/1280 stored row reads.
+
+Direct FULL DML sources follow CS05069 before reads/writes; derived SELECTs containing FULL
+use existing target-pinned materialization. In-process, InMemory/TCP, live clause conformance,
+parser round trips and the NativeAOT sample exercise these contracts. No public boundary,
+reference, persisted format, protocol frame or metadata field changes.
 
 ## N-way joins (#1109)
 
@@ -5935,7 +5978,7 @@ RESTART, generation-mode changes and identity backfill on populated tables remai
 (#1123). Compiled typed schemas cannot declare identity metadata; SQL scripts can create
 identity tables through the ordinary SQL executor.
 
-FULL OUTER, NATURAL and LATERAL joins, qualified wildcards, UPDATE SET
+NATURAL and LATERAL joins, qualified wildcards, UPDATE SET
 subqueries, `Serializable`
 isolation (rejected at begin), persisted statistics, standalone ANALYZE, hash spill,
 and index-only result production (a seek always fetches the row).
@@ -7746,7 +7789,7 @@ CTE definitions and references share one identity map; cached view plans are nev
 
 SqlDatabaseEngineOptions.StatementMemoryBudget is a positive byte count, default 67108864
 (64 MiB), snapshotted with engine options. It bounds concurrently retained hash builds in one
-statement, including nested queries: each table reserves 80 bytes, arrays reserve both old and
+statement, including nested queries: each table reserves 104 bytes, arrays reserve both old and
 new storage during doubling, and retained rows charge their arrays and conservatively sized
 boxed/text/binary cells, including both padded CHAR payloads and trimmed comparison strings.
 The limit governs accounted live hash-build memory, not result

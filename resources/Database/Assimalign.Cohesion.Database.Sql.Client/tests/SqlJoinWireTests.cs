@@ -91,8 +91,6 @@ public sealed class SqlJoinWireTests
     /// <summary>Unimplemented join forms produce the capability diagnostic before planning over the wire.</summary>
     /// <param name="statement">The excluded join form.</param>
     [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - JOIN: excluded forms report CK00001 over the wire")]
-    [InlineData(false, "SELECT u.id FROM users u FULL OUTER JOIN users v ON u.id = v.id")]
-    [InlineData(true, "SELECT u.id FROM users u FULL OUTER JOIN users v ON u.id = v.id")]
     [InlineData(false, "SELECT u.id FROM users u NATURAL JOIN users v")]
     [InlineData(true, "SELECT u.id FROM users u NATURAL JOIN users v")]
     [InlineData(false, "SELECT u.* FROM users u JOIN users v USING (id)")]
