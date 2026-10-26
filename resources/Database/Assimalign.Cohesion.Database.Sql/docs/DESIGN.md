@@ -6585,8 +6585,11 @@ is preserved and does not forbid this data operation. An explicit transaction is
 CS04066, leaving its earlier work active. Under the catalog lock at reservation and publication,
 the incoming FK closure is recomputed from the explicitly named targets and must equal the
 locked set. Both added and removed dependencies invalidate it with retryable CS04064, including
-CASCADE. FK DDL re-resolves every parent after acquiring its locks and rejects replacement
-identities with CS04064 before rebinding or backfill. CTAS remains outside SQ-T1.
+CASCADE. A cascaded table disappearing during lock acquisition reports TruncateClosureChanged
+with CS04064; an explicitly named missing table retains CS01051. FK DDL retains every resolved
+parent from its first bind, locks those exact identities, and rejects missing or replacement
+parents with CS04064 before rebinding or backfill. This also covers a name disappearing before
+lock acquisition starts. CTAS remains outside SQ-T1.
 
 The catalog internally reserves fresh owner identities with existing kind-14 reclamation
 intents, without changing the logical generation. Prepared empty B-trees commit durably before
