@@ -12,6 +12,7 @@ Transaction words remain contextual, including implicit FROM and DML aliases nam
 and each command returns Success with affected count zero.
 Controls ignore supplied parameters, including duplicate names in a wire parameter object.
 For ordinary wire statements duplicate names give CD01009 and fault an explicit transaction.
+Syntax diagnostics take precedence over duplicate parameter names, since parsing identifies controls.
 
 Commands use the session's existing transaction, including one begun through its C# API.
 COMMIT or ROLLBACK without an open transaction gives CD04104. Nested BEGIN gives CK04004 and
