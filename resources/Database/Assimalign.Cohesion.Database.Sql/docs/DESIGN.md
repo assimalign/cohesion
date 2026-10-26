@@ -6604,7 +6604,9 @@ swap and rolled back just afterwards. Its sequence is a visibility marker, with 
 record. A statement whose fixed MVCC snapshot cannot see that marker retains the pre-truncation
 table descriptions, indexes and directly dependent views, even when binding starts after
 publication. This covers BEGIN, auto-commit and ReadCommitted statements without allocating a
-catalog capture on ordinary stored reads. Multiple truncations choose the earliest owner the
+catalog capture or an extra planner field on ordinary stored reads. The fixed visibility snapshot
+is passed on the planning call stack, including retries, preserving existing DML allocation budgets.
+Multiple truncations choose the earliest owner the
 snapshot predates. DML targets use the same retained image, so existing target-definition
 validation refuses stale writes with CS04006 before apply. Unrelated current definitions retain
 existing ALTER behavior. The volatile
