@@ -53,7 +53,7 @@ namespace Assimalign.Cohesion.Database.Sql;
 /// </remarks>
 [global::System.Diagnostics.DebuggerDisplay("SqlDatabase")]
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.SqlDatabase.DebugView))]
-public sealed class SqlDatabase : DatabaseInstance
+public sealed partial class SqlDatabase : DatabaseInstance
 {
     // The callback runs only after database composition has attached its current index manager.
     private ValueTask<long> PruneIndexesAsync(TransactionSequence bound, CancellationToken cancellationToken)

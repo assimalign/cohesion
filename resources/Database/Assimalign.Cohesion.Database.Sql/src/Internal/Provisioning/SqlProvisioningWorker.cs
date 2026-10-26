@@ -9,7 +9,7 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlProvisioningWorker.DebugView))]
 internal sealed class SqlProvisioningWorker : DatabaseEngineWorker
 {
-    private readonly ConcurrentQueue<SqlDeferredMigration> _pending = new();
+    private readonly ConcurrentQueue<Action<CancellationToken>> _pending = new();
     private readonly ManualResetEventSlim _signal = new();
     private readonly ManualResetEventSlim _ready = new();
 
@@ -20,7 +20,13 @@ internal sealed class SqlProvisioningWorker : DatabaseEngineWorker
 
     internal void Enqueue(SqlDeferredMigration migration)
     {
-        _pending.Enqueue(migration);
+        _pending.Enqueue(migration.Run);
+        _signal.Set();
+    }
+
+    internal void Enqueue(SqlTableRewrite rewrite)
+    {
+        _pending.Enqueue(rewrite.Run);
         _signal.Set();
     }
 
@@ -39,7 +45,7 @@ internal sealed class SqlProvisioningWorker : DatabaseEngineWorker
         {
             // The migration reports a permanent step failure by taking its database
             // offline. It does not retry the step; a later reopen may schedule a new attempt.
-            migration.Run(cancellationToken);
+            migration(cancellationToken);
         }
     }
 
