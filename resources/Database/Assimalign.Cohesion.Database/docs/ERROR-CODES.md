@@ -44,6 +44,12 @@ This registry covers the Database edit boundary. CK does not reserve codes for u
 Cohesion libraries or resource areas. Cache has its prefix reserved even when an operation
 reports through the existing cache result vocabulary rather than an exception diagnostic.
 
+Process-crash test reopening (#1713) changes no error identity or engine behavior. An underlying
+Windows sharing/lock violation (HRESULT 0x80070020/0x80070021) still fails open with Blob CB06005,
+Documents CD06104 or Graph CG06006, retaining the I/O cause. Only the test harness retries those
+causes; unrelated errors propagate immediately. Its 30-second timeout names the file and last
+error and has no production diagnostic code.
+
 ## Kernel migration
 
 | Previous code | Code | Condition family |

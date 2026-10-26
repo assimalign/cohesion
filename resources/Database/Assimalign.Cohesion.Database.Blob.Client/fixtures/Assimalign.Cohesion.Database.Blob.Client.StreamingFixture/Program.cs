@@ -20,6 +20,12 @@ internal static class Program
     {
         try
         {
+            if (args.Length == 2 && args[0] == "crash-writer")
+            {
+                using var crashTimeout = new CancellationTokenSource(TimeSpan.FromMinutes(8));
+                await CrashWriterAsync(args[1], crashTimeout.Token);
+                return 2;
+            }
             if (args.Length != 1)
             {
                 throw new ArgumentException("Expected one database root path.");
@@ -98,6 +104,44 @@ internal static class Program
             Console.Error.WriteLine(exception);
             return 1;
         }
+    }
+
+    private static async Task CrashWriterAsync(string root, CancellationToken cancellationToken)
+    {
+        // Keep every owner alive until the parent kills us, with loser pages on disk.
+        var engine = BlobDatabaseEngine.Create("blob-wire-crash", new()
+        {
+            RootPath = root,
+            CheckpointInterval = TimeSpan.FromHours(1),
+            PageWriteBackInterval = TimeSpan.FromHours(1),
+            MaintenanceInterval = TimeSpan.FromHours(1)
+        });
+        var database = await engine.CreateDatabaseAsync("crash", cancellationToken);
+        var session = await database.CreateSessionAsync(cancellationToken);
+        var container = await session.CreateContainerAsync("objects", cancellationToken);
+        await using (var committed = await container.OpenWriteAsync("committed", cancellationToken: cancellationToken))
+        {
+            await committed.WriteAsync("committed payload"u8.ToArray(), cancellationToken);
+        }
+        var pending = await container.OpenWriteAsync("incomplete", cancellationToken: cancellationToken);
+        await pending.WriteAsync(new byte[64 * 1024], cancellationToken);
+        await pending.FlushAsync(cancellationToken);
+        foreach (var worker in engine.Workers)
+        {
+            if (worker.Kind is DatabaseEngineWorkerKind.WriteAheadFlush or DatabaseEngineWorkerKind.PageWriteBack)
+            {
+                if (!((DatabaseEngineWorker)worker).RunIteration(cancellationToken))
+                {
+                    throw new InvalidOperationException("Crash preparation worker failed.", worker.Fault);
+                }
+            }
+        }
+        Console.WriteLine("CRASH_READY");
+        await Console.Out.FlushAsync(cancellationToken);
+        await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+        GC.KeepAlive(pending);
+        GC.KeepAlive(session);
+        GC.KeepAlive(engine);
     }
 
     private static string ExpectedDigest()

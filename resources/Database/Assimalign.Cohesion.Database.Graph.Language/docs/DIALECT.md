@@ -22,6 +22,10 @@ documented owner default for #1235, preserving #1146's value contract.
 
 ## Storage integrity errors (#1160)
 
+Opening files still reports CG06006 immediately for a sharing/lock violation. Process-crash
+conformance tests alone retry the actual open until success with a 30-second hang guard (#1713);
+this changes no GQL syntax, execution semantics or production retry policy.
+
 A read that detects storage corruption fails with `CK06003`, naming the database and
 page and recommending a verified backup. It never succeeds with the damaged data omitted.
 The error is an execution failure over the wire; the connection remains usable. A

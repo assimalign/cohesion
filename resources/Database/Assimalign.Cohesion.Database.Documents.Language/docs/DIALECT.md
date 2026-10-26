@@ -10,6 +10,10 @@ it does not add backtick quoting. A missing closing delimiter is CD00003 (#1235)
 
 ## Storage integrity errors (#1160)
 
+Opening files still reports CD06104 immediately for a sharing/lock violation. Process-crash
+conformance tests alone retry the actual open until success with a 30-second hang guard (#1713);
+this changes no OQL syntax, execution semantics or production retry policy.
+
 A read that detects storage corruption fails with `CK06003`, naming the database and
 page and recommending a verified backup. It never succeeds with the damaged data omitted.
 The error is an execution failure over the wire; the connection remains usable. A

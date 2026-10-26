@@ -1,9 +1,11 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Assimalign.Cohesion.Database;
+using Assimalign.Cohesion.Database.Blob.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Graph;
 using Assimalign.Cohesion.Database.Graph.Protocol;
@@ -43,7 +45,8 @@ if (args[0] == "seed")
 }
 else if (args[0] == "verify")
 {
-    var db = await engine.OpenDatabaseAsync("crash");
+    var db = await CrashReopen.OpenAsync(Path.Combine(args[1], "crash", "graph.dat"),
+        token => engine.OpenDatabaseAsync("crash", token), CancellationToken.None);
     await using var session = await db.CreateSessionAsync();
     await using var result = (DatabaseResultSet)await session.ExecuteAsync("MATCH (a:Person {name:'a'})-[r:LINK]->(b) RETURN a,r,b");
     int count = 0;

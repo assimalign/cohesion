@@ -88,6 +88,15 @@ A StorageIOException or IOException while opening storage crosses the engine bou
 DatabaseException with structured CB06005 diagnostics (#1364). Open releases any acquired
 file set and publishes no database, so callers may resolve the I/O condition and retry.
 
+The process-crash harness retries that actual open only for an underlying sharing or lock
+violation (HRESULT 0x80070020/0x80070021), including coded wrappers (#1713). The test-only
+`CrashReopen` source is linked into the Blob.Client tests and Documents/Graph verifier fixtures
+through the existing Compile/Link mechanism. A successful open decides readiness; retries are
+paced at 25 ms with a 30-second cancellation hang guard naming the file and last error. Other
+I/O, corruption, permission and mixed aggregate failures propagate immediately. Engine open
+behavior and CB06005 are unchanged; a held-file regression proves refusal before release and
+successful retry after release, while a persistent-failure test pins timeout diagnostics.
+
 
 Storage corruption is `CK06003` (#1160). The engine translates a
 `StorageCorruptionException` into `DatabaseCorruptionException`, retaining the storage
