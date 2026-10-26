@@ -14,11 +14,38 @@ public sealed partial class GraphStore
     private readonly Dictionary<string, long> _relationshipTypeCardinalities = new(StringComparer.Ordinal);
     internal Action? OnIndexDefinitionRead { get; set; }
 
-    // Like label estimates, these retain historical and rolled-back publications until reopen.
-    // They select an access path only; neither catalog nor record visibility depends on them.
+    // Publication updates and maintenance reconciliation keep this a cached retained population.
+    // Planning never reads records; neither catalog nor record visibility depends on the count.
     internal long EstimateRelationshipTypeCount(string type)
     {
         lock (_sync) { return _relationshipTypeCardinalities.GetValueOrDefault(type); }
+    }
+
+    private void RefreshRelationshipTypeCounts(CancellationToken token)
+    {
+        // Called during the coordinator's maintenance apply gate, after record reclamation.
+        // Validate references by writer/kind/identity: a freed slot may already be reused.
+        // Only relationship headers are read; properties and nodes are never decoded here.
+        lock (_sync)
+        {
+            var counts = new Dictionary<string, long>(_relationshipTypeCardinalities.Count, StringComparer.Ordinal);
+            foreach (var (key, versions) in _records)
+            {
+                token.ThrowIfCancellationRequested();
+                if (key.Kind != 2 || versions.RelationshipType is not { } type) { continue; }
+                long count = TryRead(versions.Head, key.Kind, key.Id, out _) ? 1 : 0;
+                for (var older = versions.Older; older is not null; older = older.Next)
+                {
+                    token.ThrowIfCancellationRequested();
+                    if (TryRead(older.Reference, key.Kind, key.Id, out _)) { count++; }
+                }
+                if (count != 0) { counts[type] = counts.GetValueOrDefault(type) + count; }
+            }
+            // Publish a complete refresh only: cancellation or a damaged record leaves
+            // the previous advisory counts intact for the next maintenance attempt.
+            _relationshipTypeCardinalities.Clear();
+            foreach (var (type, count) in counts) { _relationshipTypeCardinalities.Add(type, count); }
+        }
     }
 
     internal IReadOnlyList<(string Label, string Property, ulong Id)> GetIndexIdentities(TransactionSnapshot snapshot)

@@ -228,8 +228,12 @@ public sealed partial class GraphStore
         _coordinator.VersionStore.RecordIndexEntryTombstoned(context.Sequence, new IndexUndo(this, id), key.Encoded, location);
     }
 
-    internal ValueTask<long> PruneIndexesAsync(TransactionSequence bound, CancellationToken cancellationToken)
-        => _indexes.PruneAsync(bound, cancellationToken);
+    internal async ValueTask<long> PruneIndexesAsync(TransactionSequence bound, CancellationToken cancellationToken)
+    {
+        long pruned = await _indexes.PruneAsync(bound, cancellationToken).ConfigureAwait(false);
+        RefreshRelationshipTypeCounts(cancellationToken);
+        return pruned;
+    }
 
     private void OpenIndexes()
     {
