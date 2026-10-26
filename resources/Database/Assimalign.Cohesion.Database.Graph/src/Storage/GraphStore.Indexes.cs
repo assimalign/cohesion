@@ -161,7 +161,15 @@ public sealed partial class GraphStore
     }
 
     private GraphRecord[] Definitions(TransactionSnapshot snapshot)
-        => Ids(3).Select(id => Find(3, id, snapshot)).Where(found => found.HasValue).Select(found => found!.Value.Record).ToArray();
+    {
+        var definitions = new List<GraphRecord>();
+        foreach (ulong id in Ids(3))
+        {
+            OnIndexDefinitionRead?.Invoke();
+            if (Find(3, id, snapshot) is { } found) { definitions.Add(found.Record); }
+        }
+        return definitions.ToArray();
+    }
 
     private GraphRecord? Definition(string label, string propertyKey, TransactionSnapshot snapshot)
     {
