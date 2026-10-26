@@ -90,91 +90,9 @@ internal sealed partial class SqlPlanExecutor
             EnsureSameIdentity(previous[index], current);
             previous[index] = current;
         }
-        var oldIndexes = previous.SelectMany(table => _catalog.GetIndexes(table.ObjectId)).ToArray();
-        var retiredIndexes = new Dictionary<SqlCatalogIndex, BTreeIndex>(ReferenceEqualityComparer.Instance);
-        foreach (var index in oldIndexes)
-        {
-            if (_indexManager.TryGetIndex(index.TableObjectId, index.Name, out var tree)) { retiredIndexes.Add(index, tree); }
-        }
-        var replacements = _catalog.ReserveTruncate(previous, named, cancellationToken);
-        var mapping = previous.Select((table, index) => (table.ObjectId, Replacement: replacements[index]))
-            .ToDictionary(pair => pair.ObjectId, pair => pair.Replacement);
-        var indexes = oldIndexes.Select(index => new SqlCatalogIndex(mapping[index.TableObjectId].ObjectId,
-            index.Name, index.ColumnNames, index.IsUnique, index.Owner, index.OwningSchema, index.IsPrimaryKey)).ToArray();
-        var created = new List<SqlCatalogIndex>();
-        bool published = false;
-        Exception? operationFailure = null;
-        try
-        {
-            TruncateReserved?.Invoke();
-            foreach (var table in replacements)
-            {
-                await statement.Coordinator.LockManager.AcquireAsync(statement.DdlLockOwner,
-                    LockResource.Object(table.ObjectId), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
-                _definitions.Get(table, cancellationToken);
-            }
-            if (indexes.Length != 0)
-            {
-                await statement.Coordinator.ApplyStatementAsync(statement.Transaction, async _ =>
-                {
-                    foreach (var index in indexes)
-                    {
-                        await _indexManager.CreateIndexAsync(statement.Transaction, index.TableObjectId,
-                            new IndexDefinition(index.Name, IndexKind.BTree, index.IsUnique), cancellationToken).ConfigureAwait(false);
-                        created.Add(index);
-                    }
-                    return true;
-                }, durable: true, cancellationToken).ConfigureAwait(false);
-            }
-            TruncatePrepared?.Invoke();
-            await _catalog.TruncateSnapshotGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-            TransactionContext? marker = null;
-            try
-            {
-                marker = await statement.Coordinator.BeginSnapshotPinAsync(cancellationToken).ConfigureAwait(false);
-                await _catalog.PublishTruncateAsync(previous, named, replacements, indexes, PublishedRegistrations(indexes),
-                    retiredIndexes, plan.Expression.RestartIdentity, marker.Sequence,
-                    SqlObjectIdentity.Table(plan.Expression.Tables[0].Table.SchemaName ?? SqlPlanner.DefaultSchema, plan.Expression.Tables[0].Table.TableName),
-                    statement.ScriptReceipt, cancellationToken).ConfigureAwait(false);
-                // Set before any observer can throw: publication is irrevocable, and cleanup
-                // must remove old handles even when cancellation or a test observer intervenes.
-                published = true;
-                statement.Metrics.RecordSelfCommit();
-                TruncatePublished?.Invoke();
-            }
-            finally
-            {
-                try
-                {
-                    if (marker is not null)
-                    {
-                        await statement.Coordinator.RollbackAsync(marker, CancellationToken.None).ConfigureAwait(false);
-                        if (published) { _catalog.ReleaseTruncatePublication(previous); }
-                    }
-                }
-                finally { _catalog.TruncateSnapshotGate.Release(); }
-            }
-            AfterSelfCommit?.Invoke();
-        }
-        catch (Exception failure)
-        {
-            // Preserve the original coded storage/cancellation failure if mandatory
-            // directory cleanup also fails; neither outcome may hide the other.
-            operationFailure = failure;
-            throw;
-        }
-        finally
-        {
-            try
-            {
-                await RemoveDroppedIndexesAsync(statement, published ? oldIndexes : created,
-                    cancellationToken: CancellationToken.None).ConfigureAwait(false);
-            }
-            catch (Exception cleanupFailure) when (operationFailure is not null)
-            {
-                throw new AggregateException(operationFailure, cleanupFailure);
-            }
-        }
+        await ReplaceTableStorageAsync(previous, named, null, null, copyRows: false, plan.Expression.RestartIdentity,
+            SqlObjectIdentity.Table(plan.Expression.Tables[0].Table.SchemaName ?? SqlPlanner.DefaultSchema, plan.Expression.Tables[0].Table.TableName),
+            statement, cancellationToken).ConfigureAwait(false);
         return new SqlQueryResult(DatabaseResultStatus.Success, affectedCount: 0);
     }
 }

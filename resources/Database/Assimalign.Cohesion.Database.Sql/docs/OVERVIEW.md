@@ -118,7 +118,7 @@ shared storage, with DDL flowing through this assembly's relational Catalog comp
 - **SQL definitions and declared scripts (E4)** — database-local SQL functions use the same
   bound expression evaluator and scalar ABI as registered functions. SQL domains share type
   resolution and write enforcement with registered domains. Canonical definitions, dependencies,
-  ownership, script receipts and table reclamation intents persist in catalog format 26. A builder's named scripts run
+  ownership, script receipts and table reclamation intents persist in catalog format 27. A builder's named scripts run
   inline after its typed schema, in declaration order, and resume at committed statement
   boundaries after a crash. Checksums prohibit edits to an applied name; Verify checks receipts;
   an unchanged script-set hash and catalog generation skip reconciliation in constant time.
@@ -205,6 +205,16 @@ See [DESIGN.md](DESIGN.md) for the execution model and its decisions.
 
 `SqlDatabaseServerOptions.Listener` takes an `IDuplexConnectionListener`, including TCP and InMemory listeners. The server owns accepted duplex connections and their protocol I/O.
 
+## Table maintenance (#1265)
+
+SqlDatabase.RewriteTableAsync(schemaName, tableName, cancellationToken) compacts dropped
+physical ordinals,
+copies live rows and rebuilds indexes on the provisioning worker. Names are decoded SQL
+identifiers, without delimiters. Writers wait for an exclusive table lock; older snapshots
+retain the original layout until they end. Publication is recoverable as one complete owner
+replacement. Cancellation before publication keeps the original table; retry interrupted work
+explicitly. The maintenance operation preserves schema ownership and logical definitions.
+
 ## Session execution (#1576, 2026-10-16)
 
 `SqlDatabaseSession` derives from `DatabaseLanguageSession<SqlQueryRequest>`. It offers typed
@@ -216,7 +226,7 @@ on `DatabaseSession`.
 An interrupted create is adopted only with its durable sql.create claim and initial empty
 data storage. Pre-header files can be restarted through CreateDatabaseAsync or declared
 application Build when no other persisted state conflicts. All catalog sizes are probed read-only
-before a format refusal. SQL remains at format 26; the claim does not change record layouts.
+before a format refusal. SQL remains at format 27; the claim does not change record layouts.
 Missing sidecars and ambiguous lost catalogs are preserved and refused.
 
 

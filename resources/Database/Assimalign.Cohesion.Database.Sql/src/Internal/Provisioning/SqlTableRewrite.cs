@@ -1,0 +1,100 @@
+using System;
+using System.Threading;
+using System.Threading.Tasks;
+
+using Assimalign.Cohesion.Database.Sql.Catalog;
+
+namespace Assimalign.Cohesion.Database.Sql.Internal;
+
+[System.Diagnostics.DebuggerDisplay("SqlTableRewrite")]
+[System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
+internal sealed class SqlTableRewrite
+{
+    private readonly SqlSchemaProvisioner _owner;
+    private readonly SqlCatalogTable _table;
+    private readonly IDisposable _admission;
+    private readonly CancellationTokenSource _stopping;
+    private readonly TaskCompletionSource _completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly TaskCompletionSource _joined = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private CancellationTokenRegistration _cancellation;
+    private int _claimed;
+    private bool _finished;
+
+    internal SqlTableRewrite(SqlSchemaProvisioner owner, SqlCatalogTable table, IDisposable admission,
+        CancellationToken cancellationToken)
+    {
+        _owner = owner;
+        _table = table;
+        _admission = admission;
+        _stopping = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+    }
+
+    internal Task Completion => _completion.Task;
+    internal bool IsCancellationRequested => _stopping.IsCancellationRequested;
+
+    internal void ObserveCancellation()
+    {
+        lock (_stopping)
+        {
+            if (_finished) { return; }
+            // A canceled queued operation can unwind without waiting behind another
+            // database's provisioning work. A claimed operation observes its linked token.
+            _cancellation = _stopping.Token.UnsafeRegister(static state =>
+                ((SqlTableRewrite)state!).Run(new CancellationToken(canceled: true)), this);
+            if (_finished) { _cancellation.Dispose(); }
+        }
+    }
+
+    internal void Run(CancellationToken cancellationToken)
+    {
+        if (Interlocked.CompareExchange(ref _claimed, 1, 0) != 0) { return; }
+        Exception? error = null;
+        try
+        {
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _stopping.Token);
+            _owner.RunRewriteAsync(_table, linked.Token).GetAwaiter().GetResult();
+        }
+        catch (Exception failure)
+        {
+            // The caller owns the failure. Keep the shared provisioning pump available for
+            // other databases even when a maintenance operation fails.
+            error = failure;
+        }
+        finally
+        {
+            _admission.Dispose();
+            _owner.ReleaseRewrite();
+            lock (_stopping)
+            {
+                _finished = true;
+                _cancellation.Dispose();
+                _stopping.Dispose();
+            }
+            _joined.TrySetResult();
+        }
+        // Completion also promises admission was released: a caller can immediately
+        // retry or apply a schema after awaiting it, on every success and failure path.
+        if (error is OperationCanceledException canceled) { _completion.TrySetCanceled(canceled.CancellationToken); }
+        else if (error is not null) { _completion.TrySetException(error); }
+        else { _completion.TrySetResult(); }
+    }
+
+    internal async ValueTask StopAsync()
+    {
+        CancellationToken stopped;
+        lock (_stopping)
+        {
+            if (_finished) { return; }
+            stopped = _stopping.Token;
+            _stopping.Cancel();
+        }
+        // A queued item must unwind admission even after the pump has stopped.
+        Run(stopped);
+        await _joined.Task.ConfigureAwait(false);
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(SqlTableRewrite value) { _ = value; }
+    }
+}
