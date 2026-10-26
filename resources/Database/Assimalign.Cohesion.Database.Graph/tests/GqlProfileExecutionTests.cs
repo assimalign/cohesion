@@ -201,6 +201,7 @@ public sealed class GqlProfileExecutionTests
             [GqlClauses.Limit] =
             [
                 new("MATCH (a:Person) RETURN a.name ORDER BY a.name LIMIT 1", [["Alice"]]),
+                new("MATCH (a)-[:KNOWS|SERVES]->() RETURN a.name LIMIT 1", [["Alice"]], Physical: 2, Postings: 2),
             ],
             [GqlClauses.Create] =
             [
@@ -547,6 +548,7 @@ public sealed class GqlProfileExecutionTests
         string clause, CancellationToken cancellationToken)
     {
         string context = $"{clause}: {executionCase.Statement}";
+        long postings = session.Database.Store.RelationshipTypeEntriesVisited;
         var result = await session.ExecuteAsync(executionCase.Statement, executionCase.Parameters, cancellationToken);
         result.Status.ShouldBe(DatabaseResultStatus.Success, context);
         if (executionCase.AffectedCount is { } affected)
@@ -566,6 +568,8 @@ public sealed class GqlProfileExecutionTests
             rows.Count.ShouldBe(executionCase.Rows.Length, context);
             for (int index = 0; index < rows.Count; index++) { rows[index].ShouldBe(executionCase.Rows[index], context); }
         }
+        if (executionCase.Physical is { } physical) { session.LastStatementMetrics!.Physical.ShouldBe(physical, context); }
+        if (executionCase.Postings is { } reads) { (session.Database.Store.RelationshipTypeEntriesVisited - postings).ShouldBe(reads, context); }
         foreach (var verification in executionCase.Verification ?? [])
         {
             await ExecuteAndVerifyAsync(session, verification, clause, cancellationToken);
@@ -573,5 +577,6 @@ public sealed class GqlProfileExecutionTests
     }
 
     private sealed record ExecutionCase(string Statement, object?[][] Rows, long? AffectedCount = null,
-        ExecutionCase[]? Verification = null, IReadOnlyDictionary<string, object?>? Parameters = null, string[]? Columns = null);
+        ExecutionCase[]? Verification = null, IReadOnlyDictionary<string, object?>? Parameters = null, string[]? Columns = null,
+        long? Physical = null, long? Postings = null);
 }
