@@ -6652,9 +6652,12 @@ X, apply gate, tree/page latches; no apply gate or data latch spans catalog publ
 publication takes a short snapshot-admission semaphore also used across BEGIN's MVCC creation
 and metadata capture; BEGIN takes no table locks. Both that semaphore and the marker pin release
 on every exit. The catalog metadata lock owns only its own innermost storage bracket. Both transaction and statement pins
-outlive prepared owners. Reclamation rechecks a prepared owner's committed intent after its pins
-clear; a removed intent means successful publication, so the cached worker entry is discarded
-without freeing live pages. Cancellation and exceptions remove prepared directory handles;
+outlive prepared owners. Retired intents remain hidden from discovery until the visibility marker
+ends; otherwise a reader admitted while the marker is active could begin after the worker's fence.
+Each intent has an immutable, volatile incarnation token. Reclamation rechecks that exact token
+after its pins clear, so a cached preparation fence cannot be reused if its owner became live and
+was later retired by another TRUNCATE. A removed or replaced intent discards the cached worker
+entry and requests discovery with a fresh fence, without freeing pages. Cancellation and exceptions remove prepared directory handles;
 irrevocable publication always removes old handles with a noncancelable cleanup. A failed data
 or catalog commit retains the engine's existing offline/unconfirmed-outcome handling.
 
@@ -6686,8 +6689,9 @@ and advances the identity allocator past every pending id. Reusing a name never 
 
 The catalog retains each decoded intent's identity and record location at open, adds it after
 committed unpublication or TRUNCATE preparation, and removes it after retirement or successful
-prepared-owner publication, all under its metadata lock. A captured prepared identity is rechecked
-after its transaction and statement pins clear before the worker frees any page.
+prepared-owner publication, all under its metadata lock. The worker captures an internal immutable
+intent token and rechecks that incarnation after transaction and statement pins clear before freeing
+any page. TRUNCATE retirement is discoverable only after its visibility marker ends.
 `GetPendingTableReclamations()` returns an independent read-only snapshot of the committed identities;
 `CompleteTableReclamationAsync()` idempotently retires an identity without advancing the DDL
 generation. Record locations and the kind-14 codec stay private to this assembly. These two concrete

@@ -34,6 +34,116 @@ public sealed class SqlTruncateTests
 
     public SqlTruncateTests(ITestOutputHelper output) { _output = output; }
 
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - TRUNCATE: maintenance cannot fence retirement before the visibility marker ends")]
+    public async Task ExecuteAsync_ReaderAdmittedDuringPublication_ShouldOutliveTheRetirementFence()
+    {
+        // Arrange
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using var published = new ManualResetEventSlim();
+        using var releasePublication = new ManualResetEventSlim();
+        using var snapshotTaken = new ManualResetEventSlim();
+        using var releaseRead = new ManualResetEventSlim();
+        await using var engine = SqlDatabaseEngine.Create("truncate-publication-fence", new());
+        var database = await engine.CreateDatabaseAsync("db", timeout.Token);
+        await using var writer = await database.CreateSessionAsync(timeout.Token);
+        await using var reader = await database.CreateSessionAsync(timeout.Token);
+        await ExecAsync(writer, "CREATE TABLE t (id INT PRIMARY KEY)", timeout.Token);
+        await ExecAsync(writer, "INSERT INTO t VALUES (1)", timeout.Token);
+        ulong old = Id(database, "t");
+        var pages = database.DataStorage.GetOwnerPages(old).ToArray();
+        SqlPlanExecutor.TruncatePublished = () => { published.Set(); releasePublication.Wait(timeout.Token); };
+        var truncating = DedicatedTestTask.Run(() => ExecAsync(writer, "TRUNCATE t", timeout.Token), timeout.Token);
+        Task<List<object?[]>>? reading = null;
+        try
+        {
+            published.Wait(timeout.Token);
+            database.TableReclamation.Request();
+            database.TableReclamation.RunBatch(timeout.Token);
+            SqlQueryExecutor.BeforePlan = request =>
+            {
+                if (request.Statement.SqlExpression.CommandType != SqlQueryCommandType.Select) { return; }
+                snapshotTaken.Set();
+                releaseRead.Wait(timeout.Token);
+            };
+            reading = DedicatedTestTask.Run(() => RowsAsync(reader, "SELECT id FROM t", timeout.Token), timeout.Token);
+            snapshotTaken.Wait(timeout.Token);
+
+            // Act: this reader began after the maintenance pass but while the marker was active.
+            releasePublication.Set();
+            await truncating;
+            database.TableReclamation.RunBatch(timeout.Token);
+
+            // Assert
+            database.DataStorage.GetOwnerPages(old).ShouldBe(pages);
+            database.TableReclamation.ReclaimedPages.ShouldBe(0);
+            releaseRead.Set();
+            (await reading).ShouldHaveSingleItem()[0].ShouldBe(1);
+        }
+        finally
+        {
+            SqlPlanExecutor.TruncatePublished = null;
+            SqlQueryExecutor.BeforePlan = null;
+            releasePublication.Set();
+            releaseRead.Set();
+            try { await truncating; } catch (Exception) { /* Observe every started operation without hiding the assertion. */ }
+            if (reading is not null) { try { await reading; } catch (Exception) { /* Preserve the primary failure. */ } }
+        }
+        await ReclaimAsync(database, timeout.Token);
+        database.DataStorage.GetOwnerPages(old).ShouldBeEmpty();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - TRUNCATE: a cached prepared intent cannot supply the retirement fence for its later live owner")]
+    public async Task ExecuteAsync_PreparedOwnerRetiredAgain_ShouldAcquireANewIntentFence()
+    {
+        // Arrange: pause the engine pump while the explicit passes retain one prepared intent.
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using var workerEntered = new ManualResetEventSlim();
+        using var resumeWorker = new ManualResetEventSlim();
+        await using var engine = SqlDatabaseEngine.Create("truncate-intent-fence", new() { MaintenanceInterval = TimeSpan.FromMilliseconds(2) });
+        var database = await engine.CreateDatabaseAsync("db", timeout.Token);
+        var worker = engine.Workers.OfType<SqlVersionPurgeWorker>().Single();
+        worker.BeforeFullPass = _ => { workerEntered.Set(); resumeWorker.Wait(timeout.Token); };
+        engine.UndoDeferredSignal.Set();
+        try
+        {
+            workerEntered.Wait(timeout.Token);
+            await using var writer = await database.CreateSessionAsync(timeout.Token);
+            await using var reader = await database.CreateSessionAsync(timeout.Token);
+            await ExecAsync(writer, "CREATE TABLE t (id INT PRIMARY KEY)", timeout.Token);
+            int preparedPasses = 0;
+            SqlPlanExecutor.TruncatePrepared = () =>
+            {
+                database.TableReclamation.Request();
+                database.TableReclamation.RunBatch(timeout.Token);
+                database.TableReclamation.HasWork.ShouldBeTrue();
+                preparedPasses++;
+            };
+            await ExecAsync(writer, "TRUNCATE t", timeout.Token);
+            SqlPlanExecutor.TruncatePrepared = null;
+            preparedPasses.ShouldBe(1);
+            ulong retained = Id(database, "t");
+            await ExecAsync(writer, "INSERT INTO t VALUES (2)", timeout.Token);
+            await using var snapshot = await reader.BeginTransactionAsync(timeout.Token);
+
+            // Act: that same owner now receives a different intent when the next truncate retires it.
+            await ExecAsync(writer, "TRUNCATE t", timeout.Token);
+            database.TableReclamation.RunBatch(timeout.Token);
+
+            // Assert
+            database.DataStorage.GetOwnerPages(retained).ShouldNotBeEmpty();
+            (await RowsAsync(reader, "SELECT id FROM t", timeout.Token)).ShouldHaveSingleItem()[0].ShouldBe(2);
+            await snapshot.RollbackAsync(timeout.Token);
+            await ReclaimAsync(database, timeout.Token);
+            database.DataStorage.GetOwnerPages(retained).ShouldBeEmpty();
+        }
+        finally
+        {
+            SqlPlanExecutor.TruncatePrepared = null;
+            worker.BeforeFullPass = null;
+            resumeWorker.Set();
+        }
+    }
+
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - TRUNCATE: stale snapshot DML cannot write the replacement behind its retained read binding")]
     [InlineData("INSERT INTO t VALUES (3)")]
     [InlineData("UPDATE t SET id=3")]

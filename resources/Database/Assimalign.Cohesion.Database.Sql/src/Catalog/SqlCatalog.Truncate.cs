@@ -17,6 +17,7 @@ namespace Assimalign.Cohesion.Database.Sql.Catalog;
 public sealed partial class SqlCatalog
 {
     private readonly Dictionary<ulong, (TransactionSequence Marker, SqlCatalogSnapshot Before)> _truncatedTables = new();
+    private readonly HashSet<ulong> _truncateRetirementsPublishing = new();
     private int _truncatedTableCount;
     private ulong _storageBindingGeneration;
 
@@ -96,7 +97,7 @@ public sealed partial class SqlCatalog
             _nextObjectId = next;
             for (int index = 0; index < replacements.Length; index++)
             {
-                _pendingReclamations.Add(replacements[index].ObjectId, locations[index]);
+                _pendingReclamations.Add(replacements[index].ObjectId, new SqlReclamationIntent(locations[index].PageId, locations[index].SlotIndex));
             }
             return replacements;
         }
@@ -184,7 +185,11 @@ public sealed partial class SqlCatalog
             foreach (var table in expected) { _identityCounters.Remove(table.ObjectId); }
             foreach (var counter in counters) { _identityCounters.Add(counter.Id, counter.Counter); }
             foreach (var table in replacements) { _pendingReclamations.Remove(table.ObjectId); }
-            foreach (var item in retired) { _pendingReclamations.Add(item.ObjectId, item.Location); }
+            foreach (var item in retired)
+            {
+                _pendingReclamations.Add(item.ObjectId, new SqlReclamationIntent(item.Location.PageId, item.Location.SlotIndex));
+                _truncateRetirementsPublishing.Add(item.ObjectId);
+            }
             foreach (var table in expected) { _truncatedTables.Add(table.ObjectId, (marker, before)); }
             Volatile.Write(ref _truncatedTableCount, _truncatedTables.Count);
             _registrations = merged;
@@ -219,8 +224,33 @@ public sealed partial class SqlCatalog
         }
     }
 
-    internal bool IsTableReclamationPending(ulong objectId)
+    // Readers admitted while the marker is active can still need the old owner. A worker
+    // must allocate its fence after the marker ends, not merely after the catalog swap.
+    internal void ReleaseTruncatePublication(IReadOnlyList<SqlCatalogTable> retired)
     {
-        lock (_sync) { ThrowIfOffline(); return _pendingReclamations.ContainsKey(objectId); }
+        lock (_sync)
+        {
+            foreach (var table in retired) { _truncateRetirementsPublishing.Remove(table.ObjectId); }
+        }
+    }
+
+    internal (ulong ObjectId, SqlReclamationIntent Intent)[] CaptureTableReclamations()
+    {
+        lock (_sync)
+        {
+            ThrowIfOffline();
+            return _pendingReclamations.Where(pair => !_truncateRetirementsPublishing.Contains(pair.Key))
+                .Select(pair => (pair.Key, pair.Value)).ToArray();
+        }
+    }
+
+    internal bool IsCurrentTableReclamation(ulong objectId, SqlReclamationIntent intent)
+    {
+        lock (_sync)
+        {
+            ThrowIfOffline();
+            return !_truncateRetirementsPublishing.Contains(objectId) &&
+                _pendingReclamations.TryGetValue(objectId, out var current) && ReferenceEquals(current, intent);
+        }
     }
 }
