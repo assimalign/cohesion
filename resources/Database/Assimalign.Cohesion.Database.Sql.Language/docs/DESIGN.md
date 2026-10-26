@@ -1,5 +1,12 @@
 # Assimalign.Cohesion.Database.Sql.Language — Design
 
+## Repeated subquery grouping keys (#1718)
+
+DIALECT.md records structural matching of complete scalar-subquery, EXISTS and quantified
+group keys across SELECT, HAVING and ORDER BY, including identical correlations. Operators,
+quantifiers, negation, scalar operands and query bodies remain significant; IN keys also compare
+bodies. This is an engine binding rule; syntax and persisted representations are unchanged.
+
 ## Joined DML syntax and binding (#1714, SQ-UF1)
 
 SqlUpdateExpression.From and SqlDeleteExpression.Using retain comma items and existing relation/join

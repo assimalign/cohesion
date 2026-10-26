@@ -1629,6 +1629,13 @@ from grouped columns. An ungrouped source column in a projection, `HAVING`, or
 chooses an arbitrary row's value. Aggregate arguments cannot contain another
 aggregate, and aggregates cannot occur in `WHERE`, `JOIN ... ON`, or `GROUP BY`.
 
+Repeated scalar-subquery, EXISTS and ANY/SOME/ALL grouping expressions may appear in SELECT,
+HAVING and ORDER BY. They reuse the group value when the complete query bodies are structurally
+identical in the same scope, including identical correlations, and their operators, quantifiers,
+negation and bound scalar operands agree. IN keys likewise compare their query bodies.
+Different or unproven keys do not share a slot; an ungrouped reference still reports `CS05017`.
+Matching follows PostgreSQL's whole-expression comparison (`parse_agg.c:1451`).
+
 `UPDATE` and `DELETE` act on one row at a time, so an aggregate in `UPDATE ... SET`
 or in their `WHERE` fails while planning, as PostgreSQL rejects one in those clauses
 (SQLSTATE 42803), with `Aggregate functions are not allowed in UPDATE SET.` or

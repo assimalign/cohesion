@@ -224,11 +224,12 @@ internal sealed partial class SqlPlanner
         RuntimeHelpers.EnsureSufficientExecutionStack();
         bool same = (left, right) switch
         {
-            // Two subqueries are the same group key only when they are the same node;
-            // structurally identical children do not make separate queries one key.
-            (SqlSubqueryExpression a, SqlSubqueryExpression b) => ReferenceEquals(a, b),
-            (SqlExistsExpression a, SqlExistsExpression b) => ReferenceEquals(a, b),
-            (SqlQuantifiedComparisonExpression a, SqlQuantifiedComparisonExpression b) => ReferenceEquals(a, b),
+            // Repeated subqueries in one scope share a group key when their complete bodies
+            // match structurally. The ordinary child comparison still binds scalar operands.
+            (SqlSubqueryExpression a, SqlSubqueryExpression b) => SqlPersistedExpression.SameQuery(a.Select, b.Select),
+            (SqlExistsExpression a, SqlExistsExpression b) => a.IsNegated == b.IsNegated && SqlPersistedExpression.SameQuery(a.Subquery, b.Subquery),
+            (SqlQuantifiedComparisonExpression a, SqlQuantifiedComparisonExpression b) => a.Operator == b.Operator &&
+                a.Quantifier == b.Quantifier && SqlPersistedExpression.SameQuery(a.Subquery, b.Subquery),
             (SqlColumnReferenceExpression a, SqlColumnReferenceExpression b) => SameColumn(a, b),
             (SqlLiteralExpression a, SqlLiteralExpression b) => a.LiteralType == b.LiteralType && a.Value == b.Value,
             (SqlParameterExpression a, SqlParameterExpression b) => ParameterBindings.BareName(a.ParameterName) == ParameterBindings.BareName(b.ParameterName),
@@ -253,7 +254,8 @@ internal sealed partial class SqlPlanner
             (SqlBooleanTestExpression a, SqlBooleanTestExpression b) => a.IsNegated == b.IsNegated && a.TruthValue == b.TruthValue,
             (SqlIsNullExpression a, SqlIsNullExpression b) => a.IsNegated == b.IsNegated,
             (SqlBetweenExpression a, SqlBetweenExpression b) => a.IsNegated == b.IsNegated,
-            (SqlInExpression a, SqlInExpression b) => a.IsNegated == b.IsNegated,
+            (SqlInExpression a, SqlInExpression b) => a.IsNegated == b.IsNegated &&
+                SqlPersistedExpression.SameQuery(a.Subquery, b.Subquery),
             (SqlLikeExpression a, SqlLikeExpression b) => a.IsNegated == b.IsNegated,
             (SqlCaseExpression a, SqlCaseExpression b) => (a.Input is null) == (b.Input is null)
                 && (a.ElseResult is null) == (b.ElseResult is null) && a.WhenClauses.Count == b.WhenClauses.Count,

@@ -683,6 +683,16 @@ while the enclosing plan runs, as PostgreSQL stores an init plan's output in a
 transaction, or read view. Grouping's expression-ordinal bindings hold for
 subqueries in HAVING and aggregate arguments, because the slot binding runs first.
 
+Repeated scalar-subquery, EXISTS and quantified-comparison group keys match by complete
+query-body structure through the persisted-view `SameQuery` comparer, never node identity.
+Operators, quantifiers and negation must agree; scalar operands retain the ordinary bound-column
+grouping rules. IN keys also compare their bodies. Identically written correlations in the same
+scope match. Correlation binding recognizes the complete repeated key before checking grouped
+outer columns, so SELECT, HAVING and ORDER BY read its retained group value; an identical child
+inside a different expression does not suffice. Unproven or different keys stay distinct and
+ungrouped references retain CS05017. This follows PostgreSQL's whole-expression `equal()` check
+in `src/backend/parser/parse_agg.c:1451` before its ungrouped-column walk. No persisted format changes.
+
 Scalar children require one output column and at most one row; an empty result
 is a typed null. IN children require one column and preserve SQL three-valued
 membership, including unknown for nonmatches against a null-containing set and
