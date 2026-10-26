@@ -1,5 +1,27 @@
 # Assimalign.Cohesion.Database.Sql — Design
 
+## Joined DML syntax and binding (#1714, SQ-UF1)
+
+The DML binder reuses SELECT's source namespace and join rules, seeding a distinct target binding
+at physical slot zero. SqlDmlSource retains the association SqlJoinPlan and TargetBinding index;
+SQ-UF2 must carry that binding's storage row location and version per association rather than infer
+identity from projected values or a user key. Physical columns remain target-then-source, including
+hidden USING inputs. SET destinations stay target-only; SET values, WHERE and explicit RETURNING
+source references bind to combined slots. Bare RETURNING * follows PostgreSQL by expanding the
+target, then each source in namespace order (parse_target.c:1301-1321), allowing duplicate names.
+SqlDmlSource retains visible output ordinals separately from physical association slots so USING
+emits its merged keys first and hides duplicate right keys. Source metadata
+preserves type modifiers, collation and LEFT nullability. ON excludes the target/other comma items;
+WHERE children receive the combined correlation scope. CTE reachability, function validation and
+provisioning admission visit sources, and EXPLAIN descends into the association plan.
+
+Execution unwraps WITH/subquery wrappers and refuses a source-bearing DML plan with CK00001 before
+any materialization or write. The executor deliberately cannot apply these plans yet. The profile
+is unchanged. SQ-UF2 owns collection/apply/rechecks, pre-write UPDATE cardinality errors and DELETE
+deduplication. No new diagnostic identity, interface, visibility grant, reference or persisted format
+is needed. Namespace rules follow PostgreSQL analyze.c:602-621,2560-2578; the owner's future
+cardinality rule deliberately differs from nodeModifyTable.c:2599-2608.
+
 ## Fixed-pass worker tests (found during #1365)
 
 `VersionPurgeRefusalTests.RunIteration_RefusalKind_ShouldDistinguishForeignStorageFromProgress`
@@ -7472,8 +7494,10 @@ Exact exhaustion and incomplete lower bounds are distinct. Probes use CountRange
 latch, with table/index identity validation around the count. DROP detaches indexes without
 reclaiming their pages (BTreeIndexManager.DropIndexAsync); table reclamation waits for active
 statement/snapshot fences. A retained tree and immutable key shape need no transaction object
-lock. A changed table definition reports CS04006; a detached
-or replaced index yields an unknown estimate. Costing does not enter the database-wide lock
+lock. A changed table definition discards optional costing for that plan, including earlier
+seek counts, join direction and hash selection, retaining the original bound access path (#1740).
+Readers keep the shape they bound; mutation execution retains its mandatory CS04006 checks.
+A detached or replaced index yields an unknown estimate. Costing does not enter the database-wide lock
 manager or add grants to an MVCC reader.
 Counts are neither cached across statements nor persisted. Unique complete equalities need no probe.
 A selected range of at most 16 candidates skips the base-table probe. Join estimates are lazy,

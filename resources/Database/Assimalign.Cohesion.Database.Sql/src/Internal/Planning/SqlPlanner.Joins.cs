@@ -16,12 +16,24 @@ internal sealed partial class SqlPlanner
     private IReadOnlyList<SqlRelationBinding> BindJoin(SqlSelectExpression select, SqlRelationSource first,
         out IReadOnlyList<SqlCatalogColumn> columns, out IReadOnlyList<SqlJoinStep> steps,
         out IReadOnlyList<int> outputOrdinals, bool metadataOnly = false)
+        => BindJoinSources(select.From, select, first, out columns, out steps, out outputOrdinals, metadataOnly, select);
+
+    private IReadOnlyList<SqlRelationBinding> BindJoinSources(IReadOnlyList<SqlFromItem> from, SqlQueryExpression statement,
+        SqlRelationSource first, out IReadOnlyList<SqlCatalogColumn> columns, out IReadOnlyList<SqlJoinStep> steps,
+        out IReadOnlyList<int> outputOrdinals, bool metadataOnly = false, SqlSelectExpression? queryOwner = null,
+        SqlTableReference? target = null)
     {
         var bindings = new List<SqlRelationBinding>();
         var allColumns = new List<SqlCatalogColumn>();
         var allSteps = new List<SqlJoinStep>();
         var output = new List<int>();
-        foreach (var item in select.From)
+        if (target is not null)
+        {
+            bindings.Add(new SqlRelationBinding(first, target, 0));
+            allColumns.AddRange(first.Columns);
+            output.AddRange(Enumerable.Range(0, first.Columns.Count));
+        }
+        foreach (var item in from)
         {
             int start = bindings.Count;
             Add(item.Table, false);
@@ -61,7 +73,7 @@ internal sealed partial class SqlPlanner
                     {
                         if (!names.Add(name))
                         {
-                            throw new SqlPlanningException("CS01015", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlPlannerBindJoinSqlPlanning2, name), select.Location);
+                            throw new SqlPlanningException("CS01015", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlPlannerBindJoinSqlPlanning2, name), statement.Location);
                         }
                         int leftOrdinal = FindUsing(visible, name, "left");
                         int rightOrdinal = FindUsing(Enumerable.Range(right.Offset, right.Source.Columns.Count), name, "right");
@@ -74,7 +86,7 @@ internal sealed partial class SqlPlanner
                         var previous = scope.MergedColumn(leftOrdinal);
                         var leftColumn = previous?.Column ?? allColumns[leftOrdinal];
                         var rightColumn = allColumns[rightOrdinal];
-                        var common = UsingType(leftColumn.Type, rightColumn.Type, name, select);
+                        var common = UsingType(leftColumn.Type, rightColumn.Type, name, statement);
                         bool sameDomain = string.Equals(leftColumn.DomainName, rightColumn.DomainName, StringComparison.OrdinalIgnoreCase);
                         if (!sameDomain) { common = new DatabaseTypeInfo(common.Type); }
                         var leftValue = previous?.Value ?? new SqlBoundColumn(leftOrdinal);
@@ -114,7 +126,7 @@ internal sealed partial class SqlPlanner
                     (join.JoinType != SqlJoinType.Cross && condition is null) ||
                     (join.JoinType == SqlJoinType.Cross && condition is not null)))
                 {
-                    throw new SqlPlanningException("CS05013", ErrorMessages.SqlPlannerBindJoinSqlPlanning3, select.Location);
+                    throw new SqlPlanningException("CS05013", ErrorMessages.SqlPlannerBindJoinSqlPlanning3, statement.Location);
                 }
                 visible.AddRange(Enumerable.Range(right.Offset, right.Source.Columns.Count)
                     .Where(ordinal => !right.HiddenColumns.Contains(ordinal - right.Offset)));
@@ -134,21 +146,21 @@ internal sealed partial class SqlPlanner
             var found = ordinals.Where(i => string.Equals(allColumns[i].Name, name, StringComparison.OrdinalIgnoreCase)).ToArray();
             if (found.Length != 1)
             {
-                throw new SqlPlanningException("CS01015", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlPlannerBindJoinSqlPlanning4, name, (found.Length == 0 ? ErrorMessages.UsingColumnMissing : ErrorMessages.UsingColumnAmbiguous), side), select.Location);
+                throw new SqlPlanningException("CS01015", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlPlannerBindJoinSqlPlanning4, name, (found.Length == 0 ? ErrorMessages.UsingColumnMissing : ErrorMessages.UsingColumnAmbiguous), side), statement.Location);
             }
             return found[0];
         }
 
         void Add(SqlRelationReference reference, bool nullable)
         {
-            var source = bindings.Count == 0 ? first : ResolveRelation(reference, select);
+            var source = bindings.Count == 0 ? first : ResolveRelation(reference, queryOwner);
             string name = reference.Alias ?? source.Name;
             if (bindings.Any(binding => string.Equals(name, binding.Reference.Alias ?? binding.Source.Name, StringComparison.OrdinalIgnoreCase) &&
                 (reference.Alias is not null || binding.Reference.Alias is not null ||
                     source.Derived is { IsCommonTable: true } || binding.Source.Derived is { IsCommonTable: true } ||
                     string.Equals(source.Schema, binding.Source.Schema, StringComparison.OrdinalIgnoreCase))))
             {
-                throw new SqlPlanningException("CS01019", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlPlannerBindJoinSqlPlanning5, name), select.Location);
+                throw new SqlPlanningException("CS01019", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlPlannerBindJoinSqlPlanning5, name), statement.Location);
             }
             bindings.Add(new SqlRelationBinding(source, reference, allColumns.Count));
             allColumns.AddRange(source.Columns.Select(column => nullable && !column.IsNullable
@@ -158,7 +170,7 @@ internal sealed partial class SqlPlanner
     }
 
     /// <summary>Selects the common USING type, retaining modifiers only when both inputs agree.</summary>
-    private DatabaseTypeInfo UsingType(DatabaseTypeInfo left, DatabaseTypeInfo right, string name, SqlQueryBodyExpression select, bool setOperation = false)
+    private DatabaseTypeInfo UsingType(DatabaseTypeInfo left, DatabaseTypeInfo right, string name, SqlQueryExpression statement, bool setOperation = false)
     {
         var common = left.Type;
         if (left.Type != right.Type)
@@ -187,7 +199,7 @@ internal sealed partial class SqlPlanner
 
         void Refuse() => throw new SqlPlanningException(setOperation ? "CS02003" : "CS01015",
             setOperation ? string.Format(CultureInfo.CurrentCulture, ErrorMessages.SetColumnTypes, name, left.Type, right.Type)
-                : string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlPlannerUsingTypeSqlPlanning, name, left.Type, right.Type), select.Location);
+                : string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlPlannerUsingTypeSqlPlanning, name, left.Type, right.Type), statement.Location);
     }
 
     /// <summary>Coerces the merged value without changing the physical input or qualified references.</summary>

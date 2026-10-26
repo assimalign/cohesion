@@ -173,6 +173,7 @@ internal sealed partial class SqlSchemaProvisioner
                 break;
             case SqlUpdateExpression update:
                 yield return update.Table;
+                foreach (var table in SourceReferences(update.From)) { yield return table; }
                 foreach (var expression in update.Assignments.Select(value => value.Value).Append(update.Where))
                 {
                     foreach (var table in References(expression))
@@ -183,6 +184,7 @@ internal sealed partial class SqlSchemaProvisioner
                 break;
             case SqlDeleteExpression delete:
                 yield return delete.Table;
+                foreach (var table in SourceReferences(delete.Using)) { yield return table; }
                 foreach (var table in References(delete.Where))
                 {
                     yield return table;
@@ -225,6 +227,19 @@ internal sealed partial class SqlSchemaProvisioner
             case SqlDropTableExpression drop:
                 yield return drop.Table;
                 break;
+        }
+    }
+
+    private static IEnumerable<SqlTableReference> SourceReferences(IReadOnlyList<SqlFromItem> sources)
+    {
+        foreach (var item in sources)
+        {
+            foreach (var table in References(item.Table)) { yield return table; }
+            foreach (var join in item.Joins)
+            {
+                foreach (var table in References(join.Table)) { yield return table; }
+                foreach (var table in References(join.Condition)) { yield return table; }
+            }
         }
     }
 

@@ -35,20 +35,11 @@ public sealed partial class SqlQueryParser
         var columns = ParseSelectColumns(ref lexer);
 
         // FROM
-        var from = new List<SqlFromItem>();
+        IReadOnlyList<SqlFromItem> from = [];
         if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "FROM"))
         {
             Advance(ref lexer);
-            do
-            {
-                var table = ParseRelationReference(ref lexer);
-                from.Add(new SqlFromItem(table, ParseJoinClauses(ref lexer)));
-                if (IsAtEnd(ref lexer) || lexer.Current.Type != TokenType.Comma)
-                {
-                    break;
-                }
-                Advance(ref lexer);
-            } while (true);
+            from = ParseFromItems(ref lexer);
         }
 
         // WHERE
@@ -114,6 +105,19 @@ public sealed partial class SqlQueryParser
             columns, from, where, groupBy, having, [],
             limit, null, isDistinct, null,
             Location.Create(1, 1, pos, _lastTokenEnd), limitSyntaxKind);
+    }
+
+    private IReadOnlyList<SqlFromItem> ParseFromItems(ref TokenLexer lexer)
+    {
+        var items = new List<SqlFromItem>();
+        do
+        {
+            var relation = ParseRelationReference(ref lexer);
+            items.Add(new SqlFromItem(relation, ParseJoinClauses(ref lexer)));
+            if (IsAtEnd(ref lexer) || lexer.Current.Type != TokenType.Comma) { break; }
+            Advance(ref lexer);
+        } while (true);
+        return items;
     }
 
     private SqlExpression ParseFetchCount(ref TokenLexer lexer)
