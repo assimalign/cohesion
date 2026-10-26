@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -226,9 +227,9 @@ public sealed class DocumentDatabaseSession : DatabaseLanguageSession<DocumentQu
         => _database.GetCollectionsAsync(this, cancellationToken);
 
     /// <summary>
-    /// Parses and executes one statement. An aborted transaction refuses the statement before it is
-    /// parsed; a parse failure aborts the explicit transaction exactly as an execution failure does,
-    /// so every failed statement has one outcome, as in PostgreSQL and Neo4j.
+    /// Parses and executes one statement. Transaction control is dispatched before ordinary
+    /// statement admission, so ROLLBACK can recover an aborted transaction. Malformed text in an
+    /// aborted transaction retains CD04101; a parse failure otherwise aborts the transaction.
     /// </summary>
     /// <param name="parse">Parses the statement text into its request.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
@@ -237,7 +238,6 @@ public sealed class DocumentDatabaseSession : DatabaseLanguageSession<DocumentQu
     {
         ThrowIfNotOpen();
         _database.ThrowIfOffline();
-        ThrowIfTransactionRefuses();
         DocumentQueryRequest request;
         try
         {
@@ -245,6 +245,7 @@ public sealed class DocumentDatabaseSession : DatabaseLanguageSession<DocumentQu
         }
         catch (DatabaseException error)
         {
+            ThrowIfTransactionRefuses();
             await AbortTransactionAsync(error).ConfigureAwait(false);
             throw;
         }
@@ -399,6 +400,11 @@ public sealed class DocumentDatabaseSession : DatabaseLanguageSession<DocumentQu
     {
         _database.EnsureNotDisposed();
         _database.ThrowIfOffline();
+        if (request.Statement.OqlExpression is OqlTransactionExpression transaction &&
+            !request.Statement.Diagnostics.Any(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error))
+        {
+            return ExecuteTransactionControlAsync(transaction, cancellationToken);
+        }
         return _database.RunAsync(this, operation =>
         {
             LastQueryDocumentsRead = 0;
@@ -409,6 +415,12 @@ public sealed class DocumentDatabaseSession : DatabaseLanguageSession<DocumentQu
                 {
                     return DocumentPlanExecutor.ExecuteAsync(_database, operation, request.Statement, request.Parameters, cancellationToken);
                 }
+            }
+            if (request.Statement.OqlExpression is
+                (OqlCreateCollectionExpression or OqlDropCollectionExpression or OqlCreateIndexExpression or OqlDropIndexExpression) &&
+                CurrentTransaction is not null)
+            {
+                throw new DocumentPlanningException("CD04105", ErrorMessages.TransactionDdlInvalid, request.Statement.OqlExpression.Location);
             }
             var parameters = ParameterBindings.Normalize(request.Parameters, name =>
                 new DocumentPlanningException("CD01009", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SessionExecuteCoreAsyncFailure, name)));
@@ -428,6 +440,39 @@ public sealed class DocumentDatabaseSession : DatabaseLanguageSession<DocumentQu
 
     /// <summary>JSON documents read by the last admitted OQL statement, before its residual filter.</summary>
     internal long LastQueryDocumentsRead { get; set; }
+
+    private async ValueTask<DatabaseResult> ExecuteTransactionControlAsync(OqlTransactionExpression expression, CancellationToken cancellationToken)
+    {
+        ThrowIfNotOpen();
+        cancellationToken.ThrowIfCancellationRequested();
+        if (expression.Command == OqlTransactionCommand.Begin)
+        {
+            try
+            {
+                await BeginTransactionAsync(expression.Isolation == OqlTransactionIsolation.ReadCommitted
+                    ? IsolationLevel.ReadCommitted : IsolationLevel.Snapshot, cancellationToken).ConfigureAwait(false);
+            }
+            catch (DatabaseException error)
+            {
+                await AbortTransactionAsync(error).ConfigureAwait(false);
+                throw;
+            }
+        }
+        else
+        {
+            var transaction = CurrentTransaction ??
+                throw new DocumentPlanningException("CD04104", ErrorMessages.TransactionNotOpen, expression.Location);
+            if (expression.Command == OqlTransactionCommand.Commit)
+            {
+                await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+            }
+            else
+            {
+                await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
+            }
+        }
+        return DocumentCommandResult.Success;
+    }
 
     /// <inheritdoc />
     /// <remarks>

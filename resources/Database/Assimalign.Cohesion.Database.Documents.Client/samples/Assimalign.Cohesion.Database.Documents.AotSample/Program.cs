@@ -62,6 +62,17 @@ internal static class Program
             () => 0m, (state, value) => state + value, state => state));
         builder.Functions.Add(new HasValueFunction());
         await using var engine = await builder.BuildAsync(token);
+        var database = await engine.OpenDatabaseAsync("documents", token);
+        await using (var session = await database.CreateSessionAsync(token))
+        {
+            await session.ExecuteAsync("BEGIN", cancellationToken: token);
+            Check(session.CurrentTransaction?.IsolationLevel == Transactions.IsolationLevel.Snapshot, "text default Snapshot");
+            await session.ExecuteAsync("ROLLBACK", cancellationToken: token);
+            await session.ExecuteAsync("START WORK ISOLATION LEVEL READ COMMITTED", cancellationToken: token);
+            Check(session.CurrentTransaction?.IsolationLevel == Transactions.IsolationLevel.ReadCommitted, "text ReadCommitted");
+            await session.ExecuteAsync("COMMIT TRAN", cancellationToken: token);
+            Check(session.CurrentTransaction is null, "text transaction ended");
+        }
         var server = (DocumentDatabaseServer)engine.Servers.Single();
         await server.StartAsync(token);
         await using var client = DocumentClient.Create(new()
@@ -71,6 +82,15 @@ internal static class Program
         });
         await using (var connection = await client.ConnectAsync(token))
         {
+            try
+            {
+                await connection.ExecuteAsync("BEGIN", cancellationToken: token);
+                throw new InvalidOperationException("Wire text transactions must await safe pooled reset.");
+            }
+            catch (DocumentClientException error)
+            {
+                Check(error.Diagnostics.Single().Code == "CD07002", "wire text transaction gate");
+            }
             Check(await connection.ExecuteAsync("CREATE COLLECTION items", cancellationToken: token) == 0, "create collection");
             Check(await connection.ExecuteAsync("CREATE COLLECTION IF NOT EXISTS items", cancellationToken: token) == 0, "existing collection");
             Check(await connection.GetCollectionAsync("items", token) == "items", "get collection");

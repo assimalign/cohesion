@@ -232,8 +232,8 @@ public sealed partial class DocumentQueryTests
         }
     }
 
-    [Fact(DisplayName = "Cohesion Test [Documents] - Conditional DROP preserves schema ownership precedence (#1135)")]
-    public async Task Execute_ConditionalIndexDdl_ShouldHonorOwnershipAndSnapshotConflictsAsync()
+    [Fact(DisplayName = "Cohesion Test [Documents] - Conditional DROP preserves ownership in autocommit and refuses explicit transactions")]
+    public async Task Execute_ConditionalIndexDdl_ShouldHonorOwnershipAndTransactionRestrictionAsync()
     {
         // Arrange.
         await using var engine = DocumentDatabaseEngine.Create("index-ownership", new());
@@ -256,7 +256,8 @@ public sealed partial class DocumentQueryTests
             await using var concurrent = await database.CreateSessionAsync();
             var content = await concurrent.GetCollectionAsync("items");
             await PutAsync(content, concurrent, "changed", "{\"a\":1,\"b\":2}");
-            await Should.ThrowAsync<DatabaseObjectLockedException>(async () => await session.ExecuteAsync("DROP INDEX IF EXISTS ix ON items"));
+            var restriction = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("DROP INDEX IF EXISTS ix ON items"));
+            restriction.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD04105");
             await stale.RollbackAsync();
         }
         var path = new OqlPathExpression([new("a",null)]);

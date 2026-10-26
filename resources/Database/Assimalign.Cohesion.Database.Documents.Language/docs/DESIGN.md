@@ -47,6 +47,9 @@ Lexical recognition preserves the established vocabulary so rejected constructs 
 
 | Clause | Supported | Shape or reason |
 | --- | --- | --- |
+| `BEGIN` | Yes | Session transaction start; START requires WORK, TRAN or TRANSACTION |
+| `COMMIT` | Yes | Optional WORK, TRAN or TRANSACTION |
+| `ROLLBACK` | Yes | Optional WORK, TRAN or TRANSACTION; savepoints remain deferred |
 | `SELECT` | Yes | One or more projected expressions, optional `AS` labels; a lone `*` returns the stored document |
 | `DISTINCT` | Yes | Optional quantifier directly after SELECT; ALL is the default |
 | `SELECT VALUE` | Yes | One bare expression; RAW is a synonym |
@@ -492,7 +495,7 @@ All branches still undergo parameter, numeric, metadata, aggregate and grouping 
 CASE, WHEN, THEN, ELSE, END and ESCAPE are now reserved. Existing fields remain accessible
 quoted or after a dot: `"end"` and `d.end` still work, as do `"case"` and `d.case`.
 
-The parser is a partial class, split into dispatch/token handling, SELECT clauses, DDL, DML, and
+The parser is a partial class, split into dispatch/token handling, transaction control, SELECT clauses, DDL, DML, and
 expression parsing, following `SqlQueryParser`. Parser-produced list properties are read-only
 snapshots; AST nodes retain source spans and the top-level expression retains the original
 statement text.
@@ -575,7 +578,8 @@ ordinary property segment after a dot); `COLLECTION` remains reserved outside it
 Both statements return Success with affected count zero. Creation defaults to Adhoc ownership;
 conditional creation preserves any existing collection, including a schema-owned one. Conditional
 removal ignores an absent collection but still refuses a schema-owned collection. Snapshot
-conflicts are checked before either no-op. DDL, documents, and indexes commit or roll back together.
+conflicts are checked before either no-op. OQL collection and index DDL runs only in autocommit;
+an explicit transaction refuses it with CD04105 and aborts, including conditional no-ops.
 
 An OQL statement cannot name a server or switch databases. `FROM other.collection` is invalid
 syntax; quoted collection names remain a single opaque identifier. The only qualified source
@@ -591,9 +595,30 @@ accidental syntax or missing-collection error. Projection, filtering, grouping, 
 reuse ordinary SELECT syntax; no separate metadata API or statement class is introduced.
 The engine design documents the field shapes, snapshot visibility, and read-only rules.
 `CREATE DATABASE`,
-`DROP DATABASE`, `USE`, and other SQL data-mutation/transaction commands are unsupported.
+`DROP DATABASE`, `USE`, and transaction savepoints remain unsupported.
 Multiple statements per parse are rejected. Logical database creation and deletion remain
 engine-side C# operations.
+
+### Text transactions (#1725 T1)
+
+`OqlTransactionExpression` carries a validated `OqlTransactionCommand`, an
+`OqlTransactionIsolation`, and the complete command span. Transaction controls bypass planning
+and execute on the owning Documents session after diagnostics are checked. The language package
+adds no dependency on the transaction kernel. All transaction words remain contextual identifiers.
+
+The grammar is `(BEGIN [WORK | TRAN | TRANSACTION] | START (WORK | TRAN | TRANSACTION))
+[ISOLATION LEVEL (SNAPSHOT | READ COMMITTED)]`, `COMMIT [WORK | TRAN | TRANSACTION]`, and
+`ROLLBACK [WORK | TRAN | TRANSACTION]`. Bare BEGIN and explicit SNAPSHOT are Cohesion extensions
+to the [SQL++ transaction grammar](https://github.com/couchbaselabs/docs-devex/blob/c3bb1549af4887019b9983e371d9e8b4f569052c/modules/n1ql/partials/grammar/tcl.ebnf#L9-L28).
+Snapshot remains Documents' default; [SQL++ defaults to READ COMMITTED](https://github.com/couchbaselabs/docs-devex/blob/c3bb1549af4887019b9983e371d9e8b4f569052c/modules/n1ql/pages/n1ql-language-reference/begin-transaction.adoc#L56-L60). Unsupported isolation
+spellings receive CD00002; SAVEPOINT and ROLLBACK TO SAVEPOINT receive CK00001. SET TRANSACTION
+and EXPLAIN transaction control remain unsupported. Each parse accepts only one command.
+
+OqlTransactionParserTests covers commands, isolation, spans, malformed text, contextual names and
+savepoint refusals. The keyword-disposition corpus and Documents' advertised-clause execution
+corpus include the enabled transaction capabilities. In-process sessions accept these controls;
+the Documents server temporarily refuses them with CD07002 until OQ-T2 supplies negotiated status
+and family-aware pooled reset. No wire request identifier or persisted format changes in T1.
 
 ### UPDATE (#1133)
 

@@ -214,6 +214,8 @@ SQLSTATE meanings remain those in [the SQL dialect](../../Assimalign.Cohesion.Da
 | COHDOC024 | CD03024 | Schema/constraints |
 | COHDOC004 | CD04004 | Transactions/locking |
 | COHDBD001 | CD04101 | Transactions/locking |
+| New (#1725) | CD04104 | No explicit document transaction is open for COMMIT or ROLLBACK |
+| New (#1725) | CD04105 | OQL collection/index DDL inside an explicit transaction |
 | COHDOC001 | CD05001 | Execution/budgets |
 | COHDOC015 | CD05015 | Execution/budgets |
 | COHDBD002 | CD06102 | Storage/durability |
@@ -330,6 +332,7 @@ and invariant exceptions and lower child-root typed failures retain their docume
 | CD04103 | Expected document version differs | — |
 | CD05016 | Result byte/frame limit exceeded | — |
 | CD07001 | Session belongs to another database | — |
+| CD07002 | Documents server refuses text transaction control pending safe pooled reset (#1725 T1) | — |
 | CD09001 | Collection handle is stale | — |
 | CB01001 | Container is absent | — |
 | CB01002 | Blob is absent | — |

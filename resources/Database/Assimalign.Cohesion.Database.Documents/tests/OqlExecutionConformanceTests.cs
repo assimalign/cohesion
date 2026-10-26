@@ -41,6 +41,15 @@ public sealed class OqlExecutionConformanceTests
     private static readonly IReadOnlyDictionary<string, ExecutionCase[]> _cases =
         new Dictionary<string, ExecutionCase[]>(StringComparer.OrdinalIgnoreCase)
         {
+            [OqlClauses.Begin] =
+            [
+                new("BEGIN", [[4L]], VerificationStatement: "SELECT COUNT(*) FROM items"),
+                new("START WORK ISOLATION LEVEL READ COMMITTED", [[4L]], VerificationStatement: "SELECT COUNT(*) FROM items"),
+            ],
+            [OqlClauses.Commit] = [new("COMMIT TRANSACTION", [[5L]],
+                ["BEGIN", "INSERT INTO items (KEY, VALUE) VALUES ('committed', 1)"], "SELECT COUNT(*) FROM items")],
+            [OqlClauses.Rollback] = [new("ROLLBACK WORK", [[4L]],
+                ["BEGIN", "DELETE FROM items"], "SELECT COUNT(*) FROM items")],
             [OqlClauses.Explain] =
             [
                 new("EXPLAIN SELECT name FROM items",
@@ -447,6 +456,9 @@ public sealed class OqlExecutionConformanceTests
 
     private static bool ContainsClause(OqlExpression expression, string clause) => clause switch
     {
+        OqlClauses.Begin => expression is OqlTransactionExpression { Command: OqlTransactionCommand.Begin },
+        OqlClauses.Commit => expression is OqlTransactionExpression { Command: OqlTransactionCommand.Commit },
+        OqlClauses.Rollback => expression is OqlTransactionExpression { Command: OqlTransactionCommand.Rollback },
         OqlClauses.Explain => expression is OqlExplainExpression,
         OqlClauses.Insert => expression is OqlInsertExpression,
         OqlClauses.Upsert => expression is OqlUpsertExpression,

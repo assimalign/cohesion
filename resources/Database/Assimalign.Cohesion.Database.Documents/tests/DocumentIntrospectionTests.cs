@@ -83,14 +83,16 @@ public sealed class DocumentIntrospectionTests
         collections.ShouldBe(["adhoc", "owned"]);
     }
 
-    [Fact]
-    public async Task Introspection_uses_the_statement_snapshot_and_sees_own_uncommitted_definitions()
+    [Fact(DisplayName = "Cohesion Test [Documents] - Introspection: statement snapshots and own uncommitted API definitions remain visible")]
+    public async Task ExecuteAsync_Introspection_ShouldUseStatementSnapshotAndSeeOwnApiDefinitions()
     {
+        // Arrange
         await using var engine = DocumentDatabaseEngine.Create("document-engine", new());
         var database = await engine.CreateDatabaseAsync("inventory");
         await using var reader = await database.CreateSessionAsync();
         await reader.CreateCollectionAsync("items");
         await using var writer = await database.CreateSessionAsync();
+        // Act / Assert
         await using (var transaction = await reader.BeginTransactionAsync())
         {
             await writer.ExecuteAsync("CREATE INDEX by_name ON items (name)");
@@ -100,12 +102,12 @@ public sealed class DocumentIntrospectionTests
         (await RowsAsync(reader, "SELECT INDEX_NAME FROM COHESION_SCHEMA.INDEXES")).Single().GetString(0).ShouldBe("by_name");
         await using (var transaction = await reader.BeginTransactionAsync())
         {
-            await reader.ExecuteAsync("CREATE INDEX temporary ON items (price)");
-            (await RowsAsync(reader, "SELECT COUNT(*) FROM COHESION_SCHEMA.INDEXES")).Single().GetInt32(0).ShouldBe(2);
-            (await RowsAsync(writer, "SELECT COUNT(*) FROM COHESION_SCHEMA.INDEXES")).Single().GetInt32(0).ShouldBe(1);
+            await reader.CreateCollectionAsync("temporary", CancellationToken.None);
+            (await RowsAsync(reader, "SELECT COUNT(*) FROM COHESION_SCHEMA.OBJECT_OWNERSHIP")).Single().GetInt32(0).ShouldBe(2);
+            (await RowsAsync(writer, "SELECT COUNT(*) FROM COHESION_SCHEMA.OBJECT_OWNERSHIP")).Single().GetInt32(0).ShouldBe(1);
             await transaction.RollbackAsync();
         }
-        (await RowsAsync(reader, "SELECT COUNT(*) FROM COHESION_SCHEMA.INDEXES")).Single().GetInt32(0).ShouldBe(1);
+        (await RowsAsync(reader, "SELECT COUNT(*) FROM COHESION_SCHEMA.OBJECT_OWNERSHIP")).Single().GetInt32(0).ShouldBe(1);
     }
 
     [Theory]

@@ -1,5 +1,29 @@
 # OQL SQL++ dialect
 
+## Text transactions (#1725 T1)
+
+In-process Documents sessions accept `BEGIN [WORK | TRAN | TRANSACTION]`,
+`START (WORK | TRAN | TRANSACTION)`, `COMMIT [WORK | TRAN | TRANSACTION]`, and
+`ROLLBACK [WORK | TRAN | TRANSACTION]`. A start optionally takes
+`ISOLATION LEVEL SNAPSHOT` or `ISOLATION LEVEL READ COMMITTED`. Snapshot is the default,
+intentionally differing from Couchbase SQL++'s READ COMMITTED default. Bare BEGIN and explicit
+SNAPSHOT extend the [SQL++ grammar](https://github.com/couchbaselabs/docs-devex/blob/c3bb1549af4887019b9983e371d9e8b4f569052c/modules/n1ql/partials/grammar/tcl.ebnf#L9-L28).
+Transaction words remain contextual, and each command returns Success with affected count zero.
+
+Commands use the session's existing transaction, including one begun through its C# API.
+COMMIT or ROLLBACK without an open transaction gives CD04104. Nested BEGIN gives CK04004 and
+aborts the existing transaction. A failed statement preserves CD04101 until rollback;
+text ROLLBACK recovers the session. COMMIT on a faulted transaction gives CD04101 and ends it
+without committing. Malformed text in a faulted transaction also preserves CD04101.
+OQL CREATE/DROP COLLECTION/INDEX in an explicit transaction gives CD04105 and aborts it,
+including conditional no-ops. C# collection operations retain their existing transaction contract.
+SAVEPOINT, ROLLBACK TO SAVEPOINT and SET TRANSACTION remain CK00001. EXPLAIN accepts no
+transaction control. Unsupported isolation spellings are CD00002.
+
+Until OQ-T2 adds negotiated transaction status and safe pooled reset, Documents server sessions
+refuse every text transaction command with CD07002 over InMemory and TCP. In-process sessions
+accept them. T1 changes neither wire identifiers nor persisted formats.
+
 Double-quoted collection, property and alias names accept doubled `""` as one embedded
 double quote: `"a""b"` names `a"b`. This extends the existing double-quoted identifier syntax;
 it does not add backtick quoting. A missing closing delimiter is CD00003 (#1235).
@@ -172,8 +196,8 @@ is CK00001). Conditional creation skips an existing name regardless of its defin
 An absent conditional DROP is a no-op; existing schema ownership and snapshot conflicts still refuse.
 Unconditional duplicate creation fails with CD03024; an absent unconditional DROP fails with
 CD01025. An encoded composite key beyond 1024 bytes fails with CD02026. These errors
-carry structured diagnostics, abort an explicit transaction, and leave the session usable after
-rollback. In autocommit the next statement can run immediately.
+carry structured diagnostics. OQL index DDL is autocommit-only; an explicit transaction refuses
+it with CD04105 before catalog access. After a failed autocommit statement the next can run immediately.
 PATHS in COHESION_SCHEMA.INDEXES is the ordered array, PATH is its first entry, and IS_UNIQUE is real.
 
 Leading MISSING omits the entry. Components sort MISSING, NULL, FALSE, TRUE, numbers, ordinal

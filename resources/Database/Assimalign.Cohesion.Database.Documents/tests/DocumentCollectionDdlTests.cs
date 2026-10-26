@@ -104,8 +104,8 @@ public sealed class DocumentCollectionDdlTests
         (await CollectionsAsync(session)).ShouldBe(before);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Documents] - Collection DDL: CREATE is visible inside its transaction and rolls back")]
-    public async Task Execute_CreateInTransaction_ShouldRollbackCatalogAsync()
+    [Fact(DisplayName = "Cohesion Test [Documents] - Collection API: CREATE is visible inside its transaction and rolls back")]
+    public async Task CreateCollectionAsync_InTransaction_ShouldRollbackCatalogAsync()
     {
         // Arrange
         await using var engine = DocumentDatabaseEngine.Create("ddl", new());
@@ -114,7 +114,7 @@ public sealed class DocumentCollectionDdlTests
         await using var transaction = await session.BeginTransactionAsync(CancellationToken.None);
 
         // Act
-        Success(await session.ExecuteAsync("CREATE COLLECTION new_collection", cancellationToken: CancellationToken.None));
+        await session.CreateCollectionAsync("new_collection", CancellationToken.None);
 
         // Assert
         (await CollectionsAsync(session)).ShouldBe(["new_collection:Adhoc"]);
@@ -124,8 +124,8 @@ public sealed class DocumentCollectionDdlTests
         await Should.ThrowAsync<DatabaseException>(async () => await session.GetCollectionAsync("new_collection", CancellationToken.None));
     }
 
-    [Fact(DisplayName = "Cohesion Test [Documents] - Collection DDL: DROP rolls back documents and indexes, then removes them together on commit")]
-    public async Task Execute_DropInTransaction_ShouldRestoreDocumentsAndIndexOnRollbackAsync()
+    [Fact(DisplayName = "Cohesion Test [Documents] - Collection API: DROP rolls back documents and indexes, then OQL removes them together in autocommit")]
+    public async Task DropCollectionAsync_InTransaction_ShouldRestoreDocumentsAndIndexOnRollbackAsync()
     {
         // Arrange
         await using var engine = DocumentDatabaseEngine.Create("ddl", new());
@@ -138,7 +138,7 @@ public sealed class DocumentCollectionDdlTests
         // Act
         await using (var transaction = await session.BeginTransactionAsync(CancellationToken.None))
         {
-            Success(await session.ExecuteAsync("DROP COLLECTION items", cancellationToken: CancellationToken.None));
+            await session.DropCollectionAsync("items", CancellationToken.None);
             (await RowsAsync(session, "SELECT INDEX_NAME FROM COHESION_SCHEMA.INDEXES")).ShouldBeEmpty();
             (await CollectionsAsync(session)).ShouldBeEmpty();
             await transaction.RollbackAsync(CancellationToken.None);
@@ -160,11 +160,11 @@ public sealed class DocumentCollectionDdlTests
         await Should.ThrowAsync<DatabaseException>(async () => await session.GetCollectionAsync("items", CancellationToken.None));
     }
 
-    [Theory(DisplayName = "Cohesion Test [Documents] - Collection DDL: snapshot conflicts take precedence over conditional no-ops")]
+    [Theory(DisplayName = "Cohesion Test [Documents] - Collection DDL: transaction refusal precedes catalog checks and conditional no-ops")]
     [InlineData("CREATE COLLECTION x")]
     [InlineData("CREATE COLLECTION IF NOT EXISTS x")]
     [InlineData("DROP COLLECTION IF EXISTS x")]
-    public async Task Execute_CollectionCommittedAfterSnapshot_ShouldAbortAsync(string statement)
+    public async Task Execute_CollectionCommittedAfterSnapshot_ShouldRefuseDdlBeforeCatalogChecksAsync(string statement)
     {
         // Arrange: two sessions, ordered commits; no scheduler race is required.
         await using var engine = DocumentDatabaseEngine.Create("ddl", new());
@@ -175,10 +175,11 @@ public sealed class DocumentCollectionDdlTests
         await current.ExecuteAsync("CREATE COLLECTION x", cancellationToken: CancellationToken.None);
 
         // Act
-        await Should.ThrowAsync<DatabaseTransactionAbortedException>(async () =>
+        var failure = await Should.ThrowAsync<DatabaseException>(async () =>
             await old.ExecuteAsync(statement, cancellationToken: CancellationToken.None));
 
         // Assert
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD04105");
         transaction.State.ShouldBe(TransactionState.Faulted);
         await transaction.RollbackAsync(CancellationToken.None);
         (await CollectionsAsync(old)).ShouldBe(["x:Adhoc"]);
@@ -196,13 +197,14 @@ public sealed class DocumentCollectionDdlTests
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         await session.CreateCollectionAsync("items", CancellationToken.None);
         await using var transaction = await session.BeginTransactionAsync(CancellationToken.None);
-        await session.ExecuteAsync("CREATE COLLECTION scratch", cancellationToken: CancellationToken.None);
+        await session.CreateCollectionAsync("scratch", CancellationToken.None);
 
         // Act
-        await Should.ThrowAsync<DatabaseException>(async () =>
+        var failure = await Should.ThrowAsync<DatabaseException>(async () =>
             await session.ExecuteAsync(statement, cancellationToken: CancellationToken.None));
 
         // Assert
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD04105");
         transaction.State.ShouldBe(TransactionState.Faulted);
         (await Should.ThrowAsync<DatabaseException>(async () =>
             await session.ExecuteAsync("CREATE COLLECTION later", cancellationToken: CancellationToken.None)))

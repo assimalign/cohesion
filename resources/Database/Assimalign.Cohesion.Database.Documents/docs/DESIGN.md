@@ -252,6 +252,41 @@ snapshot based. Catalog and
 index writes use the same logical context as content chunks; rollback and crash
 recovery cannot publish a partial document.
 
+### OQL transaction control (#1725 T1)
+
+In-process text and typed OQL requests dispatch `OqlTransactionExpression` directly on the
+session before ordinary statement admission. BEGIN uses the root public transaction boundary;
+COMMIT and ROLLBACK use the current transaction's public boundaries. Snapshot remains the
+default, with explicit SNAPSHOT and READ COMMITTED spellings. A successful control returns a
+zero-count command result. Parsing still precedes dispatch and error-recovery trees cannot
+execute transaction control. Malformed text in an already faulted transaction retains CD04101.
+Valid ROLLBACK recovers it; COMMIT reports CD04101, commits nothing and ends it.
+
+Nested BEGIN reuses CK04004 and aborts existing work, following Graph's failed-control policy.
+COMMIT/ROLLBACK without a current transaction reports CD04104. OQL collection and index DDL,
+including conditional no-ops, reports CD04105 inside an explicit transaction and aborts it before
+catalog mutation. C# collection operations keep their existing transactional API contract.
+DDL refusal follows [SQL++ transaction restrictions](https://github.com/couchbaselabs/docs-devex/blob/c3bb1549af4887019b9983e371d9e8b4f569052c/modules/n1ql/partials/n1ql-language-reference/transaction-restrictions.adoc#L1).
+SAVEPOINT and SET TRANSACTION remain deferred. The language's DIALECT records exact spellings.
+
+The server rejects parsed transaction commands with CD07002 before executing them. This temporary
+T1 gate prevents pooled borrowers from leaving an open transaction before OQ-T2 implements
+negotiated Ready status and family-aware reset (Documents Execute 64, Complete 66, sixteen-byte
+completion). No shared-client or protocol layout changes accompany T1. InMemory and TCP tests
+verify refusal leaves the same server session usable with no open transaction.
+
+| Code | Condition |
+| --- | --- |
+| CD04104 | COMMIT or ROLLBACK without an explicit transaction |
+| CD04105 | OQL DDL inside an explicit transaction |
+| CD07002 | Wire text transaction control awaits negotiated status and safe reset |
+
+Transaction cleanup continues to follow PostgreSQL's interruption protection in
+`src/backend/access/transam/xact.c:2854-2861`. RavenDB's
+`src/Raven.Server/Documents/TransactionMerger/AbstractTransactionOperationsMerger.cs:368-374`
+disposes failed merged work before retrying independent operations; it informs atomic failure,
+not this interactive session protocol. No reference-engine code was copied.
+
 ### Failed statements in explicit transactions (#1225)
 
 A statement that fails inside an explicit transaction aborts the whole transaction. Document
@@ -268,13 +303,13 @@ with its own code, `CD04101`:
    the kernel keeps the writer lock until its version-purge pass completes the undo; see
    `Database.Transactions` DESIGN.md, "Ending a transaction".)
 2. The transaction stays the session's `CurrentTransaction` and reports `TransactionState.Faulted`.
-   Every later statement on the session fails with `CD04101`: OQL text or requests, collection
+   Every later ordinary statement on the session fails with `CD04101`: OQL text or requests, collection
    `GetAsync`/`PutAsync`/`DeleteAsync`, and the session's own collection operations
    (`CreateCollectionAsync`, `GetCollectionAsync`, `DropCollectionAsync`,
    `GetCollectionsAsync`). `BeginTransactionAsync` fails with `CD04101` too. The error names the
    original failure in its message (`Cause: ...`) and carries it as `InnerException`. A refused
-   statement does not change the transaction, and an aborted transaction refuses text before
-   parsing it.
+   ordinary statement does not change the transaction. Text is parsed to identify transaction
+   control before admission; malformed text still receives CD04101 in an aborted transaction.
 3. `RollbackAsync` succeeds, leaves none of the transaction's writes, and returns the session to
    autocommit. Disposing the transaction or the session ends it the same way. A rollback of any
    transaction that did not commit may be repeated and raises nothing; a rollback of a committed
@@ -296,8 +331,8 @@ with its own code, `CD04101`:
    `DatabaseTransactionAbortedException` and leaves the transaction `Faulted` and ended.
 5. Every failure of a statement that started counts: parse diagnostics of text the session parses
    or of a typed request, planning and execution errors (an unknown collection, a stale expected
-   version, a document whose indexed value outgrows the 1,024-byte index key, OQL collection or
-   index DDL on a `COHESION_SCHEMA` collection), ownership
+   version, a document whose indexed value outgrows the 1,024-byte index key, or any OQL collection
+   or index DDL inside the explicit transaction), ownership
    refusals, kernel aborts such as snapshot conflicts, and cancellation while the statement runs,
    including a wait for the writer lock. Failures that come before a statement starts leave the
    transaction unchanged: argument validation (a null, empty or whitespace id, collection name or
@@ -983,8 +1018,9 @@ file set byte-identical, for both v1 definition and registration records.
 
 `CREATE [UNIQUE] INDEX [IF NOT EXISTS] <index-name> ON <collection> (<path>, ...)` and
 `DROP INDEX [IF EXISTS] <index-name> ON <collection>` are OQL statements. `DocumentPlanner` binds them to
-catalog-operation plans and `DocumentPlanExecutor` executes those plans under the statement's
-`TransactionContext`. This replaced the former extension-member entry point and gives
+catalog-operation plans and `DocumentPlanExecutor` executes those plans under an autocommit
+statement's `TransactionContext`. The session refuses OQL DDL inside an explicit transaction
+with CD04105 before planning. This replaced the former extension-member entry point and gives
 `DocumentDatabase` and `DocumentDatabaseSession` no index-management members; there is no runtime
 switch on internal database implementations.
 
@@ -1006,8 +1042,8 @@ UNIQUE flag. Conditional removal ignores an absent name. Under schema ownership,
 index still refuses removal, while an absent conditional DROP is a no-op. Snapshot conflicts
 are checked before no-ops. After collection-identity checks, a present schema-owned index
 retains its ownership refusal before document/index-set conflict checks; an absent conditional
-DROP still checks those conflicts before returning its no-op. Indexes and documents remain
-in the same logical transaction.
+DROP still checks those conflicts before returning its no-op. Index definitions and populated
+entries share one autocommit transaction; OQL DDL is refused inside an explicit transaction.
 INSERT, UPSERT, UPDATE, DELETE and CRUD share eager atomic maintenance of every index.
 UNIQUE violations use the catalog-owned public DocumentConstraintViolationException, CD03020
 (23505); non-scalar UNIQUE components use CD02021. NULL and MISSING components never conflict.
@@ -1537,7 +1573,8 @@ as embedded execution. `SELECT *` returns whole JSON values; projections return 
 whose property names are the unique column names. MISSING members are omitted; explicit NULL
 members emit JSON null (for example, `"x":null`). Both use Document (65) frames.
 Document and collection commands use the existing session-bound operations and automatic
-transactions. No transaction-control member or frame is exposed over this wire.
+transactions. Parsed text transaction controls are refused with CD07002 until negotiated status
+and family-aware pooled reset arrive in OQ-T2; no transaction-control frame is added.
 
 ### Envelope and payload layout
 
