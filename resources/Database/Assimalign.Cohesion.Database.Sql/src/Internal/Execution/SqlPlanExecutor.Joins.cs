@@ -84,6 +84,15 @@ internal sealed partial class SqlPlanExecutor
             if (plan.Inputs[i].Access is SqlIndexSeekPath seek &&
                 TryResolveSeekTree(plan.Bindings[i].Source.Table!, seek.Index, out var tree)) { inputIndexes[i] = tree; }
         }
+        if (plan.Tree is not null)
+        {
+            // All tree inputs may be reused by a parent; delivery detaches selected cells.
+            await foreach (var row in EnumerateNormalizedJoinRowsAsync(plan, statement, ReadInput, cancellationToken).ConfigureAwait(false))
+            {
+                yield return row;
+            }
+            yield break;
+        }
         if (plan.Steps.Count == 0)
         {
             var work = statement.Metrics.Analysis(plan);

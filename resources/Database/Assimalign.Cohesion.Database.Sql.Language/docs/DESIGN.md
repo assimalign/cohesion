@@ -259,6 +259,17 @@ OVERRIDING clause token unconsumed while explicit AS aliases retain their lexica
 SERIAL spellings live in the shared rejected-type table and cannot declare domains.
 Sql.Catalog has its own SQL-independent facet.
 
+## RIGHT and parenthesized join AST (#1525)
+
+The profile admits RIGHT [OUTER] JOIN with ON or ordered USING columns; FULL retains CK00001.
+SqlJoinedTableReference preserves an unaliased parenthesized item and its constituent
+namespaces. A group alias lowers to SqlDerivedTableReference over SELECT *, hiding the
+constituents and retaining optional column aliases. Parser parenthesis guards, expression
+depth, canonical rendering and the conformance corpus cover both forms. The engine keeps
+written ordinals and RIGHT USING's coerced right representative while normalizing physical
+children to LEFT. Direct RIGHT/grouped DML sources fail CS05069 at binding; derived SELECT
+sources can contain RIGHT. No clause, keyword, format or protocol count changes.
+
 ## Design intent
 
 Decision 49a adds `SqlAlterColumnAction`, a full column-definition action:

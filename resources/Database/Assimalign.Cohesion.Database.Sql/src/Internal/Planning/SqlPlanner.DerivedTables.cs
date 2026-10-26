@@ -138,6 +138,10 @@ internal sealed partial class SqlPlanner
 
     private bool ReferenceBindsTo(SqlRelationReference? reference, SqlColumnReferenceExpression column, SqlSelectExpression? owner = null)
     {
+        if (reference is SqlJoinedTableReference group)
+        {
+            return SourceRelations([group.Item]).Any(child => ReferenceBindsTo(child, column, owner));
+        }
         if (reference is null || (_queryScopes?.Scopes.Any(scope => ReferenceEquals(scope.Derived, reference)) ?? false) || !SqlExpressionEvaluator.MatchesQualifier(reference, column))
         {
             return false;

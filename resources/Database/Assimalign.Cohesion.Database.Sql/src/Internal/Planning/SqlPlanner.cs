@@ -168,9 +168,10 @@ internal sealed partial class SqlPlanner
         IReadOnlyList<SqlCatalogColumn> columns = source.Columns;
         IReadOnlyList<SqlJoinStep> steps = [];
         IReadOnlyList<int>? outputOrdinals = null;
-        if (select.From.Count > 1 || select.From[0].Joins.Count > 0 || source.Derived is not null)
+        SqlJoinTree? tree = null;
+        if (select.From.Count > 1 || select.From[0].Joins.Count > 0 || source.Derived is not null || select.From[0].Table is SqlJoinedTableReference)
         {
-            bindings = BindJoin(select, source, out columns, out steps, out outputOrdinals);
+            bindings = BindJoin(select, source, out columns, out steps, out outputOrdinals, out tree);
         }
         var evaluator = new SqlExpressionEvaluator(columns, _parameters, bindings, defaultCollation: _catalog.DefaultCollation,
             subquerySlots: _subquerySlots, functions: _functions, cancellationToken: _cancellationToken,
@@ -179,7 +180,7 @@ internal sealed partial class SqlPlanner
         if (ViewDefinitionBinding is not null) { CaptureViewSelect(select, columns, bindings, outputOrdinals, evaluator); }
         if (select.GroupBy.Count > 0 || select.Having is not null || ProjectsOrOrdersByAggregate(select))
         {
-            return PlanGroup(select, table, systemView, columns, bindings, evaluator, steps);
+            return PlanGroup(select, table, systemView, columns, bindings, evaluator, steps, tree);
         }
 
         var projections = BindProjections(select.Columns, columns, evaluator, outputOrdinals);
@@ -208,7 +209,7 @@ internal sealed partial class SqlPlanner
             return PushJoinPredicates(new SqlJoinPlan(bindings, columns, steps, projections,
                 where, ordering, BindCount(select.Limit, LimitClause(select)),
                 BindCount(select.Offset, "OFFSET"), select.IsDistinct,
-                orderByProjections));
+                orderByProjections) { Tree = tree });
         }
 
         if (systemView is not null)
@@ -243,6 +244,7 @@ internal sealed partial class SqlPlanner
 
     private SqlRelationSource ResolveRelationCore(SqlRelationReference reference, SqlSelectExpression? owner)
     {
+        if (reference is SqlJoinedTableReference group) { return ResolveRelation(group.Item.Table, owner); }
         if (reference is SqlDerivedTableReference derived)
         {
             return BindDerivedTable(derived, owner);
@@ -289,7 +291,7 @@ internal sealed partial class SqlPlanner
         var column = output?.Column ?? columns[ordinal];
         return new(name, output is null ? ordinal : null, null, column.Type.Type)
         {
-            Value = output?.Value, Collation = new SqlBoundCollation(scope.ResolveColumnCollation(ordinal)),
+            Value = output?.Value, Collation = new SqlBoundCollation(output is null ? scope.ResolveColumnCollation(ordinal) : column.Collation ?? _catalog.DefaultCollation),
             Metadata = CaptureProjectionMetadata(new SqlCollationCandidate(column.Collation, column.Collation is null ? 0 : 2), column),
             MaxLength = column.Type.MaxLength, IsNullable = column.IsNullable,
         };

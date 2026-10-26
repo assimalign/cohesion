@@ -337,15 +337,35 @@ public sealed partial class SqlQueryParser
             return ParseRequiredTableReference(ref lexer);
         }
 
+        int groupStart = lexer.Current.Position;
         Advance(ref lexer);
+        SqlQueryBodyExpression query;
         if (!StartsQuery(lexer, queryExpected: true))
         {
-            AddSyntaxDiagnostic(ref lexer, ErrorMessages.QueryParserParseRelationReferenceVoid);
-            return new SqlTableReference("?", null, null);
+            if (!TryEnterParenthesis(ref lexer, groupStart)) { return new SqlTableReference("?", null, null); }
+            SqlFromItem item;
+            try
+            {
+                var left = ParseRelationReference(ref lexer);
+                item = new SqlFromItem(left, ParseJoinClauses(ref lexer));
+            }
+            finally { _parenthesisDepth--; }
+            if (lexer.Current.Type == TokenType.RightParen) { Advance(ref lexer); }
+            else { AddSyntaxDiagnostic(ref lexer, ErrorMessages.QueryParserParseRelationReferenceVoid2); }
+            if (!IsKeyword(ref lexer, "AS") && (!IsIdentifierOrKeyword(ref lexer) || IsStatementBoundaryKeyword(ref lexer)))
+            {
+                return new SqlJoinedTableReference(item);
+            }
+            // A group alias hides its constituent namespaces just like a derived SELECT *.
+            query = new SqlSelectExpression([new SqlSelectColumn(new SqlStarExpression(null), null)], [item],
+                null, [], null, [], null, null, false, null, Location.Create(1, 1, groupStart, _lastTokenEnd));
         }
-        var query = ParseSubquery(ref lexer);
-        if (lexer.Current.Type == TokenType.RightParen) { Advance(ref lexer); }
-        else { AddSyntaxDiagnostic(ref lexer, ErrorMessages.QueryParserParseRelationReferenceVoid2); }
+        else
+        {
+            query = ParseSubquery(ref lexer);
+            if (lexer.Current.Type == TokenType.RightParen) { Advance(ref lexer); }
+            else { AddSyntaxDiagnostic(ref lexer, ErrorMessages.QueryParserParseRelationReferenceVoid2); }
+        }
         if (IsKeyword(ref lexer, "AS")) { Advance(ref lexer); }
         string alias = "?";
         if (IsIdentifierOrKeyword(ref lexer) && !IsStatementBoundaryKeyword(ref lexer))

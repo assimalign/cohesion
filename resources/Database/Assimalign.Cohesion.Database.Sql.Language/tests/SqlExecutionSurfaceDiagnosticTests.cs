@@ -17,6 +17,8 @@ public class SqlExecutionSurfaceDiagnosticTests
     [InlineData("SELECT * FROM t JOIN COHESION_SCHEMA.INDEXES i ON t.name = i.TABLE_NAME;")]
     [InlineData("SELECT * FROM t LEFT JOIN u ON t.id = u.id;")]
     [InlineData("SELECT * FROM t LEFT OUTER JOIN u ON t.id = u.id;")]
+    [InlineData("SELECT * FROM t RIGHT JOIN u ON t.id = u.id;")]
+    [InlineData("SELECT * FROM t RIGHT OUTER JOIN u USING (id);")]
     [InlineData("SELECT * FROM t CROSS JOIN u;")]
     [InlineData("SELECT * FROM t, u, v;")]
     [InlineData("SELECT * FROM t JOIN u USING (id, name);")]
@@ -35,8 +37,6 @@ public class SqlExecutionSurfaceDiagnosticTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Database.Sql.Language] - JOIN: Excludes unimplemented join types")]
-    [InlineData("SELECT * FROM t RIGHT JOIN u ON t.id = u.id;", "RIGHT OUTER JOIN", "RIGHT JOIN")]
-    [InlineData("SELECT * FROM t RIGHT OUTER JOIN u ON t.id = u.id;", "RIGHT OUTER JOIN", "RIGHT OUTER JOIN")]
     [InlineData("SELECT * FROM t FULL OUTER JOIN u ON t.id = u.id;", "FULL OUTER JOIN", "FULL OUTER JOIN")]
     public void Parse_UnimplementedJoinType_ReportsPreciseModelDiagnostic(string sql, string form, string locationText)
     {
@@ -45,7 +45,7 @@ public class SqlExecutionSurfaceDiagnosticTests
         var diagnostic = statement.Diagnostics.Single(item => item.Code == "CK00001");
         diagnostic.Severity.ShouldBe(DiagnosticSeverity.Error);
         diagnostic.Message!.ShouldContain(form);
-        diagnostic.Message!.ShouldContain("INNER, LEFT [OUTER] and CROSS JOIN");
+        diagnostic.Message!.ShouldContain("INNER, LEFT [OUTER], RIGHT [OUTER] and CROSS JOIN");
         sql[diagnostic.Start!.Value..diagnostic.End!.Value].ShouldBe(locationText);
         statement.Diagnostics.ShouldNotContain(item => item.Code == "CS00002");
     }

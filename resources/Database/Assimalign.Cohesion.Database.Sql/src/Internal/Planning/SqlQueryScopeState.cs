@@ -16,6 +16,7 @@ internal sealed class SqlQueryScopeState
     internal SqlPlanner.ViewBinding? ViewBinding { get; set; }
     internal int SetOperandDepth { get; set; }
     internal int NextScopeId { get; set; }
+    internal Dictionary<(SqlSelectExpression Owner, SqlExpression Condition), SqlExpressionEvaluator> JoinScopes { get; } = new();
     internal Dictionary<(SqlSelectExpression? Owner, SqlRelationReference Reference), SqlRelationSource> Relations { get; } = new();
 
     private sealed class DebugView

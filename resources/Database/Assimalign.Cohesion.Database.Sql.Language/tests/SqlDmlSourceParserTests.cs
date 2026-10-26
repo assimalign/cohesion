@@ -13,6 +13,7 @@ public sealed class SqlDmlSourceParserTests
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - DML sources: syntax and canonical rendering preserve complete trees (#1714)")]
     [InlineData("update dbo.t as x set v=s.v+1 from s, u where x.id=s.id returning x.id,s.v as old_value")]
     [InlineData("UPDATE t SET v = DEFAULT FROM s INNER JOIN u USING (id) LEFT JOIN w ON u.id = w.id CROSS JOIN z RETURNING *")]
+    [InlineData("UPDATE t SET v = 1 FROM s RIGHT JOIN u ON s.id = u.id")]
     [InlineData("WITH q AS (SELECT id, v FROM s) UPDATE t SET v = q.v FROM q WHERE t.id = q.id RETURNING q.v")]
     [InlineData("UPDATE t SET v = q.v FROM (SELECT id, v FROM s UNION ALL SELECT id, v FROM u) AS q WHERE t.id = q.id")]
     [InlineData("delete from t as x using s, u where x.id=s.id returning x.id,s.v")]
@@ -70,7 +71,6 @@ public sealed class SqlDmlSourceParserTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - DML sources: existing exclusions remain capability refusals (#1714)")]
-    [InlineData("UPDATE t SET v = 1 FROM s RIGHT JOIN u ON s.id = u.id")]
     [InlineData("DELETE FROM t USING s FULL JOIN u ON s.id = u.id")]
     [InlineData("UPDATE t SET v = (SELECT v FROM s) FROM s")]
     [InlineData("UPDATE t SET v = s.v FROM s RETURNING (SELECT s.v)")]

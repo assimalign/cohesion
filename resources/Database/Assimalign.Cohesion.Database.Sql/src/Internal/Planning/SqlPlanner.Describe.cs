@@ -121,6 +121,34 @@ internal sealed partial class SqlPlanner
                     Access(select.Table, select.Access, id, actual: metrics?.ActualCandidates(select));
                     break;
                 case SqlJoinPlan join:
+                    if (join.Tree is { } root)
+                    {
+                        var pending = new Stack<(SqlJoinTree Node, int Parent)>();
+                        pending.Push((root, id));
+                        while (pending.TryPop(out var next))
+                        {
+                            if (next.Node.Step is not { } treeStep)
+                            {
+                                JoinInput(next.Node.Binding, next.Parent);
+                                continue;
+                            }
+                            int treeId = nodes.Count;
+                            string algorithm = treeStep.Hash is not null ? "HashJoin" : treeStep.Access is not null ? "IndexNestedLoop" : "NestedLoop";
+                            string normalization = treeStep.Kind == SqlJoinType.RightOuter ? "; normalized RIGHT to LEFT; physical=LeftOuter" : string.Empty;
+                            Add("JoinStep", next.Parent, Target(join.Bindings[treeStep.Binding].Source),
+                                detail: $"{treeStep.Kind}; {algorithm}{normalization}; hash_budget=no_spill",
+                                actual: metrics?.ActualCandidates(treeStep));
+                            if (treeStep.Access is { } treeSeek)
+                            {
+                                string bounds = string.Join(" AND ", treeSeek.InnerColumns.Select((column, i) =>
+                                    $"{column.Name} = {JoinProbeReference(join.Bindings, treeSeek.OuterOrdinals[i])}"));
+                                Add("IndexSeek", treeId, Target(join.Bindings[treeSeek.InnerBinding].Source), treeSeek.Index.Name, bounds);
+                            }
+                            else { pending.Push((next.Node.Right!, treeId)); }
+                            pending.Push((next.Node.Left!, treeId));
+                        }
+                        break;
+                    }
                     int first = join.FirstBinding;
                     JoinInput(first, id);
                     foreach (var step in join.Steps)

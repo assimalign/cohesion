@@ -130,6 +130,15 @@ internal sealed partial class SqlPlanner
 
         void Match(SqlRelationReference relation, bool hidden)
         {
+            if (relation is SqlJoinedTableReference group)
+            {
+                Match(group.Item.Table, hidden);
+                foreach (var join in group.Item.Joins)
+                {
+                    Match(join.Table, hidden || column.TableAlias is null && join.UsingColumns.Contains(column.ColumnName, StringComparer.OrdinalIgnoreCase));
+                }
+                return;
+            }
             if (hidden || !SqlExpressionEvaluator.MatchesQualifier(relation, column)) { return; }
             qualifier |= column.TableAlias is not null;
             matches += AggregateColumnNames(relation, select).Count(name => string.Equals(name, column.ColumnName, StringComparison.OrdinalIgnoreCase));
@@ -139,6 +148,16 @@ internal sealed partial class SqlPlanner
     private IEnumerable<string> AggregateColumnNames(SqlRelationReference reference, SqlSelectExpression owner)
     {
         RuntimeHelpers.EnsureSufficientExecutionStack();
+        if (reference is SqlJoinedTableReference group)
+        {
+            var groupNames = AggregateColumnNames(group.Item.Table, owner).ToList();
+            foreach (var join in group.Item.Joins)
+            {
+                groupNames.AddRange(AggregateColumnNames(join.Table, owner)
+                    .Where(name => !join.UsingColumns.Contains(name, StringComparer.OrdinalIgnoreCase)));
+            }
+            return groupNames;
+        }
         if (reference is not SqlDerivedTableReference derived)
         {
             return ResolveRelation(reference, owner).Columns.Select(column => column.Name);
@@ -180,8 +199,15 @@ internal sealed partial class SqlPlanner
     {
         foreach (var item in select.From)
         {
-            yield return item.Table;
-            foreach (var join in item.Joins) { yield return join.Table; }
+            if (item.Table is SqlJoinedTableReference group)
+            { foreach (var relation in SourceRelations([group.Item])) { yield return relation; } }
+            else { yield return item.Table; }
+            foreach (var join in item.Joins)
+            {
+                if (join.Table is SqlJoinedTableReference right)
+                { foreach (var relation in SourceRelations([right.Item])) { yield return relation; } }
+                else { yield return join.Table; }
+            }
         }
     }
 }

@@ -134,6 +134,26 @@ internal sealed partial class SqlPlanExecutor
             join = join with { Bindings = join.Bindings.Select(binding => binding.Source.Derived is { } derived
                 ? binding with { Source = new SqlRelationSource(RewriteRelation(derived)) } : binding).ToArray() };
             if (join.Steps.Count == 0) { return join; }
+            if (join.Tree is { } root)
+            {
+                var normalized = new Dictionary<SqlJoinStep, SqlJoinStep>(ReferenceEqualityComparer.Instance);
+                var pending = new Stack<SqlJoinTree>();
+                pending.Push(root);
+                while (pending.TryPop(out var node))
+                {
+                    if (node.Step is not { } step) { continue; }
+                    pending.Push(node.Left!);
+                    pending.Push(node.Right!);
+                    var leaves = node.Right!.Leaves().ToArray();
+                    int firstInner = leaves.Min(), lastInner = leaves.Max();
+                    var keys = step.Access is null
+                        ? HashKeys(step.Condition, join, firstInner, lastInner, fullFrame: true) : null;
+                    normalized.Add(step, step with { Hash = keys });
+                }
+                var normalizedSteps = join.Steps.Select(step => normalized[step]).ToArray();
+                join = join with { Steps = normalizedSteps };
+                return join with { Tree = root.ReplaceSteps(normalized) };
+            }
             var inputs = join.Inputs.Select((input, i) => join.Bindings[i].Source.Table is { } table
                 ? input with { Access = Choose(table, input.Access) } : input).ToArray();
             BTreeRangeCount?[]? estimates = null;
@@ -215,7 +235,8 @@ internal sealed partial class SqlPlanExecutor
     private static double Estimate(BTreeRangeCount? count) => count is { } value
         ? value.IsComplete ? value.Count : Math.Max(1024, value.Count * 2) : 4096;
 
-    private static SqlHashJoinPath? HashKeys(SqlBoundExpression? condition, SqlJoinPlan plan, int inner)
+    private static SqlHashJoinPath? HashKeys(SqlBoundExpression? condition, SqlJoinPlan plan, int inner,
+        int? lastInner = null, bool fullFrame = false)
     {
         // Skipping nonmatching pairs must not suppress errors, application calls or lazy scalars.
         var referenced = new HashSet<int>();
@@ -226,20 +247,22 @@ internal sealed partial class SqlPlanExecutor
             ordinal >= binding.Offset && ordinal < binding.Offset + binding.Source.Columns.Count &&
             plan.Columns[ordinal].Type.Type is DatabaseType.String or DatabaseType.Json or DatabaseType.Character))) { return null; }
         var binding = plan.Bindings[inner];
+        var end = plan.Bindings[lastInner ?? inner];
+        int endOrdinal = end.Offset + end.Source.Columns.Count;
         var outer = new List<int>();
         var local = new List<int>();
         var collations = new List<Collation>();
         foreach (var term in Terms(condition))
         {
             if (term is not SqlBoundBinary { Operator: SqlBinaryOperator.Equal, Left: SqlBoundColumn a, Right: SqlBoundColumn b } equality) { continue; }
-            bool Inside(int ordinal) => ordinal >= binding.Offset && ordinal < binding.Offset + binding.Source.Columns.Count;
+            bool Inside(int ordinal) => ordinal >= binding.Offset && ordinal < endOrdinal;
             if (Inside(a.Ordinal) == Inside(b.Ordinal)) { continue; }
             int source = Inside(a.Ordinal) ? a.Ordinal : b.Ordinal;
             int probe = Inside(a.Ordinal) ? b.Ordinal : a.Ordinal;
             // CHAR/text comparison trims a comparand and is not a hash equivalence over text.
             if (plan.Columns[source].Type.Type == DatabaseType.Character || plan.Columns[probe].Type.Type == DatabaseType.Character) { continue; }
             outer.Add(probe);
-            local.Add(source - binding.Offset);
+            local.Add(fullFrame ? source : source - binding.Offset);
             collations.Add(equality.Collation.Resolve(null));
         }
         return outer.Count == 0 ? null : new(outer.ToArray(), local.ToArray(), collations.ToArray());

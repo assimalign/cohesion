@@ -95,7 +95,7 @@ public class SqlLanguageProfileTests
     [Theory(DisplayName = "Cohesion Test [Database.Sql.Language] - JOIN: Profile advertises only executable join types")]
     [InlineData(SqlJoinType.Inner, true)]
     [InlineData(SqlJoinType.LeftOuter, true)]
-    [InlineData(SqlJoinType.RightOuter, false)]
+    [InlineData(SqlJoinType.RightOuter, true)]
     [InlineData(SqlJoinType.FullOuter, false)]
     [InlineData(SqlJoinType.Cross, true)]
     public void Profile_JoinType_DeclaresExactExecutionSurface(SqlJoinType joinType, bool supported)
