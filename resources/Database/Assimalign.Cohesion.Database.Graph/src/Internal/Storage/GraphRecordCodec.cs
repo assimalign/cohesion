@@ -16,8 +16,8 @@ namespace Assimalign.Cohesion.Database.Graph.Internal;
 
 internal static class GraphRecordCodec
 {
-    // One graph format fence, shared by open and recovery; #1534 adds catalog label IDs.
-    internal const byte FormatVersion = 4;
+    // One graph format fence, shared by open and recovery; #1633 requires type postings.
+    internal const byte FormatVersion = 5;
     internal static void EnsureFormat(ReadOnlySpan<byte> bytes, PageId? page = null, int slot = 0)
     {
         if (bytes.Length < 18)
