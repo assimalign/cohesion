@@ -187,6 +187,7 @@ public sealed class SqlRightJoinTests
     [InlineData("SELECT a.id FROM a x RIGHT JOIN b USING(id)", "CS01015")]
     [InlineData("SELECT * FROM a RIGHT JOIN b USING(missing)", "CS01015")]
     [InlineData("SELECT * FROM a RIGHT JOIN b USING(id,id)", "CS01015")]
+    [InlineData("SELECT * FROM a RIGHT JOIN (SELECT TRUE AS id) b USING(id)", "CS01015")]
     [InlineData("SELECT * FROM a RIGHT JOIN b ON c.id = b.id JOIN a c ON TRUE", "CS01015")]
     [InlineData("SELECT * FROM a, b RIGHT JOIN a c ON a.id = c.id", "CS01015")]
     [InlineData("SELECT * FROM a RIGHT JOIN b a USING(id)", "CS01019")]
@@ -265,8 +266,11 @@ public sealed class SqlRightJoinTests
         Check(await RowsAsync(session, "SELECT id FROM domain_view;"), [[2]]);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Sql] - RIGHT: hash refusal releases its reservation and leaves the session usable (#1525)")]
-    public async Task Join_HashBudgetFailure_ShouldReleaseMemory()
+    [Theory(DisplayName = "Cohesion Test [Sql] - RIGHT: hash refusal releases its reservation and leaves the session usable (#1525)")]
+    [InlineData("")]
+    [InlineData("CROSS JOIN c")]
+    [InlineData("JOIN c ON a.id = c.marker")]
+    public async Task Join_HashBudgetFailure_ShouldReleaseMemory(string innerJoin)
     {
         // Arrange
         await using var engine = SqlDatabaseEngine.Create("right-budget", new() { StatementMemoryBudget = 1024 });
@@ -274,15 +278,19 @@ public sealed class SqlRightJoinTests
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         await ExecAsync(session, "CREATE TABLE a (id INT); CREATE TABLE b (id INT); INSERT INTO b VALUES (1);");
         await ExecAsync(session, "INSERT INTO a VALUES " + string.Join(',', Enumerable.Range(1, 100).Select(id => $"({id})")));
+        await ExecAsync(session, "CREATE TABLE c (marker INT);");
+        await ExecAsync(session, "INSERT INTO c VALUES " + string.Join(',', Enumerable.Repeat("(1)", 20)));
 
         // Act
         var failure = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(
-            "SELECT * FROM a RIGHT JOIN b ON a.id = b.id;", cancellationToken: CancellationToken.None));
+            $"SELECT * FROM a {innerJoin} RIGHT JOIN b ON a.id = b.id;", cancellationToken: CancellationToken.None));
 
         // Assert
         failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS05067");
         session.LastStatementMetrics!.HashMemoryBytes.ShouldBe(0);
         session.LastStatementMetrics.PeakHashMemoryBytes.ShouldBeLessThanOrEqualTo(1024);
+        session.LastStatementMetrics.JoinCandidatePairs.ShouldBeLessThan(100);
+        if (innerJoin.Length == 0) { session.LastStatementMetrics.RecordsExamined.ShouldBeLessThan(100); }
         Check(await RowsAsync(session, "SELECT COUNT(*) FROM a;"), [[100L]]);
     }
 

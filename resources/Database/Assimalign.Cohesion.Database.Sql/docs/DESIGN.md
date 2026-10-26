@@ -349,7 +349,7 @@ trees use an explicit postorder work stack, retain each child only through consu
 its parent, and run complete ON/WHERE residuals. They conservatively retain input predicates
 at their written level and never reorder the first pair. A two-leaf RIGHT may seek into its
 written left input; proven safe mandatory equalities use the existing budgeted hash table,
-including composite inner subtrees. Unsupported hash conditions use buffered nested loops.
+including composite inner subtrees. Hash-bound subtree output feeds the table as it is produced, so budget exhaustion stops production before a complete intermediate is retained; nested builds share and unwind the live statement grant. Unsupported hash conditions use buffered nested loops.
 EXPLAIN nests JoinStep nodes by physical association and names RIGHT-to-LEFT normalization.
 ON subqueries capture the namespace before later USING merges or null extension can alter it.
 
