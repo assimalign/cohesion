@@ -268,6 +268,11 @@ internal static class SqlTreeDump
 
     private static string Table(SqlRelationReference? relation)
     {
+        if (relation is SqlJoinedTableReference group)
+        {
+            return "Group(" + Table(group.Item.Table) + "; " + string.Join("; ", group.Item.Joins.Select(join =>
+                join.JoinType + " " + Table(join.Table) + " USING " + string.Join(",", join.UsingColumns) + " ON " + Dump(join.Condition))) + ")";
+        }
         if (relation is SqlDerivedTableReference derived)
         {
             var builder = new StringBuilder("Derived(");

@@ -81,7 +81,7 @@ public sealed class SqlKeywordDispositionTests
         ["INNER"] = Parses("SELECT * FROM t INNER JOIN u ON t.id = u.id"),
         ["ON"] = Parses("SELECT * FROM t JOIN u ON t.id = u.id"),
         ["LEFT"] = Parses("SELECT * FROM t LEFT JOIN u ON t.id = u.id"),
-        ["RIGHT"] = Rejects("SELECT * FROM t RIGHT JOIN u ON t.id = u.id", "RIGHT OUTER JOIN"),
+        ["RIGHT"] = Parses("SELECT * FROM t RIGHT JOIN u ON t.id = u.id"),
         ["FULL"] = Rejects("SELECT * FROM t FULL JOIN u ON t.id = u.id", "FULL OUTER JOIN"),
         ["OUTER"] = Parses("SELECT * FROM t LEFT OUTER JOIN u ON t.id = u.id"),
         ["CROSS"] = Parses("SELECT * FROM t CROSS JOIN u"),

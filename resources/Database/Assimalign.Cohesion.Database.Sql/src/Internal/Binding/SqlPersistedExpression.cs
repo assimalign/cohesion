@@ -443,9 +443,18 @@ internal static class SqlPersistedExpression
             : Same(left.Alias, right.Alias) && (left, right) switch
             {
                 (SqlTableReference a, SqlTableReference b) => Same(a.TableName, b.TableName) && Same(a.SchemaName, b.SchemaName),
+                (SqlJoinedTableReference a, SqlJoinedTableReference b) => SameJoinItem(a.Item, b.Item),
                 (SqlDerivedTableReference a, SqlDerivedTableReference b) => SameQuery(a.Query, b.Query) && SameList(a.Columns, b.Columns, Same),
                 _ => false,
             };
+
+    private static bool SameJoinItem(SqlFromItem left, SqlFromItem right)
+    {
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+        return SameTable(left.Table, right.Table) && SameList(left.Joins, right.Joins,
+            (a, b) => a.JoinType == b.JoinType && SameTable(a.Table, b.Table) &&
+                SameList(a.UsingColumns, b.UsingColumns, Same) && AreEquivalent(a.Condition, b.Condition));
+    }
 
     private static bool SameList<T>(IReadOnlyList<T> left, IReadOnlyList<T> right, Func<T, T, bool> same)
     {

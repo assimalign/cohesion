@@ -15,12 +15,12 @@ internal sealed partial class SqlPlanner
     /// <summary>Binds every step before execution, with ON visibility limited to its comma item.</summary>
     private IReadOnlyList<SqlRelationBinding> BindJoin(SqlSelectExpression select, SqlRelationSource first,
         out IReadOnlyList<SqlCatalogColumn> columns, out IReadOnlyList<SqlJoinStep> steps,
-        out IReadOnlyList<int> outputOrdinals, bool metadataOnly = false)
-        => BindJoinSources(select.From, select, first, out columns, out steps, out outputOrdinals, metadataOnly, select);
+        out IReadOnlyList<int> outputOrdinals, out SqlJoinTree? tree, bool metadataOnly = false)
+        => BindJoinSources(select.From, select, first, out columns, out steps, out outputOrdinals, out tree, metadataOnly, select);
 
     private IReadOnlyList<SqlRelationBinding> BindJoinSources(IReadOnlyList<SqlFromItem> from, SqlQueryExpression statement,
         SqlRelationSource first, out IReadOnlyList<SqlCatalogColumn> columns, out IReadOnlyList<SqlJoinStep> steps,
-        out IReadOnlyList<int> outputOrdinals, bool metadataOnly = false, SqlSelectExpression? queryOwner = null,
+        out IReadOnlyList<int> outputOrdinals, out SqlJoinTree? tree, bool metadataOnly = false, SqlSelectExpression? queryOwner = null,
         SqlTableReference? target = null)
     {
         var bindings = new List<SqlRelationBinding>();
@@ -33,21 +33,56 @@ internal sealed partial class SqlPlanner
             allColumns.AddRange(first.Columns);
             output.AddRange(Enumerable.Range(0, first.Columns.Count));
         }
+        bool treeNeeded = from.Any(NeedsJoinTree);
+        SqlJoinTree? whole = treeNeeded && target is not null ? new(0) : null;
         foreach (var item in from)
         {
             int start = bindings.Count;
-            Add(item.Table, false);
-            var visible = Enumerable.Range(bindings[start].Offset, bindings[start].Source.Columns.Count).ToList();
-            if (start > 0) { allSteps.Add(new SqlJoinStep(start, SqlJoinType.Cross, null, null)); }
+            int stepStart = allSteps.Count;
+            var part = BindItem(item);
+            if (start > 0)
+            {
+                var comma = new SqlJoinStep(start, SqlJoinType.Cross, null, null);
+                allSteps.Insert(stepStart, comma);
+                if (treeNeeded) { whole = new(-1, whole, part.Tree, comma); }
+            }
+            else { whole = part.Tree; }
+            output.AddRange(part.Visible);
+        }
+        columns = allColumns;
+        steps = allSteps;
+        outputOrdinals = output;
+        tree = treeNeeded ? whole : null;
+        return bindings;
+
+        (List<int> Visible, SqlJoinTree? Tree) BindItem(SqlFromItem item)
+        {
+            RuntimeHelpers.EnsureSufficientExecutionStack();
+            int start = bindings.Count;
+            var left = AddReference(item.Table, false);
+            var visible = left.Visible;
+            var root = left.Tree;
             foreach (var join in item.Joins)
             {
-                Add(join.Table, join.JoinType == SqlJoinType.LeftOuter);
-                int rightIndex = bindings.Count - 1;
-                var right = bindings[rightIndex];
+                int rightIndex = bindings.Count;
+                var rightPart = AddReference(join.Table, join.JoinType == SqlJoinType.LeftOuter);
                 var scope = new SqlExpressionEvaluator(allColumns, _parameters, bindings.Skip(start).ToArray(),
                     defaultCollation: _catalog.DefaultCollation, subquerySlots: _subquerySlots,
                     functions: _functions, cancellationToken: _cancellationToken,
                     outerScope: OuterScope, outerDependencies: OuterDependencies);
+                if (metadataOnly && join.Condition is { } scopedCondition && queryOwner is not null)
+                {
+                    var local = bindings.Skip(start).Select(binding =>
+                    {
+                        var copy = new SqlRelationBinding(binding.Source, binding.Reference, binding.Offset);
+                        copy.HiddenColumns.UnionWith(binding.HiddenColumns);
+                        if (binding.UsingColumns is { } merged) { copy.UsingColumns = new(merged); }
+                        return copy;
+                    }).ToArray();
+                    (_queryScopes ??= new()).JoinScopes[(queryOwner, scopedCondition)] = new SqlExpressionEvaluator(
+                        allColumns.ToArray(), _parameters, local, defaultCollation: _catalog.DefaultCollation,
+                        subquerySlots: _subquerySlots, functions: _functions, cancellationToken: _cancellationToken);
+                }
                 var equalities = new List<(int Left, int Right, Collation Collation)>();
                 SqlBoundExpression? condition = null;
                 if (join.Condition is { } on)
@@ -76,24 +111,29 @@ internal sealed partial class SqlPlanner
                             throw new SqlPlanningException("CS01015", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlPlannerBindJoinSqlPlanning2, name), statement.Location);
                         }
                         int leftOrdinal = FindUsing(visible, name, "left");
-                        int rightOrdinal = FindUsing(Enumerable.Range(right.Offset, right.Source.Columns.Count), name, "right");
+                        int rightOrdinal = FindUsing(rightPart.Visible, name, "right");
                         if (ViewDefinitionBinding is not null)
                         {
                             var leftSource = bindings.Last(binding => binding.Offset <= leftOrdinal);
                             RecordViewColumn(leftSource.Source, leftOrdinal - leftSource.Offset);
-                            RecordViewColumn(right.Source, rightOrdinal - right.Offset);
+                            var rightSource = bindings.Last(binding => binding.Offset <= rightOrdinal);
+                            RecordViewColumn(rightSource.Source, rightOrdinal - rightSource.Offset);
                         }
                         var previous = scope.MergedColumn(leftOrdinal);
                         var leftColumn = previous?.Column ?? allColumns[leftOrdinal];
-                        var rightColumn = allColumns[rightOrdinal];
+                        var previousRight = scope.MergedColumn(rightOrdinal);
+                        var rightColumn = previousRight?.Column ?? allColumns[rightOrdinal];
                         var common = UsingType(leftColumn.Type, rightColumn.Type, name, statement);
                         bool sameDomain = string.Equals(leftColumn.DomainName, rightColumn.DomainName, StringComparison.OrdinalIgnoreCase);
                         if (!sameDomain) { common = new DatabaseTypeInfo(common.Type); }
                         var leftValue = previous?.Value ?? new SqlBoundColumn(leftOrdinal);
-                        var rightValue = new SqlBoundColumn(rightOrdinal);
+                        var rightValue = previousRight?.Value ?? new SqlBoundColumn(rightOrdinal);
                         // PostgreSQL parse_clause.c:1676-1709,1718-1733: choose a common type,
-                        // coerce the inputs, prefer an unchanged INNER input, and preserve LEFT.
-                        var value = CoerceUsing(leftValue, leftColumn.Type, common);
+                        // coerce inputs, prefer an unchanged INNER input, and preserve the outer side.
+                        // RIGHT reads the coerced right value (parse_clause.c:1735-1738).
+                        var value = join.JoinType == SqlJoinType.RightOuter
+                            ? CoerceUsing(rightValue, rightColumn.Type, common)
+                            : CoerceUsing(leftValue, leftColumn.Type, common);
                         if (join.JoinType == SqlJoinType.Inner && !ReferenceEquals(value, leftValue))
                         {
                             // PostgreSQL parse_clause.c:1680-1700 also relabels a typmod
@@ -113,11 +153,14 @@ internal sealed partial class SqlPlanner
                         var owner = bindings.Last(binding => binding.Offset <= leftOrdinal);
                         owner.UsingColumns ??= [];
                         owner.UsingColumns[leftOrdinal] = new SqlUsingColumn(
-                            new SqlCatalogColumn(name, common, leftColumn.IsNullable, collation: leftColumn.Collation,
+                            new SqlCatalogColumn(name, common,
+                                join.JoinType == SqlJoinType.RightOuter ? rightColumn.IsNullable : leftColumn.IsNullable,
+                                collation: join.JoinType == SqlJoinType.RightOuter ? rightColumn.Collation : leftColumn.Collation,
                                 // PostgreSQL parse_coerce.c:1360-1387 preserves identical domains.
                                 domainName: sameDomain ? leftColumn.DomainName : null), value);
                         merged.Add(leftOrdinal);
-                        right.HiddenColumns.Add(rightOrdinal - right.Offset);
+                        var hiddenOwner = bindings.Last(binding => binding.Offset <= rightOrdinal);
+                        hiddenOwner.HiddenColumns.Add(rightOrdinal - hiddenOwner.Offset);
                     }
                     condition = predicates.Count == 1 ? predicates[0] : new SqlBoundLogical(false, predicates.ToArray());
                     visible = merged.Concat(visible.Except(merged)).ToList();
@@ -128,18 +171,67 @@ internal sealed partial class SqlPlanner
                 {
                     throw new SqlPlanningException("CS05013", ErrorMessages.SqlPlannerBindJoinSqlPlanning3, statement.Location);
                 }
-                visible.AddRange(Enumerable.Range(right.Offset, right.Source.Columns.Count)
-                    .Where(ordinal => !right.HiddenColumns.Contains(ordinal - right.Offset)));
-                var access = SelectJoinAccessPath(bindings, allColumns, equalities, rightIndex,
-                    rightIndex == 1 && start == 0 && join.JoinType == SqlJoinType.Inner);
-                allSteps.Add(new SqlJoinStep(rightIndex, join.JoinType, condition, access));
+                if (join.JoinType == SqlJoinType.RightOuter)
+                {
+                    Nullify(start, rightIndex, join.UsingColumns);
+                }
+                visible.AddRange(rightPart.Visible.Where(ordinal =>
+                {
+                    var owner = bindings.Last(binding => binding.Offset <= ordinal);
+                    return !owner.HiddenColumns.Contains(ordinal - owner.Offset);
+                }));
+                var access = bindings.Count == rightIndex + 1
+                    ? SelectJoinAccessPath(bindings, allColumns, equalities, rightIndex,
+                        !treeNeeded && rightIndex == 1 && start == 0 && join.JoinType == SqlJoinType.Inner) : null;
+                if (join.JoinType == SqlJoinType.RightOuter)
+                {
+                    access = rightIndex == 1 && start == 0 && bindings.Count == 2
+                        ? SelectJoinAccessPath(bindings, allColumns, equalities, rightIndex, false, 1) : null;
+                }
+                var step = new SqlJoinStep(rightIndex, join.JoinType, condition, access);
+                allSteps.Add(step);
+                if (treeNeeded)
+                {
+                    root = join.JoinType == SqlJoinType.RightOuter
+                        ? new(-1, rightPart.Tree, root, step) : new(-1, root, rightPart.Tree, step);
+                }
             }
-            output.AddRange(visible);
+
+            return (visible, root);
         }
-        columns = allColumns;
-        steps = allSteps;
-        outputOrdinals = output;
-        return bindings;
+
+        (List<int> Visible, SqlJoinTree? Tree) AddReference(SqlRelationReference reference, bool nullable)
+        {
+            if (reference is SqlJoinedTableReference group)
+            {
+                int start = bindings.Count;
+                var part = BindItem(group.Item);
+                if (nullable) { Nullify(start, bindings.Count, []); }
+                return part;
+            }
+            int index = bindings.Count;
+            Add(reference, nullable);
+            return (Enumerable.Range(bindings[index].Offset, bindings[index].Source.Columns.Count).ToList(),
+                treeNeeded ? new(index) : null);
+        }
+
+        void Nullify(int start, int end, IReadOnlyList<string> preservedMerged)
+        {
+            for (int i = start; i < end; i++)
+            {
+                var binding = bindings[i];
+                for (int ordinal = binding.Offset; ordinal < binding.Offset + binding.Source.Columns.Count; ordinal++)
+                {
+                    allColumns[ordinal] = Nullable(allColumns[ordinal]);
+                }
+                if (binding.UsingColumns is not { } merged) { continue; }
+                foreach (int ordinal in merged.Keys.ToArray())
+                {
+                    if (preservedMerged.Contains(allColumns[ordinal].Name, StringComparer.OrdinalIgnoreCase)) { continue; }
+                    merged[ordinal] = merged[ordinal] with { Column = Nullable(merged[ordinal].Column) };
+                }
+            }
+        }
 
         int FindUsing(IEnumerable<int> ordinals, string name, string side)
         {
@@ -150,6 +242,10 @@ internal sealed partial class SqlPlanner
             }
             return found[0];
         }
+
+        static SqlCatalogColumn Nullable(SqlCatalogColumn column) => column.IsNullable ? column
+            : new SqlCatalogColumn(column.Name, column.Type, true, column.DefaultLiteral,
+                column.Collation, column.DomainName, column.DefaultFunctionCalls);
 
         void Add(SqlRelationReference reference, bool nullable)
         {
@@ -168,6 +264,42 @@ internal sealed partial class SqlPlanner
                 : column));
         }
     }
+
+    private static IEnumerable<SqlRelationReference> SourceRelations(IReadOnlyList<SqlFromItem> sources)
+    {
+        foreach (var item in sources)
+        {
+            foreach (var relation in RelationLeaves(item.Table)) { yield return relation; }
+            foreach (var join in item.Joins)
+            { foreach (var relation in RelationLeaves(join.Table)) { yield return relation; } }
+        }
+    }
+
+    private static IEnumerable<SqlRelationReference> RelationLeaves(SqlRelationReference reference)
+    {
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+        if (reference is not SqlJoinedTableReference group) { yield return reference; }
+        else { foreach (var relation in SourceRelations([group.Item])) { yield return relation; } }
+    }
+
+    private static IEnumerable<SqlJoinClause> SourceJoins(IReadOnlyList<SqlFromItem> sources)
+    {
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+        foreach (var item in sources)
+        {
+            if (item.Table is SqlJoinedTableReference first)
+            { foreach (var join in SourceJoins([first.Item])) { yield return join; } }
+            foreach (var join in item.Joins)
+            {
+                if (join.Table is SqlJoinedTableReference right)
+                { foreach (var child in SourceJoins([right.Item])) { yield return child; } }
+                yield return join;
+            }
+        }
+    }
+
+    private static bool NeedsJoinTree(SqlFromItem item) => item.Table is SqlJoinedTableReference ||
+        item.Joins.Any(join => join.JoinType == SqlJoinType.RightOuter || join.Table is SqlJoinedTableReference);
 
     /// <summary>Selects the common USING type, retaining modifiers only when both inputs agree.</summary>
     private DatabaseTypeInfo UsingType(DatabaseTypeInfo left, DatabaseTypeInfo right, string name, SqlQueryExpression statement, bool setOperation = false)

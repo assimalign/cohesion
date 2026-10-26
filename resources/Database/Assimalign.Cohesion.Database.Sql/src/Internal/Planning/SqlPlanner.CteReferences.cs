@@ -89,7 +89,8 @@ internal sealed partial class SqlPlanner
 
         void Relation(SqlRelationReference relation, CommonTableScope? scope, int visible)
         {
-            if (relation is SqlDerivedTableReference derived) { pending.Push((derived.Query, scope, visible)); }
+            if (relation is SqlJoinedTableReference group) { Sources([group.Item], scope, visible); }
+            else if (relation is SqlDerivedTableReference derived) { pending.Push((derived.Query, scope, visible)); }
             else if (relation is SqlTableReference { SchemaName: null } named && scope is not null &&
                 scope.TryResolve(named.TableName, visible, out var owner, out int index))
             {

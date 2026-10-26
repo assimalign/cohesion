@@ -16,7 +16,7 @@ internal sealed partial class SqlPlanner
     /// <summary>Binds aggregation above a normal filtered relation plan.</summary>
     private SqlGroupPlan PlanGroup(SqlSelectExpression select, SqlCatalogTable? table,
         SqlSystemViewDefinition? view, IReadOnlyList<SqlCatalogColumn> columns,
-        IReadOnlyList<SqlRelationBinding>? bindings, SqlExpressionEvaluator evaluator, IReadOnlyList<SqlJoinStep> steps)
+        IReadOnlyList<SqlRelationBinding>? bindings, SqlExpressionEvaluator evaluator, IReadOnlyList<SqlJoinStep> steps, SqlJoinTree? tree = null)
     {
         foreach (var key in select.GroupBy)
         {
@@ -79,7 +79,7 @@ internal sealed partial class SqlPlanner
         var source = columns.Select((column, index) => PassThrough(column.Name, index, columns, sourceScope)).ToArray();
         var where = select.Where is null ? null : evaluator.BindPredicate(select.Where);
         SqlPlan input = bindings is not null
-            ? PushJoinPredicates(new SqlJoinPlan(bindings, columns, steps, source, where, [], null, null, false))
+            ? PushJoinPredicates(new SqlJoinPlan(bindings, columns, steps, source, where, [], null, null, false) { Tree = tree })
             : view is not null
                 ? new SqlSystemViewPlan(view, source, where, [], null, null, false)
                 : table is null

@@ -602,6 +602,13 @@ public static class SqlExpressionRenderer
 
     private static string Table(SqlRelationReference relation)
     {
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+        if (relation is SqlJoinedTableReference group)
+        {
+            var builder = new StringBuilder("(");
+            AppendSources(builder, [group.Item], string.Empty);
+            return builder.Append(')').ToString();
+        }
         if (relation is SqlDerivedTableReference derived)
         {
             return "(" + Select(derived.Query) + ") AS " + Identifier(derived.Alias!) +

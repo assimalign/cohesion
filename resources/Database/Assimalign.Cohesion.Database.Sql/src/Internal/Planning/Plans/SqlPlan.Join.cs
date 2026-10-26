@@ -23,6 +23,9 @@ internal sealed record SqlJoinPlan(
     bool IsDistinct,
     IReadOnlyDictionary<SqlExpression, int>? OrderByProjections = null) : SqlRelationPlan
 {
+    /// <summary>Normalized physical tree; null retains the ordinary flat execution path.</summary>
+    internal SqlJoinTree? Tree { get; init; }
+
     /// <summary>Restrictions evaluated before this binding contributes a candidate pair.</summary>
     internal IReadOnlyList<SqlJoinInput> Inputs { get; init; } = [];
 
