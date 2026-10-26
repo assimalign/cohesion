@@ -6635,6 +6635,10 @@ entry and requests discovery with a fresh fence, without freeing pages. Cancella
 irrevocable publication always removes old handles with a noncancelable cleanup. A failed data
 or catalog commit retains the engine's existing offline/unconfirmed-outcome handling.
 
+If BEGIN's catalog capture or transaction construction fails, cleanup skips rollback while
+the database is offline (#1243). Online cleanup releases the new snapshot pin; a cleanup
+failure cannot replace the original capture/construction failure.
+
 Deterministic tests read pinned snapshots after publication and run an explicit reclamation pass
 that frees nothing until they end, in process and on both transports. Every recorded crash image
 under Synchronous, Grouped and None is reopened; None models process loss. A nonparallel stress

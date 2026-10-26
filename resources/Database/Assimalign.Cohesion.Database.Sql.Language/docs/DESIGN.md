@@ -8,7 +8,8 @@ and RESTRICT are the defaults. Canonical rendering supplies TABLE and both effec
 TRUNCATE adds one keyword and one advertised clause; RESTART/CONTINUE/IDENTITY remain contextual.
 Completeness and live conformance cases cover the new command; CTAS retains CS00003.
 The engine's snapshot, closure, identity and reclamation contract is recorded in DIALECT.md.
-No public construction bridge or interface is added.
+No public construction bridge or interface is added. Truncate is appended to SqlQueryCommandType;
+the existing Begin, Commit and Rollback values remain 9, 10 and 11.
 
 ## Repeated subquery grouping keys (#1718)
 
