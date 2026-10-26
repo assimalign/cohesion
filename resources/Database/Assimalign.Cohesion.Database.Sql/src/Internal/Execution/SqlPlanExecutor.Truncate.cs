@@ -16,6 +16,7 @@ internal sealed partial class SqlPlanExecutor
 {
     internal static Action? TruncateReserved { get; set; }
     internal static Action? TruncatePrepared { get; set; }
+    internal static Action? TruncatePublished { get; set; }
 
     private async Task<DatabaseResult> ExecuteTruncateAsync(SqlTruncatePlan plan, SqlStatementContext statement,
         CancellationToken cancellationToken)
@@ -126,6 +127,7 @@ internal sealed partial class SqlPlanExecutor
                 // must remove old handles even when cancellation or a test observer intervenes.
                 published = true;
                 statement.Metrics.RecordSelfCommit();
+                TruncatePublished?.Invoke();
             }
             finally
             {
@@ -134,6 +136,7 @@ internal sealed partial class SqlPlanExecutor
                     if (marker is not null)
                     {
                         await statement.Coordinator.RollbackAsync(marker, CancellationToken.None).ConfigureAwait(false);
+                        if (published) { _catalog.ReleaseTruncatePublication(previous); }
                     }
                 }
                 finally { _catalog.TruncateSnapshotGate.Release(); }
