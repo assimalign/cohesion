@@ -8,6 +8,7 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.Database.Execution;
+using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
@@ -173,16 +174,27 @@ public sealed class SqlDmlSourceExecutionTests
         { await session.ExecuteAsync(sql, cancellationToken: timeout.Token); }
 
         // Act
-        string sqlText = "WITH q AS (SELECT cancel_source(id) AS id FROM s) " + (delete
-            ? "DELETE FROM t USING q WHERE t.id=q.id" : "UPDATE t SET v=q.id FROM q WHERE t.id=q.id");
+        await using var transaction = await session.BeginTransactionAsync(timeout.Token);
+        string sqlText = delete
+            ? "DELETE FROM t USING s WHERE cancel_source(s.id)=t.id" : "UPDATE t SET v=s.id FROM s WHERE cancel_source(s.id)=t.id";
         await Should.ThrowAsync<OperationCanceledException>(async () => await session.ExecuteAsync(sqlText, cancellationToken: canceled.Token));
 
         // Assert
-        calls.ShouldBeGreaterThan(0);
+        calls.ShouldBe(1);
         (await RowsAsync(session, "SELECT v FROM t")).ShouldBe(new object?[][] { [10] });
         await using var writer = await database.CreateSessionAsync(timeout.Token);
+        transaction.State.ShouldBe(TransactionState.Active);
+        database.Catalog.TryGetTable("dbo", "s", out var source).ShouldBeTrue();
+        var probe = new TransactionSequence(ulong.MaxValue - 1714);
+        try
+        {
+            database.Coordinator.LockManager.TryAcquire(probe,
+                LockResource.Object(source.ObjectId), LockMode.Exclusive).ShouldBeTrue();
+        }
+        finally { database.Coordinator.LockManager.ReleaseAll(probe); }
         (await writer.ExecuteAsync("UPDATE s SET id=id+10", cancellationToken: timeout.Token)).AffectedCount.ShouldBe(2);
         await writer.ExecuteAsync("DROP TABLE s", cancellationToken: timeout.Token);
+        await transaction.RollbackAsync(timeout.Token);
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - UPDATE FROM: retained binary source cells detach for SET and every RETURNING delivery (#1714)")]
