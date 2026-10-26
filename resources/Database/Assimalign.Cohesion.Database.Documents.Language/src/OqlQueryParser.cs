@@ -218,7 +218,9 @@ public sealed partial class OqlQueryParser : QueryParser
         var statement = new OqlQueryStatement(expression);
         foreach (var (clause, token) in unsupported)
         {
-            RequireClause(statement, clause, Span(token, token));
+            if (clause == OqlClauses.Returning)
+            { statement.AddDiagnostic(QueryDiagnostics.UnsupportedClause(clause, Profile.Language, Span(token, token))); }
+            else { RequireClause(statement, clause, Span(token, token)); }
         }
 
         foreach (var diagnostic in _diagnostics)
@@ -244,6 +246,7 @@ public sealed partial class OqlQueryParser : QueryParser
                 IsWord(_tokens[statementStart], "DROP"));
         var (updateHeaderEnd, updateClause) = FindUpdateClause(statementStart);
         bool selected = false;
+        bool returningList = false;
         int parentheses = 0;
         bool inSelectList = false;
         int selectHead = -2;
@@ -313,6 +316,12 @@ public sealed partial class OqlQueryParser : QueryParser
             // ColLabel accepts reserved words after AS; quantifier pins remain positional.
             if (inSelectList && index > 0 && IsWord(_tokens[index - 1], "AS")) { continue; }
             if (value == "FROM") { inSelectList = false; }
+            if (value == "RETURNING" && index > statementStart && parentheses == 0 && EndsOperand(index - 1) &&
+                !IsWord(_tokens[index - 1], "INTO") && !IsWord(_tokens[index - 1], "FROM") && !IsWord(_tokens[index - 1], "AS"))
+            {
+                returningList = true;
+                inSelectList = true;
+            }
 
             // A SQL++ quantified predicate, EVERY x IN ... SATISFIES ... END, is one construct:
             // its binding IN is not the IN predicate, and its text up to END belongs to it.
@@ -405,7 +414,7 @@ public sealed partial class OqlQueryParser : QueryParser
             {
                 // Only SELECT statements and INSERT/UPSERT SELECT have a query of their own.
                 // A SELECT inside an expression is nested even when it is the first one.
-                if (statementWithoutQuery || selected || parentheses > 0)
+                if (statementWithoutQuery || selected || parentheses > 0 || returningList)
                 {
                     result.Add((OqlClauses.Subquery, token));
                 }
@@ -453,7 +462,7 @@ public sealed partial class OqlQueryParser : QueryParser
                 if (value == "LIMIT") { continue; }
             }
 
-            if (!OqlUnsupportedVocabulary.TryFind(value, out var word) || Supports(word.Construct))
+            if (!OqlUnsupportedVocabulary.TryFind(value, out var word) || Supports(word.Construct) && value != "RETURNING")
             {
                 continue;
             }

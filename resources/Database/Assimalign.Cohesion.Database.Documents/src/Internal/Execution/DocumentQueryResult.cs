@@ -15,6 +15,7 @@ namespace Assimalign.Cohesion.Database.Documents.Internal;
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Documents.Internal.DocumentQueryResult.DebugView))]
 internal sealed class DocumentQueryResult : DatabaseResultSet
 {
+    private readonly long _affectedCount;
     private readonly IReadOnlyList<DatabaseColumn> _columns;
     private readonly IReadOnlyList<object?[]> _rows;
     private readonly IReadOnlyList<ReadOnlyMemory<byte>>? _rawDocuments;
@@ -28,8 +29,10 @@ internal sealed class DocumentQueryResult : DatabaseResultSet
     /// <param name="rows">The materialized row values, one array per row in column order.</param>
     /// <param name="bareValue">Whether frames contain a bare value instead of a projection object.</param>
     /// <param name="rawDocuments">The original stored bytes for lone-star results.</param>
-    public DocumentQueryResult(IReadOnlyList<DatabaseColumn> columns, IReadOnlyList<object?[]> rows, bool bareValue = false, IReadOnlyList<ReadOnlyMemory<byte>>? rawDocuments = null)
+    /// <param name="affectedCount">The mutation count, or -1 for a read-only result.</param>
+    public DocumentQueryResult(IReadOnlyList<DatabaseColumn> columns, IReadOnlyList<object?[]> rows, bool bareValue = false, IReadOnlyList<ReadOnlyMemory<byte>>? rawDocuments = null, long affectedCount = -1)
     {
+        _affectedCount = affectedCount;
         _columns = columns;
         _rows = rows;
         BareValue = bareValue;
@@ -37,7 +40,7 @@ internal sealed class DocumentQueryResult : DatabaseResultSet
     }
 
     public override DatabaseResultStatus Status => DatabaseResultStatus.Success;
-    public override long AffectedCount => -1;
+    public override long AffectedCount => _affectedCount;
     public override IReadOnlyList<Diagnostic> Diagnostics => [];
     public override IReadOnlyList<DatabaseColumn> Columns => _columns;
     public override async IAsyncEnumerable<DatabaseRow> GetRowsAsync([EnumeratorCancellation] CancellationToken cancellationToken = default)

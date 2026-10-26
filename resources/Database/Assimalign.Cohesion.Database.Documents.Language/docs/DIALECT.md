@@ -37,6 +37,64 @@ response discards the session and leaves an unacknowledged commit's outcome unkn
 has arrived, bounded status cleanup ignores caller cancellation. No request identifier, protocol
 version or persisted format changes. CD07002 remains live for this capability requirement.
 
+## RETURNING (#1727)
+
+INSERT and UPSERT (VALUES or SELECT), UPDATE and DELETE accept a final
+`RETURNING expr [AS alias], ...`, `RETURNING RAW expr` or `RETURNING VALUE expr`.
+RAW and VALUE are synonyms for exactly one unwrapped expression without an alias or star.
+A lone `RETURNING *` returns the complete image, preserving its stored UTF-8 bytes.
+Named expressions follow SELECT's output-name, duplicate-name, type and MISSING/NULL rules;
+RAW/VALUE converts a top-level MISSING to JSON null. ELEMENT is not a synonym.
+
+DELETE projects the pre-image and its old metadata. UPDATE projects the stored post-image;
+INSERT/UPSERT project the stored post-image and newly allocated durable version. The target
+alias, or collection name when no alias is supplied, binds that image, including META().id
+and META([binding]).version. INSERT/UPSERT SELECT source bindings do not escape into RETURNING.
+Scalar functions, parameters, predicates, CASE and constructors are accepted; aggregates and
+subqueries remain unavailable here. Parameters and expression contexts are checked even for
+zero affected documents. A directly constructed AST with an empty RETURNING output name gives
+CD01026 before mutation (empty quoted labels in text retain CD00002). EXPLAIN validates RETURNING and describes Returning/ReturningValue
+without reading documents, invoking projection callbacks or performing writes.
+
+Each affected document produces one row. INSERT/UPSERT retain VALUES or final SELECT source
+order; UPDATE/DELETE retain ordinal document-ID order. When the field itself is named returning, expression continuations such as
+`RETURNING returning + 1 AS x` take precedence over an implicit target alias. Use explicit
+`AS returning` to disambiguate a target alias before a unary projection. There is no independent RETURNING sort,
+paging or DISTINCT. A zero-match write returns an empty result with projection metadata and
+an affected count of zero. Without RETURNING, write commands retain their count-only results.
+
+Every projection executes before the statement transaction completes. A failure or cancellation
+rolls back the statement; in an explicit transaction the existing whole-transaction abort rule
+applies. No partial RETURNING result reaches the caller. Returned JSON values own their data.
+`DocumentDatabaseEngineOptions.StatementMemoryBudget` defaults to 64 MiB and must be positive.
+RETURNING charges retained row/array storage, scalar values, JSON clones (128 bytes plus UTF-8
+length plus 12 bytes per token), and preserved whole-image bytes once per representation to
+this per-statement budget; exhaustion gives CD05018 at the clause span
+and rolls back the writes. Serialized rows are preflighted in the same transaction: the existing
+CD05016 covers the 16 MiB frame cap, and CD05019 covers values deeper than 256 levels including
+the named projection wrapper. This is a retained-result estimate, not a managed-heap measurement;
+pre-existing source and mutation staging allocations are outside this new charge.
+An over-deep array/object constructor gives CD05015 naming RETURNING at its expression span;
+other serialization failures retain their own diagnostic identity.
+
+The existing Complete payload carries both result and affected counts, without negotiation,
+a capability flag, a frame-layout change or a disk-format change. With RETURNING the counts
+are equal and nonnegative; read-only results keep affected count -1. Updated clients accept
+this combination. Older clients that require -1 for every result header reject it, as accepted
+by owner decision 8 (2026-10-25).
+Their rejection is a client-side ProtocolViolation that closes the connection after an
+autocommit statement has already committed. Retrying a non-idempotent write can apply it
+again: `SET n = n + 10` can change 1 to 11 despite that client error, then 11 to 21 on retry.
+In an explicit transaction the disconnect rolls back the uncommitted work. Use an updated
+client for RETURNING; an old client's rejection does not prove an autocommit rollback.
+
+The image/projection basis follows Couchbase's [INSERT RETURNING](https://docs.couchbase.com/server/current/n1ql/n1ql-language-reference/insert.html#returning-clause),
+[UPDATE](https://docs.couchbase.com/server/current/n1ql/n1ql-language-reference/update.html#returning-clause)
+and [DELETE](https://docs.couchbase.com/server/current/n1ql/n1ql-language-reference/delete.html#returning-clause).
+Cohesion additionally requires transactional rollback on projection failure. RavenDB's reference
+`src/Raven.Server/Documents/Patch/PatchDocumentCommand.cs:354-356` conditionally returns
+ModifiedDocument; the same clone was inspected for this post-image precedent.
+
 ## Quoted identifiers
 
 Double-quoted collection, property and alias names accept doubled `""` as one embedded
@@ -176,10 +234,10 @@ INSERT's validation and MISSING rules. Existing identities receive complete repl
 absent properties disappear and each written identity receives a fresh version. Without VALUE,
 the complete projected row becomes the document. Every source row is staged before writes.
 A repeated key fails the whole statement with DocumentDuplicateKeyException (CD03012).
-OPTIONS and RETURNING remain CK00001 at their tokens. INSERT and UPSERT both reject
+OPTIONS remains CK00001 at its token. RETURNING follows the contract above. INSERT and UPSERT both reject
 (KEY k, OPTIONS o) SELECT ... with one diagnostic naming OPTIONS, including its expression form. No statement-level version precondition is available;
 PutAsync(expectedVersion) and UPDATE WHERE META().version = $v provide optimistic replacement.
-EXPLAIN UPSERT returns Upsert or UpsertSelect; completion reports affected count without rows.
+EXPLAIN UPSERT returns Upsert or UpsertSelect; without RETURNING, completion reports the affected count without rows.
 DocumentUpsertTests, the advertised-clause corpus, wire tests and the recovery fixture cover it.
 
 DELETE FROM collection [AS alias | alias] [WHERE expression] executes through the existing
@@ -187,11 +245,11 @@ scan and equality/range index seeks. The complete predicate selects matching ids
 statement snapshot before any deletion; META().id remains a residual filter in T1. Omitting
 WHERE deletes all content while retaining the collection and index definitions. WHERE 1
 matches every document; NULL/MISSING match none. A successful command reports its affected
-count through Complete with no Document frames. Conflicts or cancellation roll back the
+count through Complete, with Document frames only when RETURNING is present. Conflicts or cancellation roll back the
 statement; failure inside an explicit transaction aborts the whole transaction. System
 collections remain read-only and Schema-owned collection contents remain mutable.
 EXPLAIN DELETE reports Delete plus CollectionScan or IndexSeek without writing. USE KEYS,
-RETURNING and DELETE LIMIT remain CK00001 at their tokens. DocumentDeleteTests and the
+DELETE LIMIT remains CK00001 at its token. RETURNING follows the contract above. DocumentDeleteTests and the
 advertised-clause corpus cover embedded execution; wire and NativeAOT checks cover completion.
 
 UPDATE collection [AS alias | alias] SET path = expression [, ...] [UNSET path [, ...]]
@@ -208,8 +266,7 @@ document deeper than 128 levels gives CD02018. Temporary constructors retain que
 Untouched values and property-name spellings retain their bytes; rewritten-container whitespace
 may be normalized. A successful UPDATE returns the matched count, including unchanged matches,
 and allocates fresh versions. Failure or cancellation writes nothing under the transaction rules
-above. EXPLAIN UPDATE describes the access without writing. USE KEYS, RETURNING, LIMIT and FOR
-remain CK00001. DocumentUpdateTests covers paths, atomicity, serialization and matched counts.
+above. EXPLAIN UPDATE describes the access without writing. USE KEYS, LIMIT and FOR remain CK00001. DocumentUpdateTests covers paths, atomicity, serialization and matched counts.
 
 CREATE [UNIQUE] INDEX [IF NOT EXISTS] name ON collection (path [, path ...]) and
 DROP INDEX [IF EXISTS] name ON collection execute. Indexes have 1..32 distinct ordered paths;

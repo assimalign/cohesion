@@ -89,7 +89,7 @@ public sealed class OqlKeywordDispositionTests
         // Statements and clauses of other languages
         ["ALTER"] = Rejects("ALTER INDEX ix ON c", "ALTER"),
         ["INSERT"] = Parses("INSERT INTO c (KEY, VALUE) VALUES ('k', 1)"),
-        ["RETURNING"] = Rejects("INSERT INTO c (KEY, VALUE) VALUES ('k', 1) RETURNING k", "RETURNING"),
+        ["RETURNING"] = Parses("INSERT INTO c (KEY, VALUE) VALUES ('k', 1) RETURNING k"),
         ["UPDATE"] = Parses("UPDATE c SET a = 1"),
         ["UNSET"] = Parses("UPDATE c UNSET a"),
         ["DELETE"] = Parses("DELETE FROM c WHERE a IN (1)"),

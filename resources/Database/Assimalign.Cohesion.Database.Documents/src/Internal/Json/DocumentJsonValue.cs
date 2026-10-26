@@ -18,7 +18,7 @@ internal static class DocumentJsonValue
         return buffer.WrittenSpan.ToArray();
     }
 
-    internal static JsonElement Object(IEnumerable<KeyValuePair<string, object?>> members, string? writeVerb = null, int maxDepth = 256)
+    internal static JsonElement Object(IEnumerable<KeyValuePair<string, object?>> members, string? writeVerb = null, int maxDepth = 256, string resultClause = "SELECT")
     {
         // Couchbase expression/cons_object.go:53-77 constructs a keyed map and assigns
         // non-MISSING members into it (72-73). Later assignments replace the same key.
@@ -45,11 +45,11 @@ internal static class DocumentJsonValue
         }
         catch (InvalidOperationException exception)
         {
-            throw Depth("object", writeVerb, exception);
+            throw Depth("object", writeVerb, resultClause, exception);
         }
     }
 
-    internal static JsonElement Array(IEnumerable<object?> elements, string? writeVerb = null, int maxDepth = 256)
+    internal static JsonElement Array(IEnumerable<object?> elements, string? writeVerb = null, int maxDepth = 256, string resultClause = "SELECT")
     {
         try
         {
@@ -65,15 +65,15 @@ internal static class DocumentJsonValue
         }
         catch (InvalidOperationException exception)
         {
-            throw Depth("array", writeVerb, exception);
+            throw Depth("array", writeVerb, resultClause, exception);
         }
     }
 
-    private static DocumentPlanningException Depth(string constructor, string? writeVerb, Exception exception)
+    private static DocumentPlanningException Depth(string constructor, string? writeVerb, string resultClause, Exception exception)
         => writeVerb is not null
             ? new DocumentPlanningException("CD02008", string.Format(CultureInfo.CurrentCulture, ErrorMessages.WriteJsonInvalid, writeVerb), innerException: exception)
             : new DocumentPlanningException("CD05015", string.Format(CultureInfo.CurrentCulture,
-                ErrorMessages.SelectConstructorDepthExceeded, constructor), innerException: exception);
+                ErrorMessages.ResultConstructorDepthExceeded, resultClause, constructor), innerException: exception);
 
     internal static void Write(Utf8JsonWriter writer, object? value, string? writeVerb = null)
     {

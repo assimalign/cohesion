@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Globalization;
+using System.Linq;
 
 using Assimalign.Cohesion.Database.Documents.Language;
 
@@ -30,7 +31,8 @@ internal sealed partial class DocumentPlanner
             Validate(predicate, allowAggregate: false, functions: _functions);
         }
         return new DocumentUpdatePlan(collection, update, targets.AsReadOnly(),
-            ChooseAccess(update.Predicate, update.Alias, _catalog.GetIndexes(collection.Id, _snapshot)));
+            ChooseAccess(update.Predicate, update.Alias, _catalog.GetIndexes(collection.Id, _snapshot)),
+            PlanReturning(update.Returning, update.Collection, update.Alias));
 
         void Add(OqlPathExpression path, OqlExpression? value)
         {
@@ -100,7 +102,8 @@ internal sealed partial class DocumentPlanner
             Validate(predicate, allowAggregate: false, functions: _functions);
         }
         return new DocumentDeletePlan(collection, delete,
-            ChooseAccess(delete.Predicate, delete.Alias, _catalog.GetIndexes(collection.Id, _snapshot)));
+            ChooseAccess(delete.Predicate, delete.Alias, _catalog.GetIndexes(collection.Id, _snapshot)),
+            PlanReturning(delete.Returning, delete.Collection, delete.Alias));
     }
 
     private DocumentStatementPlan PlanWrite(OqlExpression statement, string destination,
@@ -110,6 +113,12 @@ internal sealed partial class DocumentPlanner
         string verb = statement is OqlUpsertExpression ? "UPSERT" : "INSERT";
         DocumentSystemCollections.EnsureReadOnly(destination, statement.Location);
         var collection = ResolveCollection(destination, statement.Location);
+        var returning = statement switch
+        {
+            OqlInsertExpression insert => PlanReturning(insert.Returning, destination, insert.Alias),
+            OqlUpsertExpression upsert => PlanReturning(upsert.Returning, destination, upsert.Alias),
+            _ => null,
+        };
         if (select is null)
         {
             if (values.Count == 0)
@@ -128,16 +137,16 @@ internal sealed partial class DocumentPlanner
                 }
             }
             return statement is OqlUpsertExpression upsert
-                ? new DocumentUpsertPlan(collection, upsert)
-                : new DocumentInsertPlan(collection, (OqlInsertExpression)statement);
+                ? new DocumentUpsertPlan(collection, upsert, Returning: returning)
+                : new DocumentInsertPlan(collection, (OqlInsertExpression)statement, returning);
         }
         var source = Plan((OqlExpression)select);
         var logical = source is DocumentPlan plan ? plan.Logical : ((DocumentSystemCollectionPlan)source).Logical;
         int keyOrdinal = Bind(keyName);
         int? valueOrdinal = valueName is null ? null : Bind(valueName);
         return statement is OqlUpsertExpression upsertSelect
-            ? new DocumentUpsertPlan(collection, upsertSelect, source, keyOrdinal, valueOrdinal)
-            : new DocumentInsertSelectPlan(collection, (OqlInsertExpression)statement, source, keyOrdinal, valueOrdinal);
+            ? new DocumentUpsertPlan(collection, upsertSelect, source, keyOrdinal, valueOrdinal, returning)
+            : new DocumentInsertSelectPlan(collection, (OqlInsertExpression)statement, source, keyOrdinal, valueOrdinal, returning);
 
         int Bind(string? name)
         {
@@ -148,6 +157,24 @@ internal sealed partial class DocumentPlanner
             throw new DocumentPlanningException("CD05001", string.Format(CultureInfo.CurrentCulture,
                 ErrorMessages.WriteOutputMissing, verb, name), statement.Location);
         }
+    }
+
+    private DocumentLogicalPlan? PlanReturning(OqlReturningExpression? returning, string collection, string? alias)
+    {
+        if (returning is null) { return null; }
+        foreach (var projection in returning.Projections)
+        {
+            _cancellationToken.ThrowIfCancellationRequested();
+            if (projection.Alias is { Length: 0 })
+            { throw new DocumentPlanningException("CD01026", ErrorMessages.ReturningNameInvalid, projection.Expression.Location); }
+            Validate(projection.Expression, allowAggregate: false, allowStar: !returning.IsValue, functions: _functions);
+        }
+        // A destination without AS is its own binding, independently of an INSERT SELECT source.
+        var logical = CreateLogicalPlan(new OqlSelectExpression(collection, alias ?? collection, returning.Projections,
+            null, [], null, [], false, returning.IsValue, location: returning.Location), _cancellationToken, _parameters, _functions);
+        if (logical.Projections.Any(projection => projection.Name.Length == 0))
+        { throw new DocumentPlanningException("CD01026", ErrorMessages.ReturningNameInvalid, returning.Location); }
+        return logical;
     }
 
     private static void ValidateMetadata(OqlExpression expression, string? alias, bool storedSource)

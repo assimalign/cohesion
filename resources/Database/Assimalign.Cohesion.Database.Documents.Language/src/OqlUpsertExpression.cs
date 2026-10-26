@@ -16,10 +16,12 @@ public sealed class OqlUpsertExpression : OqlExpression
     /// <param name="keyName">The SELECT output name supplying the key.</param>
     /// <param name="valueName">The SELECT output name supplying the value, or null to store the output row.</param>
     /// <param name="location">The source span.</param>
+    /// <param name="returning">The optional affected-document projection.</param>
     public OqlUpsertExpression(string collection, string? alias,
         IReadOnlyList<(OqlExpression Key, OqlExpression Value)> values, OqlSelectExpression? select,
-        string? keyName, string? valueName, Location? location = null) : base(location)
+        string? keyName, string? valueName, Location? location = null, OqlReturningExpression? returning = null) : base(location)
     {
+        Returning = returning;
         Collection = collection;
         Alias = alias;
         Values = values;
@@ -41,6 +43,9 @@ public sealed class OqlUpsertExpression : OqlExpression
     /// <summary>Gets the SELECT value output name, or null for the complete row.</summary>
     public string? ValueName { get; }
 
+    /// <summary>Gets the optional affected-document projection.</summary>
+    public OqlReturningExpression? Returning { get; }
+
     private sealed class DebugView
     {
         private readonly global::Assimalign.Cohesion.Database.Documents.Language.OqlUpsertExpression _target;
@@ -50,6 +55,7 @@ public sealed class OqlUpsertExpression : OqlExpression
             _target = value;
         }
 
+        public OqlReturningExpression? Returning => _target.Returning;
         public string Collection => _target.Collection;
         public string? Alias => _target.Alias;
         public global::System.Collections.Generic.IReadOnlyList<(global::Assimalign.Cohesion.Database.Documents.Language.OqlExpression Key, global::Assimalign.Cohesion.Database.Documents.Language.OqlExpression Value)> Values => _target.Values;

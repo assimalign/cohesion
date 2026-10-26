@@ -37,13 +37,13 @@ public sealed class DocumentResultSet : IReadOnlyList<DocumentRow>
     /// <summary>Gets columns in projection order.</summary>
     public IReadOnlyList<DocumentColumn> Columns { get; }
 
-    /// <summary>Gets the mutation count, or -1 for a row-returning statement.</summary>
+    /// <summary>Gets the mutation count, including writes with RETURNING rows, or -1 for a read-only statement.</summary>
     public long AffectedCount { get; }
 
-    /// <summary>Gets whether the statement returns bare JSON values (SELECT *, VALUE or RAW), including an empty result.</summary>
+    /// <summary>Gets whether the statement returns bare JSON values (SELECT or RETURNING *, VALUE or RAW), including an empty result.</summary>
     public bool IsDocumentQuery { get; }
 
-    /// <summary>Gets bare JSON values for SELECT *, VALUE or RAW; empty for named projections.</summary>
+    /// <summary>Gets bare JSON values for SELECT or RETURNING *, VALUE or RAW; empty for named projections.</summary>
     public IReadOnlyList<JsonElement> Documents { get; }
 
     /// <summary>Gets the number of materialized rows.</summary>
