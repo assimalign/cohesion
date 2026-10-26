@@ -687,10 +687,15 @@ expressions retain a full scan unless another safe anchor is available.
 Relationship-type anchors (#1633, GQ-R2) compete at every outer singleton edge position.
 A named type or pure disjunction of names selects only those persistent format-5 posting ranges;
 duplicate names are removed. Retained-publication counts, reconstructed on open and incremented
-with relationship publication, sum across the selected types. Undirected and left-or-right
-estimates double that sum conservatively; a self-loop still emits one orientation. As with label
-estimates, history, rollback and pending statements may make counts inaccurate; counts never
-decide visibility. Equality seeks count at most 512 physical index entries and 32 page visits,
+with relationship publication, sum across the selected types. Each maintenance pass reconciles
+them against retained relationship headers after undo and record/index reclamation, removing
+purged and rolled-back publications without reopening. The directory keeps the immutable type
+name for each relationship identity; stamp-verified references prevent reused slots from counting.
+Planning reads only cached counts and performs no reconciliation or graph-record scan.
+Undirected and left-or-right estimates double that sum conservatively; a self-loop still emits
+one orientation. Pinned history and pending statements can still inflate advisory counts;
+rollback removals are reflected by the next successful maintenance pass. Counts never decide
+visibility. Equality seeks count at most 512 physical index entries and 32 page visits,
 without graph-record decoding. An incomplete count falls back to at least the retained label
 population, rather than treating a partial prefix as an exact selective count. Numeric key
 collisions are included. Ties prefer an equality seek, then the first node candidate, then the

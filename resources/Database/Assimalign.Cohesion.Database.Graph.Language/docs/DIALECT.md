@@ -441,8 +441,9 @@ orientations, with one orientation for a self-loop. Quantified edges, wildcard/n
 type expressions and WHERE-only relationship type predicates retain their existing safe paths.
 EXPLAIN reports RelationshipTypeScan with selected names, edge ordinal, direction and
 postings=(type_id,relationship). Its posting edge has no Expand row. Available anchor estimates
-populate estimated_rows; actual_rows stays NULL. Type estimates sum retained publications and
-double for unconstrained direction; property seeks use a count bounded to 512 physical entries
+populate estimated_rows; actual_rows stays NULL. Type estimates sum retained publications,
+reconciled during maintenance after purge or rollback without reopening or scanning during
+planning, and double for unconstrained direction; property seeks use a count bounded to 512 physical entries
 and 32 page visits, falling back conservatively to the label population when incomplete.
 One posting head consumes one physical work unit, including union priming and resumed reads,
 shared by both undirected orientations. A work refusal occurs before inspecting an unadmitted
