@@ -298,6 +298,142 @@ public sealed class GraphShortestPathTests
         budget.Memory.ActiveLeases.ShouldBe(0);
     }
 
+    [Theory(DisplayName = "Cohesion Test [Graph] - Shortest path: session teardown refuses expansion and both reconstruction reads (#1536)")]
+    [InlineData(IsolationLevel.Snapshot, 1)]
+    [InlineData(IsolationLevel.Snapshot, 2)]
+    [InlineData(IsolationLevel.Snapshot, 3)]
+    [InlineData(IsolationLevel.Snapshot, 4)]
+    [InlineData(IsolationLevel.Snapshot, 5)]
+    [InlineData(IsolationLevel.ReadCommitted, 1)]
+    [InlineData(IsolationLevel.ReadCommitted, 2)]
+    [InlineData(IsolationLevel.ReadCommitted, 3)]
+    [InlineData(IsolationLevel.ReadCommitted, 4)]
+    [InlineData(IsolationLevel.ReadCommitted, 5)]
+    public async Task SearchAsync_RecordedSessionTeardown_ShouldRefuseClosedSession(IsolationLevel isolation, int closeAt)
+    {
+        // Arrange: own writes disappear when teardown rolls the explicit transaction back.
+        await using var engine = GraphDatabaseEngine.Create("teardown", new());
+        var database = await engine.CreateDatabaseAsync("graph");
+        await using var session = await database.CreateSessionAsync();
+        await using var transaction = await session.BeginTransactionAsync(isolation);
+        var a = await NodeAsync(database, session, "a");
+        var b = await NodeAsync(database, session, "b");
+        await EdgeAsync(database, session, a, b);
+        int teardowns = 0;
+        var budget = new GraphPlanExecutor.ExpansionBudget
+        {
+            OnConsume = count =>
+            {
+                if (count != closeAt) { return; }
+                session.DisposeAsync().AsTask().GetAwaiter().GetResult();
+                teardowns++;
+            },
+        };
+
+        // Act: work 4 reads the target node; work 5 reads its predecessor relationship.
+        var error = await Should.ThrowAsync<DatabaseException>(async () =>
+            await database.RunAsync(session, operation => GraphShortestPathFinder.SearchAsync(database,
+                operation, new(a.Id, b.Id), budget, true, CancellationToken.None), CancellationToken.None));
+
+        // Assert
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CK07004");
+        teardowns.ShouldBe(1);
+        budget.Physical.ShouldBe(closeAt);
+        budget.Memory.RetainedBytes.ShouldBe(0);
+        budget.Memory.ActiveLeases.ShouldBe(0);
+        session.State.ShouldBe(SessionState.Closed);
+        transaction.State.ShouldBe(TransactionState.RolledBack);
+        await using var observer = await database.CreateSessionAsync();
+        await CheckDistanceAsync(database, observer, new(a.Id, b.Id), null);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Graph] - Shortest path: rollback during reconstruction retains the operation lifecycle refusal (#1536)")]
+    [InlineData(IsolationLevel.Snapshot, 4)]
+    [InlineData(IsolationLevel.Snapshot, 5)]
+    [InlineData(IsolationLevel.ReadCommitted, 4)]
+    [InlineData(IsolationLevel.ReadCommitted, 5)]
+    public async Task SearchAsync_RecordedTransactionRollback_ShouldRefuseEndedOperation(IsolationLevel isolation, int rollbackAt)
+    {
+        // Arrange
+        await using var engine = GraphDatabaseEngine.Create("rollback-reconstruction", new());
+        var database = await engine.CreateDatabaseAsync("graph");
+        await using var session = await database.CreateSessionAsync();
+        await using var transaction = await session.BeginTransactionAsync(isolation);
+        var a = await NodeAsync(database, session, "a");
+        var b = await NodeAsync(database, session, "b");
+        await EdgeAsync(database, session, a, b);
+        int rollbacks = 0;
+        var budget = new GraphPlanExecutor.ExpansionBudget
+        {
+            OnConsume = count =>
+            {
+                if (count != rollbackAt) { return; }
+                transaction.RollbackAsync(CancellationToken.None).AsTask().GetAwaiter().GetResult();
+                rollbacks++;
+            },
+        };
+
+        // Act
+        var error = await Should.ThrowAsync<DatabaseException>(async () =>
+            await database.RunAsync(session, operation => GraphShortestPathFinder.SearchAsync(database,
+                operation, new(a.Id, b.Id), budget, true, CancellationToken.None), CancellationToken.None));
+
+        // Assert
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CK04002");
+        rollbacks.ShouldBe(1);
+        budget.Physical.ShouldBe(rollbackAt);
+        budget.Memory.RetainedBytes.ShouldBe(0);
+        budget.Memory.ActiveLeases.ShouldBe(0);
+        transaction.State.ShouldBe(TransactionState.RolledBack);
+        await CheckDistanceAsync(database, session, new(a.Id, b.Id), null);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Graph] - Shortest path: an absent selected node or relationship fails with a coded error (#1536)")]
+    [InlineData(IsolationLevel.Snapshot, 4)]
+    [InlineData(IsolationLevel.Snapshot, 5)]
+    [InlineData(IsolationLevel.ReadCommitted, 4)]
+    [InlineData(IsolationLevel.ReadCommitted, 5)]
+    public async Task SearchAsync_AbsentReconstructionRecord_ShouldRefuseWithoutPartialPath(IsolationLevel isolation, int deleteAt)
+    {
+        // Arrange: remove a selected record through the store while the operation stays active.
+        await using var engine = GraphDatabaseEngine.Create("absent-reconstruction", new());
+        var database = await engine.CreateDatabaseAsync("graph");
+        await using var session = await database.CreateSessionAsync();
+        await using var transaction = await session.BeginTransactionAsync(isolation);
+        var a = await NodeAsync(database, session, "a");
+        var b = await NodeAsync(database, session, "b");
+        var edge = await EdgeAsync(database, session, a, b);
+        int deletions = 0;
+        var budget = new GraphPlanExecutor.ExpansionBudget
+        {
+            OnConsume = count =>
+            {
+                if (count != deleteAt) { return; }
+                var deletion = deleteAt == 4
+                    ? database.Store.DeleteNodeAsync(b.Id.Value, true, transaction.Context, CancellationToken.None)
+                    : database.Store.DeleteRelationshipAsync(edge.Id.Value, transaction.Context, CancellationToken.None);
+                deletion.AsTask().GetAwaiter().GetResult();
+                deletions++;
+            },
+        };
+
+        // Act
+        var error = await Should.ThrowAsync<DatabaseException>(async () =>
+            await database.RunAsync(session, operation => GraphShortestPathFinder.SearchAsync(database,
+                operation, new(a.Id, b.Id), budget, true, CancellationToken.None), CancellationToken.None));
+
+        // Assert
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG05022");
+        error.InnerException.ShouldBeNull();
+        deletions.ShouldBe(1);
+        budget.Physical.ShouldBe(deleteAt);
+        budget.Memory.RetainedBytes.ShouldBe(0);
+        budget.Memory.ActiveLeases.ShouldBe(0);
+        transaction.State.ShouldBe(TransactionState.Faulted);
+        await transaction.RollbackAsync(CancellationToken.None);
+        await CheckDistanceAsync(database, session, new(a.Id, b.Id), null);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Graph] - Shortest path: cancellation after public statement admission aborts the transaction (#1536)")]
     public async Task FindShortestPathAsync_CanceledDuringTypeResolution_ShouldAbortAndReleaseMemory()
     {

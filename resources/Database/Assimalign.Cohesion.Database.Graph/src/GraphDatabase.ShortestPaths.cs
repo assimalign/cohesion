@@ -48,13 +48,16 @@ public sealed partial class GraphDatabase
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
     /// <exception cref="DatabaseException">The direction is invalid (CG05001); session ownership,
     /// state or transaction admission refuses the statement; limits are invalid (CG08021); or the
-    /// physical-work (CG05004) or retained-memory (CG05020) budget is exhausted.</exception>
+    /// physical-work (CG05004) or retained-memory (CG05020) budget is exhausted; or a selected
+    /// record is absent during reconstruction while the operation is active (CG05022).</exception>
     /// <exception cref="DatabaseOfflineException">The database is offline (CG06012).</exception>
     /// <remarks>Equal-length ties select the lexicographically smallest relationship-identity sequence.
     /// Only the selected path is materialized. The search keeps one predecessor per visited identity,
     /// with O(visited vertices + frontier) search state, plus the returned entity payloads and bounded
     /// adjacency cursor buffers. Cancellation and budget failures never return partial paths.
-    /// The same type, zero-length and transaction rules as FindShortestDistanceAsync apply.</remarks>
+    /// The same type, zero-length and transaction rules as FindShortestDistanceAsync apply.
+    /// Session closure or transaction termination during expansion or reconstruction retains the
+    /// lifecycle refusal. An absent selected record while the operation is active fails with CG05022.</remarks>
     public ValueTask<GraphShortestPathResult?> FindShortestPathAsync(GraphDatabaseSession session, GraphShortestPathSearch search,
         CancellationToken cancellationToken = default)
     {

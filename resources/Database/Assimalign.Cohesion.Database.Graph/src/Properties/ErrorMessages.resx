@@ -270,4 +270,6 @@
   <data name="FunctionNullParameterInvalid" xml:space="preserve"><value>A function called on NULL input must use nullable CLR argument types.</value></data>
   <data name="FunctionSignatureDuplicate" xml:space="preserve"><value>A function with this name and signature is already registered.</value></data>
   <data name="FunctionArgumentConversion" xml:space="preserve"><value>A function argument cannot be read as its declared CLR type.</value></data>
+  <data name="ShortestPathNodeMissing" xml:space="preserve"><value>The selected shortest path contains a node absent from this statement snapshot.</value></data>
+  <data name="ShortestPathRelationshipMissing" xml:space="preserve"><value>The selected shortest path contains a relationship absent from this statement snapshot.</value></data>
 </root>
