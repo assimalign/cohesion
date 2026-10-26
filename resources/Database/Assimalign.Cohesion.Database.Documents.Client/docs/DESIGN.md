@@ -177,6 +177,8 @@ A 2.0 or unnegotiated 2.1 peer remains usable for its rental but cannot be poole
 Status bookkeeping after Complete uses the shared bounded cleanup token, so caller cancellation
 cannot turn acknowledged COMMIT into cancellation. A missing acknowledgement leaves outcome unknown;
 disconnect cleanup never retries COMMIT. Abandoning an unfinished exchange discards the connection.
+Postamble failures retain the shared protocol, transport or cleanup exception and discard the
+session; they never retry an acknowledged statement or claim that committed work was rolled back.
 InMemory and TCP tests cover visibility, isolation, failed commands, pooled rollback, disconnect,
 cancellation/disposal races, invalid status/reset and cancellation after COMMIT acknowledgement.
 The NativeAOT sample exercises wire controls and reset on both transports.

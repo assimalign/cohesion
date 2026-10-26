@@ -232,6 +232,9 @@ token; caller cancellation in that window does not turn an acknowledged COMMIT i
 Ping and other exchanges retain their existing completion contract. Documents Command drains
 status because CRUD failures can fault an explicit transaction. The original
 statement exception survives a failure reading its status, and the connector is discarded.
+After a successful completion, a postamble failure still raises its existing protocol, transport
+or cleanup exception and discards the connector. It never retries the acknowledged statement or
+claims that committed work was rolled back.
 
 ## Streaming exchange and ownership
 

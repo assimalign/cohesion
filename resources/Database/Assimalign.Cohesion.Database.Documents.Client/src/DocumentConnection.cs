@@ -62,7 +62,7 @@ public sealed class DocumentConnection : IAsyncDisposable
     /// <exception cref="ArgumentException">The statement or a parameter value is invalid.</exception>
     /// <exception cref="ObjectDisposedException">The rental is disposed.</exception>
     /// <exception cref="InvalidOperationException">Another exchange is active.</exception>
-    /// <exception cref="OperationCanceledException">The operation is canceled before a terminal response; an unacknowledged COMMIT may have committed.</exception>
+    /// <exception cref="OperationCanceledException">The exchange or bounded status cleanup is canceled; an unacknowledged COMMIT may have committed.</exception>
     /// <exception cref="DocumentClientException">The statement or connection failed.</exception>
     public async ValueTask<long> ExecuteAsync(string statement, IReadOnlyDictionary<string, object?>? parameters = null,
         CancellationToken cancellationToken = default)
