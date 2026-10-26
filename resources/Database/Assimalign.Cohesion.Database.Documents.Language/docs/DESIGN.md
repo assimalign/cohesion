@@ -190,6 +190,9 @@ owned rows, budget CD05018 and the unnegotiated existing-wire completion contrac
 Returning/ReturningValue while retaining its nonexecuting behavior. OqlReturningParserTests,
 OqlExecutionConformanceTests, DocumentReturningTests and DocumentReturningWireTests cover the
 parser, in-process execution and both transports. No disk or frame format changes.
+Older clients can reject the successful completion after an autocommit write has committed,
+so retrying may repeat the write; disconnect rolls back explicit uncommitted work. The dialect
+states both outcomes beside the compatibility contract, and permanent wire probes cover them.
 
 ### LIMIT and OFFSET (#1129)
 

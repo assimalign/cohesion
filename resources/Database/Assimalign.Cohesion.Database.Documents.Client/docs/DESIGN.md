@@ -171,6 +171,12 @@ or a nonnegative value equal to the received row count. Mismatched result/affect
 negative affected counts below -1 still discard the connection. Owner decision 8 (2026-10-25)
 requires no capability or negotiation; older clients that insist on -1 reject these responses.
 This deliberately changes validation semantics without a byte-layout or version change.
+That rejection is a client-side ProtocolViolation and closes the connection after the server
+has already committed an autocommit statement. Its writes remain committed even though the
+client reports failure; retrying a non-idempotent write can apply it again (for example,
+`SET n = n + 10` changes 1 to 11, then a retry changes 11 to 21). In an explicit transaction,
+the disconnect rolls back the uncommitted writes instead. Use an updated client for RETURNING;
+a legacy client's rejection does not certify that an autocommit write was rolled back.
 
 The engine materializes RETURNING inside the statement transaction and charges retained rows to
 its StatementMemoryBudget (64 MiB by default). Projection, serialization preflight or budget failure rolls back all writes,
@@ -178,6 +184,11 @@ returns a terminal Failure before any header/row, and preserves the connection. 
 transaction failures remain faulted until rollback. DocumentReturningWireTests checks all forms,
 metadata, ownership, raw completion bytes, failure ordering, CD05018 and transaction/session reuse
 over InMemory and TCP. The AOT guard exercises the same completion contract on both transports.
+Permanent wire probes also cover UPDATE/DELETE of a document written earlier in the same
+explicit transaction, and the pre-RETURNING completion predicate on both transports, including
+autocommit retry and explicit disconnect cleanup. The malformed-peer zero-affected case has
+a valid decoded Complete and a matching result count, so it reaches ValidateCompletion's
+affected-count predicate directly.
 
 ## Failures and pooling
 
