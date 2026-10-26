@@ -145,7 +145,7 @@ internal sealed partial class SqlPlanner
         if (ViewDefinitionBinding is not { } binding) { return; }
         var ordering = select.OrderBy.Select(order => order.Expression).ToHashSet();
         foreach (var root in SqlViewQuery.Expressions(select).Where(root => !ordering.Contains(root) &&
-            !select.From.SelectMany(item => item.Joins).Any(join => ReferenceEquals(join.Condition, root))))
+            !SourceJoins(select.From).Any(join => ReferenceEquals(join.Condition, root))))
         { CaptureViewExpression(root, columns, bindings, select.From.FirstOrDefault()?.Table, scope); }
         foreach (var column in select.Columns)
         {
@@ -153,7 +153,7 @@ internal sealed partial class SqlPlanner
                 binding.Edits.TryGetValue(projected.Location!.Start, out var rendered) &&
                 (rendered.Text.StartsWith("CAST(", StringComparison.Ordinal) || rendered.Text.StartsWith("CASE ", StringComparison.Ordinal)))
             { binding.Edits[projected.Location.Start] = (rendered.Length, rendered.Text + " AS " + SqlObjectIdentity.Quote(projected.ColumnName)); }
-            if (column.Expression is not SqlStarExpression star) { continue; }
+            if (column.Expression is not SqlStarExpression { Location: not null } star) { continue; }
             var names = new List<string>();
             foreach (int ordinal in outputOrdinals ?? Enumerable.Range(0, columns.Count).ToArray())
             {

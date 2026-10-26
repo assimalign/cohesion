@@ -63,6 +63,7 @@ No new interface, visibility grant, reference, persistent format or wire message
 | Code | Condition |
 | --- | --- |
 | CS05068 | An UPDATE target has more than one matching source association; no row is written. |
+| CS05069 | Direct RIGHT or parenthesized joined DML source requires an unsupported target-outer execution tree; no row is read or written. |
 
 Namespace rules follow PostgreSQL analyze.c:602-621,2560-2578; the owner's cardinality rule
 deliberately differs from nodeModifyTable.c:2599-2608 (first-update behavior).
@@ -332,6 +333,40 @@ in either order using CS00003 and the column name, including table primary keys.
 an existing primary key uses that coded refusal too. SERIAL/BIGSERIAL/SMALLSERIAL are
 rejected when SQL or native domains are created, with CK00001 and an IDENTITY suggestion.
 
+## RIGHT normalization and grouped namespaces (#1525, SQ-J1)
+
+RIGHT [OUTER] JOIN executes by swapping physical children and applying LEFT's ON and
+null-extension rules. Bindings and physical column slots retain the written order. The whole
+written left subtree becomes nullable; RIGHT USING keeps its output slot on the left but
+reads the common-typed right value and collation, including right spelling under case-insensitive equality.
+Unqualified merged columns and qualified physical columns keep separate metadata and values.
+PostgreSQL src/backend/parser/parse_clause.c:1731-1751 supplies the RIGHT representative rule;
+src/backend/optimizer/prep/prepjointree.c:3668-3686 performs the corresponding child swap.
+
+An optional internal tree preserves mixed chains, comma precedence and parenthesized groups.
+Ordinary flat INNER/LEFT/CROSS queries retain their executor and costing path. Normalized
+trees use an explicit postorder work stack, retain each child only through consumption by
+its parent, and run complete ON/WHERE residuals. They conservatively retain input predicates
+at their written level and never reorder the first pair. A two-leaf RIGHT may seek into its
+written left input; proven safe mandatory equalities use the existing budgeted hash table,
+including composite inner subtrees. Hash-bound subtree output feeds the table as it is produced, so budget exhaustion stops production before a complete intermediate is retained; nested builds share and unwind the live statement grant. Unsupported hash conditions use buffered nested loops.
+EXPLAIN nests JoinStep nodes by physical association and names RIGHT-to-LEFT normalization.
+Its traversal emits the complete physical outer subtree before a correlated inner IndexSeek,
+in both EXPLAIN and EXPLAIN ANALYZE, including when the outer input is a derived query.
+ON subqueries capture the namespace before later USING merges or null extension can alter it.
+
+Unaliased parenthesized joins retain their component namespaces. An aliased group lowers to
+a derived SELECT * with the same bag and visible columns, hiding its components. Canonical
+rendering spells that alias as a derived query, with the existing complete column-alias-list rule and 32-level derived binding limit. Group walks retain stack guards. No existing identifier quoting changes, public
+bridge, interface, project reference, disk format or wire message is introduced.
+Derived-first groups retain their association through canonical rendering, CREATE VIEW and
+database reopen, including when nested aliased groups render as derived SELECTs.
+
+Direct RIGHT or grouped join trees in UPDATE FROM / DELETE USING fail CS05069 before reads
+or mutation: this run preserves the target-outer identity invariant. A derived SELECT source
+containing RIGHT executes through the existing materialization path with the target pinned.
+FULL stays CK00001; its physical execution remains SQ-J2.
+
 ## N-way joins (#1109)
 
 ORDER BY aliases following a wildcard count its visible output columns after USING merges;
@@ -388,7 +423,7 @@ Metrics retain ordered JoinAccessPaths (AccessPath renders them separated by sem
 even when empty inputs skip enumeration. A single backing slot holds a scalar or join paths,
 and stored-only planning creates no join output map or flattened-walker enumerators, preserving
 the existing ReadCommitted allocation budget. EXPLAIN emits a JoinStep child for every step,
-with its scan or correlated seek. Grouping and subqueries use this same input plan.
+with its scan or correlated seek. Grouping and subqueries use this same input plan. RIGHT and grouped trees follow the normalization contract above.
 
 Pass-through projections carry source nullability, including all LEFT right columns.
 Delivery transfers the final fresh index inner; every earlier input retained by a later loop
@@ -5900,7 +5935,7 @@ RESTART, generation-mode changes and identity backfill on populated tables remai
 (#1123). Compiled typed schemas cannot declare identity metadata; SQL scripts can create
 identity tables through the ordinary SQL executor.
 
-RIGHT/FULL OUTER, NATURAL and LATERAL joins, qualified wildcards, UPDATE SET
+FULL OUTER, NATURAL and LATERAL joins, qualified wildcards, UPDATE SET
 subqueries, `Serializable`
 isolation (rejected at begin), persisted statistics, standalone ANALYZE, hash spill,
 and index-only result production (a seek always fetches the row).

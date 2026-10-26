@@ -24,9 +24,9 @@ internal sealed partial class SqlPlanner
             reference = select.From[0].Table;
             var source = ResolveRelation(reference, select);
             columns = source.Columns;
-            if (select.From.Count > 1 || select.From[0].Joins.Count > 0 || source.Derived is not null)
+            if (select.From.Count > 1 || select.From[0].Joins.Count > 0 || source.Derived is not null || select.From[0].Table is SqlJoinedTableReference)
             {
-                bindings = BindJoin(select, source, out columns, out _, out _, metadataOnly: true);
+                bindings = BindJoin(select, source, out columns, out _, out _, out _, metadataOnly: true);
             }
         }
         else if (select is not null)
@@ -47,21 +47,15 @@ internal sealed partial class SqlPlanner
     private SqlCorrelationScope SubqueryScope(SqlCorrelationScope scope, SqlSelectExpression? select, SqlExpression source)
     {
         if (select is null) { return scope; }
-        if (scope.Bindings is { } bindings)
+        if (_queryScopes is { } state)
         {
-            int start = 0;
-            foreach (var item in select.From)
+            foreach (var join in SourceJoins(select.From))
             {
-                int end = start + 1;
-                foreach (var join in item.Joins)
+                if (join.Condition is { } condition && ContainsNode(condition, source) &&
+                    state.JoinScopes.TryGetValue((select, condition), out var local))
                 {
-                    end++;
-                    if (join.Condition is not null && ContainsNode(join.Condition, source))
-                    {
-                        return new SqlCorrelationScope(scope.Id, scope.Local.ForRelations(bindings.Skip(start).Take(end - start).ToArray()), scope.Parent);
-                    }
+                    return new SqlCorrelationScope(scope.Id, local, scope.Parent);
                 }
-                start = end;
             }
         }
         bool grouped = select.GroupBy.Count > 0 || select.Having is not null || ProjectsOrOrdersByAggregate(select);

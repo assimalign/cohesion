@@ -124,7 +124,7 @@ INSERT SELECT, UPDATE and DELETE without applying the write or evaluating the pr
 The parser and canonical renderer accept `UPDATE t [AS alias] SET ... FROM s1, s2 ... WHERE ... RETURNING ...`
 and `DELETE FROM t [AS alias] USING s1, s2 ... WHERE ... RETURNING ...`. Sources use the SELECT
 relation grammar: stored tables, views, system relations, CTEs and aliased derived queries, with
-INNER, LEFT and CROSS joins. RIGHT/FULL joins retain their CK00001 refusal.
+INNER, LEFT and CROSS joins. RIGHT or parenthesized joins directly in these DML lists fail CS05069 before reads or writes; RIGHT inside a derived SELECT source executes with the target pinned. FULL keeps CK00001.
 These forms execute and are advertised as UPDATE FROM and DELETE USING in the SQL profile.
 Plain EXPLAIN describes the target/source association plan without applying the mutation.
 
@@ -351,7 +351,7 @@ complete ISO SQL support; the boundaries below are part of the contract.
 
 | Statement | Status | Notes |
 |---|---|---|
-| `SELECT` | Supported subset, measured | Stored tables, persisted read-only views, virtual system relations and aliased derived queries, with written-order N-way INNER/LEFT/CROSS joins and comma items over these source kinds; `DISTINCT`, projections and aliases, scalar expressions, `WHERE`, grouping, multi-expression `ORDER BY ASC/DESC` with per-key `NULLS FIRST`/`NULLS LAST`, nonnegative integer `LIMIT`/`OFFSET`, ISO `FETCH FIRST`/`NEXT`, and the SQL Server `TOP` lexical alias. `COUNT(*)`, `COUNT(expr)`, `SUM`, `AVG`, `MIN`, `MAX`, `STRING_AGG`, and `LISTAGG` execute in grouped and ungrouped queries, with DISTINCT/ALL and ordered inputs. See the aggregate contract below. Top-level `SELECT` without `FROM` is rejected by the planner; CTE bodies can use one implicit row. |
+| `SELECT` | Supported subset, measured | Stored tables, persisted read-only views, virtual system relations and aliased derived queries, with written-order N-way INNER/LEFT/RIGHT/CROSS joins and comma items over these source kinds; `DISTINCT`, projections and aliases, scalar expressions, `WHERE`, grouping, multi-expression `ORDER BY ASC/DESC` with per-key `NULLS FIRST`/`NULLS LAST`, nonnegative integer `LIMIT`/`OFFSET`, ISO `FETCH FIRST`/`NEXT`, and the SQL Server `TOP` lexical alias. `COUNT(*)`, `COUNT(expr)`, `SUM`, `AVG`, `MIN`, `MAX`, `STRING_AGG`, and `LISTAGG` execute in grouped and ungrouped queries, with DISTINCT/ALL and ordered inputs. See the aggregate contract below. Top-level `SELECT` without `FROM` is rejected by the planner; CTE bodies can use one implicit row. |
 | `EXPLAIN` | Supported extension, measured | SELECT, INSERT (including query sources), UPDATE or DELETE returns the chosen plan as ordinary rows without executing it. Plain EXPLAIN remains nonexecuting. SELECT-only `EXPLAIN ANALYZE` executes the query and reports actual candidate work (#1522); data changes, including WITH data changes, normally fail `CS05057` (0A000), retaining the earlier `CS04021` read-only catalog refusal where applicable. DDL, transaction control and nested EXPLAIN report `CK00001`. Standalone ANALYZE remains unsupported. |
 | `INSERT` / `VALUES` | Supported subset, measured | Optional column list, multi-row literal/scalar `VALUES` including whole-item `DEFAULT`, `INSERT ... DEFAULT VALUES` (one row of defaults, with an optional column list), and transactional `INSERT ... SELECT` with the same destination coercion, defaults, and constraints. `VALUES` expressions have no columns in scope: a column reference reports `CS01005` before anything executes (see [VALUES and counts have no column scope](#values-and-counts-have-no-column-scope-1165)). Subqueries inside `VALUES` are excluded; use `INSERT ... SELECT`. |
 | `INSERT ... ON CONFLICT` | Supported subset, measured | Column-set inference, ON CONSTRAINT unique-index names, untargeted DO NOTHING, and targeted DO UPDATE SET/WHERE with target and EXCLUDED scope; inserted/updated RETURNING rows and counts. See the upsert contract above. |
@@ -369,7 +369,7 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | `ORDER BY` | Supported subset, measured | Multiple source-column/scalar-expression keys, projection aliases (bare or nested in expressions), and one-based select-list ordinals execute with ASC/DESC. Unqualified aliases take precedence over same-named source columns; qualified references bind to the source. Composes with DISTINCT, LIMIT/OFFSET, supported joins, grouped/aggregate queries, and system relations. Zero, negative, out-of-range, and non-integer numeric ordinals error; `1 + 1` remains a constant expression. Explicit NULLS FIRST/LAST and derived-table output ordering execute; GROUP BY ordinals report `CK00001`. See the ordering contract below (#1024). |
 | `CAST` | Supported subset, measured | Built-in conversions across all 19 shared types according to the [conversion matrix](#explicit-conversion-cast-1022-e3), plus application-registered casts (E3's cast registry), in projections, predicates, ordering, and DML expressions, including the SQL server/client. See the exact pair and error contract below. CAST executes in DEFAULT; CHECK still rejects CAST. |
 | `COLLATE` | Supported subset, measured | Column and expression overrides: `binary`, `case_insensitive`, `case_accent_insensitive`, plus compatibility `invariant` with scan execution only. Effective collation governs comparisons, `LIKE`, ordering, grouping, `DISTINCT`, and unique keys. See the collation contract below. |
-| `JOIN` / `USING` | Supported subset, measured | N-way INNER (or bare JOIN), LEFT [OUTER], CROSS and comma joins over stored/system/derived sources. INNER/LEFT require ON or USING; CROSS accepts neither. RIGHT/FULL, NATURAL, LATERAL and qualified wildcards remain excluded. See the precise contract below. |
+| `JOIN` / `USING` | Supported subset, measured | N-way INNER (or bare JOIN), LEFT [OUTER], RIGHT [OUTER], CROSS and comma joins over stored/system/derived sources, with parenthesized join groups. INNER/LEFT/RIGHT require ON or USING; CROSS accepts neither. FULL, NATURAL, LATERAL and qualified wildcards remain excluded. See the precise contract below. |
 | `GROUP BY` / `HAVING` | Supported subset, measured | One or more grouping expressions; `WHERE` filters input rows and `HAVING` filters groups after aggregation. Composes with supported N-way joins, `ORDER BY`, `LIMIT`, and `OFFSET`, including server/client execution. Ungrouped, unaggregated projected columns are errors. `DISTINCT`/`ALL` and aggregate input `ORDER BY` execute; STRING_AGG and LISTAGG concatenate text. Grouping extensions, windows, and other ordered-set aggregates report `CK00001`. |
 | Subqueries / `INSERT ... SELECT` | Supported subset, measured | Correlated and uncorrelated scalar, `IN`/`NOT IN`, `EXISTS`/`NOT EXISTS`, and scalar `op ANY`, `op SOME` or `op ALL` queries in supported SELECT expressions and UPDATE/DELETE WHERE predicates, plus aliased derived tables and transactional insert-source queries. Each body may be a set operation (#1114). All use the outer statement snapshot; nesting is limited to 32 subquery levels, within the statement's expression nesting limit (256 levels by default, `CS00006`). Subqueries in UPDATE SET, VALUES, CHECK/DEFAULT, and LIMIT/OFFSET/FETCH/TOP expressions report `CK00001`. See the subquery contract below. |
 | `TOP` / `FETCH` | Supported subset, measured | Row counts normalize to LIMIT/Offset plan fields; see [Pagination](#pagination-1107). PERCENT, WITH TIES and DML TOP retain CK00001. |
@@ -1153,13 +1153,13 @@ session overrides, and collation-aware full-text indexes report `CK00001` or
 an explicit execution error. Full linguistic collation is deferred to #1026.
 SQL defaults do not apply to Documents, Graph, Key-Value, or Blob comparisons.
 
-## Joins (#1019)
+## Joins (#1019, #1525)
 
 FROM is a comma-separated list of join trees. Each item starts with a stored table,
 registered INFORMATION_SCHEMA/COHESION_SCHEMA relation or aliased derived query, followed by any number of INNER
-(including bare JOIN), LEFT [OUTER], or CROSS joins. INNER and LEFT require exactly one
+(including bare JOIN), LEFT [OUTER], RIGHT [OUTER], or CROSS joins. INNER, LEFT and RIGHT require exactly one
 ON predicate or USING (column [, column ...]); CROSS accepts neither. Missing ON/USING
-and RIGHT/FULL OUTER remain CK00001; malformed joins and CROSS with a condition fail
+and FULL OUTER remain CK00001; malformed joins and CROSS with a condition fail
 with an error and never execute as a product. NATURAL, LATERAL and qualified wildcards
 such as t.* keep CK00001. Derived comma inputs, FROM t, (SELECT ...) d, execute.
 
@@ -1175,7 +1175,20 @@ covers stored-table query clauses and the CHECK declaration/reopen contract (#11
 PostgreSQL anchors: doc/src/sgml/queries.sgml:217-227 and
 src/backend/parser/parse_clause.c:370-386 (the ON scope contains only its join inputs).
 
-Joins execute left-deep in written order without reordering. Only the first INNER pair
+Unparenthesized joins associate left to right. Parenthesized groups preserve that explicit
+association and expose their constituent namespaces. An alias on a group hides those namespaces
+and lowers to an aliased SELECT * derived relation, including optional complete column-alias lists and the existing 32-level derived-query binding limit.
+Groups may begin with an aliased derived query for INNER, LEFT, RIGHT or CROSS JOIN,
+including nested groups. Their canonical text remains parseable when group aliases introduce
+derived SELECTs, so CREATE VIEW and reopening the view preserve the same association.
+RIGHT swaps physical children and executes LEFT null extension; its written left subtree
+becomes nullable, while its written right side is preserved. Written SELECT * ordinals and
+qualified references remain left-then-right. EXPLAIN identifies "normalized RIGHT to LEFT"
+and the chosen hash, index or buffered path. Grouped or RIGHT trees keep all predicates at
+their written level; safe mandatory hash keys still qualify, and a two-leaf RIGHT can seek
+into its written left input. No first-pair reorder crosses an outer boundary.
+
+Ordinary flat joins execute left-deep in written order. Only the first INNER pair
 may swap sides for an index. Each later step may seek into the input it adds; a LEFT
 step always drives from its preserved left input. Mandatory equalities must bind an
 index-key prefix under the existing type and effective-collation rules. The full ON
@@ -1207,7 +1220,7 @@ NULL, duplicate-key and mixed-numeric comparison semantics, including scan fallb
 when a planned index is detached or replaced.
 
 Only TRUE matches ON or the implicit USING equalities; FALSE and UNKNOWN do not.
-LEFT supplies NULL for every right column when no candidate matches. A predicate in
+LEFT supplies NULL for every right column when no candidate matches; RIGHT supplies NULL for every column of its written left subtree. A predicate in
 ON preserves unmatched left rows; the same predicate in WHERE can remove them.
 COUNT(*) counts the extended row while COUNT(right.column) ignores its NULL. All
 join forms compose with grouping/HAVING, DISTINCT, ordering and LIMIT/OFFSET.
@@ -1219,10 +1232,10 @@ ambiguous names fail binding with CS01015. Its equality uses ordinary ON collati
 precedence, including column overrides. The merged output uses PostgreSQL's common-type
 selection through implicit casts within the same type category. INT/DECIMAL produces DECIMAL
 and INT/BIGINT produces BIGINT in either order, including arithmetic and function overloads.
-LEFT preserves the coerced left value and its nullability; INNER prefers an unchanged input
+LEFT preserves the coerced left value and its nullability; RIGHT preserves the coerced right value and its nullability. INNER prefers an unchanged input
 of the common type when available. Length, precision and scale remain only when both input
 types and modifiers agree; CHAR(3)/VARCHAR(10) clears the length. Qualified references retain
-their own types and modifiers; right qualified references become nullable under LEFT.
+their own types and modifiers; right qualified references become nullable under LEFT and left qualified references become nullable under RIGHT.
 Pairs with no common type fail planning with CS01015, even on empty inputs.
 Identical domains retain their domain identity; differing domains or a domain/base pair
 resolve through their base types (PostgreSQL parse_coerce.c:1360-1387).
@@ -1630,7 +1643,7 @@ Refusing repeated FOREIGN KEY child columns is stricter than PostgreSQL.
 ## Grouping and aggregate functions (#1020)
 
 Grouping is a separate execution stage over a stored table, a virtual system
-relation, or supported N-way INNER/LEFT/CROSS/comma joins. `WHERE` first filters
+relation, or supported N-way INNER/LEFT/RIGHT/CROSS/comma joins. `WHERE` first filters
 individual input rows. `GROUP BY` then forms one row per distinct tuple of one
 or more scalar expressions. Aggregate functions consume the surviving rows in
 each group; `HAVING` filters the completed groups and retains only TRUE results.

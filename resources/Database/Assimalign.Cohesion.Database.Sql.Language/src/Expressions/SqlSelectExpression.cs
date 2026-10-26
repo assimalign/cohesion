@@ -59,12 +59,14 @@ public sealed class SqlSelectExpression : SqlQueryBodyExpression
         }
         foreach (var item in from)
         {
+            depth = System.Math.Max(depth, GroupDepth(item.Table));
             if (item.Table is SqlDerivedTableReference derived)
             {
                 depth = System.Math.Max(depth, 1 + derived.Query.ExpressionDepth);
             }
             foreach (var join in item.Joins)
             {
+                depth = System.Math.Max(depth, GroupDepth(join.Table));
                 if (join.Table is SqlDerivedTableReference joined)
                 {
                     depth = System.Math.Max(depth, 1 + joined.Query.ExpressionDepth);
@@ -78,6 +80,19 @@ public sealed class SqlSelectExpression : SqlQueryBodyExpression
         }
 
         ExpressionDepth = depth;
+    }
+
+    private static int GroupDepth(SqlRelationReference reference)
+    {
+        if (reference is SqlDerivedTableReference derived) { return 1 + derived.Query.ExpressionDepth; }
+        if (reference is not SqlJoinedTableReference group) { return 0; }
+        System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
+        int depth = GroupDepth(group.Item.Table);
+        foreach (var join in group.Item.Joins)
+        {
+            depth = System.Math.Max(depth, System.Math.Max(GroupDepth(join.Table), SqlExpression.DepthOf(join.Condition)));
+        }
+        return depth + 1;
     }
 
     /// <summary>

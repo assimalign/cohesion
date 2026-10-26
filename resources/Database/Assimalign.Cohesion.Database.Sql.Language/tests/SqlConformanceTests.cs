@@ -36,6 +36,8 @@ public class SqlConformanceTests
 
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - Conformance: supported statements parse without errors")]
     [InlineData("SELECT * FROM users;", SqlQueryCommandType.Select)]
+    [InlineData("SELECT * FROM ((SELECT * FROM a) d RIGHT JOIN b ON d.id = b.id);", SqlQueryCommandType.Select)]
+    [InlineData("SELECT id FROM ((a RIGHT JOIN b USING (id)) q RIGHT JOIN c USING (id));", SqlQueryCommandType.Select)]
     [InlineData("SELECT a FROM t UNION SELECT a FROM u;", SqlQueryCommandType.Select)]
     [InlineData("SELECT a FROM t INTERSECT ALL SELECT a FROM u;", SqlQueryCommandType.Select)]
     [InlineData("SELECT a FROM t EXCEPT DISTINCT SELECT a FROM u;", SqlQueryCommandType.Select)]

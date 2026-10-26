@@ -19,11 +19,15 @@ internal sealed partial class SqlPlanner
             return (table, DmlEvaluator(table.Columns, null, target), null, children);
         }
 
+        if (sources.Any(NeedsJoinTree))
+        {
+            throw new SqlPlanningException("CS05069", ErrorMessages.RightJoinDmlSource, statement.Location);
+        }
         var targetTable = ResolveTable(target);
         var first = new SqlRelationSource(targetTable);
         // Cache derived-source bindings across namespace construction and expression binding.
         _queryScopes ??= new();
-        var bindings = BindJoinSources(sources, statement, first, out var columns, out _, out _,
+        var bindings = BindJoinSources(sources, statement, first, out var columns, out _, out _, out _,
             metadataOnly: true, target: target);
         var evaluator = DmlEvaluator(columns, bindings, target);
         int scopeId = NextCorrelationScope();
@@ -50,7 +54,7 @@ internal sealed partial class SqlPlanner
             queries.AddRange(BindSubqueries(WalkSubqueries(where), dml: target,
                 scope: new SqlCorrelationScope(scopeId, evaluator, OuterScope)));
         }
-        bindings = BindJoinSources(sources, statement, first, out columns, out var steps, out var visibleOrdinals, target: target);
+        bindings = BindJoinSources(sources, statement, first, out columns, out var steps, out var visibleOrdinals, out _, target: target);
         evaluator = DmlEvaluator(columns, bindings, target);
         // Association slots retain every physical input column, including hidden USING inputs.
         var projections = new SqlProjection[columns.Count];

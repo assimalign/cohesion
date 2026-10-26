@@ -106,6 +106,8 @@ internal static class Program
     // E3: a CAST no registered cast performs is refused while planning, rows or not.
     private const string expandedJoin = "SELECT a.Id, c.Id FROM customers a JOIN customers b USING (Id) " +
         "LEFT JOIN customers c ON b.Id = c.Id AND c.Id = 1 ORDER BY a.Id";
+
+    private const string rightJoin = "SELECT a.Id, b.Id FROM customers a RIGHT OUTER JOIN customers b ON a.Id = b.Id AND a.Id = 1 ORDER BY b.Id";
     private const string crossJoin = "SELECT COUNT(*) FROM customers a, customers b CROSS JOIN customers c";
     private const string correlatedRows = "SELECT c.Id, (SELECT other.Score FROM customers other WHERE other.Id = c.Id) FROM customers c " +
         "WHERE EXISTS (SELECT other.Id FROM customers other WHERE other.Id = c.Id) AND c.Id IN (SELECT other.Id FROM customers other WHERE other.Id = c.Id) ORDER BY c.Id";
@@ -282,6 +284,7 @@ internal static class Program
             "SELECT Name LIKE 'x!' ESCAPE '!' FROM customers")), "CS02034");
         CheckFailure("in process: invariant LIKE work limit", await FailureAsync(() => RowsAsync(session,
             "SELECT RPAD('เก', 1024, 'เก') COLLATE invariant LIKE RPAD('%เก', 96, '%เก') || 'ข' FROM customers WHERE Id = 1")), "CS05040");
+        Check("in process: RIGHT normalization", await RowsAsync(session, rightJoin), [[1L, 1L], [null, 2L]]);
         Check("in process: three-way USING and LEFT", await RowsAsync(session, expandedJoin), [[1L, 1L], [2L, null]]);
         Check("in process: comma and CROSS", await RowsAsync(session, crossJoin), [[8L]]);
         Check("in process: set operations", await RowsAsync(session, setOperations), [[2L]]);
@@ -512,6 +515,7 @@ internal static class Program
         Check("over the wire: parameter ESCAPE", await RowsAsync(connection,
             "SELECT '50%' LIKE '50!%' ESCAPE @e FROM customers WHERE Id = 1", timeout.Token,
             new Dictionary<string, object?> { ["e"] = "!" }), [[true]]);
+        Check("over the wire: RIGHT normalization", await RowsAsync(connection, rightJoin, timeout.Token), [[1L, 1L], [null, 2L]]);
         Check("over the wire: three-way USING and LEFT", await RowsAsync(connection, expandedJoin, timeout.Token), [[1L, 1L], [2L, null]]);
         Check("over the wire: comma and CROSS", await RowsAsync(connection, crossJoin, timeout.Token), [[8L]]);
         Check("over the wire: set operations", await RowsAsync(connection, setOperations, timeout.Token), [[2L]]);
