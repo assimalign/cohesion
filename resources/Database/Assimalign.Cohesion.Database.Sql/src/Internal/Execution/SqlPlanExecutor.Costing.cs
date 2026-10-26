@@ -146,8 +146,8 @@ internal sealed partial class SqlPlanExecutor
                     pending.Push(node.Right!);
                     var leaves = node.Right!.Leaves().ToArray();
                     int firstInner = leaves.Min(), lastInner = leaves.Max();
-                    var keys = step.Access is null
-                        ? HashKeys(step.Condition, join, firstInner, lastInner, fullFrame: true) : null;
+                    var keys = step.Hash ?? (step.Access is null
+                        ? HashKeys(step.Condition, join, firstInner, lastInner, fullFrame: true) : null);
                     normalized.Add(step, step with { Hash = keys });
                 }
                 var normalizedSteps = join.Steps.Select(step => normalized[step]).ToArray();
@@ -237,42 +237,5 @@ internal sealed partial class SqlPlanExecutor
 
     private static SqlHashJoinPath? HashKeys(SqlBoundExpression? condition, SqlJoinPlan plan, int inner,
         int? lastInner = null, bool fullFrame = false)
-    {
-        // Skipping nonmatching pairs must not suppress errors, application calls or lazy scalars.
-        var referenced = new HashSet<int>();
-        if (condition is null || !SqlPlanner.JoinRestrictionColumns(condition, referenced, plan.Columns)) { return null; }
-        // Every ON term is skipped for nonmatching hash keys. Derived text has no stored
-        // codec guarantee of valid Unicode, even when it appears only in a residual term.
-        if (plan.Bindings.Any(binding => binding.Source.Derived is not null && referenced.Any(ordinal =>
-            ordinal >= binding.Offset && ordinal < binding.Offset + binding.Source.Columns.Count &&
-            plan.Columns[ordinal].Type.Type is DatabaseType.String or DatabaseType.Json or DatabaseType.Character))) { return null; }
-        var binding = plan.Bindings[inner];
-        var end = plan.Bindings[lastInner ?? inner];
-        int endOrdinal = end.Offset + end.Source.Columns.Count;
-        var outer = new List<int>();
-        var local = new List<int>();
-        var collations = new List<Collation>();
-        foreach (var term in Terms(condition))
-        {
-            if (term is not SqlBoundBinary { Operator: SqlBinaryOperator.Equal, Left: SqlBoundColumn a, Right: SqlBoundColumn b } equality) { continue; }
-            bool Inside(int ordinal) => ordinal >= binding.Offset && ordinal < endOrdinal;
-            if (Inside(a.Ordinal) == Inside(b.Ordinal)) { continue; }
-            int source = Inside(a.Ordinal) ? a.Ordinal : b.Ordinal;
-            int probe = Inside(a.Ordinal) ? b.Ordinal : a.Ordinal;
-            // CHAR/text comparison trims a comparand and is not a hash equivalence over text.
-            if (plan.Columns[source].Type.Type == DatabaseType.Character || plan.Columns[probe].Type.Type == DatabaseType.Character) { continue; }
-            outer.Add(probe);
-            local.Add(fullFrame ? source : source - binding.Offset);
-            collations.Add(equality.Collation.Resolve(null));
-        }
-        return outer.Count == 0 ? null : new(outer.ToArray(), local.ToArray(), collations.ToArray());
-
-        static IEnumerable<SqlBoundExpression> Terms(SqlBoundExpression expression)
-        {
-            System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
-            if (expression is SqlBoundLogical { IsOr: false } logical)
-            { foreach (var operand in logical.Operands) { foreach (var item in Terms(operand)) { yield return item; } } }
-            else { yield return expression; }
-        }
-    }
+        => SqlPlanner.HashKeys(condition, plan.Bindings, plan.Columns, inner, lastInner, fullFrame);
 }
