@@ -52,6 +52,8 @@ public sealed class DocumentTransactionTextWireTests
     [InlineData(true, "active")]
     [InlineData(false, "query")]
     [InlineData(true, "query")]
+    [InlineData(false, "parse")]
+    [InlineData(true, "parse")]
     [InlineData(false, "command")]
     [InlineData(true, "command")]
     [InlineData(false, "ddl")]
@@ -74,7 +76,7 @@ public sealed class DocumentTransactionTextWireTests
             var error = await Should.ThrowAsync<DocumentClientException>(async () =>
             {
                 if (failure == "command") { await first.GetCollectionAsync("absent", harness.Token); }
-                else { await first.ExecuteAsync(failure == "ddl" ? "CREATE COLLECTION escaped" : failure == "nested" ? "BEGIN" : "SELECT * FROM absent", cancellationToken: harness.Token); }
+                else { await first.ExecuteAsync(failure == "ddl" ? "CREATE COLLECTION escaped" : failure == "nested" ? "BEGIN" : failure == "parse" ? "SELECT (" : "SELECT * FROM absent", cancellationToken: harness.Token); }
             });
             if (failure == "ddl") { error.Diagnostics.ShouldContain(item => item.Code == "CD04105"); }
             if (failure == "nested") { error.Diagnostics.ShouldContain(item => item.Code == "CK04004"); }
