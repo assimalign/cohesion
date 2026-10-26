@@ -374,7 +374,7 @@ Snapshot and ReadCommitted isolation are supported. ReadCommitted captures and p
 snapshot, so metadata and each hop of a traversal share a visibility horizon. Serializable is
 rejected rather than silently weakened. Explicit transactions use the session API or ISO text
 `START TRANSACTION`, `COMMIT` and `ROLLBACK` over Execute (#1540, D5). Text START uses Snapshot.
-`BEGIN` aliases START TRANSACTION (#1725); reserved `Transaction` byte 9 is still rejected with
+`BEGIN [TRANSACTION]` aliases START TRANSACTION (#1725); reserved `Transaction` byte 9 is still rejected with
 `ProtocolViolation`. Results materialize before
 the statement transaction is released, so result iteration cannot race record reclamation.
 Statement pins use `TransactionCoordinator.BeginSnapshotPinAsync` (#1351), retaining their
@@ -2782,9 +2782,12 @@ complete codes plus structured physical context and byte-identical files.
 ## Explicit transaction text (#1540, D5)
 
 START TRANSACTION, COMMIT and ROLLBACK are standalone ISO statements on Execute, using the
-existing session transaction objects. BEGIN is a standalone alias of START TRANSACTION (#1725,
-owner decision 2026-10-25); both use Snapshot. BEGIN TRANSACTION, savepoints, transaction options,
+existing session transaction objects. BEGIN [TRANSACTION] is a standalone alias of START TRANSACTION
+(#1725, owner decision 2026-10-25); both use Snapshot. Savepoints, transaction options,
 statement composition and EXPLAIN of transaction controls remain outside this profile.
+WORK, TRAN, access modes, isolation levels and deferrability retain CG00002 before a transaction
+starts. GraphBeginAliasTests pins both aliases' Snapshot isolation and commit/rollback behavior;
+the wire corpus covers both aliases over InMemory and TCP.
 A failed statement aborts the transaction; subsequent work is refused with CG04007 until
 ROLLBACK. Failed COMMIT rolls back and reports failure, never silently commits. Duplicate START
 uses CG04022 and aborts the existing transaction; COMMIT/ROLLBACK without an open transaction

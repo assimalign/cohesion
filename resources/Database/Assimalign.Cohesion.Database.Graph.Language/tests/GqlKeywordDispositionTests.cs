@@ -100,7 +100,9 @@ public sealed class GqlKeywordDispositionTests
         ["ALTER"] = Rejects("ALTER GRAPH g", "ALTER"),
         ["GRANT"] = Rejects("GRANT READ ON GRAPH g TO u", "GRANT"),
         ["REVOKE"] = Rejects("REVOKE READ ON GRAPH g FROM u", "REVOKE"),
-        ["BEGIN"] = Parses("BEGIN"),
+        ["BEGIN"] = Parses("BEGIN TRANSACTION"),
+        ["START"] = Parses("START TRANSACTION"),
+        ["TRANSACTION"] = Parses("BEGIN TRANSACTION"),
         ["COMMIT"] = Parses("COMMIT"),
         ["ROLLBACK"] = Parses("ROLLBACK"),
         ["FINISH"] = Rejects("MATCH (a) FINISH", "FINISH"),
@@ -298,6 +300,7 @@ public sealed class GqlKeywordDispositionTests
         => GqlLanguageProfile.Instance.Keywords.ToArray()
             .Concat(GqlUnsupportedVocabulary.Words.Select(word => word.Spelling))
             .Concat(GqlLabelVocabulary.Spellings)
+            .Concat(GqlTransactionVocabulary.Spellings)
             .Concat(Enum.GetNames<GqlPathMode>())
             .Append("EXPLAIN") // Contextual statement prefix; identifier cases live in this corpus too.
             .Distinct(StringComparer.OrdinalIgnoreCase)

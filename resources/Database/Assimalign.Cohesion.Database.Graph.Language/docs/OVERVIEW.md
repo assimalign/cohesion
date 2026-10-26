@@ -48,7 +48,7 @@ The engine defaults are 256 MiB retained memory and 1,000,000 physical work unit
 bindings stream and an unordered LIMIT can stop upstream work; final results remain materialized.
 This changes no grammar or wire bytes; remote execution uses the server engine ceilings.
 
-Standalone BEGIN / START TRANSACTION, COMMIT and ROLLBACK parse into GqlTransactionCommand and run through the existing session transaction API, including over Execute (#1540).
+Standalone BEGIN [TRANSACTION] / START TRANSACTION, COMMIT and ROLLBACK parse into GqlTransactionCommand and run through the existing session transaction API, including over Execute (#1540, #1725).
 
 ## Graph diagnostic conventions (#1470)
 

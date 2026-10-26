@@ -20,6 +20,7 @@ public sealed class GraphServerProtocolTests
     [Theory(DisplayName = "Cohesion Test [Database.Graph] - Peer termination rolls back a text-started wire transaction (#1540, #1725)")]
     [InlineData("START TRANSACTION")]
     [InlineData("BEGIN")]
+    [InlineData("BEGIN TRANSACTION")]
     public async Task Terminate_TextTransaction_ShouldRollbackBeforeSessionCompletes(string begin)
     {
         await WithServerAsync(async (server, channel, token) =>
@@ -105,7 +106,7 @@ public sealed class GraphServerProtocolTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Database.Graph] - Server: rejected text and missing transactions keep the session reusable")]
-    [InlineData("BEGIN TRANSACTION", ProtocolErrorCode.ParseFailure)]
+    [InlineData("BEGIN TRANSACTION READ ONLY", ProtocolErrorCode.ParseFailure)]
     [InlineData("COMMIT", ProtocolErrorCode.ExecutionFailure)]
     [InlineData("ROLLBACK", ProtocolErrorCode.ExecutionFailure)]
     [InlineData("MATCH (a)->{3,1}(b) RETURN a.name", ProtocolErrorCode.ParseFailure)]

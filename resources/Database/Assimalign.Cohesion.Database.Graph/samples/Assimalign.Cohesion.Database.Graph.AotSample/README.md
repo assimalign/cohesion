@@ -10,4 +10,4 @@ C:/cw/w11-aot-graph/Assimalign.Cohesion.Database.Graph.AotSample.exe
 
 The Visual Studio Installer directory must be on PATH so ILC can locate the native linker.
 The executable verifies streaming fan-out, grouping, DISTINCT, ordered pages, MATCH, paths,
-budget refusals and reuse after a refused statement. Trim/AOT warnings fail publishing.
+budget refusals, both BEGIN aliases and reuse after a refused statement. Trim/AOT warnings fail publishing.

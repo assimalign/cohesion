@@ -58,6 +58,11 @@ await session.ExecuteAsync("START TRANSACTION", cancellationToken: CancellationT
 await session.ExecuteAsync("INSERT (:Committed)", cancellationToken: CancellationToken.None);
 await session.ExecuteAsync("COMMIT", cancellationToken: CancellationToken.None);
 await Check("MATCH (n:Committed) RETURN count(*)", [[1L]]);
+await session.ExecuteAsync("BEGIN TRANSACTION", cancellationToken: CancellationToken.None);
+await session.ExecuteAsync("INSERT (:AliasPending)", cancellationToken: CancellationToken.None);
+await Check("MATCH (n:AliasPending) RETURN count(*)", [[1L]]);
+await session.ExecuteAsync("ROLLBACK", cancellationToken: CancellationToken.None);
+await Check("MATCH (n:AliasPending) RETURN count(*)", [[0L]]);
 Console.WriteLine($"Graph NativeAOT: {checks}/{checks} checks passed.");
 
 async Task Check(string query, long[][] expected)

@@ -242,7 +242,7 @@ through GraphDatabaseServer over Connections.InMemory without a codec change.
 
 GraphResultSet.Diagnostics exposes negotiated success warnings, including CG01010 and CG01011 for unknown names. QueryPathsAsync returns a sealed GraphPathResult implementing IAsyncEnumerable<GraphPath>. Its Diagnostics property exposes the same ProtocolDiagnostic values as scalar results, finalized after EOF. Each result permits one enumeration. Terminal statement rejections before path output preserve diagnostics on GraphClientException and retain the rental after EOF; later stream failures discard it.
 
-Graph transaction control uses Execute text BEGIN / START TRANSACTION, COMMIT and ROLLBACK;
+Graph transaction control uses Execute text BEGIN [TRANSACTION] / START TRANSACTION, COMMIT and ROLLBACK;
 the reserved Transaction message remains unsupported. Mutations retain
 the engine's existing execution and validation semantics. Database binding remains fixed at
 handshake and catalog SHOW keeps its existing read-only and scoping diagnostics.
@@ -362,9 +362,13 @@ QueryAsync executes LET, FILTER, FOR/UNWIND, WITH and RETURN ... NEXT using the 
 ## Explicit transaction text (#1540, D5)
 
 START TRANSACTION, COMMIT and ROLLBACK are standalone ISO statements on Execute, using the
-existing session transaction objects. BEGIN aliases START TRANSACTION (#1725); both use
-Snapshot. BEGIN TRANSACTION, savepoints, transaction options,
+existing session transaction objects. BEGIN [TRANSACTION] aliases START TRANSACTION (#1725); both use
+Snapshot. Savepoints, transaction options,
 statement composition and EXPLAIN of transaction controls remain outside this profile.
+WORK, TRAN, access modes, isolation levels and deferrability retain CG00002 / ParseFailure
+without starting a transaction or replacing the authenticated session. The transaction corpus
+checks both aliases' commit, rollback, snapshot retention, duplicate-start refusal and
+ExecutePaths refusal over InMemory and TCP.
 A failed statement aborts the transaction; subsequent work is refused with CG04007 until
 ROLLBACK. Failed COMMIT rolls back and reports failure, never silently commits. Duplicate START
 uses CG04022 and aborts the existing transaction; COMMIT/ROLLBACK without an open transaction

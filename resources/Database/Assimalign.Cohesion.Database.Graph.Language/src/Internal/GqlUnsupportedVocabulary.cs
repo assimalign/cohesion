@@ -39,9 +39,10 @@ internal static class GqlUnsupportedVocabulary
         new("ALTER", "ALTER", GqlWordPosition.Clause),
         new("GRANT", "GRANT", GqlWordPosition.Clause),
         new("REVOKE", "REVOKE", GqlWordPosition.Clause),
-        new("BEGIN", "BEGIN", GqlWordPosition.Clause),
-        new("COMMIT", "COMMIT", GqlWordPosition.Clause),
-        new("ROLLBACK", "ROLLBACK", GqlWordPosition.Clause),
+        // Standalone controls execute; these entries preserve refusal of query composition.
+        new(GqlTransactionVocabulary.Begin, GqlTransactionVocabulary.Begin, GqlWordPosition.Clause),
+        new(GqlTransactionVocabulary.Commit, GqlTransactionVocabulary.Commit, GqlWordPosition.Clause),
+        new(GqlTransactionVocabulary.Rollback, GqlTransactionVocabulary.Rollback, GqlWordPosition.Clause),
         new("FINISH", "FINISH", GqlWordPosition.Clause),
         new("HAVING", "HAVING", GqlWordPosition.Clause),
         // Invocation-only words remain legal variables and property names.

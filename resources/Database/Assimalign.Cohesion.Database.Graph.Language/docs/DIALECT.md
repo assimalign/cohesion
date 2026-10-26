@@ -481,10 +481,13 @@ the copy before decoding; this adds no syntax, SQLSTATE or format version. Valid
 ## Transaction control (#1540)
 
 `START TRANSACTION`, `COMMIT` and `ROLLBACK` are standalone ISO statements, including over Execute.
-BEGIN is a standalone alias of START TRANSACTION (#1725, owner decision 2026-10-25).
+`BEGIN [TRANSACTION]` is a standalone alias of START TRANSACTION (#1725, owner decision 2026-10-25).
 Both use Snapshot; embedded callers retain typed Snapshot/ReadCommitted transaction APIs.
-A failed explicit transaction refuses work until rollback. BEGIN TRANSACTION, savepoints, transaction options,
+A failed explicit transaction refuses work until rollback. Savepoints, transaction options,
 EXPLAIN controls and multi-statement text are unsupported. ExecutePaths cannot control transactions.
+WORK, TRAN, READ ONLY/READ WRITE, isolation levels and deferrability retain CG00002;
+the optional TRANSACTION word adds no transaction options. Keywords are case-insensitive,
+comments may separate words, and one terminal semicolon is optional.
 
 An idle open wire transaction holds the database writer lock once it has acquired it, until
 COMMIT, ROLLBACK, disconnect, pool return or IdleTimeout (30 minutes by default). Keep transactions

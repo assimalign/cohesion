@@ -968,7 +968,10 @@ reports that word and nothing after it.
 Path mode words and `NODETACH` are positional, not lexer keywords. Before a path pattern, modes
 select identity rules; before `DELETE`, NODETACH names its refused construct. Elsewhere they are names, so `MATCH trail = (a)-[]->(b)`
 and `MATCH (nodetach) DELETE nodetach` still parse.
-`GqlKeywordDispositionTests` enumerates the profile's keywords, the table, the path-mode enum, and the executable
+`GqlTransactionVocabulary` lists the contextual words of standalone controls, including the
+optional TRANSACTION after BEGIN; these do not become lexer keywords. Their standalone parser
+branch preserves the existing coded refusals of transaction options and composition.
+`GqlKeywordDispositionTests` enumerates the profile's keywords, both word tables, the path-mode enum, and the executable
 label-expression spellings `GqlLabelVocabulary` lists (`|`, `&`, `!`, `%` and the positional
 `LABELED`). Every word needs a supported parse case or a case with exactly one `CK00001` naming its
 construct, and for a table entry that diagnostic must also name the construct the table records. A
@@ -1317,8 +1320,8 @@ CG05020/CG08021 and the preserved 64-hop path limit.
 ## Explicit transaction text (#1540, D5)
 
 START TRANSACTION, COMMIT and ROLLBACK are standalone ISO statements on Execute, using the
-existing session transaction objects. BEGIN is a standalone alias of START TRANSACTION (#1725,
-owner decision 2026-10-25); both use Snapshot. BEGIN TRANSACTION, savepoints, transaction options,
+existing session transaction objects. BEGIN [TRANSACTION] is a standalone alias of START TRANSACTION
+(#1725, owner decision 2026-10-25); both use Snapshot. Savepoints, transaction options,
 statement composition and EXPLAIN of transaction controls remain outside this profile.
 A failed statement aborts the transaction; subsequent work is refused with CG04007 until
 ROLLBACK. Failed COMMIT rolls back and reports failure, never silently commits. Duplicate START
@@ -1336,6 +1339,11 @@ The parser exposes GqlQueryExpression.TransactionCommand (GqlTransactionCommand 
 The server owns the connection's existing transaction, following Neo4j's
 community/bolt/src/main/java/org/neo4j/bolt/protocol/common/fsm/transition/ready/CreateTransactionStateTransition.java:63-81
 (local Neo4j clone). No code is copied, and no transaction wire message is added.
+
+The optional TRANSACTION spelling follows the local PostgreSQL grammar at
+`C:/Source/repos/postgres/postgres/src/backend/parser/gram.y:11462-11469` and
+`:11483-11485`. Graph admits only the optional TRANSACTION word: WORK, TRAN, access modes,
+isolation levels and deferrability still report CG00002 at the first trailing token.
 
 ## Graph diagnostic conventions (#1470)
 

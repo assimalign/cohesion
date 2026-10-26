@@ -38,7 +38,7 @@ completion warnings, including CG01010 for an unknown label. Each result is enum
 
 Dispose each connection to return a healthy authenticated session to the pool, and dispose the
 client to close the pool. Scalar parse/execution failures and terminal path rejections before any
-path output retain the session; later path failures discard it. Execute accepts BEGIN / START TRANSACTION,
+path output retain the session; later path failures discard it. Execute accepts BEGIN [TRANSACTION] / START TRANSACTION,
 COMMIT and ROLLBACK. Negotiated server status makes pool return roll back unfinished transactions.
 The reserved Transaction message remains unsupported.
 
