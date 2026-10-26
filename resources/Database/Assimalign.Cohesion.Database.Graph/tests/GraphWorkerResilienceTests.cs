@@ -269,6 +269,10 @@ public sealed class GraphWorkerResilienceTests
 
         // The worker keeps flushing the other database's grouped commits.
         await WriteGroupedInsertsAsync(healthy, 5);
+        // The gate wakes committers before recording event 8; completed inserts alone do not
+        // prove that the recorder has observed every flush. The timeout is only a hang guard.
+        (await Eventually(() => EventsFor(healthyDatabaseName, 8) >= 5)).ShouldBeTrue(
+            "the recorder must observe all five worker flushes before their count is captured");
 
         int failingSelfHelp = EventsFor(failingDatabaseName, 9);
         int healthyFlushes = EventsFor(healthyDatabaseName, 8);
