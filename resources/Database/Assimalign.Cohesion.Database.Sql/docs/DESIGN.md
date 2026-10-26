@@ -6611,6 +6611,65 @@ The SQL model's schema authority (area architecture:
 two questions for the planner: *what objects exist* (with stable identities) and
 *what shape are they* — and it must answer identically after any crash.
 
+#### Catalog: Atomic TRUNCATE storage replacement (#1716, SQ-T1)
+
+TRUNCATE resolves and deduplicates its list, computes the incoming FK closure (or refuses
+CS03067 under default RESTRICT), and holds ascending table-exclusive locks. RESTART IDENTITY
+and CASCADE are independent; omission means CONTINUE IDENTITY and RESTRICT. Schema ownership
+is preserved and does not forbid this data operation. An explicit transaction is refused with
+CS04066, leaving its earlier work active. CTAS remains outside SQ-T1.
+
+The catalog internally reserves fresh owner identities with existing kind-14 reclamation
+intents, without changing the logical generation. Prepared empty B-trees commit durably before
+one catalog transaction replaces every table and index description, registration, dependent
+view table/column identity and identity-counter owner. It removes prepared intents and adds
+retired-owner intents in that same commit. A volatile storage binding generation invalidates
+plans and view images independently of the durable logical DDL generation, which stays unchanged
+so compiled-schema and script verification remain trusted. A declared TRUNCATE script statement
+publishes its receipt with the first written table as its logical target in that same commit.
+All columns, constraints, ownership, physical ordinals
+and frozen missing values are copied. CONTINUE moves the exact volatile cursor/block and the
+durable last reservation; RESTART removes the counter so allocation resumes at START. No new
+record layout, durable record kind, public catalog member, interface or format version is needed:
+SQL remains format 26. Failed preparation and crash recovery use kind 14 unchanged.
+
+A short-lived coordinator snapshot pin brackets catalog publication: it is active before the
+swap and rolled back just afterwards. Its sequence is a visibility marker, with no persisted
+record. A statement whose fixed MVCC snapshot cannot see that marker retains the pre-truncation
+table descriptions, indexes and directly dependent views, even when binding starts after
+publication. This covers BEGIN, auto-commit and ReadCommitted statements without allocating a
+catalog capture on ordinary stored reads. Multiple truncations choose the earliest owner the
+snapshot predates. Unrelated current definitions retain existing ALTER behavior. The volatile
+association lasts until reclamation retires its owner; no snapshot survives reopen. Retired tree
+handles leave the manager after publication, so a new
+old-snapshot seek falls back to its owner scan while existing cursors retain their safe handles.
+
+The lock/latch order is documented at ExecuteTruncateAsync: metadata admission, ascending table
+X, apply gate, tree/page latches; no apply gate or data latch spans catalog publication. Final
+publication takes a short snapshot-admission semaphore also used across BEGIN's MVCC creation
+and metadata capture; BEGIN takes no table locks. Both that semaphore and the marker pin release
+on every exit. The catalog metadata lock owns only its own innermost storage bracket. Both transaction and statement pins
+outlive prepared owners. Reclamation rechecks a prepared owner's committed intent after its pins
+clear; a removed intent means successful publication, so the cached worker entry is discarded
+without freeing live pages. Cancellation and exceptions remove prepared directory handles;
+irrevocable publication always removes old handles with a noncancelable cleanup. A failed data
+or catalog commit retains the engine's existing offline/unconfirmed-outcome handling.
+
+Deterministic tests read pinned snapshots after publication and run an explicit reclamation pass
+that frees nothing until they end, in process and on both transports. Every recorded crash image
+under Synchronous, Grouped and None is reopened; None models process loss. A nonparallel stress
+case runs for a minimum interval and until successful writer and prepared-owner maintenance
+counters prove the race was exercised, under a 90-second guard.
+
+| Code | Condition | SQLSTATE |
+|---|---|---|
+| CS03067 | TRUNCATE omits a foreign-key referencing table | 0A000 |
+| CS04066 | TRUNCATE inside an explicit transaction | 25001 |
+
+Reference behavior was re-derived from local PostgreSQL gram.y:7239-7256,
+tablecmds.c:1915-1917,2033-2090,2225-2258 and heap.c:3701-3782. The snapshot preservation
+and explicit-transaction refusal are the owner's deliberate departures from PostgreSQL.
+
 #### Catalog: Durable table reclamation (decision 77, #1443)
 
 SQL format 11 (formerly 10) adds catalog kind **14**: a typed tuple containing kind Int32,
@@ -6622,8 +6681,10 @@ normal metadata uses owner zero. Maintenance can therefore remove it without mod
 catalog page. Load rejects duplicate retired identities and an identity both live and retired,
 and advances the identity allocator past every pending id. Reusing a name never reuses its id.
 
-The catalog retains each decoded intent's identity and record location at open, adds it only after
-the DROP commit, and removes it only after the retirement commit, all under its metadata lock.
+The catalog retains each decoded intent's identity and record location at open, adds it after
+committed unpublication or TRUNCATE preparation, and removes it after retirement or successful
+prepared-owner publication, all under its metadata lock. A captured prepared identity is rechecked
+after its transaction and statement pins clear before the worker frees any page.
 `GetPendingTableReclamations()` returns an independent read-only snapshot of the committed identities;
 `CompleteTableReclamationAsync()` idempotently retires an identity without advancing the DDL
 generation. Record locations and the kind-14 codec stay private to this assembly. These two concrete

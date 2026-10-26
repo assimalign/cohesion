@@ -130,8 +130,8 @@ public sealed class SqlLanguageConformanceTests
         // The profile drives enumeration. A newly advertised clause cannot silently escape this test.
         var cases = CreateCases();
         // #1714 adds UPDATE FROM and DELETE USING and #1718 adds quantified comparisons:
-        // exactly three over #1118's 51.
-        SqlLanguageProfile.Instance.Clauses.Count().ShouldBe(54);
+        // exactly three over #1118's 51. TRUNCATE (#1716) adds one more.
+        SqlLanguageProfile.Instance.Clauses.Count().ShouldBe(55);
         RequireExecutionCases(SqlLanguageProfile.Instance.Clauses, cases);
         cases.Keys.Except(SqlLanguageProfile.Instance.Clauses).ShouldBeEmpty("Cases must describe the current profile.");
 
@@ -803,6 +803,15 @@ public sealed class SqlLanguageConformanceTests
                 (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "SELECT * FROM t;")))
                     .Message.ShouldContain("does not exist", Case.Sensitive);
                 (await ExecuteAsync(session, "DROP TABLE IF EXISTS t;")).Status.ShouldBe(DatabaseResultStatus.Success);
+            }),
+        [SqlClauses.Truncate] = new("TRUNCATE TABLE ONLY t CONTINUE IDENTITY RESTRICT;", _seed,
+            expression => expression is SqlTruncateExpression,
+            async (session, result) =>
+            {
+                result.AffectedCount.ShouldBe(0);
+                await ExpectRowsAsync(session, "SELECT * FROM t;", []);
+                await ExecuteAsync(session, "INSERT INTO t VALUES (9, 'after', 99);");
+                await ExpectRowsAsync(session, "SELECT id FROM t;", [[9]]);
             }),
         [SqlClauses.CreateView] = new("CREATE VIEW v AS SELECT id FROM t;", _seed,
             expression => expression is SqlCreateViewExpression,

@@ -52,6 +52,7 @@ internal sealed partial class SqlPlanner
         CancellationToken cancellationToken = default, SqlStatementContext? statement = null)
     {
         _statementMetrics = statement?.Metrics;
+        _truncateVisibility = statement?.Snapshot;
         _catalog = catalog;
         _parameters = parameters;
         _cancellationToken = cancellationToken;
@@ -62,6 +63,7 @@ internal sealed partial class SqlPlanner
         : this(previous._catalog, previous._parameters, previous._functions, previous._cancellationToken)
     {
         _statementMetrics = previous._statementMetrics;
+        _truncateVisibility = previous._truncateVisibility;
     }
 
     internal SqlPlan Plan(SqlQueryExpression expression)
@@ -70,13 +72,13 @@ internal sealed partial class SqlPlanner
         while (true)
         {
             _cancellationToken.ThrowIfCancellationRequested();
-            ulong generation = _catalog.DdlGeneration;
+            var generation = _catalog.BindingGeneration;
             try
             {
                 var plan = planner.PlanOnce(expression);
-                if (_catalog.DdlGeneration == generation) { return plan; }
+                if (_catalog.BindingGeneration == generation) { return plan; }
             }
-            catch (DatabaseException) when (_catalog.DdlGeneration != generation)
+            catch (DatabaseException) when (_catalog.BindingGeneration != generation)
             {
                 // A concurrent publication may pair an old table with new index key names.
                 // Discard both successful and failed mixed-generation plans before execution.
@@ -134,6 +136,7 @@ internal sealed partial class SqlPlanner
             SqlCreateTableExpression create => PlanCreateTable(create),
             SqlCreateSchemaExpression create => new SqlCreateSchemaPlan(create.Name, create.IfNotExists),
             SqlDropTableExpression drop => PlanDropTable(drop),
+            SqlTruncateExpression truncate => new SqlTruncatePlan(truncate),
             SqlDropSchemaExpression drop => new SqlDropSchemaPlan(drop.Name, drop.IfExists, drop.Cascade),
             SqlAlterTableExpression alter => PlanAlterTable(alter),
             SqlCreateIndexExpression createIndex => PlanCreateIndex(createIndex),
@@ -144,6 +147,7 @@ internal sealed partial class SqlPlanner
 
     private SqlPlan PlanQuery(SqlQueryBodyExpression select)
     {
+        UseTruncateSnapshot();
         _cancellationToken.ThrowIfCancellationRequested();
         return select.CommonTables.Count == 0 ? PlanQueryBody(select)
             : PlanCommonTables(select.CommonTables, select);

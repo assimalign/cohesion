@@ -1,5 +1,15 @@
 # Assimalign.Cohesion.Database.Sql.Language — Design
 
+## TRUNCATE (#1716, SQ-T1)
+
+SqlTruncateExpression stores an immutable ordered list of SqlTruncateTable targets, each with
+its ONLY modifier, plus effective restart/cascade flags. TABLE is optional; CONTINUE IDENTITY
+and RESTRICT are the defaults. Canonical rendering supplies TABLE and both effective policies.
+TRUNCATE adds one keyword and one advertised clause; RESTART/CONTINUE/IDENTITY remain contextual.
+Completeness and live conformance cases cover the new command; CTAS retains CS00003.
+The engine's snapshot, closure, identity and reclamation contract is recorded in DIALECT.md.
+No public construction bridge or interface is added.
+
 ## Repeated subquery grouping keys (#1718)
 
 DIALECT.md records structural matching of complete scalar-subquery, EXISTS and quantified

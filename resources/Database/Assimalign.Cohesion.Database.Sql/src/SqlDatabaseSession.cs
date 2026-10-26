@@ -223,19 +223,35 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
                 ErrorMessages.BeginTransactionCoreAsyncDatabase);
         }
 
-        var transactionStart = (_database.Engine.EngineOptions.TimeProvider ?? TimeProvider.System).GetUtcNow();
-        TransactionContext context;
+        // A snapshot and its retained storage bindings must fall on the same side of a
+        // TRUNCATE publication. No table lock or data apply gate is held while BEGIN waits.
+        await _database.Catalog.TruncateSnapshotGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            context = await _coordinator.BeginAsync(isolationLevel, cancellationToken).ConfigureAwait(false);
-        }
-        catch (Exception exception) when (_database.TranslateFailure(exception) is var offline && !ReferenceEquals(offline, exception))
-        {
-            throw offline;
-        }
+            var transactionStart = (_database.Engine.EngineOptions.TimeProvider ?? TimeProvider.System).GetUtcNow();
+            TransactionContext context;
+            try
+            {
+                context = await _coordinator.BeginAsync(isolationLevel, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (_database.TranslateFailure(exception) is var offline && !ReferenceEquals(offline, exception))
+            {
+                throw offline;
+            }
 
-        return new SqlDatabaseTransaction(_coordinator, context, _database,
-            isolationLevel == IsolationLevel.Snapshot ? _executor.CaptureCatalogSnapshot() : null, transactionStart);
+            try
+            {
+                return new SqlDatabaseTransaction(_coordinator, context, _database,
+                    isolationLevel == IsolationLevel.Snapshot ? _executor.CaptureCatalogSnapshot() : null, transactionStart);
+            }
+            catch
+            {
+                // Capture/construction failure must not strand a snapshot pin.
+                await _coordinator.RollbackAsync(context, CancellationToken.None).ConfigureAwait(false);
+                throw;
+            }
+        }
+        finally { _database.Catalog.TruncateSnapshotGate.Release(); }
     }
 
     /// <inheritdoc />
@@ -350,7 +366,7 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
         {
             try
             {
-                if (request.Statement.SqlExpression is SqlDropTableExpression or SqlDropSchemaExpression)
+                if (request.Statement.SqlExpression is SqlDropTableExpression or SqlDropSchemaExpression or SqlTruncateExpression)
                 {
                     _database.TableReclamation.Request();
                 }
@@ -441,10 +457,10 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
     /// goes, before and independently of its transaction's commit record.
     /// </summary>
     /// <param name="request">The request.</param>
-    /// <returns>True for a <c>CREATE</c>, <c>ALTER</c> or <c>DROP</c> statement.</returns>
+    /// <returns>True for a <c>CREATE</c>, <c>ALTER</c>, <c>DROP</c> or <c>TRUNCATE</c> statement.</returns>
     private static bool IsSelfCommitting(SqlQueryRequest request)
         => request.Statement.SqlExpression.CommandType is
-            SqlQueryCommandType.Create or SqlQueryCommandType.Alter or SqlQueryCommandType.Drop;
+            SqlQueryCommandType.Create or SqlQueryCommandType.Alter or SqlQueryCommandType.Drop or SqlQueryCommandType.Truncate;
 
     /// <summary>
     /// Reports whether a failed request is a self-committing statement that had committed at
@@ -553,6 +569,10 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
 
             try
             {
+                if (request.Statement.SqlExpression is SqlTruncateExpression)
+                {
+                    return TransactionDiagnostic("CS04066", ErrorMessages.TruncateExplicitTransaction);
+                }
                 if (IsSelfCommitting(request))
                 {
                     return TransactionDiagnostic("CS04003",

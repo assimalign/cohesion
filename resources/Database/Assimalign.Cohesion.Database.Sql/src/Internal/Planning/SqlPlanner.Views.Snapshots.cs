@@ -25,7 +25,7 @@ internal sealed partial class SqlPlanner
         var directory = _viewImages.GetValue(_catalog, _ => new());
         lock (directory.Sync)
         {
-            ulong generation = _catalog.DdlGeneration;
+            var generation = _catalog.BindingGeneration;
             if (directory.Current is { } current && directory.Generation == generation) { return current; }
             var snapshot = _catalog.CaptureSnapshot();
             var functions = new SqlFunctionEnvironment(_functions.Catalog, _functions.Database, _functions.Types);
@@ -88,7 +88,7 @@ internal sealed partial class SqlPlanner
     private sealed class ViewImageDirectory
     {
         internal object Sync { get; } = new();
-        internal ulong Generation { get; set; }
+        internal (ulong Definition, ulong Storage) Generation { get; set; }
         internal ViewImage? Current { get; set; }
         internal List<WeakReference<ViewImage>> Images { get; } = new();
         internal ConditionalWeakTable<SqlCatalogSnapshot, ViewImage> Captures { get; } = new();

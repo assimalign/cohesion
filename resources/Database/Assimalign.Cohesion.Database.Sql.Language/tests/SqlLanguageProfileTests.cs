@@ -33,6 +33,7 @@ public class SqlLanguageProfileTests
     [InlineData(SqlClauses.CreateIndex, "CREATE INDEX ix_t_id ON t (id);")]
     [InlineData(SqlClauses.AlterTable, "ALTER TABLE t ADD COLUMN name TEXT;")]
     [InlineData(SqlClauses.DropTable, "DROP TABLE t;")]
+    [InlineData(SqlClauses.Truncate, "TRUNCATE TABLE ONLY t RESTART IDENTITY CASCADE;")]
     [InlineData(SqlClauses.CreateView, "CREATE VIEW v AS SELECT a FROM t;")]
     [InlineData(SqlClauses.DropView, "DROP VIEW v;")]
     [InlineData(SqlClauses.DropIndex, "DROP INDEX ix_t_id ON t;")]

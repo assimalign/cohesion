@@ -106,6 +106,7 @@ public sealed class SqlStatementCompletenessTests
         [SqlClauses.CreateView] = ["CREATE VIEW v AS SELECT a FROM t", "CREATE OR REPLACE VIEW dbo.v (a) AS SELECT a FROM t"],
         [SqlClauses.DropView] = ["DROP VIEW v", "DROP VIEW IF EXISTS dbo.v RESTRICT", "DROP VIEW v CASCADE"],
         [SqlClauses.DropTable] = ["DROP TABLE t", "DROP TABLE IF EXISTS dbo.t"],
+        [SqlClauses.Truncate] = ["TRUNCATE t", "TRUNCATE TABLE ONLY dbo.t, u RESTART IDENTITY CASCADE", "TRUNCATE t CONTINUE IDENTITY RESTRICT"],
         [SqlClauses.CreateSchema] = ["CREATE SCHEMA sales", "CREATE SCHEMA IF NOT EXISTS sales"],
         [SqlClauses.DropSchema] = ["DROP SCHEMA sales", "DROP SCHEMA IF EXISTS sales RESTRICT", "DROP SCHEMA sales CASCADE"],
         [SqlClauses.DropIndex] = ["DROP INDEX ix ON t", "DROP INDEX IF EXISTS ix ON dbo.t"],

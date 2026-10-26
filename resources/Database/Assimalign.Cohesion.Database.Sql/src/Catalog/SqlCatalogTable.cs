@@ -124,6 +124,7 @@ public sealed class SqlCatalogTable
     /// <summary>
     /// Gets the table's stable object identity — the value data rows, index
     /// registrations, and lock resources are keyed by.
+    /// TRUNCATE replaces this owner identity atomically; older snapshots retain this description.
     /// </summary>
     public ulong ObjectId { get; }
 

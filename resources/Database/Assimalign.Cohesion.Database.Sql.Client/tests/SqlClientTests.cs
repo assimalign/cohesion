@@ -154,7 +154,7 @@ public class SqlClientTests
 
         // Act: an unknown command → parse failure; a missing table → execution failure
         SqlClientException parseFailure = await Should.ThrowAsync<SqlClientException>(
-            async () => await connection.ExecuteAsync("TRUNCATE TABLE users;", cancellationToken: SqlClientTestHarness.Timeout()));
+            async () => await connection.ExecuteAsync("MERGE INTO users;", cancellationToken: SqlClientTestHarness.Timeout()));
 
         SqlClientException executionFailure = await Should.ThrowAsync<SqlClientException>(
             async () => await connection.QueryAsync("SELECT id FROM missing_table", cancellationToken: SqlClientTestHarness.Timeout()));

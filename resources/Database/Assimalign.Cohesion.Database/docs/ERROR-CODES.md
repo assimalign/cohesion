@@ -146,6 +146,7 @@ structured-carrier messages remain unprefixed.
 | COHSQLE061 | CS03061 | Schema/constraints |
 | COHSQLE065 | CS03065 | Schema/constraints |
 | COHSQLE066 | CS03066 | Schema/constraints |
+| New (#1716) | CS03067 | Schema/constraints — TRUNCATE omits a required referencing table (0A000) |
 | COHSQLP001 | CS03101 | Schema/constraints |
 | COHSQLP002 | CS03102 | Schema/constraints |
 | COHSQLP003 | CS03103 | Schema/constraints |
@@ -170,6 +171,7 @@ structured-carrier messages remain unprefixed.
 | COHSQLE044 | CS04044 | Transactions/locking |
 | COHSQLE064 | CS04064 | Transactions/locking |
 | New (w11 review) | CS04065 | Transactions/locking — hard deadlock (`40P01`) |
+| New (#1716) | CS04066 | Transactions/locking — TRUNCATE inside an explicit transaction (25001) |
 | COHSQLE004 | CS05004 | Execution/budgets |
 | COHSQLE007 | CS05007 | Execution/budgets |
 | COHSQLE013 | CS05013 | Execution/budgets |
