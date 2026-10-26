@@ -63,7 +63,7 @@ internal sealed class SqlQueryExecutor
         SqlPlan plan;
         try
         {
-            plan = planner.Plan(request.Statement.SqlExpression);
+            plan = planner.Plan(request.Statement.SqlExpression, statement.Snapshot);
         }
         catch (SqlUnsupportedQueryException exception)
         {

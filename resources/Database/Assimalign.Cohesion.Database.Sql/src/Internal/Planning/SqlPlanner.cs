@@ -8,6 +8,7 @@ using System.Threading;
 using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Language;
 using Assimalign.Cohesion.Database.Types;
+using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
@@ -52,7 +53,6 @@ internal sealed partial class SqlPlanner
         CancellationToken cancellationToken = default, SqlStatementContext? statement = null)
     {
         _statementMetrics = statement?.Metrics;
-        _truncateVisibility = statement?.Snapshot;
         _catalog = catalog;
         _parameters = parameters;
         _cancellationToken = cancellationToken;
@@ -63,10 +63,9 @@ internal sealed partial class SqlPlanner
         : this(previous._catalog, previous._parameters, previous._functions, previous._cancellationToken)
     {
         _statementMetrics = previous._statementMetrics;
-        _truncateVisibility = previous._truncateVisibility;
     }
 
-    internal SqlPlan Plan(SqlQueryExpression expression)
+    internal SqlPlan Plan(SqlQueryExpression expression, TransactionSnapshot? snapshot = null)
     {
         var planner = this;
         while (true)
@@ -75,6 +74,14 @@ internal sealed partial class SqlPlanner
             var generation = _catalog.BindingGeneration;
             try
             {
+                // Carry visibility on the planning call stack, preserving the ordinary
+                // planner's allocation budget. Retry uses this same fixed statement snapshot.
+                // DML targets retain the read image too, so definition validation refuses
+                // stale writers before they can mutate a replacement owner.
+                if (expression is SqlQueryBodyExpression or SqlInsertExpression or SqlUpdateExpression or SqlDeleteExpression)
+                {
+                    planner.UseTruncateSnapshot(snapshot);
+                }
                 var plan = planner.PlanOnce(expression);
                 if (_catalog.BindingGeneration == generation) { return plan; }
             }
@@ -122,10 +129,6 @@ internal sealed partial class SqlPlanner
     {
         SqlSystemViews.EnsureReadOnly(expression);
         EnsureViewTargetReadOnly(expression);
-        // A snapshot retaining a truncated owner must never write its replacement.
-        // Bind DML targets through that same retained image; the ordinary target
-        // definition check then refuses the stale writer with CS04006 before apply.
-        if (expression is SqlInsertExpression or SqlUpdateExpression or SqlDeleteExpression) { UseTruncateSnapshot(); }
         ValidateFunctionCalls(expression);
         return expression switch
         {
@@ -151,7 +154,6 @@ internal sealed partial class SqlPlanner
 
     private SqlPlan PlanQuery(SqlQueryBodyExpression select)
     {
-        UseTruncateSnapshot();
         _cancellationToken.ThrowIfCancellationRequested();
         return select.CommonTables.Count == 0 ? PlanQueryBody(select)
             : PlanCommonTables(select.CommonTables, select);

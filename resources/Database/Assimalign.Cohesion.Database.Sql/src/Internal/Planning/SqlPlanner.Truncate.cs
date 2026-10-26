@@ -4,11 +4,9 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 internal sealed partial class SqlPlanner
 {
-    private readonly TransactionSnapshot? _truncateVisibility;
-
-    private void UseTruncateSnapshot()
+    private void UseTruncateSnapshot(TransactionSnapshot? snapshot)
     {
-        if (ViewImageState is not null || _truncateVisibility is not { } snapshot ||
+        if (ViewImageState is not null || snapshot is null ||
             _catalog.CaptureTruncateReadSnapshot(snapshot) is not { } retained) { return; }
         var directory = _viewImages.GetValue(_catalog, _ => new());
         lock (directory.Sync)

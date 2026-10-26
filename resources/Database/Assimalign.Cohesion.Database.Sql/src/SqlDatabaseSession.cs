@@ -718,7 +718,7 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
         var planner = new SqlPlanner(_database.Catalog, parameters, _database.Definitions.Functions, cancellationToken, scope);
         try
         {
-            var plan = planner.Plan(explain.Statement);
+            var plan = planner.Plan(explain.Statement, scope.Snapshot);
             var executor = new SqlPlanExecutor(_database.DataStorage, _database.Catalog, _database.IndexManager, _database.Definitions);
             plan = executor.Cost(plan, scope, cancellationToken);
             scope.Metrics.IsPlanned = true;
