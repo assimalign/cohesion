@@ -107,6 +107,8 @@ internal static class Program
     private const string expandedJoin = "SELECT a.Id, c.Id FROM customers a JOIN customers b USING (Id) " +
         "LEFT JOIN customers c ON b.Id = c.Id AND c.Id = 1 ORDER BY a.Id";
 
+    private const string fullGroup = "SELECT Id, COUNT(*) FROM customers a FULL JOIN (SELECT CAST(3 AS BIGINT) AS Id) b USING(Id) GROUP BY Id ORDER BY Id";
+    private const string fullJoin = "SELECT Id, a.Id, b.Id FROM customers a FULL JOIN (SELECT CAST(3 AS BIGINT) AS Id) b USING(Id) ORDER BY Id";
     private const string rightJoin = "SELECT a.Id, b.Id FROM customers a RIGHT OUTER JOIN customers b ON a.Id = b.Id AND a.Id = 1 ORDER BY b.Id";
     private const string crossJoin = "SELECT COUNT(*) FROM customers a, customers b CROSS JOIN customers c";
     private const string correlatedRows = "SELECT c.Id, (SELECT other.Score FROM customers other WHERE other.Id = c.Id) FROM customers c " +
@@ -285,6 +287,8 @@ internal static class Program
         CheckFailure("in process: invariant LIKE work limit", await FailureAsync(() => RowsAsync(session,
             "SELECT RPAD('เก', 1024, 'เก') COLLATE invariant LIKE RPAD('%เก', 96, '%เก') || 'ข' FROM customers WHERE Id = 1")), "CS05040");
         Check("in process: RIGHT normalization", await RowsAsync(session, rightJoin), [[1L, 1L], [null, 2L]]);
+        Check("in process: FULL coalesces both unmatched sides", await RowsAsync(session, fullJoin), [[1L, 1L, null], [2L, 2L, null], [3L, null, 3L]]);
+        Check("in process: FULL merged grouping keys", await RowsAsync(session, fullGroup), [[1L, 1L], [2L, 1L], [3L, 1L]]);
         Check("in process: three-way USING and LEFT", await RowsAsync(session, expandedJoin), [[1L, 1L], [2L, null]]);
         Check("in process: comma and CROSS", await RowsAsync(session, crossJoin), [[8L]]);
         Check("in process: set operations", await RowsAsync(session, setOperations), [[2L]]);
@@ -525,6 +529,8 @@ internal static class Program
             "SELECT '50%' LIKE '50!%' ESCAPE @e FROM customers WHERE Id = 1", timeout.Token,
             new Dictionary<string, object?> { ["e"] = "!" }), [[true]]);
         Check("over the wire: RIGHT normalization", await RowsAsync(connection, rightJoin, timeout.Token), [[1L, 1L], [null, 2L]]);
+        Check("over the wire: FULL coalesces both unmatched sides", await RowsAsync(connection, fullJoin, timeout.Token), [[1L, 1L, null], [2L, 2L, null], [3L, null, 3L]]);
+        Check("over the wire: FULL merged grouping keys", await RowsAsync(connection, fullGroup, timeout.Token), [[1L, 1L], [2L, 1L], [3L, 1L]]);
         Check("over the wire: three-way USING and LEFT", await RowsAsync(connection, expandedJoin, timeout.Token), [[1L, 1L], [2L, null]]);
         Check("over the wire: comma and CROSS", await RowsAsync(connection, crossJoin, timeout.Token), [[8L]]);
         Check("over the wire: set operations", await RowsAsync(connection, setOperations, timeout.Token), [[2L]]);
