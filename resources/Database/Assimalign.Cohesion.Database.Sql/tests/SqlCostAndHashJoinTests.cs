@@ -197,7 +197,7 @@ public sealed class SqlCostAndHashJoinTests
         var metrics = session.LastStatementMetrics.ShouldNotBeNull();
         metrics.JoinAccessPaths.ShouldBe(["join-hash"]);
         metrics.JoinCandidatePairs.ShouldBe(0);
-        metrics.PeakHashMemoryBytes.ShouldBe(80);
+        metrics.PeakHashMemoryBytes.ShouldBe(104);
         metrics.HashMemoryBytes.ShouldBe(0);
     }
 

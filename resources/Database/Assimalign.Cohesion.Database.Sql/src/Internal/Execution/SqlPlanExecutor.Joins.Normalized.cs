@@ -12,7 +12,10 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 internal sealed partial class SqlPlanExecutor
 {
-    /// <summary>Executes swapped RIGHT children with LEFT's ON and null-extension rules.</summary>
+    // Optional deterministic test observation; no counters or callback state per statement.
+    internal static Action<string, SqlStatementMetrics, CancellationToken>? FullJoinProgress { get; set; }
+
+    /// <summary>Executes normalized joins, including FULL's independently tracked build rows.</summary>
     private async IAsyncEnumerable<object?[]> EnumerateNormalizedJoinRowsAsync(SqlJoinPlan plan,
         SqlStatementContext statement, Func<int, IEnumerable<object?[]>> readInput,
         [EnumeratorCancellation] CancellationToken cancellationToken)
@@ -67,7 +70,7 @@ internal sealed partial class SqlPlanExecutor
                 var outer = results[node.Left!];
                 if (next.Phase == 1)
                 {
-                    if (outer.Rows.Count == 0)
+                    if (outer.Rows.Count == 0 && step.Kind != SqlJoinType.FullOuter)
                     {
                         var leaves = node.Leaves().ToArray();
                         var last = plan.Bindings[leaves.Max()];
@@ -79,7 +82,8 @@ internal sealed partial class SqlPlanExecutor
                     {
                         // Reserve while producing the inner subtree, before retaining its output.
                         // Nested builds share the same live grant and unwind together on failure.
-                        var build = new SqlHashJoinTable(keys, statement.Metrics, _definitions.StatementMemoryBudget);
+                        var build = new SqlHashJoinTable(keys, statement.Metrics, _definitions.StatementMemoryBudget,
+                            trackUnmatched: step.Kind == SqlJoinType.FullOuter, evaluator: evaluator);
                         builds.Add(node, build);
                         sinks.Add(node.Right!, build);
                     }
@@ -101,9 +105,46 @@ internal sealed partial class SqlPlanExecutor
                     foreach (var left in outer.Rows)
                     {
                         cancellationToken.ThrowIfCancellationRequested();
+                        bool matched = false;
+                        foreach (var candidate in Candidates(left))
+                        {
+                            cancellationToken.ThrowIfCancellationRequested();
+                            statement.Metrics.RecordJoinCandidate();
+                            if (statement.Metrics.Analysis(step) is { } work) { work.Candidates++; }
+                            var joined = (object?[])left.Clone();
+                            var right = candidate.Row;
+                            right.AsSpan(seek ? 0 : inner.Start, inner.End - inner.Start).CopyTo(joined.AsSpan(inner.Start));
+                            await PrepareSubqueriesAsync(step.Condition, joined, statement, cancellationToken).ConfigureAwait(false);
+                            if (!evaluator.Matches(step.Condition, joined)) { continue; }
+                            matched = true;
+                            if (step.Kind == SqlJoinType.FullOuter)
+                            {
+                                hash!.MarkMatched(candidate.Entry);
+                                FullJoinProgress?.Invoke("match", statement.Metrics, cancellationToken);
+                            }
+                            Retain(node, joined, output);
+                        }
+                        if (!matched && step.Kind is SqlJoinType.LeftOuter or SqlJoinType.RightOuter or SqlJoinType.FullOuter) { Retain(node, left, output); }
+                    }
+                    if (step.Kind == SqlJoinType.FullOuter)
+                    {
+                        foreach (var row in hash!.Unmatched(cancellationToken))
+                        {
+                            FullJoinProgress?.Invoke("unmatched", statement.Metrics, cancellationToken);
+                            cancellationToken.ThrowIfCancellationRequested();
+                            Retain(node, row, output);
+                        }
+                    }
+
+                    IEnumerable<(object?[] Row, int Entry)> Candidates(object?[] left)
+                    {
+                        if (hash is not null)
+                        {
+                            foreach (int entry in hash.ProbeEntries(left, cancellationToken)) { yield return (hash.RowAt(entry), entry); }
+                            yield break;
+                        }
                         IEnumerable<object?[]> candidates = inner.Rows;
-                        if (hash is not null) { candidates = hash.Probe(left, cancellationToken); }
-                        else if (seek)
+                        if (seek)
                         {
                             var access = step.Access!;
                             var values = JoinProbeValues(access, left);
@@ -111,20 +152,7 @@ internal sealed partial class SqlPlanExecutor
                                 new SqlIndexSeekPath(access.Index, values, null, null), index!, statement, cancellationToken)
                                 .Select(row => row.Values);
                         }
-                        bool matched = false;
-                        foreach (var right in candidates)
-                        {
-                            cancellationToken.ThrowIfCancellationRequested();
-                            statement.Metrics.RecordJoinCandidate();
-                            if (statement.Metrics.Analysis(step) is { } work) { work.Candidates++; }
-                            var joined = (object?[])left.Clone();
-                            right.AsSpan(seek ? 0 : inner.Start, inner.End - inner.Start).CopyTo(joined.AsSpan(inner.Start));
-                            await PrepareSubqueriesAsync(step.Condition, joined, statement, cancellationToken).ConfigureAwait(false);
-                            if (!evaluator.Matches(step.Condition, joined)) { continue; }
-                            matched = true;
-                            Retain(node, joined, output);
-                        }
-                        if (!matched && step.Kind is SqlJoinType.LeftOuter or SqlJoinType.RightOuter) { Retain(node, left, output); }
+                        foreach (var row in candidates) { yield return (row, -1); }
                     }
                 }
                 finally { hash?.Dispose(); }
@@ -145,7 +173,11 @@ internal sealed partial class SqlPlanExecutor
 
         void Retain(SqlJoinTree node, object?[] row, List<object?[]> buffer)
         {
-            if (sinks.TryGetValue(node, out var sink)) { sink.Add(row, cancellationToken); }
+            if (sinks.TryGetValue(node, out var sink))
+            {
+                sink.Add(row, cancellationToken);
+                FullJoinProgress?.Invoke("build", statement.Metrics, cancellationToken);
+            }
             else { buffer.Add(row); }
         }
     }

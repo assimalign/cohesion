@@ -134,6 +134,12 @@ internal sealed partial class SqlPlanner
                         var value = join.JoinType == SqlJoinType.RightOuter
                             ? CoerceUsing(rightValue, rightColumn.Type, common)
                             : CoerceUsing(leftValue, leftColumn.Type, common);
+                        if (join.JoinType == SqlJoinType.FullOuter)
+                        {
+                            // PostgreSQL parse_clause.c:1740-1756: a FULL merged column
+                            // reads the first non-NULL input after both common-type coercions.
+                            value = new SqlBoundCoalesce([value, CoerceUsing(rightValue, rightColumn.Type, common)], common.Type);
+                        }
                         if (join.JoinType == SqlJoinType.Inner && !ReferenceEquals(value, leftValue))
                         {
                             // PostgreSQL parse_clause.c:1680-1700 also relabels a typmod
@@ -154,8 +160,11 @@ internal sealed partial class SqlPlanner
                         owner.UsingColumns ??= [];
                         owner.UsingColumns[leftOrdinal] = new SqlUsingColumn(
                             new SqlCatalogColumn(name, common,
-                                join.JoinType == SqlJoinType.RightOuter ? rightColumn.IsNullable : leftColumn.IsNullable,
-                                collation: join.JoinType == SqlJoinType.RightOuter ? rightColumn.Collation : leftColumn.Collation,
+                                join.JoinType == SqlJoinType.FullOuter ? leftColumn.IsNullable || rightColumn.IsNullable
+                                    : join.JoinType == SqlJoinType.RightOuter ? rightColumn.IsNullable : leftColumn.IsNullable,
+                                collation: join.JoinType == SqlJoinType.FullOuter
+                                    ? leftColumn.Collation is not null || rightColumn.Collation is not null ? collation.Resolve(null) : null
+                                    : join.JoinType == SqlJoinType.RightOuter ? rightColumn.Collation : leftColumn.Collation,
                                 // PostgreSQL parse_coerce.c:1360-1387 preserves identical domains.
                                 domainName: sameDomain ? leftColumn.DomainName : null), value);
                         merged.Add(leftOrdinal);
@@ -171,16 +180,17 @@ internal sealed partial class SqlPlanner
                 {
                     throw new SqlPlanningException("CS05013", ErrorMessages.SqlPlannerBindJoinSqlPlanning3, statement.Location);
                 }
-                if (join.JoinType == SqlJoinType.RightOuter)
+                if (join.JoinType is SqlJoinType.RightOuter or SqlJoinType.FullOuter)
                 {
                     Nullify(start, rightIndex, join.UsingColumns);
                 }
+                if (join.JoinType == SqlJoinType.FullOuter) { Nullify(rightIndex, bindings.Count, []); }
                 visible.AddRange(rightPart.Visible.Where(ordinal =>
                 {
                     var owner = bindings.Last(binding => binding.Offset <= ordinal);
                     return !owner.HiddenColumns.Contains(ordinal - owner.Offset);
                 }));
-                var access = bindings.Count == rightIndex + 1
+                var access = join.JoinType != SqlJoinType.FullOuter && bindings.Count == rightIndex + 1
                     ? SelectJoinAccessPath(bindings, allColumns, equalities, rightIndex,
                         !treeNeeded && rightIndex == 1 && start == 0 && join.JoinType == SqlJoinType.Inner) : null;
                 if (join.JoinType == SqlJoinType.RightOuter)
@@ -189,6 +199,15 @@ internal sealed partial class SqlPlanner
                         ? SelectJoinAccessPath(bindings, allColumns, equalities, rightIndex, false, 1) : null;
                 }
                 var step = new SqlJoinStep(rightIndex, join.JoinType, condition, access);
+                if (!metadataOnly && join.JoinType == SqlJoinType.FullOuter)
+                {
+                    var keys = HashKeys(condition, bindings, allColumns, rightIndex, bindings.Count - 1, fullFrame: true);
+                    if (keys is null)
+                    {
+                        throw new SqlPlanningException("CS05070", ErrorMessages.FullJoinCondition, join.Condition?.Location ?? statement.Location);
+                    }
+                    step = step with { Hash = keys };
+                }
                 allSteps.Add(step);
                 if (treeNeeded)
                 {
@@ -299,7 +318,7 @@ internal sealed partial class SqlPlanner
     }
 
     private static bool NeedsJoinTree(SqlFromItem item) => item.Table is SqlJoinedTableReference ||
-        item.Joins.Any(join => join.JoinType == SqlJoinType.RightOuter || join.Table is SqlJoinedTableReference);
+        item.Joins.Any(join => join.JoinType is SqlJoinType.RightOuter or SqlJoinType.FullOuter || join.Table is SqlJoinedTableReference);
 
     /// <summary>Selects the common USING type, retaining modifiers only when both inputs agree.</summary>
     private DatabaseTypeInfo UsingType(DatabaseTypeInfo left, DatabaseTypeInfo right, string name, SqlQueryExpression statement, bool setOperation = false)

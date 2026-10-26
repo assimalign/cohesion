@@ -147,9 +147,9 @@ public static class SqlLanguageProfile
 
     /// <summary>
     /// Reports whether a join type executes in the SQL surface. Supported joins
-    /// associate in written order. INNER, LEFT and RIGHT require ON or USING; CROSS has neither.
+    /// associate in written order. INNER, LEFT, RIGHT and FULL require ON or USING; CROSS has neither.
     /// </summary>
     /// <param name="joinType">The parsed join type.</param>
-    /// <returns><see langword="true"/> for INNER (including bare JOIN), LEFT OUTER, RIGHT OUTER and CROSS JOIN.</returns>
-    public static bool SupportsJoin(SqlJoinType joinType) => joinType is SqlJoinType.Inner or SqlJoinType.LeftOuter or SqlJoinType.RightOuter or SqlJoinType.Cross;
+    /// <returns><see langword="true"/> for INNER (including bare JOIN), LEFT OUTER, RIGHT OUTER, FULL OUTER and CROSS JOIN.</returns>
+    public static bool SupportsJoin(SqlJoinType joinType) => joinType is SqlJoinType.Inner or SqlJoinType.LeftOuter or SqlJoinType.RightOuter or SqlJoinType.FullOuter or SqlJoinType.Cross;
 }

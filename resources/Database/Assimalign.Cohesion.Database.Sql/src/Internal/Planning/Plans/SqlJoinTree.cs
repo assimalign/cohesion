@@ -4,7 +4,7 @@ using Assimalign.Cohesion.Database.Sql.Language;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
-/// <summary>Physical children with original column slots; RIGHT swaps children and executes as LEFT.</summary>
+/// <summary>Physical children with original column slots; RIGHT swaps as LEFT, FULL preserves both.</summary>
 internal sealed record SqlJoinTree(int Binding, SqlJoinTree? Left = null, SqlJoinTree? Right = null, SqlJoinStep? Step = null)
 {
     internal IEnumerable<int> Leaves()
