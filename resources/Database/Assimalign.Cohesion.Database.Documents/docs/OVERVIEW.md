@@ -25,8 +25,8 @@ synthetic objects keyed by variable names; an ordinary star preserves the stored
 serves OQL and document/collection commands on a consumer-supplied listener. Each authenticated
 connection binds one database. [Documents.Client](../../Assimalign.Cohesion.Database.Documents.Client/docs/OVERVIEW.md)
 provides pooled concrete client APIs, whole-document and row results, versioned mutations and
-structured diagnostics. Statement failures leave the connection reusable; explicit transactions
-remain in process only.
+structured diagnostics. Text transactions run on the connection-owned session. Pool return rolls
+back active or failed work, requiring negotiated Idle status before reuse.
 
 The public entry points are `DocumentDatabaseEngine.Create(name, options)` and the builder from
 `DocumentDatabaseEngine.CreateBuilder(name)`; no options type carries the engine name. A created database is a
@@ -42,11 +42,12 @@ has index-management members. A statement that fails inside an explicit transact
 whole transaction: the session refuses further statements and BEGIN with `CD04101` until the
 caller rolls back, and a commit fails without committing.
 
-In-process OQL accepts BEGIN/START, COMMIT and ROLLBACK on the session's transaction, with
+In-process and wire OQL accept BEGIN/START, COMMIT and ROLLBACK on the session's transaction, with
 Snapshot by default and optional SNAPSHOT or READ COMMITTED isolation. Text ROLLBACK recovers
 a faulted session. COMMIT/ROLLBACK without an open transaction gives CD04104; nested BEGIN gives
-CK04004 and faults the transaction. Wire text transaction control remains refused with CD07002
-until OQ-T2 supplies negotiated status and safe pooled reset. The language DIALECT lists spellings.
+CK04004 and faults the transaction. Documents negotiates Ready status after Execute and Command;
+text controls without negotiated status receive CD07002 and leave the session usable for
+autocommit work. The shared client discards unnegotiated peers on pool return. The language DIALECT lists spellings.
 
 OQL INSERT creates externally keyed documents from VALUES pairs or SELECT output names and
 reports the number inserted. META([alias]).id and .version read stored identity and version;

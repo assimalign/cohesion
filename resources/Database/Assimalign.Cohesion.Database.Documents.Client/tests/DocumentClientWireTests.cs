@@ -230,6 +230,14 @@ public sealed class DocumentClientWireTests
         await connection.PutAsync("items", "b", "{\"name\":\"Bob\",\"group\":\"A\",\"score\":4,\"active\":false}"u8.ToArray(), cancellationToken: harness.Token);
         await connection.PutAsync("items", "c", "{\"name\":\"Cy\",\"group\":\"B\",\"score\":1,\"active\":true}"u8.ToArray(), cancellationToken: harness.Token);
 
+        // Transaction clauses join the advertised wire conformance corpus (#1725).
+        (await connection.ExecuteAsync("START WORK", cancellationToken: harness.Token)).ShouldBe(0);
+        await connection.PutAsync("items", "rolled_back", "{}"u8.ToArray(), cancellationToken: harness.Token);
+        (await connection.ExecuteAsync("ROLLBACK TRAN", cancellationToken: harness.Token)).ShouldBe(0);
+        (await connection.GetAsync("items", "rolled_back", harness.Token)).ShouldBeNull();
+        (await connection.ExecuteAsync("BEGIN ISOLATION LEVEL READ COMMITTED", cancellationToken: harness.Token)).ShouldBe(0);
+        (await connection.ExecuteAsync("COMMIT WORK", cancellationToken: harness.Token)).ShouldBe(0);
+
         // Act / Assert: SELECT, FROM alias, WHERE, paths, parameters, ORDER BY and arithmetic.
         var rows = await connection.QueryAsync("SELECT d.name AS person, d.nested.x AS x, d.array[0] AS entry_value, d.score * 2 + 1 AS value FROM items AS d WHERE d.score >= @min AND NOT d.active = false ORDER BY \"value\" DESC",
             new Dictionary<string, object?> { ["min"] = 2 }, harness.Token);

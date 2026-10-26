@@ -6,5 +6,5 @@ namespace Assimalign.Cohesion.Database.Documents.Protocol;
 public static class DocumentProtocol
 {
     /// <summary>Gets the message family bound to each document connection.</summary>
-    public static ProtocolMessageFamily Family { get; } = new("Documents", 64, 65, 66, 67, 68, 69, 70, 71, 72);
+    public static ProtocolMessageFamily Family { get; } = new("Documents", [ProtocolCapability.TransactionStatus], 64, 65, 66, 67, 68, 69, 70, 71, 72);
 }

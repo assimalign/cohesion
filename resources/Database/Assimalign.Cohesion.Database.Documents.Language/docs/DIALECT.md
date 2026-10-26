@@ -1,8 +1,8 @@
 # OQL SQL++ dialect
 
-## Text transactions (#1725 T1)
+## Text transactions (#1725)
 
-In-process Documents sessions accept `BEGIN [WORK | TRAN | TRANSACTION]`,
+In-process and wire Documents sessions accept `BEGIN [WORK | TRAN | TRANSACTION]`,
 `START (WORK | TRAN | TRANSACTION)`, `COMMIT [WORK | TRAN | TRANSACTION]`, and
 `ROLLBACK [WORK | TRAN | TRANSACTION]`. A start optionally takes
 `ISOLATION LEVEL SNAPSHOT` or `ISOLATION LEVEL READ COMMITTED`. Snapshot is the default,
@@ -10,21 +10,32 @@ intentionally differing from Couchbase SQL++'s READ COMMITTED default. Bare BEGI
 SNAPSHOT extend the [SQL++ grammar](https://github.com/couchbaselabs/docs-devex/blob/c3bb1549af4887019b9983e371d9e8b4f569052c/modules/n1ql/partials/grammar/tcl.ebnf#L9-L28).
 Transaction words remain contextual, including implicit FROM and DML aliases named `savepoint`,
 and each command returns Success with affected count zero.
+Controls ignore supplied parameters, including duplicate names in a wire parameter object.
+For ordinary wire statements duplicate names give CD01009 and fault an explicit transaction.
+Syntax diagnostics take precedence over duplicate parameter names, since parsing identifies controls.
 
 Commands use the session's existing transaction, including one begun through its C# API.
 COMMIT or ROLLBACK without an open transaction gives CD04104. Nested BEGIN gives CK04004 and
 aborts the existing transaction. A failed statement preserves CD04101 until rollback;
 text ROLLBACK recovers the session. COMMIT on a faulted transaction gives CD04101 and ends it
 without committing. Malformed text in a faulted transaction also preserves CD04101.
+Wire command validation and response serialization failures also abort explicit work; a response
+size failure retains CD05016 before later statements receive CD04101.
 OQL CREATE/DROP COLLECTION/INDEX in an explicit transaction gives CD04105 and aborts it,
 including conditional no-ops. C# collection operations retain their existing transaction contract.
 SAVEPOINT, ROLLBACK TO SAVEPOINT and SET TRANSACTION remain CK00001; the rollback form reports
 the unsupported clause at `TO`. EXPLAIN accepts no
 transaction control. Unsupported isolation spellings are CD00002.
 
-Until OQ-T2 adds negotiated transaction status and safe pooled reset, Documents server sessions
-refuse every text transaction command with CD07002 over InMemory and TCP. In-process sessions
-accept them. T1 changes neither wire identifiers nor persisted formats.
+On InMemory and TCP, controls require the negotiated transaction-status capability; every control
+from a 2.0 or unnegotiated 2.1 peer receives CD07002 before touching a transaction. The session
+remains usable for ordinary autocommit work. Controls run on the connection-owned session. Documents negotiates
+transaction-status and sends Ready after Execute and Command, including complete failures.
+Returning a pooled connection rolls back active or faulted work and requires Idle before reuse;
+legacy peers without negotiated status are discarded. Cancellation or disconnect before a terminal
+response discards the session and leaves an unacknowledged commit's outcome unknown. Once Complete
+has arrived, bounded status cleanup ignores caller cancellation. No request identifier, protocol
+version or persisted format changes. CD07002 remains live for this capability requirement.
 
 ## Quoted identifiers
 

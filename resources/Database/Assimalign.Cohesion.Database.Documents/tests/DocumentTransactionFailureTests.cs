@@ -25,8 +25,8 @@ namespace Assimalign.Cohesion.Database.Documents.Tests;
 /// abort record changes nothing, and an undo the journal rejects is deferred with the writer lock
 /// held until the version-purge pass completes it, even against a late operation of the ended
 /// transaction, and is scrubbed at the next open when it still fails at close. These
-/// API end-state failures run in process; DocumentTextTransactionWireTests covers the interim
-/// server refusal of text transaction control over InMemory and TCP.
+/// API end-state failures run in process; DocumentTextTransactionWireTests covers negotiated
+/// transaction state and failed command admission over InMemory and TCP.
 /// </summary>
 public sealed class DocumentTransactionFailureTests
 {

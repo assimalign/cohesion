@@ -391,18 +391,24 @@ Decoder failures become ProtocolException and the server sends fatal ProtocolVio
 
 ## Execute transaction status (#1540, D5)
 
-SQL and Graph advertise the shared `transaction-status` capability in protocol 2.1. Startup Ready
-keeps its version/capability payload. When negotiated, each Execute (also Graph ExecutePaths)
-ends with an existing Ready frame (byte 4) after ResultComplete/PathsComplete or a statement Error.
+SQL, Graph and Documents advertise the shared `transaction-status` capability in protocol 2.1.
+Startup Ready keeps its version/capability payload. When negotiated, each Execute (also Graph
+ExecutePaths and Documents Command) ends with an existing Ready frame (byte 4). It follows
+ResultComplete/PathsComplete or statement Error for SQL/Graph, and Complete or Failure for Documents.
 Its payload is exactly one ASCII byte: `I` idle, `T` explicit transaction active, `E` explicit
 transaction failed. No new message identifier, protocol version or on-disk format is introduced.
 Unnegotiated peers retain their original bytes. Ping/Pong and terminal connection errors have no
 postamble. Malformed status payloads use CK07002 and are protocol violations.
 
-The capability also defines parameterless reset: Execute byte 5 carries the usual length-prefixed
-UTF-8 `ROLLBACK` followed by a zero Int32 parameter count. Success is ResultComplete byte 8 with
-an Int64 affected count of zero, then Ready `I`. An error or any other completion/status discards
-the connector. Clients never determine transaction state by recognizing user command text.
+The capability also defines parameterless reset using the family's existing envelope. SQL/Graph
+Execute byte 5 carries the usual length-prefixed UTF-8 `ROLLBACK` followed by a zero Int32 parameter
+count. Success is ResultComplete byte 8 with an Int64 affected count of zero. Documents Execute
+byte 64 carries the length-prefixed statement followed by the JSON byte length (Int32 2) and `{}`;
+Complete byte 66 must contain two zero Int64 counts (exactly sixteen bytes). Both require Ready
+`I` before reuse. An error or any other completion/status discards the connector. An unnegotiated
+transaction-capable peer cannot certify reuse and is discarded on return. Clients never determine
+transaction state by recognizing user command text. These family-specific reset envelopes add no
+model dependency or public adapter to the shared client (#1725).
 
 PostgreSQL reports the same idle/active/failed distinction after a command cycle in
 `src/backend/tcop/dest.c:268-281` and `src/backend/access/transam/xact.c:5058-5090` (local PostgreSQL

@@ -146,6 +146,7 @@ public sealed class ModelDiagnosticProducerTests
     [Fact(DisplayName = "Cohesion Test [Documents] - Diagnostics: duplicate wire parameter keys have one stable prefix")]
     public async Task Execute_DuplicateWireParameters_ShouldCarryCodeAsync()
     {
+        // Arrange
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30)); // Hang guard for the wire peer.
         var token = timeout.Token;
         await using var listener = new InMemoryConnectionListener();
@@ -159,8 +160,11 @@ public sealed class ModelDiagnosticProducerTests
         (await channel.Reader.ReadFrameAsync(token)).ShouldNotBeNull().Type.ShouldBe(ProtocolMessageType.Authenticate);
         await WriteAsync(ProtocolMessageType.AuthenticateResponse, []);
         (await channel.Reader.ReadFrameAsync(token)).ShouldNotBeNull().Type.ShouldBe(ProtocolMessageType.Ready);
+        // Act: valid OQL isolates parameter validation after parsing identifies statement controls.
         await WriteAsync((ProtocolMessageType)DocumentProtocolMessageType.Execute,
-            new DocumentProtocolExecuteMessage("SELECT 1", "{\"x\":1,\"x\":2}"u8.ToArray()).Encode());
+            new DocumentProtocolExecuteMessage("SELECT 1 FROM items", "{\"x\":1,\"x\":2}"u8.ToArray()).Encode());
+
+        // Assert
         var frame = (await channel.Reader.ReadFrameAsync(token)).ShouldNotBeNull();
         frame.Type.ShouldBe((ProtocolMessageType)DocumentProtocolMessageType.Failure);
         var failure = DocumentProtocolFailureMessage.Decode(frame.Payload.Span);

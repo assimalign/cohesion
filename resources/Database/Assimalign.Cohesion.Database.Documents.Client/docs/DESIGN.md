@@ -160,19 +160,38 @@ failure over InMemory and TCP (#1135).
 
 ## Failures and pooling
 
-### Text transaction gate (#1725 T1)
+### Text transactions and pool return (#1725)
 
-The OQL parser now recognizes BEGIN/START, COMMIT and ROLLBACK for in-process sessions.
-Until OQ-T2 supplies negotiated Ready transaction status and family-aware pooled reset, the
-Documents server refuses these commands with ExecutionFailure and CD07002 before opening a
-transaction. A decoded refusal leaves the same pooled session reusable. MERGE and other
-unsupported syntax retain ParseFailure with CK00001. Client failure tests verify both
-classifications, source locations and the same session after the next rental over InMemory and TCP.
-The telemetry parse-refusal test uses MERGE so it still exercises StatementParseFailed.
+BEGIN/START, COMMIT and ROLLBACK use ordinary Execute on the connection-owned session.
+Snapshot is the default and READ COMMITTED is explicit. Command CRUD and collection operations
+share that transaction. OQL DDL retains CD04105; failed work retains CD04101 until ROLLBACK,
+or a failed COMMIT that ends it without committing. CD07002 refuses every text control when
+transaction-status was not negotiated, before touching any transaction; ordinary autocommit
+work remains available. Capability-free pooled-driver regressions verify refusal and clean reuse
+over InMemory and TCP, including after a statement failure.
 
-The NativeAOT sample checks in-process default Snapshot and explicit READ COMMITTED control,
-then checks the wire refusal on both transports. No client runtime member, shared-client reset
-logic, protocol layout or capability advertisement changes in T1.
+Documents advertises transaction-status. Every Execute and Command terminal response is followed
+by negotiated Ready (Idle, Active or Failed), including decoded Failure. The shared client observes
+both request identifiers, drains status before completing the operation, and rolls back active or
+failed transactions before pooling. Reset validates Execute 64 / Complete 66 with two zero counts
+and Idle status. Missing, malformed, unnegotiated or failed reset evidence discards the session.
+A 2.0 or unnegotiated 2.1 peer remains usable for its rental but cannot be pooled.
+
+Status bookkeeping after Complete uses the shared bounded cleanup token, so caller cancellation
+cannot turn acknowledged COMMIT into caller cancellation. Any exception from COMMIT leaves its
+outcome unknown to the caller and discards the connection, including when Complete acknowledged
+the commit but its Ready status postamble was lost. A missing Ready times out with
+OperationCanceledException from the five-second internal bound, independent of the caller's token;
+a closed connection before Ready reports DocumentClientException (ProtocolViolation).
+Disconnect cleanup never retries COMMIT. Abandoning an unfinished exchange discards the connection.
+Postamble failures retain the shared protocol, transport or cleanup exception and discard the
+session; they never retry an acknowledged statement or claim that committed work was rolled back.
+InMemory and TCP tests cover visibility, isolation, failed commands, pooled rollback, disconnect,
+cancellation/disposal races, invalid status/reset and cancellation after COMMIT acknowledgement.
+Frame relays on both transports drop Complete before the client receives it, or close/withhold
+Ready after forwarding Complete. They assert caller failure, a fresh physical connection on the
+next rental, exactly one COMMIT on the wire, and atomic visibility from an independent session.
+The NativeAOT sample exercises wire controls and reset on both transports.
 
 ### Terminal response ownership
 
@@ -198,6 +217,10 @@ Blank OQL collection names return `CD05001` at the quoted name's span; empty quo
 return the parser's `CD00002`. Both preserve the connection. The typed command API rejects blank
 names locally with its existing argument guard. A peer sending one through Command (69) receives
 an unlocated `CD05001` Failure and can continue using the same server session.
+Within an explicit transaction, that semantic command failure aborts pending work and requires
+an end control before further statements. Oversized Put response preflight and query response
+serialization failures follow the same rule, retaining CD05016 for the original failure and
+CD04101 for later statements.
 
 Collection refusals preserve `CD01002` (missing DROP), `CD03010` (duplicate CREATE), and
 `CD03011` (schema-owned DROP) through both OQL and Command exchanges. Their OQL diagnostics
@@ -259,7 +282,7 @@ The sample executes every scalar category and verifies code-point LENGTH and Int
 both InMemory and TCP (#1137), alongside the existing advertised-clause checks.
 
 Documents.Client is inventoried and built in the Database workflow, but remains NuGet-only like
-Graph.Client. Model-specific Documents security remains deferred within the engine. Transactions, remote database administration,
+Graph.Client. Model-specific Documents security remains deferred within the engine. Remote database administration,
 replication and model-specific security policies are outside this wire slice. OQL INSERT, UPSERT, UPDATE and DELETE
 return their affected counts through the existing completion field. Wire negotiation remains
 the shared protocol's responsibility, with no model-specific version exchange. The startup version
@@ -298,7 +321,7 @@ JSON uses fixed, one-level objects and cannot carry arbitrary nested content.
 
 ## Shared startup 2.1 (#1105)
 
-The shared client reads the negotiated Ready version and capability intersection. Documents agrees 2.1 with an empty list and retains its existing structured Failure payload; it does not adopt the core Diagnostics frame. A negotiated 2.0 peer still sends empty Ready.
+The shared client reads the negotiated Ready version and capability intersection. Documents agrees 2.1 with transaction-status and retains its existing structured Failure payload; it does not adopt the core Diagnostics frame. A negotiated 2.0 peer still sends empty Ready.
 
 ## Dedicated test actors (#1285)
 

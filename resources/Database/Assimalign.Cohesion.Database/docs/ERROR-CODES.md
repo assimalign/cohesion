@@ -348,7 +348,7 @@ and invariant exceptions and lower child-root typed failures retain their docume
 | CD04105 | OQL collection/index DDL inside an explicit transaction (#1725) | — |
 | CD05016 | Result byte/frame limit exceeded | — |
 | CD07001 | Session belongs to another database | — |
-| CD07002 | Documents server refuses text transaction control pending safe pooled reset (#1725 T1) | — |
+| CD07002 | Text transaction control requires the negotiated transaction-status capability (#1725) | — |
 | CD09001 | Collection handle is stale | — |
 | CB01001 | Container is absent | — |
 | CB01002 | Blob is absent | — |
