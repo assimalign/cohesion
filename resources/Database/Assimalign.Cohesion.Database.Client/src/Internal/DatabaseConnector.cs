@@ -384,7 +384,8 @@ internal sealed class DatabaseConnector
             // Select the existing envelope by family identifiers, without referencing model
             // assemblies or inferring transaction state from statement text. SQL/Graph use 5/8;
             // Documents has no Execute 5 and uses 64/66 with two zero completion counts.
-            bool documents = !Family.Supports((ProtocolMessageType)5);
+            bool documents = Family.Capabilities.Contains(ProtocolCapability.TransactionStatus) &&
+                !Family.Supports((ProtocolMessageType)5) && Family.Supports((ProtocolMessageType)69);
             byte execute = documents ? (byte)64 : (byte)5;
             byte complete = documents ? (byte)66 : (byte)8;
             if (!Family.Supports((ProtocolMessageType)execute) || !Family.Supports((ProtocolMessageType)complete))

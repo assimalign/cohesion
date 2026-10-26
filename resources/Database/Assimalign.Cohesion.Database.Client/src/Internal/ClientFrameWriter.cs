@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -26,7 +27,8 @@ internal sealed class ClientFrameWriter : ProtocolFrameWriter
     public ClientFrameWriter(ProtocolFrameWriter writer, ProtocolMessageFamily family)
     {
         _writer = writer;
-        _documentCommands = !family.Supports((ProtocolMessageType)5) && family.Supports((ProtocolMessageType)69);
+        _documentCommands = family.Capabilities.Contains(ProtocolCapability.TransactionStatus) &&
+            !family.Supports((ProtocolMessageType)5) && family.Supports((ProtocolMessageType)69);
     }
 
     protected override async ValueTask WriteFrameCoreAsync(ProtocolFrame frame, CancellationToken cancellationToken)

@@ -222,8 +222,10 @@ lease operation. The rollback reply and its Ready drain each have a five-second 
 or an unnegotiated transaction-capable peer discards the connector. Idle sessions need no reset
 exchange. No state is inferred from statement text. Reset keeps SQL/Graph Execute 5 / completion 8
 (one zero Int64); Documents uses Execute 64
-with empty JSON parameters / Complete 66 (two zero Int64 counts). The family identifiers select
-the envelope without a model reference or new public seam. The connector observes Execute (5),
+with empty JSON parameters / Complete 66 (two zero Int64 counts). The family's TransactionStatus
+capability, absence of Execute 5 and presence of Command 69 select the Documents envelope without
+a model reference or new public seam. Blob also defines byte 69 for ChunkAcknowledgement, so
+identifiers alone cannot identify Documents. The connector observes Execute (5),
 ExecutePaths / Documents Execute (64), and Documents Command (69) frames and drains negotiated
 status even for application exchanges using the one-argument constructor. The explicit
 transactionStatus flag can still require a postamble.
