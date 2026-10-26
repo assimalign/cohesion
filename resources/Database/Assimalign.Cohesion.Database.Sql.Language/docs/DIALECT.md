@@ -338,8 +338,10 @@ foreign-key closure, including cycles and tables in other SQL namespaces, indepe
 ON DELETE action. The entire set is validated before publication. A concurrent identity,
 definition or foreign-key closure change retains retryable CS04064/CS04006; no partial table list is published.
 The closure is recomputed from the written targets at reservation and publication; added and
-removed dependents both require a retry. Concurrent FK declarations reject a replaced parent
-identity with CS04064 before validating existing rows.
+removed dependents both require a retry. A cascaded table dropped or renamed during the lock
+wait reports CS04064 with the closure-change message; an explicitly named missing table keeps
+CS01051. Concurrent FK declarations retain the initially resolved parent identities and reject
+a missing or replaced parent with CS04064 before rebinding or validating existing rows.
 RESTART IDENTITY resets every identity in the resulting set to its declared START, including
 its declared INCREMENT. CONTINUE preserves the allocator's exact in-process next value and
 unused reservation block. Reopen still skips reserved values under the existing identity

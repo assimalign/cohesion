@@ -79,7 +79,14 @@ internal sealed partial class SqlPlanExecutor
         {
             await statement.Coordinator.LockManager.AcquireAsync(statement.DdlLockOwner,
                 LockResource.Object(previous[index].ObjectId), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
-            var current = ReadCurrentTable(previous[index]);
+            if (!_catalog.TryGetTable(previous[index].Schema, previous[index].Name, out var current))
+            {
+                if (!named.Any(table => table.ObjectId == previous[index].ObjectId))
+                {
+                    throw new SqlExecutionException(SqlExecutionException.SerializationFailureCode, ErrorMessages.TruncateClosureChanged);
+                }
+                current = ReadCurrentTable(previous[index]);
+            }
             EnsureSameIdentity(previous[index], current);
             previous[index] = current;
         }

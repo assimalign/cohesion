@@ -15,6 +15,7 @@ using Assimalign.Cohesion.Connections.InMemory;
 using Assimalign.Cohesion.Connections.Tcp;
 using Assimalign.Cohesion.Database.Client;
 using Assimalign.Cohesion.Database.Execution;
+using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Client;
 using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Sql.Tests.TestObjects;
@@ -88,11 +89,11 @@ public sealed partial class SqlTruncateReviewTests
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - TRUNCATE: the closure is rechecked at publication (#1716)")]
-    public async Task ExecuteAsync_RemovedDependentAfterPreparation_ShouldRefusePublication()
+    public async Task ExecuteAsync_AddedDependentAfterPreparation_ShouldRefusePublication()
     {
         // Arrange: the public catalog can publish independently of SQL's table locks.
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        await using var engine = SqlDatabaseEngine.Create("truncate-publication-shrink", new());
+        await using var engine = SqlDatabaseEngine.Create("truncate-publication-growth", new());
         var database = await engine.CreateDatabaseAsync("db", timeout.Token);
         await using var session = await database.CreateSessionAsync(timeout.Token);
         await ExecAsync(session, "CREATE TABLE p (id INT PRIMARY KEY)", timeout.Token);
@@ -102,14 +103,19 @@ public sealed partial class SqlTruncateReviewTests
         int prepared = 0;
         SqlPlanExecutor.TruncatePrepared = () =>
         {
-            database.Catalog.DropConstraintAsync("dbo", "c", "fk", timeout.Token).GetAwaiter().GetResult();
+            database.Catalog.CreateTableAsync("dbo", "added", database.Catalog.Tables.Single(table => table.Name == "c").Columns,
+                primaryKeyColumns: null, DatabaseObjectOwner.Adhoc, owningSchema: null, timeout.Token,
+                constraints: [new SqlCatalogConstraint("added_fk", SqlCatalogConstraintKind.Reference, ["id"], "dbo", "p", ["id"])])
+                .GetAwaiter().GetResult();
             prepared++;
         };
         try
         {
             // Act / Assert
             var failure = await Should.ThrowAsync<DatabaseException>(() => ExecAsync(session, "TRUNCATE p CASCADE", timeout.Token));
-            failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS04064");
+            var diagnostic = failure.Diagnostics.ShouldHaveSingleItem();
+            diagnostic.Code.ShouldBe("CS04064");
+            diagnostic.Message.ShouldBe(ErrorMessages.TruncateClosureChanged);
             prepared.ShouldBe(1);
         }
         finally { SqlPlanExecutor.TruncatePrepared = null; }
