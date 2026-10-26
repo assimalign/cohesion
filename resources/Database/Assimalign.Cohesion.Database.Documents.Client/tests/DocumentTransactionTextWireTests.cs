@@ -10,6 +10,7 @@ using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Documents.Client.Tests;
 
+[Collection(nameof(DocumentClientEventSourceCollection))]
 public sealed class DocumentTransactionTextWireTests
 {
     [Theory(DisplayName = "Cohesion Test [Documents.Client] - Transaction spellings retain own writes and isolate other sessions on both transports (#1725)")]
@@ -119,11 +120,13 @@ public sealed class DocumentTransactionTextWireTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Documents.Client] - Disconnect rolls back open writes and releases the writer for a new session (#1725)")]
-    [InlineData(false, false)]
-    [InlineData(true, false)]
-    [InlineData(false, true)]
-    [InlineData(true, true)]
-    public async Task AbortAsync_OpenTransaction_ShouldRollbackBeforeNewWriter(bool tcp, bool serverDisconnect)
+    [InlineData(false, false, false)]
+    [InlineData(true, false, false)]
+    [InlineData(false, true, false)]
+    [InlineData(true, true, false)]
+    [InlineData(false, false, true)]
+    [InlineData(true, false, true)]
+    public async Task AbortAsync_OpenTransaction_ShouldRollbackBeforeNewWriter(bool tcp, bool serverDisconnect, bool clientShutdown)
     {
         // Arrange
         await using var harness = await DocumentClientTestHarness.StartAsync(tcp);
@@ -135,8 +138,14 @@ public sealed class DocumentTransactionTextWireTests
 
         // Act
         if (serverDisconnect) { await session.DisposeAsync(); }
-        await first.AbortAsync();
-        await using var next = await harness.Client.ConnectAsync(harness.Token);
+        if (clientShutdown)
+        {
+            await harness.Client.DisposeAsync();
+            await first.DisposeAsync();
+        }
+        else { await first.AbortAsync(); }
+        await using var replacement = CreatePeer(harness);
+        await using var next = await (clientShutdown ? replacement : harness.Client).ConnectAsync(harness.Token);
         await next.PutAsync("items", "clean", "{}"u8.ToArray(), cancellationToken: harness.Token);
 
         // Assert: the successful new writer proves teardown released the old writer lock.

@@ -10,6 +10,8 @@ intentionally differing from Couchbase SQL++'s READ COMMITTED default. Bare BEGI
 SNAPSHOT extend the [SQL++ grammar](https://github.com/couchbaselabs/docs-devex/blob/c3bb1549af4887019b9983e371d9e8b4f569052c/modules/n1ql/partials/grammar/tcl.ebnf#L9-L28).
 Transaction words remain contextual, including implicit FROM and DML aliases named `savepoint`,
 and each command returns Success with affected count zero.
+Controls ignore supplied parameters, including duplicate names in a wire parameter object.
+For ordinary wire statements duplicate names give CD01009 and fault an explicit transaction.
 
 Commands use the session's existing transaction, including one begun through its C# API.
 COMMIT or ROLLBACK without an open transaction gives CD04104. Nested BEGIN gives CK04004 and

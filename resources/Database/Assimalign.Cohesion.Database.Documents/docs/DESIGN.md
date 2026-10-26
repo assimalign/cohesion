@@ -284,6 +284,10 @@ after each Execute or Command terminal response, including Failure. Legacy 2.0 a
 uses Execute 64 with an empty JSON parameter object and Complete 66 with two zero Int64 counts,
 then requires Idle before reuse. CD07002, the temporary wire gate, is retired and reserved.
 No new request identifier, protocol version or disk format is needed.
+Controls ignore the supplied parameter object, including duplicate names. For ordinary statements,
+duplicate-name validation runs inside statement admission: CD01009 faults an explicit transaction,
+and later work retains CD04101 until an end control recovers it. Malformed wire JSON still terminates
+the connection before statement admission.
 
 The single server pump owns session access. On the client, lock order is the typed wrapper's
 operation lock then shared lease admission lock; pool locks and storage latches are never taken

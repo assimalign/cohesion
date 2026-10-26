@@ -58,7 +58,7 @@ public sealed class DocumentTextTransactionWireTests
 
         // Act / Assert: commands and failures share the same negotiated status contract.
         await ExecuteAsync("CREATE COLLECTION items", false, 'I');
-        await ExecuteAsync("BEGIN", false, 'T');
+        await ExecuteAsync("BEGIN", false, 'T', duplicateParameters: true);
         session.DatabaseSession.ShouldNotBeNull().CurrentTransaction.ShouldNotBeNull().IsolationLevel
             .ShouldBe(Transactions.IsolationLevel.Snapshot);
         await WriteAsync((ProtocolMessageType)DocumentProtocolMessageType.Command,
@@ -66,19 +66,22 @@ public sealed class DocumentTextTransactionWireTests
         (await channel.Reader.ReadFrameAsync(token)).ShouldNotBeNull().Type.ShouldBe((ProtocolMessageType)DocumentProtocolMessageType.Collection);
         (await channel.Reader.ReadFrameAsync(token)).ShouldNotBeNull().Type.ShouldBe((ProtocolMessageType)DocumentProtocolMessageType.Complete);
         await StatusAsync('T');
-        await ExecuteAsync("SELECT * FROM absent", true, 'E');
-        await ExecuteAsync("ROLLBACK", false, 'I');
+        await ExecuteAsync("SELECT * FROM items", true, 'E', duplicateParameters: true, code: "CD01009");
+        await ExecuteAsync("SELECT * FROM absent", true, 'E', code: "CD04101");
+        await ExecuteAsync("ROLLBACK", false, 'I', duplicateParameters: true);
         await ExecuteAsync("START WORK ISOLATION LEVEL READ COMMITTED", false, 'T');
-        await ExecuteAsync("COMMIT TRAN", false, 'I');
+        await ExecuteAsync("COMMIT TRAN", false, 'I', duplicateParameters: true);
         await WriteAsync(ProtocolMessageType.Ping, []);
         (await channel.Reader.ReadFrameAsync(token)).ShouldNotBeNull().Type.ShouldBe(ProtocolMessageType.Pong);
         server.Sessions.ShouldHaveSingleItem().Id.ShouldBe(session.Id);
 
-        async Task ExecuteAsync(string source, bool failure, char status)
+        async Task ExecuteAsync(string source, bool failure, char status, bool duplicateParameters = false, string? code = null)
         {
-            await WriteAsync((ProtocolMessageType)DocumentProtocolMessageType.Execute, DocumentProtocolExecuteMessage.Create(source).Encode());
+            await WriteAsync((ProtocolMessageType)DocumentProtocolMessageType.Execute,
+                new DocumentProtocolExecuteMessage(source, duplicateParameters ? "{\"p\":1,\"p\":2}"u8.ToArray() : "{}"u8.ToArray()).Encode());
             var response = (await channel.Reader.ReadFrameAsync(token)).ShouldNotBeNull();
             response.Type.ShouldBe((ProtocolMessageType)(failure ? DocumentProtocolMessageType.Failure : DocumentProtocolMessageType.Complete));
+            if (code is not null) { DocumentProtocolFailureMessage.Decode(response.Payload.Span).Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(code); }
             await StatusAsync(status);
         }
 

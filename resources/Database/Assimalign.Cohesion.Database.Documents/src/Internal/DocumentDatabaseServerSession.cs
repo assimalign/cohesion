@@ -413,14 +413,6 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
             if (execute is not null)
             {
                 using var parametersJson = JsonDocument.Parse(execute.Parameters, new JsonDocumentOptions { MaxDepth = 256 });
-                var parameters = new Dictionary<string, object?>(StringComparer.Ordinal);
-                foreach (var property in parametersJson.RootElement.EnumerateObject())
-                {
-                    if (!parameters.TryAdd(property.Name, property.Value.Clone()))
-                    {
-                        throw DatabaseException.CreateDocumentsFailure("CD01009", ErrorMessages.ParameterNameDuplicate);
-                    }
-                }
                 var result = await _databaseSession!.ExecuteStatementAsync(() =>
                 {
                     var statement = (OqlQueryStatement)new OqlQueryParser(allowUnregisteredFunctions: true).Parse(execute.Statement);
@@ -431,6 +423,19 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
                         var error = new DatabaseParseException(detail.Length == 0 ? ErrorMessages.StatementInvalid : detail, diagnostics);
                         DocumentDatabaseEventSource.Log.StatementParseFailed(this, _databaseSession!.Database.Name, error);
                         throw error;
+                    }
+                    // Controls ignore supplied parameters. Ordinary parameter validation belongs
+                    // inside statement admission so a failure also faults an explicit transaction.
+                    var parameters = new Dictionary<string, object?>(StringComparer.Ordinal);
+                    if (statement.OqlExpression is not OqlTransactionExpression)
+                    {
+                        foreach (var property in parametersJson.RootElement.EnumerateObject())
+                        {
+                            if (!parameters.TryAdd(property.Name, property.Value.Clone()))
+                            {
+                                throw DatabaseException.CreateDocumentsFailure("CD01009", ErrorMessages.ParameterNameDuplicate);
+                            }
+                        }
                     }
                     return new DocumentQueryRequest(statement, parameters);
                 }, cancellationToken).ConfigureAwait(false);
