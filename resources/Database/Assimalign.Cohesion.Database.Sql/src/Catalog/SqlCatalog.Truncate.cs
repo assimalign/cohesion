@@ -204,7 +204,7 @@ public sealed partial class SqlCatalog
             }
             foreach (var table in expected) { _truncatedTables.Add(table.ObjectId, (marker, before)); }
             foreach (var pair in retiredIndexes) { _truncatedIndexes.Add(pair.Key, pair.Value); }
-            PublishOrderedTruncations();
+            AppendOrderedTruncations(expected, marker, before);
             _registrations = merged;
             _registrationsLocation = registrationsLocation;
             _storageBindingGeneration = bindingGeneration;
@@ -216,29 +216,60 @@ public sealed partial class SqlCatalog
     // still retains that exact owner. Statement/transaction pins protect the caller's use.
     internal bool IsTruncatedTable(SqlCatalogTable table)
     {
+        if (Volatile.Read(ref _orderedTruncations).Length == 0) { return false; }
         lock (_sync)
         {
             ThrowIfOffline();
-            return _truncatedTables.TryGetValue(table.ObjectId, out var retired) &&
-                retired.Before.Tables.Any(candidate => ReferenceEquals(candidate, table));
+            return IsTruncatedTableCore(table);
         }
+    }
+
+    private bool IsTruncatedTableCore(SqlCatalogTable table)
+    {
+        if (!_truncatedTables.TryGetValue(table.ObjectId, out var retired)) { return false; }
+        for (int index = 0; index < retired.Before.Tables.Count; index++)
+        {
+            if (ReferenceEquals(retired.Before.Tables[index], table)) { return true; }
+        }
+        return false;
     }
 
     internal bool TryGetTruncatedIndex(SqlCatalogTable table, SqlCatalogIndex planned, out BTreeIndex index)
     {
+        index = null!;
+        if (Volatile.Read(ref _orderedTruncations).Length == 0 || planned.TableObjectId != table.ObjectId) { return false; }
         lock (_sync)
         {
             ThrowIfOffline();
-            index = null!;
-            return planned.TableObjectId == table.ObjectId && IsTruncatedTable(table) &&
+            return IsTruncatedTableCore(table) &&
                 _truncatedIndexes.TryGetValue(planned, out index!);
         }
     }
 
-    private void PublishOrderedTruncations()
-        => Volatile.Write(ref _orderedTruncations, _truncatedTables
-            .Select(pair => (ObjectId: pair.Key, pair.Value.Marker, pair.Value.Before))
-            .OrderBy(retired => retired.Marker).ThenBy(retired => retired.ObjectId).ToArray());
+    private void AppendOrderedTruncations(IReadOnlyList<SqlCatalogTable> retired, TransactionSequence marker, SqlCatalogSnapshot before)
+    {
+        // Snapshot admission serializes monotonically increasing markers. The caller
+        // supplies this publication's owners in ascending identity order.
+        var previous = _orderedTruncations;
+        var next = new (ulong ObjectId, TransactionSequence Marker, SqlCatalogSnapshot Before)[previous.Length + retired.Count];
+        Array.Copy(previous, next, previous.Length);
+        for (int index = 0; index < retired.Count; index++)
+        {
+            next[previous.Length + index] = (retired[index].ObjectId, marker, before);
+        }
+        Volatile.Write(ref _orderedTruncations, next);
+    }
+
+    private void RemoveOrderedTruncation(ulong objectId)
+    {
+        var previous = _orderedTruncations;
+        int index = 0;
+        while (previous[index].ObjectId != objectId) { index++; }
+        var next = new (ulong ObjectId, TransactionSequence Marker, SqlCatalogSnapshot Before)[previous.Length - 1];
+        Array.Copy(previous, next, index);
+        Array.Copy(previous, index + 1, next, index, previous.Length - index - 1);
+        Volatile.Write(ref _orderedTruncations, next);
+    }
 
     private void ValidateTruncateSet(IReadOnlyList<SqlCatalogTable> expected, IReadOnlyList<SqlCatalogTable> named)
     {
