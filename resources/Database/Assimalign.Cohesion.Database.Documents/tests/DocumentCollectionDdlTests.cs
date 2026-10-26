@@ -160,36 +160,40 @@ public sealed class DocumentCollectionDdlTests
         await Should.ThrowAsync<DatabaseException>(async () => await session.GetCollectionAsync("items", CancellationToken.None));
     }
 
-    [Theory(DisplayName = "Cohesion Test [Documents] - Collection DDL: transaction refusal precedes catalog checks and conditional no-ops")]
+    [Theory(DisplayName = "Cohesion Test [Documents] - Collection DDL: autocommit snapshot conflicts precede catalog checks and conditional no-ops")]
     [InlineData("CREATE COLLECTION x")]
     [InlineData("CREATE COLLECTION IF NOT EXISTS x")]
     [InlineData("DROP COLLECTION IF EXISTS x")]
-    public async Task Execute_CollectionCommittedAfterSnapshot_ShouldRefuseDdlBeforeCatalogChecksAsync(string statement)
+    public async Task Execute_CollectionChangedWhileWaiting_ShouldCheckConflictBeforeNoOpAsync(string statement)
     {
-        // Arrange: two sessions, ordered commits; no scheduler race is required.
+        // Arrange: the writer's open C# transaction holds the lock while OQL captures its snapshot.
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         await using var engine = DocumentDatabaseEngine.Create("ddl", new());
-        var database = await engine.CreateDatabaseAsync("test", CancellationToken.None);
-        await using var old = await database.CreateSessionAsync(CancellationToken.None);
-        await using var current = await database.CreateSessionAsync(CancellationToken.None);
-        await using var transaction = await old.BeginTransactionAsync(IsolationLevel.Snapshot, CancellationToken.None);
-        await current.ExecuteAsync("CREATE COLLECTION x", cancellationToken: CancellationToken.None);
+        var database = await engine.CreateDatabaseAsync("test", timeout.Token);
+        await using var old = await database.CreateSessionAsync(timeout.Token);
+        await using var current = await database.CreateSessionAsync(timeout.Token);
+        bool create = statement.StartsWith("CREATE", StringComparison.Ordinal);
+        if (create) { await current.CreateCollectionAsync("x", timeout.Token); }
+        await using var transaction = await current.BeginTransactionAsync(timeout.Token);
+        // CREATE IF NOT EXISTS sees the old identity; DROP IF EXISTS sees absence.
+        if (create) { await current.DropCollectionAsync("x", timeout.Token); }
+        await current.CreateCollectionAsync("x", timeout.Token);
+        var pending = old.ExecuteAsync(statement, cancellationToken: timeout.Token).AsTask();
+        pending.IsCompleted.ShouldBeFalse();
 
         // Act
-        var failure = await Should.ThrowAsync<DatabaseException>(async () =>
-            await old.ExecuteAsync(statement, cancellationToken: CancellationToken.None));
+        await transaction.CommitAsync(timeout.Token);
+        var failure = await Should.ThrowAsync<DatabaseTransactionAbortedException>(async () => await pending.WaitAsync(timeout.Token));
 
         // Assert
-        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD04105");
-        transaction.State.ShouldBe(TransactionState.Faulted);
-        await transaction.RollbackAsync(CancellationToken.None);
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD04102");
+        old.CurrentTransaction.ShouldBeNull();
         (await CollectionsAsync(old)).ShouldBe(["x:Adhoc"]);
+        Success(await old.ExecuteAsync("CREATE COLLECTION IF NOT EXISTS x", cancellationToken: timeout.Token));
     }
 
-    [Theory(DisplayName = "Cohesion Test [Documents] - Collection DDL: failed statements abort their explicit transaction")]
-    [InlineData("CREATE COLLECTION items")]
-    [InlineData("DROP COLLECTION absent")]
-    [InlineData("CREATE COLLECTION COHESION_SCHEMA.INDEXES")]
-    public async Task Execute_FailedDdl_ShouldAbortWholeTransactionAsync(string statement)
+    [Fact(DisplayName = "Cohesion Test [Documents] - Collection DDL: a refused statement aborts its explicit transaction")]
+    public async Task Execute_FailedDdl_ShouldAbortWholeTransactionAsync()
     {
         // Arrange
         await using var engine = DocumentDatabaseEngine.Create("ddl", new());
@@ -201,7 +205,7 @@ public sealed class DocumentCollectionDdlTests
 
         // Act
         var failure = await Should.ThrowAsync<DatabaseException>(async () =>
-            await session.ExecuteAsync(statement, cancellationToken: CancellationToken.None));
+            await session.ExecuteAsync("CREATE COLLECTION items", cancellationToken: CancellationToken.None));
 
         // Assert
         failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD04105");

@@ -898,11 +898,12 @@ for #1102. PostgreSQL's duplicate-relation refusal supplies the 42P07 precedent
 (`src/backend/catalog/heap.c:1194-1198`, `src/backend/utils/errcodes.txt:383`).
 
 Under the database writer lock, snapshot conflicts are checked before either conditional no-op.
-A collection committed after a Snapshot transaction began therefore aborts conditional creation.
-DDL is transactional: CREATE is visible to subsequent statements of its transaction; rollback
-removes it. DROP removes documents and indexes together with the collection; rollback restores
-all three, including physical index selection. A failed OQL collection statement aborts an
-explicit transaction under the ordinary failed-statement rule above.
+An autocommit statement captures its snapshot before waiting for that lock: a collection created
+or replaced by the preceding writer therefore raises CD04102 even with IF [NOT] EXISTS.
+The C# collection APIs remain transactional: CREATE is visible to subsequent operations of its
+transaction; rollback removes it. DROP removes documents and indexes together with the collection;
+rollback restores all three, including physical index selection. OQL collection DDL inside any
+explicit transaction raises CD04105 under the ordinary failed-statement rule above.
 
 The existing wire Execute operation carries both clauses. CREATE followed by DocumentClient
 Put/Get works on the new collection. A schema-owned DROP returns ExecutionFailure (6), naming

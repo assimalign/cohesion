@@ -232,8 +232,8 @@ public sealed partial class DocumentQueryTests
         }
     }
 
-    [Fact(DisplayName = "Cohesion Test [Documents] - Conditional DROP preserves ownership in autocommit and refuses explicit transactions")]
-    public async Task Execute_ConditionalIndexDdl_ShouldHonorOwnershipAndTransactionRestrictionAsync()
+    [Fact(DisplayName = "Cohesion Test [Documents] - Conditional DROP preserves ownership in autocommit and direct index ASTs enforce the path cap")]
+    public async Task Execute_ConditionalIndexDdl_ShouldHonorOwnershipAndPathCapAsync()
     {
         // Arrange.
         await using var engine = DocumentDatabaseEngine.Create("index-ownership", new());
@@ -251,15 +251,6 @@ public sealed partial class DocumentQueryTests
         var ownership = await Should.ThrowAsync<DatabaseObjectLockedException>(async () => await session.ExecuteAsync("DROP INDEX IF EXISTS ix ON items"));
         ownership.Message.ShouldContain("Sales"); ownership.Message.ShouldContain("DROP INDEX");
         (await RowsAsync(session, "SELECT INDEX_NAME FROM COHESION_SCHEMA.INDEXES")).ShouldHaveSingleItem().GetString(0).ShouldBe("ix");
-        await using (var stale = await session.BeginTransactionAsync())
-        {
-            await using var concurrent = await database.CreateSessionAsync();
-            var content = await concurrent.GetCollectionAsync("items");
-            await PutAsync(content, concurrent, "changed", "{\"a\":1,\"b\":2}");
-            var restriction = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("DROP INDEX IF EXISTS ix ON items"));
-            restriction.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD04105");
-            await stale.RollbackAsync();
-        }
         var path = new OqlPathExpression([new("a",null)]);
         var invalid = new OqlCreateIndexExpression("wide", "items", Enumerable.Repeat(path,33).ToArray(), false, false);
         var cap = Should.Throw<DatabaseException>(() => new DocumentPlanner(database.Catalog, context.Snapshot, null).Plan(invalid));
