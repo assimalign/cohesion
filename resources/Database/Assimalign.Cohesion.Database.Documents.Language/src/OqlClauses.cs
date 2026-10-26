@@ -63,6 +63,12 @@ public static class OqlClauses
     /// <summary>Constructs a JSON array from expressions.</summary>
     public const string ArrayConstructor = "ARRAY CONSTRUCTOR";
 
+    /// <summary>Maps qualifying elements into an array, omitting MISSING mappings.</summary>
+    public const string ArrayComprehension = "ARRAY ... FOR";
+
+    /// <summary>Returns the first qualifying array element's mapping.</summary>
+    public const string FirstComprehension = "FIRST ... FOR";
+
     /// <summary>Describes a SELECT, INSERT, UPSERT, UPDATE or DELETE statement without executing it.</summary>
     public const string Explain = "EXPLAIN";
 

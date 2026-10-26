@@ -64,6 +64,11 @@ objects, preserves property order and reports the number matched with fresh vers
 removes named properties and becomes null in array elements. Shape and overlapping-target failures
 abort the statement; EXPLAIN UPDATE includes its chosen access path without writing.
 
+OQL ARRAY/FIRST comprehensions map one lexically scoped IN binding with optional WHEN filtering.
+They compose with nested expressions, grouping, registered function arguments and RETURNING.
+ARRAY omits mapped MISSING values; FIRST returns the first qualifying mapping or MISSING.
+Both use ANY's input-unknown rules and check cancellation per element.
+
 All four writes accept RETURNING named expressions or RAW/VALUE and return owned rows with
 the affected count. DELETE returns its pre-image; INSERT/UPSERT/UPDATE return stored post-images.
 Projection and serialization preflight run inside the transaction, and retained rows spend the

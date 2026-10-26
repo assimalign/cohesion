@@ -19,6 +19,7 @@ public sealed partial class OqlQueryParser : QueryParser
     private readonly List<Lexeme> _tokens = [];
     private readonly List<Diagnostic> _diagnostics = [];
     private readonly HashSet<int> _parameterFormPositions = [];
+    private bool[] _comprehensionTails = [];
     private int _position;
     private int _depth;
 
@@ -92,6 +93,7 @@ public sealed partial class OqlQueryParser : QueryParser
         line += TokenLexer.CountLineBreaks(_source.AsSpan(scanned));
 
         _tokens.Add(new Lexeme(TokenType.Eof, string.Empty, _source.Length, _source.Length, line));
+        FindComprehensionTails();
 
         // Capability checks precede syntax parsing, so a known unsupported construct
         // cannot be disguised by the first downstream syntax error it would cause.
@@ -253,6 +255,7 @@ public sealed partial class OqlQueryParser : QueryParser
         int fetchHead = -2;
         int pagingHead = -2;
         int openQuantifiers = 0;
+        var expressionScopes = new Stack<bool>();
         var (indexKeyStart, indexKeyEnd) = FindIndexKeyRange();
         for (int index = 0; index < _tokens.Count; index++)
         {
@@ -333,7 +336,7 @@ public sealed partial class OqlQueryParser : QueryParser
                     openQuantifiers++;
                     index += 2;
                 }
-                else if (value == "CASE" || value == "ARRAY" && index + 1 < _tokens.Count && _tokens[index + 1].Type != TokenType.LeftParen)
+                else if (value == "CASE" || value is "ARRAY" or "FIRST" && IsComprehension(index))
                 {
                     // CASE shares END with quantified predicates. Its END must not expose
                     // the rest of the unsupported predicate to independent capability scans.
@@ -345,8 +348,20 @@ public sealed partial class OqlQueryParser : QueryParser
                 }
                 continue;
             }
+            if (value is "ARRAY" or "FIRST" && IsComprehension(index) &&
+                !(index > 0 && EndsOperand(index - 1) && IsWord(_tokens[index + 1], "FROM")))
+            {
+                string clause = value == "ARRAY" ? OqlClauses.ArrayComprehension : OqlClauses.FirstComprehension;
+                if (!Supports(clause)) { AddUnsupported(result, clause, token); openQuantifiers++; }
+                else { expressionScopes.Push(true); }
+                continue;
+            }
+            if (value == "CASE" && expressionScopes.Count > 0) { expressionScopes.Push(false); }
+            if (value == "END" && expressionScopes.Count > 0) { expressionScopes.Pop(); }
+            if (value == "FOR" && expressionScopes.Count > 0 && expressionScopes.Peek()) { continue; }
             if (quantifier)
             {
+                if (expressionScopes.Count > 0) { expressionScopes.Push(false); }
                 string clause = value == "EVERY" ? OqlClauses.Every : OqlClauses.Any;
                 if (!Supports(clause))
                 {
@@ -357,12 +372,6 @@ public sealed partial class OqlQueryParser : QueryParser
                 continue;
             }
 
-            if (value == "ARRAY" && index + 1 < _tokens.Count && _tokens[index + 1].Type != TokenType.LeftParen)
-            {
-                AddUnsupported(result, "ARRAY", token);
-                openQuantifiers++;
-                continue;
-            }
             if (value == "ANY" && index + 2 < _tokens.Count && IsWord(_tokens[index + 1], "AND") && IsWord(_tokens[index + 2], "EVERY"))
             {
                 AddUnsupported(result, "ANY AND EVERY", token);
@@ -535,6 +544,52 @@ public sealed partial class OqlQueryParser : QueryParser
         if (!Supports(construct))
         {
             result.Add((construct, token));
+        }
+    }
+
+    private bool IsComprehension(int index)
+    {
+        // Parenthesized mappings are legal; the retired ARRAY()/FIRST() calls stay refused.
+        if (index + 1 >= _tokens.Count) { return false; }
+        return _tokens[index + 1].Type != TokenType.LeftParen || _comprehensionTails[index + 1];
+    }
+
+    private void FindComprehensionTails()
+    {
+        // Memoize balanced lookahead in linear work, including inputs much deeper than
+        // the parser's limit. Re-scanning each nested parenthesized mapping is quadratic.
+        _comprehensionTails = new bool[_tokens.Count];
+        var delimiters = new Stack<int>();
+        for (int index = _tokens.Count - 1; index >= 0; index--)
+        {
+            var token = _tokens[index];
+            int next = index + 1;
+            // Reserved words can still name dotted members, AS labels and object keys.
+            bool expressionWord = (index == 0 || _tokens[index - 1].Type != TokenType.Dot && !IsWord(_tokens[index - 1], "AS")) &&
+                (next >= _tokens.Count || _tokens[next].Type != TokenType.Colon);
+            if (token.Type is TokenType.RightParen or TokenType.RightBracket or TokenType.RightBrace ||
+                expressionWord && IsWord(token, "END")) { delimiters.Push(index); }
+            else if (token.Type is TokenType.LeftParen or TokenType.LeftBracket or TokenType.LeftBrace)
+            {
+                TokenType close = token.Type switch
+                {
+                    TokenType.LeftParen => TokenType.RightParen,
+                    TokenType.LeftBracket => TokenType.RightBracket,
+                    _ => TokenType.RightBrace,
+                };
+                next = delimiters.TryPeek(out int end) && _tokens[end].Type == close ? delimiters.Pop() + 1 : _tokens.Count;
+            }
+            else if (expressionWord && (IsWord(token, "CASE") ||
+                (IsWord(token, "ARRAY") || IsWord(token, "FIRST")) && IsComprehension(index) ||
+                (IsWord(token, "ANY") || IsWord(token, "SOME") || IsWord(token, "EVERY")) && IsQuantifierBinding(next)))
+            {
+                // Skip the entire nested expression, including its FOR/WHEN, before looking
+                // for this comprehension's binding. The reverse pass already classified it.
+                next = delimiters.TryPeek(out int end) && IsWord(_tokens[end], "END") ? delimiters.Pop() + 1 : _tokens.Count;
+            }
+            bool stop = token.Type is TokenType.Comma or TokenType.Semicolon or TokenType.Eof or TokenType.RightParen ||
+                expressionWord && (IsWord(token, "FROM") || IsWord(token, "AS") || IsWord(token, "END"));
+            _comprehensionTails[index] = !stop && (IsWord(token, "FOR") || next < _tokens.Count && _comprehensionTails[next]);
         }
     }
 
