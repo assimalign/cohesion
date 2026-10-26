@@ -1069,6 +1069,9 @@ sees; rows written after the drop are never visible to it, because a statement's
 snapshot is taken before it is planned. Snapshots older than the drop keep
 reading their rows, without the dropped column once a statement is planned on
 the new definition.
+Optional probe costing discards its estimates when the definition changes and retains
+the original bound access path (#1740); it does not refuse that single-table SELECT.
+Mutation and join execution keep their mandatory definition checks described above.
 
 `ADD COLUMN` after a drop adds a new column, even under the dropped column's name:
 existing rows read the new column's default (or NULL), never the dropped values.

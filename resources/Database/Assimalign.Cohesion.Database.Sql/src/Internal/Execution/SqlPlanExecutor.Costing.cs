@@ -28,7 +28,8 @@ internal sealed partial class SqlPlanExecutor
     {
         System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
         cancellationToken.ThrowIfCancellationRequested();
-        return plan switch
+        bool definitionChanged = false;
+        var costed = plan switch
         {
             SqlSelectPlan p => CostSelect(p),
             SqlUpdatePlan p => p with { Access = Choose(p.Table, p.Access) },
@@ -42,6 +43,9 @@ internal sealed partial class SqlPlanExecutor
             SqlInsertSelectPlan p => p with { Source = Rewrite(p.Source) },
             _ => plan,
         };
+        // Every rewrite here is optional. Discard earlier successful observations too:
+        // join direction and hash selection must retain binding's path after invalidation.
+        return definitionChanged ? plan : costed;
 
         SqlPlan Rewrite(SqlPlan child) => child is SqlSelectPlan { Access: SqlScanPath } ||
             child is SqlSelectPlan { Access: SqlIndexSeekPath { Cost: null, Index.IsUnique: true } seek } &&
@@ -69,8 +73,9 @@ internal sealed partial class SqlPlanExecutor
             // DROP detaches the directory entry; statement/snapshot reclamation fences retain
             // its pages. CountRange owns the tree read latch, including against rollback/pruning,
             // so this immutable key shape needs no transaction lock. Validate identities around
-            // the observation instead.
-            EnsureCurrentDefinition(table);
+            // the observation instead. A changed definition invalidates only the estimate;
+            // readers can still use their bound shape, and writes recheck during execution.
+            if (!HasCurrentDefinition(table)) { return null; }
             var description = seek?.Index ?? _catalog.GetIndexes(table.ObjectId)
                 .OrderBy(index => index.IsPrimaryKey ? 0 : index.IsUnique ? 1 : 2)
                 .ThenBy(index => index.Name, StringComparer.OrdinalIgnoreCase).FirstOrDefault();
@@ -79,8 +84,16 @@ internal sealed partial class SqlPlanExecutor
                 _definitions.Get(table, cancellationToken).GetKey(description.ColumnNames).Ordinals);
             var count = tree.CountRange(statement.Snapshot, range, cancellationToken: cancellationToken);
             CostProbeCompleted?.Invoke(count);
-            EnsureCurrentDefinition(table);
+            if (!HasCurrentDefinition(table)) { return null; }
             return TryResolveSeekTree(table, description, out var current) && ReferenceEquals(tree, current) ? count : null;
+        }
+
+        bool HasCurrentDefinition(SqlCatalogTable table)
+        {
+            if (definitionChanged) { return false; }
+            if (_catalog.TryGetTable(table.Schema, table.Name, out var current) && ReferenceEquals(table, current)) { return true; }
+            definitionChanged = true;
+            return false;
         }
 
         SqlAccessPath Choose(SqlCatalogTable table, SqlAccessPath path)

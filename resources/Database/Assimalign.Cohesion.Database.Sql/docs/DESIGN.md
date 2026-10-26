@@ -7492,8 +7492,10 @@ Exact exhaustion and incomplete lower bounds are distinct. Probes use CountRange
 latch, with table/index identity validation around the count. DROP detaches indexes without
 reclaiming their pages (BTreeIndexManager.DropIndexAsync); table reclamation waits for active
 statement/snapshot fences. A retained tree and immutable key shape need no transaction object
-lock. A changed table definition reports CS04006; a detached
-or replaced index yields an unknown estimate. Costing does not enter the database-wide lock
+lock. A changed table definition discards optional costing for that plan, including earlier
+seek counts, join direction and hash selection, retaining the original bound access path (#1740).
+Readers keep the shape they bound; mutation execution retains its mandatory CS04006 checks.
+A detached or replaced index yields an unknown estimate. Costing does not enter the database-wide lock
 manager or add grants to an MVCC reader.
 Counts are neither cached across statements nor persisted. Unique complete equalities need no probe.
 A selected range of at most 16 candidates skips the base-table probe. Join estimates are lazy,
