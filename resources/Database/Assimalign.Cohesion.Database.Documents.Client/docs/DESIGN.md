@@ -178,12 +178,19 @@ and Idle status. Missing, malformed, unnegotiated or failed reset evidence disca
 A 2.0 or unnegotiated 2.1 peer remains usable for its rental but cannot be pooled.
 
 Status bookkeeping after Complete uses the shared bounded cleanup token, so caller cancellation
-cannot turn acknowledged COMMIT into cancellation. A missing acknowledgement leaves outcome unknown;
-disconnect cleanup never retries COMMIT. Abandoning an unfinished exchange discards the connection.
+cannot turn acknowledged COMMIT into caller cancellation. Any exception from COMMIT leaves its
+outcome unknown to the caller and discards the connection, including when Complete acknowledged
+the commit but its Ready status postamble was lost. A missing Ready times out with
+OperationCanceledException from the five-second internal bound, independent of the caller's token;
+a closed connection before Ready reports DocumentClientException (ProtocolViolation).
+Disconnect cleanup never retries COMMIT. Abandoning an unfinished exchange discards the connection.
 Postamble failures retain the shared protocol, transport or cleanup exception and discard the
 session; they never retry an acknowledged statement or claim that committed work was rolled back.
 InMemory and TCP tests cover visibility, isolation, failed commands, pooled rollback, disconnect,
 cancellation/disposal races, invalid status/reset and cancellation after COMMIT acknowledgement.
+Frame relays on both transports drop Complete before the client receives it, or close/withhold
+Ready after forwarding Complete. They assert caller failure, a fresh physical connection on the
+next rental, exactly one COMMIT on the wire, and atomic visibility from an independent session.
 The NativeAOT sample exercises wire controls and reset on both transports.
 
 ### Terminal response ownership

@@ -62,8 +62,15 @@ public sealed class DocumentConnection : IAsyncDisposable
     /// <exception cref="ArgumentException">The statement or a parameter value is invalid.</exception>
     /// <exception cref="ObjectDisposedException">The rental is disposed.</exception>
     /// <exception cref="InvalidOperationException">Another exchange is active.</exception>
-    /// <exception cref="OperationCanceledException">The exchange or bounded status cleanup is canceled; an unacknowledged COMMIT may have committed.</exception>
+    /// <exception cref="OperationCanceledException">The exchange or bounded status cleanup is canceled.</exception>
     /// <exception cref="DocumentClientException">The statement or connection failed.</exception>
+    /// <remarks>
+    /// Any exception from COMMIT leaves its outcome unknown to the caller and discards the connection.
+    /// This includes losing the Ready status postamble after Complete acknowledged the commit.
+    /// Status cleanup uses a five-second internal bound independent of the caller's token; its timeout
+    /// raises OperationCanceledException, and closure before Ready raises DocumentClientException.
+    /// Cleanup never retries COMMIT or promises to undo committed work.
+    /// </remarks>
     public async ValueTask<long> ExecuteAsync(string statement, IReadOnlyDictionary<string, object?>? parameters = null,
         CancellationToken cancellationToken = default)
         => (await RunAsync("Execute", new DocumentExchange(statement, parameters), cancellationToken).ConfigureAwait(false)).Result.AffectedCount;

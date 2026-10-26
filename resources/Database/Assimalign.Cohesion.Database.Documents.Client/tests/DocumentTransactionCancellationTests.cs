@@ -8,6 +8,7 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.Connections;
+using Assimalign.Cohesion.Database.Client;
 using Assimalign.Cohesion.Database.Types;
 using Assimalign.Cohesion.Database.Documents.Protocol;
 using Assimalign.Cohesion.Database.Protocol;
@@ -18,6 +19,60 @@ namespace Assimalign.Cohesion.Database.Documents.Client.Tests;
 [Collection(nameof(DocumentClientEventSourceCollection))]
 public sealed class DocumentTransactionCancellationTests
 {
+    [Theory(DisplayName = "Cohesion Test [Documents.Client] - Lost COMMIT completion or status reports failure, discards the connection and never retries (#1725)")]
+    [InlineData(false, "complete")]
+    [InlineData(true, "complete")]
+    [InlineData(false, "ready-close")]
+    [InlineData(true, "ready-close")]
+    [InlineData(false, "ready-timeout")]
+    [InlineData(true, "ready-timeout")]
+    public async Task ExecuteAsync_LostCommitReply_ShouldFailDiscardAndNeverRetransmit(bool tcp, string drop)
+    {
+        // Arrange: both relay legs use the selected transport and a real server applies the writes.
+        await using var harness = await DocumentClientTestHarness.StartAsync(tcp);
+        await using var relay = await DocumentCommitRelay.StartAsync(harness, tcp, drop);
+        await using var client = DocumentClient.Create(new()
+        {
+            Settings = new DatabaseConnectionSettings { Database = "documents", Principal = "relayed", EndPoint = relay.Listener.EndPoint, MaxPoolSize = 1 },
+            ConnectionFactory = relay.Factory,
+        });
+        await using var connection = await client.ConnectAsync(harness.Token);
+        await connection.CreateCollectionAsync("items", harness.Token);
+        await connection.ExecuteAsync("BEGIN", cancellationToken: harness.Token);
+        await connection.ExecuteAsync("INSERT INTO items (KEY, VALUE) VALUES ('first', {}), ('second', {})", cancellationToken: harness.Token);
+        await using var observer = await harness.Database.CreateSessionAsync(harness.Token);
+        var items = await observer.GetCollectionAsync("items", harness.Token);
+        (await items.GetAsync(observer, "first", harness.Token)).ShouldBeNull();
+        (await items.GetAsync(observer, "second", harness.Token)).ShouldBeNull();
+
+        // Act: the relay drops the frame before the typed client can receive it.
+        if (drop == "ready-timeout")
+        {
+            var error = await Should.ThrowAsync<OperationCanceledException>(async () =>
+                await connection.ExecuteAsync("COMMIT", cancellationToken: harness.Token));
+            error.CancellationToken.ShouldNotBe(harness.Token);
+            harness.Token.IsCancellationRequested.ShouldBeFalse();
+        }
+        else
+        {
+            var error = await Should.ThrowAsync<DocumentClientException>(async () =>
+                await connection.ExecuteAsync("COMMIT", cancellationToken: harness.Token));
+            error.Code.ShouldBe(ProtocolErrorCode.ProtocolViolation);
+        }
+        await connection.DisposeAsync();
+        await using var next = await client.ConnectAsync(harness.Token);
+        (await next.GetCollectionsAsync(harness.Token)).ShouldBe(["items"]);
+
+        // Assert: a distinct physical connection, exactly one COMMIT, and atomic independent visibility.
+        relay.Connections.ShouldBe(2);
+        relay.Commits.ShouldBe(1);
+        relay.Drops.ShouldBe(1);
+        relay.Completions.ShouldBe(drop == "complete" ? 0 : 1);
+        // Consuming a real Complete at the relay proves this transaction committed, even if its caller cannot know.
+        (await items.GetAsync(observer, "first", harness.Token)).ShouldNotBeNull();
+        (await items.GetAsync(observer, "second", harness.Token)).ShouldNotBeNull();
+    }
+
     [Theory(DisplayName = "Cohesion Test [Documents.Client] - Disconnect without reading COMMIT completion cannot undo a committed transaction (#1725)")]
     [InlineData(false)]
     [InlineData(true)]
