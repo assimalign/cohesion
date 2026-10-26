@@ -122,6 +122,10 @@ internal sealed partial class SqlPlanner
     {
         SqlSystemViews.EnsureReadOnly(expression);
         EnsureViewTargetReadOnly(expression);
+        // A snapshot retaining a truncated owner must never write its replacement.
+        // Bind DML targets through that same retained image; the ordinary target
+        // definition check then refuses the stale writer with CS04006 before apply.
+        if (expression is SqlInsertExpression or SqlUpdateExpression or SqlDeleteExpression) { UseTruncateSnapshot(); }
         ValidateFunctionCalls(expression);
         return expression switch
         {

@@ -211,8 +211,10 @@ public sealed partial class SqlCatalog
             if (table.Constraints.Any(constraint => constraint.Kind == SqlCatalogConstraintKind.Reference &&
                 names.Contains((constraint.ReferencedSchema!, constraint.ReferencedTable!))))
             {
-                throw new SqlCatalogException("CS03067", string.Format(CultureInfo.CurrentCulture,
-                    ErrorMessages.TruncateForeignKeyDependent, table.Schema, table.Name));
+                // The executor closed the original graph before waiting for table locks.
+                // A newly published child invalidates that graph, including under CASCADE;
+                // retry rather than telling a CASCADE caller to specify CASCADE again.
+                throw new SqlCatalogException("CS04064", ErrorMessages.TruncateClosureChanged);
             }
         }
     }

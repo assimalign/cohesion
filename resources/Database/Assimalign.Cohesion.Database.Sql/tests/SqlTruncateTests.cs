@@ -34,6 +34,109 @@ public sealed class SqlTruncateTests
 
     public SqlTruncateTests(ITestOutputHelper output) { _output = output; }
 
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - TRUNCATE: stale snapshot DML cannot write the replacement behind its retained read binding")]
+    [InlineData("INSERT INTO t VALUES (3)")]
+    [InlineData("UPDATE t SET id=3")]
+    [InlineData("DELETE FROM t")]
+    public async Task ExecuteAsync_StaleSnapshotWriter_ShouldRefuseBeforeAnyMutation(string sql)
+    {
+        // Arrange
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        await using var engine = SqlDatabaseEngine.Create("truncate-stale-write", new());
+        var database = await engine.CreateDatabaseAsync("db", timeout.Token);
+        await using var writer = await database.CreateSessionAsync(timeout.Token);
+        await using var reader = await database.CreateSessionAsync(timeout.Token);
+        await ExecAsync(writer, "CREATE TABLE t (id INT PRIMARY KEY)", timeout.Token);
+        await ExecAsync(writer, "INSERT INTO t VALUES (1)", timeout.Token);
+        await using var snapshot = await reader.BeginTransactionAsync(timeout.Token);
+        await ExecAsync(writer, "TRUNCATE t", timeout.Token);
+        await ExecAsync(writer, "INSERT INTO t VALUES (2)", timeout.Token);
+
+        // Act
+        var failure = await Should.ThrowAsync<DatabaseTransactionAbortedException>(() => ExecAsync(reader, sql, timeout.Token));
+
+        // Assert
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS04006");
+        (await RowsAsync(reader, "SELECT * FROM t", timeout.Token)).ShouldHaveSingleItem()[0].ShouldBe(1);
+        (await RowsAsync(writer, "SELECT * FROM t", timeout.Token)).ShouldHaveSingleItem()[0].ShouldBe(2);
+        await snapshot.RollbackAsync(timeout.Token);
+        await ExecAsync(reader, sql, timeout.Token);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - TRUNCATE: ReadCommitted DML uses its refreshed statement snapshot")]
+    public async Task ExecuteAsync_ReadCommittedWriter_ShouldUseReplacement()
+    {
+        // Arrange
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        await using var engine = SqlDatabaseEngine.Create("truncate-fresh-write", new());
+        var database = await engine.CreateDatabaseAsync("db", timeout.Token);
+        await using var writer = await database.CreateSessionAsync(timeout.Token);
+        await using var reader = await database.CreateSessionAsync(timeout.Token);
+        await ExecAsync(writer, "CREATE TABLE t (id INT PRIMARY KEY)", timeout.Token);
+        await using var transaction = await reader.BeginTransactionAsync(IsolationLevel.ReadCommitted, timeout.Token);
+        await ExecAsync(writer, "TRUNCATE t", timeout.Token);
+
+        // Act
+        await ExecAsync(reader, "INSERT INTO t VALUES (3)", timeout.Token);
+
+        // Assert
+        (await RowsAsync(reader, "SELECT * FROM t", timeout.Token)).ShouldHaveSingleItem()[0].ShouldBe(3);
+        await transaction.CommitAsync(timeout.Token);
+        (await RowsAsync(writer, "SELECT * FROM t", timeout.Token)).ShouldHaveSingleItem()[0].ShouldBe(3);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - TRUNCATE: a foreign key published ahead of the table lock invalidates CASCADE's closed set retryably")]
+    public async Task ExecuteAsync_ConcurrentForeignKeyPublication_ShouldRefuseStaleClosureRetryably()
+    {
+        // Arrange: queue CREATE's parent lock before TRUNCATE captures a catalog without c.
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        await using var engine = SqlDatabaseEngine.Create("truncate-fk-race", new());
+        var database = await engine.CreateDatabaseAsync("db", timeout.Token);
+        await using var creator = await database.CreateSessionAsync(timeout.Token);
+        await using var session = await database.CreateSessionAsync(timeout.Token);
+        await ExecAsync(session, "CREATE TABLE p (id INT PRIMARY KEY)", timeout.Token);
+        await ExecAsync(session, "INSERT INTO p VALUES (1)", timeout.Token);
+        var holder = await database.Coordinator.BeginAsync(IsolationLevel.ReadCommitted, timeout.Token);
+        await database.Coordinator.LockManager.AcquireAsync(holder.Sequence,
+            LockResource.Object(Id(database, "p")), LockMode.Exclusive, timeout.Token);
+        var first = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var second = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        int waits = 0;
+        using var listener = new LockWaitListener(database.Name);
+        listener.Observed = written =>
+        {
+            if (written.EventName != "LockWaitStart") { return; }
+            if (Interlocked.Increment(ref waits) == 1) { first.TrySetResult(); }
+            else { second.TrySetResult(); }
+        };
+        Task? creating = null;
+        Task? truncating = null;
+        try
+        {
+            creating = ExecAsync(creator, "CREATE TABLE c (pid INT REFERENCES p(id))", timeout.Token);
+            await first.Task.WaitAsync(timeout.Token);
+            truncating = ExecAsync(session, "TRUNCATE p CASCADE", timeout.Token);
+            await second.Task.WaitAsync(timeout.Token);
+
+            // Act
+            await database.Coordinator.RollbackAsync(holder, CancellationToken.None);
+            await creating;
+            var failure = await Should.ThrowAsync<DatabaseException>(async () => await truncating);
+
+            // Assert
+            failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS04064");
+            (await RowsAsync(session, "SELECT * FROM p", timeout.Token)).ShouldHaveSingleItem()[0].ShouldBe(1);
+            await ExecAsync(session, "TRUNCATE p CASCADE", timeout.Token);
+            (await RowsAsync(session, "SELECT * FROM p", timeout.Token)).ShouldBeEmpty();
+        }
+        finally
+        {
+            if (holder.State == TransactionState.Active) { await database.Coordinator.RollbackAsync(holder, CancellationToken.None); }
+            if (creating is not null) { try { await creating; } catch (Exception) { /* Observe the started operation on every assertion path. */ } }
+            if (truncating is not null) { try { await truncating; } catch (Exception) { /* The expected refusal is observed above. */ } }
+        }
+    }
+
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - TRUNCATE: canceled table-lock waits release statement admission and preserve all tables")]
     public async Task ExecuteAsync_CanceledTableLockWait_ShouldReleaseAdmission()
     {
