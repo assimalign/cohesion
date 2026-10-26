@@ -2737,6 +2737,9 @@ current statement's transaction instant and cancellation. Binding never folds ap
 Execution checks for a bound row window before creating its evaluator. Cancellable INSERT,
 index-seek SELECT and aggregate statements with application functions registered therefore add
 zero startup bytes compared with dispatch directly to the same statement cores (Release, tiering off).
+The guard binds both plans before measuring; planner validation and optional costing are outside
+its counters. It records each round's raw totals and Gen0 collections, plus process architecture
+and runtime, after all measurements so failure diagnostics do not allocate inside a measured round.
 Catalog opens parse all views; every recoverable body binding failure is deferred to a read of
 that view, with a coded view-local exception retaining the original cause. OperationCanceledException, InsufficientExecutionStackException, OutOfMemoryException,
 StorageException (every subtype, including offline, format, journal and slotted-page failures),
