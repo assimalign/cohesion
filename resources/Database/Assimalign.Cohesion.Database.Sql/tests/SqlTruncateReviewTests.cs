@@ -302,6 +302,31 @@ public sealed partial class SqlTruncateReviewTests
         allocated.ShouldBe(0);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Sql] - TRUNCATE: a cached view image cannot hide a later retained index (#1716)")]
+    public async Task ExecuteAsync_IndexAddedAfterViewImage_ShouldRetainNewSeekMetadata()
+    {
+        // Arrange: CREATE INDEX preserves the table and view description instances.
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        await using var engine = SqlDatabaseEngine.Create("truncate-index-image", new());
+        var database = await engine.CreateDatabaseAsync("db", timeout.Token);
+        await using var writer = await database.CreateSessionAsync(timeout.Token);
+        await using var reader = await database.CreateSessionAsync(timeout.Token);
+        await ExecAsync(writer, "CREATE TABLE t (id INT)", timeout.Token);
+        await ExecAsync(writer, "INSERT INTO t VALUES " + string.Join(",", Enumerable.Range(0, 64).Select(id => $"({id})")), timeout.Token);
+        await ExecAsync(writer, "CREATE VIEW v AS SELECT id FROM t", timeout.Token);
+        (await RowsAsync(reader, "SELECT * FROM v", timeout.Token)).Count.ShouldBe(64);
+        await ExecAsync(writer, "CREATE INDEX ix ON t(id)", timeout.Token);
+        await using var snapshot = await reader.BeginTransactionAsync(timeout.Token);
+
+        // Act
+        await ExecAsync(writer, "TRUNCATE t", timeout.Token);
+        (await RowsAsync(reader, "SELECT id FROM t WHERE id=42", timeout.Token)).ShouldHaveSingleItem()[0].ShouldBe(42);
+
+        // Assert
+        reader.LastStatementMetrics!.RecordsExamined.ShouldBe(1);
+        reader.LastStatementMetrics.AccessPath.ShouldBe("seek:ix");
+    }
+
     [Fact(DisplayName = "Cohesion Test [Sql] - TRUNCATE: prepared owners stay internal to reclamation (#1716)")]
     public async Task GetPendingTableReclamations_PreparedOwner_ShouldRemainInternal()
     {
