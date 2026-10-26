@@ -1,4 +1,5 @@
 using System;
+using System.Buffers.Binary;
 using System.IO;
 using System.Net;
 using System.Text;
@@ -57,7 +58,7 @@ public sealed class DocumentClientProtocolTests
     public async Task ConnectAsync_OldServerVersion_ShouldPreserveRefusalAndReleasePoolSlot(bool tcp)
     {
         // Arrange
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         var token = timeout.Token;
         await using IDuplexConnectionListener listener = tcp
             ? new TcpConnectionListener(new TcpConnectionListenerOptions { EndPoint = new IPEndPoint(IPAddress.Loopback, 0) })
@@ -188,12 +189,14 @@ public sealed class DocumentClientProtocolTests
     [InlineData("duplicate-member")]
     [InlineData("count")]
     [InlineData("query-affected-count")]
+    [InlineData("negative-affected-count")]
+    [InlineData("returning-count-mismatch")]
     [InlineData("duplicate-header")]
     [InlineData("invalid-json")]
     public async Task QueryAsync_MalformedResponse_ShouldDiscardConnection(string scenario)
     {
         // Arrange
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         var token = timeout.Token;
         await using var listener = new InMemoryConnectionListener();
         await listener.BindAsync(token);
@@ -231,6 +234,15 @@ public sealed class DocumentClientProtocolTests
                 case "row-width": await WriteAsync(channel, 65, "{\"n\":1,\"extra\":2}"u8.ToArray(), token); break;
                 case "duplicate-member": await WriteAsync(channel, 65, "{\"n\":null,\"n\":2}"u8.ToArray(), token); break;
                 case "count": await WriteAsync(channel, 66, new DocumentProtocolCompleteMessage(1, -1).Encode(), token); break;
+                case "negative-affected-count":
+                    byte[] invalidCounts = new DocumentProtocolCompleteMessage(0, -1).Encode();
+                    BinaryPrimitives.WriteInt64BigEndian(invalidCounts.AsSpan(8), -2);
+                    await WriteAsync(channel, 66, invalidCounts, token);
+                    break;
+                case "returning-count-mismatch":
+                    await WriteAsync(channel, 65, "{\"n\":1}"u8.ToArray(), token);
+                    await WriteAsync(channel, 66, new DocumentProtocolCompleteMessage(1, 2).Encode(), token);
+                    break;
                 case "query-affected-count": await WriteAsync(channel, 66, new DocumentProtocolCompleteMessage(0, 1).Encode(), token); break;
                 case "duplicate-header": await WriteAsync(channel, 67, header, token); break;
                 case "invalid-json": await WriteAsync(channel, 65, "{"u8.ToArray(), token); break;

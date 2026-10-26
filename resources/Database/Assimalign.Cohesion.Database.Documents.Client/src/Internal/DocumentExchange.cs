@@ -151,7 +151,8 @@ internal sealed class DocumentExchange : DatabaseProtocolExchange<DocumentExchan
         if (complete.ResultCount != count) { throw new ProtocolException(ErrorMessages.CompletionCountMismatch); }
         bool valid = _command?.Operation switch
         {
-            null => header is null ? count == 0 && complete.AffectedCount >= 0 : complete.AffectedCount == -1,
+            null => header is null ? count == 0 && complete.AffectedCount >= 0 :
+                complete.AffectedCount == -1 || complete.AffectedCount == count,
             DocumentProtocolOperation.Get => count <= 1 && complete.AffectedCount == -1,
             DocumentProtocolOperation.Put => count == 1 && complete.AffectedCount == 1,
             DocumentProtocolOperation.Delete => count == 0 && complete.AffectedCount is 0 or 1,

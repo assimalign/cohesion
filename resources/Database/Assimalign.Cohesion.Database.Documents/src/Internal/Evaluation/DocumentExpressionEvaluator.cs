@@ -123,18 +123,25 @@ internal sealed partial class DocumentExpressionEvaluator
                 break;
             case OqlDeleteExpression delete:
                 ValidateInputs(delete.Predicate);
+                ValidateInputs(delete.Returning);
                 break;
             case OqlUpdateExpression update:
                 foreach (var assignment in update.Assignments) { ValidateInputs(assignment.Value); }
                 ValidateInputs(update.Predicate);
+                ValidateInputs(update.Returning);
                 break;
             case OqlInsertExpression insert:
                 foreach (var pair in insert.Values) { ValidateInputs(pair.Key); ValidateInputs(pair.Value); }
                 ValidateInputs(insert.Select);
+                ValidateInputs(insert.Returning);
                 break;
             case OqlUpsertExpression upsert:
                 foreach (var pair in upsert.Values) { ValidateInputs(pair.Key); ValidateInputs(pair.Value); }
                 ValidateInputs(upsert.Select);
+                ValidateInputs(upsert.Returning);
+                break;
+            case OqlReturningExpression returning:
+                foreach (var projection in returning.Projections) { ValidateInputs(projection.Expression); }
                 break;
             case OqlMetaExpression meta:
                 foreach (var argument in meta.Arguments) { ValidateInputs(argument); }

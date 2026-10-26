@@ -68,6 +68,7 @@ Lexical recognition preserves the established vocabulary so rejected constructs 
 | `UPDATE` | Yes | One collection, optional alias, SET assignments and/or UNSET paths, optional WHERE |
 | `UNSET` | Yes | Removes properties in UPDATE; a final array index is invalid |
 | `DELETE` | Yes | `DELETE FROM collection [AS? alias] [WHERE expression]`; keeps the collection and indexes |
+| `RETURNING` | Yes | Affected-image expressions with optional AS labels, or one RAW/VALUE expression, on all four writes |
 | `OPTIONS` | No | INSERT/UPSERT header element; one CK00001 at OPTIONS, including directly after KEY; no TTL or version precondition in T1 |
 | `VALUES` | Yes | One or more parenthesized key/value pairs for INSERT or UPSERT |
 | `FROM` | Yes | One collection or reserved `COHESION_SCHEMA` source, optional iteration variable, then ordered UNNEST bindings |
@@ -171,6 +172,25 @@ rule, including repeated literal names; arrays preserve source order and replace
 with JSON null. Constructors use Utf8JsonWriter and owned JsonElement values, preserving decimal
 scale and the decimal scalar domain. The existing 128-level parser limit also covers constructors.
 
+### RETURNING (#1727)
+
+Each public write AST has an optional OqlReturningExpression with ordered OqlProjection values,
+IsValue and a clause span. The parser retains the complete statement Text, including RETURNING;
+this language has no separate expression renderer. RAW/VALUE enforces one non-star expression
+without an alias. Named projections reuse SELECT's expression parsing and reserved AS labels.
+RETURNING stays contextual: destinations, properties, output bindings and aliases keep that name.
+The recognized-vocabulary row remains for contextual coverage and unsupported prefix/SELECT use.
+The capability scan recognizes nested SELECT in RETURNING as SUBQUERY, including INSERT VALUES.
+
+The engine binds only the target image (alias or implicit collection binding), validates scalar
+contexts before writes, and uses SELECT projection names/types and JSON semantics. Aggregate
+placement fails CD05001; duplicate output names retain CD01003; parameters retain CD01005.
+The [dialect contract](DIALECT.md#returning-1727) records pre/post images, stable output order,
+owned rows, budget CD05018 and the unnegotiated existing-wire completion contract. EXPLAIN adds
+Returning/ReturningValue while retaining its nonexecuting behavior. OqlReturningParserTests,
+OqlExecutionConformanceTests, DocumentReturningTests and DocumentReturningWireTests cover the
+parser, in-process execution and both transports. No disk or frame format changes.
+
 ### LIMIT and OFFSET (#1129)
 
 LIMIT and OFFSET accept integer literals, optionally signed, or ordinary $name/@name/$1
@@ -224,12 +244,10 @@ a name:
   statement. UPSERT bypasses refusal through OqlClauses.Upsert; its table entry retains contextual
   keyword coverage. Elsewhere they are names, so an AS-less alias such as `FROM c merge` still parses,
   as it did before #1101.
-- **Trailing** (`RETURNING`): rejected after the parser consumes a complete statement, or at
-  the statement prefix. Destinations, KEY/VALUE output binding names, properties, object keys,
-  index names and aliases named `returning` are ordinary identifiers. An implicit FROM alias
-  uses that name when followed by the end or a following clause; `FROM c RETURNING *` leaves
-  RETURNING for the capability rejection. This positional check keeps a real trailing clause
-  at CK00001 without treating positional INTO or KEY as preceding operands. VALUE is reserved for projection and INSERT binding syntax.
+- **Trailing** (`RETURNING`): executable at the end of INSERT/UPSERT/UPDATE/DELETE;
+  unsupported at the statement prefix or after SELECT. Other identifier positions retain
+  `returning`, including an implicit FROM alias before the end or another clause. The final
+  grammar owns the trailing projection; it does not reserve the spelling globally.
 - **Function** (`ELEMENT`, `FLATTEN`, `LISTTOSET`, `STRUCT`, `LIST`, `BAG`, `TYPEOF`, `ARRAY_AGG`, and the deferred REGEXP functions):
   only immediately before `(`. Elsewhere these spellings are ordinary identifiers.
 - **Quantifiers**: `EVERY`, `ANY` or `SOME` followed by `name IN` opens a supported predicate.
@@ -652,8 +670,8 @@ respectively. The [dialect page](DIALECT.md) records the executable UPDATE contr
 
 WHERE and SET values share ordinary parameter, numeric and META validation, and reject aggregates.
 Subqueries in either clause report CK00001 naming SUBQUERY at the inner SELECT, including under
-EXPLAIN. USE KEYS, RETURNING and FOR comprehensions remain CK00001 at USE, RETURNING or FOR.
-UPDATE's grammar itself refuses LIMIT and OFFSET, independently of SELECT capabilities. An update returns
+EXPLAIN. USE KEYS and FOR comprehensions remain CK00001 at USE or FOR.
+UPDATE's grammar itself refuses LIMIT and OFFSET, independently of SELECT capabilities. An update without RETURNING returns
 the matched-document count without rows; EXPLAIN UPDATE describes its scan or seek without writing.
 
 ### DELETE (#1132)
@@ -667,11 +685,11 @@ all documents are deleted and the collection and its index definitions remain.
 The public OqlDeleteExpression retains Collection, Alias, Predicate and source spans. The
 engine chooses the existing scan or index seek, reapplies the full predicate to the statement
 snapshot, then deletes the collected identities atomically. META predicates remain residual
-filters with no key lookup in T1. USE KEYS, RETURNING and DELETE LIMIT remain CK00001 at
+filters with no key lookup in T1. USE KEYS and DELETE LIMIT remain CK00001 at
 their clause token; DELETE's parser refuses LIMIT and OFFSET independently of SELECT's paging support.
 System collections are read-only; Schema-owned stored collections permit content deletion.
 Commands report the deleted-document count, including zero, through the existing completion
-affected count and emit no Document frames. EXPLAIN DELETE describes the access without writing.
+affected count and, without RETURNING, emit no Document frames. EXPLAIN DELETE describes the access without writing.
 
 ### UPSERT (#1134)
 
@@ -683,11 +701,11 @@ properties absent from the replacement disappear. Every pair counts once and rec
 version, including an unchanged value. SELECT sources materialize before writes, including self-sources.
 Repeated keys in one statement raise DocumentDuplicateKeyException and roll back the statement;
 last-writer-wins does not apply. Key/value validation, MISSING omission and complete-row binding
-are shared with INSERT. OPTIONS and RETURNING remain CK00001 at their tokens, and a nested
+are shared with INSERT. OPTIONS remains CK00001 at its token, and a nested
 SELECT in VALUES reports SUBQUERY. There is no statement-level version precondition in T1;
 use PutAsync(expectedVersion) or UPDATE WHERE META().version = $v for optimistic replacement.
 EXPLAIN UPSERT describes Upsert or UpsertSelect without writing. The existing completion carries
-the affected count with no result rows; no wire or persisted catalog shape changes.
+the affected count and optional RETURNING rows; no wire or persisted catalog shape changes.
 
 ### INSERT and metadata (#1131)
 
@@ -696,8 +714,7 @@ SQL++ KEY/VALUE forms above are the T1 mutation grammar. Id-less VALUE/VALUES fo
 CD00002 asking for KEY. KEY, VALUES and INTO remain non-reserved; the header reads KEY and
 VALUE by position, independently of SELECT VALUE's eventual reservation. OPTIONS in the
 header reports one CK00001 at OPTIONS, including when it follows KEY directly in the SELECT
-form, because Documents has no TTL or statement-level version precondition. A trailing RETURNING clause is recognized
-but deferred; identifier positions keep `returning` as a name. General database-qualified destinations remain invalid.
+form, because Documents has no TTL or statement-level version precondition. A trailing RETURNING clause projects the affected image; identifier positions keep `returning` as a name. General database-qualified destinations remain invalid.
 
 VALUES expressions accept constants, parameters, operators and object constructors; document
 paths, aggregates and META require a source and fail planning here. INSERT SELECT binds KEY

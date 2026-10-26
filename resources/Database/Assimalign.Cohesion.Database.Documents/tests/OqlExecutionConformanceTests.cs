@@ -87,6 +87,13 @@ public sealed class OqlExecutionConformanceTests
                 new("DELETE FROM items", [["by_score"]], ["CREATE INDEX by_score ON items (details.score)"],
                     "SELECT INDEX_NAME FROM COHESION_SCHEMA.INDEXES", ExpectedAffectedCount: 4),
             ],
+            [OqlClauses.Returning] =
+            [
+                new("INSERT INTO items (KEY, VALUE) VALUES ('e', {name:'echo'}) RETURNING name", [["echo"]], ExpectedAffectedCount: 1),
+                new("UPSERT INTO items (KEY, VALUE) VALUES ('a', {name:'replaced'}) RETURNING VALUE name", [["replaced"]], ExpectedAffectedCount: 1),
+                new("UPDATE items SET amount = 10 WHERE name = 'alpha' RETURNING RAW amount", [[10m]], ExpectedAffectedCount: 1),
+                new("DELETE FROM items WHERE name = 'alpha' RETURNING name", [["alpha"]], ExpectedAffectedCount: 1),
+            ],
             [OqlClauses.Values] =
             [
                 InsertCase(),
@@ -272,6 +279,7 @@ public sealed class OqlExecutionConformanceTests
 
                 // Assert: DDL must change catalog state; queries must return the exact values and order.
                 result.Status.ShouldBe(DatabaseResultStatus.Success, context);
+                if (clause == OqlClauses.Returning) { result.AffectedCount.ShouldBe(execution.ExpectedAffectedCount, context); }
                 if (execution.VerificationStatement is string verification)
                 {
                     result.AffectedCount.ShouldBe(execution.ExpectedAffectedCount, context);
@@ -456,6 +464,8 @@ public sealed class OqlExecutionConformanceTests
 
     private static bool ContainsClause(OqlExpression expression, string clause) => clause switch
     {
+        OqlClauses.Returning => expression is OqlInsertExpression { Returning: not null } or OqlUpsertExpression { Returning: not null }
+            or OqlUpdateExpression { Returning: not null } or OqlDeleteExpression { Returning: not null },
         OqlClauses.Begin => expression is OqlTransactionExpression { Command: OqlTransactionCommand.Begin },
         OqlClauses.Commit => expression is OqlTransactionExpression { Command: OqlTransactionCommand.Commit },
         OqlClauses.Rollback => expression is OqlTransactionExpression { Command: OqlTransactionCommand.Rollback },

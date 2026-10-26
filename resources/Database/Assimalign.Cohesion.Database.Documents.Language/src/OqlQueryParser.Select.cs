@@ -136,7 +136,7 @@ public sealed partial class OqlQueryParser
                 if (token.Type == TokenType.Comma) { return index > _position; }
                 if (token.Type is TokenType.Eof or TokenType.Semicolon || IsWord(token, "LIMIT") || IsWord(token, "OFFSET") ||
                     IsWord(token, "ORDER") || IsWord(token, "GROUP") || IsWord(token, "HAVING") ||
-                    IsWord(token, "WHERE") || IsWord(token, "FROM")) { return false; }
+                    IsWord(token, "WHERE") || IsWord(token, "FROM") || IsWord(token, "RETURNING")) { return false; }
             }
             if (token.Type is TokenType.LeftParen or TokenType.LeftBracket or TokenType.LeftBrace) { depth++; }
             else if (token.Type is TokenType.RightParen or TokenType.RightBracket or TokenType.RightBrace)
@@ -178,10 +178,21 @@ public sealed partial class OqlQueryParser
         if (!Is("RETURNING")) { return false; }
         var next = _tokens[_position + 1];
         // An implicit source alias must be followed by the end or another clause. Keep
-        // RETURNING as that name there; otherwise leave the trailing clause for rejection.
-        return next.Type is not (TokenType.Eof or TokenType.Semicolon) &&
-            !IsWord(next, "WHERE") && !IsWord(next, "GROUP") && !IsWord(next, "HAVING") &&
-            !IsWord(next, "ORDER") && !IsWord(next, "LIMIT") && !IsWord(next, "OFFSET") && !(IsWord(next, "RETURNING") &&
-                _tokens[_position + 2].Type is not (TokenType.Eof or TokenType.Semicolon));
+        // RETURNING as that name there; otherwise leave the trailing clause for the statement parser.
+        if (next.Type is TokenType.Eof or TokenType.Semicolon || IsWord(next, "WHERE") || IsWord(next, "GROUP") ||
+            IsWord(next, "HAVING") || IsWord(next, "ORDER") || IsWord(next, "LIMIT") || IsWord(next, "OFFSET")) { return false; }
+        if (!IsWord(next, "RETURNING")) { return true; }
+        // Prefer an expression reading the field named returning when its next token
+        // continues that expression. An implicit alias still works before RETURNING *
+        // or a separate operand; AS disambiguates an alias before unary projections.
+        var after = _tokens[_position + 2];
+        if (after.Text == "*")
+        {
+            var following = _tokens[_position + 3];
+            return following.Type is not (TokenType.Eof or TokenType.Semicolon or TokenType.Comma) && !IsWord(following, "AS");
+        }
+        return after.Type is TokenType.Eof or TokenType.Semicolon or TokenType.Comma or TokenType.Dot or TokenType.LeftBracket or TokenType.LeftParen ||
+            after.Text.ToUpperInvariant() is "AS" or "IS" or "IN" or "NOT" or "BETWEEN" or "LIKE" or "AND" or "OR" or
+                "+" or "-" or "/" or "%" or "=" or "!=" or "<>" or "<" or "<=" or ">" or ">=";
     }
 }

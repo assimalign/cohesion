@@ -38,6 +38,7 @@
   <data name="OqlQueryParserParsePathVoid" xml:space="preserve"><value>Expected a nonnegative array index or quoted property name.</value></data>
   <data name="OqlQueryParserParseSelectVoid" xml:space="preserve"><value>SELECT VALUE requires an expression.</value></data>
   <data name="OqlQueryParserParseSelectVoid2" xml:space="preserve"><value>SELECT VALUE requires an expression other than star.</value></data>
+  <data name="ReturningValueInvalid" xml:space="preserve"><value>RETURNING RAW or VALUE requires one expression without a star or alias.</value></data>
   <data name="OqlQueryParserParseSelectVoid3" xml:space="preserve"><value>UNNEST requires an alias for an expression without a final path name.</value></data>
   <data name="OqlQueryParserParseSelectVoid4" xml:space="preserve"><value>Multiple {0} clauses are not allowed.</value></data>
   <data name="OqlQueryParserParseCountVoid" xml:space="preserve"><value>Expected an integer literal or parameter after {0}.</value></data>

@@ -237,6 +237,24 @@ internal static class Program
                 Check(exception.Code == ProtocolErrorCode.ExecutionFailure && exception.Diagnostics.Any(d => d.Code == "CD02008"), "UPSERT invalid key");
             }
             Check(await connection.ExecuteAsync("UPSERT INTO items (KEY k, VALUE v) SELECT META().id AS k, 1 AS v FROM items", cancellationToken: token) == 3, "UPSERT SELECT session reuse");
+            var insertedRows = await connection.QueryAsync("INSERT INTO items AS d (KEY, VALUE) VALUES ('returned', {n:1}) RETURNING META(d).id AS id, META(d).version AS version, d.n AS n", cancellationToken: token);
+            var insertedImage = await connection.GetAsync("items", "returned", token);
+            Check(insertedRows.AffectedCount == 1 && insertedRows.Count == 1 && insertedRows[0]["id"] is "returned" &&
+                insertedRows[0]["version"] is decimal version && version == insertedImage.GetValueOrDefault().Version.Value, "INSERT RETURNING stored metadata");
+            var upsertRows = await connection.QueryAsync("UPSERT INTO items (KEY, VALUE) VALUES ('returned', {n:2}) RETURNING RAW items.n", cancellationToken: token);
+            Check(upsertRows.AffectedCount == 1 && upsertRows.Documents[0].GetInt32() == 2, "UPSERT RETURNING RAW");
+            var updateRows = await connection.QueryAsync("UPDATE items SET n = 3 WHERE META().id = 'returned' RETURNING VALUE n", cancellationToken: token);
+            Check(updateRows.AffectedCount == 1 && updateRows.Documents[0].GetInt32() == 3, "UPDATE RETURNING post-image");
+            try
+            {
+                await connection.QueryAsync("DELETE FROM items WHERE META().id = 'returned' RETURNING 1 / 0", cancellationToken: token);
+                throw new InvalidOperationException("RETURNING projection failure succeeded.");
+            }
+            catch (DocumentClientException exception)
+            { Check(exception.Diagnostics.Any(d => d.Code == "CD02006"), "RETURNING projection rollback diagnostic"); }
+            Check(await connection.GetAsync("items", "returned", token) is not null, "RETURNING projection rollback preserved document");
+            var deleteRows = await connection.QueryAsync("DELETE FROM items WHERE META().id = 'returned' RETURNING *", cancellationToken: token);
+            Check(deleteRows.AffectedCount == 1 && deleteRows.Documents[0].GetProperty("n").GetInt32() == 3, "DELETE RETURNING pre-image");
             Check(await connection.ExecuteAsync("DROP COLLECTION items", cancellationToken: token) == 0, "OQL drop collection");
             Check(await connection.ExecuteAsync("DROP COLLECTION IF EXISTS items", cancellationToken: token) == 0, "absent collection");
             await connection.CreateCollectionAsync("intersection", token);

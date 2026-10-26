@@ -51,6 +51,7 @@ internal static class OqlUnsupportedVocabulary
         // Statements and clauses of other languages.
         new("ALTER", "ALTER", OqlWordPosition.Clause),
         new("INSERT", "INSERT", OqlWordPosition.Clause),
+        // Enabled for DML; retained for contextual coverage and prefix/SELECT refusal.
         new("RETURNING", "RETURNING", OqlWordPosition.Trailing),
         // Enabled by OqlClauses.Update; SET's positional exemption belongs to UPDATE.
         new("UPDATE", "UPDATE", OqlWordPosition.Clause),

@@ -42,6 +42,9 @@ public static class OqlClauses
     /// <summary>Deletes documents from one collection.</summary>
     public const string Delete = "DELETE";
 
+    /// <summary>Projects each affected document, optionally as one RAW or VALUE expression.</summary>
+    public const string Returning = "RETURNING";
+
     /// <summary>Supplies key and value pairs to INSERT or UPSERT.</summary>
     public const string Values = "VALUES";
 

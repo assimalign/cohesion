@@ -41,7 +41,10 @@ create externally keyed documents. UPSERT uses the same forms to insert or wholl
 and versions independently of JSON content. `DELETE FROM collection [AS? alias] [WHERE expression]`
 deletes snapshot-selected documents and retains the collection and indexes. EXPLAIN accepts
 SELECT, INSERT, UPSERT, UPDATE and DELETE. UPDATE accepts SET and/or UNSET over nested properties and
-array indexes; SET-to-MISSING removes a property. USE KEYS, RETURNING, FOR comprehensions and
+array indexes; SET-to-MISSING removes a property. RETURNING named expressions or RAW/VALUE return each affected image with the mutation count.
+DELETE returns the pre-image; the other writes return the stored post-image. Projection,
+serialization or budget failure rolls back writes before any results are exposed.
+USE KEYS, FOR comprehensions and
 UPDATE/DELETE LIMIT remain deferred.
 `DEFINE` is recognized statement-initially, and `ELEMENT` / `FLATTEN` in call position, to
 produce `CK00001`; all three remain usable field names. Subqueries remain unsupported.
