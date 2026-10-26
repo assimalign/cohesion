@@ -287,8 +287,8 @@ public sealed partial class SqlTruncateReviewTests
         await ExecAsync(writer, "CREATE TABLE t (id INT)", timeout.Token);
         await using var pin = await reader.BeginTransactionAsync(timeout.Token);
         for (int i = 0; i < count; i++) { await ExecAsync(writer, "TRUNCATE t", timeout.Token); }
-        var fresh = new TransactionSnapshot(TransactionSequence.None, database.Coordinator.Manager.OldestActive,
-            new TransactionSequence(ulong.MaxValue), Array.Empty<TransactionSequence>());
+        await using var freshTransaction = await writer.BeginTransactionAsync(timeout.Token);
+        var fresh = freshTransaction.Context.Snapshot;
         for (int i = 0; i < 100; i++) { database.Catalog.CaptureTruncateReadSnapshot(fresh).ShouldBeNull(); }
 
         // Act
