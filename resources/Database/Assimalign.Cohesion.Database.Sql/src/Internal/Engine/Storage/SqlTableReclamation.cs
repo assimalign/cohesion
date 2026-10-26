@@ -122,7 +122,7 @@ internal sealed class SqlTableReclamation
                         // Data durability precedes intent removal. A crash in between just
                         // visits the remaining owner directory again; freed pages have no owner.
                         token.ThrowIfCancellationRequested();
-                        _database.Catalog.CompleteTableReclamationAsync(pending.ObjectId, token).GetAwaiter().GetResult();
+                        _database.Catalog.CompleteTableReclamationAsync(pending.ObjectId, pending.Intent, token).GetAwaiter().GetResult();
                         _pending.Remove(pending.ObjectId);
                         Volatile.Write(ref _pendingCount, _pending.Count);
                         SqlDatabaseEventSource.Log.TableReclamationCompleted(_database, pending.ObjectId, pending.Pages);

@@ -83,6 +83,9 @@ internal sealed partial class SqlPlanner
     private bool TryReadTable(string schema, string name, out SqlCatalogTable table)
         => ViewImageState is { } image ? image.Snapshot.TryGetTable(schema, name, out table!) : _catalog.TryGetTable(schema, name, out table!);
 
+    private IReadOnlyList<SqlCatalogIndex> ReadIndexes(ulong objectId)
+        => ViewImageState is { } image ? image.Snapshot.GetIndexes(objectId) : _catalog.GetIndexes(objectId);
+
     [global::System.Diagnostics.DebuggerDisplay("ViewImageDirectory")]
     [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlPlanner.ViewImageDirectory.DebugView))]
     private sealed class ViewImageDirectory

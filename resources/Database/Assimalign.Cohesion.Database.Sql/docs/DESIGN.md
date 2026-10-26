@@ -6582,8 +6582,11 @@ TRUNCATE resolves and deduplicates its list, computes the incoming FK closure (o
 CS03067 under default RESTRICT), and holds ascending table-exclusive locks. RESTART IDENTITY
 and CASCADE are independent; omission means CONTINUE IDENTITY and RESTRICT. Schema ownership
 is preserved and does not forbid this data operation. An explicit transaction is refused with
-CS04066, leaving its earlier work active. A child FK published while the statement waits
-invalidates the closed set with retryable CS04064, including CASCADE. CTAS remains outside SQ-T1.
+CS04066, leaving its earlier work active. Under the catalog lock at reservation and publication,
+the incoming FK closure is recomputed from the explicitly named targets and must equal the
+locked set. Both added and removed dependencies invalidate it with retryable CS04064, including
+CASCADE. FK DDL re-resolves every parent after acquiring its locks and rejects replacement
+identities with CS04064 before rebinding or backfill. CTAS remains outside SQ-T1.
 
 The catalog internally reserves fresh owner identities with existing kind-14 reclamation
 intents, without changing the logical generation. Prepared empty B-trees commit durably before
@@ -6611,8 +6614,12 @@ snapshot predates. DML targets use the same retained image, so existing target-d
 validation refuses stale writes with CS04006 before apply. Unrelated current definitions retain
 existing ALTER behavior. The volatile
 association lasts until reclamation retires its owner; no snapshot survives reopen. Retired tree
-handles leave the manager after publication, so a new
-old-snapshot seek falls back to its owner scan while existing cursors retain their safe handles.
+handles leave the mutable manager after publication but remain in the catalog alongside their
+exact immutable index descriptions until reclamation. Retained reads bind those descriptions
+and resolve those handles, preserving index seeks. Join read validation accepts only these
+protected retired definitions; all DML target/source definition checks remain unchanged.
+Retirements are published as an ordered immutable array. A snapshot seeing its maximum marker
+sees every earlier serialized marker and returns without locking, collecting or sorting.
 
 The lock/latch order is documented at ExecuteTruncateAsync: metadata admission, ascending table
 X, apply gate, tree/page latches; no apply gate or data latch spans catalog publication. Final
@@ -6659,7 +6666,9 @@ committed unpublication or TRUNCATE preparation, and removes it after retirement
 prepared-owner publication, all under its metadata lock. The worker captures an internal immutable
 intent token and rechecks that incarnation after transaction and statement pins clear before freeing
 any page. TRUNCATE retirement is discoverable only after its visibility marker ends.
-`GetPendingTableReclamations()` returns an independent read-only snapshot of the committed identities;
+`GetPendingTableReclamations()` returns an independent read-only snapshot of permanently retired
+identities, hiding prepared owners that can still become live. Public completion ignores prepared
+owners; the internal worker captures and completes exact intent incarnations;
 `CompleteTableReclamationAsync()` idempotently retires an identity without advancing the DDL
 generation. Record locations and the kind-14 codec stay private to this assembly. These two concrete
 catalog members are the narrow boundary change requested in review #1443; no interface, friend grant,

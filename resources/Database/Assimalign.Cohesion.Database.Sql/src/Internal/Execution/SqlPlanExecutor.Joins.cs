@@ -33,7 +33,9 @@ internal sealed partial class SqlPlanExecutor
         {
             await statement.Coordinator.LockManager.AcquireAsync(statement.Transaction.Sequence,
                 LockResource.Object(table.ObjectId), LockMode.IntentShared, cancellationToken).ConfigureAwait(false);
-            EnsureCurrentDefinition(table);
+            // A retired TRUNCATE owner is immutable and protected by this read's pins.
+            // DML and its source preparation keep their separate stale-writer checks.
+            if (!_catalog.IsTruncatedTable(table)) { EnsureCurrentDefinition(table); }
         }
         // Require binding's image even when an empty outer input would skip virtual enumeration.
         if (plan.Bindings.Any(binding => binding.Source.View is not null))

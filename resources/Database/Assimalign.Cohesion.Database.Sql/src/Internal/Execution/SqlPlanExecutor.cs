@@ -1580,8 +1580,9 @@ internal sealed partial class SqlPlanExecutor
 
     /// <summary>Never applies a planned key shape to a detached or same-name replacement tree.</summary>
     private bool TryResolveSeekTree(SqlCatalogTable table, SqlCatalogIndex planned, out BTreeIndex index)
-        => _indexManager.TryGetIndex(table.ObjectId, planned.Name, out index!) &&
-            _catalog.TryGetIndex(table.ObjectId, planned.Name, out var current) && ReferenceEquals(current, planned);
+        => (_indexManager.TryGetIndex(table.ObjectId, planned.Name, out index!) &&
+            _catalog.TryGetIndex(table.ObjectId, planned.Name, out var current) && ReferenceEquals(current, planned)) ||
+            _catalog.TryGetTruncatedIndex(table, planned, out index!);
 
     /// <summary>
     /// Drives an index seek: incrementally reads visible entries in the seek's key

@@ -17,8 +17,10 @@ namespace Assimalign.Cohesion.Database.Sql.Catalog;
 public sealed partial class SqlCatalog
 {
     private readonly Dictionary<ulong, (TransactionSequence Marker, SqlCatalogSnapshot Before)> _truncatedTables = new();
+    private (ulong ObjectId, TransactionSequence Marker, SqlCatalogSnapshot Before)[] _orderedTruncations = [];
+    private readonly Dictionary<SqlCatalogIndex, BTreeIndex> _truncatedIndexes = new(ReferenceEqualityComparer.Instance);
+    private readonly HashSet<ulong> _preparedTruncateOwners = new();
     private readonly HashSet<ulong> _truncateRetirementsPublishing = new();
-    private int _truncatedTableCount;
     private ulong _storageBindingGeneration;
 
     // Physical replacement invalidates table/view bindings without reporting logical schema
@@ -40,18 +42,21 @@ public sealed partial class SqlCatalog
     // normal stored-query path. No snapshot survives reopen, so the association is volatile.
     internal SqlCatalogSnapshot? CaptureTruncateReadSnapshot(TransactionSnapshot snapshot)
     {
-        if (Volatile.Read(ref _truncatedTableCount) == 0) { return null; }
+        var retirements = Volatile.Read(ref _orderedTruncations);
+        // Publication markers are serialized by TruncateSnapshotGate. Seeing the maximum
+        // therefore implies seeing every earlier marker, even with older readers pinned.
+        if (retirements.Length == 0 || snapshot.IsVisible(retirements[^1].Marker)) { return null; }
         lock (_sync)
         {
             ThrowIfOffline();
             var tables = new Dictionary<(string Schema, string Name), SqlCatalogTable>(TableNameComparer.Instance);
             var indexes = new List<SqlCatalogIndex>();
             var views = new Dictionary<string, SqlCatalogView>(StringComparer.OrdinalIgnoreCase);
-            foreach (var retired in _truncatedTables.OrderBy(pair => pair.Value.Marker))
+            foreach (var retired in _orderedTruncations)
             {
-                if (snapshot.IsVisible(retired.Value.Marker)) { continue; }
-                var before = retired.Value.Before;
-                var table = before.Tables.Single(table => table.ObjectId == retired.Key);
+                if (snapshot.IsVisible(retired.Marker)) { continue; }
+                var before = retired.Before;
+                var table = before.Tables.Single(table => table.ObjectId == retired.ObjectId);
                 // Multiple truncations can overlap one reader: keep the first owner it
                 // predates, rather than a later empty replacement of the same table.
                 if (!tables.TryAdd((table.Schema, table.Name), table)) { continue; }
@@ -74,13 +79,14 @@ public sealed partial class SqlCatalog
     // Internal engine operations: no new cross-assembly catalog seam. Callers hold table X
     // locks in ascending identity order, then enter this metadata lock. No data apply gate
     // or tree/page latch is held here. Catalog storage brackets are strictly innermost.
-    internal SqlCatalogTable[] ReserveTruncate(IReadOnlyList<SqlCatalogTable> expected, CancellationToken cancellationToken)
+    internal SqlCatalogTable[] ReserveTruncate(IReadOnlyList<SqlCatalogTable> expected,
+        IReadOnlyList<SqlCatalogTable> named, CancellationToken cancellationToken)
     {
         lock (_sync)
         {
             ThrowIfOffline();
             cancellationToken.ThrowIfCancellationRequested();
-            ValidateTruncateSet(expected);
+            ValidateTruncateSet(expected, named);
             ulong next = _nextObjectId;
             var replacements = expected.Select(table => new SqlCatalogTable(checked(next++), table.Schema, table.Name,
                 table.Columns, table.PrimaryKeyColumns, table.Owner, table.OwningSchema, table.Constraints,
@@ -98,20 +104,22 @@ public sealed partial class SqlCatalog
             for (int index = 0; index < replacements.Length; index++)
             {
                 _pendingReclamations.Add(replacements[index].ObjectId, new SqlReclamationIntent(locations[index].PageId, locations[index].SlotIndex));
+                _preparedTruncateOwners.Add(replacements[index].ObjectId);
             }
             return replacements;
         }
     }
 
-    internal ValueTask PublishTruncateAsync(IReadOnlyList<SqlCatalogTable> expected,
+    internal ValueTask PublishTruncateAsync(IReadOnlyList<SqlCatalogTable> expected, IReadOnlyList<SqlCatalogTable> named,
         IReadOnlyList<SqlCatalogTable> replacements, IReadOnlyList<SqlCatalogIndex> indexes,
-        IReadOnlyList<BTreeIndexRegistration> registrations, bool restartIdentity, TransactionSequence marker, string actualObject, SqlCatalogScriptPublication? publication, CancellationToken cancellationToken)
+        IReadOnlyList<BTreeIndexRegistration> registrations, IReadOnlyDictionary<SqlCatalogIndex, BTreeIndex> retiredIndexes,
+        bool restartIdentity, TransactionSequence marker, string actualObject, SqlCatalogScriptPublication? publication, CancellationToken cancellationToken)
     {
         lock (_sync)
         {
             ThrowIfOffline();
             cancellationToken.ThrowIfCancellationRequested();
-            ValidateTruncateSet(expected);
+            ValidateTruncateSet(expected, named);
             ulong bindingGeneration = checked(_storageBindingGeneration + 1);
             var ids = expected.Select(table => table.ObjectId).ToHashSet();
             var mapping = expected.Select((table, index) => (table.ObjectId, Replacement: replacements[index]))
@@ -184,14 +192,19 @@ public sealed partial class SqlCatalog
             foreach (var view in viewSlots) { _views[view.Key] = view.Slot; }
             foreach (var table in expected) { _identityCounters.Remove(table.ObjectId); }
             foreach (var counter in counters) { _identityCounters.Add(counter.Id, counter.Counter); }
-            foreach (var table in replacements) { _pendingReclamations.Remove(table.ObjectId); }
+            foreach (var table in replacements)
+            {
+                _pendingReclamations.Remove(table.ObjectId);
+                _preparedTruncateOwners.Remove(table.ObjectId);
+            }
             foreach (var item in retired)
             {
                 _pendingReclamations.Add(item.ObjectId, new SqlReclamationIntent(item.Location.PageId, item.Location.SlotIndex));
                 _truncateRetirementsPublishing.Add(item.ObjectId);
             }
             foreach (var table in expected) { _truncatedTables.Add(table.ObjectId, (marker, before)); }
-            Volatile.Write(ref _truncatedTableCount, _truncatedTables.Count);
+            foreach (var pair in retiredIndexes) { _truncatedIndexes.Add(pair.Key, pair.Value); }
+            PublishOrderedTruncations();
             _registrations = merged;
             _registrationsLocation = registrationsLocation;
             _storageBindingGeneration = bindingGeneration;
@@ -199,7 +212,35 @@ public sealed partial class SqlCatalog
         }
     }
 
-    private void ValidateTruncateSet(IReadOnlyList<SqlCatalogTable> expected)
+    // Immutable owner descriptions and detached trees are usable only while reclamation
+    // still retains that exact owner. Statement/transaction pins protect the caller's use.
+    internal bool IsTruncatedTable(SqlCatalogTable table)
+    {
+        lock (_sync)
+        {
+            ThrowIfOffline();
+            return _truncatedTables.TryGetValue(table.ObjectId, out var retired) &&
+                retired.Before.Tables.Any(candidate => ReferenceEquals(candidate, table));
+        }
+    }
+
+    internal bool TryGetTruncatedIndex(SqlCatalogTable table, SqlCatalogIndex planned, out BTreeIndex index)
+    {
+        lock (_sync)
+        {
+            ThrowIfOffline();
+            index = null!;
+            return planned.TableObjectId == table.ObjectId && IsTruncatedTable(table) &&
+                _truncatedIndexes.TryGetValue(planned, out index!);
+        }
+    }
+
+    private void PublishOrderedTruncations()
+        => Volatile.Write(ref _orderedTruncations, _truncatedTables
+            .Select(pair => (ObjectId: pair.Key, pair.Value.Marker, pair.Value.Before))
+            .OrderBy(retired => retired.Marker).ThenBy(retired => retired.ObjectId).ToArray());
+
+    private void ValidateTruncateSet(IReadOnlyList<SqlCatalogTable> expected, IReadOnlyList<SqlCatalogTable> named)
     {
         foreach (var table in expected)
         {
@@ -209,18 +250,28 @@ public sealed partial class SqlCatalog
                     ErrorMessages.TableIdentityReplaced, table.Schema, table.Name));
             }
         }
-        var names = expected.Select(table => (table.Schema, table.Name)).ToHashSet(TableNameComparer.Instance);
-        foreach (var table in _tables.Values.Select(slot => slot.Table))
+        // Recompute from the written targets, not the formerly expanded set. A dropped
+        // FK can shrink CASCADE while its child keeps the same owner id during the wait.
+        // Both reservation and publication must reject growth AND shrinkage of that set.
+        var names = named.Select(table => (table.Schema, table.Name)).ToHashSet(TableNameComparer.Instance);
+        bool added;
+        do
         {
-            if (names.Contains((table.Schema, table.Name))) { continue; }
-            if (table.Constraints.Any(constraint => constraint.Kind == SqlCatalogConstraintKind.Reference &&
-                names.Contains((constraint.ReferencedSchema!, constraint.ReferencedTable!))))
+            added = false;
+            foreach (var table in _tables.Values.Select(slot => slot.Table))
             {
-                // The executor closed the original graph before waiting for table locks.
-                // A newly published child invalidates that graph, including under CASCADE;
-                // retry rather than telling a CASCADE caller to specify CASCADE again.
-                throw new SqlCatalogException("CS04064", ErrorMessages.TruncateClosureChanged);
+                if (names.Contains((table.Schema, table.Name))) { continue; }
+                if (table.Constraints.Any(constraint => constraint.Kind == SqlCatalogConstraintKind.Reference &&
+                    names.Contains((constraint.ReferencedSchema!, constraint.ReferencedTable!))))
+                {
+                    names.Add((table.Schema, table.Name));
+                    added = true;
+                }
             }
+        } while (added);
+        if (names.Count != expected.Count || expected.Any(table => !names.Contains((table.Schema, table.Name))))
+        {
+            throw new SqlCatalogException("CS04064", ErrorMessages.TruncateClosureChanged);
         }
     }
 

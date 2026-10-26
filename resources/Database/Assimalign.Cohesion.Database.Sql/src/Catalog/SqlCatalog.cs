@@ -174,11 +174,10 @@ public sealed partial class SqlCatalog
 
     // The catalog owns committed reclamation state and its retirement, as it owns pending
     // migrations and script receipts; the worker captures immutable intent incarnations.
-    /// <summary>Captures the unpublished table-owner identities whose storage reclamation is pending.</summary>
+    /// <summary>Captures permanently retired table-owner identities whose storage reclamation is pending.</summary>
     /// <returns>A read-only snapshot unaffected by later publications or completed reclamations.</returns>
-    /// <remarks>Prepared TRUNCATE owners can become live by removing their intent atomically with
-    /// publication. Reclamation must wait for transaction and statement pins and then recheck that
-    /// the same intent is still committed before freeing any owner pages. Retired owners become
+    /// <remarks>Prepared TRUNCATE owners remain internal because they can become live.
+    /// Reclamation must wait for transaction and statement pins before freeing owner pages. Retired owners become
     /// discoverable after the TRUNCATE visibility marker ends, so the fence covers every old reader.</remarks>
     /// <exception cref="StorageOfflineException">The catalog is offline.</exception>
     public IReadOnlyList<ulong> GetPendingTableReclamations()
@@ -186,7 +185,8 @@ public sealed partial class SqlCatalog
         lock (_sync)
         {
             ThrowIfOffline();
-            return Array.AsReadOnly(_pendingReclamations.Keys.Where(id => !_truncateRetirementsPublishing.Contains(id)).ToArray());
+            return Array.AsReadOnly(_pendingReclamations.Keys.Where(id =>
+                !_preparedTruncateOwners.Contains(id) && !_truncateRetirementsPublishing.Contains(id)).ToArray());
         }
     }
 
@@ -204,6 +204,12 @@ public sealed partial class SqlCatalog
     /// <exception cref="OperationCanceledException">Cancellation was requested before retirement began.</exception>
     /// <exception cref="StorageOfflineException">The catalog is offline or the retirement commit is unconfirmed.</exception>
     public ValueTask CompleteTableReclamationAsync(ulong objectId, CancellationToken cancellationToken = default)
+        => CompleteTableReclamationCoreAsync(objectId, null, cancellationToken);
+
+    internal ValueTask CompleteTableReclamationAsync(ulong objectId, SqlReclamationIntent intent, CancellationToken cancellationToken)
+        => CompleteTableReclamationCoreAsync(objectId, intent, cancellationToken);
+
+    private ValueTask CompleteTableReclamationCoreAsync(ulong objectId, SqlReclamationIntent? intent, CancellationToken cancellationToken)
     {
         ArgumentOutOfRangeException.ThrowIfZero(objectId);
         cancellationToken.ThrowIfCancellationRequested();
@@ -212,13 +218,19 @@ public sealed partial class SqlCatalog
             ThrowIfOffline();
             cancellationToken.ThrowIfCancellationRequested();
             if (!_pendingReclamations.TryGetValue(objectId, out var location)) { return default; }
+            if (_truncateRetirementsPublishing.Contains(objectId) ||
+                (intent is null ? _preparedTruncateOwners.Contains(objectId) : !ReferenceEquals(intent, location))) { return default; }
             using var transaction = _storage.BeginTransaction();
             _storage.DeleteRow(transaction, location.PageId, location.SlotIndex);
             transaction.Commit();
             _pendingReclamations.Remove(objectId);
             _truncateRetirementsPublishing.Remove(objectId);
-            _truncatedTables.Remove(objectId);
-            Volatile.Write(ref _truncatedTableCount, _truncatedTables.Count);
+            _preparedTruncateOwners.Remove(objectId);
+            if (_truncatedTables.Remove(objectId, out var retired))
+            {
+                foreach (var index in retired.Before.GetIndexes(objectId)) { _truncatedIndexes.Remove(index); }
+                PublishOrderedTruncations();
+            }
             return default;
         }
     }
