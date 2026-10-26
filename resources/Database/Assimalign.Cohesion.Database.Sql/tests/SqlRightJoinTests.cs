@@ -28,18 +28,18 @@ public sealed class SqlRightJoinTests
         await using var engine = SqlDatabaseEngine.Create("right-bags", new());
         var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
-        await Exec(session, "CREATE TABLE a (id INT, v TEXT); CREATE TABLE b (id INT, v TEXT);");
-        await Exec(session, "INSERT INTO a VALUES (1, 'keep'), (1, 'other'), (NULL, 'null'), (4, 'left');");
-        await Exec(session, "INSERT INTO b VALUES (1, 'one'), (1, 'again'), (NULL, 'null'), (2, 'right');");
-        if (indexed) { await Exec(session, "CREATE INDEX ix_a ON a(id);"); }
+        await ExecAsync(session, "CREATE TABLE a (id INT, v TEXT); CREATE TABLE b (id INT, v TEXT);");
+        await ExecAsync(session, "INSERT INTO a VALUES (1, 'keep'), (1, 'other'), (NULL, 'null'), (4, 'left');");
+        await ExecAsync(session, "INSERT INTO b VALUES (1, 'one'), (1, 'again'), (NULL, 'null'), (2, 'right');");
+        if (indexed) { await ExecAsync(session, "CREATE INDEX ix_a ON a(id);"); }
 
         // Act / Assert
         for (int empty = 0; empty < 3; empty++)
         {
-            var right = await Rows(session, $"SELECT a.id, a.v, b.id, b.v FROM a RIGHT JOIN b ON {condition};");
-            var left = await Rows(session, $"SELECT a.id, a.v, b.id, b.v FROM b LEFT JOIN a ON {condition};");
+            var right = await RowsAsync(session, $"SELECT a.id, a.v, b.id, b.v FROM a RIGHT JOIN b ON {condition};");
+            var left = await RowsAsync(session, $"SELECT a.id, a.v, b.id, b.v FROM b LEFT JOIN a ON {condition};");
             Bag(right).ShouldBe(Bag(left));
-            await Exec(session, empty == 0 ? "DELETE FROM a;" : "DELETE FROM b;");
+            await ExecAsync(session, empty == 0 ? "DELETE FROM a;" : "DELETE FROM b;");
         }
     }
 
@@ -52,23 +52,23 @@ public sealed class SqlRightJoinTests
         await using var engine = SqlDatabaseEngine.Create("right-slots", new());
         var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
-        await Exec(session, "CREATE TABLE a (left_value TEXT NOT NULL, id INT NOT NULL); CREATE TABLE b (id INT NOT NULL, right_value TEXT NOT NULL);");
-        await Exec(session, "INSERT INTO a VALUES ('left', 1); INSERT INTO b VALUES (1, 'one'), (2, 'two');");
-        if (indexed) { await Exec(session, "CREATE INDEX ix_a ON a(id);"); }
+        await ExecAsync(session, "CREATE TABLE a (left_value TEXT NOT NULL, id INT NOT NULL); CREATE TABLE b (id INT NOT NULL, right_value TEXT NOT NULL);");
+        await ExecAsync(session, "INSERT INTO a VALUES ('left', 1); INSERT INTO b VALUES (1, 'one'), (2, 'two');");
+        if (indexed) { await ExecAsync(session, "CREATE INDEX ix_a ON a(id);"); }
 
         // Act
         await using var result = (await session.ExecuteAsync("SELECT * FROM a RIGHT OUTER JOIN b ON a.id = b.id ORDER BY 3;", cancellationToken: CancellationToken.None)).ShouldBeAssignableTo<DatabaseResultSet>();
-        var rows = await Read(result);
+        var rows = await ReadAsync(result);
 
         // Assert
         Check(rows, [["left", 1, 1, "one"], [null, null, 2, "two"]]);
         result.Columns.Select(column => column.Name).ShouldBe(["left_value", "id", "id", "right_value"]);
         result.Columns.Select(column => column.IsNullable).ShouldBe([true, true, false, false]);
         session.LastStatementMetrics!.JoinAccessPaths.ShouldBe(indexed ? ["join-seek:ix_a"] : ["join-hash"]);
-        Check(await Rows(session, "SELECT b.id FROM a RIGHT JOIN b ON a.id = b.id WHERE a.id IS NULL;"), [[2]]);
-        Check(await Rows(session, "SELECT a.id, b.id FROM a RIGHT JOIN b ON a.id = b.id AND b.id = 2 ORDER BY b.id;"), [[null, 1], [null, 2]]);
-        Check(await Rows(session, "SELECT a.id, b.id FROM a RIGHT JOIN b ON a.id = b.id WHERE b.id = 2;"), [[null, 2]]);
-        Check(await Rows(session, "SELECT COUNT(*), COUNT(a.id) FROM a RIGHT JOIN b ON a.id = b.id;"), [[2L, 1L]]);
+        Check(await RowsAsync(session, "SELECT b.id FROM a RIGHT JOIN b ON a.id = b.id WHERE a.id IS NULL;"), [[2]]);
+        Check(await RowsAsync(session, "SELECT a.id, b.id FROM a RIGHT JOIN b ON a.id = b.id AND b.id = 2 ORDER BY b.id;"), [[null, 1], [null, 2]]);
+        Check(await RowsAsync(session, "SELECT a.id, b.id FROM a RIGHT JOIN b ON a.id = b.id WHERE b.id = 2;"), [[null, 2]]);
+        Check(await RowsAsync(session, "SELECT COUNT(*), COUNT(a.id) FROM a RIGHT JOIN b ON a.id = b.id;"), [[2L, 1L]]);
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - RIGHT USING: merged right spelling, common type and wildcard order survive (#1525)")]
@@ -80,13 +80,13 @@ public sealed class SqlRightJoinTests
         await using var engine = SqlDatabaseEngine.Create("right-using", new());
         var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
-        await Exec(session, "CREATE TABLE a (extra TEXT NOT NULL, id DECIMAL NOT NULL, name VARCHAR(8) COLLATE case_insensitive NOT NULL); CREATE TABLE b (id INT NOT NULL, name VARCHAR(12) COLLATE case_insensitive NOT NULL, tail TEXT NOT NULL);");
-        await Exec(session, "INSERT INTO a VALUES ('L', 1, 'Ada'); INSERT INTO b VALUES (1, 'ADA', 'R'), (2, 'Grace', 'unmatched');");
-        if (indexed) { await Exec(session, "CREATE INDEX ix_a ON a(id, name);"); }
+        await ExecAsync(session, "CREATE TABLE a (extra TEXT NOT NULL, id DECIMAL NOT NULL, name VARCHAR(8) COLLATE case_insensitive NOT NULL); CREATE TABLE b (id INT NOT NULL, name VARCHAR(12) COLLATE case_insensitive NOT NULL, tail TEXT NOT NULL);");
+        await ExecAsync(session, "INSERT INTO a VALUES ('L', 1, 'Ada'); INSERT INTO b VALUES (1, 'ADA', 'R'), (2, 'Grace', 'unmatched');");
+        if (indexed) { await ExecAsync(session, "CREATE INDEX ix_a ON a(id, name);"); }
 
         // Act
         await using var result = (await session.ExecuteAsync("SELECT *, a.id AS old_id, b.id AS new_id FROM a RIGHT JOIN b USING (name, id) ORDER BY id;", cancellationToken: CancellationToken.None)).ShouldBeAssignableTo<DatabaseResultSet>();
-        var rows = await Read(result);
+        var rows = await ReadAsync(result);
 
         // Assert
         Check(rows, [["ADA", 1m, "L", "R", 1m, 1], ["Grace", 2m, null, "unmatched", null, 2]]);
@@ -94,7 +94,7 @@ public sealed class SqlRightJoinTests
         result.Columns.Select(column => column.IsNullable).ShouldBe([false, false, true, false, true, false]);
         result.Columns[0].MaxLength.ShouldBeNull();
         result.Columns[1].Type.ShouldBe(DatabaseType.Decimal);
-        Check(await Rows(session, "SELECT name, a.name, b.name FROM a RIGHT JOIN b USING (id, name) ORDER BY id;"),
+        Check(await RowsAsync(session, "SELECT name, a.name, b.name FROM a RIGHT JOIN b USING (id, name) ORDER BY id;"),
             [["ADA", "Ada", "ADA"], ["Grace", null, "Grace"]]);
     }
 
@@ -107,14 +107,14 @@ public sealed class SqlRightJoinTests
         await using var engine = SqlDatabaseEngine.Create("right-collation", new());
         var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
-        await Exec(session, "CREATE TABLE a (name TEXT COLLATE case_insensitive); CREATE TABLE b (name TEXT); INSERT INTO b VALUES ('a'), ('A');");
+        await ExecAsync(session, "CREATE TABLE a (name TEXT COLLATE case_insensitive); CREATE TABLE b (name TEXT); INSERT INTO b VALUES ('a'), ('A');");
 
         // Act
-        var rows = await Rows(session, $"SELECT DISTINCT {projection} FROM a RIGHT JOIN b USING(name) ORDER BY name;");
+        var rows = await RowsAsync(session, $"SELECT DISTINCT {projection} FROM a RIGHT JOIN b USING(name) ORDER BY name;");
 
         // Assert
         Check(rows, [["A"], ["a"]]);
-        Check(await Rows(session, "SELECT COUNT(*) FROM a RIGHT JOIN b USING(name) WHERE name = 'A';"), [[1L]]);
+        Check(await RowsAsync(session, "SELECT COUNT(*) FROM a RIGHT JOIN b USING(name) WHERE name = 'A';"), [[1L]]);
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - RIGHT chains and groups preserve SQL association (#1525)")]
@@ -127,20 +127,20 @@ public sealed class SqlRightJoinTests
         await using var engine = SqlDatabaseEngine.Create("right-chains", new());
         var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
-        await Exec(session, "CREATE TABLE a (id INT NOT NULL); CREATE TABLE b (id INT NOT NULL); CREATE TABLE c (id INT NOT NULL);");
-        await Exec(session, "INSERT INTO a VALUES (1), (2); INSERT INTO b VALUES (1); INSERT INTO c VALUES (1), (3);");
-        await Exec(session, "CREATE INDEX ix_a ON a(id);");
+        await ExecAsync(session, "CREATE TABLE a (id INT NOT NULL); CREATE TABLE b (id INT NOT NULL); CREATE TABLE c (id INT NOT NULL);");
+        await ExecAsync(session, "INSERT INTO a VALUES (1), (2); INSERT INTO b VALUES (1); INSERT INTO c VALUES (1), (3);");
+        await ExecAsync(session, "CREATE INDEX ix_a ON a(id);");
 
         // Act
         await using var result = (await session.ExecuteAsync($"SELECT a.id, b.id, c.id FROM {from} ORDER BY c.id NULLS LAST, a.id;", cancellationToken: CancellationToken.None)).ShouldBeAssignableTo<DatabaseResultSet>();
-        var rows = await Read(result);
+        var rows = await ReadAsync(result);
 
         // Assert
         Check(rows, preservesA ? [[1, 1, 1], [2, null, null]] : [[1, 1, 1], [null, null, 3]]);
         result.Columns.Select(column => column.IsNullable).ShouldBe(preservesA ? [false, true, true] : [true, true, false]);
-        Check(await Rows(session, "SELECT c.id FROM a empty_side, b RIGHT JOIN c ON b.id = c.id WHERE empty_side.id = 2 ORDER BY c.id;"), [[1], [3]]);
-        await Exec(session, "DELETE FROM a;");
-        (await Rows(session, "SELECT c.id FROM a, b RIGHT JOIN c ON b.id = c.id;")).ShouldBeEmpty();
+        Check(await RowsAsync(session, "SELECT c.id FROM a empty_side, b RIGHT JOIN c ON b.id = c.id WHERE empty_side.id = 2 ORDER BY c.id;"), [[1], [3]]);
+        await ExecAsync(session, "DELETE FROM a;");
+        (await RowsAsync(session, "SELECT c.id FROM a, b RIGHT JOIN c ON b.id = c.id;")).ShouldBeEmpty();
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - RIGHT: derived, CTE, view and aliased group consumers retain metadata (#1525)")]
@@ -154,12 +154,12 @@ public sealed class SqlRightJoinTests
         await using var engine = SqlDatabaseEngine.Create("right-consumers", new());
         var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
-        await Exec(session, "CREATE TABLE a (id INT NOT NULL); CREATE TABLE b (id INT NOT NULL); INSERT INTO a VALUES (1); INSERT INTO b VALUES (1), (2);");
-        await Exec(session, "CREATE VIEW v AS SELECT a.id AS aid, b.id FROM a RIGHT JOIN b ON a.id = b.id;");
+        await ExecAsync(session, "CREATE TABLE a (id INT NOT NULL); CREATE TABLE b (id INT NOT NULL); INSERT INTO a VALUES (1); INSERT INTO b VALUES (1), (2);");
+        await ExecAsync(session, "CREATE VIEW v AS SELECT a.id AS aid, b.id FROM a RIGHT JOIN b ON a.id = b.id;");
 
         // Act
         await using var result = (await session.ExecuteAsync(prefix + query, cancellationToken: CancellationToken.None)).ShouldBeAssignableTo<DatabaseResultSet>();
-        var rows = await Read(result);
+        var rows = await ReadAsync(result);
 
         // Assert
         Check(rows, [[1, 1], [null, 2]]);
@@ -173,13 +173,13 @@ public sealed class SqlRightJoinTests
         await using var engine = SqlDatabaseEngine.Create("right-correlations", new());
         var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
-        await Exec(session, "CREATE TABLE a (id INT NOT NULL); CREATE TABLE b (id INT NOT NULL); CREATE TABLE c (k INT NOT NULL); CREATE TABLE d (id INT NOT NULL);");
-        await Exec(session, "INSERT INTO a VALUES (1); INSERT INTO b VALUES (1), (2); INSERT INTO c VALUES (2); INSERT INTO d VALUES (2), (3);");
+        await ExecAsync(session, "CREATE TABLE a (id INT NOT NULL); CREATE TABLE b (id INT NOT NULL); CREATE TABLE c (k INT NOT NULL); CREATE TABLE d (id INT NOT NULL);");
+        await ExecAsync(session, "INSERT INTO a VALUES (1); INSERT INTO b VALUES (1), (2); INSERT INTO c VALUES (2); INSERT INTO d VALUES (2), (3);");
 
         // Act / Assert
-        Check(await Rows(session, "SELECT id, a.id, b.id, c.k, d.id FROM (a RIGHT JOIN b USING (id)) LEFT JOIN c ON EXISTS (SELECT 1 WHERE id = c.k) RIGHT JOIN d USING (id) ORDER BY id;"),
+        Check(await RowsAsync(session, "SELECT id, a.id, b.id, c.k, d.id FROM (a RIGHT JOIN b USING (id)) LEFT JOIN c ON EXISTS (SELECT 1 WHERE id = c.k) RIGHT JOIN d USING (id) ORDER BY id;"),
             [[2, null, 2, 2, 2], [3, null, null, null, 3]]);
-        Check(await Rows(session, "SELECT a.id, b.id FROM a RIGHT JOIN b ON EXISTS (SELECT 1 WHERE a.id = b.id) ORDER BY b.id;"), [[1, 1], [null, 2]]);
+        Check(await RowsAsync(session, "SELECT a.id, b.id FROM a RIGHT JOIN b ON EXISTS (SELECT 1 WHERE a.id = b.id) ORDER BY b.id;"), [[1, 1], [null, 2]]);
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - RIGHT: binding errors precede reading even for empty relations (#1525)")]
@@ -199,7 +199,7 @@ public sealed class SqlRightJoinTests
         await using var engine = SqlDatabaseEngine.Create("right-errors", new());
         var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
-        await Exec(session, "CREATE TABLE a (id INT); CREATE TABLE b (id INT);");
+        await ExecAsync(session, "CREATE TABLE a (id INT); CREATE TABLE b (id INT);");
 
         // Act
         var failure = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None));
@@ -216,13 +216,13 @@ public sealed class SqlRightJoinTests
         await using var engine = SqlDatabaseEngine.Create("right-dml", new());
         var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
-        await Exec(session, "CREATE TABLE t (id INT, v INT); CREATE TABLE a (id INT); CREATE TABLE b (id INT); INSERT INTO t VALUES (1, 0), (2, 0); INSERT INTO b VALUES (2);");
+        await ExecAsync(session, "CREATE TABLE t (id INT, v INT); CREATE TABLE a (id INT); CREATE TABLE b (id INT); INSERT INTO t VALUES (1, 0), (2, 0); INSERT INTO b VALUES (2);");
 
         // Act / Assert
-        await Exec(session, "UPDATE t SET v = q.id FROM (SELECT b.id FROM a RIGHT JOIN b USING (id)) q WHERE t.id = q.id;");
-        Check(await Rows(session, "SELECT * FROM t ORDER BY id;"), [[1, 0], [2, 2]]);
-        await Exec(session, "DELETE FROM t USING (SELECT b.id FROM a RIGHT JOIN b USING (id)) q WHERE t.id = q.id;");
-        Check(await Rows(session, "SELECT * FROM t;"), [[1, 0]]);
+        await ExecAsync(session, "UPDATE t SET v = q.id FROM (SELECT b.id FROM a RIGHT JOIN b USING (id)) q WHERE t.id = q.id;");
+        Check(await RowsAsync(session, "SELECT * FROM t ORDER BY id;"), [[1, 0], [2, 2]]);
+        await ExecAsync(session, "DELETE FROM t USING (SELECT b.id FROM a RIGHT JOIN b USING (id)) q WHERE t.id = q.id;");
+        Check(await RowsAsync(session, "SELECT * FROM t;"), [[1, 0]]);
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - RIGHT EXPLAIN identifies normalization and its physical path (#1525)")]
@@ -234,11 +234,11 @@ public sealed class SqlRightJoinTests
         await using var engine = SqlDatabaseEngine.Create("right-explain", new());
         var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
-        await Exec(session, "CREATE TABLE a (id INT NOT NULL); CREATE TABLE b (id INT NOT NULL); INSERT INTO a VALUES (1); INSERT INTO b VALUES (1), (2);");
-        if (indexed) { await Exec(session, "CREATE INDEX ix_a ON a(id);"); }
+        await ExecAsync(session, "CREATE TABLE a (id INT NOT NULL); CREATE TABLE b (id INT NOT NULL); INSERT INTO a VALUES (1); INSERT INTO b VALUES (1), (2);");
+        if (indexed) { await ExecAsync(session, "CREATE INDEX ix_a ON a(id);"); }
 
         // Act
-        var plan = await Rows(session, "EXPLAIN ANALYZE SELECT * FROM a RIGHT JOIN b ON a.id = b.id;");
+        var plan = await RowsAsync(session, "EXPLAIN ANALYZE SELECT * FROM a RIGHT JOIN b ON a.id = b.id;");
 
         // Assert
         var step = plan.Single(row => Equals(row[2], "JoinStep"));
@@ -254,15 +254,15 @@ public sealed class SqlRightJoinTests
         await using var engine = SqlDatabaseEngine.Create("right-system-domain", new());
         var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
-        await Exec(session, "CREATE DOMAIN positive AS INT CHECK(VALUE > 0); CREATE TABLE a (id positive NOT NULL); CREATE TABLE b (id positive NOT NULL); INSERT INTO b VALUES (2);");
+        await ExecAsync(session, "CREATE DOMAIN positive AS INT CHECK(VALUE > 0); CREATE TABLE a (id positive NOT NULL); CREATE TABLE b (id positive NOT NULL); INSERT INTO b VALUES (2);");
 
         // Act / Assert
-        Check(await Rows(session, "SELECT a.id, t.TABLE_NAME FROM a RIGHT JOIN INFORMATION_SCHEMA.TABLES t ON FALSE WHERE t.TABLE_NAME = 'a';"), [[null, "a"]]);
+        Check(await RowsAsync(session, "SELECT a.id, t.TABLE_NAME FROM a RIGHT JOIN INFORMATION_SCHEMA.TABLES t ON FALSE WHERE t.TABLE_NAME = 'a';"), [[null, "a"]]);
         session.LastStatementMetrics!.CatalogSnapshotCaptures.ShouldBe(1);
-        Check(await Rows(session, "SELECT id, a.id, b.id FROM a RIGHT JOIN b USING (id);"), [[2, null, 2]]);
-        await Exec(session, "CREATE VIEW domain_view AS SELECT id FROM a RIGHT JOIN b USING (id);");
+        Check(await RowsAsync(session, "SELECT id, a.id, b.id FROM a RIGHT JOIN b USING (id);"), [[2, null, 2]]);
+        await ExecAsync(session, "CREATE VIEW domain_view AS SELECT id FROM a RIGHT JOIN b USING (id);");
         database.Catalog.Views.Single(view => view.Name == "domain_view").Columns.Single().DomainName.ShouldBe("positive");
-        Check(await Rows(session, "SELECT id FROM domain_view;"), [[2]]);
+        Check(await RowsAsync(session, "SELECT id FROM domain_view;"), [[2]]);
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - RIGHT: hash refusal releases its reservation and leaves the session usable (#1525)")]
@@ -272,8 +272,8 @@ public sealed class SqlRightJoinTests
         await using var engine = SqlDatabaseEngine.Create("right-budget", new() { StatementMemoryBudget = 1024 });
         var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
-        await Exec(session, "CREATE TABLE a (id INT); CREATE TABLE b (id INT); INSERT INTO b VALUES (1);");
-        await Exec(session, "INSERT INTO a VALUES " + string.Join(',', Enumerable.Range(1, 100).Select(id => $"({id})")));
+        await ExecAsync(session, "CREATE TABLE a (id INT); CREATE TABLE b (id INT); INSERT INTO b VALUES (1);");
+        await ExecAsync(session, "INSERT INTO a VALUES " + string.Join(',', Enumerable.Range(1, 100).Select(id => $"({id})")));
 
         // Act
         var failure = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(
@@ -283,7 +283,7 @@ public sealed class SqlRightJoinTests
         failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS05067");
         session.LastStatementMetrics!.HashMemoryBytes.ShouldBe(0);
         session.LastStatementMetrics.PeakHashMemoryBytes.ShouldBeLessThanOrEqualTo(1024);
-        Check(await Rows(session, "SELECT COUNT(*) FROM a;"), [[100L]]);
+        Check(await RowsAsync(session, "SELECT COUNT(*) FROM a;"), [[100L]]);
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - RIGHT: long chains use an iterative physical stack (#1525)")]
@@ -293,11 +293,11 @@ public sealed class SqlRightJoinTests
         await using var engine = SqlDatabaseEngine.Create("right-long", new());
         var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
-        await Exec(session, "CREATE TABLE t (id INT); INSERT INTO t VALUES (1);");
+        await ExecAsync(session, "CREATE TABLE t (id INT); INSERT INTO t VALUES (1);");
         string from = "t a0 " + string.Join(' ', Enumerable.Range(1, 1024).Select(id => $"RIGHT JOIN t a{id} ON FALSE"));
 
         // Act
-        var rows = await Rows(session, "SELECT a0.id, a1024.id FROM " + from);
+        var rows = await RowsAsync(session, "SELECT a0.id, a1024.id FROM " + from);
 
         // Assert
         Check(rows, [[null, 1]]);
@@ -313,12 +313,12 @@ public sealed class SqlRightJoinTests
         await using var engine = SqlDatabaseEngine.Create("right-group-view", new());
         var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
-        await Exec(session, "CREATE TABLE a (id INT NOT NULL); CREATE TABLE b (id INT NOT NULL); INSERT INTO b VALUES (2);");
-        await Exec(session, "CREATE VIEW v AS " + body);
+        await ExecAsync(session, "CREATE TABLE a (id INT NOT NULL); CREATE TABLE b (id INT NOT NULL); INSERT INTO b VALUES (2);");
+        await ExecAsync(session, "CREATE VIEW v AS " + body);
 
         // Act
-        await Exec(session, "ALTER TABLE a ADD COLUMN extra INT; ALTER TABLE b ADD COLUMN tail INT;");
-        var rows = await Rows(session, "SELECT * FROM v;");
+        await ExecAsync(session, "ALTER TABLE a ADD COLUMN extra INT; ALTER TABLE b ADD COLUMN tail INT;");
+        var rows = await RowsAsync(session, "SELECT * FROM v;");
 
         // Assert
         Check(rows, [[2]]);
@@ -336,9 +336,9 @@ public sealed class SqlRightJoinTests
             {
                 var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
                 await using var session = await database.CreateSessionAsync(CancellationToken.None);
-                await Exec(session, "CREATE TABLE a (id INT NOT NULL, left_tag TEXT NOT NULL); CREATE TABLE b (id INT NOT NULL); INSERT INTO b VALUES (2);");
-                await Exec(session, "CREATE VIEW v AS SELECT * FROM (a RIGHT JOIN b USING(id)); CREATE VIEW w AS SELECT * FROM (a RIGHT JOIN b USING(id)) AS q;");
-                await Exec(session, "ALTER TABLE a ADD COLUMN extra INT; ALTER TABLE b ADD COLUMN tail INT;");
+                await ExecAsync(session, "CREATE TABLE a (id INT NOT NULL, left_tag TEXT NOT NULL); CREATE TABLE b (id INT NOT NULL); INSERT INTO b VALUES (2);");
+                await ExecAsync(session, "CREATE VIEW v AS SELECT * FROM (a RIGHT JOIN b USING(id)); CREATE VIEW w AS SELECT * FROM (a RIGHT JOIN b USING(id)) AS q;");
+                await ExecAsync(session, "ALTER TABLE a ADD COLUMN extra INT; ALTER TABLE b ADD COLUMN tail INT;");
             }
 
             // Act / Assert
@@ -348,14 +348,14 @@ public sealed class SqlRightJoinTests
             foreach (string view in new[] { "v", "w" })
             {
                 await using var result = (await reader.ExecuteAsync("SELECT * FROM " + view, cancellationToken: CancellationToken.None)).ShouldBeAssignableTo<DatabaseResultSet>();
-                Check(await Read(result), [[2, null]]);
+                Check(await ReadAsync(result), [[2, null]]);
                 result.Columns.Select(column => column.IsNullable).ShouldBe([false, true]);
             }
         }
         finally { if (Directory.Exists(root)) { Directory.Delete(root, true); } }
     }
 
-    private static async Task Exec(SqlDatabaseSession session, string sql)
+    private static async Task ExecAsync(SqlDatabaseSession session, string sql)
     {
         foreach (string statement in sql.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
@@ -363,13 +363,13 @@ public sealed class SqlRightJoinTests
         }
     }
 
-    private static async Task<List<object?[]>> Rows(SqlDatabaseSession session, string sql)
+    private static async Task<List<object?[]>> RowsAsync(SqlDatabaseSession session, string sql)
     {
         await using var result = (await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None)).ShouldBeAssignableTo<DatabaseResultSet>();
-        return await Read(result);
+        return await ReadAsync(result);
     }
 
-    private static async Task<List<object?[]>> Read(DatabaseResultSet result)
+    private static async Task<List<object?[]>> ReadAsync(DatabaseResultSet result)
     {
         var rows = new List<object?[]>();
         await foreach (var row in result.GetRowsAsync(CancellationToken.None))
