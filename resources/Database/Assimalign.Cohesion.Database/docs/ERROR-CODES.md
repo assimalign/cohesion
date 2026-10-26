@@ -328,8 +328,11 @@ and invariant exceptions and lower child-root typed failures retain their docume
 | CS06060 | SQL catalog metadata format/version is unsupported | 0A000 |
 | CD04102 | Catalog snapshot conflict | — |
 | CD04103 | Expected document version differs | — |
+| CD04104 | No explicit document transaction is open for COMMIT or ROLLBACK (#1725) | — |
+| CD04105 | OQL collection/index DDL inside an explicit transaction (#1725) | — |
 | CD05016 | Result byte/frame limit exceeded | — |
 | CD07001 | Session belongs to another database | — |
+| CD07002 | Documents server refuses text transaction control pending safe pooled reset (#1725 T1) | — |
 | CD09001 | Collection handle is stale | — |
 | CB01001 | Container is absent | — |
 | CB01002 | Blob is absent | — |

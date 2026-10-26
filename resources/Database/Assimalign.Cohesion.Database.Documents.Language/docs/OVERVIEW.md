@@ -2,7 +2,7 @@
 
 This package parses the Documents engine's executable SQL++ profile, retaining the OQL name, into typed statement and
 expression trees. It provides `OqlLanguageProfile`, stable `OqlClauses` names, `OqlQueryParser`,
-`OqlQueryStatement`,
+`OqlQueryStatement`, `OqlTransactionExpression`, `OqlTransactionCommand`, `OqlTransactionIsolation`,
 `OqlSelectExpression`, `OqlInsertExpression`, `OqlUpsertExpression`, `OqlUpdateExpression`, `OqlUpdateAssignment`, `OqlDeleteExpression`, `OqlMetaExpression`, `OqlObjectExpression`, `OqlCreateCollectionExpression`, `OqlDropCollectionExpression`,
 `OqlCreateIndexExpression`, `OqlDropIndexExpression`, and expression nodes
 for projection, filtering, grouping, aggregates, ordering, nested properties, and array access.
@@ -10,6 +10,11 @@ One immutable standard-function table declares META, five aggregates and 34 SQL+
 native parse-time arity checks and static result types used by native registrations. The standalone
 parser default reports CD00008 for unknown calls; engine requests defer additional named calls to
 the executing engine's function catalog.
+BEGIN/START, COMMIT and ROLLBACK execute on in-process sessions. Snapshot is the default;
+explicit SNAPSHOT and READ COMMITTED are supported. The wire server refuses these controls
+with CD07002 until transaction-status negotiation and safe pooled reset arrive in OQ-T2.
+OQL collection/index DDL is refused in an explicit transaction (CD04105). See DIALECT.md for
+exact spellings, fault recovery and the deferred savepoint forms.
 SELECT LIMIT/OFFSET accept signed integer literals or parameters in either order, with non-negative
 Int64 values and CD00007 for invalid counts. LIMIT and OFFSET are reserved field names; quoting
 or a preceding dot keeps them usable, and AS labels still accept them.

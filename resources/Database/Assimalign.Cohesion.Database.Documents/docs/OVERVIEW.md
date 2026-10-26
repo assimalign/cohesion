@@ -36,11 +36,17 @@ use the `DocumentCollection` methods. Collection operations exist only on the se
 transaction, or in an automatic statement transaction when none is active. Disposing a database,
 directly or through `session.Database`, closes it for every session; once the close ends the
 engine forgets it, and `OpenDatabaseAsync` opens it again with its documents, in memory as on
-disk (owner decision 33). Index definitions are changed with OQL on the session, using its
-active transaction or an automatic statement transaction; neither the database nor the session
+disk (owner decision 33). Index definitions are changed with autocommit OQL on the session;
+OQL collection/index DDL inside an explicit transaction is refused with CD04105. Neither the database nor the session
 has index-management members. A statement that fails inside an explicit transaction aborts the
 whole transaction: the session refuses further statements and BEGIN with `CD04101` until the
 caller rolls back, and a commit fails without committing.
+
+In-process OQL accepts BEGIN/START, COMMIT and ROLLBACK on the session's transaction, with
+Snapshot by default and optional SNAPSHOT or READ COMMITTED isolation. Text ROLLBACK recovers
+a faulted session. COMMIT/ROLLBACK without an open transaction gives CD04104; nested BEGIN gives
+CK04004 and faults the transaction. Wire text transaction control remains refused with CD07002
+until OQ-T2 supplies negotiated status and safe pooled reset. The language DIALECT lists spellings.
 
 OQL INSERT creates externally keyed documents from VALUES pairs or SELECT output names and
 reports the number inserted. META([alias]).id and .version read stored identity and version;
@@ -62,8 +68,8 @@ reuses query index seeks, filters the statement snapshot before writing, and ret
 collection and its index definitions. EXPLAIN DELETE describes the access without writing.
 
 OQL also creates and removes collections with `CREATE COLLECTION [IF NOT EXISTS] name` and
-`DROP COLLECTION [IF EXISTS] name`. They share the C# collection operations' transaction and
-ownership rules and return Success with affected count zero. `IF` remains usable as a name.
+`DROP COLLECTION [IF EXISTS] name`. They share the C# collection operations' ownership rules,
+run only in autocommit and return Success with affected count zero. `IF` remains usable as a name.
 
 A failed journal or data fsync takes the database offline: every later operation is refused
 with `DatabaseOfflineException` (`CD06102`) until `OpenDatabaseAsync` reopens it and recovery

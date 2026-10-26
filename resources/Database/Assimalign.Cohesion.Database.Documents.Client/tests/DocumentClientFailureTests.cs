@@ -72,11 +72,18 @@ public sealed class DocumentClientFailureTests
             await connection.PutAsync("items", "one", "{\"n\":2}"u8.ToArray(), cancellationToken: harness.Token);
 
             // Act / Assert
-            foreach (string statement in new[] { "MERGE INTO items", "BEGIN", "COMMIT", "ROLLBACK" })
+            foreach (var (statement, code, diagnostic) in new[]
+            {
+                ("MERGE INTO items", ProtocolErrorCode.ParseFailure, "CK00001"),
+                ("BEGIN", ProtocolErrorCode.ExecutionFailure, "CD07002"),
+                ("START WORK", ProtocolErrorCode.ExecutionFailure, "CD07002"),
+                ("COMMIT", ProtocolErrorCode.ExecutionFailure, "CD07002"),
+                ("ROLLBACK", ProtocolErrorCode.ExecutionFailure, "CD07002"),
+            })
             {
                 var error = await Should.ThrowAsync<DocumentClientException>(async () => await connection.QueryAsync(statement, cancellationToken: harness.Token));
-                error.Code.ShouldBe(ProtocolErrorCode.ParseFailure);
-                error.Diagnostics.ShouldContain(d => d.Code == "CK00001");
+                error.Code.ShouldBe(code);
+                error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(diagnostic);
                 error.Diagnostics.ShouldAllBe(d => d.Start.HasValue && d.End.HasValue && d.Line > 0);
                 connection.IsOpen.ShouldBeTrue();
             }

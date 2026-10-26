@@ -6,6 +6,15 @@ namespace Assimalign.Cohesion.Database.Documents.Language;
 /// </summary>
 public static class OqlClauses
 {
+    /// <summary>Begins an explicit transaction; START is a synonym.</summary>
+    public const string Begin = "BEGIN";
+
+    /// <summary>Commits the session's explicit transaction.</summary>
+    public const string Commit = "COMMIT";
+
+    /// <summary>Rolls back the session's explicit transaction.</summary>
+    public const string Rollback = "ROLLBACK";
+
     /// <summary>A <c>CREATE COLLECTION</c> statement.</summary>
     public const string CreateCollection = "CREATE COLLECTION";
 

@@ -57,9 +57,12 @@ internal static class OqlUnsupportedVocabulary
         // Enabled by OqlClauses.Delete; retained here for contextual keyword coverage.
         new("DELETE", "DELETE", OqlWordPosition.Clause),
         new("USE", "USE", OqlWordPosition.Clause),
-        new("BEGIN", "BEGIN", OqlWordPosition.Clause),
-        new("COMMIT", "COMMIT", OqlWordPosition.Clause),
-        new("ROLLBACK", "ROLLBACK", OqlWordPosition.Clause),
+        // Enabled transaction controls retain contextual keyword coverage.
+        new("BEGIN", OqlClauses.Begin, OqlWordPosition.Clause),
+        new("START", OqlClauses.Begin, OqlWordPosition.Statement),
+        new("COMMIT", OqlClauses.Commit, OqlWordPosition.Clause),
+        new("ROLLBACK", OqlClauses.Rollback, OqlWordPosition.Clause),
+        new("SAVEPOINT", "SAVEPOINT", OqlWordPosition.Statement),
         new("WITH", "WITH", OqlWordPosition.Clause),
         new("JOIN", "JOIN", OqlWordPosition.Clause),
         new("NEST", "NEST", OqlWordPosition.Clause),

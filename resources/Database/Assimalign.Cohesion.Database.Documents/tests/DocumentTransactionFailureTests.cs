@@ -24,8 +24,9 @@ namespace Assimalign.Cohesion.Database.Documents.Tests;
 /// the transaction wrote survives. A started rollback always ends the transaction (#1226): a lost
 /// abort record changes nothing, and an undo the journal rejects is deferred with the writer lock
 /// held until the version-purge pass completes it, even against a late operation of the ended
-/// transaction, and is scrubbed at the next open when it still fails at close. Documents has no
-/// wire server or client, so every case runs in process.
+/// transaction, and is scrubbed at the next open when it still fails at close. These
+/// API end-state failures run in process; DocumentTextTransactionWireTests covers the interim
+/// server refusal of text transaction control over InMemory and TCP.
 /// </summary>
 public sealed class DocumentTransactionFailureTests
 {
