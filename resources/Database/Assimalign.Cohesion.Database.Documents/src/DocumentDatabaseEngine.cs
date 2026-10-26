@@ -212,7 +212,7 @@ public sealed class DocumentDatabaseEngine : DatabaseEngine
     /// <exception cref="ArgumentNullException"><paramref name="name"/> or <paramref name="options"/> is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="name"/> is empty or white space.</exception>
     /// <exception cref="ArgumentOutOfRangeException">
-    /// A worker interval or batch size is not positive, the grouped-commit window is not positive or
+    /// The statement memory budget, a worker interval or batch size is not positive; the grouped-commit window is not positive or
     /// is longer than <see cref="Assimalign.Cohesion.Database.Storage.Storage.MaximumGroupCommitWindow"/>,
     /// the buffer pool capacity is not a whole number of 8 KiB pages of at least 1 MiB, the
     /// checkpoint journal size is negative, the worker failure window is not positive or is longer
@@ -266,6 +266,11 @@ public sealed class DocumentDatabaseEngine : DatabaseEngine
         ArgumentNullException.ThrowIfNull(options);
         string engine = DatabaseEngineOptionChecks.Describe(ModelName, name);
 
+        if (options.StatementMemoryBudget <= 0)
+        {
+            throw DatabaseEngineOptionChecks.Refuse(engine, nameof(options.StatementMemoryBudget),
+                options.StatementMemoryBudget, ErrorMessages.OptionPositiveRequirement);
+        }
         DatabaseEngineOptionChecks.ThrowIfNotPositive(options.CheckpointInterval, engine, nameof(options.CheckpointInterval));
         DatabaseEngineOptionChecks.ThrowIfNotPositive(options.PageWriteBackInterval, engine, nameof(options.PageWriteBackInterval));
         DatabaseEngineOptionChecks.ThrowIfNotPositive(options.MaintenanceInterval, engine, nameof(options.MaintenanceInterval));

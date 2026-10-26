@@ -32,6 +32,7 @@ public class OqlLanguageProfileTests
     [InlineData(OqlClauses.Update)]
     [InlineData(OqlClauses.Unset)]
     [InlineData(OqlClauses.Delete)]
+    [InlineData(OqlClauses.Returning)]
     [InlineData(OqlClauses.Values)]
     [InlineData(OqlClauses.Select)]
     [InlineData(OqlClauses.Distinct)]
@@ -70,7 +71,6 @@ public class OqlLanguageProfileTests
     }
 
     [Theory]
-    [InlineData("RETURNING")]
     [InlineData(OqlClauses.Subquery)]
     public void Instance_UnimplementedClause_IsNotSupported(string clause)
     {

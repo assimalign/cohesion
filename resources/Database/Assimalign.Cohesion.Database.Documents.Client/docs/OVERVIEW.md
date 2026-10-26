@@ -43,7 +43,11 @@ UNNEST and quantified predicates use the same query exchange. A star with UNNEST
 synthetic whole-document objects; a MISSING LEFT binding is omitted while actual null elements
 remain null. Grouped counts over expanded rows retain Int64 values and metadata.
 
-OQL INSERT, UPSERT, UPDATE and DELETE return their affected counts through ExecuteAsync. UPDATE accepts
+OQL INSERT, UPSERT, UPDATE and DELETE return their affected counts through ExecuteAsync.
+With RETURNING, QueryAsync also exposes owned named rows or RAW/VALUE images alongside
+AffectedCount. DELETE returns pre-images; the other writes return stored post-images. The existing
+completion carries both counts without negotiation; projection/serialization/budget failures
+roll back writes before any result rows arrive. UPDATE accepts
 SET and UNSET paths and reports the matched count, with a new version for every match. DELETE
 retains the collection and index definitions; EXPLAIN UPDATE/DELETE includes the chosen scan or
 index seek. UPSERT inserts or wholly replaces using INSERT's KEY/VALUE grammar and reports

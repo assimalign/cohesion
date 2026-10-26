@@ -51,7 +51,6 @@ public sealed class OqlDmlParserTests
     [InlineData("UPDATE items SET = 1", "CD00002", "=", "identifier")]
     [InlineData("UPDATE items SET a 1", "CD00002", "1", "=")]
     [InlineData("UPDATE items SET a = 1 garbage", "CD00002", "garbage", "Unexpected")]
-    [InlineData("UPDATE items SET a = 1 RETURNING a", "CK00001", "RETURNING", "RETURNING")]
     [InlineData("UPDATE items SET a = 1 FOR t IN tags END", "CK00001", "FOR", "FOR")]
     [InlineData("UPDATE items USE KEYS 'a' SET a = 1", "CK00001", "USE", "USE")]
     [InlineData("UPDATE items SET a = 1 LIMIT 1", "CK00001", "LIMIT", "LIMIT")]
@@ -106,7 +105,6 @@ public sealed class OqlDmlParserTests
     [InlineData("DELETE FROM items d garbage", "CD00002", "garbage")]
     [InlineData("DELETE FROM items WHERE amount > 3 garbage", "CD00002", "garbage")]
     [InlineData("DELETE FROM items; garbage", "CD00002", "garbage")]
-    [InlineData("DELETE FROM items WHERE amount > 3 RETURNING amount", "CK00001", "RETURNING")]
     [InlineData("DELETE FROM items WHERE amount > 3 LIMIT 1", "CK00001", "LIMIT", "DELETE LIMIT")]
     [InlineData("DELETE FROM items LIMIT 1", "CK00001", "LIMIT", "DELETE LIMIT")]
     [InlineData("DELETE FROM items WHERE amount > 3 OFFSET 1", "CK00001", "OFFSET", "DELETE OFFSET")]
@@ -194,9 +192,6 @@ public sealed class OqlDmlParserTests
     [InlineData("INSERT INTO other.items (KEY, VALUE) VALUES ('e', $doc)", "CD00002", ".", "KEY")]
     [InlineData("INSERT INTO items (KEY, VALUE) VALUES ('e', $doc) garbage", "CD00002", "garbage", "Unexpected")]
     [InlineData("INSERT INTO items (KEY, VALUE, OPTIONS) VALUES ('e', $doc, $o)", "CK00001", "OPTIONS", "OPTIONS")]
-    [InlineData("INSERT INTO items (KEY, VALUE) VALUES ('e', $doc) RETURNING k", "CK00001", "RETURNING", "RETURNING")]
-    [InlineData("INSERT INTO archive (KEY k) SELECT META(d).id AS k FROM items d WHERE d.category = 'a' RETURNING k", "CK00001", "RETURNING", "RETURNING")]
-    [InlineData("INSERT INTO archive (KEY k) SELECT META(d).id AS k FROM items d WHERE d.details = {'score':1} RETURNING k", "CK00001", "RETURNING", "RETURNING")]
     [InlineData("INSERT INTO archive (KEY k, OPTIONS o) SELECT META(d).id AS k FROM items d", "CK00001", "OPTIONS", "OPTIONS")]
     [InlineData("INSERT INTO archive (KEY k, OPTIONS {'expiration': 10}) SELECT META(d).id AS k FROM items d", "CK00001", "OPTIONS", "OPTIONS")]
     [InlineData("INSERT INTO archive (KEY k, VALUE v, OPTIONS o) SELECT META(d).id AS k, d AS v FROM items d", "CK00001", "OPTIONS", "OPTIONS")]
@@ -255,9 +250,6 @@ public sealed class OqlDmlParserTests
     [InlineData("UPSERT INTO other.items (KEY, VALUE) VALUES ('e', $doc)", "CD00002", ".", "KEY")]
     [InlineData("UPSERT INTO items (KEY, VALUE) VALUES ('e', $doc) garbage", "CD00002", "garbage", "Unexpected")]
     [InlineData("UPSERT INTO items (KEY, VALUE, OPTIONS) VALUES ('e', $doc, $o)", "CK00001", "OPTIONS", "OPTIONS")]
-    [InlineData("UPSERT INTO items (KEY, VALUE) VALUES ('e', $doc) RETURNING k", "CK00001", "RETURNING", "RETURNING")]
-    [InlineData("UPSERT INTO archive (KEY k) SELECT META(d).id AS k FROM items d WHERE d.category = 'a' RETURNING k", "CK00001", "RETURNING", "RETURNING")]
-    [InlineData("UPSERT INTO archive (KEY k) SELECT META(d).id AS k FROM items d WHERE d.details = {'score':1} RETURNING k", "CK00001", "RETURNING", "RETURNING")]
     [InlineData("UPSERT INTO archive (KEY k, OPTIONS o) SELECT META(d).id AS k FROM items d", "CK00001", "OPTIONS", "OPTIONS")]
     [InlineData("UPSERT INTO archive (KEY k, OPTIONS {'expiration': 10}) SELECT META(d).id AS k FROM items d", "CK00001", "OPTIONS", "OPTIONS")]
     [InlineData("UPSERT INTO archive (KEY k, VALUE v, OPTIONS o) SELECT META(d).id AS k, d AS v FROM items d", "CK00001", "OPTIONS", "OPTIONS")]
@@ -311,7 +303,7 @@ public sealed class OqlDmlParserTests
         new OqlQueryParser().Parse(query).Diagnostics.ShouldBeEmpty();
     }
 
-    [Theory(DisplayName = "Cohesion Test [Documents.Language] - RETURNING: actual trailing clauses remain unsupported after ordinary names")]
+    [Theory(DisplayName = "Cohesion Test [Documents.Language] - RETURNING: trailing clauses preserve contextual names")]
     [InlineData("DELETE FROM returning RETURNING *")]
     [InlineData("DELETE FROM items returning RETURNING *")]
     [InlineData("DELETE FROM items WHERE n = 1 RETURNING returning")]
@@ -322,13 +314,18 @@ public sealed class OqlDmlParserTests
     public void Parse_TrailingReturning_ShouldLocateTheClause(string query)
     {
         // Arrange / Act
-        var statement = new OqlQueryParser().Parse(query);
+        var statement = new OqlQueryParser().Parse(query).ShouldBeOfType<OqlQueryStatement>();
 
         // Assert
-        var diagnostic = statement.Diagnostics.ShouldHaveSingleItem();
-        diagnostic.Code.ShouldBe("CK00001");
-        diagnostic.Start.ShouldBe(query.LastIndexOf("RETURNING", StringComparison.Ordinal));
-        diagnostic.End.ShouldBe(diagnostic.Start + "RETURNING".Length);
-        diagnostic.Message.ShouldNotBeNull().ShouldContain("RETURNING", Case.Sensitive);
+        statement.Diagnostics.ShouldBeEmpty();
+        var returning = statement.OqlExpression switch
+        {
+            OqlDeleteExpression delete => delete.Returning,
+            OqlInsertExpression insert => insert.Returning,
+            _ => null,
+        };
+        var location = returning.ShouldNotBeNull().Location.ShouldNotBeNull();
+        location.Start.ShouldBe(query.LastIndexOf("RETURNING", StringComparison.Ordinal));
+        location.End.ShouldBe(query.Length);
     }
 }

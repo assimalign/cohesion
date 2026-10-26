@@ -191,6 +191,14 @@ SQLSTATE meanings remain those in [the SQL dialect](../../Assimalign.Cohesion.Da
 
 ## Documents migration
 
+OQL RETURNING (#1727) preserves existing syntax, binding and value identities for malformed
+projections, duplicate names, missing parameters and scalar failures. Unsupported subqueries
+and ELEMENT calls retain CK00001. CD01026 rejects empty output names in direct ASTs, CD05018
+identifies retained-result budget exhaustion, and CD05019 identifies serialized result depth
+including the named wrapper. Existing CD05016 covers frame-size preflight. A failure
+rolls back statement writes before results become visible. The existing two-count Complete
+payload accepts rows plus a matching affected count without capability negotiation.
+
 | Previous code | Code | Category |
 |---|---|---|
 | OQL0001 | CD00001 | Language/syntax |
@@ -211,6 +219,7 @@ SQLSTATE meanings remain those in [the SQL dialect](../../Assimalign.Cohesion.Da
 | COHDOC017 | CD01017 | Binding/names |
 | COHDOC023 | CD01023 | Binding/names |
 | COHDOC025 | CD01025 | Binding/names |
+| New (#1727) | CD01026 | Binding/names — empty RETURNING output name in a directly constructed AST |
 | COHDOC006 | CD02006 | Values/types |
 | COHDOC007 | CD02007 | Values/types |
 | COHDOC008 | CD02008 | Values/types |
@@ -351,6 +360,8 @@ and invariant exceptions and lower child-root typed failures retain their docume
 | CD04104 | No explicit document transaction is open for COMMIT or ROLLBACK (#1725) | — |
 | CD04105 | OQL collection/index DDL inside an explicit transaction (#1725) | — |
 | CD05016 | Result byte/frame limit exceeded | — |
+| CD05018 | RETURNING retained result exceeds the statement memory budget (#1727) | — |
+| CD05019 | Serialized RETURNING value exceeds 256 levels, including the named projection wrapper (#1727) | — |
 | CD07001 | Session belongs to another database | — |
 | CD07002 | Text transaction control requires the negotiated transaction-status capability (#1725) | — |
 | CD09001 | Collection handle is stale | — |

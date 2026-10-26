@@ -208,6 +208,7 @@ public sealed class DocumentEngineDeclarationTests : IDisposable
             WorkerFailureMinimumPasses = 5,
             JournalSizeLimit = 12 * 1024 * 1024,
             BufferPoolCapacity = 2 * 1024 * 1024,
+            StatementMemoryBudget = 3 * 1024 * 1024,
             PageWriteBackInterval = TimeSpan.FromSeconds(3),
             PageWriteBackBatchSize = 33,
             MaintenanceInterval = TimeSpan.FromMinutes(4),
@@ -230,6 +231,7 @@ public sealed class DocumentEngineDeclarationTests : IDisposable
         copy.WorkerFailureMinimumPasses.ShouldBe(options.WorkerFailureMinimumPasses);
         copy.JournalSizeLimit.ShouldBe(options.JournalSizeLimit);
         copy.BufferPoolCapacity.ShouldBe(options.BufferPoolCapacity);
+        copy.StatementMemoryBudget.ShouldBe(options.StatementMemoryBudget);
         copy.PageWriteBackInterval.ShouldBe(options.PageWriteBackInterval);
         copy.PageWriteBackBatchSize.ShouldBe(options.PageWriteBackBatchSize);
         copy.MaintenanceInterval.ShouldBe(options.MaintenanceInterval);
@@ -241,10 +243,10 @@ public sealed class DocumentEngineDeclarationTests : IDisposable
 
         // Every property, the internal ones included: an option added to either set fails here
         // until Snapshot copies it and this test checks it.
-        typeof(DocumentDatabaseEngineOptions).GetProperties().Length.ShouldBe(12);
+        typeof(DocumentDatabaseEngineOptions).GetProperties().Length.ShouldBe(13);
         typeof(DocumentDatabaseEngineOptions)
             .GetProperties(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic)
-            .Length.ShouldBe(15);
+            .Length.ShouldBe(16);
     }
 
     [Theory(DisplayName = "Cohesion Test [Database.Documents] - Declarations: a name that breaks the database-name rule is refused at the declaration")]
