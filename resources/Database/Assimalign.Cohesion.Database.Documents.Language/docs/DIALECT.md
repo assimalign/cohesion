@@ -102,7 +102,9 @@ ModifiedDocument; the same clone was inspected for this post-image precedent.
 [Couchbase range transformations](https://docs.couchbase.com/server/current/n1ql/n1ql-language-reference/collectionops.html#range-transformations).
 The collection evaluates outside the new variable's scope; mapping and WHEN evaluate inside it.
 Nested variables shadow outer variables and fields and restore the enclosing scope at END.
-Parenthesized mappings are accepted. The expressions compose with all current scalar contexts,
+Parenthesized mappings are accepted, including mappings followed by CASE, nested ARRAY/FIRST or
+ANY/SOME/EVERY expressions without extra parentheses. Mapping and WHEN may nest these forms.
+The expressions compose with all current scalar contexts,
 including registered arguments, grouped projections, aggregate arguments, UNNEST and RETURNING.
 Closed mappings using only local paths also execute in INSERT/UPSERT VALUES. Calls in VALUES
 retain their existing refusal. Aggregates inside a comprehension retain the quantifier
