@@ -428,14 +428,22 @@ internal sealed partial class DocumentPlanner
         return builder.Length == 0 ? null : builder.ToString();
     }
 
-    internal static bool IsConstant(OqlExpression expression) => expression switch
+    internal static bool IsConstant(OqlExpression expression) => IsConstant(expression, null);
+
+    private static bool IsConstant(OqlExpression expression, DocumentBindingScope? bound) => expression switch
     {
-        OqlInExpression or OqlBetweenExpression or OqlLikeExpression or OqlCaseExpression => PredicateChildren(expression).All(IsConstant),
+        OqlComprehensionExpression comprehension => IsConstant(comprehension.Collection, bound) &&
+            IsConstant(comprehension.Projection, new DocumentBindingScope(comprehension.Variable, bound)) &&
+            (comprehension.Predicate is null || IsConstant(comprehension.Predicate, new DocumentBindingScope(comprehension.Variable, bound))),
+        OqlQuantifiedExpression quantified => IsConstant(quantified.Collection, bound) &&
+            IsConstant(quantified.Predicate, new DocumentBindingScope(quantified.Variable, bound)),
+        OqlPathExpression { Segments.Count: > 0 } path => DocumentBindingScope.Resolve(bound, path.Segments[0].Name, out _) is not null,
+        OqlInExpression or OqlBetweenExpression or OqlLikeExpression or OqlCaseExpression => PredicateChildren(expression).All(child => IsConstant(child, bound)),
         OqlLiteralExpression or OqlMissingExpression or OqlParameterExpression => true,
-        OqlArrayExpression array => array.Elements.All(IsConstant),
-        OqlObjectExpression obj => obj.Members.All(member => IsConstant(member.Value)),
-        OqlUnaryExpression unary => IsConstant(unary.Operand),
-        OqlBinaryExpression binary => IsConstant(binary.Left) && IsConstant(binary.Right),
+        OqlArrayExpression array => array.Elements.All(child => IsConstant(child, bound)),
+        OqlObjectExpression obj => obj.Members.All(member => IsConstant(member.Value, bound)),
+        OqlUnaryExpression unary => IsConstant(unary.Operand, bound),
+        OqlBinaryExpression binary => IsConstant(binary.Left, bound) && IsConstant(binary.Right, bound),
         _ => false,
     };
 
@@ -444,7 +452,7 @@ internal sealed partial class DocumentPlanner
         functions ??= DocumentFunctionCatalog.Standard;
         return expression switch
         {
-            OqlQuantifiedExpression or OqlInExpression or OqlBetweenExpression or OqlLikeExpression or OqlCaseExpression => PredicateChildren(expression).Any(child => ContainsAggregate(child, functions)),
+            OqlComprehensionExpression or OqlQuantifiedExpression or OqlInExpression or OqlBetweenExpression or OqlLikeExpression or OqlCaseExpression => PredicateChildren(expression).Any(child => ContainsAggregate(child, functions)),
             OqlArrayExpression array => array.Elements.Any(child => ContainsAggregate(child, functions)),
             OqlObjectExpression obj => obj.Members.Any(member => ContainsAggregate(member.Value, functions)),
             OqlCallExpression call => functions.IsAggregate(call.Name) || call.Arguments.Any(child => ContainsAggregate(child, functions)),
@@ -459,6 +467,11 @@ internal sealed partial class DocumentPlanner
         functions ??= DocumentFunctionCatalog.Standard;
         switch (expression)
         {
+            case OqlComprehensionExpression comprehension:
+                if (comprehension.Variable.Length == 0)
+                { throw new DocumentPlanningException("CD01027", ErrorMessages.ComprehensionBindingInvalid, comprehension.Location); }
+                foreach (var child in PredicateChildren(comprehension)) { Validate(child, false, functions: functions); }
+                return;
             case OqlQuantifiedExpression quantified:
                 Validate(quantified.Collection, false, functions: functions);
                 Validate(quantified.Predicate, false, functions: functions);
@@ -524,10 +537,18 @@ internal sealed partial class DocumentPlanner
         // PostgreSQL parse_agg.c:1439-1452 adjusts grouping expressions to the current
         // scope before matching. An inner t must never stand in for an outer field t.
         if (query.GroupBy.Any(key => EquivalentExpression(key, expression, query.Alias, variables, scopes, rightScope: bound))) { return; }
+        if (expression is OqlComprehensionExpression comprehension)
+        {
+            ValidateGrouped(comprehension.Collection, query, variables, scopes, functions, bound);
+            var inner = scopes.Enter(comprehension, comprehension.Variable, bound);
+            ValidateGrouped(comprehension.Projection, query, variables, scopes, functions, inner);
+            if (comprehension.Predicate is not null) { ValidateGrouped(comprehension.Predicate, query, variables, scopes, functions, inner); }
+            return;
+        }
         if (expression is OqlQuantifiedExpression quantified)
         {
             ValidateGrouped(quantified.Collection, query, variables, scopes, functions, bound);
-            ValidateGrouped(quantified.Predicate, query, variables, scopes, functions, scopes.Enter(quantified, bound));
+            ValidateGrouped(quantified.Predicate, query, variables, scopes, functions, scopes.Enter(quantified, quantified.Variable, bound));
             return;
         }
         if (expression is OqlInExpression or OqlBetweenExpression or OqlLikeExpression or OqlCaseExpression)
@@ -571,10 +592,17 @@ internal sealed partial class DocumentPlanner
     private static bool EquivalentExpression(OqlExpression left, OqlExpression right, string? alias, IReadOnlySet<string>? variables,
         DocumentBindingScopes scopes, DocumentBindingScope? leftScope = null, DocumentBindingScope? rightScope = null, int localDepth = 0) => (left, right) switch
     {
+        (OqlComprehensionExpression a, OqlComprehensionExpression b) => a.IsFirst == b.IsFirst && a.Variable == b.Variable &&
+            (a.Predicate is null) == (b.Predicate is null) &&
+            EquivalentExpression(a.Collection, b.Collection, alias, variables, scopes, leftScope, rightScope, localDepth) &&
+            EquivalentExpression(a.Projection, b.Projection, alias, variables, scopes,
+                scopes.Enter(a, a.Variable, leftScope), scopes.Enter(b, b.Variable, rightScope), localDepth + 1) &&
+            (a.Predicate is null || EquivalentExpression(a.Predicate, b.Predicate!, alias, variables, scopes,
+                scopes.Enter(a, a.Variable, leftScope), scopes.Enter(b, b.Variable, rightScope), localDepth + 1)),
         (OqlQuantifiedExpression a, OqlQuantifiedExpression b) => a.IsEvery == b.IsEvery && a.Variable == b.Variable &&
             EquivalentExpression(a.Collection, b.Collection, alias, variables, scopes, leftScope, rightScope, localDepth) &&
             EquivalentExpression(a.Predicate, b.Predicate, alias, variables, scopes,
-                scopes.Enter(a, leftScope), scopes.Enter(b, rightScope), localDepth + 1),
+                scopes.Enter(a, a.Variable, leftScope), scopes.Enter(b, b.Variable, rightScope), localDepth + 1),
         (OqlInExpression a, OqlInExpression b) => (a.Array is null) == (b.Array is null) && a.Negated == b.Negated && EquivalentChildren(a, b, alias, variables, scopes, leftScope, rightScope, localDepth),
         (OqlBetweenExpression a, OqlBetweenExpression b) => a.Negated == b.Negated && EquivalentChildren(a, b, alias, variables, scopes, leftScope, rightScope, localDepth),
         (OqlLikeExpression a, OqlLikeExpression b) => a.Negated == b.Negated && EquivalentChildren(a, b, alias, variables, scopes, leftScope, rightScope, localDepth),

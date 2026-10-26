@@ -39,6 +39,8 @@ public class OqlLanguageProfileTests
     [InlineData(OqlClauses.SelectValue)]
     [InlineData(OqlClauses.ObjectConstructor)]
     [InlineData(OqlClauses.ArrayConstructor)]
+    [InlineData(OqlClauses.ArrayComprehension)]
+    [InlineData(OqlClauses.FirstComprehension)]
     [InlineData(OqlClauses.Explain)]
     [InlineData(OqlClauses.From)]
     [InlineData(OqlClauses.Unnest)]

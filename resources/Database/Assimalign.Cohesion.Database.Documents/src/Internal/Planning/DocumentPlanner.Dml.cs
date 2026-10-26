@@ -181,6 +181,12 @@ internal sealed partial class DocumentPlanner
     {
         switch (expression)
         {
+            case OqlComprehensionExpression comprehension:
+                ValidateMetadata(comprehension.Collection, alias, storedSource);
+                ValidateMetadata(comprehension.Projection, comprehension.Variable == alias ? null : alias, storedSource);
+                if (comprehension.Predicate is not null)
+                { ValidateMetadata(comprehension.Predicate, comprehension.Variable == alias ? null : alias, storedSource); }
+                break;
             case OqlQuantifiedExpression quantified:
                 ValidateMetadata(quantified.Collection, alias, storedSource);
                 ValidateMetadata(quantified.Predicate, quantified.Variable == alias ? null : alias, storedSource);

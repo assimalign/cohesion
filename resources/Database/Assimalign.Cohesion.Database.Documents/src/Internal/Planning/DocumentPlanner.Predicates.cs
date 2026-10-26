@@ -10,6 +10,11 @@ internal sealed partial class DocumentPlanner
     {
         switch (expression)
         {
+            case OqlComprehensionExpression comprehension:
+                yield return comprehension.Collection;
+                yield return comprehension.Projection;
+                if (comprehension.Predicate is not null) { yield return comprehension.Predicate; }
+                break;
             case OqlQuantifiedExpression quantified:
                 yield return quantified.Collection;
                 yield return quantified.Predicate;

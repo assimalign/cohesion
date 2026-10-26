@@ -194,6 +194,12 @@ SQLSTATE meanings remain those in [the SQL dialect](../../Assimalign.Cohesion.Da
 
 ## Documents migration
 
+OQL ARRAY/FIRST comprehensions (#1728) reuse CD00002/CD00005 for malformed/deep syntax,
+CD01005 for missing parameters, CD02006/CD02007/CD02008 for scalar failures and CD05001 for
+invalid grouping, aggregate or metadata contexts. CD01027 identifies an empty variable in a
+direct AST. Existing constructor depth and surrounding retained-result budgets also apply;
+no disk or wire format changes.
+
 OQL RETURNING (#1727) preserves existing syntax, binding and value identities for malformed
 projections, duplicate names, missing parameters and scalar failures. Unsupported subqueries
 and ELEMENT calls retain CK00001. CD01026 rejects empty output names in direct ASTs, CD05018
@@ -223,6 +229,7 @@ payload accepts rows plus a matching affected count without capability negotiati
 | COHDOC023 | CD01023 | Binding/names |
 | COHDOC025 | CD01025 | Binding/names |
 | New (#1727) | CD01026 | Binding/names — empty RETURNING output name in a directly constructed AST |
+| New (#1728) | CD01027 | Binding/names — empty comprehension variable in a directly constructed AST |
 | COHDOC006 | CD02006 | Values/types |
 | COHDOC007 | CD02007 | Values/types |
 | COHDOC008 | CD02008 | Values/types |

@@ -62,6 +62,8 @@ Lexical recognition preserves the established vocabulary so rejected constructs 
 | `SELECT VALUE` | Yes | One bare expression; RAW is a synonym |
 | `OBJECT CONSTRUCTOR` | Yes | Named members in braces; last non-MISSING member wins |
 | `ARRAY CONSTRUCTOR` | Yes | Expressions in brackets; MISSING elements become NULL |
+| `ARRAY ... FOR` | Yes | One IN binding, optional WHEN; ordered mapped array omits MISSING |
+| `FIRST ... FOR` | Yes | First qualifying mapping, or MISSING |
 | `EXPLAIN` | Yes | SELECT, INSERT, UPSERT, UPDATE or DELETE plan description without reading document data or writing |
 | `INSERT` | Yes | Explicit KEY/VALUE pairs, or KEY and optional VALUE bindings to SELECT output names |
 | `UPSERT` | Yes | The same KEY/VALUE grammar; inserts absent keys and wholly replaces existing documents |
@@ -161,8 +163,7 @@ applies only within a SELECT list; reserved unsupported FROM and INSERT aliases 
 COUNT(DISTINCT x) remains one CK00001 naming COUNT(DISTINCT). Function-position names in the
 recognized-unsupported table receive that same single refusal for DISTINCT/ALL:
 ARRAY_AGG(DISTINCT x) and ARRAY_AGG(ALL x) name ARRAY_AGG(DISTINCT) and ARRAY_AGG(ALL).
-ARRAY comprehensions, computed
-member names and path access on constructor results remain deferred.
+Computed member names and path access on constructor results remain deferred.
 Member colons remain delimiters even without whitespace: `{a:DISTINCT}` receives the positional
 capability refusal, while `:distinct` in an operand keeps the parameter-form syntax diagnostic.
 
@@ -255,8 +256,9 @@ a name:
   only immediately before `(`. Elsewhere these spellings are ordinary identifiers.
 - **Quantifiers**: `EVERY`, `ANY` or `SOME` followed by `name IN` opens a supported predicate.
   The scan skips the binding IN and still scans the collection and SATISFIES expression for
-  unsupported constructs. SOME maps to the ANY capability. ARRAY comprehensions and ANY AND
-  EVERY are each one deferred construct through their matching END, including nested CASE.
+  unsupported constructs. SOME maps to the ANY capability. ARRAY/FIRST open supported
+  comprehension scopes; their binding FOR is exempt while inner expressions remain scanned.
+  ANY AND EVERY is one deferred construct through its matching END, including nested CASE.
   ODMG's `FOR ALL name IN` and `EXISTS name IN` retain their single refusal. Non-binding ANY
   and SOME uses remain unsupported. EVERY and SATISFIES remain contextual names elsewhere.
 
@@ -289,8 +291,9 @@ Membership tests assert these lists without freezing arrays that later T1 items 
 rejected only in call position; a future positional SELECT ELEMENT needs no reservation.
 `STRUCT`, `LIST`, `BAG` and `TYPEOF` lose their ODMG constructor/type meaning and are likewise
 rejected only as calls. All eight freed names can be projected as unquoted fields.
-`FIRST`, `LAST` and `UNIQUE` retain SQL++ reservations and report CK00001 wherever a
-reserved unsupported word does; UNIQUE is executable only directly after CREATE in CREATE UNIQUE INDEX.
+`FIRST`, `LAST` and `UNIQUE` retain SQL++ reservations. FIRST executes as a comprehension;
+its retired function spelling remains CK00001. LAST remains unsupported; UNIQUE executes only
+directly after CREATE in CREATE UNIQUE INDEX.
 `UNDEFINED` stays reserved and rejected, never a MISSING synonym. `NIL` remains a NULL synonym.
 SET and UNSET are reserved for UPDATE assignments and removals. Only SET immediately after
 UPDATE's destination and optional alias is exempt from the unsupported-word scan; SET calls
@@ -370,7 +373,7 @@ one require an explicit alias. An inferred duplicate spans the final path-name t
 bracket-string paths and parenthesized paths. UNNEST, INNER, LEFT, OUTER, EVERY and SATISFIES are contextual,
 preserving existing fields and AS-less aliases named every or satisfies. END was already
 reserved. ANY and SOME retain their existing reservations. UNNEST in UPDATE/DELETE, FLATTEN calls,
-JOIN, NEST, WITHIN, ANY AND EVERY and ARRAY/FIRST comprehensions remain CK00001.
+JOIN, NEST, WITHIN and ANY AND EVERY remain CK00001.
 UPDATE/DELETE reject UNNEST only where their grammar expects a clause; a field named unnest
 in SATISFIES remains an expression. MERGE INTO in a CASE result under SATISFIES reports the
 single MERGE construct before its internal mutation tokens are scanned.
@@ -397,6 +400,29 @@ diverging from [Couchbase coll_in.go:57-71](https://github.com/couchbase/query/b
 Aggregates are forbidden inside UNNEST operands and quantified expressions. META accepts
 only the stored FROM binding; META on an inner variable is an error even if it shadows FROM.
 
+### ARRAY and FIRST comprehensions (#1728)
+
+OqlComprehensionExpression is a sealed expression leaf retaining Variable, Collection,
+Projection, optional Predicate and IsFirst. The same expression shape is available to future
+index-key consumers; array index DDL itself remains deferred. Comprehensions are primary
+expressions, including parenthesized mappings, nested mappings, registered function arguments,
+UNNEST, grouping, predicates and RETURNING. The collection evaluates in the enclosing scope;
+the mapped expression and WHEN introduce one binding which may shadow any enclosing variable.
+Bindings never escape END. Malformed syntax uses CD00002 and nesting shares CD00005's limit.
+Legacy ARRAY()/FIRST() calls, WITHIN, position variables and multiple bindings remain CK00001.
+An empty direct-AST binding gives CD01027. OBJECT transformation remains outside this subset.
+
+ARRAY preserves input order, filters using SQL++ Truth, omits mapped MISSING and returns []
+for no retained mappings. FIRST returns the first qualifying mapping, including NULL or MISSING,
+without visiting later elements; with no qualifying element it returns MISSING. Both propagate
+MISSING input, and return NULL for NULL or non-array input. The
+[dialect](DIALECT.md#array-and-first-comprehensions-1728) records the reference and defaults.
+All child expressions participate in parameter/numeric, function, aggregate and metadata
+validation even for empty input. As with quantifiers, aggregates inside a comprehension are
+refused; a comprehension may be an aggregate argument. Closed comprehensions and quantified
+predicates are constant for VALUES/constructor validation when all paths bind local variables;
+registered calls remain nonconstant. No rendering, wire or storage contract changes.
+
 ## Grammar, statement, and expression trees
 
 ```text
@@ -409,6 +435,7 @@ count        := ['+' | '-'] integer-literal | parameter
 from-clause  := FROM collection [AS? identifier] unnest*
 unnest       := [INNER | LEFT [OUTER]] UNNEST expression [AS? identifier]
 quantified-expression := (ANY | SOME | EVERY) identifier IN expression SATISFIES expression END
+comprehension := (ARRAY | FIRST) expression FOR identifier IN expression [WHEN expression] END
 select-kind  := projection (',' projection)* | (VALUE | RAW) expression
 insert       := INSERT INTO collection [AS identifier] write-input
 upsert       := UPSERT INTO collection [AS identifier] write-input
@@ -673,7 +700,8 @@ respectively. The [dialect page](DIALECT.md) records the executable UPDATE contr
 
 WHERE and SET values share ordinary parameter, numeric and META validation, and reject aggregates.
 Subqueries in either clause report CK00001 naming SUBQUERY at the inner SELECT, including under
-EXPLAIN. USE KEYS and FOR comprehensions remain CK00001 at USE or FOR.
+EXPLAIN. USE KEYS remains CK00001 at USE. ARRAY/FIRST comprehensions execute in SET and WHERE;
+UPDATE's separate SQL++ FOR mutation clause remains CK00001 at FOR.
 UPDATE's grammar itself refuses LIMIT and OFFSET, independently of SELECT capabilities. An update without RETURNING returns
 the matched-document count without rows; EXPLAIN UPDATE describes its scan or seek without writing.
 
