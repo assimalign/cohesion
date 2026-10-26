@@ -15,6 +15,7 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 internal sealed partial class SqlPlanExecutor
 {
+    internal static Action? ReferencedTablesLocked { get; set; }
     private async Task CreateConstrainedTableAsync(SqlCreateTablePlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
         // Every DEFAULT must convert to its column before anything is reserved, as ADD COLUMN
@@ -71,19 +72,26 @@ internal sealed partial class SqlPlanExecutor
 
     private async Task LockReferencedTablesAsync(IReadOnlyList<SqlCatalogConstraint> constraints, SqlStatementContext statement, CancellationToken cancellationToken)
     {
-        var parents = new SortedSet<ulong>();
+        var parents = new SortedDictionary<ulong, SqlCatalogTable>();
         foreach (var constraint in constraints.Where(c => c.Kind == SqlCatalogConstraintKind.Reference))
         {
             if (_catalog.TryGetTable(constraint.ReferencedSchema!, constraint.ReferencedTable!, out var parent))
             {
-                parents.Add(parent.ObjectId);
+                parents.TryAdd(parent.ObjectId, parent);
             }
         }
 
-        foreach (ulong parent in parents)
+        foreach (ulong parent in parents.Keys)
         {
             await statement.Coordinator.LockManager.AcquireAsync(statement.DdlLockOwner, LockResource.Object(parent),
                 LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
+        }
+        ReferencedTablesLocked?.Invoke();
+        // Object locks protect identities, not names. Rebinding a replacement after
+        // waiting on its retired owner's lock would read uncommitted parent rows.
+        foreach (var parent in parents.Values)
+        {
+            EnsureSameIdentity(parent, ReadCurrentTable(parent));
         }
     }
 

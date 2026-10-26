@@ -47,6 +47,7 @@ internal sealed partial class SqlPlanExecutor
             // PostgreSQL tablecmds.c:1915 ignores duplicate relations in the written list.
             targets.TryAdd(table.ObjectId, table);
         }
+        var named = targets.Values.ToArray();
         bool added;
         do
         {
@@ -83,7 +84,12 @@ internal sealed partial class SqlPlanExecutor
             previous[index] = current;
         }
         var oldIndexes = previous.SelectMany(table => _catalog.GetIndexes(table.ObjectId)).ToArray();
-        var replacements = _catalog.ReserveTruncate(previous, cancellationToken);
+        var retiredIndexes = new Dictionary<SqlCatalogIndex, BTreeIndex>(ReferenceEqualityComparer.Instance);
+        foreach (var index in oldIndexes)
+        {
+            if (_indexManager.TryGetIndex(index.TableObjectId, index.Name, out var tree)) { retiredIndexes.Add(index, tree); }
+        }
+        var replacements = _catalog.ReserveTruncate(previous, named, cancellationToken);
         var mapping = previous.Select((table, index) => (table.ObjectId, Replacement: replacements[index]))
             .ToDictionary(pair => pair.ObjectId, pair => pair.Replacement);
         var indexes = oldIndexes.Select(index => new SqlCatalogIndex(mapping[index.TableObjectId].ObjectId,
@@ -119,8 +125,8 @@ internal sealed partial class SqlPlanExecutor
             try
             {
                 marker = await statement.Coordinator.BeginSnapshotPinAsync(cancellationToken).ConfigureAwait(false);
-                await _catalog.PublishTruncateAsync(previous, replacements, indexes, PublishedRegistrations(indexes),
-                    plan.Expression.RestartIdentity, marker.Sequence,
+                await _catalog.PublishTruncateAsync(previous, named, replacements, indexes, PublishedRegistrations(indexes),
+                    retiredIndexes, plan.Expression.RestartIdentity, marker.Sequence,
                     SqlObjectIdentity.Table(plan.Expression.Tables[0].Table.SchemaName ?? SqlPlanner.DefaultSchema, plan.Expression.Tables[0].Table.TableName),
                     statement.ScriptReceipt, cancellationToken).ConfigureAwait(false);
                 // Set before any observer can throw: publication is irrevocable, and cleanup

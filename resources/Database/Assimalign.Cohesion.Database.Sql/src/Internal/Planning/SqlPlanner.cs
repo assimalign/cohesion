@@ -368,7 +368,7 @@ internal sealed partial class SqlPlanner
             return SqlScanPath.Instance;
         }
 
-        var indexes = _catalog.GetIndexes(table.ObjectId);
+        var indexes = ReadIndexes(table.ObjectId);
 
         if (indexes.Count == 0)
         {
@@ -395,7 +395,7 @@ internal sealed partial class SqlPlanner
         {
             return SqlScanPath.Instance;
         }
-        indexes ??= _catalog.GetIndexes(table.ObjectId);
+        indexes ??= ReadIndexes(table.ObjectId);
         SqlIndexSeekPath? best = null;
         List<SqlIndexSeekPath>? alternatives = null;
         SqlIndexSeekPath? firstCandidate = null;
