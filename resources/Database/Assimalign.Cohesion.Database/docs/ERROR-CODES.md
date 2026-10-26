@@ -178,7 +178,7 @@ structured-carrier messages remain unprefixed.
 | COHSQLE057 | CS05057 | Execution/budgets |
 | COHSQLE060 | CS05060 | Execution/budgets |
 | COHSQLE067 | CS05067 | Execution/budgets |
-| — | CS05068 | UPDATE target matched by multiple source associations (before writes) |
+| New (#1714) | CS05068 | Execution/budgets — UPDATE target matched by multiple source associations (before writes) |
 | COHSQLE041 | CS06041 | Storage/durability |
 | COHSQLE058 | CS06058 | Storage/durability |
 

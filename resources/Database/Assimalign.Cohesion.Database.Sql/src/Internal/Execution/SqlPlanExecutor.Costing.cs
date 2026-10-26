@@ -32,8 +32,8 @@ internal sealed partial class SqlPlanExecutor
         var costed = plan switch
         {
             SqlSelectPlan p => CostSelect(p),
-            SqlUpdatePlan p => p with { Access = Choose(p.Table, p.Access) },
-            SqlDeletePlan p => p with { Access = Choose(p.Table, p.Access) },
+            SqlUpdatePlan p => p with { Access = Choose(p.Table, p.Access), Source = RewriteDmlSource(p.Source) },
+            SqlDeletePlan p => p with { Access = Choose(p.Table, p.Access), Source = RewriteDmlSource(p.Source) },
             SqlJoinPlan p => CostJoin(p),
             SqlGroupPlan p => p with { Input = Rewrite(p.Input) },
             SqlSubqueryPlan p => p with { Input = Rewrite(p.Input), Queries = p.Queries.Select(q => q with { Query = Rewrite(q.Query) }).ToArray() },
@@ -61,6 +61,9 @@ internal sealed partial class SqlPlanExecutor
             }
             return rewritten;
         }
+
+        SqlDmlSource? RewriteDmlSource(SqlDmlSource? source)
+            => source is null ? null : source with { Associations = CostJoin(source.Associations, pinFirst: true) };
 
         SqlPlan CostSelect(SqlSelectPlan select)
         {
@@ -126,7 +129,7 @@ internal sealed partial class SqlPlanExecutor
             return best;
         }
 
-        SqlJoinPlan CostJoin(SqlJoinPlan join)
+        SqlJoinPlan CostJoin(SqlJoinPlan join, bool pinFirst = false)
         {
             join = join with { Bindings = join.Bindings.Select(binding => binding.Source.Derived is { } derived
                 ? binding with { Source = new SqlRelationSource(RewriteRelation(derived)) } : binding).ToArray() };
@@ -137,7 +140,7 @@ internal sealed partial class SqlPlanExecutor
             bool[]? estimated = null;
             var steps = join.Steps.ToArray();
             int first = join.FirstBinding;
-            if (steps[0] is { Kind: SqlJoinType.Inner, Access.Alternatives: { Count: > 1 } alternatives } initial &&
+            if (!pinFirst && steps[0] is { Kind: SqlJoinType.Inner, Access.Alternatives: { Count: > 1 } alternatives } initial &&
                 !UniqueProbe(initial.Access) && !UniqueInput(first) && GetEstimate(0) is not null && GetEstimate(1) is not null)
             {
                 var chosen = initial.Access!;
@@ -173,7 +176,7 @@ internal sealed partial class SqlPlanExecutor
                     : outerRows * (1 + Math.Log2(innerRows + 1));
                 if (step.Access is not null && innerCount is { IsComplete: true, Count: <= 16 } ||
                     nestedWork <= 4 * (outerRows + innerRows)) { continue; }
-                if (i == 0 && step.Kind == SqlJoinType.Inner && outerRows < innerRows)
+                if (!pinFirst && i == 0 && step.Kind == SqlJoinType.Inner && outerRows < innerRows)
                 {
                     first = inner;
                     inner = inner == 0 ? 1 : 0;

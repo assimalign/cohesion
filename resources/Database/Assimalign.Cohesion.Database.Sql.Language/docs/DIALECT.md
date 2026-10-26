@@ -157,6 +157,13 @@ a replacement row. Constraint and statement-rollback behavior is the same as pla
 This deliberately differs from PostgreSQL's first-update behavior at
 `src/backend/executor/nodeModifyTable.c:2599-2608`.
 
+Joined associations keep the target outer. Safe target-only WHERE restrictions can seek the target;
+mandatory target/source equalities use source index probes or budgeted hash joins. EXPLAIN shows
+the chosen paths and algorithms. WITH definitions and source references share one materialization,
+including volatile expressions. Failure/cancellation unwinds new statement locks after undo,
+including locks taken by WITH/subqueries, while earlier transaction grants remain held. DELETE
+retries retain collected source values and re-acquire source intents before resuming preparation.
+
 UPDATE and DELETE without source clauses choose the same indexed equality-prefix and range access paths as SELECT,
 including target aliases and qualified columns. EXPLAIN shows the chosen IndexSeek and bounds
 or TableScan below the mutation. The complete WHERE remains a residual predicate, including

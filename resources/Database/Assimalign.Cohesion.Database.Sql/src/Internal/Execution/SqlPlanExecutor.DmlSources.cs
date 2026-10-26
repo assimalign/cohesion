@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Transactions;
@@ -13,8 +14,109 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 internal sealed partial class SqlPlanExecutor
 {
-    // Observation runs after all enumerators have been disposed, before row-lock acquisition.
-    internal static Action? DmlAssociationsCollected { get; set; }
+    private static bool JoinedDml(SqlPlan plan)
+    {
+        while (true)
+        {
+            switch (plan)
+            {
+                case SqlWithPlan with: plan = with.Input; break;
+                case SqlSubqueryPlan query: plan = query.Input; break;
+                case SqlCorrelatedSubqueryPlan query: plan = query.Input; break;
+                default: return plan is SqlUpdatePlan { Source: not null } or SqlDeletePlan { Source: not null };
+            }
+        }
+    }
+
+    // This scope surrounds WITH and independent subquery materialization as well as apply.
+    // ApplyStatementAsync finishes undo before propagating an error to this catch.
+    private async Task<DatabaseResult> ExecuteJoinedStatementAsync(SqlPlan plan, SqlStatementContext statement,
+        CancellationToken cancellationToken)
+    {
+        var locks = statement.Coordinator.LockManager;
+        var mark = locks.MarkStatement(statement.Transaction.Sequence);
+        statement.Metrics.JoinedDmlStatement = (plan, mark);
+        try
+        {
+            if (plan is SqlWithPlan or SqlSubqueryPlan or SqlCorrelatedSubqueryPlan)
+            {
+                await AcquireDmlSourceIntentLocksAsync(plan, statement, cancellationToken).ConfigureAwait(false);
+            }
+            return await ExecuteCoreAsync(plan, statement, cancellationToken).ConfigureAwait(false);
+        }
+        catch when (!_storage.IsOffline)
+        {
+            locks.ReleaseSince(mark);
+            throw;
+        }
+        finally { statement.Metrics.JoinedDmlStatement = null; }
+    }
+
+    private async ValueTask AcquireDmlSourceIntentLocksAsync(SqlPlan plan, SqlStatementContext statement,
+        CancellationToken cancellationToken, bool cascade = false)
+    {
+        var tables = new SortedDictionary<ulong, SqlCatalogTable>();
+        var visited = new HashSet<SqlPlan>(ReferenceEqualityComparer.Instance);
+        Visit(plan);
+        var locks = statement.Coordinator.LockManager;
+        var owner = statement.Transaction.Sequence;
+        var mark = locks.MarkStatement(owner);
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            SqlCatalogTable? blocked = null;
+            foreach (var table in tables.Values)
+            {
+                if (!locks.TryAcquire(owner, LockResource.Object(table.ObjectId), LockMode.IntentShared))
+                { blocked = table; break; }
+            }
+            if (blocked is null)
+            {
+                foreach (var table in tables.Values) { EnsureCurrentDefinition(table); }
+                return;
+            }
+            var resource = LockResource.Object(blocked.ObjectId);
+            if (cascade) { throw new SqlCascadeLockRetry(resource, LockMode.IntentShared); }
+            locks.ReleaseSince(mark);
+            await locks.AcquireAsync(owner, resource, LockMode.IntentShared, cancellationToken).ConfigureAwait(false);
+            locks.ReleaseSince(mark);
+        }
+
+        void Visit(SqlPlan input)
+        {
+            System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
+            if (!visited.Add(input)) { return; }
+            switch (input)
+            {
+                case SqlSelectPlan select: tables[select.Table.ObjectId] = select.Table; break;
+                case SqlJoinPlan join:
+                    foreach (var binding in join.Bindings)
+                    {
+                        if (binding.Source.Table is { } table) { tables[table.ObjectId] = table; }
+                        if (binding.Source.Derived is { } derived) { Visit(derived.Query); }
+                    }
+                    break;
+                case SqlUpdatePlan { Source: { } source }: Visit(source.Associations); break;
+                case SqlDeletePlan { Source: { } source }: Visit(source.Associations); break;
+                case SqlWithPlan with:
+                    foreach (var relation in with.Relations) { Visit(relation.Query); }
+                    Visit(with.Input);
+                    break;
+                case SqlSubqueryPlan query:
+                    foreach (var child in query.Queries) { Visit(child.Query); }
+                    Visit(query.Input);
+                    break;
+                case SqlCorrelatedSubqueryPlan query:
+                    foreach (var child in query.Queries) { Visit(child.Query); }
+                    Visit(query.Input);
+                    break;
+                case SqlSetOperationPlan set:
+                    foreach (var operand in set.Operands) { Visit(operand.Query); }
+                    break;
+                case SqlGroupPlan group: Visit(group.Input); break;
+            }
+        }
+    }
 
     private sealed record DmlAssociation(PageId PageId, int SlotIndex, TransactionSequence Writer,
         object?[] TargetValues, object?[] Values);
@@ -31,26 +133,15 @@ internal sealed partial class SqlPlanExecutor
             (derivedRows ??= new(ReferenceEqualityComparer.Instance))[derived] =
                 await MaterializeRelationAsync(derived, statement, cancellationToken).ConfigureAwait(false);
         }
-        // Intent locks precede reads; all scans/cursors release their page/tree latches before
-        // yielding. Drain every input before waiting for sorted target row locks, then parent
-        // and unique-key locks, then the coordinator apply gate and storage/index latches.
-        // No asynchronous lock wait holds a storage latch or the apply gate.
-        foreach (var table in plan.Bindings.Select(binding => binding.Source.Table).OfType<SqlCatalogTable>()
-            .DistinctBy(table => table.ObjectId).OrderBy(table => table.ObjectId))
-        {
-            await statement.Coordinator.LockManager.AcquireAsync(statement.Transaction.Sequence,
-                LockResource.Object(table.ObjectId), LockMode.IntentShared, cancellationToken).ConfigureAwait(false);
-            EnsureCurrentDefinition(table);
-        }
+        // Source intents were prepared before wrappers and target write intents.
+        // All scans/cursors drain before row-lock waits and the physical apply gate.
         if (plan.Bindings.Any(binding => binding.Source.View is not null)) { _ = statement.RequireCatalogSnapshot(); }
 
         var identities = new Dictionary<object?[], DmlAssociation>(ReferenceEqualityComparer.Instance);
-        foreach (var version in ScanVersions(target, cancellationToken, statement.Metrics))
+        foreach (var (location, values) in EnumerateRows(target, plan.Inputs[source.TargetBinding].Access, statement, cancellationToken))
         {
-            if (!statement.Snapshot.IsVisible(version.Writer) ||
-                version.Deleter != TransactionSequence.None && statement.Snapshot.IsVisible(version.Deleter)) { continue; }
-            identities.Add(version.Values, new(version.Location.PageId, version.Location.SlotIndex,
-                version.Writer, version.Values, version.Values));
+            identities.Add(values, new(location.PageId, location.SlotIndex,
+                ReadVersionStamps(target, location.PageId, location.SlotIndex).Writer, values, values));
         }
         var result = new Dictionary<ulong, DmlAssociation>();
         var sharedColumns = new bool[plan.Columns.Count];
@@ -78,7 +169,6 @@ internal sealed partial class SqlPlanExecutor
             // source buffers. Their evaluators request detached binary values on delivery.
             result.Add(key, identity with { Values = row });
         }
-        DmlAssociationsCollected?.Invoke();
         return result;
     }
 

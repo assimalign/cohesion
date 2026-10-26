@@ -736,6 +736,7 @@ public sealed class SqlLanguageConformanceTests
             async (session, result) =>
             {
                 result.AffectedCount.ShouldBe(1);
+                session.LastStatementMetrics.ShouldNotBeNull().RecordsExamined.ShouldBe(2);
                 CheckRows(await ReadRowsAsync(result), [[45, "Grace"]]);
                 await ExpectRowsAsync(session, "SELECT age FROM t ORDER BY id;", [[45], [45], [41]]);
             }),
@@ -760,6 +761,7 @@ public sealed class SqlLanguageConformanceTests
             async (session, result) =>
             {
                 result.AffectedCount.ShouldBe(1);
+                session.LastStatementMetrics.ShouldNotBeNull().RecordsExamined.ShouldBe(2);
                 CheckRows(await ReadRowsAsync(result), [[2, "Grace"]]);
                 await ExpectRowsAsync(session, "SELECT id FROM t ORDER BY id;", [[1], [3]]);
             }),

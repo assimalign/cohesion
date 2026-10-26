@@ -1,6 +1,6 @@
 # Assimalign.Cohesion.Database.Sql — Design
 
-## Joined DML syntax and binding (#1714, SQ-UF1)
+## Joined DML planning and execution (#1714, SQ-UF2)
 
 The DML binder reuses SELECT's source namespace and join rules, seeding a distinct target binding
 at physical slot zero. SqlDmlSource retains the association SqlJoinPlan and TargetBinding index;
@@ -16,8 +16,12 @@ WHERE children receive the combined correlation scope. CTE reachability, functio
 provisioning admission visit sources, and EXPLAIN descends into the association plan.
 
 Execution drains source relations and target/source associations through one statement snapshot
-before evaluating SET or writing. Joined targets use a snapshot scan; source joins retain their
-bound access paths, and transient costing is unchanged. A private join-frame identity slot retains the original decoded
+before evaluating SET or writing. Association plans use SELECT predicate pushdown and transient
+costing with the target pinned as the outer input. Safe target-only WHERE terms select target
+seeks; mandatory target/source equalities drive source index probes or the existing budgeted
+hash build. EXPLAIN exposes those access paths and algorithms. The full WHERE remains a residual.
+Costing rewrites source-derived relations through the same identity map as WITH definitions, so
+volatile CTE sources materialize once. A private join-frame identity slot retains the original decoded
 target array by reference; a local map associates it with physical location and writer stamp.
 Equal unkeyed rows and self joins therefore retain distinct identities. UPDATE rejects a second
 association for any target with CS05068 before SET evaluation, even when source values are equal.
@@ -32,8 +36,14 @@ change fails with the existing first-updater-wins transaction conflict rather th
 replacement row. Snapshot retention prevents reclamation while collection waits. The existing
 UPDATE final-state, domain, CHECK, foreign-key, unique-index and DELETE cascade helpers enforce
 constraints; all effects and RETURNING preparation stay in the existing statement undo bracket.
-Joined UPDATE failures release only grants acquired since the statement mark after undo; offline storage
-retains locks. DELETE retains its existing cascade retry and unwritten-failure release discipline.
+The joined statement mark precedes WITH/subquery materialization; failures release only new grants
+after undo, preserving earlier transaction grants. Offline storage retains locks. Source intents
+precede target write intents and use release-before-wait preparation. DELETE re-acquires source
+intents at every bounded cascade retry while reusing its collected volatile associations.
+The same outer mark and root plan cover wrapper grants during cascade back-off; the optional
+joined scope uses the existing join-only state slot, without growing ordinary statement objects.
+Plain UPDATE and DELETE keep separate async state machines and apply closures without association
+state, preserving their ordinary allocation budget.
 Scans/cursors dispose before row-lock waits; row/parent/key locks precede the apply gate and
 storage/index latches. Cancellation, callback failures and result preparation unwind these owners.
 No new interface, visibility grant, reference, persistent format or wire message is introduced.

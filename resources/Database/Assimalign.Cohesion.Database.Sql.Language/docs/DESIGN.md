@@ -1,6 +1,6 @@
 # Assimalign.Cohesion.Database.Sql.Language — Design
 
-## Joined DML syntax and binding (#1714, SQ-UF1)
+## Joined DML planning and execution (#1714, SQ-UF2)
 
 SqlUpdateExpression.From and SqlDeleteExpression.Using retain comma items and existing relation/join
 variants without adding a public construction bridge. Shared parsing and canonical source rendering
@@ -8,6 +8,8 @@ preserve SELECT behavior and DML round trips, including WITH, derived bodies and
 capability scan admits read-source queries while keeping SET/RETURNING subquery exclusions.
 Visible source OLD/NEW names mask pseudo-relations. The profile now advertises UPDATE FROM and
 DELETE USING; DIALECT.md records pre-write CS05068 and physical-target DELETE deduplication.
+Joined execution uses target-outer predicate pushdown/costing, one materialization per CTE, and
+statement unwind before WITH/subquery wrappers. Both project overviews reflect executable support.
 DELETE's top-level USING source position recognizes keyword-spelled CTE references, while actual
 WITH RECURSIVE remains refused. Canonical rendering delimits ordinary OLD/NEW column qualifiers
 so a quoted identifier cannot become a RETURNING pseudo-relation on reparse.

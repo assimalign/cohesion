@@ -12,7 +12,7 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 internal sealed partial class SqlPlanner
 {
     /// <summary>Attaches proven non-throwing singleton restrictions without changing ON/WHERE residuals.</summary>
-    private SqlJoinPlan PushJoinPredicates(SqlJoinPlan plan)
+    private SqlJoinPlan PushJoinPredicates(SqlJoinPlan plan, bool pinFirst = false)
     {
         var filters = plan.Bindings.Select(_ => new List<SqlBoundExpression>()).ToArray();
         var predicates = plan.Bindings.Select(_ => new Dictionary<int, List<(SqlBinaryOperator Op, object? Value)>>()).ToArray();
@@ -79,7 +79,7 @@ internal sealed partial class SqlPlanner
         {
             bool Unique(int binding) => inputs[binding].Access is SqlIndexSeekPath seek && seek.Index.IsUnique &&
                 seek.EqualityValues.Count == seek.Index.ColumnNames.Count;
-            int? preferred = Unique(0) ? 0 : Unique(1) ? 1 : null;
+            int? preferred = pinFirst || Unique(0) ? 0 : Unique(1) ? 1 : null;
             if (preferred is int driver)
             {
                 first = driver;
