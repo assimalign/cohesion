@@ -1,5 +1,14 @@
 # Assimalign.Cohesion.Database.Sql.Language — Design
 
+## Joined DML syntax and binding (#1714, SQ-UF1)
+
+SqlUpdateExpression.From and SqlDeleteExpression.Using retain comma items and existing relation/join
+variants without adding a public construction bridge. Shared parsing and canonical source rendering
+preserve SELECT behavior and DML round trips, including WITH, derived bodies and RETURNING. The
+capability scan admits read-source queries while keeping SET/RETURNING subquery exclusions.
+Visible source OLD/NEW names mask pseudo-relations. DIALECT.md distinguishes parsed/bound support
+from execution: no clause/profile declaration is added until SQ-UF2 executes the forms.
+
 ## Cascade progress and deadlock diagnostics (w11 review)
 
 DIALECT.md records the per-statement bound of three cascade lock refusals: two releases,

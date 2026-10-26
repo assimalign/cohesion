@@ -1,5 +1,24 @@
 # Assimalign.Cohesion.Database.Sql — Design
 
+## Joined DML syntax and binding (#1714, SQ-UF1)
+
+The DML binder reuses SELECT's source namespace and join rules, seeding a distinct target binding
+at physical slot zero. SqlDmlSource retains the association SqlJoinPlan and TargetBinding index;
+SQ-UF2 must carry that binding's storage row location and version per association rather than infer
+identity from projected values or a user key. Physical columns remain target-then-source, including
+hidden USING inputs. SET destinations stay target-only; SET values, WHERE and explicit RETURNING
+source references bind to combined slots. Bare RETURNING * expands only the target. Source metadata
+preserves type modifiers, collation and LEFT nullability. ON excludes the target/other comma items;
+WHERE children receive the combined correlation scope. CTE reachability, function validation and
+provisioning admission visit sources, and EXPLAIN descends into the association plan.
+
+Execution unwraps WITH/subquery wrappers and refuses a source-bearing DML plan with CK00001 before
+any materialization or write. The executor deliberately cannot apply these plans yet. The profile
+is unchanged. SQ-UF2 owns collection/apply/rechecks, pre-write UPDATE cardinality errors and DELETE
+deduplication. No new diagnostic identity, interface, visibility grant, reference or persisted format
+is needed. Namespace rules follow PostgreSQL analyze.c:602-621,2560-2578; the owner's future
+cardinality rule deliberately differs from nodeModifyTable.c:2599-2608.
+
 ## Fixed-pass worker tests (found during #1365)
 
 `VersionPurgeRefusalTests.RunIteration_RefusalKind_ShouldDistinguishForeignStorageFromProgress`

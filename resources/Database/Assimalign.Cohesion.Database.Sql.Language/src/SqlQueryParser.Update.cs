@@ -28,6 +28,13 @@ public sealed partial class SqlQueryParser
             }
         }
 
+        IReadOnlyList<SqlFromItem> sources = [];
+        if (IsKeyword(ref lexer, "FROM"))
+        {
+            Advance(ref lexer);
+            sources = ParseFromItems(ref lexer);
+        }
+
         // WHERE
         SqlExpression? where = null;
         if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "WHERE"))
@@ -36,10 +43,10 @@ public sealed partial class SqlQueryParser
             where = ParseExpression(ref lexer);
         }
 
-        var returning = ParseReturning(ref lexer, table);
+        var returning = ParseReturning(ref lexer, table, sources: sources);
 
         return new SqlUpdateExpression(table, assignments, where, null,
-            Location.Create(1, 1, pos, _lastTokenEnd), returning);
+            Location.Create(1, 1, pos, _lastTokenEnd), returning, sources);
     }
 
     /// <summary>

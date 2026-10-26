@@ -10,6 +10,9 @@ internal sealed record SqlDeletePlan(SqlCatalogTable Table, SqlBoundExpression? 
 {
     public IReadOnlyList<SqlProjection>? Returning { get; init; }
 
+    /// <summary>The target/source associations, retaining the physical target binding for apply and recheck.</summary>
+    public SqlDmlSource? Source { get; init; }
+
     private sealed class DebugView
     {
         private readonly global::Assimalign.Cohesion.Database.Sql.Internal.SqlDeletePlan _target;

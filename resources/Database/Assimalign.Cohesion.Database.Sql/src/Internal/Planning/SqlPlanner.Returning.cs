@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 
 using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Language;
@@ -25,6 +26,23 @@ internal sealed partial class SqlPlanner
             defaultCollation: _catalog.DefaultCollation, functions: _functions,
             cancellationToken: _cancellationToken, relation: target, foldConstants: false);
         return BindProjections(returning, table.Columns, evaluator);
+    }
+
+    private IReadOnlyList<SqlProjection>? BindSourceReturning(IReadOnlyList<SqlSelectColumn>? returning,
+        SqlJoinPlan associations, SqlTableReference target)
+    {
+        if (returning is null) { return null; }
+        foreach (var column in returning)
+        {
+            if (ContainsAggregate(column.Expression))
+            {
+                throw new SqlPlanningException("CS05017", ErrorMessages.ReturningAggregate, column.Expression.Location);
+            }
+        }
+        var evaluator = DmlEvaluator(associations.Columns, associations.Bindings, target, foldConstants: false);
+        // A bare RETURNING * expands only the target row, as in PostgreSQL analyze.c.
+        return BindProjections(returning, associations.Columns, evaluator,
+            Enumerable.Range(0, associations.Bindings[0].Source.Columns.Count).ToArray());
     }
 
     private List<SqlProjection> BindProjections(IReadOnlyList<SqlSelectColumn> selectColumns,

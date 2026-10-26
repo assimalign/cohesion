@@ -181,10 +181,12 @@ internal sealed partial class SqlPlanner
                     Visit(insert.Source, id);
                     break;
                 case SqlUpdatePlan update:
-                    Access(update.Table, update.Access, id);
+                    if (update.Source is { } updateSource) { Visit(updateSource.Associations, id); }
+                    else { Access(update.Table, update.Access, id); }
                     break;
                 case SqlDeletePlan delete:
-                    Access(delete.Table, delete.Access, id);
+                    if (delete.Source is { } deleteSource) { Visit(deleteSource.Associations, id); }
+                    else { Access(delete.Table, delete.Access, id); }
                     break;
             }
         }

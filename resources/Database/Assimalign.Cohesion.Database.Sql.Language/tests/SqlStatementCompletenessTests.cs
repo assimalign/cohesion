@@ -224,7 +224,7 @@ public sealed class SqlStatementCompletenessTests
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - Completeness: dropped clauses and predicates report CS00003 where they start")]
     [InlineData("DELETE FROM t WHRE ^id = 1;", "id")]
     [InlineData("UPDATE t SET a = 1 ^WHRE id = 1;", "WHRE")]
-    [InlineData("UPDATE t SET a = 1 ^FROM u WHERE t.id = u.id;", "FROM")]
+    [InlineData("UPDATE t SET a = 1 FROM u ^FROM v WHERE t.id = u.id;", "FROM")]
     [InlineData("SELECT id FROM t LIMIT 1 ^FETCH FIRST 1 ROW ONLY;", "FETCH")]
     [InlineData("SELECT id FROM t WHERE id = ^:id;", ":id")]
     [InlineData("UPDATE t SET a = ^:a WHERE id = 1;", ":a")]

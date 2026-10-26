@@ -21,16 +21,19 @@ public sealed class SqlUpdateExpression : SqlQueryExpression
     /// <param name="text">The raw statement text.</param>
     /// <param name="location">The source location.</param>
     /// <param name="returning">The written-row projection, if specified.</param>
+    /// <param name="sources">The FROM sources, if specified.</param>
     internal SqlUpdateExpression(
         SqlTableReference table,
         IReadOnlyList<SqlAssignment> assignments,
         SqlExpression? where,
         string? text,
         Location? location,
-        IReadOnlyList<SqlSelectColumn>? returning = null)
+        IReadOnlyList<SqlSelectColumn>? returning = null,
+        IReadOnlyList<SqlFromItem>? sources = null)
         : base(SqlQueryCommandType.Update, text, location)
     {
         Table = table;
+        From = sources ?? [];
         Returning = returning;
         Assignments = assignments;
         Where = where;
@@ -40,6 +43,9 @@ public sealed class SqlUpdateExpression : SqlQueryExpression
     /// Gets the target table reference.
     /// </summary>
     public SqlTableReference Table { get; }
+
+    /// <summary>Gets the comma-separated FROM sources and their join trees; empty when absent.</summary>
+    public IReadOnlyList<SqlFromItem> From { get; }
 
     /// <summary>Gets the written-row projection, or null when RETURNING is absent.</summary>
     public IReadOnlyList<SqlSelectColumn>? Returning { get; }

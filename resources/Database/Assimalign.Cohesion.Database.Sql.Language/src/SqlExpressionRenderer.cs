@@ -107,6 +107,52 @@ public static class SqlExpressionRenderer
         return Select(query);
     }
 
+    /// <summary>Renders an UPDATE, including FROM sources, as canonical SQL without a terminator.</summary>
+    /// <param name="query">The parsed statement.</param>
+    /// <returns>The canonical statement text.</returns>
+    /// <exception cref="ArgumentNullException">The query is null.</exception>
+    /// <exception cref="NotSupportedException">The tree cannot be represented by the dialect.</exception>
+    /// <exception cref="InsufficientExecutionStackException">The thread has insufficient stack.</exception>
+    public static string Render(SqlUpdateExpression query)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        ThrowIfTooDeep(query.NestingDepth);
+        var builder = new StringBuilder();
+        AppendCommonTables(builder, query.CommonTables);
+        builder.Append("UPDATE ").Append(Table(query.Table)).Append(" SET ");
+        builder.Append(string.Join(", ", query.Assignments.Select(assignment => Identifier(assignment.ColumnName) + " = " + Expression(assignment.Value))));
+        AppendSources(builder, query.From, " FROM ");
+        AppendDmlTail(builder, query.Where, query.Returning);
+        return builder.ToString();
+    }
+
+    /// <summary>Renders a DELETE, including USING sources, as canonical SQL without a terminator.</summary>
+    /// <param name="query">The parsed statement.</param>
+    /// <returns>The canonical statement text.</returns>
+    /// <exception cref="ArgumentNullException">The query is null.</exception>
+    /// <exception cref="NotSupportedException">The tree cannot be represented by the dialect.</exception>
+    /// <exception cref="InsufficientExecutionStackException">The thread has insufficient stack.</exception>
+    public static string Render(SqlDeleteExpression query)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        ThrowIfTooDeep(query.NestingDepth);
+        var builder = new StringBuilder();
+        AppendCommonTables(builder, query.CommonTables);
+        builder.Append("DELETE FROM ").Append(Table(query.Table));
+        AppendSources(builder, query.Using, " USING ");
+        AppendDmlTail(builder, query.Where, query.Returning);
+        return builder.ToString();
+    }
+
+    private static void AppendDmlTail(StringBuilder builder, SqlExpression? where, IReadOnlyList<SqlSelectColumn>? returning)
+    {
+        if (where is not null) { builder.Append(" WHERE ").Append(Expression(where)); }
+        if (returning is null) { return; }
+        builder.Append(" RETURNING ");
+        builder.Append(string.Join(", ", returning.Select(column => Expression(column.Expression) +
+            (column.Alias is null ? string.Empty : " AS " + Identifier(column.Alias)))));
+    }
+
     /// <summary>
     /// Refuses a tree deeper than any parser accepts (#1151): the highest limit a parser can be
     /// configured with. Its text would not parse back, so it has no canonical form; and refusing it
@@ -406,22 +452,7 @@ public static class SqlExpressionRenderer
             foreach (var definition in query.CommonTables) { ThrowIfTooDeep(definition.Body.ExpressionDepth); }
         }
         var builder = new StringBuilder();
-        if (query.CommonTables.Count > 0)
-        {
-            builder.Append("WITH ");
-            for (int i = 0; i < query.CommonTables.Count; i++)
-            {
-                if (i > 0) { builder.Append(", "); }
-                var definition = query.CommonTables[i];
-                builder.Append(Identifier(definition.Name));
-                if (definition.Columns.Count > 0)
-                {
-                    builder.Append(" (").Append(string.Join(", ", definition.Columns.Select(Identifier))).Append(')');
-                }
-                builder.Append(" AS (").Append(Select(definition.Body)).Append(')');
-            }
-            builder.Append(' ');
-        }
+        AppendCommonTables(builder, query.CommonTables);
         if (query is SqlSetOperationExpression set)
         {
             builder.Append(SetOperand(set.Left, set.Operator, false)).Append(set.Operator switch
@@ -458,10 +489,49 @@ public static class SqlExpressionRenderer
             }
         }
 
-        for (int itemIndex = 0; itemIndex < select.From.Count; itemIndex++)
+        AppendSources(builder, select.From, " FROM ");
+        if (select.Where is not null)
         {
-            var item = select.From[itemIndex];
-            builder.Append(itemIndex == 0 ? " FROM " : ", ").Append(Table(item.Table));
+            builder.Append(" WHERE ").Append(Expression(select.Where));
+        }
+        if (select.GroupBy.Count > 0)
+        {
+            builder.Append(" GROUP BY ").Append(List(select.GroupBy));
+        }
+        if (select.Having is not null)
+        {
+            builder.Append(" HAVING ").Append(Expression(select.Having));
+        }
+        AppendQueryTail(builder, select);
+        return builder.ToString();
+    }
+
+    private static void AppendCommonTables(StringBuilder builder, IReadOnlyList<SqlCommonTableExpression> definitions)
+    {
+        if (definitions.Count > 0)
+        {
+            builder.Append("WITH ");
+            for (int i = 0; i < definitions.Count; i++)
+            {
+                if (i > 0) { builder.Append(", "); }
+                var definition = definitions[i];
+                builder.Append(Identifier(definition.Name));
+                if (definition.Columns.Count > 0)
+                {
+                    builder.Append(" (").Append(string.Join(", ", definition.Columns.Select(Identifier))).Append(')');
+                }
+                builder.Append(" AS (").Append(Select(definition.Body)).Append(')');
+            }
+            builder.Append(' ');
+        }
+    }
+
+    private static void AppendSources(StringBuilder builder, IReadOnlyList<SqlFromItem> sources, string clause)
+    {
+        for (int itemIndex = 0; itemIndex < sources.Count; itemIndex++)
+        {
+            var item = sources[itemIndex];
+            builder.Append(itemIndex == 0 ? clause : ", ").Append(Table(item.Table));
             foreach (var join in item.Joins)
             {
                 builder.Append(join.JoinType switch
@@ -483,20 +553,6 @@ public static class SqlExpressionRenderer
                 }
             }
         }
-        if (select.Where is not null)
-        {
-            builder.Append(" WHERE ").Append(Expression(select.Where));
-        }
-        if (select.GroupBy.Count > 0)
-        {
-            builder.Append(" GROUP BY ").Append(List(select.GroupBy));
-        }
-        if (select.Having is not null)
-        {
-            builder.Append(" HAVING ").Append(Expression(select.Having));
-        }
-        AppendQueryTail(builder, select);
-        return builder.ToString();
     }
 
     private static string SetOperand(SqlQueryBodyExpression operand, SqlSetOperator parent, bool right)

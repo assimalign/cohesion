@@ -58,11 +58,10 @@ internal sealed partial class SqlPlanner
     }
 
     private IReadOnlyList<SqlSubqueryBinding> BindSubqueries(IEnumerable<SqlExpression> sources,
-        SqlSelectExpression? owner = null, SqlTableReference? dml = null)
+        SqlSelectExpression? owner = null, SqlTableReference? dml = null, SqlCorrelationScope? scope = null)
     {
         RuntimeHelpers.EnsureSufficientExecutionStack();
         var queries = new List<SqlSubqueryBinding>();
-        SqlCorrelationScope? scope = null;
         foreach (var expression in sources)
         {
             switch (expression)

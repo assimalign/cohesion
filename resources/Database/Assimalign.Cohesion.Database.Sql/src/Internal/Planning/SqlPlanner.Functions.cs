@@ -87,6 +87,7 @@ internal sealed partial class SqlPlanner
                 }
                 break;
             case SqlUpdateExpression update:
+                ValidateSourceFunctionCalls(update.From);
                 if (update.Returning is not null)
                 {
                     foreach (var column in update.Returning) { ValidateFunctionCalls(column.Expression); }
@@ -98,6 +99,7 @@ internal sealed partial class SqlPlanner
                 ValidateFunctionCalls(update.Where);
                 break;
             case SqlDeleteExpression delete:
+                ValidateSourceFunctionCalls(delete.Using);
                 if (delete.Returning is not null)
                 {
                     foreach (var column in delete.Returning) { ValidateFunctionCalls(column.Expression); }
@@ -127,6 +129,19 @@ internal sealed partial class SqlPlanner
             case SqlAlterTableExpression { Action: SqlAlterAddConstraintAction add }:
                 ValidateFunctionCalls(add.Constraint.CheckExpression);
                 break;
+        }
+    }
+
+    private void ValidateSourceFunctionCalls(System.Collections.Generic.IReadOnlyList<SqlFromItem> sources)
+    {
+        foreach (var item in sources)
+        {
+            if (item.Table is SqlDerivedTableReference derived) { ValidateFunctionCalls(derived.Query); }
+            foreach (var join in item.Joins)
+            {
+                if (join.Table is SqlDerivedTableReference joined) { ValidateFunctionCalls(joined.Query); }
+                ValidateFunctionCalls(join.Condition);
+            }
         }
     }
 

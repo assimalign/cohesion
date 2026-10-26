@@ -62,15 +62,30 @@ internal sealed partial class SqlPlanner
                     if (insert.SelectSource is { } source) { pending.Push((source, scope, visible)); }
                     break;
                 case SqlUpdateExpression update:
+                    Sources(update.From, scope, visible);
                     Expressions(update.Where, scope, visible);
                     foreach (var assignment in update.Assignments) { Expressions(assignment.Value, scope, visible); }
                     break;
                 case SqlDeleteExpression delete:
+                    Sources(delete.Using, scope, visible);
                     Expressions(delete.Where, scope, visible);
                     break;
             }
         }
         return referenced;
+
+        void Sources(IReadOnlyList<SqlFromItem> sources, CommonTableScope? scope, int visible)
+        {
+            foreach (var item in sources)
+            {
+                Relation(item.Table, scope, visible);
+                foreach (var join in item.Joins)
+                {
+                    Relation(join.Table, scope, visible);
+                    Expressions(join.Condition, scope, visible);
+                }
+            }
+        }
 
         void Relation(SqlRelationReference relation, CommonTableScope? scope, int visible)
         {
