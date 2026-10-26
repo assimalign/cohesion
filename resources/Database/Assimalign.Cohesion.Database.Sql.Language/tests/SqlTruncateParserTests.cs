@@ -9,6 +9,16 @@ namespace Assimalign.Cohesion.Database.Sql.Language.Tests;
 
 public sealed class SqlTruncateParserTests
 {
+    [Fact(DisplayName = "Cohesion Test [Sql.Language] - TRUNCATE: existing command category values remain stable (#1716)")]
+    public void CommandType_TruncateAdded_ShouldPreserveExistingValues()
+    {
+        // Arrange / Act / Assert
+        ((int)SqlQueryCommandType.Begin).ShouldBe(9);
+        ((int)SqlQueryCommandType.Commit).ShouldBe(10);
+        ((int)SqlQueryCommandType.Rollback).ShouldBe(11);
+        ((int)SqlQueryCommandType.Truncate).ShouldBe(12);
+    }
+
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - TRUNCATE: table lists and policies round trip")]
     [InlineData("TRUNCATE t", false, false, 1)]
     [InlineData("TRUNCATE TABLE ONLY dbo.t, ONLY \"odd table\" RESTART IDENTITY CASCADE", true, true, 2)]

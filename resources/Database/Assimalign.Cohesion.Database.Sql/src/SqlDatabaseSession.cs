@@ -246,8 +246,13 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
             }
             catch
             {
-                // Capture/construction failure must not strand a snapshot pin.
-                await _coordinator.RollbackAsync(context, CancellationToken.None).ConfigureAwait(false);
+                // Offline storage leaves recovery to abort this context (#1243). Cleanup
+                // must never replace the capture/construction failure that brought us here.
+                if (!_database.IsOffline)
+                {
+                    try { await _coordinator.RollbackAsync(context, CancellationToken.None).ConfigureAwait(false); }
+                    catch (Exception) { /* Preserve the original capture/construction failure. */ }
+                }
                 throw;
             }
         }
