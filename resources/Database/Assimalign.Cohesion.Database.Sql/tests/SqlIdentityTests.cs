@@ -58,7 +58,7 @@ public sealed class SqlIdentityTests
         {
             var failure = await Should.ThrowAsync<DatabaseException>(() => ExecAsync(session, sql));
             failure.Message.ShouldContain("id", Case.Sensitive);
-            failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE025");
+            failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS03025");
         }
         (await IdsAsync(session)).ShouldBe([1L]);
     }
@@ -77,7 +77,7 @@ public sealed class SqlIdentityTests
         var collision = await Should.ThrowAsync<DatabaseException>(() => ExecAsync(session, "INSERT INTO ids DEFAULT VALUES"));
         collision.Message.ShouldContain("PrimaryKey_ids_id_0", Case.Sensitive);
         var nullFailure = await Should.ThrowAsync<DatabaseException>(() => ExecAsync(session, "INSERT INTO ids VALUES (NULL)"));
-        nullFailure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE024");
+        nullFailure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS03024");
         await ExecAsync(session, "INSERT INTO ids DEFAULT VALUES");
         (await IdsAsync(session)).ShouldBe([1L, 2L]);
     }
@@ -100,7 +100,7 @@ public sealed class SqlIdentityTests
         var failure = await Should.ThrowAsync<DatabaseException>(() => ExecAsync(session, "INSERT INTO ids (label) VALUES (1), (2), (3)"));
 
         // Assert
-        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE025");
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS03025");
         long limit = increment < 0 ? type == "TINYINT" ? sbyte.MinValue : long.MinValue : start;
         failure.Message.ShouldBe($"Identity column 'id' has exhausted its {type} range ({limit}).");
         failure.InnerException.ShouldBeOfType<SqlCatalogException>().Message.ShouldBe(failure.Message);
@@ -126,7 +126,7 @@ public sealed class SqlIdentityTests
 
         // Assert
         failure.Message.ShouldContain(column, Case.Sensitive);
-        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE025");
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS03025");
         (await RowsAsync(session, "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'ids'")).ShouldBeEmpty();
     }
 
@@ -142,7 +142,7 @@ public sealed class SqlIdentityTests
 
         // Act / Assert
         var failure = await Should.ThrowAsync<DatabaseException>(() => ExecAsync(session, "ALTER TABLE ids ADD id INT IDENTITY"));
-        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE025");
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS03025");
         failure.Message.ShouldBe("Identity column 'id': ADD COLUMN IDENTITY requires a table with no live rows.");
         await ExecAsync(session, "DELETE FROM ids");
         await ExecAsync(session, "ALTER TABLE ids ADD id INT IDENTITY(100,5)");
@@ -198,7 +198,7 @@ public sealed class SqlIdentityTests
         await ExecAsync(session, "INSERT INTO ids (label) VALUES (1)");
 
         // Assert
-        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE024");
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS03024");
         (await IdsAsync(session)).ShouldBe([11L]);
     }
 
@@ -346,7 +346,7 @@ public sealed class SqlIdentityTests
             $"ALTER TABLE ids ADD COLUMN second INT {constraints}", $"ALTER TABLE ids ALTER COLUMN id INT {constraints}" })
         {
             var failure = await Should.ThrowAsync<DatabaseException>(() => ExecAsync(session, sql));
-            failure.Diagnostics.ShouldContain(item => item.Code == "SQL0003");
+            failure.Diagnostics.ShouldContain(item => item.Code == "CS00003");
             failure.Message.ShouldContain(sql.Contains("second") ? "second" : "id", Case.Sensitive);
             database.Catalog.DdlGeneration.ShouldBe(generation);
         }
@@ -366,7 +366,7 @@ public sealed class SqlIdentityTests
         var failure = await Should.ThrowAsync<DatabaseException>(() => ExecAsync(session, "ALTER TABLE ids ALTER COLUMN id INT NULL"));
 
         // Assert
-        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("SQL0003");
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS00003");
         failure.Message.ShouldBe("Conflicting NULL/NOT NULL declarations for column 'id'.");
         database.Catalog.DdlGeneration.ShouldBe(generation);
     }
@@ -390,7 +390,7 @@ public sealed class SqlIdentityTests
         var failure = await Should.ThrowAsync<DatabaseException>(() => ExecAsync(session, $"ALTER TABLE ids ADD COLUMN {definition}"));
 
         // Assert
-        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE025");
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS03025");
         failure.Message.ShouldContain("'second'", Case.Sensitive);
         database.Catalog.DdlGeneration.ShouldBe(generation);
         database.Catalog.TryGetTable("dbo", "ids", out var unchanged).ShouldBeTrue();
@@ -412,7 +412,7 @@ public sealed class SqlIdentityTests
         foreach (string definition in new[] { "BIGINT NOT NULL", "INT NOT NULL DEFAULT 5", "INT", "INT NULL" })
         {
             var failure = await Should.ThrowAsync<DatabaseException>(() => ExecAsync(session, $"ALTER TABLE ids ALTER COLUMN id {definition}"));
-            failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE025");
+            failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS03025");
             failure.Message.ShouldContain("'id'", Case.Sensitive);
             database.Catalog.DdlGeneration.ShouldBe(generation);
         }

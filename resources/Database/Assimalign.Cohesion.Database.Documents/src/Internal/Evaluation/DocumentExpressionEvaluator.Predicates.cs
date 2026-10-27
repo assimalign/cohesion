@@ -94,7 +94,7 @@ internal sealed partial class DocumentExpressionEvaluator
             {
                 if (escapeScalar >= 0)
                 {
-                    throw new DocumentPlanningException("COHDOC013", ErrorMessages.LikeEscapeInvalid, expression.Escape?.Location);
+                    throw new DocumentPlanningException("CD02013", ErrorMessages.LikeEscapeInvalid, expression.Escape?.Location);
                 }
                 escapeScalar = rune.Value;
             }
@@ -122,7 +122,7 @@ internal sealed partial class DocumentExpressionEvaluator
             else if (rune.Value == escape) { escaped = true; }
             else { tokens.Add(rune.Value == '%' ? -1 : rune.Value == '_' ? -2 : rune.Value); }
         }
-        if (escaped) { throw new DocumentPlanningException("COHDOC013", ErrorMessages.LikeTrailingEscape); }
+        if (escaped) { throw new DocumentPlanningException("CD02013", ErrorMessages.LikeTrailingEscape); }
         return tokens.ToArray();
     }
 

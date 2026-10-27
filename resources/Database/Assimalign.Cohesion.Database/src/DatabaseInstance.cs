@@ -68,7 +68,7 @@ public abstract class DatabaseInstance : IAsyncDisposable, IDisposable
     {
         if (name.IsEmpty)
         {
-            throw new ArgumentException("A database name is required.", nameof(name));
+            throw new ArgumentException(ErrorMessages.DatabaseEngineThrowIfEmptyArgument, nameof(name));
         }
 
         ArgumentNullException.ThrowIfNull(engine);

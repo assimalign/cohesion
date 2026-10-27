@@ -3,15 +3,21 @@ using System;
 namespace Assimalign.Cohesion.Database.Documents.Storage.Tests;
 
 
-internal static class DocumentStorageTupleTestExtensions
+internal static partial class DocumentStorageTupleTestExtensions
 {
-    internal static ReadOnlyMemory<byte> ToUtf8(this string value)
+    extension(string value)
     {
-        return System.Text.Encoding.UTF8.GetBytes(value);
+        internal ReadOnlyMemory<byte> ToUtf8()
+        {
+            return System.Text.Encoding.UTF8.GetBytes(value);
+        }
     }
 
-    internal static string ToStringValue(this ReadOnlyMemory<byte> value)
+    extension(ReadOnlyMemory<byte> value)
     {
-        return System.Text.Encoding.UTF8.GetString(value.Span);
+        internal string ToStringValue()
+        {
+            return System.Text.Encoding.UTF8.GetString(value.Span);
+        }
     }
 }

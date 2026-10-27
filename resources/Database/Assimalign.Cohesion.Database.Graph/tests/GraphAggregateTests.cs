@@ -233,7 +233,7 @@ public sealed class GraphAggregateTests
     public void Accumulate_LargeFloatingAverage_ShouldAvoidConversionExceptions()
     {
         // Arrange
-        var accumulator = new GraphAggregateAccumulator(new GqlAggregateExpression(GqlAggregateFunction.Avg, new GqlLiteralExpression(1.0e30)));
+        var accumulator = new GraphBuiltinAggregateState(new GqlAggregateExpression(GqlAggregateFunction.Avg, new GqlLiteralExpression(1.0e30)));
         int threadId = Environment.CurrentManagedThreadId;
         int overflows = 0;
         EventHandler<System.Runtime.ExceptionServices.FirstChanceExceptionEventArgs> observe = (_, args) =>
@@ -274,16 +274,16 @@ public sealed class GraphAggregateTests
         foreach (string prefix in new[] { "", "EXPLAIN " })
         {
             var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(prefix + source, cancellationToken: CancellationToken.None));
-            error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG001");
+            error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG05001");
             error.Diagnostics[0].Start.ShouldNotBeNull();
         }
     }
 
     [Theory(DisplayName = "Cohesion Test [Graph] - Aggregates: invalid operands are validated before reading even empty input")]
-    [InlineData("MATCH (a:Nobody) RETURN sum($missing)", "COHDBG001")]
-    [InlineData("MATCH (a) RETURN count(b)", "COHDBG001")]
-    [InlineData("MATCH p = (a)->(b) RETURN count(p.x)", "COHDBG003")]
-    [InlineData("MATCH p = (a)-->(b) RETURN count(p.x)", "GQL0008")]
+    [InlineData("MATCH (a:Nobody) RETURN sum($missing)", "CG05001")]
+    [InlineData("MATCH (a) RETURN count(b)", "CG05001")]
+    [InlineData("MATCH p = (a)->(b) RETURN count(p.x)", "CG03003")]
+    [InlineData("MATCH p = (a)-->(b) RETURN count(p.x)", "CG00008")]
     public async Task Execute_InvalidAggregateOperand_ShouldReportPlanningDiagnosticAsync(string source, string code)
     {
         // Arrange
@@ -339,7 +339,7 @@ public sealed class GraphAggregateTests
         await Insert(session, numeric ? [1L, 2L] : ["text"]);
         // Act / Assert
         var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(source, cancellationToken: CancellationToken.None));
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG013");
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG02013");
         if (!numeric)
         {
             error.Diagnostics[0].Message.ShouldBe(source.Contains("sum(", StringComparison.Ordinal)
@@ -358,7 +358,7 @@ public sealed class GraphAggregateTests
         // Act / Assert
         var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(
             GraphPathsQueryRequest.FromGql("MATCH (a) RETURN count(a)"), CancellationToken.None));
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG001");
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG05001");
         error.Diagnostics[0].Message.ShouldNotBeNull().ShouldContain("Path execution requires", Case.Sensitive);
     }
 
@@ -369,7 +369,7 @@ public sealed class GraphAggregateTests
     public void Accumulate_OversizedList_ShouldReportValueDiagnostic(int bound)
     {
         // Arrange
-        var accumulator = new GraphAggregateAccumulator(new GqlAggregateExpression(GqlAggregateFunction.CollectList, new GqlLiteralExpression(1L)));
+        var accumulator = new GraphBuiltinAggregateState(new GqlAggregateExpression(GqlAggregateFunction.CollectList, new GqlLiteralExpression(1L)));
         object value = bound switch
         {
             0 => new object?[GraphValueCodec.MaxValueCount - 1],
@@ -382,7 +382,7 @@ public sealed class GraphAggregateTests
             accumulator.Add(value, CancellationToken.None);
             accumulator.Add(value, CancellationToken.None);
         });
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG013");
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG02013");
     }
 
     [Fact(DisplayName = "Cohesion Test [Graph] - Aggregates: composite and entity extrema follow the existing total order and identity")]
@@ -417,7 +417,7 @@ public sealed class GraphAggregateTests
         description.ShouldContain(row => Equals(row[2], "GroupAggregate") && ((string)row[5]!).Contains("keys=0; aggregates=sum(", StringComparison.Ordinal));
         var error = await Should.ThrowAsync<DatabaseException>(async () =>
             await session.ExecuteAsync("INSERT (:Unwritten) RETURN sum('text')", cancellationToken: CancellationToken.None));
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG013");
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG02013");
         (await Rows(session, "MATCH (a) RETURN count(*)")).ShouldHaveSingleItem()[0].ShouldBe(0L);
         await session.ExecuteAsync(seed, cancellationToken: CancellationToken.None);
         (await Rows(session, "MATCH (count:Person) WHERE count.age=42 RETURN count.name, count(count)"))
@@ -442,7 +442,7 @@ public sealed class GraphAggregateTests
             var query = new GqlQueryExpression([], null, [], [], false, [new GqlProjection(aggregate, "n")]);
             var error = await Should.ThrowAsync<DatabaseException>(async () =>
                 await session.ExecuteAsync(new GraphQueryRequest(new GqlQueryStatement(query)), CancellationToken.None));
-            error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG001");
+            error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG05001");
         }
     }
 

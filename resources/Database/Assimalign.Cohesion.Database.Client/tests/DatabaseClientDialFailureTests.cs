@@ -18,6 +18,8 @@ using Assimalign.Cohesion.Database.Sql;
 
 using Assimalign.Cohesion.Database.Sql.Protocol;
 
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
+
 namespace Assimalign.Cohesion.Database.Client.Tests;
 
 /// <summary>
@@ -29,7 +31,7 @@ namespace Assimalign.Cohesion.Database.Client.Tests;
 /// </summary>
 public sealed class DatabaseClientDialFailureTests
 {
-    private static readonly IPEndPoint ScriptedEndPoint = new(IPAddress.Loopback, DatabaseConnectionSettings.DefaultPort);
+    private static readonly IPEndPoint _scriptedEndPoint = new(IPAddress.Loopback, DatabaseConnectionSettings.DefaultPort);
 
     [Fact(DisplayName = "Cohesion Test [Database.Client] - Dial: a port nothing listens on fails with ConnectionFailure and the socket error")]
     public async Task RentAsync_NothingListening_ShouldThrowConnectionFailure()
@@ -69,7 +71,7 @@ public sealed class DatabaseClientDialFailureTests
             "timeout" => new TimeoutException("The connect timed out."),
             _ => new ConnectionAbortedException("The listener is gone."),
         };
-        await using var client = CreateClient(ScriptedConnectionFactory.Failing(() => original), ScriptedEndPoint);
+        await using var client = CreateClient(ScriptedConnectionFactory.Failing(() => original), _scriptedEndPoint);
 
         // Act
         var exception = await Should.ThrowAsync<DatabaseClientException>(async () => await client.RentAsync(ClientTestHarness.Timeout()));
@@ -77,7 +79,7 @@ public sealed class DatabaseClientDialFailureTests
         // Assert
         exception.Code.ShouldBe(ProtocolErrorCode.ConnectionFailure);
         exception.InnerException.ShouldBeSameAs(original);
-        exception.Message.ShouldContain(ScriptedEndPoint.ToString(), Case.Sensitive);
+        exception.Message.ShouldContain(_scriptedEndPoint.ToString(), Case.Sensitive);
         exception.Message.ShouldContain(original.Message, Case.Sensitive);
     }
 
@@ -86,7 +88,7 @@ public sealed class DatabaseClientDialFailureTests
     {
         // Arrange
         var factory = ScriptedConnectionFactory.Stalled();
-        await using var client = CreateClient(factory, ScriptedEndPoint);
+        await using var client = CreateClient(factory, _scriptedEndPoint);
         using var cancellation = new CancellationTokenSource();
 
         // Act
@@ -117,7 +119,7 @@ public sealed class DatabaseClientDialFailureTests
             cancellation.Cancel();
             return aborted;
         });
-        await using var client = CreateClient(factory, ScriptedEndPoint);
+        await using var client = CreateClient(factory, _scriptedEndPoint);
 
         // Act: caught directly, because Should.ThrowAsync reports a canceled task with a new
         // TaskCanceledException, which drops the inner exception.
@@ -204,7 +206,7 @@ public sealed class DatabaseClientDialFailureTests
         });
         await using var client = CreateClient(factory, listener.EndPoint);
         var released = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        Task server = Task.Run(async () =>
+        Task server = DedicatedTestTask.Run(async () =>
         {
             await using IDuplexConnection accepted = await listener.AcceptAsync(ClientTestHarness.Timeout());
             Stream stream = accepted.AsStream();
@@ -235,7 +237,7 @@ public sealed class DatabaseClientDialFailureTests
     {
         // Arrange
         var disposed = new ObjectDisposedException("transport");
-        await using var client = CreateClient(ScriptedConnectionFactory.Failing(() => disposed), ScriptedEndPoint);
+        await using var client = CreateClient(ScriptedConnectionFactory.Failing(() => disposed), _scriptedEndPoint);
 
         // Act
         var exception = await Should.ThrowAsync<ObjectDisposedException>(async () => await client.RentAsync(ClientTestHarness.Timeout()));

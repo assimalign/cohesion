@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -35,8 +36,9 @@ namespace Assimalign.Cohesion.Database.Documents;
 /// <para>
 /// <b>A failed statement aborts the explicit transaction (#1225, the contract #1188 set for
 /// Graph).</b> The transaction stays the session's transaction until the caller commits, rolls back
-/// or disposes it; the session then refuses every statement and BEGIN with <c>COHDBD001</c> until
-/// the caller rolls back. A failure never turns later statements into autocommit writes. A
+/// or disposes it; the session refuses ordinary statements and BEGIN with <c>CD04101</c>.
+/// Text ROLLBACK recovers it; text COMMIT reports <c>CD04101</c>, commits nothing and ends it.
+/// A failure never turns later statements into autocommit writes. A
 /// statement (an OQL statement, a collection operation of the session, or a document operation of
 /// a <see cref="DocumentCollection"/> run in the session) holds the session (the base's operation
 /// hold) from its start to its end, so a second statement on the session is refused meanwhile, and
@@ -65,6 +67,8 @@ namespace Assimalign.Cohesion.Database.Documents;
 /// the transaction are re-exposed typed with <c>new</c> members over the base's public members.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("DocumentDatabaseSession")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Documents.DocumentDatabaseSession.DebugView))]
 public sealed class DocumentDatabaseSession : DatabaseLanguageSession<DocumentQueryRequest>
 {
     private readonly DocumentDatabase _database;
@@ -113,9 +117,9 @@ public sealed class DocumentDatabaseSession : DatabaseLanguageSession<DocumentQu
     /// </exception>
     /// <exception cref="DatabaseException">
     /// The session is closed; a transaction or operation is already active on it; or the session's
-    /// transaction refuses work (<c>COHDBD001</c>).
+    /// transaction refuses work (<c>CD04101</c>).
     /// </exception>
-    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBD002</c>, #1243).</exception>
+    /// <exception cref="DatabaseOfflineException">The database is offline (<c>CD06102</c>, #1243).</exception>
     public new async ValueTask<DocumentDatabaseTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default)
         => (DocumentDatabaseTransaction)await base.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
 
@@ -135,10 +139,10 @@ public sealed class DocumentDatabaseSession : DatabaseLanguageSession<DocumentQu
     /// </exception>
     /// <exception cref="DatabaseException">
     /// The session is closed; a transaction or operation is already active on it; the session's
-    /// transaction refuses work (<c>COHDBD001</c>); or the document engine does not support
+    /// transaction refuses work (<c>CD04101</c>); or the document engine does not support
     /// <paramref name="isolationLevel"/>.
     /// </exception>
-    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBD002</c>, #1243).</exception>
+    /// <exception cref="DatabaseOfflineException">The database is offline (<c>CD06102</c>, #1243).</exception>
     /// <remarks>
     /// The base refuses a closed session and an active transaction or operation before the
     /// isolation level, the disposed database and the offline database are checked.
@@ -159,9 +163,9 @@ public sealed class DocumentDatabaseSession : DatabaseLanguageSession<DocumentQu
     /// <exception cref="DatabaseException">
     /// <paramref name="name"/> names a system collection, or a collection with the same name already
     /// exists; the session is closed, another statement holds it, or its transaction refuses
-    /// statements (<c>COHDBD001</c>).
+    /// statements (<c>CD04101</c>).
     /// </exception>
-    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBD002</c>, #1243).</exception>
+    /// <exception cref="DatabaseOfflineException">The database is offline (<c>CD06102</c>, #1243).</exception>
     /// <exception cref="DatabaseTransactionAbortedException">The document catalog changed since the transaction's snapshot (retryable).</exception>
     /// <exception cref="DatabaseTransactionCommitUnconfirmedException">An autocommit statement's commit record could not be confirmed durable.</exception>
     public ValueTask<DocumentCollection> CreateCollectionAsync(string name, CancellationToken cancellationToken = default)
@@ -178,9 +182,9 @@ public sealed class DocumentDatabaseSession : DatabaseLanguageSession<DocumentQu
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
     /// <exception cref="DatabaseException">
     /// The collection does not exist in the statement's snapshot; the session is closed, another
-    /// statement holds it, or its transaction refuses statements (<c>COHDBD001</c>).
+    /// statement holds it, or its transaction refuses statements (<c>CD04101</c>).
     /// </exception>
-    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBD002</c>, #1243).</exception>
+    /// <exception cref="DatabaseOfflineException">The database is offline (<c>CD06102</c>, #1243).</exception>
     /// <exception cref="DatabaseTransactionCommitUnconfirmedException">An autocommit statement's commit record could not be confirmed durable.</exception>
     public ValueTask<DocumentCollection> GetCollectionAsync(string name, CancellationToken cancellationToken = default)
         => _database.GetCollectionAsync(name, this, cancellationToken);
@@ -198,9 +202,9 @@ public sealed class DocumentDatabaseSession : DatabaseLanguageSession<DocumentQu
     /// <exception cref="DatabaseException">
     /// <paramref name="name"/> names a system collection, or the collection does not exist; the
     /// session is closed, another statement holds it, or its transaction refuses statements
-    /// (<c>COHDBD001</c>).
+    /// (<c>CD04101</c>).
     /// </exception>
-    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBD002</c>, #1243).</exception>
+    /// <exception cref="DatabaseOfflineException">The database is offline (<c>CD06102</c>, #1243).</exception>
     /// <exception cref="DatabaseTransactionAbortedException">The collection, its documents or its indexes changed since the transaction's snapshot (retryable).</exception>
     /// <exception cref="DatabaseTransactionCommitUnconfirmedException">An autocommit statement's commit record could not be confirmed durable.</exception>
     public ValueTask DropCollectionAsync(string name, CancellationToken cancellationToken = default)
@@ -216,17 +220,17 @@ public sealed class DocumentDatabaseSession : DatabaseLanguageSession<DocumentQu
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
     /// <exception cref="DatabaseException">
     /// The session is closed (also while the collections are yielded), another statement holds it,
-    /// or its transaction refuses statements (<c>COHDBD001</c>).
+    /// or its transaction refuses statements (<c>CD04101</c>).
     /// </exception>
-    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBD002</c>, #1243).</exception>
+    /// <exception cref="DatabaseOfflineException">The database is offline (<c>CD06102</c>, #1243).</exception>
     /// <exception cref="DatabaseTransactionCommitUnconfirmedException">An autocommit statement's commit record could not be confirmed durable.</exception>
     public IAsyncEnumerable<DocumentCollection> GetCollectionsAsync(CancellationToken cancellationToken = default)
         => _database.GetCollectionsAsync(this, cancellationToken);
 
     /// <summary>
-    /// Parses and executes one statement. An aborted transaction refuses the statement before it is
-    /// parsed; a parse failure aborts the explicit transaction exactly as an execution failure does,
-    /// so every failed statement has one outcome, as in PostgreSQL and Neo4j.
+    /// Parses and executes one statement. Transaction control is dispatched before ordinary
+    /// statement admission, so ROLLBACK can recover an aborted transaction. Malformed text in an
+    /// aborted transaction retains CD04101; a parse failure otherwise aborts the transaction.
     /// </summary>
     /// <param name="parse">Parses the statement text into its request.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
@@ -235,7 +239,6 @@ public sealed class DocumentDatabaseSession : DatabaseLanguageSession<DocumentQu
     {
         ThrowIfNotOpen();
         _database.ThrowIfOffline();
-        ThrowIfTransactionRefuses();
         DocumentQueryRequest request;
         try
         {
@@ -243,6 +246,7 @@ public sealed class DocumentDatabaseSession : DatabaseLanguageSession<DocumentQu
         }
         catch (DatabaseException error)
         {
+            ThrowIfTransactionRefuses();
             await AbortTransactionAsync(error).ConfigureAwait(false);
             throw;
         }
@@ -258,13 +262,13 @@ public sealed class DocumentDatabaseSession : DatabaseLanguageSession<DocumentQu
     /// <returns>The explicit transaction the statement runs in, or null for autocommit.</returns>
     /// <exception cref="DatabaseException">
     /// The session is closed; another statement or a BEGIN holds it; or its transaction refuses
-    /// statements (<c>COHDBD001</c>).
+    /// statements (<c>CD04101</c>).
     /// </exception>
     internal DocumentDatabaseTransaction? EnterOperation()
     {
         if (!TryEnterOperation())
         {
-            throw new DatabaseException("Dispose the active document operation before starting another operation on this session.");
+            throw DatabaseException.CreateDocumentsFailure("CK07003", ErrorMessages.DatabaseSessionEnterOperationDatabase);
         }
 
         var transaction = CurrentTransaction;
@@ -321,14 +325,23 @@ public sealed class DocumentDatabaseSession : DatabaseLanguageSession<DocumentQu
         ThrowIfClosed();
     }
 
+    /// <summary>Checks command admission before semantic validation or response preflight.</summary>
+    internal void ThrowIfCommandRefuses()
+    {
+        ThrowIfNotOpen();
+        _database.ThrowIfOffline();
+        ThrowIfTransactionRefuses();
+    }
+
     /// <summary>
-    /// Aborts the explicit transaction for a statement that failed before it reached an operation
-    /// (parsing). A statement running concurrently on the session (a caller contract violation)
+    /// Aborts the explicit transaction for a statement that failed outside an engine operation
+    /// (parsing, command preflight or wire serialization). A statement running concurrently on
+    /// the session (a caller contract violation)
     /// owns the session; its own outcome decides the transaction's.
     /// </summary>
     /// <param name="cause">The failure the caller observes.</param>
     /// <returns>A task that completes once the transaction is aborted, or at once.</returns>
-    private async ValueTask AbortTransactionAsync(Exception cause)
+    internal async ValueTask AbortTransactionAsync(Exception cause)
     {
         if (CurrentTransaction is not { AcceptsStatements: true } transaction)
         {
@@ -366,7 +379,7 @@ public sealed class DocumentDatabaseSession : DatabaseLanguageSession<DocumentQu
     {
         if (isolationLevel is not (IsolationLevel.Snapshot or IsolationLevel.ReadCommitted))
         {
-            throw new DatabaseException("The document engine supports Snapshot and ReadCommitted isolation.");
+            throw DatabaseException.CreateDocumentsFailure("CK04001", ErrorMessages.BeginTransactionCoreAsyncDatabase);
         }
 
         _database.EnsureNotDisposed();
@@ -397,8 +410,14 @@ public sealed class DocumentDatabaseSession : DatabaseLanguageSession<DocumentQu
     {
         _database.EnsureNotDisposed();
         _database.ThrowIfOffline();
+        if (request.Statement.OqlExpression is OqlTransactionExpression transaction &&
+            !request.Statement.Diagnostics.Any(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error))
+        {
+            return ExecuteTransactionControlAsync(transaction, cancellationToken);
+        }
         return _database.RunAsync(this, operation =>
         {
+            LastQueryDocumentsRead = 0;
             // Preserve the typed seam's parse diagnostics before touching an error-recovery AST.
             foreach (var diagnostic in request.Statement.Diagnostics)
             {
@@ -407,19 +426,64 @@ public sealed class DocumentDatabaseSession : DatabaseLanguageSession<DocumentQu
                     return DocumentPlanExecutor.ExecuteAsync(_database, operation, request.Statement, request.Parameters, cancellationToken);
                 }
             }
+            if (request.Statement.OqlExpression is
+                (OqlCreateCollectionExpression or OqlDropCollectionExpression or OqlCreateIndexExpression or OqlDropIndexExpression) &&
+                CurrentTransaction is not null)
+            {
+                throw new DocumentPlanningException("CD04105", ErrorMessages.TransactionDdlInvalid, request.Statement.OqlExpression.Location);
+            }
             var parameters = ParameterBindings.Normalize(request.Parameters, name =>
-                new DocumentPlanningException("COHDOC009", $"More than one parameter key binds the name '{name}'."));
+                new DocumentPlanningException("CD01009", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SessionExecuteCoreAsyncFailure, name)));
             if (request.Statement.OqlExpression is OqlExplainExpression explain)
             {
                 operation.EnsureActive();
                 cancellationToken.ThrowIfCancellationRequested();
                 new DocumentExpressionEvaluator(null, parameters, cancellationToken).ValidateInputs(explain.Statement);
-                var plan = new DocumentPlanner(_database.Catalog, operation.Context.Snapshot, parameters, cancellationToken).Plan((OqlExpression)explain.Statement);
+                var plan = new DocumentPlanner(_database.Catalog, operation.Context.Snapshot, parameters, cancellationToken,
+                    estimateSinglePath: true, functions: _database.Engine.Functions).Plan((OqlExpression)explain.Statement);
                 return ValueTask.FromResult<DatabaseResult>(DocumentPlanner.Describe(plan, request.Statement.Diagnostics));
             }
             new DocumentExpressionEvaluator(null, parameters, cancellationToken).ValidateInputs(request.Statement.OqlExpression);
             return DocumentPlanExecutor.ExecuteAsync(_database, operation, request.Statement, parameters, cancellationToken);
         }, cancellationToken);
+    }
+
+    /// <summary>JSON documents read by the last admitted OQL statement, before its residual filter.</summary>
+    internal long LastQueryDocumentsRead { get; set; }
+
+    private async ValueTask<DatabaseResult> ExecuteTransactionControlAsync(OqlTransactionExpression expression, CancellationToken cancellationToken)
+    {
+        ThrowIfNotOpen();
+        cancellationToken.ThrowIfCancellationRequested();
+        if (expression.Command == OqlTransactionCommand.Begin)
+        {
+            try
+            {
+                await BeginTransactionAsync(expression.Isolation == OqlTransactionIsolation.ReadCommitted
+                    ? IsolationLevel.ReadCommitted : IsolationLevel.Snapshot, cancellationToken).ConfigureAwait(false);
+            }
+            catch (DatabaseException error) when (error.Diagnostics.Any(diagnostic => diagnostic.Code == "CK04004"))
+            {
+                // Only a nested BEGIN aborts existing work. An overlapping BEGIN can fail
+                // with CK07003 before another BEGIN publishes its successful transaction.
+                await AbortTransactionAsync(error).ConfigureAwait(false);
+                throw;
+            }
+        }
+        else
+        {
+            var transaction = CurrentTransaction ??
+                throw new DocumentPlanningException("CD04104", ErrorMessages.TransactionNotOpen, expression.Location);
+            if (expression.Command == OqlTransactionCommand.Commit)
+            {
+                await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+            }
+            else
+            {
+                await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
+            }
+        }
+        return DocumentCommandResult.Success;
     }
 
     /// <inheritdoc />
@@ -447,7 +511,19 @@ public sealed class DocumentDatabaseSession : DatabaseLanguageSession<DocumentQu
 
         if (operation is not null)
         {
-            await operation.AbortAsync(new DatabaseException("The document session closed while the operation was running.")).ConfigureAwait(false);
+            await operation.AbortAsync(new DatabaseException(ErrorMessages.SessionDisposeAsyncCoreDatabase)).ConfigureAwait(false);
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Documents.DocumentDatabaseSession _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Documents.DocumentDatabaseSession value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Documents.DocumentDatabase Database => _target.Database;
     }
 }

@@ -22,15 +22,20 @@ public class SqlLanguageProfileTests
     [InlineData(SqlClauses.Except, "SELECT a FROM t EXCEPT SELECT a FROM u;")]
     [InlineData(SqlClauses.Explain, "EXPLAIN SELECT * FROM t;")]
     [InlineData(SqlClauses.Insert, "INSERT INTO t (id) VALUES (1);")]
+    [InlineData(SqlClauses.Merge, "MERGE INTO t USING s ON t.id=s.id WHEN MATCHED THEN DELETE;")]
     [InlineData(SqlClauses.OnConflict, "INSERT INTO t (id) VALUES (1) ON CONFLICT DO NOTHING;")]
     [InlineData(SqlClauses.Returning, "INSERT INTO t (id) VALUES (1) RETURNING id;")]
     [InlineData(SqlClauses.Update, "UPDATE t SET id = 1;")]
+    [InlineData(SqlClauses.UpdateFrom, "UPDATE t SET id=s.id FROM s WHERE t.id=s.id;")]
+    [InlineData(SqlClauses.DeleteUsing, "DELETE FROM t USING s WHERE t.id=s.id;")]
     [InlineData(SqlClauses.Delete, "DELETE FROM t;")]
     [InlineData(SqlClauses.Identity, "CREATE TABLE t (id INT IDENTITY);")]
     [InlineData(SqlClauses.CreateTable, "CREATE TABLE t (id INT);")]
+    [InlineData(SqlClauses.CreateTableAs, "CREATE TABLE t (id) AS SELECT 1 WITH NO DATA;")]
     [InlineData(SqlClauses.CreateIndex, "CREATE INDEX ix_t_id ON t (id);")]
     [InlineData(SqlClauses.AlterTable, "ALTER TABLE t ADD COLUMN name TEXT;")]
     [InlineData(SqlClauses.DropTable, "DROP TABLE t;")]
+    [InlineData(SqlClauses.Truncate, "TRUNCATE TABLE ONLY t RESTART IDENTITY CASCADE;")]
     [InlineData(SqlClauses.CreateView, "CREATE VIEW v AS SELECT a FROM t;")]
     [InlineData(SqlClauses.DropView, "DROP VIEW v;")]
     [InlineData(SqlClauses.DropIndex, "DROP INDEX ix_t_id ON t;")]
@@ -93,8 +98,8 @@ public class SqlLanguageProfileTests
     [Theory(DisplayName = "Cohesion Test [Database.Sql.Language] - JOIN: Profile advertises only executable join types")]
     [InlineData(SqlJoinType.Inner, true)]
     [InlineData(SqlJoinType.LeftOuter, true)]
-    [InlineData(SqlJoinType.RightOuter, false)]
-    [InlineData(SqlJoinType.FullOuter, false)]
+    [InlineData(SqlJoinType.RightOuter, true)]
+    [InlineData(SqlJoinType.FullOuter, true)]
     [InlineData(SqlJoinType.Cross, true)]
     public void Profile_JoinType_DeclaresExactExecutionSurface(SqlJoinType joinType, bool supported)
     {
@@ -124,11 +129,11 @@ public class SqlLanguageProfileTests
     {
         var statement = (SqlQueryStatement)new SqlQueryParser().Parse(sql);
 
-        var diagnostic = statement.Diagnostics.Single(item => item.Code == "COHDBL001");
+        var diagnostic = statement.Diagnostics.Single(item => item.Code == "CK00001");
         diagnostic.Message.ShouldNotBeNull();
         diagnostic.Message!.ShouldContain(clause);
         diagnostic.Message.ShouldContain("SQL");
-        statement.Diagnostics.ShouldNotContain(item => item.Code == "SQL0002");
+        statement.Diagnostics.ShouldNotContain(item => item.Code == "CS00002");
     }
 
     [Fact]
@@ -137,7 +142,7 @@ public class SqlLanguageProfileTests
         var statement = (SqlQueryStatement)new SqlQueryParser().Parse(
             "CREATE UNIQUE /* retained trivia */ INDEX ix_t_email ON t (email);");
 
-        statement.Diagnostics.ShouldNotContain(item => item.Code == "COHDBL001");
+        statement.Diagnostics.ShouldNotContain(item => item.Code == "CK00001");
         statement.SqlExpression.ShouldBeOfType<SqlCreateIndexExpression>().IsUnique.ShouldBeTrue();
     }
 
@@ -162,7 +167,7 @@ public class SqlLanguageProfileTests
             CancellationToken cancellationToken = default)
         {
             SawUnsupportedClause = context.Statement.Diagnostics
-                .Any(item => item.Code == "COHDBL001");
+                .Any(item => item.Code == "CK00001");
             return Task.CompletedTask;
         }
     }

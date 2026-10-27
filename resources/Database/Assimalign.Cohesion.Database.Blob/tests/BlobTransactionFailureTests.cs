@@ -18,7 +18,7 @@ namespace Assimalign.Cohesion.Database.Blob.Tests;
 /// <summary>
 /// An operation that fails inside an explicit transaction aborts the whole transaction (#1225, the
 /// contract #1188 set for Graph): the session keeps it as <see cref="TransactionState.Faulted"/> and
-/// refuses every later operation and BEGIN with COHDBB001 until the caller rolls back, and nothing
+/// refuses every later operation and BEGIN with CB04001 until the caller rolls back, and nothing
 /// the transaction wrote survives. A started rollback always ends the transaction (#1226): a lost
 /// abort record changes nothing, an undo the journal rejects is deferred with the writer lock held
 /// until the version-purge pass completes it, and one that still fails when the engine closes is
@@ -27,7 +27,7 @@ namespace Assimalign.Cohesion.Database.Blob.Tests;
 /// </summary>
 public sealed class BlobTransactionFailureTests
 {
-    private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan _timeout = TimeSpan.FromSeconds(10);
 
     /// <summary>The issue's reproduction: a failure, then a write, then ROLLBACK leaves the blobs unchanged.</summary>
     /// <param name="failure">The kind of operation that fails inside the transaction.</param>
@@ -67,7 +67,7 @@ public sealed class BlobTransactionFailureTests
 
         // Assert
         ShouldBeExpectedFailure(error, failure);
-        refused.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBB001");
+        refused.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CB04001");
         if (error is OperationCanceledException)
         {
             // A canceled task rethrows a fresh cancellation exception, so the cause matches by kind.
@@ -125,7 +125,7 @@ public sealed class BlobTransactionFailureTests
         await transaction.RollbackAsync();
 
         // Assert
-        refusals.Cast<DatabaseException>().ShouldAllBe(error => error.Diagnostics.Any(diagnostic => diagnostic.Code == "COHDBB001"));
+        refusals.Cast<DatabaseException>().ShouldAllBe(error => error.Diagnostics.Any(diagnostic => diagnostic.Code == "CB04001"));
         (await ReadAsync(files, "keep")).ShouldBe("original");
         await using (var next = await session.BeginTransactionAsync())
         {
@@ -136,7 +136,7 @@ public sealed class BlobTransactionFailureTests
         (await NamesAsync(container)).ShouldBe(["keep", "next"]);
     }
 
-    /// <summary>COMMIT on a faulted transaction fails with COHDBB001, commits nothing, and ends the transaction.</summary>
+    /// <summary>COMMIT on a faulted transaction fails with CB04001, commits nothing, and ends the transaction.</summary>
     [Fact(DisplayName = "Cohesion Test [Database.Blob] - Transaction: COMMIT after a failed operation fails and commits nothing")]
     public async Task CommitAsync_AfterFailedOperation_ShouldThrowAndCommitNothing()
     {
@@ -154,7 +154,7 @@ public sealed class BlobTransactionFailureTests
         var error = await Should.ThrowAsync<DatabaseException>(async () => await transaction.CommitAsync());
 
         // Assert
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBB001");
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CB04001");
         error.Message.ShouldStartWith("The session's transaction is aborted and cannot commit; nothing was committed.", Case.Sensitive);
         error.Message.ShouldEndWith("Cause: " + failure.Message, Case.Sensitive);
         error.InnerException.ShouldBeSameAs(failure);
@@ -197,7 +197,7 @@ public sealed class BlobTransactionFailureTests
         // COMMIT keeps its coded error after the transaction ended, so its outcome never depends on
         // whether the caller's commit or the session's teardown ran first.
         var commit = await Should.ThrowAsync<DatabaseException>(async () => await transaction.CommitAsync());
-        commit.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBB001");
+        commit.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CB04001");
         commit.InnerException.ShouldBeSameAs(failure);
     }
 
@@ -305,7 +305,7 @@ public sealed class BlobTransactionFailureTests
         await blocking.CommitAsync();
 
         // Assert: a canceled task rethrows a fresh cancellation exception, so the cause matches by kind.
-        refused.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBB001");
+        refused.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CB04001");
         refused.InnerException.ShouldBeAssignableTo<OperationCanceledException>();
         faultedState.ShouldBe(TransactionState.Faulted);
         (await NamesAsync(container)).ShouldBe(["blocker"]);
@@ -336,7 +336,7 @@ public sealed class BlobTransactionFailureTests
 
     /// <summary>
     /// A read that fails once its stream is open is a failed operation: inside an explicit
-    /// transaction it aborts the transaction, so the next operation is refused with COHDBB001, and
+    /// transaction it aborts the transaction, so the next operation is refused with CB04001, and
     /// disposing the failed stream raises nothing more.
     /// </summary>
     [Fact(DisplayName = "Cohesion Test [Database.Blob] - Transaction: a failed read aborts the explicit transaction")]
@@ -367,8 +367,8 @@ public sealed class BlobTransactionFailureTests
 
         // Assert
         faultedState.ShouldBe(TransactionState.Faulted);
-        refusedRead.Message.ShouldNotStartWith("COHDBB001", Case.Sensitive);
-        refused.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBB001");
+        refusedRead.Message.ShouldNotStartWith("CB04001", Case.Sensitive);
+        refused.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CB04001");
         // A canceled task rethrows a fresh cancellation exception, so the cause matches by kind.
         refused.InnerException.ShouldBeAssignableTo<OperationCanceledException>();
         transaction.State.ShouldBe(TransactionState.RolledBack);
@@ -402,7 +402,7 @@ public sealed class BlobTransactionFailureTests
     }
 
     /// <summary>
-    /// A commit after the session closed under an open transaction fails with COHDBB001 naming why
+    /// A commit after the session closed under an open transaction fails with CB04001 naming why
     /// nothing committed, whichever is asked first, and commits nothing; a rollback afterwards is a
     /// no-op. For an active transaction the cause is the root session base's teardown cause, "The
     /// session closed before the transaction ended." (concrete-types plan §6.4), for the model's
@@ -411,7 +411,7 @@ public sealed class BlobTransactionFailureTests
     /// keeps (the model's own close did the same before phase 4).
     /// </summary>
     /// <param name="aborted">True when an operation aborted the transaction before the session closed.</param>
-    [Theory(DisplayName = "Cohesion Test [Database.Blob] - Transaction: COMMIT after the session closed reports COHDBB001 naming why nothing committed")]
+    [Theory(DisplayName = "Cohesion Test [Database.Blob] - Transaction: COMMIT after the session closed reports CB04001 naming why nothing committed")]
     [InlineData(false)]
     [InlineData(true)]
     public async Task CommitAsync_AfterSessionClosed_ShouldReportWhyNothingCommitted(bool aborted)
@@ -435,7 +435,7 @@ public sealed class BlobTransactionFailureTests
         await transaction.RollbackAsync();
 
         // Assert
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBB001");
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CB04001");
         error.Message.ShouldStartWith("The session's transaction is aborted and cannot commit; nothing was committed.", Case.Sensitive);
         if (failure is null)
         {
@@ -478,7 +478,7 @@ public sealed class BlobTransactionFailureTests
 
         // Assert: a blob session has no execute member, so only its container and blob operations
         // validate here.
-        rejections.OfType<DatabaseException>().ShouldAllBe(error => error.Diagnostics.All(diagnostic => diagnostic.Code != "COHDBB001"));
+        rejections.OfType<DatabaseException>().ShouldAllBe(error => error.Diagnostics.All(diagnostic => diagnostic.Code != "CB04001"));
         state.ShouldBe(TransactionState.Active);
         transaction.State.ShouldBe(TransactionState.Committed);
         (await NamesAsync(container)).ShouldBe(["pending"]);
@@ -571,7 +571,7 @@ public sealed class BlobTransactionFailureTests
     /// <summary>
     /// Closing a session aborts the operation running on it, here an upload stream still open, and
     /// the operation's abort is the cause a later commit of its transaction reports with
-    /// <c>COHDBB001</c>: the teardown's own cause does not replace it. The model's teardown did the
+    /// <c>CB04001</c>: the teardown's own cause does not replace it. The model's teardown did the
     /// same; since the concrete-types plan's phase 4 the session's root base runs it (§6.4), so the
     /// order is pinned here. The open stream refuses a write once the session closed, with the
     /// base's closed-session message.
@@ -598,7 +598,7 @@ public sealed class BlobTransactionFailureTests
 
         // Assert
         write.Message.ShouldBe("The session is closed.");
-        commit.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBB001");
+        commit.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CB04001");
         commit.Message.ShouldEndWith("Cause: The blob session closed while the operation was running.", Case.Sensitive);
         transaction.State.ShouldBe(TransactionState.RolledBack);
         (await ReadAsync(container, "keep")).ShouldBe("original");
@@ -633,7 +633,7 @@ public sealed class BlobTransactionFailureTests
         var refusal = await Should.ThrowAsync<DatabaseException>(async () => await transaction.CommitAsync());
         var stateAfterRefusal = transaction.State;
         await blocking.CommitAsync();
-        (await pending.WaitAsync(Timeout)).ShouldBeTrue();
+        (await pending.WaitAsync(_timeout)).ShouldBeTrue();
         await transaction.CommitAsync();
 
         // Assert
@@ -723,12 +723,12 @@ public sealed class BlobTransactionFailureTests
     /// A transaction the kernel ended under its caller (its database was dropped while the session
     /// held it) reports <c>Faulted</c>, and the root base orders its refusal against the database's
     /// disposal and a canceled token (concrete-types plan §6.4): BEGIN refuses the open transaction
-    /// with <c>COHDBB001</c> before it checks the token or anything of the model, where the model
+    /// with <c>CB04001</c> before it checks the token or anything of the model, where the model
     /// reported the disposed database; once the caller rolled the ended transaction back, BEGIN
     /// reports the disposed database. A blob session has no execute member; the token-before-model
     /// order of the execute members is pinned by the Graph and Documents suites.
     /// </summary>
-    [Fact(DisplayName = "Cohesion Test [Database.Blob] - Session: a transaction the kernel ended refuses BEGIN with COHDBB001 before the token and the disposed database")]
+    [Fact(DisplayName = "Cohesion Test [Database.Blob] - Session: a transaction the kernel ended refuses BEGIN with CB04001 before the token and the disposed database")]
     public async Task BeginTransactionAsync_TransactionEndedByTheKernel_ShouldOrderTheRefusals()
     {
         // Arrange
@@ -751,7 +751,7 @@ public sealed class BlobTransactionFailureTests
 
         // Assert
         state.ShouldBe(TransactionState.Faulted);
-        begin.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBB001");
+        begin.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CB04001");
         beginAfterRollback.ShouldNotBeNull();
         session.CurrentTransaction.ShouldBeNull();
     }
@@ -1085,7 +1085,7 @@ public sealed class BlobTransactionFailureTests
     /// kernel's exception is kept as the inner exception. Before #1272 this path kept the kernel's
     /// message, uncoded.
     /// </summary>
-    [Fact(DisplayName = "Cohesion Test [Database.Blob] - Transaction: a commit record that could not be made durable crosses the boundary as committed-unconfirmed, led by COHDBB002")]
+    [Fact(DisplayName = "Cohesion Test [Database.Blob] - Transaction: a commit record that could not be made durable crosses the boundary as committed-unconfirmed, led by CB06002")]
     public async Task TranslateKernelFailure_CommitUnconfirmed_ShouldBecomeTheCodedCommitUnconfirmedException()
     {
         // Arrange
@@ -1099,8 +1099,9 @@ public sealed class BlobTransactionFailureTests
         // Assert: not an abort, so a caller never retries work that committed.
         var unconfirmed = translated.ShouldBeOfType<DatabaseTransactionCommitUnconfirmedException>();
         unconfirmed.ShouldNotBeAssignableTo<DatabaseTransactionAbortedException>();
+        unconfirmed.Diagnostics.ShouldContain(d => d.Code == "CB06002");
         unconfirmed.Message.ShouldBe(
-            "COHDBB002: Database 'test' went offline while a transaction was committing: the durable flush of its commit record failed (flush) " +
+            "Database 'test' went offline while a transaction was committing: the durable flush of its commit record failed (flush) " +
             "after the transaction's commit record was written. The transaction may or may not have committed; do not retry it. Reopen the " +
             "database (OpenDatabaseAsync): its recovery keeps the commit if its record reached stable storage and discards it if not, and " +
             "reading the data back then tells which.");
@@ -1158,7 +1159,8 @@ public sealed class BlobTransactionFailureTests
         // Assert
         unspent.ShouldBe(0);
         StorageOfflineException.Find(error).ShouldNotBeNull();
-        error.Message.ShouldStartWith("COHDBB002: Database 'test' went offline while a transaction was committing", Case.Sensitive);
+        error.Diagnostics.ShouldContain(d => d.Code == "CB06002");
+        error.Message.ShouldStartWith("Database 'test' went offline while a transaction was committing", Case.Sensitive);
         stateAfterCommit.ShouldBe(TransactionState.Committed);
         session.CurrentTransaction.ShouldBeNull();
         (await NamesAsync(await AutocommitContainer.GetAsync(recovered, "files"))).ShouldBeEmpty();
@@ -1208,7 +1210,7 @@ public sealed class BlobTransactionFailureTests
         // Assert
         unspent.ShouldBe(0);
         StorageOfflineException.Find(error).ShouldNotBeNull();
-        error.Code.ShouldBe("COHDBB002");
+        error.Code.ShouldBe("CB06002");
         stateAfterCommit.ShouldBe(TransactionState.Faulted);
         session.CurrentTransaction.ShouldBeNull();
         (await NamesAsync(await AutocommitContainer.GetAsync(recovered, "files"))).ShouldBeEmpty();

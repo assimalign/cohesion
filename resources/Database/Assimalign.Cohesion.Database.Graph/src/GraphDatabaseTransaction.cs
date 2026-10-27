@@ -16,15 +16,15 @@ namespace Assimalign.Cohesion.Database.Graph;
 /// <para>
 /// <b>The end state machine is the root base's</b> (<see cref="DatabaseTransaction"/>, the
 /// #1188, #1225 and #1226 contracts): until the caller ends an aborted transaction, the session
-/// refuses every statement and BEGIN with <c>COHDBG007</c>; a rollback ends it, and a commit ends
-/// it with <c>COHDBG007</c> and commits nothing, as every later commit does. A transaction that
+/// refuses every statement and BEGIN with <c>CG04007</c>; a rollback ends it, and a commit ends
+/// it with <c>CG04007</c> and commits nothing, as every later commit does. A transaction that
 /// did not commit accepts any number of rollbacks, a token is observed only before a commit or
 /// rollback starts, and a commit is refused while a statement of the transaction still runs. A
 /// commit or rollback that started always ends the context: the transaction kernel completes a
 /// started rollback whatever fails or is canceled, and aborts a commit it cannot complete (#1226).
 /// This type supplies the model's vocabulary only: the kernel state, the kernel commit and
-/// rollback with the engine's exception translation, the offline refusal (<c>COHDBG012</c>,
-/// #1243) and the <c>COHDBG007</c> aborted error. Graph DESIGN.md, "Failed statements in explicit
+/// rollback with the engine's exception translation, the offline refusal (<c>CG06012</c>,
+/// #1243) and the <c>CG04007</c> aborted error. Graph DESIGN.md, "Failed statements in explicit
 /// transactions", records the contract and the reference engines it follows.
 /// </para>
 /// <para>
@@ -33,6 +33,8 @@ namespace Assimalign.Cohesion.Database.Graph;
 /// the model's internal transaction, which carried its own copy of the end state machine.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("GraphDatabaseTransaction Id={Id}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.GraphDatabaseTransaction.DebugView))]
 public sealed class GraphDatabaseTransaction : DatabaseTransaction
 {
     // Aborted refusals are created on a normal path, so their messages are read once.
@@ -101,7 +103,7 @@ public sealed class GraphDatabaseTransaction : DatabaseTransaction
     /// <inheritdoc />
     /// <remarks>
     /// While the database closes, the kernel refuses every end before it starts: a commit then
-    /// fails with a <see cref="DatabaseException"/> carrying <c>COHDBG019</c> and the kernel's
+    /// fails with a <see cref="DatabaseException"/> carrying <c>CG09019</c> and the kernel's
     /// <see cref="ObjectDisposedException"/> cause, and the base reports the transaction ended
     /// with nothing committed. A commit whose record was written but could not be made durable
     /// throws <see cref="DatabaseTransactionCommitUnconfirmedException"/> and leaves the transaction
@@ -135,7 +137,7 @@ public sealed class GraphDatabaseTransaction : DatabaseTransaction
     /// <c>AbortTransaction</c> for the same reason), and the kernel ends the context whatever
     /// fails once it starts (#1226). Only a closing database refuses the rollback before it starts,
     /// and its disposal then aborts the context itself. The refusal is a
-    /// <see cref="DatabaseException"/> carrying <c>COHDBG019</c> and the kernel's
+    /// <see cref="DatabaseException"/> carrying <c>CG09019</c> and the kernel's
     /// <see cref="ObjectDisposedException"/> cause.
     /// </remarks>
     protected override async ValueTask RollbackCoreAsync()
@@ -172,14 +174,27 @@ public sealed class GraphDatabaseTransaction : DatabaseTransaction
         string reason = cause is null ? string.Empty : string.Format(CultureInfo.CurrentCulture, _failureCause, causeText);
         string message = (commit ? _commitAborted : _operationsAborted) + reason;
         return new DatabaseException(message, [new Types.Diagnostic
-        { Code = "COHDBG007", Message = message, Severity = Types.DiagnosticSeverity.Error }], cause);
+        { Code = "CG04007", Message = message, Severity = Types.DiagnosticSeverity.Error }], cause);
     }
 
     // A failure the offline storage caused is the database's coded refusal (#1243), checked first:
-    // the offline error is a StorageException, which the kernel translation reports as COHDBG006.
+    // the offline error is a StorageException, which the kernel translation reports as CG06006.
     private Exception Translate(Exception error)
     {
         var offline = _database.TranslateOffline(error);
         return ReferenceEquals(offline, error) ? _database.TranslateKernelFailure(error) : offline;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Graph.GraphDatabaseTransaction _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Graph.GraphDatabaseTransaction value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Transactions.TransactionId Id => _target.Id;
+        public global::Assimalign.Cohesion.Database.Transactions.IsolationLevel IsolationLevel => _target.IsolationLevel;
     }
 }

@@ -4,6 +4,8 @@ The shared client core of the Data Platform: the protocol client every per-model
 client (`Sql.Client`, `KeyValuePair.Client`, `Blob.Client`, …) builds on. It dials a
 `libraries/Connections` transport, runs the startup/authenticate/ready
 handshake, runs model-owned framed exchanges, and pools authenticated connections.
+SQL, Graph and Documents negotiate transaction status so pool return can roll back open or failed
+work and require Idle before reuse. Legacy transaction-capable peers without status are discarded.
 
 ## Scope
 
@@ -93,3 +95,48 @@ Utf8JsonWriter/JsonDocument access. The caller disposes the client; redirect fol
 are disabled. No runtime Hosting or ApplicationModel dependency was added.
 
 Supply an `IDuplexConnectionFactory` through `DatabaseClientOptions.ConnectionFactory`; the shared pool owns the duplex connections it establishes.
+
+## Dedicated test actors (#1285)
+
+Deadline-dependent peers and busy test drivers use the linked Storage test helper's LongRunning threads. Ordinary async driver continuations stay on their actor scheduler, without changing SynchronizationContext. Existing deadlines of 25 seconds or more are hang guards. Runner settings impose no parallel-thread cap. See the [scheduling audit](../../Assimalign.Cohesion.Database.Storage/docs/TEST-HYGIENE-AUDIT.md) for every original Task.Run site, the exact journal counters and the physical index-work guards.
+
+Pool return now rolls back unfinished SQL/Graph transactions using negotiated server status before reusing a session; uncertified sessions are discarded (#1540).
+
+## Error and construction conventions (#1470)
+
+Exception messages and format templates are generated from `src/Properties/ErrorMessages.resx`;
+format arguments use the current culture. Cancellation and abort templates used during normal
+cleanup are cached before reuse. Error identities remain separate from message text where a
+structured diagnostic carrier exists. Standard .NET guards retain their argument names and exception types.
+
+## Explicit pool-reset construction
+
+The internal pool-reset exchange uses an explicit constructor while retaining the same negotiated status and connection-reuse behavior; see [DESIGN.md](DESIGN.md).
+
+
+## Debugger inspection (#1470)
+
+Eligible concrete source types use private nested debugger views of reviewed public/protected
+state; existing inherited display/proxy pairs are reused. See the shared
+[debugger convention](../../Assimalign.Cohesion.Database/docs/CONVENTIONS.md#debugger-inspection).
+Lease getters that take locks or enforce disposal, delegated stream state and transport callbacks are omitted. Stored connection metadata is exposed without I/O or exchange activity.
+Runtime APIs, methods, allocation budgets, persistent formats and wire behavior are unchanged.
+
+
+## Function exchange canary
+
+The client-only NativeAOT sample exercises `KeyValueConnection.InvokeFunctionAsync` against an
+in-memory protocol peer for an Int64 value, NULL, and binary data. It verifies parameterized CALL
+text, typed component encoding, result headers and materialized values through the existing
+Execute/result frames. The pre-trim reference-closure guard still excludes engine, parser,
+storage and transaction assemblies; the canary gains no engine reference.
+
+## Lease cancellation completion
+
+Disposing or aborting an active rental joins its queued cancellation callbacks before exchange
+cleanup disposes their source. Cancellation and cleanup claim ownership under the lease lock;
+callbacks, source disposal and pool return run outside it. Callback failures still reach the
+returning caller after the exchange and pool slot are released, while the exchange retains its
+original result or cancellation exception. Repeated disposal joins the same return task. This
+repairs the #1313 exchange-join guarantee without changing public APIs or wire behavior; see
+[DESIGN.md](DESIGN.md#lease-cancellation-completion).

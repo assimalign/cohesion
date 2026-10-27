@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
+  <resheader name="version"><value>2.0</value></resheader>
+  <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms</value></resheader>
+  <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
+  <data name="WorkspaceMissing" xml:space="preserve"><value>No workspace.</value></data>
+  <data name="BlobWorkspaceUnavailable" xml:space="preserve"><value>The Blob workspace is not ready (see the Workspace page).</value></data>
+  <data name="DatabaseSelectionMissing" xml:space="preserve"><value>Select or create a database first.</value></data>
+  <data name="ContainerSelectionMissing" xml:space="preserve"><value>Select a container first.</value></data>
+  <data name="BlobSelectionMissing" xml:space="preserve"><value>Select a blob first.</value></data>
+  <data name="ContainerNameMissing" xml:space="preserve"><value>Enter a container name.</value></data>
+  <data name="DownloadFolderMissing" xml:space="preserve"><value>Enter a download folder.</value></data>
+  <data name="KeyValueWorkspaceUnavailable" xml:space="preserve"><value>The Key-Value workspace is not ready (see the Workspace page).</value></data>
+  <data name="KeyMissing" xml:space="preserve"><value>Enter a key.</value></data>
+  <data name="DocumentWorkspaceUnavailable" xml:space="preserve"><value>The Documents workspace is not ready.</value></data>
+  <data name="RequiredValueMissing" xml:space="preserve"><value>Enter the {0}.</value></data>
+  <data name="SessionSelectionMissing" xml:space="preserve"><value>Select a database first.</value></data>
+  <data name="DocumentWireUnsupported" xml:space="preserve"><value>Documents has no wire server or client.</value></data>
+  <data name="ExpectedETagMissing" xml:space="preserve"><value>Enter the expected ETag.</value></data>
+  <data name="KeyValueRequestFailed" xml:space="preserve"><value>Key-value request returned {0}: {1}</value></data>
+  <data name="CatalogQueryFailed" xml:space="preserve"><value>Catalog query failed ({0}): {1}</value></data>
+  <data name="WireEndpointMissing" xml:space="preserve"><value>No wire endpoint.</value></data>
+  <data name="TransactionMissing" xml:space="preserve"><value>No transaction is active.</value></data>
+  <data name="WireTransactionsUnsupported" xml:space="preserve"><value>{0} has no wire transaction verbs; explicit transactions are embedded-only.</value></data>
+  <data name="ExternalCatalogUnsupported" xml:space="preserve"><value>An external server exposes no catalog/admin verbs for this model over the wire.</value></data>
+  <data name="ExternalManagementUnsupported" xml:space="preserve"><value>Database create/drop/list is engine-side only; the external wire exposes no database-management verbs.</value></data>
+  <data name="OqlRejectionMissing" xml:space="preserve"><value>unsupported OQL unexpectedly succeeded</value></data>
+  <data name="DeclaredDropRefusalMissing" xml:space="preserve"><value>DROP of the declared database '{0}' was not refused.</value></data>
+  <data name="DeclarationIsolationFailed" xml:space="preserve"><value>expected only SQL's declaration to fail, got [{0}]</value></data>
+  <data name="InsertAffectedMismatch" xml:space="preserve"><value>insert affected {0}</value></data>
+  <data name="TransactionNotActive" xml:space="preserve"><value>transaction not active after Begin</value></data>
+  <data name="RollbackRowCountMismatch" xml:space="preserve"><value>expected 2 rows after rollback, got {0}</value></data>
+  <data name="CommitRowCountMismatch" xml:space="preserve"><value>expected 4 rows after commit, got {0}</value></data>
+  <data name="ItemsCollectionMissing" xml:space="preserve"><value>items collection missing</value></data>
+  <data name="DocumentReadBackFailed" xml:space="preserve"><value>document not read back</value></data>
+  <data name="DocumentDeleteFailed" xml:space="preserve"><value>delete returned false</value></data>
+  <data name="CollectionCreateFailed" xml:space="preserve"><value>create collection failed</value></data>
+  <data name="CollectionReadFailed" xml:space="preserve"><value>get collection failed</value></data>
+  <data name="DocumentVersionMismatch" xml:space="preserve"><value>get did not preserve version</value></data>
+  <data name="OqlRowsMismatch" xml:space="preserve"><value>OQL row query failed</value></data>
+  <data name="WholeDocumentMismatch" xml:space="preserve"><value>whole document query failed</value></data>
+  <data name="WireCollectionCatalogMissing" xml:space="preserve"><value>collection catalog missing wire collection</value></data>
+  <data name="WireDiagnosticMissing" xml:space="preserve"><value>diagnostic code lost on wire</value></data>
+  <data name="PostFailureDeleteFailed" xml:space="preserve"><value>delete after statement failure failed</value></data>
+  <data name="DeletedDocumentVisible" xml:space="preserve"><value>deleted document still visible</value></data>
+  <data name="DroppedCollectionVisible" xml:space="preserve"><value>dropped collection still visible</value></data>
+  <data name="RolledBackNodeVisible" xml:space="preserve"><value>rolled-back node is visible</value></data>
+  <data name="PathResultMismatch" xml:space="preserve"><value>paths: {0}</value></data>
+  <data name="RolledBackKeyVisible" xml:space="preserve"><value>rolled-back key exists</value></data>
+  <data name="PutNotApplied" xml:space="preserve"><value>put not applied</value></data>
+  <data name="KeyValueReadMismatch" xml:space="preserve"><value>get returned {0}</value></data>
+  <data name="StaleETagAccepted" xml:space="preserve"><value>stale etag write applied</value></data>
+  <data name="MatchingETagRejected" xml:space="preserve"><value>matching etag write not applied</value></data>
+  <data name="IfAbsentAcceptedExistingKey" xml:space="preserve"><value>IfAbsent applied over an existing key</value></data>
+  <data name="PrefixScanMismatch" xml:space="preserve"><value>prefix scan returned {0}</value></data>
+  <data name="RangeScanMismatch" xml:space="preserve"><value>range scan returned {0}</value></data>
+  <data name="DeletedKeyVisible" xml:space="preserve"><value>deleted key still exists</value></data>
+  <data name="KeyspacesMissing" xml:space="preserve"><value>KEYSPACES returned no rows</value></data>
+  <data name="ContainerNotListed" xml:space="preserve"><value>container not listed</value></data>
+  <data name="BlobListCountMismatch" xml:space="preserve"><value>listed {0} blobs</value></data>
+  <data name="BlobPropertiesMismatch" xml:space="preserve"><value>properties mismatch</value></data>
+  <data name="BlobDownloadLengthMismatch" xml:space="preserve"><value>downloaded {0} bytes, expected {1}</value></data>
+  <data name="DroppedContainerListed" xml:space="preserve"><value>container still listed</value></data>
+  <data name="DeclaredDatabaseNotListed" xml:space="preserve"><value>'{0}' not listed after the engine's build ({1})</value></data>
+  <data name="CheckRefusalMissing" xml:space="preserve"><value>a title with no word was not refused by {0}: {1}</value></data>
+  <data name="ConflictingTableCreateFailed" xml:space="preserve"><value>the conflicting table was not created: {0}</value></data>
+  <data name="SiblingDeclarationFailed" xml:space="preserve"><value>{0} did not declare '{1}' next to the failed SQL declaration</value></data>
+  <data name="CreatedDatabaseNotListed" xml:space="preserve"><value>database not listed after create</value></data>
+  <data name="CatalogObjectMissing" xml:space="preserve"><value>'{0}' not in catalog ({1} lines)</value></data>
+  <data name="ExpectedDiagnosticMissing" xml:space="preserve"><value>expected a failure with diagnostics</value></data>
+  <data name="ResultTableMissing" xml:space="preserve"><value>no result table</value></data>
+  <data name="ResultRowCountMismatch" xml:space="preserve"><value>expected {0} rows, got {1}: {2}</value></data>
+  <data name="WireServerUnsupported" xml:space="preserve"><value>{0} has no wire server.</value></data>
+  <data name="LoopbackBindTimeout" xml:space="preserve"><value>The {0} loopback listener did not bind within 15 seconds.</value></data>
+  <data name="PortInvalid" xml:space="preserve"><value>Invalid port in '{0}'.</value></data>
+  <data name="HexLengthInvalid" xml:space="preserve"><value>Hex input must contain an even number of digits.</value></data>
+  <data name="ResultLastRowMismatch" xml:space="preserve"><value>unexpected last row: {0}</value></data>
+  <data name="ResultSetMissing" xml:space="preserve"><value>no result set</value></data>
+  <data name="DiagnosticsMissing" xml:space="preserve"><value>no diagnostics</value></data>
+  <data name="GqlScriptContinuationFailed" xml:space="preserve"><value>A refused GQL arrow must leave two statements with editor offsets and execute the independent RETURN when StopOnError=false.</value></data>
+  <data name="ScriptSplitLanguageMismatch" xml:space="preserve"><value>Script splitting must follow the workspace language's arrow/comment boundaries and retain statement text and editor offsets.</value></data>
+</root>

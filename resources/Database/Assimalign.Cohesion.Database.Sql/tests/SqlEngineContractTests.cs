@@ -14,6 +14,8 @@ using Assimalign.Cohesion.Database.Sql.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Types;
 
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
+
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 /// <summary>
@@ -272,7 +274,7 @@ public sealed class SqlEngineContractTests
 
         // Act: the holder's close stalls in its shutdown checkpoint; meanwhile every worker runs a
         // pass, the name is looked up and created, and an open starts.
-        var close = Task.Run(async () => await database.DisposeAsync());
+        var close = DedicatedTestTask.Run(async () => await database.DisposeAsync());
         bool stalled = await Eventually(() => faults.StalledDataFlushes == 1);
         bool trackedWhileClosing = Array.IndexOf(engine.GetInstanceSnapshot(), database) >= 0;
         var passes = engine.Workers.Select(worker => worker.RunIteration(TestTimeout.Token())).ToArray();
@@ -318,9 +320,9 @@ public sealed class SqlEngineContractTests
         using var released = new Release(faults.ReleaseDataFlushes);
 
         // Act: the holder's close stalls in its shutdown checkpoint, and a drop starts.
-        var close = Task.Run(async () => await database.DisposeAsync());
+        var close = DedicatedTestTask.Run(async () => await database.DisposeAsync());
         bool stalled = await Eventually(() => faults.StalledDataFlushes == 1);
-        var drop = Task.Run(async () => await engine.DropDatabaseAsync("held", TestTimeout.Token(30)));
+        var drop = DedicatedTestTask.Run(async () => await engine.DropDatabaseAsync("held", TestTimeout.Token(30)));
         bool dropWaited = !await CompletesWithin(drop, TimeSpan.FromMilliseconds(200));
         bool filesWhileClosing = strategy.StorageExists("held", catalog: false);
         faults.ReleaseDataFlushes();

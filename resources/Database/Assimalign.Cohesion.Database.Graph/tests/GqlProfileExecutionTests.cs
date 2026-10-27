@@ -28,25 +28,45 @@ public sealed class GqlProfileExecutionTests
             [
                 new("EXPLAIN MATCH (a:Person) RETURN a",
                     [[0, null, "Match", null, null, "filter=False; matches_nothing=False", null, null],
-                     [1, 0, "ExpandPath", null, null, null, null, null],
-                     [2, 1, "LabelScan", "Person", null, "node=0; property=; value=NULL", null, null],
+                     [1, 0, "ExpandPath", null, null, "mode=Trail", null, null],
+                     [2, 1, "LabelScan", "Person", null, "node=0; property=; value=NULL", 3L, null],
                      [3, 0, "Project", "a", null, "kind=Node; expression=a", null, null]]),
                 new("EXPLAIN MATCH (a:Person|Robot) RETURN a",
                     [[0, null, "Match", null, null, "filter=False; matches_nothing=False", null, null],
-                     [1, 0, "ExpandPath", null, null, null, null, null],
-                     [2, 1, "LabelScan", "Person|Robot", null, "node=0; property=; value=NULL; combine=union", null, null],
+                     [1, 0, "ExpandPath", null, null, "mode=Trail", null, null],
+                     [2, 1, "LabelScan", "Person|Robot", null, "node=0; property=; value=NULL; combine=union", 4L, null],
                      [3, 0, "Project", "a", null, "kind=Node; expression=a", null, null]]),
                 new("EXPLAIN MATCH (a) WHERE a IS LABELED Person RETURN a",
                     [[0, null, "Match", null, null, "filter=True; matches_nothing=False", null, null],
-                     [1, 0, "ExpandPath", null, null, null, null, null],
-                     [2, 1, "LabelScan", "Person", null, "node=0; property=; value=NULL", null, null],
+                     [1, 0, "ExpandPath", null, null, "mode=Trail", null, null],
+                     [2, 1, "LabelScan", "Person", null, "node=0; property=; value=NULL", 3L, null],
                      [3, 0, "Project", "a", null, "kind=Node; expression=a", null, null]]),
                 new("EXPLAIN MATCH (a:Person)-[:KNOWS]->(b) RETURN a",
                     [[0, null, "Match", null, null, "filter=False; matches_nothing=False", null, null],
-                     [1, 0, "ExpandPath", null, null, null, null, null],
-                     [2, 1, "LabelScan", "Person", null, "node=0; property=; value=NULL", null, null],
-                     [3, 2, "Expand", "KNOWS", null, "edge=0; direction=Outgoing; labels=KNOWS; adjacency=(node,direction,type_id,relationship); seek_direction=Outgoing; type_filter=KNOWS; physical=visited_candidates; viable=accepted_hops; physical_limit=1000000", null, null],
-                     [4, 0, "Project", "a", null, "kind=Node; expression=a", null, null]]),
+                     [1, 0, "ExpandPath", null, null, "mode=Trail", null, null],
+                     [2, 1, "RelationshipTypeScan", "KNOWS", null, "edge=0; direction=Outgoing; postings=(type_id,relationship); combine=union; physical=visited_postings; viable=accepted_hops; physical_limit=1000000", 1L, null],
+                     [3, 0, "Project", "a", null, "kind=Node; expression=a", null, null]]),
+                new("EXPLAIN MATCH (a)-[:KNOWS|SERVES]->(b) RETURN a",
+                    [[0, null, "Match", null, null, "filter=False; matches_nothing=False", null, null],
+                     [1, 0, "ExpandPath", null, null, "mode=Trail", null, null],
+                     [2, 1, "RelationshipTypeScan", "KNOWS|SERVES", null, "edge=0; direction=Outgoing; postings=(type_id,relationship); combine=union; physical=visited_postings; viable=accepted_hops; physical_limit=1000000", 2L, null],
+                     [3, 0, "Project", "a", null, "kind=Node; expression=a", null, null]]),
+            ],
+            [GqlClauses.PathSelector] =
+            [
+                new("MATCH ANY (a:Person {name:'Alice'})->*(b:Person {name:'Bob'}) RETURN a.name,b.name", [["Alice","Bob"]]),
+                new("MATCH ALL (a:Person {name:'Alice'})->*(b:Person {name:'Bob'}) RETURN a.name,b.name", [["Alice","Bob"]]),
+                new("MATCH p = ANY SHORTEST (a:Person {name:'Alice'})->*(b:Person {name:'Bob'}) RETURN path_length(p)", [[1L]]),
+                new("MATCH p = ALL SHORTEST (a:Person {name:'Alice'})->*(b:Person {name:'Bob'}) RETURN path_length(p)", [[1L]]),
+                new("MATCH p = SHORTEST 2 (a:Person {name:'Alice'})->*(b:Person {name:'Bob'}) RETURN path_length(p)", [[1L]]),
+                new("MATCH p = SHORTEST 2 GROUPS (a:Person {name:'Alice'})->*(b:Person {name:'Bob'}) RETURN path_length(p)", [[1L]]),
+            ],
+            [GqlClauses.PathMode] =
+            [
+                new("MATCH WALK (a:Person {name:'Alice'})->{1,2}(b) RETURN b.name", [["Bob"]]),
+                new("MATCH TRAIL (a:Person {name:'Alice'})->{1,2}(b) RETURN b.name", [["Bob"]]),
+                new("MATCH SIMPLE (a:Person {name:'Alice'})->{1,2}(b) RETURN b.name", [["Bob"]]),
+                new("MATCH ACYCLIC (a:Person {name:'Alice'})->{1,2}(b) RETURN b.name", [["Bob"]]),
             ],
             [GqlClauses.QuantifiedPath] =
             [
@@ -190,6 +210,7 @@ public sealed class GqlProfileExecutionTests
             [GqlClauses.Limit] =
             [
                 new("MATCH (a:Person) RETURN a.name ORDER BY a.name LIMIT 1", [["Alice"]]),
+                new("MATCH (a)-[:KNOWS|SERVES]->() RETURN a.name LIMIT 1", [["Alice"]], Physical: 2, Postings: 2),
             ],
             [GqlClauses.Create] =
             [
@@ -348,13 +369,13 @@ public sealed class GqlProfileExecutionTests
     [InlineData("MATCH (a)<~(b) RETURN a")]
     public async Task Profile_UnsupportedForms_ReportCapabilityDiagnosticAsync(string source)
     {
-        new GqlQueryParser().Parse(source).Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHDBL001");
+        new GqlQueryParser().Parse(source).Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CK00001");
         await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         var database = await engine.CreateDatabaseAsync("boundary", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         var error = await Should.ThrowAsync<DatabaseParseException>(async () =>
             await session.ExecuteAsync(source, cancellationToken: CancellationToken.None));
-        error.Message.ShouldContain("COHDBL001", Case.Sensitive);
+        error.Message.ShouldContain("CK00001", Case.Sensitive);
     }
 
     private static readonly IReadOnlyDictionary<string, ExecutionCase> _functionCases =
@@ -459,6 +480,8 @@ public sealed class GqlProfileExecutionTests
         GqlClauses.Set => query.Stages.Any(stage => stage is GqlSetStage),
         GqlClauses.Remove => query.Stages.Any(stage => stage is GqlRemoveStage),
         GqlClauses.QuantifiedPath => query.MatchClauses.SelectMany(clause => clause.Paths).SelectMany(PatternPaths).Any(path => path.Relationships.Any(edge => edge.Quantifier is not null) || path.Elements?.Any(element => element is GqlParenthesizedPathPattern { Quantifier: not null }) == true),
+        GqlClauses.PathSelector => query.MatchClauses.SelectMany(clause => clause.Paths).Any(path => path.Selector is not null),
+        GqlClauses.PathMode => query.MatchClauses.SelectMany(clause => clause.Paths).Any(path => path.Mode is not null),
         GqlClauses.Explain => query.IsExplain,
         GqlClauses.Match => query.MatchClauses.Any(clause => !clause.Optional),
         GqlClauses.OptionalMatch => query.MatchClauses.Any(clause => clause.Optional),
@@ -535,6 +558,7 @@ public sealed class GqlProfileExecutionTests
         string clause, CancellationToken cancellationToken)
     {
         string context = $"{clause}: {executionCase.Statement}";
+        long postings = session.Database.Store.RelationshipTypeEntriesVisited;
         var result = await session.ExecuteAsync(executionCase.Statement, executionCase.Parameters, cancellationToken);
         result.Status.ShouldBe(DatabaseResultStatus.Success, context);
         if (executionCase.AffectedCount is { } affected)
@@ -554,6 +578,8 @@ public sealed class GqlProfileExecutionTests
             rows.Count.ShouldBe(executionCase.Rows.Length, context);
             for (int index = 0; index < rows.Count; index++) { rows[index].ShouldBe(executionCase.Rows[index], context); }
         }
+        if (executionCase.Physical is { } physical) { session.LastStatementMetrics!.Physical.ShouldBe(physical, context); }
+        if (executionCase.Postings is { } reads) { (session.Database.Store.RelationshipTypeEntriesVisited - postings).ShouldBe(reads, context); }
         foreach (var verification in executionCase.Verification ?? [])
         {
             await ExecuteAndVerifyAsync(session, verification, clause, cancellationToken);
@@ -561,5 +587,6 @@ public sealed class GqlProfileExecutionTests
     }
 
     private sealed record ExecutionCase(string Statement, object?[][] Rows, long? AffectedCount = null,
-        ExecutionCase[]? Verification = null, IReadOnlyDictionary<string, object?>? Parameters = null, string[]? Columns = null);
+        ExecutionCase[]? Verification = null, IReadOnlyDictionary<string, object?>? Parameters = null, string[]? Columns = null,
+        long? Physical = null, long? Postings = null);
 }

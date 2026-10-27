@@ -7,6 +7,8 @@ namespace Assimalign.Cohesion.Database.Sql.Language;
 /// <summary>
 /// Represents a column definition in a CREATE TABLE statement.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("SqlColumnDefinition")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Language.SqlColumnDefinition.DebugView))]
 public sealed class SqlColumnDefinition
 {
     /// <summary>
@@ -22,13 +24,15 @@ public sealed class SqlColumnDefinition
     /// <param name="identity">The identity generation facet, when declared.</param>
     /// <param name="resolvedType">The resolved built-in type, or null for an engine-resolved domain.</param>
     /// <param name="isExplicitlyNullable">Whether a NULL declaration was written, for table-constraint conflict checking.</param>
+    /// <param name="typeName">The decoded type name retained by the parser.</param>
     internal SqlColumnDefinition(string columnName, string dataType, bool isNullable, bool isPrimaryKey, SqlExpression? defaultValue,
         IReadOnlyList<SqlConstraintDefinition>? constraints = null, string? collationName = null, DatabaseTypeInfo? resolvedType = null, SqlIdentityDefinition? identity = null,
-        bool isExplicitlyNullable = false)
+        bool isExplicitlyNullable = false, string? typeName = null)
     {
         Identity = identity;
         ColumnName = columnName;
         DataType = dataType;
+        TypeName = typeName ?? dataType;
         ResolvedType = resolvedType;
         IsNullable = isNullable;
         IsExplicitlyNullable = isExplicitlyNullable;
@@ -47,6 +51,8 @@ public sealed class SqlColumnDefinition
     /// Gets the data type name (e.g., <c>INT</c>, <c>TEXT</c>, <c>VARCHAR(100)</c>).
     /// </summary>
     public string DataType { get; }
+
+    internal string TypeName { get; }
 
     /// <summary>
     /// Gets the built-in type resolved during parsing, or null when the name requires
@@ -79,4 +85,24 @@ public sealed class SqlColumnDefinition
 
     /// <summary>Gets the declared collation name, or null to inherit the database default.</summary>
     public string? CollationName { get; }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Sql.Language.SqlColumnDefinition _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Language.SqlColumnDefinition value)
+        {
+            _target = value;
+        }
+
+        public string ColumnName => _target.ColumnName;
+        public string DataType => _target.DataType;
+        public global::Assimalign.Cohesion.Database.Types.DatabaseTypeInfo? ResolvedType => _target.ResolvedType;
+        public bool IsNullable => _target.IsNullable;
+        public bool IsPrimaryKey => _target.IsPrimaryKey;
+        public global::Assimalign.Cohesion.Database.Sql.Language.SqlExpression? DefaultValue => _target.DefaultValue;
+        public global::Assimalign.Cohesion.Database.Sql.Language.SqlIdentityDefinition? Identity => _target.Identity;
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.Sql.Language.SqlConstraintDefinition> Constraints => _target.Constraints;
+        public string? CollationName => _target.CollationName;
+    }
 }

@@ -79,7 +79,7 @@ public sealed class SqlExplainTests
 
     [Theory(DisplayName = "Cohesion Test [Sql] - EXPLAIN: one derived source has a Select root and multiple sources retain join steps")]
     [InlineData("SELECT * FROM (SELECT id FROM t) d", "Select", 0)]
-    [InlineData("SELECT * FROM t JOIN (SELECT id FROM t) d ON t.id = d.id", "NestedLoopJoin", 1)]
+    [InlineData("SELECT * FROM t JOIN (SELECT id FROM t) d ON t.id = d.id", "HashJoin", 1)]
     public async Task Execute_DerivedSource_ShouldDescribeRelationShape(string sql, string root, int steps)
     {
         // Arrange
@@ -101,7 +101,7 @@ public sealed class SqlExplainTests
     [Theory(DisplayName = "Cohesion Test [Sql] - EXPLAIN: chosen relational operators and index bounds are described")]
     [InlineData("SELECT id FROM t", "TableScan", false)]
     [InlineData("SELECT id FROM t WHERE age >= 20 AND age < 40", "IndexSeek", true)]
-    [InlineData("SELECT t.id FROM t JOIN u ON t.id = u.id", "NestedLoopJoin", false)]
+    [InlineData("SELECT t.id FROM t JOIN u ON t.id = u.id", "HashJoin", false)]
     [InlineData("SELECT t.id FROM t JOIN u ON t.id = u.id", "IndexSeek", true)]
     [InlineData("SELECT age, COUNT(*) FROM t GROUP BY age", "Group", false)]
     [InlineData("SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES", "SystemView", false)]
@@ -142,7 +142,9 @@ public sealed class SqlExplainTests
             var seek = rows.Single(row => Equals(row[2], "IndexSeek"));
             seek[3].ShouldBe("dbo.t");
             seek[4].ShouldBe("by_age");
-            seek[5].ShouldBe("age >= 20 AND age < 40");
+            seek[5].ShouldBe("age >= 20 AND age < 40; estimate_kind=exact_probe; probe_entries=0; probe_pages=1");
+            seek[6].ShouldBe(0L);
+            seek[7].ShouldBeNull();
         }
         if (indexes && statement.Contains("JOIN", StringComparison.Ordinal))
         {
@@ -212,7 +214,7 @@ public sealed class SqlExplainTests
         var rows = new List<DatabaseRow>();
         await foreach (var row in description.GetRowsAsync(CancellationToken.None)) { rows.Add(row); }
         rows[0].GetString(2).ShouldBe(expected);
-        new SqlQueryParser().Parse("EXPLAIN " + statement).Diagnostics.ShouldContain(d => d.Code == "COHDBL001");
+        new SqlQueryParser().Parse("EXPLAIN " + statement).Diagnostics.ShouldContain(d => d.Code == "CK00001");
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - EXPLAIN: binary seek bounds preserve the bytes as hexadecimal")]
@@ -233,7 +235,7 @@ public sealed class SqlExplainTests
             if (row.GetString(2) == "IndexSeek") { bounds.Add(row.GetString(5)); }
         }
         // Assert
-        bounds.ShouldBe(["key_bytes = X'00ABFF'"]);
+        bounds.ShouldBe(["key_bytes = X'00ABFF'; estimate_kind=exact_probe; probe_entries=0; probe_pages=1"]);
     }
 
     private static async Task<List<object?[]>> RowsAsync(SqlDatabaseSession session, string source)

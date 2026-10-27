@@ -1,23 +1,28 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database;
+using Assimalign.Cohesion.Database.Blob.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Documents;
 using Assimalign.Cohesion.Database.Documents.Catalog;
+using Assimalign.Cohesion.Database.Documents.RecoveryFixture;
 using Assimalign.Cohesion.Database.Execution;
 
 if (args.Length != 2) { throw new ArgumentException("Usage: seed|verify directory"); }
-await using var engine = DocumentDatabaseEngine.Create("document-engine", new()
-{
-    RootPath = args[1],
-    CheckpointInterval = TimeSpan.FromHours(1),
-    PageWriteBackInterval = TimeSpan.FromHours(1),
-    PageWriteBackBatchSize = 1024,
-    MaintenanceInterval = TimeSpan.FromHours(1)
-});
+var builder = DocumentDatabaseEngine.CreateBuilder("document-engine");
+builder.Options.RootPath = args[1];
+builder.Options.CheckpointInterval = TimeSpan.FromHours(1);
+builder.Options.PageWriteBackInterval = TimeSpan.FromHours(1);
+builder.Options.PageWriteBackBatchSize = 1024;
+builder.Options.MaintenanceInterval = TimeSpan.FromHours(1);
+builder.Functions.Add(DocumentScalarFunction.Create<string, string>("lower_tag", value => value.ToLowerInvariant()));
+builder.Functions.Add(DocumentAggregateFunction.Create<decimal, decimal, decimal>("rank_total", () => 0m, (state, value) => state + value, state => state));
+builder.Functions.Add(new HasValueFunction());
+await using var engine = await builder.BuildAsync(CancellationToken.None);
 string original = "{\"marker\":7,\"rank\":1,\"nested\":{\"array\":[true,null,\"" + new string('x', 40000) + "\"]}}";
 string updated = original.Replace("\"rank\":1,", "\"rank\":11,", StringComparison.Ordinal);
 if (args[0] == "seed")
@@ -61,7 +66,8 @@ if (args[0] == "seed")
 }
 else if (args[0] == "verify")
 {
-    var database = await engine.OpenDatabaseAsync("crash");
+    var database = await CrashReopen.OpenAsync(Path.Combine(args[1], "crash", "document.dat"),
+        token => engine.OpenDatabaseAsync("crash", token), CancellationToken.None);
     await using var session = await database.CreateSessionAsync();
     var collection = await session.GetCollectionAsync("items");
     var document = await collection.GetAsync(session, "committed");
@@ -111,6 +117,17 @@ else if (args[0] == "verify")
         throw new InvalidOperationException("Recovered unique index accepted a duplicate.");
     }
     catch (DocumentConstraintViolationException) { }
+    await using var custom = (DatabaseResultSet)await session.ExecuteAsync(
+        "SELECT lower_tag('READY') AS tag, has_value(nested.absent) AS present FROM items WHERE rank = 11", cancellationToken: CancellationToken.None);
+    await using var customRows = custom.GetRowsAsync(CancellationToken.None).GetAsyncEnumerator();
+    if (!await customRows.MoveNextAsync() || customRows.Current.GetString(0) != "ready" ||
+        !Equals(customRows.Current.GetValue(1), false) || await customRows.MoveNextAsync())
+    { throw new InvalidOperationException("Registered scalar functions did not retain typed and MISSING behavior after recovery."); }
+    await using var customTotal = (DatabaseResultSet)await session.ExecuteAsync(
+        "SELECT rank_total(rank) AS total FROM items WHERE rank = 11", cancellationToken: CancellationToken.None);
+    await using var totalRows = customTotal.GetRowsAsync(CancellationToken.None).GetAsyncEnumerator();
+    if (!await totalRows.MoveNextAsync() || !Equals(totalRows.Current.GetValue(0), 11m) || await totalRows.MoveNextAsync())
+    { throw new InvalidOperationException("Registered aggregate function did not execute after recovery."); }
     Console.WriteLine("Committed JSON and index recovered; partial writes absent.");
 }
 else { throw new ArgumentException("Unknown fixture mode."); }

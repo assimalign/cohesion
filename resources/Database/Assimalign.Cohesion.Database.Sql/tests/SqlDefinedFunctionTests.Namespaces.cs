@@ -61,7 +61,7 @@ public sealed partial class SqlDefinedFunctionTests
         var failure = await Should.ThrowAsync<SqlSchemaMigrationException>(async () => await builder.BuildAsync(CancellationToken.None));
 
         // Assert
-        failure.Message.ShouldContain("COHSQLS005");
+        failure.Message.ShouldContain("CS03205");
         failure.Message.ShouldContain("Nothing was opened or written");
     }
 }

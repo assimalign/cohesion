@@ -21,7 +21,7 @@ public sealed class SqlUnsupportedFunctionTests
         {
             var statement = new SqlQueryParser().Parse($"SELECT {entry.Spelling}(a) FROM t;");
             var diagnostic = statement.Diagnostics.ShouldHaveSingleItem();
-            diagnostic.Code.ShouldBe("COHDBL001");
+            diagnostic.Code.ShouldBe("CK00001");
             diagnostic.Message.ShouldNotBeNull().ShouldContain(entry.Spelling, Case.Sensitive);
             diagnostic.Start.ShouldBe(7);
             diagnostic.End.ShouldBe(7 + entry.Spelling.Length);
@@ -41,7 +41,7 @@ public sealed class SqlUnsupportedFunctionTests
         foreach (string expression in new[] { name + "()" })
         {
             var diagnostic = new SqlQueryParser().Parse($"SELECT {expression} FROM t;").Diagnostics.ShouldHaveSingleItem();
-            diagnostic.Code.ShouldBe("SQL0003");
+            diagnostic.Code.ShouldBe("CS00003");
             diagnostic.Severity.ShouldBe(DiagnosticSeverity.Error);
             diagnostic.Message.ShouldNotBeNull().ShouldContain(name, Case.Sensitive);
         }

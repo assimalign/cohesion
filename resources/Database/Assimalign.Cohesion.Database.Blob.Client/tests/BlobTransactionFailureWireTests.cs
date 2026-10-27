@@ -56,7 +56,7 @@ public sealed class BlobTransactionFailureWireTests
         (await next.GetPropertiesAsync("files", "keep", timeout.Token)).ShouldNotBeNull().Length.ShouldBe(8);
     }
 
-    /// <summary>COMMIT of a transaction a wire operation aborted fails with COHDBB001 and commits nothing.</summary>
+    /// <summary>COMMIT of a transaction a wire operation aborted fails with CB04001 and commits nothing.</summary>
     [Fact(DisplayName = "Cohesion Test [Blob.Client] - Transaction: COMMIT after a failed wire operation fails and commits nothing")]
     public async Task CommitAsync_AfterFailedWireOperation_ShouldFailWithCodeAndCommitNothing()
     {
@@ -76,9 +76,9 @@ public sealed class BlobTransactionFailureWireTests
         var repeated = await Should.ThrowAsync<DatabaseException>(async () => await transaction.CommitAsync(timeout.Token));
 
         // Assert
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBB001");
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CB04001");
         error.Message.ShouldContain("Container 'missing' does not exist.", Case.Sensitive);
-        repeated.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBB001");
+        repeated.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CB04001");
         transaction.State.ShouldBe(TransactionState.RolledBack);
         (await ReadAsync(harness.Container, "keep", timeout.Token)).ShouldBe("original");
     }
@@ -86,11 +86,11 @@ public sealed class BlobTransactionFailureWireTests
     /// <summary>
     /// A wire request refused before its operation starts still ends a host-opened transaction,
     /// because a Blob wire failure is terminal: the server aborts the transaction before it reports
-    /// the failure, then closes the connection. The host's COMMIT fails with COHDBB001 naming the
+    /// the failure, then closes the connection. The host's COMMIT fails with CB04001 naming the
     /// refusal before and after the teardown, its earlier wire write is undone, and a fresh
     /// connection works.
     /// </summary>
-    [Fact(DisplayName = "Cohesion Test [Blob.Client] - Transaction: a refused wire request ends the host transaction and COMMIT fails with COHDBB001")]
+    [Fact(DisplayName = "Cohesion Test [Blob.Client] - Transaction: a refused wire request ends the host transaction and COMMIT fails with CB04001")]
     public async Task UploadAsync_RefusedBeforeItStarts_ShouldEndHostTransactionAndFailCommitWithCode()
     {
         // Arrange
@@ -114,12 +114,26 @@ public sealed class BlobTransactionFailureWireTests
         // Assert: the refusal is the root session base's one "already active" message
         // (concrete-types plan §6.4), for the model's former "A transaction or stream is already
         // active on this session.".
+        const string refusalDetail = "A transaction or operation is already active on this session.";
         failure.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
-        failure.Message.ShouldContain("A transaction or operation is already active on this session.", Case.Sensitive);
-        commit.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBB001");
-        commit.Message.ShouldContain("nothing was committed", Case.Sensitive);
-        commit.Message.ShouldContain(failure.Message, Case.Sensitive);
+        failure.Message.ShouldBe("CK04004: " + refusalDetail);
+        failure.Diagnostics.ShouldBeEmpty(); // Blob's Error frame carries the formatted message only.
+        commit.ShouldBeOfType<DatabaseException>();
+        var cause = commit.InnerException.ShouldBeOfType<DatabaseException>();
+        cause.Message.ShouldBe(refusalDetail);
+        var causeDiagnostic = cause.Diagnostics.ShouldHaveSingleItem();
+        causeDiagnostic.Code.ShouldBe("CK04004");
+        causeDiagnostic.Message.ShouldBe(refusalDetail);
+        causeDiagnostic.Severity.ShouldBe(Types.DiagnosticSeverity.Error);
+        causeDiagnostic.Start.ShouldBeNull();
+        causeDiagnostic.End.ShouldBeNull();
+        var commitDiagnostic = commit.Diagnostics.ShouldHaveSingleItem();
+        commitDiagnostic.Code.ShouldBe("CB04001");
+        commitDiagnostic.Message.ShouldBe(commit.Message);
+        commit.Message.ShouldBe("The session's transaction is aborted and cannot commit; nothing was committed. Cause: " + refusalDetail);
         repeated.Message.ShouldBe(commit.Message);
+        repeated.InnerException.ShouldBeSameAs(cause);
+        repeated.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CB04001");
         transaction.State.ShouldBe(TransactionState.RolledBack);
         (await ReadAsync(harness.Container, "keep", timeout.Token)).ShouldBe("original");
         await using var next = await harness.Client.ConnectAsync(timeout.Token);

@@ -9,6 +9,7 @@ using System.Runtime.ExceptionServices;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Database;
 using Assimalign.Cohesion.Database.Internal;
 using Assimalign.Cohesion.Database.Documents.Internal;
 using Assimalign.Cohesion.Database.Documents.Storage;
@@ -68,9 +69,11 @@ namespace Assimalign.Cohesion.Database.Documents;
 /// </para>
 /// </remarks>
 // Deviates from the repo interface-first rule per design decision: Database engines are concrete-first — abstract bases with protected cores and sealed model leaves (owner, 2026-10-04; database-area.md).
+[global::System.Diagnostics.DebuggerDisplay("DocumentDatabaseEngine {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Documents.DocumentDatabaseEngine.DebugView))]
 public sealed class DocumentDatabaseEngine : DatabaseEngine
 {
-    private const string interruptedCreationCode = "COHDBD003";
+    private const string interruptedCreationCode = "CD06103";
 
     // How the model's messages start: "Document engine '{name}' …".
     internal const string ModelName = "Document";
@@ -100,9 +103,10 @@ public sealed class DocumentDatabaseEngine : DatabaseEngine
     // The databases the builder declared (owner decision 56): set once, before they are opened.
     private DatabaseName[] _declaredDatabases = [];
 
-    private DocumentDatabaseEngine(string name, DocumentDatabaseEngineOptions options)
+    private DocumentDatabaseEngine(string name, DocumentDatabaseEngineOptions options, DocumentFunctionCatalog functions)
         : base(name, EngineModel.Document, options.WorkerFailureWindow, options.WorkerFailureMinimumPasses, options.TimeProvider)
     {
+        Functions = functions;
         _options = options;
         JournalSizeLimit = DatabaseWorkerLimits.GetJournalSizeLimit(options.JournalSizeLimit, options.CheckpointJournalSize);
         _rootPath = options.StorageStrategy is null && options.RootPath is { IsEmpty: false } root ? Path.GetFullPath(root) : null;
@@ -139,6 +143,9 @@ public sealed class DocumentDatabaseEngine : DatabaseEngine
             return offline is null ? [] : offline.AsReadOnly();
         }
     }
+
+    /// <summary>Gets the immutable function catalog shared by every database and session.</summary>
+    public DocumentFunctionCatalog Functions { get; }
 
     internal DocumentDatabaseEngineOptions EngineOptions => _options;
 
@@ -205,7 +212,7 @@ public sealed class DocumentDatabaseEngine : DatabaseEngine
     /// <exception cref="ArgumentNullException"><paramref name="name"/> or <paramref name="options"/> is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="name"/> is empty or white space.</exception>
     /// <exception cref="ArgumentOutOfRangeException">
-    /// A worker interval or batch size is not positive, the grouped-commit window is not positive or
+    /// The statement memory budget, a worker interval or batch size is not positive; the grouped-commit window is not positive or
     /// is longer than <see cref="Assimalign.Cohesion.Database.Storage.Storage.MaximumGroupCommitWindow"/>,
     /// the buffer pool capacity is not a whole number of 8 KiB pages of at least 1 MiB, the
     /// checkpoint journal size is negative, the worker failure window is not positive or is longer
@@ -235,10 +242,10 @@ public sealed class DocumentDatabaseEngine : DatabaseEngine
     /// (<see cref="DocumentDatabaseEngineOptions.Snapshot"/>): the engine keeps this object.
     /// </param>
     /// <returns>The running engine.</returns>
-    internal static DocumentDatabaseEngine CreateUncomposed(string name, DocumentDatabaseEngineOptions options)
+    internal static DocumentDatabaseEngine CreateUncomposed(string name, DocumentDatabaseEngineOptions options, DocumentFunctionCatalog? functions = null)
     {
         ValidateOptions(name, options);
-        return new DocumentDatabaseEngine(name, options);
+        return new DocumentDatabaseEngine(name, options, functions ?? DocumentFunctionCatalog.Standard);
     }
 
     /// <summary>
@@ -259,6 +266,11 @@ public sealed class DocumentDatabaseEngine : DatabaseEngine
         ArgumentNullException.ThrowIfNull(options);
         string engine = DatabaseEngineOptionChecks.Describe(ModelName, name);
 
+        if (options.StatementMemoryBudget <= 0)
+        {
+            throw DatabaseEngineOptionChecks.Refuse(engine, nameof(options.StatementMemoryBudget),
+                options.StatementMemoryBudget, ErrorMessages.OptionPositiveRequirement);
+        }
         DatabaseEngineOptionChecks.ThrowIfNotPositive(options.CheckpointInterval, engine, nameof(options.CheckpointInterval));
         DatabaseEngineOptionChecks.ThrowIfNotPositive(options.PageWriteBackInterval, engine, nameof(options.PageWriteBackInterval));
         DatabaseEngineOptionChecks.ThrowIfNotPositive(options.MaintenanceInterval, engine, nameof(options.MaintenanceInterval));
@@ -431,7 +443,7 @@ public sealed class DocumentDatabaseEngine : DatabaseEngine
             bool open = _databases.Remove(name, out var database);
             if (!open && !StorageExists(name, directory))
             {
-                throw new DatabaseNotFoundException($"Database '{name}' does not exist.");
+                throw DatabaseNotFoundException.CreateEngineAbsence("CK03002", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.EngineDropDatabaseCoreAsyncFailure, name));
             }
 
             // The engine lets the database go before it closes it, and the close waits for one a
@@ -559,7 +571,7 @@ public sealed class DocumentDatabaseEngine : DatabaseEngine
 
         if (failures is not null)
         {
-            throw new AggregateException("One or more document databases failed to close.", failures);
+            throw new AggregateException(ErrorMessages.EngineDisposeAsyncCoreAggregate, failures);
         }
     }
 
@@ -575,7 +587,7 @@ public sealed class DocumentDatabaseEngine : DatabaseEngine
             {
                 if (create)
                 {
-                    throw new DatabaseException($"Database '{name}' already exists.");
+                    throw DatabaseException.CreateEngineFailure("CK03001", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabaseEngineGetDatabaseDatabase, name));
                 }
 
                 if (existing.IsClosed || !existing.IsOffline)
@@ -621,12 +633,12 @@ public sealed class DocumentDatabaseEngine : DatabaseEngine
             }
             if (create && StorageExists(name, directory))
             {
-                throw new DatabaseException($"Database '{name}' already exists.");
+                throw DatabaseException.CreateEngineFailure("CK03001", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabaseEngineGetDatabaseDatabase, name));
             }
 
             if (!create && !HasDatabase(name, directory))
             {
-                throw new DatabaseNotFoundException($"Database '{name}' does not exist.");
+                throw DatabaseNotFoundException.CreateEngineAbsence("CK03002", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.EngineDropDatabaseCoreAsyncFailure, name));
             }
 
             if (directory is not null && create)
@@ -641,7 +653,7 @@ public sealed class DocumentDatabaseEngine : DatabaseEngine
                     : OpenStorage(directory, _memory, name, create, _options.Durability);
                 if (storage is null)
                 {
-                    throw new InvalidOperationException("The storage strategy returned null.");
+                    throw new InvalidOperationException(ErrorMessages.DatabaseEngineGetDatabaseFailure);
                 }
                 // Recovery may retain a partial tail described only by uncommitted work.
                 // Storage ignores it until the next allocation overwrites it.
@@ -677,7 +689,7 @@ public sealed class DocumentDatabaseEngine : DatabaseEngine
                 && DatabaseFailure.Find<Assimalign.Cohesion.Database.Indexing.IndexCorruptionException>(exception) is { } indexCorruption)
             {
                 var refusal = DatabaseCorruptionException.Create(name, indexCorruption, [new Types.Diagnostic
-                { Code = "COHDBD005", Message = exception.Message, Severity = Types.DiagnosticSeverity.Error }]);
+                { Code = "CD06105", Message = exception.Message, Severity = Types.DiagnosticSeverity.Error }]);
                 storage?.TakeOffline(StorageOfflineCause.RecoveryInterrupted, refusal.Message, exception);
                 storage?.Dispose();
                 throw refusal;
@@ -688,26 +700,26 @@ public sealed class DocumentDatabaseEngine : DatabaseEngine
                 storage?.TakeOffline(StorageOfflineCause.RecoveryInterrupted, message, exception);
                 storage?.Dispose();
                 throw new DatabaseException(message, [new Types.Diagnostic
-                { Code = "COHDBD004", Message = message, Severity = Types.DiagnosticSeverity.Error }], exception);
+                { Code = "CD06104", Message = message, Severity = Types.DiagnosticSeverity.Error }], exception);
             }
             catch (Assimalign.Cohesion.Database.Indexing.IndexException exception)
             {
                 storage?.Dispose();
                 throw new DatabaseException(exception.Message, [new Types.Diagnostic
-                { Code = "COHDBD005", Message = exception.Message, Severity = Types.DiagnosticSeverity.Error }], exception);
+                { Code = "CD06105", Message = exception.Message, Severity = Types.DiagnosticSeverity.Error }], exception);
             }
             catch (Documents.Catalog.DocumentCatalogException exception)
             {
                 storage?.Dispose();
                 throw new DatabaseException(exception.Message, [new Types.Diagnostic
-                { Code = "COHDBD005", Message = exception.Message, Severity = Types.DiagnosticSeverity.Error }], exception);
+                { Code = "CD06105", Message = exception.Message, Severity = Types.DiagnosticSeverity.Error }], exception);
             }
             catch (StorageFormatException exception)
             {
                 // The storage refused the file set before recovery wrote anything; the refusal
                 // names the formats and the remedy, and this names the database.
                 storage?.Dispose();
-                throw new DatabaseException($"Database '{name}' cannot be opened. {exception.Message}", exception);
+                throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CatalogOpenFailed, name, exception.Message), exception);
             }
             catch
             {
@@ -733,8 +745,8 @@ public sealed class DocumentDatabaseEngine : DatabaseEngine
                 if (!found)
                 {
                     throw create
-                        ? new DatabaseException($"Database '{name}' already exists.")
-                        : new DatabaseNotFoundException($"Database '{name}' does not exist.");
+                        ? DatabaseException.CreateEngineFailure("CK03001", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabaseEngineGetDatabaseDatabase, name))
+                        : DatabaseNotFoundException.CreateEngineAbsence("CK03002", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.EngineDropDatabaseCoreAsyncFailure, name));
                 }
             }
             else
@@ -824,5 +836,18 @@ public sealed class DocumentDatabaseEngine : DatabaseEngine
     private void RebuildSnapshot()
     {
         Volatile.Write(ref _instances, [.. _databases.Values]);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Documents.DocumentDatabaseEngine _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Documents.DocumentDatabaseEngine value)
+        {
+            _target = value;
+        }
+
+        public string Name => _target.Name;
+        public global::Assimalign.Cohesion.Database.EngineModel Model => _target.Model;
     }
 }

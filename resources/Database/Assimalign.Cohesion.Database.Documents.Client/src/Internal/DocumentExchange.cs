@@ -12,19 +12,21 @@ using Assimalign.Cohesion.Database.Documents.Protocol;
 
 namespace Assimalign.Cohesion.Database.Documents.Client.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("DocumentExchange")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Documents.Client.Internal.DocumentExchange.DebugView))]
 internal sealed class DocumentExchange : DatabaseProtocolExchange<DocumentExchangeResult>
 {
     private readonly ProtocolFrame _request;
     private readonly DocumentProtocolCommandMessage? _command;
 
-    internal DocumentExchange(string statement, IReadOnlyDictionary<string, object?>? parameters) : base(DocumentProtocol.Family)
+    internal DocumentExchange(string statement, IReadOnlyDictionary<string, object?>? parameters) : base(DocumentProtocol.Family, transactionStatus: true)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(statement);
         _request = new((ProtocolMessageType)DocumentProtocolMessageType.Execute,
             new DocumentProtocolExecuteMessage(statement, DocumentJsonValues.Parameters(parameters)).Encode());
     }
 
-    internal DocumentExchange(DocumentProtocolCommandMessage command) : base(DocumentProtocol.Family)
+    internal DocumentExchange(DocumentProtocolCommandMessage command) : base(DocumentProtocol.Family, transactionStatus: true)
     {
         _command = command;
         _request = new((ProtocolMessageType)DocumentProtocolMessageType.Command, command.Encode());
@@ -149,7 +151,8 @@ internal sealed class DocumentExchange : DatabaseProtocolExchange<DocumentExchan
         if (complete.ResultCount != count) { throw new ProtocolException(ErrorMessages.CompletionCountMismatch); }
         bool valid = _command?.Operation switch
         {
-            null => header is null ? count == 0 && complete.AffectedCount >= 0 : complete.AffectedCount == -1,
+            null => header is null ? count == 0 && complete.AffectedCount >= 0 :
+                complete.AffectedCount == -1 || complete.AffectedCount == count,
             DocumentProtocolOperation.Get => count <= 1 && complete.AffectedCount == -1,
             DocumentProtocolOperation.Put => count == 1 && complete.AffectedCount == 1,
             DocumentProtocolOperation.Delete => count == 0 && complete.AffectedCount is 0 or 1,
@@ -160,5 +163,13 @@ internal sealed class DocumentExchange : DatabaseProtocolExchange<DocumentExchan
             _ => false,
         };
         if (!valid) { throw new ProtocolException(ErrorMessages.CompletionUnexpected); }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Documents.Client.Internal.DocumentExchange value)
+        {
+            _ = value;
+        }
     }
 }

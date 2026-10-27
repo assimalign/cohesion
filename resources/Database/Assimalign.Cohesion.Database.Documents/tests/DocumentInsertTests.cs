@@ -24,7 +24,7 @@ public sealed class DocumentInsertTests
     [InlineData("INSERT INTO returning (KEY, VALUE) VALUES ('a', 1)", "1")]
     [InlineData("INSERT INTO returning (KEY returning) SELECT 'a' AS returning FROM items", "{\"returning\":\"a\"}")]
     [InlineData("INSERT INTO returning (KEY k, VALUE returning) SELECT 'a' AS k, n AS returning FROM items", "2")]
-    public async Task Execute_ReturningIdentifier_ShouldBindAndRejectOnlyATrailingClauseAsync(string statement, string expected)
+    public async Task Execute_ReturningIdentifier_ShouldBindAndProjectTrailingClauseAsync(string statement, string expected)
     {
         // Arrange
         await using var engine = DocumentDatabaseEngine.Create("returning", new());
@@ -40,9 +40,13 @@ public sealed class DocumentInsertTests
         // Assert
         inserted.AffectedCount.ShouldBe(1);
         Encoding.UTF8.GetString((await destination.GetAsync(session, "a", CancellationToken.None)).ShouldNotBeNull().Content.Span).ShouldBe(expected);
-        var refused = await Should.ThrowAsync<DatabaseParseException>(async () =>
-            await session.ExecuteAsync(statement + " RETURNING *", cancellationToken: CancellationToken.None));
-        refused.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBL001");
+        await destination.DeleteAsync(session, "a", cancellationToken: CancellationToken.None);
+        await using var returned = (await session.ExecuteAsync(statement + " RETURNING *", cancellationToken: CancellationToken.None)).ShouldBeAssignableTo<DatabaseResultSet>();
+        returned.AffectedCount.ShouldBe(1);
+        await using var rows = returned.GetRowsAsync(CancellationToken.None).GetAsyncEnumerator();
+        (await rows.MoveNextAsync()).ShouldBeTrue();
+        Encoding.UTF8.GetString(rows.Current.GetBytes(0).Span).ShouldBe(expected);
+        (await rows.MoveNextAsync()).ShouldBeFalse();
         (await RowsAsync(session, "SELECT META().id FROM returning")).ShouldHaveSingleItem()[0].ShouldBe("a");
     }
 
@@ -88,7 +92,7 @@ public sealed class DocumentInsertTests
             new Dictionary<string, object?> { ["doc"] = json.RootElement }, CancellationToken.None));
 
         // Assert
-        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDOC008");
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD02008");
         failure.InnerException.ShouldBeOfType<JsonException>();
         (await RowsAsync(session, "SELECT * FROM items")).ShouldBeEmpty();
     }
@@ -142,7 +146,7 @@ public sealed class DocumentInsertTests
         duplicate.CollectionName.ShouldBe("items");
         duplicate.DocumentId.ShouldBe(new DocumentId("a"));
         duplicate.Message.ShouldBe("Collection 'items' already contains document key 'a'.");
-        duplicate.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDOC012");
+        duplicate.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD03012");
         (await RowsAsync(session, "SELECT META().id, META().version FROM items")).SelectMany(row => row).ShouldBe(before.SelectMany(row => row));
         (await items.GetAsync(session, "a", CancellationToken.None)).ShouldNotBeNull();
     }

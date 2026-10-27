@@ -25,6 +25,8 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// and resolves with one field read.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("SqlBoundCollation")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlBoundCollation.DebugView))]
 internal readonly struct SqlBoundCollation
 {
     private readonly Collation? _collation;
@@ -68,4 +70,12 @@ internal readonly struct SqlBoundCollation
         => first.IsDeferred || second.IsDeferred
             ? new SqlBoundCollation(new SqlDeferredCollation(first, second, defaultCollation))
             : new SqlBoundCollation(SqlCollationCandidate.Choose(first, second) ?? defaultCollation);
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlBoundCollation value)
+        {
+            _ = value;
+        }
+    }
 }

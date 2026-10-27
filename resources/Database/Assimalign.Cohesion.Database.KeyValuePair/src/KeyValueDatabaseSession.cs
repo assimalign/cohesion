@@ -29,9 +29,9 @@ using Assimalign.Cohesion.Database.Transactions;
 /// <para>
 /// <b>A command is statement-atomic.</b> Inside an explicit transaction, a command that fails
 /// writes nothing and leaves the transaction active, as a failed SQL statement does; the session
-/// never aborts its transaction for a failed command (DESIGN.md, "Failed commands in explicit
-/// transactions"). Commands do not hold the session (the base's operation hold): an auto-commit
-/// command and a BEGIN may run side by side, as before the bases.
+/// never aborts its transaction for an ordinary failed command (DESIGN.md, "Failed commands in explicit
+/// transactions"). CALL holds the session until completion and refuses other commands before
+/// execution. Ordinary data commands retain their existing admission behavior.
 /// </para>
 /// <para>
 /// <b>Typed requests only.</b> The key-value model has no query language. Its one execute member
@@ -48,11 +48,14 @@ using Assimalign.Cohesion.Database.Transactions;
 /// the base's public members.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("KeyValueDatabaseSession")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.KeyValuePair.KeyValueDatabaseSession.DebugView))]
 public sealed class KeyValueDatabaseSession : DatabaseExecutionSession<KeyValueRequest>
 {
     private readonly KeyValueDatabase _database;
     private readonly TransactionCoordinator _coordinator;
     private readonly KeyValueOperationExecutor _executor;
+    private int _invokingFunction;
 
     internal KeyValueDatabaseSession(KeyValueDatabase database, TransactionCoordinator coordinator, KeyValueOperationExecutor executor)
         : base(database)
@@ -82,9 +85,9 @@ public sealed class KeyValueDatabaseSession : DatabaseExecutionSession<KeyValueR
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the transaction began.</exception>
     /// <exception cref="DatabaseException">
     /// The session is closed; a transaction or operation is already active on it; or the session's
-    /// transaction refuses work (<c>COHDBK001</c>).
+    /// transaction refuses work (<c>CV04101</c>).
     /// </exception>
-    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBK002</c>, #1243).</exception>
+    /// <exception cref="DatabaseOfflineException">The database is offline (<c>CV06102</c>, #1243).</exception>
     public new async ValueTask<KeyValueDatabaseTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default)
         => (KeyValueDatabaseTransaction)await base.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
 
@@ -97,10 +100,10 @@ public sealed class KeyValueDatabaseSession : DatabaseExecutionSession<KeyValueR
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the transaction began.</exception>
     /// <exception cref="DatabaseException">
     /// The session is closed; a transaction or operation is already active on it; the session's
-    /// transaction refuses work (<c>COHDBK001</c>); or <paramref name="isolationLevel"/> is
+    /// transaction refuses work (<c>CV04101</c>); or <paramref name="isolationLevel"/> is
     /// <see cref="IsolationLevel.Serializable"/>.
     /// </exception>
-    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBK002</c>, #1243).</exception>
+    /// <exception cref="DatabaseOfflineException">The database is offline (<c>CV06102</c>, #1243).</exception>
     /// <remarks>
     /// The session begins an MVCC transaction context on the database's transaction manager
     /// alongside the physical storage bracket (paired under one sequence):
@@ -120,10 +123,8 @@ public sealed class KeyValueDatabaseSession : DatabaseExecutionSession<KeyValueR
         _database.ThrowIfOffline();
         if (isolationLevel == IsolationLevel.Serializable)
         {
-            throw new DatabaseException(
-                "IsolationLevel.Serializable is not supported by the key-value engine yet: serialization-conflict " +
-                "detection is a post-MVP feature, and the session contract forbids running weaker than requested. " +
-                "Use IsolationLevel.Snapshot or IsolationLevel.ReadCommitted.");
+            throw DatabaseException.CreateKeyValuePairFailure("CK04001",
+                ErrorMessages.BeginTransactionCoreAsyncDatabase);
         }
 
         TransactionContext context;
@@ -142,7 +143,7 @@ public sealed class KeyValueDatabaseSession : DatabaseExecutionSession<KeyValueR
     /// <summary>
     /// Runs one command of the key-value command grammar (<c>docs/COMMANDS.md</c>:
     /// <c>GET</c>/<c>PUT</c>/<c>DELETE</c>/<c>EXISTS</c>/<c>SCAN</c> with parameter operands, and
-    /// <c>KEYSPACES</c>), the wire encoding of the typed requests: the wire server's entry, which
+    /// <c>KEYSPACES</c>/<c>CALL</c>), the wire encoding of the typed requests: the wire server's entry, which
     /// lets it carry key-value commands in the protocol's existing Execute message.
     /// </summary>
     /// <param name="commandText">The command text.</param>
@@ -159,10 +160,10 @@ public sealed class KeyValueDatabaseSession : DatabaseExecutionSession<KeyValueR
     /// </remarks>
     /// <exception cref="ArgumentException"><paramref name="commandText"/> is null, empty or white space.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the command was parsed.</exception>
-    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBK002</c>, #1243).</exception>
+    /// <exception cref="DatabaseOfflineException">The database is offline (<c>CV06102</c>, #1243).</exception>
     /// <exception cref="DatabaseParseException">The text violates the grammar, references a missing parameter, or binds an operand of the wrong type.</exception>
     /// <exception cref="DatabaseException">
-    /// The session is closed; its transaction refuses commands (<c>COHDBK001</c>); or the command
+    /// The session is closed; its transaction refuses commands (<c>CV04101</c>); or the command
     /// failed.
     /// </exception>
     internal ValueTask<DatabaseResult> ExecuteCommandTextAsync(string commandText, IReadOnlyDictionary<string, object?>? parameters = null, CancellationToken cancellationToken = default)
@@ -184,6 +185,19 @@ public sealed class KeyValueDatabaseSession : DatabaseExecutionSession<KeyValueR
     private async ValueTask<DatabaseResult> ExecuteRequestAsync(KeyValueRequest request, CancellationToken cancellationToken)
     {
         _database.ThrowIfOffline();
+        if (Volatile.Read(ref _invokingFunction) != 0)
+        {
+            throw DatabaseException.CreateKeyValuePairFailure("CK07003", ErrorMessages.SessionOperationActive);
+        }
+        bool invokesFunction = request is KeyValueFunctionRequest;
+        if (invokesFunction)
+        {
+            if (!TryEnterOperation())
+            {
+                throw DatabaseException.CreateKeyValuePairFailure("CK07003", ErrorMessages.SessionOperationActive);
+            }
+            Volatile.Write(ref _invokingFunction, 1);
+        }
 
         try
         {
@@ -196,6 +210,14 @@ public sealed class KeyValueDatabaseSession : DatabaseExecutionSession<KeyValueR
             // unconfirmed when a storage commit record was written before the flush failed; the
             // unconfirmed commit that took it offline keeps its own type.
             throw await AbortStorageFailureAsync(translated).ConfigureAwait(false);
+        }
+        finally
+        {
+            if (invokesFunction)
+            {
+                Volatile.Write(ref _invokingFunction, 0);
+                ExitOperation();
+            }
         }
     }
 
@@ -350,5 +372,17 @@ public sealed class KeyValueDatabaseSession : DatabaseExecutionSession<KeyValueR
         {
             await _coordinator.RollbackAsync(snapshotPin, CancellationToken.None).ConfigureAwait(false);
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.KeyValuePair.KeyValueDatabaseSession _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.KeyValuePair.KeyValueDatabaseSession value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.KeyValuePair.KeyValueDatabase Database => _target.Database;
     }
 }

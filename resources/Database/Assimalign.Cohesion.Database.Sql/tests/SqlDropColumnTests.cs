@@ -12,6 +12,8 @@ using Xunit;
 
 using Assimalign.Cohesion.Database.Sql.Protocol;
 
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
+
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 using Assimalign.Cohesion.Database.Execution;
@@ -33,7 +35,7 @@ using Assimalign.Cohesion.Database.Types;
 /// </summary>
 public sealed class SqlDropColumnTests : IDisposable
 {
-    private static readonly string LongDefault = new('p', 1_500);
+    private static readonly string _longDefault = new('p', 1_500);
 
     private readonly string _rootPath = Path.Combine(Path.GetTempPath(), "cohesion-sql-drop-column", Guid.NewGuid().ToString("N"));
 
@@ -153,7 +155,7 @@ public sealed class SqlDropColumnTests : IDisposable
 
             using var stop = new CancellationTokenSource();
             int started = 0;
-            var tasks = Enumerable.Range(0, readers).Select(reader => Task.Run(async () =>
+            var tasks = Enumerable.Range(0, readers).Select(reader => DedicatedTestTask.Run(async () =>
             {
                 await using var session = await database.CreateSessionAsync();
                 int query = 0;
@@ -238,7 +240,7 @@ public sealed class SqlDropColumnTests : IDisposable
             var tuples = new List<string>();
             foreach (int id in batch)
             {
-                var row = new PagedRow(id, id % 7, id % 50, CodeOf(id), LongDefault);
+                var row = new PagedRow(id, id % 7, id % 50, CodeOf(id), _longDefault);
                 model.Add(id, row);
                 tuples.Add($"({id}, {row.Grp}, {row.Score}, 'note-{id:D4}-for-the-dropped-column', '{row.Code}')");
             }
@@ -246,7 +248,7 @@ public sealed class SqlDropColumnTests : IDisposable
             await ExecuteAsync(writer, $"INSERT INTO t (id, grp, score, note, code) VALUES {string.Join(", ", tuples)}");
         }
 
-        await ExecuteAsync(writer, $"ALTER TABLE t ADD COLUMN pad VARCHAR(1600) DEFAULT '{LongDefault}'");
+        await ExecuteAsync(writer, $"ALTER TABLE t ADD COLUMN pad VARCHAR(1600) DEFAULT '{_longDefault}'");
 
         // The reader's snapshot pins the versions the DML below tombstones.
         var snapshot = await reader.BeginTransactionAsync(IsolationLevel.Snapshot, CancellationToken.None);
@@ -267,7 +269,7 @@ public sealed class SqlDropColumnTests : IDisposable
         for (int id = 1_000; id < 1_020; id++)
         {
             bool explicitPad = id % 2 == 0;
-            var row = new PagedRow(id, id % 7, id % 50, CodeOf(id), explicitPad ? $"short-{id}" : LongDefault);
+            var row = new PagedRow(id, id % 7, id % 50, CodeOf(id), explicitPad ? $"short-{id}" : _longDefault);
             model.Add(id, row);
             await ExecuteAsync(writer, explicitPad
                 ? $"INSERT INTO t (id, grp, score, note, code, pad) VALUES ({id}, {row.Grp}, {row.Score}, NULL, '{row.Code}', '{row.Pad}')"

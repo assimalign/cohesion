@@ -38,10 +38,10 @@ public sealed class SqlTypedLiteralTests
 
     public static IEnumerable<object[]> InvalidLiterals()
     {
-        string[][] cases = [["DATE '2024-02-30'", "SQL0008"], ["INTERVAL '1 year'", "COHDBL001"],
-            ["INTERVAL 'P1M'", "COHDBL001"], ["INTERVAL '1-2'", "COHDBL001"],
-            ["INTERVAL 'P1Y2M'", "COHDBL001"], ["INTERVAL 'P0001-02-03T04:05:06'", "COHDBL001"],
-            ["INTERVAL '10675199 02:48:05.4775808'", "SQL0008"]];
+        string[][] cases = [["DATE '2024-02-30'", "CS00008"], ["INTERVAL '1 year'", "CK00001"],
+            ["INTERVAL 'P1M'", "CK00001"], ["INTERVAL '1-2'", "CK00001"],
+            ["INTERVAL 'P1Y2M'", "CK00001"], ["INTERVAL 'P0001-02-03T04:05:06'", "CK00001"],
+            ["INTERVAL '10675199 02:48:05.4775808'", "CS00008"]];
         foreach (bool tcp in new[] { false, true })
         {
             foreach (string[] literal in cases) { yield return [literal[0], literal[1], tcp]; }

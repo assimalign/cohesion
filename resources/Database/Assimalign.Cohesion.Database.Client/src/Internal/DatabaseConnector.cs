@@ -14,17 +14,23 @@ using Assimalign.Cohesion.Database.Protocol;
 namespace Assimalign.Cohesion.Database.Client.Internal;
 
 // An authenticated transport. Only the pool owns connectors; callers receive a new lease per rent.
+[global::System.Diagnostics.DebuggerDisplay("DatabaseConnector {Database,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Client.Internal.DatabaseConnector.DebugView))]
 internal sealed class DatabaseConnector
 {
+    private static readonly string _errorDatabaseConnectorDialAsyncFailure = ErrorMessages.DatabaseConnectorDialAsyncFailure;
+
     private readonly IDuplexConnectionFactory _connectionFactory;
     private readonly DatabaseConnectionSettings _settings;
 
     private IDuplexConnection? _connection;
     private ProtocolFrameReader? _reader;
     private ProtocolFrameWriter? _writer;
+    private ClientFrameWriter? _exchangeWriter;
     private volatile bool _isOpen;
     private bool _isClosed;
     private int _opened;
+    private ProtocolTransactionStatus? _transactionStatus;
 
     internal DatabaseConnector(IDuplexConnectionFactory connectionFactory, DatabaseConnectionSettings settings, ProtocolMessageFamily family)
     {
@@ -101,6 +107,7 @@ internal sealed class DatabaseConnector
             var channel = new ProtocolChannel(stream, Family, leaveOpen: true);
             _reader = channel.Reader;
             _writer = channel.Writer;
+            _exchangeWriter = new ClientFrameWriter(_writer, Family);
 
             var startup = new ProtocolStartupMessage(ProtocolVersion.Current, Database, Principal)
             { Capabilities = Family.Capabilities.Select(capability => capability.Name).ToArray() };
@@ -116,7 +123,7 @@ internal sealed class DatabaseConnector
 
             if (challenge.Type != ProtocolMessageType.Authenticate)
             {
-                throw MarkBroken(new DatabaseClientException(ProtocolErrorCode.ProtocolViolation, $"Expected an authenticate challenge but received {challenge.Type}."));
+                throw MarkBroken(new DatabaseClientException(ProtocolErrorCode.ProtocolViolation, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ConnectorOpenAsyncDatabaseClient, challenge.Type)));
             }
 
             // MVP trust method: the challenge carries no payload and the response
@@ -134,7 +141,7 @@ internal sealed class DatabaseConnector
 
             if (ready.Type != ProtocolMessageType.Ready)
             {
-                throw MarkBroken(new DatabaseClientException(ProtocolErrorCode.ProtocolViolation, $"Expected a ready frame but received {ready.Type}."));
+                throw MarkBroken(new DatabaseClientException(ProtocolErrorCode.ProtocolViolation, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ConnectorOpenAsyncDatabaseClient2, ready.Type)));
             }
             try
             {
@@ -142,6 +149,8 @@ internal sealed class DatabaseConnector
                 channel.SetAgreement(agreement);
                 ServerVersion = agreement.Version;
                 Capabilities = channel.Capabilities;
+                if (Capabilities.Contains(ProtocolCapability.TransactionStatus.Name))
+                { _transactionStatus = ProtocolTransactionStatus.Idle; }
             }
             catch (ProtocolException exception)
             {
@@ -207,18 +216,18 @@ internal sealed class DatabaseConnector
         }
         catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested)
         {
-            throw new DatabaseClientException(ProtocolErrorCode.ConnectionFailure, $"Failed to connect to {Describe(endPoint)}: the connection attempt timed out.", exception);
+            throw new DatabaseClientException(ProtocolErrorCode.ConnectionFailure, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ConnectorDialAsyncDatabaseClient, Describe(endPoint)), exception);
         }
         catch (Exception exception) when (cancellationToken.IsCancellationRequested && exception is not (OperationCanceledException or ObjectDisposedException or OutOfMemoryException))
         {
-            throw new OperationCanceledException("The connection attempt was canceled.", exception, cancellationToken);
+            throw new OperationCanceledException(_errorDatabaseConnectorDialAsyncFailure, exception, cancellationToken);
         }
         catch (Exception exception) when (exception is not (OperationCanceledException or ObjectDisposedException or OutOfMemoryException))
         {
             // Broad on purpose: IDuplexConnectionFactory is an open seam and each transport throws its
             // own types (SocketException, IOException, AuthenticationException, TimeoutException,
             // ConnectionAbortedException), so a list would let the next transport's failure escape.
-            throw new DatabaseClientException(ProtocolErrorCode.ConnectionFailure, $"Failed to connect to {Describe(endPoint)}: {exception.Message}", exception);
+            throw new DatabaseClientException(ProtocolErrorCode.ConnectionFailure, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ConnectorDialAsyncDatabaseClient2, Describe(endPoint), exception.Message), exception);
         }
     }
 
@@ -267,7 +276,22 @@ internal sealed class DatabaseConnector
                 }
                 throw FromErrorFrame(terminal.Value);
             }
-            return await exchange.ExecuteAsync(_reader!, _writer!, cancellationToken).ConfigureAwait(false);
+            TResult result;
+            _exchangeWriter!.BeginExchange();
+            try
+            {
+                result = await exchange.ExecuteAsync(_reader!, _exchangeWriter, cancellationToken).ConfigureAwait(false);
+            }
+            catch when (exchange.IsResponseComplete && (_exchangeWriter.RequiresTransactionStatus || exchange.ExpectsTransactionStatus) && Capabilities.Contains(ProtocolCapability.TransactionStatus.Name))
+            {
+                // Preserve the original statement exception, even if its trailing status is broken.
+                try { await ReadTransactionStatusAsync().ConfigureAwait(false); }
+                catch { _isOpen = false; }
+                throw;
+            }
+            if ((_exchangeWriter.RequiresTransactionStatus || exchange.ExpectsTransactionStatus) && Capabilities.Contains(ProtocolCapability.TransactionStatus.Name))
+            { await ReadTransactionStatusAsync().ConfigureAwait(false); }
+            return result;
         }
         catch (DatabaseClientException exception) when (exception.Code == ProtocolErrorCode.ConnectionFailure)
         {
@@ -275,7 +299,7 @@ internal sealed class DatabaseConnector
             // from a server's error frame: a peer that is not a conforming server. The decoded
             // exception is not kept as the inner exception, so no exception chain carries the code
             // for anything but a failed dial.
-            throw MarkBroken(new DatabaseClientException(ProtocolErrorCode.ProtocolViolation, $"The server sent the client-local {nameof(ProtocolErrorCode.ConnectionFailure)} code: {exception.Message}"));
+            throw MarkBroken(new DatabaseClientException(ProtocolErrorCode.ProtocolViolation, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ConnectorExecuteAsyncDatabaseClient, nameof(ProtocolErrorCode.ConnectionFailure), exception.Message)));
         }
         catch (DatabaseClientException exception)
         {
@@ -294,7 +318,7 @@ internal sealed class DatabaseConnector
         }
         catch (Exception exception) when (IsTransportFailure(exception))
         {
-            throw MarkBroken(new DatabaseClientException(ProtocolErrorCode.Internal, "The connection failed during an exchange.", exception));
+            throw MarkBroken(new DatabaseClientException(ProtocolErrorCode.Internal, ErrorMessages.ConnectorExecuteAsyncDatabaseClient2, exception));
         }
         catch (OperationCanceledException)
         {
@@ -309,6 +333,94 @@ internal sealed class DatabaseConnector
                 _isOpen = false;
             }
             throw;
+        }
+    }
+
+    private async ValueTask ReadTransactionStatusAsync()
+    {
+        // Result/terminal error already arrived. Caller cancellation can no longer cancel
+        // the statement; finish protocol bookkeeping with a bounded cleanup token.
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        _transactionStatus = null;
+        var frame = await _reader!.ReadFrameAsync(timeout.Token).ConfigureAwait(false);
+        if (frame is null || frame.Value.Type != ProtocolMessageType.Ready)
+        { throw new ProtocolException(ErrorMessages.TransactionStatusMissing); }
+        _transactionStatus = ProtocolTransactionStatusMessage.Decode(frame.Value.Payload.Span).Status;
+    }
+
+    // Return owns the connector exclusively, after the lease joined its last exchange. No pool lock
+    // is held across this I/O. Legacy transaction-capable peers cannot certify a clean session.
+    internal async ValueTask<bool> ResetAsync()
+    {
+        if (!Family.Capabilities.Contains(ProtocolCapability.TransactionStatus)) { return true; }
+        if (!Capabilities.Contains(ProtocolCapability.TransactionStatus.Name)) { return false; }
+        if (_transactionStatus == ProtocolTransactionStatus.Idle) { return true; }
+        if (_transactionStatus is null) { return false; }
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        try
+        {
+            await ExecuteAsync(new TransactionRollbackExchange(Family), timeout.Token).ConfigureAwait(false);
+            return _transactionStatus == ProtocolTransactionStatus.Idle;
+        }
+        catch
+        {
+            _isOpen = false;
+            return false;
+        }
+    }
+
+    [global::System.Diagnostics.DebuggerDisplay("TransactionRollbackExchange")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Client.Internal.DatabaseConnector.TransactionRollbackExchange.DebugView))]
+    private sealed class TransactionRollbackExchange : DatabaseProtocolExchange<bool>
+    {
+        internal TransactionRollbackExchange(ProtocolMessageFamily family)
+            : base(family, transactionStatus: true)
+        {
+        }
+
+        protected override async ValueTask<bool> ExecuteCoreAsync(ProtocolFrameReader reader, ProtocolFrameWriter writer,
+            CancellationToken cancellationToken)
+        {
+            // Select the existing envelope by family identifiers, without referencing model
+            // assemblies or inferring transaction state from statement text. SQL/Graph use 5/8;
+            // Documents has no Execute 5 and uses 64/66 with two zero completion counts.
+            bool documents = Family.Capabilities.Contains(ProtocolCapability.TransactionStatus) &&
+                !Family.Supports((ProtocolMessageType)5) && Family.Supports((ProtocolMessageType)69);
+            byte execute = documents ? (byte)64 : (byte)5;
+            byte complete = documents ? (byte)66 : (byte)8;
+            if (!Family.Supports((ProtocolMessageType)execute) || !Family.Supports((ProtocolMessageType)complete))
+            { throw new ProtocolException(ErrorMessages.TransactionResetInvalid); }
+            var payload = new List<byte>();
+            ProtocolPayload.WriteString(payload, "ROLLBACK");
+            if (documents)
+            {
+                ProtocolPayload.WriteInt32(payload, 2);
+                payload.Add((byte)'{');
+                payload.Add((byte)'}');
+            }
+            else { ProtocolPayload.WriteInt32(payload, 0); }
+            await writer.WriteFrameAsync(new ProtocolFrame((ProtocolMessageType)execute, payload.ToArray()), cancellationToken).ConfigureAwait(false);
+            await writer.FlushAsync(cancellationToken).ConfigureAwait(false);
+            var frame = await reader.ReadFrameAsync(cancellationToken).ConfigureAwait(false);
+            if (frame is null || (byte)frame.Value.Type != complete || frame.Value.Payload.Length != (documents ? 2 : 1) * sizeof(long))
+            { throw new ProtocolException(ErrorMessages.TransactionResetInvalid); }
+            int position = 0;
+            if (ProtocolPayload.ReadInt64(frame.Value.Payload.Span, ref position) != 0 ||
+                (documents && ProtocolPayload.ReadInt64(frame.Value.Payload.Span, ref position) != 0))
+            { throw new ProtocolException(ErrorMessages.TransactionResetInvalid); }
+            return true;
+        }
+
+        private sealed class DebugView
+        {
+            private readonly global::Assimalign.Cohesion.Database.Client.Internal.DatabaseConnector.TransactionRollbackExchange _target;
+
+            public DebugView(global::Assimalign.Cohesion.Database.Client.Internal.DatabaseConnector.TransactionRollbackExchange value)
+            {
+                _target = value;
+            }
+
+            public global::Assimalign.Cohesion.Database.Protocol.ProtocolMessageFamily Family => _target.Family;
         }
     }
 
@@ -397,7 +509,7 @@ internal sealed class DatabaseConnector
         }
         catch (Exception exception) when (IsTransportFailure(exception))
         {
-            throw MarkBroken(new DatabaseClientException(ProtocolErrorCode.Internal, "The connection failed while sending a frame.", exception));
+            throw MarkBroken(new DatabaseClientException(ProtocolErrorCode.Internal, ErrorMessages.WriteFrameAsyncDatabaseClient, exception));
         }
     }
 
@@ -428,7 +540,7 @@ internal sealed class DatabaseConnector
         }
         catch (Exception exception) when (IsTransportFailure(exception))
         {
-            throw MarkBroken(new DatabaseClientException(ProtocolErrorCode.Internal, "The connection failed while awaiting a frame.", exception));
+            throw MarkBroken(new DatabaseClientException(ProtocolErrorCode.Internal, ErrorMessages.ExpectFrameAsyncDatabaseClient, exception));
         }
 
         if (frame is null)
@@ -475,9 +587,25 @@ internal sealed class DatabaseConnector
 
         if (error.Code == ProtocolErrorCode.ConnectionFailure)
         {
-            return MarkBroken(new DatabaseClientException(ProtocolErrorCode.ProtocolViolation, $"The server sent the client-local {nameof(ProtocolErrorCode.ConnectionFailure)} code: {error.Message}"));
+            return MarkBroken(new DatabaseClientException(ProtocolErrorCode.ProtocolViolation, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ConnectorExecuteAsyncDatabaseClient, nameof(ProtocolErrorCode.ConnectionFailure), error.Message)));
         }
 
         return MarkBroken(new DatabaseClientException(error.Code, error.Message));
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Client.Internal.DatabaseConnector _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Client.Internal.DatabaseConnector value)
+        {
+            _target = value;
+        }
+
+        public string Database => _target.Database;
+        public string Principal => _target.Principal;
+        public global::Assimalign.Cohesion.Database.Protocol.ProtocolVersion ServerVersion => _target.ServerVersion;
+        public global::Assimalign.Cohesion.Database.Protocol.ProtocolMessageFamily Family => _target.Family;
+        public global::System.Collections.Generic.IReadOnlyList<string> Capabilities => _target.Capabilities;
     }
 }

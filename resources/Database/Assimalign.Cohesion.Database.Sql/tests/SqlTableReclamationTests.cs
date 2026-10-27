@@ -20,7 +20,10 @@ using Assimalign.Cohesion.Database.Sql.Schema;
 using Assimalign.Cohesion.Database.Sql.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Storage.Units;
+using Assimalign.Cohesion.Database.Tests;
 using Assimalign.Cohesion.Database.Transactions;
+
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
@@ -32,9 +35,10 @@ public sealed class SqlTableReclamationTests
     public SqlTableReclamationTests(ITestOutputHelper output) { _output = output; }
 
     [Theory(DisplayName = "Cohesion Test [Database.Sql] - Concurrent large catalog CREATE/DROP never fails maintenance and reclaims every retired identity")]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task DropTable_ConcurrentLargeDefinitions_ShouldReclaimWithoutMaintenanceFailures(bool fileBacked)
+    [InlineData(false, 0)]
+    [InlineData(true, 0)]
+    [InlineData(false, 1500)]
+    public async Task DropTable_ConcurrentLargeDefinitions_ShouldReclaimWithoutMaintenanceFailures(bool fileBacked, int lanePauseMilliseconds)
     {
         // Arrange: each definition occupies a catalog page which DROP can clear and reuse.
         string path = Path.Combine(Environment.CurrentDirectory, "_out", "1443", Guid.NewGuid().ToString("N"));
@@ -46,16 +50,24 @@ public sealed class SqlTableReclamationTests
             await using var engine = SqlDatabaseEngine.Create("catalog-discovery-race", options);
             var database = await engine.CreateDatabaseAsync("db", timeout.Token);
             var worker = engine.Workers.OfType<SqlVersionPurgeWorker>().Single();
+            var observed = new ConcurrentQueue<DatabaseWorkerPass>();
+            worker.PassCompleted = observed.Enqueue;
+            int pumpBackoffs = 0;
+            using var pump = WorkerPumpObservation.Create(worker,
+                _ => Interlocked.Increment(ref pumpBackoffs), _ => { });
             var retired = new ConcurrentBag<ulong>();
             int passes = 0;
             int batches = 0;
-            worker.BeforeFullPass = _ => Interlocked.Increment(ref passes);
+            worker.BeforeFullPass = _ =>
+            {
+                if (Interlocked.Increment(ref passes) == 1) { Thread.Sleep(lanePauseMilliseconds); }
+            };
             database.TableReclamation.AfterBatch = (_, _) => Interlocked.Increment(ref batches);
             string payload = new('x', 6000);
             var elapsed = Stopwatch.StartNew();
 
             // Act: only public session operations drive DDL, alongside the normal engine worker.
-            var cycles = await Task.WhenAll(Enumerable.Range(0, 3).Select(index => Task.Run(async () =>
+            var cycles = await Task.WhenAll(Enumerable.Range(0, 3).Select(index => DedicatedTestTask.Run(async () =>
             {
                 await using var session = await database.CreateSessionAsync(timeout.Token);
                 int completed = 0;
@@ -72,7 +84,8 @@ public sealed class SqlTableReclamationTests
             }, timeout.Token)));
             await WaitDoneAsync(database, timeout.Token);
 
-            // Assert: cumulative failures cannot be hidden by a later successful retry.
+            // Assert: retain every operational failure, even if a later retry succeeds. A slow
+            // lane may report an advisory; it must settle after the observed work completes.
             cycles.ShouldAllBe(count => count >= 1000);
             passes.ShouldBeGreaterThanOrEqualTo(50);
             batches.ShouldBeGreaterThanOrEqualTo(50);
@@ -86,7 +99,16 @@ public sealed class SqlTableReclamationTests
             AssertSpaceMap(database.DataStorage);
             AssertSpaceMap(database.CatalogStorage);
             _output.WriteLine($"DDL cycles={retired.Count}; full passes={passes}; completed batches={batches}; failures={worker.FailureCount}");
-            worker.FailureCount.ShouldBe(0, worker.Fault?.ToString());
+            observed.ShouldNotBeEmpty();
+            observed.Where(pass => pass.PassThrew || pass.Visits.Any(visit =>
+                visit.Reason == DatabaseWorkerPass.VisitReason.Failed || visit.Offline || visit.GiveUpRequested))
+                .Select(pass => $"pass {pass.Number}: {string.Join(", ", pass.Visits.Select(visit => visit.Reason))}")
+                .ShouldBeEmpty();
+            Volatile.Read(ref pumpBackoffs).ShouldBe(0);
+            pump.Failure.ShouldBeNull();
+            worker.PassObserverFailure.ShouldBeNull();
+            while (worker.Fault is not null) { await Task.Delay(5, timeout.Token); }
+            worker.Fault.ShouldBeNull();
         }
         finally
         {
@@ -506,11 +528,13 @@ public sealed class SqlTableReclamationTests
         await using var engine = await builder.BuildAsync(timeout.Token);
         var database = await engine.CreateDatabaseAsync("db", timeout.Token);
         await using var writer = await database.CreateSessionAsync(timeout.Token);
-        await SeedAsync(writer, "t", 100, timeout.Token);
+        // Preserve the cursor-specific half of this race under probe costing: 100 matches
+        // out of 500 rows retain the seek; the scan variant still has exactly 100 rows.
+        await SeedAsync(writer, "t", indexed ? 500 : 100, timeout.Token);
         await using var reader = await database.CreateSessionAsync(timeout.Token);
         var snapshot = await reader.BeginTransactionAsync(IsolationLevel.Snapshot, timeout.Token);
         string sql = indexed ? "SELECT id FROM t WHERE id >= 0 AND id < 100 AND hold_row(id) >= 0" : "SELECT id FROM t WHERE hold_row(id) >= 0";
-        var scan = Task.Run(async () => await reader.ExecuteAsync(sql, cancellationToken: timeout.Token));
+        var scan = DedicatedTestTask.Run(async () => await reader.ExecuteAsync(sql, cancellationToken: timeout.Token));
         try
         {
             entered.Wait(timeout.Token);

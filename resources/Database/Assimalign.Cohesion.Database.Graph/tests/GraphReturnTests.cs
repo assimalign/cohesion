@@ -159,14 +159,14 @@ public sealed class GraphReturnTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Graph] - RETURN: binding failures remain coded before data access")]
-    [InlineData("RETURN missing", "COHDBG001")]
-    [InlineData("RETURN missing.age + 1", "COHDBG001")]
-    [InlineData("MATCH (a) RETURN b.age + 1", "COHDBG001")]
-    [InlineData("MATCH (a) RETURN $missing", "COHDBG001")]
-    [InlineData("RETURN $missing", "COHDBG001")]
-    [InlineData("EXPLAIN RETURN $missing", "COHDBG001")]
-    [InlineData("RETURN FALSE AND $missing", "COHDBG001")]
-    [InlineData("MATCH p = (a)-[r]->(b) RETURN p.name", "COHDBG003")]
+    [InlineData("RETURN missing", "CG05001")]
+    [InlineData("RETURN missing.age + 1", "CG05001")]
+    [InlineData("MATCH (a) RETURN b.age + 1", "CG05001")]
+    [InlineData("MATCH (a) RETURN $missing", "CG05001")]
+    [InlineData("RETURN $missing", "CG05001")]
+    [InlineData("EXPLAIN RETURN $missing", "CG05001")]
+    [InlineData("RETURN FALSE AND $missing", "CG05001")]
+    [InlineData("MATCH p = (a)-[r]->(b) RETURN p.name", "CG03003")]
     public async Task Execute_InvalidProjection_ShouldKeepDiagnosticAsync(string source, string code)
     {
         // Arrange
@@ -224,10 +224,10 @@ public sealed class GraphReturnTests
 
         // Assert
         var diagnostic = error.Diagnostics.ShouldHaveSingleItem();
-        diagnostic.Code.ShouldBe("COHDBG015");
+        diagnostic.Code.ShouldBe("CG01015");
         diagnostic.Start.ShouldNotBeNull();
         error.Message.ShouldContain("is declared more than once", Case.Sensitive);
-        error.Message.ShouldNotContain("COHDBG015", Case.Sensitive);
+        error.Message.ShouldNotContain("CG01015", Case.Sensitive);
     }
 
     [Fact(DisplayName = "Cohesion Test [Graph] - RETURN: duplicate names prevent mutation and names compare ordinally")]
@@ -244,7 +244,7 @@ public sealed class GraphReturnTests
         var result = await RowsAsync(session, "RETURN 1 AS x, 2 AS X");
 
         // Assert
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG015");
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG01015");
         (await RowsAsync(session, "SHOW LABELS")).Rows.ShouldBeEmpty();
         result.Names.ShouldBe(["x", "X"]);
         result.Rows.ShouldHaveSingleItem().ShouldBe(new object?[] { 1L, 2L });
@@ -271,7 +271,7 @@ public sealed class GraphReturnTests
             await session.ExecuteAsync(GraphPathsQueryRequest.FromGql(source), CancellationToken.None));
 
         // Assert
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG001");
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG05001");
         error.Message.ShouldContain("exactly one path or bound entity projection", Case.Sensitive);
     }
 
@@ -336,7 +336,7 @@ public sealed class GraphReturnTests
             await session.ExecuteAsync(new GraphQueryRequest(new GqlQueryStatement(query)), CancellationToken.None));
 
         // Assert
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG001");
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG05001");
         error.Message.ShouldBe("SHOW cannot be composed with graph clauses.");
     }
 
@@ -356,7 +356,7 @@ public sealed class GraphReturnTests
             await session.ExecuteAsync(new GraphQueryRequest(new GqlQueryStatement(query)), CancellationToken.None));
 
         // Assert
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG001");
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG05001");
         (await RowsAsync(session, "SHOW LABELS")).Rows.ShouldBeEmpty();
     }
 

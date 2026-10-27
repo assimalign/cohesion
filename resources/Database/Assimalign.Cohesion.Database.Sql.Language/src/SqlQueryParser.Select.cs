@@ -35,20 +35,11 @@ public sealed partial class SqlQueryParser
         var columns = ParseSelectColumns(ref lexer);
 
         // FROM
-        var from = new List<SqlFromItem>();
+        IReadOnlyList<SqlFromItem> from = [];
         if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "FROM"))
         {
             Advance(ref lexer);
-            do
-            {
-                var table = ParseRelationReference(ref lexer);
-                from.Add(new SqlFromItem(table, ParseJoinClauses(ref lexer)));
-                if (IsAtEnd(ref lexer) || lexer.Current.Type != TokenType.Comma)
-                {
-                    break;
-                }
-                Advance(ref lexer);
-            } while (true);
+            from = ParseFromItems(ref lexer);
         }
 
         // WHERE
@@ -70,7 +61,7 @@ public sealed partial class SqlQueryParser
             }
             else
             {
-                AddSyntaxDiagnostic(ref lexer, "Expected BY after GROUP.");
+                AddSyntaxDiagnostic(ref lexer, ErrorMessages.SqlQueryParserParseSelectVoid);
             }
 
             while (true)
@@ -78,7 +69,7 @@ public sealed partial class SqlQueryParser
                 if (IsAtEnd(ref lexer) || lexer.Current.Type is TokenType.Semicolon or TokenType.RightParen or TokenType.Comma ||
                     IsStatementBoundaryKeyword(ref lexer))
                 {
-                    AddSyntaxDiagnostic(ref lexer, "Expected a grouping expression after GROUP BY or ','.");
+                    AddSyntaxDiagnostic(ref lexer, ErrorMessages.SqlQueryParserParseSelectVoid2);
                     break;
                 }
 
@@ -99,7 +90,7 @@ public sealed partial class SqlQueryParser
             if (IsAtEnd(ref lexer) || lexer.Current.Type is TokenType.Semicolon or TokenType.RightParen ||
                 IsStatementBoundaryKeyword(ref lexer))
             {
-                AddSyntaxDiagnostic(ref lexer, "Expected a predicate after HAVING.");
+                AddSyntaxDiagnostic(ref lexer, ErrorMessages.SqlQueryParserParseSelectVoid3);
             }
             else
             {
@@ -114,6 +105,19 @@ public sealed partial class SqlQueryParser
             columns, from, where, groupBy, having, [],
             limit, null, isDistinct, null,
             Location.Create(1, 1, pos, _lastTokenEnd), limitSyntaxKind);
+    }
+
+    private IReadOnlyList<SqlFromItem> ParseFromItems(ref TokenLexer lexer)
+    {
+        var items = new List<SqlFromItem>();
+        do
+        {
+            var relation = ParseRelationReference(ref lexer);
+            items.Add(new SqlFromItem(relation, ParseJoinClauses(ref lexer)));
+            if (IsAtEnd(ref lexer) || lexer.Current.Type != TokenType.Comma) { break; }
+            Advance(ref lexer);
+        } while (true);
+        return items;
     }
 
     private SqlExpression ParseFetchCount(ref TokenLexer lexer)
@@ -140,7 +144,7 @@ public sealed partial class SqlQueryParser
         {
             return ParsePaginationExpression(ref lexer, "TOP", primaryOnly: true);
         }
-        AddSyntaxDiagnostic(ref lexer, "TOP requires one integer literal or parameter, or a parenthesized count expression.");
+        AddSyntaxDiagnostic(ref lexer, ErrorMessages.SqlQueryParserParseTopCountVoid);
         return new SqlLiteralExpression("NULL", SqlLiteralType.Null,
             Location.Create(1, 1, lexer.Current.Position, lexer.Current.Position));
     }
@@ -220,7 +224,7 @@ public sealed partial class SqlQueryParser
         return new SqlSelectColumn(expr, alias);
     }
 
-    private List<SqlJoinClause> ParseJoinClauses(ref TokenLexer lexer)
+    private List<SqlJoinClause> ParseJoinClauses(ref TokenLexer lexer, bool mergeSource = false)
     {
         var joins = new List<SqlJoinClause>();
 
@@ -259,14 +263,16 @@ public sealed partial class SqlQueryParser
 
             // ON condition
             SqlExpression? condition = null;
-            bool hasOn = !IsAtEnd(ref lexer) && IsKeyword(ref lexer, "ON");
+            // A top-level source CROSS JOIN has no condition; the next ON belongs to MERGE.
+            bool hasOn = !(mergeSource && joinType == SqlJoinType.Cross) &&
+                !IsAtEnd(ref lexer) && IsKeyword(ref lexer, "ON");
             if (hasOn)
             {
                 Advance(ref lexer);
                 if (IsAtEnd(ref lexer) || lexer.Current.Type == TokenType.Semicolon ||
                     IsStatementBoundaryKeyword(ref lexer))
                 {
-                    AddSyntaxDiagnostic(ref lexer, "Expected a predicate after JOIN ... ON.");
+                    AddSyntaxDiagnostic(ref lexer, ErrorMessages.SqlQueryParserParseJoinClausesVoid);
                 }
                 else
                 {
@@ -281,7 +287,7 @@ public sealed partial class SqlQueryParser
                 Advance(ref lexer);
                 if (lexer.Current.Type != TokenType.LeftParen)
                 {
-                    AddSyntaxDiagnostic(ref lexer, "Expected '(' after USING.");
+                    AddSyntaxDiagnostic(ref lexer, ErrorMessages.SqlQueryParserParseJoinClausesVoid2);
                 }
                 else
                 {
@@ -290,7 +296,7 @@ public sealed partial class SqlQueryParser
                     {
                         if (!IsIdentifierOrKeyword(ref lexer) || IsStatementBoundaryKeyword(ref lexer))
                         {
-                            AddSyntaxDiagnostic(ref lexer, "Expected a column name in USING.");
+                            AddSyntaxDiagnostic(ref lexer, ErrorMessages.SqlQueryParserParseJoinClausesVoid3);
                             break;
                         }
                         usingColumns.Add(CurrentIdentifierText(ref lexer));
@@ -299,25 +305,25 @@ public sealed partial class SqlQueryParser
                         Advance(ref lexer);
                     }
                     if (lexer.Current.Type == TokenType.RightParen) { Advance(ref lexer); }
-                    else { AddSyntaxDiagnostic(ref lexer, "Expected ')' after USING columns."); }
+                    else { AddSyntaxDiagnostic(ref lexer, ErrorMessages.SqlQueryParserParseJoinClausesVoid4); }
                 }
             }
             if (!SqlLanguageProfile.SupportsJoin(joinType.Value))
             {
                 AddUnsupportedSurfaceDiagnostic(joinStart, joinEnd,
-                    "SQL supports INNER, LEFT [OUTER] and CROSS JOIN; RIGHT OUTER JOIN and FULL OUTER JOIN are not supported.");
+                    ErrorMessages.SqlQueryParserParseJoinClausesVoid5);
             }
             else if (joinType == SqlJoinType.Cross && (hasOn || hasUsing))
             {
-                AddSyntaxDiagnostic(joinStart, joinEnd, "CROSS JOIN cannot have ON or USING.");
+                AddSyntaxDiagnostic(joinStart, joinEnd, ErrorMessages.SqlQueryParserParseJoinClausesVoid6);
             }
             else if (joinType != SqlJoinType.Cross && !hasOn && !hasUsing)
             {
-                AddUnsupportedSurfaceDiagnostic(joinStart, joinEnd, "INNER and LEFT JOIN require ON or USING.");
+                AddUnsupportedSurfaceDiagnostic(joinStart, joinEnd, ErrorMessages.SqlQueryParserParseJoinClausesVoid7);
             }
             if (hasOn && hasUsing)
             {
-                AddSyntaxDiagnostic(joinStart, joinEnd, "JOIN accepts exactly one of ON or USING.");
+                AddSyntaxDiagnostic(joinStart, joinEnd, ErrorMessages.SqlQueryParserParseJoinClausesVoid8);
             }
 
             joins.Add(new SqlJoinClause(joinType.Value, table, condition, usingColumns));
@@ -333,15 +339,37 @@ public sealed partial class SqlQueryParser
             return ParseRequiredTableReference(ref lexer);
         }
 
+        int groupStart = lexer.Current.Position;
         Advance(ref lexer);
-        if (!StartsQuery(lexer, queryExpected: true))
+        SqlQueryBodyExpression query;
+        // A leading parenthesized SELECT can be the first relation of a joined group.
+        // Check its closing continuation, including the derived alias (PostgreSQL gram.y:13938-14022).
+        if (!StartsQuery(lexer))
         {
-            AddSyntaxDiagnostic(ref lexer, "Expected SELECT in a derived table.");
-            return new SqlTableReference("?", null, null);
+            if (!TryEnterParenthesis(ref lexer, groupStart)) { return new SqlTableReference("?", null, null); }
+            SqlFromItem item;
+            try
+            {
+                var left = ParseRelationReference(ref lexer);
+                item = new SqlFromItem(left, ParseJoinClauses(ref lexer));
+            }
+            finally { _parenthesisDepth--; }
+            if (lexer.Current.Type == TokenType.RightParen) { Advance(ref lexer); }
+            else { AddSyntaxDiagnostic(ref lexer, ErrorMessages.QueryParserParseRelationReferenceVoid2); }
+            if (!IsKeyword(ref lexer, "AS") && (!IsIdentifierOrKeyword(ref lexer) || IsStatementBoundaryKeyword(ref lexer)))
+            {
+                return new SqlJoinedTableReference(item);
+            }
+            // A group alias hides its constituent namespaces just like a derived SELECT *.
+            query = new SqlSelectExpression([new SqlSelectColumn(new SqlStarExpression(null), null)], [item],
+                null, [], null, [], null, null, false, null, Location.Create(1, 1, groupStart, _lastTokenEnd));
         }
-        var query = ParseSubquery(ref lexer);
-        if (lexer.Current.Type == TokenType.RightParen) { Advance(ref lexer); }
-        else { AddSyntaxDiagnostic(ref lexer, "Expected ')' after the derived query."); }
+        else
+        {
+            query = ParseSubquery(ref lexer);
+            if (lexer.Current.Type == TokenType.RightParen) { Advance(ref lexer); }
+            else { AddSyntaxDiagnostic(ref lexer, ErrorMessages.QueryParserParseRelationReferenceVoid2); }
+        }
         if (IsKeyword(ref lexer, "AS")) { Advance(ref lexer); }
         string alias = "?";
         if (IsIdentifierOrKeyword(ref lexer) && !IsStatementBoundaryKeyword(ref lexer))
@@ -349,7 +377,7 @@ public sealed partial class SqlQueryParser
             alias = CurrentIdentifierText(ref lexer);
             Advance(ref lexer);
         }
-        else { AddSyntaxDiagnostic(ref lexer, "A derived table requires an alias."); }
+        else { AddSyntaxDiagnostic(ref lexer, ErrorMessages.QueryParserParseRelationReferenceVoid3); }
 
         var columns = new List<string>();
         if (lexer.Current.Type == TokenType.LeftParen)
@@ -359,7 +387,7 @@ public sealed partial class SqlQueryParser
             {
                 if (!IsIdentifierOrKeyword(ref lexer) || IsStatementBoundaryKeyword(ref lexer))
                 {
-                    AddSyntaxDiagnostic(ref lexer, "Expected a derived column name.");
+                    AddSyntaxDiagnostic(ref lexer, ErrorMessages.QueryParserParseRelationReferenceVoid4);
                     break;
                 }
                 columns.Add(CurrentIdentifierText(ref lexer));
@@ -368,7 +396,7 @@ public sealed partial class SqlQueryParser
                 Advance(ref lexer);
             }
             if (lexer.Current.Type == TokenType.RightParen) { Advance(ref lexer); }
-            else { AddSyntaxDiagnostic(ref lexer, "Expected ')' after derived column names."); }
+            else { AddSyntaxDiagnostic(ref lexer, ErrorMessages.QueryParserParseRelationReferenceVoid5); }
         }
         return new SqlDerivedTableReference(query, alias, columns.AsReadOnly());
     }
@@ -377,7 +405,7 @@ public sealed partial class SqlQueryParser
     {
         _parseDiagnostics.Add(new Diagnostic
         {
-            Code = "COHDBL001",
+            Code = "CK00001",
             Message = message,
             Start = start,
             End = end,
@@ -465,7 +493,7 @@ public sealed partial class SqlQueryParser
         }
         else
         {
-            AddSyntaxDiagnostic(ref lexer, "Expected JOIN after the join type.");
+            AddSyntaxDiagnostic(ref lexer, ErrorMessages.ParserConsumeRequiredJoinKeywordVoid);
         }
     }
 

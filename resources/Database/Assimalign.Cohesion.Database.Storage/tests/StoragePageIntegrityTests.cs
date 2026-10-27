@@ -56,7 +56,7 @@ public sealed class StoragePageIntegrityTests
         var failure = Should.Throw<StorageCorruptionException>(() => TornStorage.Open(images));
 
         // Assert
-        failure.Code.ShouldBe("COHDBS003");
+        failure.Code.ShouldBe("CK06003");
         failure.PageId.ShouldBe(pageId);
     }
 

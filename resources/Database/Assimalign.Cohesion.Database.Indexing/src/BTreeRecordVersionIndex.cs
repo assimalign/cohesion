@@ -16,6 +16,8 @@ namespace Assimalign.Cohesion.Database.Indexing;
 /// the B-tree it undoes through; it was <c>RecordVersionIndex</c> until that name passed to the
 /// Transactions base it derives from (#1258).
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("BTreeRecordVersionIndex")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Indexing.BTreeRecordVersionIndex.DebugView))]
 public sealed class BTreeRecordVersionIndex : RecordVersionIndex
 {
     private readonly BTreeIndex _index;
@@ -56,4 +58,12 @@ public sealed class BTreeRecordVersionIndex : RecordVersionIndex
         TransactionSequence writer,
         CancellationToken cancellationToken)
         => _index.ClearDeleterAsync(transaction, new IndexKey(key), entryReference, writer, cancellationToken);
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Indexing.BTreeRecordVersionIndex value)
+        {
+            _ = value;
+        }
+    }
 }

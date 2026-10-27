@@ -19,16 +19,16 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 /// </summary>
 public sealed class SqlParseStrictnessExecutionTests
 {
-    private const string Schema = "CREATE TABLE t (id INT PRIMARY KEY, a INT, b INT);";
-    private const string Rows = "INSERT INTO t VALUES (1, 10, 100), (2, 20, 200);";
+    private const string schema = "CREATE TABLE t (id INT PRIMARY KEY, a INT, b INT);";
+    private const string rowsValue = "INSERT INTO t VALUES (1, 10, 100), (2, 20, 200);";
 
     /// <summary>
     /// A stray character used to lex as a one-character identifier: SELECT * FROM t ? read
     /// ? as an alias and returned every row, and DELETE FROM t ? deleted them. Each reports
-    /// SQL0003 at the character and changes nothing.
+    /// CS00003 at the character and changes nothing.
     /// </summary>
     /// <param name="sql">A statement with a character outside the dialect.</param>
-    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Strictness: a stray character reports SQL0003 and nothing executes")]
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Strictness: a stray character reports CS00003 and nothing executes")]
     [InlineData("SELECT * FROM t ?;")]
     [InlineData("SELECT * FROM t #;")]
     [InlineData("SELECT * FROM t ^;")]
@@ -52,15 +52,15 @@ public sealed class SqlParseStrictnessExecutionTests
     // A stray character before the statement, such as a byte order mark.
     [InlineData("﻿DELETE FROM t;")]
     public async Task ExecuteAsync_StrayCharacter_ShouldReportSyntaxErrorWithoutExecuting(string sql)
-        => await AssertRejectedAsync(sql, "SQL0003");
+        => await AssertRejectedAsync(sql, "CS00003");
 
     /// <summary>
     /// ~ used to parse as bitwise NOT, whose evaluator returned NULL for a NULL operand and
     /// threw per row otherwise, so SELECT ~NULL and ~ over an empty table succeeded. Prefix and
-    /// infix ~ now report COHDBL001 at parse time.
+    /// infix ~ now report CK00001 at parse time.
     /// </summary>
     /// <param name="sql">A statement using ~.</param>
-    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Strictness: ~ reports COHDBL001 and nothing executes, whatever the rows")]
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Strictness: ~ reports CK00001 and nothing executes, whatever the rows")]
     [InlineData("SELECT ~NULL;")]
     [InlineData("SELECT ~a FROM t;")]
     [InlineData("SELECT a FROM t WHERE a ~ 'x';")]
@@ -73,7 +73,7 @@ public sealed class SqlParseStrictnessExecutionTests
     [InlineData("UPDATE t SET a = 1 WHERE b ~* 'x';")]
     [InlineData("SELECT a FROM t WHERE a = ~ ~a;")]
     public async Task ExecuteAsync_Tilde_ShouldReportUnsupportedOperatorWithoutExecuting(string sql)
-        => await AssertRejectedAsync(sql, "COHDBL001");
+        => await AssertRejectedAsync(sql, "CK00001");
 
     private static async Task AssertRejectedAsync(string sql, string code)
     {
@@ -83,10 +83,10 @@ public sealed class SqlParseStrictnessExecutionTests
             await using var engine = SqlDatabaseEngine.Create("sql-strictness", new SqlDatabaseEngineOptions());
             var database = await engine.CreateDatabaseAsync("strictness");
             await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
-            await ExecuteAsync(session, Schema);
+            await ExecuteAsync(session, schema);
             if (withRows)
             {
-                await ExecuteAsync(session, Rows);
+                await ExecuteAsync(session, rowsValue);
             }
             var before = await SnapshotAsync(session);
 

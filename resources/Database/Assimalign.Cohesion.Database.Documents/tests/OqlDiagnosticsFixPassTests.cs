@@ -15,14 +15,14 @@ namespace Assimalign.Cohesion.Database.Documents.Tests;
 public sealed class OqlDiagnosticsFixPassTests
 {
     [Theory(DisplayName = "Cohesion Test [Documents] - Diagnostics: typed evaluator rejections keep their innermost location")]
-    [InlineData("binary", "COHDOC001")]
-    [InlineData("unary", "COHDOC001")]
-    [InlineData("context", "COHDOC001")]
-    [InlineData("arity", "COHDOC001")]
-    [InlineData("aggregate", "COHDOC001")]
-    [InlineData("json", "COHDOC007")]
-    [InlineData("value", "COHDOC008")]
-    [InlineData("double", "COHDOC007")]
+    [InlineData("binary", "CD05001")]
+    [InlineData("unary", "CD05001")]
+    [InlineData("context", "CD05001")]
+    [InlineData("arity", "CD05001")]
+    [InlineData("aggregate", "CD05001")]
+    [InlineData("json", "CD02007")]
+    [InlineData("value", "CD02008")]
+    [InlineData("double", "CD02007")]
     public void Evaluate_TypedInvalidExpression_ShouldCarryLocatedDiagnostic(string scenario, string code)
     {
         // Arrange
@@ -67,7 +67,7 @@ public sealed class OqlDiagnosticsFixPassTests
 
         // Assert
         var diagnostic = failure.Diagnostics.ShouldHaveSingleItem();
-        diagnostic.Code.ShouldBe("COHDOC004");
+        diagnostic.Code.ShouldBe("CD04004");
         diagnostic.Start.ShouldBeNull();
         diagnostic.End.ShouldBeNull();
     }
@@ -88,18 +88,18 @@ public sealed class OqlDiagnosticsFixPassTests
 
         // Assert
         var diagnostic = failure.Diagnostics.ShouldHaveSingleItem();
-        diagnostic.Code.ShouldBe("COHDOC004");
+        diagnostic.Code.ShouldBe("CD04004");
         diagnostic.Start.ShouldBe(request.Statement.OqlExpression.Location!.Start);
         diagnostic.End.ShouldBe(request.Statement.OqlExpression.Location.End);
         diagnostic.Message.ShouldBe(failure.Message);
     }
 
     [Theory(DisplayName = "Cohesion Test [Documents] - Diagnostics: evaluator faults carry codes and expression spans")]
-    [InlineData("1 / 0", "COHDOC006")]
-    [InlineData("1 % 0", "COHDOC006")]
-    [InlineData("$missing", "COHDOC005")]
-    [InlineData("'text' + 1", "COHDOC008")]
-    [InlineData("79228162514264337593543950335 * 2", "COHDOC007")]
+    [InlineData("1 / 0", "CD02006")]
+    [InlineData("1 % 0", "CD02006")]
+    [InlineData("$missing", "CD01005")]
+    [InlineData("'text' + 1", "CD02008")]
+    [InlineData("79228162514264337593543950335 * 2", "CD02007")]
     public async Task Execute_EvaluationFault_ShouldCarryExpressionSpanAsync(string text, string code)
     {
         // Arrange

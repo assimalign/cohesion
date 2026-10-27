@@ -17,6 +17,8 @@ namespace Assimalign.Cohesion.Database.Embedded;
 /// whether embedded or hosted — so the facade only composes and disposes them.
 /// Disposal stops engines in reverse registration order.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("EmbeddedDatabase")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Embedded.EmbeddedDatabase.DebugView))]
 public sealed class EmbeddedDatabase : IAsyncDisposable
 {
     private readonly IReadOnlyList<DatabaseEngine> _engines;
@@ -48,7 +50,7 @@ public sealed class EmbeddedDatabase : IAsyncDisposable
 
         if (options.Engines.Count == 0)
         {
-            throw new DatabaseException("An embedded database requires at least one engine.");
+            throw new DatabaseException(ErrorMessages.EmbeddedDatabaseCreateDatabase);
         }
 
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -56,11 +58,11 @@ public sealed class EmbeddedDatabase : IAsyncDisposable
         {
             if (engine is null)
             {
-                throw new DatabaseException("Registered engines cannot be null.");
+                throw new DatabaseException(ErrorMessages.EmbeddedDatabaseCreateDatabase2);
             }
             if (!names.Add(engine.Name))
             {
-                throw new DatabaseException($"An engine named '{engine.Name}' is already registered.");
+                throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.EmbeddedDatabaseCreateDatabase3, engine.Name));
             }
         }
 
@@ -130,7 +132,19 @@ public sealed class EmbeddedDatabase : IAsyncDisposable
         }
         if (failures is not null)
         {
-            throw new AggregateException("One or more embedded engines failed to dispose.", failures);
+            throw new AggregateException(ErrorMessages.EmbeddedDatabaseDisposeAsyncAggregate, failures);
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Embedded.EmbeddedDatabase _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Embedded.EmbeddedDatabase value)
+        {
+            _target = value;
+        }
+
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.DatabaseEngine> Engines => _target.Engines;
     }
 }

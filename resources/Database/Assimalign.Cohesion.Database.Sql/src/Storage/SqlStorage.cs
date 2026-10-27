@@ -39,6 +39,8 @@ using Assimalign.Cohesion.Database.Storage;
 /// storage.FlushChanges();
 /// </code>
 /// </example>
+[global::System.Diagnostics.DebuggerDisplay("SqlStorage")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Storage.SqlStorage.DebugView))]
 public sealed class SqlStorage : Assimalign.Cohesion.Database.Storage.Storage
 {
     private SqlStorage(StorageStream data, StorageStream journal, StorageStream backup)
@@ -255,5 +257,19 @@ public sealed class SqlStorage : Assimalign.Cohesion.Database.Storage.Storage
     public void FlushChanges()
     {
         Flush();
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Sql.Storage.SqlStorage _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Storage.SqlStorage value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Storage.StorageId Id => _target.Id;
+        public global::Assimalign.Cohesion.Database.Storage.Name Name => _target.Name;
+        public global::Assimalign.Cohesion.Database.Storage.StorageModel Model => _target.Model;
     }
 }

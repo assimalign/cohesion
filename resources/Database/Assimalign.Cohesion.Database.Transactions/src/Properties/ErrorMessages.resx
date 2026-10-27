@@ -4,6 +4,24 @@
     <value>A lock wait exceeded the configured lock timeout.</value>
   </data>
   <data name="LockStatementMarkInvalid" xml:space="preserve"><value>The statement mark must have been created by this lock manager.</value></data>
+  <data name="VersionRecordTooShort" xml:space="preserve">
+    <value>Versioned record contains {0} bytes; at least {1} are required for its stamps.</value>
+  </data>
   <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
   <resheader name="version"><value>2.0</value></resheader>
+  <data name="LockManagerEnterEngineModeFailure" xml:space="preserve"><value>The lock manager is already in engine mode.</value></data>
+  <data name="LockManagerAbandonFailure" xml:space="preserve"><value>Only a lock manager in engine mode abandons its waits.</value></data>
+  <data name="LockManagerAbandonedFailure" xml:space="preserve"><value>Transaction {0}'s request for {1} on {2} was refused: the database's storage went offline, so no lock of it is released until it is reopened.</value></data>
+  <data name="LockManagerWaitInsideApplyFailure" xml:space="preserve"><value>Transaction {0}'s request for {1} on {2} would wait inside a statement apply, which holds the database's apply gate; the request was refused. A statement acquires every lock its apply needs before the apply begins.</value></data>
+  <data name="LockManagerAcquireCoreAsyncFailure" xml:space="preserve"><value>Transaction {0} has ended; its request for {1} on {2} was refused.</value></data>
+  <data name="LockManagerDeadlockFailure" xml:space="preserve"><value>Transaction {0} was chosen as the deadlock victim requesting {1} on {2}.</value></data>
+  <data name="LockManagerFailEndedFailure" xml:space="preserve"><value>Transaction {0} ended while it waited for {1} on {2}; the request was not granted.</value></data>
+  <data name="CoordinatorThrowIfInsideApplyFailure" xml:space="preserve"><value>A checkpoint or version purge cannot run inside a statement apply: the statement holds the apply gate maintenance waits for. Run maintenance after the statement completes.</value></data>
+  <data name="TransactionManagerCommitAsyncFailure" xml:space="preserve"><value>Transaction {0} aborted: the commit record could not be written.</value></data>
+  <data name="TransactionManagerEnterApplyFailure" xml:space="preserve"><value>Transaction {0} ended while its statement was running; the statement was not applied.</value></data>
+  <data name="TransactionManagerClaimEndFailure" xml:space="preserve"><value>The transaction context was not created by this manager.</value></data>
+  <data name="TransactionManagerClaimEndFailure2" xml:space="preserve"><value>Transaction {0} is not active (state: {1}).</value></data>
+  <data name="TransactionManagerClaimEndFailure3" xml:space="preserve"><value>Transaction {0} is already ending: its commit or rollback is running.</value></data>
+  <data name="TransactionSnapshotArgument" xml:space="preserve"><value>Snapshot minimum cannot exceed its maximum.</value></data>
+  <data name="LogUnconfirmedMessageFailure" xml:space="preserve"><value>Transaction {0} committed in this process, but its commit record could not be made durable, so its outcome is unknown: the failed flush took the storage offline, and nothing more is written to it. Reopen the database; its recovery keeps the commit if the record reached stable storage and discards it if not.</value></data>
 </root>

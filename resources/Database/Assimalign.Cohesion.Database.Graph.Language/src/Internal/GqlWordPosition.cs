@@ -23,16 +23,9 @@ internal enum GqlWordPosition
     BeforeDelete,
 
     /// <summary>
-    /// A path mode prefix: between clauses and directly before a path pattern, optionally
-    /// followed by <c>PATH</c> or <c>PATHS</c>, as in <c>MATCH TRAIL (a)-[]->(b)</c>. Followed by
-    /// <c>=</c> it is a path variable.
-    /// </summary>
-    PathMode,
-
-    /// <summary>
     /// An edge's opening spelling directly after a node pattern's <c>)</c>: <c>~</c>, or
     /// <c>&lt;~</c> written without a space. Elsewhere the character is not GQL and fails with
-    /// <c>GQL0002</c>.
+    /// <c>CG00002</c>.
     /// </summary>
     EdgePattern,
 }

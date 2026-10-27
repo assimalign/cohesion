@@ -48,7 +48,7 @@ public sealed partial class SqlViewTests
         await ExecuteAsync(reader, "DROP VIEW v");
 
         // Assert
-        error.Diagnostics[0].Code.ShouldBe("COHSQLE009");
+        error.Diagnostics[0].Code.ShouldBe("CS01009");
         error.Message.ShouldBe("View 'dbo.v' cannot be bound. A source definition changed its output type, modifiers, domain or collation.");
         error.InnerException.ShouldBeOfType<SqlPlanningException>();
         metadata.ShouldHaveSingleItem().ShouldBe(["CHARACTER VARYING"]);
@@ -78,7 +78,7 @@ public sealed partial class SqlViewTests
         await ExecuteAsync(session, "DROP VIEW v");
 
         // Assert
-        error.Diagnostics[0].Code.ShouldBe("COHSQLE033");
+        error.Diagnostics[0].Code.ShouldBe("CS03033");
         error.InnerException.ShouldBeSameAs(failure);
         rows.ShouldHaveSingleItem().ShouldBe([3L]);
         database.Catalog.Views.ShouldBeEmpty();

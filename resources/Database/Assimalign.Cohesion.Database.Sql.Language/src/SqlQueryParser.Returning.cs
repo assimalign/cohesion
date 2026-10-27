@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 using Assimalign.Cohesion.Database.Language;
 
@@ -7,7 +8,8 @@ namespace Assimalign.Cohesion.Database.Sql.Language;
 
 public sealed partial class SqlQueryParser
 {
-    private IReadOnlyList<SqlSelectColumn>? ParseReturning(ref TokenLexer lexer, SqlTableReference table, bool onConflict = false)
+    private IReadOnlyList<SqlSelectColumn>? ParseReturning(ref TokenLexer lexer, SqlTableReference table, bool onConflict = false,
+        IReadOnlyList<SqlFromItem>? sources = null)
     {
         if (RejectDmlOutput(ref lexer) || !IsKeyword(ref lexer, "RETURNING")) { return null; }
         Advance(ref lexer);
@@ -18,7 +20,22 @@ public sealed partial class SqlQueryParser
             return [];
         }
 
-        // OLD/NEW are contextual pseudo-relations only when the target does not mask them
+        bool MasksPseudoRelation(string name) => name.Equals(table.Alias ?? table.TableName, StringComparison.OrdinalIgnoreCase) ||
+            sources is not null && sources.Any(item => MasksItem(item, name));
+
+        static bool MasksItem(SqlFromItem item, string name)
+            => MasksReference(item.Table, name) || item.Joins.Any(join => MasksReference(join.Table, name));
+
+        static bool MasksReference(SqlRelationReference reference, string name)
+        {
+            System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
+            // A group alias hides its children; an aliasless group exposes their namespaces.
+            if (reference.Alias is { } alias) { return name.Equals(alias, StringComparison.OrdinalIgnoreCase); }
+            return reference is SqlJoinedTableReference group ? MasksItem(group.Item, name)
+                : reference is SqlTableReference named && name.Equals(named.TableName, StringComparison.OrdinalIgnoreCase);
+        }
+
+        // OLD/NEW are contextual pseudo-relations only when a visible relation does not mask them
         // (PostgreSQL src/backend/parser/analyze.c:2773-2786). Keep quoted identifiers ordinary.
         var scan = lexer;
         bool afterDot = false;
@@ -30,14 +47,14 @@ public sealed partial class SqlQueryParser
                 continue;
             }
             if (!afterDot && (IsWord(ref scan, "OLD") || IsWord(ref scan, "NEW")) &&
-                !CurrentText(ref scan).Equals(table.Alias ?? table.TableName, StringComparison.OrdinalIgnoreCase) &&
+                !MasksPseudoRelation(CurrentText(ref scan)) &&
                 IsReturningPseudoRelation(scan))
             {
                 RequireSkippedConstruct(scan.Current.Position, scan.Current.Position + scan.Current.Value.Length,
                     $"RETURNING {CurrentText(ref scan).ToUpperInvariant()}.");
             }
             if (onConflict && !afterDot && IsWord(ref scan, "EXCLUDED") &&
-                !CurrentText(ref scan).Equals(table.Alias ?? table.TableName, StringComparison.OrdinalIgnoreCase) &&
+                !MasksPseudoRelation(CurrentText(ref scan)) &&
                 IsReturningPseudoRelation(scan))
             {
                 RequireSkippedConstruct(scan.Current.Position, scan.Current.Position + scan.Current.Value.Length, "EXCLUDED in RETURNING");

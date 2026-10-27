@@ -9,6 +9,8 @@ using Xunit;
 
 using Assimalign.Cohesion.Database.Transactions;
 
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
+
 namespace Assimalign.Cohesion.Database.Graph.Storage.Tests;
 
 [CollectionDefinition(nameof(GraphLabelConcurrencyTests), DisableParallelization = true)]
@@ -55,7 +57,7 @@ public sealed class GraphLabelConcurrencyTests
         };
 
         // Act: exactly `rounds` coordinated races.
-        var reader = Task.Run(() =>
+        var reader = DedicatedTestTask.Run(() =>
         {
             for (int iteration = 0; iteration < rounds; iteration++)
             {
@@ -74,7 +76,7 @@ public sealed class GraphLabelConcurrencyTests
                 if (Volatile.Read(ref continueRace) == 0) { break; }
             }
         }, timeout.Token);
-        var writer = Task.Run(async () =>
+        var writer = DedicatedTestTask.Run(async () =>
         {
             for (int iteration = 0; iteration < rounds; iteration++)
             {

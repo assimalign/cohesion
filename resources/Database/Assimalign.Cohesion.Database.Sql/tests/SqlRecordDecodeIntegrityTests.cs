@@ -8,6 +8,8 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
+
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 using Assimalign.Cohesion.Database.Execution;
@@ -31,13 +33,13 @@ using Assimalign.Cohesion.Database.Types;
 [Collection(SqlRecordDecodeRaceCollection.Name)]
 public sealed class SqlRecordDecodeIntegrityTests
 {
-    private const string Seek = "SELECT id FROM t WHERE val = 20";
+    private const string seek = "SELECT id FROM t WHERE val = 20";
 
     /// <summary>The shortest time the scan race runs.</summary>
-    private static readonly TimeSpan RaceMinimum = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan _raceMinimum = TimeSpan.FromSeconds(2);
 
     /// <summary>The longest the scan race waits past its minimum for the work it needs.</summary>
-    private static readonly TimeSpan RaceCeiling = TimeSpan.FromSeconds(60);
+    private static readonly TimeSpan _raceCeiling = TimeSpan.FromSeconds(60);
 
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - Upsert: damage behind a live unique entry is corruption rather than a conflict")]
     [InlineData(RecordDamage.InvalidTag)]
@@ -100,14 +102,16 @@ public sealed class SqlRecordDecodeIntegrityTests
         Damage(database, damaged, damage);
 
         // Act
-        var failure = await Should.ThrowAsync<DatabaseCorruptionException>(() => Ids(session, Seek));
+        var failure = await Should.ThrowAsync<DatabaseCorruptionException>(() => Ids(session, seek));
         var neighbour = await Ids(session, "SELECT id FROM t WHERE val = 10");
 
         // Assert: the failure names the record; the page itself reads, so the row beside it does.
         failure.PageId.ShouldBe(damaged.PageId);
-        failure.InnerException.ShouldBeOfType<StorageCorruptionException>().Message.ShouldStartWith(
-            $"The row record in slot {damaged.SlotIndex} of page {(long)damaged.PageId} of table 'dbo.t' (object {Table(database).ObjectId}) does not decode: ",
-            Case.Sensitive);
+        var corruption = failure.InnerException.ShouldBeOfType<StorageCorruptionException>();
+        corruption.SlotIndex.ShouldBe(damaged.SlotIndex);
+        corruption.InnerException.ShouldBeOfType<DatabaseTypeException>();
+        corruption.Message.ShouldStartWith(
+            $"Corrupt record at page {(long)damaged.PageId}, slot {damaged.SlotIndex}: Row of table 'dbo.t' (object {Table(database).ObjectId}) does not decode: ", Case.Sensitive);
         neighbour.ShouldBe([1]);
         session.LastStatementMetrics.ShouldNotBeNull().AccessPath.ShouldBe("seek:ix_val");
     }
@@ -136,7 +140,11 @@ public sealed class SqlRecordDecodeIntegrityTests
 
         // Assert
         failure.PageId.ShouldBe(damaged.PageId);
-        failure.Message.ShouldContain($"slot {damaged.SlotIndex} of page {(long)damaged.PageId} of table 'dbo.t'", Case.Sensitive);
+        var corruption = failure.InnerException.ShouldBeOfType<StorageCorruptionException>();
+        corruption.SlotIndex.ShouldBe(damaged.SlotIndex);
+        corruption.InnerException.ShouldBeOfType<DatabaseTypeException>();
+        corruption.Message.ShouldStartWith(
+            $"Corrupt record at page {(long)damaged.PageId}, slot {damaged.SlotIndex}: Row of table 'dbo.t' (object {Table(database).ObjectId}) does not decode: ", Case.Sensitive);
         failure.Message.ShouldContain("does not decode", Case.Sensitive);
     }
 
@@ -198,7 +206,7 @@ public sealed class SqlRecordDecodeIntegrityTests
         database.DataStorage.TryReadRecord(stale.PageId, stale.SlotIndex, out _).ShouldBeTrue("u's row sits in the slot t's entry names");
 
         // Act
-        var ids = await Ids(session, Seek);
+        var ids = await Ids(session, seek);
 
         // Assert
         ids.ShouldBeEmpty();
@@ -295,7 +303,7 @@ public sealed class SqlRecordDecodeIntegrityTests
         string label = new('x', 900);
         using var stop = new CancellationTokenSource();
         long cycles = 0;
-        var writer = Task.Run(() =>
+        var writer = DedicatedTestTask.Run(() =>
         {
             var live = new List<(PageId PageId, int SlotIndex)>();
             int id = 0;
@@ -336,8 +344,8 @@ public sealed class SqlRecordDecodeIntegrityTests
         var elapsed = Stopwatch.StartNew();
         while (failure is null
             && !writer.IsCompleted
-            && (elapsed.Elapsed < RaceMinimum
-                || ((Interlocked.Read(ref cycles) < 20 || scans < 20) && elapsed.Elapsed < RaceMinimum + RaceCeiling)))
+            && (elapsed.Elapsed < _raceMinimum
+                || ((Interlocked.Read(ref cycles) < 20 || scans < 20) && elapsed.Elapsed < _raceMinimum + _raceCeiling)))
         {
             try
             {

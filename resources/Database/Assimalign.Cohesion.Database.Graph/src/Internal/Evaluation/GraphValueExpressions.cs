@@ -61,8 +61,11 @@ internal static class GraphValueExpressions
     {
         switch (expression)
         {
+            case GqlNamedFunctionCallExpression named:
+                foreach (var argument in named.Arguments) { yield return argument; }
+                break;
             case GqlFunctionCallExpression call:
-                if (call.Arguments is null) { throw new GraphPlanningException("COHDBG001", ErrorMessages.ProjectionUnsupported, expression.Location); }
+                if (call.Arguments is null) { throw new GraphPlanningException("CG05001", ErrorMessages.ProjectionUnsupported, expression.Location); }
                 foreach (var argument in call.Arguments) { yield return argument; }
                 break;
             case GqlCastExpression cast: yield return cast.Operand; break;
@@ -78,37 +81,37 @@ internal static class GraphValueExpressions
             case GqlStringPredicateExpression predicate: yield return predicate.Left; yield return predicate.Right; break;
             case GqlCaseExpression conditional:
                 if (conditional.Alternatives is null || conditional.Alternatives.Count == 0 || conditional.Alternatives.Any(branch => branch is null || branch.Comparison is not ("=" or "<>" or "!=" or "<" or "<=" or ">" or ">=" or "IS NULL" or "IS NOT NULL")))
-                { throw new GraphPlanningException("COHDBG001", ErrorMessages.CaseInvalid, expression.Location); }
+                { throw new GraphPlanningException("CG05001", ErrorMessages.CaseInvalid, expression.Location); }
                 if (conditional.Operand is not null) { yield return conditional.Operand; }
                 foreach (var branch in conditional.Alternatives) { yield return branch.When; yield return branch.Then; }
                 if (conditional.Otherwise is not null) { yield return conditional.Otherwise; }
                 break;
             case GqlCoalesceExpression coalesce:
                 if (coalesce.Operands is null || coalesce.Operands.Count < 2)
-                { throw new GraphPlanningException("COHDBG001", ErrorMessages.CaseInvalid, expression.Location); }
+                { throw new GraphPlanningException("CG05001", ErrorMessages.CaseInvalid, expression.Location); }
                 foreach (var operand in coalesce.Operands) { yield return operand; }
                 break;
             case GqlNullIfExpression nullIf: yield return nullIf.Left; yield return nullIf.Right; break;
             case GqlListExpression list:
-                if (list.Items is null) { throw new GraphPlanningException("COHDBG001", ErrorMessages.MembershipListRequired, expression.Location); }
+                if (list.Items is null) { throw new GraphPlanningException("CG05001", ErrorMessages.MembershipListRequired, expression.Location); }
                 foreach (var item in list.Items) { yield return item; }
                 break;
             case GqlMapExpression map:
                 if (map.Entries is null || map.Entries.Any(entry => entry.Key is null) ||
                     map.Entries.Select(entry => entry.Key).Distinct(StringComparer.Ordinal).Count() != map.Entries.Count)
-                { throw new GraphPlanningException("COHDBG001", ErrorMessages.CompositeRequired, expression.Location); }
+                { throw new GraphPlanningException("CG05001", ErrorMessages.CompositeRequired, expression.Location); }
                 foreach (var entry in map.Entries) { yield return entry.Value; }
                 break;
             case GqlSubscriptExpression subscript: yield return subscript.Operand; yield return subscript.Index; break;
             case GqlMemberExpression member:
-                if (member.Member is null) { throw new GraphPlanningException("COHDBG001", ErrorMessages.CompositeRequired, expression.Location); }
+                if (member.Member is null) { throw new GraphPlanningException("CG05001", ErrorMessages.CompositeRequired, expression.Location); }
                 yield return member.Operand; break;
         }
     }
 
     // Track group lists at their exact container depth. Accessing a group's entity is not
     // itself a group, while extracting a group from a list/map retains its provenance.
-    internal static bool IsGroup(GqlExpression expression, Func<string, int, bool> variableGroup, int accesses)
+    internal static bool IsGroup(GqlExpression expression, Func<string, int, bool> variableGroup, int accesses, Func<GqlNamedFunctionCallExpression, GqlExpression?>? nativeExpression = null)
     {
         var pending = new Stack<(GqlExpression Expression, int Accesses)>();
         pending.Push((expression, accesses));
@@ -117,6 +120,9 @@ internal static class GraphValueExpressions
             var (value, depth) = item;
             switch (value)
             {
+                case GqlNamedFunctionCallExpression named:
+                    if (nativeExpression?.Invoke(named) is { } native) { pending.Push((native, depth)); }
+                    break;
                 case GqlFunctionCallExpression { Function: GqlScalarFunction.Properties } call when depth > 0:
                     pending.Push((call.Arguments[0], depth));
                     break;
@@ -147,7 +153,7 @@ internal static class GraphValueExpressions
     }
 
     // Access consumes a container level; accessing an entity produces a scalar property.
-    internal static bool MayReturn(GqlExpression expression, IReadOnlyDictionary<string, object?>? parameters, bool entity, Func<string, int, bool, bool>? variableShape = null, int initialAccesses = 0)
+    internal static bool MayReturn(GqlExpression expression, IReadOnlyDictionary<string, object?>? parameters, bool entity, Func<string, int, bool, bool>? variableShape = null, int initialAccesses = 0, Func<GqlNamedFunctionCallExpression, GraphFunctionType>? functionType = null, Func<GqlNamedFunctionCallExpression, GqlExpression?>? nativeExpression = null)
     {
         var pending = new Stack<(GqlExpression Expression, int Accesses)>();
         pending.Push((expression, initialAccesses));
@@ -156,6 +162,14 @@ internal static class GraphValueExpressions
             var (value, accesses) = item;
             switch (value)
             {
+                case GqlNamedFunctionCallExpression call:
+                    if (nativeExpression?.Invoke(call) is { } native) { pending.Push((native, accesses)); break; }
+                    var declared = (functionType?.Invoke(call) ?? GraphFunctionType.Any).At(accesses);
+                    if (declared is null) { break; }
+                    if (entity ? (declared.Kind & (GraphFunctionKind.Node | GraphFunctionKind.Relationship | GraphFunctionKind.Path)) != 0 ||
+                        (declared.Kind & (GraphFunctionKind.List | GraphFunctionKind.Map)) != 0 && ContainsEntity(declared)
+                        : (declared.Kind & (GraphFunctionKind.List | GraphFunctionKind.Map)) != 0) { return true; }
+                    break;
                 case GqlFunctionCallExpression call:
                     // Properties of stored entities are scalar. Properties(map) preserves the
                     // map's nested shapes, including entities, without returning an entity input.
@@ -203,7 +217,7 @@ internal static class GraphValueExpressions
     // Proof is stricter than MayReturn: every possible non-NULL result must have
     // the same entity kind. Accesses retain this proof through projection boundaries.
     internal static GraphEntityShape EntityShape(GqlExpression expression, Func<string, int, GraphEntityShape> variableShape,
-        int accesses, CancellationToken token)
+        int accesses, CancellationToken token, Func<GqlNamedFunctionCallExpression, GraphFunctionType>? functionType = null, Func<GqlNamedFunctionCallExpression, GqlExpression?>? nativeExpression = null)
     {
         var pending = new Stack<(GqlExpression Expression, int Depth, bool NonNull)>();
         pending.Push((expression, accesses, false));
@@ -223,6 +237,13 @@ internal static class GraphValueExpressions
                         ? false : call.Function is GqlScalarFunction.StartNode or GqlScalarFunction.EndNode && call.Arguments is [GqlVariableExpression input]
                         ? variableShape(input.Variable, 0).Optional : true;
                     if (!Merge(new GraphEntityShape(GraphScalarFunctions.Entity(call.Function, depth), nullable), nonNull)) { return default; }
+                    break;
+                case GqlNamedFunctionCallExpression named:
+                    if (nativeExpression?.Invoke(named) is { } native) { pending.Push((native, depth, nonNull)); break; }
+                    var declared = functionType?.Invoke(named).At(depth);
+                    var declaredKind = declared?.Kind == GraphFunctionKind.Node ? GraphProjectionKind.Node
+                        : declared?.Kind == GraphFunctionKind.Relationship ? GraphProjectionKind.Relationship : GraphProjectionKind.Scalar;
+                    if (!Merge(new GraphEntityShape(declaredKind, declared?.IsNullable ?? true), nonNull)) { return default; }
                     break;
                 case GqlCastExpression: return default;
                 case GqlVariableExpression variable:
@@ -287,9 +308,9 @@ internal static class GraphValueExpressions
     }
 
     // A missing/NULL element has no known scalar type. Mixed container/scalar
-    // branches defer container validation to evaluation (COHDBG013).
+    // branches defer container validation to evaluation (CG02013).
     internal static bool IsKnownScalar(GqlExpression expression, IReadOnlyDictionary<string, object?>? parameters,
-        Func<string, int, bool> variableScalar, int accesses)
+        Func<string, int, bool> variableScalar, int accesses, Func<GqlNamedFunctionCallExpression, GraphFunctionType>? functionType = null, Func<GqlNamedFunctionCallExpression, GqlExpression?>? nativeExpression = null)
     {
         var pending = new Stack<(GqlExpression Expression, int Accesses)>();
         pending.Push((expression, accesses));
@@ -304,6 +325,11 @@ internal static class GraphValueExpressions
                 case GqlFunctionCallExpression call:
                     if (depth == 0 ? (GraphScalarFunctions.Result(call.Function) & GraphFunctionKind.Scalar) == 0
                         : depth != 1 || call.Function is not (GqlScalarFunction.Labels or GqlScalarFunction.Keys)) { return false; }
+                    break;
+                case GqlNamedFunctionCallExpression named:
+                    if (nativeExpression?.Invoke(named) is { } native) { pending.Push((native, depth)); break; }
+                    var declared = functionType?.Invoke(named).At(depth);
+                    if (declared is null || (declared.Kind & ~GraphFunctionKind.Scalar) != 0) { return false; }
                     break;
                 case GqlCastExpression:
                     if (depth != 0) { return false; }
@@ -343,6 +369,16 @@ internal static class GraphValueExpressions
             }
         }
         return true;
+    }
+
+    private static bool ContainsEntity(GraphFunctionType type)
+    {
+        for (GraphFunctionType? current = type; current is not null; current = current.Element)
+        {
+            if ((current.Kind & (GraphFunctionKind.Node | GraphFunctionKind.Relationship | GraphFunctionKind.Path)) != 0) { return true; }
+            if (current.Element is null && (current.Kind & (GraphFunctionKind.List | GraphFunctionKind.Map)) != 0) { return true; }
+        }
+        return false;
     }
 
     private static bool ScalarValue(object? value, int accesses)

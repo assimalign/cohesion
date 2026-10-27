@@ -1,4 +1,5 @@
 using System.IO;
+using Assimalign.Cohesion.Database;
 using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.KeyValuePair.Internal;
@@ -19,6 +20,8 @@ using Assimalign.Cohesion.Database.Storage.Units;
 /// database created as <c>sales</c> and opened as <c>SALES</c> on Linux was not found, and the
 /// engine's open-or-create made a second, empty database.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("FileSystemKeyValueStorageStrategy")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.KeyValuePair.Internal.FileSystemKeyValueStorageStrategy.DebugView))]
 internal sealed class FileSystemKeyValueStorageStrategy : KeyValueStorageStrategy
 {
     private readonly string _rootPath;
@@ -40,9 +43,11 @@ internal sealed class FileSystemKeyValueStorageStrategy : KeyValueStorageStrateg
         // drop deletes; a create takes over neither, so a stale catalog set never meets new data.
         if (!catalog && Directory.Exists(directory))
         {
-            throw new DatabaseException(File.Exists(DatabaseFileNames.GetFiles(directory, GetFileSet(catalog)).Data)
-                ? $"Storage for database '{databaseName}' already exists."
-                : DatabaseFileNames.GetLeftoverRefusal(databaseName, directory));
+            bool exists = File.Exists(DatabaseFileNames.GetFiles(directory, GetFileSet(catalog)).Data);
+            string message = exists
+                ? string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.FileStorageAlreadyExists, databaseName)
+                : DatabaseFileNames.GetLeftoverRefusal(databaseName, directory);
+            throw DatabaseException.CreateEngineFailure(exists ? "CK03001" : "CK06004", message);
         }
 
         Directory.CreateDirectory(directory);
@@ -75,7 +80,7 @@ internal sealed class FileSystemKeyValueStorageStrategy : KeyValueStorageStrateg
 
         if (!File.Exists(files.Data))
         {
-            throw new DatabaseException($"Storage '{GetLabel(databaseName, catalog)}' does not exist.");
+            throw DatabaseException.CreateEngineFailure("CK06005", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageStrategyOpenStorageDatabase, GetLabel(databaseName, catalog)));
         }
 
         var catalogFiles = DatabaseFileNames.GetFiles(DatabaseFileNames.GetDirectory(_rootPath, databaseName), GetFileSet(catalog: true));
@@ -83,7 +88,7 @@ internal sealed class FileSystemKeyValueStorageStrategy : KeyValueStorageStrateg
             || (!catalog && (!File.Exists(catalogFiles.Data) || !File.Exists(catalogFiles.Journal) || !File.Exists(catalogFiles.Backup))))
         {
             string message = string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CreationSidecarMissing, databaseName);
-            throw new DatabaseException(message, [new Diagnostic { Code = "COHDBK004", Message = message, Severity = DiagnosticSeverity.Error }]);
+            throw new DatabaseException(message, [new Diagnostic { Code = "CV06104", Message = message, Severity = DiagnosticSeverity.Error }]);
         }
         var dataStream = StorageStream.FromFile(files.Data, FileMode.Open, FileShare.Read);
 
@@ -129,4 +134,12 @@ internal sealed class FileSystemKeyValueStorageStrategy : KeyValueStorageStrateg
     // reached disk. Inspect only the length: a refused open must not recover either set.
     internal bool HasIncompleteCreation(string databaseName)
         => new FileInfo(DatabaseFileNames.GetFiles(DatabaseFileNames.GetDirectory(_rootPath, databaseName), DataFileSet).Data).Length <= Page.Size;
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.KeyValuePair.Internal.FileSystemKeyValueStorageStrategy value)
+        {
+            _ = value;
+        }
+    }
 }

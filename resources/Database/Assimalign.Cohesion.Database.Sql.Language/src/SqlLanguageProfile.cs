@@ -15,11 +15,11 @@ public static class SqlLanguageProfile
     private static readonly string[] _keywords =
     [
         // DML
-        "SELECT", "EXPLAIN", "FROM", "WHERE", "INSERT", "UPDATE", "DELETE",
+        "SELECT", "EXPLAIN", "FROM", "WHERE", "INSERT", "UPDATE", "DELETE", "MERGE",
         "SET", "VALUES", "INTO", "RETURNING",
         "FUNCTION", "DOMAIN", "RETURNS", "RETURN", "IMMUTABLE", "STABLE", "VOLATILE", "STRICT", "CALLED", "INPUT",
         // DDL
-        "CREATE", "DROP", "ALTER", "TABLE", "INDEX", "VIEW", "IF",
+        "CREATE", "DROP", "TRUNCATE", "ALTER", "TABLE", "INDEX", "VIEW", "IF",
         "ADD", "COLUMN",
         "PRIMARY", "KEY", "FOREIGN", "REFERENCES",
         "CONSTRAINT", "DEFAULT", "CHECK", "UNIQUE", "COLLATE",
@@ -75,15 +75,20 @@ public static class SqlLanguageProfile
         SqlClauses.Explain,
         SqlClauses.Insert,
         SqlClauses.OnConflict,
+        SqlClauses.Merge,
         SqlClauses.Update,
+        SqlClauses.UpdateFrom,
         SqlClauses.Delete,
+        SqlClauses.DeleteUsing,
         SqlClauses.Returning,
         SqlClauses.CreateTable,
+        SqlClauses.CreateTableAs,
         SqlClauses.CreateSchema,
         SqlClauses.Identity,
         SqlClauses.CreateIndex,
         SqlClauses.AlterTable,
         SqlClauses.DropTable,
+        SqlClauses.Truncate,
         SqlClauses.CreateView,
         SqlClauses.DropView,
         SqlClauses.DropSchema,
@@ -104,6 +109,7 @@ public static class SqlLanguageProfile
         SqlClauses.Intersect,
         SqlClauses.Except,
         SqlClauses.Subquery,
+        SqlClauses.QuantifiedComparison,
         SqlClauses.Cte,
         SqlClauses.Case,
         SqlClauses.Cast,
@@ -125,8 +131,8 @@ public static class SqlLanguageProfile
     ];
 
     /// <summary>
-    /// Gets the SQL language profile. Clauses awaiting execution support are excluded even
-    /// when <see cref="SqlQueryParser"/> can construct their syntax trees.
+    /// Gets the SQL language profile, including MERGE actions, BY SOURCE, RETURNING,
+    /// repeated-target detection and EXPLAIN. Clauses awaiting execution are excluded.
     /// </summary>
     public static QueryLanguageProfile Instance { get; } = new(
         "SQL",
@@ -143,9 +149,9 @@ public static class SqlLanguageProfile
 
     /// <summary>
     /// Reports whether a join type executes in the SQL surface. Supported joins
-    /// run left-deep in written order. INNER and LEFT require ON or USING; CROSS has neither.
+    /// associate in written order. INNER, LEFT, RIGHT and FULL require ON or USING; CROSS has neither.
     /// </summary>
     /// <param name="joinType">The parsed join type.</param>
-    /// <returns><see langword="true"/> for INNER (including bare JOIN), LEFT OUTER and CROSS JOIN.</returns>
-    public static bool SupportsJoin(SqlJoinType joinType) => joinType is SqlJoinType.Inner or SqlJoinType.LeftOuter or SqlJoinType.Cross;
+    /// <returns><see langword="true"/> for INNER (including bare JOIN), LEFT OUTER, RIGHT OUTER, FULL OUTER and CROSS JOIN.</returns>
+    public static bool SupportsJoin(SqlJoinType joinType) => joinType is SqlJoinType.Inner or SqlJoinType.LeftOuter or SqlJoinType.RightOuter or SqlJoinType.FullOuter or SqlJoinType.Cross;
 }

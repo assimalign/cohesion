@@ -34,11 +34,11 @@ public sealed class DatabaseCorruptionTests
         await using var engine = new TestEngine();
         var cause = new StorageCorruptionException((PageId)9L, "Page 9 failed checksum verification.");
         Diagnostic[] diagnostics = [new Diagnostic
-        { Code = "COHDBG018", Message = "Open failed.", Severity = DiagnosticSeverity.Error }];
+        { Code = "CG06018", Message = "Open failed.", Severity = DiagnosticSeverity.Error }];
         if (wrapper >= 5)
         {
             diagnostics = [new Diagnostic
-            { Code = "COHDBS003", Message = "Already reported corruption.", Severity = DiagnosticSeverity.Error }, .. diagnostics];
+            { Code = "CK06003", Message = "Already reported corruption.", Severity = DiagnosticSeverity.Error }, .. diagnostics];
         }
         var coded = new DatabaseException("Open failed.", diagnostics, cause);
         Exception error = wrapper switch
@@ -85,11 +85,11 @@ public sealed class DatabaseCorruptionTests
         }
 
         // Assert
-        failure.Code.ShouldBe("COHDBS003");
+        failure.Code.ShouldBe("CK06003");
         failure.Database.ShouldBe((DatabaseName)"broken");
         failure.PageId.ShouldBe((PageId)9L);
         failure.InnerException.ShouldBeSameAs(cause);
-        failure.Diagnostics.Select(diagnostic => diagnostic.Code).ShouldBe(wrapper != 0 ? ["COHDBS003", "COHDBG018"] : ["COHDBS003"]);
+        failure.Diagnostics.Select(diagnostic => diagnostic.Code).ShouldBe(wrapper != 0 ? ["CK06003", "CG06018"] : ["CK06003"]);
         failure.Message.ShouldContain("verified backup", Case.Sensitive);
         engine.CreateOperation = null;
         (await engine.CreateDatabaseAsync("healthy", CancellationToken.None)).Name.ShouldBe((DatabaseName)"healthy");

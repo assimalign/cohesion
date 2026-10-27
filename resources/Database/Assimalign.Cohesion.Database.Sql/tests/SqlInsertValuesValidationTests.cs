@@ -22,11 +22,11 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 /// a target column used to resolve against the table and then index the empty row it is evaluated
 /// over: the <c>IndexOutOfRangeException</c> was not a <see cref="DatabaseException"/>, so over the
 /// wire it ended the session with <c>Internal</c>. Planning now rejects every column reference in
-/// those clauses with <c>COHSQLE005</c>, before anything executes.
+/// those clauses with <c>CS01005</c>, before anything executes.
 /// </summary>
 public sealed class SqlInsertValuesValidationTests
 {
-    private const string ColumnReferenceNotAllowed = "COHSQLE005";
+    private const string columnReferenceNotAllowed = "CS01005";
 
     /// <summary>
     /// A column reference anywhere in a VALUES row fails planning with the coded error on both session
@@ -62,7 +62,7 @@ public sealed class SqlInsertValuesValidationTests
         // Arrange
         await using var engine = CreateEngine();
         await using var session = await SeedAsync(engine);
-        string expected = $"{ColumnReferenceNotAllowed}: Column reference '{reference}' is not allowed in INSERT ... VALUES, " +
+        string expected = $"{columnReferenceNotAllowed}: Column reference '{reference}' is not allowed in INSERT ... VALUES, " +
             "which has no columns in scope. Use literals, parameters and expressions over them, or INSERT ... SELECT to read values from a table.";
 
         // Act
@@ -72,7 +72,7 @@ public sealed class SqlInsertValuesValidationTests
         // Assert
         foreach (var failure in new[] { text, typed })
         {
-            failure.ShouldBeOfType<SqlEvaluationException>().Code.ShouldBe(ColumnReferenceNotAllowed);
+            failure.ShouldBeOfType<SqlEvaluationException>().Code.ShouldBe(columnReferenceNotAllowed);
             failure.ShouldHaveMessage(expected);
         }
         session.State.ShouldBe(SessionState.Open);
@@ -94,7 +94,7 @@ public sealed class SqlInsertValuesValidationTests
         var failure = await Should.ThrowAsync<DatabaseException>(() => session.ExecuteAsync("INSERT INTO u (id, a) VALUES (id, 1)").AsTask());
 
         // Assert
-        failure.ShouldStartWithMessage($"{ColumnReferenceNotAllowed}: Column reference 'id' is not allowed in INSERT ... VALUES", Case.Sensitive);
+        failure.ShouldStartWithMessage($"{columnReferenceNotAllowed}: Column reference 'id' is not allowed in INSERT ... VALUES", Case.Sensitive);
         (await RowsAsync(session, "SELECT COUNT(*) FROM u")).ShouldHaveSingleItem().ShouldBe(new object?[] { 0L });
     }
 
@@ -115,7 +115,7 @@ public sealed class SqlInsertValuesValidationTests
         var failure = await Should.ThrowAsync<DatabaseException>(() => session.ExecuteAsync("INSERT INTO v (id, a) VALUES (3, a)").AsTask());
 
         // Assert
-        failure.ShouldBeOfType<SqlEvaluationException>().Code.ShouldBe(ColumnReferenceNotAllowed);
+        failure.ShouldBeOfType<SqlEvaluationException>().Code.ShouldBe(columnReferenceNotAllowed);
         session.CurrentTransaction.ShouldNotBeNull();
         await session.ExecuteAsync("COMMIT");
         (await RowsAsync(session, "SELECT id, a FROM v ORDER BY id")).ShouldBe([[1, 10], [2, 20]]);
@@ -181,7 +181,7 @@ public sealed class SqlInsertValuesValidationTests
     /// A sign over an operand the plan types as non-numeric is checked in VALUES too, while
     /// planning, so a later row's fault leaves the earlier rows unwritten.
     /// </summary>
-    [Fact(DisplayName = "Cohesion Test [SqlEngine] - INSERT VALUES: a non-numeric sign operand is COHSQLE003 while planning")]
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - INSERT VALUES: a non-numeric sign operand is CS02003 while planning")]
     public async Task ExecuteAsync_NonNumericSignInValues_ShouldFailWithInvalidOperandType()
     {
         // Arrange
@@ -193,7 +193,7 @@ public sealed class SqlInsertValuesValidationTests
             session.ExecuteAsync("INSERT INTO v (id, a) VALUES (2, 2), (3, +'abc')").AsTask());
 
         // Assert
-        failure.ShouldBeOfType<SqlEvaluationException>().Code.ShouldBe("COHSQLE003");
+        failure.ShouldBeOfType<SqlEvaluationException>().Code.ShouldBe("CS02003");
         (await RowsAsync(session, "SELECT COUNT(*) FROM v")).ShouldHaveSingleItem().ShouldBe(new object?[] { 1L });
     }
 
@@ -202,7 +202,7 @@ public sealed class SqlInsertValuesValidationTests
     /// reference there is the same coded error, over an empty result as over a full one. A subquery's
     /// count is no different: a reference to its own columns or to the outer query's fails with the
     /// same code, thrown like any other planning error, where it used to come back as an error result
-    /// carrying <c>COHDBL001</c>'s correlated-subquery diagnosis.
+    /// carrying <c>CK00001</c>'s correlated-subquery diagnosis.
     /// </summary>
     /// <param name="sql">The query.</param>
     /// <param name="reference">The reference as the diagnostic names it.</param>
@@ -230,8 +230,8 @@ public sealed class SqlInsertValuesValidationTests
         var failure = await Should.ThrowAsync<DatabaseException>(() => session.ExecuteAsync(sql).AsTask());
 
         // Assert
-        failure.ShouldBeOfType<SqlEvaluationException>().Code.ShouldBe(ColumnReferenceNotAllowed);
-        failure.ShouldHaveMessage($"{ColumnReferenceNotAllowed}: Column reference '{reference}' is not allowed in {clause}, " +
+        failure.ShouldBeOfType<SqlEvaluationException>().Code.ShouldBe(columnReferenceNotAllowed);
+        failure.ShouldHaveMessage($"{columnReferenceNotAllowed}: Column reference '{reference}' is not allowed in {clause}, " +
             "which has no columns in scope. Use literals, parameters and expressions over them.");
         (await RowsAsync(session, "SELECT a FROM v LIMIT @n OFFSET 1 - 1", new Dictionary<string, object?> { ["n"] = 1 }))
             .ShouldHaveSingleItem().ShouldBe(new object?[] { 10 });
@@ -279,7 +279,7 @@ public sealed class SqlInsertValuesValidationTests
 
         // Assert
         failure.ShouldBeOfType<DatabaseParseException>();
-        failure.Diagnostics.Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error).ShouldHaveSingleItem().Code.ShouldBe("COHDBL001");
+        failure.Diagnostics.Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error).ShouldHaveSingleItem().Code.ShouldBe("CK00001");
         failure.Message.ShouldContain(function.ToUpperInvariant(), Case.Sensitive);
         session.State.ShouldBe(SessionState.Open);
         (await RowsAsync(session, "SELECT COUNT(*) FROM v")).ShouldHaveSingleItem().ShouldBe(new object?[] { 1L });
@@ -308,7 +308,7 @@ public sealed class SqlInsertValuesValidationTests
 
         // Assert
         error.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
-        error.ShouldStartWithMessage($"{ColumnReferenceNotAllowed}: Column reference '", Case.Sensitive);
+        error.ShouldStartWithMessage($"{columnReferenceNotAllowed}: Column reference '", Case.Sensitive);
         error.Message.ShouldEndWith(" is not allowed in INSERT ... VALUES, which has no columns in scope. " +
             "Use literals, parameters and expressions over them, or INSERT ... SELECT to read values from a table.", Case.Sensitive);
         harness.Server.Sessions.Count.ShouldBe(1);

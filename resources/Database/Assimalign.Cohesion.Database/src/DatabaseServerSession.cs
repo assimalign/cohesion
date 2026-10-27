@@ -93,7 +93,7 @@ public abstract class DatabaseServerSession : IAsyncDisposable
         {
             if (_negotiated)
             {
-                throw new InvalidOperationException("The session's protocol version was already negotiated.");
+                throw new InvalidOperationException(ErrorMessages.SessionSetNegotiatedVersionFailure);
             }
 
             _protocolVersion = version;
@@ -114,7 +114,7 @@ public abstract class DatabaseServerSession : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(principal);
         if (Interlocked.CompareExchange(ref _principal, principal, null) is not null)
         {
-            throw new InvalidOperationException("The session's principal was already authenticated.");
+            throw new InvalidOperationException(ErrorMessages.SetAuthenticatedPrincipalFailure);
         }
 
         DatabaseEventSource.Log.ServerSessionAuthenticated(this, principal);

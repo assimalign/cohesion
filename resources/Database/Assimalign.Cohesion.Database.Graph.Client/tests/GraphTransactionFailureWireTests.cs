@@ -44,11 +44,11 @@ public sealed class GraphTransactionFailureWireTests
 
         // Assert
         failure.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
-        failure.Message.ShouldContain("COHDBG001", Case.Sensitive);
+        failure.Message.ShouldContain("CG05001", Case.Sensitive);
         refused.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
-        refused.Message.ShouldContain("COHDBG007", Case.Sensitive);
+        refused.Message.ShouldContain("CG04007", Case.Sensitive);
         refusedRead.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
-        refusedRead.Message.ShouldContain("COHDBG007", Case.Sensitive);
+        refusedRead.Message.ShouldContain("CG04007", Case.Sensitive);
         faultedState.ShouldBe(TransactionState.Faulted);
         connection.IsOpen.ShouldBeTrue();
         harness.Server.Sessions.ShouldHaveSingleItem().Id.ShouldBe(serverSession.Id);
@@ -127,7 +127,7 @@ public sealed class GraphTransactionFailureWireTests
         failure.Code.ShouldBe(code);
         failure.Message.ShouldContain(fragment, Case.Sensitive);
         refused.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
-        refused.Message.ShouldContain("COHDBG007", Case.Sensitive);
+        refused.Message.ShouldContain("CG04007", Case.Sensitive);
         refused.Message.ShouldContain(fragment, Case.Sensitive);
         faultedState.ShouldBe(TransactionState.Faulted);
         connection.IsOpen.ShouldBeTrue();
@@ -159,7 +159,7 @@ public sealed class GraphTransactionFailureWireTests
         failure.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
         failure.Message.ShouldContain("depth 64", Case.Sensitive);
         faultedState.ShouldBe(TransactionState.Faulted);
-        commitError.Diagnostics[0].Code.ShouldBe("COHDBG007");
+        commitError.Diagnostics[0].Code.ShouldBe("CG04007");
         commitError.Message.ShouldContain("depth 64", Case.Sensitive);
         transaction.State.ShouldBe(TransactionState.RolledBack);
         connection.IsOpen.ShouldBeTrue();
@@ -192,7 +192,7 @@ public sealed class GraphTransactionFailureWireTests
         (await connection.ExecuteAsync("CREATE (:After)", cancellationToken: harness.Token)).ShouldBe(1);
 
         // Assert
-        error.Diagnostics[0].Code.ShouldBe("COHDBG007");
+        error.Diagnostics[0].Code.ShouldBe("CG04007");
         transaction.State.ShouldBe(TransactionState.RolledBack);
         (await connection.QueryAsync("SHOW LABELS", cancellationToken: harness.Token)).Select(row => (string?)row[2]).ShouldBe(["After"]);
     }

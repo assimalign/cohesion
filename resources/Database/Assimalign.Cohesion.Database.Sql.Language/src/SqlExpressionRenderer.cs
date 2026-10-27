@@ -33,6 +33,31 @@ namespace Assimalign.Cohesion.Database.Sql.Language;
 /// </remarks>
 public static class SqlExpressionRenderer
 {
+    /// <summary>Renders an ALTER COLUMN TYPE statement as canonical SQL without a terminator.</summary>
+    /// <param name="query">The parsed statement.</param>
+    /// <returns>The target type, optional collation and original-row conversion.</returns>
+    /// <exception cref="ArgumentNullException">The query is null.</exception>
+    /// <exception cref="NotSupportedException">The action is not ALTER COLUMN TYPE.</exception>
+    /// <exception cref="InsufficientExecutionStackException">The thread has insufficient stack.</exception>
+    public static string Render(SqlAlterTableExpression query)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        if (query.Action is not SqlAlterColumnTypeAction change)
+        {
+            throw new NotSupportedException(ErrorMessages.AlterTypeRenderingRequired);
+        }
+        return "ALTER TABLE " + (query.Table.SchemaName is { } schema ? Identifier(schema) + "." : "") +
+            Identifier(query.Table.TableName) + " ALTER COLUMN " + Identifier(change.Column.ColumnName) +
+            " TYPE " + AlterTypeTarget(change.Column) + (change.Column.CollationName is { } collation ? " COLLATE " + Identifier(collation) : "") +
+            (change.UsingExpression is { } conversion ? " USING " + Render(conversion) : "");
+    }
+
+    private static string AlterTypeTarget(SqlColumnDefinition column)
+    {
+        if (column.ResolvedType is not null) { return CastTarget(column.DataType); }
+        return Identifier(column.TypeName);
+    }
+
     // Precedence ladder of SqlQueryParser.Expressions.cs, loosest first. An operand whose own
     // level is below what its position parses is parenthesized.
     private const int orLevel = 1;
@@ -51,6 +76,34 @@ public static class SqlExpressionRenderer
     // Words that are not profile keywords or functions but that a parser rule reads by spelling
     // in some position: the LIKE escape clause, IS UNKNOWN, and NULLS FIRST/LAST.
     private static readonly string[] _positionalWords = ["ESCAPE", "UNKNOWN", "BOTH", "LEADING", "TRAILING", "NULLS"];
+
+    /// <summary>Renders TRUNCATE as canonical SQL without a terminator.</summary>
+    /// <param name="query">The parsed statement.</param>
+    /// <returns>The table list and explicit effective identity and dependency policies.</returns>
+    /// <exception cref="ArgumentNullException">The query is null.</exception>
+    public static string Render(SqlTruncateExpression query)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        return "TRUNCATE TABLE " + string.Join(", ", query.Tables.Select(target =>
+            (target.Only ? "ONLY " : "") + (target.Table.SchemaName is { } schema ? Identifier(schema) + "." : "") +
+            Identifier(target.Table.TableName))) + (query.RestartIdentity ? " RESTART IDENTITY" : " CONTINUE IDENTITY") +
+            (query.Cascade ? " CASCADE" : " RESTRICT");
+    }
+
+    /// <summary>Renders CREATE TABLE AS as canonical SQL without a terminator.</summary>
+    /// <param name="query">The parsed statement.</param>
+    /// <returns>The destination, optional output names, query and explicit data policy.</returns>
+    /// <exception cref="ArgumentNullException">The query is null.</exception>
+    /// <exception cref="NotSupportedException">The query cannot be represented by the dialect.</exception>
+    /// <exception cref="InsufficientExecutionStackException">The thread has insufficient stack.</exception>
+    public static string Render(SqlCreateTableAsExpression query)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        return "CREATE TABLE " + (query.IfNotExists ? "IF NOT EXISTS " : "") +
+            (query.Table.SchemaName is { } schema ? Identifier(schema) + "." : "") + Identifier(query.Table.TableName) +
+            (query.Columns.Count == 0 ? "" : " (" + string.Join(", ", query.Columns.Select(Identifier)) + ")") +
+            " AS " + Render(query.Query) + (query.WithData ? " WITH DATA" : " WITH NO DATA");
+    }
 
     // Builtin window functions. An accepted quoted uppercase or mixed-case spelling is a
     // distinct name: keep it delimited so rendering cannot turn it into an unquoted built-in.
@@ -107,6 +160,95 @@ public static class SqlExpressionRenderer
         return Select(query);
     }
 
+    /// <summary>Renders an UPDATE, including FROM sources, as canonical SQL without a terminator.</summary>
+    /// <param name="query">The parsed statement.</param>
+    /// <returns>The canonical statement text.</returns>
+    /// <exception cref="ArgumentNullException">The query is null.</exception>
+    /// <exception cref="NotSupportedException">The tree cannot be represented by the dialect.</exception>
+    /// <exception cref="InsufficientExecutionStackException">The thread has insufficient stack.</exception>
+    public static string Render(SqlUpdateExpression query)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        ThrowIfTooDeep(query.NestingDepth);
+        var builder = new StringBuilder();
+        AppendCommonTables(builder, query.CommonTables);
+        builder.Append("UPDATE ").Append(Table(query.Table)).Append(" SET ");
+        builder.Append(string.Join(", ", query.Assignments.Select(assignment => Identifier(assignment.ColumnName) + " = " + Expression(assignment.Value))));
+        AppendSources(builder, query.From, " FROM ");
+        AppendDmlTail(builder, query.Where, query.Returning);
+        return builder.ToString();
+    }
+
+    /// <summary>Renders MERGE and its ordered actions as canonical SQL without a terminator.</summary>
+    /// <param name="query">The parsed statement.</param>
+    /// <returns>The canonical statement text.</returns>
+    /// <exception cref="ArgumentNullException">The query is null.</exception>
+    /// <exception cref="NotSupportedException">The tree exceeds the supported nesting limit.</exception>
+    /// <exception cref="InsufficientExecutionStackException">The thread has insufficient stack.</exception>
+    public static string Render(SqlMergeExpression query)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        ThrowIfTooDeep(query.NestingDepth);
+        var builder = new StringBuilder("MERGE INTO ");
+        builder.Append(Table(query.Table));
+        AppendSources(builder, [query.Source], " USING ");
+        builder.Append(" ON ").Append(Expression(query.Condition));
+        foreach (var action in query.Actions)
+        {
+            builder.Append(action.MatchKind switch
+            {
+                SqlMergeMatchKind.Matched => " WHEN MATCHED",
+                SqlMergeMatchKind.NotMatchedBySource => " WHEN NOT MATCHED BY SOURCE",
+                _ => action.IsByTargetExplicit ? " WHEN NOT MATCHED BY TARGET" : " WHEN NOT MATCHED",
+            });
+            if (action.Condition is { } condition) { builder.Append(" AND ").Append(Expression(condition)); }
+            builder.Append(" THEN ");
+            switch (action.Action)
+            {
+                case SqlMergeAction.Update:
+                    builder.Append("UPDATE SET ").Append(string.Join(", ", action.Assignments.Select(assignment => Identifier(assignment.ColumnName) + " = " + Expression(assignment.Value))));
+                    break;
+                case SqlMergeAction.Delete: builder.Append("DELETE"); break;
+                case SqlMergeAction.DoNothing: builder.Append("DO NOTHING"); break;
+                case SqlMergeAction.Insert:
+                    builder.Append("INSERT");
+                    if (action.Columns is { } columns) { builder.Append(" (").Append(string.Join(", ", columns.Select(Identifier))).Append(')'); }
+                    if (action.IsDefaultValues) { builder.Append(" DEFAULT VALUES"); }
+                    else { builder.Append(" VALUES (").Append(string.Join(", ", action.Values!.Select(Expression))).Append(')'); }
+                    break;
+            }
+        }
+        AppendDmlTail(builder, null, query.Returning);
+        return builder.ToString();
+    }
+
+    /// <summary>Renders a DELETE, including USING sources, as canonical SQL without a terminator.</summary>
+    /// <param name="query">The parsed statement.</param>
+    /// <returns>The canonical statement text.</returns>
+    /// <exception cref="ArgumentNullException">The query is null.</exception>
+    /// <exception cref="NotSupportedException">The tree cannot be represented by the dialect.</exception>
+    /// <exception cref="InsufficientExecutionStackException">The thread has insufficient stack.</exception>
+    public static string Render(SqlDeleteExpression query)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        ThrowIfTooDeep(query.NestingDepth);
+        var builder = new StringBuilder();
+        AppendCommonTables(builder, query.CommonTables);
+        builder.Append("DELETE FROM ").Append(Table(query.Table));
+        AppendSources(builder, query.Using, " USING ");
+        AppendDmlTail(builder, query.Where, query.Returning);
+        return builder.ToString();
+    }
+
+    private static void AppendDmlTail(StringBuilder builder, SqlExpression? where, IReadOnlyList<SqlSelectColumn>? returning)
+    {
+        if (where is not null) { builder.Append(" WHERE ").Append(Expression(where)); }
+        if (returning is null) { return; }
+        builder.Append(" RETURNING ");
+        builder.Append(string.Join(", ", returning.Select(column => Expression(column.Expression) +
+            (column.Alias is null ? string.Empty : " AS " + Identifier(column.Alias)))));
+    }
+
     /// <summary>
     /// Refuses a tree deeper than any parser accepts (#1151): the highest limit a parser can be
     /// configured with. Its text would not parse back, so it has no canonical form; and refusing it
@@ -120,7 +262,7 @@ public static class SqlExpressionRenderer
         if (depth > SqlQueryParserOptions.MaximumExpressionNestingLimit)
         {
             throw new NotSupportedException(
-                $"The expression nests {depth} levels deep; the SQL dialect allows at most {SqlQueryParserOptions.MaximumExpressionNestingLimit}, so its text would not parse.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.RendererThrowIfTooDeepNotSupported, depth, SqlQueryParserOptions.MaximumExpressionNestingLimit));
         }
     }
 
@@ -148,6 +290,9 @@ public static class SqlExpressionRenderer
         SqlBetweenExpression between => Operand(between.Operand, concatLevel) + (between.IsNegated ? " NOT BETWEEN " : " BETWEEN ") +
             Operand(between.Low, concatLevel) + " AND " + Operand(between.High, concatLevel),
         SqlInExpression inExpression => In(inExpression),
+        SqlQuantifiedComparisonExpression quantified => Operand(quantified.Operand, predicateLevel) + " " +
+            OperatorText(quantified.Operator) + " " + quantified.Quantifier.ToString().ToUpperInvariant() +
+            " (" + Select(quantified.Subquery) + ")",
         SqlLikeExpression like => Operand(like.Operand, concatLevel) + (like.IsNegated ? " NOT LIKE " : " LIKE ") +
             Operand(like.Pattern, collateLevel) + (like.Escape is null ? "" : " ESCAPE " + Operand(like.Escape, collateLevel)),
         SqlCollateExpression collate => Operand(collate.Operand, collateLevel) + " COLLATE " + collate.CollationName,
@@ -161,7 +306,7 @@ public static class SqlExpressionRenderer
         SqlCastExpression cast => "CAST(" + Expression(cast.Operand) + " AS " + CastTarget(cast.TargetType) + ")",
         SqlExistsExpression exists => (exists.IsNegated ? "NOT EXISTS (" : "EXISTS (") + Select(exists.Subquery) + ")",
         SqlSubqueryExpression subquery => "(" + Select(subquery.Select) + ")",
-        _ => throw new NotSupportedException($"Expression node '{expression.GetType().Name}' has no SQL spelling."),
+        _ => throw new NotSupportedException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlExpressionRendererNodeNotSupported, expression.GetType().Name)),
     };
 
     private static string Ordering(SqlOrderByColumn key) => Expression(key.Expression) + (key.IsDescending ? " DESC" : "") +
@@ -200,11 +345,12 @@ public static class SqlExpressionRenderer
                 SqlBinaryOperator.GreaterThan or SqlBinaryOperator.LessOrEqual or SqlBinaryOperator.GreaterOrEqual,
         } => comparisonLevel,
         SqlIsNullExpression or SqlDistinctExpression or SqlBooleanTestExpression => isLevel,
+        SqlQuantifiedComparisonExpression => comparisonLevel,
         SqlBetweenExpression or SqlInExpression or SqlLikeExpression => predicateLevel,
         SqlBinaryExpression { Operator: SqlBinaryOperator.Add or SqlBinaryOperator.Subtract } => additiveLevel,
         SqlBinaryExpression { Operator: SqlBinaryOperator.Concat } => concatLevel,
         SqlBinaryExpression { Operator: SqlBinaryOperator.Multiply or SqlBinaryOperator.Divide or SqlBinaryOperator.Modulo } => multiplicativeLevel,
-        SqlBinaryExpression binary => throw new NotSupportedException($"Binary operator '{binary.Operator}' has no SQL spelling."),
+        SqlBinaryExpression binary => throw new NotSupportedException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExpressionRendererLevelNotSupported, binary.Operator)),
         SqlUnaryExpression => unaryLevel,
         SqlCollateExpression => collateLevel,
         _ => primaryLevel,
@@ -265,7 +411,7 @@ public static class SqlExpressionRenderer
         SqlBinaryOperator.LessOrEqual => "<=",
         SqlBinaryOperator.GreaterOrEqual => ">=",
         // AND and OR are SqlLogicalExpression chains; the parser builds no binary node for them.
-        _ => throw new NotSupportedException($"Binary operator '{op}' has no SQL spelling."),
+        _ => throw new NotSupportedException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExpressionRendererLevelNotSupported, op)),
     };
 
     private static string Unary(SqlUnaryExpression unary)
@@ -283,7 +429,7 @@ public static class SqlExpressionRenderer
             SqlUnaryOperator.Negate => "-",
             SqlUnaryOperator.Plus => "+",
             SqlUnaryOperator.BitwiseNot => "~",
-            _ => throw new NotSupportedException($"Unary operator '{unary.Operator}' has no SQL spelling."),
+            _ => throw new NotSupportedException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExpressionRendererUnaryNotSupported, unary.Operator)),
         };
 
         // A sign applied to a sign is parenthesized: two minus signs in a row would start a
@@ -314,7 +460,7 @@ public static class SqlExpressionRenderer
         SqlLiteralType.Null => "NULL",
         SqlLiteralType.Boolean => literal.Value.Equals("TRUE", StringComparison.OrdinalIgnoreCase) ? "TRUE" : "FALSE",
         SqlLiteralType.Integer or SqlLiteralType.Float => literal.Value,
-        _ => throw new NotSupportedException($"Literal type '{literal.LiteralType}' has no SQL spelling."),
+        _ => throw new NotSupportedException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExpressionRendererLiteralNotSupported, literal.LiteralType)),
     };
 
     private static string Column(SqlColumnReferenceExpression column)
@@ -326,7 +472,11 @@ public static class SqlExpressionRenderer
         }
         if (column.TableAlias is not null)
         {
-            builder.Append(Identifier(column.TableAlias)).Append('.');
+            // OLD/NEW are contextual RETURNING pseudo-relations. The AST keeps ordinary
+            // identifier values, so delimit these qualifiers to preserve that meaning.
+            builder.Append(column.TableAlias.Equals("old", StringComparison.OrdinalIgnoreCase) ||
+                column.TableAlias.Equals("new", StringComparison.OrdinalIgnoreCase)
+                ? "\"" + column.TableAlias + "\"" : Identifier(column.TableAlias)).Append('.');
         }
         return builder.Append(Identifier(column.ColumnName)).ToString();
     }
@@ -406,22 +556,7 @@ public static class SqlExpressionRenderer
             foreach (var definition in query.CommonTables) { ThrowIfTooDeep(definition.Body.ExpressionDepth); }
         }
         var builder = new StringBuilder();
-        if (query.CommonTables.Count > 0)
-        {
-            builder.Append("WITH ");
-            for (int i = 0; i < query.CommonTables.Count; i++)
-            {
-                if (i > 0) { builder.Append(", "); }
-                var definition = query.CommonTables[i];
-                builder.Append(Identifier(definition.Name));
-                if (definition.Columns.Count > 0)
-                {
-                    builder.Append(" (").Append(string.Join(", ", definition.Columns.Select(Identifier))).Append(')');
-                }
-                builder.Append(" AS (").Append(Select(definition.Body)).Append(')');
-            }
-            builder.Append(' ');
-        }
+        AppendCommonTables(builder, query.CommonTables);
         if (query is SqlSetOperationExpression set)
         {
             builder.Append(SetOperand(set.Left, set.Operator, false)).Append(set.Operator switch
@@ -458,31 +593,7 @@ public static class SqlExpressionRenderer
             }
         }
 
-        for (int itemIndex = 0; itemIndex < select.From.Count; itemIndex++)
-        {
-            var item = select.From[itemIndex];
-            builder.Append(itemIndex == 0 ? " FROM " : ", ").Append(Table(item.Table));
-            foreach (var join in item.Joins)
-            {
-                builder.Append(join.JoinType switch
-                {
-                    SqlJoinType.Inner => " INNER JOIN ",
-                    SqlJoinType.LeftOuter => " LEFT OUTER JOIN ",
-                    SqlJoinType.RightOuter => " RIGHT OUTER JOIN ",
-                    SqlJoinType.FullOuter => " FULL OUTER JOIN ",
-                    SqlJoinType.Cross => " CROSS JOIN ",
-                    _ => throw new NotSupportedException($"Join type '{join.JoinType}' has no SQL spelling."),
-                }).Append(Table(join.Table));
-                if (join.Condition is not null)
-                {
-                    builder.Append(" ON ").Append(Expression(join.Condition));
-                }
-                if (join.UsingColumns.Count > 0)
-                {
-                    builder.Append(" USING (").Append(string.Join(", ", join.UsingColumns.Select(Identifier))).Append(')');
-                }
-            }
-        }
+        AppendSources(builder, select.From, " FROM ");
         if (select.Where is not null)
         {
             builder.Append(" WHERE ").Append(Expression(select.Where));
@@ -497,6 +608,55 @@ public static class SqlExpressionRenderer
         }
         AppendQueryTail(builder, select);
         return builder.ToString();
+    }
+
+    private static void AppendCommonTables(StringBuilder builder, IReadOnlyList<SqlCommonTableExpression> definitions)
+    {
+        if (definitions.Count > 0)
+        {
+            builder.Append("WITH ");
+            for (int i = 0; i < definitions.Count; i++)
+            {
+                if (i > 0) { builder.Append(", "); }
+                var definition = definitions[i];
+                builder.Append(Identifier(definition.Name));
+                if (definition.Columns.Count > 0)
+                {
+                    builder.Append(" (").Append(string.Join(", ", definition.Columns.Select(Identifier))).Append(')');
+                }
+                builder.Append(" AS (").Append(Select(definition.Body)).Append(')');
+            }
+            builder.Append(' ');
+        }
+    }
+
+    private static void AppendSources(StringBuilder builder, IReadOnlyList<SqlFromItem> sources, string clause)
+    {
+        for (int itemIndex = 0; itemIndex < sources.Count; itemIndex++)
+        {
+            var item = sources[itemIndex];
+            builder.Append(itemIndex == 0 ? clause : ", ").Append(Table(item.Table));
+            foreach (var join in item.Joins)
+            {
+                builder.Append(join.JoinType switch
+                {
+                    SqlJoinType.Inner => " INNER JOIN ",
+                    SqlJoinType.LeftOuter => " LEFT OUTER JOIN ",
+                    SqlJoinType.RightOuter => " RIGHT OUTER JOIN ",
+                    SqlJoinType.FullOuter => " FULL OUTER JOIN ",
+                    SqlJoinType.Cross => " CROSS JOIN ",
+                    _ => throw new NotSupportedException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExpressionRendererSelectNotSupported, join.JoinType)),
+                }).Append(Table(join.Table));
+                if (join.Condition is not null)
+                {
+                    builder.Append(" ON ").Append(Expression(join.Condition));
+                }
+                if (join.UsingColumns.Count > 0)
+                {
+                    builder.Append(" USING (").Append(string.Join(", ", join.UsingColumns.Select(Identifier))).Append(')');
+                }
+            }
+        }
     }
 
     private static string SetOperand(SqlQueryBodyExpression operand, SqlSetOperator parent, bool right)
@@ -538,6 +698,13 @@ public static class SqlExpressionRenderer
 
     private static string Table(SqlRelationReference relation)
     {
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+        if (relation is SqlJoinedTableReference group)
+        {
+            var builder = new StringBuilder("(");
+            AppendSources(builder, [group.Item], string.Empty);
+            return builder.Append(')').ToString();
+        }
         if (relation is SqlDerivedTableReference derived)
         {
             return "(" + Select(derived.Query) + ") AS " + Identifier(derived.Alias!) +

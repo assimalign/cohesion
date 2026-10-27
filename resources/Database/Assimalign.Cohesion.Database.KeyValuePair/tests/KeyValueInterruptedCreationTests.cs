@@ -38,7 +38,7 @@ public sealed class KeyValueInterruptedCreationTests : IDisposable
             strategy.StorageExists("kv", catalog: true).ShouldBeFalse();
             strategy.StorageExists("kv", catalog: false).ShouldBeTrue();
             var refusal = failure.ShouldBeOfType<DatabaseException>();
-            refusal.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBK006");
+            refusal.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CV06106");
             refusal.Message.ShouldContain("catalog", Case.Sensitive);
             refusal.Message.ShouldContain("restore", Case.Sensitive);
             refusal.Message.ShouldNotContain(".dat", Case.Sensitive);
@@ -77,7 +77,7 @@ public sealed class KeyValueInterruptedCreationTests : IDisposable
             var failure = await Should.ThrowAsync<DatabaseException>(async () => await engine.OpenDatabaseAsync("kv", CancellationToken.None));
             failure.Message.ShouldContain("DropDatabaseAsync", Case.Sensitive);
             failure.Message.ShouldContain("CreateDatabaseAsync", Case.Sensitive);
-            failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBK006");
+            failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CV06106");
             engine.TryGetDatabase("kv", out _).ShouldBeFalse();
             Directory.GetFiles(directory).ShouldBe(before.Keys, ignoreOrder: true);
             foreach (var (path, bytes) in before) { File.ReadAllBytes(path).ShouldBe(bytes); }

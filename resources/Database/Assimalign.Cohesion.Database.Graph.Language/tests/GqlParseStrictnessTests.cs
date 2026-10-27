@@ -7,8 +7,8 @@ using Xunit;
 namespace Assimalign.Cohesion.Database.Graph.Language.Tests;
 
 /// <summary>
-/// Parse strictness (#1101): a stray character is one GQL0002 that binds nothing, an ISO
-/// construct outside the subset is one COHDBL001 at its own span, and every statement form
+/// Parse strictness (#1101): a stray character is one CG00002 that binds nothing, an ISO
+/// construct outside the subset is one CK00001 at its own span, and every statement form
 /// still rejects leftover text. #1139 flipped the label-expression and <c>IS</c> pins to
 /// supported cases (<c>GqlLabelExpressionParserTests</c>) and added the tilde-edge pins;
 /// <c>GqlCypherArrowTests</c> owns <c>--</c> after a pattern element.
@@ -16,7 +16,7 @@ namespace Assimalign.Cohesion.Database.Graph.Language.Tests;
 public sealed class GqlParseStrictnessTests
 {
     /// <param name="marked">The statement; the stray character sits between '«' and '»'.</param>
-    [Theory(DisplayName = "Cohesion Test [Graph.Language] - Strictness: a stray character is one GQL0002 at its span and binds nothing")]
+    [Theory(DisplayName = "Cohesion Test [Graph.Language] - Strictness: a stray character is one CG00002 at its span and binds nothing")]
     [InlineData("MATCH (a) RETURN a.x «?»")]
     [InlineData("MATCH (a) RETURN a «#»;")]
     [InlineData("MATCH (a) WHERE a.x = «?» RETURN a", true)]
@@ -35,7 +35,7 @@ public sealed class GqlParseStrictnessTests
 
         // Assert
         var error = statement.Diagnostics.ShouldHaveSingleItem();
-        error.Code.ShouldBe("GQL0002");
+        error.Code.ShouldBe("CG00002");
         error.Start.ShouldBe(start);
         error.End.ShouldBe(end);
         error.Message!.ShouldStartWith(parameterForm ? "Unsupported parameter form;" : "Unexpected character ", Case.Sensitive);
@@ -47,12 +47,12 @@ public sealed class GqlParseStrictnessTests
     }
 
     /// <summary>
-    /// Each used to fail with GQL0002 at a downstream token, or with two COHDBL001s. Each is now
-    /// exactly one COHDBL001 at the construct's span, named as the construct.
+    /// Each used to fail with CG00002 at a downstream token, or with two COHDBL001s. Each is now
+    /// exactly one CK00001 at the construct's span, named as the construct.
     /// </summary>
     /// <param name="marked">The statement; the reported span sits between '«' and '»'.</param>
     /// <param name="construct">The construct the message names.</param>
-    [Theory(DisplayName = "Cohesion Test [Graph.Language] - Strictness: ISO constructs report one COHDBL001 at their span and no GQL0002")]
+    [Theory(DisplayName = "Cohesion Test [Graph.Language] - Strictness: ISO constructs report one CK00001 at their span and no CG00002")]
     // Undirected (tilde) edges (#1139 pins): the engine stores only directed relationships.
     [InlineData("MATCH (a)«~[r]~»(b) RETURN a", "UNDIRECTED EDGE")]
     [InlineData("MATCH (a)«<~[r:T]~»(b) RETURN a", "UNDIRECTED EDGE")]
@@ -62,28 +62,19 @@ public sealed class GqlParseStrictnessTests
     [InlineData("MATCH (a)«~>»(b) RETURN a", "UNDIRECTED EDGE")]
     [InlineData("INSERT (a:P)«~>»(b:P)", "UNDIRECTED EDGE")]
     [InlineData("MATCH (a)-[r]->(b)«~»(c) RETURN a", "UNDIRECTED EDGE")]
-    // Path mode prefixes (pins)
-    [InlineData("MATCH «TRAIL» (a)-[]->(b)", "TRAIL PATH MODE")]
-    [InlineData("MATCH p = «ACYCLIC» (a)-[]->(b)", "ACYCLIC PATH MODE")]
-    [InlineData("MATCH «WALK» (a)-[]->(b)", "WALK PATH MODE")]
-    [InlineData("MATCH p = «SIMPLE» (a)-[]->(b) RETURN p", "SIMPLE PATH MODE")]
-    [InlineData("MATCH «TRAIL PATH» (a)-[]->(b) RETURN a", "TRAIL PATH MODE")]
-    // Path search prefixes (pins): one prefix, not ALL or ANY plus SHORTEST PATH
-    [InlineData("MATCH «ALL SHORTEST» (a)-[]->(b)", "ALL SHORTEST")]
-    [InlineData("MATCH «ANY SHORTEST» (a)-[]->(b)", "ANY SHORTEST")]
-    [InlineData("MATCH p = «ANY SHORTEST PATHS» (a)-[]->(b) RETURN p", "ANY SHORTEST")]
-    // A path search prefix owns its path mode and PATH/PATHS (ISO/IEC 39075 <path search prefix>)
-    [InlineData("MATCH «ANY SHORTEST TRAIL» (a)-[]->(b) RETURN a", "ANY SHORTEST")]
-    [InlineData("MATCH «ALL TRAIL» (a)-[]->(b) RETURN a", "ALL PATH SEARCH")]
-    [InlineData("MATCH «ALL» (a)-[]->(b) RETURN a", "ALL PATH SEARCH")]
-    [InlineData("MATCH «ANY» (a)-[]->(b) RETURN a", "ANY PATH SEARCH")]
+    // Modes remain refused inside parenthesized subpaths; unbounded WALK is also refused.
+    [InlineData("MATCH («TRAIL» (a)-[]->(b))", "TRAIL")]
+    [InlineData("MATCH p = («ACYCLIC» (a)-[]->(b))", "ACYCLIC")]
+    [InlineData("MATCH «WALK» (a)-[]->+(b)", "UNBOUNDED WALK")]
+    [InlineData("MATCH p = («SIMPLE» (a)-[]->(b)) RETURN p", "SIMPLE")]
+    [InlineData("MATCH «WALK PATH» (a)-[]->+(b) RETURN a", "UNBOUNDED WALK")]
+    // Counted ANY remains outside the approved selector surface (#1734).
     [InlineData("MATCH «ANY 2 WALK PATHS» (a)-[]->(b) RETURN a", "ANY PATH SEARCH")]
-    [InlineData("MATCH «SHORTEST 2 GROUPS» (a)-[]->(b) RETURN a", "SHORTEST PATH")]
     // A procedure's YIELD belongs to its CALL
     [InlineData("MATCH (a) «CALL» db.labels() YIELD label RETURN label", "CALL")]
     // Delete without detaching (pin)
     [InlineData("MATCH (n) «NODETACH DELETE» n", "NODETACH DELETE")]
-    // MERGE (pin; already COHDBL001 before #1101)
+    // MERGE (pin; already CK00001 before #1101)
     [InlineData("«MERGE» (n)", "MERGE")]
     public void Parse_IsoConstruct_ShouldReportOneCapabilityDiagnostic(string marked, string construct)
     {
@@ -95,7 +86,7 @@ public sealed class GqlParseStrictnessTests
 
         // Assert
         var diagnostic = statement.Diagnostics.ShouldHaveSingleItem();
-        diagnostic.Code.ShouldBe("COHDBL001");
+        diagnostic.Code.ShouldBe("CK00001");
         diagnostic.Message.ShouldBe($"The {construct} clause is not supported by the GQL surface of this database model.");
         diagnostic.Start.ShouldBe(start);
         diagnostic.End.ShouldBe(end);
@@ -140,7 +131,7 @@ public sealed class GqlParseStrictnessTests
 
         // Assert
         var error = statement.Diagnostics.ShouldHaveSingleItem();
-        error.Code.ShouldBe("GQL0002");
+        error.Code.ShouldBe("CG00002");
         error.Message.ShouldBe("Unexpected token; exactly one statement is accepted.");
         error.Start.ShouldBe(gql.IndexOf("extra", StringComparison.Ordinal));
     }

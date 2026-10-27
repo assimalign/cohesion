@@ -6,6 +6,15 @@ namespace Assimalign.Cohesion.Database.Documents.Language;
 /// </summary>
 public static class OqlClauses
 {
+    /// <summary>Begins an explicit transaction; START is a synonym.</summary>
+    public const string Begin = "BEGIN";
+
+    /// <summary>Commits the session's explicit transaction.</summary>
+    public const string Commit = "COMMIT";
+
+    /// <summary>Rolls back the session's explicit transaction.</summary>
+    public const string Rollback = "ROLLBACK";
+
     /// <summary>A <c>CREATE COLLECTION</c> statement.</summary>
     public const string CreateCollection = "CREATE COLLECTION";
 
@@ -33,6 +42,9 @@ public static class OqlClauses
     /// <summary>Deletes documents from one collection.</summary>
     public const string Delete = "DELETE";
 
+    /// <summary>Projects each affected document, optionally as one RAW or VALUE expression.</summary>
+    public const string Returning = "RETURNING";
+
     /// <summary>Supplies key and value pairs to INSERT or UPSERT.</summary>
     public const string Values = "VALUES";
 
@@ -50,6 +62,12 @@ public static class OqlClauses
 
     /// <summary>Constructs a JSON array from expressions.</summary>
     public const string ArrayConstructor = "ARRAY CONSTRUCTOR";
+
+    /// <summary>Maps qualifying elements into an array, omitting MISSING mappings.</summary>
+    public const string ArrayComprehension = "ARRAY ... FOR";
+
+    /// <summary>Returns the first qualifying array element's mapping.</summary>
+    public const string FirstComprehension = "FIRST ... FOR";
 
     /// <summary>Describes a SELECT, INSERT, UPSERT, UPDATE or DELETE statement without executing it.</summary>
     public const string Explain = "EXPLAIN";

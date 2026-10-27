@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Threading;
 
@@ -16,6 +17,8 @@ namespace Assimalign.Cohesion.Database.Storage.Internal;
 /// <em>never</em> acknowledged before its records are durable — a missing or stalled
 /// worker only costs latency, never durability.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("StorageGroupCommitGate")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Storage.Internal.StorageGroupCommitGate.DebugView))]
 internal sealed class StorageGroupCommitGate
 {
     private readonly object _syncRoot = new();
@@ -29,6 +32,13 @@ internal sealed class StorageGroupCommitGate
     // waiting for one and go straight to their own flush, which the offline journal refuses
     // (or confirms, for an LSN that was already durable).
     private bool _abandoned;
+
+    // Opt-in test evidence of the actual monitor operation. Guarded by _syncRoot; no
+    // callbacks run under it. The test reads completed records only after joining its waiter.
+    private int _waiting;
+    internal int WaitingCount { get { lock (_syncRoot) { return _waiting; } } }
+    internal List<WaitObservation>? WaitObservations { get; set; }
+    internal readonly record struct WaitObservation(TimeSpan Requested, bool Signaled, bool Abandoned);
 
     internal bool HasPendingCommits
     {
@@ -86,10 +96,13 @@ internal sealed class StorageGroupCommitGate
             {
                 TimeSpan remaining = window - Stopwatch.GetElapsedTime(start);
 
-                if (remaining <= TimeSpan.Zero || !Monitor.Wait(_syncRoot, remaining))
-                {
-                    break;
-                }
+                if (remaining <= TimeSpan.Zero) { break; }
+                bool signaled;
+                _waiting++;
+                try { signaled = Monitor.Wait(_syncRoot, remaining); }
+                finally { _waiting--; }
+                WaitObservations?.Add(new WaitObservation(remaining, signaled, _abandoned));
+                if (!signaled) { break; }
             }
 
             if (_durableLsn >= lsn)
@@ -172,6 +185,14 @@ internal sealed class StorageGroupCommitGate
                 _durableLsn = lsn;
                 Monitor.PulseAll(_syncRoot);
             }
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Storage.Internal.StorageGroupCommitGate value)
+        {
+            _ = value;
         }
     }
 }

@@ -30,7 +30,7 @@ public sealed class SecretStoreResourceTests
         resource.Options.ShouldBeSameAs(options);
         resource.PlannerName.ShouldBe("SecretStore planner");
         resource.Manifest.ControlPlane.Endpoint.ShouldBe("api");
-        resource.Manifest.ControlPlane.Path.ShouldBe("/cohesion/v1");
+        resource.Manifest.ControlPlane.Path.Value.ShouldBe("/cohesion/v1");
     }
 
     [Fact(DisplayName = "Cohesion Test [SecretStore.ApplicationModel] - AddSecretStore: composes the manifest with typed options")]

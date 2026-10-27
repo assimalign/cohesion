@@ -71,11 +71,11 @@ public class ResourceValueObjectTests
         source.Equals((ResourceMountSource)"store:key").ShouldBeFalse();
     }
 
-    [Theory(DisplayName = "Cohesion Test [ApplicationModel] - Parse: Invalid manifest path and mount expressions fail manifest validation")]
+    [Theory(DisplayName = "Cohesion Test [ApplicationModel] - Parse: Invalid manifest path and mount expressions fail typed deserialization")]
     [InlineData("http", "ready")]
     [InlineData("path", "cohesion/v1")]
     [InlineData("source", "parameter:   ")]
-    public void Parse_InvalidManifestValue_ShouldRejectDuringValidation(string property, string text)
+    public void Parse_InvalidManifestValue_ShouldRejectDuringDeserialization(string property, string text)
     {
         // Arrange
         var manifest = new ResourceManifest
@@ -114,7 +114,7 @@ public class ResourceValueObjectTests
         string json = document.ToJsonString();
 
         // Act
-        InvalidDataException error = Should.Throw<InvalidDataException>(() => ResourceManifest.Parse(json));
+        JsonException error = Should.Throw<JsonException>(() => ResourceManifest.Parse(json));
 
         // Assert
         error.Message.ShouldContain(property == "source" ? "A mount source must use" : "A resource HTTP path", Case.Sensitive);

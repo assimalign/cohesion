@@ -48,7 +48,7 @@ public sealed class SqlEngineProvisioningTests : IDisposable
     {
         // Arrange
         var builder = CreateBuilder("create-path");
-        builder.AddDatabase("sales", database => database.Schema(Sales));
+        builder.AddDatabase("sales", database => database.Schema(_sales));
 
         // Act
         await using var engine = await builder.BuildAsync();
@@ -61,7 +61,7 @@ public sealed class SqlEngineProvisioningTests : IDisposable
         var result = engine.DeclaredDatabases.ShouldHaveSingleItem().Result.ShouldNotBeNull();
         result.WasAlreadyApplied.ShouldBeFalse();
         result.FromHash.ShouldBeNull();
-        result.ToHash.ShouldBe(Sales.Compile().Hash);
+        result.ToHash.ShouldBe(_sales.Compile().Hash);
         result.OperationCount.ShouldBeGreaterThan(0);
     }
 
@@ -69,7 +69,7 @@ public sealed class SqlEngineProvisioningTests : IDisposable
     public async Task BuildAsync_DeclaredDatabaseExists_ShouldOpenItAndSkipTheAppliedSchema()
     {
         // Arrange: a first build creates and provisions the database, and a row is written.
-        await using (var first = await CreateBuilder("open-path").AddDatabase(Sales).BuildAsync())
+        await using (var first = await CreateBuilder("open-path").AddDatabase(_sales).BuildAsync())
         {
             first.TryGetDatabase("sales", out SqlDatabase? created).ShouldBeTrue();
             await using var session = await created!.CreateSessionAsync();
@@ -77,7 +77,7 @@ public sealed class SqlEngineProvisioningTests : IDisposable
         }
 
         // Act: a second engine over the same files declares the same schema.
-        await using var second = await CreateBuilder("open-path").AddDatabase(Sales).BuildAsync();
+        await using var second = await CreateBuilder("open-path").AddDatabase(_sales).BuildAsync();
 
         // Assert: opened, not created, and no DDL ran.
         second.TryGetDatabase("sales", out SqlDatabase? opened).ShouldBeTrue();
@@ -110,7 +110,7 @@ public sealed class SqlEngineProvisioningTests : IDisposable
     {
         // Arrange: the design's §3.10, an in-memory engine with a reusable schema value.
         var sql = SqlDatabaseEngine.CreateBuilder("local");
-        sql.AddDatabase(Sales);
+        sql.AddDatabase(_sales);
 
         // Act
         await using SqlDatabaseEngine engine = await sql.BuildAsync(TestTimeout.Token());
@@ -128,7 +128,7 @@ public sealed class SqlEngineProvisioningTests : IDisposable
     public async Task BuildAsync_VerifyMode_ShouldRefuseDriftWithoutDdl()
     {
         // Arrange: a database provisioned with the first schema.
-        await using (var applied = await CreateBuilder("verify").AddDatabase(Sales).BuildAsync())
+        await using (var applied = await CreateBuilder("verify").AddDatabase(_sales).BuildAsync())
         {
         }
 
@@ -136,7 +136,7 @@ public sealed class SqlEngineProvisioningTests : IDisposable
         await using (var verified = await CreateBuilder("verify")
             .AddDatabase("sales", database =>
             {
-                database.Schema(Sales);
+                database.Schema(_sales);
                 database.Provisioning = SqlProvisioningMode.Verify;
             })
             .BuildAsync())
@@ -147,7 +147,7 @@ public sealed class SqlEngineProvisioningTests : IDisposable
         var drift = await Should.ThrowAsync<SqlSchemaMigrationException>(async () => await CreateBuilder("verify")
             .AddDatabase("sales", database =>
             {
-                database.Schema(SalesWithIndex);
+                database.Schema(_salesWithIndex);
                 database.Provisioning = SqlProvisioningMode.Verify;
             })
             .BuildAsync());
@@ -156,9 +156,9 @@ public sealed class SqlEngineProvisioningTests : IDisposable
             .BuildAsync());
 
         // Assert: coded, naming the engine and the database, and nothing created or migrated.
-        drift.Message.ShouldStartWith("COHSQLP003: SQL engine 'verify', database 'sales': the declared schema (hash ", Case.Sensitive);
-        drift.Message.ShouldContain($"the database records schema hash {Sales.Compile().Hash}");
-        missing.Message.ShouldStartWith("COHSQLP003: SQL engine 'verify', database 'archive': the database does not exist.", Case.Sensitive);
+        drift.Message.ShouldStartWith("CS03103: SQL engine 'verify', database 'sales': the declared schema (hash ", Case.Sensitive);
+        drift.Message.ShouldContain($"the database records schema hash {_sales.Compile().Hash}");
+        missing.Message.ShouldStartWith("CS03103: SQL engine 'verify', database 'archive': the database does not exist.", Case.Sensitive);
         await using var reopened = SqlDatabaseEngine.Create("verify", new SqlDatabaseEngineOptions { RootPath = _rootPath });
         var sales = await reopened.OpenDatabaseAsync("sales");
         sales.Catalog.TryGetTable("dbo", "orders", out var orders).ShouldBeTrue();
@@ -188,7 +188,7 @@ public sealed class SqlEngineProvisioningTests : IDisposable
             worker!.Started.Wait(TimeSpan.FromSeconds(10)).ShouldBeTrue();
             return server = new RecordingServer(engine);
         });
-        builder.AddDatabase(Sales);
+        builder.AddDatabase(_sales);
 
         // Act
         var failure = await Should.ThrowAsync<SqlSchemaMigrationException>(async () => await builder.BuildAsync());
@@ -196,7 +196,7 @@ public sealed class SqlEngineProvisioningTests : IDisposable
         // Assert: the refusal is coded, and the engine, its server and its worker were released
         // before the build threw, the worker's pump thread joined.
         failure.Message.ShouldStartWith(
-            "COHSQLP002: SQL engine 'fails', database 'sales': the database was created with default collation 'case_insensitive', but it is declared with 'binary'.",
+            "CS03102: SQL engine 'fails', database 'sales': the database was created with default collation 'case_insensitive', but it is declared with 'binary'.",
             Case.Sensitive);
         product.ShouldNotBeNull().State.ShouldBe(EngineState.Disposed);
         server.ShouldNotBeNull().Stops.ShouldBe(1);
@@ -230,7 +230,7 @@ public sealed class SqlEngineProvisioningTests : IDisposable
     public async Task BuildAsync_SchemaStepFails_ShouldNameTheEngineTheDatabaseAndTheStep()
     {
         // Arrange: a child row whose parent does not exist, then a schema that adds the reference.
-        await using (var first = await CreateBuilder("steps").AddDatabase(Unreferenced).BuildAsync())
+        await using (var first = await CreateBuilder("steps").AddDatabase(_unreferenced).BuildAsync())
         {
             first.TryGetDatabase("shop", out SqlDatabase? shop).ShouldBeTrue();
             await using var session = await shop!.CreateSessionAsync();
@@ -241,13 +241,13 @@ public sealed class SqlEngineProvisioningTests : IDisposable
         var failure = await Should.ThrowAsync<SqlSchemaMigrationException>(async () =>
             await CreateBuilder("steps").AddDatabase("shop", database =>
             {
-                database.Schema(Referenced);
+                database.Schema(_referenced);
                 database.RunMigrationsInline = true;
             }).BuildAsync());
 
         // Assert
         failure.Message.ShouldStartWith(
-            "COHSQLP004: SQL engine 'steps', database 'shop': applying schema 'shop': step 1 of 1 (AddConstraint 'children.",
+            "CS03104: SQL engine 'steps', database 'shop': applying schema 'shop': step 1 of 1 (AddConstraint 'children.",
             Case.Sensitive);
         failure.Message.ShouldEndWith("Every completed step was compensated.", Case.Sensitive);
     }
@@ -271,7 +271,7 @@ public sealed class SqlEngineProvisioningTests : IDisposable
 
         // Assert: refused in phase 3, before the engine (whose creation makes the root directory).
         failure.Message.ShouldBe(
-            "COHSQLP001: SQL engine 'principals' cannot provision database 'sales': its schema declares principal 'reader', " +
+            "CS03101: SQL engine 'principals' cannot provision database 'sales': its schema declares principal 'reader', " +
             "and principals and grants are refused until their DDL exists. Nothing was opened or written.");
         product.ShouldBeNull();
         Directory.Exists(_rootPath).ShouldBeFalse();
@@ -292,7 +292,7 @@ public sealed class SqlEngineProvisioningTests : IDisposable
             await CreateBuilder("invalid").AddDatabase(invalid).BuildAsync());
 
         // Assert
-        failure.Message.ShouldStartWith("COHSQLP001: SQL engine 'invalid' cannot provision database 'sales': ", Case.Sensitive);
+        failure.Message.ShouldStartWith("CS03101: SQL engine 'invalid' cannot provision database 'sales': ", Case.Sensitive);
         failure.InnerException.ShouldBeOfType<SqlSchemaValidationException>();
         Directory.Exists(_rootPath).ShouldBeFalse();
     }
@@ -301,7 +301,7 @@ public sealed class SqlEngineProvisioningTests : IDisposable
     public async Task DropDatabaseAsync_DeclaredDatabase_ShouldBeRefused()
     {
         // Arrange
-        await using var engine = await SqlDatabaseEngine.CreateBuilder("owner").AddDatabase(Sales).BuildAsync();
+        await using var engine = await SqlDatabaseEngine.CreateBuilder("owner").AddDatabase(_sales).BuildAsync();
         await engine.CreateDatabaseAsync("adhoc");
 
         // Act
@@ -325,7 +325,7 @@ public sealed class SqlEngineProvisioningTests : IDisposable
     {
         // Arrange
         await using var engine = await CreateBuilder("imperative")
-            .AddDatabase(Sales)
+            .AddDatabase(_sales)
             .AddDatabase("scratch")
             .BuildAsync();
         engine.TryGetDatabase("sales", out SqlDatabase? sales).ShouldBeTrue();
@@ -334,8 +334,8 @@ public sealed class SqlEngineProvisioningTests : IDisposable
 
         // Act
         var refusal = await Should.ThrowAsync<DatabaseObjectLockedException>(async () =>
-            await sales!.ApplySchemaAsync(SalesWithIndex.Compile()));
-        var same = await sales!.ApplySchemaAsync(Sales.Compile());
+            await sales!.ApplySchemaAsync(_salesWithIndex.Compile()));
+        var same = await sales!.ApplySchemaAsync(_sales.Compile());
         var ensured = await scratch!.ApplySchemaAsync(SqlSchema.Compile("scratch", schema =>
             schema.Table<Order>("orders", table => table.Key(order => order.Id))));
         var free = await adhoc.ApplySchemaAsync(SqlSchema.Compile("adhoc", schema =>
@@ -376,17 +376,17 @@ public sealed class SqlEngineProvisioningTests : IDisposable
 
         // Act: dropping the archive table is destructive, and the shop schema would adopt the table.
         var destructive = await Should.ThrowAsync<SqlSchemaMigrationException>(async () =>
-            await CreateBuilder("policy").AddDatabase(Sales).BuildAsync());
+            await CreateBuilder("policy").AddDatabase(_sales).BuildAsync());
         var adopt = await Should.ThrowAsync<SqlSchemaMigrationException>(async () =>
-            await CreateBuilder("policy").AddDatabase(Unreferenced).BuildAsync());
+            await CreateBuilder("policy").AddDatabase(_unreferenced).BuildAsync());
 
         // Assert
         destructive.Message.ShouldStartWith(
-            "COHSQLP005: SQL engine 'policy', database 'sales': Destructive migration step 'DropTable' for 'archive' was refused.",
+            "CS03105: SQL engine 'policy', database 'sales': Destructive migration step 'DropTable' for 'archive' was refused.",
             Case.Sensitive);
         destructive.Message.ShouldEndWith("Nothing was changed.", Case.Sensitive);
         adopt.Message.ShouldBe(
-            "COHSQLP005: SQL engine 'policy', database 'shop': SQL schema 'shop' cannot adopt table 'parents' because it " +
+            "CS03105: SQL engine 'policy', database 'shop': SQL schema 'shop' cannot adopt table 'parents' because it " +
             "was not created by this schema. Nothing was changed.");
         await using var reopened = SqlDatabaseEngine.Create("policy", new SqlDatabaseEngineOptions { RootPath = _rootPath });
         var sales = await reopened.OpenDatabaseAsync("sales");
@@ -397,7 +397,7 @@ public sealed class SqlEngineProvisioningTests : IDisposable
     public async Task BuildAsync_VerifyDrift_ShouldNameTheFirstDifference()
     {
         // Arrange: the database holds the schema without the index.
-        await using (var applied = await CreateBuilder("drift").AddDatabase(Sales).BuildAsync())
+        await using (var applied = await CreateBuilder("drift").AddDatabase(_sales).BuildAsync())
         {
         }
 
@@ -405,14 +405,14 @@ public sealed class SqlEngineProvisioningTests : IDisposable
         var drift = await Should.ThrowAsync<SqlSchemaMigrationException>(async () => await CreateBuilder("drift")
             .AddDatabase("sales", database =>
             {
-                database.Schema(SalesWithIndex);
+                database.Schema(_salesWithIndex);
                 database.Provisioning = SqlProvisioningMode.Verify;
             })
             .BuildAsync());
 
         // Assert
         drift.Message.ShouldContain(
-            $"the database records schema hash {Sales.Compile().Hash}; first difference from the declaration: table 'orders': index '",
+            $"the database records schema hash {_sales.Compile().Hash}; first difference from the declaration: table 'orders': index '",
             Case.Sensitive);
         drift.Message.ShouldContain("' is missing.", Case.Sensitive);
     }
@@ -566,6 +566,7 @@ public sealed class SqlEngineProvisioningTests : IDisposable
             GroupCommitWindow = TimeSpan.FromMilliseconds(7),
             StatementTimeout = TimeSpan.FromSeconds(11),
             LockTimeout = TimeSpan.FromMilliseconds(222),
+            StatementMemoryBudget = 3 * 1024 * 1024,
             CheckpointInterval = TimeSpan.FromMinutes(9),
             CheckpointJournalSize = 3 * 1024 * 1024,
             WorkerFailureWindow = TimeSpan.FromSeconds(42),
@@ -590,6 +591,7 @@ public sealed class SqlEngineProvisioningTests : IDisposable
         copy.GroupCommitWindow.ShouldBe(options.GroupCommitWindow);
         copy.StatementTimeout.ShouldBe(options.StatementTimeout);
         copy.LockTimeout.ShouldBe(options.LockTimeout);
+        copy.StatementMemoryBudget.ShouldBe(options.StatementMemoryBudget);
         copy.CheckpointInterval.ShouldBe(options.CheckpointInterval);
         copy.CheckpointJournalSize.ShouldBe(options.CheckpointJournalSize);
         copy.WorkerFailureWindow.ShouldBe(options.WorkerFailureWindow);
@@ -608,10 +610,10 @@ public sealed class SqlEngineProvisioningTests : IDisposable
 
         // Every property, the internal ones included: an option added to either set fails here
         // until Snapshot copies it and this test checks it.
-        typeof(SqlDatabaseEngineOptions).GetProperties().Length.ShouldBe(15);
+        typeof(SqlDatabaseEngineOptions).GetProperties().Length.ShouldBe(16);
         typeof(SqlDatabaseEngineOptions)
             .GetProperties(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic)
-            .Length.ShouldBe(18);
+            .Length.ShouldBe(19);
     }
 
     [Theory(DisplayName = "Cohesion Test [Database.Sql] - Provisioning: a name that breaks the database-name rule is refused at the declaration")]
@@ -680,7 +682,7 @@ public sealed class SqlEngineProvisioningTests : IDisposable
 
         // Act
         var duplicate = Should.Throw<InvalidOperationException>(() => builder.AddDatabase("SALES", _ => configured++));
-        var mismatch = Should.Throw<ArgumentException>(() => builder.AddDatabase("reports", database => database.Schema(Sales)));
+        var mismatch = Should.Throw<ArgumentException>(() => builder.AddDatabase("reports", database => database.Schema(_sales)));
         var twice = Should.Throw<InvalidOperationException>(() => builder.AddDatabase("ledger", database =>
         {
             database.Schema(schema => schema.Table<Order>("orders", table => table.Key(order => order.Id)));
@@ -707,7 +709,7 @@ public sealed class SqlEngineProvisioningTests : IDisposable
         // Act / Assert
         Should.Throw<InvalidOperationException>(() => declared!.DefaultCollation = Collation.Binary);
         Should.Throw<InvalidOperationException>(() => declared!.Provisioning = SqlProvisioningMode.Verify);
-        Should.Throw<InvalidOperationException>(() => declared!.Schema(Sales));
+        Should.Throw<InvalidOperationException>(() => declared!.Schema(_sales));
         Should.Throw<InvalidOperationException>(() => builder.AddDatabase("late"));
         await Should.ThrowAsync<InvalidOperationException>(async () => await builder.BuildAsync());
     }
@@ -719,7 +721,7 @@ public sealed class SqlEngineProvisioningTests : IDisposable
         using var canceled = new CancellationTokenSource();
         await canceled.CancelAsync();
         SqlDatabaseEngine? product = null;
-        var builder = CreateBuilder("canceled").AddDatabase(Sales);
+        var builder = CreateBuilder("canceled").AddDatabase(_sales);
         builder.AddWorker(engine => new RecordingWorker(product = engine));
 
         // Act
@@ -753,14 +755,14 @@ public sealed class SqlEngineProvisioningTests : IDisposable
         product.ShouldNotBeNull().State.ShouldBe(EngineState.Disposed);
     }
 
-    private static readonly SqlSchema Sales = SqlSchema.Create("sales", schema =>
+    private static readonly SqlSchema _sales = SqlSchema.Create("sales", schema =>
         schema.Table<Order>("orders", table =>
         {
             table.Key(order => order.Id);
             table.Column(order => order.Item);
         }));
 
-    private static readonly SqlSchema SalesWithIndex = SqlSchema.Create("sales", schema =>
+    private static readonly SqlSchema _salesWithIndex = SqlSchema.Create("sales", schema =>
         schema.Table<Order>("orders", table =>
         {
             table.Key(order => order.Id);
@@ -768,7 +770,7 @@ public sealed class SqlEngineProvisioningTests : IDisposable
             table.Index(order => order.Item);
         }));
 
-    private static readonly SqlSchema Unreferenced = SqlSchema.Create("shop", schema =>
+    private static readonly SqlSchema _unreferenced = SqlSchema.Create("shop", schema =>
     {
         schema.Table<Parent>("parents", table => table.Key(parent => parent.Id));
         schema.Table<Child>("children", table =>
@@ -778,7 +780,7 @@ public sealed class SqlEngineProvisioningTests : IDisposable
         });
     });
 
-    private static readonly SqlSchema Referenced = SqlSchema.Create("shop", schema =>
+    private static readonly SqlSchema _referenced = SqlSchema.Create("shop", schema =>
     {
         schema.Table<Parent>("parents", table => table.Key(parent => parent.Id));
         schema.Table<Child>("children", table =>

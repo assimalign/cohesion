@@ -30,7 +30,7 @@ public sealed class SqlCatalogDomain
         ArgumentNullException.ThrowIfNull(dependencies);
         if (dependencies.Any(string.IsNullOrWhiteSpace) || constraintName is not null && string.IsNullOrWhiteSpace(checkExpression))
         {
-            throw new ArgumentException("Invalid SQL domain constraint or dependencies.");
+            throw new ArgumentException(ErrorMessages.SqlCatalogDomainArgument);
         }
         SqlCatalogOwnership.Validate(owner, owningSchema);
         Name = name;
@@ -44,12 +44,12 @@ public sealed class SqlCatalogDomain
         CheckFunctionCalls = Array.AsReadOnly((checkFunctionCalls ?? []).ToArray());
         if (CheckFunctionCalls.Any(string.IsNullOrWhiteSpace))
         {
-            throw new ArgumentException("A function identity cannot be blank.", nameof(checkFunctionCalls));
+            throw new ArgumentException(ErrorMessages.SqlCatalogDomainArgument2, nameof(checkFunctionCalls));
         }
         DefaultFunctionCalls = Array.AsReadOnly((defaultFunctionCalls ?? []).ToArray());
         if (DefaultFunctionCalls.Any(string.IsNullOrWhiteSpace))
         {
-            throw new ArgumentException("A function identity cannot be blank.", nameof(defaultFunctionCalls));
+            throw new ArgumentException(ErrorMessages.SqlCatalogDomainArgument2, nameof(defaultFunctionCalls));
         }
         Owner = owner;
         OwningSchema = owningSchema;

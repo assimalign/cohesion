@@ -198,7 +198,7 @@ The Web health model and HTTP endpoints remain in `Web.Health`.
 using Assimalign.Cohesion.Web.Health;
 using Assimalign.Cohesion.Web.Hosting.Health;
 
-IHealthCheckService health = HealthChecks.CreateBuilder()
+IHealthCheckService health = new HealthChecksBuilder()
     .AddContributor(contributor)
     .Build();
 pipeline.MapHealthChecks(health);
@@ -274,3 +274,12 @@ Acquire the lifetime during composition, then register `InvokeAsync` ahead of ro
 The server accepts HTTP connections through `AcceptAsync` and reports `ServerBound` addresses
 from `IHttpConnectionListener.EndPoints` after binding. Raw `UseServer` listener registrations
 report the same assigned TCP or QUIC ports as the hosting convenience registrations.
+
+
+## Health-check builder construction (#1470)
+
+Composition uses the public sealed `HealthChecksBuilder` in `Assimalign.Cohesion.Web.Health`,
+with its public parameterless constructor. The standalone `HealthChecks.CreateBuilder()` factory
+is removed. Existing `IHealthChecksBuilder` adapters, duplicate-name checks and immutable service
+snapshots are preserved; Database's admin endpoint uses the same public constructor. No Database
+interface, protocol, format, diagnostic code, event or counter is added or changed.

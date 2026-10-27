@@ -62,7 +62,7 @@ public sealed partial class SqlDefinedFunctionTests
         });
 
         // Assert
-        failure.Message.ShouldContain("COHSQLS001");
+        failure.Message.ShouldContain("CS03201");
         failure.Message.ShouldContain("001");
         failure.Message.ShouldContain("wanted");
     }

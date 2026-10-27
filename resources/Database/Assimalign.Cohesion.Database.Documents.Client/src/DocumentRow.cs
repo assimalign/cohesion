@@ -12,6 +12,8 @@ using Assimalign.Cohesion.Database.Documents.Protocol;
 namespace Assimalign.Cohesion.Database.Documents.Client;
 
 /// <summary>A document query row with ordinal and column-name access.</summary>
+[global::System.Diagnostics.DebuggerDisplay("DocumentRow Count={Count}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Documents.Client.DocumentRow.DebugView))]
 public sealed class DocumentRow : DatabaseRow, IReadOnlyList<object?>
 {
     private readonly object?[] _values;
@@ -95,4 +97,17 @@ public sealed class DocumentRow : DatabaseRow, IReadOnlyList<object?>
     }
 
     IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Documents.Client.DocumentRow _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Documents.Client.DocumentRow value)
+        {
+            _target = value;
+        }
+
+        public int Count => _target.Count;
+        public int FieldCount => _target.FieldCount;
+    }
 }

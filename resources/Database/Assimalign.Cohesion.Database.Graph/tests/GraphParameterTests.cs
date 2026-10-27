@@ -38,11 +38,11 @@ public sealed class GraphParameterTests
             await session.ExecuteAsync("INSERT (:Later)", cancellationToken: CancellationToken.None));
 
         // Assert
-        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG001");
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG05001");
         failure.Message.ShouldContain("missing", Case.Sensitive);
         transaction.State.ShouldBe(TransactionState.Faulted);
         session.CurrentTransaction.ShouldBeSameAs(transaction);
-        refused.Diagnostics[0].Code.ShouldBe("COHDBG007");
+        refused.Diagnostics[0].Code.ShouldBe("CG04007");
         refused.Message.ShouldContain(failure.Message, Case.Sensitive);
         refused.InnerException.ShouldBeSameAs(failure);
         await using var observer = await database.CreateSessionAsync(CancellationToken.None);
@@ -73,7 +73,7 @@ public sealed class GraphParameterTests
             await reader.ExecuteAsync("INSERT (:P {k: $missing})", cancellationToken: cancellation.Token));
 
         // Assert
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG001");
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG05001");
         await transaction.RollbackAsync(cancellation.Token);
         (await RowsAsync(reader, "SHOW LABELS")).ShouldBeEmpty();
     }
@@ -117,7 +117,7 @@ public sealed class GraphParameterTests
             await session.ExecuteAsync(source, cancellationToken: CancellationToken.None));
 
         // Assert
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG001");
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG05001");
         error.Message.ShouldContain("missing", Case.Sensitive);
         (await RowsAsync(session, "MATCH (n) RETURN n")).ShouldBeEmpty();
         (await RowsAsync(session, "SHOW LABELS")).ShouldBeEmpty();
@@ -143,7 +143,7 @@ public sealed class GraphParameterTests
         (await RowsAsync(session, "MATCH (n:P {k: $name}) RETURN n.k", parameters)).Select(row => row[0]).ShouldBe(["Ada", "Ada"]);
         var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(
             "INSERT (:P {k: $name})", new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase) { ["Name"] = "wrong" }, CancellationToken.None));
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG001");
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG05001");
         (await session.ExecuteAsync("INSERT (:P {k: $1})", new Dictionary<string, object?> { ["1"] = 1 }, CancellationToken.None)).AffectedCount.ShouldBe(1);
     }
 
@@ -164,7 +164,7 @@ public sealed class GraphParameterTests
                 source, new Dictionary<string, object?> { [first] = 1, [second] = 2 }, CancellationToken.None));
 
             // Assert
-            error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG014");
+            error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG01014");
             error.Message.ShouldContain("name", Case.Sensitive);
         }
         (await RowsAsync(session, "SHOW LABELS")).ShouldBeEmpty();
@@ -239,7 +239,7 @@ public sealed class GraphParameterTests
                 continue;
             }
             var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(source, parameters, CancellationToken.None));
-            error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG003");
+            error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG03003");
         }
         (await RowsAsync(session, "MATCH (a) RETURN a")).Count.ShouldBe(1);
         (await RowsAsync(session, "SHOW LABELS")).Count.ShouldBe(1);

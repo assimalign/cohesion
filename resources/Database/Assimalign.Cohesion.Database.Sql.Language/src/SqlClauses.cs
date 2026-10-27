@@ -18,14 +18,26 @@ public static class SqlClauses
     /// <summary>An INSERT's unique-key conflict action.</summary>
     public const string OnConflict = "ON CONFLICT";
 
+    /// <summary>A MERGE statement whose syntax and binding are supported.</summary>
+    public const string Merge = "MERGE";
+
     /// <summary>An <c>UPDATE</c> statement.</summary>
     public const string Update = "UPDATE";
+
+    /// <summary>An UPDATE with joined read sources.</summary>
+    public const string UpdateFrom = "UPDATE FROM";
 
     /// <summary>A <c>DELETE</c> statement.</summary>
     public const string Delete = "DELETE";
 
+    /// <summary>A DELETE with joined read sources.</summary>
+    public const string DeleteUsing = "DELETE USING";
+
     /// <summary>A <c>CREATE TABLE</c> statement.</summary>
     public const string CreateTable = "CREATE TABLE";
+
+    /// <summary>CREATE TABLE AS with inferred output columns and optional data.</summary>
+    public const string CreateTableAs = "CREATE TABLE AS";
 
     /// <summary>A <c>CREATE SCHEMA</c> SQL namespace definition.</summary>
     public const string CreateSchema = "CREATE SCHEMA";
@@ -41,6 +53,9 @@ public static class SqlClauses
 
     /// <summary>A <c>DROP TABLE</c> statement.</summary>
     public const string DropTable = "DROP TABLE";
+
+    /// <summary>Empty one or more tables, with identity and foreign-key policies.</summary>
+    public const string Truncate = "TRUNCATE";
 
     /// <summary>A <c>DROP SCHEMA</c> SQL namespace removal.</summary>
     public const string DropSchema = "DROP SCHEMA";
@@ -77,6 +92,9 @@ public static class SqlClauses
 
     /// <summary>A scalar, predicate, or insert-source subquery.</summary>
     public const string Subquery = "SUBQUERY";
+
+    /// <summary>A scalar ANY, SOME or ALL comparison over a subquery.</summary>
+    public const string QuantifiedComparison = "QUANTIFIED COMPARISON";
 
     /// <summary>A <c>WITH</c> common-table-expression clause.</summary>
     public const string Cte = "WITH";

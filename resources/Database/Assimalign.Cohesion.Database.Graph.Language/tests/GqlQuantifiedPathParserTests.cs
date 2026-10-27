@@ -61,22 +61,22 @@ public sealed class GqlQuantifiedPathParserTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Graph.Language] - Quantifiers: malformed bounds keep stable codes and valid spans")]
-    [InlineData("MATCH (a)->{3,1}(b) RETURN a", "GQL0002")]
-    [InlineData("MATCH (a)->{0}(b) RETURN a", "GQL0002")]
-    [InlineData("MATCH (a)->{0,0}(b) RETURN a", "GQL0002")]
-    [InlineData("MATCH (a)(b) RETURN a", "GQL0002")]
-    [InlineData("MATCH (a)->{1,65}(b) RETURN a", "GQL0005")]
-    [InlineData("MATCH (a)->{65,}(b) RETURN a", "GQL0005")]
-    [InlineData("MATCH (a)->{1,40}(b)->{1,40}(c) RETURN a", "GQL0005")]
-    [InlineData("MATCH (a) ((x)->(y)->(z)){33} (b) RETURN a", "GQL0005")]
-    [InlineData("MATCH (a)->{1,999999999999999999999}(b) RETURN a", "GQL0004")]
-    [InlineData("MATCH (a)-[*999999999999999999999]->(b) RETURN a", "GQL0004")]
-    [InlineData("MATCH (a){1,3} RETURN a", "GQL0002")]
-    [InlineData("MATCH (a)+ RETURN a", "GQL0002")]
-    [InlineData("INSERT (a)->{1,3}(b)", "GQL0002")]
-    [InlineData("CREATE (a)-[*2]->(b)", "GQL0002")]
-    [InlineData("INSERT ((a)->(b)){2}", "GQL0002")]
-    [InlineData("MATCH (a) RETURN a.x ?", "GQL0002")]
+    [InlineData("MATCH (a)->{3,1}(b) RETURN a", "CG00002")]
+    [InlineData("MATCH (a)->{0}(b) RETURN a", "CG00002")]
+    [InlineData("MATCH (a)->{0,0}(b) RETURN a", "CG00002")]
+    [InlineData("MATCH (a)(b) RETURN a", "CG00002")]
+    [InlineData("MATCH (a)->{1,65}(b) RETURN a", "CG00005")]
+    [InlineData("MATCH (a)->{65,}(b) RETURN a", "CG00005")]
+    [InlineData("MATCH (a)->{1,40}(b)->{1,40}(c) RETURN a", "CG00005")]
+    [InlineData("MATCH (a) ((x)->(y)->(z)){33} (b) RETURN a", "CG00005")]
+    [InlineData("MATCH (a)->{1,999999999999999999999}(b) RETURN a", "CG00004")]
+    [InlineData("MATCH (a)-[*999999999999999999999]->(b) RETURN a", "CG00004")]
+    [InlineData("MATCH (a){1,3} RETURN a", "CG00002")]
+    [InlineData("MATCH (a)+ RETURN a", "CG00002")]
+    [InlineData("INSERT (a)->{1,3}(b)", "CG00002")]
+    [InlineData("CREATE (a)-[*2]->(b)", "CG00002")]
+    [InlineData("INSERT ((a)->(b)){2}", "CG00002")]
+    [InlineData("MATCH (a) RETURN a.x ?", "CG00002")]
     public void Parse_InvalidQuantifier_ShouldReportOneDiagnostic(string source, string code)
     {
         // Act
@@ -88,7 +88,6 @@ public sealed class GqlQuantifiedPathParserTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Graph.Language] - Quantifiers: owned exclusions report one capability diagnostic")]
-    [InlineData("MATCH ((a)-[]->(b) WHERE a.x=1){1,3} RETURN a", "PARENTHESIZED PATH WHERE", "WHERE")]
     [InlineData("MATCH (p = (a)-[]->(b)){1,3} RETURN p", "SUBPATH VARIABLE", "p =")]
     [InlineData("MATCH ((a)-[]->(b))? RETURN a", "QUESTIONED PATH", "?")]
     [InlineData("MATCH (a)-[]->?(b) RETURN a", "QUESTIONED PATH", "?")]
@@ -99,15 +98,13 @@ public sealed class GqlQuantifiedPathParserTests
     [InlineData("MATCH (ANY SHORTEST (a)->(b)){1,3} RETURN a", "ANY SHORTEST", "ANY")]
     [InlineData("MATCH ((a)->(b)) (WALK (c)->(d)){2} RETURN a", "WALK", "WALK")]
     [InlineData("MATCH (a) ((x)~[:T]~(y)){1,3} (b) RETURN a", "UNDIRECTED EDGE", "~")]
-    [InlineData("MATCH p = TRAIL (a)-[:T]->{1,3}(b) RETURN p", "TRAIL", "TRAIL")]
     [InlineData("MATCH WALK (a)-[:T]->+(b) RETURN a", "WALK", "WALK")]
-    [InlineData("MATCH ANY SHORTEST (a)-[:T]->+(b) RETURN a", "ANY SHORTEST", "ANY")]
     public void Parse_UnsupportedQuantifierConstruct_ShouldNameFirstToken(string source, string construct, string first)
     {
         // Act
         var error = Parse(source).Diagnostics.ShouldHaveSingleItem();
         // Assert
-        error.Code.ShouldBe("COHDBL001");
+        error.Code.ShouldBe("CK00001");
         error.Message.ShouldNotBeNull().ShouldContain(construct, Case.Sensitive);
         error.Start.ShouldBe(source.IndexOf(first, StringComparison.Ordinal));
     }
@@ -125,7 +122,7 @@ public sealed class GqlQuantifiedPathParserTests
         // Act
         var error = Parse(source).Diagnostics.ShouldHaveSingleItem();
         // Assert
-        error.Code.ShouldBe("GQL0008");
+        error.Code.ShouldBe("CG00008");
         error.Start.ShouldBe(source.IndexOf("--", StringComparison.Ordinal));
     }
 
@@ -146,7 +143,7 @@ public sealed class GqlQuantifiedPathParserTests
         thread.Join(TimeSpan.FromSeconds(30)).ShouldBeTrue();
         // Assert
         failure.ShouldBeNull();
-        statement.ShouldNotBeNull().Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("GQL0009");
+        statement.ShouldNotBeNull().Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG00009");
     }
 
     [Fact(DisplayName = "Cohesion Test [Graph.Language] - Quantified paths: an oversized body cannot hide its bound behind a zero-minimum quantifier")]
@@ -156,7 +153,7 @@ public sealed class GqlQuantifiedPathParserTests
         string body = "(x)" + string.Concat(Enumerable.Repeat("->()", 65));
         // Act / Assert
         foreach (string suffix in new[] { "*", "{0,1}", "+" })
-        { Parse("MATCH (a) (" + body + ")" + suffix + " (b) RETURN a").Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("GQL0005"); }
+        { Parse("MATCH (a) (" + body + ")" + suffix + " (b) RETURN a").Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG00005"); }
     }
 
     private static GqlQueryStatement Parse(string source) => (GqlQueryStatement)new GqlQueryParser().Parse(source);

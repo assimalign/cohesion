@@ -48,6 +48,8 @@ namespace Assimalign.Cohesion.Database.KeyValuePair;
 /// <c>engineBuilder.AddServer(factory)</c> builder verb.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("KeyValueDatabaseServer")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.KeyValuePair.KeyValueDatabaseServer.DebugView))]
 public sealed class KeyValueDatabaseServer : DatabaseServer
 {
     private readonly KeyValueDatabaseEngine _engine;
@@ -71,21 +73,11 @@ public sealed class KeyValueDatabaseServer : DatabaseServer
         // The server keeps a copy, checked here, as the engine keeps a copy of its options (B3 of
         // the engine extensibility design): the sessions read the limits and timeouts live.
         options = options.Snapshot();
-        if (options.Listener is null)
-        {
-            throw new ArgumentException("A connection listener is required.", nameof(options));
-        }
-        if (options.MaxSessions <= 0)
-        {
-            throw new ArgumentException("The session limit must be positive.", nameof(options));
-        }
-
-        ValidateDrainTimeout(options.ShutdownDrainTimeout, nameof(options.ShutdownDrainTimeout));
-        ValidateDrainTimeout(options.TerminalDrainLinger, nameof(options.TerminalDrainLinger));
+        options.ValidateFor(engine.Name);
 
         _engine = engine;
         _options = options;
-        _listener = options.Listener;
+        _listener = options.Listener!;
         _authenticator = options.Authenticator ?? DatabaseAuthenticator.AllowAll;
     }
 
@@ -326,17 +318,23 @@ public sealed class KeyValueDatabaseServer : DatabaseServer
         }
     }
 
-    private static void ValidateDrainTimeout(TimeSpan value, string name)
-    {
-        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(value, TimeSpan.Zero, name);
-        ArgumentOutOfRangeException.ThrowIfGreaterThan(value, TimeSpan.FromMilliseconds(uint.MaxValue - 1), name);
-    }
-
     internal void OnSessionCompleted(KeyValueDatabaseServerSession session)
     {
         if (_sessions.TryRemove(session.Id, out _))
         {
             KeyValueDatabaseEventSource.Log.SessionClosed(session, session.CloseReason, session.AcceptedTimestamp);
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.KeyValuePair.KeyValueDatabaseServer _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.KeyValuePair.KeyValueDatabaseServer value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.KeyValuePair.KeyValueDatabaseEngine Engine => _target.Engine;
     }
 }

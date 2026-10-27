@@ -23,7 +23,7 @@ public sealed class GraphValueTests
         foreach (object value in new object[] { new object?[] { new object() }, new object?[] { double.NaN }, new int[1, 1], cyclicList, cyclicMap })
         {
             Should.Throw<GraphPlanningException>(() => GraphCompositeValues.Snapshot(value))
-                .Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG003");
+                .Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG03003");
         }
     }
 
@@ -109,7 +109,7 @@ public sealed class GraphValueTests
         var invalidParameter = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("RETURN $p",
             new Dictionary<string, object?> { ["p"] = new object?[] { Guid.Empty } }, CancellationToken.None));
         var invalidDiagnostic = invalidParameter.Diagnostics.ShouldHaveSingleItem();
-        invalidDiagnostic.Code.ShouldBe("COHDBG003");
+        invalidDiagnostic.Code.ShouldBe("CG03003");
         invalidDiagnostic.Start.ShouldBe(7); invalidDiagnostic.End.ShouldBe(9);
         var firstMissing = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(
             "RETURN CASE WHEN $first THEN 1 ELSE $last END", cancellationToken: CancellationToken.None));
@@ -128,14 +128,14 @@ public sealed class GraphValueTests
             .ShouldHaveSingleItem().ShouldBe(new object?[] { "Alice", null, "Alice", "Alice" });
         var memberError = await Should.ThrowAsync<DatabaseException>(async () =>
             await session.ExecuteAsync("MATCH (a:Person) RETURN (a.name).x", cancellationToken: CancellationToken.None));
-        memberError.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG013");
+        memberError.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG02013");
         var distinct = await Rows(session, "MATCH (a:Person) RETURN DISTINCT [NULL,1], {k:NULL}");
         distinct.Count.ShouldBe(1);
         (await Rows(session, "MATCH (a:Person) RETURN DISTINCT CASE a.age WHEN 42 THEN [$d] ELSE [$f] END", values)).Count.ShouldBe(2);
         values["d"] = 1m; values["f"] = 1.0d;
         (await Rows(session, "MATCH (a:Person) RETURN DISTINCT CASE a.age WHEN 42 THEN [$d,NULL] ELSE [$f,NULL] END", values)).Count.ShouldBe(1);
         var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("INSERT (:Unwritten {tags: $l})", values, CancellationToken.None));
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG003");
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG03003");
         (await Rows(session, "MATCH (a:Unwritten) RETURN a.name")).ShouldBeEmpty();
     }
 
@@ -155,7 +155,7 @@ public sealed class GraphValueTests
         // Act
         var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("RETURN " + expression, cancellationToken: CancellationToken.None));
         // Assert
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG013");
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG02013");
     }
 
     [Theory(DisplayName = "Cohesion Test [Graph] - Values: constructed bounds roll back the statement in process")]
@@ -175,7 +175,7 @@ public sealed class GraphValueTests
         var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(
             "INSERT (:Unwritten) RETURN " + value, parameters, CancellationToken.None));
         // Assert
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG013");
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG02013");
         (await Rows(session, "MATCH (n:Unwritten) RETURN 1")).ShouldBeEmpty();
         (await Rows(session, "RETURN 42")).ShouldHaveSingleItem().ShouldBe(new object?[] { 42L });
     }

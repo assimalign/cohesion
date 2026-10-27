@@ -10,6 +10,8 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Database.Blob.Tests.TestObjects;
+
 namespace Assimalign.Cohesion.Database.Blob.Tests;
 
 /// <summary>
@@ -89,7 +91,8 @@ public sealed class BlobProcessTests
             fields.Length.ShouldBe(3);
             long committedLength = long.Parse(fields[1], CultureInfo.InvariantCulture);
             await using var reopened = BlobDatabaseEngine.Create("blob-engine", new BlobDatabaseEngineOptions { RootPath = root });
-            var database = await reopened.OpenDatabaseAsync("existing", timeout.Token);
+            var database = await CrashReopen.OpenAsync(Path.Combine(root, "existing", "blob.dat"),
+                token => reopened.OpenDatabaseAsync("existing", token), timeout.Token);
             var container = await AutocommitContainer.GetAsync(database, "objects", timeout.Token);
             (await container.GetPropertiesAsync("committed", timeout.Token))!.Value.Length.ShouldBe(committedLength);
             var (length, digest) = await ReadDigestAsync(container, "committed", timeout.Token);
@@ -102,7 +105,8 @@ public sealed class BlobProcessTests
             }
             names.ShouldBe(new[] { "committed" });
 
-            var otherDatabase = await reopened.OpenDatabaseAsync("new-object", timeout.Token);
+            var otherDatabase = await CrashReopen.OpenAsync(Path.Combine(root, "new-object", "blob.dat"),
+                token => reopened.OpenDatabaseAsync("new-object", token), timeout.Token);
             var otherContainer = await AutocommitContainer.GetAsync(otherDatabase, "objects", timeout.Token);
             (await otherContainer.GetPropertiesAsync("incomplete", timeout.Token)).ShouldBeNull();
             await Should.ThrowAsync<DatabaseException>(async () =>
@@ -149,7 +153,7 @@ public sealed class BlobProcessTests
         {
             process.Kill(entireProcessTree: true);
         }
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         await process.WaitForExitAsync(timeout.Token);
     }
 

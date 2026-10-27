@@ -34,7 +34,7 @@ public sealed class ParameterBindingTests
 
         // Assert
         var diagnostic = failure.Diagnostics.ShouldHaveSingleItem();
-        diagnostic.Code.ShouldBe("OQL0002");
+        diagnostic.Code.ShouldBe("CD00002");
         diagnostic.Start.ShouldBe(7);
         diagnostic.End.ShouldBe(7 + reference.Length);
     }
@@ -53,7 +53,7 @@ public sealed class ParameterBindingTests
             await session.ExecuteAsync(new DocumentQueryRequest(statement), CancellationToken.None));
 
         // Assert
-        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("OQL0002");
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD00002");
     }
 
     [Theory(DisplayName = "Cohesion Test [Documents] - Parameters: both sigils bind bare and sigiled ordinal keys")]
@@ -142,7 +142,7 @@ public sealed class ParameterBindingTests
             await session.ExecuteAsync(collision ? "SELECT a FROM t" : "SELECT $id AS value FROM t", parameters, CancellationToken.None));
 
         // Assert
-        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(collision ? "COHDOC009" : "COHDOC005");
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(collision ? "CD01009" : "CD01005");
         failure.Message.ShouldContain("id");
     }
 
@@ -165,7 +165,7 @@ public sealed class ParameterBindingTests
 
         // Assert
         var diagnostic = failure.Diagnostics.ShouldHaveSingleItem();
-        diagnostic.Code.ShouldBe("COHDOC005");
+        diagnostic.Code.ShouldBe("CD01005");
         failure.Message.ShouldContain("missing");
         diagnostic.Start.ShouldBe(query.IndexOf("missing", StringComparison.Ordinal) - 1);
         diagnostic.End.ShouldBe(diagnostic.Start + 8);

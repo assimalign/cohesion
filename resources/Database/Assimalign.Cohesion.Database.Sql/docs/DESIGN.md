@@ -1,5 +1,86 @@
 # Assimalign.Cohesion.Database.Sql — Design
 
+## Joined DML planning and execution (#1714, SQ-UF2)
+
+The DML binder reuses SELECT's source namespace and join rules, seeding a distinct target binding
+at physical slot zero. SqlDmlSource retains the association SqlJoinPlan and TargetBinding index;
+Execution carries that binding's storage row location and writer stamp per association rather than inferring
+identity from projected values or a user key. Physical columns remain target-then-source, including
+hidden USING inputs. SET destinations stay target-only; SET values, WHERE and explicit RETURNING
+source references bind to combined slots. Bare RETURNING * follows PostgreSQL by expanding the
+target, then each source in namespace order (parse_target.c:1301-1321), allowing duplicate names.
+SqlDmlSource retains visible output ordinals separately from physical association slots so USING
+emits its merged keys first and hides duplicate right keys. Source metadata
+preserves type modifiers, collation and LEFT nullability. ON excludes the target/other comma items;
+WHERE children receive the combined correlation scope. CTE reachability, function validation and
+provisioning admission visit sources, and EXPLAIN descends into the association plan.
+
+Execution drains source relations and target/source associations through one statement snapshot
+before evaluating SET or writing. Association plans use SELECT predicate pushdown and transient
+costing with the target pinned as the outer input. Safe target-only WHERE terms select target
+seeks; mandatory target/source equalities drive source index probes or the existing budgeted
+hash build. EXPLAIN exposes those access paths and algorithms. The full WHERE remains a residual.
+Equality-driven hash or seek steps are formed one at a time in written source order. For example,
+`UPDATE t SET v = b.v FROM a, b WHERE t.id = b.tid AND b.aid = a.id` visits |t| * |a|
+pairs before reaching b's hash. Write `FROM b, a` to make these equality joins linear in the
+input sizes. Both orders return correct results; general join-order search belongs to #1629.
+The pushed target filter runs before retaining target identities. Collection keeps the writer
+stamp from the original decode, avoiding a second whole-row read. Internal statement counters
+record association reads separately from total row reads, which also include stamp checks and
+tombstone pre-images, and record peak retained target identities. Joined target/association
+collections share StatementMemoryBudget with inputs, selected writes and hash builds
+(#1751); the statement-budget section below defines ownership and conservative charges.
+Costing rewrites source-derived relations through the same identity map as WITH definitions, so
+volatile CTE sources materialize once. A private join-frame identity slot retains the original decoded
+target array by reference; a local map associates it with physical location and writer stamp.
+Equal unkeyed rows and self joins therefore retain distinct identities. UPDATE rejects a second
+association for any target with CS05068 before SET evaluation, even when source values are equal.
+DELETE keeps the first enumerated source association per physical target; the chosen source and
+RETURNING order are unspecified. Cascade retries reuse this collected set rather than rerunning
+volatile sources. Source values remain from collection; UPDATE RETURNING substitutes only the
+new target columns, while DELETE RETURNING uses the old target columns.
+
+Target rows take sorted exclusive locks before constraint preparation. The apply gate rechecks
+every collected target's original location and writer before writes; a concurrent committed
+change fails with the existing first-updater-wins transaction conflict rather than following a
+replacement row. Snapshot retention prevents reclamation while collection waits. The existing
+UPDATE final-state, domain, CHECK, foreign-key, unique-index and DELETE cascade helpers enforce
+constraints; all effects and RETURNING preparation stay in the existing statement undo bracket.
+The joined statement mark precedes WITH/subquery materialization; failures release only new grants
+after undo, preserving earlier transaction grants. Offline storage retains locks. Source intents
+precede target write intents and use release-before-wait preparation. DELETE re-acquires source
+intents at every bounded cascade retry while reusing its collected volatile associations.
+The same outer mark and root plan cover wrapper grants during cascade back-off; the optional
+joined scope uses the existing join-only state slot, without growing ordinary statement objects.
+Joined UPDATE prepares source, wrapper and reference intents as one try/release/wait unit, so a
+reference-table wait also releases new target read intents before FK DDL requests target X.
+Plain UPDATE and DELETE keep separate async state machines and apply closures without association
+state, preserving their ordinary allocation budget.
+Scans/cursors dispose before row-lock waits; row/parent/key locks precede the apply gate and
+storage/index latches. Cancellation, callback failures and result preparation unwind these owners.
+No new interface, visibility grant, reference, persistent format or wire message is introduced.
+
+| Code | Condition |
+| --- | --- |
+| CS05068 | An UPDATE target has more than one matching source association; no row is written. |
+| CS05069 | Direct RIGHT, FULL or parenthesized joined DML source requires an unsupported target-outer execution tree; no row is read or written. |
+| CS05070 | FULL JOIN requires a safe mandatory hash equality; refused during binding before either input is read. |
+
+Namespace rules follow PostgreSQL analyze.c:602-621,2560-2578; the owner's cardinality rule
+deliberately differs from nodeModifyTable.c:2599-2608 (first-update behavior).
+
+## Fixed-pass worker tests (found during #1365)
+
+`VersionPurgeRefusalTests.RunIteration_RefusalKind_ShouldDistinguishForeignStorageFromProgress`
+owns a separate `SqlVersionPurgeWorker` through `CheckpointPace.Own`. Its exact pass and
+failure counts are driven only by the test. Using an engine-owned worker allowed its live
+pump to invoke the same callback beside explicit iterations: a full Debug run observed
+thirteen callbacks for twelve requested passes. A fixture assertion excludes registered
+workers; no assertion or production scheduling behavior is relaxed. Real-pump refusal and
+owed-pass coverage remains in the other cases. This follows the existing short-refusal
+fixture in the same class and closes a test-hygiene gap related to #1285. No engine behavior
+was copied from another database, and no language, protocol, format or error-code change applies.
+
 ## Worker lane isolation (#1279)
 
 Checkpoint, page write-back, WAL group flush and version purge run one database's work at a
@@ -22,6 +103,13 @@ and owed full purge passes on the pump. They allocate nothing and dispatch no la
 index stubs dispatch only through their internal test hook until a real maintenance body exists.
 A detached write-back completion wakes collection without advancing other databases' interval;
 the next regular write-back deadline remains absolute, including a stuck-detection timeout.
+The completion-pacing regression holds a real completed lane through `AfterDatabase`, then
+owes new dirty peer pages after their lanes have settled and snapshots their exact two visits
+on the collecting pump pass. `BeforeDatabase` forces idle work due, including follow-up batches;
+using it here or reading live visit counts after a delayed test continuation confuses that
+injected work or a later regular interval with the completion being tested. Both base and
+review implementations preserve the same pacing; the test retains the exact count and also
+requires the dirty peers to remain unattempted on the completion pass.
 Work deferred by capacity remains owed and can use reclaimed slots on these early wakes. Runner parking and result publication
 share one critical section. Provisional and published SQL/Key-Value data file sets keep the same
 lane identity; a published database waits for an outstanding provisional catalog flush before
@@ -45,13 +133,31 @@ before closing storages. Lock order is the root pass gate, then the lane monitor
 spans model/apply/storage locks, failure reporting or observer callbacks.
 
 The shared DatabaseLaneWorker publishes opt-in DatabaseWorkerPass observations for all kinds.
+Checkpoint failure tests assert requested waits, due visits, completed work and runner availability
+at publication, including a delayed observer; elapsed times are diagnostic. Deferred-undo tests
+require a recorded undo-only worker completion, a positive-work DeferredUndoCompleted event and a
+released writer with 30-second hang guards,
+independently of the hour-long full-maintenance interval.
 Checkpoint due evidence remains optional checkpoint-specific data. Resilience tests hold the actual
-page-write/fsync faults (purge/index use the internal dispatch hook), require at least 12 healthy
-worker completions while the other database is still held, and judge measured waits by median
-and 75-percent share under the budget. They do not credit committer self-help or a statement's
+page-write/fsync faults (purge/index use the internal dispatch hook), require K = 4 healthy
+positive-work completions while exactly one runner remains held, and assert lane-wait counters.
+Page-write setup holds dispatch while preparing the dirty page, then releases it into the device gate.
+A 30-second hang guard bounds each phase; elapsed durations are diagnostic only. After release,
+the held worker must complete and clear any stuck-lane advisory before a second stall exercises disposal. They do not credit
+committer self-help or a statement's
 checkpoint as worker progress. Cancellation, completion, failed thread start, capacity and disposal
 are exercised in the non-parallel lane stress tests. Each runner starts without caller ExecutionContext and restores a clean context after each job,
 preventing apply-gate reentrancy or other AsyncLocal state from crossing databases.
+SQL/Key-Value index compaction remains a stub: the test hook performs counted page write-back
+on its lane and pairs the result with collection. Grouped-commit resilience uses worker flush
+and self-help events; hung-checkpoint progress uses a 30-second hang guard instead of a short
+throughput window. Slow-cadence, producer and observer regressions cover runner pauses.
+Completion-wake regressions inspect the collected pass rather than live counters after an await;
+a paused observer cannot credit later regular ticks to that completion. Provisional-flush waits
+use the same 30-second hang guard, with self-help outside it; a controlled three-second pump
+pause covers provisional collection and publication.
+Large-definition reclamation stress retains every operationally failed visit and pump backoff
+request. A slow-lane regression allows a stuck advisory and requires it to clear after draining.
 No public type, visibility grant, project reference or storage format changed. Storage exposes
 its pending-commit and dirty-page scheduling hints without exposing buffer-pool frames.
 
@@ -71,9 +177,9 @@ this parsing boundary; the catalog encoding and storage format are unchanged.
 ## Wrapped child failures and abort evidence (#1364)
 
 Otherwise unclassified `StorageException` subclasses and ordinary I/O, including wrapped
-and aggregate causes, use `COHSQLE041`. Offline and format refusals retain their specific codes.
-Attached-index damage leads with `COHDBS003` and retains `COHDBI002` and `COHSQLE041`;
-other index failures use `COHSQLE041`. Begin, statement, commit and rollback share classification.
+and aggregate causes, use `CS06041`. Offline and format refusals retain their specific codes.
+Attached-index damage leads with `CK06003` and retains `CK06102` and `CS06041`;
+other index failures use `CS06041`. Begin, statement, commit and rollback share classification.
 Create and open also code child failures before publication. Known format refusals retain their
 authored types, messages and source diagnostics. Snapshot release and transaction abort preserve
 the exact coded statement exception, including its corruption type. The model EventSource
@@ -102,7 +208,7 @@ Read-only SELECT, EXPLAIN, system views and SHOW encode one frame at a time duri
 after materialization and statement admission have ended. A late encoding, enumeration or
 disposal failure ends the exchange with ExecutionFailure, even after partial result frames.
 The client discards partial columns and rows; the connection and any explicit transaction stay
-usable because the statement wrote nothing. Uncoded result failures use COHSQLE045; already-coded
+usable because the statement wrote nothing. Uncoded result failures use CS05045; already-coded
 failures retain their diagnostics. Transport failures during delivery remain terminal on both
 paths, as do malformed incoming parameters. Embedded execution allocates no wire buffers.
 The optional wire preparation reference lives once in the shared statement metrics, so copies
@@ -114,7 +220,7 @@ There is no aggregate encoded-result cap on either path. Results are already ful
 a 64 MiB cap adds a functional limit without bounding their existing memory. Writes additionally
 retain encoded payloads until delivery, accepting that memory cost to preserve statement atomicity;
 reads retain only the current encoded frame. Every header/row is bounded by
-ProtocolFrameHeader.MaxPayloadLength (currently 16 MiB). Size refusals use COHSQLE045 / SQLSTATE
+ProtocolFrameHeader.MaxPayloadLength (currently 16 MiB). Size refusals use CS05045 / SQLSTATE
 54000 and report the encoded size and frame limit. Variable-width sizes include UTF-8 and zero
 escapes and are measured before allocating encoded columns. The row scratch buffer is at most one
 frame; header encoding uses a temporary growable buffer (less than twice the frame limit) plus
@@ -136,7 +242,7 @@ The dependency direction remains engine → Catalog → Storage → shared kerne
 Existing INSERT, INSERT SELECT, UPDATE and DELETE plans retain bound Returning
 projections. Binding shares SELECT projection metadata, naming and target qualifier
 checks; INSERT sources never enter that scope. Function validation includes every
-projection, and aggregates fail before reading rows with COHSQLE017.
+projection, and aggregates fail before reading rows with CS05017.
 RETURNING disables immutable constant folding so even foldable calls run per written
 row inside apply, after index checks, rather than during planning.
 EXPLAIN includes the expanded RETURNING projection count and names in every DML
@@ -157,7 +263,7 @@ visibility grant, persisted text, storage version or protocol change is needed.
 
 New CHECK declarations resolve table and schema qualifiers against the constrained table,
 using the same case-insensitive identity as query binding. An unknown qualifier fails DDL
-validation with located COHSQLE015, before publication, including CREATE, ADD CONSTRAINT and
+validation with located CS01015, before publication, including CREATE, ADD CONSTRAINT and
 ADD COLUMN. Bare, table-qualified and schema-qualified column names remain valid. The CHECK
 syntax walk validates this against catalog identity locally; it needs no new language AST
 constructor or shipped-assembly visibility grant. BindPersistedCheck retains its older lenient
@@ -172,36 +278,36 @@ and nested references alongside the existing join, correlation and DML suites.
 
 ## Invalid statement declarations (#1192)
 
-UPDATE binds each target ordinal only once and rejects repeated assignments with COHSQLE019,
+UPDATE binds each target ordinal only once and rejects repeated assignments with CS01019,
 including DEFAULT and empty inputs. A shared internal declaration validator rejects repeated
 columns in PRIMARY KEY, UNIQUE and FOREIGN KEY child lists before key deduplication, catalog
 publication or index construction, for CREATE and ALTER ADD CONSTRAINT. It uses the same
 case-insensitive identity as column binding and names the column and constraint. A second
-PRIMARY KEY declaration is refused with COHSQLE019, including mixed inline/table declarations
+PRIMARY KEY declaration is refused with CS01019, including mixed inline/table declarations
 and ALTER ADD CONSTRAINT or ADD COLUMN on an existing primary key, or repeated PRIMARY KEY
 clauses on one added column. PostgreSQL rewriteHandler.c:1166 uses 42601 for repeated
 whole-column assignments; parse_utilcmd.c:2773-2779 uses 42701 for repeated PK/UNIQUE
 columns, and :2378 uses 42P16 for multiple primary keys. Repeated FK child columns are
 rejected more strictly than PostgreSQL; repeated referenced columns are also refused with
-COHSQLE019 (PostgreSQL tablecmds.c:13982-13989 uses 42830). CREATE TABLE IF NOT EXISTS
+CS01019 (PostgreSQL tablecmds.c:13982-13989 uses 42830). CREATE TABLE IF NOT EXISTS
 skips declaration checks when the table exists, preserving it unchanged (PostgreSQL
 parse_utilcmd.c:202). The live invalid-statement conformance corpus checks both execution
-boundaries, statement atomicity, connection usability, existing SQL0005 type limits and
-COHSQLE017 aggregate placement. No public API or persisted representation changes.
+boundaries, statement atomicity, connection usability, existing CS00005 type limits and
+CS05017 aggregate placement. No public API or persisted representation changes.
 
 ## Identity execution (#1123)
 
 CREATE and ADD column planning validate the identity mode, integer type, nonzero increment,
 START range, DEFAULT exclusion and one-column limit before catalog writes. ADD checks no live
 rows under the existing exclusive DDL lock. Typed schema reconciliation refuses identity facets
-with SqlSchemaMigrationException / COHSQLP005 and "Nothing was changed.".
+with SqlSchemaMigrationException / CS03105 and "Nothing was changed.".
 Identity metadata implies NOT NULL; COLUMN_DEFAULT remains null. INFORMATION_SCHEMA appends
 seven identity fields after DATETIME_PRECISION, preserving its previous ordinals.
 
 The common INSERT VALUES / INSERT SELECT path allocates omitted or DEFAULT identity values
 before any column's NOT NULL/default validation or application of the row write set, independent
 of the identity column's ordinal. BY DEFAULT UPDATE DEFAULT shares that path;
-ALWAYS rejects explicit INSERT values and every UPDATE assignment with COHSQLE025. Explicit
+ALWAYS rejects explicit INSERT values and every UPDATE assignment with CS03025. Explicit
 BY DEFAULT values leave the counter untouched; existing indexes enforce any later collision.
 All rows are materialized before application, so range exhaustion inserts nothing. Existing
 plans and EXPLAIN mappings remain sufficient.
@@ -224,9 +330,90 @@ The unreleased record-space format advances **14 -> 15**, table extension **4 ->
 upgrade path. No new interface, visibility grant, project reference or wire format is introduced.
 
 The common column parser refuses explicit NULL with NOT NULL, PRIMARY KEY or IDENTITY
-in either order using SQL0003 and the column name, including table primary keys. ALTER of
+in either order using CS00003 and the column name, including table primary keys. ALTER of
 an existing primary key uses that coded refusal too. SERIAL/BIGSERIAL/SMALLSERIAL are
-rejected when SQL or native domains are created, with COHDBL001 and an IDENTITY suggestion.
+rejected when SQL or native domains are created, with CK00001 and an IDENTITY suggestion.
+
+## RIGHT normalization and grouped namespaces (#1525, SQ-J1)
+
+RIGHT [OUTER] JOIN executes by swapping physical children and applying LEFT's ON and
+null-extension rules. Bindings and physical column slots retain the written order. The whole
+written left subtree becomes nullable; RIGHT USING keeps its output slot on the left but
+reads the common-typed right value and collation, including right spelling under case-insensitive equality.
+Unqualified merged columns and qualified physical columns keep separate metadata and values.
+PostgreSQL src/backend/parser/parse_clause.c:1731-1751 supplies the RIGHT representative rule;
+src/backend/optimizer/prep/prepjointree.c:3668-3686 performs the corresponding child swap.
+
+An optional internal tree preserves mixed chains, comma precedence and parenthesized groups.
+Ordinary flat INNER/LEFT/CROSS queries retain their executor and costing path. Normalized
+trees use an explicit postorder work stack, retain each child only through consumption by
+its parent, and run complete ON/WHERE residuals. They conservatively retain input predicates
+at their written level and never reorder the first pair. A two-leaf RIGHT may seek into its
+written left input; proven safe mandatory equalities use the existing budgeted hash table,
+including composite inner subtrees. Hash-bound subtree output feeds the table as it is produced, so budget exhaustion stops production before a complete intermediate is retained; nested builds share and unwind the live statement grant. Unsupported hash conditions use buffered nested loops.
+EXPLAIN nests JoinStep nodes by physical association and names RIGHT-to-LEFT normalization.
+Its traversal emits the complete physical outer subtree before a correlated inner IndexSeek,
+in both EXPLAIN and EXPLAIN ANALYZE, including when the outer input is a derived query.
+ON subqueries capture the namespace before later USING merges or null extension can alter it.
+
+Unaliased parenthesized joins retain their component namespaces. An aliased group lowers to
+a derived SELECT * with the same bag and visible columns, hiding its components. Canonical
+rendering spells that alias as a derived query, with the existing complete column-alias-list rule and 32-level derived binding limit. Group walks retain stack guards. No existing identifier quoting changes, public
+bridge, interface, project reference, disk format or wire message is introduced.
+Derived-first groups retain their association through canonical rendering, CREATE VIEW and
+database reopen, including when nested aliased groups render as derived SELECTs.
+
+Direct RIGHT or grouped join trees in UPDATE FROM / DELETE USING fail CS05069 before reads
+or mutation: this run preserves the target-outer identity invariant. A derived SELECT source
+containing RIGHT executes through the existing materialization path with the target pinned.
+FULL follows the physical and eligibility contract below.
+
+## FULL physical joins (#1525, SQ-J2)
+
+FULL [OUTER] JOIN uses the normalized tree without swapping its written children. Binding
+requires at least one mandatory hash equality between the children and proves the complete
+ON condition non-throwing with the existing hash-safety rules. CS05070 refuses other forms
+before reading either input, even when an input is empty. This includes inequality-only/OR
+conditions, unproven calls, arithmetic, subqueries, CHAR-only keys and derived text without
+a stored-codec Unicode guarantee. No merge executor, nested-loop FULL fallback or spill is
+introduced. Computed USING COALESCE and proven identity/widening casts can supply hash keys
+in later joins or grouped inner subtrees. PostgreSQL optimizer/path/joinrels.c:1157-1180
+likewise refuses FULL when it cannot produce a merge/hash path.
+
+Column-only equalities retain direct ordinal extraction; operand-analysis sets and expression
+vectors are allocated only for computed keys, with earlier column keys backfilled when a vector
+first becomes necessary. The Release allocation guard retains the pre-FULL ordinary-equijoin
+extraction budget of 1,040 bytes per call.
+
+Both physical sides become nullable. USING keeps one output in written USING order, with
+COALESCE of both common-typed inputs, the resolved equality collation for text, and retained
+identical domain identity. The merged column is nonnullable only when both inputs were
+nonnullable before this FULL; qualified inputs remain separate nullable physical columns.
+PostgreSQL parser/parse_clause.c:1739-1756 supplies the COALESCE rule.
+
+The existing chained hash table retains each build row independently, including duplicate and
+NULL-key rows. NULL keys stay outside bucket chains. A separate bool array tracks matches,
+with one flag per retained entry; growth copies flags and reserves old plus new arrays before
+allocation. A flag is set only after complete ON evaluation is TRUE. After every outer row is
+matched or null-extended, unmatched build entries are emitted once with the outer slots NULL.
+An empty outer still builds and drains the inner. WHERE remains above both null extensions.
+PostgreSQL executor/nodeHashjoin.c:578-592,634-679,729-756 uses the same ON-match distinction
+and separate unmatched/null-key drain; no code was copied.
+
+The statement grant charges the table object (104 bytes including new tracking/evaluator
+fields), bucket/entry arrays, the aligned tracking array header/payload and retained rows.
+Nested tables share the live grant. Success, budget refusal, evaluation failure and cancellation
+release every reservation. CS05067 is unchanged. Only hash-build state is bounded: existing
+outer/intermediate/result materialization retains its existing contract. The build side is
+always the written right child, including when an index exists. EXPLAIN names FullHashJoin and
+unmatched=both in JoinStep detail; ANALYZE retains candidate-pair counts rather than emitted
+unmatched-row counts. Deterministic 64/640-row fixtures compare 4096/409600 loop candidates
+with 64/640 FULL hash candidates, with identical paired values and 128/1280 stored row reads.
+
+Direct FULL DML sources follow CS05069 before reads/writes; derived SELECTs containing FULL
+use existing target-pinned materialization. In-process, InMemory/TCP, live clause conformance,
+parser round trips and the NativeAOT sample exercise these contracts. No public boundary,
+reference, persisted format, protocol frame or metadata field changes.
 
 ## N-way joins (#1109)
 
@@ -244,7 +431,7 @@ and parse_coerce.c:1393-1437. Identical domains preserve their identity and regi
 mixed domain/base inputs use the common base type (parse_coerce.c:1360-1387).
 Differing types or modifiers clear length, precision and scale (parse_coerce.c:1648-1678);
 incompatible categories or missing implicit casts fail planning with
-COHSQLE015, including on empty inputs. Later USING and ON steps consume these merged expressions.
+CS01015, including on empty inputs. Later USING and ON steps consume these merged expressions.
 Computed merged keys do not acquire physical index probes. Ordinary equality and collation
 precedence remain unchanged. Grouping compares bound column values so qualified inputs and
 coerced merged names cannot accidentally share a key slot with different types.
@@ -284,7 +471,7 @@ Metrics retain ordered JoinAccessPaths (AccessPath renders them separated by sem
 even when empty inputs skip enumeration. A single backing slot holds a scalar or join paths,
 and stored-only planning creates no join output map or flattened-walker enumerators, preserving
 the existing ReadCommitted allocation budget. EXPLAIN emits a JoinStep child for every step,
-with its scan or correlated seek. Grouping and subqueries use this same input plan.
+with its scan or correlated seek. Grouping and subqueries use this same input plan. RIGHT and grouped trees follow the normalization contract above.
 
 Pass-through projections carry source nullability, including all LEFT right columns.
 Delivery transfers the final fresh index inner; every earlier input retained by a later loop
@@ -316,7 +503,7 @@ DO UPDATE WHERE require BOOLEAN. The shared planner check uses StaticOperandType
 binder inference as its fallback, so arithmetic, CASE results, aggregates and supplied
 parameters fail before reading even an empty relation. AND/OR/NOT operands, searched
 CASE conditions and IS TRUE/FALSE/UNKNOWN operands use the same rule, including ORDER BY output aliases. The error is
-COHSQLE003 (SQLSTATE 42804), names the construct and retains its source span. This follows
+CS02003 (SQLSTATE 42804), names the construct and retains its source span. This follows
 PostgreSQL src/backend/parser/parse_coerce.c:1163-1184 without implicit non-Boolean coercion.
 Untyped NULL remains UNKNOWN; a typed non-Boolean NULL expression is refused. Every CASE result
 and COALESCE alternative in a Boolean position is checked, including unreachable alternatives.
@@ -328,7 +515,7 @@ branch preparation shares the check before selecting or evaluating another branc
 Boolean short-circuiting and simple CASE value comparisons retain their existing rules.
 Invalid stored view predicates now fail binding with the same diagnostic; catalog/storage
 encoding is unchanged. SQL function declarations run the Boolean-position walk; stored bodies
-retain the load-only binding path, with COHSQLE003 isolated as a SqlBoundFailure. Legacy invalid
+retain the load-only binding path, with CS02003 isolated as a SqlBoundFailure. Legacy invalid
 CASE/logical operands and changed application return types therefore fail on invocation, while
 the database opens. Logical nodes, NOT and searched CASE conditions retain runtime error spans.
 The generic Matches runtime backstop on a bound root has no source span; known-type
@@ -339,8 +526,8 @@ No interface, visibility grant, reflection or dynamic code is added.
 
 Each execution copies request parameters into an ordinal, bare-name dictionary using
 Execution's stateless shared source. Missing parameters fail while validating/binding
-expressions, before data rows are read or written, with COHSQLE020 and the reference's
-span. Collisions after one-sigil removal carry COHSQLE023. Group keys compare bare
+expressions, before data rows are read or written, with CS01020 and the reference's
+span. Collisions after one-sigil removal carry CS01023. Group keys compare bare
 names. Transaction control bypasses planning, so the session applies the same
 normalization before BEGIN, COMMIT or ROLLBACK can change state. A collision leaves
 that state unchanged. The [shared parameter contract](../../Assimalign.Cohesion.Database.Language/docs/DESIGN.md#parameter-contract-1102)
@@ -354,7 +541,7 @@ matching map key can bind. `$0`, `$01` and names beyond Int64 remain exact strin
 `DatabaseType.Character` (19) is CHAR/CHARACTER, distinct from String (VARCHAR/TEXT).
 `SqlType.Char(n)` and the parser reuse shared `SqlTypeModifiers` validation; bare CHAR is CHAR(1).
 `SqlCastConverter.ApplyModifiers` pads assignments, parameters, defaults, domain values and function
-results to n Unicode scalar values, rejects non-space assignment overflow with COHSQLE012, and
+results to n Unicode scalar values, rejects non-space assignment overflow with CS02012, and
 truncates explicit casts. The registry has 124 standard casts after #1119, including CHAR/text conversions and
 the TEXT conversion pairs mirrored for CHAR. CHAR-to-text strips trailing U+0020.
 
@@ -397,10 +584,10 @@ Validation-only ALTER COLUMN compares the exact padded CLR values, not wrapper r
 trailing-space-insensitive equality. Every CHAR length change requires validation, including widening;
 non-null values that would be repadded cause refusal before metadata publication. Empty or all-null
 columns may change length. Code-first changes on populated tables defer that validation to the existing
-provisioning worker. Rewriting remains #1447's responsibility, sharing #1265's machinery; this change
-does not invent a metadata-only repadding behavior or a separate rewrite implementation. Both the
-definition-rewrite and changed-padding refusals name the column and direct callers to an explicit
-table-copy migration, identifying #1447 as the in-place rewrite work.
+provisioning worker. TYPE now performs repadding through #1447's shared #1265 rewrite machinery;
+the validation-only full-definition path names the column and directs callers to TYPE. Changing
+DEFAULT separately on that path uses SET/DROP DEFAULT. There is no metadata-only repadding
+behavior or separate type-only copier.
 
 BETWEEN binds independent comparands for its lower and upper comparisons, matching PostgreSQL
 `src/backend/parser/parse_expr.c:1325-1341`; round 2 leaves that implementation unchanged. IN separates
@@ -504,7 +691,7 @@ Each CTE body collects its direct SELECT operand identities once in a reference-
 projection metadata uses membership checks, keeping FROM-less set-chain planning linear.
 Combined ordering binds output names and ordinals directly, without source-expression lookup.
 USING's category/implicit-cast rule is reused, with unknown handling and a set-specific mismatch
-message (COHSQLE003 / 42804). Literal strings retain unknown provenance until the pair
+message (CS02003 / 42804). Literal strings retain unknown provenance until the pair
 chooses its type; explicit TEXT casts remain typed (PostgreSQL parse_coerce.c:1397 and
 analyze.c:2357). Unconstrained CHAR preserves its value without the declaration default
 CHAR(1), following varchar.c:284-286. Identical domains survive; differing types or modifiers clear typmods. Collation
@@ -520,7 +707,7 @@ apply to completed rows. Set binding uses iterative postorder; compatible same-q
 UNION nodes reuse the left operand list to build one N-way node (PostgreSQL
 prepunion.c:1380-1420), retaining pairwise type and collation decisions. Such chains retain
 O(total input) rows with no repeated prefix copying; remaining recursive execution levels
-check the stack for COHSQLE004. Other nodes cost O(L+R) rows and membership state,
+check the stack for CS05004. Other nodes cost O(L+R) rows and membership state,
 plus O(N log N) sorting; streaming and spilling remain non-goals. Structural SameQuery equivalence
 includes set operators, quantifiers, operands, WITH and tails for view canonicalization.
 
@@ -528,12 +715,38 @@ CORRESPONDING remains a contextual exclusion. UNION/INTERSECT/EXCEPT were profil
 so identifier canonicalization and the storage format are unchanged. No public interface,
 visibility grant, project reference, dynamic code or wire-format change is introduced.
 
+## Quantified scalar subqueries (#1718)
+
+SqlQuantifiedComparisonExpression retains its scalar operand, comparison operator,
+ANY/SOME/ALL spelling and query body. Planning registers the body as an existing typed
+set slot; SqlBoundQuantifiedComparison folds the ordinary comparer over that slot.
+ANY/SOME uses OR and ALL uses AND with UNKNOWN preserved and the empty-set identity
+FALSE/TRUE (PostgreSQL src/backend/executor/nodeSubplan.c:244-269,399-427).
+Scalar folding evaluates the operand once for a nonempty set and skips it for an empty
+one; preparation also skips correlated scalar children of that operand. Independent
+subqueries retain eager statement preparation.
+Comparison folding stops at a deciding result; the existing set materializer still
+reads child output first, once per statement for independent children and per frame
+for correlated children. Lazy correlated preparation follows CASE/COALESCE/Boolean
+branches as before. No query, transaction or read view is opened by scalar evaluation.
+
+Ordinary value comparison and CHAR comparand binding are reused, including CS02055
+for compared incompatible non-NULL values and left explicit COLLATE precedence.
+The Boolean result carries no text collation. Child width validation reuses CS05013;
+name errors retain CS01015. No diagnostic identity is allocated.
+Query walkers include the body for functions, aggregate levels, CTE reachability,
+view equivalence and provisioning admission. Row values, arrays and the previously
+excluded expression positions stay excluded. ANY/SOME retain their contextual
+vocabulary rows for array refusals and stable persisted identifier quoting, so
+no persisted contract or wire version changes. No public interface, construction
+bridge, assembly grant or project reference is added.
+
 ## Subquery and insert-source operators (#1021)
 
 Non-recursive WITH (#1116) binds every definition in declaration order and resolves
 unqualified read names before the catalog. Targets and schema-qualified reads keep
 catalog resolution; self-references and names matching later siblings fall back to
-stored tables. Only a missing future relation receives COHSQLE026 (PostgreSQL
+stored tables. Only a missing future relation receives CS01026 (PostgreSQL
 src/backend/parser/parse_relation.c:1463-1487). CTE bindings have schema-less
 qualifier identities and conflict with same-named relations like aliases
 (parse_relation.c:120-168,241-279,461-470). A qualified column may still correlate
@@ -553,7 +766,7 @@ and delivery. EXPLAIN maps WITH and constant-source plans. Scalar/aggregate bodi
 without FROM use one implicit row, as do top-level queries, set operands, views, derived tables
 and scalar/IN/EXISTS children (#1373). All bodies,
 including unused constant bodies, reject aggregates in WHERE during planning
-(COHSQLE017; PostgreSQL src/backend/parser/parse_agg.c:407).
+(CS05017; PostgreSQL src/backend/parser/parse_agg.c:407).
 No interface, project reference or internal grant is added.
 
 Data-storage format 16 was introduced because the new SEARCH and MATERIALIZED
@@ -580,7 +793,7 @@ atomicity remain on the shared INSERT/UPDATE paths; identity allocation (#1123) 
 extend the omitted-column resolver so these forms inherit it. No format, protocol,
 project-reference or visibility boundary changes.
 
-Both the missing-default resolver and explicit-NULL coercion raise COHSQLE024
+Both the missing-default resolver and explicit-NULL coercion raise CS03024
 (SQLSTATE 23502, not_null_violation), preserving their existing message texts. Each
 failure carries one error diagnostic naming the column and no source span, because
 these execution paths have no source location. PostgreSQL raises this category at
@@ -597,6 +810,16 @@ while the enclosing plan runs, as PostgreSQL stores an init plan's output in a
 `PARAM_EXEC` parameter. Expression evaluation never opens a query, session,
 transaction, or read view. Grouping's expression-ordinal bindings hold for
 subqueries in HAVING and aggregate arguments, because the slot binding runs first.
+
+Repeated scalar-subquery, EXISTS and quantified-comparison group keys match by complete
+query-body structure through the persisted-view `SameQuery` comparer, never node identity.
+Operators, quantifiers and negation must agree; scalar operands retain the ordinary bound-column
+grouping rules. IN keys also compare their bodies. Identically written correlations in the same
+scope match. Correlation binding recognizes the complete repeated key before checking grouped
+outer columns, so SELECT, HAVING and ORDER BY read its retained group value; an identical child
+inside a different expression does not suffice. Unproven or different keys stay distinct and
+ungrouped references retain CS05017. This follows PostgreSQL's whole-expression `equal()` check
+in `src/backend/parser/parse_agg.c:1451` before its ungrouped-column walk. No persisted format changes.
 
 Scalar children require one output column and at most one row; an empty result
 is a typed null. IN children require one column and preserve SQL three-valued
@@ -622,10 +845,10 @@ slots, and a statement cache retains only independent child results. CASE,
 COALESCE and Boolean preparation follows lazy branches and retains condition values
 within that evaluation frame so volatile calls are not repeated. Projection and
 ordering freeze child values per outer row before sorting. Grouped references bind
-to grouping slots; ungrouped outer columns fail with COHSQLE017 naming the column.
+to grouping slots; ungrouped outer columns fail with CS05017 naming the column.
 Aggregate levels use the lowest variable or aggregate dependency, descending into
 nested query bodies and adjusting levels as PostgreSQL `parse_agg.c:646-690,762,850`
-does. Outer-only aggregates report COHDBL001 before grouped-column validation,
+does. Outer-only aggregates report CK00001 before grouped-column validation,
 including explicitly and implicitly grouped ancestors; a nested local dependency
 keeps a mixed aggregate local. A nested aggregate's dependency summary is consumed
 once, avoiding repeated argument walks. Arguments of an aggregate of the grouped level
@@ -651,7 +874,7 @@ evaluator layout and synchronous execution path, preserving its allocation budge
 PostgreSQL's source references and SQL-visible errors are recorded in DIALECT.md.
 Parsing and planning enforce at most 32
 subquery levels, counting derived bodies too. UPDATE SET, VALUES, CHECK/DEFAULT and LIMIT/OFFSET expression
-subqueries, quantified comparisons, recursive/nested CTEs and lateral joins remain
+subqueries, recursive/nested CTEs and lateral joins remain
 outside the profile. Every FROM-less SELECT uses one implicit row, with ordinary filters, aggregation and row windows. Subquery resolution binds
 each use site to its slot number when the statement is planned; it needs no
 language-assembly friend access or public AST constructors. See [DIALECT.md](../../Assimalign.Cohesion.Database.Sql.Language/docs/DIALECT.md#subqueries-and-query-source-inserts-1021)
@@ -688,7 +911,7 @@ COLLATE become declared strength (2); ties between declared collations keep the
 existing left-operand rule. IN/NOT IN expression types are Boolean while
 their subquery slots retain the membership element type. Empty or whitespace-only
 derived output names and partial or excessive output-name lists fail planning with
-COHSQLE013, before row reads, preserving wire sessions and open transactions.
+CS05013, before row reads, preserving wire sessions and open transactions.
 Admission visits derived bodies and waits for deferred table/index publication
 before binding, including when EXPLAIN wraps the query.
 
@@ -702,8 +925,8 @@ no catalog representation change, so no format bump or upgrade path is needed.
 
 ## EXPLAIN operator vocabulary (#1104)
 
-The ordinary binder plans the wrapped data statement once. The session then returns
-`SqlPlanner.Describe` before calling the data executor. It retains its normal
+The ordinary binder plans the wrapped data statement once and applies transient probe costing.
+For plain EXPLAIN the session returns `SqlPlanner.Describe` before calling the data executor. It retains its normal
 statement admission and transaction bracket, so an explained mutation writes nothing in
 autocommit or an explicit transaction. SQL and its client use existing result frames unchanged.
 Deferred-provisioning admission recursively walks `SqlExplainExpression.Statement`, including
@@ -718,7 +941,7 @@ SQL's combined operators, not a shared or independently executable algebra:
 | Operators | Meaning |
 | --- | --- |
 | `Select`, `TableScan`, `IndexSeek` | Bound projection/filter/order/distinct/window above the chosen table access; seeks name the catalog index and equality-prefix/range bounds |
-| `NestedLoopJoin`, `JoinStep` | N-way written-order join; each JoinStep describes its kind and has its own scan or correlated index seek child |
+| `NestedLoopJoin`, `HashJoin`, `JoinStep` | N-way written-order join; each JoinStep describes its kind and has its own scan or correlated index seek child |
 | `Group` | Group keys, aggregates, HAVING and result modifiers above the actual input plan |
 | `With` | Reachable CTE materializations in declaration order, followed by the enclosing input |
 | `Materialize` | One named CTE's complete definition plan, evaluated once per statement |
@@ -851,9 +1074,9 @@ flowchart TD
   did not validate, and a literal its type cannot hold each bind as a `SqlBoundFailure`
   that raises the same exception, freshly constructed, when evaluated. So a statement
   over an empty table, or one whose short circuit or CASE skips the node, succeeds
-  exactly as before, and an overflowing literal still codes as `COHSQLE002` at the
+  exactly as before, and an overflowing literal still codes as `CS02002` at the
   evaluation boundary and as a conversion failure under CAST. The walk checks the stack
-  as it descends, so a tree the thread cannot walk fails with `COHSQLE004` here.
+  as it descends, so a tree the thread cannot walk fails with `CS05004` here.
 - **Binding costs less stack per level than parsing.** `Bind` is a thin dispatcher and
   each node kind binds in its own non-inlined helper, so a level costs the walk two
   small frames and the operand candidates, collection-expression buffers and closures
@@ -960,7 +1183,7 @@ type. INTERVAL field extraction retains normalized TimeSpan components, a docume
 PostgreSQL departure. Integer arithmetic with NULL retains BIGINT metadata.
 CREATE/ALTER TABLE accept variable-free expression DEFAULTs, including Stable/Volatile
 calls nested under evaluator forms (#1121). ADD COLUMN freezes a nonvolatile expression
-into its missing-value literal; a volatile default requires an empty table (COHSQLE027).
+into its missing-value literal; a volatile default requires an empty table (CS03027).
 
 String-producing scalars cap output and Unicode work buffers at 1,048,576 UTF-16 units.
 UPPER/LOWER apply the same bound; LENGTH/CHAR_LENGTH count without allocating a rune
@@ -968,7 +1191,7 @@ buffer. CONCAT checks binary-to-hex expansion before formatting as well as joine
 LPAD/RPAD bound two units per requested scalar; REPLACE counts nonoverlapping matches
 and bounds the expanded length before allocating. CONCAT/CONCAT_WS bound the joined
 length, and slicing/trimming/reversal bound their input work buffers. Long loops
-observe cancellation. Allocation failures are translated to COHSQLE002. PostgreSQL's
+observe cancellation. Allocation failures are translated to CS02002. PostgreSQL's
 equivalent preallocation check is `src/backend/utils/adt/oracle_compat.c:199-206`.
 
 SqlDatabaseSession captures one UTC instant from EngineOptions.TimeProvider at
@@ -1127,7 +1350,7 @@ flowchart LR
   `func_select_candidate`). The planner's pre-pass checks every call's name and count
   before it binds the catalog: a name outside the catalog is `Unknown function '<name>'.`
   unless the SQL profile declares it (`NULLIF`, `TRIM`, ...), which still fails only when
-  evaluated; a count no overload takes is `COHSQLE006`, worded from the overload set
+  evaluated; a count no overload takes is `CS01006`, worded from the overload set
   (`takes exactly 1 argument or '*'`, `Accepted: COUNT(*) or COUNT(value)`). Then, in
   each expression's validation, the candidates by count are costed by their arguments'
   static types (`SqlExpressionEvaluator.StaticTypeOf`): nothing for an exact type or an
@@ -1135,8 +1358,8 @@ flowchart LR
   INT8 → INT16 → INT32 → INT64 → DECIMAL → FLOAT64, one for REAL → FLOAT64 (PostgreSQL's
   implicit float4 → float8; nothing widens to REAL, which would lose digits, and nothing
   converts to or from text), ten for a pseudo-type, one for a variadic overload.
-  The unique cheapest wins; none is `COHSQLE006` (`has no overload that accepts argument
-  types (TEXT)`), a tie `COHSQLE008` (SQLSTATE 42725). An integer literal is typed by its
+  The unique cheapest wins; none is `CS01006` (`has no overload that accepts argument
+  types (TEXT)`), a tie `CS01008` (SQLSTATE 42725). An integer literal is typed by its
   magnitude, INTEGER when it fits and BIGINT otherwise, as PostgreSQL types one
   (src/backend/parser/scan.l:1335-1348). Both planner operand inference and the literal evaluator
   use that same type. Inside a grouping, a grouping
@@ -1192,7 +1415,7 @@ flowchart LR
   (INTEGER for BIGINT) is converted; a JSON result may be text and a JSONB one bytes; an
   `ANYELEMENT` result must have its call's `ANYELEMENT` arguments' type (an aggregate's is not
   checked: it has no arguments at `Finish`; `ABS` keeps its own rule); and a function that
-  sets `IsNeverNull` may not return NULL. Anything else fails the statement as `COHSQLE007`
+  sets `IsNeverNull` may not return NULL. Anything else fails the statement as `CS05007`
   (`Function 'lying' failed: The function returned TEXT, but it declares BIGINT.`), where it
   used to reach clients with metadata that contradicted the value, or fail later uncoded.
 - **The typed shorthands.** `Create<T1..T4, TResult>` and `Create<TState, T1, TResult>` map
@@ -1202,9 +1425,9 @@ flowchart LR
   typed aggregate called on NULL input folds its NULL rows too.
 - **Exceptions.** Whatever a core throws other than cancellation of the statement itself,
   `InsufficientExecutionStackException`, `OutOfMemoryException` or a `DatabaseException`
-  becomes `COHSQLE007` (`Function 'clamp' failed: ...`, SQLSTATE 38000), the original as
+  becomes `CS05007` (`Function 'clamp' failed: ...`, SQLSTATE 38000), the original as
   its inner exception; a `DatabaseException` passes unchanged, so a built-in's own
-  codes (`ABS` of the BIGINT minimum is `COHSQLE002`) are what they were, and an
+  codes (`ABS` of the BIGINT minimum is `CS02002`) are what they were, and an
   application function raises an error of its own code the same way (a message that leads
   with `APP001:` reaches the client unchanged). The statement
   fails like any coded failure: it writes nothing and an explicit transaction stays
@@ -1216,7 +1439,7 @@ flowchart LR
   state or per-row allocations are needed. Direct public Finish has no statement and codes
   application cancellation as a function failure, even if creation supplied a canceled token.
   Direct public calls with the default context have no statement to cancel, so application
-  cancellation is `COHSQLE007`; callers can already supply a token through `SqlFunctionContext`.
+  cancellation is `CS05007`; callers can already supply a token through `SqlFunctionContext`.
   No token-taking Invoke overload is added. Domain checks, SQL function bodies and SQL domain
   CHECKs retain the same token through nested calls; a native failure keeps the native function's
   name. A coded failure while folding an immutable call remains a call and is retried during execution.
@@ -1250,7 +1473,7 @@ flowchart LR
   32 key evaluations/comparisons; runtime-wrapped comparer cancellation keeps its original
   OperationCanceledException. Correlated ordering and buffered key preparation also poll.
   Ordered DISTINCT retains one tuple per class, choosing the first sorted representative.
-  Scalar modifiers and DISTINCT keys outside the argument list fail with COHSQLE032.
+  Scalar modifiers and DISTINCT keys outside the argument list fail with CS05032.
   STRING_AGG and ISO LISTAGG are ordinary catalog aggregates with nullable Text results,
   called on NULL input: skip NULL values, omit NULL delimiters, and trim Character inputs.
   JSON needs an explicit text CAST. Delimiters are literals or parameters. Their StringBuilder
@@ -1260,10 +1483,10 @@ flowchart LR
   new function identifier quoting; no old-format reader or boundary grant is introduced.
   Persisted equivalence normalizes explicit ALL to default while rendering retains ALL.
   LISTAGG requires nonempty WITHIN GROUP ordering even for quoted names; missing or inner
-  ordering fails with SQL0003 before input is read.
+  ordering fails with CS00003 before input is read.
 - **Aggregates.** The planner recognizes an aggregate call by its name in the catalog and
   resolves its overload over the input row (`SUM` and `AVG` take the numeric pseudo-type
-  `SqlType.AnyNumeric`, so `SUM(text)` is `COHSQLE006` while planning). `SqlGroupAggregate` carries
+  `SqlType.AnyNumeric`, so `SUM(text)` is `CS01006` while planning). `SqlGroupAggregate` carries
   the overload, its bound arguments (none for `name(*)`) and conversion targets; the
   grouping executor creates one accumulator per group per aggregate call through
   `CreateAccumulator`, adds each row (a strict aggregate skips a row with a NULL
@@ -1273,7 +1496,7 @@ flowchart LR
   included. The per-row add holds no `SqlValue` in its own frame: a one-argument call hands
   its value, evaluated once, to the accumulator's internal `AddResolved(object, …)`, one frame
   that converts it and makes the coded call (an integer that does not fit its parameter is
-  `COHSQLE002`, as the evaluator codes one); `COUNT(*)` adds through one that builds no
+  `CS02002`, as the evaluator codes one); `COUNT(*)` adds through one that builds no
   argument; more arguments go through a buffered helper. Every aggregate takes these paths.
   A projected `COUNT` is non-nullable because its function says so (`IsNeverNull`), not
   because of its name.
@@ -1302,12 +1525,12 @@ flowchart LR
   (`SqlPersistedExpression.ParseDeclaration`); every column and function must resolve, every call's count
   and types must match an overload (`SqlPlanner.ValidateDeclaredCalls`, then
   `ValidateCheck` over a table shaped from the compiled columns); and every function must
-  be `Immutable`. A refusal is `COHSQLP001` naming the engine, the database, the table and
+  be `Immutable`. A refusal is `CS03101` naming the engine, the database, the table and
   the constraint, with the binder's error as the reason and inner exception (`... CHECK
   constraint 'ck' on table 'customers' does not bind: Unknown function 'slugify'. Register
   it on the engine's builder (SqlDatabaseEngineBuilder.Functions) before Build. Nothing was
   opened or written.`). An imperative `SqlDatabase.ApplySchemaAsync` binds the same way
-  before any step runs and refuses with `COHSQLP005`; the apply or verify a build runs
+  before any step runs and refuses with `CS03105`; the apply or verify a build runs
   skips that bind when the schema's hash is both already applied and the one the engine declares
   for the database. New or changed hashes validate qualifiers before any step; already-applied
   hashes bind qualifiers leniently like stored predicates (#1191). Phase 3 already bound the
@@ -1325,7 +1548,7 @@ flowchart LR
   remains the damaged-definition case described in #1189.
   Found, the CHECK binds as *unresolved* (`SqlUnresolvedDefinition`): the
   database opens and its reads proceed; its bound tree is a failure that raises
-  `COHSQLE009` (SQLSTATE 42883) on every write that evaluates it, whatever the row,
+  `CS01009` (SQLSTATE 42883) on every write that evaluates it, whatever the row,
   naming the constraint, the table and the call as the definition makes it (`CHECK
   constraint 'ck_email' on table 'dbo.customers' calls function 'is_email(TEXT)', which this
   engine does not register, so the constraint cannot be evaluated and the write is refused.
@@ -1333,7 +1556,7 @@ flowchart LR
   definition's columns come from its text); `DROP CONSTRAINT` removes it. An engine that
   declares the database verifies its stored definitions as provisioning's last step
   (`SqlBoundTableCache.FindUnresolved`) and fails its build with a `SqlSchemaMigrationException`
-  led by `COHSQLE009` that names the engine and the database too; the application that
+  led by `CS01009` that names the engine and the database too; the application that
   declares the database is the one that removed the function, so its deploy fails before
   the engine accepts work. PostgreSQL likewise fails at use, not when it loads its catalog,
   when a function's implementation is missing (`src/backend/utils/fmgr/fmgr.c`).
@@ -1365,7 +1588,7 @@ stateDiagram-v2
     [*] --> Unresolved: an application call does not resolve, or its result no longer fits
     [*] --> Refused: anything else does not bind
     Bound --> [*]: writes evaluate the bound tree
-    Unresolved --> [*]: reads proceed, writes fail COHSQLE009, a declaring build fails
+    Unresolved --> [*]: reads proceed, writes fail CS01009, a declaring build fails
     Refused --> [*]: the open fails, as damage or as the #1189 COALESCE arity case
 ```
 
@@ -1373,34 +1596,34 @@ stateDiagram-v2
 |---|---|---|---|
 | `UPPER`, `LOWER` | `SqlUpperFunction`, `SqlLowerFunction` | `TEXT` → `TEXT` | non-text inputs fail planning |
 | `LENGTH` | `SqlLengthFunction` | `TEXT` → `BIGINT` | Unicode scalar length |
-| `ABS` | `SqlAbsFunction` | `ANYELEMENT` → integers `BIGINT`, else the argument's type | a non-number fails planning; the BIGINT minimum is `COHSQLE002` |
+| `ABS` | `SqlAbsFunction` | `ANYELEMENT` → integers `BIGINT`, else the argument's type | a non-number fails planning; the BIGINT minimum is `CS02002` |
 | `COUNT` | `SqlCountFunction` ×2 | `()` called as `COUNT(*)`, and `ANY`, → `BIGINT` | never NULL; 0 for an empty group |
-| `SUM`, `AVG` | `SqlSumFunction` | numeric → `NUMERIC` | decimal accumulation; overflow is `COHSQLE002` |
+| `SUM`, `AVG` | `SqlSumFunction` | numeric → `NUMERIC` | decimal accumulation; overflow is `CS02002` |
 | `MIN`, `MAX` | `SqlExtremumFunction` | `ANYELEMENT` → `ANYELEMENT` | compares under the context's collation |
 
-**Behavior that moved.** #1120 makes UPPER/LOWER text-only with TEXT results; numeric inputs fail planning with COHSQLE006. The other T1 leaves and special forms are documented in DIALECT.md. `SUM` and `AVG` over a
-non-numeric argument fail planning with `COHSQLE006` (`Accepted: SUM(numeric)`) instead of
+**Behavior that moved.** #1120 makes UPPER/LOWER text-only with TEXT results; numeric inputs fail planning with CS01006. The other T1 leaves and special forms are documented in DIALECT.md. `SUM` and `AVG` over a
+non-numeric argument fail planning with `CS01006` (`Accepted: SUM(numeric)`) instead of
 an uncoded message, a `char` parameter included, even over an empty table where they used
 to return NULL; aggregate `DISTINCT`, `ALL` and input `ORDER BY` execute through the
 catalog-aware planner and executor described above; a parameter of a
 CLR type the codec does not store widens losslessly when a function receives it (`byte` to
 SMALLINT, `char` to TEXT, so `UPPER(@p)` over a `char` returns the upper-cased string where
 it returned the `char` unchanged); and an unknown column under a sign reports `Unknown
-column` rather than `COHSQLE003`. `ABS` keeps its static type over a non-number (the
+column` rather than `CS02003`. `ABS` keeps its static type over a non-number (the
 argument's), so `SUM(ABS(text))` and a `CASE` that mixes it with a number are still refused
 while planning. Part 2: a
 database whose stored CHECK calls a function the opening engine does not register opens
-(its writes to that table fail with `COHSQLE009`) where its open used to fail as a damaged
-catalog; an engine build that declares such a database fails with `COHSQLE009`; a declared
-CHECK that does not bind fails the build with `COHSQLP001` before any file, where it used
+(its writes to that table fail with `CS01009`) where its open used to fail as a damaged
+catalog; an engine build that declares such a database fails with `CS01009`; a declared
+CHECK that does not bind fails the build with `CS03101` before any file, where it used
 to fail the provisioning step that ran its DDL; and a sign over a constant binds as a
 constant. The review of E2: an application overload that would shadow a built-in, and a
 reserved, type or quantifier name, are refused at registration; a call over a grouping key
-or an aggregate result resolves by its type (it was ambiguous, `COHSQLE008`, for an
+or an aggregate result resolves by its type (it was ambiguous, `CS01008`, for an
 overloaded function); a REAL argument widens to a DOUBLE parameter; a result of another
-type than declared is `COHSQLE007` or widened; a stored CHECK whose application function
+type than declared is `CS05007` or widened; a stored CHECK whose application function
 changed its result, or that calls a standard-library name no built-in takes, opens and
-fails writes with `COHSQLE009` where the open failed; DDL refuses a CHECK in which an
+fails writes with `CS01009` where the open failed; DDL refuses a CHECK in which an
 application function's result does not fit a comparison or an arithmetic operand; and an
 aggregate's `VOLATILITY` in `COHESION_SCHEMA.FUNCTIONS` is NULL.
 
@@ -1411,11 +1634,11 @@ a typed aggregate over a reference-type state, a hand-written scalar (`clamp`) a
 (`is_missing`) and typed (`or_none`); declares a schema
 whose `table.Check` calls one; runs the same statements in process and over the wire through
 `Sql.Client` on the in-memory driver (results compared value and CLR type, the CHECK's
-refusal, `COHSQLE007`, `COHESION_SCHEMA.FUNCTIONS` and a folded parameterized call); and
+refusal, `CS05007`, `COHESION_SCHEMA.FUNCTIONS` and a folded parameterized call); and
 exits 1 when a check fails. E3 added a domain with a check (`email`, a declared column of
 it, and its refusal), a domain with application casts to and from it (`cents`, under
 `CAST(CAST(Score AS cents) AS TEXT)`), a built-in cast from text to DATE, UUID-to-TEXT
-conversion (built-in since #1119), and a `CAST` no cast performs refused while planning (`COHSQLE011`), in process and over the wire. It promotes the trim and AOT analyzer diagnostics to errors and
+conversion (built-in since #1119), and a `CAST` no cast performs refused while planning (`CS02011`), in process and over the wire. It promotes the trim and AOT analyzer diagnostics to errors and
 has ILC treat every warning of its whole-program analysis as an error, reported at its
 source (`IlcTreatWarningsAsErrors`, `TrimmerSingleWarn=false`); it is published for
 win-arm64 by hand and for linux-x64 in CI (`resource-database.yml`), which runs the binary,
@@ -1631,7 +1854,7 @@ flowchart LR
     Freeze --> Catalog["SqlDatabaseEngine.Types (SqlTypeCatalog)"]
     Catalog --> Ddl["DDL column type: built-in name, else domain"]
     Catalog --> Cast["CAST: target resolved, casts chosen once per statement"]
-    Catalog --> Bind["table version bound: each domain column's check, or COHSQLE010"]
+    Catalog --> Bind["table version bound: each domain column's check, or CS02010"]
 ```
 
 - **A domain** (`SqlType.CreateDomain(name, baseType, check?)`, PostgreSQL's `CREATE DOMAIN`,
@@ -1663,7 +1886,7 @@ flowchart LR
   database's `SqlFunctionEnvironment` carries it. DDL (`CREATE TABLE`, `ADD COLUMN`) and `CAST`
   read a built-in name through `SqlTypeNames` first and fall back to the catalog
   (`SqlTypeCatalog.Resolve`); a domain takes no type arguments, and a name neither resolves is
-  `COHSQLE010` (SQLSTATE 42704) while planning, in DDL and in `CAST`.
+  `CS02010` (SQLSTATE 42704) while planning, in DDL and in `CAST`.
 - **Storage.** A column of a domain stores its base type: the row codec, key encoding and
   on-disk format do not change. The catalog's column record keeps the domain's name
   (`SqlCatalogColumn.DomainName`, table-record extension version 4), which introduced
@@ -1676,8 +1899,8 @@ flowchart LR
   each existing row takes. First the base type's length, precision and scale bound the value, as
   `coerce_to_domain` applies the base type's modifier before the check
   (`src/backend/parser/parse_coerce.c`) and as a `CAST` to the domain does. Since #1418 the
-  shared modifier routine rounds NUMERIC before testing precision (`COHSQLE002`) and applies
-  the assignment character-length rule (`COHSQLE012`); the check sees that bounded value.
+  shared modifier routine rounds NUMERIC before testing precision (`CS02002`) and applies
+  the assignment character-length rule (`CS02012`); the check sees that bounded value.
   Plain columns use the same routine ([Declared column bounds](#declared-column-bounds-1418)).
   Then the check: only FALSE refuses the value, so a strict check passes NULL without a call:
   `SqlConstraintViolationException` of kind `DOMAIN`, naming the domain and the table.
@@ -1687,7 +1910,7 @@ flowchart LR
   was created with, which a `CAST` to the changed domain would no longer apply), the column binds
   as unresolved: the database opens, reads proceed and so do
   writes that do not assign the column (an UPDATE of another column, a DELETE), and a write that
-  assigns it fails with `COHSQLE010`, naming the column, the table and the domain. An engine
+  assigns it fails with `CS02010`, naming the column, the table and the domain. An engine
   that declares the database fails its build with it instead (`FindUnresolvedDomain`,
   provisioning's last step).
 - **The cast registry** (`pg_cast`'s `castfunc` and `castcontext`, `src/include/catalog/pg_cast.h`).
@@ -1713,7 +1936,7 @@ flowchart LR
   Canonical output is shared with concatenation. REAL/DOUBLE exact conversions parse shortest
   round-trip text before Decimal modifiers. NUMERIC-to-REAL parses the exact Decimal text directly
   to Single, avoiding a DOUBLE midpoint and second rounding (PostgreSQL numeric.c:4691-4696).
-  Integer targets refuse fractions; non-finite floats are range failures, COHSQLE002/22003
+  Integer targets refuse fractions; non-finite floats are range failures, CS02002/22003
   (float.c:1267-1270). Backslash-free BYTEA input encodes the original text, including surrounding
   whitespace (bytea.c:230-231); the hex form retains its separate trimmed-input grammar.
   INTERVAL output uses PostgreSQL's postgres-style day units and omits a zero clock after days
@@ -1743,20 +1966,20 @@ flowchart LR
 - **A CAST no cast performs** is refused while planning when the plan knows the operand's type
   (a literal, a column, a `CAST`, a predicate, a call's result type, a bound subquery, or the
   binder's inferred CASE, COALESCE, unary-sign or arithmetic result):
-  `COHSQLE011` (SQLSTATE 42846), PostgreSQL's "cannot cast type ... to ..." from
+  `CS02011` (SQLSTATE 42846), PostgreSQL's "cannot cast type ... to ..." from
   `transformTypeCast` (`src/backend/parser/parse_expr.c`), the same over an empty table as over a
   populated one. CAST reuses the binder's existing result inference, including aggregate slots,
   while parameter-dependent result types keep evaluation-time checks. Parameters in CASE conditions
   do not make a statically typed result dynamic. NULLIF still has no bound result type: its existing
-  COHDBL001 language refusal precedes planning. PostgreSQL checks the transformed operand's type in
+  CK00001 language refusal precedes planning. PostgreSQL checks the transformed operand's type in
   src/backend/parser/parse_expr.c:2764-2788. Before E3 the parser refused these targets outright; E3 made every built-in
   type a target, so the planner owns the refusal.
 - **Failures.** A `FormatException`, `OverflowException` or `InvalidCastException` a conversion
   throws is the value's fault: `CAST from X to T failed: ...`, with the original as its inner
-  exception. Built-in NUMERIC conversion reports `COHSQLE002` when text cannot fit Decimal
+  exception. Built-in NUMERIC conversion reports `CS02002` when text cannot fit Decimal
   exactly after rounding to any declared scale, as do its modifier overflows. Anything else, other than a
   `DatabaseException`, an exhausted stack or memory, is a fault of the conversion's code:
-  `COHSQLE007` (`Cast TEXT AS cents failed: ...`), the code decision 71 gives a function that
+  `CS05007` (`Cast TEXT AS cents failed: ...`), the code decision 71 gives a function that
   throws, so the session and an explicit transaction stay usable. That includes an
   `OperationCanceledException` the statement did not ask for: a conversion never receives the
   statement's token, and a raw cancellation would end a wire session. The rule is the same for
@@ -1776,11 +1999,11 @@ flowchart LR
   named for `T` over `NUMERIC(p, s)`, every member of `T` declared with it (Sql.Schema's DESIGN).
   Build phase 2 registers a schema's domains in the engine's catalog (a domain the application
   registers already, of the same name and base type, is the same domain; another is refused,
-  `COHSQLP001`); phase 3 resolves every declared column type, refusing a name the catalog does
+  `CS03101`); phase 3 resolves every declared column type, refusing a name the catalog does
   not know or a type not stored as its member is, before any file. The statement renderer writes
   the declared name into the DDL after checking its shape. An imperative
   `SqlDatabase.ApplySchemaAsync` needs the engine to register the schema's domains already
-  (`COHSQLP005` otherwise). The migration planner's `AddDomain` and `DropDomain` steps render no
+  (`CS03105` otherwise). The migration planner's `AddDomain` and `DropDomain` steps render no
   statement: a domain declared by the typed schema is engine-registered. E4 SQL domains
   are database catalog objects and reopen through the merged type environment.
 
@@ -1806,13 +2029,14 @@ to zero consistently. Invalid catalog resolution reports the shared reason as de
 
 DIALECT.md records precision 1..28, scale 0..precision, and explicit string/binary length
 1..10485760. Bare VARCHAR/TEXT retain their unbounded meaning; CHAR defaults to one and pads (#1437).
-Invalid SQL modifiers are SQL0005 naming the column, domain, function parameter/result or CAST
+Invalid SQL modifiers are CS00005 naming the column, domain, function parameter/result or CAST
 target. Text execution throws DatabaseParseException; the server sends ParseFailure and keeps the
 connection usable. Declared scripts parse in Build before database I/O, so the same failure precedes
 any script effects. Typed schema declarations use their existing UnsupportedType validation enum;
 COHSQLS codes remain reserved for script receipts/ownership. There is no persisted-catalog upgrade
-or compatibility reader: nothing has shipped. The full-definition ALTER COLUMN form is covered;
-PostgreSQL's TYPE/USING syntax remains unsupported.
+or compatibility reader: nothing has shipped. Both the full-definition ALTER COLUMN form and
+PostgreSQL's TYPE/USING form use this modifier admission; TYPE/USING rewrites through #1447's
+shared exclusive copier.
 
 Raw compiled decimal metadata follows the same shared scale normalization: precision with no
 scale resolves to scale zero. Compiled snapshots canonicalize it before hashing, and provisioning
@@ -1836,15 +2060,15 @@ FLOAT(p) selects Float32 for 1..24 bits and Float64 for 25..53 bits; bare FLOAT 
 The shared resolver supplies that storage identity everywhere, including domain bases, function
 signatures, CAST and provisioning of typed SQL names. Catalog metadata records REAL or DOUBLE,
 with INFORMATION_SCHEMA reporting REAL or DOUBLE PRECISION; no decimal modifier remains.
-Precision 0 or greater than 53 is SQL0005 with PostgreSQL's bit-range reason. Temporal precision
+Precision 0 or greater than 53 is CS00005 with PostgreSQL's bit-range reason. Temporal precision
 is recognized but lacks fractional-second rounding, so declarations, scripts and CAST fail closed
-with COHDBL001 naming the object and modifier. Malformed arguments still use SQL0005. The wire
+with CK00001 naming the object and modifier. Malformed arguments still use CS00005. The wire
 keeps its ParseFailure category and usable connection. See DIALECT.md for the PostgreSQL difference.
 
 INTERVAL field qualifiers (the six individual fields and seven PostgreSQL X TO Y ranges), with
 optional precision on SECOND, follow the same unsupported-modifier path. The parser consumes the
 complete qualifier at columns, domain bases, function signatures and CAST; shared validation
-reports COHDBL001 with the object and qualifier before provisioning or script execution. Typed
+reports CK00001 with the object and qualifier before provisioning or script execution. Typed
 SQL names and SDK extraction use that rule too. Delimited domain names remain identifiers.
 
 ## Declared column bounds (#1418)
@@ -1869,7 +2093,7 @@ character probes whole: a longer string can compare equal under the index's coll
 
 - **Characters.** A declared length counts Unicode scalar values, so a surrogate pair is one
   character and truncation never splits it. Assignment to `VARCHAR(n)`, `CHAR(n)` or
-  `CHARACTER(n)` rejects an overlong value with `COHSQLE012` (SQLSTATE 22001), except when every
+  `CHARACTER(n)` rejects an overlong value with `CS02012` (SQLSTATE 22001), except when every
   character past the limit is an ASCII space (U+0020): those spaces are discarded. An explicit
   CAST truncates to the declared length even when the discarded characters are not spaces.
   This is PostgreSQL's `varchar()` and `bpchar()` distinction
@@ -1879,7 +2103,7 @@ character probes whole: a longer string can compare equal under the index's coll
 - **NUMERIC/DECIMAL.** A declared scale rounds with midpoint ties away from zero before testing
   precision. `NUMERIC(p)` means scale zero; `NUMERIC(p,s)` requires the rounded value to have
   magnitude below `10^(p-s)`. Thus `1.235` becomes `1.24` in `NUMERIC(3,2)`, while `9.995`
-  rounds to `10.00` and fails with `COHSQLE002` (SQLSTATE 22003, numeric field overflow).
+  rounds to `10.00` and fails with `CS02002` (SQLSTATE 22003, numeric field overflow).
   Text is rounded directly from its digits before constructing a Decimal. The discarded
   digit determines whether the retained magnitude increments, independently of the sign, so
   negative ties round away from zero too. The rounded text alone must fit Decimal exactly;
@@ -1892,7 +2116,7 @@ character probes whole: a longer string can compare equal under the index's coll
   (`src/backend/utils/adt/numeric.c:7693-7750`); `round_var` carries a half digit at
   `:11720-11748`. A bare NUMERIC/DECIMAL requires text to fit the existing `System.Decimal`
   representation exactly, without rounding. Text whose rounded value still does not fit, or
-  unscaled text that cannot fit exactly, fails with `COHSQLE002`. The grammar for quoted numeric
+  unscaled text that cannot fit exactly, fails with `CS02002`. The grammar for quoted numeric
   text is the existing CAST grammar: trim surrounding whitespace, accept an optional leading
   sign, then digits with an optional decimal point followed by digits. Exponents, grouping and
   leading/trailing decimal points are rejected in every text conversion path. An unquoted
@@ -1905,10 +2129,10 @@ character probes whole: a longer string can compare equal under the index's coll
   still cover rounding at the coefficient and scale limits directly, without admitting invalid
   precision-29 declarations into a catalog.
 - **Errors.** `SqlEvaluationException` retains the existing message-prefix convention:
-  `COHSQLE012` for character assignment overflow and the existing `COHSQLE002` for numeric
+  `CS02012` for character assignment overflow and the existing `CS02002` for numeric
   modifier overflow or an inexact Decimal representation after any target-scale rounding.
   DEFAULT and domain context is appended without hiding the leading code.
-  CAST's built-in NUMERIC conversion carries `COHSQLE002` for both failures too; invalid source text and an inexact
+  CAST's built-in NUMERIC conversion carries `CS02002` for both failures too; invalid source text and an inexact
   conversion to an integer keep their existing conversion failures. PostgreSQL lists 22001
   and 22003 in `src/backend/utils/errcodes.txt:200` and `:197`. The server sends
   `ExecutionFailure` with the same coded message, the SQL client keeps its connection usable,
@@ -1936,7 +2160,7 @@ Provisioning belongs to this model (owner decisions 49 to 58 of 2026-10-09, B1 o
 work for every database it declares before its build returns (next section), and the typed `SqlDatabase.ApplySchemaAsync(SqlCompiledSchema,
 CancellationToken)` applies a schema imperatively, for tools, Studio and tests (decision 53). The
 public member checks disposal, a null schema and the token first, then refuses an offline database
-(`COHSQLT004`). Until B1 the root `DatabaseInstance` carried the capability
+(`CS04004`). Until B1 the root `DatabaseInstance` carried the capability
 (`SupportsSchemaProvisioning` over a virtual `ApplySchemaCoreAsync`) and a hosting service applied
 a root `CompiledSchema` through it; decision 50 deleted all three. Before a
 schema is applied, the provisioner requires the same logical
@@ -1949,8 +2173,8 @@ operations requiring a rewrite and advanced objects (principals/grants) fail bef
 recording a false applied hash. Foreign keys and checks now render into provisioning
 DDL and persist in the table catalog; unique declarations use unique indexes. Every message names
 the engine and the database. A plan the planner refuses (a destructive step the schema does not
-allow) and a schema that would adopt a table or index it did not create lead with `COHSQLP005`,
-before any step runs; a failed step leads with `COHSQLP004` and names "step k of n" and its
+allow) and a schema that would adopt a table or index it did not create lead with `CS03105`,
+before any step runs; a failed step leads with `CS03104` and names "step k of n" and its
 operation. A failed apply whose token was canceled throws `OperationCanceledException` once its
 completed steps are compensated: a canceled commit surfaces as the aborted transaction of the step
 it interrupted, so the token decides, not the failure's type. The skip checks the cached declaration hash and catalog DDL generation. When either differs,
@@ -2020,7 +2244,7 @@ resolves its column's effective type, including a domain's base type. Preflight 
 `SqlPlanExecutor.ResolveDefault` conversion as CREATE TABLE and ADD COLUMN, which uses
 `SqlCastConverter.ParseNumericText` and `ApplyModifiers` for numeric rounding and effective
 length, precision and scale bounds. Conversion failures and values outside those bounds fail
-Build with `COHSQLP001` before either file set exists; finite and underflow checks for floating
+Build with `CS03101` before either file set exists; finite and underflow checks for floating
 defaults apply here too. Valid rounding, Unicode character lengths and excess-space trimming
 therefore agree with DDL. The renderer emits canonical SQL; expressions/functions are refused,
 and `DEFAULT NULL` has the same live meaning as absence. The compiled document format is
@@ -2154,7 +2378,7 @@ stateDiagram-v2
     state "Pending: durable target and ordered steps; table locks reserved" as Pending
     state "Running: DDL with row progress" as Running
     state "Done: applied marker and pending removal commit together" as Done
-    state "Failed: database offline; COHSQLP004; intent retained" as Failed
+    state "Failed: database offline; CS03104; intent retained" as Failed
     [*] --> Pending
     Pending --> Running
     Running --> Done
@@ -2182,7 +2406,7 @@ including through checkpoints or another table's DDL. Restart discards their in-
 and rebuilds from scratch; abandoned pages follow ordinary DROP INDEX reclamation (future vacuum),
 as `BTreeIndexManager.DropIndexAsync` does. Completed steps survive a later failure and are omitted
 by B2's complete-catalog reconciliation. A failed step takes only its database offline with
-`COHSQLP004` and keeps the intent for the next open, even without a fresh schema declaration.
+`CS03104` and keeps the intent for the next open, even without a fresh schema declaration.
 Catalog publication merges only affected registrations under its metadata lock. Independently
 finished trees therefore cannot erase one another through stale full-directory snapshots.
 Every new description requires its matching registration in the same catalog commit.
@@ -2264,7 +2488,7 @@ stateDiagram-v2
    type, declares a column of a type the catalog does not know or does not store as its member's,
    declares a DEFAULT that cannot convert to that effective type or fit its bounds,
    or declares a CHECK that does not bind (not exactly one predicate, an unknown column or function, a call no
-   overload accepts, a function that is not `Immutable`) is refused here with `COHSQLP001`, naming
+   overload accepts, a function that is not `Immutable`) is refused here with `CS03101`, naming
    the table and its column or constraint, before any file is touched: the engine, whose creation makes the
    root directory, does not exist yet.
 4. **Engine.** Created; its built-in workers attach and start.
@@ -2273,13 +2497,13 @@ stateDiagram-v2
    `SqlDatabaseServer` from the options it configures), and composition is frozen.
 6. **Provisioning**, in declaration order. Open, or create (`DefaultCollation ?? Collation.Binary`)
    when the database does not exist; an existing database whose collation is not the declared one
-   (an unset declaration meaning `Binary`) is refused with `COHSQLP002`, because a key's collation id
+   (an unset declaration meaning `Binary`) is refused with `CS03102`, because a key's collation id
    cannot change (decision 56). Then `Apply` skips a schema whose cached hash and catalog DDL generation match its marker,
    and otherwise plans and applies it with compensation; `Verify` runs
-   no DDL and creates nothing, and refuses a missing database or any difference with `COHSQLP003`.
+   no DDL and creates nothing, and refuses a missing database or any difference with `CS03103`.
    A declaration without a schema only ensures the database exists. Last, every stored
    definition must bind to the catalog (decision 65): a CHECK, declared or ad hoc, that calls a
-   function this engine does not register fails the build with `COHSQLE009`, naming the engine,
+   function this engine does not register fails the build with `CS01009`, naming the engine,
    the database, the table, the constraint and the call. Opened by an engine that does not
    declare it, the same database opens and only the writes that evaluate that CHECK fail.
 7. **Return.** A failure in phases 4 to 6 disposes the engine (servers, workers, open databases)
@@ -2293,9 +2517,9 @@ schema than the one a declared database is declared with: the engine's next buil
 away, or refuse it as destructive. A database declared without a schema, and one the builder did
 not declare, accept any schema. A database declared twice is refused at the second `AddDatabase`,
 including one its own callback declares again. The provisioning codes are a new family,
-`COHSQLP001` to `COHSQLP005`, each a `SqlSchemaMigrationException` whose message leads with the
+`CS03101` to `CS03105`, each a `SqlSchemaMigrationException` whose message leads with the
 code and names the engine and the database; the stored-definition verification's failure is the
-same exception led by `COHSQLE009`, the code its writes would raise, so one code names one cause. The provisioning events are the SQL event source's,
+same exception led by `CS01009`, the code its writes would raise, so one code names one cause. The provisioning events are the SQL event source's,
 added by the EventSource track.
 
 `SqlDatabaseServer` keeps a copy of its `SqlDatabaseServerOptions`, checked when it is created, as
@@ -2387,7 +2611,7 @@ They are independent catalog descriptions, never compiled-schema declarations. D
 Exclusive object locks with DdlLockOwner in ObjectId order on all contained tables and external
 children whose incoming foreign keys will be removed, before taking the definition metadata lease.
 It then captures the catalog again and compares namespace, contained-table, external-child and
-index instances with the original enumeration. Changed contents receive COHSQLE013 with a retry
+index instances with the original enumeration. Changed contents receive CS05013 with a retry
 remedy; normal statement cleanup releases every lock. Namespace, table and index ownership is
 checked against that revalidated set before publication, naming DROP SCHEMA in the existing
 ownership diagnostic. Table/index/constraint DDL cannot publish while the lease is held, including
@@ -2413,15 +2637,15 @@ check remains an independent invariant guard.
 Incoming external FKs are removed while external tables survive, following PostgreSQL's constraint
 dependency direction (src/backend/catalog/pg_constraint.c:304-324). Typed external child ownership
 blocks this metadata change too. SQL namespace checks stay in planning/execution, preserving the
-bare catalog API's independent use. Reads and DML in missing namespaces retain COHSQLE014;
+bare catalog API's independent use. Reads and DML in missing namespaces retain CS01014;
 CREATE TABLE, unguarded DROP TABLE, ALTER TABLE and table-qualified CREATE/DROP INDEX use
-COHSQLE028 (3F000). DROP TABLE IF EXISTS retains its no-op and declared-script absence receipt.
+CS01028 (3F000). DROP TABLE IF EXISTS retains its no-op and declared-script absence receipt.
 PostgreSQL anchors are namespace.c:673-683,3605-3616, tablecmds.c:1498-1506,4534-4539,
 utility.c:1480-1483 and namespace.c:526-531.
 
-AUTHORIZATION and nested schema elements are rejected with COHDBL001. Atomic nested statements
+AUTHORIZATION and nested schema elements are rejected with CK00001. Atomic nested statements
 would require a separate DDL execution contract because each existing statement self-commits.
-Record-space format 26 has no upgrade reader: export older databases, recreate and explicitly
+Record-space format 27 has no upgrade reader: export older databases, recreate and explicitly
 CREATE SCHEMA for non-dbo table namespaces before importing. Namespace records are not synthesized.
 
 The area root carries only the model-independent ownership contracts (`DatabaseObjectOwner`,
@@ -2462,11 +2686,11 @@ the engine continues to authorize session operations against schema-owned object
 
 UPDATE SET values and UPDATE/DELETE predicates bind against the target relation, just as
 SELECT expressions do. An alias hides the base name; an unknown or hidden qualifier fails
-planning with located COHSQLE015 before any row changes, leaving an explicit transaction
+planning with located CS01015 before any row changes, leaving an explicit transaction
 active. This follows PostgreSQL `src/backend/parser/parse_relation.c:3759`. Correlated and uncorrelated
 UPDATE/DELETE WHERE subqueries execute, including aggregates inside child queries;
 aggregates outside children remain rejected. UPDATE SET subqueries
-retain COHDBL001.
+retain CK00001.
 
 ## Virtual system relations (C1)
 
@@ -2664,7 +2888,7 @@ to the unconstrained common type, following PostgreSQL
 `CASE WHEN TRUE THEN source ELSE NULL END`: bare CAST AS CHAR would mean CHAR(1), whereas the
 CASE preserves the complete value and clears only the output modifier. The canonical text and
 ordered resolved call vector preserve those bindings across ADD COLUMN. Rebinding rejects any column identity
-absent from the recorded C: dependencies (COHSQLE033), following PostgreSQL
+absent from the recorded C: dependencies (CS03033), following PostgreSQL
 `src/backend/rewrite/rewriteDefine.c:61`'s persistence of the transformed tree. A
 ConditionalWeakTable parses once per immutable view; a per-catalog generation cache binds the
 closed body once, with SqlBindingEntry's cancellable compilation and no application callback
@@ -2678,11 +2902,14 @@ current statement's transaction instant and cancellation. Binding never folds ap
 Execution checks for a bound row window before creating its evaluator. Cancellable INSERT,
 index-seek SELECT and aggregate statements with application functions registered therefore add
 zero startup bytes compared with dispatch directly to the same statement cores (Release, tiering off).
+The guard binds both plans before measuring; planner validation and optional costing are outside
+its counters. It records each round's raw totals and Gen0 collections, plus process architecture
+and runtime, after all measurements so failure diagnostics do not allocate inside a measured round.
 Catalog opens parse all views; every recoverable body binding failure is deferred to a read of
 that view, with a coded view-local exception retaining the original cause. OperationCanceledException, InsufficientExecutionStackException, OutOfMemoryException,
 StorageException (every subtype, including offline, format, journal and slotted-page failures),
 and IOException propagate, including through inner exceptions and aggregates. At open, stack
-exhaustion reaches the existing larger-stack advisory; on reads it reports COHSQLE004 and
+exhaustion reaches the existing larger-stack advisory; on reads it reports CS05004 and
 StatementTooComplex. Unrelated queries, metadata
 and DROP remain usable. Set, CASE and COALESCE outputs carry collation metadata only for
 character/string result types. The existing bind-time system-relation
@@ -2703,7 +2930,7 @@ and function outputs preserve complete precision, scale and length before contra
 lexical scope before restoring the parent, including correlated column projections. ALTER
 COLUMN refuses
 changes to type, length, precision or scale for any column a view reads, both in the executor
-and catalog publication (COHSQLD002; PostgreSQL `src/backend/commands/tablecmds.c:15612-15624`).
+and catalog publication (CS03302; PostgreSQL `src/backend/commands/tablecmds.c:15612-15624`).
 CASE and COALESCE preserve a modifier only when all alternatives have the same type, domain and modifier;
 an absent ELSE or an unconstrained/different argument clears it. NULLIF retains its first
 argument's modifier. Set operands capture complete output descriptors in their own lexical
@@ -2720,7 +2947,7 @@ output aliases contribute only their projection's dependencies (PostgreSQL
 OR REPLACE does not retain obsolete dependencies. Both SQL admission and catalog publication
 enforce dependency guards. DROP SCHEMA RESTRICT counts views and CASCADE removes external
 dependent views as well as contained views; DROP VIEW CASCADE removes the dependent view
-closure. Dependency errors name the view and use COHSQLD002 (PostgreSQL
+closure. Dependency errors name the view and use CS03302 (PostgreSQL
 `src/backend/catalog/dependency.c:1163-1170`). Schema-apply failures retain that diagnostic and
 dependent name in their outer migration message. Deferred typed migration admission follows
 persisted table identities through views.
@@ -2728,7 +2955,7 @@ persisted table identities through views.
 Views join TABLES, COLUMNS, OBJECT_OWNERSHIP and INFORMATION_SCHEMA.VIEWS; catalog snapshots
 contain their immutable descriptions. Session DDL creates Adhoc views; declared scripts use
 Schema ownership and atomic V: publication and absence receipts. View CREATE/DROP is
-self-committing and returns COHSQLT003 in explicit transactions. Format **23** gates kind **17**
+self-committing and returns CS04003 in explicit transactions. Format **23** gates kind **17**
 with no upgrade path. The encoded record is limited to **8,092 bytes** and rejected before
 publication if larger. MATERIALIZED, recursive, temporary and updatable views, options and CHECK
 OPTION remain excluded. The dialect records the complete executable surface.
@@ -2738,7 +2965,7 @@ OPTION remain excluded. The dialect records the complete executable surface.
 SET/DROP NOT NULL reuse the full-definition column executor, retaining live-row validation,
 PK/identity protection and one replacement publication. SET/DROP DEFAULT share CREATE's
 admission and conversion path, including signed/typed literals and scalar function calls.
-Function results satisfy INSERT's assignment rule before publication (COHSQLE013 naming the
+Function results satisfy INSERT's assignment rule before publication (CS05013 naming the
 column; PostgreSQL heap.c:3409). Facets resolve the column's actual domain: DROP re-inherits its
 default and explicit NULL keeps the override marker (rewriteHandler.c:1305-1313; heap.c:2466-2475);
 only these facet plans permit a default change. The immutable column carries both its current
@@ -2756,10 +2983,10 @@ pre-encode and rewrite the table, affected FK records and column index metadata 
 transaction, then publish the complete cache directory and generation. IDs, physical ordinals,
 rows, identity counters and physical index registrations remain stable. Generated object names
 stay unchanged. Table-name changes with retained declared-script object claims refuse with
-COHSQLD002 naming the script, preserving forward-only receipt verification. CHECK column-reference tokens are rewritten and canonically rendered/rebound
+CS03302 naming the script, preserving forward-only receipt verification. CHECK column-reference tokens are rewritten and canonically rendered/rebound
 before commit, using the WHERE carrier and CeilingParserOptions for every persisted CHECK.
 Strings and function/type/collation names are untouched. Every republished child version is bound
-before the DDL returns. Name collisions report COHSQLE013 with the conflicting name.
+before the DDL returns. Name collisions report CS05013 with the conflicting name.
 The planner brackets the complete binding pass with the catalog's DDL generation, including
 nested queries, joins and EXPLAIN. If publication overlaps planning, it discards the plan or its
 binding error and retries with fresh scopes, CTE state and subquery slots before execution.
@@ -2773,7 +3000,7 @@ subqueries, so this base has no dependent canonical FROM text. Future views add 
 Crash-point tests reopen every recorded storage write/flush around parent and column renames
 and require complete old or new FK metadata. Ordered lock-wait tests prove stale writers refuse
 all six actions; a related-table cycle exercises deadlock detection and retry. Explicit-transaction
-DDL remains COHSQLT003 and preserves pending DML. No new public interface, assembly grant,
+DDL remains CS04003 and preserves pending DML. No new public interface, assembly grant,
 record kind, wire message, reflection or runtime code generation is introduced.
 PostgreSQL references: tablecmds.c:3903-4062 (column identity), :4329-4385 (relation name),
 :8201-8268 (default), and heaptuple.c:151-180 (frozen missing values).
@@ -2789,6 +3016,98 @@ replaced row/index versions before inserting any new versions in the same rollba
 so unique entries also validate the final state during a swap. Snapshot and ReadCommitted
 use the same pending view. Wire regressions select isolation via the existing server-session
 API because SQL BEGIN deliberately has no isolation clause; UPDATE/results use both transports.
+
+## MERGE binding, association and execution (#1715, SQ-M1/SQ-M2)
+
+SqlPlanner.Merge reuses BindDmlSources and BindJoinSources metadata/subquery association
+binding, with an explicit tree for MERGE; ordinary joined UPDATE/DELETE keep CS05069.
+SqlMergePlan retains the stored target, physical target binding, target-then-source slots,
+ordered SqlMergeActionPlan records and RETURNING. INNER/LEFT/RIGHT/FULL preservation is
+chosen from non-DO-NOTHING unmatched actions, following PostgreSQL
+optimizer/prep/prepjointree.c:222-246. RIGHT normalizes to source LEFT target without changing
+slot ordinals. FULL requires the same safe mandatory hash equality and complete non-throwing
+ON proof as #1525; CS05070 refuses other predicates during planning, including EXPLAIN.
+This follows PostgreSQL optimizer/path/joinrels.c:1165-1179 after prepjointree.c:238-240
+chooses JOIN_FULL. Hashless LEFT and normalized RIGHT associations remain supported.
+No WHEN filter is pushed into the match join.
+
+MATCHED sees both sides; BY TARGET sees source only; BY SOURCE sees target only, following
+parser/parse_merge.c:52-99. Each match kind becomes terminal after an unconditional clause
+(parser/parse_merge.c:138-178). CS05071 identifies the complete unreachable WHEN clause using
+its retained AST source span. Destinations resolve only against target columns. Duplicates,
+identity policy, parameters, Boolean predicates, aggregates and assignment families are
+checked before execution, including empty sources. Assignment types use existing INSERT
+SELECT conversion families; runtime values and final constraints remain for SQ-M2/3.
+ON/WHEN and SET/INSERT subqueries bind against their action namespace. RETURNING
+retains the existing subquery capability boundary. Sources retain normal read-source binding.
+Regression cases pair MERGE USING with UPDATE FROM for stored tables, system relations,
+views, aliased derived queries and supported INNER/LEFT/CROSS joins, before and after
+canonical rendering. Unsupported source forms retain the existing read-source codes;
+no VALUES relation is added. The parser reserves a trailing source CROSS JOIN's ON for MERGE.
+WITH-prefixed MERGE is outside the requested statement grammar.
+Each action retains its own bound condition/value subqueries. A lazy action frame prepares
+only reached scalar branches; independent query values cache per statement, correlated values
+expire per candidate. A failed condition never evaluates the action's values. The first matching
+clause ends selection even for DO NOTHING; later clauses are never materialized.
+Clause-subquery binding suppresses constant callback folding and seek-bound evaluation,
+including nested query scopes, so even immutable application callbacks remain lazy. These
+queries conservatively scan instead of evaluating a seek bound before the clause is reached.
+Source/ON subqueries use the shared association wrappers. EXPLAIN nests action children
+under their owning MergeAction.
+
+RETURNING sees both sides and null-extended metadata, using the shared projection binder.
+Target outputs retain their schema nullability because every changed row supplies its old
+or new target, including INSERT; source outputs retain absent-side nullability.
+merge_action() uses the existing scalar-call AST but resolves to ReturningActionOrdinal,
+a text slot immediately after association columns; execution supplies INSERT/UPDATE/DELETE
+per changed row before projecting. It is never registered as an application/native function.
+The slot's typing and metadata bypass application overloads with the same spelling.
+Bare * follows existing DML target-then-visible-source expansion. Action expressions and
+projections disable constant callback folding so binding cannot execute an action.
+
+EXPLAIN emits Merge, the complete association tree, ordered MergeAction children and
+RETURNING names. EXPLAIN ANALYZE stays SELECT-only. SqlPlanExecutor.Merge drains the
+association cursor before selecting actions and writing. Normalized join frames optionally
+retain target-array identity and source-subtree presence independently of user NULLs, including
+FULL unmatched build rows. Target index probes are disabled for this identity-preserving path;
+ordinary SELECT and joined DML retain their existing allocations and physical paths.
+
+MERGE shares joined-DML's outer lock mark (including source and clause subqueries), metadata
+admission, cascade retry discipline and pre-apply row/reference/unique locks. All mutations,
+index updates and RETURNING preparation execute in one ApplyStatementAsync bracket, so a
+late uniqueness, projection, wire encoding or cancellation failure undoes the whole statement.
+Only directly selected actions contribute affected counts and RETURNING, excluding cascade
+side effects. INSERT uses the existing default/identity/coercion routines; UPDATE assignments
+read the original association. DELETE projects the old target, and BY SOURCE nullifies source
+columns. A set of packed target identities rejects a second selected UPDATE/DELETE with
+CS05036 before writes; DO NOTHING does not enter the set (PostgreSQL
+executor/nodeModifyTable.c:3521-3551). Retained selection and generated defaults survive
+referential lock retries without invoking action callbacks again.
+
+Hash builds and retained inputs, candidates and writes use the shared statement memory grant
+and unwind on budget/cancellation failure; the statement-budget section records alias ownership.
+Provisioning admission enumerates target, source, ON and all action/subquery references before
+planning. Result preparation includes MERGE in the session DML boundary. Existing cascade,
+CHECK/domain and FK routines validate actions; SQ-M3 completes mixed INSERT/UPDATE/DELETE
+final-state constraint composition and PostgreSQL ReadCommitted target rechecks. Until then,
+existing EnsureLatestVersion refuses stale targets, and overlapping direct UPDATE/referential
+writes conservatively fail CS05036. Disk and wire formats and assembly boundaries are unchanged.
+Deviates from interface-first (database-area.md); new public syntax leaves are sealed.
+
+| Code | MERGE binding condition |
+|---|---|
+| CS01053 | merge_action() outside MERGE RETURNING |
+| CS05036 | A second modifying action selects the same physical target |
+| CS05070 | FULL association lacks a safe mandatory hash equality or complete ON safety proof |
+| CS05071 | WHEN follows an unconditional clause of the same match kind |
+
+Existing names/duplicates/arity/parameters use CS01014/015/019/006/020; non-Boolean predicates
+and incompatible assignment types use CS02003; aggregates use CS05017; identity uses CS03025.
+INSERT width mismatches retain CS05013 and the existing INSERT row-width message.
+All new messages use generated SQL resources. SQ-M1 allocates no CS03/04/06 identity.
+The SQL NativeAOT guard explains all three match kinds and executes MERGE RETURNING in process
+and over the in-memory wire. Engine and client regressions cover all action kinds, lazy subqueries,
+repeated targets, statement rollback and the basic InMemory/TCP round trip.
 
 ## INSERT ... ON CONFLICT execution (#1118)
 
@@ -2814,7 +3133,7 @@ identity check alone cannot protect arbiter binding. Gated tests cover all three
 The parser supplies EXCLUDED, so binding
 target-plus-proposed rows needs no visibility grant or public internal type. A per-index/key
 pending map models successful earlier proposals and rekeys in source order. Repeated effects
-raise COHSQLE036 before publication; arbiter failures use COHSQLE035. Encoded index equality
+raise CS05036 before publication; arbiter failures use CS03035. Encoded index equality
 supplies collation, NULL and temporal identity unchanged. For self-referencing FKs, the existing
 referential-action pending-update view excludes replaced heap versions and supplies final
 values to FK and incoming-reference checks. A removed key cannot authorize a new child; a
@@ -2870,7 +3189,7 @@ src/backend/executor/execIndexing.c:85-95). Callers roll back/retry the victim t
 that exposure, as PostgreSQL advises in doc/src/sgml/mvcc.sgml:1546-1555.
 
 Every exception before ApplyStatementAsync begins releases grants acquired since the original
-statement mark and rethrows, including cancellation during or after a wait, COHSQLE036,
+statement mark and rethrows, including cancellation during or after a wait, CS05036,
 CHECK/NOT NULL violations and an unhandled deadlock. This also releases rows retained by completed
 waits, so a failed upsert does not keep its new rows or arbiter keys locked while its explicit
 transaction stays active. Pre-statement grants and their upgrades remain protected. Once apply
@@ -2914,13 +3233,12 @@ project reference or InternalsVisibleTo change is required.
 
 ## Execution model
 
-- **Rule-based planning, plan/execute split.** `SqlPlanner` binds the AST against
+- **Binding, transient costing and the plan/execute split.** `SqlPlanner` binds the AST against
   the catalog into a small `SqlPlan` IR and rejects everything outside the
   [declared dialect](../../Assimalign.Cohesion.Database.Sql.Language/docs/DIALECT.md)
   *at plan time with precise messages*. The IR
-  is deliberately thin — a cost-based planner replaces the binding internals
-  later without changing the executor seam (#178's plan-stage requirement, MVP
-  shape). That promise paid out with index adoption: the IR gained exactly one
+  remains deliberately thin. Bounded probe costing chooses physical paths after binding
+  without changing the executor seam (#1522, D3). That promise paid out with index adoption: the IR gained exactly one
   node family (`SqlAccessPath` on SELECT, UPDATE and DELETE plans — scan | index seek) and the
   executor seam did not move.
 - **Unknown functions and wrong argument counts fail before binding (#1068,
@@ -2928,9 +3246,9 @@ project reference or InternalsVisibleTo change is required.
   (`ValidateFunctionCalls`), subqueries, DML values and RETURNING projections, `CHECK` predicates and
   `DEFAULT`s included, and checks every call before it binds the catalog or
   reads a row: a name outside the engine's function catalog and outside
-  `SqlLanguageProfile.Instance.Functions` and the recognized-unsupported vocabulary is `COHSQLE016`, `Unknown function '<name>'.`, and a
+  `SqlLanguageProfile.Instance.Functions` and the recognized-unsupported vocabulary is `CS01016`, `Unknown function '<name>'.`, and a
   call whose argument count no overload of its function accepts fails with
-  `SqlEvaluationException` `COHSQLE006` (the overload by type is chosen once a scope
+  `SqlEvaluationException` `CS01006` (the overload by type is chosen once a scope
   types the arguments, [Functions (E2)](#functions-e2)). The
   evaluator used to discover an unknown name per row, so the same statement failed
   on a populated table and succeeded on an empty one, and it evaluated an argument
@@ -2941,13 +3259,13 @@ project reference or InternalsVisibleTo change is required.
   resolves the function, `src/backend/parser/parse_expr.c`), so the innermost bad
   call is the one reported. A recognized name that does not execute yet (`NULLIF`,
   `TRIM`, ...) is absent from the executable profile and rejects at parse time with
-  `COHDBL001`; it is not also reported as an unknown function (#1103).
+  `CK00001`; it is not also reported as an unknown function (#1103).
 - **One catalog of functions (#1189, E2).** The engine's `SqlFunctionCatalog` holds
   every executable function, the standard library's and the application's alike
   ([Functions (E2)](#functions-e2)). Its readers are the planner walk above; the
   expression binder, which resolves each call against it once when the expression is
   bound and keeps the overload in the bound call (a tree bound outside planning gets
-  the same `COHSQLE006` when the call is evaluated), so the evaluator calls the
+  the same `CS01006` when the call is evaluated), so the evaluator calls the
   function, never looks up a name, per row; the grouping planner and aggregate
   detection; CHECK validation; and persisted-definition binding (below). The rule
   follows PostgreSQL's function resolution: `func_get_detail` keeps only candidates
@@ -2970,15 +3288,14 @@ project reference or InternalsVisibleTo change is required.
   write one row at a time, so no group exists for the aggregate to summarize; without
   the check they succeeded over an empty table and failed per row, uncoded, over a
   populated one. The arity walk runs first, so a wrong count still reports
-  `COHSQLE006`. Every DML RETURNING list uses the same COHSQLE017 aggregate refusal,
+  `CS01006`. Every DML RETURNING list uses the same CS05017 aggregate refusal,
   because it projects one written row at a time.
-- **Access-path selection (rule-based; no cost model — the MVP planner
-  contract).** The planner flattens the WHERE clause's top-level `AND`
+- **Access-path binding and probe costing (#1522).** The planner flattens the WHERE clause's top-level `AND`
   conjuncts into per-column sargable predicates — `column op comparand` where
   the comparand is plan-time evaluable (literal/parameter, no column
   references), non-null, and coercible to the column's storage type; `BETWEEN`
-  contributes its two bounds — then picks the index with the **longest
-  equality prefix** over its leading key columns (ties prefer a usable range
+  contributes its two bounds — then binds candidate indexes by **equality
+  prefix** over its leading key columns (ties prefer a usable range
   bound, then uniqueness, then name — deterministic), extended by range bounds
   on the next key column. **Range sargability is a type matrix**: only types
   whose evaluator comparison order provably equals the key codec's byte order
@@ -3062,16 +3379,16 @@ project reference or InternalsVisibleTo change is required.
   construction, versions are WAL-covered like all record writes (restart keeps
   them correct for free), and aborted stamps revert physically with the page
   images. Deletes tombstone (older snapshots keep the row until the purge
-  worker reclaims below every live horizon). No DDL rewrites a row (ADD and
-  DROP COLUMN change only the catalog, #1023 and #1241): **no statement ever
-  moves a version**, so a location (page, slot) is a version's identity for its
-  whole life — what index entries, row locks and the version store's ledger all
+  worker reclaims below every live horizon). ADD and DROP COLUMN change only the
+  catalog (#1023 and #1241). A rewrite copies live versions into a fresh owner and
+  rebuilds its indexes atomically (#1265); existing versions never move within an
+  owner, so a location (page, slot) remains a version's identity for its whole life — what index entries, row locks and the version store's ledger all
   key on.
 - **Format rule (data-storage format version, catalog-persisted): exactly one
   format, no upgrade path.** The catalog stores the format version of the whole
   data file set, rows and the index trees that ride it (a kind-4 record for
   versions 1–3, a kind-8 record from version 4). The engine reads and writes
-  format 26 only: format 6's stamped rows in per-object page chains whose index keys use the
+  format 27 only: format 6's stamped rows in per-object page chains whose index keys use the
   temporal identity encoding (#1099, below), in index trees of B-tree page format
   2, which order entries by key, entry reference and writer (#1194,
   `Database.Indexing` DESIGN), decoded through each table's physical column
@@ -3097,7 +3414,7 @@ project reference or InternalsVisibleTo change is required.
   after a crash. No format bump is needed: the claim is consulted only for marker-free catalogs
   (RecordSpaceFormatVersion == 1), which carry no format number. Older engines harmlessly
   ignore the claim, so a bump would fence no interrupted catalog and would unnecessarily
-  refuse every intact format-26 database. Claim-file creation and deletion are not directory-fsynced.
+  refuse every intact format-27 database. Claim-file creation and deletion are not directory-fsynced.
   A lost create loses the proof and refuses adoption; a lost delete leaves a stale claim fenced
   by the checkpointed data header. Neither permits adopting committed data as creation.
   Create and open complete a marker-free catalog only when the catalog-owned internal
@@ -3108,13 +3425,13 @@ project reference or InternalsVisibleTo change is required.
   later checkpoints cannot be mistaken for creation. Its journal and backup must still be empty:
   lifecycle WAL must not be discarded. The durable claim, rather than an empty page scan,
   distinguishes initialization from a lost catalog after acknowledged empty-table DDL. Missing journals/backups are refused
-  before write access with COHSQLC001, preserving acknowledged commits and partial drops.
+  before write access with CS03401, preserving acknowledged commits and partial drops.
   Transient probe I/O failures surface as retryable inspection failures, never as missing-catalog
   damage with backup advice. Storage header offsets remain local internal format constants in SQL;
   the owning storage constants are internal to another assembly, whose boundary is not widened.
   A sub-header data file with no catalog content, or a sub-header catalog beside initial empty
   data, is restartable only with empty journal and backup images. Plain open refuses this
-  unfinished claim with COHSQLC001 and names CreateDatabaseAsync as the remedy; create
+  unfinished claim with CS03401 and names CreateDatabaseAsync as the remedy; create
   and declared application Build restart it with the requested collation. A short data file beside
   existing catalog or journal state is instead preserved for investigation: retrying create cannot
   safely restart it. A creation-only catalog beside non-empty data uses the missing-catalog
@@ -3153,15 +3470,15 @@ project reference or InternalsVisibleTo change is required.
   registrations, before recovery's scrub or checkpoint writes anything. A marker
   that does not describe its trees — a damaged root, or pages another engine build
   wrote — fails the open with `SqlDataStorageFormatException` ("uses data-storage
-  format 6, but one of its index trees does not: COHDBI001: …", the index manager's
+  format 6, but one of its index trees does not: CK06101: …", the index manager's
   `IndexFormatException` as its inner exception), and the files are left
   byte-identical. `SqlDataStorageFormatTests` pins both refusals with real format-1
   index pages. **Below the gate, each file set has its own storage format (#1251).**
   The storage refuses a file set in another storage format with
-  `StorageFormatException` (`COHDBS001`) when it opens, before recovery reads its
+  `StorageFormatException` (`CK06001`) when it opens, before recovery reads its
   journal. A database has two file sets, so `OpenDatabaseAsync` carries the refusal
   in `SqlDataStorageFormatException` naming the database and the file set: "Database
-  'x' cannot be opened: its catalog file set 'x/catalog' was refused. COHDBS001: …"
+  'x' cannot be opened: its catalog file set 'x/catalog' was refused. CK06001: …"
   (or its data file set 'x'). The server forwards it to the client like the gate's
   own refusals, and the files stay byte-identical.
 - **Schema evolution (#1023):** `ADD COLUMN` validates the literal default and
@@ -3266,7 +3583,7 @@ project reference or InternalsVisibleTo change is required.
     each dropped ordinal costs the table record one five-byte integer component,
     and a definition that outgrows one record is refused (`EnsureStorable`). For a
     table with dropped columns the refusal counts them and names the remedy,
-    recreating the table and copying its rows, since only a new table starts
+    calling RewriteTableAsync (or recreating the table and copying its rows), since a fresh owner starts
     without dropped ordinals (`SqlCatalogDroppedColumnTests`: a two-column table
     reaches the bound after 1,588 ADD/DROP cycles, where PostgreSQL stops at
     "tables can have at most 1600 columns", `tablecmds.c:7445-7452`).
@@ -3335,9 +3652,9 @@ project reference or InternalsVisibleTo change is required.
   expression tree the planner compiled once per statement, not the language AST
   ([Bound expressions](#bound-expressions-e1)).
 - **Arithmetic faults are coded statement failures (#1069).** Division or
-  modulo by zero raises `SqlEvaluationException` with `COHSQLE001`; a result,
+  modulo by zero raises `SqlEvaluationException` with `CS02001`; a result,
   operand, literal, aggregate or CASE/COALESCE value outside its numeric type
-  raises it with `COHSQLE002` (the dialect's arithmetic fault contract). Each
+  raises it with `CS02002` (the dialect's arithmetic fault contract). Each
   operator, negation and `ABS` codes its own fault at the source. The evaluator's
   entry point, `Evaluate`, then converts any remaining `ArithmeticException`
   from the expression tree (an oversized literal, for example), so no raw runtime
@@ -3351,9 +3668,9 @@ project reference or InternalsVisibleTo change is required.
   the `InvalidOperationException` the runtime sort puts around a throwing
   comparer, so incomparable `ORDER BY` keys fail the statement with the
   comparer's own `DatabaseException` instead of ending a wire session. The
-  exception is an internal `DatabaseException` whose message leads with the code, the convention
-  Graph's `COHDBG` codes use, until the area root grows a structured diagnostics
-  carrier. Evaluation runs in a write statement's first phase, before any
+  exception is an internal `DatabaseException` whose `Diagnostics` carry the code and
+  unprefixed detail. The root statement-failure event reads that carrier without parsing
+  Message. Evaluation runs in a write statement's first phase, before any
   physical bracket opens, so a fault writes nothing. The session's ordinary
   failure path then applies: auto-commit rolls back, and an explicit transaction
   stays active.
@@ -3369,7 +3686,7 @@ project reference or InternalsVisibleTo change is required.
   Every session parses statement text with it (`SqlQueryRequest.FromSql` with the
   engine's options), and refuses a typed request whose
   `SqlQueryStatement.ExpressionNestingDepth`, the nesting its own parser measured,
-  exceeds it, with the `SQL0006` the engine's parse would have reported, so the
+  exceeds it, with the `CS00006` the engine's parse would have reported, so the
   limit holds on every seam. A request over a subquery taken out of a parsed
   statement carries no parser's measure and is held to the depth of its own tree,
   which is what the walks recurse through. The `FromSql` overload that takes
@@ -3389,8 +3706,8 @@ project reference or InternalsVisibleTo change is required.
   the interface, and its cases (the range refused in `Build`, both ends of it accepted, the
   value carried to the engine) are retested against the sealed builder
   (`SqlExpressionDepthExecutionTests`). A
-  parse that runs out of stack (`SQL0007`) is not a syntax error: `FromSql` raises
-  it as `COHSQLE004`, like any other walk out of stack. Text the engine generates
+  parse that runs out of stack (`CS00007`) is not a syntax error: `FromSql` raises
+  it as `CS05004`, like any other walk out of stack. Text the engine generates
   rather than receives (persisted definitions, schema-migration statements) parses
   at the 4096 ceiling: the executing engine's limit still applies to a migration's
   requests, and a definition stored under one engine's limit opens under any other.
@@ -3425,7 +3742,7 @@ project reference or InternalsVisibleTo change is required.
   comparison per node; a tree within the default limit trips it only on a thread
   created with a small stack. `SqlDatabaseSession.ExecuteAsync`
   turns the resulting `InsufficientExecutionStackException` into
-  `SqlEvaluationException` with `COHSQLE004` (ISO SQLSTATE 54001, statement too
+  `SqlEvaluationException` with `CS05004` (ISO SQLSTATE 54001, statement too
   complex), so it takes the ordinary failure path above instead of ending the
   process; over the wire it is an `ExecutionFailure` and the session stays ready.
   The tests prove each check without risking the test process:
@@ -3436,13 +3753,13 @@ project reference or InternalsVisibleTo change is required.
   not check would carry on into the runtime's reserve, which a 128-level walk fits
   inside, and complete, so a missing check fails the test rather than the test
   process. Under a 4096 limit, a 3,000-level statement runs on a 64 MB thread and
-  fails with `COHSQLE004` on a small one, whether its parse or a later walk is what
+  fails with `CS05004` on a small one, whether its parse or a later walk is what
   runs out (`Engine_HighLimit_ShouldRunOrFailWithStatementTooComplex`). A later walk
   must also spend less stack per level than the parser, so that on any thread the
   parse is what refuses a statement too deep for it and a definition the open can read
   back it can also bind: `Statement_DeepestOnThread_ShouldBeLimitedByTheParser` finds
   the deepest statement of six shapes a 1 MB thread runs and requires the next depth
-  to fail in the parser (`SQL0007`). Calibration and verification dispatch through the
+  to fail in the parser (`CS00007`). Calibration and verification dispatch through the
   same worker frame on one dedicated thread; a thread-identity assertion guards that
   invariant. The persisted-CHECK calibration uses the same dedicated-thread helper.
   The debug build's parser frames are large enough
@@ -3452,13 +3769,13 @@ project reference or InternalsVisibleTo change is required.
   evaluator returns a unary-plus operand unchanged (value and CLR type; NULL
   propagates), while negation still widens exact integers to BIGINT, and
   `GroupExpressionType` reports the matching result types. A sign whose operand is
-  not a number raises `SqlEvaluationException` with `COHSQLE003`. When the operand's
+  not a number raises `SqlEvaluationException` with `CS02003`. When the operand's
   type is fixed by the plan — a string or Boolean literal, a column, a predicate,
   `||`, `UPPER`/`LOWER`, a CAST, a bound scalar subquery — `SqlPlanner.ValidateExpression`
   raises it before execution (`StaticOperandType`), so the result does not depend on
-  whether the table has rows; it and `COHSQLE005` (below) are the planner's own
+  whether the table has rows; it and `CS01005` (below) are the planner's own
   coded rejections, and count evaluation and stack checks can also raise
-  `COHSQLE001`/`002`/`004` while planning. A parameter, CASE or other operand only
+  `CS02001`/`002`/`004` while planning. A parameter, CASE or other operand only
   its value types fails when evaluated, with the same code and message.
 - **VALUES rows and LIMIT/OFFSET counts have no column scope (#1165).** Both are
   evaluated once, against an empty row: a VALUES row before the INSERT writes
@@ -3471,11 +3788,11 @@ project reference or InternalsVisibleTo change is required.
   `SqlPlanner.ValidateScopelessExpression` checks every expression of every VALUES row,
   and each count, before anything executes. It rejects a column reference anywhere
   (under a sign, CAST, CASE, aggregate or function call, qualified or not) with
-  `SqlEvaluationException` `COHSQLE005`, which names the reference and the clause
+  `SqlEvaluationException` `CS01005`, which names the reference and the clause
   (ISO SQLSTATE class 42, syntax error or access rule violation). It then rejects an
   aggregate and `*` with uncoded messages naming the clause, and runs
-  `ValidateExpression` against an empty column scope, which raises `COHSQLE003` for a
-  sign over a non-numeric literal or parameter and `COHDBL001` for a subquery. The
+  `ValidateExpression` against an empty column scope, which raises `CS02003` for a
+  sign over a non-numeric literal or parameter and `CK00001` for a subquery. The
   column check runs first, so `-a` and `SUM(a)` report the column, not the
   operand type or the aggregate. Every row is checked before planning returns, so a
   fault in a later row leaves the earlier rows unwritten. As defense in depth,
@@ -3485,11 +3802,11 @@ project reference or InternalsVisibleTo change is required.
   with a column reference already failed while planning, as `Unknown column`, or,
   inside a subquery, as an error result: `PlanSubqueries` turned the child's
   `Unknown column` into `SqlUnsupportedQueryException`, which `SqlQueryExecutor`
-  returns as a `DatabaseResultStatus.Error` result carrying `COHDBL001`'s
-  correlated-subquery diagnosis. It now throws `COHSQLE005` at every nesting level,
+  returns as a `DatabaseResultStatus.Error` result carrying `CK00001`'s
+  correlated-subquery diagnosis. It now throws `CS01005` at every nesting level,
   for a reference to the subquery's own columns or the outer query's: ISO SQL's
   fetch-first count is a simple value specification, which no column of any scope
-  reaches. (Explicit outer qualifiers also parse and fail planning with `COHSQLE005`.) A `*` in
+  reaches. (Explicit outer qualifiers also parse and fail planning with `CS01005`.) A `*` in
   a count now reports `'*' is not allowed in LIMIT.` (or `OFFSET`) instead of the
   evaluator's `Expression 'SqlStarExpression' is not supported by the executor yet.`
   A whole `DEFAULT` item instead maps to the target column's omitted-value path (#1193);
@@ -3744,12 +4061,19 @@ description + exported registrations), the engine binds them.
   storage order; its safe scalar diagnostic follows that key. PostgreSQL likewise checks key
   equality during sorted unique builds before the row-reference tiebreaker
   (`src/backend/utils/sort/tuplesortvariants.c:1655-1698`) and excludes dead tuples from the
-  uniqueness check (`src/backend/access/nbtree/nbtsort.c:440-443`). Full-GC retained-heap
-  tests use a 4,096-row, 900-character table over a 1 MiB pool and require less than one quarter
-  of its decoded bytes. Samples inside the unique-validation cursor walk include its midpoint
-  and final key, before any retained keys can be released, for inline and deferred index and
-  constraint builds; minimum-of-three allocation comparisons bound duplicate detection's
-  overhead against an otherwise identical non-unique build for all paths.
+  uniqueness check (`src/backend/access/nbtree/nbtsort.c:440-443`). Retained-workspace tests use a 4,096-row,
+  900-character table over a 1 MiB pool and require less than one quarter of its decoded bytes
+  (1,843,200 bytes) in every round. Process-wide GC heap deltas cannot attribute runtime,
+  worker or shared-pool retention to the statement. Null-by-default internal observers instead
+  weakly track decoded row arrays, their wide strings and constructed/validated key arrays.
+  After a blocking compacting collection, the test charges surviving payloads, a conservative
+  four-pointer header allowance per object, and the entire configured pool. Observer bookkeeping
+  is test-owned. The six paths also retain an unrelated 8 MiB array after setup: it cannot affect
+  this attributed bound. Sampling covers the midpoint and last cursor key before workspace
+  release. Row-list and cursor-key-list mutants exceed the same bound; restoring streaming
+  passes. Physical journal/pre-image budgets remain guarded by storage tests. Release-only
+  minimum-of-three allocation comparisons independently reject full hex-key sets. The
+  observers allocate nothing while disabled; the stored-query allocation budget is unchanged.
 - **Write-path maintenance mirrors the row-version discipline exactly.** INSERT
   adds entries stamped with the writer's sequence; DELETE stamps entry deleters
   (tombstones — old snapshots keep seeing them); UPDATE tombstones the
@@ -3783,8 +4107,8 @@ description + exported registrations), the engine binds them.
   collision only over-locks, and the class ordering keeps acquisition globally
   consistent. **The first deliberate exception is the cascade walk**, which locks
   rows in discovery order because the closure it is discovering is what
-  determines the lock set; see "Referential enforcement locks parent rows" under
-  constraints for why that trade was taken and what it costs. The second is ON CONFLICT: proposal unique keys precede nonblocking row arbitration, and a contended row releases new grants before waiting and restarting; see INSERT ... ON CONFLICT execution above.
+  determines the lock set. D2 / #1420 makes that whole unapplied preparation release new
+  grants before waiting and restart afterward; see "Cascade lock retries" below. The second is ON CONFLICT: proposal unique keys precede nonblocking row arbitration, and a contended row releases new grants before waiting and restarting; see INSERT ... ON CONFLICT execution above.
 - **Uniqueness = the B+Tree's latest-state check under the exclusive hashed-key
   lock** (never snapshot visibility — write skew; the recorded #851 lesson).
   Violations surface as the area root's `DatabaseException` at the model
@@ -3841,12 +4165,12 @@ description + exported registrations), the engine binds them.
   then the writer, so tombstoning a row version's entries and the logical undo of
   a ROLLBACK find each entry in one descent however long its key's run. An
   `ON DELETE CASCADE` over one parent's children is linear in the child count
-  (16,000 children: 6.2 s before, 0.43 s after; `SqlCascadeFanOutTests` guards the
-  growth ratio, timing four 4,000-child cascades against one of 16,000 in the
-  process's CPU time, so another process's load cannot stretch one block alone).
-  The UNIQUE check still reads its key's dead versions until a live one, so a row
-  updated thousands of times under a UNIQUE index slows linearly per update until
-  dead versions are pruned (#1195). Measurements and
+  (`SqlCascadeFanOutTests` compares physical B-tree entry-directory reads per child for
+  four 4,000-child cascades and one 16,000-child cascade in the same tree, below 2× growth;
+  it also checks that the bystander survives). The former process-CPU ratio is removed (#1285).
+  The UNIQUE insert now prunes safely dead versions on its single cached descent
+  (#1195, #1239), so hot updates keep flat physical work when no old snapshot
+  retains the history. The coordinator also prunes all registered trees. Measurements and
   the design are in the `Database.Indexing` DESIGN ("Entry order").
 
 ## Engine-owned background workers
@@ -3922,11 +4246,10 @@ the provisional storage snapshot described above:
   good, leaving every deferred writer holding its locks until the database closed. The
   stub-era seam was untouched, as designed: activation changed the worker body and
   nothing else.
-- **`SqlIndexMaintenanceWorker`** — the one remaining documented stub
-  (sanctioned by #902): the index layer has no compaction to drive yet. It
-  keeps the inventory — and any observer over it — stable; the throttled
-  maintenance body fills in when index compaction lands, without touching the
-  seam.
+- **`SqlIndexMaintenanceWorker`** — retains its inventory/test-hook seam for future
+  empty-page reclamation. Dead-entry pruning (#1195) already runs in the shared
+  coordinator's version-purge pass under the apply gate; this worker does not
+  schedule the same work twice.
 
 **Lifecycle (create → use → dispose):** the worker threads live exactly as long
 as the engine. Disposal signals the pumps, joins the threads *before* closing
@@ -4009,7 +4332,7 @@ default, means four times `CheckpointJournalSize`, 1 GiB at its default) takes i
 `JournalSizeLimit`; one failure of a journal that reached the cap with no failure at all (#1283)
 is retried like any other. Either way the database goes offline through the #1243 machinery:
 the catalog file set follows through the data set's hook, every operation is refused with
-`COHSQLT004`, its lock waits end, nothing more is written to it, and the engine lists it in
+`CS04004`, its lock waits end, nothing more is written to it, and the engine lists it in
 `OfflineDatabases` until `OpenDatabaseAsync` reopens it (a hosted engine's application reopens it
 with backoff, owner decision 22). The engine takes it offline on a thread-pool thread, never the worker's,
 so a give-up that waits for a hung fsync of that database holds back none of the others, and it
@@ -4096,7 +4419,7 @@ writes the operating system already dropped. The engine stops the database, not 
 
 - The statement whose commit flush failed gets `DatabaseTransactionCommitUnconfirmedException`
   (the kernel's `TransactionCommitUnconfirmedException` inside it, and the storage's
-  `StorageOfflineException` inside that). Its message leads with `COHSQLT004` on every path, the
+  `StorageOfflineException` inside that). Its message leads with `CS04004` on every path, the
   explicit COMMIT and an auto-commit statement's own commit alike (owner decision 24 of
   2026-10-06, #1272: `SqlDatabase.CreateUnconfirmedCommit`, through the root's
   `DatabaseTransactionCommitUnconfirmedException.Create(code, database, cause)`); before #1272
@@ -4117,7 +4440,7 @@ writes the operating system already dropped. The engine stops the database, not 
   whose commit record was appended before its flush failed is flagged
   (`StorageOfflineException.CommitRecordWritten`). A DDL statement that committed at least one
   recorded catalog change, or whose failing bracket had written its commit record, gets
-  `DatabaseTransactionCommitUnconfirmedException` led by `COHSQLT004`: part of it may survive.
+  `DatabaseTransactionCommitUnconfirmedException` led by `CS04004`: part of it may survive.
   One that met the offline storage before any of that (it waited for a lock while another
   statement's fsync failed, the database was already offline, its transaction's begin was
   refused, or only unreachable steps had committed) gets `DatabaseOfflineException`, and a retry
@@ -4136,7 +4459,7 @@ writes the operating system already dropped. The engine stops the database, not 
   (`RecordTransactionCommit`, `src/backend/access/transam/xact.c:1470-1583`, `XLogFlush` at
   `:1544`); an error before it aborts the transaction.
 - Every later operation on the database is refused with `DatabaseOfflineException`, code
-  `COHSQLT004` (`Code`, and the message leads with it), carrying the storage's
+  `CS04004` (`Diagnostics` and the existing `Code` getter), carrying the storage's
   `StorageOfflineException`: a new session, every statement on an existing one, BEGIN, and the
   COMMIT or ROLLBACK of a transaction that was open at the failure. A statement already
   running fails with the same error when it next reaches the storage.
@@ -4167,11 +4490,11 @@ fails each fsync of `CREATE TABLE`, `CREATE INDEX`, `DROP TABLE` and `ALTER TABL
 turn, reopens, and checks the caller was told unconfirmed every time, including the cases whose
 effect survived. Three more pin the DDL classification (#1272): a `DROP TABLE` waiting for its
 table's lock when another statement's fsync takes the database offline is refused with
-`COHSQLT004` and the table survives the reopen; a `DROP TABLE` confirms its catalog commit while
+`CS04004` and the table survives the reopen; a `DROP TABLE` confirms its catalog commit while
 an unrelated statement holds the apply gate, and a later offline failure leaves its durable
 reclamation intent to resume on reopen (decision 77); and a `CREATE TABLE`
 that committed its identity reservation and then waits for the apply gate to build its
-primary-key tree when the database goes offline is refused with `COHSQLT004`, the table is absent
+primary-key tree when the database goes offline is refused with `CS04004`, the table is absent
 after the reopen, and the next table created skips the reserved identity, which proves the
 reservation did commit.
 
@@ -4180,7 +4503,7 @@ header slot write fails leaves that slot possibly the newest generation on the m
 storage writes no header again in this process, and with no header write no checkpoint can
 truncate the journal. The storage therefore goes offline exactly as a failed fsync takes it
 (`Database.Storage` DESIGN.md, "A header write that fails after its slot write was issued"), and
-the database with it: every later operation is refused with `COHSQLT004`, whose message names
+the database with it: every later operation is refused with `CS04004`, whose message names
 "a write of the file header" (`StorageOfflineException.Cause` is `HeaderWrite`). Before #1268 the
 storage only refused later header writes while the database kept accepting commits; the
 reproduction committed 200 rows after the fault and grew the journal from 16,688 to 3,339,088
@@ -4200,7 +4523,7 @@ reopen: releasing the lock without the undo would let the next holder build on v
 never undone. A writer queued for that row therefore waited until the reopen. The data file set's
 offline hook now calls `TransactionCoordinator.AbandonLockWaits`, which fails every lock wait of
 the database, and every later one, with the storage's offline error, which the session translates
-into `COHSQLT004`; a lock the table can grant at once is still granted, and the storage refuses
+into `CS04004`; a lock the table can grant at once is still granted, and the storage refuses
 the work. `SqlWorkerResilienceTests` holds a row in an explicit transaction, queues an update of
 the same row, checks before the fault that the update's transaction is open beside the holder's
 and its statement has not completed, takes the database offline with a header slot write, journal
@@ -4443,13 +4766,13 @@ record moves with the machinery):
   reached the `Internal` catch-all and closed the session, and so did the
   `InvalidOperationException` the runtime sort wraps around an `ORDER BY` key
   comparison that fails). A statement nested deeper than the engine's expression
-  nesting limit (256 levels by default) is a `ParseFailure` (`SQL0006`), and one
+  nesting limit (256 levels by default) is a `ParseFailure` (`CS00006`), and one
   within it whose parse or execution exhausts the server thread's stack is an
-  `ExecutionFailure` (`COHSQLE004`); before #1151 a 200,000-term expression
+  `ExecutionFailure` (`CS05004`); before #1151 a 200,000-term expression
   overflowed the stack and ended the server process, every session with it. A
   10,000-term `AND`/`OR` predicate executes.
   A column reference in an `INSERT ... VALUES` row is a planning error coded
-  `COHSQLE005` and takes the same path (#1165; before that fix the
+  `CS01005` and takes the same path (#1165; before that fix the
   `IndexOutOfRangeException` it raised during evaluation closed the session as
   `Internal`). A cascading delete of any depth is an ordinary statement; before #1164 one
   that cascaded through a 20,000-row self-referencing chain ended the process the
@@ -4501,7 +4824,7 @@ It starts for each request after text parsing; cancellation remains cooperative.
 a token to that commit, and SQL transaction-control requests do not arm either timer. A completed
 execution or self-committing DDL retains #1246's commit/mandatory-cleanup boundary and delivers
 its result even if a timer expires there. An explicit transaction's later commit has no statement
-timer. Timer cancellation becomes SqlTimeoutException with COHSQLE043 / SQLSTATE 57014 only
+timer. Timer cancellation becomes SqlTimeoutException with CS05043 / SQLSTATE 57014 only
 when the caller did not cancel; caller cancellation remains OperationCanceledException and
 retains its existing locking behavior.
 Mandatory post-self-commit binding, including CREATE/DROP FUNCTION and DOMAIN refreshes, uses
@@ -4512,7 +4835,7 @@ registration before their creation bracket ends. UNIQUE/PRIMARY KEY publication 
 
 LockManager.EnterLockTimeout scopes a duration to the execution flow, so nested BTreeIndex
 unique-key acquisitions use the same policy. Each contended wait arms a fresh timer; granted
-requests allocate no timer. Lock expiration becomes SqlTimeoutException with COHSQLE044 /
+requests allocate no timer. Lock expiration becomes SqlTimeoutException with CS04044 /
 SQLSTATE 55P03. Both errors carry a statement location and a public SqlState; existing negotiated
 wire diagnostics carry the COHSQLE code and ExecutionFailure without a wire-format change.
 The kernel's LockWaitStop outcome is Timeout for a lock timer, Cancelled for a statement token.
@@ -4563,7 +4886,7 @@ one per statement. The internal TimeProvider is the existing engine test seam.
 `END`, and `ROLLBACK [WORK|TRANSACTION]` are ordinary SQL requests over the
 existing wire `Execute` message. The parser maps these spellings onto the existing
 Begin/Commit/Rollback commands (#1125), so END without a transaction reports the
-canonical `COHSQLT002` message, "COMMIT requires an open transaction." The session
+canonical `CS04002` message, "COMMIT requires an open transaction." The session
 dispatches their parsed AST before creating an auto-commit transaction. `BEGIN`
 opens a coordinator context; subsequent queries and DML share that context and
 its visibility snapshot. `COMMIT` awaits the coordinator's durable commit;
@@ -4582,7 +4905,7 @@ next commit's, which also takes the database offline (`Database.Storage` DESIGN.
 `BEGIN WORK ... ROLLBACK WORK` through `ServerTestHarness`, checking observer
 visibility across commit and restoration after rollback. Malformed
 `START TRANSACTION ISOLATION LEVEL SERIALIZABLE` returns wire `ParseFailure`
-carrying `SQL0003`, opens no transaction, and permits the next statement on the
+carrying `CS00003`, opens no transaction, and permits the next statement on the
 same connection. Protocol responses synchronize these checks without fixed sleeps.
 
 The session's transaction is the root `DatabaseSession`'s (concrete-types plan §6.4, phase 4):
@@ -4608,29 +4931,29 @@ stateDiagram-v2
     Open --> Idle: COMMIT or ROLLBACK
     Open --> Closed: disconnect rolls back
     Open --> Faulted: the kernel ends it under the caller
-    Faulted --> Idle: ROLLBACK, or COMMIT failing with COHSQLT005
+    Faulted --> Idle: ROLLBACK, or COMMIT failing with CS04005
     Idle --> Closed: disconnect
 ```
 
 State misuse returns `DatabaseResultStatus.Error` with an error diagnostic, without
-throwing or changing the active transaction. `COHSQLT001` means nested `BEGIN`;
-`COHSQLT002` means `COMMIT` or `ROLLBACK` without an active scope. The wire maps
+throwing or changing the active transaction. `CS04001` means nested `BEGIN`;
+`CS04002` means `COMMIT` or `ROLLBACK` without an active scope. The wire maps
 these to `ExecutionFailure` and includes the stable diagnostic code in its
 message. The connection remains usable.
 
 DDL still commits on the catalog's separate storage and cannot enlist in a user
-transaction through the frozen catalog contract. `COHSQLT003` therefore refuses
+transaction through the frozen catalog contract. `CS04003` therefore refuses
 `CREATE`, `ALTER`, and `DROP` while a session transaction is open, before catalog
 or data mutation. Auto-commit DDL retains its established durability contract.
 This limitation and the unavailable interface seam are recorded in
 `_out/phase4-b2-ESCALATIONS.md`.
 
-`COHSQLT004` means the database is offline (#1243): a durable flush of its journal or data
+`CS04004` means the database is offline (#1243): a durable flush of its journal or data
 file failed, and every operation is refused with `DatabaseOfflineException` until the
 database is reopened ("Storage operations", above). Unlike the three state codes it is an
 exception, not a diagnostic, and the wire maps it to `Unavailable`. A DDL statement that had
 committed a durable bracket of its own when the database went offline is reported as
-`DatabaseTransactionCommitUnconfirmedException` led by `COHSQLT004` instead, because part or all
+`DatabaseTransactionCommitUnconfirmedException` led by `CS04004` instead, because part or all
 of it may survive the reopen; one that had committed nothing is refused like any other statement
 (#1272).
 
@@ -4653,13 +4976,13 @@ transaction active, the owner's
 and require rollback before further statements (#1364). A transaction the
 kernel ended under its caller (its database was dropped or closed while the session held it)
 reports `Faulted`, stays the session's transaction, and refuses statements, BEGIN (typed or as
-text) and COMMIT with `COHSQLT005` until the caller rolls it back:
-"COHSQLT005: The session's transaction is aborted; statements are refused until it is rolled
-back." and, for a commit, "COHSQLT005: The session's transaction is aborted and cannot commit;
-nothing was committed.", each followed by " Cause: …" when there is one. `COHSQLT005` is the
+text) and COMMIT with `CS04005` until the caller rolls it back:
+"CS04005: The session's transaction is aborted; statements are refused until it is rolled
+back." and, for a commit, "CS04005: The session's transaction is aborted and cannot commit;
+nothing was committed.", each followed by " Cause: …" when there is one. `CS04005` is the
 transaction-state family's next code (T001 to T003 are diagnostics, T004 the offline refusal);
-like `COHSQLT004` it is an exception, not a diagnostic, but a plain `DatabaseException`, so the
-wire maps it to `ExecutionFailure` (`COHSQLT004`'s `DatabaseOfflineException` maps to
+like `CS04004` it is an exception, not a diagnostic, but a plain `DatabaseException`, so the
+wire maps it to `ExecutionFailure` (`CS04004`'s `DatabaseOfflineException` maps to
 `Unavailable`). Closing the session ends its open transaction as the session's teardown and
 records the cause "The session closed before the transaction ended.", which a later commit
 names. Before phase 4 the session dropped a transaction whose kernel state left `Active`, so a
@@ -4684,13 +5007,13 @@ preceded that grant. Adding an incoming FK requires X on its referenced parent
 (`LockReferencedTablesAsync`); removing or changing one requires X on its child. Adjacent
 ADD COLUMN, FK removal and child DROP during a wait therefore refresh the graph and
 continue before any row is read. A changed target definition invalidates the bound plan
-and returns retryable `DatabaseTransactionAbortedException` with structured `COHSQLT006`;
+and returns retryable `DatabaseTransactionAbortedException` with structured `CS04006`;
 retry in a fresh transaction. This code is reserved for target-plan invalidation, not
 adjacent cache refresh.
 
 | Code | Meaning | Retry |
 | --- | --- | --- |
-| `COHSQLT006` | The statement's target definition was changed, dropped or replaced during lock preparation | Retry in a fresh transaction |
+| `CS04006` | The statement's target definition was changed, dropped or replaced during lock preparation | Retry in a fresh transaction |
 
 Neither locked endpoint can change until transaction end. Row locks,
 then sorted unique-key locks, precede the apply gate and storage/index latches; a cascade
@@ -4788,13 +5111,13 @@ snapshot fixed at the transaction's begin, every child version in that closure m
 be one the snapshot sees
 ([Cascades under a fixed snapshot](#cascades-under-a-fixed-snapshot-1370)). Parent key
 updates are restricted while referenced. `ON UPDATE` is unsupported and returns
-`COHDBL001`.
+`CK00001`.
 
 Checks require Boolean predicates made from supported deterministic row
 expressions. Parameters, subqueries, aggregates, unsupported functions and casts
 are rejected when the DDL declares the check (`SqlPlanExecutor.ValidateCheck`), and so
 is a function that is not `Immutable` (owner decision 64, E2); a call with arguments no
-overload of its function accepts is rejected while the DDL is planned (`COHSQLE006`,
+overload of its function accepts is rejected while the DDL is planned (`CS01006`,
 #1189). A function declared to return BOOLEAN is a predicate by itself. The
 load path binds a stored predicate with `BindPersistedCheck`, which resolves calls
 against the engine's function catalog but does not apply the declaration rules again (see
@@ -5072,11 +5395,11 @@ NOT NULL default is legal; actual INSERT/UPDATE assignment and ADD COLUMN over l
 enforce NOT NULL. ALTER COLUMN compares canonical persisted default text directly, preserving
 expressions through SET/DROP NOT NULL and full-definition validation-only alterations.
 Immutable declaration results and stable frozen missing values reject nonfinite floats with
-COHSQLE002, as literal defaults do; volatile row values use ordinary assignment rules.
+CS02002, as literal defaults do; volatile row values use ordinary assignment rules.
 Stable and volatile trees run per assigned row with SqlStatementContext.TransactionStart,
 including INSERT SELECT, explicit DEFAULT and ON DELETE SET DEFAULT. ADD COLUMN evaluates
 a nonvolatile expression once into its frozen missing literal. A volatile addition to a
-table with live rows reports COHSQLE027 because physical rewrites belong to #1447; empty
+table with live rows reports CS03027 because physical rewrites belong to #1447; empty
 tables admit it. SET/DROP DEFAULT never changes the frozen missing value. SQL format 20
 gates the new persisted referential-action values; table extension 6 remains unchanged.
 
@@ -5153,7 +5476,7 @@ and add it again" as the only remedy.
   later release that tightens a declaration rule must not turn the predicate into
   an open failure, as #1068's parser tightening would have done to stored text.
   `CHECK (-label IS NULL)` on a TEXT column, which DDL now rejects with
-  `COHSQLE003`, still opens and is enforced as stored; a row it cannot evaluate
+  `CS02003`, still opens and is enforced as stored; a row it cannot evaluate
   fails its own statement with the evaluator's coded error. The rule for future
   changes, apart from function identity and Immutable admission: **a rule that narrows
   what DDL accepts goes in `ValidateCheck` only; a
@@ -5169,7 +5492,7 @@ and add it again" as the only remedy.
   table. A stored CHECK whose recorded call is unavailable, no longer Immutable, or has
   a registered result that no longer fits where the predicate uses it binds as unresolved:
   the database opens, reads proceed, and
-  each write that evaluates the CHECK fails with `COHSQLE009` naming the function, the table
+  each write that evaluates the CHECK fails with `CS01009` naming the function, the table
   and the constraint; an engine that declares the database fails its build with the same
   code. Native, built-in and SQL calls use the same identity lookup. A replacement
   overload is never a substitute for a missing recorded signature.
@@ -5179,7 +5502,7 @@ and add it again" as the only remedy.
   evaluator used to evaluate no argument for it and return NULL, so `CHECK (ABS(c, 1)
   > 0)` admitted every row. Binding therefore resolves every call against the
   function catalog (`SqlPersistedExpression.Bind`, after the call's arguments), and a
-  stored CHECK holding such a call fails the open with `COHSQLE006`; since E2 lets an
+  stored CHECK holding such a call fails the open with `CS01006`; since E2 lets an
   application overload a standard-library name for another arity, that holds for the
   special form `COALESCE`, and a function name's wrong arity is the amendment above. By the rule
   above that is a catalog-format change, and it takes no version bump only because
@@ -5221,13 +5544,13 @@ and add it again" as the only remedy.
   so text stored before chains were n-ary reads back to the same chain. Reading the
   deepest definition back needs well under a default thread's stack in a release
   build (the parser's cost is in the Sql.Language design); on a thread with less, the
-  parser reports `SQL0007` rather than `SQL0006`. `Load` and the bind then raise an
+  parser reports `CS00007` rather than `CS00006`. `Load` and the bind then raise an
   `InsufficientExecutionStackException` that names the definition and says the
   catalog is not damaged, never the restore-from-backup hint, and the caller decides
   what it means: `BindCatalog` fails the open, adding that the database should be
   opened on a thread with a larger stack, while inside a statement (a DDL
   re-parsing canonical text, or a table version bound on first use) the session
-  fails the statement with `COHSQLE004` like any other walk out of stack.
+  fails the statement with `CS05004` like any other walk out of stack.
 - **When binding happens.** `SqlDatabase` binds every table right after
   the catalog opens and the format checks pass, before recovery or the index
   manager touch the data file set. Each DDL binds the version it publishes before
@@ -5335,7 +5658,7 @@ the in-process message. SQL and Graph compose `CODE: message` for ExecutionFailu
 [negotiated diagnostics](../../Assimalign.Cohesion.Database.Protocol/docs/DESIGN.md#negotiated-statement-diagnostics-1105) add structured delivery.
 
 `QueryLanguageProfile.Functions` is the executable built-in set. Recognized non-executing
-functions live in each language's unsupported vocabulary and report COHDBL001 at parse time.
+functions live in each language's unsupported vocabulary and report CK00001 at parse time.
 The single function guard in each engine's execution-conformance suite requires live evidence
 for every declared name and rejects evidence for undeclared names. OQL's
 [temporary exemptions were removed by #1126](../../Assimalign.Cohesion.Database.Documents.Language/docs/DESIGN.md#function-declaration-and-diagnostic-delivery-1103).
@@ -5344,34 +5667,34 @@ for every declared name and rejects evidence for undeclared names. OQL's
 
 Execution and DDL refusals carry structured diagnostics at their source (#1653). The internal
 SqlExecutionException covers cardinality, store assignment, DDL admission, persisted-expression
-damage and executor invariants; scalar evaluation keeps SqlEvaluationException. COHSQLE046–066
+damage and executor invariants; scalar evaluation keeps SqlEvaluationException. CS02046–066
 and their PostgreSQL SQLSTATE mappings are listed in the SQL dialect. Invalid store text reuses
-COHSQLE022, numeric overflow keeps COHSQLE002, and NOT NULL keeps COHSQLE024. Catalog DDL
+CS02022, numeric overflow keeps CS02002, and NOT NULL keeps CS03024. Catalog DDL
 guards use the same codes without depending on engine-layer types. An otherwise uncoded catalog
-or plain DatabaseException escaping statement execution receives COHSQLE060 (XX000); ownership
-refusals receive COHSQLE066 (42501), preserving DatabaseObjectLockedException metadata.
+or plain DatabaseException escaping statement execution receives CS05060 (XX000); ownership
+refusals receive CS03066 (42501), preserving DatabaseObjectLockedException metadata.
 The session uses its existing catch slot to attach the enclosing statement span to unlocated
 diagnostics, retaining a more precise current-statement expression span and concrete constraint/catalog/ownership
 exception types. Already translated storage failures and aborted-transaction refusals retain
 their exact exception identity and recorded cause (#1364). Open-time failures have no statement span. DEFAULT wrappers retain the inner
 carrier and cause. Persisted CHECK/DEFAULT bindings and evaluations discard synthetic offsets before
 statement fallback, as does compiled CHECK provisioning; numeric containment alone cannot establish provenance.
-Definition dependency/native-drop codes COHSQLD002/003 move from message
+Definition dependency/native-drop codes CS03302/003 move from message
 prefixes into the carrier, so the wire composes one prefix. Successful statements allocate no
 diagnostics or additional async state. Messages at the changed executor sites use generated
 resources; the remaining SQL resource migration is left to #1470.
-Namespace failures retain COHSQLE028/030 without embedded resource prefixes. Catalog script
-receipt refusals likewise carry their existing COHSQLS001 separately, so the generic statement
-fallback cannot prepend an unrelated code; oversized receipts use COHSQLE042.
+Namespace failures retain CS01028/030 without embedded resource prefixes. Catalog script
+receipt refusals likewise carry their existing CS03201 separately, so the generic statement
+fallback cannot prepend an unrelated code; oversized receipts use CS05042.
 The mappings follow PostgreSQL src/backend/utils/errcodes.txt:119,157,166-179,206,280,346-398,499-500;
 no reference implementation code was copied. There is no public API, visibility-grant, storage
 format or wire-format change.
 
-Oversized encoded rows and index keys fail with `SqlEvaluationException` / `COHSQLE042`,
+Oversized encoded rows and index keys fail with `SqlEvaluationException` / `CS05042`,
 mapped to SQLSTATE 54000 (program_limit_exceeded), naming the table, byte size and limit (#1266).
 Catalog definition records and exhausted catalog DDL generations use the same code. Index-name
-collisions use 42P07, constraint names retain 42710, and FK collation mismatches use COHSQLE063 /
-42P21. A replaced table uses COHSQLE064 / 40001. Unknown declaration collations use 42704;
+collisions use 42P07, constraint names retain 42710, and FK collation mismatches use CS02063 /
+42P21. A replaced table uses CS04064 / 40001. Unknown declaration collations use 42704;
 only loaded persisted collation failures imply XX001. Fresh CREATE VIEW rendering failures use XX000.
 `SqlRowCodec.Encode` enforces `SlottedPage.MaxRecordSize` (8,092 bytes), covering every caller,
 including script receipts. Referential SET NULL/SET DEFAULT records are encoded only after all
@@ -5403,7 +5726,7 @@ reference clone, `src/backend/access/heap/hio.c:527-534`. Live size-limit confor
 execution boundaries, statement atomicity, exact limits and a repeated, observed upsert row wait.
 
 Storage I/O failures (StorageIOException or IOException) are DatabaseException with an Error
-diagnostic COHSQLE041 (#1364); corruption keeps DatabaseCorruptionException / COHDBS003.
+diagnostic CS06041 (#1364); corruption keeps DatabaseCorruptionException / CK06003.
 Aborted-transaction refusals keep their own structured diagnostic and the original coded cause.
 The documented SQLSTATE mappings are 58030 for I/O and XX001 for corruption; no new carrier
 member is introduced. These failures abort an explicit transaction, retain the coded cause,
@@ -5417,7 +5740,7 @@ and its report/transaction-abort/session-loop path in src/backend/tcop/postgres.
 The implementation uses static type checks and the existing transaction abort mechanism.
 
 
-Storage corruption is `COHDBS003` (#1160). The engine translates a
+Storage corruption is `CK06003` (#1160). The engine translates a
 `StorageCorruptionException` into `DatabaseCorruptionException`, retaining the storage
 cause and page id, naming the database and page, and advising restoration from a verified
 backup. Its structured diagnostic crosses the existing wire execution-failure path; a
@@ -5430,8 +5753,8 @@ Corruption translation searches coded inner exceptions and every aggregate branc
 `StorageCorruptionException.Find`; an existing `DatabaseCorruptionException` is retained.
 This applies to read/statement and transaction failures as well as synchronous and deferred
 create/open failures. A refused open retains any existing model diagnostics in addition to the
-outer `COHDBS003`; Graph, Documents and Blob also carry their unrecoverable-files diagnostic
-(`COHDBG018`, `COHDBD003` and `COHDBB004` respectively). The original storage exception remains
+outer `CK06003`; Graph, Documents and Blob also carry their unrecoverable-files diagnostic
+(`CG06018`, `CD06103` and `CB06004` respectively). The original storage exception remains
 the inner cause, preserving its page context. Graph abort messages prefix a cause's code only
 when the message does not already contain that prefix.
 
@@ -5439,10 +5762,10 @@ when the message does not already contain that prefix.
 validation and execution errors. Named integrity violations use
 `SqlConstraintViolationException`, a `DatabaseException` carrying the constraint,
 table and safe offending value. Both constructors create exactly one Error diagnostic:
-COHSQLE037 for UNIQUE, PRIMARY KEY and unique indexes (23505, unique_violation),
-COHSQLE038 for table CHECK and domain checks on writes, CAST and function arguments/results
-(23514, check_violation), COHSQLE039 for either direction of a foreign key refusal
-(23503, foreign_key_violation), and the existing COHSQLE024 for NOT NULL (23502).
+CS03037 for UNIQUE, PRIMARY KEY and unique indexes (23505, unique_violation),
+CS03038 for table CHECK and domain checks on writes, CAST and function arguments/results
+(23514, check_violation), CS03039 for either direction of a foreign key refusal
+(23503, foreign_key_violation), and the existing CS03024 for NOT NULL (23502).
 The mappings follow PostgreSQL `src/backend/utils/errcodes.txt:237-240` in the local
 reference clone. SQLSTATE is a documented mapping; the existing diagnostic carrier has no
 SQLSTATE member. A caller-supplied unrecognized constraint kind uses the generic CHECK code.
@@ -5459,20 +5782,20 @@ particular — can distinguish fix-the-text errors (`ParseFailure` on the wire)
 from execution errors without model knowledge. Opening a database absent from the
 storage strategy throws the root's `DatabaseNotFoundException`; opening one the
 data-storage format gate refuses throws the internal `SqlDataStorageFormatException`
-(a `DatabaseException`, format rule above); storage I/O failures carry COHSQLE041; other open failures
+(a `DatabaseException`, format rule above); storage I/O failures carry CS06041; other open failures
 retain their own error type. `SqlCatalogException` (a `DatabaseException`) surfaces
 catalog violations unchanged. Arithmetic faults throw the internal
 `SqlEvaluationException` (a `DatabaseException`) whose message leads with
-`COHSQLE001` (division by zero) or `COHSQLE002` (numeric value out of range);
-a sign over a non-numeric operand throws it with `COHSQLE003`, from planning when
+`CS02001` (division by zero) or `CS02002` (numeric value out of range);
+a sign over a non-numeric operand throws it with `CS02003`, from planning when
 the operand's type is known there or the operand is a parameter whose bound value
 is not a number, and a statement whose walk runs out of stack throws it with
-`COHSQLE004` (#1151). A column reference where no columns are in scope throws it
-with `COHSQLE005` (#1165), a function call whose arguments no overload of its
-function accepts with `COHSQLE006` (#1189), and one that several overloads accept
-equally well with `COHSQLE008`, all while planning. Whatever a function throws, other
+`CS05004` (#1151). A column reference where no columns are in scope throws it
+with `CS01005` (#1165), a function call whose arguments no overload of its
+function accepts with `CS01006` (#1189), and one that several overloads accept
+equally well with `CS01008`, all while planning. Whatever a function throws, other
 than a `DatabaseException`, cancellation of the statement itself or an exhausted stack or memory,
-throws it with `COHSQLE007`, naming the function with its original exception inner (E2, #1419).
+throws it with `CS05007`, naming the function with its original exception inner (E2, #1419).
 An `OperationCanceledException` is cancellation only when the statement's own token is canceled;
 a default or unrelated token on the exception does not change that rule. It covers scalar calls,
 aggregate creation/addition/finishing, engine domain checks and application calls inside SQL
@@ -5528,24 +5851,24 @@ function metadata from execution state and defers plan preparation (`src/backend
 its session-local cache is not a cross-thread coordination implementation to copy here.
 
 A write that would evaluate a
-stored CHECK whose function the engine does not resolve throws it with `COHSQLE009`
-(E2 part 2). Character assignment overflow throws it with `COHSQLE012` (SQLSTATE 22001);
-numeric modifier overflow, after scale rounding, reuses `COHSQLE002` (SQLSTATE 22003),
+stored CHECK whose function the engine does not resolve throws it with `CS01009`
+(E2 part 2). Character assignment overflow throws it with `CS02012` (SQLSTATE 22001);
+numeric modifier overflow, after scale rounding, reuses `CS02002` (SQLSTATE 22003),
 including under CAST and DEFAULT. A built-in NUMERIC conversion that cannot represent its
 text exactly as Decimal after any target-scale rounding uses the same code
 ([Declared column bounds](#declared-column-bounds-1418)).
 The codes are published in the dialect's diagnostics table. A persisted CHECK or DEFAULT that
 does not load fails the open with a `DatabaseException` naming the database, table
 and constraint or column; one whose call fails its signature carries the
-`COHSQLE006` error in its message and as its inner exception; one whose call names an
+`CS01006` error in its message and as its inner exception; one whose call names an
 application function the engine no longer resolves does not fail the open (it binds as
 unresolved, above), but fails the build of an engine that declares the database with a
-`SqlSchemaMigrationException` led by `COHSQLE009`. No runtime
+`SqlSchemaMigrationException` led by `CS01009`. No runtime
 `ArithmeticException` escapes expression evaluation. Provisioning a declared database fails with
 `SqlSchemaMigrationException` led by a `COHSQLP` code (`Internal/Provisioning/SqlProvisioningCodes`):
-`COHSQLP001` a declaration refused before any file is touched, `COHSQLP002` an existing database's
-collation that is not the declared one, `COHSQLP003` a `Verify` declaration that drifted or does not
-exist, `COHSQLP004` a failed schema step after compensation, `COHSQLP005` an apply refused before
+`CS03101` a declaration refused before any file is touched, `CS03102` an existing database's
+collation that is not the declared one, `CS03103` a `Verify` declaration that drifted or does not
+exist, `CS03104` a failed schema step after compensation, `CS03105` an apply refused before
 any step runs (a destructive step not allowed, or a table or index the schema did not create).
 
 A row page the statement cannot read fails the statement with the storage
@@ -5561,7 +5884,7 @@ from the row fetch as "the row was reclaimed beneath its entry" and dropped the
 row. Only a reclaimed row is skipped now, through the positive check
 `Storage.TryReadRecord` makes (see "Seek execution is snapshot-anchored"), as
 PostgreSQL's heap fetch returns "not found" for a dead line pointer and raises
-`ERRCODE_DATA_CORRUPTED` for an invalid page. Corruption is translated to `DatabaseCorruptionException` (`COHDBS003`), naming the
+`ERRCODE_DATA_CORRUPTED` for an invalid page. Corruption is translated to `DatabaseCorruptionException` (`CK06003`), naming the
 database and page, and reaches the wire as `ExecutionFailure` without closing the session.
 Other I/O failures retain their existing handling.
 The read-only creation emptiness probe uses the same wrapped-corruption search before its
@@ -5589,30 +5912,14 @@ type, because the codec read whatever type the tag named rather than the column'
 raises `ERRCODE_DATA_CORRUPTED` for a stored value that disagrees with its own header
 (`src/backend/access/heap/heaptoast.c:740-760`), as the
 Graph, Documents and Blob codecs here raise `StorageCorruptionException` for a malformed record.
-The read holds a pin, not a latch, so it can copy a slot while a writer reclaims it (the purge
-freeing and clearing it; a failed statement's bracket rollback restoring the page did too until
-#1371, below); that copy is torn, not damaged. `DecodeRow` therefore confirms a failed decode before it reports it
-(`DecodeConfirmed`): it reads the slot again with the same owner check, skips a slot reclaimed by
-then, and uses a re-read that decodes. A re-read that still does not decode is corrupt when its
-bytes equal the read before it, because damage is stable and a copy a writer tore is not; when
-they differ the slot is still changing and is read once more, up to two re-reads. Without the
-re-read, a scan racing a writer that reverts inserts and frees pages failed within two seconds on
-each of three runs, reading a cleared page as "Expected a Int64 component but found Null"
-(`SqlRecordDecodeIntegrityTests`); the code before #1362 reads such a copy the same way and fails
-the statement with that type error. The confirmation narrows the torn-copy window and does not
-close it: a writer descheduled half-way through rewriting the page (a free clearing the body, an
-in-place update) leaves the same torn bytes for every read. Closing it needs a
-read that confirms against the page write lock, which every bracket holds from its first touch of
-a page until it ends; the storage does not expose that check yet (a follow-up). PostgreSQL needs
-no second read because it reads a heap page under a share lock
-(`src/backend/access/heap/heapam.c:647`, `:1706`). A rollback applying a pre-image is no longer
-such a writer since #1371: the storage restores each page in one copy bracketed by a restore
-sequence that `TryReadRecord` and the scan confirm against and repeat after, so neither the
-decode nor the reclaimed-row skip before it sees a page half restored (`Database.Storage` DESIGN,
-"No reader sees a rollback's restore half done"). Before that, the skip was the worse half: a
-committed row on the page read as reclaimed and was dropped with no error, which no re-read
-reached ("Secondary indexes", above). The index read before the row read has no such window
-either: the rollback restores a tree's pages under the tree latch the seek's cursor holds.
+Storage now confirms every owned record copy against the D1 frame seqlock, covering
+forward writes, page clears, tombstones, compaction and rollback restores (#1365, #1372).
+The decode therefore reports a malformed confirmed copy immediately. The earlier speculative
+same-byte comparison and its extra reads are removed: a writer paused halfway through a page
+mutation cannot make that partial image eligible for decoding. A genuinely reclaimed slot is
+still absence at the storage read, before decoding. The original DatabaseTypeException remains
+attached to the location-bearing StorageCorruptionException.
+The index read before the row read remains protected by the tree cursor's latch.
 The slot directory the read walks had a torn read of its own, below the decode: on ARM64 a scan
 beside an insert could see the new slot count before the slot's entry and fail with "Slotted page
 N is malformed" on a healthy page, which no re-read of the record reaches. The slotted page now
@@ -5769,10 +6076,10 @@ RESTART, generation-mode changes and identity backfill on populated tables remai
 (#1123). Compiled typed schemas cannot declare identity metadata; SQL scripts can create
 identity tables through the ordinary SQL executor.
 
-RIGHT/FULL OUTER, NATURAL and LATERAL joins, qualified wildcards, UPDATE SET
+NATURAL and LATERAL joins, qualified wildcards, UPDATE SET
 subqueries, `Serializable`
-isolation (rejected at begin), cost-based optimization (selection stays
-rule-based), and index-only result production (a seek always fetches the row).
+isolation (rejected at begin), persisted statistics, standalone ANALYZE, hash spill,
+and index-only result production (a seek always fetches the row).
 (Row-level MVCC visibility and secondary indexes — DDL, write-path maintenance, and planner seek
 adoption — were non-goals of earlier cuts and are now delivered; see "The MVCC
 integration", "Secondary indexes", and the access-path bullets above.)
@@ -5804,7 +6111,7 @@ scalar component for independent clients. The server binds SqlProtocol.Family
 once on accept and retains its existing model payloads. The shared startup version advances
 to 2.1 for #1105 negotiation, retaining #1126's major-2 Documents projection contract, and rejects incompatible majors before
 authentication. Result materialization belongs to
-Database.Sql.Client. The TCP Listen(Uri) extension lives in the optional Database.Sql.Tcp composition package; this engine references only generic Connections.
+Database.Sql.Client. The TCP Listen(Uri) extension lives in the optional Database.Tcp composition package; this engine references only generic Connections.
 
 Payload offsets are zero-based and exclude the shared five-byte frame header. `Execute` (5)
 starts with a signed 32-bit big-endian statement byte length `S` at bytes 0–3, followed by
@@ -5906,7 +6213,7 @@ deleted: the factory lives on the type. The test-only `CrashCaptureSqlStorageStr
   the databases); the database base owns the disposed flag and the schema-provisioning
   capability; the session base owns the session state, the session's transaction and the
   "already active" check; the transaction base owns the whole end state machine; the server
-  base owns the lifecycle. The model supplies its vocabulary: `COHSQLT004` and `COHSQLT005`,
+  base owns the lifecycle. The model supplies its vocabulary: `CS04004` and `CS04005`,
   the kernel calls and the translation of the kernel's exceptions. It keeps its per-statement
   rule for ordinary errors; storage corruption and I/O abort the transaction (#1364). Statements do not take the
   session's operation hold.
@@ -5915,10 +6222,10 @@ deleted: the factory lives on the type. The test-only `CrashCaptureSqlStorageStr
   with "A transaction or operation is already active on this session." (was "A transaction is
   already active on this session."), before the Serializable and offline refusals; a transaction
   the kernel ended under its caller stays the session's transaction, reports `Faulted`, and
-  refuses statements, BEGIN and COMMIT with `COHSQLT005` until it is rolled back (the session
+  refuses statements, BEGIN and COMMIT with `CS04005` until it is rolled back (the session
   used to drop it, so a statement after it ran in auto-commit, and its commit failed with
   "Cannot commit transaction in state …"); a canceled token is refused by `CreateSessionAsync`,
-  BEGIN, both execute seams and `ApplySchemaAsync` before the offline refusal (`COHSQLT004`),
+  BEGIN, both execute seams and `ApplySchemaAsync` before the offline refusal (`CS04004`),
   which was reported first; a commit or rollback with a canceled token never starts, and a
   started commit takes no token; a rollback is repeatable, a rollback after a commit fails with
   "The transaction is Committed; a committed transaction cannot roll back." and a commit of an
@@ -5926,7 +6233,7 @@ deleted: the factory lives on the type. The test-only `CrashCaptureSqlStorageStr
   commit while a statement of the transaction runs fails with "An operation of the transaction
   is still running; commit after it completes." and leaves it active; closing the session ends
   its transaction with the cause "The session closed before the transaction ended.", which a
-  later commit names in `COHSQLT005`; a closed session fails with "The session is closed." (was
+  later commit names in `CS04005`; a closed session fails with "The session is closed." (was
   "Session is not open. Current state: Closed."); a session that fails to close reports one
   `AggregateException` ("The session failed to close.", which no SQL path can provoke and the
   root suite pins); and the engine's disposal aggregate is
@@ -5998,7 +6305,7 @@ bounded peer-sent names) are in the area's
 | 18 | `DeferredStepBound` | Informational | — | `engineName`, `database`, `table`, `objectName`, `kind`, `position`, `stepCount`, `rowsProcessed`, `totalRows` |
 | 19 | `DeferredStepProgress` | Verbose | — | same as 18 |
 | 20 | `DeferredStepCompleted` | Informational | — | same as 18, `outcome` (`Applied`, `Error`, `Cancelled`), `durationMilliseconds` |
-| 21 | `DeferredStepFailed` | Error | — | same as 18, `code` (`COHSQLP004`), `exceptionType` (no message) |
+| 21 | `DeferredStepFailed` | Error | — | same as 18, `code` (`CS03104`), `exceptionType` (no message) |
 | 22 | `ScriptApplied` | Informational | — | `engineName`, `database`, `script`, `hash`; never the script body |
 | 23 | `TableReclamationStarted` | Informational | — | `engineName`, `database`, `objectId` (retired identity) |
 | 24 | `TableReclamationCompleted` | Informational | — | same as 23, `pages` (durable data/index frees in this process) |
@@ -6184,7 +6491,7 @@ This follows PostgreSQL's domain coercion node (`src/backend/parser/parse_coerce
 and argument evaluation before strict dispatch (`src/backend/executor/execExpr.c:2752-2791`).
 Missing recorded calls and native signatures whose volatility no longer satisfies their stored
 use produce unresolved bindings: open and ordinary reads succeed, but affected evaluation fails
-with COHSQLE009, and a declared database fails Build's generation-cached validation. This propagates
+with CS01009, and a declared database fails Build's generation-cached validation. This propagates
 through SQL wrappers and domain CHECKs, including domains used by casts and function parameters
 or results; short-circuit branches cannot bypass an unresolved CHECK.
 Reopening with the compatible registration restores writes. New declarations still refuse
@@ -6204,10 +6511,10 @@ Format 10 extends 9 with record kinds 10-13. Bodies, checks and defaults follow 
 persisted-expression rule and carry their resolved call vectors. Function/domain metadata retains
 domain dependencies and Adhoc/Schema ownership. DROP reads those recorded call identities and
 domain dependencies, including column domain names. Definition DDL excludes
-other catalog mutations while checking dependencies. It refuses native DROP (COHSQLD003), dependent
-DROP (COHSQLD002) and invalid declarations (COHSQLD001). Native DROP classification matches the
+other catalog mutations while checking dependencies. It refuses native DROP (CS03303), dependent
+DROP (CS03302) and invalid declarations (CS03301). Native DROP classification matches the
 requested normalized name and parameter signature, not every overload sharing that name;
-an unknown function signature is COHSQLE009 (42883); a duplicate function is COHSQLE065 (42723). No interface, new project reference,
+an unknown function signature is CS01009 (42883); a duplicate function is CS03065 (42723). No interface, new project reference,
 shipped-to-shipped internal grant or assembly scanning was added.
 
 Scripts use statement-granular recovery. An internal `ExecuteScriptAsync(request, publication)`
@@ -6222,7 +6529,7 @@ with embedded quotes doubled. Function storage type codes remain separate signat
 Publication, persisted targets, dependency keys and script ownership checks use this encoding
 with the catalog's case-insensitive name rules; script names, digests and preceding receipt
 snapshots retain exact comparison. A mismatched target or preceding receipt/generation is
-`COHSQLS001` before commit. `BeginScriptAsync` records the checksum before effects. Explicit
+`CS03201` before commit. `BeginScriptAsync` records the checksum before effects. Explicit
 object-id reservations advance the generation without completing a statement; direct catalog
 table creation completes it. An IF EXISTS drop verifies absence and completes its receipt
 without advancing DDL generation. Data
@@ -6235,7 +6542,7 @@ The ordered script-set digest is computed before I/O. A matching digest plus DDL
 skips reconciliation in O(1), without parsing, hashing, receipt scans or catalog walks. Verify
 requires complete checksum-matching receipts and executes nothing. Outside the O(1) skip, Apply
 and Verify compare every completed statement's recorded target with its declared SQL and refuse
-inconsistent target or created-object claims with `COHSQLS001`. Function receipts retain parameter
+inconsistent target or created-object claims with `CS03201`. Function receipts retain parameter
 type spellings paired with the actual normalized storage signature: CREATE takes them from the
 published definition; DROP takes the SQL binder's already-resolved requested spellings as explicit
 mutation input. SQL owns name-to-type resolution, including native domains, while the catalog
@@ -6246,7 +6553,7 @@ from dropping raw-owned objects. A continuous receipt
 generation chain repairs the typed marker after a crash between typed apply and script completion.
 The typed schema exclusively owns its declared objects. Before any database is opened, declaration
 compilation refuses script ALTER TABLE/DROP TABLE of a typed table and DROP INDEX of a typed index,
-including the primary key, with `COHSQLS005` naming the object and directing the change to the typed
+including the primary key, with `CS03205` naming the object and directing the change to the typed
 schema. Thus refusal leaves the database exactly as it was before Build. Scripts may create and
 later alter their own tables, add their own indexes to typed tables, and run DML. The typed marker
 records only typed objects, whose structure scripts cannot change; it is safe to advance its
@@ -6297,7 +6604,7 @@ Model statement, parameter-name and result-header strings use that same shared s
 
 ## Diagnostic completion (#1103 review)
 
-System-relation mutations use COHSQLE021 with the statement's available location, before
+System-relation mutations use CS04021 with the statement's available location, before
 lookup or IF EXISTS shortcuts. VALUES/LIMIT/OFFSET column-scope failures retain the
 column's own location, and UPDATE aggregate rejections retain the assignment expression's
 location. SQL operator and CAST bound nodes retain their immutable source
@@ -6305,21 +6612,21 @@ locations so runtime failures and planning-time count evaluation preserve the ex
 span. Definitions without a separately located column or type token use the statement
 fallback; a DEFAULT span must not be used for an unrelated COLLATE failure.
 
-Evaluator unsupported nodes/operators use COHSQLE013, operand-type failures use COHSQLE003,
-and CAST range failures use COHSQLE002 (PostgreSQL 22003). CAST invalid text uses the new
-COHSQLE022 (22P02); division/remainder by zero keeps COHSQLE001 (22012). The dialect records
+Evaluator unsupported nodes/operators use CS05013, operand-type failures use CS02003,
+and CAST range failures use CS02002 (PostgreSQL 22003). CAST invalid text uses the new
+CS02022 (22P02); division/remainder by zero keeps CS02001 (22012). The dialect records
 the complete code mapping. Messages remain unprefixed; servers compose the code once.
 
 ### Statement rejection carriers (second #1103 review)
 
-SqlDefinitionBinder.Refuse returns the existing SqlPlanningException with COHSQLD001 and an
+SqlDefinitionBinder.Refuse returns the existing SqlPlanningException with CS03301 and an
 unprefixed message. Definition admission uses the offending expression's location, falling back
 to the declaration for type/parameter metadata without separate tokens. Reopened definitions
 locate their retained canonical body or type fragment when no declaration AST survives; expression
 walks retain the parsed node's span. DROP of an absent domain/function locates the DROP statement.
-The existing COHSQLD002/003 executor ownership and dependency checks are unchanged.
+The existing CS03302/003 executor ownership and dependency checks are unchanged.
 
-A CHECK that is not Boolean reports COHSQLE003 / SQLSTATE 42804, including domain CHECK and
+A CHECK that is not Boolean reports CS02003 / SQLSTATE 42804, including domain CHECK and
 CREATE TABLE c (id INT CHECK (id)). It reports the predicate span before any table is created.
 PostgreSQL likewise rejects a non-Boolean CHECK operand during coercion and reports its expression
 position (src/backend/parser/parse_coerce.c:1163-1191). No runtime row-value failure is converted.
@@ -6336,14 +6643,14 @@ lowercase endpoint family followed by a dot. The core owns `diagnostics` and fra
 SQL and Graph register `ProtocolCapability.Diagnostics`. When agreed, one Diagnostics
 frame carries the bounded Warning/Error list immediately before Error on failure,
 or immediately before ResultComplete (PathsComplete for graph paths) on success.
-Information, including SQL0100, is never sent. Error and result payloads are unchanged.
+Information, including CS00009, is never sent. Error and result payloads are unchanged.
 Statement failures leave the server session ready. Model clients validate diagnostic
 ordering and preserve every code, severity, message, nullable offset and source line.
 
 The owning SQL test assembly supplies a result double through an internal server-session execution hook to verify success warnings and Information filtering. This adds no public seam or friend assembly.
 
 Diagnostic overflow is preflighted before output and retains a source-order prefix plus
-COHDBP001 with exact retained/omitted counts; the original Error category/message or
+CK07001 with exact retained/omitted counts; the original Error category/message or
 successful result is preserved and the session stays reusable. Both the 4,096-entry
 and 1 MiB bounds include the notice. See [wire policy](WIRE-PROTOCOL.md#negotiated-statement-diagnostics-1105).
 
@@ -6362,7 +6669,7 @@ effective collation folds the value, pattern and escape candidates, so an ESCAPE
 COLLATE participates without rewriting the escape scalar. Fixed
 patterns and supplied parameters compile once during binding, using the existing SQL
 text formatter for concatenated constants; invalid fixed escapes
-fail on empty inputs too (COHSQLE034), an intentional eager-validation divergence
+fail on empty inputs too (CS02034), an intentional eager-validation divergence
 from PostgreSQL. Wildcards consume original input scalars (like_match.c:193-221);
 a scalar-to-normalized-offset map preserves boundaries across expansions and ignored
 marks. Binary and simple case-insensitive matching use last-`%` backtracking with
@@ -6388,7 +6695,7 @@ linear in input length, leaving the polynomial budget as a backstop. Each zero-i
 32-bit visited-state word also costs one unit, charged before allocating its row;
 many literal tokens therefore cannot bypass the budget through state initialization.
 Exhaustion raises located
-COHSQLE040; it never returns a guessed Boolean. This bounds comparison work even when
+CS05040; it never returns a guessed Boolean. This bounds comparison work even when
 a single probe scans a long equal prefix, while preserving reordered and ignorable
 scalar semantics for admitted matches (#1166). Cancellation wins over budget refusal.
 The planner marks LIKE-bearing plans during its existing expression walk, including
@@ -6445,6 +6752,371 @@ The SQL model's schema authority (area architecture:
 two questions for the planner: *what objects exist* (with stable identities) and
 *what shape are they* — and it must answer identically after any crash.
 
+#### Catalog: Atomic TRUNCATE storage replacement (#1716, SQ-T1)
+
+TRUNCATE resolves and deduplicates its list, computes the incoming FK closure (or refuses
+CS03067 under default RESTRICT), and holds ascending table-exclusive locks. RESTART IDENTITY
+and CASCADE are independent; omission means CONTINUE IDENTITY and RESTRICT. Schema ownership
+is preserved and does not forbid this data operation. An explicit transaction is refused with
+CS04066, leaving its earlier work active. Under the catalog lock at reservation and publication,
+the incoming FK closure is recomputed from the explicitly named targets and must equal the
+locked set. Both added and removed dependencies invalidate it with retryable CS04064, including
+CASCADE. A cascaded table disappearing during lock acquisition reports TruncateClosureChanged
+with CS04064; an explicitly named missing table retains CS01051. FK DDL retains every resolved
+parent from its first bind, locks those exact identities, and rejects missing or replacement
+parents with CS04064 before rebinding or backfill. This also covers a name disappearing before
+lock acquisition starts. CTAS remains outside SQ-T1.
+
+The catalog internally reserves fresh owner identities with existing kind-14 reclamation
+intents, without changing the logical generation. Prepared empty B-trees commit durably before
+one catalog transaction replaces every table and index description, registration, dependent
+view table/column identity and identity-counter owner. It removes prepared intents and adds
+retired-owner intents in that same commit. A volatile storage binding generation invalidates
+plans and view images independently of the durable logical DDL generation, which stays unchanged
+so compiled-schema and script verification remain trusted. A declared TRUNCATE script statement
+publishes its receipt with the first written table as its logical target in that same commit.
+All columns, constraints, ownership, physical ordinals
+and frozen missing values are copied. CONTINUE moves the exact volatile cursor/block and the
+durable last reservation; RESTART removes the counter so allocation resumes at START. No new
+record layout, durable record kind, public catalog member, interface or format version is needed:
+SQL remains format 27. Failed preparation and crash recovery use kind 14 unchanged.
+
+A short-lived coordinator snapshot pin brackets catalog publication: it is active before the
+swap and rolled back just afterwards. Its sequence is a visibility marker, with no persisted
+record. A statement whose fixed MVCC snapshot cannot see that marker retains the pre-truncation
+table descriptions, indexes and directly dependent views, even when binding starts after
+publication. This covers BEGIN, auto-commit and ReadCommitted statements without allocating a
+catalog capture or an extra planner field on ordinary stored reads. The fixed visibility snapshot
+is passed on the planning call stack, including retries, preserving existing DML allocation budgets.
+Multiple truncations choose the earliest owner the
+snapshot predates. DML targets use the same retained image, so existing target-definition
+validation refuses stale writes with CS04006 before apply. Unrelated current definitions retain
+existing ALTER behavior. The volatile
+association lasts until reclamation retires its owner; no snapshot survives reopen. Retired tree
+handles leave the mutable manager after publication but remain in the catalog alongside their
+exact immutable index descriptions until reclamation. Retained reads bind those descriptions
+and resolve those handles, preserving index seeks. Join read validation accepts these
+protected retired definitions only for read-only statements. The outer statement's DML status
+propagates through WITH, INSERT SELECT sources, derived/view bodies and subquery materialization,
+so every DML join source retains its CS04006 definition check before reading retired rows.
+Catalog-image equivalence includes each table's index descriptions, so a cached view image
+cannot hide an index created before retirement while table and view descriptions stay identical.
+Retirements are published as an ordered immutable array. Serialized monotonic markers let
+publication append owners and completion remove an owner with one replacement array, without sorting
+the whole set. A snapshot seeing its maximum marker sees every earlier serialized marker and
+returns without locking, collecting or sorting. Join retirement lookups return without taking
+the catalog lock when this array is empty; exact-owner lookup uses a plain loop and allocates
+nothing, including when retirements exist. Retained-index lookup takes the catalog lock once.
+
+The lock/latch order is documented at ExecuteTruncateAsync: metadata admission, ascending table
+X, apply gate, tree/page latches; no apply gate or data latch spans catalog publication. Final
+publication takes a short snapshot-admission semaphore also used across BEGIN's MVCC creation
+and metadata capture; BEGIN takes no table locks. Both that semaphore and the marker pin release
+on every exit. The catalog metadata lock owns only its own innermost storage bracket. Both transaction and statement pins
+outlive prepared owners. Retired intents remain hidden from discovery until the visibility marker
+ends; otherwise a reader admitted while the marker is active could begin after the worker's fence.
+Each intent has an immutable, volatile incarnation token. Reclamation rechecks that exact token
+after its pins clear, so a cached preparation fence cannot be reused if its owner became live and
+was later retired by another TRUNCATE. A removed or replaced intent discards the cached worker
+entry and requests discovery with a fresh fence, without freeing pages. Cancellation and exceptions remove prepared directory handles;
+irrevocable publication always removes old handles with a noncancelable cleanup. A failed data
+or catalog commit retains the engine's existing offline/unconfirmed-outcome handling.
+
+If BEGIN's catalog capture or transaction construction fails, cleanup skips rollback while
+the database is offline (#1243). Online cleanup releases the new snapshot pin; a cleanup
+failure cannot replace the original capture/construction failure.
+
+Deterministic tests read pinned snapshots after publication and run an explicit reclamation pass
+that frees nothing until they end, in process and on both transports. Every recorded crash image
+under Synchronous, Grouped and None is reopened; None models process loss. A nonparallel stress
+case runs for a minimum interval and until successful writer and prepared-owner maintenance
+counters prove the race was exercised, under a 90-second guard. Its independent monotonic
+history orders writer commits, TRUNCATE publications and BEGIN snapshots. Every pinned read
+must equal its committed row prefix after the preceding TRUNCATE, and the final table must
+equal the committed suffix after the last TRUNCATE. Fault modes exercise that same final-row
+assertion after deleting a committed write or substituting a pre-TRUNCATE write at the same
+row count, verifying that the shared oracle detects both.
+
+| Code | Condition | SQLSTATE |
+|---|---|---|
+| CS03067 | TRUNCATE omits a foreign-key referencing table | 0A000 |
+| CS04066 | TRUNCATE inside an explicit transaction | 25001 |
+
+Reference behavior was re-derived from local PostgreSQL gram.y:7239-7256,
+tablecmds.c:1915-1917,2033-2090,2225-2258 and heap.c:3701-3782. The snapshot preservation
+and explicit-transaction refusal are the owner's deliberate departures from PostgreSQL.
+
+#### Catalog: Atomic CREATE TABLE AS (#1716, SQ-T2)
+
+CTAS shares view/derived output inference, including type facets, domain identity and collation.
+Its name list renames the complete output; unnamed, blank, duplicate or wrong-width outputs
+fail with CS03068 (42601). All destination columns are nullable, following persisted-view metadata
+and PostgreSQL CTAS rather than copying source NOT NULL. Untyped NULL becomes TEXT. No source
+key, table constraint, column default, index or identity is copied; inferred domain constraints and
+domain defaults (including their resolved function-call vectors) still apply. WITH DATA uses normal
+indexed planning while retaining projection metadata; only WITH NO DATA suppresses access-path
+evaluation. Reservation encodes and size-checks the table record before allocating its identity or
+evaluating the source, so overwide metadata fails with CS05042 before building any rows.
+Parameters are allowed. WITH DATA is the default; WITH NO DATA binds without query execution or
+cost probes, including skipped predicates, functions and row-limit evaluation. IF NOT EXISTS skips
+source binding/execution for an existing table. Completion reports the rows written, with zero
+for WITH NO DATA, empty input and an IF NOT EXISTS skip, in process and over the wire. The executor
+prepares that actual completion before publication; other DDL retains its fixed zero completion.
+
+The session's DDL/metadata lease precedes reserved owner X, the coordinator apply gate and data
+page latches; catalog monitor/storage brackets are innermost and never overlap data apply or
+page latches. Source reads use the fixed statement snapshot and ordinary retained read owners.
+The shared metadata lease spans the entire query and build, as it does for CREATE INDEX. Other
+sessions' CREATE/DROP of views, functions, domains and schemas therefore fail immediately while
+CTAS runs. Unrelated table DDL remains concurrent. The statement epoch spans reservation, source
+disposal, exceptions and cancellation cleanup; it also delays reclamation of other owners retired
+while this statement remains active.
+
+Reservation commits a new identity and existing kind-14 reclamation intent together. All copied
+rows carry one dedicated builder transaction's writer sequence. Batches contain at most 64 rows
+and release the apply gate between brackets; every bracket appends without awaiting durability,
+including the final batch and exact multiples of 64. The builder commits durably outside the apply
+gate after the last flush and source disposal, before catalog publication. Its later commit record
+makes every earlier bracket durable through the ordered WAL. Whole-owner abandonment supplies
+failure cleanup, so the builder needs no growing per-row undo ledger.
+
+Ordinary MVCC over the builder's single commit controls visibility. A snapshot taken before that
+commit sees no destination rows. A snapshot taken after it sees every row once the live catalog
+can bind the table at publication, just as for a concurrently created table. This includes snapshots
+taken between builder commit and publication: the rows committed before those snapshots, so they
+see the complete table after publication. No snapshot sees a partial build. CTAS adds no snapshot
+admission gate or per-statement synchronization/allocation; BEGIN, explicit-transaction and
+auto-commit admission retain their pre-CTAS shape. TRUNCATE's BEGIN/publication semaphore is
+unchanged; a BEGIN queued there does not block admission of ordinary statements. No snapshot
+survives reopen, so no persisted creation marker or format change is needed.
+
+Query operators keep their existing materialization policy, as INSERT SELECT does. Before copying,
+the retained child result (row arrays, scalar/text/binary payloads and result-list capacity) is
+charged to the statement memory grant. The encoded batch and its reference buffer share that
+grant. CS05067 refuses an over-budget build before publication. Source disposal, flush completion
+and every exception/cancellation path release the corresponding reservations.
+
+One catalog transaction publishes the complete table and removes its abandonment intent, advancing
+the logical DDL generation and any declared-script receipt together. Under the same catalog monitor,
+a newly occupied table name reports CS03049 (42P07); IF NOT EXISTS instead completes with zero rows
+and retains the losing owner's abandonment intent for reclamation. Source disposal finishes before
+this irrevocable boundary. Every exit after reservation clears the owner's volatile prepared mark,
+including reservation-hook, lock, binding and builder failures and a lost name race. Its durable
+intent is then listed as pending until reclamation finishes, matching reopen. Earlier failures leave
+no table; the existing worker reclaims the abandoned owner after the statement/snapshot fences
+clear. Recovery restores either no table plus reclamation
+work, or the entire table with no intent. SQL stays format 27: ordinary table records and kind 14
+already express this protocol. There is no public catalog seam, friend grant or new interface.
+CTAS follows existing self-committing DDL and is refused inside BEGIN with CS04003 (25001);
+commit-time transactional DDL needs broader catalog machinery and remains outside this run.
+
+Tests cover metadata, renaming, no-data evaluation suppression, value/domain failures, pre-publication
+fault/cancellation cleanup, and both wire transports. Every captured storage crash boundary is reopened
+under Synchronous, Grouped and None (None models process loss), including copy checkpoints and
+abandonment reclamation. Nonparallel stress runs for a minimum interval and then until hidden-owner,
+complete-read, build and concurrent reclamation counters all move, with a 90-second hang guard.
+NativeAOT smoke copies rows and verifies no-data evaluation suppression over the wire.
+Tests pin snapshots before builder commit, between commit and publication, and after publication;
+actual data-journal flush counts stay zero through every copy bracket and advance at builder commit.
+Abandonment tests capture the owner through TableAsStage, assert it is listed pending while a
+statement pin prevents reclamation, and assert HasOwnerPages is false after the pin ends and the
+worker drains. Destination assignment is tested independently of source evaluation: a conversion
+failure after a checkpointed copied batch leaves no table and reclaims the whole owner, both in
+process and after crash.
+PostgreSQL references: createas.c:90-109,167-185,242-283,342-349 (SELECT n completion),
+rewrite/rewriteHandler.c:1301-1312 (domain default fallback) and makefuncs.c:565-582. Source constraint omission and complete
+output-list validation are explicit dialect choices recorded in DIALECT.md.
+
+| Code | Condition | SQLSTATE |
+|---|---|---|
+| CS03068 | CTAS output names are missing, blank, duplicate or have the wrong width | 42601 |
+
+#### ALTER COLUMN TYPE and USING (#1447, SQ-A2)
+
+ALTER [COLUMN] c [SET DATA] TYPE type [COLLATE collation] [USING expression] binds USING
+against the original table row and requires an assignment/implicit registry cast for its result;
+without USING the old column is the operand. Explicit-only pairs require a written CAST.
+Character modifiers retain assignment overflow checks; explicit CAST inside USING may truncate.
+PostgreSQL anchors in the local clone are tablecmds.c:14949-14998 (old-row scope and assignment
+coercion), :15269-15304 (independent default conversion) and :15612-15624 (view dependency refusal).
+The target declaration selects its collation; nullability, identity and existing constraints remain.
+Integer identity types may change within the existing integer family, retaining cursor/start/increment.
+Domain identity targets refuse, following PostgreSQL parse_utilcmd.c:3700-3727 and
+sequence.c:1382-1389. Publication validates the allocated counter against the target range
+(sequence.c:1547-1571), trims unissued reservation tails to that range and persists a valid
+kind-16 endpoint. This preserves the live cursor without making a narrower table unreadable
+after reopen; ordinary restart may still skip unused reserved values, as before.
+Full-definition storage-type, scale, domain and collation changes share this rewrite; decision
+49a's validation-only nullability/length/precision path remains intact. Full definitions refuse
+CS05013 if the resulting default differs, or if collation changes without an explicit COLLATE;
+SET/DROP DEFAULT remains the default-changing operation even when a rewrite is needed. TYPE
+without USING also uses the validation-only path when storage identity, scale, domain and
+collation remain unchanged and length/precision only widen (or become unbounded), except CHAR
+width changes that can require repadding. Narrowing uses the copier and assignment semantics:
+VARCHAR discards only excess trailing spaces and refuses other overflow. Such widenings
+retain the heap owner and index trees. PostgreSQL's corresponding rewrite test is
+tablecmds.c:15142-15199 (ATColumnChangeRequiresRewrite and its binary-coercibility contract);
+varchar.c:620-648 supplies trailing-space assignment trimming. The existing
+full-definition identity-type refusal remains; explicit TYPE permits integer identity conversion.
+
+Defaults are tested independently of USING from the original expression without implicit column
+coercion (tablecmds.c:15269-15304). Numeric and Boolean literals retain their expression identity;
+unknown string literals retain their resolved old identity. Immutable results persist as canonical
+literals and lose their function pins, preventing CAST accumulation across repeated changes and
+reopen. Only non-immutable defaults retain their original text and pinned calls. An internal
+persisted RecastDefault column flag makes the DEFAULT binder supply a resolved standard or
+application assignment cast on each evaluation, including DATE to TIMESTAMP and TIMESTAMP to
+TIMESTAMPTZ and target-domain base modifiers. Ordinary defaults retain their prior evaluation
+behavior, including application-domain expressions; SET/DROP DEFAULT clears the flag. Character
+overflow refuses rather than truncating. A missing native domain still opens with readable stored values; its bound domain
+checker retains CS02010 for writes, including columns with expression defaults. A column with no default inherits the target domain's default, as CREATE TABLE
+and CTAS do. Volatile defaults are bound without execution; immutable defaults are evaluated
+before reservation. Referencing CHECKs keep persisted-definition rules (declaring: false), pin
+existing function identities, and validate only operands whose static type changes, including
+CASE input/WHEN compatibility on empty tables. LIKE retains runtime's invariant text conversion
+for numeric and other non-character operands (SqlExpressionEvaluator.cs:1122). CHECKs
+evaluate over every converted row. Domain checks and NOT NULL use the shared write validators.
+All indexes are rebuilt and uniqueness is checked under the target collation before publication.
+FK compatibility retains the engine's declaration rule: identical storage identity and character
+collation. Incoming and outgoing keys are revalidated against the complete replacement, including
+self references and MATCH SIMPLE NULL keys. Only FKs whose child or referenced key includes the
+altered column are locked and revalidated; unrelated neighbors remain writable and are not scanned.
+The affected adjacent tables take exclusive locks, so their rows and definitions remain stable
+through validation/publication. Dependent views refuse even
+a same-type USING expression; views reading only other columns retain the shared owner remapping.
+CHAR defaults retain their old declared width when resolving unknown literals and use assignment
+modifiers on future calls. Application CHAR/TEXT defaults use the registered assignment cast;
+the former CK00001 refusal is unnecessary because no explicit truncating CAST is persisted.
+Immutable target-domain defaults validate even on empty tables.
+
+The inline path holds session schema/metadata admission, source table X, adjacent FK X in id
+order, reserved owner X, then the apply gate and tree/page latches. The lock manager detects
+cycles with other DDL; no apply gate/page latch spans catalog publication. LockTimeout and
+caller cancellation retain the session cleanup contract. Failures abandon the reserved owner
+and keep the old table/indexes current. The shared copier converts and validates each bounded
+64-row chunk before entering the database-wide apply gate; only physical row/index writes run
+under that gate. Application callbacks can therefore write unrelated tables through another
+session. Abandonment clears the volatile prepared-owner mark even if directory cleanup fails,
+leaving the durable intent publicly pending until reclamation frees its pages. This applies to
+TYPE and the maintenance RewriteTableAsync path. The shared copier publishes the logical description,
+indexes, generation and optional script receipt in one transaction. Older snapshots retain the
+old owner; stale writers retry with CS04006. Cancellation after publication cannot undo it.
+The populated-table worker handoff and expanded crash/wire convergence coverage remain SQ-A3.
+
+CS02064 identifies a missing assignment cast for an old value, USING result or default (42804).
+Existing constraint, conversion, view, locking and storage codes retain their conditions.
+SQL format 27 gates table extension 7's RecastDefault Boolean beside each missing-value literal;
+earlier SQL files are refused without an upgrade reader. Compiled-schema v8, dense row encoding,
+replacement markers and reclamation intents are unchanged. The language assembly
+adds the public sealed SqlAlterColumnTypeAction leaf and SqlExpressionRenderer.Render(SqlAlterTableExpression)
+overload; canonical rendering quotes the AST's decoded domain name, including names whose actual
+first and last characters are quotes. No wire message, public interface, visibility grant or
+project reference changes. NativeAOT smoke
+executes TYPE USING; nonparallel tests force stale-writer waits/retries until counters prove the
+race, and inject failure/cancellation at each preparation stage to verify ownership release.
+TYPE crash-image tests reopen success and cancellation images under all three durability policies,
+checking complete old/new definitions, rows, unique-index seeks and abandoned-owner reclamation
+through copy checkpoints and cleanup.
+
+#### Catalog: Recoverable table rewrite and ordinal compaction (#1265)
+
+SqlDatabase.RewriteTableAsync accepts validated SqlObjectName schema/table components,
+resolves the current immutable description and runs physical maintenance on the existing
+provisioning worker, including for an empty table.
+Schema-owned tables are supported because the operation preserves the logical definition,
+DDL generation and applied-schema hash. It always replaces the physical owner, even when
+there are no dropped columns. The internal description-based entry refuses stale bindings
+with existing CS04064 before reservation.
+Schema application and maintenance share fail-fast admission; session DDL is excluded for
+the operation. Ordinary readers retain their snapshot layouts. Writers that bound a retired owner,
+including transactions begun before publication, abort retryably with CS04006 after waiting
+for table X; retry the entire transaction against a fresh snapshot. The lock
+and latch order in SqlPlanExecutor.RewriteTableAsync is fail-fast schema admission, source-table
+X before queueing, fail-fast EnterMetadata on the worker, then reserved-table X and data apply.
+EnterMetadata must not wait while source-table X is held: definition DDL can own metadata
+while waiting for that table. Catalog reservation/publication hold only their inner catalog
+monitor and storage bracket, and no data apply gate or tree/page latch spans publication.
+Database disposal cancels
+queued work, claims it if the pump stopped, and joins in-flight cleanup before storage closes.
+The provisioning FIFO uses a short queue monitor and removable rewrite nodes: cancellation
+unlinks queued work immediately, so a stalled peer cannot retain canceled database graphs or
+accumulate canceled queue entries. The queue monitor never spans job or cancellation cleanup;
+enqueue may follow the rewrite admission monitor, while removal releases the queue monitor
+before returning admission. Failed enqueue discards the unpublished cancellation source.
+
+The maintenance caller begins the logical transaction and acquires source-table X before
+enqueueing, mirroring deferred schema preparation. An idle transaction blocking one database
+therefore occupies no provisioning worker and cannot stall a peer's migration. The engine's
+nonzero LockTimeout bounds this acquisition and reports CS04044; zero retains the normal
+unlimited lock-wait policy, so a caller holding a conflicting transaction must supply cancellation.
+Preparation, queue cancellation, failed enqueue and disposal retain one transaction/admission
+owner and join its rollback before completion. Deterministic regressions observe the lock wait,
+complete another database's deferred index migration before releasing the holder, and assert
+the caller-held conflict's coded timeout without an elapsed-time assertion.
+Cleanup assertions finish reclamation first: discovery briefly owns a coordinator snapshot
+fence, which must not be mistaken for a leaked maintenance transaction.
+Pre-queue failures use the same SQL failure translation as worker failures; an injected enqueue
+failure plus rollback I/O failure retains both causes under CS06041 before admission is released.
+
+TRUNCATE and rewrite use one ReplaceTableStorageAsync preparation/publication path and one
+catalog reservation/publication transaction. Rewrite decodes the old physical layout, including
+frozen missing values, then writes currently live rows with dense ordinals into the reserved
+owner. Historical versions remain available through the retired owner for old snapshots;
+they do not need copying. Existing committed writer stamps are retained. A batch holds at most
+64 decoded rows and durably inserts its rows and all index entries together, releasing the
+apply gate between batches. Unique indexes are validated before publication. Identity cursors,
+constraints, collation, defaults, missing values, ownership and dependent view identities follow
+the same catalog swap as TRUNCATE CONTINUE IDENTITY. Prepared owners and failures retain
+kind-14 reclamation intents. Every publication or cleanup requests reclamation after its
+statement pin ends. A crash therefore exposes either the complete original layout/index set
+or the complete compact layout/index set, and abandoned/retired owners converge through the
+existing reclamation worker. Interrupted preparation is abandoned; the caller retries explicitly.
+
+The shared copier accepts an internal replacement-definition function, row transform and final
+validation callback for #1447. TYPE uses these hooks; its deferred schema intent is a later run.
+There is no second type-only copier. Physical maintenance adds no SQL syntax, wire
+message, public interface, visibility grant or project reference. The maintenance API uses a
+generated SqlObjectName value object for decoded schema and table components, preserving case-insensitive
+catalog identity and delimited-name punctuation; default names are refused at admission.
+FK intent preparation rechecks the physical binding generation after grants and refreshes
+outgoing parents after a swap. Retained publications identify their replacement by ObjectId,
+so a later rename cannot hide an invisible compact owner. Only the first non-null, non-self
+key that actually probes a parent checks visibility, using the probe's snapshot (refreshed
+committed visibility for read-committed ON CONFLICT). An invisible replacement aborts with
+CS04006 instead of reporting a false FK violation; empty input and MATCH SIMPLE null keys
+need no parent probe and can commit. Seeing the newest ordered publication marker skips all
+retained owners in constant work; older snapshots use an allocation-free indexed scan.
+The ordered vector stores only owner, replacement and marker identities; snapshot descriptions
+remain in the retired-owner directory under the catalog monitor. Replacement identity therefore
+preserves the existing publication/removal array allocation budgets.
+Hook-driven regressions pause child INSERT, child DELETE and a parent DELETE binding a rewriting
+child between discovery and IS grant, assert rediscovery, and verify rollback cannot restore an
+orphan. Parent DELETE must wait for the child's shared lock on the replacement parent's row.
+The null-key shortcut follows local PostgreSQL src/backend/utils/adt/ri_triggers.c:458-496;
+no reference-engine code is copied.
+Existing codes retain their conditions. SQL remains format 27: ordinary dense table records,
+kind-14 intents and the existing TRUNCATE publication contract are readable by the format-27
+engine, so this operation changes no persisted contract. Compiled-schema v8 and catalog record
+shapes stay unchanged. The existing coded open gate refuses all earlier files; no upgrade or legacy reader is added.
+
+Crash tests retain every write/flush/length image through copy-batch checkpoints, snapshot
+release, reclamation and the free-before-intent-removal window, then reopen every image for
+successful publication and canceled preparation under Synchronous, Grouped and None;
+None models process loss. Snapshot/index, missing-tail, duplicate-row, cancellation, exception,
+lock wait, stale-description, disposal and counter-driven nonparallel stress tests exercise
+admission and every acquired owner. Prepared-owner IDs are captured at reservation; assertions
+check their physical pages after reclamation as well as the live owner. A mutation that removes
+intents without freeing pages fails these guards. The independent commit/BEGIN history checks
+exact parent and child rows and values for both snapshot reads and final state while inserts,
+updates, deletes/cascades, FK writes, DDL and TRUNCATE race rewrites. An independent writer updates
+child FK rows without an earlier parent access or lock; its chosen ids and increments join the
+commit history, and successful child-only writes are required before the run can finish.
+Lost-write and equal-count
+resurrection fault modes exercise the same oracle, including the two-row false-prefix case.
+NativeAOT smoke executes compaction and a rebuilt seek.
+The exclusive rewrite follows local PostgreSQL tablecmds.c:4681-4691,6049,6186; preserving old
+snapshot layouts through owner replacement follows the owner's deliberate TRUNCATE policy.
+
 #### Catalog: Durable table reclamation (decision 77, #1443)
 
 SQL format 11 (formerly 10) adds catalog kind **14**: a typed tuple containing kind Int32,
@@ -6456,9 +7128,14 @@ normal metadata uses owner zero. Maintenance can therefore remove it without mod
 catalog page. Load rejects duplicate retired identities and an identity both live and retired,
 and advances the identity allocator past every pending id. Reusing a name never reuses its id.
 
-The catalog retains each decoded intent's identity and record location at open, adds it only after
-the DROP commit, and removes it only after the retirement commit, all under its metadata lock.
-`GetPendingTableReclamations()` returns an independent read-only snapshot of the committed identities;
+The catalog retains each decoded intent's identity and record location at open, adds it after
+committed unpublication or TRUNCATE preparation, and removes it after retirement or successful
+prepared-owner publication, all under its metadata lock. The worker captures an internal immutable
+intent token and rechecks that incarnation after transaction and statement pins clear before freeing
+any page. TRUNCATE retirement is discoverable only after its visibility marker ends.
+`GetPendingTableReclamations()` returns an independent read-only snapshot of permanently retired
+identities, hiding prepared owners that can still become live. Public completion ignores prepared
+owners; the internal worker captures and completes exact intent incarnations;
 `CompleteTableReclamationAsync()` idempotently retires an identity without advancing the DDL
 generation. Record locations and the kind-14 codec stay private to this assembly. These two concrete
 catalog members are the narrow boundary change requested in review #1443; no interface, friend grant,
@@ -6512,7 +7189,7 @@ would tell every caller the value is changeable and then guard that promise at
 runtime.
 
 Table metadata extension version 2 introduced one collation identifier per column
-after the existing constraints. Current format 26 requires the complete table extension 6 record,
+after the existing constraints. Current format 27 requires the complete table extension 7 record,
 including resolved-call vectors, identity facets and frozen missing-value literals described below. Column additions,
 drops, and restart preserve explicit overrides. An index inherits its key
 columns' effective collations; the SQL engine verifies index eligibility and
@@ -6545,19 +7222,17 @@ dropped list.
   `relnatts + 1`, `src/backend/commands/tablecmds.c:7445-7446`), so a column
   re-added under a dropped column's name never shares the dropped column's
   component.
-- **Ordinals are never reclaimed.** Reusing a dropped ordinal would decode the
+- **Ordinals are retained within one physical owner.** Reusing a dropped ordinal would decode the
   dropped value, still stored in older versions, into another column. PostgreSQL
   keeps a dropped attribute's number for good and counts it against its column limit
   (`doc/src/sgml/limits.sgml:133-134`); here each dropped ordinal costs the table
   record one five-byte integer component and counts against the one-record limit
   below. When a table that has dropped columns outgrows the record, the refusal
-  counts them and says that recreating the table and copying its rows reclaims them,
-  since only a new table starts without dropped ordinals (`EncodeTable`; a
+  counts them and recommends RewriteTableAsync or recreating and copying the table;
+  both publish a fresh physical owner without dropped ordinals (`EncodeTable`; a
   two-column table reaches the limit after 1,588 ADD/DROP cycles).
-  Compacting the layout would take a table rewrite that moves every row version and
-  rebuilds its indexes; none exists, and one added later must replace the layout in
-  the same recoverable unit as the versions (the SQL engine's DESIGN, "DROP COLUMN
-  marks the column dropped").
+  RewriteTableAsync compacts the layout through the recoverable replacement described
+  below; older snapshots retain the original physical owner and layout.
 - **Every alteration carries the layout.** ADD/DROP COLUMN and ADD/DROP CONSTRAINT
   copy the dropped ordinals into the replacement, and `PublishTableAsync` refuses,
   with `SqlCatalogException`, a replacement that does not keep the current layout as
@@ -6582,7 +7257,7 @@ length, precision and scale, and `SqlCatalogColumn.DomainName` the domain's name
 column record keeps the name only. Engine-registered domains remain code; SQL-defined
 domains are catalog objects in kind-11 records. On reopen the engine binds column names
 against the merged engine registrations and persisted SQL domains. An unavailable domain
-leaves the database readable but refuses writes assigning that column with `COHSQLE010`.
+leaves the database readable but refuses writes assigning that column with `CS02010`.
 PostgreSQL records a domain column's type as the
 domain's own OID and keeps the domain in `pg_type`; here the base type is what the row
 codec, the key encoding and every comparison read, so they do not consult the domain.
@@ -6592,7 +7267,7 @@ codec, the key encoding and every comparison read, so they do not consult the do
   column (the primary key's implicit NOT NULL).
 - **Persistence: table extension version 4** (data-storage format 7). After the dropped
   ordinals, one optional string per live column, NULL for a column of a built-in type,
-  which this catalog always writes. Current format 26 also requires the call vectors, identity facets and extension 6 missing-value literals;
+  which this catalog always writes. Current format 27 also requires the call vectors, identity facets and extension 7 missing-value literals and TYPE default-assignment flags;
   the format gate refuses earlier databases rather than loading their definitions. A persisted blank
   name fails the load with `SqlCatalogException`, as does a blank `domainName` at the
   column's constructor (`ArgumentException`).
@@ -6933,7 +7608,7 @@ and domain definitions on open. Calls bind only to the recorded identities, so a
 cannot replace existing CHECKs, DEFAULTs or bodies. DROP reads those same vectors. Missing
 identities, and recorded native signatures whose volatility is now incompatible with their
 persisted use, use the engine's unresolved-definition path: open and reads succeed, but use and
-declared Build fail with `COHSQLE009`. CHECK rechecks Immutable admission at every bind;
+declared Build fail with `CS01009`. CHECK rechecks Immutable admission at every bind;
 other tightened declaration-only rules are not reapplied. A structurally malformed definition
 fails open, naming the table and constraint or column. Canonical storage began in data-storage
 format 4, so it needed no further
@@ -7083,7 +7758,7 @@ line and full XML documentation. This immutable expectation names the statement'
 table, index, function signature or domain and supplies the exact preceding receipt and live
 DDL generation. Under the metadata lock, the catalog compares all preceding receipt fields and
 vectors, generation and target with durable state and its actual mutation before committing;
-a mismatch is `COHSQLS001`. The catalog derives every object claim from that mutation and commits
+a mismatch is `CS03201`. The catalog derives every object claim from that mutation and commits
 the new receipt with its metadata. Callers cannot publish a progress DTO or supply object claims.
 This is an API consistency contract, not a boundary against callers controlling catalog storage.
 
@@ -7095,11 +7770,11 @@ expectation after the read or data statement succeeds; the engine owns atomic DM
 `SaveScriptStateAsync` checks generation before saving the O(1) marker. Except for that skip,
 Apply and Verify validate each completed statement's recorded target against the declared SQL,
 including its retained function type spellings, and validate created table/index ownership;
-inconsistency is `COHSQLS001`. No multi-statement catalog transaction was introduced. History is
+inconsistency is `CS03201`. No multi-statement catalog transaction was introduced. History is
 forward-only.
 
 The engine preflights declared scripts against the typed schema before opening files: scripts
-cannot ALTER/DROP typed tables or DROP typed indexes (`COHSQLS005`). Script-created tables may
+cannot ALTER/DROP typed tables or DROP typed indexes (`CS03205`). Script-created tables may
 evolve through later scripts, and script-created indexes on typed tables remain separately
 tracked. The typed schema document therefore stays an accurate record of its own objects when
 the engine advances its generation after a script commit.
@@ -7116,8 +7791,8 @@ in catalog metadata, following PostgreSQL's unconstrained view attributes
 flag, and COLUMNS never needs to bind a view body. No interface, friend grant or language reference
 was added. Format **23** fences kind 17; table extension 6 is unchanged. Older
 formats are refused, with no upgrade reader. The encoded record must fit one page
-(**8,092 bytes**); oversized definitions fail CREATE with COHSQLE033.
-View refusals carry structured diagnostics on SqlCatalogException, including COHSQLE033 for
+(**8,092 bytes**); oversized definitions fail CREATE with CS03033.
+View refusals carry structured diagnostics on SqlCatalogException, including CS03033 for
 incompatible replacement and oversized records, so the wire preserves the same code.
 
 CreateViewAsync validates collisions, live dependency identities, cycles and the
@@ -7129,7 +7804,7 @@ records its target claim when run by a declared script. DropViewAsync commits
 RESTRICT or dependent-view CASCADE and optional absence receipts atomically.
 Table create/reserve/publish/rename share the view relation namespace. Table/column
 drops, textual renames and changes to type/length/precision/scale independently enforce
-view dependencies at publication (COHSQLD002; PostgreSQL `src/backend/commands/tablecmds.c:15612-15624`).
+view dependencies at publication (CS03302; PostgreSQL `src/backend/commands/tablecmds.c:15612-15624`).
 DROP SCHEMA includes contained and external dependent views in its one atomic
 transaction. Engine ownership and DDL admission precede these invariant guards.
 
@@ -7146,7 +7821,7 @@ The internal stateless SqlCatalogCreation predicate owns the creation-only recor
 initial counter constraints. SQL uses it directly from Internal/Catalog,
 so recovery decisions use catalog vocabulary without a public API or friend-assembly grant.
 Creation commits collation, dbo and the format marker in that order. Completion changes no
-catalog record layout or record-space format 26. SQL requires its sql.create claim only when
+catalog record layout or the record-space format. SQL requires its sql.create claim only when
 adopting a marker-free interrupted file set; an empty data scan alone is no proof. The predicate
 receives the default namespace from SQL's shared SqlNamespaceNames constant, avoiding a new
 catalog dependency on the language assembly.
@@ -7246,7 +7921,7 @@ the remaining temporal forms and aligns floating assignment with that existing C
 
 Record-space format 26 and compiled-schema v8 fence changed temporal DEFAULT and frozen
 missing-value spellings. Every noncurrent catalog is refused before stored expressions bind;
-SqlDataStorageFormatException carries the existing storage-failure code COHSQLE041. Rebuild old
+SqlDataStorageFormatException carries the existing storage-failure code CS06041. Rebuild old
 schema artifacts and recreate old databases with their writing engine's export; there is no
 upgrade path or legacy reader (#1152). Sql.Schema DESIGN records the schema-hash change.
 
@@ -7254,7 +7929,7 @@ Temporal assignment, DEFAULT and CAST share SqlTemporalReader's explicit format/
 reason through the existing Sql.Language shared-source link. Each assembly owns a reader and its
 generated resource messages; private reader failures never cross an assembly boundary. Public
 SqlLiteralText translates them to its documented FormatException/OverflowException contract, while SQL
-uses COHSQLE047 / 22007, COHSQLE048 / 22008 and COHSQLE062 / 22015 respectively. There is
+uses CS02047 / 22007, CS02048 / 22008 and CS02062 / 22015 respectively. There is
 no CLR-exception-type inference or duplicate temporal conversion path. PostgreSQL datetime.c:4247-4290
 provides the classifications; no reference implementation code was copied.
 Floating text assignment calls CAST's ParseReal/ParseFloat, rejecting grouping, overflow and
@@ -7275,3 +7950,503 @@ worker completions and bounded recorded trigger/lane waits; statement-completed 
 not supply its progress count. The observation remains internal and opt-in; see the
 [root worker design](../../Assimalign.Cohesion.Database/docs/DESIGN.md#why-this-not-that-decisions)
 for publication scope, callback isolation and the limits of the wait budgets.
+
+## Structured failure codes (#1350)
+
+Hard lock deadlocks retain `DatabaseTransactionDeadlockException` with structured
+`CS04065`, mapped to SQLSTATE `40P01` (PostgreSQL `src/backend/utils/errcodes.txt:334`).
+Embedded and negotiated wire failures carry that diagnostic; SQLSTATE is the documented
+code mapping rather than an additional wire field. Under statement atomicity, earlier
+work and locks of an explicit victim remain until its caller rolls the transaction back.
+Auto-commit rolls its one-statement transaction back before translating the failure.
+
+The root statement-failure event reads `DatabaseException.Diagnostics`, preferring the first
+Error diagnostic and then the first entry. Offline refusals and unconfirmed commits carry the
+model's existing code there, with unprefixed Message detail and the original cause. The wire
+writer supplies the legacy error prefix once; negotiated peers also receive the existing
+structured diagnostics. No public signature, on-disk format, protocol version, event schema
+or counter changes. See the root DESIGN, structured failure-event codes, for selection and
+its PostgreSQL `src/backend/utils/error/elog.c:875-884` precedent; no reference code is copied.
+
+## Dedicated test actors (#1285)
+
+Deadline-dependent peers and busy test drivers use the linked Storage test helper's LongRunning threads. Ordinary async driver continuations stay on their actor scheduler, without changing SynchronizationContext. Existing deadlines of 25 seconds or more are hang guards. Runner settings impose no parallel-thread cap. See the [scheduling audit](../../Assimalign.Cohesion.Database.Storage/docs/TEST-HYGIENE-AUDIT.md) for every original Task.Run site, the exact journal counters and the physical index-work guards.
+
+Reference consulted: RavenDB test/StressTests/Voron/InvalidReleasesOfScratchPages.cs:39–68 and :71–103 use LongRunning stress drivers. No code was copied.
+
+## Shared B-tree pruning (#1195, #1239)
+
+This model supplies the coordinator's safe `PruneBound` to its B-tree manager and binds
+the current manager to the coordinator's version-purge pass. Record reclamation and a bounded
+index batch therefore share the existing worker schedule; index pruning runs under the apply
+gate, at most 64 leaf pages per pass, with one leaf's tree write latch held at a time.
+Catalog/store manager replacement is observed by the callback. Unique insertion prunes safely
+dead versions during its single cached descent, while pinned snapshots retain their visible
+history. Exact horizon equality retains the entry. Cancellation rolls back the unfinished page
+and retries it on a later pass. Empty leaves and their separator fences remain allocated.
+
+The independent index-maintenance worker inventory remains stable; it does not schedule this
+prune a second time. No language syntax, diagnostic code, wire bytes, model/storage/index format
+or transaction semantics change. The shared Indexing DESIGN records PostgreSQL references,
+split-path invariants, deterministic mutants and before/after measurements. Root integration
+tests exercise this model's real coordinator and current index manager, including catalog/store
+reattachment for Documents and Graph.
+
+## Confirmed record decoding (D1, #1372)
+
+All row decoding uses a storage-confirmed copy; a DatabaseTypeException is
+reported with page, slot, table and its original cause. Catalog Load adds that same physical
+context around decoder failures, retaining SqlCatalogException and its complete existing
+Diagnostics. Unit-iterator I/O remains outside the decoding catch. Format refusal details and
+codes are retained; no old-format reader is introduced.
+
+Reference consulted, without copying code: Neo4j
+community/record-storage-engine/src/main/java/org/neo4j/kernel/impl/store/CommonAbstractStore.java:785–792
+retries the page cursor before checking decoding errors; :861–865 checks bounds and cursor errors.
+Its record/RecordLoad.java:155–163 retains the cursor failure as the invalid-record cause.
+Cohesion uses the already-established D1 seqlock rather than adding a page read latch.
+
+Stable malformed copies are reported without speculative retries or waiting for a whole
+physical transaction. The existing storage read confirms both bytes and absence against
+all page mutations (#1365), including the copy-to-confirm window. Storage I/O, cancellation,
+timeout and existing storage exception identities are not caught by decoder-only wrappers.
+No file format, version, protocol frame, event, counter or diagnostic number changes.
+
+Malformed persisted catalog records now carry storage corruption through the engine boundary,
+so OpenDatabaseAsync reports DatabaseCorruptionException with CK06003, page and slot instead
+of leaking a catalog/parser exception. Direct SqlCatalog.Open retains SqlCatalogException,
+including for malformed key components, with the original DatabaseTypeException underneath
+its location-bearing corruption cause. The existing marker probe still distinguishes genuine
+older/newer format refusals from a damaged marker-free/current-format catalog. Format tests
+require this common corruption classification, retained causes and unchanged files; the
+six superseded exception-type assertions are strengthened to this contract, not bypassed.
+
+## Cascade lock retries (#1420, D2)
+
+DELETE prepares its complete cascade and SET NULL/DEFAULT work before the coordinator's
+physical apply. Every preparation lock participates: table/adjacent intents, directly targeted
+and discovered rows, released-reference parent rows, and unique keys for deletions and
+replacement versions. Each is tried without waiting. The first two refusals release every resource first
+granted after the current retry mark, wait through the normal lock manager, then take a new
+mark retaining the waited grant. All completed wait grants remain retained across later
+back-offs, preventing two contenders from handing the same grant back and forth (#1668).
+From the third refusal of the same statement onward, new closure grants are retained too
+and each refused resource queues through the normal lock manager (owner decision, 2026-10-24).
+This bounds release/rebuild starvation from hot child inserts while retaining deadlock detection.
+The complete closure is reconstructed, including its targets, reference graph, cached live
+indexes and lock-coverage claims. No deletion, version, index mutation or RETURNING projection
+from the abandoned attempt has been applied. The private retry signal never becomes a user
+diagnostic. Normal physical helpers only re-grant already owned locks and cannot use that signal.
+
+The initial delete-preparation mark is immutable, as in #1668 arbitration. Resources already held
+before preparation, and their upgrades, survive that mark along with earlier transaction work. Any preparation failure releases every grant newer than the initial mark,
+including completed wait grants, while prior statements and their upgrades remain protected.
+Caller cancellation retains its exception/token; it gives back new unapplied cascade grants,
+as upsert preparation already does. An offline owner retains all locks, and a started physical
+apply keeps its existing rollback/ownership contract. Apply starts only inside the admitted
+delegate, so cancellation while waiting for the apply gate still releases the new grants.
+Statement timeouts span every retry;
+individual lock waits retain their existing lock-timeout budgets. No key-share mode is added.
+Locks retained from earlier statements or completed waits can still form real hard deadlocks,
+which the shared manager resolves; soft queue cycles first attempt reordering.
+
+This is the existing #1668 SQL pattern (OnConflict.WaitForUpsertRowAsync) applied to the D2
+pre-apply cascade walk. PostgreSQL first repairs soft queue edges
+(`src/backend/storage/lmgr/deadlock.c:310–370,860–996`), while its referential enforcement uses
+FOR KEY SHARE (`src/backend/utils/adt/ri_triggers.c:563–583`, RI_FKey_check). Cohesion keeps its current
+modes and adopts the approved retry alternative. No reference code copied.
+
+After a wait the fixed statement snapshot is unchanged. A newer committed child still fails
+first-updater-wins. If a child candidate was physically undone while waiting, the restart
+finds the current closure instead of reading its freed slot; an old direct parent can then
+report its own committed-replacement conflict. The #1390 rollback race now pre-holds its child
+lock before the first failing statement, because an unwritten failure no longer retains a new
+child grant. It requires the actual second wait and retains the conflict and data assertions.
+
+No field is added to SqlStatementContext or SqlStatementMetrics. The SELECT allocation contract,
+public APIs, diagnostics, format, statement spans and wire messages are unchanged. The retry
+suite exercises CASCADE/SET NULL/SET DEFAULT at row and unique-key refusal, shared-parent and
+adjacent-table refusals, retained grants across two waits, cancellation cleanup, and actual
+IX ownership during result preparation after a restart. Existing snapshot, depth, fan-out,
+constraint and concurrent-DDL suites remain required.
+
+## #1420 measurements
+
+Release Windows ARM64 / .NET 10.0.13, tiering and background GC disabled in the standalone
+measurement host, shared machine. The committed #1390 probe runs one warm-up and twelve
+interleaved five-second samples per shape on each version. Precise active durations normalize
+commits/victims; setup-only reflection invokes the existing test helper outside its worker hot
+loops. These are development-scale measurements, not rankings or per-sample timing assertions.
+The before DLLs are frozen, and loaded SQL/Transactions/Storage hashes are checked on the fixed
+operation probe. No unexpected failure or wait of ten seconds was recorded in either phase.
+
+| Shape | Median commits/s before -> after | Median victims/s before -> after | Median victims / 1,000 commits before -> after | After samples above before commit-rate median |
+| --- | --- | --- | --- | --- |
+| 6 parents, 3 deleters, 5 writers | 899.412 -> 1440.178 | 17.825 -> 23.169 | 20.234 -> 16.419 | 12/12 |
+| 1 parent, 1 deleter, 14 explicit writers | 246.993 -> 355.118 | 28.369 -> 27.155 | 115.068 -> 77.325 | 12/12 |
+
+Absolute default-shape victims increase from 1,095 to 1,401 while more work commits; its parent
+deletes increase from 8,261 to 12,693. Hot-shape victims decrease from 1,752 to 1,613 and parent
+deletes increase from zero to 24, but only four of twelve samples make parent-delete progress.
+Its median parent-delete rate remains zero. D2 therefore improves this measured shape without
+guaranteeing uniform cascade progress in that historical unbounded-release implementation.
+The 2026-10-24 refusal bound above supersedes that release policy. Earlier grants and retained wait grants can still form
+hard cycles; this result does not authorize key-share modes or a different victim policy.
+
+A separate fixed operation deletes one parent with 32 children and rolls back outside the
+measured interval. After one warm-up, twelve batches of 100 deletes measure median
+80,958.5 -> 81,858.5 ns/delete and 108,032 -> 108,056 B/delete. Four of twelve final duration
+samples are at or below the old median. Allocation is the precise process-wide GC counter,
+including engine workers; periodic worker samples are visible in the raw data. Every batch
+validates the restored child ids/parent values outside timing. Digest FBF326266BA187D1 is
+unchanged. The additional 24 median bytes are on DELETE; no context/metrics field was added
+to the SELECT path. Stored-query allocation remains a required Release guard.
+
+Raw measurements/hashes/harness: temporary wave11-1420-probe-before/after.jsonl,
+wave11-1420-delete-before-v2/after.csv, wave11-1420-delete-final-hashes.json and
+Wave11CascadeProbe/Wave11DeleteProbe. The initial delete baseline without the final payload
+verification is retained separately; the figures above use the final matching harness on both
+versions. The local Windows results do not replace official quiet-host profiling.
+
+The single-row seek/lock-race guard counts exactly two examined rows for DELETE after one
+refused row lock (the original seek and retry), and exactly one for UPDATE. Uncontended seek
+counts remain unchanged; no scan bound is widened (#1420).
+
+## Transient probe costing and bounded hash builds (#1522, D3)
+
+No catalog statistic, maintenance command, storage format change or legacy reader is introduced.
+Binding still proves sargability and keeps the entire WHERE/ON residual. Competing seek paths
+are ranked by snapshot-visible B+Tree range counts. Each probe visits at most 32 pages and
+examines at most 512 physical entries, including invisible entries and the stopping key.
+Exact exhaustion and incomplete lower bounds are distinct. Probes use CountRange's tree read
+latch, with table/index identity validation around the count. DROP detaches indexes without
+reclaiming their pages (BTreeIndexManager.DropIndexAsync); table reclamation waits for active
+statement/snapshot fences. A retained tree and immutable key shape need no transaction object
+lock. A changed table definition discards optional costing for that plan, including earlier
+seek counts, join direction and hash selection, retaining the original bound access path (#1740).
+Readers keep the shape they bound; mutation execution retains its mandatory CS04006 checks.
+A detached or replaced index yields an unknown estimate. Costing does not enter the database-wide lock
+manager or add grants to an MVCC reader.
+Counts are neither cached across statements nor persisted. Unique complete equalities need no probe.
+A selected range of at most 16 candidates skips the base-table probe. Join estimates are lazy,
+reuse input access-path counts, and run only for hash keys or competing indexed directions;
+a complete unique first-step probe skips pair costing, and later unique/indexed steps need none.
+Deterministic 100k-row common-query measurements confirm fewer costing page reads, four fewer
+lock-manager acquisitions per statement and lower allocations; the stored-query allocation
+guard retains its 4293.296 bytes/query ceiling.
+Equal estimated costs retain binding's equality-prefix/range/uniqueness/name tie-break.
+Incomplete counts cost at least 1024 candidates or twice their observed visible count; unknown
+inputs cost 4096. These are planning heuristics, not reported exact cardinalities. A seek with
+more than 16 candidates loses to a scan only when an exact base probe costs no more than four
+random fetch units per seek candidate. Small indexed inner inputs (at most 16 exact candidates)
+and unique complete probes retain their index nested loop.
+
+For a safe mandatory equality, hash build plus probe work is compared with nested work.
+An unindexed loop costs the input product; an index loop costs outer rows times
+(1 + log2(inner rows + 1)). Loops remain when that work is at most four times the input sum.
+Unknown outer cardinality conservatively retains an available index probe. When both first-pair
+inputs have count estimates, compatible indexed directions use the same lookup cost, rather
+than index name, to choose the driver. Later indexed steps retain their bound direction. Only the first INNER pair may
+reverse to build the smaller estimated input. LEFT always preserves its written outer input.
+Each later join step can build its own table once. NULL keys have no matches; duplicate keys and
+hash collisions retain every candidate and evaluate the full ON. Numeric, temporal, binary and
+collated string hashes use SqlValueComparer equality classes. CHAR keys and unproven throwing,
+lazy, application-call or derived-text conditions retain the existing loop/probe path. Rewritten
+CTE definitions and references share one identity map; cached view plans are never mutated.
+
+SqlDatabaseEngineOptions.StatementMemoryBudget is a positive byte count, default 67108864
+(64 MiB), snapshotted with engine options. It bounds concurrently retained hash builds in one
+statement, including nested queries: each table reserves 104 bytes, arrays reserve both old and
+new storage during doubling, and retained rows charge their arrays and conservatively sized
+boxed/text/binary cells, including both padded CHAR payloads and trimmed comparison strings.
+The limit governs accounted live hash-build memory, joined-DML retention and CTAS retention described above. General
+result materialization, planning and transient scalar hashing remain outside this grant. Hash-build
+reservation precedes retained allocation; CTAS admits the completed query output before copying.
+Every exit releases reservations, including cancellation, failed decoding and budget refusal.
+CS05067 / PostgreSQL SQLSTATE 53200 reports budget exhaustion through an unprefixed resx
+message and one diagnostic code. There is no partitioning or spill. Persisted statistics,
+standalone ANALYZE and spill remain post-T2 Hardening work under D3.
+
+Joined UPDATE FROM, DELETE USING and MERGE also reserve retained decoded target identities,
+non-hash input buffers, derived-source copies, normalized intermediate frames, associations,
+selected write values and encoded replacement versions before retaining each item (#1715, #1751).
+Cascade deletion/update storage uses the same grant when owned by a joined statement. CS05067
+refuses exhaustion before the apply bracket writes anything. The outer joined-statement scope
+releases every reservation on success, refusal, constraint failure and cancellation, including
+WITH/subquery work and cascade retries. Plain UPDATE, DELETE and ON CONFLICT retain their
+existing allocation paths and do not create this owner.
+
+The join-only metrics state lazily owns a reference-identity ledger. Arrays and shared
+boxed/text/binary/CHAR cells use the hash table's conservative size rules; each retained object
+is charged once. The ledger reserves 320 bytes for its owner/promoted metrics/headers and 160 per tracked slot
+for entries/buckets, including simultaneous arrays during growth; vacated hash-only slots are reused.
+Empty joined statements keep the original metrics size and allocate no ledger. Per-row allowances cover
+growing lists, identity/association records, dictionaries, selected writes and constraint maps.
+These conservative reservations last until statement exit, even when a temporary buffer is
+consumed; the ledger can retain its shared objects for that lifetime. Existing hash builds keep
+their original full charges. Registering a hash row credits overlapping ledger payload first;
+disposing the hash releases its charge and transfers surviving retained payload to the ledger.
+Unselected hash objects leave the ledger when their last hash owner releases them. Thus hash
+storage is never charged a second time merely because an association aliases it. The existing
+HashMemoryBytes/PeakHashMemoryBytes internal metrics report the combined statement grant.
+General query-result materialization and transient expression values remain outside the grant;
+derived-source copies and selected write values are admitted as they are retained.
+
+Plain EXPLAIN never executes the SELECT/DML. Probes can read indexes; actual_rows stays NULL.
+Owner clarification on 2026-10-22 adds EXPLAIN ANALYZE over SELECT query bodies only, including
+read-only WITH/set operations. It executes and drains the query under normal snapshot,
+cancellation, timeout and hash-memory rules, then returns the description. INSERT/UPDATE/DELETE,
+including WITH data changes, normally fail CS05057 / SQLSTATE 0A000 before execution.
+The existing earlier read-only catalog check retains CS04021 for mutations of system relations.
+Standalone ANALYZE remains unsupported. SELECT expressions and application functions run as for an ordinary SELECT.
+The existing eight columns and ordinary result frames remain unchanged. estimated_rows on an
+access node contains the probe count; detail says exact_probe or lower_bound and records physical
+entry/page work. JoinStep estimates are explicitly heuristic (minimum probed inputs for hash,
+Cartesian product for loops), without a distinct-count claim. actual_rows records candidate work
+before residuals on measured select/join/access/step nodes; it is not the final result cardinality.
+Repeated probes/child executions accumulate, and unmeasured nodes remain NULL. Analysis counters
+are absent during normal execution. Join-only telemetry and live-memory accounting reuse the
+existing metrics path slot; ordinary statement/context instance layouts do not grow.
+
+Each analyzed invocation has a nested frame. A select/join node subtracts its direct children's
+inclusive physical work before accumulating its own candidates; wrapper frames propagate work
+even when they have no reported count. Correlated invocations accumulate on the child node without
+inflating the outer node. Frame unwinding runs in finally on success, cancellation and failure.
+Statement-wide record/pair totals still include all invocations. The extra state and frames exist
+only during analysis, using the existing join-telemetry reference slot.
+Zero-step derived SELECTs count ReadInput candidates without incrementing join-pair totals.
+Analysis counters are scoped by relation path and plan identity: two references to a cached
+view body, including nested view bodies, report independent counts, while repeated correlated
+invocations of the same reference accumulate. Execution and description enter the same scopes.
+
+Nonpositive StatementMemoryBudget refusals use DatabaseEngineOptionChecks.Refuse, preserving
+ArgumentOutOfRangeException, parameter name and actual value while identifying the SQL engine.
+PostgreSQL postgres/postgres/src/backend/executor/instrument.c:196-217 likewise counts tuples
+on a node's own instrumentation and accumulates repeated cycles. Cohesion reports cumulative
+candidate work rather than PostgreSQL's output-row average; no code was copied.
+
+On Windows ARM64 .NET 10.0.13, the two-row correlated select and join fixtures each add
+368 B per analyzed query (analysis state and invocation frames); ordinary query allocations
+are unchanged. Twelve sequential batches of fifty executions, after one warmup, measured
+median ExecuteAsync durations of 40056 -> 37722 ns for select and 76431 -> 67770 ns for join;
+9/12 and 10/12 after samples respectively were at or below the old median. Tiering/background
+GC were disabled. Description enumeration and exact work-count verification were outside the
+timed/allocation interval. These shared-host durations are descriptive, not a speed claim.
+Raw samples, harness and hashes are retained under Temp/Wave11AnalysisOverheadProbe and
+Temp/Wave11AnalysisFixCostProbe. Both fixtures verify the corrected outer count and unchanged
+child work; ordinary-query output digests and allocations also match before/after.
+
+Reference consultation, no copied code (clones under C:/Source/repos):
+PostgreSQL postgres/postgres/src/backend/utils/errcodes.txt:119,409 defines 0A000
+(feature_not_supported) and 53200 (out_of_memory), respectively.
+PostgreSQL postgres/postgres/src/backend/optimizer/path/costsize.c:546-580 models index fetch
+costs; :4330-4400 models hash build/probe work.
+postgres/postgres/src/backend/executor/nodeHash.c:683-720 sizes tuples and bucket memory; its
+batch/spill machinery is deliberately excluded by D3.
+Neo4j neo4j/neo4j/community/cypher/interpreted-runtime/src/main/scala/org/neo4j/cypher/internal/runtime/interpreted/pipes/ValueHashJoinPipe.scala:47-80
+uses a tracked table, skips null keys and retains matching rows.
+RavenDB ravendb/ravendb/src/Raven.Server/Documents/Queries/Dynamic/DynamicQueryToIndexMatcher.cs:71-115
+ranks compatible indexes, then freshness/field coverage; those proxies were rejected for SQL skew
+in favor of bounded physical probes.
+
+Before/after measurement uses frozen item-9 Release assemblies and the final item-10 assemblies,
+with explicit copied-assembly hash checks. Windows ARM64 .NET 10.0.13, tiering/background GC off,
+one warm-up followed by twelve batches per shape; these are sequential shared-host samples,
+not interleaved quiet-host rankings. Table values are rounded to six decimal places. Queries execute synchronously in one explicit ReadCommitted
+transaction with pre-parsed requests. Stopwatch and current-thread allocation surround ExecuteAsync;
+row enumeration, exact id/pair verification, digesting and disposal occur outside each interval.
+Both join inputs have primary indexes but no index on the joined key. The skewed table has the
+same broad composite and rare single-column indexes on both versions. No statistics are saved.
+
+| Shape | Median ns/query, before -> after | Median B/query, before -> after | After durations at/below old median |
+| --- | --- | --- | --- |
+| 80-by-80 equality join, 12 queries/batch | 714412.5 -> 125000 | 423344 -> 80080 | 12/12 |
+| 800-by-800 equality join, 2 queries/batch | 62780875 -> 1108150 | 36331456 -> 609096 | 12/12 |
+| 800-row skewed lookup, 100 queries/batch | 249362.5 -> 18649.5 | 263208 -> 14928 | 12/12 |
+| Complete primary-key lookup, 100 queries/batch | 5634 -> 5621.5 | 8520 -> 8528 | 7/12 |
+
+Exact output digests remain 457EF3AD47C442A1, 8169E2A5479E4EF1 and 000000000000004C
+(the last applies to both lookup shapes). The seek metadata adds one reference field and therefore
+eight bytes to this primary-key query, even though its fast path performs no probe or cost-context
+allocation. The ordinary scan/context/metrics layouts remain unchanged. These durations are
+descriptive evidence; deterministic candidate and physical-work counters decide regressions.
+Raw harness, frozen assemblies, hashes and twelve-sample JSONL files are retained outside the
+repository under Temp/Wave11SqlCostProbe and Temp/wave11-1522-probe-*. The final after sample
+and its hashes are -after-final.jsonl and -final-hashes.json; earlier after data precedes a
+comment-only cleanup and is retained as superseded evidence. The stored-query Release guard
+remains 4280 B/query in three runs, below its unchanged 4293.296 bound.
+
+## Server-reported transaction reset (#1540)
+
+SQL/Graph transaction-status negotiation adds an existing Ready I/T/E frame after Execute
+completion or a statement error. The shared client drains it before returning, rolls back open
+or failed transactions on pool return, and only reuses an Idle session. Cleanup runs outside the
+pool lock. Rollback reply and Ready drain each have a five-second internal bound (up to ten
+seconds total). Missing/invalid state or legacy transaction-capable peers
+are discarded. SQL's formerly skipped pool-rollback regression is enabled. No new wire identifier,
+public interface, protocol version or persistent format is introduced.
+
+An idle open wire transaction keeps the table-intent and row/key locks it has acquired until
+COMMIT, ROLLBACK, disconnect, pool return or IdleTimeout (30 minutes by default). Keep transactions
+short: an idle transaction blocks writers that need the same rows or keys. New clients discard sessions against pre-#1540 servers
+that cannot negotiate transaction-status, so those servers are not pooled.
+
+## Shared server options and TCP composition (#1391, D7 B)
+
+The five sealed model server-options types derive from root DatabaseServerOptions. The base owns
+Listener, Authenticator, MaxSessions, AuthenticationTimeout, IdleTimeout and ShutdownDrainTimeout.
+Defaults stay 100 sessions, ten seconds for authentication, thirty minutes idle and thirty seconds
+for shutdown. TerminalDrainLinger remains on the model leaves, default two seconds. Each model
+still snapshots every value before validation and owns the transferred listener through stop.
+No public Database interface is added; the count remains five.
+
+Database.Tcp replaces Database.Sql.Tcp. Its root-namespace extension
+Listen<TOptions>(this TOptions options, Uri endpoint) where TOptions : DatabaseServerOptions
+returns that same concrete options instance. AddServer(configure) and AddServer(factory) retain
+their existing ownership rules. Engines still reference generic Connections, never the TCP
+integration. App.Database publicly carries Database.Tcp; Connections.Tcp stays runtime-private.
+Consumer source migrates its package reference and imports Assimalign.Cohesion.Database.
+
+Binding preserves the previous SQL helper: Uri.IdnHost, literal IPv4/IPv6, localhost -> IPv4
+loopback, wildcard -> Any; DNS names are refused synchronously with CK07101. Endpoint URIs
+must be absolute, have a host and explicit positive port, and have no user information, query or
+fragment. Port zero remains invalid for a resolved endpoint URI; transport-level ephemeral binds
+remain available through the generic listener option. The old Sql.Tcp design's port-zero claim
+was inconsistent with Uri.ThrowIfNotEndpoint and is not carried forward.
+
+Missing Listener, invalid MaxSessions and invalid timers report model, engine and the exact
+option as ParamName, with kernel resx codes CK08001, CK08002 and CK08003. Existing timer
+policies are retained: Documents permits zero authentication/idle values; Blob requires positive
+values; both accept InfiniteTimeSpan. SQL/Graph/KeyValue retain their existing authentication/
+idle policy. All models require positive finite shutdown/linger values no greater than
+4,294,967,294 milliseconds. Configuration ArgumentExceptions have no SQLSTATE. No wire,
+protocol, storage format, event or counter changes.
+
+The TCP address setup was compared with PostgreSQL src/backend/libpq/pqcomm.c:442-470
+(AI_PASSIVE and pg_getaddrinfo_all) in the local clone. Cohesion deliberately keeps its existing
+literal-only bind policy instead of copying hostname resolution. No reference-engine code is copied.
+
+## Error and construction conventions (#1470)
+
+Exception messages and format templates are generated from `src/Properties/ErrorMessages.resx`;
+format arguments use the current culture. Cancellation and abort templates used during normal
+cleanup are cached before reuse. Error identities remain separate from message text where a
+structured diagnostic carrier exists. Standard .NET guards retain their argument names and exception types.
+Shared Engine source uses the consuming assembly's generated accessor through the internal `EngineErrorMessages` binding; no public resource accessor or cross-assembly internal access is introduced.
+
+## Sql diagnostic conventions (#1470)
+
+Exception and diagnostic templates use the project's build-generated `ErrorMessages` resources.
+Parameterized templates format with the current culture; abort/cancellation templates used in
+normal cleanup are cached. The [Database error-code registry](../../Assimalign.Cohesion.Database/docs/ERROR-CODES.md)
+assigns this family its two-letter prefix and categorized five-digit identities.
+Existing SQLSTATE meanings, numeric wire error kinds, frame layouts and disk formats are preserved.
+Structured diagnostics keep their code outside the message. Compiler diagnostic identifiers and
+standard .NET argument guards retain their own contracts.
+
+
+## Fixed-pass refusal fixture ownership (found during #1470)
+
+Explicit-pass SQL refusal fixtures pause the engine pump at its existing trigger observer before
+creating their databases. The observer acknowledges the pause before the fixture proceeds;
+only then do manual iterations dispatch and collect real lanes. The worker remains attached to
+the engine, preserving observational Faulted state, recovery and offline-policy coverage. In
+particular, the three refused-undo episodes assert Faulted while a refusal is held and Running
+after recovery. Using a detached replacement would miss that owner-state contract.
+
+The real-pump owed-pass tests retain their normal pump. Five-millisecond delays only yield while
+establishing the pause; thirty-second cancellation/join limits are hang guards. No duration or
+extra retry decides an assertion, and no parallelism cap is added. This corrects a fixture race:
+the engine pump could add a pass to an exact-count manually driven refusal episode. Product
+worker scheduling, fault semantics, public APIs, diagnostics and storage/wire formats are unchanged.
+
+
+## Shared defaults and diagnostic resources (#1470)
+
+The Defaults shared module resolves incompatible-value text through a consuming-assembly-local
+`SqlDefaultLiteralErrorMessages` binding to the generated internal resource accessor. SQL schema
+and SDK extraction therefore retain identical ArgumentException text and the `value` parameter,
+without a resource lookup on successful rendering. SQL explanatory message fragments also use
+resources. SDK compiler identifiers remain `COHDBSDK`; embedded runtime identities use `CK00001`
+for language syntax and `CS03101` for unsupported principal declarations. Schema format remains
+`cohesion/database-schema/v8`; SQLSTATE, wire, diagnostics carriers and public APIs are unchanged.
+
+
+The shared Types module also binds modifier-refusal templates to each consumer's own generated
+resources through internal `SqlTypeModifierErrorMessages`. Unsupported type/modifier text and
+codes are preserved. Numeric modifier spelling remains invariant SQL text; message templates
+format with the current culture. Successful type validation adds no resource lookup.
+
+
+## Shared validation message completion (#1470)
+
+Engine option requirements and portable database-name refusal reasons, including their rule
+text, resolve through each consuming model's generated internal resources. Valid name checks
+still avoid resource lookup; the engine-description template is cached for construction.
+Existing message text, parameter names, refused values and pre-I/O validation order remain
+unchanged. No public API, error identity, SQLSTATE, storage or wire format, event or counter changes.
+Local predicate guards remain with the policies they validate; reusable unconditional catalog
+throws use exception-type extension members. Private cold comparison and location-attachment
+paths retain their allocation and exception-identity behavior.
+
+## Rules audit after main cleanup
+
+The transient cost, cascade-retry and EXPLAIN analysis carriers use explicit constructors with
+the same property/field layout. Private names follow repository casing; the four constructors
+add no state or hot-path work. SELECT-only EXPLAIN ANALYZE, plain EXPLAIN admission, transient
+probes, hash-budget refusal and cascade release/retry retain their existing contracts.
+Assembly-local Engine/Types resource bindings live under Internal and keep the linked module's
+owning namespace. SqlStorageTests keeps its existing cases and assertions through Shouldly.
+
+## Error message producers and catalog carriers
+
+Failure-detail producers now use the same generated resources as their outer exception templates:
+unresolved function/domain reasons, signature arity, declaration conflicts, schema drift and
+compensation explanations, and catalog size-refusal context. Persisted-definition explanation
+strings are cached. Canonical SQL, type/identity spellings and protocol/diagnostic framing remain
+data. Existing message text, codes and source-span policy are preserved for these resource moves.
+Handshake refusal prose uses these resources too, preserving its numeric protocol categories and
+current-culture formatting.
+
+Owned catalog producers no longer depend on the public message-only SqlCatalogException
+constructor. Malformed persisted catalog metadata reports CS06059 (SQLSTATE XX001); unsupported
+catalog metadata formats/versions report CS06060 (0A000). Table/index declaration, stale identity,
+identity range/type and script-state refusals use their existing specific identities. A truncated
+typed decode receives CS06059 at the catalog boundary while retaining the same SqlCatalogException,
+StorageCorruptionException, original cause, page and slot. Existing authored carriers remain intact.
+The public legacy constructor, refusal behavior, storage versions and lack of upgrade readers are
+unchanged. Runtime regressions pin the new carriers alongside existing message/location checks.
+
+## Shared lifecycle diagnostic completion
+
+Duplicate logical database/storage creation carries CK03001, whether the database is open or
+represented only by its closed files. Ordinary logical absence remains the precise
+DatabaseNotFoundException and carries CK03002. Each diagnostic has Error severity, the unchanged
+unprefixed exception message and no statement span. Existing coded interrupted-creation failures
+and original causes are retained. No ownership, file mutation, lifecycle ordering, format or
+protocol message-kind change accompanies these diagnostics.
+
+An orphan directory without its data file refuses creation with CK06004 and the unchanged remedy.
+A directly opened missing physical data/catalog set carries CK06005. In-memory and file-backed
+strategies share the same condition identities. The orphan-directory format text is resourced
+through this assembly's existing Engine binding; no new public helper or reference is required.
+
+Identical SQL error text shares one canonical resource entry; internal accessor aliases are deduplicated without changing the text or culture.
+
+## Debugger inspection
+
+Concrete source types with explicit nonpublic instance state use a private nested DebugView
+and debugger display/proxy attributes. The view is the last member in the same type file and
+exposes only reviewed public/protected state through read-only properties. Exception and
+EventSource types remain excluded. A type with no state to filter keeps its normal member view;
+a type whose base supplies both debugger attributes inherits that view.
+
+Inspection does not perform I/O, take lifecycle locks, mutate state, invoke application callbacks,
+or materialize lazy results. The additions are debugger metadata and nested helper types; existing
+instance fields, runtime operations, error identities, data formats and protocol contracts do
+not change. SDK and Studio source are outside this rule's scope.
+
+The function argument view snapshots only Count; the function context view snapshots only
+TransactionTimestamp. Neither view retains a ref struct, span, context, or cancellation token.
+The SQL value view reads Type and IsNull without decoding its payload. Internal-only plan or
+metrics state stays hidden rather than being promoted to a public debugger projection.

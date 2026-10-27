@@ -39,22 +39,22 @@ public sealed partial class SqlQueryParser
     // first operand before the rest of the chain is parsed). The two together reject a statement
     // exactly when its tree is deeper than the limit, and they bound the parser's own recursion:
     // every cycle through the rules passes TryEnterOperand or a parenthesis. Crossing either
-    // limit reports SQL0006, abandons the rest of the statement and keeps only its command type,
+    // limit reports CS00006, abandons the rest of the statement and keeps only its command type,
     // the way a character outside the dialect does: nothing past the limit is parsed, so no
     // deeper tree is ever built and the statement never executes. Each entry also checks the
-    // thread's stack, and a thread too small for text within the limits gets SQL0007 the same
+    // thread's stack, and a thread too small for text within the limits gets CS00007 the same
     // way. The deepest nesting the statement reaches is recorded on its root
     // (SqlQueryStatement.ExpressionNestingDepth), so an engine with a lower limit can refuse a
     // statement another parser accepted without parsing it again.
 
     /// <summary>The diagnostic for text nested deeper than the parser's limit.</summary>
-    internal const string NestingCode = "SQL0006";
+    internal const string NestingCode = "CS00006";
 
     /// <summary>
     /// The diagnostic for text within the limits that the calling thread has too little stack
     /// left to parse. The same text parses on a thread with more stack.
     /// </summary>
-    internal const string NestingStackCode = "SQL0007";
+    internal const string NestingStackCode = "CS00007";
 
     // How deep the expression tree may be, and how deep grouping parentheses may nest.
     private readonly int _nestingLimit;
@@ -69,7 +69,7 @@ public sealed partial class SqlQueryParser
     // and its deepest grouping parentheses.
     private int _deepestNesting;
 
-    // The index of the SQL0006 or SQL0007 diagnostic in _parseDiagnostics, or -1.
+    // The index of the CS00006 or CS00007 diagnostic in _parseDiagnostics, or -1.
     private int _nestingDiagnostic = -1;
 
     /// <summary>
@@ -103,8 +103,8 @@ public sealed partial class SqlQueryParser
 
     /// <summary>
     /// Parses an operand that the node being built will enclose: one level deeper than the
-    /// node's own position. When that level would exceed the limit it reports <c>SQL0006</c>
-    /// instead (<c>SQL0007</c> when the thread is out of stack), abandons the statement and
+    /// node's own position. When that level would exceed the limit it reports <c>CS00006</c>
+    /// instead (<c>CS00007</c> when the thread is out of stack), abandons the statement and
     /// returns a placeholder.
     /// </summary>
     private SqlExpression ParseOperand(ref TokenLexer lexer, OperandRule rule)
@@ -180,7 +180,7 @@ public sealed partial class SqlQueryParser
         if (_parenthesisDepth >= _nestingLimit)
         {
             RejectNesting(ref lexer, position, position + 1,
-                $"Parentheses nest deeper than the supported limit of {_nestingLimit} levels.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ParenthesisNestingLimit, _nestingLimit));
             return false;
         }
 
@@ -261,7 +261,7 @@ public sealed partial class SqlQueryParser
         }
     }
 
-    private string ExpressionTooDeepMessage => $"Expression nesting exceeds the supported limit of {_nestingLimit} levels.";
+    private string ExpressionTooDeepMessage => string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExpressionNestingLimit, _nestingLimit);
 
     /// <summary>
     /// A level of parentheses or calls runs the whole precedence ladder: about 1 to 2 KB of stack
@@ -270,8 +270,8 @@ public sealed partial class SqlQueryParser
     /// around 255 nested calls, parses on a 1 MB thread in a release build. A thread with less,
     /// such as one created with a small maximum size, a debug build, or a statement within a
     /// higher configured limit, may not recurse as far as the limit allows; the parser then
-    /// rejects the statement with <c>SQL0007</c> rather than overflow. The code differs from the
-    /// limit's <c>SQL0006</c> because the same text parses on a thread with more stack: the
+    /// rejects the statement with <c>CS00007</c> rather than overflow. The code differs from the
+    /// limit's <c>CS00006</c> because the same text parses on a thread with more stack: the
     /// statement is within the dialect, the thread is not big enough for it.
     /// </summary>
     private bool HasStackToNest(ref TokenLexer lexer, int start, int end)
@@ -282,12 +282,12 @@ public sealed partial class SqlQueryParser
         }
 
         RejectNesting(ref lexer, NestingStackCode, start, end,
-            "Expression nesting exceeds the stack available to the parser on this thread.");
+            ErrorMessages.ParserStackExhausted);
         return false;
     }
 
     /// <summary>
-    /// Reports <c>SQL0006</c>, or <c>SQL0007</c> for a thread out of stack, and consumes the rest
+    /// Reports <c>CS00006</c>, or <c>CS00007</c> for a thread out of stack, and consumes the rest
     /// of the statement, so every rule still on the stack meets the end of the text and returns
     /// without parsing further. What those rules report on the way out is dropped at the end of
     /// <see cref="ParseCore"/>.
@@ -315,7 +315,7 @@ public sealed partial class SqlQueryParser
     }
 
     /// <summary>
-    /// Drops the diagnostics the abandoned rules reported after <c>SQL0006</c> or <c>SQL0007</c>:
+    /// Drops the diagnostics the abandoned rules reported after <c>CS00006</c> or <c>CS00007</c>:
     /// each met the end of the text the rejection consumed, so none describes the statement as
     /// written.
     /// </summary>

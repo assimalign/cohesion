@@ -35,6 +35,8 @@ namespace Assimalign.Cohesion.Database.Blob.Internal;
 /// as in the other models.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("BlobWriteAheadFlushWorker {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Blob.Internal.BlobWriteAheadFlushWorker.DebugView))]
 internal sealed class BlobWriteAheadFlushWorker : DatabaseWriteWorker<BlobDatabase>
 {
     private readonly BlobDatabaseEngine _engine;
@@ -66,5 +68,20 @@ internal sealed class BlobWriteAheadFlushWorker : DatabaseWriteWorker<BlobDataba
         DatabaseWriteResult failures = default;
         TryWrite(() => database.DataStorage.FlushPendingCommits() ? 1 : 0, ref failures);
         return failures;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Blob.Internal.BlobWriteAheadFlushWorker _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Blob.Internal.BlobWriteAheadFlushWorker value)
+        {
+            _target = value;
+        }
+
+        public bool CompletionOnly => _target.CompletionOnly;
+        public string Name => _target.Name;
+        public global::Assimalign.Cohesion.Database.DatabaseEngineWorkerKind Kind => _target.Kind;
+        public global::System.TimeSpan Interval => _target.Interval;
     }
 }

@@ -31,8 +31,11 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// catalog directly, is bound on first use.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("SqlBoundTableCache")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlBoundTableCache.DebugView))]
 internal sealed class SqlBoundTableCache
 {
+    internal long StatementMemoryBudget { get; init; } = 64L * 1024 * 1024;
     private readonly SqlCatalog _catalog;
     private readonly SqlFunctionEnvironment _native;
     private readonly object _sync = new();
@@ -127,7 +130,7 @@ internal sealed class SqlBoundTableCache
     /// <exception cref="InsufficientExecutionStackException">
     /// The calling thread has too little stack left to read a definition back
     /// (<see cref="SqlPersistedExpression.OutOfStack"/>); inside a statement the session reports it
-    /// as <c>COHSQLE004</c>.
+    /// as <c>CS05004</c>.
     /// </exception>
     internal SqlBoundTable Get(SqlCatalogTable table, CancellationToken cancellationToken = default)
     {
@@ -309,7 +312,7 @@ internal sealed class SqlBoundTableCache
                 continue;
             }
 
-            string subject = $"CHECK constraint '{constraint.Name}' on table '{tableName}'";
+            string subject = string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CheckConstraintSubject, constraint.Name, tableName);
             var predicate = SqlPersistedExpression.Load(constraint.CheckExpression!, subject);
             try
             {
@@ -334,7 +337,7 @@ internal sealed class SqlBoundTableCache
             {
                 // Converted to the column's type once, here: no decoded row and no INSERT converts it again.
                 defaults[ordinal] = declaredDefaults?[ordinal] ?? SqlPlanExecutor.BindDefaultExpression(column,
-                    $"DEFAULT of column '{column.Name}' on table '{tableName}'", functions, _catalog.DefaultCollation, cancellationToken);
+                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ColumnDefaultSubject, column.Name, tableName), functions, _catalog.DefaultCollation, cancellationToken);
             }
 
             if (column.MissingValueLiteral is { } text)
@@ -345,7 +348,7 @@ internal sealed class SqlBoundTableCache
                     throw new SqlExecutionException(SqlExecutionException.DamagedDefinitionCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.MissingValueNotLiteral, column.Name));
                 }
                 missing[ordinal] = string.Equals(text, column.DefaultLiteral, StringComparison.Ordinal) ? defaults[ordinal] : SqlPlanExecutor.BindDefaultExpression(frozen,
-                    $"Missing value of column '{column.Name}' on table '{tableName}'", functions, _catalog.DefaultCollation, cancellationToken);
+                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ColumnMissingValueSubject, column.Name, tableName), functions, _catalog.DefaultCollation, cancellationToken);
             }
             if (column.DomainName is not null)
             {
@@ -360,7 +363,7 @@ internal sealed class SqlBoundTableCache
     /// Binds a stored column's domain against the engine's type catalog (phase E3): its check as a call
     /// over the column's value, or, when the engine registers no domain of the name, or one over another
     /// storage type or another length, precision or scale than the column stores, an unresolved
-    /// binding that fails each write to the column with <c>COHSQLE010</c> while the table opens and its
+    /// binding that fails each write to the column with <c>CS02010</c> while the table opens and its
     /// reads proceed, as owner decision 65 has it for a function. A column keeps the bound it was
     /// created with, so a domain whose base type changed would otherwise bound the column's writes and
     /// a <c>CAST</c> to the domain differently.
@@ -370,12 +373,12 @@ internal sealed class SqlBoundTableCache
         var column = table.Columns[ordinal];
         string name = column.DomainName!;
         string? reason = !functions.Types.TryGetDomain(name, out var domain)
-            ? "which this engine does not register"
+            ? ErrorMessages.RegistrationMissingReason
             : domain.Storage.Type != column.Type.Type
                 || domain.Storage.MaxLength != column.Type.MaxLength
                 || domain.Storage.Precision != column.Type.Precision
                 || domain.Storage.Scale != column.Type.Scale
-                ? $"which this engine registers over {domain.BaseType!.Name}, but the column stores {SqlType.ForStorage(column.Type).Name}"
+                ? string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.RegisteredDomainStorageMismatch, domain.BaseType!.Name, SqlType.ForStorage(column.Type).Name)
                 : null;
         if (reason is not null)
         {
@@ -404,7 +407,7 @@ internal sealed class SqlBoundTableCache
 
     /// <summary>
     /// Binds one persisted CHECK: its tree when every call resolves, or an unresolved binding that
-    /// fails each write with <c>COHSQLE009</c> (owner decision 65) when a call names a function the
+    /// fails each write with <c>CS01009</c> (owner decision 65) when a call names a function the
     /// engine's catalog does not resolve, or an application function whose registered result no
     /// longer fits where the predicate uses it (a BOOLEAN predicate, a comparison, an arithmetic
     /// operand). Anything else that does not bind is a damaged catalog.
@@ -429,7 +432,7 @@ internal sealed class SqlBoundTableCache
 
         // A call the engine's catalog does not resolve is an application change, not damage: the
         // predicate binds as unresolved, the table opens and its reads proceed, and each write that
-        // would evaluate the predicate fails with COHSQLE009. Looked for only once binding failed, so
+        // would evaluate the predicate fails with CS01009. Looked for only once binding failed, so
         // a predicate that binds costs nothing more.
         var unresolved = FindUnresolvedCall(table, predicate, subject, constraint.CheckFunctionCalls, functions);
         if (unresolved is null && failure is SqlFunctionResultMismatchException mismatch)
@@ -437,7 +440,7 @@ internal sealed class SqlBoundTableCache
             // An application function the engine registers, with a result that no longer fits where
             // the stored predicate uses it: its registration changed after the predicate was stored.
             unresolved = new SqlUnresolvedDefinition(subject, Signature(table, mismatch.Call, functions),
-                $"which this engine registers returning {mismatch.Returned}, where the CHECK needs {mismatch.Needed}");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.RegisteredResultTypeMismatch, mismatch.Returned, mismatch.Needed));
         }
 
         if (unresolved is not null)
@@ -452,14 +455,12 @@ internal sealed class SqlBoundTableCache
             // format-4 catalog can hold such a predicate, which never had a value. Format 4 is
             // unreleased and carries no such definition forward (#1152); the open fails, coded.
             throw new DatabaseException(
-                $"{subject} cannot be loaded: its persisted definition '{constraint.CheckExpression}' calls a function with " +
-                $"arguments the function does not accept ({failure.Message}). {SqlPersistedExpression.UncheckedCallHint}",
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlBoundTableCacheBindCheckDatabase, subject, constraint.CheckExpression, failure.Message, SqlPersistedExpression.UncheckedCallHint),
                 SqlExecutionException.DiagnosticsOf(failure, SqlExecutionException.DamagedDefinitionCode, discardLocations: true), failure);
         }
 
         throw new DatabaseException(
-            $"{subject} cannot be loaded: its persisted definition '{constraint.CheckExpression}' does not bind to the table " +
-            $"({failure.Message}). {SqlPersistedExpression.DamagedCatalogHint}",
+            string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlBoundTableCacheBindCheckDatabase2, subject, constraint.CheckExpression, failure.Message, SqlPersistedExpression.DamagedCatalogHint),
             SqlExecutionException.DiagnosticsOf(failure, SqlExecutionException.DamagedDefinitionCode, discardLocations: true), failure);
     }
 
@@ -504,11 +505,11 @@ internal sealed class SqlBoundTableCache
         {
             if (!functions.Catalog.TryGetOverloads(call.FunctionName, out var overloads))
             {
-                return "which this engine does not register";
+                return ErrorMessages.RegistrationMissingReason;
             }
             if (overloads[0].Kind != SqlFunctionKind.Scalar)
             {
-                return "which this engine registers as an aggregate";
+                return ErrorMessages.RegisteredAsAggregateReason;
             }
 
             try
@@ -519,19 +520,19 @@ internal sealed class SqlBoundTableCache
                     // Resolve only to explain the missing identity; never use the replacement.
                     var diagnostic = new SqlExpressionEvaluator(table.Columns, null, defaultCollation: _catalog.DefaultCollation, functions: functions);
                     _ = diagnostic.ResolveFunction(call);
-                    return $"whose recorded identity '{SqlDefinitionBinder.DescribeIdentity(scope.RecordedIdentity(call)!)}' this engine does not register";
+                    return string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.RecordedFunctionIdentityMissing, SqlDefinitionBinder.DescribeIdentity(scope.RecordedIdentity(call)!));
                 }
                 return resolved.Volatility != SqlFunctionVolatility.Immutable
-                    ? "which this engine no longer registers as IMMUTABLE"
+                    ? ErrorMessages.ImmutableRegistrationMissing
                     : resolved is SqlExpressionFunction { Unresolved: { } reason } ? reason : null;
             }
             catch (SqlEvaluationException exception) when (exception.Code == SqlEvaluationException.AmbiguousFunctionCallCode)
             {
-                return $"which more than one overload this engine registers accepts equally well ({exception.Message})";
+                return string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.OverloadSelectionAmbiguousReason, exception.Message);
             }
             catch (SqlEvaluationException exception) when (exception.Code == SqlEvaluationException.FunctionSignatureMismatchCode)
             {
-                return $"which no overload this engine registers accepts ({exception.Message})";
+                return string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.NoAcceptedOverloadReason, exception.Message);
             }
         }
     }
@@ -599,6 +600,8 @@ internal sealed class SqlBoundTableCache
 
     // A refresh replaces the whole state. A slow binding retains its original environment and
     // table map and cannot publish an old result into the replacement generation.
+    [global::System.Diagnostics.DebuggerDisplay("CacheState")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlBoundTableCache.CacheState.DebugView))]
     private sealed class CacheState
     {
         private readonly SqlBoundTableCache _owner;
@@ -621,5 +624,21 @@ internal sealed class SqlBoundTableCache
 
         private SqlBindingEntry<SqlBoundTable> CreateEntry(SqlCatalogTable table)
             => new(token => _owner.Bind(table, Functions, token));
+
+        private sealed class DebugView
+        {
+            public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlBoundTableCache.CacheState value)
+            {
+                _ = value;
+            }
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlBoundTableCache value)
+        {
+            _ = value;
+        }
     }
 }

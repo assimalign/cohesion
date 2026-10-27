@@ -12,7 +12,7 @@ nonzero exit. COUNT verification requires an Int64 long (#1137), including index
 A composite UNIQUE (rank, marker) index also survives restart. Verify seeks the committed key
 and attempts a duplicate Put, which must fail without leaving state so verify can run twice.
 The owning test reads both raw trees and counts all live entries as well as each committed,
-deleted and abandoned key, proving no missing or orphan entries. Both registrations are v2 and
+deleted and abandoned key, proving no missing or orphan entries. Both registrations are v3 (#1530) and
 the composite registration retains its UNIQUE flag. The fixture uses no reflection and can be published with NativeAOT.
 
 The process boundary forces recovery from persisted files, independently of
@@ -27,3 +27,12 @@ flowchart TD
     Exit --> Open["Reopen and recover in another process"]
     Open --> Assert["Assert document and indexed OQL results"]
 ```
+
+## Registered-function NativeAOT consumer
+
+The fixture builds the engine with three application registrations before any database I/O:
+a typed lower_tag scalar, a typed rank_total aggregate and the derived has_value scalar that
+receives NULL/MISSING explicitly. Verify executes all three after recovery and checks exact
+string, Boolean and Decimal results. These registrations exercise static generic factory
+instantiations and a protected-core application implementation without reflection, dynamic code,
+new dependencies or persisted function records. Seed/verify storage behavior remains unchanged.

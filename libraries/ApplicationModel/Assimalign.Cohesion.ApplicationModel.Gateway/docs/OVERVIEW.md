@@ -147,3 +147,13 @@ and posted to the application's telemetry sink as an event that names the operat
 value. Wire contract:
 [runtime contract](../../../../docs/RUNTIME_CONTRACT.md#deployment-record); routes and grants:
 [control plane design](../../Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane/docs/DESIGN.md).
+
+## Checked manifest paths and sources (#1470)
+
+Manifest probe `Http` is `ResourceHttpPath?`, control-plane `Path` is `ResourceHttpPath`, and mount
+`Source` is `ResourceMountSource?`. Consumers use the underlying `Value` when composing addresses
+or comparing raw text. Valid string initializers remain supported; malformed strings are refused
+at construction or typed JSON import. Default structs still pass through explicit manifest/plan
+validation. JSON stays plain strings/nulls under `cohesion/resource/v2`; no transport message,
+Database storage format, diagnostic identity, event or counter changes. All binary consumers
+must be rebuilt together, including installed SDK/framework E2E payloads.

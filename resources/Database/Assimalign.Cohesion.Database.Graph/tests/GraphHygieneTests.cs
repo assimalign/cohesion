@@ -64,7 +64,7 @@ public sealed class GraphHygieneTests
         (await GraphSchema.Open(database, session).GetLabelsAsync(CancellationToken.None)).ShouldHaveSingleItem().ShouldBe(label);
     }
 
-    [Theory(DisplayName = "Cohesion Test [Database.Graph] - Wire: oversized catalog names fail with COHDBG009 and preserve the session")]
+    [Theory(DisplayName = "Cohesion Test [Database.Graph] - Wire: oversized catalog names fail with CG02009 and preserve the session")]
     [InlineData(0)]
     [InlineData(1)]
     [InlineData(2)]
@@ -89,7 +89,7 @@ public sealed class GraphHygieneTests
 
         // Assert
         error.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
-        error.Message.ShouldStartWith("COHDBG009:", Case.Sensitive);
+        error.Message.ShouldStartWith("CG02009:", Case.Sensitive);
         error.Message.ShouldContain("Graph catalog metadata encodes to", Case.Sensitive);
         await client.SendAsync(ProtocolMessageType.Ping);
         await client.ExpectAsync(ProtocolMessageType.Pong);
@@ -98,7 +98,7 @@ public sealed class GraphHygieneTests
         (await GraphSchema.Open(session.Database, session).GetRelationshipTypesAsync(CancellationToken.None)).ShouldBeEmpty();
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Graph] - Catalog: metadata-only overflow carries structured COHDBG009")]
+    [Fact(DisplayName = "Cohesion Test [Database.Graph] - Catalog: metadata-only overflow carries structured CG02009")]
     public async Task SaveLabelAsync_CatalogOnlyOverflow_ShouldReportStructuredSizeFailure()
     {
         // Arrange: the label name fits a node record; only the catalog stores its owner name.
@@ -116,8 +116,8 @@ public sealed class GraphHygieneTests
             await GraphSchema.Open(database, session).SaveLabelAsync(label, CancellationToken.None));
 
         // Assert
-        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG009");
-        failure.Message.ShouldNotStartWith("COHDBG009:", Case.Sensitive);
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG02009");
+        failure.Message.ShouldNotStartWith("CG02009:", Case.Sensitive);
         failure.InnerException.ShouldBeOfType<GraphElementTooLargeException>().Message.ShouldContain("Graph catalog metadata encodes to", Case.Sensitive);
         (await GraphSchema.Open(database, session).GetLabelsAsync(CancellationToken.None)).ShouldBeEmpty();
     }
@@ -136,7 +136,7 @@ public sealed class GraphHygieneTests
 
         // Assert
         error.Message.ShouldContain("MissingType", Case.Sensitive);
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG002");
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG01002");
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Graph] - Properties: unsigned runtime types retain their declared signed/decimal classification")]

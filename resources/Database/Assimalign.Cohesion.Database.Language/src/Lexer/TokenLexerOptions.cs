@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 
 namespace Assimalign.Cohesion.Database.Language;
 
@@ -23,4 +23,11 @@ public ref struct TokenLexerOptions
     /// Defaults to <c>false</c> (case-insensitive), which suits SQL and GQL.
     /// </summary>
     public bool IsCaseSensitive { get; set; }
+
+    /// <summary>
+    /// Whether to recognize <c>&lt;-</c> as a left arrow. Defaults to <c>false</c>, so
+    /// SQL and OQL read it as a less-than operator followed by a minus or line comment.
+    /// GQL enables this option for incoming relationship patterns.
+    /// </summary>
+    public bool RecognizeLeftArrow { get; set; }
 }

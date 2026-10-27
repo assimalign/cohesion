@@ -6,6 +6,8 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// An <c>AND</c> or <c>OR</c> chain with SQL three-valued logic, its terms evaluated first to last
 /// until one decides the result (#1069, #1151).
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("SqlBoundLogical")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlBoundLogical.DebugView))]
 internal sealed class SqlBoundLogical : SqlBoundExpression
 {
     /// <summary>Initializes a bound chain.</summary>
@@ -28,4 +30,12 @@ internal sealed class SqlBoundLogical : SqlBoundExpression
 
     /// <summary>Gets the source logical expression span.</summary>
     internal Location? Location { get; }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlBoundLogical value)
+        {
+            _ = value;
+        }
+    }
 }

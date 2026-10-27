@@ -37,7 +37,7 @@ public sealed class SqlTransactionSpellingTests
         {
             var error = await writer.ExecuteAsync(nested, cancellationToken: CancellationToken.None);
             error.Status.ShouldBe(DatabaseResultStatus.Error);
-            error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLT001");
+            error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS04001");
             writer.CurrentTransaction.ShouldBeSameAs(transaction);
         }
         await ExecuteAsync(writer, "INSERT INTO t VALUES (1);");
@@ -97,10 +97,10 @@ public sealed class SqlTransactionSpellingTests
         // Assert
         missing.Status.ShouldBe(DatabaseResultStatus.Error);
         var diagnostic = missing.Diagnostics.ShouldHaveSingleItem();
-        diagnostic.Code.ShouldBe("COHSQLT002");
+        diagnostic.Code.ShouldBe("CS04002");
         diagnostic.Message.ShouldBe("COMMIT requires an open transaction.");
         ddl.Status.ShouldBe(DatabaseResultStatus.Error);
-        ddl.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLT003");
+        ddl.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS04003");
         session.CurrentTransaction.ShouldBeSameAs(transaction);
         transaction.State.ShouldBe(TransactionState.Active);
         await ExecuteAsync(session, "ROLLBACK WORK;");
@@ -127,36 +127,36 @@ public sealed class SqlTransactionSpellingTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - Transactions: every rejected typed request preserves the active scope")]
-    [InlineData("START", "SQL0003")]
-    [InlineData("START WORK", "SQL0003")]
-    [InlineData("BEGIN SAVEPOINT marker", "SQL0003")]
-    [InlineData("ROLLBACK TO marker", "SQL0003")]
-    [InlineData("BEGIN WORK TRANSACTION", "SQL0003")]
-    [InlineData("COMMIT WORK WORK", "SQL0003")]
-    [InlineData("END WORK", "SQL0003")]
-    [InlineData("END TRANSACTION", "SQL0003")]
-    [InlineData("BEGIN TRAN", "SQL0003")]
-    [InlineData("BEGIN TRANSACTION named", "SQL0003")]
-    [InlineData("END IF", "SQL0003")]
-    [InlineData("COMMIT PREPARED 'x'", "SQL0003")]
-    [InlineData("START TRANSACTION ISOLATION LEVEL READ COMMITTED", "SQL0003")]
-    [InlineData("START TRANSACTION READ ONLY", "SQL0003")]
-    [InlineData("BEGIN WORK ISOLATION LEVEL SERIALIZABLE", "SQL0003")]
-    [InlineData("ROLLBACK WORK TO SAVEPOINT a", "SQL0003")]
-    [InlineData("COMMIT AND NO CHAIN", "SQL0003")]
-    [InlineData("COMMIT AND CHAIN", "SQL0003")]
-    [InlineData("ROLLBACK AND NO CHAIN", "SQL0003")]
-    [InlineData("END AND NO CHAIN", "SQL0003")]
-    [InlineData("ABORT", "SQL0002")]
-    [InlineData("ABORT WORK", "SQL0002")]
-    [InlineData("ABORT TRANSACTION", "SQL0002")]
-    [InlineData("SAVEPOINT a", "SQL0002")]
-    [InlineData("RELEASE SAVEPOINT a", "SQL0002")]
-    [InlineData("SET TRANSACTION ISOLATION LEVEL READ COMMITTED", "SQL0002")]
-    [InlineData("PREPARE TRANSACTION 'x'", "SQL0002")]
-    [InlineData("\"START\" TRANSACTION", "SQL0002")]
-    [InlineData("START \"TRANSACTION\"", "SQL0003")]
-    [InlineData("BEGIN \"WORK\"", "SQL0003")]
+    [InlineData("START", "CS00003")]
+    [InlineData("START WORK", "CS00003")]
+    [InlineData("BEGIN SAVEPOINT marker", "CS00003")]
+    [InlineData("ROLLBACK TO marker", "CS00003")]
+    [InlineData("BEGIN WORK TRANSACTION", "CS00003")]
+    [InlineData("COMMIT WORK WORK", "CS00003")]
+    [InlineData("END WORK", "CS00003")]
+    [InlineData("END TRANSACTION", "CS00003")]
+    [InlineData("BEGIN TRAN", "CS00003")]
+    [InlineData("BEGIN TRANSACTION named", "CS00003")]
+    [InlineData("END IF", "CS00003")]
+    [InlineData("COMMIT PREPARED 'x'", "CS00003")]
+    [InlineData("START TRANSACTION ISOLATION LEVEL READ COMMITTED", "CS00003")]
+    [InlineData("START TRANSACTION READ ONLY", "CS00003")]
+    [InlineData("BEGIN WORK ISOLATION LEVEL SERIALIZABLE", "CS00003")]
+    [InlineData("ROLLBACK WORK TO SAVEPOINT a", "CS00003")]
+    [InlineData("COMMIT AND NO CHAIN", "CS00003")]
+    [InlineData("COMMIT AND CHAIN", "CS00003")]
+    [InlineData("ROLLBACK AND NO CHAIN", "CS00003")]
+    [InlineData("END AND NO CHAIN", "CS00003")]
+    [InlineData("ABORT", "CS00002")]
+    [InlineData("ABORT WORK", "CS00002")]
+    [InlineData("ABORT TRANSACTION", "CS00002")]
+    [InlineData("SAVEPOINT a", "CS00002")]
+    [InlineData("RELEASE SAVEPOINT a", "CS00002")]
+    [InlineData("SET TRANSACTION ISOLATION LEVEL READ COMMITTED", "CS00002")]
+    [InlineData("PREPARE TRANSACTION 'x'", "CS00002")]
+    [InlineData("\"START\" TRANSACTION", "CS00002")]
+    [InlineData("START \"TRANSACTION\"", "CS00003")]
+    [InlineData("BEGIN \"WORK\"", "CS00003")]
     public async Task ExecuteAsync_RejectedTypedTransactionForm_ShouldKeepScopeActive(string sql, string code)
     {
         // Arrange

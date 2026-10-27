@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 
+using Assimalign.Cohesion.Database.KeyValuePair.Protocol;
 using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.KeyValuePair.Internal;
@@ -11,7 +12,7 @@ namespace Assimalign.Cohesion.Database.KeyValuePair.Internal;
 /// into typed requests: <c>GET @k</c>, <c>PUT @k @v [IF ABSENT | IF @etag]</c>,
 /// <c>DELETE @k [IF @etag]</c>, <c>EXISTS @k</c>,
 /// <c>SCAN [FROM @start] [TO @end] [PREFIX @p] [LIMIT n|@n]</c>, and
-/// <c>KEYSPACES</c>. Keywords are
+/// <c>KEYSPACES</c> and <c>CALL name @arg ...</c>. Keywords are
 /// case-insensitive; every data operand is a named parameter (<c>@name</c>)
 /// riding the session's parameter map — the grammar itself never carries values,
 /// which is what keeps it trivially injection-proof and wire-compatible with the
@@ -37,7 +38,7 @@ internal static class KeyValueCommandParser
 
         if (tokens.Length == 0)
         {
-            throw Error("COHKV001", ErrorMessages.CommandEmpty);
+            throw Error("CV00001", ErrorMessages.CommandEmpty);
         }
 
         // KEYSPACES is a virtual command result, never an entry address. A
@@ -45,7 +46,7 @@ internal static class KeyValueCommandParser
         if (tokens.Length > 1 && IsKeyword(tokens[1], "KEYSPACES") &&
             (IsKeyword(tokens[0], "PUT") || IsKeyword(tokens[0], "DELETE")))
         {
-            throw Error("COHKV002", ErrorMessages.CatalogReadOnly);
+            throw Error("CV03002", ErrorMessages.CatalogReadOnly);
         }
 
         try
@@ -58,15 +59,28 @@ internal static class KeyValueCommandParser
                 "EXISTS" => ParseExists(tokens, parameters),
                 "SCAN" => ParseScan(tokens, parameters),
                 "KEYSPACES" => ParseKeySpaces(tokens),
-                var verb => throw Error("COHKV003", string.Format(CultureInfo.CurrentCulture, ErrorMessages.CommandUnknown, verb)),
+                "CALL" => ParseCall(tokens, parameters),
+                var verb => throw Error("CV00003", string.Format(CultureInfo.CurrentCulture, ErrorMessages.CommandUnknown, verb)),
             };
         }
         catch (ArgumentException exception)
         {
             // Request-constructor validation (empty key, contradictory
             // conditions) is a command error at this boundary.
-            throw Error("COHKV004", exception.Message);
+            throw Error("CV00004", exception.Message);
         }
+    }
+
+    private static KeyValueFunctionRequest ParseCall(string[] tokens, IReadOnlyDictionary<string, object?>? parameters)
+    {
+        if (tokens.Length < 2) { throw Error("CV00019", ErrorMessages.CallFormInvalid); }
+        var name = new KeyValueFunctionName(tokens[1]);
+        var arguments = new object?[tokens.Length - 2];
+        for (int index = 0; index < arguments.Length; index++)
+        {
+            arguments[index] = BindParameter(tokens[index + 2], parameters);
+        }
+        return new KeyValueFunctionRequest(name, arguments);
     }
 
     private static KeyValueKeySpacesRequest ParseKeySpaces(string[] tokens)
@@ -91,7 +105,7 @@ internal static class KeyValueCommandParser
     {
         if (tokens.Length is not (3 or 5))
         {
-            throw Error("COHKV005", ErrorMessages.PutFormInvalid);
+            throw Error("CV00005", ErrorMessages.PutFormInvalid);
         }
 
         var key = BindBytes(tokens[1], parameters);
@@ -102,7 +116,7 @@ internal static class KeyValueCommandParser
         {
             if (!IsKeyword(tokens[3], "IF"))
             {
-                throw Error("COHKV006", string.Format(CultureInfo.CurrentCulture, ErrorMessages.PutIfExpected, tokens[3]));
+                throw Error("CV00006", string.Format(CultureInfo.CurrentCulture, ErrorMessages.PutIfExpected, tokens[3]));
             }
 
             options = IsKeyword(tokens[4], "ABSENT")
@@ -117,7 +131,7 @@ internal static class KeyValueCommandParser
     {
         if (tokens.Length is not (2 or 4))
         {
-            throw Error("COHKV007", ErrorMessages.DeleteFormInvalid);
+            throw Error("CV00007", ErrorMessages.DeleteFormInvalid);
         }
 
         var key = BindBytes(tokens[1], parameters);
@@ -127,7 +141,7 @@ internal static class KeyValueCommandParser
         {
             if (!IsKeyword(tokens[2], "IF"))
             {
-                throw Error("COHKV008", string.Format(CultureInfo.CurrentCulture, ErrorMessages.DeleteIfExpected, tokens[2]));
+                throw Error("CV00008", string.Format(CultureInfo.CurrentCulture, ErrorMessages.DeleteIfExpected, tokens[2]));
             }
 
             expectedETag = BindETag(tokens[3], parameters);
@@ -147,7 +161,7 @@ internal static class KeyValueCommandParser
 
             if (index + 1 >= tokens.Length)
             {
-                throw Error("COHKV009", string.Format(CultureInfo.CurrentCulture, ErrorMessages.ScanOperandMissing, clause));
+                throw Error("CV00009", string.Format(CultureInfo.CurrentCulture, ErrorMessages.ScanOperandMissing, clause));
             }
 
             string operand = tokens[index + 1];
@@ -171,10 +185,10 @@ internal static class KeyValueCommandParser
                     break;
 
                 case "FROM" or "TO" or "PREFIX" or "LIMIT":
-                    throw Error("COHKV010", string.Format(CultureInfo.CurrentCulture, ErrorMessages.ScanClauseRepeated, clause));
+                    throw Error("CV00010", string.Format(CultureInfo.CurrentCulture, ErrorMessages.ScanClauseRepeated, clause));
 
                 default:
-                    throw Error("COHKV011", string.Format(CultureInfo.CurrentCulture, ErrorMessages.ScanClauseUnknown, tokens[index]));
+                    throw Error("CV00011", string.Format(CultureInfo.CurrentCulture, ErrorMessages.ScanClauseUnknown, tokens[index]));
             }
 
             index += 2;
@@ -192,7 +206,7 @@ internal static class KeyValueCommandParser
         return value switch
         {
             byte[] bytes => bytes,
-            _ => throw Error("COHKV012", string.Format(CultureInfo.CurrentCulture, ErrorMessages.BytesOperandInvalid, token, value?.GetType().Name ?? "null")),
+            _ => throw Error("CV02012", string.Format(CultureInfo.CurrentCulture, ErrorMessages.BytesOperandInvalid, token, value?.GetType().Name ?? "null")),
         };
     }
 
@@ -204,7 +218,7 @@ internal static class KeyValueCommandParser
         {
             long etag => etag,
             int etag => etag,
-            _ => throw Error("COHKV013", string.Format(CultureInfo.CurrentCulture, ErrorMessages.ETagOperandInvalid, token, value?.GetType().Name ?? "null")),
+            _ => throw Error("CV02013", string.Format(CultureInfo.CurrentCulture, ErrorMessages.ETagOperandInvalid, token, value?.GetType().Name ?? "null")),
         };
     }
 
@@ -215,7 +229,7 @@ internal static class KeyValueCommandParser
         {
             if (!int.TryParse(token, out int literal) || literal < 0)
             {
-                throw Error("COHKV014", string.Format(CultureInfo.CurrentCulture, ErrorMessages.LimitLiteralInvalid, token));
+                throw Error("CV02014", string.Format(CultureInfo.CurrentCulture, ErrorMessages.LimitLiteralInvalid, token));
             }
 
             return literal;
@@ -227,7 +241,7 @@ internal static class KeyValueCommandParser
         {
             int limit when limit >= 0 => limit,
             long limit when limit is >= 0 and <= int.MaxValue => (int)limit,
-            _ => throw Error("COHKV015", string.Format(CultureInfo.CurrentCulture, ErrorMessages.LimitOperandInvalid, token, value?.GetType().Name ?? "null")),
+            _ => throw Error("CV02015", string.Format(CultureInfo.CurrentCulture, ErrorMessages.LimitOperandInvalid, token, value?.GetType().Name ?? "null")),
         };
     }
 
@@ -235,14 +249,14 @@ internal static class KeyValueCommandParser
     {
         if (token.Length < 2 || token[0] != '@')
         {
-            throw Error("COHKV016", string.Format(CultureInfo.CurrentCulture, ErrorMessages.ParameterReferenceExpected, token));
+            throw Error("CV00016", string.Format(CultureInfo.CurrentCulture, ErrorMessages.ParameterReferenceExpected, token));
         }
 
         string name = token[1..];
 
         if (parameters is null || !parameters.TryGetValue(name, out object? value))
         {
-            throw Error("COHKV017", string.Format(CultureInfo.CurrentCulture, ErrorMessages.ParameterMissing, name));
+            throw Error("CV01017", string.Format(CultureInfo.CurrentCulture, ErrorMessages.ParameterMissing, name));
         }
 
         return value;
@@ -258,7 +272,7 @@ internal static class KeyValueCommandParser
     {
         if (tokens.Length != count)
         {
-            throw Error("COHKV018", string.Format(CultureInfo.CurrentCulture, ErrorMessages.CommandArityInvalid, tokens[0].ToUpperInvariant(), form));
+            throw Error("CV00018", string.Format(CultureInfo.CurrentCulture, ErrorMessages.CommandArityInvalid, tokens[0].ToUpperInvariant(), form));
         }
     }
 }

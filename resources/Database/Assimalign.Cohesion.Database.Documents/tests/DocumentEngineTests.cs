@@ -257,7 +257,7 @@ public sealed class DocumentEngineTests
         await Should.ThrowAsync<ArgumentException>(async () => await engine.CreateDatabaseAsync(name));
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Documents] - Format: a database whose indexes are in B-tree page format 1 is refused at open with COHDBI001, its files untouched (#1194)")]
+    [Fact(DisplayName = "Cohesion Test [Database.Documents] - Format: a database whose indexes are in B-tree page format 1 is refused at open with CK06101, its files untouched (#1194)")]
     public async Task Open_IndexPagesInFormatOne_ShouldBeRefused()
     {
         string root = Path.Combine(Path.GetTempPath(), "cohesion-documents-format-" + Guid.NewGuid().ToString("N"));
@@ -298,10 +298,12 @@ public sealed class DocumentEngineTests
         finally { Directory.Delete(root, recursive: true); }
     }
 
-    [Theory(DisplayName = "Cohesion Test [Database.Documents] - Format: v1 index records refuse engine open without writes and dispose the coordinator (#1135)")]
-    [InlineData((byte)4)]
-    [InlineData((byte)5)]
-    public async Task OpenDatabaseAsync_V1IndexRecord_ShouldRefuseWithoutWritesAndDisposeCoordinator(byte kind)
+    [Theory(DisplayName = "Cohesion Test [Database.Documents] - Format: earlier index records refuse engine open without writes and dispose the coordinator (#1530)")]
+    [InlineData((byte)4, (byte)1)]
+    [InlineData((byte)5, (byte)1)]
+    [InlineData((byte)4, (byte)2)]
+    [InlineData((byte)5, (byte)2)]
+    public async Task OpenDatabaseAsync_EarlierIndexRecord_ShouldRefuseWithoutWritesAndDisposeCoordinator(byte kind, byte version)
     {
         // Arrange: hand-build the complete v1 layout, independently of the current catalog codec.
         string root = Path.Combine(Path.GetTempPath(), "cohesion-documents-catalog-format-" + Guid.NewGuid().ToString("N"));
@@ -319,12 +321,14 @@ public sealed class DocumentEngineTests
                 writer.Write(kind == 4 ? 42UL : 0UL); // An unproven definition would be scrubbed without the fence.
                 writer.Write(0UL);
                 writer.Write(kind);
-                writer.Write((byte)1);
+                writer.Write(version);
                 if (kind == 4)
                 {
                     writer.Write(Guid.NewGuid().ToByteArray());
                     writer.Write(2); writer.Write("ix"u8);
+                    if (version == 2) { writer.Write(1); }
                     writer.Write(1); writer.Write("a"u8);
+                    if (version == 2) { writer.Write(false); }
                     writer.Write(1UL);
                 }
                 else
@@ -332,6 +336,7 @@ public sealed class DocumentEngineTests
                     writer.Write(1UL);
                     writer.Write(1L);
                     writer.Write(2); writer.Write("ix"u8);
+                    if (version == 2) { writer.Write(false); }
                 }
                 using var bracket = storage.BeginTransaction();
                 if (kind == 4) { storage.InsertEntry(bracket, record.ToArray()); }
@@ -350,9 +355,13 @@ public sealed class DocumentEngineTests
             var failure = await Should.ThrowAsync<DatabaseException>(async () => await engine.OpenDatabaseAsync("legacy", CancellationToken.None));
 
             // Assert: the manager's disposed guard must fire, even though storage has also closed.
-            failure.Message.ShouldStartWith($"Database 'legacy' cannot be opened. Document catalog kind {kind} format: found 1, supported 2.", Case.Sensitive);
+            failure.Message.ShouldStartWith($"Database 'legacy' cannot be opened. Document catalog kind {kind} format: found {version}, supported 3.", Case.Sensitive);
             failure.Message.ShouldContain("Recreate the database", Case.Sensitive);
-            failure.InnerException.ShouldBeOfType<DocumentCatalogException>();
+            failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD06105");
+            var refused = failure.InnerException.ShouldBeOfType<DocumentCatalogException>();
+            refused.IsFormatRefusal.ShouldBeTrue();
+            refused.PageId.ShouldNotBeNull();
+            refused.SlotIndex.ShouldNotBeNull();
             engine.TryGetDatabase("legacy", out _).ShouldBeFalse();
             var coordinator = openedStorage.OnOffline.ShouldNotBeNull().Target.ShouldBeOfType<TransactionCoordinator>();
             var disposed = await Should.ThrowAsync<ObjectDisposedException>(async () =>
@@ -368,7 +377,7 @@ public sealed class DocumentEngineTests
         finally { Directory.Delete(root, recursive: true); }
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Documents] - Format: a database in storage format 2 (the format before #1253) is refused at open with COHDBS001 naming it, its files untouched (#1251, #1253)")]
+    [Fact(DisplayName = "Cohesion Test [Database.Documents] - Format: a database in storage format 2 (the format before #1253) is refused at open with CK06001 naming it, its files untouched (#1251, #1253)")]
     public async Task Open_StorageFormatTwo_ShouldBeRefusedNamingTheDatabase()
     {
         string root = Path.Combine(Path.GetTempPath(), "cohesion-documents-storage-format-" + Guid.NewGuid().ToString("N"));

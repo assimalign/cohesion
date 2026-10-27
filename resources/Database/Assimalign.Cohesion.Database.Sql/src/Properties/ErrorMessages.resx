@@ -1,6 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <root>
   <data name="UpsertArbiterInvalid" xml:space="preserve"><value>ON CONFLICT target '{0}' on '{1}.{2}': {3}</value></data>
+  <data name="MergeActionInvalid" xml:space="preserve"><value>MERGE requires at least one WHEN clause with an action valid for its match kind.</value></data>
+  <data name="MergeWhenUnreachable" xml:space="preserve"><value>A MERGE WHEN clause follows an unconditional clause of the same match kind.</value></data>
+  <data name="MergeActionContext" xml:space="preserve"><value>merge_action() is allowed only in the RETURNING projection of MERGE.</value></data>
+  <data name="MergeActionArity" xml:space="preserve"><value>merge_action() accepts no arguments, quantifier or ordering.</value></data>
+  <data name="MergeAggregate" xml:space="preserve"><value>Aggregates are not allowed in MERGE conditions or action values; use a source query.</value></data>
+  <data name="MergeStar" xml:space="preserve"><value>A wildcard is not allowed in MERGE conditions or action values.</value></data>
+  <data name="MergeAssignmentType" xml:space="preserve"><value>MERGE value of type {0} cannot be assigned to column '{1}' of type {2}.</value></data>
+  <data name="MergeRepeatedRow" xml:space="preserve"><value>MERGE cannot affect a target row a second time.</value></data>
   <data name="UpsertTargetRequired" xml:space="preserve"><value>DO UPDATE requires a column or ON CONSTRAINT target.</value></data>
   <data name="UpsertConstraintNotUnique" xml:space="preserve"><value>The constraint has no associated unique index (CHECK and FOREIGN KEY cannot arbitrate).</value></data>
   <data name="UpsertLegacyPrimaryKey" xml:space="preserve"><value>The legacy primary key has no associated unique index.</value></data>
@@ -116,6 +124,7 @@
   <data name="IdentityInsertForbidden" xml:space="preserve"><value>GENERATED ALWAYS forbids an explicit INSERT value</value></data>
   <data name="IdentityBackfillForbidden" xml:space="preserve"><value>ADD COLUMN IDENTITY requires a table with no live rows</value></data>
   <data name="IdentityTypeChangeForbidden" xml:space="preserve"><value>ALTER COLUMN cannot change an identity storage type</value></data>
+  <data name="IdentityReplacementRange" xml:space="preserve"><value>Identity column '{0}' has a current counter value outside the target type {1}.</value></data>
   <data name="IdentitySchemaOwnedForbidden" xml:space="preserve"><value>{0}: {1}: schema-owned column '{2}' cannot declare identity metadata. Nothing was changed.</value></data>
   <data name="IdentityColumnViolation" xml:space="preserve">
     <value>Identity column '{0}': {1}.</value>
@@ -129,7 +138,7 @@
   <data name="EngineNamespaceDependentObjects" xml:space="preserve"><value>Cannot drop schema '{0}' because other objects depend on it. Use DROP SCHEMA ... CASCADE to drop the dependent objects too.</value></data>
   <data name="DefaultNamespaceProtected" xml:space="preserve"><value>Cannot drop schema 'dbo': code-first provisioning depends on this pre-existing SQL namespace.</value></data>
   <data name="SystemNamespaceReadOnly" xml:space="preserve"><value>System namespace '{0}' is read-only.</value></data>
-  <data name="ScriptNamespaceTypedObjects" xml:space="preserve"><value>COHSQLS005: Declared script '{0}' cannot DROP SCHEMA '{1}' CASCADE over typed schema objects; declare the change in the typed schema. Nothing was opened or written.</value></data>
+  <data name="ScriptNamespaceTypedObjects" xml:space="preserve"><value>CS03205: Declared script '{0}' cannot DROP SCHEMA '{1}' CASCADE over typed schema objects; declare the change in the typed schema. Nothing was opened or written.</value></data>
   <data name="CteDuplicateName" xml:space="preserve"><value>Common table expression name '{0}' is declared more than once.</value></data>
   <data name="CteForwardReference" xml:space="preserve"><value>Common table expression '{0}' is referenced before its declaration.</value></data>
   <data name="ConstantQueryWildcard" xml:space="preserve"><value>A SELECT without FROM cannot project a wildcard.</value></data>
@@ -137,7 +146,10 @@
   <data name="CorrelatedUngroupedColumn" xml:space="preserve"><value>Outer column '{0}' must appear in GROUP BY before it can be referenced by a grouped query's subquery.</value></data>
   <data name="OuterOnlyAggregate" xml:space="preserve"><value>An aggregate whose column references all belong to outer query scopes is not supported.</value></data>
   <data name="PrimaryKeyNullable" xml:space="preserve"><value>A primary-key column cannot become nullable.</value></data>
-  <data name="AlterColumnRewrite" xml:space="preserve"><value>ALTER COLUMN '{0}' would rewrite existing values; only validation-only changes are supported. Use an explicit table-copy migration; in-place rewrites are tracked by #1447.</value></data>
+  <data name="AlterTypeAssignmentRequired" xml:space="preserve"><value>Column '{0}' cannot be cast automatically from {1} to {2}. Supply an explicit CAST in USING, or drop an incompatible DEFAULT before changing the type.</value></data>
+  <data name="AlterTypeUsingScalarOnly" xml:space="preserve"><value>ALTER COLUMN TYPE USING requires a scalar row expression without aggregates or window functions.</value></data>
+  <data name="AlterColumnImplicitCollation" xml:space="preserve"><value>ALTER COLUMN '{0}' implicitly changes collation through a full definition; specify COLLATE explicitly.</value></data>
+  <data name="AlterColumnRewrite" xml:space="preserve"><value>ALTER COLUMN '{0}' would rewrite existing values; use ALTER COLUMN TYPE to convert them.</value></data>
   <data name="ConstraintCollationUnsupported" xml:space="preserve"><value>Collation 'invariant' is not index-backed; column '{0}' cannot have an index or indexed constraint.</value></data>
   <data name="ExecutionColumnExists" xml:space="preserve"><value>Column '{0}' already exists.</value></data>
   <data name="ExecutionConstraintMissing" xml:space="preserve"><value>Constraint '{0}' does not exist on '{1}'.</value></data>
@@ -157,14 +169,15 @@
   <data name="ColumnNameMissing" xml:space="preserve"><value>Table '{0}.{1}' has no column named '{2}'.</value></data>
   <data name="WriteIndexUnavailable" xml:space="preserve"><value>Index '{0}' on '{1}.{2}' is unavailable; writes cannot bypass its constraints.</value></data>
   <data name="TableProvisioningCollision" xml:space="preserve"><value>Table '{0}.{1}' already exists; schema provisioning cannot adopt it.</value></data>
-  <data name="ExecutionTableMissing" xml:space="preserve"><value>Table '{0}.{1}' does not exist.</value></data>
-  <data name="CurrentTableMissing" xml:space="preserve"><value>Table '{0}.{1}' does not exist.</value></data>
-  <data name="LookupTableMissing" xml:space="preserve"><value>Table '{0}.{1}' does not exist.</value></data>
+  <data name="TruncateClosureChanged" xml:space="preserve"><value>The foreign-key set of TRUNCATE changed while the statement was waiting. Retry the statement.</value></data>
+  <data name="TruncateForeignKeyDependent" xml:space="preserve"><value>TRUNCATE must also include referencing table '{0}.{1}'; include it explicitly or specify CASCADE.</value></data>
+  <data name="TruncateExplicitTransaction" xml:space="preserve"><value>TRUNCATE cannot execute inside an explicit transaction.</value></data>
   <data name="TableForeignKeyDependent" xml:space="preserve"><value>Table '{0}' is referenced by a foreign key and cannot be dropped.</value></data>
   <data name="IndexProvisioningCollision" xml:space="preserve"><value>Index '{0}' already exists on '{1}.{2}'; schema provisioning cannot adopt it.</value></data>
   <data name="ExecutionIndexExists" xml:space="preserve"><value>An index named '{0}' already exists on '{1}.{2}'.</value></data>
   <data name="ExecutionIndexMissing" xml:space="preserve"><value>No index named '{0}' exists on '{1}.{2}'.</value></data>
-  <data name="CurrentIndexMissing" xml:space="preserve"><value>No index named '{0}' exists on '{1}.{2}'.</value></data>
+  <data name="TableAsOutputNames" xml:space="preserve"><value>CREATE TABLE AS requires a complete list of nonblank, distinct output names; alias every unnamed expression or supply the complete column-name list.</value></data>
+  <data name="TableAsTargetChanged" xml:space="preserve"><value>The CREATE TABLE AS destination changed while the statement was being planned. Retry the statement.</value></data>
   <data name="TableIdentityReplaced" xml:space="preserve"><value>Table '{0}.{1}' was replaced while waiting for a DDL lock. Retry the statement.</value></data>
   <data name="ColumnBinaryRequired" xml:space="preserve"><value>Column '{0}' requires binary data.</value></data>
   <data name="DateConversionUnsupported" xml:space="preserve"><value>Cannot convert {0} to DATE.</value></data>
@@ -261,9 +274,7 @@
 
   <data name="IdentityMetadataInvalid" xml:space="preserve"><value>Column '{0}' has invalid or duplicate identity metadata.</value></data>
 
-  <data name="NamespaceMissing" xml:space="preserve"><value>Schema '{0}' does not exist.</value></data>
 
-  <data name="NamespaceDependentObjects" xml:space="preserve"><value>Cannot drop schema '{0}' because other objects depend on it. Use DROP SCHEMA ... CASCADE to drop the dependent objects too.</value></data>
 
   <data name="NamespaceRecordMalformed" xml:space="preserve"><value>Malformed or duplicate SQL namespace record.</value></data>
 
@@ -271,7 +282,6 @@
 
   <data name="ViewRecordTooLarge" xml:space="preserve"><value>The view definition exceeds the catalog record limit of 8,092 bytes.</value></data>
 
-  <data name="ViewNameIsTable" xml:space="preserve"><value>The target is a table, not a view.</value></data>
 
   <data name="ViewExists" xml:space="preserve"><value>Relation &#x27;{0}.{1}&#x27; already exists.</value></data>
 
@@ -281,9 +291,7 @@
 
   <data name="ViewCycle" xml:space="preserve"><value>A view cannot depend on itself, directly or indirectly.</value></data>
 
-  <data name="ViewDependent" xml:space="preserve"><value>Cannot change the object because view &#x27;{0}.{1}&#x27; depends on it.</value></data>
 
-  <data name="ViewDropDependent" xml:space="preserve"><value>Cannot drop '{0}' because other objects depend on it: view '{1}.{2}' depends on it.</value></data>
   <data name="DatabaseCreationFailed" xml:space="preserve"><value>Database '{0}' could not be created because a storage or index operation failed. {1}</value></data>
   <data name="TransactionCommitAborted" xml:space="preserve"><value>The session's transaction is aborted and cannot commit; nothing was committed.</value></data>
   <data name="TransactionOperationsAborted" xml:space="preserve"><value>The session's transaction is aborted; statements are refused until it is rolled back.</value></data>
@@ -317,4 +325,552 @@
   <data name="ScriptPrefixRegressed" xml:space="preserve"><value>A declared script checksum, statement count or original generation changed, or its completed prefix regressed.</value></data>
   <data name="ScriptReceiptTooLarge" xml:space="preserve"><value>Declared script receipt exceeds the catalog record limit.</value></data>
   <data name="ScriptPublicationMismatch" xml:space="preserve"><value>The statement target, script identity or expected preceding receipt state does not match this publication.</value></data>
+  <data name="StoredRowDecodeFailed" xml:space="preserve"><value>Row of table '{0}.{1}' (object {2}) does not decode: {3}</value></data>
+  <data name="StatementMemoryBudgetExceeded" xml:space="preserve">
+    <value>The statement memory budget of {0} bytes was exceeded.</value>
+  </data>
+  <data name="ExplainAnalyzeSelectOnly" xml:space="preserve">
+    <value>EXPLAIN ANALYZE supports SELECT queries only.</value>
+  </data>
+  <data name="DeclarationsAlreadyDeclaredFailure" xml:space="preserve"><value>{0} engine '{1}' already declares database '{2}'.</value></data>
+  <data name="DatabaseDeclarationsRefuseDropFailure" xml:space="preserve"><value>{0} engine '{1}' declares database '{2}' ({3}.AddDatabase), so DROP DATABASE is refused. Remove the declaration from the engine builder and rebuild the engine before dropping it.</value></data>
+  <data name="DatabaseDeclarationsDeclareFailure" xml:space="preserve"><value>Engine '{0}' already declares its databases.</value></data>
+  <data name="BuilderStateEnsureMutableFailure" xml:space="preserve"><value>{0} engine '{1}': composition is frozen after a build attempt.</value></data>
+  <data name="EngineBuilderStateBeginBuildFailure" xml:space="preserve"><value>{0} engine '{1}': the builder supports one build attempt.</value></data>
+  <data name="EngineBuilderStateCompleteFailure" xml:space="preserve"><value>The compose method returned before it attached every product.</value></data>
+  <data name="EngineBuilderStateProduceFailure" xml:space="preserve"><value>The compose method read a product sequence twice.</value></data>
+  <data name="EngineBuilderStateProduceFailure2" xml:space="preserve"><value>The compose method requested a server before it attached every worker.</value></data>
+  <data name="StateThrowIfPendingUnattachedFailure" xml:space="preserve"><value>The compose method read past a product it did not attach.</value></data>
+  <data name="EngineOptionChecksRefuseFailure" xml:space="preserve"><value>{0}: {1} {2}</value></data>
+  <data name="FileNamesThrowIfInvalidArgument" xml:space="preserve"><value>{0} {1}</value></data>
+  <data name="DatabaseMemoryFilesTryOpenFailure" xml:space="preserve"><value>The in-memory file set '{0}' was opened or created again while an open copied it.</value></data>
+  <data name="DatabaseMemoryFilesThrowIfOpenFailure" xml:space="preserve"><value>The in-memory file set '{0}' is still open: its database's storage has not closed, so it cannot be opened again.</value></data>
+  <data name="ResumeProvisioningAsyncFailure" xml:space="preserve"><value>{0}: pending migration target hash is invalid.</value></data>
+  <data name="ResumeProvisioningAsyncFailure2" xml:space="preserve"><value>{0}: database '{1}' has a different pending schema. Finish its recorded migration before replacing the declaration.</value></data>
+  <data name="SqlDatabaseDatabase" xml:space="preserve"><value>Database '{0}' cannot be opened. {1}</value></data>
+  <data name="SqlDatabaseFailure" xml:space="preserve"><value>Database '{0}' uses data-storage format {1}, but one of its index trees does not: {2}</value></data>
+  <data name="ThrowIfFormatIsNotCurrentFailure" xml:space="preserve"><value>Database '{0}' uses data-storage format {1}, but this engine supports only format {2}. {3}</value></data>
+  <data name="SqlDatabaseStampNewCatalogDatabase" xml:space="preserve"><value>Database '{0}' cannot be created: its catalog storage already holds data-storage format {1} and {2} table(s). SqlStorageStrategy.CreateStorage must return new, empty storage.</value></data>
+  <data name="SqlDatabaseApplySchemaAsyncFailure" xml:space="preserve"><value>SQL engine '{0}' declares database '{1}' with a schema (SqlDatabaseBuilder.Schema), so ApplySchemaAsync refuses another one: change the declaration and rebuild the engine instead.</value></data>
+  <data name="ResolveStatementBracketDatabase" xml:space="preserve"><value>Transaction {0} has no statement bracket applying on this database.</value></data>
+  <data name="SqlDatabaseBuilderFailure" xml:space="preserve"><value>The provisioning mode is not defined.</value></data>
+  <data name="SqlDatabaseBuilderSchemaArgument" xml:space="preserve"><value>Schema '{0}' cannot be the schema of database '{1}': a schema names the database it declares.</value></data>
+  <data name="SqlDatabaseBuilderScriptArgument" xml:space="preserve"><value>Script names must be unique and at most 128 characters.</value></data>
+  <data name="BuilderThrowIfSchemaDeclaredFailure" xml:space="preserve"><value>Database '{0}' already declares its schema.</value></data>
+  <data name="SqlDatabaseEngineDeclareFailure" xml:space="preserve"><value>SQL engine '{0}' already declares its databases.</value></data>
+  <data name="EngineCreateDatabaseAsyncArgument" xml:space="preserve"><value>A database name is required.</value></data>
+  <data name="EngineOpenDatabaseFilesFailure" xml:space="preserve"><value>Database '{0}' does not exist.</value></data>
+  <data name="EngineRefuseStorageFormatFailure" xml:space="preserve"><value>Database '{0}' cannot be opened: its {1} file set '{2}' was refused. {3}</value></data>
+  <data name="EngineDisposeAsyncCoreAggregate" xml:space="preserve"><value>One or more SQL databases failed to close.</value></data>
+  <data name="BeginTransactionCoreAsyncDatabase" xml:space="preserve"><value>IsolationLevel.Serializable is not supported by the SQL engine yet: serialization-conflict detection is a post-MVP feature, and the session contract forbids running weaker than requested. Use IsolationLevel.Snapshot or IsolationLevel.ReadCommitted.</value></data>
+  <data name="ExecuteStatementCoreAsyncFailure" xml:space="preserve"><value>SQL parse error {0}: {1}</value></data>
+  <data name="NestingLimitDiagnosticDiagnostic" xml:space="preserve"><value>Expression nesting of {0} levels exceeds this engine's limit of {1} levels.</value></data>
+  <data name="StatementCoreAsyncDatabaseResult" xml:space="preserve"><value>DDL requires auto-commit mode because the catalog does not enlist in session transactions.</value></data>
+  <data name="TransactionControlAsyncDatabaseResult" xml:space="preserve"><value>BEGIN requires a session with no open transaction.</value></data>
+  <data name="TransactionControlAsyncDatabaseResult2" xml:space="preserve"><value>{0} requires an open transaction.</value></data>
+  <data name="ScriptGeneratorGenerateFailure" xml:space="preserve"><value>Migration plan source hash '{0}' does not match the supplied current schema hash '{1}'.</value></data>
+  <data name="MigrationScriptGeneratorRenderFailure" xml:space="preserve"><value>Cannot render SQL migration operation '{0}' for '{1}': {2}</value></data>
+  <data name="ResolveAlterColumnTypeDatabase" xml:space="preserve"><value>Column '{0}' is declared with an invalid domain type '{1}'.</value></data>
+  <data name="GeneratorRequireMatchingNameFailure" xml:space="preserve"><value>Migration operation '{0}' names '{1}' but carries a {2} definition named '{3}'.</value></data>
+  <data name="ScriptGeneratorInvalidPayloadFailure" xml:space="preserve"><value>Migration operation '{0}' for '{1}' does not carry {2}.</value></data>
+  <data name="ScriptGeneratorUnsupportedFailure" xml:space="preserve"><value>SQL migration operation '{0}' for '{1}' is unsupported: {2}.</value></data>
+  <data name="InitializeDefaultCollationSqlCatalog" xml:space="preserve"><value>The database default collation cannot change after tables are created; existing index keys depend on it.</value></data>
+  <data name="CatalogDropTableCoreAsyncSqlCatalog" xml:space="preserve"><value>Table '{0}.{1}' is referenced by '{2}.{3}'. Drop the foreign key first.</value></data>
+  <data name="CatalogAddColumnCoreAsyncSqlCatalog" xml:space="preserve"><value>Table '{0}.{1}' already has a column named '{2}'.</value></data>
+  <data name="CatalogDropColumnCoreAsyncSqlCatalog" xml:space="preserve"><value>Column '{0}' is part of the primary key of '{1}.{2}' and cannot be dropped.</value></data>
+  <data name="CatalogDropColumnCoreAsyncSqlCatalog2" xml:space="preserve"><value>Column '{0}' is referenced by constraint '{1}'. Drop the constraint first.</value></data>
+  <data name="CatalogDropColumnCoreAsyncSqlCatalog3" xml:space="preserve"><value>Column '{0}' is referenced by index '{1}' on '{2}.{3}'. Drop the index first.</value></data>
+  <data name="CatalogDropColumnCoreAsyncSqlCatalog4" xml:space="preserve"><value>Cannot drop the last column of '{0}.{1}'.</value></data>
+  <data name="CatalogCreateIndexCoreAsyncSqlCatalog" xml:space="preserve"><value>No table with object id {0} exists.</value></data>
+  <data name="CatalogCreateIndexCoreAsyncSqlCatalog2" xml:space="preserve"><value>Index '{0}': table '{1}.{2}' has no column named '{3}'.</value></data>
+  <data name="CatalogDropIndexCoreAsyncSqlCatalog" xml:space="preserve"><value>No index named '{0}' exists on object {1}.</value></data>
+  <data name="MergePublishedRegistrationsSqlCatalog" xml:space="preserve"><value>Index '{0}' requires exactly one matching B-tree registration with a positive root page id in the same publication.</value></data>
+  <data name="CatalogSaveSchemaDocumentSqlCatalog" xml:space="preserve"><value>The applied-schema state does not describe the current DDL generation.</value></data>
+  <data name="SqlCatalogLoadSqlCatalog" xml:space="preserve"><value>Unsupported catalog counter format: DDL generations require record-space format 8. Recreate the database; no upgrade is available.</value></data>
+  <data name="SqlCatalogLoadSqlCatalog2" xml:space="preserve"><value>Malformed catalog counter record.</value></data>
+  <data name="SqlCatalogLoadSqlCatalog3" xml:space="preserve"><value>The persisted default collation contains trailing values.</value></data>
+  <data name="SqlCatalogLoadSqlCatalog4" xml:space="preserve"><value>Duplicate declared script-set marker.</value></data>
+  <data name="SqlCatalogLoadSqlCatalog5" xml:space="preserve"><value>Malformed declared script-set marker.</value></data>
+  <data name="SqlCatalogLoadSqlCatalog6" xml:space="preserve"><value>Malformed SQL definition record.</value></data>
+  <data name="SqlCatalogLoadSqlCatalog7" xml:space="preserve"><value>Malformed catalog record of kind {0}.</value></data>
+  <data name="SqlCatalogLoadSqlCatalog8" xml:space="preserve"><value>Malformed pending migration: no intent.</value></data>
+  <data name="SqlCatalogLoadSqlCatalog9" xml:space="preserve"><value>Malformed pending migration: target hashes differ.</value></data>
+  <data name="SqlCatalogLoadSqlCatalog10" xml:space="preserve"><value>Malformed pending migration: {0}</value></data>
+  <data name="CatalogCommitCatalogChangeSqlCatalog" xml:space="preserve"><value>The catalog DDL generation is exhausted.</value></data>
+  <data name="SqlCatalogValidateColumnsSqlCatalog" xml:space="preserve"><value>Table '{0}.{1}' declares column '{2}' more than once.</value></data>
+  <data name="SqlCatalogValidateColumnsSqlCatalog2" xml:space="preserve"><value>Primary-key column '{0}' is not a column of '{1}.{2}'.</value></data>
+  <data name="SqlCatalogEnsureStorableSqlCatalog" xml:space="preserve"><value>The definition of {0} encodes to {1} bytes, more than the {2} bytes a catalog record can hold.{3}</value></data>
+  <data name="CatalogAppendFunctionCallsSqlCatalog" xml:space="preserve"><value>The function-call count exceeds its canonical expression length.</value></data>
+  <data name="SqlCatalogReadFunctionCallsSqlCatalog" xml:space="preserve"><value>The persisted function-call run count is invalid.</value></data>
+  <data name="SqlCatalogReadFunctionCallsSqlCatalog2" xml:space="preserve"><value>The persisted function-call identity or repetition count is invalid.</value></data>
+  <data name="SqlCatalogDecodeTableSqlCatalog" xml:space="preserve"><value>Unsupported table-constraint metadata version {0}.</value></data>
+  <data name="SqlCatalogDecodeTableSqlCatalog2" xml:space="preserve"><value>The persisted constraint count is invalid.</value></data>
+  <data name="SqlCatalogDecodeTableSqlCatalog3" xml:space="preserve"><value>The persisted constraint '{0}' is invalid: {1}</value></data>
+  <data name="SqlCatalogDecodeTableSqlCatalog4" xml:space="preserve"><value>The persisted column collation identifier {0} is invalid.</value></data>
+  <data name="SqlCatalogDecodeTableSqlCatalog5" xml:space="preserve"><value>The persisted dropped-column count {0} of '{1}.{2}' is invalid.</value></data>
+  <data name="SqlCatalogDecodeTableSqlCatalog6" xml:space="preserve"><value>The persisted domain name of column '{0}' of '{1}.{2}' is empty.</value></data>
+  <data name="SqlCatalogDecodeTableSqlCatalog7" xml:space="preserve"><value>The persisted table '{0}.{1}' is missing format 10 function-call identities.</value></data>
+  <data name="SqlCatalogDecodeTableSqlCatalog8" xml:space="preserve"><value>The persisted table constraint metadata contains trailing values.</value></data>
+  <data name="SqlCatalogDecodeTableSqlCatalog9" xml:space="preserve"><value>The persisted definition of '{0}.{1}' is invalid: {2}</value></data>
+  <data name="SqlCatalogDecodeIndexSqlCatalog" xml:space="preserve"><value>Unsupported index metadata version {0}.</value></data>
+  <data name="SqlCatalogDecodeIndexSqlCatalog2" xml:space="preserve"><value>The persisted primary-key index metadata is invalid.</value></data>
+  <data name="CatalogValidateConstraintsSqlCatalog" xml:space="preserve"><value>Constraint '{0}' is declared more than once on '{1}.{2}'.</value></data>
+  <data name="CatalogValidateConstraintsSqlCatalog2" xml:space="preserve"><value>Constraint '{0}' refers to unknown column '{1}'.</value></data>
+  <data name="SqlCatalogReadColumnNamesSqlCatalog" xml:space="preserve"><value>The persisted constraint column count is invalid.</value></data>
+  <data name="PublishTableCoreAsyncSqlCatalog" xml:space="preserve"><value>Table '{0}.{1}' has no reserved catalog identity.</value></data>
+  <data name="PublishTableCoreAsyncSqlCatalog2" xml:space="preserve"><value>Table '{0}.{1}' has an unexpected catalog identity.</value></data>
+  <data name="PublishTableCoreAsyncSqlCatalog3" xml:space="preserve"><value>Index '{0}' conflicts with the replacement table definition.</value></data>
+  <data name="PublishTableCoreAsyncSqlCatalog4" xml:space="preserve"><value>Index '{0}' does not describe a new index on '{1}.{2}'.</value></data>
+  <data name="EnsurePhysicalLayoutKeptSqlCatalog" xml:space="preserve"><value>Table '{0}.{1}' cannot be created with dropped columns.</value></data>
+  <data name="EnsurePhysicalLayoutKeptSqlCatalog2" xml:space="preserve"><value>The frozen missing value of column '{0}' cannot be changed by replacement publication.</value></data>
+  <data name="EnsurePhysicalLayoutKeptSqlCatalog3" xml:space="preserve"><value>The replacement definition of '{0}.{1}' does not keep the physical column layout of the current one: it may only append columns.</value></data>
+  <data name="CatalogAddConstraintAsyncSqlCatalog" xml:space="preserve"><value>Constraint or index '{0}' already exists on '{1}.{2}'.</value></data>
+  <data name="DropConstraintCoreAsyncSqlCatalog" xml:space="preserve"><value>Constraint '{0}' does not exist on '{1}.{2}'.</value></data>
+  <data name="SqlCatalogReadOwnershipSqlCatalog" xml:space="preserve"><value>The persisted object ownership metadata is invalid.</value></data>
+  <data name="DecodeSchemaStateChunkSqlCatalog" xml:space="preserve"><value>Unsupported applied-schema state format: DDL generations require record-space format 8. Recreate the database; no upgrade is available.</value></data>
+  <data name="DecodeSchemaStateChunkSqlCatalog2" xml:space="preserve"><value>Malformed applied-schema state: a chunk contains trailing values.</value></data>
+  <data name="CatalogAssembleSchemaStateSqlCatalog" xml:space="preserve"><value>Malformed applied-schema state: its chunk count is inconsistent.</value></data>
+  <data name="CatalogAssembleSchemaStateSqlCatalog2" xml:space="preserve"><value>Malformed applied-schema state: its chunks do not describe one complete document.</value></data>
+  <data name="CatalogAssembleSchemaStateSqlCatalog3" xml:space="preserve"><value>Malformed applied-schema state: a document chunk is missing.</value></data>
+  <data name="CatalogAssembleSchemaStateSqlCatalog4" xml:space="preserve"><value>Malformed applied-schema state: its canonical document is not valid UTF-8.</value></data>
+  <data name="SqlCatalogDropFunctionAsyncArgument" xml:space="preserve"><value>A requested function parameter type cannot be blank.</value></data>
+  <data name="CreateDefinitionAsyncSqlCatalog" xml:space="preserve"><value>SQL definition '{0}' exceeds the catalog record limit of {1} bytes.</value></data>
+  <data name="CreateDefinitionAsyncSqlCatalog2" xml:space="preserve"><value>SQL definition '{0}' already exists.</value></data>
+  <data name="CatalogDropDefinitionAsyncSqlCatalog" xml:space="preserve"><value>SQL definition '{0}' does not exist.</value></data>
+  <data name="SqlCatalogLoadDefinitionSqlCatalog" xml:space="preserve"><value>Missing SQL function definition.</value></data>
+  <data name="SqlCatalogLoadDefinitionSqlCatalog2" xml:space="preserve"><value>Duplicate SQL function '{0}'.</value></data>
+  <data name="SqlCatalogLoadDefinitionSqlCatalog3" xml:space="preserve"><value>Missing SQL domain definition.</value></data>
+  <data name="SqlCatalogLoadDefinitionSqlCatalog4" xml:space="preserve"><value>Duplicate SQL domain '{0}'.</value></data>
+  <data name="SqlCatalogLoadDefinitionSqlCatalog5" xml:space="preserve"><value>Malformed SQL definition: {0}</value></data>
+  <data name="SqlCatalogRenameCoreAsyncSqlCatalog" xml:space="preserve"><value>Table '{0}.{1}' changed while the statement was waiting. Retry the statement.</value></data>
+  <data name="SqlCatalogRenameCoreAsyncSqlCatalog2" xml:space="preserve"><value>Rename of '{0}' requires every rewritten CHECK definition.</value></data>
+  <data name="CatalogSaveScriptStateAsyncSqlCatalog" xml:space="preserve"><value>Invalid script-set reconciliation marker.</value></data>
+  <data name="SqlCatalogColumnArgument" xml:space="preserve"><value>Only string columns may declare a collation.</value></data>
+  <data name="SqlCatalogColumnArgument2" xml:space="preserve"><value>A column's domain name cannot be empty or white space.</value></data>
+  <data name="SqlCatalogColumnArgument3" xml:space="preserve"><value>A default function identity cannot be blank.</value></data>
+  <data name="SqlCatalogConstraintArgument" xml:space="preserve"><value>The constraint kind or referential action is invalid.</value></data>
+  <data name="SqlCatalogConstraintArgument2" xml:space="preserve"><value>A foreign key must pair its columns with referenced columns and cannot contain a check expression.</value></data>
+  <data name="SqlCatalogConstraintArgument3" xml:space="preserve"><value>A check constraint requires an expression and cannot declare a reference or referential action.</value></data>
+  <data name="SqlCatalogConstraintArgument4" xml:space="preserve"><value>A check function identity cannot be blank.</value></data>
+  <data name="SqlCatalogConstraintSnapshotArgument" xml:space="preserve"><value>Constraint column '{0}' is repeated.</value></data>
+  <data name="SqlCatalogDomainArgument" xml:space="preserve"><value>Invalid SQL domain constraint or dependencies.</value></data>
+  <data name="SqlCatalogDomainArgument2" xml:space="preserve"><value>A function identity cannot be blank.</value></data>
+  <data name="SqlCatalogFunctionArgument" xml:space="preserve"><value>Invalid SQL function signature, volatility or dependencies.</value></data>
+  <data name="SqlCatalogIndexSqlCatalog" xml:space="preserve"><value>Index '{0}' must declare at least one key column.</value></data>
+  <data name="SqlCatalogIndexArgument" xml:space="preserve"><value>A primary-key index must enforce uniqueness.</value></data>
+  <data name="SqlCatalogPendingMigrationArgument" xml:space="preserve"><value>A pending migration must contain steps within its total.</value></data>
+  <data name="SqlCatalogPendingMigrationArgument2" xml:space="preserve"><value>Pending step positions must increase within the migration's total.</value></data>
+  <data name="SqlCatalogScriptArgument" xml:space="preserve"><value>Invalid declared script receipt.</value></data>
+  <data name="SqlCatalogScriptArgument2" xml:space="preserve"><value>Invalid declared script object claims.</value></data>
+  <data name="SqlCatalogScriptArgument3" xml:space="preserve"><value>Invalid declared script parameter-type claims.</value></data>
+  <data name="SqlCatalogScriptPublicationArgument" xml:space="preserve"><value>Invalid declared script publication expectation.</value></data>
+  <data name="SqlCatalogTableSqlCatalog" xml:space="preserve"><value>Table '{0}.{1}' must declare at least one column.</value></data>
+  <data name="SqlCatalogTableArgument" xml:space="preserve"><value>A constraint cannot be null.</value></data>
+  <data name="SqlCatalogTableArgument2" xml:space="preserve"><value>Dropped column ordinal {0} of '{1}.{2}' is outside its {3} physical columns.</value></data>
+  <data name="SqlCatalogTableArgument3" xml:space="preserve"><value>Dropped column ordinal {0} of '{1}.{2}' is listed more than once.</value></data>
+  <data name="SqlAggregateAccumulatorAddFailure" xml:space="preserve"><value>The accumulator was not created by SqlAggregateFunction.CreateAccumulator.</value></data>
+  <data name="SqlAggregateAccumulatorAddFailure2" xml:space="preserve"><value>The accumulator of aggregate '{0}' is finished.</value></data>
+  <data name="SqlAggregateAccumulatorAddArgument" xml:space="preserve"><value>Aggregate '{0}' takes {1} argument(s), but {2} were passed.</value></data>
+  <data name="SqlAggregateAccumulatorFinishFailure" xml:space="preserve"><value>The accumulator of aggregate '{0}' is already finished.</value></data>
+  <data name="FunctionCreateAccumulatorFailure" xml:space="preserve"><value>Aggregate '{0}' returned no accumulator.</value></data>
+  <data name="FunctionCreateAccumulatorFailure2" xml:space="preserve"><value>Aggregate '{0}' returned an accumulator that is already in use; create a new one for every group.</value></data>
+  <data name="SqlCastCreateFailure" xml:space="preserve"><value>The cast context is not defined.</value></data>
+  <data name="SqlCastCreateArgument" xml:space="preserve"><value>A cast converts between storage types and domains; {0} is a pseudo-type.</value></data>
+  <data name="SqlCastCreateArgument2" xml:space="preserve"><value>A cast from {0} to {1} converts a type to itself.</value></data>
+  <data name="SqlCastRequireStorageArgument" xml:space="preserve"><value>{0} maps to {1}, but {2}{3} is stored as {4}; give the cast the CLR type of its storage.</value></data>
+  <data name="SqlFunctionFailure" xml:space="preserve"><value>The function kind is not defined.</value></data>
+  <data name="SqlFunctionFailure2" xml:space="preserve"><value>The volatility is not defined.</value></data>
+  <data name="SqlFunctionFailure3" xml:space="preserve"><value>The NULL behavior is not defined.</value></data>
+  <data name="SqlFunctionArgument" xml:space="preserve"><value>Function '{0}' returns ANYELEMENT but has no ANYELEMENT parameter to take the result type from.</value></data>
+  <data name="SqlFunctionArgument2" xml:space="preserve"><value>Function '{0}' cannot return the pseudo-type {1}.</value></data>
+  <data name="SqlFunctionResultMismatchInvalidCast" xml:space="preserve"><value>The function returned {0}, but {1}.</value></data>
+  <data name="ThrowIfArgumentCountInvalidArgument" xml:space="preserve"><value>Function '{0}' takes {1} {2} argument(s), but {3} were passed.</value></data>
+  <data name="SqlFunctionCollectionAddFailure" xml:space="preserve"><value>Function '{0}' is registered as {1}; {2} of the same name cannot be added.</value></data>
+  <data name="SqlFunctionCollectionAddFailure2" xml:space="preserve"><value>Function {0} is already registered{1}; a function cannot be replaced, only overloaded with other parameter types.</value></data>
+  <data name="SqlFunctionCollectionAddFailure3" xml:space="preserve"><value>Function {0} takes calls the standard library's {1} takes, so it would replace the built-in for them or make them ambiguous, in stored CHECK constraints too; a standard-library function cannot be replaced. Register the function under another name, or with a number of parameters {2} does not take.</value></data>
+  <data name="SqlTypeCreateDomainCoreArgument" xml:space="preserve"><value>Domain '{0}' cannot be over the pseudo-type {1}: a domain's base type is a storage type.</value></data>
+  <data name="SqlTypeCreateDomainCoreArgument2" xml:space="preserve"><value>Domain '{0}' cannot be over domain '{1}': a domain's base type is a built-in type in this iteration. Declare it over {2}, with a check that tests both conditions.</value></data>
+  <data name="SqlTypeCreateDomainCoreArgument3" xml:space="preserve"><value>The check of domain '{0}', {1}, must take one argument of the domain's base type {2}.</value></data>
+  <data name="SqlTypeCreateDomainCoreArgument4" xml:space="preserve"><value>The check of domain '{0}', {1}, must return BOOLEAN, but it returns {2}.</value></data>
+  <data name="SqlTypeCreateDomainCoreArgument5" xml:space="preserve"><value>The check of domain '{0}', {1}, is {2}; a domain's check must be IMMUTABLE, as a CHECK constraint's functions must (owner decision 64), so a value it accepted once is accepted again. Create it with SqlFunctionVolatility.Immutable.</value></data>
+  <data name="SqlTypeForStorageArgument" xml:space="preserve"><value>Storage type {0} is not a SQL type.</value></data>
+  <data name="SqlTypeCollectionAddArgument" xml:space="preserve"><value>Type {0} is not a domain: the built-in types are registered already, and an application adds domains (SqlType.CreateDomain); other base types stay closed in this iteration (owner decision 68).</value></data>
+  <data name="SqlTypeCollectionAddFailure" xml:space="preserve"><value>Domain '{0}' cannot be added: {1} registered already. A domain cannot be replaced.</value></data>
+  <data name="SqlTypeCollectionAddCastFailure" xml:space="preserve"><value>Cast {0} names domain '{1}', which this collection does not register; add the domain (Types.Add) before a cast to or from it.</value></data>
+  <data name="SqlTypeCollectionAddCastFailure2" xml:space="preserve"><value>A cast from {0} to {1} is already registered{2}; a cast cannot be replaced.</value></data>
+  <data name="SqlDatabaseServerSessionAbortFailure" xml:space="preserve"><value>The server is shutting down.</value></data>
+  <data name="ServerSessionExecuteAsyncProtocol" xml:space="preserve"><value>Malformed component encoding for parameter '{0}'.</value></data>
+  <data name="ServerSessionRunAsyncValueTask" xml:space="preserve"><value>An unexpected server error terminated the session.</value></data>
+  <data name="ServerSessionReadyLoopAsyncValueTask" xml:space="preserve"><value>The session was closed after exceeding the idle timeout.</value></data>
+  <data name="ServerSessionExecuteAsyncValueTask" xml:space="preserve"><value>{0}: {1}</value></data>
+  <data name="SessionWriteResultAsyncValueTask" xml:space="preserve"><value>The statement completed with status {0}.</value></data>
+  <data name="RejectUnexpectedFrameAsyncValueTask" xml:space="preserve"><value>Unexpected {0} frame in the ready state.</value></data>
+  <data name="SqlValueThrowNullComparedArgument" xml:space="preserve"><value>NULL has no place in the order; test IsNull first.</value></data>
+  <data name="SqlValueFromOtherObjectDatabase" xml:space="preserve"><value>A value of CLR type '{0}' has no SQL type a function can take.</value></data>
+  <data name="SqlValueBoxFailure" xml:space="preserve"><value>A {0} value has no row representation.</value></data>
+  <data name="SqlValueMismatchInvalidCast" xml:space="preserve"><value>The value is NULL, not {0}.</value></data>
+  <data name="SqlValueMismatchInvalidCast2" xml:space="preserve"><value>The value is {0}, not {1}; read it with the accessor of its type.</value></data>
+  <data name="SqlBoundTableGetCheckFailure" xml:space="preserve"><value>CHECK constraint '{0}' is not bound for table '{1}.{2}'.</value></data>
+  <data name="SqlBoundTableCacheBindCheckDatabase" xml:space="preserve"><value>{0} cannot be loaded: its persisted definition '{1}' calls a function with arguments the function does not accept ({2}). {3}</value></data>
+  <data name="SqlBoundTableCacheBindCheckDatabase2" xml:space="preserve"><value>{0} cannot be loaded: its persisted definition '{1}' does not bind to the table ({2}). {3}</value></data>
+  <data name="BinderResolveTypeSqlPlanning" xml:space="preserve"><value>Type '{0}' does not resolve: {1}.</value></data>
+  <data name="BinderDeclareFunctionSqlPlanning" xml:space="preserve"><value>Function '{0}' repeats a parameter name.</value></data>
+  <data name="BinderDeclareFunctionSqlPlanning2" xml:space="preserve"><value>Recursive SQL function '{0}' is not supported.</value></data>
+  <data name="BinderDeclareDomainSqlPlanning" xml:space="preserve"><value>Type '{0}' already exists; native and SQL domains share one namespace.</value></data>
+  <data name="BinderDeclareDomainSqlPlanning2" xml:space="preserve"><value>Domain '{0}' must have a built-in base type.</value></data>
+  <data name="BinderDeclareDomainSqlPlanning3" xml:space="preserve"><value>Domain '{0}' requires a literal DEFAULT.</value></data>
+  <data name="SqlDefinitionBinderLoadSqlPlanning" xml:space="preserve"><value>Recursive SQL definition dependency at '{0}'.</value></data>
+  <data name="SqlDefinitionBinderLoadSqlPlanning2" xml:space="preserve"><value>SQL domain '{0}' conflicts with an engine-registered type.</value></data>
+  <data name="SqlDefinitionBinderBindSqlPlanning" xml:space="preserve"><value>Malformed persisted signature of '{0}'.</value></data>
+  <data name="DefinitionBinderPinCallsSqlPlanning" xml:space="preserve"><value>Persisted function-call identities do not match the expression.</value></data>
+  <data name="DefinitionBinderPinCallsSqlPlanning2" xml:space="preserve"><value>Persisted function-call identity is missing or mismatched for '{0}'.</value></data>
+  <data name="BinderDependenciesSqlPlanning" xml:space="preserve"><value>Function '{0}' is not a scalar of volatility {1} or stronger.</value></data>
+  <data name="DefinitionBinderVolatilitySqlPlanning" xml:space="preserve"><value>Invalid volatility '{0}'.</value></data>
+  <data name="ExpressionCanonicalizeFailure" xml:space="preserve"><value>{0} cannot be stored on this thread: reading its canonical text back needs more stack than the thread has left.</value></data>
+  <data name="PersistedExpressionOutOfStackFailure" xml:space="preserve"><value>{0} cannot be loaded on this thread: reading its persisted definition needs more stack than the thread has left. The catalog is not damaged.</value></data>
+  <data name="ExpressionParseDeclarationFailure" xml:space="preserve"><value>Reading the declared SQL text needs more stack than the thread has left.</value></data>
+  <data name="SqlCatalogOwnershipValidateArgument" xml:space="preserve"><value>An ad-hoc object cannot name an owning compiled schema.</value></data>
+  <data name="EvaluatorNotMaterializedSqlPlanning" xml:space="preserve"><value>A subquery must be materialized by its plan before scalar evaluation.</value></data>
+  <data name="EvaluatorMissingInValuesSqlPlanning" xml:space="preserve"><value>An IN query requires a value list or a subquery.</value></data>
+  <data name="EvaluatorUnsupportedSqlPlanning" xml:space="preserve"><value>Expression '{0}' is not supported by the executor yet.</value></data>
+  <data name="EvaluatorMissingParameterSqlPlanning" xml:space="preserve"><value>No value was supplied for parameter '{0}'.</value></data>
+  <data name="UnsupportedFunctionSqlPlanning" xml:space="preserve"><value>Function '{0}' is not supported by the executor yet.</value></data>
+  <data name="EvaluatorEvaluateCoreSqlPlanning" xml:space="preserve"><value>Bound expression '{0}' is not supported by the executor yet.</value></data>
+  <data name="ResolveLocalColumnSqlPlanning" xml:space="preserve"><value>Ambiguous column '{0}'; qualify it with a table name or alias.</value></data>
+  <data name="EvaluatorEvaluateLiteralSqlPlanning" xml:space="preserve"><value>Literal type {0} is not supported.</value></data>
+  <data name="EvaluatorParseIntegerLiteralOverflow" xml:space="preserve"><value>integer literal {0} exceeds BIGINT.</value></data>
+  <data name="ParseFractionalLiteralOverflow" xml:space="preserve"><value>numeric literal {0} cannot be represented exactly as DECIMAL.</value></data>
+  <data name="EvaluatorEvaluateBinarySqlPlanning" xml:space="preserve"><value>Operator {0} is not supported by the executor yet.</value></data>
+  <data name="EvaluatorEvaluateUnarySqlPlanning" xml:space="preserve"><value>Unary operator {0} is not supported.</value></data>
+  <data name="ToArithmeticNumberSqlPlanning" xml:space="preserve"><value>Arithmetic requires numeric operands.</value></data>
+  <data name="EvaluatorEvaluateCastSqlEvaluation" xml:space="preserve"><value>CAST to {0} failed: operand cannot be represented exactly.</value></data>
+  <data name="EvaluatorEvaluateUnarySqlEvaluation" xml:space="preserve"><value>negating BIGINT {0} overflowed.</value></data>
+  <data name="ToArithmeticNumberSqlEvaluation" xml:space="preserve"><value>approximate operand {0} cannot be represented as DECIMAL for arithmetic.</value></data>
+  <data name="EvaluatorArithmeticSqlEvaluation" xml:space="preserve"><value>BIGINT '{0}' overflowed.</value></data>
+  <data name="EvaluatorArithmeticSqlEvaluation2" xml:space="preserve"><value>approximate divisor {0} underflows DECIMAL for '{1}'.</value></data>
+  <data name="EvaluatorArithmeticSqlEvaluation3" xml:space="preserve"><value>DECIMAL '{0}' overflowed.</value></data>
+  <data name="DataRightTruncationSqlEvaluation" xml:space="preserve"><value>value too long for type character varying({0}).</value></data>
+  <data name="ExceptionFunctionFailedSqlEvaluation" xml:space="preserve"><value>Function '{0}' failed: {1}</value></data>
+  <data name="ExceptionCastFailedSqlEvaluation" xml:space="preserve"><value>Cast {0} failed: {1}</value></data>
+  <data name="ExceptionCannotCastSqlEvaluation" xml:space="preserve"><value>Cannot CAST type {0} to {1}: no cast from {2} to {3}{4} is registered. Register one on the engine's builder (SqlDatabaseEngineBuilder.Types.AddCast) before Build.</value></data>
+  <data name="ArgumentTypeMismatchSqlEvaluation" xml:space="preserve"><value>{0}</value></data>
+  <data name="AmbiguousFunctionCallSqlEvaluation" xml:space="preserve"><value>Function call '{0}({1})' is ambiguous: {2} accept it equally well. Cast an argument to choose one.</value></data>
+  <data name="UnregisteredFunctionSqlEvaluation" xml:space="preserve"><value>{0}, so the constraint cannot be evaluated and the write is refused. Register the function on the engine's builder (SqlDatabaseEngineBuilder.Functions), or drop the constraint.</value></data>
+  <data name="ExceptionUnknownTypeSqlEvaluation" xml:space="preserve"><value>{0}: type '{1}' does not exist: it is neither a built-in type nor a domain this engine registers. Register the domain on the engine's builder (SqlDatabaseEngineBuilder.Types) before Build.</value></data>
+  <data name="UnregisteredDomainSqlEvaluation" xml:space="preserve"><value>{0}, so the column cannot be written and the write is refused. Register the domain on the engine's builder (SqlDatabaseEngineBuilder.Types), or drop the column.</value></data>
+  <data name="ExceptionDivisionByZeroSqlEvaluation" xml:space="preserve"><value>Division by zero: the right operand of '{0}' is zero.</value></data>
+  <data name="NumericValueOutOfRangeSqlEvaluation" xml:space="preserve"><value>Numeric value out of range: {0}</value></data>
+  <data name="InvalidOperandTypeSqlEvaluation" xml:space="preserve"><value>Invalid operand type: unary '{0}' requires a numeric operand, but the operand is {1}.</value></data>
+  <data name="ReferenceNotAllowedSqlEvaluation" xml:space="preserve"><value>Column reference '{0}' is not allowed in {1}, which has no columns in scope. Use literals, parameters and expressions over them{2}.</value></data>
+  <data name="SignatureMismatchSqlEvaluation" xml:space="preserve"><value>Function '{0}' takes {1} but was called with {2}. Accepted: {3}.</value></data>
+  <data name="ExceptionFromArithmeticSqlEvaluation" xml:space="preserve"><value>Division by zero.</value></data>
+  <data name="SqlMaterializedRowGetBytesDatabase" xml:space="preserve"><value>Field {0} is not binary.</value></data>
+  <data name="MaterializedRowRequireValueDatabase" xml:space="preserve"><value>Field {0} is NULL.</value></data>
+  <data name="ExecuteAlterColumnAsyncSqlPlanning" xml:space="preserve"><value>ALTER COLUMN '{0}' changes DEFAULT through a full definition; use SET/DROP DEFAULT separately, and TYPE for value conversions.</value></data>
+  <data name="EnsureSnapshotSeesCascadeRowFailure" xml:space="preserve"><value>Write-write conflict on '{0}.{1}': ON DELETE {2} reached a row version that was rolled back after the walk found it, which this transaction's snapshot does not see (first-updater-wins). Retry the transaction.</value></data>
+  <data name="EnsureSnapshotSeesCascadeRowFailure2" xml:space="preserve"><value>The row record in slot {0} of page {1} of table '{2}.{3}' holds {4} bytes, fewer than its {5}-byte version-stamp header.</value></data>
+  <data name="EnsureSnapshotSeesCascadeRowFailure3" xml:space="preserve"><value>Write-write conflict on '{0}.{1}': ON DELETE {2} reached a row version written by transaction {3}, which this transaction's snapshot does not see (first-updater-wins). Retry the transaction.</value></data>
+  <data name="ExecutorEnsureLatestVersionFailure" xml:space="preserve"><value>Write-write conflict on '{0}.{1}': the row was modified by concurrently committed transaction {2} (first-updater-wins). Retry the transaction.</value></data>
+  <data name="ExecutorCoerceForColumnSqlEvaluation" xml:space="preserve"><value>value '{0}' does not fit column '{1}' of type {2}.</value></data>
+  <data name="PlanExecutorParseBinaryDefaultFormat" xml:space="preserve"><value>A binary DEFAULT must be a quoted \x-prefixed hexadecimal value.</value></data>
+  <data name="ExecuteDefinitionAsyncSqlPlanning" xml:space="preserve"><value>Domain '{0}' does not exist.</value></data>
+  <data name="CheckDefinitionOwnerSqlPlanning" xml:space="preserve"><value>Schema '{0}' cannot adopt or drop ad-hoc definition '{1}'.</value></data>
+  <data name="NormalizeGroupValueSqlEvaluation" xml:space="preserve"><value>{0} does not fit the {1} result type.</value></data>
+  <data name="ExecutorExecuteRenameAsyncSqlPlanning" xml:space="preserve"><value>System view '{0}.{1}' is read-only.</value></data>
+  <data name="ExecutorExecuteRenameAsyncSqlPlanning2" xml:space="preserve"><value>Table '{0}' cannot be renamed because declared script '{1}' retains a dependent object target.</value></data>
+  <data name="NormalizeParametersSqlPlanning" xml:space="preserve"><value>More than one parameter key binds the name '{0}'.</value></data>
+  <data name="ContextRequireCatalogSnapshotDatabase" xml:space="preserve"><value>Internal invariant: a bound system relation requires a captured catalog snapshot.</value></data>
+  <data name="SqlCollationFailureTermResolveFailure" xml:space="preserve"><value>A collation that failed to bind resolved on a later attempt.</value></data>
+  <data name="SqlAbsFunctionInvokeCoreDatabase" xml:space="preserve"><value>ABS requires a numeric argument.</value></data>
+  <data name="SqlAbsFunctionInvokeCoreSqlEvaluation" xml:space="preserve"><value>ABS of BIGINT {0} overflowed.</value></data>
+  <data name="ScalarFunctionComputeSqlPlanning" xml:space="preserve"><value>Datetime value functions require an executing SQL transaction; datetime DEFAULT expressions are not supported yet.</value></data>
+  <data name="ScalarFunctionInvokeCoreSqlEvaluation" xml:space="preserve"><value>{0} requested length is too large.</value></data>
+  <data name="ScalarFunctionInvokeCoreSqlEvaluation2" xml:space="preserve"><value>{0} result is out of range.</value></data>
+  <data name="ScalarFunctionComputeSqlEvaluation" xml:space="preserve"><value>SUBSTRING length must not be negative.</value></data>
+  <data name="ScalarFunctionNumericSqlEvaluation" xml:space="preserve"><value>{0} argument is outside its domain.</value></data>
+  <data name="ScalarFunctionNumericSqlEvaluation2" xml:space="preserve"><value>{0} overflowed REAL.</value></data>
+  <data name="ScalarFunctionRoundExactSqlEvaluation" xml:space="preserve"><value>ROUND result exceeds DECIMAL.</value></data>
+  <data name="ScalarFunctionFiniteSqlEvaluation" xml:space="preserve"><value>Function result is not finite.</value></data>
+  <data name="ScalarFunctionChangeCaseSqlEvaluation" xml:space="preserve"><value>Requested string length is too large.</value></data>
+  <data name="FunctionCheckLengthSqlEvaluation" xml:space="preserve"><value>Requested string length is too large (maximum 1048576 UTF-16 code units).</value></data>
+  <data name="AccumulatorAddCoreSqlEvaluation" xml:space="preserve"><value>COUNT overflowed; the aggregate cannot be represented as a decimal or count.</value></data>
+  <data name="AccumulatorAddCoreSqlEvaluation2" xml:space="preserve"><value>{0} overflowed; the aggregate cannot be represented as a decimal or count.</value></data>
+  <data name="SqlFunctionResolverCoerceOverflow" xml:space="preserve"><value>{0} {1} does not fit argument {2} of function '{3}', which is {4}.</value></data>
+  <data name="SqlFunctionResolverCoerceDatabase" xml:space="preserve"><value>Function '{0}' takes {1} for argument {2}, but the value is {3}.</value></data>
+  <data name="StandardLibraryValidateNameArgument" xml:space="preserve"><value>Function name '{0}' is not an identifier: it must start with a letter or an underscore.</value></data>
+  <data name="StandardLibraryValidateNameArgument2" xml:space="preserve"><value>Function name '{0}' is not an identifier: it may hold only letters, digits and underscores.</value></data>
+  <data name="StandardLibraryValidateNameArgument3" xml:space="preserve"><value>'{0}' is a SQL special form, not a function, and cannot be registered.</value></data>
+  <data name="StandardLibraryValidateNameArgument4" xml:space="preserve"><value>'{0}' is a SQL keyword and cannot name a function.</value></data>
+  <data name="StandardLibraryValidateNameArgument5" xml:space="preserve"><value>'{0}' is reserved by the SQL dialect and cannot name a function.</value></data>
+  <data name="StandardLibraryValidateNameArgument6" xml:space="preserve"><value>'{0}' is reserved for a SQL built-in function and cannot be registered by an application.</value></data>
+  <data name="StandardLibraryValidateNameArgument7" xml:space="preserve"><value>'{0}' is a SQL type name and cannot name a function.</value></data>
+  <data name="StandardLibraryValidateNameArgument8" xml:space="preserve"><value>'{0}' is reserved for a built-in function of the SQL dialect that does not execute yet, and cannot be registered by an application. Register the function under another name.</value></data>
+  <data name="AccumulatorAddCoreDatabase" xml:space="preserve"><value>{0} requires a numeric argument.</value></data>
+  <data name="SqlValueConverterNotSupported" xml:space="preserve"><value>The CLR type '{0}' has no SQL type. A typed function takes and returns bool, sbyte, short, int, long, float, double, decimal, string, byte[], DateOnly, TimeOnly, DateTime, DateTimeOffset, TimeSpan or Guid, or a nullable of a value type.</value></data>
+  <data name="ValueConverterRequireNullableArgument" xml:space="preserve"><value>Function '{0}' is called on NULL input, but argument {1} is '{2}', which cannot receive NULL; declare it '{3}?'.</value></data>
+  <data name="PlannerPlanStatementCoreSqlPlanning" xml:space="preserve"><value>Statement type {0} is not supported by the executor yet.</value></data>
+  <data name="SqlPlannerPlanSelectCoreSqlPlanning" xml:space="preserve"><value>Aggregate functions are not allowed in WHERE; use HAVING to filter groups.</value></data>
+  <data name="SqlPlannerPlanInsertSqlPlanning" xml:space="preserve"><value>INSERT requires a VALUES list, DEFAULT VALUES or SELECT source.</value></data>
+  <data name="SqlPlannerPlanInsertSqlPlanning2" xml:space="preserve"><value>INSERT target column '{0}' is specified more than once.</value></data>
+  <data name="ScopelessExpressionSqlPlanning" xml:space="preserve"><value>Aggregate functions are not allowed in {0}.</value></data>
+  <data name="ScopelessExpressionSqlPlanning2" xml:space="preserve"><value>'*' is not allowed in {0}.</value></data>
+  <data name="DmlMultipleSourceMatches" xml:space="preserve"><value>UPDATE target '{0}.{1}' matched more than one source row.</value></data>
+  <data name="DmlTargetVersionChanged" xml:space="preserve"><value>Target row version in '{0}.{1}' changed after source association collection.</value></data>
+  <data name="SqlPlannerPlanUpdateSqlPlanning" xml:space="preserve"><value>Aggregate functions are not allowed in UPDATE SET.</value></data>
+  <data name="RejectAggregateInDmlWhereSqlPlanning" xml:space="preserve"><value>Aggregate functions are not allowed in WHERE.</value></data>
+  <data name="ResolveDefaultLiteralSqlPlanning" xml:space="preserve"><value>Column '{0}': typed DEFAULT {1} does not match {2}.</value></data>
+  <data name="ResolveColumnCollationSqlPlanning" xml:space="preserve"><value>COLLATE requires a string column; '{0}' is {1}.</value></data>
+  <data name="SqlPlannerPlanCreateIndexSqlPlanning" xml:space="preserve"><value>CREATE INDEX requires an index name.</value></data>
+  <data name="SqlPlannerPlanCreateIndexSqlPlanning2" xml:space="preserve"><value>CREATE INDEX '{0}' requires at least one key column.</value></data>
+  <data name="SqlPlannerPlanDropIndexSqlPlanning" xml:space="preserve"><value>DROP INDEX requires an index name.</value></data>
+  <data name="SqlPlannerPlanDropIndexSqlPlanning2" xml:space="preserve"><value>DROP INDEX requires the table-qualified form: DROP INDEX &lt;name&gt; ON &lt;table&gt;.</value></data>
+  <data name="SqlPlannerPlanAlterTableSqlPlanning" xml:space="preserve"><value>This ALTER TABLE action is not supported by the executor yet.</value></data>
+  <data name="SqlPlannerPlanAlterColumnSqlPlanning" xml:space="preserve"><value>ALTER COLUMN does not change constraints or primary keys.</value></data>
+  <data name="PlannerResolveColumnTypeSqlPlanning" xml:space="preserve"><value>Column '{0}': {1}.</value></data>
+  <data name="PlannerResolveCastTargetSqlPlanning" xml:space="preserve"><value>CAST target '{0}': {1}.</value></data>
+  <data name="ValidateExpressionCoreSqlPlanning" xml:space="preserve"><value>Subqueries are supported only in SELECT expressions and INSERT ... SELECT.</value></data>
+  <data name="ValidateExpressionCoreSqlPlanning2" xml:space="preserve"><value>IN subqueries are supported only in SELECT expressions and INSERT ... SELECT.</value></data>
+  <data name="ValidateDeclaredCallsSqlPlanning" xml:space="preserve"><value>Unknown function '{0}'. Register it on the engine's builder (SqlDatabaseEngineBuilder.Functions) before Build.</value></data>
+  <data name="SqlPlannerCheckCallCoreSqlPlanning" xml:space="preserve"><value>Unknown function '{0}'.</value></data>
+  <data name="SqlPlannerPlanGroupSqlPlanning" xml:space="preserve"><value>Aggregate functions are not allowed in GROUP BY.</value></data>
+  <data name="SqlPlannerPlanGroupSqlPlanning2" xml:space="preserve"><value>Nested aggregate functions are not allowed.</value></data>
+  <data name="SqlPlannerPlanGroupSqlPlanning3" xml:space="preserve"><value>Column '{0}' must appear in GROUP BY or be used in an aggregate function.</value></data>
+  <data name="SqlPlannerPlanGroupSqlPlanning4" xml:space="preserve"><value>SELECT * is not allowed in a grouped query; project GROUP BY expressions or aggregate functions.</value></data>
+  <data name="SqlPlannerCommonGroupTypeSqlPlanning" xml:space="preserve"><value>Grouped CASE/COALESCE results require compatible types; found {0} and {1}.</value></data>
+  <data name="SqlPlannerPlanInsertSelectSqlPlanning" xml:space="preserve"><value>INSERT SELECT source column {0} of type {1} is incompatible with target column '{2}' of type {3}.</value></data>
+  <data name="SqlPlannerBindJoinSqlPlanning" xml:space="preserve"><value>Aggregate functions are not allowed in JOIN ON.</value></data>
+  <data name="SqlPlannerBindJoinSqlPlanning2" xml:space="preserve"><value>Column '{0}' appears more than once in USING.</value></data>
+  <data name="FullJoinCondition" xml:space="preserve"><value>FULL JOIN requires a hash-compatible mandatory equality between its inputs and a proven non-throwing ON condition.</value></data>
+  <data name="RightJoinDmlSource" xml:space="preserve"><value>RIGHT, FULL or parenthesized joins in a joined DML source are not supported; the mutation target must remain the outer input.</value></data>
+  <data name="SqlPlannerBindJoinSqlPlanning3" xml:space="preserve"><value>INNER, LEFT and RIGHT JOIN require ON or USING; CROSS JOIN accepts neither.</value></data>
+  <data name="SqlPlannerBindJoinSqlPlanning4" xml:space="preserve"><value>USING column '{0}' is {1} on the {2} input.</value></data>
+  <data name="SqlPlannerBindJoinSqlPlanning5" xml:space="preserve"><value>Duplicate table name or alias '{0}'; use distinct aliases for a self join.</value></data>
+  <data name="SqlPlannerUsingTypeSqlPlanning" xml:space="preserve"><value>USING column '{0}' requires a common type; found {1} and {2}.</value></data>
+  <data name="BindOrderByProjectionsSqlPlanning" xml:space="preserve"><value>ORDER BY ordinal '{0}' must be an integer.</value></data>
+  <data name="BindOrderByProjectionsSqlPlanning2" xml:space="preserve"><value>ORDER BY ordinal '{0}' must be a positive integer.</value></data>
+  <data name="BindOrderByProjectionsSqlPlanning3" xml:space="preserve"><value>ORDER BY ordinal '{0}' is out of range for {1} output columns.</value></data>
+  <data name="BindOrderByProjectionsSqlPlanning4" xml:space="preserve"><value>Ambiguous ORDER BY alias '{0}'.</value></data>
+  <data name="DeclaredDatabaseProvisionAsyncFailure" xml:space="preserve"><value>{0}: SQL engine '{1}', database '{2}': the database was created with default collation '{3}', but it is declared with '{4}'. A key's collation is persisted in it and cannot change: declare the collation the database has, or move its data to a new database.</value></data>
+  <data name="DeclaredDatabaseProvisionAsyncFailure2" xml:space="preserve"><value>SQL engine '{0}', database '{1}': {2}. The engine declares this database, so its build fails before the engine accepts work: register the function on the engine's builder (SqlDatabaseEngineBuilder.Functions), or drop the constraint through an engine that does not declare the database.</value></data>
+  <data name="DeclaredDatabaseProvisionAsyncFailure3" xml:space="preserve"><value>SQL engine '{0}', database '{1}': {2}. The engine declares this database, so its build fails before the engine accepts work: register the domain on the engine's builder (SqlDatabaseEngineBuilder.Types), or drop the column through an engine that does not declare the database.</value></data>
+  <data name="DatabaseOpenOrCreateAsyncFailure" xml:space="preserve"><value>{0}: SQL engine '{1}', database '{2}': the database does not exist. It is declared in Verify mode, so it is not created; create and migrate it out of band, or declare it in Apply mode.</value></data>
+  <data name="SqlDeclaredDatabaseRefuseFailure" xml:space="preserve"><value>{0}: SQL engine '{1}' cannot provision database '{2}': {3} Nothing was opened or written.</value></data>
+  <data name="ValidateScriptOwnershipFailure" xml:space="preserve"><value>CS03205: Declared script '{0}' cannot alter or drop typed schema object '{1}'; declare the change in the typed schema. Nothing was opened or written.</value></data>
+  <data name="DatabaseValidateScriptsAsyncFailure" xml:space="preserve"><value>CS03201: Declared script '{0}' has a different body from its recorded SHA-256. Use a new name for forward-only changes.</value></data>
+  <data name="DatabaseValidateScriptsAsyncFailure2" xml:space="preserve"><value>CS03201: Declared script '{0}' has an inconsistent recorded statement count or target list.</value></data>
+  <data name="DatabaseValidateScriptsAsyncFailure3" xml:space="preserve"><value>CS03201: Declared script '{0}', statement {1} targets '{2}' but its receipt records '{3}'.</value></data>
+  <data name="DatabaseValidateScriptsAsyncFailure4" xml:space="preserve"><value>CS03201: Declared script '{0}' records object ownership inconsistent with its completed CREATE statements.</value></data>
+  <data name="DatabaseValidateScriptsAsyncFailure5" xml:space="preserve"><value>CS03202: Declared script '{0}' is not completely recorded with its checksum.</value></data>
+  <data name="DatabaseApplyScriptsAsyncFailure" xml:space="preserve"><value>CS03204: Script '{0}' cannot adopt existing table '{1}'.</value></data>
+  <data name="DatabaseApplyScriptsAsyncFailure2" xml:space="preserve"><value>CS03204: Script '{0}' cannot adopt existing index '{1}'.</value></data>
+  <data name="DatabaseApplyScriptsAsyncFailure3" xml:space="preserve"><value>CS03204: Script '{0}', statement {1} failed.</value></data>
+  <data name="DatabaseApplyScriptsAsyncFailure4" xml:space="preserve"><value>CS03201: Script '{0}', statement {1} did not publish its expected receipt.</value></data>
+  <data name="DeclaredDatabaseScriptTargetFailure" xml:space="preserve"><value>CS03201: Script '{0}', statement {1}: cannot resolve type '{2}' while validating its function target.</value></data>
+  <data name="SqlDeclaredScriptDatabase" xml:space="preserve"><value>CS03203: Declared scripts own statement transactions; transaction-control statements are not allowed.</value></data>
+  <data name="SqlSchemaProvisionerApplyAsyncFailure" xml:space="preserve"><value>{0}: {1}: a different schema is pending. Finish the recorded migration before replacing its declaration.</value></data>
+  <data name="SqlSchemaProvisionerApplyAsyncFailure2" xml:space="preserve"><value>{0}: {1}: {2} Nothing was changed.</value></data>
+  <data name="SqlSchemaProvisionerApplyAsyncFailure3" xml:space="preserve"><value>{0}: the applied catalog differs: {1}.</value></data>
+  <data name="SqlSchemaProvisionerApplyAsyncFailure4" xml:space="preserve"><value>{0}: applying schema '{1}' was canceled; every completed step was compensated.</value></data>
+  <data name="SqlSchemaProvisionerApplyAsyncFailure5" xml:space="preserve"><value>{0}: {1}: applying schema '{2}': {3}. {4}{5}</value></data>
+  <data name="SchemaProvisionerVerifyAsyncFailure" xml:space="preserve"><value>{0}: {1}: the declared schema (hash {2}) is not the one applied: {3}. The database is declared in Verify mode, so nothing was changed; migrate it out of band, or declare it in Apply mode.</value></data>
+  <data name="ProvisionerResolveColumnTypeDatabase" xml:space="preserve"><value>Column '{0}' is declared with type '{1}': {2}.</value></data>
+  <data name="ProvisionerResolveColumnTypeDatabase2" xml:space="preserve"><value>Column '{0}' is declared with type '{1}', which is stored as {2}, but its member is stored as {3}; declare a type whose storage is the member's.</value></data>
+  <data name="ProvisionerBindDeclaredTypesDatabase" xml:space="preserve"><value>The schema declares domain '{0}' over {1}, which this engine does not register with that base type; declare the database on the engine's builder (SqlDatabaseEngineBuilder.AddDatabase), which registers the domains its schema declares, or register the domain (SqlDatabaseEngineBuilder.Types).</value></data>
+  <data name="ProvisionerBindDeclaredTypesDatabase2" xml:space="preserve"><value>Table '{0}': {1}</value></data>
+  <data name="ProvisionerBindDeclaredChecksDatabase" xml:space="preserve"><value>DEFAULT on column '{0}.{1}' does not bind: {2}</value></data>
+  <data name="ProvisionerBindDeclaredChecksDatabase2" xml:space="preserve"><value>CHECK constraint '{0}' on table '{1}' does not bind: {2}</value></data>
+  <data name="ProvisionerSnapshotCatalogFailure" xml:space="preserve"><value>{0}: the live SQL catalog contains table '{1}.{2}', but compiled schemas currently address the 'dbo' schema only.</value></data>
+  <data name="ProvisionerCanonicalDefaultDatabase" xml:space="preserve"><value>Only literal DEFAULT values are supported.</value></data>
+  <data name="ValidateCatalogOwnershipFailure" xml:space="preserve"><value>{0}: {1}: SQL schema '{2}' cannot adopt table '{3}' because it was not created by this schema. Nothing was changed.</value></data>
+  <data name="ValidateCatalogOwnershipFailure2" xml:space="preserve"><value>{0}: {1}: SQL schema '{2}' cannot adopt index '{3}' because it was not created by this schema. Nothing was changed.</value></data>
+  <data name="ValidateSupportedSchemaFailure" xml:space="preserve"><value>{0}: the database cannot apply schema '{1}'.</value></data>
+  <data name="ValidateSupportedSchemaFailure2" xml:space="preserve"><value>{0}: SQL schema '{1}' declares {2}.</value></data>
+  <data name="ValidateSupportedSchemaFailure3" xml:space="preserve"><value>{0}: {1}: SQL schema '{2}': {3} Nothing was changed.</value></data>
+  <data name="ProvisionerRunDeferredAsyncFailure" xml:space="preserve"><value>The applied catalog differs: {0}.</value></data>
+  <data name="ProvisionerRunDeferredAsyncFailure2" xml:space="preserve"><value>{0}: {1}: deferred step {2} of {3} ({4} '{5}.{6}') failed. The pending migration is retained for recovery and retry.</value></data>
+  <data name="RendererAppendConstraintDatabase" xml:space="preserve"><value>Constraint '{0}' has an unsupported delete action.</value></data>
+  <data name="RendererAppendConstraintDatabase2" xml:space="preserve"><value>Check constraint '{0}' has no expression.</value></data>
+  <data name="RendererAppendConstraintDatabase3" xml:space="preserve"><value>Constraint '{0}' has an unsupported kind.</value></data>
+  <data name="StatementRendererTypeNameDatabase" xml:space="preserve"><value>Column '{0}' is declared with '{1}', which is not a SQL type name.</value></data>
+  <data name="StatementRendererTypeNameDatabase2" xml:space="preserve"><value>Column '{0}' uses database type '{1}', which cannot be emitted as SQL DDL.</value></data>
+  <data name="RendererDecimalTypeNameDatabase" xml:space="preserve"><value>Column '{0}' declares a decimal scale without a precision.</value></data>
+  <data name="StatementRendererIdentifierDatabase" xml:space="preserve"><value>Schema identifier '{0}' contains a null character or embedded double quote unsupported by the SQL dialect.</value></data>
+  <data name="SqlCastConverterConvertInvalidCast" xml:space="preserve"><value>Unsupported source/target pair.</value></data>
+  <data name="ConverterApplyModifiersInvalidCast" xml:space="preserve"><value>Binary length exceeds {0}; truncation is not supported.</value></data>
+  <data name="CastConverterNumericScaleSqlPlanning" xml:space="preserve"><value>Invalid decimal precision or scale.</value></data>
+  <data name="CastConverterParseExactDecimalFormat" xml:space="preserve"><value>Expected signed fixed-point numeric text.</value></data>
+  <data name="CastConverterParseExactDecimalFormat2" xml:space="preserve"><value>Expected signed fixed-point numeric text without grouping or exponent.</value></data>
+  <data name="ConverterParseExactDecimalOverflow" xml:space="preserve"><value>Text cannot be represented exactly as System.Decimal.</value></data>
+  <data name="SqlCastConverterConvertSqlEvaluation" xml:space="preserve"><value>CAST from {0} to {1} failed: {2}</value></data>
+  <data name="ConverterApplyModifiersSqlEvaluation" xml:space="preserve"><value>numeric field overflow: Value exceeds precision {0} and scale {1}.</value></data>
+  <data name="SqlStandardCastsCreateInvalidCast" xml:space="preserve"><value>BOOLEAN requires a boolean or TRUE/FALSE text.</value></data>
+  <data name="SqlStandardCastsWholeInvalidCast" xml:space="preserve"><value>An integer target requires a whole number; truncation is not supported.</value></data>
+  <data name="SqlStandardCastsCheckRealOverflow" xml:space="preserve"><value>Value {0} is out of range for REAL.</value></data>
+  <data name="SqlStandardCastsCheckRealOverflow2" xml:space="preserve"><value>Value {0} underflows REAL.</value></data>
+  <data name="ArithmeticInvalidOperandsSqlPlanning" xml:space="preserve"><value>Invalid temporal arithmetic operands: {0} {1} {2}.</value></data>
+  <data name="TemporalArithmeticEvaluateSqlPlanning" xml:space="preserve"><value>Invalid temporal arithmetic operands.</value></data>
+  <data name="ArithmeticEvaluateSqlEvaluation" xml:space="preserve"><value>Temporal arithmetic is outside years 1..9999.</value></data>
+  <data name="TypeRulesValidateDomainNameArgument" xml:space="preserve"><value>Domain name '{0}' is not an identifier: it must start with an ASCII letter or an underscore.</value></data>
+  <data name="TypeRulesValidateDomainNameArgument2" xml:space="preserve"><value>Domain name '{0}' is not an identifier: it may hold only ASCII letters, digits and underscores.</value></data>
+  <data name="RulesValidateSqlDomainNameArgument" xml:space="preserve"><value>'{0}' is a SQL keyword and cannot name a domain.</value></data>
+  <data name="RulesValidateSqlDomainNameArgument2" xml:space="preserve"><value>'{0}' is reserved by the SQL dialect and cannot name a domain.</value></data>
+  <data name="RulesValidateSqlDomainNameArgument3" xml:space="preserve"><value>'{0}' is a pseudo-type's name and cannot name a domain.</value></data>
+  <data name="RulesValidateSqlDomainNameArgument4" xml:space="preserve"><value>'{0}' is a built-in SQL type name and cannot name a domain.</value></data>
+  <data name="SqlStorageStrategyOpenStorageDatabase" xml:space="preserve"><value>Storage '{0}' does not exist.</value></data>
+  <data name="StorageStrategyCreateStorageDatabase" xml:space="preserve"><value>In-memory storage for database '{0}' already exists.</value></data>
+  <data name="StorageStrategyCreateStorageDatabase2" xml:space="preserve"><value>In-memory storage '{0}' already exists.</value></data>
+  <data name="SqlStorageStrategyOpenStorageDatabase2" xml:space="preserve"><value>In-memory storage '{0}' does not exist.</value></data>
+  <data name="SqlRowCodecDecodeDatabaseType" xml:space="preserve"><value>The record holds {0} bytes, fewer than its {1}-byte version-stamp header.</value></data>
+  <data name="SqlRowCodecDecodeDatabaseType2" xml:space="preserve"><value>The record's object-id prefix names object {0}, not the table's object {1}.</value></data>
+  <data name="SqlRowCodecDecodeDatabaseType3" xml:space="preserve"><value>A component holds a value outside its type: {0}</value></data>
+  <data name="SqlRowCodecAppendValueDatabase" xml:space="preserve"><value>Column type {0} cannot be stored yet.</value></data>
+  <data name="SqlRowCodecReadValueDatabaseType" xml:space="preserve"><value>A {0} component is stored for a column of type {1}, which stores only NULL.</value></data>
+  <data name="ThrowIfFormatIsNotCurrentFailure2" xml:space="preserve"><value>It has no format marker: its creation was interrupted, or it predates format markers. This engine does not upgrade or repair databases: drop the database (DropDatabaseAsync) and create it again, exporting any data first with the engine that wrote it (on-disk format upgrades are tracked by assimalign/cohesion#1152).</value></data>
+  <data name="ThrowIfFormatIsNotCurrentFailure3" xml:space="preserve"><value>This engine does not upgrade databases written in an older format: export its data with the engine that wrote it, drop the database (DropDatabaseAsync) and create it again with this engine, then reload the data (on-disk format upgrades are tracked by assimalign/cohesion#1152).</value></data>
+  <data name="ThrowIfFormatIsNotCurrentFailure4" xml:space="preserve"><value>The database was written by a newer engine; open it with that engine.</value></data>
+  <data name="SqlValueComparerCompareSqlExecution" xml:space="preserve"><value> Use DATE 'yyyy-mm-dd' for a date literal.</value></data>
+  <data name="SchemaProvisionerVerifyAsyncFailure2" xml:space="preserve"><value>the database records no applied schema</value></data>
+  <data name="SchemaProvisionerVerifyAsyncFailure3" xml:space="preserve"><value>the database records schema hash {0}</value></data>
+  <data name="SchemaProvisionerVerifyAsyncFailure4" xml:space="preserve"><value>the catalog DDL generation changed from {0} to {1}</value></data>
+  <data name="ProvisionerBindDeclaredChecksDatabase3" xml:space="preserve"><value>{0}.</value></data>
+  <data name="DomainStorageSuffix" xml:space="preserve"><value> (a domain over {0})</value></data>
+  <data name="ArgumentCountExact" xml:space="preserve"><value>exactly</value></data>
+  <data name="ArgumentCountMinimum" xml:space="preserve"><value>at least</value></data>
+  <data name="StandardLibrarySuffix" xml:space="preserve"><value> by the standard library</value></data>
+  <data name="SameDomainSubject" xml:space="preserve"><value>it is</value></data>
+  <data name="OtherDomainSubject" xml:space="preserve"><value>domain '{0}' is</value></data>
+  <data name="UnknownTypeDetail" xml:space="preserve"><value>unknown type</value></data>
+  <data name="DomainCastAlternative" xml:space="preserve"><value> or to its base type {0}</value></data>
+  <data name="FunctionSignatureMismatch" xml:space="preserve"><value>Function '{0}' has no overload that accepts argument types ({1}). Accepted: {2}.</value></data>
+  <data name="UsingColumnMissing" xml:space="preserve"><value>missing</value></data>
+  <data name="UsingColumnAmbiguous" xml:space="preserve"><value>ambiguous</value></data>
+  <data name="TypeArgumentShape" xml:space="preserve"><value>Type arguments must be one or two unsigned integer literals within the Int32 range.</value></data>
+  <data name="TimeZoneStorageUnsupported" xml:space="preserve"><value>TIME WITH TIME ZONE has no shared storage type; use TIME WITHOUT TIME ZONE or TIMESTAMP WITH TIME ZONE.</value></data>
+  <data name="BitStorageUnsupported" xml:space="preserve"><value>BIT denotes PostgreSQL bit strings, which are not supported; use BOOLEAN for a truth value.</value></data>
+  <data name="SmallDateTimeUnsupported" xml:space="preserve"><value>SMALLDATETIME range and minute precision cannot be honored; use TIMESTAMP.</value></data>
+  <data name="SerialTypeUnsupported" xml:space="preserve"><value>{0} is not supported; use GENERATED BY DEFAULT AS IDENTITY.</value></data>
+  <data name="IntervalPrecisionArgument" xml:space="preserve"><value>Only the SECOND interval field accepts one nonnegative precision argument.</value></data>
+  <data name="IntervalFieldUnsupported" xml:space="preserve"><value>Interval field modifier '{0}' is recognized but not supported by the SQL model surface; field restrictions are not enforced, so use bare INTERVAL.</value></data>
+  <data name="FloatArgumentCount" xml:space="preserve"><value>FLOAT accepts one precision argument in bits.</value></data>
+  <data name="FloatPrecisionMinimum" xml:space="preserve"><value>Precision for type float must be at least 1 bit.</value></data>
+  <data name="FloatPrecisionMaximum" xml:space="preserve"><value>Precision for type float must be less than 54 bits.</value></data>
+  <data name="TemporalPrecisionArgument" xml:space="preserve"><value>Temporal types accept one nonnegative precision argument.</value></data>
+  <data name="TemporalPrecisionUnsupported" xml:space="preserve"><value>Temporal precision modifier '{0}({1})' is recognized but not supported by the SQL model surface.</value></data>
+  <data name="DecimalLengthInvalid" xml:space="preserve"><value>Decimal types accept precision and scale, not a length.</value></data>
+  <data name="DecimalPrecisionInvalid" xml:space="preserve"><value>The decimal precision must be between 1 and 28.</value></data>
+  <data name="DecimalScaleInvalid" xml:space="preserve"><value>The decimal scale must be between 0 and precision.</value></data>
+  <data name="TypeLengthInvalid" xml:space="preserve"><value>String and binary types accept one positive length argument between 1 and 10485760.</value></data>
+  <data name="TypeArgumentsUnsupported" xml:space="preserve"><value>This type does not accept type arguments.</value></data>
+  <data name="ReferenceAlternativeSuffix" xml:space="preserve"><value>, or {0}</value></data>
+  <data name="DeclaredSchemaUnsupported" xml:space="preserve"><value>its schema declares {0}.</value></data>
+  <data name="EngineDescription" xml:space="preserve"><value>{0} engine '{1}'</value></data>
+  <data name="OptionPositiveRequirement" xml:space="preserve"><value>must be positive.</value></data>
+  <data name="OptionNonnegativeRequirement" xml:space="preserve"><value>must not be negative.</value></data>
+  <data name="OptionMaximumRequirement" xml:space="preserve"><value>must be at most {0}.</value></data>
+  <data name="BufferPoolCapacityRequirement" xml:space="preserve"><value>must be a whole number of {0}-byte pages, at least {1} bytes ({2} pages) and at most {3} bytes.</value></data>
+  <data name="JournalCheckpointMinimum" xml:space="preserve"><value>must be zero (the default) or at least the checkpoint journal size ({0} bytes): a journal would otherwise pass it before it is due for a checkpoint.</value></data>
+  <data name="DatabaseNameRule" xml:space="preserve"><value>A database name must be 1 to 128 ASCII letters, digits, underscores, hyphens and dots, must not start or end with a dot or hold two dots in a row, and must not be a Windows device name (CON, PRN, AUX, NUL, COM0 to COM9, LPT0 to LPT9) on its own or before a dot.</value></data>
+  <data name="DatabaseNameEmpty" xml:space="preserve"><value>The name is empty.</value></data>
+  <data name="DatabaseNameTooLong" xml:space="preserve"><value>The name is {0} characters long.</value></data>
+  <data name="DatabaseNameCharacterInvalid" xml:space="preserve"><value>The name holds {0} at position {1}.</value></data>
+  <data name="DatabaseNameLeadingDot" xml:space="preserve"><value>The name starts with a dot.</value></data>
+  <data name="DatabaseNameTrailingDot" xml:space="preserve"><value>The name ends with a dot.</value></data>
+  <data name="DatabaseNameConsecutiveDots" xml:space="preserve"><value>The name holds two dots in a row.</value></data>
+  <data name="DatabaseNameDeviceReserved" xml:space="preserve"><value>'{0}' is a Windows device name.</value></data>
+  <data name="ExpressionNestingRequirement" xml:space="preserve"><value>must be between {0} and {1} levels.</value></data>
+  <data name="ScalarFunctionKindLabel" xml:space="preserve"><value>a scalar function</value></data>
+  <data name="AggregateKindLabel" xml:space="preserve"><value>an aggregate</value></data>
+  <data name="DeclaredDomainRegistrationConflict" xml:space="preserve"><value>it declares domain '{0}' over {1}, but the engine registers </value></data>
+  <data name="RegisteredDomainDescription" xml:space="preserve"><value>domain '{0}' over {1}</value></data>
+  <data name="RegisteredBuiltInTypeDescription" xml:space="preserve"><value>the built-in type {0}</value></data>
+  <data name="CheckConstraintSubject" xml:space="preserve"><value>CHECK constraint '{0}' on table '{1}'</value></data>
+  <data name="ColumnDefaultSubject" xml:space="preserve"><value>DEFAULT of column '{0}' on table '{1}'</value></data>
+  <data name="ColumnMissingValueSubject" xml:space="preserve"><value>Missing value of column '{0}' on table '{1}'</value></data>
+  <data name="RegistrationMissingReason" xml:space="preserve"><value>which this engine does not register</value></data>
+  <data name="RegisteredDomainStorageMismatch" xml:space="preserve"><value>which this engine registers over {0}, but the column stores {1}</value></data>
+  <data name="RegisteredResultTypeMismatch" xml:space="preserve"><value>which this engine registers returning {0}, where the CHECK needs {1}</value></data>
+  <data name="RegisteredAsAggregateReason" xml:space="preserve"><value>which this engine registers as an aggregate</value></data>
+  <data name="RecordedFunctionIdentityMissing" xml:space="preserve"><value>whose recorded identity '{0}' this engine does not register</value></data>
+  <data name="ImmutableRegistrationMissing" xml:space="preserve"><value>which this engine no longer registers as IMMUTABLE</value></data>
+  <data name="OverloadSelectionAmbiguousReason" xml:space="preserve"><value>which more than one overload this engine registers accepts equally well ({0})</value></data>
+  <data name="NoAcceptedOverloadReason" xml:space="preserve"><value>which no overload this engine registers accepts ({0})</value></data>
+  <data name="UnresolvedFunctionDescription" xml:space="preserve"><value>{0} calls function '{1}', {2}</value></data>
+  <data name="UnresolvedColumnDomainDescription" xml:space="preserve"><value>Column '{0}' of table '{1}' is of domain '{2}', {3}</value></data>
+  <data name="FunctionSubject" xml:space="preserve"><value>Function '{0}'</value></data>
+  <data name="DomainDefaultSubject" xml:space="preserve"><value>DEFAULT of domain '{0}'</value></data>
+  <data name="DomainCheckSubject" xml:space="preserve"><value>CHECK of domain '{0}'</value></data>
+  <data name="FunctionFailureContext" xml:space="preserve"><value>Function '{0}': {1}</value></data>
+  <data name="UnresolvedDomainCheck" xml:space="preserve"><value>Domain '{0}' has an unresolved SQL CHECK ({1}).</value></data>
+  <data name="AmbiguousOverloadPair" xml:space="preserve"><value>{0} and {1}</value></data>
+  <data name="AnyArgumentCount" xml:space="preserve"><value>any number of arguments</value></data>
+  <data name="MinimumArgumentCount" xml:space="preserve"><value>{0} or more arguments</value></data>
+  <data name="NoArgumentsExpected" xml:space="preserve"><value>no arguments</value></data>
+  <data name="ExactArgumentCount" xml:space="preserve"><value>exactly {0} {1}</value></data>
+  <data name="ExpectedArgumentSingular" xml:space="preserve"><value>argument</value></data>
+  <data name="ExpectedArgumentPlural" xml:space="preserve"><value>arguments</value></data>
+  <data name="ArgumentCountRange" xml:space="preserve"><value>{0} to {1} arguments</value></data>
+  <data name="MinimumArgumentCountFragment" xml:space="preserve"><value>{0} or more</value></data>
+  <data name="ListedArgumentCounts" xml:space="preserve"><value>{0} or {1} arguments</value></data>
+  <data name="StarOnlyExpected" xml:space="preserve"><value>only '*'</value></data>
+  <data name="AlternativeStarExpected" xml:space="preserve"><value>{0} or '*'</value></data>
+  <data name="NoArgumentsReceived" xml:space="preserve"><value>none</value></data>
+  <data name="StarArgumentCountReceived" xml:space="preserve"><value>{0} arguments including '*'</value></data>
+  <data name="OneOrMoreArgumentsExpected" xml:space="preserve"><value>1 or more arguments</value></data>
+  <data name="TwoArgumentsExpected" xml:space="preserve"><value>exactly 2 arguments</value></data>
+  <data name="CompensationComplete" xml:space="preserve"><value>Every completed step was compensated.</value></data>
+  <data name="CompensationIncomplete" xml:space="preserve"><value>Compensation was incomplete; the live catalog must be reconciled before retrying.</value></data>
+  <data name="MigrationStepFailureContext" xml:space="preserve"><value>step {0} of {1} ({2}) failed</value></data>
+  <data name="SchemaRecordFailureContext" xml:space="preserve"><value>recording the applied schema failed after all {0} step(s)</value></data>
+  <data name="DeclarationDifferenceContext" xml:space="preserve"><value>; first difference from the declaration: {0}</value></data>
+  <data name="PrincipalDdlUnavailable" xml:space="preserve"><value>principal '{0}', and principals and grants are refused until their DDL exists</value></data>
+  <data name="ColumnSubject" xml:space="preserve"><value>Column '{0}'</value></data>
+  <data name="QualifiedColumnDefaultSubject" xml:space="preserve"><value>DEFAULT on column '{0}.{1}'</value></data>
+  <data name="EngineDatabaseContext" xml:space="preserve"><value>SQL engine '{0}', database '{1}'</value></data>
+  <data name="DeclaredTableMissing" xml:space="preserve"><value>table '{0}' is missing</value></data>
+  <data name="TableSchemaOwnershipMismatch" xml:space="preserve"><value>table '{0}' was not created by schema '{1}'</value></data>
+  <data name="PrimaryKeyActualContext" xml:space="preserve"><value>table '{0}': its primary key is ({1}), </value></data>
+  <data name="PrimaryKeyDeclaredContext" xml:space="preserve"><value>declared ({0})</value></data>
+  <data name="DeclaredConstraintMissing" xml:space="preserve"><value>table '{0}': constraint '{1}' is missing</value></data>
+  <data name="ConstraintDeclarationMismatch" xml:space="preserve"><value>table '{0}': constraint '{1}' differs from its declaration</value></data>
+  <data name="ConstraintCountMismatch" xml:space="preserve"><value>table '{0}' has {1} constraint(s), declared {2}</value></data>
+  <data name="ExtraConstraint" xml:space="preserve"><value>table '{0}': constraint '{1}' is not declared</value></data>
+  <data name="DeclaredIndexMissing" xml:space="preserve"><value>table '{0}': index '{1}' is missing</value></data>
+  <data name="IndexDeclarationMismatch" xml:space="preserve"><value>table '{0}': index '{1}' differs from its declaration (uniqueness or columns)</value></data>
+  <data name="SchemaIndexCountMismatch" xml:space="preserve"><value>table '{0}' has {1} schema-owned index(es), declared {2}</value></data>
+  <data name="ExtraIndex" xml:space="preserve"><value>table '{0}': index '{1}' is not declared</value></data>
+  <data name="OwnedTableCountMismatch" xml:space="preserve"><value>the database has {0} table(s) created by schema '{1}', declared {2}</value></data>
+  <data name="ExtraOwnedTable" xml:space="preserve"><value>table '{0}.{1}' was created by schema '{2}' but is not declared</value></data>
+  <data name="DeclaredColumnMissing" xml:space="preserve"><value>table '{0}': column '{1}' is missing</value></data>
+  <data name="ColumnCountMismatch" xml:space="preserve"><value>table '{0}' has {1} column(s), declared {2}</value></data>
+  <data name="ExtraColumn" xml:space="preserve"><value>table '{0}': column '{1}' is not declared</value></data>
+  <data name="ColumnOrderMismatch" xml:space="preserve"><value>table '{0}': column {1} is '{2}', declared '{3}'</value></data>
+  <data name="ColumnDifferenceContext" xml:space="preserve"><value>table '{0}': column '{1}' {2}</value></data>
+  <data name="ColumnTypeContext" xml:space="preserve"><value>table '{0}': column '{1}' is </value></data>
+  <data name="DeclarationComparison" xml:space="preserve"><value>{0}, declared {1}</value></data>
+  <data name="NullableColumnDescription" xml:space="preserve"><value>nullable</value></data>
+  <data name="NonNullableColumnDescription" xml:space="preserve"><value>not nullable</value></data>
+  <data name="ColumnIdentityUndeclared" xml:space="preserve"><value>table '{0}': column '{1}' has identity metadata absent from its declaration</value></data>
+  <data name="ColumnDefaultMismatch" xml:space="preserve"><value>table '{0}': column '{1}' has a different default from its declaration</value></data>
+  <data name="DeclaredTypeUnresolvedReason" xml:space="preserve"><value>is declared with a type this engine does not resolve ({0})</value></data>
+  <data name="ActualTypeContext" xml:space="preserve"><value>is {0}, </value></data>
+  <data name="DeclaredTypeContext" xml:space="preserve"><value>declared {0}</value></data>
+  <data name="NoActualDomain" xml:space="preserve"><value>of no domain</value></data>
+  <data name="ActualDomainContext" xml:space="preserve"><value>of domain '{0}'</value></data>
+  <data name="NoDeclaredDomain" xml:space="preserve"><value>with no domain</value></data>
+  <data name="CompiledCheckSubject" xml:space="preserve"><value>Compiled CHECK predicate</value></data>
+  <data name="CompiledDefaultSubject" xml:space="preserve"><value>Compiled column DEFAULT</value></data>
+  <data name="DamagedCatalogHint" xml:space="preserve"><value>The catalog is damaged or was written by an incompatible engine build; restore the database from a backup.</value></data>
+  <data name="UncheckedCallHint" xml:space="preserve"><value>An engine build that did not check function arguments stored it, and this engine cannot evaluate it; open the database with that build and drop the constraint or replace it with a valid one.</value></data>
+  <data name="FileNamesOrphanDirectory" xml:space="preserve"><value>Database '{0}' cannot be created: its directory '{1}' is already there without a database in it, left by an interrupted create or drop. Delete the directory, or drop the database, which deletes it, and create the database again.</value></data>
+  <data name="FileStorageAlreadyExists" xml:space="preserve"><value>Storage for database '{0}' already exists.</value></data>
+  <data name="CatalogTableSubject" xml:space="preserve"><value>table '{0}.{1}'</value></data>
+  <data name="SqlObjectNameInvalid" xml:space="preserve"><value>A SQL object name must contain a non-whitespace character.</value></data>
+  <data name="RetainedDroppedColumnHint" xml:space="preserve"><value>It keeps the physical positions of {0} dropped columns, which are never reused (#1241); RewriteTableAsync compacts them, or recreate the table and copy its rows (CREATE TABLE, INSERT ... SELECT).</value></data>
+  <data name="CatalogIndexSubject" xml:space="preserve"><value>index '{0}'</value></data>
+  <data name="CatalogRegistrationsSubject" xml:space="preserve"><value>the database's {0} index registrations</value></data>
+  <data name="StartupFrameExpected" xml:space="preserve"><value>Expected a startup frame but received {0}.</value></data>
+  <data name="ProtocolVersionUnsupported" xml:space="preserve"><value>Protocol major version {0} is not supported; the server speaks {1}.</value></data>
+  <data name="HandshakeDatabaseMissing" xml:space="preserve"><value>The server's engine has no database named '{0}'.</value></data>
+  <data name="AuthenticationResponseExpected" xml:space="preserve"><value>Expected an authenticate response but received {0}.</value></data>
+  <data name="PrincipalAuthenticationFailed" xml:space="preserve"><value>Authentication failed for principal '{0}'.</value></data>
 </root>

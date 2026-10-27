@@ -30,8 +30,7 @@ internal sealed partial class SqlSchemaProvisioner
         }
         if (!string.Equals(schema.Hash, pending.Schema.Hash, StringComparison.Ordinal))
         {
-            throw new SqlSchemaMigrationException($"{SqlProvisioningCodes.PolicyRefused}: {Describe()}: a different schema is pending. " +
-                "Finish the recorded migration before replacing its declaration.");
+            throw new SqlSchemaMigrationException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlSchemaProvisionerApplyAsyncFailure, SqlProvisioningCodes.PolicyRefused, Describe()));
         }
         return new SqlSchemaMigrationResult(null, schema.Hash, 0, WasAlreadyApplied: false);
     }
@@ -193,7 +192,7 @@ internal sealed partial class SqlSchemaProvisioner
                 ulong generation = _catalog.DdlGeneration;
                 if (FirstCatalogDifference(migration.Schema) is { } difference)
                 {
-                    throw new SqlSchemaMigrationException($"The applied catalog differs: {difference}.");
+                    throw new SqlSchemaMigrationException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ProvisionerRunDeferredAsyncFailure, difference));
                 }
                 try
                 {
@@ -216,9 +215,7 @@ internal sealed partial class SqlSchemaProvisioner
                 FailDeferredTrace(migration, index, failure);
                 EndDeferredTrace(migration, index, "Error");
                 var position = migration.Intent.Steps[Math.Min(index, migration.Steps.Count - 1)];
-                var coded = new SqlSchemaMigrationException($"{SqlProvisioningCodes.StepFailed}: {Describe()}: " +
-                    $"deferred step {position.Position} of {migration.Intent.StepCount} ({position.Kind} '{position.Table}.{position.ObjectName}') failed. " +
-                    "The pending migration is retained for recovery and retry.", failure);
+                var coded = new SqlSchemaMigrationException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ProvisionerRunDeferredAsyncFailure2, SqlProvisioningCodes.StepFailed, Describe(), position.Position, migration.Intent.StepCount, position.Kind, position.Table, position.ObjectName), failure);
                 var progress = _database.Provisioning;
                 _database.ReportProvisioning(new DatabaseProvisioningProgress(position.Kind, position.Table,
                     position.Position, migration.Intent.StepCount, false, progress?.RowsProcessed, progress?.TotalRows,
@@ -256,6 +253,7 @@ internal sealed partial class SqlSchemaProvisioner
 
     internal async ValueTask StopDeferredAsync()
     {
+        await StopRewriteAsync().ConfigureAwait(false);
         if (Deferred is { } pending)
         {
             await pending.StopAsync().ConfigureAwait(false);

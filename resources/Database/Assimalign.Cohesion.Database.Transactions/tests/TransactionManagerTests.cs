@@ -18,7 +18,7 @@ public class TransactionManagerTests
 {
     private static (TransactionManager Manager, VersionStore Versions, LockManager Locks) CreateKernel()
     {
-        var locks = LockManager.Create();
+        var locks = new LockManager();
         var versions = VersionStore.CreateInMemory();
         var manager = TransactionManager.Create(locks, versions);
         return (manager, versions, locks);
@@ -153,7 +153,7 @@ public class TransactionManagerTests
     {
         // Arrange
         var versions = VersionStore.CreateInMemory();
-        var manager = TransactionManager.Create(new FailingCommitLog(), LockManager.Create(), versions);
+        var manager = TransactionManager.Create(new FailingCommitLog(), new LockManager(), versions);
         await using var _ = manager;
 
         var transaction = await manager.BeginAsync();
@@ -210,7 +210,7 @@ public class TransactionManagerTests
         // pre-advanced past values the manager never saw (a storage-side bracket).
         ulong counter = 10;
         var manager = TransactionManager.Create(
-            LockManager.Create(),
+            new LockManager(),
             VersionStore.CreateInMemory(),
             () => new TransactionSequence(++counter));
         await using var _ = manager;

@@ -202,7 +202,7 @@ public sealed class SqlExpressionRendererTests
 
         // Assert
         var diagnostic = errors.ShouldHaveSingleItem();
-        diagnostic.Code.ShouldBe("COHDBL001");
+        diagnostic.Code.ShouldBe("CK00001");
         diagnostic.Start.ShouldBe(7);
         diagnostic.End.ShouldBe(7 + written.IndexOf('('));
         rendered.ShouldBe(canonical);
@@ -244,7 +244,7 @@ public sealed class SqlExpressionRendererTests
         else
         {
             var diagnostic = errors.ShouldHaveSingleItem();
-            diagnostic.Code.ShouldBe("COHDBL001");
+            diagnostic.Code.ShouldBe("CK00001");
             diagnostic.Start.ShouldBe(7);
             diagnostic.End.ShouldBe(9 + name.Length);
             rendered.ShouldBe("NULL");

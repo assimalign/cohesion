@@ -17,10 +17,14 @@ internal sealed partial class SqlExpressionEvaluator
     /// <param name="call">The call.</param>
     /// <returns>The overload; null when the catalog has no function of the call's name.</returns>
     /// <exception cref="SqlEvaluationException">
-    /// No overload accepts the call (<c>COHSQLE006</c>), or several accept it equally well (<c>COHSQLE008</c>).
+    /// No overload accepts the call (<c>CS01006</c>), or several accept it equally well (<c>CS01008</c>).
     /// </exception>
     internal SqlFunction? ResolveFunction(SqlFunctionCallExpression call)
     {
+        // A MERGE action slot has its own type; an application function with the same
+        // spelling must not supply its arity, length or domain metadata.
+        if (_projectionSources?.ContainsKey(call) == true &&
+            call.FunctionName.Equals("MERGE_ACTION", StringComparison.OrdinalIgnoreCase)) { return null; }
         if (!TryGetCallOverloads(call, out var overloads))
         {
             return null;
@@ -75,7 +79,7 @@ internal sealed partial class SqlExpressionEvaluator
         {
             overloads = System.Linq.Enumerable.ToArray(System.Linq.Enumerable.Where(_functions.Catalog.GetOverloads(call.FunctionName), function =>
                 SqlDefinitionBinder.Key(function).Equals(identity, StringComparison.OrdinalIgnoreCase)));
-            if (overloads.Length == 0) { throw new SqlPlanningException("COHSQLE009", ErrorMessages.ViewFunctionMissing, call.Location); }
+            if (overloads.Length == 0) { throw new SqlPlanningException("CS01009", ErrorMessages.ViewFunctionMissing, call.Location); }
             return true;
         }
         return _functions.Catalog.TryGetOverloads(call.FunctionName, out overloads!);
@@ -86,7 +90,7 @@ internal sealed partial class SqlExpressionEvaluator
     /// grammar takes them (ISO requires two; one operand is the operand itself).
     /// </summary>
     /// <param name="call">The call to <c>COALESCE</c>.</param>
-    /// <exception cref="SqlEvaluationException">The call passes no operand or a <c>*</c> (<c>COHSQLE006</c>).</exception>
+    /// <exception cref="SqlEvaluationException">The call passes no operand or a <c>*</c> (<c>CS01006</c>).</exception>
     internal static void CheckEvaluatorForm(SqlFunctionCallExpression call)
     {
         var arguments = call.Arguments;
@@ -98,7 +102,7 @@ internal sealed partial class SqlExpressionEvaluator
         if (arguments.Count == 0 || star || !SqlStandardLibrary.IsCoalesce(call.FunctionName) && arguments.Count != 2)
         {
             bool coalesce = SqlStandardLibrary.IsCoalesce(call.FunctionName);
-            throw SqlEvaluationException.FunctionSignatureMismatch(call.FunctionName, coalesce ? "1 or more arguments" : "exactly 2 arguments",
+            throw SqlEvaluationException.FunctionSignatureMismatch(call.FunctionName, coalesce ? ErrorMessages.OneOrMoreArgumentsExpected : ErrorMessages.TwoArgumentsExpected,
                 SqlFunctionResolver.DescribeArguments(arguments), coalesce ? SqlStandardLibrary.CoalesceUsage :
                     call.FunctionName.Equals("EXTRACT", StringComparison.OrdinalIgnoreCase) ? "EXTRACT(field FROM temporal)" : "NULLIF(value, value)");
         }
@@ -298,7 +302,7 @@ internal sealed partial class SqlExpressionEvaluator
                 or SqlBinaryOperator.Divide or SqlBinaryOperator.Modulo } arithmetic:
                 return ArithmeticType(arithmetic.Operator, StaticTypeOf(arithmetic.Left), StaticTypeOf(arithmetic.Right));
             case SqlBinaryExpression or SqlLogicalExpression or SqlDistinctExpression or SqlBooleanTestExpression or SqlIsNullExpression or SqlBetweenExpression
-                or SqlInExpression or SqlLikeExpression or SqlExistsExpression:
+                or SqlInExpression or SqlQuantifiedComparisonExpression or SqlLikeExpression or SqlExistsExpression:
                 return DatabaseType.Boolean;
             case SqlSubqueryExpression:
                 return _subquerySlots is not null && _subquerySlots.TryGetValue(expression, out var slot) ? slot.Type : DatabaseType.Null;
@@ -475,7 +479,7 @@ internal sealed partial class SqlExpressionEvaluator
     /// </summary>
     private void RememberTypedCall(SqlFunctionCallExpression call, (SqlFunction? Function, DatabaseType Type) typed)
     {
-        if (ReferenceEquals(this, RowEvaluator))
+        if (ReferenceEquals(this, _rowEvaluator))
         {
             return;
         }
@@ -489,6 +493,8 @@ internal sealed partial class SqlExpressionEvaluator
     /// it typed with what each resolved to and its result type. The calls are forgotten when the
     /// planner adds a subquery slot, the one input of a static type that changes while a scope plans.
     /// </summary>
+    [global::System.Diagnostics.DebuggerDisplay("SqlTypingMemory")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlExpressionEvaluator.SqlTypingMemory.DebugView))]
     private sealed class SqlTypingMemory
     {
         private int _subquerySlots;
@@ -536,6 +542,14 @@ internal sealed partial class SqlExpressionEvaluator
             }
 
             Calls[call] = typed;
+        }
+
+        private sealed class DebugView
+        {
+            public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlExpressionEvaluator.SqlTypingMemory value)
+            {
+                _ = value;
+            }
         }
     }
 

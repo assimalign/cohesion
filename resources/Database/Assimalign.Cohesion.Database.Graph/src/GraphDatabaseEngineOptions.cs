@@ -16,8 +16,20 @@ namespace Assimalign.Cohesion.Database.Graph;
 /// or <see cref="GraphDatabaseEngine.Create(string, GraphDatabaseEngineOptions)"/> (owner decision 52 of
 /// 2026-10-09).
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("GraphDatabaseEngineOptions")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.GraphDatabaseEngineOptions.DebugView))]
 public sealed class GraphDatabaseEngineOptions
 {
+    /// <summary>Gets or sets the retained execution-memory ceiling per statement; defaults to 256 MiB.</summary>
+    /// <remarks>Positive. The default admits 100,000 one-property rows for SET, FOR/INSERT,
+    /// entity RETURN and QueryPaths. Wider rows and retained intermediate stages use more memory.
+    /// Raise this ceiling for larger workloads; a request may select a lower limit.</remarks>
+    public long QueryMemoryBudget { get; set; } = 256L * 1024 * 1024;
+
+    /// <summary>Gets or sets the physical-work ceiling per statement; defaults to 1,000,000 units.</summary>
+    /// <remarks>Positive. Candidates count after direction/type filtering; merge heads and dead ends count.</remarks>
+    public long QueryWorkBudget { get; set; } = 1_000_000;
+
     /// <summary>
     /// Gets or sets how commits reach stable storage. When unset, opening a
     /// database selects <see cref="StorageCommitDurability.Synchronous"/> for
@@ -76,7 +88,7 @@ public sealed class GraphDatabaseEngineOptions
     /// <see cref="DatabaseEngine.MaximumWorkerFailureWindow"/>.
     /// </summary>
     /// <remarks>
-    /// An offline database refuses every operation with <c>COHDBG012</c> until it is reopened
+    /// An offline database refuses every operation with <c>CG06012</c> until it is reopened
     /// (<see cref="GraphDatabaseEngine.OpenDatabaseAsync(DatabaseName, System.Threading.CancellationToken)"/>),
     /// whose recovery reads its journal; a hosted engine is reopened by the hosting module with
     /// backoff. A pass that finishes the database's work ends the streak, and the window starts
@@ -183,6 +195,8 @@ public sealed class GraphDatabaseEngineOptions
     /// </remarks>
     internal GraphDatabaseEngineOptions Snapshot() => new()
     {
+        QueryMemoryBudget = QueryMemoryBudget,
+        QueryWorkBudget = QueryWorkBudget,
         Durability = Durability,
         GroupCommitWindow = GroupCommitWindow,
         CheckpointInterval = CheckpointInterval,
@@ -199,4 +213,28 @@ public sealed class GraphDatabaseEngineOptions
         RootPath = RootPath,
         StorageStrategy = StorageStrategy,
     };
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Graph.GraphDatabaseEngineOptions _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Graph.GraphDatabaseEngineOptions value)
+        {
+            _target = value;
+        }
+
+        public long QueryMemoryBudget => _target.QueryMemoryBudget;
+        public long QueryWorkBudget => _target.QueryWorkBudget;
+        public global::Assimalign.Cohesion.Database.Storage.StorageCommitDurability? Durability => _target.Durability;
+        public global::System.TimeSpan GroupCommitWindow => _target.GroupCommitWindow;
+        public global::System.TimeSpan CheckpointInterval => _target.CheckpointInterval;
+        public long CheckpointJournalSize => _target.CheckpointJournalSize;
+        public global::System.TimeSpan WorkerFailureWindow => _target.WorkerFailureWindow;
+        public int WorkerFailureMinimumPasses => _target.WorkerFailureMinimumPasses;
+        public long JournalSizeLimit => _target.JournalSizeLimit;
+        public global::System.TimeSpan PageWriteBackInterval => _target.PageWriteBackInterval;
+        public int PageWriteBackBatchSize => _target.PageWriteBackBatchSize;
+        public global::System.TimeSpan MaintenanceInterval => _target.MaintenanceInterval;
+        public global::System.IO.FileSystemPath? RootPath => _target.RootPath;
+    }
 }

@@ -11,7 +11,7 @@ public sealed class SqlAlterTableExpression : SqlQueryExpression
     /// Initializes a new <see cref="SqlAlterTableExpression"/>.
     /// </summary>
     /// <param name="table">The table being altered.</param>
-    /// <param name="action">The ADD/DROP column or constraint, RENAME, full column-definition, SET/DROP DEFAULT or SET/DROP NOT NULL action.</param>
+    /// <param name="action">The ADD/DROP column or constraint, RENAME, full column-definition, TYPE/USING, SET/DROP DEFAULT or SET/DROP NOT NULL action.</param>
     /// <param name="text">The raw statement text.</param>
     /// <param name="location">The source location.</param>
     internal SqlAlterTableExpression(

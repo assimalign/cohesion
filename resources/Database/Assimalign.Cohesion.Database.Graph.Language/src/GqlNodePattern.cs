@@ -20,8 +20,11 @@ public sealed record GqlNodePattern(string? Variable, IReadOnlyList<string> Labe
     /// <remarks>
     /// When it is set it is the node's whole label requirement, and <see cref="Labels"/> must be
     /// empty or name exactly the labels of its conjunction; the planner rejects any other
-    /// combination with <c>COHDBG001</c>. A pattern built with <see cref="Labels"/> alone keeps
+    /// combination with <c>CG05001</c>. A pattern built with <see cref="Labels"/> alone keeps
     /// its meaning: the node carries every listed label.
     /// </remarks>
     public GqlLabelExpression? LabelExpression { get; init; }
+
+    /// <summary>Gets the inline WHERE prefilter, evaluated for this node inside path search.</summary>
+    public GqlExpression? Predicate { get; init; }
 }

@@ -67,7 +67,8 @@ internal static class Program
         Check(new BlobClientException(shared.Code, "blob", shared).Diagnostics.Count == 0);
         using var pathTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         await RunPathExchangeAsync(graph, listener, pathTimeout.Token);
-        Console.WriteLine("Client-only NativeAOT canary passed: five clients, five wire codecs, six diagnostic exception paths and twenty batched graph paths.");
+        await RunFunctionExchangeAsync(keyValue, listener, pathTimeout.Token);
+        Console.WriteLine("Client-only NativeAOT canary passed: five clients, five wire codecs, six diagnostic exception paths, twenty batched graph paths and three key-value function exchanges.");
     }
 
     private static async Task RunPathExchangeAsync(GraphClient graph, InMemoryConnectionListener listener,
@@ -78,6 +79,7 @@ internal static class Program
         try
         {
             await using var connection = await graph.ConnectAsync(cancellationToken);
+            await connection.ExecuteAsync("START TRANSACTION", cancellationToken: cancellationToken);
             GraphPath? retained = null;
             int count = 0;
             await foreach (var path in connection.QueryPathsAsync("MATCH (n) RETURN n", cancellationToken: cancellationToken))
@@ -114,6 +116,16 @@ internal static class Program
         var ready = channel.Negotiate(ProtocolVersion.Current, startup!.Capabilities);
         await channel.Writer.WriteFrameAsync(new(ProtocolMessageType.Ready, ready.Encode()), cancellationToken);
         await channel.Writer.FlushAsync(cancellationToken);
+        Check(await channel.Reader.ReadBorrowedFrameAsync(frame =>
+        {
+            Check(frame.Type == (ProtocolMessageType)GraphProtocolMessageType.Execute);
+            Check(GraphProtocolExecuteMessage.Decode(frame.Payload.Span).Statement == "START TRANSACTION");
+        }, cancellationToken));
+        await channel.Writer.WriteFrameAsync(new((ProtocolMessageType)GraphProtocolMessageType.ResultComplete,
+            new GraphProtocolResultCompleteMessage(0).Encode()), cancellationToken);
+        await channel.Writer.WriteFrameAsync(new(ProtocolMessageType.Ready,
+            new ProtocolTransactionStatusMessage(ProtocolTransactionStatus.Active).Encode()), cancellationToken);
+        await channel.Writer.FlushAsync(cancellationToken);
         Check(await channel.Reader.ReadBorrowedFrameAsync(
             frame => Check(frame.Type == (ProtocolMessageType)GraphProtocolMessageType.ExecutePaths), cancellationToken));
         var node = new GraphNode(new(1), ["Canary"], new Dictionary<string, object?> { ["name"] = "canary" });
@@ -126,7 +138,93 @@ internal static class Program
         }
         await channel.Writer.WriteFrameAsync(new((ProtocolMessageType)GraphProtocolMessageType.PathsComplete,
             new GraphProtocolPathsCompleteMessage(20).Encode()), cancellationToken);
+        await channel.Writer.WriteFrameAsync(new(ProtocolMessageType.Ready,
+            new ProtocolTransactionStatusMessage(ProtocolTransactionStatus.Active).Encode()), cancellationToken);
         await channel.Writer.FlushAsync(cancellationToken);
+        Check(await channel.Reader.ReadBorrowedFrameAsync(frame =>
+        {
+            Check(frame.Type == (ProtocolMessageType)GraphProtocolMessageType.Execute);
+            Check(GraphProtocolExecuteMessage.Decode(frame.Payload.Span).Statement == "ROLLBACK");
+        }, cancellationToken));
+        await channel.Writer.WriteFrameAsync(new((ProtocolMessageType)GraphProtocolMessageType.ResultComplete,
+            new GraphProtocolResultCompleteMessage(0).Encode()), cancellationToken);
+        await channel.Writer.WriteFrameAsync(new(ProtocolMessageType.Ready,
+            new ProtocolTransactionStatusMessage(ProtocolTransactionStatus.Idle).Encode()), cancellationToken);
+        await channel.Writer.FlushAsync(cancellationToken);
+        await finished.WaitAsync(cancellationToken);
+    }
+
+    private static async Task RunFunctionExchangeAsync(KeyValueClient keyValue, InMemoryConnectionListener listener,
+        CancellationToken cancellationToken = default)
+    {
+        var finished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Task peer = ServeFunctionsAsync(listener, finished.Task, cancellationToken);
+        try
+        {
+            await using var connection = await keyValue.ConnectAsync(cancellationToken);
+            Check(Equals(await connection.InvokeFunctionAsync("canary_addone", [41L], cancellationToken), 42L));
+            Check(await connection.InvokeFunctionAsync("canary_null", [null], cancellationToken) is null);
+            var binary = await connection.InvokeFunctionAsync("canary_binary", [new byte[] { 1, 2 }], cancellationToken);
+            Check(binary is byte[] { Length: 2 } bytes && bytes[0] == 3 && bytes[1] == 4);
+        }
+        finally
+        {
+            // Join the peer on every exit, after the rented connection has been returned.
+            finished.TrySetResult();
+            await peer;
+        }
+    }
+
+    private static async Task ServeFunctionsAsync(InMemoryConnectionListener listener, Task finished,
+        CancellationToken cancellationToken = default)
+    {
+        await using var transport = await listener.AcceptAsync(cancellationToken);
+        await using var channel = new ProtocolChannel(transport.AsStream(), KeyValueWire.KeyValueProtocol.Family, batchWrites: true);
+        ProtocolStartupMessage? startup = null;
+        Check(await channel.Reader.ReadBorrowedFrameAsync(frame =>
+        {
+            Check(frame.Type == ProtocolMessageType.Startup);
+            startup = ProtocolStartupMessage.Decode(frame.Payload.Span);
+        }, cancellationToken));
+        await channel.Writer.WriteFrameAsync(new(ProtocolMessageType.Authenticate, ReadOnlyMemory<byte>.Empty), cancellationToken);
+        await channel.Writer.FlushAsync(cancellationToken);
+        Check(await channel.Reader.ReadBorrowedFrameAsync(
+            frame => Check(frame.Type == ProtocolMessageType.AuthenticateResponse), cancellationToken));
+        var ready = channel.Negotiate(ProtocolVersion.Current, startup!.Capabilities);
+        await channel.Writer.WriteFrameAsync(new(ProtocolMessageType.Ready, ready.Encode()), cancellationToken);
+        await channel.Writer.FlushAsync(cancellationToken);
+        string[] names = ["canary_addone", "canary_null", "canary_binary"];
+        object?[] arguments = [41L, null, new byte[] { 1, 2 }];
+        object?[] results = [42L, null, new byte[] { 3, 4 }];
+        DatabaseType[] types = [DatabaseType.Int64, DatabaseType.Int64, DatabaseType.Binary];
+        for (int index = 0; index < names.Length; index++)
+        {
+            int current = index;
+            Check(await channel.Reader.ReadBorrowedFrameAsync(frame =>
+            {
+                Check(frame.Type == (ProtocolMessageType)KeyValueWire.KeyValueProtocolMessageType.Execute);
+                var request = KeyValueWire.ProtocolExecuteMessage.Decode(frame.Payload.Span);
+                Check(request.Statement == "CALL " + names[current] + " @p0");
+                Check(request.Parameters.Count == 1 && request.Parameters.ContainsKey("p0"));
+                var keyReader = new DatabaseKeyReader(request.Parameters["p0"]);
+                object? argument = DatabaseValueCodec.Read(ref keyReader);
+                Check(keyReader.IsAtEnd);
+                if (arguments[current] is byte[] expected)
+                {
+                    Check(argument is byte[] { Length: 2 } value && value[0] == expected[0] && value[1] == expected[1]);
+                }
+                else { Check(Equals(argument, arguments[current])); }
+            }, cancellationToken));
+            await channel.Writer.WriteFrameAsync(new((ProtocolMessageType)KeyValueWire.KeyValueProtocolMessageType.ResultHeader,
+                new KeyValueWire.ProtocolResultHeaderMessage([("value", (byte)types[index])]).Encode()), cancellationToken);
+            var valueWriter = new DatabaseKeyWriter();
+            DatabaseValueCodec.Append(valueWriter, results[index]);
+            await channel.Writer.WriteFrameAsync(new((ProtocolMessageType)KeyValueWire.KeyValueProtocolMessageType.ResultRow,
+                valueWriter.ToArray()), cancellationToken);
+            await channel.Writer.WriteFrameAsync(new((ProtocolMessageType)KeyValueWire.KeyValueProtocolMessageType.ResultComplete,
+                new KeyValueWire.ProtocolResultCompleteMessage(-1).Encode()), cancellationToken);
+            await channel.Writer.FlushAsync(cancellationToken);
+        }
         await finished.WaitAsync(cancellationToken);
     }
 

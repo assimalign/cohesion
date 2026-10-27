@@ -14,6 +14,8 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// <see cref="SqlCatalogTable"/> instance by <see cref="SqlBoundTableCache"/>, so the write and
 /// read paths never parse catalog text or convert a DEFAULT again.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("SqlBoundTable")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlBoundTable.DebugView))]
 internal sealed class SqlBoundTable
 {
     private readonly IReadOnlyList<SqlBoundCheck> _checks;
@@ -146,6 +148,14 @@ internal sealed class SqlBoundTable
             }
         }
 
-        throw new InvalidOperationException($"CHECK constraint '{constraint.Name}' is not bound for table '{Table.Schema}.{Table.Name}'.");
+        throw new InvalidOperationException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlBoundTableGetCheckFailure, constraint.Name, Table.Schema, Table.Name));
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlBoundTable value)
+        {
+            _ = value;
+        }
     }
 }

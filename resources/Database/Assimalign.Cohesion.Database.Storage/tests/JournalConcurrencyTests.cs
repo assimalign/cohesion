@@ -36,7 +36,7 @@ public sealed class JournalConcurrencyTests
         using var reopened = StorageJournal.Create(faults.WrapJournal(medium));
         long first = reopened.AppendCommit(2);
         Stall(faults, write);
-        Task force = Task.Run(() => reopened.EnsureDurable(first));
+        Task force = DedicatedTestTask.Run(() => reopened.EnsureDurable(first));
         try
         {
             WaitForStall(faults, write);
@@ -72,7 +72,7 @@ public sealed class JournalConcurrencyTests
         using var journal = StorageJournal.Create(faults.WrapJournal(medium));
         long first = journal.AppendCommit(1);
         Stall(faults, write);
-        Task force = Task.Run(() => { if (flush) { journal.Flush(true); } else { journal.EnsureDurable(first); } });
+        Task force = DedicatedTestTask.Run(() => { if (flush) { journal.Flush(true); } else { journal.EnsureDurable(first); } });
         Task[] waiters = [];
 
         try
@@ -80,8 +80,8 @@ public sealed class JournalConcurrencyTests
             WaitForStall(faults, write);
 
             // Act: the second commit is buffered while the first prefix is on the device.
-            long second = await Task.Run(() => journal.AppendCommit(2)).WaitAsync(TimeSpan.FromSeconds(10));
-            waiters = Enumerable.Range(0, 8).Select(_ => Task.Run(() => journal.EnsureDurable(first))).ToArray();
+            long second = await DedicatedTestTask.Run(() => journal.AppendCommit(2)).WaitAsync(TimeSpan.FromSeconds(10));
+            waiters = Enumerable.Range(0, 8).Select(_ => DedicatedTestTask.Run(() => journal.EnsureDurable(first))).ToArray();
 
             // Assert: neither the in-flight prefix nor the later commit was acknowledged yet.
             second.ShouldBe(first + 1);
@@ -120,7 +120,7 @@ public sealed class JournalConcurrencyTests
         byte[] payload = [1, 2, 3, 4];
         long first = journal.AppendPageRecord(2, (PageId)1L, JournalRecordType.FullPageImage, payload, out var location);
         Stall(faults, write);
-        Task force = Task.Run(() => Should.Throw<StorageOfflineException>(() => journal.EnsureDurable(first)));
+        Task force = DedicatedTestTask.Run(() => Should.Throw<StorageOfflineException>(() => journal.EnsureDurable(first)));
         try
         {
             WaitForStall(faults, write);
@@ -132,7 +132,7 @@ public sealed class JournalConcurrencyTests
             read.AsSpan(0, payload.Length).ToArray().ShouldBe(payload);
             if (write)
             {
-                await Task.Run(() => journal.ReadPageRecord(location, read)).WaitAsync(TimeSpan.FromSeconds(10));
+                await DedicatedTestTask.Run(() => journal.ReadPageRecord(location, read)).WaitAsync(TimeSpan.FromSeconds(10));
                 read.AsSpan(0, payload.Length).ToArray().ShouldBe(payload);
                 faults.FailJournalWrites = true;
             }
@@ -140,7 +140,7 @@ public sealed class JournalConcurrencyTests
             {
                 faults.FailJournalFlushes = true;
             }
-            Task laterForce = Task.Run(() => Should.Throw<StorageOfflineException>(() => journal.EnsureDurable(later)));
+            Task laterForce = DedicatedTestTask.Run(() => Should.Throw<StorageOfflineException>(() => journal.EnsureDurable(later)));
             Release(faults, write);
             await Task.WhenAll(force, laterForce).WaitAsync(TimeSpan.FromSeconds(10));
 
@@ -178,7 +178,7 @@ public sealed class JournalConcurrencyTests
         using var journal = StorageJournal.Create(faults.WrapJournal(medium), leaveOpen: true);
         long first = journal.AppendCommit(1);
         faults.StallJournalFlushes();
-        Task force = Task.Run(() => journal.EnsureDurable(first));
+        Task force = DedicatedTestTask.Run(() => journal.EnsureDurable(first));
         Exception? error = null;
         Thread? exclusive = null;
         try
@@ -259,13 +259,13 @@ public sealed class JournalConcurrencyTests
         long first = journal.AppendCommit(1);
         journal.EnsureWritten(first);
         faults.StallJournalFlushes();
-        Task force = Task.Run(() => journal.Flush(true));
+        Task force = DedicatedTestTask.Run(() => journal.Flush(true));
         try
         {
             WaitForStall(faults, write: false);
 
             // Act: no write followed the previous OS flush, so only the append lock is needed.
-            await Task.Run(() => journal.EnsureWritten(first)).WaitAsync(TimeSpan.FromSeconds(10));
+            await DedicatedTestTask.Run(() => journal.EnsureWritten(first)).WaitAsync(TimeSpan.FromSeconds(10));
 
             // Assert
             faults.StalledJournalFlushes.ShouldBe(1);
@@ -315,7 +315,7 @@ public sealed class JournalConcurrencyTests
                 observed.Set();
             };
             long first = journal.AppendCommit(round * (appenderCount + 1) + 1);
-            Task committer = Task.Run(() =>
+            Task committer = DedicatedTestTask.Run(() =>
             {
                 gate.AwaitDurable(first, TimeSpan.FromSeconds(30), journal);
                 acknowledged.Add(first);
@@ -326,7 +326,7 @@ public sealed class JournalConcurrencyTests
             try
             {
                 pending.Wait(TimeSpan.FromSeconds(10)).ShouldBeTrue();
-                flusher = Task.Run(() =>
+                flusher = DedicatedTestTask.Run(() =>
                 {
                     if (gate.FlushPending(journal))
                     {
@@ -334,7 +334,7 @@ public sealed class JournalConcurrencyTests
                     }
                 });
                 entered.Wait(TimeSpan.FromSeconds(10)).ShouldBeTrue();
-                appenders = Enumerable.Range(1, appenderCount).Select(sequence => Task.Run(() =>
+                appenders = Enumerable.Range(1, appenderCount).Select(sequence => DedicatedTestTask.Run(() =>
                 {
                     long lsn = journal.AppendCommit(sequence);
                     appended.Signal();

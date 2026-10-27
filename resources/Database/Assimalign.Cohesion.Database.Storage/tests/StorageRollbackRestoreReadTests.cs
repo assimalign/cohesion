@@ -26,16 +26,16 @@ namespace Assimalign.Cohesion.Database.Storage.Tests;
 [Collection(StorageRaceCollection.Name)]
 public sealed class StorageRollbackRestoreReadTests
 {
-    private const ulong Owner = 7;
-    private const int CommittedRecords = 30;
-    private const int RecordLength = 128;
-    private const int FailedInserts = 20;
+    private const ulong owner = 7;
+    private const int committedRecords = 30;
+    private const int recordLength = 128;
+    private const int failedInserts = 20;
 
     /// <summary>The shortest time a race runs.</summary>
-    private static readonly TimeSpan RaceMinimum = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan _raceMinimum = TimeSpan.FromSeconds(2);
 
     /// <summary>The longest a race waits past its minimum for the work it needs.</summary>
-    private static readonly TimeSpan RaceCeiling = TimeSpan.FromSeconds(60);
+    private static readonly TimeSpan _raceCeiling = TimeSpan.FromSeconds(60);
 
     /// <summary>
     /// A writer inserts records onto the page that holds 30 committed ones and rolls the bracket
@@ -49,7 +49,7 @@ public sealed class StorageRollbackRestoreReadTests
         var committed = CommitRecords(storage);
         using var stop = new CancellationTokenSource();
         var race = new Race(stop);
-        var writer = Task.Run(() => race.RollBackInserts(storage, committed[0].PageId));
+        var writer = DedicatedTestTask.Run(() => race.RollBackInserts(storage, committed[0].PageId));
 
         // Act: two readers through TryReadRecord, one through the storages' direct ReadRecord.
         var readers = new Task[3];
@@ -57,7 +57,7 @@ public sealed class StorageRollbackRestoreReadTests
         {
             int seed = reader + 1;
             bool direct = reader == readers.Length - 1;
-            readers[reader] = Task.Run(() => race.Run(() =>
+            readers[reader] = DedicatedTestTask.Run(() => race.Run(() =>
             {
                 var random = new Random(seed);
                 while (race.Running)
@@ -71,7 +71,7 @@ public sealed class StorageRollbackRestoreReadTests
                             race.Fail(new InvalidOperationException($"Committed record {index} at page {(long)pageId} slot {slotIndex} read directly as another record."));
                         }
                     }
-                    else if (!storage.TryReadRecord(pageId, slotIndex, Owner, out var record) || Id(record.Span) != index)
+                    else if (!storage.TryReadRecord(pageId, slotIndex, owner, out var record) || Id(record.Span) != index)
                     {
                         race.Fail(new InvalidOperationException($"Committed record {index} at page {(long)pageId} slot {slotIndex} read as reclaimed or as another record."));
                     }
@@ -81,7 +81,7 @@ public sealed class StorageRollbackRestoreReadTests
             }));
         }
 
-        await race.RunUntilExercisedAsync(RaceMinimum, RaceCeiling, () => race.Rollbacks >= 20 && race.Reads >= 50);
+        await race.RunUntilExercisedAsync(_raceMinimum, _raceCeiling, () => race.Rollbacks >= 20 && race.Reads >= 50);
         await Task.WhenAll([writer, .. readers]);
 
         // Assert: the race ran on both sides and no read missed a committed record.
@@ -102,35 +102,35 @@ public sealed class StorageRollbackRestoreReadTests
         var committed = CommitRecords(storage);
         using var stop = new CancellationTokenSource();
         var race = new Race(stop);
-        var writer = Task.Run(() => race.RollBackInserts(storage, committed[0].PageId));
+        var writer = DedicatedTestTask.Run(() => race.RollBackInserts(storage, committed[0].PageId));
 
         // Act
         var readers = new Task[2];
         for (int reader = 0; reader < readers.Length; reader++)
         {
-            readers[reader] = Task.Run(() => race.Run(() =>
+            readers[reader] = DedicatedTestTask.Run(() => race.Run(() =>
             {
                 while (race.Running)
                 {
                     // The storage has no visibility: a scan also returns the open bracket's
                     // records (ids from 1,000), which the models above filter by their stamps.
-                    var records = storage.ScanOwner(Owner);
+                    var records = storage.ScanOwner(owner);
                     var committedIds = new SortedSet<int>();
                     bool malformed = false;
                     foreach (var record in records)
                     {
                         int id = Id(record);
                         malformed |= id < 0;
-                        if (id is >= 0 and < CommittedRecords)
+                        if (id is >= 0 and < committedRecords)
                         {
                             malformed |= !committedIds.Add(id);
                         }
                     }
 
-                    if (malformed || committedIds.Count != CommittedRecords)
+                    if (malformed || committedIds.Count != committedRecords)
                     {
                         race.Fail(new InvalidOperationException(
-                            $"A scan returned {committedIds.Count} of the {CommittedRecords} committed records [{string.Join(", ", committedIds)}]{(malformed ? ", and a torn or repeated record" : "")}."));
+                            $"A scan returned {committedIds.Count} of the {committedRecords} committed records [{string.Join(", ", committedIds)}]{(malformed ? ", and a torn or repeated record" : "")}."));
                     }
 
                     race.CountRead();
@@ -138,7 +138,7 @@ public sealed class StorageRollbackRestoreReadTests
             }));
         }
 
-        await race.RunUntilExercisedAsync(RaceMinimum, RaceCeiling, () => race.Rollbacks >= 20 && race.Reads >= 20);
+        await race.RunUntilExercisedAsync(_raceMinimum, _raceCeiling, () => race.Rollbacks >= 20 && race.Reads >= 20);
         await Task.WhenAll([writer, .. readers]);
 
         // Assert
@@ -164,7 +164,7 @@ public sealed class StorageRollbackRestoreReadTests
         // Act
         var (completedWhileRestoring, read) = WhileRestoring(storage, pageId, () =>
         {
-            bool found = storage.TryReadRecord(pageId, slotIndex, Owner, out var record);
+            bool found = storage.TryReadRecord(pageId, slotIndex, owner, out var record);
             return found ? Id(record.Span) : -1;
         });
         int id = await read.WaitAsync(TimeSpan.FromSeconds(10));
@@ -208,12 +208,12 @@ public sealed class StorageRollbackRestoreReadTests
         var committed = CommitRecords(storage);
 
         // Act
-        var (completedWhileRestoring, scan) = WhileRestoring(storage, committed[0].PageId, () => storage.ScanOwner(Owner).Count);
+        var (completedWhileRestoring, scan) = WhileRestoring(storage, committed[0].PageId, () => storage.ScanOwner(owner).Count);
         int count = await scan.WaitAsync(TimeSpan.FromSeconds(10));
 
         // Assert
         completedWhileRestoring.ShouldBeFalse("the scan waits while the restore is open");
-        count.ShouldBe(CommittedRecords);
+        count.ShouldBe(committedRecords);
     }
 
     /// <summary>
@@ -230,7 +230,7 @@ public sealed class StorageRollbackRestoreReadTests
         try
         {
             page.Clear();
-            var task = Task.Run(read);
+            var task = DedicatedTestTask.Run(read);
             bool completed = SpinWait.SpinUntil(() => task.IsCompleted, TimeSpan.FromMilliseconds(200));
             whole.CopyTo(page);
             return (completed, task);
@@ -242,17 +242,17 @@ public sealed class StorageRollbackRestoreReadTests
     }
 
     /// <summary>
-    /// Commits 30 records of <see cref="RecordLength"/> bytes, each carrying its index, onto one page
+    /// Commits 30 records of <see cref="recordLength"/> bytes, each carrying its index, onto one page
     /// of the owner's chain, leaving room on the page for a failed bracket's inserts.
     /// </summary>
     private static List<(PageId PageId, int SlotIndex)> CommitRecords(TornStorage storage)
     {
-        var locations = new List<(PageId PageId, int SlotIndex)>(CommittedRecords);
+        var locations = new List<(PageId PageId, int SlotIndex)>(committedRecords);
         using (var transaction = storage.BeginTransaction())
         {
-            for (int index = 0; index < CommittedRecords; index++)
+            for (int index = 0; index < committedRecords; index++)
             {
-                locations.Add(storage.Insert(transaction, Owner, Record(index)));
+                locations.Add(storage.Insert(transaction, owner, Record(index)));
             }
 
             transaction.Commit();
@@ -265,7 +265,7 @@ public sealed class StorageRollbackRestoreReadTests
     /// <summary>A record that starts with its index and is filled with a byte derived from it.</summary>
     private static byte[] Record(int index)
     {
-        var record = new byte[RecordLength];
+        var record = new byte[recordLength];
         record.AsSpan().Fill((byte)(index + 1));
         BinaryPrimitives.WriteInt32LittleEndian(record, index);
         return record;
@@ -274,13 +274,13 @@ public sealed class StorageRollbackRestoreReadTests
     /// <summary>The index a record carries, or -1 when its bytes are not a record <see cref="Record"/> wrote.</summary>
     private static int Id(ReadOnlySpan<byte> record)
     {
-        if (record.Length != RecordLength)
+        if (record.Length != recordLength)
         {
             return -1;
         }
 
         int index = BinaryPrimitives.ReadInt32LittleEndian(record);
-        if (index < 0 || index >= 1_000_000 || record[RecordLength - 1] != (byte)(index + 1))
+        if (index < 0 || index >= 1_000_000 || record[recordLength - 1] != (byte)(index + 1))
         {
             return -1;
         }
@@ -350,9 +350,9 @@ public sealed class StorageRollbackRestoreReadTests
             while (Running)
             {
                 using var transaction = storage.BeginTransaction();
-                for (int index = 0; index < FailedInserts; index++)
+                for (int index = 0; index < failedInserts; index++)
                 {
-                    var location = storage.Insert(transaction, Owner, Record(1_000 + index));
+                    var location = storage.Insert(transaction, owner, Record(1_000 + index));
                     if (location.PageId != committedPage)
                     {
                         throw new InvalidOperationException("A failed insert left the committed records' page.");

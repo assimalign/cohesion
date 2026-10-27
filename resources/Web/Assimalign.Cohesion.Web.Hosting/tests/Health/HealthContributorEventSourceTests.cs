@@ -27,7 +27,7 @@ public sealed class HealthContributorEventSourceTests
         using var recorder = new EventSourceRecorder(source, EventLevel.Verbose);
         string checkName = "reported-contributor-" + Guid.NewGuid().ToString("N");
         var contributor = new StubHealthContributor(checkName, HealthContribution.Unhealthy());
-        IHealthCheckService service = HealthChecks.CreateBuilder().AddContributor(contributor).Build();
+        IHealthCheckService service = new HealthChecksBuilder().AddContributor(contributor).Build();
 
         // Act
         await service.CheckHealthAsync(predicate: null, CancellationToken.None);
@@ -58,7 +58,7 @@ public sealed class HealthContributorEventSourceTests
         var contributor = new StubHealthContributor(
             checkName,
             _ => ValueTask.FromException<HealthContribution>(new InvalidOperationException("dependency offline")));
-        IHealthCheckService service = HealthChecks.CreateBuilder().AddContributor(contributor).Build();
+        IHealthCheckService service = new HealthChecksBuilder().AddContributor(contributor).Build();
 
         // Act
         await service.CheckHealthAsync(predicate: null, CancellationToken.None);
@@ -88,7 +88,7 @@ public sealed class HealthContributorEventSourceTests
 
     private static async Task<EventSource> GetHealthEventSourceAsync()
     {
-        IHealthCheckService warmup = HealthChecks.CreateBuilder()
+        IHealthCheckService warmup = new HealthChecksBuilder()
             .AddCheck("event-source-warmup", () => HealthCheckResult.Healthy())
             .Build();
         await warmup.CheckHealthAsync(predicate: null, CancellationToken.None);

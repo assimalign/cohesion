@@ -25,24 +25,24 @@ namespace Assimalign.Cohesion.Database.Storage.Tests;
 [Collection(StorageRaceCollection.Name)]
 public sealed class StorageRecordReclamationTests
 {
-    private const ulong Owner = 7;
-    private const ulong OtherOwner = 9;
+    private const ulong ownerValue = 7;
+    private const ulong otherOwner = 9;
 
     /// <summary>The shortest time a race runs.</summary>
-    private static readonly TimeSpan RaceMinimum = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan _raceMinimum = TimeSpan.FromSeconds(2);
 
     /// <summary>The longest a race waits past its minimum for the work it needs.</summary>
-    private static readonly TimeSpan RaceCeiling = TimeSpan.FromSeconds(60);
+    private static readonly TimeSpan _raceCeiling = TimeSpan.FromSeconds(60);
 
     [Fact(DisplayName = "Cohesion Test [Storage] - Reclaimed records: a live record reads back through both overloads")]
     public void TryReadRecord_LiveRecord_ShouldReturnACopy()
     {
         // Arrange
         using var storage = RecordStorage.Create(new CrashSimulationStream(), new CrashSimulationStream());
-        var location = Insert(storage, Owner, "alpha");
+        var location = Insert(storage, ownerValue, "alpha");
 
         // Act
-        bool owned = storage.TryReadRecord(location.PageId, location.SlotIndex, Owner, out var ownedRecord);
+        bool owned = storage.TryReadRecord(location.PageId, location.SlotIndex, ownerValue, out var ownedRecord);
         bool any = storage.TryReadRecord(location.PageId, location.SlotIndex, out var anyRecord);
 
         // Assert
@@ -57,14 +57,14 @@ public sealed class StorageRecordReclamationTests
     {
         // Arrange: two records on one page, then the first one deleted.
         using var storage = RecordStorage.Create(new CrashSimulationStream(), new CrashSimulationStream());
-        var deleted = Insert(storage, Owner, "alpha");
-        var kept = Insert(storage, Owner, "beta");
+        var deleted = Insert(storage, ownerValue, "alpha");
+        var kept = Insert(storage, ownerValue, "beta");
         kept.PageId.ShouldBe(deleted.PageId);
         Delete(storage, deleted);
 
         // Act
-        bool deletedRead = storage.TryReadRecord(deleted.PageId, deleted.SlotIndex, Owner, out var deletedRecord);
-        bool keptRead = storage.TryReadRecord(kept.PageId, kept.SlotIndex, Owner, out var keptRecord);
+        bool deletedRead = storage.TryReadRecord(deleted.PageId, deleted.SlotIndex, ownerValue, out var deletedRecord);
+        bool keptRead = storage.TryReadRecord(kept.PageId, kept.SlotIndex, ownerValue, out var keptRecord);
 
         // Assert
         deletedRead.ShouldBeFalse();
@@ -78,16 +78,16 @@ public sealed class StorageRecordReclamationTests
     {
         // Arrange: the page stays allocated; only the second slot is reverted.
         using var storage = RecordStorage.Create(new CrashSimulationStream(), new CrashSimulationStream());
-        var committed = Insert(storage, Owner, "alpha");
+        var committed = Insert(storage, ownerValue, "alpha");
         (PageId PageId, int SlotIndex) reverted;
         using (var bracket = storage.BeginTransaction())
         {
-            reverted = storage.Insert(bracket, Owner, Bytes("beta"));
+            reverted = storage.Insert(bracket, ownerValue, Bytes("beta"));
             bracket.Rollback();
         }
 
         // Act
-        bool read = storage.TryReadRecord(reverted.PageId, reverted.SlotIndex, Owner, out _);
+        bool read = storage.TryReadRecord(reverted.PageId, reverted.SlotIndex, ownerValue, out _);
 
         // Assert
         reverted.PageId.ShouldBe(committed.PageId);
@@ -100,12 +100,12 @@ public sealed class StorageRecordReclamationTests
     {
         // Arrange
         using var storage = RecordStorage.Create(new CrashSimulationStream(), new CrashSimulationStream());
-        var location = Insert(storage, Owner, "alpha");
+        var location = Insert(storage, ownerValue, "alpha");
         Delete(storage, location);
         storage.FreeSpaceMap.IsAllocated(location.PageId).ShouldBeFalse();
 
         // Act
-        bool owned = storage.TryReadRecord(location.PageId, location.SlotIndex, Owner, out _);
+        bool owned = storage.TryReadRecord(location.PageId, location.SlotIndex, ownerValue, out _);
         bool any = storage.TryReadRecord(location.PageId, location.SlotIndex, out _);
 
         // Assert
@@ -118,14 +118,14 @@ public sealed class StorageRecordReclamationTests
     {
         // Arrange: the freed page is the next one the allocator hands out.
         using var storage = RecordStorage.Create(new CrashSimulationStream(), new CrashSimulationStream());
-        var former = Insert(storage, Owner, "alpha");
+        var former = Insert(storage, ownerValue, "alpha");
         Delete(storage, former);
-        var reused = Insert(storage, OtherOwner, "gamma");
+        var reused = Insert(storage, otherOwner, "gamma");
         reused.ShouldBe(former);
 
         // Act
-        bool formerOwner = storage.TryReadRecord(former.PageId, former.SlotIndex, Owner, out _);
-        bool newOwner = storage.TryReadRecord(former.PageId, former.SlotIndex, OtherOwner, out var newRecord);
+        bool formerOwner = storage.TryReadRecord(former.PageId, former.SlotIndex, ownerValue, out _);
+        bool newOwner = storage.TryReadRecord(former.PageId, former.SlotIndex, otherOwner, out var newRecord);
         bool anyOwner = storage.TryReadRecord(former.PageId, former.SlotIndex, out var anyRecord);
 
         // Assert: only the owner overload can tell; the ownerless one leaves it to the stamps.
@@ -142,7 +142,7 @@ public sealed class StorageRecordReclamationTests
         // Arrange: the freed data page comes back as a page whose header, read as a slotted
         // page, records more slots than a page can hold.
         using var storage = RecordStorage.Create(new CrashSimulationStream(), new CrashSimulationStream());
-        var location = Insert(storage, Owner, "alpha");
+        var location = Insert(storage, ownerValue, "alpha");
         Delete(storage, location);
         using (var bracket = storage.BeginTransaction())
         {
@@ -156,7 +156,7 @@ public sealed class StorageRecordReclamationTests
         }
 
         // Act
-        bool owned = storage.TryReadRecord(location.PageId, location.SlotIndex, Owner, out _);
+        bool owned = storage.TryReadRecord(location.PageId, location.SlotIndex, ownerValue, out _);
         bool any = storage.TryReadRecord(location.PageId, location.SlotIndex, out _);
 
         // Assert
@@ -171,14 +171,14 @@ public sealed class StorageRecordReclamationTests
         var data = new CrashSimulationStream(writeThrough: true);
         var journal = new CrashSimulationStream();
         var storage = RecordStorage.Create(data, journal);
-        var location = Insert(storage, Owner, "alpha-record");
+        var location = Insert(storage, ownerValue, "alpha-record");
         storage.Dispose();
         byte[] image = data.CaptureDurable();
         FlipRecordByte(image, location.PageId, "alpha-record");
         using var reopened = RecordStorage.Open(new CrashSimulationStream(image, writeThrough: true), new CrashSimulationStream(journal.CaptureDurable()));
 
         // Act
-        var owned = Should.Throw<StorageCorruptionException>(() => reopened.TryReadRecord(location.PageId, location.SlotIndex, Owner, out _));
+        var owned = Should.Throw<StorageCorruptionException>(() => reopened.TryReadRecord(location.PageId, location.SlotIndex, ownerValue, out _));
         var any = Should.Throw<StorageCorruptionException>(() => reopened.TryReadRecord(location.PageId, location.SlotIndex, out _));
 
         // Assert
@@ -193,14 +193,14 @@ public sealed class StorageRecordReclamationTests
         var data = new CrashSimulationStream(writeThrough: true);
         var journal = new CrashSimulationStream();
         var storage = RecordStorage.Create(data, journal);
-        var location = Insert(storage, Owner, "alpha");
+        var location = Insert(storage, ownerValue, "alpha");
         storage.Dispose();
         var cut = new CrashSimulationStream(data.CaptureDurable(), writeThrough: true);
         using var reopened = RecordStorage.Open(cut, new CrashSimulationStream(journal.CaptureDurable()));
         cut.SetLength(((long)location.PageId * Page.Size) + (Page.Size / 2));
 
         // Act
-        var failure = Should.Throw<StorageIOException>(() => reopened.TryReadRecord(location.PageId, location.SlotIndex, Owner, out _));
+        var failure = Should.Throw<StorageIOException>(() => reopened.TryReadRecord(location.PageId, location.SlotIndex, ownerValue, out _));
 
         // Assert
         reopened.FreeSpaceMap.IsAllocated(location.PageId).ShouldBeTrue();
@@ -212,7 +212,7 @@ public sealed class StorageRecordReclamationTests
     {
         // Arrange: the slot entry's offset moved to the last byte of the page.
         using var storage = RecordStorage.Create(new CrashSimulationStream(), new CrashSimulationStream());
-        var location = Insert(storage, Owner, "alpha");
+        var location = Insert(storage, ownerValue, "alpha");
         using (var handle = storage.PageManager.GetPage(location.PageId))
         {
             var entry = handle.Page.AsSpan().Slice(Page.Size - ((location.SlotIndex + 1) * 4), 4);
@@ -220,7 +220,7 @@ public sealed class StorageRecordReclamationTests
         }
 
         // Act
-        var failure = Should.Throw<StorageCorruptionException>(() => storage.TryReadRecord(location.PageId, location.SlotIndex, Owner, out _));
+        var failure = Should.Throw<StorageCorruptionException>(() => storage.TryReadRecord(location.PageId, location.SlotIndex, ownerValue, out _));
 
         // Assert
         failure.PageId.ShouldBe(location.PageId);
@@ -237,15 +237,15 @@ public sealed class StorageRecordReclamationTests
     {
         // Arrange: one record, then a writer that keeps freeing its page and taking it back.
         using var storage = RecordStorage.Create(new CrashSimulationStream(), new CrashSimulationStream());
-        var stale = Insert(storage, Owner, "alpha");
+        var stale = Insert(storage, ownerValue, "alpha");
         Delete(storage, stale);
         using var stop = new CancellationTokenSource();
         long cycles = 0;
-        var writer = Task.Run(() =>
+        var writer = DedicatedTestTask.Run(() =>
         {
             while (!stop.IsCancellationRequested)
             {
-                Delete(storage, Insert(storage, OtherOwner, "gamma"));
+                Delete(storage, Insert(storage, otherOwner, "gamma"));
                 Interlocked.Increment(ref cycles);
             }
         });
@@ -259,7 +259,7 @@ public sealed class StorageRecordReclamationTests
         {
             try
             {
-                if (storage.TryReadRecord(stale.PageId, stale.SlotIndex, Owner, out _))
+                if (storage.TryReadRecord(stale.PageId, stale.SlotIndex, ownerValue, out _))
                 {
                     found++;
                 }
@@ -288,10 +288,10 @@ public sealed class StorageRecordReclamationTests
         // Arrange: three records on one page, a fourth page-mate inserted and reverted, and the
         // scan standing on the first record with the page pinned.
         using var storage = RecordStorage.Create(new CrashSimulationStream(), new CrashSimulationStream());
-        var first = Insert(storage, Owner, "alpha");
-        var second = Insert(storage, Owner, "beta");
-        var third = Insert(storage, Owner, "gamma");
-        using var iterator = storage.GetUnitIterator(Owner);
+        var first = Insert(storage, ownerValue, "alpha");
+        var second = Insert(storage, ownerValue, "beta");
+        var third = Insert(storage, ownerValue, "gamma");
+        using var iterator = storage.GetUnitIterator(ownerValue);
         iterator.MoveNext().ShouldBeTrue();
         Text(iterator.Current.Data).ShouldBe("alpha");
 
@@ -300,7 +300,7 @@ public sealed class StorageRecordReclamationTests
         Delete(storage, second);
         using (var bracket = storage.BeginTransaction())
         {
-            storage.Insert(bracket, Owner, Bytes("delta"));
+            storage.Insert(bracket, ownerValue, Bytes("delta"));
             bracket.Rollback();
         }
 
@@ -333,7 +333,7 @@ public sealed class StorageRecordReclamationTests
         byte[] payload = new byte[900];
         using var stop = new CancellationTokenSource();
         long cycles = 0;
-        var writer = Task.Run(() =>
+        var writer = DedicatedTestTask.Run(() =>
         {
             var live = new List<(PageId PageId, int SlotIndex)>();
             while (!stop.IsCancellationRequested)
@@ -342,7 +342,7 @@ public sealed class StorageRecordReclamationTests
                 {
                     for (int index = 0; index < 16; index++)
                     {
-                        live.Add(storage.Insert(bracket, Owner, payload));
+                        live.Add(storage.Insert(bracket, ownerValue, payload));
                     }
 
                     bracket.Commit();
@@ -350,7 +350,7 @@ public sealed class StorageRecordReclamationTests
 
                 using (var bracket = storage.BeginTransaction())
                 {
-                    storage.Insert(bracket, Owner, payload);
+                    storage.Insert(bracket, ownerValue, payload);
                     bracket.Rollback();
                 }
 
@@ -372,7 +372,7 @@ public sealed class StorageRecordReclamationTests
         {
             try
             {
-                using var iterator = storage.GetUnitIterator(Owner);
+                using var iterator = storage.GetUnitIterator(ownerValue);
                 while (iterator.MoveNext())
                 {
                 }
@@ -395,15 +395,15 @@ public sealed class StorageRecordReclamationTests
     }
 
     /// <summary>
-    /// Whether a race goes on: for at least <see cref="RaceMinimum"/>, then until it has done the
-    /// work it needs, for at most <see cref="RaceCeiling"/> more, and never past a failure or a
+    /// Whether a race goes on: for at least <see cref="_raceMinimum"/>, then until it has done the
+    /// work it needs, for at most <see cref="_raceCeiling"/> more, and never past a failure or a
     /// writer that stopped. A fixed window lets a starved writer finish no cycle on a small CI
     /// runner, and the race never happens.
     /// </summary>
     private static bool KeepRacing(Stopwatch elapsed, Task writer, Exception? failure, bool exercised)
         => failure is null
             && !writer.IsCompleted
-            && (elapsed.Elapsed < RaceMinimum || (!exercised && elapsed.Elapsed < RaceMinimum + RaceCeiling));
+            && (elapsed.Elapsed < _raceMinimum || (!exercised && elapsed.Elapsed < _raceMinimum + _raceCeiling));
 
     private static (PageId PageId, int SlotIndex) Insert(RecordStorage storage, ulong owner, string text)
     {

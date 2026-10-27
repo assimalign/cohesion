@@ -23,7 +23,7 @@ public sealed class IndexTestHarness : IAsyncDisposable
     public IndexTestHarness(IFileSystemFileHandle? data = null, IFileSystemFileHandle? journal = null, string? name = null)
     {
         Storage = HarnessStorage.Create(data ?? new SimulatedDurableFileHandle(), journal ?? new SimulatedDurableFileHandle(), name);
-        LockManager = Transactions.LockManager.Create();
+        LockManager = new Transactions.LockManager();
         Manager = TransactionManager.Create(LockManager, VersionStore.CreateInMemory());
         IndexManager = BTreeIndexManager.Create(new BTreeIndexManagerOptions
         {
@@ -36,7 +36,7 @@ public sealed class IndexTestHarness : IAsyncDisposable
     private IndexTestHarness(HarnessStorage storage, IReadOnlyList<BTreeIndexRegistration> registrations)
     {
         Storage = storage;
-        LockManager = Transactions.LockManager.Create();
+        LockManager = new Transactions.LockManager();
         Manager = TransactionManager.Create(LockManager, VersionStore.CreateInMemory());
         IndexManager = BTreeIndexManager.Create(new BTreeIndexManagerOptions
         {

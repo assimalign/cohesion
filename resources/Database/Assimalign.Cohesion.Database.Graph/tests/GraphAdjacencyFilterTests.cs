@@ -137,7 +137,7 @@ public sealed class GraphAdjacencyFilterTests
         {
             var plan = new GraphPlanner(database, operation.Context.Snapshot).Plan(GraphQueryRequest.FromGql("MATCH (a:Hub)-[:T]->(b {absent:1}) RETURN a").Statement.GqlExpression);
             var error = await Should.ThrowAsync<DatabaseException>(async () => await GraphPlanExecutor.MatchAsync(database, operation, plan.MatchClauses[0].Paths[0], new(StringComparer.Ordinal), [], budget, null, timeout.Token));
-            error.Diagnostics.Single().Code.ShouldBe("COHDBG004");
+            error.Diagnostics.Single().Code.ShouldBe("CG05004");
             error.Message.ShouldContain("physical=1000001, viable=0", Case.Sensitive);
             return true;
         }, timeout.Token);
@@ -156,7 +156,8 @@ public sealed class GraphAdjacencyFilterTests
         var database = await engine.CreateDatabaseAsync("graph", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         // Act
-        await using var result = (await session.ExecuteAsync("EXPLAIN MATCH (a)-[:T]->" + quantifier + "(b) RETURN a", cancellationToken: CancellationToken.None)).ShouldBeAssignableTo<DatabaseResultSet>();
+        // Bind the endpoint so this corpus continues to exercise adjacency rather than a type leaf.
+        await using var result = (await session.ExecuteAsync("EXPLAIN MATCH (a) WITH a MATCH (a)-[:T]->" + quantifier + "(b) RETURN a", cancellationToken: CancellationToken.None)).ShouldBeAssignableTo<DatabaseResultSet>();
         var details = new List<string>();
         await foreach (var row in result.GetRowsAsync(CancellationToken.None))
         { if (Equals(row.GetValue(2), "Expand")) { details.Add((string)row.GetValue(5)!); } }

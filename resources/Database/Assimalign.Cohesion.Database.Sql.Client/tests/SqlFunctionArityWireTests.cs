@@ -16,28 +16,28 @@ namespace Assimalign.Cohesion.Database.Sql.Client.Tests;
 /// </summary>
 public sealed class SqlFunctionArityWireTests
 {
-    private const string FunctionSignatureMismatch = "COHSQLE006";
+    private const string functionSignatureMismatch = "CS01006";
 
     /// <summary>Each position fails the same way, over the seeded table and an empty one.</summary>
     /// <param name="statement">A statement with a wrong-arity call.</param>
     /// <param name="message">The complete failure message.</param>
     [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - Functions: a wrong-arity call is a coded failure on a usable connection")]
     [InlineData("SELECT ABS(1, 2), UPPER(), COALESCE() FROM empty_rows",
-        "COHSQLE006: Function 'ABS' takes exactly 1 argument but was called with 2. Accepted: ABS(numeric).")]
+        "CS01006: Function 'ABS' takes exactly 1 argument but was called with 2. Accepted: ABS(numeric).")]
     [InlineData("SELECT id FROM users WHERE UPPER() IS NULL",
-        "COHSQLE006: Function 'UPPER' takes exactly 1 argument but was called with none. Accepted: UPPER(TEXT).")]
+        "CS01006: Function 'UPPER' takes exactly 1 argument but was called with none. Accepted: UPPER(TEXT).")]
     [InlineData("UPDATE users SET score = COALESCE()",
-        "COHSQLE006: Function 'COALESCE' takes 1 or more arguments but was called with none. Accepted: COALESCE(value [, value ...]).")]
+        "CS01006: Function 'COALESCE' takes 1 or more arguments but was called with none. Accepted: COALESCE(value [, value ...]).")]
     [InlineData("UPDATE empty_rows SET id = SUM()",
-        "COHSQLE006: Function 'SUM' takes exactly 1 argument but was called with none. Accepted: SUM(numeric).")]
+        "CS01006: Function 'SUM' takes exactly 1 argument but was called with none. Accepted: SUM(numeric).")]
     [InlineData("INSERT INTO users (id, name, score) VALUES (3, LOWER('A', 'B'), 1)",
-        "COHSQLE006: Function 'LOWER' takes exactly 1 argument but was called with 2. Accepted: LOWER(TEXT).")]
+        "CS01006: Function 'LOWER' takes exactly 1 argument but was called with 2. Accepted: LOWER(TEXT).")]
     [InlineData("SELECT COUNT(id, name) FROM users",
-        "COHSQLE006: Function 'COUNT' takes exactly 1 argument or '*' but was called with 2. Accepted: COUNT(*) or COUNT(value).")]
+        "CS01006: Function 'COUNT' takes exactly 1 argument or '*' but was called with 2. Accepted: COUNT(*) or COUNT(value).")]
     [InlineData("CREATE TABLE ck1 (c INT CHECK (ABS(c, 1) > 0))",
-        "COHSQLE006: Function 'ABS' takes exactly 1 argument but was called with 2. Accepted: ABS(numeric).")]
+        "CS01006: Function 'ABS' takes exactly 1 argument but was called with 2. Accepted: ABS(numeric).")]
     [InlineData("ALTER TABLE users ADD CONSTRAINT ck CHECK (LENGTH(name, 1) > 0)",
-        "COHSQLE006: Function 'LENGTH' takes exactly 1 argument but was called with 2. Accepted: LENGTH(TEXT).")]
+        "CS01006: Function 'LENGTH' takes exactly 1 argument but was called with 2. Accepted: LENGTH(TEXT).")]
     public async Task ExecuteAsync_WrongArity_ShouldFailWithCodeAndKeepTheConnection(string statement, string message)
     {
         // Arrange
@@ -54,7 +54,7 @@ public sealed class SqlFunctionArityWireTests
         failure.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
         failure.ConnectionUsable.ShouldBeTrue();
         failure.Message.ShouldBe(message);
-        failure.Message.ShouldStartWith(FunctionSignatureMismatch, Case.Sensitive);
+        failure.Message.ShouldStartWith(functionSignatureMismatch, Case.Sensitive);
         SqlResultSet users = await connection.QueryAsync("SELECT id, name, score FROM users ORDER BY id",
             cancellationToken: SqlClientTestHarness.Timeout());
         users.Select(row => (row["id"], row["name"], row["score"])).ShouldBe([(1, "ada", 100L), (2, "grace", 200L)]);

@@ -127,7 +127,7 @@ internal static class ApplicationProviderValidation
                     continue;
                 }
 
-                if (!ResourceMountSource.TryCreate(mount.Source, out ResourceMountSource expression))
+                if (!ResourceMountSource.TryCreate(mount.Source.Value.Value, out ResourceMountSource expression))
                 {
                     throw new InvalidOperationException(string.Format(
                         CultureInfo.CurrentCulture, ErrorMessages.ProviderMountSourceInvalid,

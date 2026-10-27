@@ -8,9 +8,9 @@ namespace Assimalign.Cohesion.Database.Sql;
 
 /// <summary>Raised when a SQL row violates a named CHECK, FOREIGN KEY, or UNIQUE constraint.</summary>
 /// <remarks>
-/// The rejected statement is rolled back. Diagnostics contains exactly one error: COHSQLE037
-/// (SQLSTATE 23505) for uniqueness, COHSQLE038 (23514) for CHECK and domain checks,
-/// COHSQLE039 (23503) for foreign keys, or COHSQLE024 (23502) for NOT NULL.
+/// The rejected statement is rolled back. Diagnostics contains exactly one error: CS03037
+/// (SQLSTATE 23505) for uniqueness, CS03038 (23514) for CHECK and domain checks,
+/// CS03039 (23503) for foreign keys, or CS03024 (23502) for NOT NULL.
 /// Raw unique keys and unrelated row values are omitted to avoid disclosing sensitive data.
 /// </remarks>
 public sealed class SqlConstraintViolationException : DatabaseException
@@ -48,10 +48,10 @@ public sealed class SqlConstraintViolationException : DatabaseException
             // CHECK classification rather than adding validation to the public constructor.
             Code = constraintKind switch
             {
-                "UNIQUE" or "PRIMARY KEY" => "COHSQLE037",
-                "FOREIGN KEY" => "COHSQLE039",
-                "NOT NULL" => "COHSQLE024",
-                _ => "COHSQLE038",
+                "UNIQUE" or "PRIMARY KEY" => "CS03037",
+                "FOREIGN KEY" => "CS03039",
+                "NOT NULL" => "CS03024",
+                _ => "CS03038",
             },
             Message = message,
             Severity = DiagnosticSeverity.Error,

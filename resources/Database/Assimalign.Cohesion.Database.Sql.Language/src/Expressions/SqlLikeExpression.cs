@@ -5,6 +5,8 @@ using Assimalign.Cohesion.Database.Language;
 /// <summary>
 /// Represents a <c>LIKE</c> predicate such as <c>name LIKE '%test%'</c>.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("SqlLikeExpression")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Language.SqlLikeExpression.DebugView))]
 public sealed class SqlLikeExpression : SqlExpression
 {
     /// <summary>
@@ -42,4 +44,19 @@ public sealed class SqlLikeExpression : SqlExpression
     /// Gets whether the predicate is negated (<c>NOT LIKE</c>).
     /// </summary>
     public bool IsNegated { get; }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Sql.Language.SqlLikeExpression _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Language.SqlLikeExpression value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Sql.Language.SqlExpression Operand => _target.Operand;
+        public global::Assimalign.Cohesion.Database.Sql.Language.SqlExpression Pattern => _target.Pattern;
+        public global::Assimalign.Cohesion.Database.Sql.Language.SqlExpression? Escape => _target.Escape;
+        public bool IsNegated => _target.IsNegated;
+    }
 }

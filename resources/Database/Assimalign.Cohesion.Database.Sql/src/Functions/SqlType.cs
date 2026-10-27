@@ -45,6 +45,8 @@ namespace Assimalign.Cohesion.Database.Sql;
 /// (PostgreSQL's <c>anyelement</c>).
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("SqlType {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.SqlType.DebugView))]
 public sealed class SqlType : IEquatable<SqlType>
 {
     private SqlType(string name, DatabaseTypeInfo storage, bool isPseudo, SqlType? baseType = null, SqlScalarFunction? check = null)
@@ -245,7 +247,7 @@ public sealed class SqlType : IEquatable<SqlType>
     /// The name DDL and CAST write, matched ignoring case: an ASCII identifier (an ASCII letter or
     /// underscore, then ASCII letters, digits and underscores, the rule the typed schema applies) that
     /// is neither a SQL keyword nor a built-in type name or alias (<c>INT</c>, <c>VARCHAR</c>,
-    /// <c>DATE</c>, ...). SERIAL, BIGSERIAL and SMALLSERIAL are refused with COHDBL001 and an
+    /// <c>DATE</c>, ...). SERIAL, BIGSERIAL and SMALLSERIAL are refused with CK00001 and an
     /// IDENTITY suggestion because the type grammar reserves those spellings.
     /// </param>
     /// <param name="baseType">
@@ -285,13 +287,12 @@ public sealed class SqlType : IEquatable<SqlType>
         if (baseType.IsPseudo)
         {
             throw new ArgumentException(
-                $"Domain '{name}' cannot be over the pseudo-type {baseType.Name}: a domain's base type is a storage type.", nameof(baseType));
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlTypeCreateDomainCoreArgument, name, baseType.Name), nameof(baseType));
         }
         if (baseType.IsDomain)
         {
             throw new ArgumentException(
-                $"Domain '{name}' cannot be over domain '{baseType.Name}': a domain's base type is a built-in type in this iteration. " +
-                $"Declare it over {baseType.BaseType!.Name}, with a check that tests both conditions.", nameof(baseType));
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlTypeCreateDomainCoreArgument2, name, baseType.Name, baseType.BaseType!.Name), nameof(baseType));
         }
 
         if (check is not null)
@@ -299,19 +300,17 @@ public sealed class SqlType : IEquatable<SqlType>
             if (!check.AcceptsCount(1) || !SqlFunctionResolver.AcceptsType(check.ParameterAt(0), baseType.Storage.Type))
             {
                 throw new ArgumentException(
-                    $"The check of domain '{name}', {check}, must take one argument of the domain's base type {baseType.Name}.", nameof(check));
+                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlTypeCreateDomainCoreArgument3, name, check, baseType.Name), nameof(check));
             }
             if (check.ReturnType.IsPseudo || check.ReturnType.Storage.Type != DatabaseType.Boolean)
             {
                 throw new ArgumentException(
-                    $"The check of domain '{name}', {check}, must return BOOLEAN, but it returns {check.ReturnType.Name}.", nameof(check));
+                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlTypeCreateDomainCoreArgument4, name, check, check.ReturnType.Name), nameof(check));
             }
             if (check.Volatility != SqlFunctionVolatility.Immutable)
             {
                 throw new ArgumentException(
-                    $"The check of domain '{name}', {check}, is {check.Volatility.ToString().ToUpperInvariant()}; a domain's check must be " +
-                    "IMMUTABLE, as a CHECK constraint's functions must (owner decision 64), so a value it accepted once is accepted again. " +
-                    "Create it with SqlFunctionVolatility.Immutable.", nameof(check));
+                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlTypeCreateDomainCoreArgument5, name, check, check.Volatility.ToString().ToUpperInvariant()), nameof(check));
             }
         }
 
@@ -354,7 +353,7 @@ public sealed class SqlType : IEquatable<SqlType>
             }
         }
 
-        throw new ArgumentException($"Storage type {storage.Type} is not a SQL type.", nameof(storage));
+        throw new ArgumentException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlTypeForStorageArgument, storage.Type), nameof(storage));
     }
 
     /// <inheritdoc />
@@ -405,4 +404,21 @@ public sealed class SqlType : IEquatable<SqlType>
     }
 
     private static SqlType Create(string name, DatabaseType type) => new(name, new DatabaseTypeInfo(type), isPseudo: false);
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Sql.SqlType _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.SqlType value)
+        {
+            _target = value;
+        }
+
+        public string Name => _target.Name;
+        public global::Assimalign.Cohesion.Database.Types.DatabaseTypeInfo Storage => _target.Storage;
+        public bool IsPseudo => _target.IsPseudo;
+        public global::Assimalign.Cohesion.Database.Sql.SqlType? BaseType => _target.BaseType;
+        public global::Assimalign.Cohesion.Database.Sql.SqlScalarFunction? Check => _target.Check;
+        public bool IsDomain => _target.IsDomain;
+    }
 }

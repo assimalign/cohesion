@@ -45,11 +45,11 @@ public sealed class SqlJoinShapeTests
         var statement = (SqlQueryStatement)new SqlQueryParser().Parse(sql);
 
         // Assert
-        var diagnostic = statement.Diagnostics.Single(d => d.Code == "COHDBL001");
+        var diagnostic = statement.Diagnostics.Single(d => d.Code == "CK00001");
         sql[diagnostic.Start!.Value..diagnostic.End!.Value].ShouldBe(token);
     }
 
-    [Theory(DisplayName = "Cohesion Test [Sql.Language] - JOIN: malformed joins and USING outside SELECT fail")]
+    [Theory(DisplayName = "Cohesion Test [Sql.Language] - JOIN: malformed joins and invalid USING lists fail")]
     [InlineData("SELECT * FROM t CROSS JOIN u ON TRUE;")]
     [InlineData("SELECT * FROM t CROSS JOIN u USING (id);")]
     [InlineData("SELECT * FROM t JOIN u USING ();")]
@@ -60,7 +60,7 @@ public sealed class SqlJoinShapeTests
     [InlineData("SELECT * FROM t INNER JOIN u;")]
     [InlineData("SELECT * FROM t,;")]
     [InlineData("SELECT * FROM t,")]
-    [InlineData("DELETE FROM t USING u WHERE t.id = u.id;")]
+    [InlineData("DELETE FROM t USING u, WHERE t.id = u.id;")]
     [InlineData("CREATE INDEX ix ON t USING btree (id);")]
     public void Parse_InvalidJoin_ShouldReportError(string sql)
     {

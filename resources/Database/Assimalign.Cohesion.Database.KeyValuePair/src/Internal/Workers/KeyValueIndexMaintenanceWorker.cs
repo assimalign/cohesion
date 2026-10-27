@@ -19,6 +19,8 @@ namespace Assimalign.Cohesion.Database.KeyValuePair.Internal;
 /// compaction lands, the throttled maintenance body fills in here without
 /// changing the seam.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("KeyValueIndexMaintenanceWorker {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.KeyValuePair.Internal.KeyValueIndexMaintenanceWorker.DebugView))]
 internal sealed class KeyValueIndexMaintenanceWorker : DatabaseWriteWorker<KeyValueDatabase>
 {
     private readonly KeyValueDatabaseEngine _engine;
@@ -44,5 +46,20 @@ internal sealed class KeyValueIndexMaintenanceWorker : DatabaseWriteWorker<KeyVa
         DatabaseWriteResult failures = default;
         // The index layer has no compaction yet; its future body already has database isolation.
         return failures;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.KeyValuePair.Internal.KeyValueIndexMaintenanceWorker _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.KeyValuePair.Internal.KeyValueIndexMaintenanceWorker value)
+        {
+            _target = value;
+        }
+
+        public bool CompletionOnly => _target.CompletionOnly;
+        public string Name => _target.Name;
+        public global::Assimalign.Cohesion.Database.DatabaseEngineWorkerKind Kind => _target.Kind;
+        public global::System.TimeSpan Interval => _target.Interval;
     }
 }

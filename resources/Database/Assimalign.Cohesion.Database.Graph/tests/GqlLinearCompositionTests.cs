@@ -49,20 +49,20 @@ public sealed class GqlLinearCompositionTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Graph] - Composition: scope shrinks and binding kinds are validated per stage")]
-    [InlineData("LET x = 1 LET x = 2 RETURN x", "COHDBG003")]
-    [InlineData("FOR x IN [1] FOR x IN [2] RETURN x", "COHDBG003")]
-    [InlineData("LET x = 1 DELETE x", "COHDBG003")]
-    [InlineData("LET x = 1 FILTER x:Foo RETURN x", "COHDBG003")]
-    [InlineData("LET x = 1 MATCH (x) RETURN x", "COHDBG003")]
-    [InlineData("MATCH (a), (b) WITH a RETURN b", "COHDBG001")]
-    [InlineData("MATCH (a), (b) RETURN a NEXT RETURN b", "COHDBG001")]
-    [InlineData("MATCH (a) RETURN a.name NEXT RETURN name", "COHDBG001")]
-    [InlineData("MATCH (a) WITH a.name RETURN name", "COHDBG001")]
-    [InlineData("MATCH (a) DELETE a MATCH (b) RETURN a", "COHDBG003")]
-    [InlineData("LET x = 1 WITH x ORDER BY x LET y = missing RETURN y", "COHDBG001")]
-    [InlineData("LET x = [1] INSERT (:T {k:x})", "COHDBG003")]
-    [InlineData("FOR x IN 1 RETURN x", "COHDBG013")]
-    [InlineData("UNWIND 'a' AS x RETURN x", "COHDBG013")]
+    [InlineData("LET x = 1 LET x = 2 RETURN x", "CG03003")]
+    [InlineData("FOR x IN [1] FOR x IN [2] RETURN x", "CG03003")]
+    [InlineData("LET x = 1 DELETE x", "CG03003")]
+    [InlineData("LET x = 1 FILTER x:Foo RETURN x", "CG03003")]
+    [InlineData("LET x = 1 MATCH (x) RETURN x", "CG03003")]
+    [InlineData("MATCH (a), (b) WITH a RETURN b", "CG05001")]
+    [InlineData("MATCH (a), (b) RETURN a NEXT RETURN b", "CG05001")]
+    [InlineData("MATCH (a) RETURN a.name NEXT RETURN name", "CG05001")]
+    [InlineData("MATCH (a) WITH a.name RETURN name", "CG05001")]
+    [InlineData("MATCH (a) DELETE a MATCH (b) RETURN a", "CG03003")]
+    [InlineData("LET x = 1 WITH x ORDER BY x LET y = missing RETURN y", "CG05001")]
+    [InlineData("LET x = [1] INSERT (:T {k:x})", "CG03003")]
+    [InlineData("FOR x IN 1 RETURN x", "CG02013")]
+    [InlineData("UNWIND 'a' AS x RETURN x", "CG02013")]
     public async Task Execute_InvalidBindings_ShouldReportCodedDiagnosticsAsync(string source, string code)
     {
         // Arrange
@@ -95,11 +95,11 @@ public sealed class GqlLinearCompositionTests
         {
             var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(source,
                 new Dictionary<string, object?> { ["xs"] = input }, CancellationToken.None));
-            error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG013");
+            error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG02013");
         }
         var propertyError = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("INSERT (:T {k:$xs})",
             new Dictionary<string, object?> { ["xs"] = new List<long> { 1, 2 } }, CancellationToken.None));
-        propertyError.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG003");
+        propertyError.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG03003");
     }
 
     [Theory(DisplayName = "Cohesion Test [Graph] - Composition: insertion labels and own writes are visible to later stages")]
@@ -168,18 +168,28 @@ public sealed class GqlLinearCompositionTests
         await tx.RollbackAsync(CancellationToken.None);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Graph] - Composition: FOR fan-out shares the 100000 binding cap with MATCH")]
-    public async Task Execute_Expansion_ShouldFailAtSharedRowCapAsync()
+    [Fact(DisplayName = "Cohesion Test [Graph] - Composition: affordable FOR results may exceed the former 100000 binding cap (#1533)")]
+    public async Task Execute_Expansion_ShouldMaterializeWithinMemoryBudgetAsync()
     {
         // Arrange
         await using var engine = GraphDatabaseEngine.Create("linear", new());
         var database = await engine.CreateDatabaseAsync("graph", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         // Act
-        var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("FOR x IN $xs FOR y IN $xs RETURN x, y",
-            new Dictionary<string, object?> { ["xs"] = Enumerable.Range(0, 317).ToArray() }, CancellationToken.None));
-        // Assert
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG004");
+        await using var result = (DatabaseResultSet)await session.ExecuteAsync("FOR x IN $xs FOR y IN $xs RETURN x, y",
+            new Dictionary<string, object?> { ["xs"] = Enumerable.Range(0, 317).ToArray() }, CancellationToken.None);
+        int count = 0;
+        await foreach (var row in result.GetRowsAsync(CancellationToken.None))
+        {
+            Convert.ToInt64(row.GetValue(0)).ShouldBe(count / 317);
+            Convert.ToInt64(row.GetValue(1)).ShouldBe(count % 317);
+            count++;
+        }
+        // Every result is verified and this scalar shape still fits within 64 MiB.
+        count.ShouldBe(100489);
+        session.LastStatementMetrics!.Memory.PeakRetainedBytes.ShouldBeLessThanOrEqualTo(64L * 1024 * 1024);
+        session.LastStatementMetrics.Memory.RetainedBytes.ShouldBe(0);
+        session.LastStatementMetrics.Memory.ActiveLeases.ShouldBe(0);
     }
 
     [Fact(DisplayName = "Cohesion Test [Graph] - Composition: EXPLAIN maps every stage and never executes writes")]
@@ -220,40 +230,40 @@ public sealed class GqlLinearCompositionTests
         {
             var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(
                 new GraphQueryRequest(new GqlQueryStatement(new GqlQueryExpression(stages))), CancellationToken.None));
-            error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG001");
+            error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG05001");
         }
         var show = new GqlQueryExpression([new GqlLetStage([new GqlProjection(new GqlLiteralExpression(1L), "x")])])
         { CatalogSurface = GqlCatalogSurface.Labels };
         var rejected = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(
             new GraphQueryRequest(new GqlQueryStatement(show)), CancellationToken.None));
-        rejected.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG001");
+        rejected.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG05001");
         var catalogWrite = new GqlQueryExpression([new GqlInsertStage([])]) { CatalogSurface = GqlCatalogSurface.Labels };
         var writeRejected = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(
             new GraphQueryRequest(new GqlQueryStatement(catalogWrite)), CancellationToken.None));
-        writeRejected.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("GQL0007");
+        writeRejected.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG00007");
     }
 
     [Theory(DisplayName = "Cohesion Test [Graph] - Composition: invalid scopes and duplicate carried names fail during planning, including EXPLAIN")]
-    [InlineData("LET x=1 WITH DISTINCT x AS y WHERE x=1 RETURN y", "COHDBG001")]
-    [InlineData("MATCH (a:P) WITH DISTINCT a.k AS k WHERE a.k > 1 RETURN k", "COHDBG001")]
-    [InlineData("MATCH (a:P) WITH DISTINCT a AS b WHERE a.k > 1 RETURN b", "COHDBG001")]
-    [InlineData("MATCH (a:P) WITH a.k AS k, count(*) AS c WHERE a.k > 1 RETURN k", "COHDBG001")]
-    [InlineData("MATCH (a:P) WITH a AS b, count(*) AS c WHERE a.k > 1 RETURN b", "COHDBG001")]
-    [InlineData("MATCH (a:P) WITH a.k AS k, count(*) AS c WHERE count(*) > 1 RETURN k", "COHDBG001")]
-    [InlineData("INSERT (a:T {k: a.k})", "COHDBG001")]
-    [InlineData("INSERT (a:T)-[r:R {w:1}]->(b:T {w: r.w})", "COHDBG001")]
-    [InlineData("INSERT (a:T)-[r:R {w: r.w}]->(b:T)", "COHDBG001")]
-    [InlineData("CREATE (a:T {k: a.k})", "COHDBG001")]
-    [InlineData("CREATE (a:T)-[r:R {w:1}]->(b:T {w: r.w})", "COHDBG001")]
-    [InlineData("CREATE (a:T)-[r:R {w: r.w}]->(b:T)", "COHDBG001")]
-    [InlineData("INSERT (a:T), (b:T {k:a.k})", "COHDBG001")]
-    [InlineData("LET x = 1 WITH x, (x) RETURN x", "COHDBG015")]
-    [InlineData("MATCH (a) RETURN a, \"a\" NEXT RETURN a", "COHDBG015")]
-    [InlineData("LET x = 1 WITH x, \"x\" RETURN x", "COHDBG015")]
-    [InlineData("LET x = 1 RETURN x.k", "COHDBG003")]
-    [InlineData("FOR x IN [1,2] RETURN x.k", "COHDBG003")]
-    [InlineData("LET x=1 RETURN (x).k", "COHDBG003")]
-    [InlineData("WITH 1 AS x ORDER BY x.k RETURN x", "COHDBG003")]
+    [InlineData("LET x=1 WITH DISTINCT x AS y WHERE x=1 RETURN y", "CG05001")]
+    [InlineData("MATCH (a:P) WITH DISTINCT a.k AS k WHERE a.k > 1 RETURN k", "CG05001")]
+    [InlineData("MATCH (a:P) WITH DISTINCT a AS b WHERE a.k > 1 RETURN b", "CG05001")]
+    [InlineData("MATCH (a:P) WITH a.k AS k, count(*) AS c WHERE a.k > 1 RETURN k", "CG05001")]
+    [InlineData("MATCH (a:P) WITH a AS b, count(*) AS c WHERE a.k > 1 RETURN b", "CG05001")]
+    [InlineData("MATCH (a:P) WITH a.k AS k, count(*) AS c WHERE count(*) > 1 RETURN k", "CG05001")]
+    [InlineData("INSERT (a:T {k: a.k})", "CG05001")]
+    [InlineData("INSERT (a:T)-[r:R {w:1}]->(b:T {w: r.w})", "CG05001")]
+    [InlineData("INSERT (a:T)-[r:R {w: r.w}]->(b:T)", "CG05001")]
+    [InlineData("CREATE (a:T {k: a.k})", "CG05001")]
+    [InlineData("CREATE (a:T)-[r:R {w:1}]->(b:T {w: r.w})", "CG05001")]
+    [InlineData("CREATE (a:T)-[r:R {w: r.w}]->(b:T)", "CG05001")]
+    [InlineData("INSERT (a:T), (b:T {k:a.k})", "CG05001")]
+    [InlineData("LET x = 1 WITH x, (x) RETURN x", "CG01015")]
+    [InlineData("MATCH (a) RETURN a, \"a\" NEXT RETURN a", "CG01015")]
+    [InlineData("LET x = 1 WITH x, \"x\" RETURN x", "CG01015")]
+    [InlineData("LET x = 1 RETURN x.k", "CG03003")]
+    [InlineData("FOR x IN [1,2] RETURN x.k", "CG03003")]
+    [InlineData("LET x=1 RETURN (x).k", "CG03003")]
+    [InlineData("WITH 1 AS x ORDER BY x.k RETURN x", "CG03003")]
     public async Task Plan_InvalidComposition_ShouldRejectBeforeExecutionAsync(string source, string code)
     {
         // Arrange
@@ -326,7 +336,7 @@ public sealed class GqlLinearCompositionTests
         inserted.AffectedCount.ShouldBe(1);
         (await Rows(session, "MATCH (n:Imported) RETURN n.name")).Rows.ShouldHaveSingleItem()[0].ShouldBe("Eve");
         var invalid = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("FOR m IN [{k:1},2] RETURN m.k", cancellationToken: CancellationToken.None));
-        invalid.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG013");
+        invalid.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG02013");
         (await Rows(session, "RETURN 7")).Rows.ShouldHaveSingleItem()[0].ShouldBe(7L);
     }
 
@@ -370,7 +380,7 @@ public sealed class GqlLinearCompositionTests
         {
             var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(
                 prefix + "MATCH (a:P {k:b.k}) MATCH (b:P) RETURN a.name", cancellationToken: CancellationToken.None));
-            error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG001");
+            error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG05001");
         }
         (await Rows(session, "RETURN 7")).Rows.ShouldHaveSingleItem()[0].ShouldBe(7L);
     }
@@ -427,15 +437,15 @@ public sealed class GqlLinearCompositionTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Graph] - FOR: mixed or scalar elements keep Value binding rejections")]
-    [InlineData("UNWIND [1] AS n MATCH (n) RETURN n", "COHDBG003")]
-    [InlineData("FOR n IN [1] WITH n DETACH DELETE n", "COHDBG003")]
-    [InlineData("MATCH (a:P) WITH [a,1] AS ns UNWIND ns AS n MATCH (n) RETURN n.name", "COHDBG003")]
-    [InlineData("MATCH (a:P) WITH CASE WHEN TRUE THEN [a] ELSE [1] END AS ns FOR n IN ns MATCH (n) RETURN 1", "COHDBG003")]
-    [InlineData("MATCH (a:P) WITH COALESCE([a],[1]) AS ns FOR n IN ns DELETE n", "COHDBG003")]
-    [InlineData("MATCH (a:P)-[r:T]->() WITH [a,r] AS ns FOR n IN ns DELETE n", "COHDBG003")]
-    [InlineData("MATCH (a:P) WITH collect(a) AS ns UNWIND ns AS n MATCH ()-[n]->() RETURN 1", "COHDBG003")]
-    [InlineData("MATCH ()-[r:T]->() WITH collect(r) AS ns FOR n IN ns MATCH (n) RETURN 1", "COHDBG003")]
-    [InlineData("FOR n IN $ns RETURN n NEXT MATCH (n) RETURN n.name", "COHDBG003")]
+    [InlineData("UNWIND [1] AS n MATCH (n) RETURN n", "CG03003")]
+    [InlineData("FOR n IN [1] WITH n DETACH DELETE n", "CG03003")]
+    [InlineData("MATCH (a:P) WITH [a,1] AS ns UNWIND ns AS n MATCH (n) RETURN n.name", "CG03003")]
+    [InlineData("MATCH (a:P) WITH CASE WHEN TRUE THEN [a] ELSE [1] END AS ns FOR n IN ns MATCH (n) RETURN 1", "CG03003")]
+    [InlineData("MATCH (a:P) WITH COALESCE([a],[1]) AS ns FOR n IN ns DELETE n", "CG03003")]
+    [InlineData("MATCH (a:P)-[r:T]->() WITH [a,r] AS ns FOR n IN ns DELETE n", "CG03003")]
+    [InlineData("MATCH (a:P) WITH collect(a) AS ns UNWIND ns AS n MATCH ()-[n]->() RETURN 1", "CG03003")]
+    [InlineData("MATCH ()-[r:T]->() WITH collect(r) AS ns FOR n IN ns MATCH (n) RETURN 1", "CG03003")]
+    [InlineData("FOR n IN $ns RETURN n NEXT MATCH (n) RETURN n.name", "CG03003")]
     public async Task Execute_UnprovenEntityElements_ShouldRejectDuringPlanningAsync(string source, string code)
     {
         // Arrange
@@ -464,7 +474,7 @@ public sealed class GqlLinearCompositionTests
         (await Rows(session, source + " MATCH (n) RETURN count(*)")).Rows.ShouldHaveSingleItem()[0].ShouldBe(1L);
         var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(
             GraphPathsQueryRequest.FromGql(source + " RETURN n"), CancellationToken.None));
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG001");
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG05001");
         (await session.ExecuteAsync(source + " DETACH DELETE n", cancellationToken: CancellationToken.None)).AffectedCount.ShouldBe(1);
     }
 
@@ -490,12 +500,12 @@ public sealed class GqlLinearCompositionTests
                 var budget = new GraphPlanExecutor.ExpansionBudget();
                 var error = await Should.ThrowAsync<DatabaseException>(async () => await GraphPlanExecutor.MatchAsync(database, operation,
                     plan.MatchClauses[0].Paths[0], new(StringComparer.Ordinal) { ["n"] = value }, [], budget, null, CancellationToken.None));
-                error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG013");
+                error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG02013");
                 budget.Consumed.ShouldBe(0);
             }
             var deletion = await Should.ThrowAsync<DatabaseException>(async () => await GraphPlanExecutor.DeleteAsync(database, operation,
                 new GqlDeleteStage(["n"]) { Detach = true }, [new(StringComparer.Ordinal) { ["n"] = node }, new(StringComparer.Ordinal) { ["n"] = 1L }], CancellationToken.None));
-            deletion.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG013");
+            deletion.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG02013");
             return true;
         }, CancellationToken.None);
         (await Rows(session, "MATCH (a:P) RETURN count(*)")).Rows.ShouldHaveSingleItem()[0].ShouldBe(2L);

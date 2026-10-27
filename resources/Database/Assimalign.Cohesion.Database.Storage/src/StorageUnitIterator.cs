@@ -15,9 +15,11 @@ using Assimalign.Cohesion.Database.Storage.Units;
 /// The iterator pins at most one page at a time; disposing it releases that pin. The pin is not a
 /// latch: a slot deleted or reverted and a page freed while the scan runs are skipped, and a page
 /// the scan cannot read (a failed checksum, a malformed page, an I/O error) fails it (#1342). A
-/// read that a rollback's restore of the page overlapped is read again, so the scan sees each
-/// page whole (#1371).
+/// read overlapping an in-place write or rollback retries against the frame's sequence, so
+/// the scan returns only a confirmed private copy (D1, #1365).
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("StorageUnitIterator")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Storage.StorageUnitIterator.DebugView))]
 public sealed unsafe class StorageUnitIterator : IEnumerator<StorageUnit>
 {
     private readonly StoragePageManager _pageManager;
@@ -171,17 +173,16 @@ public sealed unsafe class StorageUnitIterator : IEnumerator<StorageUnit>
     /// of the scan's; false when the page has no further record for it.
     /// </summary>
     /// <remarks>
-    /// A failed bracket's rollback can rewrite the page while the scan stands on it, so each
-    /// attempt is confirmed against the page's restore sequence and repeated when a restore
-    /// overlapped it: the scan never skips a committed record because the page was half restored
-    /// when it read it, and a malformed read a restore overlapped is not reported as damage (#1371).
+    /// Forward writes and rollback can rewrite the page while the scan stands on it. Each
+    /// attempt confirms its private copy against the frame's sequence and retries an overlapping
+    /// write; partial mutations cannot publish a missing record or false damage (D1, #1365).
     /// </remarks>
     private bool TryReadNextSlot(PageId pageId, StoragePageHandle handle)
     {
         var entry = handle.Entry;
         while (true)
         {
-            int restore = entry.BeginRead();
+            long restore = entry.BeginRead();
             try
             {
                 int slotIndex = FindNextSlot(handle.Page, out byte[] data);
@@ -234,5 +235,17 @@ public sealed unsafe class StorageUnitIterator : IEnumerator<StorageUnit>
         }
 
         return -1;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Storage.StorageUnitIterator _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Storage.StorageUnitIterator value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Storage.StorageUnit Current => _target.Current;
     }
 }

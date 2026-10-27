@@ -34,7 +34,7 @@ public sealed class SqlCharacterBoundaryTests
             await RowsAsync(session, $"SELECT {sign}(CASE WHEN TRUE THEN c ELSE NULL END) FROM t"));
 
         // Assert
-        failure.DiagnosticDetail("COHSQLE003").ShouldBe($"Invalid operand type: unary '{sign}' requires a numeric operand, but the operand is Character.");
+        failure.DiagnosticDetail("CS02003").ShouldBe($"Invalid operand type: unary '{sign}' requires a numeric operand, but the operand is Character.");
     }
 
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - Native domain checks apply their own CHAR parameter width")]
@@ -270,12 +270,12 @@ public sealed class SqlCharacterBoundaryTests
         rows.ShouldBe([[false, true, null, null, null, true, false, null, null]]);
     }
 
-    // Cohesion's validation-only ALTER policy (#1447), not PostgreSQL behavior:
-    // PostgreSQL performs the rewrite in tablecmds.c:5897 (ATRewriteTables).
-    [Theory(DisplayName = "Cohesion Test [SqlEngine] - ALTER rewrite refusals name the column and explicit migration remedy")]
+    // Full-definition facet changes retain decision 49a's validation-only policy.
+    // TYPE selects the shared rewrite (PostgreSQL tablecmds.c:6186, ATRewriteTable).
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - ALTER facet refusals name the column and executable TYPE remedy")]
     [InlineData("CHAR(4) NOT NULL DEFAULT 'b'")]
     [InlineData("CHAR(4)")]
-    public async Task AlterColumn_CharacterRewrite_ShouldNameColumnAndMigration(string definition)
+    public async Task AlterColumn_CharacterRewrite_ShouldNameColumnAndTypeRemedy(string definition)
     {
         // Arrange
         await using var engine = SqlDatabaseEngine.Create("char-alter-diagnostic", new SqlDatabaseEngineOptions());
@@ -290,8 +290,9 @@ public sealed class SqlCharacterBoundaryTests
 
         // Assert
         failure.Message.ShouldContain("ALTER COLUMN 'c'", Case.Sensitive);
-        failure.Message.ShouldContain("explicit table-copy migration", Case.Sensitive);
-        failure.Message.ShouldContain("#1447", Case.Sensitive);
+        failure.Message.ShouldContain("TYPE", Case.Sensitive);
+        await session.ExecuteAsync("ALTER TABLE populated ALTER c TYPE CHAR(4)", cancellationToken: CancellationToken.None);
+        (await RowsAsync(session, "SELECT c FROM populated")).ShouldHaveSingleItem()[0].ShouldBe("a   ");
     }
 
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - Predicate controls: VARCHAR, domain and decimal bounds do not coerce a shared operand")]
@@ -429,7 +430,7 @@ public sealed class SqlCharacterBoundaryTests
         var failure = await Should.ThrowAsync<DatabaseException>(() => RowsAsync(session, $"SELECT observed_char({arguments}) FROM t"));
 
         // Assert
-        failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE012");
+        failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS02012");
     }
 
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - Native CHAR aggregates repad already typed arguments to their declared lengths")]
@@ -477,7 +478,7 @@ public sealed class SqlCharacterBoundaryTests
         var failure = await Should.ThrowAsync<DatabaseException>(() => RowsAsync(session, $"SELECT observed_char({arguments}) FROM t"));
 
         // Assert
-        failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE012");
+        failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS02012");
     }
 
     private static async Task<List<object?[]>> RowsAsync(SqlDatabaseSession session, string sql,

@@ -355,10 +355,10 @@ public sealed class SqlJoinIndexSemanticsTests
         const string seek = "SELECT l.id, r.id FROM outer_rows l INNER JOIN inner_rows r ON l.key_value = r.key_value ORDER BY l.id, r.id";
         const string scan = "SELECT l.id, r.id FROM outer_rows l INNER JOIN scan_rows r ON l.key_value = r.key_value ORDER BY l.id, r.id";
 
-        // The scan is the reference: the evaluator's equality defines the answer.
+        // The unindexed hash path retains the complete evaluator equality as residual.
         PlanOf(database, scan).Steps[0].Access.ShouldBeNull();
         var expected = await ReadPairsAsync(session, scan);
-        MetricsOf(session).JoinAccessPaths.ShouldBe(["join-scan"]);
+        MetricsOf(session).JoinAccessPaths.ShouldBe(["join-hash"]);
         expected.ShouldBe(new[] { (1, 2), (1, 3) });
 
         PlanOf(database, seek).Steps[0].Access.ShouldNotBeNull().Index.Name.ShouldBe("ix_key");

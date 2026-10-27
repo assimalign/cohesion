@@ -14,6 +14,8 @@ namespace Assimalign.Cohesion.Database.Blob.Internal;
 /// lasts until the stream is disposed. Every operation has a session (owner decision 32 of
 /// 2026-10-06).
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("BlobOperation")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Blob.Internal.BlobOperation.DebugView))]
 internal sealed class BlobOperation
 {
     private readonly BlobDatabase _database;
@@ -68,7 +70,7 @@ internal sealed class BlobOperation
         if (Context.State != TransactionState.Active || Volatile.Read(ref _finished) != 0)
         {
             if (_isUpload) { throw _database.TranslateFailure(new BlobUploadException(ErrorMessages.UploadTransactionInactive)); }
-            throw new DatabaseException(ErrorMessages.OperationTransactionInactive);
+            throw DatabaseException.CreateBlobFailure("CK04002", ErrorMessages.OperationTransactionInactive);
         }
     }
 
@@ -168,6 +170,14 @@ internal sealed class BlobOperation
         if (pin?.State == TransactionState.Active && !_database.IsOffline)
         {
             await _database.Coordinator.RollbackAsync(pin).ConfigureAwait(false);
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Blob.Internal.BlobOperation value)
+        {
+            _ = value;
         }
     }
 }

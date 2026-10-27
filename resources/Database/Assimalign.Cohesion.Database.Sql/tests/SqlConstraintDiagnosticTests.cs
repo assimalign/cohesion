@@ -15,13 +15,13 @@ public sealed class SqlConstraintDiagnosticTests
     /// <param name="kind">The constraint kind supplied by the caller.</param>
     /// <param name="code">The required engine diagnostic code.</param>
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - Constraint constructors: one coded error preserves safe metadata without disclosing values")]
-    [InlineData("UNIQUE", "COHSQLE037")]
-    [InlineData("PRIMARY KEY", "COHSQLE037")]
-    [InlineData("CHECK", "COHSQLE038")]
-    [InlineData("DOMAIN", "COHSQLE038")]
-    [InlineData("FOREIGN KEY", "COHSQLE039")]
-    [InlineData("NOT NULL", "COHSQLE024")]
-    [InlineData("application-defined", "COHSQLE038")]
+    [InlineData("UNIQUE", "CS03037")]
+    [InlineData("PRIMARY KEY", "CS03037")]
+    [InlineData("CHECK", "CS03038")]
+    [InlineData("DOMAIN", "CS03038")]
+    [InlineData("FOREIGN KEY", "CS03039")]
+    [InlineData("NOT NULL", "CS03024")]
+    [InlineData("application-defined", "CS03038")]
     public void Constructor_ConstraintKind_ShouldCarryOneUnlocatedError(string kind, string code)
     {
         // Arrange
@@ -60,7 +60,7 @@ public sealed class SqlConstraintDiagnosticTests
 
         // Assert
         var diagnostic = located.Diagnostics.ShouldHaveSingleItem();
-        diagnostic.Code.ShouldBe("COHSQLE038");
+        diagnostic.Code.ShouldBe("CS03038");
         diagnostic.Start.ShouldBe(12);
         diagnostic.End.ShouldBe(40);
         diagnostic.Line.ShouldBe(4);
@@ -98,6 +98,6 @@ public sealed class SqlConstraintDiagnosticTests
         located.InnerException.ShouldBeSameAs(thrown);
         thrown.StackTrace.ShouldNotBeNull();
         thrown.StackTrace!.ShouldContain(nameof(At_ThrownViolationWithoutCause_ShouldKeepOriginalStack), Case.Sensitive);
-        located.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE038");
+        located.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS03038");
     }
 }

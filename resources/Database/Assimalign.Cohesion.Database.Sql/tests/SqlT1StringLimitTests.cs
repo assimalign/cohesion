@@ -41,7 +41,7 @@ public sealed class SqlT1StringLimitTests
 
         // Act / Assert
         var failure = await Should.ThrowAsync<DatabaseException>(() => session.ExecuteAsync($"SELECT {expression} FROM t", parameters, CancellationToken.None).AsTask());
-        failure.Diagnostics[0].Code.ShouldBe("COHSQLE002");
+        failure.Diagnostics[0].Code.ShouldBe("CS02002");
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - T1 strings: exact limits succeed and empty padding keeps PostgreSQL behavior")]

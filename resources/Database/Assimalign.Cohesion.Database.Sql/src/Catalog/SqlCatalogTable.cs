@@ -18,7 +18,7 @@ namespace Assimalign.Cohesion.Database.Sql.Catalog;
 /// <see cref="Columns"/> are the table's live columns, in order: what <c>SELECT *</c>
 /// returns, what INSERT without a column list fills and what every name resolves
 /// against. A row version stores one component per <i>physical ordinal</i>, and a
-/// column keeps its physical ordinal for the life of the table. Dropping a column
+/// column keeps its physical ordinal for the life of its physical owner. Dropping a column
 /// removes it from <see cref="Columns"/> and records its physical ordinal in
 /// <see cref="DroppedColumnOrdinals"/>; adding one appends a new physical ordinal
 /// after every existing one. A physical ordinal is never reused, so a component
@@ -28,6 +28,8 @@ namespace Assimalign.Cohesion.Database.Sql.Catalog;
 /// and a new column takes <c>relnatts + 1</c> (<c>src/backend/commands/tablecmds.c:7445-7446</c>).
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("SqlCatalogTable {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Catalog.SqlCatalogTable.DebugView))]
 public sealed class SqlCatalogTable
 {
     private readonly int[] _physicalOrdinals;
@@ -69,7 +71,7 @@ public sealed class SqlCatalogTable
 
         if (columns.Count == 0)
         {
-            throw new SqlCatalogException($"Table '{schema}.{name}' must declare at least one column.");
+            throw new SqlCatalogException("CS03053", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlCatalogTableSqlCatalog, schema, name));
         }
 
         ObjectId = objectId;
@@ -82,7 +84,7 @@ public sealed class SqlCatalogTable
         var constraintCopy = new SqlCatalogConstraint[constraints?.Count ?? 0];
         for (int index = 0; index < constraintCopy.Length; index++)
         {
-            constraintCopy[index] = constraints![index] ?? throw new ArgumentException("A constraint cannot be null.", nameof(constraints));
+            constraintCopy[index] = constraints![index] ?? throw new ArgumentException(ErrorMessages.SqlCatalogTableArgument, nameof(constraints));
         }
         Constraints = Array.AsReadOnly(constraintCopy);
 
@@ -94,14 +96,14 @@ public sealed class SqlCatalogTable
             if (dropped[index] < 0 || dropped[index] >= PhysicalColumnCount)
             {
                 throw new ArgumentException(
-                    $"Dropped column ordinal {dropped[index]} of '{schema}.{name}' is outside its {PhysicalColumnCount} physical columns.",
+                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlCatalogTableArgument2, dropped[index], schema, name, PhysicalColumnCount),
                     nameof(droppedColumnOrdinals));
             }
 
             if (index > 0 && dropped[index] == dropped[index - 1])
             {
                 throw new ArgumentException(
-                    $"Dropped column ordinal {dropped[index]} of '{schema}.{name}' is listed more than once.", nameof(droppedColumnOrdinals));
+                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlCatalogTableArgument3, dropped[index], schema, name), nameof(droppedColumnOrdinals));
             }
         }
 
@@ -122,6 +124,7 @@ public sealed class SqlCatalogTable
     /// <summary>
     /// Gets the table's stable object identity — the value data rows, index
     /// registrations, and lock resources are keyed by.
+    /// TRUNCATE and table rewrite replace this owner identity atomically; older snapshots retain this description.
     /// </summary>
     public ulong ObjectId { get; }
 
@@ -165,7 +168,7 @@ public sealed class SqlCatalogTable
     /// Gets the physical ordinals of the dropped columns, ascending. A version stores a
     /// component at each of them that comes before one of its live columns (the dropped
     /// value, or NULL when written after the drop), which every read skips; the ordinals
-    /// are never reused.
+    /// are never reused within this owner. A table rewrite publishes a fresh compact owner.
     /// </summary>
     public IReadOnlyList<int> DroppedColumnOrdinals { get; }
 
@@ -207,5 +210,26 @@ public sealed class SqlCatalogTable
         }
 
         return null;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Sql.Catalog.SqlCatalogTable _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Catalog.SqlCatalogTable value)
+        {
+            _target = value;
+        }
+
+        public ulong ObjectId => _target.ObjectId;
+        public string Schema => _target.Schema;
+        public string Name => _target.Name;
+        public global::Assimalign.Cohesion.Database.DatabaseObjectOwner Owner => _target.Owner;
+        public string? OwningSchema => _target.OwningSchema;
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.Sql.Catalog.SqlCatalogColumn> Columns => _target.Columns;
+        public int PhysicalColumnCount => _target.PhysicalColumnCount;
+        public global::System.Collections.Generic.IReadOnlyList<int> DroppedColumnOrdinals => _target.DroppedColumnOrdinals;
+        public global::System.Collections.Generic.IReadOnlyList<string> PrimaryKeyColumns => _target.PrimaryKeyColumns;
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.Sql.Catalog.SqlCatalogConstraint> Constraints => _target.Constraints;
     }
 }

@@ -10,7 +10,7 @@ namespace Assimalign.Cohesion.Database.Graph.Internal;
 /// <summary>Total Neo4j orderability for the supported graph value families.</summary>
 internal static class GraphOrderComparer
 {
-    private sealed record PreparedMap(string[] Keys, object?[] Values);
+    internal sealed record PreparedMap(string[] Keys, object?[] Values);
 
     // Canonicalize every map once, including maps nested inside maps and lists. These private
     // values belong only to the ordering keys; projected values retain their original shape.

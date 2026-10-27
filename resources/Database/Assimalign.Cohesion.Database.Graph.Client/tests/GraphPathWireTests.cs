@@ -175,12 +175,12 @@ public sealed class GraphPathWireTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Graph.Client] - Initial path rejections retain the connection and pooled session over InMemory and TCP")]
-    [InlineData(false, "MATCH (n {k: $missing}) RETURN n", ProtocolErrorCode.ExecutionFailure, "COHDBG001")]
-    [InlineData(true, "MATCH (n {k: $missing}) RETURN n", ProtocolErrorCode.ExecutionFailure, "COHDBG001")]
-    [InlineData(false, "MATCH (n {k: @missing}) RETURN n", ProtocolErrorCode.ExecutionFailure, "COHDBG001")]
-    [InlineData(true, "MATCH (n {k: @missing}) RETURN n", ProtocolErrorCode.ExecutionFailure, "COHDBG001")]
-    [InlineData(false, "MATCH (n) RETURN $", ProtocolErrorCode.ParseFailure, "GQL0002")]
-    [InlineData(true, "MATCH (n) RETURN $", ProtocolErrorCode.ParseFailure, "GQL0002")]
+    [InlineData(false, "MATCH (n {k: $missing}) RETURN n", ProtocolErrorCode.ExecutionFailure, "CG05001")]
+    [InlineData(true, "MATCH (n {k: $missing}) RETURN n", ProtocolErrorCode.ExecutionFailure, "CG05001")]
+    [InlineData(false, "MATCH (n {k: @missing}) RETURN n", ProtocolErrorCode.ExecutionFailure, "CG05001")]
+    [InlineData(true, "MATCH (n {k: @missing}) RETURN n", ProtocolErrorCode.ExecutionFailure, "CG05001")]
+    [InlineData(false, "MATCH (n) RETURN $", ProtocolErrorCode.ParseFailure, "CG00002")]
+    [InlineData(true, "MATCH (n) RETURN $", ProtocolErrorCode.ParseFailure, "CG00002")]
     public async Task QueryPathsAsync_InitialRejection_ShouldReuseConnectionAndPooledSession(
         bool tcp, string statement, ProtocolErrorCode code, string diagnostic)
     {
@@ -209,7 +209,7 @@ public sealed class GraphPathWireTests
         harness.Server.Sessions.ShouldHaveSingleItem().Id.ShouldBe(sessionId);
     }
 
-    [Theory(DisplayName = "Cohesion Test [Graph.Client] - Paths: COHDBG008 before output keeps the exact connection and pooled session (#1230)")]
+    [Theory(DisplayName = "Cohesion Test [Graph.Client] - Paths: CG05008 before output keeps the exact connection and pooled session (#1230)")]
     [InlineData(false)]
     [InlineData(true)]
     public async Task QueryPathsAsync_NestingPastTheServerStack_ShouldRetainConnectionAndSession(bool tcp)
@@ -231,8 +231,8 @@ public sealed class GraphPathWireTests
 
             // Assert: the terminal rejection drained cleanly; the rental itself still works.
             error.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
-            error.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHDBG008");
-            error.Message.ShouldContain("COHDBG008", Case.Sensitive);
+            error.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CG05008");
+            error.Message.ShouldContain("CG05008", Case.Sensitive);
             connection.IsOpen.ShouldBeTrue();
             (await connection.QueryAsync("MATCH (n:Keep) RETURN n.name", cancellationToken: harness.Token))
                 .ShouldHaveSingleItem()[0].ShouldBe("retained");

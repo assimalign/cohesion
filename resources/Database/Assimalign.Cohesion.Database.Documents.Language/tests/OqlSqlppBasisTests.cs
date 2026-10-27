@@ -88,7 +88,7 @@ public sealed class OqlSqlppBasisTests
         var diagnostic = new OqlQueryParser().Parse(query).Diagnostics.ShouldHaveSingleItem();
 
         // Assert
-        diagnostic.Code.ShouldBe("COHDBL001");
+        diagnostic.Code.ShouldBe("CK00001");
         diagnostic.Message.ShouldNotBeNull().ShouldContain(word, Case.Sensitive);
         diagnostic.Start.ShouldBe(start);
         diagnostic.End.ShouldBe(start + word.Length);

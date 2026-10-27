@@ -241,7 +241,7 @@ public sealed record ResourceManifest
                 $"Resource manifest control-plane endpoint '{ControlPlane.Endpoint}' does not name a declared endpoint.");
         }
 
-        if (!ResourceHttpPath.IsValid(ControlPlane.Path, out _))
+        if (!ResourceHttpPath.IsValid(ControlPlane.Path.Value, out _))
         {
             throw new InvalidDataException(ErrorMessages.ResourceHttpPathInvalid);
         }
@@ -402,7 +402,7 @@ public sealed record ResourceManifest
                 CultureInfo.CurrentCulture, ErrorMessages.VolumeMountSourceInvalid, mount.Name));
         }
 
-        if (!ResourceMountSource.TryCreate(mount.Source, out ResourceMountSource source))
+        if (!ResourceMountSource.TryCreate(mount.Source.Value.Value, out ResourceMountSource source))
         {
             throw new InvalidDataException(ErrorMessages.ResourceMountSourceInvalid);
         }
@@ -512,7 +512,7 @@ public sealed record ResourceManifest
                 $"Resource manifest {role} probe endpoint '{probe.Endpoint}' does not name a declared endpoint.");
         }
 
-        if (probe.Http is not null && !ResourceHttpPath.IsValid(probe.Http, out _))
+        if (probe.Http is not null && !ResourceHttpPath.IsValid(probe.Http.Value.Value, out _))
         {
             throw new InvalidDataException(ErrorMessages.ResourceHttpPathInvalid);
         }

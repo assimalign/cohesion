@@ -15,6 +15,8 @@ namespace Assimalign.Cohesion.Database.Storage;
 /// ... and so on
 /// </code>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("Address")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Storage.Address.DebugView))]
 public readonly struct Address : IEquatable<Address>
 {
     private readonly long[]? _offsets;
@@ -145,4 +147,16 @@ public readonly struct Address : IEquatable<Address>
 
     /// <summary>Inequality operator.</summary>
     public static bool operator !=(Address left, Address right) => !left.Equals(right);
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Storage.Address _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Storage.Address value)
+        {
+            _target = value;
+        }
+
+        public int Depth => _target.Depth;
+    }
 }

@@ -289,7 +289,7 @@ public partial class CompileDatabaseSchemaTaskTests
         }));
         using var directory = new TemporaryDirectory();
         string sourcePath = directory.File("Schema.cs");
-        File.WriteAllText(sourcePath, TypedDefaultsSource);
+        File.WriteAllText(sourcePath, typedDefaultsSource);
         var engine = new RecordingBuildEngine();
         CompileDatabaseSchemaTask task = CreateTask(directory, sourcePath, "Sql", engine,
             useReferencePack ? GetFrameworkReferenceAssemblyPaths() : null);
@@ -429,7 +429,7 @@ public partial class CompileDatabaseSchemaTaskTests
         task.Schemas.ShouldBeEmpty();
     }
 
-    private const string TypedDefaultsSource = """
+    private const string typedDefaultsSource = """
         using System;
         using Assimalign.Cohesion.Database.Sql.Schema;
 

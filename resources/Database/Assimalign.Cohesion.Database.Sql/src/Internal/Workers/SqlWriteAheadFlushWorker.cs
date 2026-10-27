@@ -29,6 +29,8 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// window meanwhile, as they do whenever the worker is late.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("SqlWriteAheadFlushWorker {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlWriteAheadFlushWorker.DebugView))]
 internal sealed class SqlWriteAheadFlushWorker : DatabaseWriteWorker<SqlDatabase>
 {
     private readonly SqlDatabaseEngine _engine;
@@ -124,4 +126,20 @@ internal sealed class SqlWriteAheadFlushWorker : DatabaseWriteWorker<SqlDatabase
         out DatabaseWorkerLanes<DatabaseWriteResult>.Outcome outcome, DatabaseWorkerPass.Visit? visit)
         => Lanes.Run(storage, () => new DatabaseWriteResult { Units = storage.FlushPendingCommits() ? 1 : 0 },
             LaneSignal, LaneTimeout, cancellationToken, out outcome, visit, storage.Name);
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Sql.Internal.SqlWriteAheadFlushWorker _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlWriteAheadFlushWorker value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.DatabaseWorkerLanes<global::Assimalign.Cohesion.Database.DatabaseWriteResult> Lanes => _target.Lanes;
+        public bool CompletionOnly => _target.CompletionOnly;
+        public string Name => _target.Name;
+        public global::Assimalign.Cohesion.Database.DatabaseEngineWorkerKind Kind => _target.Kind;
+        public global::System.TimeSpan Interval => _target.Interval;
+    }
 }

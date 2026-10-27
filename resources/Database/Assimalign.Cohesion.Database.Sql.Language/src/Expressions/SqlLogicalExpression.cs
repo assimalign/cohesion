@@ -28,6 +28,8 @@ using Assimalign.Cohesion.Database.Language;
 /// as the nested binary operators it replaces.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("SqlLogicalExpression")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Language.SqlLogicalExpression.DebugView))]
 public sealed class SqlLogicalExpression : SqlExpression
 {
     private List<SqlExpression> _operands;
@@ -78,5 +80,18 @@ public sealed class SqlLogicalExpression : SqlExpression
         var operands = _operands;
         _operands = [];
         return operands;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Sql.Language.SqlLogicalExpression _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Language.SqlLogicalExpression value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Sql.Language.SqlLogicalOperator Operator => _target.Operator;
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.Sql.Language.SqlExpression> Operands => _target.Operands;
     }
 }

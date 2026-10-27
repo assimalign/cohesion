@@ -1,12 +1,16 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Client;
 using Assimalign.Cohesion.Database.KeyValuePair.Client.Internal;
+using Assimalign.Cohesion.Database.KeyValuePair.Protocol;
 using Assimalign.Cohesion.Database.Protocol;
+using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.KeyValuePair.Client;
 
@@ -35,6 +39,8 @@ namespace Assimalign.Cohesion.Database.KeyValuePair.Client;
 /// that caller's rental.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("KeyValueConnection {Database,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.KeyValuePair.Client.KeyValueConnection.DebugView))]
 public sealed class KeyValueConnection : IAsyncDisposable
 {
     private readonly DatabaseConnection _connection;
@@ -111,7 +117,7 @@ public sealed class KeyValueConnection : IAsyncDisposable
 
         // An unconditional put always applies (a concurrent conflict surfaces as
         // an ExecutionFailure exception, never as a miss).
-        return outcome.ETag ?? throw MalformedResult(command, "an applied write must carry its new etag");
+        return outcome.ETag ?? throw MalformedResult(command, ErrorMessages.ValueConnectionPutAsyncKeyValueClient);
     }
 
     /// <summary>
@@ -210,7 +216,7 @@ public sealed class KeyValueConnection : IAsyncDisposable
 
         if (result.Rows.Count != 1 || result.Rows[0] is not [bool exists])
         {
-            throw MalformedResult(command, "expected one boolean row");
+            throw MalformedResult(command, ErrorMessages.ConnectionExistsAsyncKeyValueClient);
         }
 
         return exists;
@@ -236,7 +242,7 @@ public sealed class KeyValueConnection : IAsyncDisposable
         {
             if (range.Prefix is { IsEmpty: false } && (range.Start is { IsEmpty: false } || range.End is { IsEmpty: false }))
             {
-                throw new ArgumentException("A prefix scan cannot combine with explicit start/end bounds.", nameof(range));
+                throw new ArgumentException(ErrorMessages.KeyValueConnectionScanAsyncArgument, nameof(range));
             }
 
             if (range.Start is { IsEmpty: false } start)
@@ -279,6 +285,84 @@ public sealed class KeyValueConnection : IAsyncDisposable
         return entries;
     }
 
+    /// <summary>Invokes a registered scalar over the existing Execute/result frames.</summary>
+    /// <param name="name">The function identifier, matched ignoring case; default is refused.</param>
+    /// <param name="arguments">Native primitive arguments in order; NULL is permitted and binary bytes are copied.</param>
+    /// <param name="cancellationToken">Cancellation before encoding preserves this token and leaves the rental untouched; cancellation of an admitted exchange follows existing connection policy.</param>
+    /// <returns>The declared primitive value or null; binary results are caller-owned byte arrays.</returns>
+    /// <exception cref="ArgumentNullException">The argument list is null.</exception>
+    /// <exception cref="ArgumentException">The name is default or an argument is not a supported primitive.</exception>
+    /// <exception cref="ObjectDisposedException">This rental was disposed.</exception>
+    /// <exception cref="InvalidOperationException">Another command is active on the connection.</exception>
+    /// <exception cref="OperationCanceledException">The caller canceled before encoding (retaining its token), or an admitted exchange was canceled.</exception>
+    /// <exception cref="KeyValueClientException">The server refused the call or returned a malformed scalar result.</exception>
+    public async ValueTask<object?> InvokeFunctionAsync(KeyValueFunctionName name, IReadOnlyList<object?> arguments,
+        CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
+        if (name.Value is null) { throw new ArgumentException(ErrorMessages.FunctionNameRequired, nameof(name)); }
+        ArgumentNullException.ThrowIfNull(arguments);
+        // This call is not admitted yet: preserve the caller's token before the shared
+        // exchange creates a linked operation token or any parameter bytes are encoded.
+        cancellationToken.ThrowIfCancellationRequested();
+        var command = new StringBuilder("CALL ").Append(name.ToString());
+        var parameters = new Dictionary<string, object?>(arguments.Count, StringComparer.Ordinal);
+        for (int index = 0; index < arguments.Count; index++)
+        {
+            string parameter = "p" + index.ToString(CultureInfo.InvariantCulture);
+            object? value = arguments[index];
+            if (!TryGetFunctionType(value, out _))
+            {
+                throw new ArgumentException(ErrorMessages.FunctionArgumentUnsupported, nameof(arguments));
+            }
+            parameters.Add(parameter, value switch
+            {
+                byte[] bytes => bytes.AsSpan().ToArray(),
+                ReadOnlyMemory<byte> bytes => bytes.ToArray(),
+                Memory<byte> bytes => bytes.ToArray(),
+                _ => value,
+            });
+            command.Append(" @").Append(parameter);
+        }
+        string text = command.ToString();
+        KeyValueProtocolResult result = await ExecuteCoreAsync(text, parameters, cancellationToken).ConfigureAwait(false);
+        if (result.Columns.Count != 1 || result.Columns[0].Name != "value"
+            || (byte)result.Columns[0].Type > (byte)DatabaseType.Guid
+            || result.AffectedCount != -1 || result.Rows.Count != 1 || result.Rows[0].Length != 1
+            || !TryGetFunctionType(result.Rows[0][0], out DatabaseType actual)
+            || result.Rows[0][0] is not null && actual != result.Columns[0].Type)
+        {
+            throw MalformedResult(text, ErrorMessages.FunctionResultInvalid);
+        }
+        return result.Rows[0][0] is byte[] binary ? binary.AsSpan().ToArray() : result.Rows[0][0];
+    }
+
+    private static bool TryGetFunctionType(object? value, out DatabaseType type)
+    {
+        type = value switch
+        {
+            null => DatabaseType.Null,
+            bool => DatabaseType.Boolean,
+            sbyte => DatabaseType.Int8,
+            short => DatabaseType.Int16,
+            int => DatabaseType.Int32,
+            long => DatabaseType.Int64,
+            float => DatabaseType.Float32,
+            double => DatabaseType.Float64,
+            decimal => DatabaseType.Decimal,
+            string => DatabaseType.String,
+            byte[] or ReadOnlyMemory<byte> or Memory<byte> => DatabaseType.Binary,
+            DateOnly => DatabaseType.Date,
+            TimeOnly => DatabaseType.Time,
+            DateTime => DatabaseType.DateTime,
+            DateTimeOffset => DatabaseType.DateTimeOffset,
+            TimeSpan => DatabaseType.TimeSpan,
+            Guid => DatabaseType.Guid,
+            _ => (DatabaseType)byte.MaxValue,
+        };
+        return (byte)type <= (byte)DatabaseType.Guid;
+    }
+
     /// <summary>
     /// Returns the connection to its pool, with its authenticated session intact when it is still
     /// healthy. Idempotent.
@@ -299,7 +383,7 @@ public sealed class KeyValueConnection : IAsyncDisposable
     {
         if (row is not [byte[] key, byte[] value, long etag])
         {
-            throw MalformedResult(command, "expected [key, value, etag] rows");
+            throw MalformedResult(command, ErrorMessages.ConnectionDecodeEntryKeyValueClient);
         }
 
         return new KeyValueClientEntry(key, value, etag);
@@ -313,7 +397,7 @@ public sealed class KeyValueConnection : IAsyncDisposable
     {
         if (result.Rows.Count != 1 || result.Rows[0] is not [bool applied, var etag] || etag is not (null or long))
         {
-            throw MalformedResult(command, "expected one [applied, etag] outcome row");
+            throw MalformedResult(command, ErrorMessages.DecodeWriteOutcomeKeyValueClient);
         }
 
         return new KeyValueWriteResult(applied, (long?)etag);
@@ -323,7 +407,7 @@ public sealed class KeyValueConnection : IAsyncDisposable
         => new(
             KeyValueClientErrorKind.MalformedResult,
             ProtocolErrorCode.Internal,
-            $"The server's result for '{command}' does not match the key-value result contract ({detail}).");
+            string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.MalformedResultKeyValueClient, command, detail));
 
     /// <summary>
     /// Runs one command on the shared connection, wrapping it in telemetry and
@@ -427,5 +511,17 @@ public sealed class KeyValueConnection : IAsyncDisposable
             // A telemetry observer must never mask the original failure.
             KeyValueClientEventSource.Log.ObserverFailed(this, nameof(KeyValueClientObserver.OnFailed), observerException);
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.KeyValuePair.Client.KeyValueConnection _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.KeyValuePair.Client.KeyValueConnection value)
+        {
+            _target = value;
+        }
+
+        public string Database => _target.Database;
     }
 }

@@ -17,6 +17,10 @@ public class SqlExecutionSurfaceDiagnosticTests
     [InlineData("SELECT * FROM t JOIN COHESION_SCHEMA.INDEXES i ON t.name = i.TABLE_NAME;")]
     [InlineData("SELECT * FROM t LEFT JOIN u ON t.id = u.id;")]
     [InlineData("SELECT * FROM t LEFT OUTER JOIN u ON t.id = u.id;")]
+    [InlineData("SELECT * FROM t RIGHT JOIN u ON t.id = u.id;")]
+    [InlineData("SELECT * FROM t RIGHT OUTER JOIN u USING (id);")]
+    [InlineData("SELECT * FROM t FULL JOIN u ON t.id = u.id;")]
+    [InlineData("SELECT * FROM t FULL OUTER JOIN u USING (id);")]
     [InlineData("SELECT * FROM t CROSS JOIN u;")]
     [InlineData("SELECT * FROM t, u, v;")]
     [InlineData("SELECT * FROM t JOIN u USING (id, name);")]
@@ -34,22 +38,6 @@ public class SqlExecutionSurfaceDiagnosticTests
         statement.Diagnostics.ShouldNotContain(item => item.Severity == DiagnosticSeverity.Error);
     }
 
-    [Theory(DisplayName = "Cohesion Test [Database.Sql.Language] - JOIN: Excludes unimplemented join types")]
-    [InlineData("SELECT * FROM t RIGHT JOIN u ON t.id = u.id;", "RIGHT OUTER JOIN", "RIGHT JOIN")]
-    [InlineData("SELECT * FROM t RIGHT OUTER JOIN u ON t.id = u.id;", "RIGHT OUTER JOIN", "RIGHT OUTER JOIN")]
-    [InlineData("SELECT * FROM t FULL OUTER JOIN u ON t.id = u.id;", "FULL OUTER JOIN", "FULL OUTER JOIN")]
-    public void Parse_UnimplementedJoinType_ReportsPreciseModelDiagnostic(string sql, string form, string locationText)
-    {
-        var statement = (SqlQueryStatement)new SqlQueryParser().Parse(sql);
-
-        var diagnostic = statement.Diagnostics.Single(item => item.Code == "COHDBL001");
-        diagnostic.Severity.ShouldBe(DiagnosticSeverity.Error);
-        diagnostic.Message!.ShouldContain(form);
-        diagnostic.Message!.ShouldContain("INNER, LEFT [OUTER] and CROSS JOIN");
-        sql[diagnostic.Start!.Value..diagnostic.End!.Value].ShouldBe(locationText);
-        statement.Diagnostics.ShouldNotContain(item => item.Code == "SQL0002");
-    }
-
     [Theory(DisplayName = "Cohesion Test [Database.Sql.Language] - JOIN: Reports the explicit execution boundary")]
     [InlineData("SELECT * FROM t JOIN u;", "require ON or USING")]
     [InlineData("SELECT t.* FROM t JOIN u ON t.id = u.id;", "Qualified SQL wildcard")]
@@ -58,10 +46,10 @@ public class SqlExecutionSurfaceDiagnosticTests
     {
         var statement = (SqlQueryStatement)new SqlQueryParser().Parse(sql);
 
-        var diagnostic = statement.Diagnostics.Single(item => item.Code == "COHDBL001");
+        var diagnostic = statement.Diagnostics.Single(item => item.Code == "CK00001");
         diagnostic.Severity.ShouldBe(DiagnosticSeverity.Error);
         diagnostic.Message!.ShouldContain(message);
-        statement.Diagnostics.ShouldNotContain(item => item.Code == "SQL0002");
+        statement.Diagnostics.ShouldNotContain(item => item.Code == "CS00002");
     }
 
     [Theory(DisplayName = "Cohesion Test [Database.Sql.Language] - JOIN: Rejects incomplete INNER JOIN syntax")]
@@ -72,7 +60,7 @@ public class SqlExecutionSurfaceDiagnosticTests
     {
         var statement = (SqlQueryStatement)new SqlQueryParser().Parse(sql);
 
-        statement.Diagnostics.ShouldContain(item => item.Code == "SQL0003");
+        statement.Diagnostics.ShouldContain(item => item.Code == "CS00003");
     }
 
     [Theory(DisplayName = "Cohesion Test [Database.Sql.Language] - Grouping: Restores executable grouping clauses")]
@@ -119,11 +107,11 @@ public class SqlExecutionSurfaceDiagnosticTests
 
         var statement = (SqlQueryStatement)new SqlQueryParser().Parse(sql);
 
-        var diagnostic = statement.Diagnostics.Single(item => item.Code == "COHDBL001");
+        var diagnostic = statement.Diagnostics.Single(item => item.Code == "CK00001");
         diagnostic.Severity.ShouldBe(DiagnosticSeverity.Error);
         diagnostic.Message!.ShouldContain(form);
         sql[diagnostic.Start!.Value..diagnostic.End!.Value].ShouldBe(locationText);
-        statement.Diagnostics.ShouldNotContain(item => item.Code == "SQL0002");
+        statement.Diagnostics.ShouldNotContain(item => item.Code == "CS00002");
     }
 
     [Theory(DisplayName = "Cohesion Test [Database.Sql.Language] - CAST: Accepts supported scalar contexts")]

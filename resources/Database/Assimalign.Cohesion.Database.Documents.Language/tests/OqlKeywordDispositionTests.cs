@@ -14,7 +14,7 @@ namespace Assimalign.Cohesion.Database.Documents.Language.Tests;
 /// <summary>
 /// Keyword disposition (#1101): every word the OQL profile lexes as a keyword, and every
 /// entry of the recognized-unsupported table, and contextual EXPLAIN either parses inside a supported clause or is
-/// rejected with exactly one <c>COHDBL001</c> naming its construct. A word added to either list
+/// rejected with exactly one <c>CK00001</c> naming its construct. A word added to either list
 /// without a case here fails the coverage test.
 /// </summary>
 public sealed class OqlKeywordDispositionTests
@@ -68,7 +68,7 @@ public sealed class OqlKeywordDispositionTests
         ["IN"] = Parses("SELECT * FROM c WHERE a IN (1, 2)"),
         ["LIKE"] = Parses("SELECT * FROM c WHERE a LIKE 'x%'"),
         ["BETWEEN"] = Parses("SELECT * FROM c WHERE a BETWEEN 1 AND 2"),
-        ["FOR"] = Rejects("SELECT * FROM c WHERE FOR ALL x IN c.items: x > 1", "FOR ALL"),
+        ["FOR"] = Parses("SELECT ARRAY x FOR x IN [1] END FROM c"),
         ["SOME"] = Parses("SELECT * FROM c WHERE SOME x IN c.items SATISFIES x > 1 END"),
         ["ANY"] = Parses("SELECT * FROM c WHERE ANY x IN c.items SATISFIES x > 1 END"),
         ["UNDEFINED"] = Rejects("SELECT UNDEFINED FROM c", "UNDEFINED"),
@@ -76,8 +76,8 @@ public sealed class OqlKeywordDispositionTests
         ["LIST"] = Rejects("SELECT LIST(1, 2) FROM c", "LIST"),
         ["SET"] = Rejects("SELECT SET(1, 2) FROM c", "SET"),
         ["BAG"] = Rejects("SELECT BAG(1, 2) FROM c", "BAG"),
-        ["ARRAY"] = Rejects("SELECT ARRAY(1, 2) FROM c", "ARRAY"),
-        ["FIRST"] = Rejects("SELECT FIRST(a) FROM c", "FIRST"),
+        ["ARRAY"] = Parses("SELECT ARRAY x FOR x IN [1,2] END FROM c"),
+        ["FIRST"] = Parses("SELECT FIRST x FOR x IN [1,2] END FROM c"),
         ["LAST"] = Rejects("SELECT LAST(a) FROM c", "LAST"),
         ["UNIQUE"] = Parses("CREATE UNIQUE INDEX ix ON c (a)"),
         ["LISTTOSET"] = Rejects("SELECT LISTTOSET(a) FROM c", "LISTTOSET"),
@@ -89,14 +89,16 @@ public sealed class OqlKeywordDispositionTests
         // Statements and clauses of other languages
         ["ALTER"] = Rejects("ALTER INDEX ix ON c", "ALTER"),
         ["INSERT"] = Parses("INSERT INTO c (KEY, VALUE) VALUES ('k', 1)"),
-        ["RETURNING"] = Rejects("INSERT INTO c (KEY, VALUE) VALUES ('k', 1) RETURNING k", "RETURNING"),
+        ["RETURNING"] = Parses("INSERT INTO c (KEY, VALUE) VALUES ('k', 1) RETURNING k"),
         ["UPDATE"] = Parses("UPDATE c SET a = 1"),
         ["UNSET"] = Parses("UPDATE c UNSET a"),
         ["DELETE"] = Parses("DELETE FROM c WHERE a IN (1)"),
         ["USE"] = Rejects("USE other", "USE"),
-        ["BEGIN"] = Rejects("BEGIN TRANSACTION", "BEGIN"),
-        ["COMMIT"] = Rejects("COMMIT", "COMMIT"),
-        ["ROLLBACK"] = Rejects("ROLLBACK", "ROLLBACK"),
+        ["BEGIN"] = Parses("BEGIN TRANSACTION"),
+        ["START"] = Parses("START WORK ISOLATION LEVEL READ COMMITTED"),
+        ["COMMIT"] = Parses("COMMIT"),
+        ["ROLLBACK"] = Parses("ROLLBACK"),
+        ["SAVEPOINT"] = Rejects("SAVEPOINT point", "SAVEPOINT"),
         ["WITH"] = Rejects("WITH x AS (SELECT a FROM c) SELECT a FROM x", "WITH"),
         ["JOIN"] = Rejects("SELECT * FROM c JOIN d ON c.a = d.a", "JOIN"),
         ["UNION"] = Rejects("SELECT a FROM c UNION SELECT a FROM d", "UNION"),
@@ -138,7 +140,7 @@ public sealed class OqlKeywordDispositionTests
             .Message.ShouldContain("FUTUREWORD", Case.Sensitive);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Documents.Language] - Keyword disposition: each word parses in a supported clause or reports one COHDBL001 naming its construct")]
+    [Fact(DisplayName = "Cohesion Test [Documents.Language] - Keyword disposition: each word parses in a supported clause or reports one CK00001 naming its construct")]
     public void Parse_EveryCase_ShouldMatchItsDisposition()
     {
         // Arrange
@@ -163,10 +165,10 @@ public sealed class OqlKeywordDispositionTests
                     failures.Add($"{word}: expected a supported parse of '{keywordCase.Oql}' but found {found}");
                 }
             }
-            else if (errors.Length != 1 || errors[0].Code != "COHDBL001" ||
+            else if (errors.Length != 1 || errors[0].Code != "CK00001" ||
                      errors[0].Message?.Contains($"The {keywordCase.Construct} clause", StringComparison.Ordinal) != true)
             {
-                failures.Add($"{word}: expected one COHDBL001 naming '{keywordCase.Construct}' for '{keywordCase.Oql}' but found {found}");
+                failures.Add($"{word}: expected one CK00001 naming '{keywordCase.Construct}' for '{keywordCase.Oql}' but found {found}");
             }
             else if (OqlUnsupportedVocabulary.TryFind(word.ToUpperInvariant(), out var entry) &&
                      !errors[0].Message!.Contains(entry.Construct, StringComparison.Ordinal))
@@ -226,7 +228,7 @@ public sealed class OqlKeywordDispositionTests
         var statement = parser.Parse(source);
 
         // Assert
-        statement.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBL001");
+        statement.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CK00001");
     }
 
     [Fact(DisplayName = "Cohesion Test [Documents.Language] - Keyword disposition: words matched anywhere are lexer keywords or functions")]

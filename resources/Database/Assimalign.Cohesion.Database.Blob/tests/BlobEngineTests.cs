@@ -340,7 +340,7 @@ public sealed class BlobEngineTests
         }
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Blob] - Format: a database in storage format 2 (the format before #1253) is refused at open with COHDBS001 naming it, its files untouched (#1251, #1253)")]
+    [Fact(DisplayName = "Cohesion Test [Database.Blob] - Format: a database in storage format 2 (the format before #1253) is refused at open with CK06001 naming it, its files untouched (#1251, #1253)")]
     public async Task Open_StorageFormatTwo_ShouldBeRefusedNamingTheDatabase()
     {
         string root = Path.Combine(Path.GetTempPath(), "cohesion-blob-storage-format-" + Guid.NewGuid().ToString("N"));

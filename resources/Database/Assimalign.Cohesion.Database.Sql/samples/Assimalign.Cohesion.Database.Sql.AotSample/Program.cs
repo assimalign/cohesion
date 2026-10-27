@@ -26,17 +26,21 @@ namespace Assimalign.Cohesion.Database.Sql.AotSample;
 /// </summary>
 internal static class Program
 {
-    private const string EngineName = "aot-sql";
-    private const string DatabaseName = "aot";
+    private const string engineName = "aot-sql";
+    private const string databaseName = "aot";
 
-    private const string Projection =
+    private const string projection =
         "SELECT Id, slugify(Name) AS slug, scaled(Score, 1.5) AS scaled, in_range(Score, 50, 150) AS ranged, " +
         "describe(Name, Score, Active, Token) AS described, clamp(Score, 0, 150) AS clamped, is_missing(Note) AS missing, " +
         "slugify(Note) AS note_slug, or_none(Note) AS note_or FROM customers ORDER BY Id";
 
-    private const string Aggregates = "SELECT product(Score) AS p, median(Score) AS m, join_names(Name) AS names, COUNT(*) AS c FROM customers";
+    private const string aggregates = "SELECT product(Score) AS p, median(Score) AS m, join_names(Name) AS names, COUNT(*) AS c FROM customers";
 
-    private const string Registered = "SELECT FUNCTION_NAME FROM COHESION_SCHEMA.FUNCTIONS WHERE IS_BUILT_IN = 'NO' ORDER BY FUNCTION_NAME";
+    private const string mergeBinding = "MERGE INTO default_guard AS t USING default_guard AS s ON t.id=s.id " +
+        "WHEN MATCHED THEN UPDATE SET note=s.id WHEN NOT MATCHED THEN INSERT DEFAULT VALUES " +
+        "WHEN NOT MATCHED BY SOURCE THEN DELETE RETURNING merge_action(),t.id,s.id";
+
+    private const string registered = "SELECT FUNCTION_NAME FROM COHESION_SCHEMA.FUNCTIONS WHERE IS_BUILT_IN = 'NO' ORDER BY FUNCTION_NAME";
 
     private static readonly object?[][] _projection =
     [
@@ -51,7 +55,7 @@ internal static class Program
 
     // E3: a domain column, an application's casts to and from the cents domain (the inner CAST tells
     // the outer one its source is cents), built-in casts from text to DATE and from UUID to canonical TEXT.
-    private const string Domains =
+    private const string domains =
         "SELECT Email, CAST(CAST(Score AS cents) AS TEXT) AS shown, CAST('$4.56' AS cents) AS parsed, " +
         "CAST('2026-02-01' AS DATE) AS day, CAST(Token AS TEXT) AS token FROM customers ORDER BY Id";
 
@@ -83,7 +87,7 @@ internal static class Program
         "NOT EXISTS (SELECT Id FROM customers WHERE Id < 0) IS TRUE FROM customers WHERE Id = 1";
     private static readonly object?[][] _predicates = [[true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true]];
 
-    private const string Characters = "SELECT c, CAST(c AS TEXT), LENGTH(c), c || 'b', c LIKE 'a' FROM fixed_codes WHERE c = 'a'";
+    private const string characters = "SELECT c, CAST(c AS TEXT), LENGTH(c), c || 'b', c LIKE 'a' FROM fixed_codes WHERE c = 'a'";
     private static readonly object?[][] _characters = [["a  ", "a", 1L, "ab", false]];
 
     private const string typeAliases = "SELECT n, CAST(s AS CHARACTER VARYING(5)), CAST(f AS DOUBLE PRECISION), " +
@@ -106,6 +110,10 @@ internal static class Program
     // E3: a CAST no registered cast performs is refused while planning, rows or not.
     private const string expandedJoin = "SELECT a.Id, c.Id FROM customers a JOIN customers b USING (Id) " +
         "LEFT JOIN customers c ON b.Id = c.Id AND c.Id = 1 ORDER BY a.Id";
+
+    private const string fullGroup = "SELECT Id, COUNT(*) FROM customers a FULL JOIN (SELECT CAST(3 AS BIGINT) AS Id) b USING(Id) GROUP BY Id ORDER BY Id";
+    private const string fullJoin = "SELECT Id, a.Id, b.Id FROM customers a FULL JOIN (SELECT CAST(3 AS BIGINT) AS Id) b USING(Id) ORDER BY Id";
+    private const string rightJoin = "SELECT a.Id, b.Id FROM customers a RIGHT OUTER JOIN customers b ON a.Id = b.Id AND a.Id = 1 ORDER BY b.Id";
     private const string crossJoin = "SELECT COUNT(*) FROM customers a, customers b CROSS JOIN customers c";
     private const string correlatedRows = "SELECT c.Id, (SELECT other.Score FROM customers other WHERE other.Id = c.Id) FROM customers c " +
         "WHERE EXISTS (SELECT other.Id FROM customers other WHERE other.Id = c.Id) AND c.Id IN (SELECT other.Id FROM customers other WHERE other.Id = c.Id) ORDER BY c.Id";
@@ -116,7 +124,7 @@ internal static class Program
 
     private const string derivedJoin = "SELECT d.key_id FROM customers c JOIN (SELECT Id FROM customers WHERE Id = 1) d (key_id) ON c.Id = d.key_id";
 
-    private const string CannotCast = "SELECT CAST(Active AS DATE) FROM customers WHERE Id < 0";
+    private const string cannotCast = "SELECT CAST(Active AS DATE) FROM customers WHERE Id < 0";
 
     private static int _passed;
     private static int _failed;
@@ -147,7 +155,7 @@ internal static class Program
     /// <summary>Builds the engine: the functions, the declared database with its CHECK, and a server on the in-memory driver.</summary>
     private static async Task<SqlDatabaseEngine> BuildAsync(InMemoryConnectionListener listener)
     {
-        SqlDatabaseEngineBuilder sql = SqlDatabaseEngine.CreateBuilder(EngineName);
+        SqlDatabaseEngineBuilder sql = SqlDatabaseEngine.CreateBuilder(engineName);
         sql.Functions
             .Add(SqlScalarFunction.Create("slugify", static (string text) => Slugify(text), SqlFunctionVolatility.Immutable))
             .Add(SqlScalarFunction.Create("scaled", static (long value, decimal factor) => value * factor, SqlFunctionVolatility.Immutable))
@@ -175,7 +183,7 @@ internal static class Program
                 static text => (long)(decimal.Parse(text.TrimStart('$'), CultureInfo.InvariantCulture) * 100), SqlCastContext.Explicit))
             .AddCast(SqlCast.Create<long, string>(cents, SqlType.Text,
                 static value => "$" + (value / 100m).ToString("0.00", CultureInfo.InvariantCulture), SqlCastContext.Assignment));
-        sql.AddDatabase(DatabaseName, database => database.Schema(schema => schema.Table<Customer>("customers", table =>
+        sql.AddDatabase(databaseName, database => database.Schema(schema => schema.Table<Customer>("customers", table =>
         {
             table.Key(customer => customer.Id);
             table.Column(customer => customer.Name);
@@ -189,14 +197,14 @@ internal static class Program
         sql.AddServer(options => options.Listener = listener);
 
         SqlDatabaseEngine engine = await sql.BuildAsync();
-        Check("build declared the database", engine.TryGetDatabase(DatabaseName, out _), true);
+        Check("build declared the database", engine.TryGetDatabase(databaseName, out _), true);
         await engine.Servers[0].StartAsync();
         return engine;
     }
 
     private static async Task RunInProcessAsync(SqlDatabaseEngine engine)
     {
-        engine.TryGetDatabase(DatabaseName, out SqlDatabase? database);
+        engine.TryGetDatabase(databaseName, out SqlDatabase? database);
         await using SqlDatabaseSession session = await database!.CreateSessionAsync(CancellationToken.None);
         await session.ExecuteAsync("CREATE SCHEMA native_namespace", cancellationToken: CancellationToken.None);
         Check("in process: CREATE SCHEMA and SCHEMATA", await RowsAsync(session,
@@ -204,7 +212,7 @@ internal static class Program
         await session.ExecuteAsync("CREATE TABLE native_namespace.t(id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY)", cancellationToken: CancellationToken.None);
         await session.ExecuteAsync("INSERT INTO native_namespace.t DEFAULT VALUES", cancellationToken: CancellationToken.None);
         CheckFailure("in process: DROP SCHEMA RESTRICT", await FailureAsync(() => session.ExecuteAsync(
-            "DROP SCHEMA native_namespace", cancellationToken: CancellationToken.None).AsTask()), "COHSQLE030");
+            "DROP SCHEMA native_namespace", cancellationToken: CancellationToken.None).AsTask()), "CS03030");
         await session.ExecuteAsync("DROP SCHEMA native_namespace CASCADE", cancellationToken: CancellationToken.None);
         Check("in process: DROP SCHEMA CASCADE", await RowsAsync(session,
             "SELECT SCHEMA_NAME FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME = 'native_namespace'"), []);
@@ -235,6 +243,14 @@ internal static class Program
             Check("in process: RETURNING affected count", written.AffectedCount, 1L);
         }
         Check("in process: UPDATE RETURNING", await RowsAsync(session, "UPDATE returning_native SET value = value + 1 RETURNING value"), [[4]]);
+        await session.ExecuteAsync("CREATE TABLE joined_native (id INT PRIMARY KEY,value INT)");
+        await session.ExecuteAsync("INSERT INTO joined_native VALUES(1,4)");
+        await session.ExecuteAsync("CREATE TABLE source_native (id INT,v INT)");
+        await session.ExecuteAsync("INSERT INTO source_native VALUES(1,8)");
+        Check("in process: UPDATE FROM", await RowsAsync(session, "UPDATE joined_native SET value=s.v FROM source_native AS s WHERE joined_native.id=s.id RETURNING joined_native.value,s.v"), [[8,8]]);
+        await session.ExecuteAsync("INSERT INTO source_native VALUES(1,8)");
+        CheckFailure("in process: UPDATE FROM cardinality", await FailureAsync(() => RowsAsync(session, "UPDATE joined_native SET value=s.v FROM source_native AS s WHERE joined_native.id=s.id")), "CS05068");
+        Check("in process: DELETE USING deduplication", await RowsAsync(session, "DELETE FROM joined_native USING source_native AS s WHERE joined_native.id=s.id RETURNING joined_native.value,s.v"), [[8,8]]);
         await session.ExecuteAsync("CREATE TABLE upsert_native (id INT PRIMARY KEY, value INT DEFAULT (1 + 2))");
         await session.ExecuteAsync("INSERT INTO upsert_native VALUES (1, 10)");
         Check("in process: ON CONFLICT EXCLUDED RETURNING", await RowsAsync(session,
@@ -253,8 +269,8 @@ internal static class Program
         Check("in process: public function timestamp (#1373)",
             new SqlFunctionContext(default, null, CancellationToken.None, DateTimeOffset.UnixEpoch).TransactionTimestamp, DateTimeOffset.UnixEpoch);
         Check<DateTimeOffset?>("in process: absent function timestamp (#1373)", default(SqlFunctionContext).TransactionTimestamp, null);
-        CheckFailure("in process: non-Boolean WHERE (#1190)", await FailureAsync(() => RowsAsync(session, "SELECT 1 WHERE 1")), "COHSQLE003");
-        CheckFailure("in process: mixed Boolean alternatives (#1190)", await FailureAsync(() => RowsAsync(session, "SELECT 1 WHERE COALESCE(TRUE, 1)")), "COHSQLE003");
+        CheckFailure("in process: non-Boolean WHERE (#1190)", await FailureAsync(() => RowsAsync(session, "SELECT 1 WHERE 1")), "CS02003");
+        CheckFailure("in process: mixed Boolean alternatives (#1190)", await FailureAsync(() => RowsAsync(session, "SELECT 1 WHERE COALESCE(TRUE, 1)")), "CS02003");
         Check("in process: Boolean string literal (#1190)", await RowsAsync(session, "SELECT 1 WHERE 'YeS'"), [[1L]]);
         Check("in process: Boolean UNKNOWN (#1190)", await RowsAsync(session, "SELECT NULL AND TRUE, NULL OR FALSE, CASE WHEN NULL THEN 1 END"), [[null, null, null]]);
         Check("in process: FROM-less aggregate (#1373)", await RowsAsync(session, "SELECT COUNT(*) WHERE FALSE"), [[0L]]);
@@ -271,13 +287,17 @@ internal static class Program
             "RPAD('a', 200000, 'a') COLLATE invariant LIKE 'abc%', " +
             "RPAD('a', 200000, 'a') COLLATE invariant NOT LIKE '%b' FROM customers WHERE Id = 1"), [[true, true, true, true, false, true]]);
         CheckFailure("in process: invalid ESCAPE", await FailureAsync(() => RowsAsync(session,
-            "SELECT Name LIKE 'x!' ESCAPE '!' FROM customers")), "COHSQLE034");
+            "SELECT Name LIKE 'x!' ESCAPE '!' FROM customers")), "CS02034");
         CheckFailure("in process: invariant LIKE work limit", await FailureAsync(() => RowsAsync(session,
-            "SELECT RPAD('เก', 1024, 'เก') COLLATE invariant LIKE RPAD('%เก', 96, '%เก') || 'ข' FROM customers WHERE Id = 1")), "COHSQLE040");
+            "SELECT RPAD('เก', 1024, 'เก') COLLATE invariant LIKE RPAD('%เก', 96, '%เก') || 'ข' FROM customers WHERE Id = 1")), "CS05040");
+        Check("in process: RIGHT normalization", await RowsAsync(session, rightJoin), [[1L, 1L], [null, 2L]]);
+        Check("in process: FULL coalesces both unmatched sides", await RowsAsync(session, fullJoin), [[1L, 1L, null], [2L, 2L, null], [3L, null, 3L]]);
+        Check("in process: FULL merged grouping keys", await RowsAsync(session, fullGroup), [[1L, 1L], [2L, 1L], [3L, 1L]]);
         Check("in process: three-way USING and LEFT", await RowsAsync(session, expandedJoin), [[1L, 1L], [2L, null]]);
         Check("in process: comma and CROSS", await RowsAsync(session, crossJoin), [[8L]]);
         Check("in process: set operations", await RowsAsync(session, setOperations), [[2L]]);
         Check("in process: set subquery", await RowsAsync(session, "SELECT Id FROM customers WHERE Id IN (SELECT Id FROM customers EXCEPT SELECT Id FROM customers WHERE Id = 1)"), [[2L]]);
+        Check("in process: quantified comparisons", await RowsAsync(session, "SELECT 1 = ANY (SELECT 1 UNION ALL SELECT NULL), NULL <> SOME (SELECT 1 WHERE FALSE), NULL < ALL (SELECT 1 WHERE FALSE), 1 > ALL (SELECT NULL)"), [[true, false, true, null]]);
         Check("in process: renamed derived join", await RowsAsync(session, derivedJoin), [[1L]]);
         Check("in process: correlated scalar EXISTS and IN", await RowsAsync(session, correlatedRows), [[1L, 100L], [2L, 200L]]);
         CheckFailure("in process: correlated cardinality", await FailureAsync(() => RowsAsync(session, correlatedCardinality)), "one row");
@@ -299,6 +319,14 @@ internal static class Program
         await session.ExecuteAsync("ALTER TABLE altered_guard ALTER value DROP NOT NULL");
         await session.ExecuteAsync("ALTER TABLE altered_guard ALTER value SET NOT NULL");
         Check("in process: ALTER rename and frozen missing values", await RowsAsync(session, "SELECT value FROM altered_guard ORDER BY id"), [[7], [-9]]);
+        await session.ExecuteAsync("ALTER TABLE altered_guard ADD gone INT", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("ALTER TABLE altered_guard DROP COLUMN gone", cancellationToken: CancellationToken.None);
+        await database.RewriteTableAsync("dbo", "altered_guard", CancellationToken.None);
+        Check("in process: rewritten rows and index seek", await RowsAsync(session, "SELECT value FROM altered_guard WHERE id=1"), [[7]]);
+        Check("in process: rewritten index plan", (await RowsAsync(session, "EXPLAIN SELECT value FROM altered_guard WHERE id=1"))
+            .Any(row => Equals(row[2], "IndexSeek")), true);
+        await session.ExecuteAsync("ALTER TABLE altered_guard ALTER value TYPE BIGINT USING value+id", cancellationToken: CancellationToken.None);
+        Check("in process: ALTER TYPE USING", await RowsAsync(session, "SELECT value FROM altered_guard ORDER BY id"), [[8L], [-7L]]);
         await session.ExecuteAsync("CREATE TABLE aggregate_guard (id INT, g INT)", cancellationToken: CancellationToken.None);
         await session.ExecuteAsync("INSERT INTO aggregate_guard VALUES (2, 1), (1, 1), (2, 1)", cancellationToken: CancellationToken.None);
         foreach (string grouping in new[] { "", " GROUP BY g" })
@@ -332,14 +360,14 @@ internal static class Program
             "SELECT CAST('1:02' AS TIME), CAST('13:45:00.' AS TIME), CAST('10:00Z' AS TIME), CAST('1 2 hours' AS INTERVAL), CAST('@ 1 day 2 hours ago' AS INTERVAL)"),
             [[new TimeOnly(1, 2), new TimeOnly(13, 45), new TimeOnly(10, 0), TimeSpan.FromHours(26), TimeSpan.FromHours(-26)]]);
         CheckFailure("in process: temporal assignment diagnostics", await FailureAsync(async () =>
-            await session.ExecuteAsync("INSERT INTO temporal_text_guard(t) VALUES ('25:00')", cancellationToken: CancellationToken.None)), "COHSQLE048");
+            await session.ExecuteAsync("INSERT INTO temporal_text_guard(t) VALUES ('25:00')", cancellationToken: CancellationToken.None)), "CS02048");
         CheckFailure("in process: floating assignment grouping", await FailureAsync(async () =>
-            await session.ExecuteAsync("INSERT INTO temporal_text_guard(f) VALUES ('1,000')", cancellationToken: CancellationToken.None)), "COHSQLE022");
+            await session.ExecuteAsync("INSERT INTO temporal_text_guard(f) VALUES ('1,000')", cancellationToken: CancellationToken.None)), "CS02022");
         CheckFailure("in process: floating assignment overflow", await FailureAsync(async () =>
-            await session.ExecuteAsync("INSERT INTO temporal_text_guard(f) VALUES ('1e400')", cancellationToken: CancellationToken.None)), "COHSQLE002");
+            await session.ExecuteAsync("INSERT INTO temporal_text_guard(f) VALUES ('1e400')", cancellationToken: CancellationToken.None)), "CS02002");
         Check("in process: strict typed literals", await RowsAsync(session, typedLiterals), _typedLiterals);
         Check("in process: ISO type names and SQL Server lexical aliases", await RowsAsync(session, typeAliases), _typeAliases);
-        Check("in process: CHAR storage, cast, length, concat, LIKE and seek", await RowsAsync(session, Characters), _characters);
+        Check("in process: CHAR storage, cast, length, concat, LIKE and seek", await RowsAsync(session, characters), _characters);
         await session.ExecuteAsync("CREATE TABLE default_guard (id INT DEFAULT 7 NOT NULL, label TEXT DEFAULT 'seed', note INT)");
         await session.ExecuteAsync("INSERT INTO default_guard (label, id) VALUES (DEFAULT, 1), (NULL, 2)");
         await session.ExecuteAsync("INSERT INTO default_guard DEFAULT VALUES");
@@ -352,6 +380,38 @@ internal static class Program
         Check("in process: EXPLAIN retains index and shared columns", explained.Any(row => Equals(row[2], "IndexSeek") && row[4] is string && row.Length == 8), true);
         await RowsAsync(session, "EXPLAIN DELETE FROM default_guard");
         Check("in process: EXPLAIN DELETE has no effects", await RowsAsync(session, "SELECT COUNT(*) FROM default_guard"), [[3L]]);
+        var mergePlan = await RowsAsync(session, "EXPLAIN " + mergeBinding);
+        Check("in process: MERGE binding and ordered actions", mergePlan.Any(row => Equals(row[2], "Merge")) &&
+            mergePlan.Count(row => Equals(row[2], "MergeAction")) == 3, true);
+        var merged = await RowsAsync(session, mergeBinding);
+        Check("in process: MERGE actions execute", merged.Length == 3 && merged.All(row => Equals(row[0], "UPDATE")), true);
+        Check("in process: MERGE retains target count", await RowsAsync(session, "SELECT COUNT(*) FROM default_guard"), [[3L]]);
+        foreach (string side in new[] { "left", "right" })
+        {
+            await session.ExecuteAsync($"CREATE TABLE hash_{side}(id INT PRIMARY KEY,k INT)");
+            await session.ExecuteAsync($"INSERT INTO hash_{side} VALUES " + string.Join(',', Enumerable.Range(1, 80).Select(id => $"({id},{id})")));
+        }
+        const string hashQuery = "SELECT l.id,r.id FROM hash_left l JOIN hash_right r ON l.k=r.k ORDER BY l.id";
+        Check("in process: hash join pairs", await RowsAsync(session, hashQuery),
+            Enumerable.Range(1, 80).Select(id => new object?[] { id, id }).ToArray());
+        var hashPlan = await RowsAsync(session, "EXPLAIN " + hashQuery);
+        Check("in process: plain hash EXPLAIN has no actual counts", hashPlan.Any(row => Equals(row[2], "HashJoin")) && hashPlan.All(row => row[7] is null), true);
+        var hashAnalysis = await RowsAsync(session, "EXPLAIN ANALYZE " + hashQuery);
+        Check("in process: hash analysis actual candidates", hashAnalysis.Any(row => Equals(row[2], "JoinStep") && Equals(row[7], 80L)), true);
+        foreach (string table in new[] { "analysis_outer", "analysis_outer_join", "analysis_inner", "analysis_inner_join" })
+        {
+            await session.ExecuteAsync($"CREATE TABLE {table}(id INT)");
+            await session.ExecuteAsync($"INSERT INTO {table} VALUES (1),(2)");
+        }
+        foreach (bool joins in new[] { false, true })
+        {
+            string nestedQuery = joins
+                ? "SELECT o.id,(SELECT COUNT(*) FROM analysis_inner i JOIN analysis_inner_join r ON i.id=r.id WHERE i.id<=o.id) AS n FROM analysis_outer o JOIN analysis_outer_join p ON o.id=p.id ORDER BY o.id"
+                : "SELECT o.id,(SELECT COUNT(*) FROM analysis_inner i WHERE i.id<=o.id) AS n FROM analysis_outer o ORDER BY o.id";
+            var nestedAnalysis = await RowsAsync(session, "EXPLAIN ANALYZE " + nestedQuery);
+            Check($"in process: correlated {(joins ? "join" : "select")} analysis excludes child candidates",
+                nestedAnalysis.Any(row => Equals(row[1], 0) && Equals(row[2], joins ? "HashJoin" : "Select") && Equals(row[7], 2L)), true);
+        }
         await session.ExecuteAsync("CREATE TABLE binary_keys (key_bytes VARBINARY(4))");
         await session.ExecuteAsync("CREATE INDEX by_bytes ON binary_keys (key_bytes)");
         await using (var description = (DatabaseResultSet)await session.ExecuteAsync(
@@ -361,33 +421,33 @@ internal static class Program
             bool describedBytes = false;
             await foreach (var row in description.GetRowsAsync(CancellationToken.None))
             {
-                describedBytes |= row.GetString(2) == "IndexSeek" && row.GetString(5) == "key_bytes = X'00ABFF'";
+                describedBytes |= row.GetString(2) == "IndexSeek" && row.GetString(5) == "key_bytes = X'00ABFF'; estimate_kind=exact_probe; probe_entries=0; probe_pages=1";
             }
             Check("in process: EXPLAIN binary bounds", describedBytes, true);
         }
-        Check("in process: scalars of every arity, strict and non-strict", await RowsAsync(session, Projection), _projection);
-        Check("in process: typed and hand-written aggregates", await RowsAsync(session, Aggregates), _aggregates);
-        Check("in process: COHESION_SCHEMA.FUNCTIONS", await RowsAsync(session, Registered), _registered);
-        Check("in process: a domain column, application casts and a cast to DATE", await RowsAsync(session, Domains), _domains);
+        Check("in process: scalars of every arity, strict and non-strict", await RowsAsync(session, projection), _projection);
+        Check("in process: typed and hand-written aggregates", await RowsAsync(session, aggregates), _aggregates);
+        Check("in process: COHESION_SCHEMA.FUNCTIONS", await RowsAsync(session, registered), _registered);
+        Check("in process: a domain column, application casts and a cast to DATE", await RowsAsync(session, domains), _domains);
         CheckFailure("in process: the domain's check refuses a row",
-            await FailureAsync(() => session.ExecuteAsync(DomainRefusedInsert, RefusedParameters, CancellationToken.None).AsTask()),
+            await FailureAsync(() => session.ExecuteAsync(domainRefusedInsert, RefusedParameters, CancellationToken.None).AsTask()),
             "DOMAIN constraint 'email' on 'dbo.customers' was violated");
         CheckFailure("in process: the declared CHECK refuses a row",
-            await FailureAsync(() => session.ExecuteAsync(RefusedInsert, RefusedParameters, CancellationToken.None).AsTask()),
+            await FailureAsync(() => session.ExecuteAsync(refusedInsert, RefusedParameters, CancellationToken.None).AsTask()),
             "CHECK constraint 'ck_name' on 'dbo.customers' was violated");
-        CheckFailure("in process: a throwing function is COHSQLE007",
+        CheckFailure("in process: a throwing function is CS05007",
             await FailureAsync(() => RowsAsync(session, "SELECT clamp(1, 5, 0) FROM customers")),
-            "COHSQLE007: Function 'clamp' failed: '5' cannot be greater than 0.");
-        CheckFailure("in process: a CAST no cast performs is COHSQLE011 while planning",
-            await FailureAsync(() => RowsAsync(session, CannotCast)),
-            "COHSQLE011: Cannot CAST type BOOLEAN to DATE");
+            "CS05007: Function 'clamp' failed: '5' cannot be greater than 0.");
+        CheckFailure("in process: a CAST no cast performs is CS02011 while planning",
+            await FailureAsync(() => RowsAsync(session, cannotCast)),
+            "CS02011: Cannot CAST type BOOLEAN to DATE");
     }
 
     // A row whose name slugifies to nothing, which the declared CHECK refuses.
-    private const string RefusedInsert = "INSERT INTO customers (Id, Name, Score, Active, Token) VALUES (3, '!!!', 1, TRUE, @token)";
+    private const string refusedInsert = "INSERT INTO customers (Id, Name, Score, Active, Token) VALUES (3, '!!!', 1, TRUE, @token)";
 
     // A row whose email the email domain's check refuses.
-    private const string DomainRefusedInsert =
+    private const string domainRefusedInsert =
         "INSERT INTO customers (Id, Name, Score, Active, Token, Email) VALUES (4, 'Mary Somerville', 1, TRUE, @token, 'nobody')";
 
     private static Dictionary<string, object?> RefusedParameters => new() { ["token"] = Token(3) };
@@ -398,18 +458,31 @@ internal static class Program
     {
         await using var client = SqlClient.Create(new SqlClientOptions
         {
-            Settings = new DatabaseConnectionSettings { Database = DatabaseName, Principal = "aot", EndPoint = listener.EndPoint },
+            Settings = new DatabaseConnectionSettings { Database = databaseName, Principal = "aot", EndPoint = listener.EndPoint },
             ConnectionFactory = listener.CreateFactory(),
         });
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         await using SqlConnection connection = await client.ConnectAsync(timeout.Token);
+        await connection.ExecuteAsync("CREATE TABLE truncate_native (id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY)", cancellationToken: timeout.Token);
+        await connection.ExecuteAsync("INSERT INTO truncate_native DEFAULT VALUES", cancellationToken: timeout.Token);
+        Check("over the wire: TRUNCATE zero completion", await connection.ExecuteAsync("TRUNCATE TABLE ONLY truncate_native CONTINUE IDENTITY RESTRICT", cancellationToken: timeout.Token), 0L);
+        await connection.ExecuteAsync("INSERT INTO truncate_native DEFAULT VALUES", cancellationToken: timeout.Token);
+        Check("over the wire: TRUNCATE CONTINUE IDENTITY", await RowsAsync(connection, "SELECT id FROM truncate_native", timeout.Token), [[2L]]);
+        await connection.ExecuteAsync("TRUNCATE truncate_native RESTART IDENTITY CASCADE", cancellationToken: timeout.Token);
+        await connection.ExecuteAsync("INSERT INTO truncate_native DEFAULT VALUES", cancellationToken: timeout.Token);
+        Check("over the wire: TRUNCATE RESTART IDENTITY", await RowsAsync(connection, "SELECT id FROM truncate_native", timeout.Token), [[1L]]);
+        Check("over the wire: CTAS copied completion", await connection.ExecuteAsync("CREATE TABLE ctas_native (copied) AS SELECT id FROM truncate_native WITH DATA", cancellationToken: timeout.Token), 1L);
+        Check("over the wire: CTAS inferred rows", await RowsAsync(connection, "SELECT copied FROM ctas_native", timeout.Token), [[1L]]);
+        Check("over the wire: CTAS no-data completion", await connection.ExecuteAsync("CREATE TABLE ctas_empty AS SELECT CAST('bad' AS INT) AS value WITH NO DATA", cancellationToken: timeout.Token), 0L);
+        Check("over the wire: CTAS no-data skips evaluation", await RowsAsync(connection, "SELECT * FROM ctas_empty", timeout.Token), []);
+
         await connection.ExecuteAsync("CREATE SCHEMA wire_namespace", cancellationToken: timeout.Token);
         await connection.ExecuteAsync("CREATE TABLE wire_namespace.t(id INT PRIMARY KEY)", cancellationToken: timeout.Token);
         await connection.ExecuteAsync("CREATE TABLE namespace_external(pid INT REFERENCES wire_namespace.t(id))", cancellationToken: timeout.Token);
         Check("over the wire: CREATE SCHEMA and SCHEMATA", await RowsAsync(connection,
             "SELECT SCHEMA_NAME FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME = 'wire_namespace'", timeout.Token), [["wire_namespace"]]);
         CheckFailure("over the wire: DROP SCHEMA RESTRICT", await FailureAsync(async () =>
-            await connection.ExecuteAsync("DROP SCHEMA wire_namespace RESTRICT", cancellationToken: timeout.Token)), "COHSQLE030");
+            await connection.ExecuteAsync("DROP SCHEMA wire_namespace RESTRICT", cancellationToken: timeout.Token)), "CS03030");
         await connection.ExecuteAsync("DROP SCHEMA wire_namespace CASCADE", cancellationToken: timeout.Token);
         await connection.ExecuteAsync("INSERT INTO namespace_external VALUES (99)", cancellationToken: timeout.Token);
         Check("over the wire: CASCADE retains external tables", await RowsAsync(connection,
@@ -430,7 +503,7 @@ internal static class Program
         await connection.ExecuteAsync("CREATE TABLE identity_wire (id INT IDENTITY(10,2))", cancellationToken: timeout.Token);
         await connection.ExecuteAsync("INSERT INTO identity_wire DEFAULT VALUES", cancellationToken: timeout.Token);
         CheckFailure("over the wire: ALWAYS IDENTITY rejects explicit values", await FailureAsync(async () =>
-            await connection.ExecuteAsync("INSERT INTO identity_wire VALUES (1)", cancellationToken: timeout.Token)), "COHSQLE025");
+            await connection.ExecuteAsync("INSERT INTO identity_wire VALUES (1)", cancellationToken: timeout.Token)), "CS03025");
         var returned = await connection.QueryAsync("INSERT INTO returning_native DEFAULT VALUES RETURNING *", cancellationToken: timeout.Token);
         Check("over the wire: RETURNING affected count", returned.AffectedCount, 1L);
         Check("over the wire: RETURNING identity", returned[0].GetInt32(0), 2);
@@ -439,6 +512,13 @@ internal static class Program
         Check("over the wire: ON CONFLICT affected count", upserted.AffectedCount, 2L);
         Check("over the wire: ON CONFLICT EXCLUDED RETURNING", upserted.Select(row => new object?[] { row.GetInt32(0), row.GetInt32(1) }).ToArray(), [[1, 20], [3, 30]]);
         Check("over the wire: DELETE RETURNING", await RowsAsync(connection, "DELETE FROM returning_native WHERE id = 1 RETURNING value", timeout.Token), [[4]]);
+        await connection.ExecuteAsync("INSERT INTO joined_native VALUES(1,4)", cancellationToken: timeout.Token);
+        await connection.ExecuteAsync("DELETE FROM source_native", cancellationToken: timeout.Token);
+        await connection.ExecuteAsync("INSERT INTO source_native VALUES(1,9)", cancellationToken: timeout.Token);
+        Check("over the wire: UPDATE FROM", await RowsAsync(connection, "UPDATE joined_native SET value=s.v FROM source_native AS s WHERE joined_native.id=s.id RETURNING joined_native.value,s.v", timeout.Token), [[9,9]]);
+        await connection.ExecuteAsync("INSERT INTO source_native VALUES(1,9)", cancellationToken: timeout.Token);
+        CheckFailure("over the wire: UPDATE FROM cardinality", await FailureAsync(() => RowsAsync(connection, "UPDATE joined_native SET value=s.v FROM source_native AS s WHERE joined_native.id=s.id", timeout.Token)), "CS05068");
+        Check("over the wire: DELETE USING deduplication", await RowsAsync(connection, "DELETE FROM joined_native USING source_native AS s WHERE joined_native.id=s.id RETURNING joined_native.value,s.v", timeout.Token), [[9,9]]);
         Check("over the wire: IDENTITY leaves connection usable", await RowsAsync(connection, "SELECT id FROM identity_wire", timeout.Token), [[10]]);
         await connection.ExecuteAsync("CREATE TABLE default_wire (id INT DEFAULT 7 NOT NULL, label TEXT DEFAULT 'seed', note INT)", cancellationToken: timeout.Token);
         await connection.ExecuteAsync("INSERT INTO default_wire (label, id) VALUES (DEFAULT, 1), (NULL, 2)", cancellationToken: timeout.Token);
@@ -448,9 +528,17 @@ internal static class Program
             await RowsAsync(connection, "SELECT id, label, note FROM default_wire ORDER BY id", timeout.Token),
             [[1, "seed", null], [2, "seed", null], [7, "seed", null]]);
 
-        Check("over the wire: CHAR storage, cast, length, concat, LIKE and seek", await RowsAsync(connection, Characters, timeout.Token), _characters);
+        Check("over the wire: CHAR storage, cast, length, concat, LIKE and seek", await RowsAsync(connection, characters, timeout.Token), _characters);
         var explained = await RowsAsync(connection, "EXPLAIN SELECT c FROM fixed_codes WHERE c = 'a'", timeout.Token);
         Check("over the wire: EXPLAIN uses existing result rows", explained.Any(row => Equals(row[2], "IndexSeek") && row[4] is string && row.Length == 8), true);
+        var mergePlan = await RowsAsync(connection, "EXPLAIN " + mergeBinding, timeout.Token);
+        Check("over the wire: MERGE binding and ordered actions", mergePlan.Any(row => Equals(row[2], "Merge")) &&
+            mergePlan.Count(row => Equals(row[2], "MergeAction")) == 3, true);
+        var merged = await RowsAsync(connection, mergeBinding, timeout.Token);
+        Check("over the wire: MERGE actions execute", merged.Length == 3 && merged.All(row => Equals(row[0], "UPDATE")), true);
+        var hashAnalysis = await RowsAsync(connection,
+            "EXPLAIN ANALYZE SELECT l.id FROM hash_left l JOIN hash_right r ON l.k=r.k", timeout.Token);
+        Check("over the wire: hash analysis keeps typed counts", hashAnalysis.Any(row => Equals(row[2], "JoinStep") && Equals(row[7], 80L) && row.Length == 8), true);
         Check("over the wire: all CAST families", await RowsAsync(connection, allCasts, timeout.Token), _allCasts);
         Check("over the wire: distinct truth tests and ESCAPE", await RowsAsync(connection, predicates, timeout.Token), _predicates);
         Check("over the wire: ordinary invariant LIKE anchors", await RowsAsync(connection,
@@ -461,16 +549,20 @@ internal static class Program
             "RPAD('a', 200000, 'a') COLLATE invariant LIKE 'abc%', " +
             "RPAD('a', 200000, 'a') COLLATE invariant NOT LIKE '%b' FROM customers WHERE Id = 1", timeout.Token), [[true, true, true, true, false, true]]);
         CheckFailure("over the wire: invalid ESCAPE", await FailureAsync(() => RowsAsync(connection,
-            "SELECT Name LIKE 'x!' ESCAPE '!' FROM customers", timeout.Token)), "COHSQLE034");
+            "SELECT Name LIKE 'x!' ESCAPE '!' FROM customers", timeout.Token)), "CS02034");
         CheckFailure("over the wire: invariant LIKE work limit", await FailureAsync(() => RowsAsync(connection,
-            "SELECT RPAD('เก', 1024, 'เก') COLLATE invariant LIKE RPAD('%เก', 96, '%เก') || 'ข' FROM customers WHERE Id = 1", timeout.Token)), "COHSQLE040");
+            "SELECT RPAD('เก', 1024, 'เก') COLLATE invariant LIKE RPAD('%เก', 96, '%เก') || 'ข' FROM customers WHERE Id = 1", timeout.Token)), "CS05040");
         Check("over the wire: parameter ESCAPE", await RowsAsync(connection,
             "SELECT '50%' LIKE '50!%' ESCAPE @e FROM customers WHERE Id = 1", timeout.Token,
             new Dictionary<string, object?> { ["e"] = "!" }), [[true]]);
+        Check("over the wire: RIGHT normalization", await RowsAsync(connection, rightJoin, timeout.Token), [[1L, 1L], [null, 2L]]);
+        Check("over the wire: FULL coalesces both unmatched sides", await RowsAsync(connection, fullJoin, timeout.Token), [[1L, 1L, null], [2L, 2L, null], [3L, null, 3L]]);
+        Check("over the wire: FULL merged grouping keys", await RowsAsync(connection, fullGroup, timeout.Token), [[1L, 1L], [2L, 1L], [3L, 1L]]);
         Check("over the wire: three-way USING and LEFT", await RowsAsync(connection, expandedJoin, timeout.Token), [[1L, 1L], [2L, null]]);
         Check("over the wire: comma and CROSS", await RowsAsync(connection, crossJoin, timeout.Token), [[8L]]);
         Check("over the wire: set operations", await RowsAsync(connection, setOperations, timeout.Token), [[2L]]);
         Check("over the wire: set subquery", await RowsAsync(connection, "SELECT Id FROM customers WHERE Id IN (SELECT Id FROM customers EXCEPT SELECT Id FROM customers WHERE Id = 1)", timeout.Token), [[2L]]);
+        Check("over the wire: quantified correlation", await RowsAsync(connection, "SELECT c.Id, c.Id >= ALL (SELECT d.Id FROM customers d WHERE d.Id <= c.Id), c.Id = SOME (SELECT d.Id FROM customers d WHERE d.Id > c.Id), (SELECT 1 / (c.Id - c.Id)) = ANY (SELECT d.Id FROM customers d WHERE d.Id = c.Id AND FALSE) FROM customers c ORDER BY c.Id", timeout.Token), [[1L, true, false, false], [2L, true, false, false]]);
         Check("over the wire: renamed derived join", await RowsAsync(connection, derivedJoin, timeout.Token), [[1L]]);
         Check("over the wire: chained CTEs", await RowsAsync(connection,
             "WITH a AS (SELECT Id FROM customers), b AS (SELECT Id FROM a) SELECT Id FROM b ORDER BY Id", timeout.Token), [[1L], [2L]]);
@@ -485,29 +577,29 @@ internal static class Program
         Check("over the wire: correlated scalar EXISTS and IN after failure", await RowsAsync(connection, correlatedRows, timeout.Token), [[1L, 100L], [2L, 200L]]);
         Check("over the wire: correlated UPDATE", await connection.ExecuteAsync("UPDATE subquery_guard SET id = id WHERE EXISTS (SELECT u.id FROM subquery_guard u WHERE u.id = subquery_guard.id)", cancellationToken: timeout.Token), 1L);
         Check("over the wire: correlated DELETE", await connection.ExecuteAsync("DELETE FROM subquery_guard WHERE id IN (SELECT u.id FROM subquery_guard u WHERE u.id = subquery_guard.id)", cancellationToken: timeout.Token), 1L);
-        Check("over the wire: ALTER rename and frozen missing values", await RowsAsync(connection, "SELECT value FROM altered_guard ORDER BY id", timeout.Token), [[7], [-9]]);
+        Check("over the wire: ALTER TYPE, rename and frozen missing values", await RowsAsync(connection, "SELECT value FROM altered_guard ORDER BY id", timeout.Token), [[8L], [-7L]]);
         Check("over the wire: T1 scalars and transaction clock", await RowsAsync(connection, t1Scalars, timeout.Token), _t1Scalars);
         Check("over the wire: strict typed literals", await RowsAsync(connection, typedLiterals, timeout.Token), _typedLiterals);
         Check("over the wire: ISO type names and SQL Server lexical aliases", await RowsAsync(connection, typeAliases, timeout.Token), _typeAliases);
-        var fixedCodes = await connection.QueryAsync(Characters, cancellationToken: timeout.Token);
+        var fixedCodes = await connection.QueryAsync(characters, cancellationToken: timeout.Token);
         Check("over the wire: CHAR type", fixedCodes.Columns[0].Type == Types.DatabaseType.Character, true);
         Check("over the wire: CHAR length", fixedCodes.Columns[0].MaxLength == 3, true);
-        Check("over the wire: scalars of every arity, strict and non-strict", await RowsAsync(connection, Projection, timeout.Token), _projection);
-        Check("over the wire: typed and hand-written aggregates", await RowsAsync(connection, Aggregates, timeout.Token), _aggregates);
-        Check("over the wire: COHESION_SCHEMA.FUNCTIONS", await RowsAsync(connection, Registered, timeout.Token), _registered);
-        Check("over the wire: a domain column, application casts and a cast to DATE", await RowsAsync(connection, Domains, timeout.Token), _domains);
+        Check("over the wire: scalars of every arity, strict and non-strict", await RowsAsync(connection, projection, timeout.Token), _projection);
+        Check("over the wire: typed and hand-written aggregates", await RowsAsync(connection, aggregates, timeout.Token), _aggregates);
+        Check("over the wire: COHESION_SCHEMA.FUNCTIONS", await RowsAsync(connection, registered, timeout.Token), _registered);
+        Check("over the wire: a domain column, application casts and a cast to DATE", await RowsAsync(connection, domains, timeout.Token), _domains);
         CheckFailure("over the wire: the domain's check refuses a row",
-            await FailureAsync(() => connection.ExecuteAsync(DomainRefusedInsert, RefusedParameters, timeout.Token).AsTask()),
+            await FailureAsync(() => connection.ExecuteAsync(domainRefusedInsert, RefusedParameters, timeout.Token).AsTask()),
             "DOMAIN constraint 'email' on 'dbo.customers' was violated");
         CheckFailure("over the wire: the declared CHECK refuses a row",
-            await FailureAsync(() => connection.ExecuteAsync(RefusedInsert, RefusedParameters, timeout.Token).AsTask()),
+            await FailureAsync(() => connection.ExecuteAsync(refusedInsert, RefusedParameters, timeout.Token).AsTask()),
             "CHECK constraint 'ck_name' on 'dbo.customers' was violated");
-        CheckFailure("over the wire: a throwing function is COHSQLE007",
+        CheckFailure("over the wire: a throwing function is CS05007",
             await FailureAsync(() => RowsAsync(connection, "SELECT clamp(1, 5, 0) FROM customers", timeout.Token)),
-            "COHSQLE007: Function 'clamp' failed: '5' cannot be greater than 0.");
-        CheckFailure("over the wire: a CAST no cast performs is COHSQLE011 while planning",
-            await FailureAsync(() => RowsAsync(connection, CannotCast, timeout.Token)),
-            "COHSQLE011: Cannot CAST type BOOLEAN to DATE");
+            "CS05007: Function 'clamp' failed: '5' cannot be greater than 0.");
+        CheckFailure("over the wire: a CAST no cast performs is CS02011 while planning",
+            await FailureAsync(() => RowsAsync(connection, cannotCast, timeout.Token)),
+            "CS02011: Cannot CAST type BOOLEAN to DATE");
         Check("over the wire: the parameterized call folds",
             await RowsAsync(connection, "SELECT slugify(@text) AS s FROM customers WHERE Id = 1", timeout.Token,
                 new Dictionary<string, object?> { ["text"] = " Hello, World " }),

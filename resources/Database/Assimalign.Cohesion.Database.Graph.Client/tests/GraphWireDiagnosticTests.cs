@@ -19,7 +19,7 @@ public sealed class GraphWireDiagnosticTests
         // Arrange
         await using var harness = await GraphClientTestHarness.StartAsync();
         await using var connection = await harness.Client.ConnectAsync(harness.Token);
-        const string gql = "MATCH ANY SHORTEST (a)->(b) RETURN a UNION MATCH (c) RETURN c";
+        const string gql = "MATCH (a)->(b) MERGE (d) RETURN a UNION MATCH (c) RETURN c";
         var expected = new GqlQueryParser().Parse(gql).Diagnostics.Where(item => item.Severity is DiagnosticSeverity.Warning or DiagnosticSeverity.Error).ToArray();
         // Act
         var parse = await Should.ThrowAsync<GraphClientException>(async () => await connection.QueryAsync(gql, cancellationToken: harness.Token));
@@ -28,7 +28,7 @@ public sealed class GraphWireDiagnosticTests
         expected.Length.ShouldBeGreaterThanOrEqualTo(2);
         parse.Diagnostics.Select(Value).ShouldBe(expected.Select(Value));
         parse.InnerException.ShouldBeOfType<DatabaseClientException>().Diagnostics.Select(Value).ShouldBe(expected.Select(Value));
-        plan.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG001");
+        plan.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG05001");
         await connection.QueryAsync("SHOW LABELS", cancellationToken: harness.Token);
         harness.Server.Sessions.Count.ShouldBe(1);
     }
@@ -47,11 +47,11 @@ public sealed class GraphWireDiagnosticTests
         var pathResult = connection.QueryPathsAsync("MATCH (n:Absent) RETURN n", cancellationToken: harness.Token);
         await foreach (var path in pathResult) { paths++; }
         // Assert
-        result.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG010");
+        result.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG01010");
         result.Diagnostics[0].Severity.ShouldBe(ProtocolDiagnosticSeverity.Warning);
         paths.ShouldBe(0);
         Should.Throw<InvalidOperationException>(() => pathResult.GetAsyncEnumerator(harness.Token));
-        pathResult.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG010");
+        pathResult.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG01010");
         pathResult.Diagnostics[0].Severity.ShouldBe(ProtocolDiagnosticSeverity.Warning);
         await connection.QueryAsync("SHOW LABELS", cancellationToken: harness.Token);
         harness.Server.Sessions.Count.ShouldBe(1);
@@ -68,12 +68,12 @@ public sealed class GraphWireDiagnosticTests
         // Act
         var error = await Should.ThrowAsync<GraphClientException>(async () =>
         {
-            await foreach (var path in connection.QueryPathsAsync("MATCH ANY SHORTEST (a)->(b) RETURN a UNION MATCH (c) RETURN c", cancellationToken: harness.Token)) { }
+            await foreach (var path in connection.QueryPathsAsync("MATCH (a)->(b) MERGE (d) RETURN a UNION MATCH (c) RETURN c", cancellationToken: harness.Token)) { }
         });
         // Assert
         error.Diagnostics.Count.ShouldBeGreaterThanOrEqualTo(2);
         error.Code.ShouldBe(ProtocolErrorCode.ParseFailure);
-        error.Diagnostics.Select(Value).ShouldBe(new GqlQueryParser().Parse("MATCH ANY SHORTEST (a)->(b) RETURN a UNION MATCH (c) RETURN c").Diagnostics.Select(Value));
+        error.Diagnostics.Select(Value).ShouldBe(new GqlQueryParser().Parse("MATCH (a)->(b) MERGE (d) RETURN a UNION MATCH (c) RETURN c").Diagnostics.Select(Value));
         connection.IsOpen.ShouldBeTrue();
         var session = harness.Server.Sessions.Single();
         await connection.QueryAsync("SHOW LABELS", cancellationToken: harness.Token);

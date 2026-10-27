@@ -43,6 +43,10 @@ public sealed class DatabaseDiagnosticTests
         new DatabaseException("message").Diagnostics.ShouldBeEmpty();
         new DatabaseException("message", new InvalidOperationException()).Diagnostics.ShouldBeEmpty();
         new DatabaseParseException("message").Diagnostics.ShouldBeEmpty();
+        new DatabaseNotFoundException("message").Diagnostics.ShouldBeEmpty();
+        var absent = new DatabaseNotFoundException("message", null);
+        absent.Diagnostics.ShouldBeEmpty();
+        absent.InnerException.ShouldBeNull();
     }
 
     [Fact(DisplayName = "Cohesion Test [Database] - Diagnostics: snapshots preserve every diagnostic and sort source offsets stably")]
@@ -67,5 +71,24 @@ public sealed class DatabaseDiagnosticTests
         failure.Message.ShouldBe("first error");
         failure.InnerException.ShouldBeSameAs(cause);
         Should.Throw<NotSupportedException>(() => ((IList<Diagnostic>)failure.Diagnostics).Clear());
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database] - Diagnostics: precise database absence snapshots the typed carrier and preserves its cause")]
+    public void Constructor_NotFoundDiagnostics_ShouldCopyAndPreservePreciseAbsence()
+    {
+        // Arrange
+        var input = new List<Diagnostic> { new() { Code = "CK03002", Severity = DiagnosticSeverity.Error } };
+        var cause = new System.IO.IOException("Original absence cause.");
+        // Act
+        var failure = new DatabaseNotFoundException("Database absent.", input, cause);
+        input.Clear();
+        // Assert
+        failure.GetType().ShouldBe(typeof(DatabaseNotFoundException));
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CK03002");
+        failure.Message.ShouldBe("Database absent.");
+        failure.InnerException.ShouldBeSameAs(cause);
+        Should.Throw<NotSupportedException>(() => ((IList<Diagnostic>)failure.Diagnostics).Clear());
+        Should.Throw<ArgumentNullException>(() => new DatabaseNotFoundException("message", null!, null));
+        new DatabaseNotFoundException("message", Array.Empty<Diagnostic>(), null).Diagnostics.ShouldBeEmpty();
     }
 }

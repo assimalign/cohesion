@@ -16,6 +16,28 @@ abort, and idle eviction must release the sole session slot for a fresh client a
 
 Direct references are Database.Client, Sql.Protocol, Database.Types, Database.Protocol and Connections. Wire contracts live in each model Protocol assembly, shared by client and engine. This client has no engine, area-root, storage, transaction, indexing, model parser or schema reference. Cache.Client remains an empty placeholder. Engine-free trimming and NativeAOT coverage lives in Database.Client/samples/Assimalign.Cohesion.Database.Client.AotSample.
 
+## MERGE (#1715, SQ-M2)
+
+The existing exchange carries MERGE actions, BY SOURCE and RETURNING with merge_action().
+InMemory/TCP tests assert new UPDATE/INSERT targets, old DELETE targets, NULL absent-source
+cells and reusable CS05036 failures with unchanged rows. No client API or protocol changes.
+
+## TRUNCATE (#1716, SQ-T1)
+
+The existing execute exchange carries table lists, FK policies and identity policies with zero
+completion count. InMemory and TCP tests pin old rows after publication, CS03067 for incomplete
+FK sets, CS04066 inside BEGIN, identity continuity/restart, and usable connections after refusal.
+Engine-owned wire tests also run reclamation while the old snapshot remains active and verify
+no frees until it ends. No client surface, result shape or protocol version changes.
+
+## Quantified comparisons (#1718)
+
+The existing execute exchange carries scalar ANY/SOME/ALL subqueries without a
+protocol change. InMemory and TCP tests measure all comparison operators against
+empty, TRUE/FALSE/UNKNOWN and mixed sets, NULL operands, correlated scopes,
+CS01015/CS02055/CS05013 failures and connection reuse. UNKNOWN is delivered as a
+NULL Boolean cell through the ordinary result codec.
+
 ## Client exception ownership
 
 `SqlClientException` derives directly from `System.Exception`. It preserves constructors, wire codes, inner exception and connection-usability behavior. Its locally declared Diagnostics is never null: explicit diagnostics are defensively copied into a read-only snapshot, stably ordered by offset with unlocated entries last. SQL and Graph wrappers copy from DatabaseClientException or their own nested client exception. Documents retains its explicit diagnostics parameter and returns an empty collection when none was supplied. Engine-side DatabaseException remains in the area root; catching it intentionally no longer catches remote client failures.
@@ -34,18 +56,18 @@ existing SQL execute exchange. Wire tests pin results, exact affected counts and
 recursive/modifying-body ParseFailure diagnostics, preserving connection reuse
 and stored rows after rejection. No client API or wire payload changes.
 
-Blank derived output names fail planning with COHSQLE013 and arrive as an
+Blank derived output names fail planning with CS05013 and arrive as an
 ExecutionFailure with ConnectionUsable true. The connection and an explicit
 transaction remain usable; the wire regression verifies pending writes and rollback.
 
-Boolean predicate errors (#1190) retain ExecutionFailure, COHSQLE003 diagnostics and
+Boolean predicate errors (#1190) retain ExecutionFailure, CS02003 diagnostics and
 connection reuse over InMemory and TCP. Coverage includes every clause, supplied string
 parameters and explicit transactions; failed writes preserve rows. No protocol changes.
 
 ## Constraint diagnostics (#1666)
 
 Execution, conversion, persisted-expression and DDL failures also retain structured diagnostics
-(#1653): COHSQLE046–066, existing COHSQLE022/024 and definition COHSQLD002/003. The engine
+(#1653): CS02046–066, existing CS02022/024 and definition CS03302/003. The engine
 discards persisted-expression offsets before attaching the statement span; the wire composes the code prefix
 once. Both transports cover execution and DDL refusals; engine-owned wire regressions also
 include a damaged stored DEFAULT and a default-conversion wrapper, preserving the carrier,
@@ -53,14 +75,30 @@ ExecutionFailure and a reusable connection. SQLSTATE mappings
 remain documented in the SQL dialect; no client API or protocol format changes.
 
 SqlConnection preserves the existing ExecutionFailure category and exposes the single
-constraint diagnostic through SqlClientException.Diagnostics: COHSQLE037 (23505) for
-uniqueness, COHSQLE038 (23514) for CHECK/domain checks, COHSQLE039 (23503) for foreign
-keys; NOT NULL stays COHSQLE024 (23502). Read Diagnostics[0].Code for the engine code;
+constraint diagnostic through SqlClientException.Diagnostics: CS03037 (23505) for
+uniqueness, CS03038 (23514) for CHECK/domain checks, CS03039 (23503) for foreign
+keys; NOT NULL stays CS03024 (23502). Read Diagnostics[0].Code for the engine code;
 SqlClientException.Code remains the protocol error category. Negotiated diagnostics retain
 the statement span and message. Without diagnostics negotiation, the composed message
 still starts with the engine code. The connection and explicit transaction remain usable.
 Both-transport tests assert rollback of earlier rows in multi-row INSERT, INSERT SELECT and
 upsert failures. There is no API or wire-format change.
+
+## FULL joins (#1525)
+
+InMemory and loopback TCP conformance use the ordinary result codec for duplicate/NULL keys,
+both unmatched bags, common-typed COALESCE USING outputs and empty inputs. EXPLAIN identifies
+FullHashJoin. Physical eligibility CS05070, direct joined-DML CS05069 and statement hash-budget
+CS05067 preserve structured diagnostics and connection reuse; derived FULL DML sources execute.
+No client API, protocol version or header nullability field changes.
+
+## Joined DML (#1714)
+
+UPDATE FROM and DELETE USING use the existing command/result exchange. Both InMemory and TCP
+cover source SET/WHERE/RETURNING, visible star metadata and LEFT null extension, affected counts,
+empty results, DELETE deduplication, constraint rollback and CS05068 before writes. Multiple UPDATE
+source matches leave the connection and earlier explicit-transaction work usable. No client API,
+protocol version, frame or metadata format changes.
 
 ## UPDATE final foreign-key state (#1667)
 
@@ -74,7 +112,7 @@ the UPDATE, error, result and COMMIT exchanges all use the wire. No protocol cha
 Existing execute/query exchanges carry inserted-plus-updated affected counts and RETURNING
 rows. DO NOTHING-skipped proposals return no row. Wire tests cover InMemory and TCP,
 untargeted inserts without unique indexes, and reusable connections after arbiter,
-repeated-row and constraint failures (ExecutionFailure) or excluded spellings (COHDBL001
+repeated-row and constraint failures (ExecutionFailure) or excluded spellings (CK00001
 ParseFailure). There is no client API, payload or protocol change.
 
 ## Derived relations and DML predicate subqueries (#1113, part b)
@@ -102,8 +140,8 @@ SqlParameterCollection strips one leading sigil and keeps ordinal case-sensitive
 names; `$name`, `@name` and numeric names such as `$1` follow the
 [shared parameter contract](../../Assimalign.Cohesion.Database.Language/docs/DESIGN.md#parameter-contract-1102).
 Add and the indexer continue to replace a previously normalized name. A raw request
-map containing two keys for one bare name is rejected by the server with COHSQLE023.
-An unbound reference fails with COHSQLE020 before rows are accessed; wire execution
+map containing two keys for one bare name is rejected by the server with CS01023.
+An unbound reference fails with CS01020 before rows are accessed; wire execution
 failures keep the connection usable, including on empty tables. No protocol changes.
 
 
@@ -158,7 +196,7 @@ still carries no nullability field. No client API or wire format changes.
 
 The existing execute exchange carries results ordered with per-key NULLS FIRST/LAST,
 including outer ordering over derived outputs. Wire tests assert all four direction and
-placement combinations; GROUP BY ordinals keep COHDBL001 with a reusable connection.
+placement combinations; GROUP BY ordinals keep CK00001 with a reusable connection.
 No protocol or client API change is needed.
 
 ## Pagination (#1107)
@@ -166,8 +204,8 @@ No protocol or client API change is needed.
 OFFSET/FETCH, OFFSET before LIMIT and TOP use the existing SQL execute exchange and
 result metadata. SqlPagingWireTests verifies exact windows and column names/types over
 InMemory and TCP, plus coded parse/count refusals and subsequent connection reuse.
-INSERT, UPDATE and DELETE TOP retain COHDBL001 naming DML TOP; bare FETCH arithmetic
-receives SQL0003, matching the language grammar.
+INSERT, UPDATE and DELETE TOP retain CK00001 naming DML TOP; bare FETCH arithmetic
+receives CS00003, matching the language grammar.
 No wire or client API changes.
 
 ## Expanded joins (#1109)
@@ -175,7 +213,7 @@ No wire or client API changes.
 LEFT null values, N-way, CROSS, comma and USING results use the existing SQL frames and
 production materializer. No nullability field or frame-writing change is introduced.
 Wire tests run every join case over InMemory and loopback TCP, pin exact values and
-multiplicities, and retain RIGHT/FULL/NATURAL and qualified-wildcard exclusions. USING
+multiplicities, and retain FULL/NATURAL and qualified-wildcard exclusions. RIGHT [OUTER] and RIGHT USING (#1525) carry null-extended written-left values, merged right spelling, coerced decimal values, original column ordinals and cleared lengths on both transports; direct joined-DML refusals carry CS05069 and keep the connection usable. Engine nullability remains engine metadata; no nullability field is added to the wire. USING
 wildcard alias/ordinal ordering, decimal common-type values in both input orders, qualified
 types and cleared character lengths use the same production frames and materializer.
 
@@ -187,7 +225,7 @@ Wire tests pin exact rows and String/Int64 metadata; there is no protocol format
 ## Identity values (#1123)
 
 Identity DDL, omitted-column INSERT and typed generated results use the existing execute
-exchange and integer codec. ALWAYS violations carry COHSQLE025 as ExecutionFailure and leave
+exchange and integer codec. ALWAYS violations carry CS03025 as ExecutionFailure and leave
 the connection usable. No client API or protocol shape changes.
 
 ## T1 scalar and clock wire behavior (#1120)
@@ -221,8 +259,8 @@ dependency closure contains no SQL engine, catalog or storage implementation. Th
 
 DATE, TIME, TIMESTAMP, TIMESTAMPTZ, day-time INTERVAL and X binary literals use the existing
 DateOnly, TimeOnly, DateTime, DateTimeOffset, TimeSpan and byte[] tuple encodings and DatabaseType
-metadata. N strings remain String. No protocol format changes. SQL0008 content errors and
-COHDBL001 year-month exclusions arrive as ParseFailure and leave the connection usable.
+metadata. N strings remain String. No protocol format changes. CS00008 content errors and
+CK00001 year-month exclusions arrive as ParseFailure and leave the connection usable.
 TIMESTAMP assignment returns Kind Unspecified; TIMESTAMPTZ preserves its offset, following the
 [dialect normalization rule](../../Assimalign.Cohesion.Database.Sql.Language/docs/DIALECT.md#timestamp-normalization-1110).
 
@@ -274,30 +312,28 @@ SQL transactions currently use ordinary `BEGIN`, `COMMIT` and `ROLLBACK` command
 on one connection. The wire protocol does not expose a durable transaction token,
 status lookup or replay deduplication. A connection loss after the server publishes
 COMMIT but before the response reaches the client has an unknown outcome. Client
-exceptions do not promise that a failed COMMIT left no writes. The SQL mapper
-documents and enforces this boundary by faulting its scope/store and refusing replay;
-see its [reconciliation contract](../../Assimalign.Cohesion.Database.Sql.Mapping/docs/DESIGN.md#commit-outcome-and-reconciliation).
+exceptions do not promise that a failed COMMIT left no writes. Callers must reconcile
+an uncertain outcome through application state before deciding whether to retry;
+the client provides no automatic replay or reconciliation operation.
 
-**Known gap (#1540):** end or roll back an explicit transaction before disposing a connection.
-The pool currently preserves unfinished transaction state, which the next renter can inherit.
-Server-reported transaction status and rollback on pool return belong to #1540 (and P8 #1264).
-The skipped `DisposeAsync_WithExplicitTransaction_ShouldRollbackBeforeNextRental` regression
-records that required behavior. A disposed core lease rejects SQL extension calls permanently,
+**Pool reset (#1540):** negotiated server status certifies a clean session. Return rolls back
+an unfinished transaction before pooling; reset failure or legacy status support discards the
+connector. `DisposeAsync_WithExplicitTransaction_ShouldRollbackBeforeNextRental` is enabled. A disposed core lease rejects SQL extension calls permanently,
 even when its authenticated session is rented again.
 
 In-process sessions carry engine codes in `DatabaseException.Diagnostics` (#1103).
 The SQL server preserves the existing `CODE: message` Error text. On a negotiated 2.1 diagnostics session, client exceptions also retain the complete structured carrier. Cancellation tests that execute sessions directly
 assert structured codes, while their wire counterparts keep their original text assertions.
-CAST value failures follow the same contract: invalid text carries COHSQLE022 (PostgreSQL
-22P02), numeric overflow COHSQLE002 (22003), and division by zero COHSQLE001 (22012).
+CAST value failures follow the same contract: invalid text carries CS02022 (PostgreSQL
+22P02), numeric overflow CS02002 (22003), and division by zero CS02001 (22012).
 Protocol 2.0 clients retain the composed code prefix and ExecutionFailure category; a value
 failure keeps the connection usable. In-process regression tests assert code and source span.
 
-Negative and fractional LIMIT/OFFSET counts retain COHSQLE018 in the composed wire text.
+Negative and fractional LIMIT/OFFSET counts retain CS02018 in the composed wire text.
 The Int64 row-window tests (#1100) assert that prefix alongside ExecutionFailure and connection
 reuse, aligning their expected text with the carrier convention added by #1103.
 
-NOT NULL failures retain COHSQLE024 (SQLSTATE 23502) in the composed wire message,
+NOT NULL failures retain CS03024 (SQLSTATE 23502) in the composed wire message,
 with the unchanged column-specific missing-default or explicit-NULL detail. DEFAULT
 VALUES, DEFAULT items and UPDATE DEFAULT use that same contract. SqlInsertValuesWireTests
 covers success, syntax rejection and constraint rejection over InMemory and loopback TCP,
@@ -314,14 +350,14 @@ and marks the response complete so the same connection remains usable. The serve
 writing statements' headers and rows before commit, inside DML's undo bracket, so an encoding
 failure rolls back the statement. Read-only statements encode during delivery and may fail after
 partial result frames. Both paths preserve the explicit transaction and connection. Uncoded
-result failures and size refusals use COHSQLE045 (size refusals: SQLSTATE 54000). Each header/row
+result failures and size refusals use CS05045 (size refusals: SQLSTATE 54000). Each header/row
 has a 16 MiB frame limit; there is no aggregate result cap. Writes retain prepared payloads until
 delivery; reads retain only the current encoded frame. Transport failures during delivery are
 terminal. ParseFailure after result frames and terminal errors still invalidate the rental.
 
 Application function cancellation follows the statement token (#1419): an
 `OperationCanceledException` from a scalar, any aggregate phase or a domain CHECK is
-`COHSQLE007`, naming the function, unless the server statement's own token is canceled.
+`CS05007`, naming the function, unless the server statement's own token is canceled.
 This includes application calls inside SQL functions and SQL domains, and plan-time calls in
 LIMIT/OFFSET, seek bounds and constant folding. The coded error is
 an `ExecutionFailure` with `ConnectionUsable = true`; the next command uses the same
@@ -444,19 +480,20 @@ The package has no public interface left and no `Abstractions/` folder
 
 COUNT/SUM DISTINCT and ordered STRING_AGG use the existing statement/result framing.
 The live wire corpus verifies values, nullable String metadata and independent aggregate
-slots; excluded grouping/window forms continue to report usable-connection COHDBL001.
+slots; excluded grouping/window forms continue to report usable-connection CK00001.
 There is no client ABI or protocol change.
 
 ## E4 SQL definitions
 
 Typed-literal wire theories run over both InMemory and loopback TCP. Temporal, interval,
 binary and national-string values retain the same runtime types and metadata. Malformed
-literals (SQL0008), year-month forms (COHDBL001) and interval overflow retain their parse
+literals (CS00008), year-month forms (CK00001) and interval overflow retain their parse
 diagnostics and permit a subsequent query on the same connection.
 
 Function/domain DDL and calls use the existing statement transport and server environment without
-client ABI or wire-format changes. Dependency/admission refusals retain leading COHSQLD codes in
-execution-failure messages and leave connections usable. SqlDomainWireTests exercises SQL-defined
+client ABI or wire-format changes. Dependency/admission refusals carry categorized `CS` identities
+(`CS033xx` for registered definitions) in diagnostics and wire execution-failure text, as assigned
+by the [Database error-code registry](../../Assimalign.Cohesion.Database/docs/ERROR-CODES.md), and leave connections usable. SqlDomainWireTests exercises SQL-defined
 functions in SELECT, WHERE, CHECK and DEFAULT alongside SQL domain enforcement.
 
 ## Duplex transport composition
@@ -482,16 +519,16 @@ framing, handshake and model messages are unchanged.
 ## Declaration modifier failures (#1438)
 
 The server parses every SQL declaration and CAST against the shared modifier ranges before any
-catalog mutation. SQL0005 and the column/domain/function parameter or return-type name travel in
+catalog mutation. CS00005 and the column/domain/function parameter or return-type name travel in
 the existing ParseFailure message; SqlClientException reports ParseFailure with ConnectionUsable
 true. No client ABI or wire format changes. Typed schema and declared-script validation happen at
 host declaration/Build, before a server starts; these host APIs have no remote declaration verb.
 
-Recognized but unsupported temporal precision uses COHDBL001 in the same ParseFailure exchange,
+Recognized but unsupported temporal precision uses CK00001 in the same ParseFailure exchange,
 including CAST, naming the declaration and modifier. FLOAT(p) returns the resolved Float32
 (1..24 bits) or Float64 (25..53 bits) in catalog queries and result headers; bare FLOAT stays
-Float64. Invalid FLOAT precision remains SQL0005. INTERVAL field/range qualifiers, including
-SECOND(p), likewise report COHDBL001 at every declaration site and CAST, naming the complete
+Float64. Invalid FLOAT precision remains CS00005. INTERVAL field/range qualifiers, including
+SECOND(p), likewise report CK00001 at every declaration site and CAST, naming the complete
 qualifier; no-precision forms are also unsupported. Neither path changes the wire format.
 
 ## Negotiated statement diagnostics (#1105)
@@ -506,15 +543,28 @@ lowercase endpoint family followed by a dot. The core owns `diagnostics` and fra
 SQL and Graph register `ProtocolCapability.Diagnostics`. When agreed, one Diagnostics
 frame carries the complete Warning/Error list immediately before Error on failure,
 or immediately before ResultComplete (PathsComplete for graph paths) on success.
-Information, including SQL0100, is never sent. Error and result payloads are unchanged.
+Information, including CS00009, is never sent. Error and result payloads are unchanged.
 Statement failures leave the server session ready. Model clients validate diagnostic
 ordering and preserve every code, severity, message, nullable offset and source line.
 
 DatabaseClientResult.Diagnostics and SqlResultSet.Diagnostics expose negotiated ProtocolDiagnostic values. SqlClientException retains the shared core exception and copies its existing diagnostics carrier.
 
-Set-operation type mismatches reuse COHSQLE003 (42804), retaining the one-based output
+Set-operation type mismatches reuse CS02003 (42804), retaining the one-based output
 position and both types. INSERT set-source width/type errors use the same exchange and
 leave the connection usable.
+
+## CREATE TABLE AS (#1716, SQ-T2)
+
+CTAS uses the existing Execute request and affected-row completion, with no client ABI,
+protocol or format change. InMemory and TCP tests verify inferred/renamed copies, WITH NO DATA,
+conversion cleanup, structured CS03068 output-name refusals, CS04003 explicit-transaction
+refusal with prior writes preserved, and connection reuse after every refusal. Publication is
+atomic; as with other committed DDL, a lost response can leave the committed table present.
+Disposing a running server session during a CTAS function call cancels its unpublished build;
+both transport tests await session cleanup and successfully retry from a new connection.
+Completion reports copied rows for WITH DATA and zero for WITH NO DATA or an IF NOT EXISTS skip.
+The engine prepares the actual count before its catalog commit, preserving result-encoding
+failure atomicity and committed-result delivery after cancellation.
 
 ## Read-only persisted views (#1124)
 
@@ -525,12 +575,12 @@ the connection stays usable. The wire format and client API are unchanged.
 ## Distinct, truth tests and LIKE ESCAPE (#1111)
 
 Existing SQL frames carry predicate truth tables and bound ESCAPE parameters on both
-transports. Invalid escape sequences (COHSQLE034) and non-Boolean truth tests
-(COHSQLE003) are ExecutionFailure responses; data and the connection remain usable.
+transports. Invalid escape sequences (CS02034) and non-Boolean truth tests
+(CS02003) are ExecutionFailure responses; data and the connection remain usable.
 A volatile application function that raises a stack refusal deterministically pins
-execution-time COHSQLE004 over the wire, including a reusable connection.
+execution-time CS05004 over the wire, including a reusable connection.
 Invariant LIKE work exhaustion uses the existing located ExecutionFailure diagnostic
-COHSQLE040 and leaves the connection reusable (#1166). The real session lifetime token
+CS05040 and leaves the connection reusable (#1166). The real session lifetime token
 reaches row-time LIKE without an application function; disconnect cancellation closes
 the session on both InMemory and TCP. Its regression holds a hook inside Match,
 asserts entry, waits for the server lifetime token after disconnect, then releases
@@ -539,3 +589,59 @@ Cancelled. The test uses AOT-compatible UnsafeAccessor seams without a public AP
 or friend-assembly grant. Event assertions wait for the matching SessionClosed and StatementStop
 records with a hang guard: removal from the server's session table precedes close-event publication.
 No client API or protocol format changes are needed.
+
+## Dedicated test actors (#1285)
+
+Deadline-dependent peers and busy test drivers use the linked Storage test helper's LongRunning threads. Ordinary async driver continuations stay on their actor scheduler, without changing SynchronizationContext. Existing deadlines of 25 seconds or more are hang guards. Runner settings impose no parallel-thread cap. See the [scheduling audit](../../Assimalign.Cohesion.Database.Storage/docs/TEST-HYGIENE-AUDIT.md) for every original Task.Run site, the exact journal counters and the physical index-work guards.
+
+Reference consulted: RavenDB test/StressTests/Voron/InvalidReleasesOfScratchPages.cs:39–68 and :71–103 use LongRunning stress drivers. No code was copied.
+
+## Server-reported transaction reset (#1540)
+
+SQL/Graph transaction-status negotiation adds an existing Ready I/T/E frame after Execute
+completion or a statement error. The shared client drains it before returning, rolls back open
+or failed transactions on pool return, and only reuses an Idle session. Cleanup runs outside the
+pool lock. Rollback reply and Ready drain each have a five-second internal bound (up to ten
+seconds total). Missing/invalid state or legacy transaction-capable peers
+are discarded. SQL's formerly skipped pool-rollback regression is enabled. No new wire identifier,
+public interface, protocol version or persistent format is introduced.
+
+An idle open wire transaction holds the database writer lock once it has acquired it, until
+COMMIT, ROLLBACK, disconnect, pool return or IdleTimeout (30 minutes by default). Keep transactions
+short: an idle writer blocks other writers. New clients discard sessions against pre-#1540 servers
+that cannot negotiate transaction-status, so those servers are not pooled.
+
+## Sql diagnostic conventions (#1470)
+
+Exception and diagnostic templates use the project's build-generated `ErrorMessages` resources.
+Parameterized templates format with the current culture; abort/cancellation templates used in
+normal cleanup are cached. The [Database error-code registry](../../Assimalign.Cohesion.Database/docs/ERROR-CODES.md)
+assigns this family its two-letter prefix and categorized five-digit identities.
+Existing SQLSTATE meanings, numeric wire error kinds, frame layouts and disk formats are preserved.
+Structured diagnostics keep their code outside the message. Compiler diagnostic identifiers and
+standard .NET argument guards retain their own contracts.
+
+## Rules audit after main cleanup
+
+Private test constants use repository casing. The transaction-outcome guidance is self-contained:
+connection loss after COMMIT can remain uncertain, and the client supplies no automatic replay
+or reconciliation operation. The removed mapper package is no longer a documentation dependency.
+Wire bytes, diagnostics, pooling and public APIs are unchanged.
+
+## Debugger inspection
+
+Concrete source types with explicit nonpublic instance state use a private nested DebugView
+and debugger display/proxy attributes. The view is the last member in the same type file and
+exposes only reviewed public/protected state through read-only properties. Exception and
+EventSource types remain excluded. A type with no state to filter keeps its normal member view;
+a type whose base supplies both debugger attributes inherits that view.
+
+Inspection does not perform I/O, take lifecycle locks, mutate state, invoke application callbacks,
+or materialize lazy results. The additions are debugger metadata and nested helper types; existing
+instance fields, runtime operations, error identities, data formats and protocol contracts do
+not change. SDK and Studio source are outside this rule's scope.
+
+Connection inspection reads its existing database name without checking connection health,
+taking the shared exchange lock, dialing, or returning a lease. Result views read already
+materialized columns/diagnostics and row counts; row and parameter views do not enumerate values
+or call typed conversions. Client exchange behavior and wire framing remain unchanged.

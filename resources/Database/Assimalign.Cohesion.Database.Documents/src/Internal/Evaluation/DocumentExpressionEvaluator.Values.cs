@@ -22,9 +22,11 @@ internal sealed partial class DocumentExpressionEvaluator
     // Couchbase value/object.go:770-799 and value/array.go:751-779:
     // a definite mismatch wins over nested NULL; otherwise NULL is not equality.
     // IN consumes only TRUE (expression/coll_in.go:103-115), as does simple CASE.
-    private object? Equal(object? left, object? right)
+    private object? Equal(object? left, object? right) => ValuesEqual(left, right, _cancellationToken);
+
+    internal static object? ValuesEqual(object? left, object? right, System.Threading.CancellationToken cancellationToken)
     {
-        _cancellationToken.ThrowIfCancellationRequested();
+        cancellationToken.ThrowIfCancellationRequested();
         left = left is JsonElement leftJson ? ReadJson(leftJson) : Normalize(left);
         right = right is JsonElement rightJson ? ReadJson(rightJson) : Normalize(right);
         if (left is DocumentMissing || right is DocumentMissing) { return DocumentMissing.Instance; }
@@ -49,7 +51,7 @@ internal sealed partial class DocumentExpressionEvaluator
             foreach (var item in a.EnumerateArray())
             {
                 rightItems.MoveNext();
-                var equal = Equal(item, rightItems.Current);
+                var equal = ValuesEqual(item, rightItems.Current, cancellationToken);
                 if (equal is false) { return false; }
                 if (equal is null) { unknown = true; }
             }
@@ -60,7 +62,7 @@ internal sealed partial class DocumentExpressionEvaluator
             foreach (var property in a.EnumerateObject())
             {
                 if (!b.TryGetProperty(property.Name, out var value)) { return false; }
-                var equal = Equal(property.Value, value);
+                var equal = ValuesEqual(property.Value, value, cancellationToken);
                 if (equal is false) { return false; }
                 if (equal is null) { unknown = true; }
             }

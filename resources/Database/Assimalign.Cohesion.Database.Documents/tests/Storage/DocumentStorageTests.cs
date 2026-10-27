@@ -1,5 +1,7 @@
 using System;
 using System.IO;
+
+using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.Database.Documents.Protocol;
@@ -23,8 +25,8 @@ public class DocumentStorageTests
     {
         using var storage = CreateInMemory("test-docs");
 
-        Assert.NotEqual(default, storage.Id);
-        Assert.Equal(StorageModel.Document, storage.Model);
+        storage.Id.ShouldNotBe(default);
+        storage.Model.ShouldBe(StorageModel.Document);
     }
 
     [Fact(DisplayName = "Cohesion Test [DocumentStorage] - Create: Should accept StorageStream")]
@@ -35,7 +37,7 @@ public class DocumentStorageTests
         using var backup = StorageStream.FromInMemory();
         using var storage = DocumentStorage.Create(data, journal, backup, "test-docs");
 
-        Assert.NotEqual(default, storage.Id);
+        storage.Id.ShouldNotBe(default);
     }
 
     [Fact(DisplayName = "Cohesion Test [DocumentStorage] - InsertDocument: Should return valid page and slot")]
@@ -46,8 +48,8 @@ public class DocumentStorageTests
         var data = CreateTuplePayload(1, "Alice");
         var (pageId, slotIndex) = storage.InsertDocument(data);
 
-        Assert.True((long)pageId >= 1);
-        Assert.Equal(0, slotIndex);
+        ((long)pageId).ShouldBeGreaterThanOrEqualTo(1L);
+        slotIndex.ShouldBe(0);
     }
 
     [Fact(DisplayName = "Cohesion Test [DocumentStorage] - ReadDocument: Should return inserted data")]
@@ -61,13 +63,13 @@ public class DocumentStorageTests
         var result = storage.ReadDocument(pageId, slotIndex);
         var tuple = StorageTuple.FromBytes(result.Span);
 
-        Assert.True(tuple.TryGetField("id", out var idField));
-        Assert.Equal(1, BitConverter.ToInt32(idField.Value.Span));
+        tuple.TryGetField("id", out var idField).ShouldBeTrue();
+        BitConverter.ToInt32(idField.Value.Span).ShouldBe(1);
 
-        Assert.True(tuple.TryGetField("name", out var nameField));
-        Assert.Equal("Alice", nameField.Value.ToStringValue());
+        tuple.TryGetField("name", out var nameField).ShouldBeTrue();
+        nameField.Value.ToStringValue().ShouldBe("Alice");
 
-        Assert.Equal(original, result.ToArray());
+        result.ToArray().ShouldBe(original);
     }
 
     [Fact(DisplayName = "Cohesion Test [DocumentStorage] - InsertDocument: Multiple inserts should produce sequential slots")]
@@ -79,11 +81,11 @@ public class DocumentStorageTests
         var (page2, slot2) = storage.InsertDocument(CreateTuplePayload(2, "B"));
         var (page3, slot3) = storage.InsertDocument(CreateTuplePayload(3, "C"));
 
-        Assert.Equal(0, slot1);
-        Assert.Equal(1, slot2);
-        Assert.Equal(2, slot3);
-        Assert.Equal(page1, page2);
-        Assert.Equal(page2, page3);
+        slot1.ShouldBe(0);
+        slot2.ShouldBe(1);
+        slot3.ShouldBe(2);
+        page2.ShouldBe(page1);
+        page3.ShouldBe(page2);
     }
 
     [Fact(DisplayName = "Cohesion Test [DocumentStorage] - UpdateDocument: Should overwrite existing data")]
@@ -99,9 +101,9 @@ public class DocumentStorageTests
 
         var result = storage.ReadDocument(pageId, slotIndex);
         var tuple = StorageTuple.FromBytes(result.Span);
-        Assert.True(tuple.TryGetField("name", out var nameField));
-        Assert.Equal("Bob", nameField.Value.ToStringValue());
-        Assert.Equal(updated, result.ToArray());
+        tuple.TryGetField("name", out var nameField).ShouldBeTrue();
+        nameField.Value.ToStringValue().ShouldBe("Bob");
+        result.ToArray().ShouldBe(updated);
     }
 
     [Fact(DisplayName = "Cohesion Test [DocumentStorage] - DeleteDocument: Should prevent reading deleted record")]
@@ -112,7 +114,7 @@ public class DocumentStorageTests
         var (pageId, slotIndex) = storage.InsertDocument(CreateTuplePayload(1, "Alice"));
         storage.DeleteDocument(pageId, slotIndex);
 
-        Assert.ThrowsAny<Exception>(() => storage.ReadDocument(pageId, slotIndex));
+        Should.Throw<Exception>(() => storage.ReadDocument(pageId, slotIndex));
     }
 
     [Fact(DisplayName = "Cohesion Test [DocumentStorage] - FlushChanges: Should not throw")]
@@ -151,7 +153,7 @@ public class DocumentStorageTests
             StorageStream.FromInMemory()))
         {
             var result = storage.ReadDocument(savedPageId, savedSlot);
-            Assert.Equal(original, result.ToArray());
+            result.ToArray().ShouldBe(original);
         }
     }
 
@@ -180,7 +182,7 @@ public class DocumentStorageTests
             new MemoryStream()))
         {
             var result = storage.ReadDocument(savedPageId, savedSlot);
-            Assert.Equal(original, result.ToArray());
+            result.ToArray().ShouldBe(original);
         }
     }
 
@@ -205,13 +207,13 @@ public class DocumentStorageTests
         while (iterator.MoveNext())
         {
             var tuple = StorageTuple.FromBytes(iterator.Current.Data.Span);
-            Assert.True(tuple.TryGetField("id", out var idField));
+            tuple.TryGetField("id", out var idField).ShouldBeTrue();
             ids.Add(BitConverter.ToInt32(idField.Value.Span));
         }
 
-        Assert.Equal(2, ids.Count);
-        Assert.Equal(1, ids[0]);
-        Assert.Equal(3, ids[1]);
+        ids.Count.ShouldBe(2);
+        ids[0].ShouldBe(1);
+        ids[1].ShouldBe(3);
     }
 
     [Fact(DisplayName = "Cohesion Test [DocumentStorage] - InsertDocument: Large documents should span multiple pages")]
@@ -234,11 +236,11 @@ public class DocumentStorageTests
         var (page3, _) = storage.InsertDocument(bigDoc3);
 
         // At least one of the later docs should overflow to a new page
-        Assert.True((long)page3 > (long)page1, "Large documents should cause page overflow.");
+        ((long)page3).ShouldBeGreaterThan((long)page1, "Large documents should cause page overflow.");
 
         // Verify all documents read back correctly
         var result1 = storage.ReadDocument(page1, 0);
-        Assert.Equal(bigDoc1, result1.ToArray());
+        result1.ToArray().ShouldBe(bigDoc1);
     }
 
     [Fact(DisplayName = "Cohesion Test [DocumentStorage] - Dispose: Should be idempotent")]

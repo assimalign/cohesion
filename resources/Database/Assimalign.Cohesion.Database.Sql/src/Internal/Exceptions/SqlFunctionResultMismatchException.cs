@@ -15,7 +15,7 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// DDL reports it as the reason the CHECK is refused. When a stored predicate raises it, the
 /// application changed the function's registration after the predicate was stored (owner decision
 /// 65): the predicate binds as unresolved and each write that would evaluate it fails with
-/// <c>COHSQLE009</c>, naming the call, instead of the open failing as if the catalog were damaged.
+/// <c>CS01009</c>, naming the call, instead of the open failing as if the catalog were damaged.
 /// </remarks>
 internal sealed class SqlFunctionResultMismatchException : DatabaseException
 {

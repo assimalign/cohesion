@@ -14,7 +14,7 @@ namespace Assimalign.Cohesion.Database.Sql.Language.Tests;
 /// <summary>
 /// Keyword disposition (#1101): every word the SQL profile lexes as a keyword, and every
 /// entry of the recognized-unsupported table, either parses inside a supported clause or is
-/// rejected with exactly one <c>COHDBL001</c> naming its construct. A word added to either list
+/// rejected with exactly one <c>CK00001</c> naming its construct. A word added to either list
 /// without a case here fails the coverage test.
 /// </summary>
 public sealed class SqlKeywordDispositionTests
@@ -32,6 +32,7 @@ public sealed class SqlKeywordDispositionTests
         ["UPDATE"] = Parses("UPDATE t SET a = 1"),
         ["SET"] = Parses("UPDATE t SET a = 1"),
         ["DELETE"] = Parses("DELETE FROM t WHERE a = 1"),
+        ["MERGE"] = Parses("MERGE INTO t USING s ON t.id=s.id WHEN MATCHED THEN DO NOTHING"),
         ["RETURNING"] = Parses("DELETE FROM t RETURNING a"),
         ["FUNCTION"] = Parses("CREATE FUNCTION f(p INT) RETURNS INT VOLATILE CALLED ON NULL INPUT RETURN p"),
         ["DOMAIN"] = Parses("CREATE DOMAIN d AS INT CHECK (VALUE > 0)"),
@@ -47,6 +48,7 @@ public sealed class SqlKeywordDispositionTests
         ["CREATE"] = Parses("CREATE TABLE t (a INT)"),
         ["TABLE"] = Parses("CREATE TABLE t (a INT)"),
         ["DROP"] = Parses("DROP TABLE t"),
+        ["TRUNCATE"] = Parses("TRUNCATE TABLE t"),
         ["IF"] = Parses("DROP TABLE IF EXISTS t"),
         ["ALTER"] = Parses("ALTER TABLE t ADD COLUMN c INT"),
         ["ADD"] = Parses("ALTER TABLE t ADD COLUMN c INT"),
@@ -81,8 +83,8 @@ public sealed class SqlKeywordDispositionTests
         ["INNER"] = Parses("SELECT * FROM t INNER JOIN u ON t.id = u.id"),
         ["ON"] = Parses("SELECT * FROM t JOIN u ON t.id = u.id"),
         ["LEFT"] = Parses("SELECT * FROM t LEFT JOIN u ON t.id = u.id"),
-        ["RIGHT"] = Rejects("SELECT * FROM t RIGHT JOIN u ON t.id = u.id", "RIGHT OUTER JOIN"),
-        ["FULL"] = Rejects("SELECT * FROM t FULL JOIN u ON t.id = u.id", "FULL OUTER JOIN"),
+        ["RIGHT"] = Parses("SELECT * FROM t RIGHT JOIN u ON t.id = u.id"),
+        ["FULL"] = Parses("SELECT * FROM t FULL JOIN u ON t.id = u.id"),
         ["OUTER"] = Parses("SELECT * FROM t LEFT OUTER JOIN u ON t.id = u.id"),
         ["CROSS"] = Parses("SELECT * FROM t CROSS JOIN u"),
         ["NATURAL"] = Rejects("SELECT * FROM t NATURAL JOIN u", SqlClauses.Natural),
@@ -128,8 +130,8 @@ public sealed class SqlKeywordDispositionTests
         ["SIMILAR"] = Rejects("SELECT a FROM t WHERE a SIMILAR TO 'x%'", "SIMILAR TO"),
         ["LIKE"] = Parses("SELECT a FROM t WHERE a LIKE 'x%'"),
         ["IS"] = Parses("SELECT a FROM t WHERE a IS NULL"),
-        ["ANY"] = Rejects("SELECT a FROM t WHERE a = ANY (SELECT b FROM u)", "ANY quantified comparison"),
-        ["SOME"] = Rejects("SELECT a FROM t WHERE a = SOME (SELECT b FROM u)", "SOME quantified comparison"),
+        ["ANY"] = Parses("SELECT a FROM t WHERE a = ANY (SELECT b FROM u)"),
+        ["SOME"] = Parses("SELECT a FROM t WHERE a = SOME (SELECT b FROM u)"),
         ["~"] = Rejects("SELECT ~a FROM t", "prefix ~ operator"),
         // Literals
         ["NULL"] = Parses("SELECT a FROM t WHERE a IS NULL"),
@@ -212,7 +214,7 @@ public sealed class SqlKeywordDispositionTests
             .Message.ShouldContain("FUTUREWORD", Case.Sensitive);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Sql.Language] - Keyword disposition: each word parses in a supported clause or reports one COHDBL001 naming its construct")]
+    [Fact(DisplayName = "Cohesion Test [Sql.Language] - Keyword disposition: each word parses in a supported clause or reports one CK00001 naming its construct")]
     public void Parse_EveryCase_ShouldMatchItsDisposition()
     {
         // Arrange
@@ -237,10 +239,10 @@ public sealed class SqlKeywordDispositionTests
                     failures.Add($"{word}: expected a supported parse of '{keywordCase.Sql}' but found {found}");
                 }
             }
-            else if (errors.Length != 1 || errors[0].Code != "COHDBL001" ||
+            else if (errors.Length != 1 || errors[0].Code != "CK00001" ||
                      errors[0].Message?.Contains(keywordCase.Construct, StringComparison.Ordinal) != true)
             {
-                failures.Add($"{word}: expected one COHDBL001 naming '{keywordCase.Construct}' for '{keywordCase.Sql}' but found {found}");
+                failures.Add($"{word}: expected one CK00001 naming '{keywordCase.Construct}' for '{keywordCase.Sql}' but found {found}");
             }
             else if (TableConstruct(word) is { } construct &&
                      !errors[0].Message!.Contains(construct, StringComparison.Ordinal))

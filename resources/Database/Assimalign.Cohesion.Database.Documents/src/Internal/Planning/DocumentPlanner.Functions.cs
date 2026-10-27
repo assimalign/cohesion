@@ -8,7 +8,7 @@ namespace Assimalign.Cohesion.Database.Documents.Internal;
 internal sealed partial class DocumentPlanner
 {
     // Available before data access and paging, including for an empty grouped result (#1129).
-    internal static DatabaseType StaticType(OqlExpression expression) => expression switch
+    internal static DatabaseType StaticType(OqlExpression expression, DocumentFunctionCatalog? functions = null) => expression switch
     {
         OqlLiteralExpression { Value: JsonElement json } => json.ValueKind switch
         {
@@ -22,16 +22,17 @@ internal sealed partial class DocumentPlanner
         OqlLiteralExpression { Value: bool } => DatabaseType.Boolean,
         OqlLiteralExpression { Value: decimal or int or long } => DatabaseType.Decimal,
         OqlArrayExpression or OqlObjectExpression or OqlStarExpression => DatabaseType.Json,
+        OqlComprehensionExpression comprehension => comprehension.IsFirst ? StaticType(comprehension.Projection, functions) : DatabaseType.Json,
         OqlMetaExpression meta => meta.Member == "id" ? DatabaseType.String : DatabaseType.Decimal,
         OqlUnaryExpression unary when unary.Operator is "+" or "-" => DatabaseType.Decimal,
         OqlUnaryExpression => DatabaseType.Boolean,
         OqlBinaryExpression binary => binary.Operator is "+" or "-" or "*" or "/" or "%" ? DatabaseType.Decimal : DatabaseType.Boolean,
-        OqlCallExpression call => OqlFunctions.Find(call.Name)?.ResultType ?? DatabaseType.Null,
+        OqlCallExpression call => (functions ?? DocumentFunctionCatalog.Standard).Find(call.Name, call.Arguments.Count == 1 && call.Arguments[0] is OqlStarExpression ? 0 : call.Arguments.Count)?.ReturnType ?? OqlFunctions.Find(call.Name)?.ResultType ?? DatabaseType.Null,
         OqlQuantifiedExpression or OqlInExpression or OqlBetweenExpression or OqlLikeExpression => DatabaseType.Boolean,
         _ => DatabaseType.Null,
     };
 
-    private static void ValidateFunctionKind(OqlFunction function, int index, OqlExpression argument)
+    private static void ValidateFunctionKind(DocumentFunction function, int index, OqlExpression argument)
     {
         // Only a literal (including unary minus) or constructor has a statically wrong kind.
         // Calls and paths may return NULL/MISSING at runtime, so their metadata is not a proof.
@@ -47,7 +48,7 @@ internal sealed partial class DocumentPlanner
         };
         if (kind is not (JsonValueKind.Null or JsonValueKind.Undefined) && !function.AcceptsArgument(index, kind))
         {
-            throw new DocumentPlanningException("COHDOC001", ErrorMessages.FunctionArgumentKindInvalid, argument.Location);
+            throw new DocumentPlanningException("CD05001", ErrorMessages.FunctionArgumentKindInvalid, argument.Location);
         }
     }
 }

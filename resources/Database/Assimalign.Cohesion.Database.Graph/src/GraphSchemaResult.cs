@@ -10,10 +10,12 @@ namespace Assimalign.Cohesion.Database.Graph;
 /// <typeparam name="T">The definition type.</typeparam>
 /// <remarks>
 /// A read that names a label the database does not have returns no definitions and a
-/// <c>COHDBG010</c> warning instead of failing, so it never aborts the caller's explicit
+/// <c>CG01010</c> warning instead of failing, so it never aborts the caller's explicit
 /// transaction (Graph DESIGN, "Unknown labels and relationship types in reads"). Neo4j's schema API
 /// likewise returns an empty list for a label token that does not exist.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("GraphSchemaResult")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.GraphSchemaResult<>.DebugView))]
 public sealed class GraphSchemaResult<T> : IReadOnlyList<T>
 {
     private readonly IReadOnlyList<T> _items;
@@ -39,4 +41,16 @@ public sealed class GraphSchemaResult<T> : IReadOnlyList<T>
     public IEnumerator<T> GetEnumerator() => _items.GetEnumerator();
 
     IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Graph.GraphSchemaResult<T> _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Graph.GraphSchemaResult<T> value)
+        {
+            _target = value;
+        }
+
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.Types.Diagnostic> Diagnostics => _target.Diagnostics;
+    }
 }

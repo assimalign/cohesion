@@ -19,19 +19,22 @@ internal sealed partial class GraphPlanner
         GqlRemoveStage => "Remove",
         GraphMatchClausePlan { Optional: true } => "OptionalMatch",
         GraphMatchClausePlan => "Match",
+        GraphPathSelectionPlan => "SelectPaths",
+        GraphPathPlan { Selection: not null } => "SelectPaths",
         GraphPathPlan => "ExpandPath",
         GraphProjectionPlan => "Project",
         GraphDistinctPlan => "Distinct",
         GraphGroupingPlan => "GroupAggregate",
         GraphSortKeyPlan => "SortKey",
         GraphSortPagePlan => "SortPage",
+        GraphAnchor { RelationshipTypes: not null } => "RelationshipTypeScan",
         GraphAnchor { Property: not null } => "IndexSeek",
         GraphAnchor { Label: not null } => "LabelScan",
         GraphAnchor => "NodeScan",
         _ => throw new UnreachableException(),
     };
 
-    internal DatabasePlanDescription Describe(GraphPlan plan)
+    internal DatabasePlanDescription Describe(GraphPlan plan, GraphPlanExecutor.ExpansionBudget? budget = null)
     {
         var nodes = new List<DatabasePlanNode>();
         bool pipeline = plan.Stages.Any(item => item.Stage is GqlLetStage or GqlForStage or GqlFilterStage or GqlNextStage or GqlSetStage or GqlRemoveStage or GqlReturnStage { IsWith: true }) ||
@@ -76,9 +79,14 @@ internal sealed partial class GraphPlanner
                 // optionals expose their ordered join boundary and local filter/null extension.
                 int clauseId = plan.MatchClauses.Count == 1 && !clause.Optional ? rootId
                     : Add(DescribeOperator(clause), rootId, detail: $"filter={clause.Predicate is not null}; matches_nothing={clause.MatchesNothing}; nulls={string.Join(",", clause.Optional ? clause.NewVariables : [])}");
+                int pathParent = clause.Paths.Any(path => path.Selection is not null) && clause.Predicate is { } postfilter
+                    ? Add("PostFilter", clauseId, detail: GraphProjectionText.Describe(postfilter)) : clauseId;
                 foreach (var path in clause.Paths)
                 {
-                    int pathId = Add(DescribeOperator(path), clauseId, path.Pattern.Variable);
+                    var selection = path.Selection;
+                    int pathId = Add(DescribeOperator(path), pathParent, path.Pattern.Variable,
+                        detail: selection is null ? $"mode={path.Mode}"
+                            : $"selector={selection.Selector}; partition=endpoint_pair; per_input=True; mode={selection.Mode}; count={selection.Count?.ToString(CultureInfo.InvariantCulture) ?? "ALL"}; count_unit={(selection.CountLengthGroups ? "distinct_lengths" : "paths")}; order={(selection.OrderByLength ? "length," : "")}identity; start={string.Join(",", selection.StartVariables)}; end={string.Join(",", selection.EndVariables)}; bound_endpoints={string.Join(",", selection.BoundEndpoints)}; execution=iterative_deepening");
                     var anchor = path.Anchor;
                     string? index = anchor.Property is null ? null : $"{anchor.Label}({anchor.Property})";
                     if (anchor.Property is not null && _database.Catalog.FindLabel(anchor.Label!, _snapshot) is { } label)
@@ -87,26 +95,35 @@ internal sealed partial class GraphPlanner
                             .Where(candidate => candidate.PropertyKey == anchor.Property)
                             .OrderBy(candidate => candidate.Name, StringComparer.Ordinal).FirstOrDefault().Name ?? index;
                     }
-                    int parent = Add(DescribeOperator(anchor),
-                        pathId, anchor.UnionLabels is { } union ? string.Join("|", union) : anchor.Label, index,
-                        $"node={anchor.NodeIndex}; property={anchor.Property}; value={Value(anchor.Value)}" +
-                        (anchor.UnionLabels is null ? "" : "; combine=union"));
-                    // The executor expands right of the anchor, then left, in this exact order.
                     var shape = path.Shape ?? GraphPathShape.Create(path.Pattern);
-                    foreach (int edge in Enumerable.Range(anchor.NodeIndex, shape.Segments.Count - anchor.NodeIndex)
+                    if (selection is not null || shape.HasPrefilters)
+                    {
+                        pathId = Add("PathSearch", pathId, detail: $"element_predicates={shape.ElementPrefilterCount}; path_predicates={shape.PathPrefilterCount}; work_limit={budget?.WorkLimit ?? GraphPlanExecutor.ExpansionBudget.PhysicalLimit}; state_and_output_memory_limit={budget?.Memory.Limit ?? 268435456}; work_refusal=CG05004; memory_refusal=CG05020; statement_pairs={budget?.SelectorPairs ?? 0}; statement_states={budget?.SelectorStates ?? 0}; statement_candidates={budget?.SelectorCandidates ?? 0}; statement_selected={budget?.SelectorSelected ?? 0}");
+                        DescribePrefilters(shape, pathId, "root");
+                    }
+                    int parent = anchor.RelationshipTypes is { } types
+                        ? Add(DescribeOperator(anchor), pathId, string.Join("|", types),
+                            detail: $"edge={anchor.NodeIndex}; direction={shape.Segments[anchor.NodeIndex].Body.Edge!.Direction}; postings=(type_id,relationship); combine=union; physical=visited_postings; viable=accepted_hops; physical_limit={budget?.WorkLimit ?? GraphPlanExecutor.ExpansionBudget.PhysicalLimit}",
+                            estimate: anchor.EstimatedRows)
+                        : Add(DescribeOperator(anchor), pathId, anchor.UnionLabels is { } union ? string.Join("|", union) : anchor.Label, index,
+                            $"node={anchor.NodeIndex}; property={anchor.Property}; value={Value(anchor.Value)}" +
+                            (anchor.UnionLabels is null ? "" : "; combine=union"), anchor.EstimatedRows);
+                    // The posting supplies its edge directly; only the remaining edges expand.
+                    int rightStart = anchor.NodeIndex + (anchor.RelationshipTypes is null ? 0 : 1);
+                    foreach (int edge in Enumerable.Range(rightStart, shape.Segments.Count - rightStart)
                         .Concat(Enumerable.Range(0, anchor.NodeIndex).Reverse()))
                     {
                         var segment = shape.Segments[edge];
                         if (segment.Quantifier is { } quantifier)
                         {
                             parent = Add("Expand", parent, segment.Body.Edge?.Type,
-                                detail: $"edge={edge}; quantifier={{{quantifier.Min},{quantifier.Max?.ToString(CultureInfo.InvariantCulture) ?? ""}}}; body_hops={segment.Body.Bound}; trail=True; {AdjacencyDetail(segment.Body, edge >= anchor.NodeIndex)}");
+                                detail: $"edge={edge}; quantifier={{{quantifier.Min},{quantifier.Max?.ToString(CultureInfo.InvariantCulture) ?? ""}}}; body_hops={segment.Body.Bound}; mode={path.Mode}; {AdjacencyDetail(segment.Body, edge >= anchor.NodeIndex, budget?.WorkLimit ?? GraphPlanExecutor.ExpansionBudget.PhysicalLimit)}");
                         }
                         else
                         {
                             var relationship = segment.Body.Edge!;
                             parent = Add("Expand", parent, relationship.Type,
-                                detail: $"edge={edge}; direction={relationship.Direction}; labels={relationship.LabelExpression}; {HopDetail(relationship, edge >= anchor.NodeIndex)}");
+                                detail: $"edge={edge}; direction={relationship.Direction}; labels={relationship.LabelExpression}; {HopDetail(relationship, edge >= anchor.NodeIndex, budget?.WorkLimit ?? GraphPlanExecutor.ExpansionBudget.PhysicalLimit)}");
                         }
                     }
                 }
@@ -137,20 +154,35 @@ internal sealed partial class GraphPlanner
             }
         }
 
-        int Add(string name, int? parent, string? target = null, string? index = null, string? detail = null)
+        int Add(string name, int? parent, string? target = null, string? index = null, string? detail = null, long? estimate = null)
         {
             int id = nodes.Count;
-            nodes.Add(new DatabasePlanNode { NodeId = id, ParentId = parent, Operator = name, Target = target, Index = index, Detail = detail });
+            nodes.Add(new DatabasePlanNode { NodeId = id, ParentId = parent, Operator = name, Target = target, Index = index, Detail = detail, EstimatedRows = estimate });
             return id;
+        }
+
+        void DescribePrefilters(GraphPathShape shape, int parent, string scope)
+        {
+            foreach (var filter in shape.Prefilters)
+            { Add("PathPrefilter", parent, detail: $"scope={scope}; boundaries={filter.StartBoundary}..{filter.EndBoundary}; expression={GraphProjectionText.Describe(filter.Predicate)}"); }
+            foreach (var node in shape.Nodes.SelectMany(nodes => nodes))
+            {
+                if (node.LabelExpression is not null || node.Labels.Count != 0 || node.Properties.Count != 0 || node.Predicate is not null)
+                { Add("ElementPrefilter", parent, node.Variable, detail: $"scope={scope}; labels={node.LabelExpression?.ToString() ?? string.Join("&", node.Labels)}; properties={string.Join(",", node.Properties.Keys)}; predicate={(node.Predicate is null ? "" : GraphProjectionText.Describe(node.Predicate))}"); }
+            }
+            if (shape.Edge is { } edge && (edge.LabelExpression is not null || edge.Type is not null || edge.Properties.Count != 0 || edge.Predicate is not null))
+            { Add("ElementPrefilter", parent, edge.Variable, detail: $"scope={scope}; type={edge.LabelExpression?.ToString() ?? edge.Type}; properties={string.Join(",", edge.Properties.Keys)}; predicate={(edge.Predicate is null ? "" : GraphProjectionText.Describe(edge.Predicate))}"); }
+            for (int i = 0; i < shape.Segments.Count; i++)
+            { DescribePrefilters(shape.Segments[i].Body, parent, $"{scope}/{i}{(shape.Segments[i].Quantifier is null ? "" : "/iteration")}"); }
         }
     }
 
-    private static string AdjacencyDetail(GraphPathShape shape, bool forward)
-        => shape.Edge is { } edge ? HopDetail(edge, forward)
-            : string.Join(" | ", shape.Segments.Select(segment => AdjacencyDetail(segment.Body, forward)));
+    private static string AdjacencyDetail(GraphPathShape shape, bool forward, long workLimit)
+        => shape.Edge is { } edge ? HopDetail(edge, forward, workLimit)
+            : string.Join(" | ", shape.Segments.Select(segment => AdjacencyDetail(segment.Body, forward, workLimit)));
 
-    private static string HopDetail(GqlRelationshipPattern relationship, bool forward)
-        => $"adjacency=(node,direction,type_id,relationship); seek_direction={GraphLabelEvaluator.IncidentDirection(relationship, forward)}; type_filter={relationship.LabelExpression?.ToString() ?? relationship.Type ?? "%"}; physical=visited_candidates; viable=accepted_hops; physical_limit={GraphPlanExecutor.ExpansionBudget.PhysicalLimit}";
+    private static string HopDetail(GqlRelationshipPattern relationship, bool forward, long workLimit)
+        => $"adjacency=(node,direction,type_id,relationship); seek_direction={GraphLabelEvaluator.IncidentDirection(relationship, forward)}; type_filter={relationship.LabelExpression?.ToString() ?? relationship.Type ?? "%"}; physical=visited_candidates; viable=accepted_hops; physical_limit={workLimit}";
 
     private static string StageName(GqlStage stage) => stage switch
     {

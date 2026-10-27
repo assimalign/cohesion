@@ -222,7 +222,7 @@ public sealed class KeyValueClientEventSourceTests
     /// </summary>
     private sealed class KeyValueClientEventRecorder : EventListener
     {
-        private const string ClientCoreSourceName = "Assimalign.Cohesion.Database.Client";
+        private const string clientCoreSourceName = "Assimalign.Cohesion.Database.Client";
 
         // Field initializers run before the base constructor, which calls OnEventSourceCreated for
         // the sources that already exist.
@@ -240,7 +240,7 @@ public sealed class KeyValueClientEventSourceTests
 
         protected override void OnEventSourceCreated(EventSource eventSource)
         {
-            if (eventSource.Name == ClientCoreSourceName)
+            if (eventSource.Name == clientCoreSourceName)
             {
                 EnableEvents(eventSource, EventLevel.Verbose, EventKeywords.All);
             }
@@ -252,7 +252,7 @@ public sealed class KeyValueClientEventSourceTests
             {
                 _events.Enqueue(eventData);
             }
-            else if (eventData.EventSource.Name == ClientCoreSourceName)
+            else if (eventData.EventSource.Name == clientCoreSourceName)
             {
                 _coreEvents.Enqueue(eventData);
             }

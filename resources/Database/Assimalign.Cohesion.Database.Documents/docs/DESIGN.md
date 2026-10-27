@@ -45,13 +45,25 @@ before closing storages. Lock order is the root pass gate, then the lane monitor
 spans model/apply/storage locks, failure reporting or observer callbacks.
 
 The shared DatabaseLaneWorker publishes opt-in DatabaseWorkerPass observations for all kinds.
+Checkpoint failure tests assert requested waits, due visits, completed work and runner availability
+at publication, including a delayed observer; elapsed times are diagnostic. Deferred-undo tests
+require a recorded undo-only worker completion, a positive-work DeferredUndoCompleted event and a
+released writer with 30-second hang guards,
+independently of the hour-long full-maintenance interval.
 Checkpoint due evidence remains optional checkpoint-specific data. Resilience tests hold the actual
-page-write/fsync faults (purge/index use the internal dispatch hook), require at least 12 healthy
-worker completions while the other database is still held, and judge measured waits by median
-and 75-percent share under the budget. They do not credit committer self-help or a statement's
+page-write/fsync faults (purge/index use the internal dispatch hook), require K = 4 healthy
+positive-work completions while exactly one runner remains held, and assert lane-wait counters.
+Page-write setup holds dispatch while preparing the dirty page, then releases it into the device gate.
+A 30-second hang guard bounds each phase; elapsed durations are diagnostic only. After release,
+the held worker must complete and clear any stuck-lane advisory before a second stall exercises disposal. They do not credit
+committer self-help or a statement's
 checkpoint as worker progress. Cancellation, completion, failed thread start, capacity and disposal
 are exercised in the non-parallel lane stress tests. Each runner starts without caller ExecutionContext and restores a clean context after each job,
 preventing apply-gate reentrancy or other AsyncLocal state from crossing databases.
+SQL/Key-Value index compaction remains a stub: the test hook performs counted page write-back
+on its lane and pairs the result with collection. Grouped-commit resilience uses worker flush
+and self-help events; hung-checkpoint progress uses a 30-second hang guard instead of a short
+throughput window. Slow-cadence, producer and observer regressions cover runner pauses.
 No public type, visibility grant, project reference or storage format changed. Storage exposes
 its pending-commit and dirty-page scheduling hints without exposing buffer-pool frames.
 
@@ -62,24 +74,31 @@ there is nothing to report (#1264). Failure frames retain their existing diagnos
 
 ## Child-root failure boundaries (#1247, #1364)
 
-Attached-index damage becomes `DatabaseCorruptionException` / `COHDBS003`, retaining the
-index cause, `COHDBI002`, and model diagnostic `COHDBD005`. Other index failures use
-`COHDBD005`. I/O inside catalog/index-registration wrappers remains `COHDBD004`, including
+Attached-index damage becomes `DatabaseCorruptionException` / `CK06003`, retaining the
+index cause, `CK06102`, and model diagnostic `CD06105`. Other index failures use
+`CD06105`. I/O inside catalog/index-registration wrappers remains `CD06104`, including
 open before publication. Explicit and automatic transaction begin use the same full translator.
 Wire execution returns `ExecutionFailure` with diagnostics and preserves the session; a
 regression damages an actual non-root B-tree leaf and proves both embedded and wire behavior.
-Aborted-transaction refusals carry `COHDBD001` in Diagnostics; only the wire adds its prefix.
+Aborted-transaction refusals carry `CD04101` in Diagnostics; only the wire adds its prefix.
 The internal begin fault seam exercises both begin callers without widening the coordinator.
 
 
 ## Storage corruption (#1160)
 
+After ungraceful fixture termination, the verifier's actual open and the parent's raw-index
+open use Blob's linked test-only `CrashReopen` source (#1713). Only native sharing/lock failures
+(0x80070020/0x80070021, or EWOULDBLOCK/EAGAIN errno 11 on Linux and 35 on macOS), including
+coded storage wrappers, retry. Open success decides readiness;
+25 ms pacing avoids spinning and a 30-second hang guard names the file and last error.
+The engine still reports CD06104 immediately for a sharing violation; production behavior is unchanged.
+
 A StorageIOException or IOException while opening storage crosses the engine boundary as
-DatabaseException with structured COHDBD004 diagnostics (#1364). Open releases any acquired
+DatabaseException with structured CD06104 diagnostics (#1364). Open releases any acquired
 file set and publishes no database, so callers may resolve the I/O condition and retry.
 
 
-Storage corruption is `COHDBS003` (#1160). The engine translates a
+Storage corruption is `CK06003` (#1160). The engine translates a
 `StorageCorruptionException` into `DatabaseCorruptionException`, retaining the storage
 cause and page id, naming the database and page, and advising restoration from a verified
 backup. Its structured diagnostic crosses the existing wire execution-failure path; a
@@ -92,8 +111,8 @@ Corruption translation searches coded inner exceptions and every aggregate branc
 `StorageCorruptionException.Find`; an existing `DatabaseCorruptionException` is retained.
 This applies to read/statement and transaction failures as well as synchronous and deferred
 create/open failures. A refused open retains any existing model diagnostics in addition to the
-outer `COHDBS003`; Graph, Documents and Blob also carry their unrecoverable-files diagnostic
-(`COHDBG018`, `COHDBD003` and `COHDBB004` respectively). The original storage exception remains
+outer `CK06003`; Graph, Documents and Blob also carry their unrecoverable-files diagnostic
+(`CG06018`, `CD06103` and `CB06004` respectively). The original storage exception remains
 the inner cause, preserving its page context. Graph abort messages prefix a cause's code only
 when the message does not already contain that prefix.
 
@@ -117,8 +136,8 @@ The session copies the caller map once per execution with Execution's stateless 
 source, inside the operation bracket so a failure retains the usual transaction-abort
 behavior. It validates every parameter reference before planning/executing data access,
 including projections, filters, grouping, HAVING and ordering over empty collections.
-Missing names carry COHDOC005 and their reference span; normalized-key collisions carry
-COHDOC009. The evaluator reads the ordinal bare-name snapshot. Unused keys are ignored.
+Missing names carry CD01005 and their reference span; normalized-key collisions carry
+CD01009. The evaluator reads the ordinal bare-name snapshot. Unused keys are ignored.
 Numeric names use ASCII digits only; Unicode numeric references fail parsing before a
 matching map key can bind. `$0`, `$01` and names beyond Int64 remain exact string keys.
 See the [shared parameter contract](../../Assimalign.Cohesion.Database.Language/docs/DESIGN.md#parameter-contract-1102).
@@ -209,7 +228,7 @@ executing OQL or CRUD never interprets it as session authority over other databa
 Each statement uses one `TransactionContext`. Automatic operations commit on
 success and roll back on failure. Explicit transaction operations leave commit
 to the caller; a failing operation aborts the whole explicit transaction, which
-then refuses every later statement until the caller rolls it back, as
+then refuses ordinary statements until the caller ends it, as
 [Failed statements in explicit transactions](#failed-statements-in-explicit-transactions-1225)
 describes.
 Snapshot isolation fixes the read horizon at transaction start. ReadCommitted
@@ -240,6 +259,71 @@ snapshot based. Catalog and
 index writes use the same logical context as content chunks; rollback and crash
 recovery cannot publish a partial document.
 
+### OQL transaction control (#1725 T1)
+
+In-process text and typed OQL requests dispatch `OqlTransactionExpression` directly on the
+session before ordinary statement admission. BEGIN uses the root public transaction boundary;
+COMMIT and ROLLBACK use the current transaction's public boundaries. Snapshot remains the
+default, with explicit SNAPSHOT and READ COMMITTED spellings. A successful control returns a
+zero-count command result. Parsing still precedes dispatch and error-recovery trees cannot
+execute transaction control. Malformed text in an already faulted transaction retains CD04101.
+Valid ROLLBACK recovers it; COMMIT reports CD04101, commits nothing and ends it.
+
+Nested BEGIN reuses CK04004 and aborts existing work, following Graph's failed-control policy.
+Only that nested-BEGIN refusal aborts existing work. An overlapping BEGIN refused with CK07003
+leaves the successful BEGIN's transaction active, even if it registers before the refusal unwinds.
+COMMIT/ROLLBACK without a current transaction reports CD04104. OQL collection and index DDL,
+including conditional no-ops, reports CD04105 inside an explicit transaction and aborts it before
+catalog mutation. C# collection operations keep their existing transactional API contract.
+DDL refusal follows [SQL++ transaction restrictions](https://github.com/couchbaselabs/docs-devex/blob/c3bb1549af4887019b9983e371d9e8b4f569052c/modules/n1ql/partials/n1ql-language-reference/transaction-restrictions.adoc#L1).
+SAVEPOINT and SET TRANSACTION remain deferred. The language's DIALECT records exact spellings.
+
+The wire server dispatches the same controls on its connection-owned session (#1725 OQ-T2).
+Documents negotiates transaction-status and sends Ready with Idle (I), Active (T), or Failed (E)
+after each Execute or Command terminal response, including Failure. Legacy 2.0 and unnegotiated
+2.1 peers retain the terminal framing, but every text transaction control is refused with CD07002
+before transaction admission or cleanup touches the session's transaction. The session remains
+usable for ordinary autocommit work. This prevents capability-free drivers from leaking active or
+failed transactions across pooled rentals. The shared status-capable client discards an
+unnegotiated peer on return. Pooled rollback
+uses Execute 64 with an empty JSON parameter object and Complete 66 with two zero Int64 counts,
+then requires Idle before reuse. CD07002 remains live for the negotiated-capability requirement.
+No new request identifier, protocol version or disk format is needed.
+Controls ignore the supplied parameter object, including duplicate names. For ordinary statements,
+duplicate-name validation runs inside statement admission: CD01009 faults an explicit transaction,
+and later work retains CD04101 until an end control recovers it. Malformed wire JSON still terminates
+the connection before statement admission.
+
+Semantic Command validation and wire response encoding also belong to the failed-statement
+contract. A blank command collection, an oversized Put response preflight, or a query serialization
+failure aborts active explicit work before Failure and Ready E are sent. Command admission checks
+an already failed transaction before preflight, preserving CD04101. The server reuses the session's
+internal failure cleanup; no public API or assembly boundary changes.
+
+The single server pump owns session access. On the client, lock order is the typed wrapper's
+operation lock then shared lease admission lock; pool locks and storage latches are never taken
+there. The lease releases its lock before I/O, cancellation, joining and pool return. Return joins
+the last exchange before reset, and reset performs no I/O under the pool lock. Disconnect cancels
+the pump and session disposal undoes pending work before releasing storage locks. Counter-driven
+non-parallel stress covers cancellation, disposal, abort, rejected overlap and repeated teardown.
+
+Ready status follows PostgreSQL's end-of-cycle reporting (src/backend/tcop/dest.c:256–282 and
+src/backend/access/transam/xact.c:5055–5095). Complete is the statement acknowledgement; bounded
+status cleanup ignores subsequent caller cancellation. A disconnect before acknowledgement leaves
+COMMIT outcome unknown; cleanup never retries COMMIT or promises to undo committed work.
+
+| Code | Condition |
+| --- | --- |
+| CD04104 | COMMIT or ROLLBACK without an explicit transaction |
+| CD04105 | OQL DDL inside an explicit transaction |
+| CD07002 | Text transaction control requires the negotiated transaction-status capability |
+
+Transaction cleanup continues to follow PostgreSQL's interruption protection in
+`src/backend/access/transam/xact.c:2854-2861`. RavenDB's
+`src/Raven.Server/Documents/TransactionMerger/AbstractTransactionOperationsMerger.cs:368-374`
+disposes failed merged work before retrying independent operations; it informs atomic failure,
+not this interactive session protocol. No reference-engine code was copied.
+
 ### Failed statements in explicit transactions (#1225)
 
 A statement that fails inside an explicit transaction aborts the whole transaction. Document
@@ -249,20 +333,20 @@ chain and publishes catalog and index entries through separate physical brackets
 #1225 the session then dropped the rolled-back transaction from view, so the next statement
 silently ran in autocommit and the caller's `RollbackAsync` threw. The session now follows the
 contract the Graph engine set in #1188 (Graph [DESIGN.md](../../Assimalign.Cohesion.Database.Graph/docs/DESIGN.md#failed-statements-in-explicit-transactions-1188)),
-with its own code, `COHDBD001`:
+with its own code, `CD04101`:
 
 1. The failure rolls the transaction's work back at once and releases its locks, so the aborted
    transaction blocks no other writer while it waits for the caller. (When the undo itself fails,
    the kernel keeps the writer lock until its version-purge pass completes the undo; see
    `Database.Transactions` DESIGN.md, "Ending a transaction".)
 2. The transaction stays the session's `CurrentTransaction` and reports `TransactionState.Faulted`.
-   Every later statement on the session fails with `COHDBD001`: OQL text or requests, collection
+   Every later ordinary statement on the session fails with `CD04101`: OQL text or requests, collection
    `GetAsync`/`PutAsync`/`DeleteAsync`, and the session's own collection operations
    (`CreateCollectionAsync`, `GetCollectionAsync`, `DropCollectionAsync`,
-   `GetCollectionsAsync`). `BeginTransactionAsync` fails with `COHDBD001` too. The error names the
+   `GetCollectionsAsync`). `BeginTransactionAsync` fails with `CD04101` too. The error names the
    original failure in its message (`Cause: ...`) and carries it as `InnerException`. A refused
-   statement does not change the transaction, and an aborted transaction refuses text before
-   parsing it.
+   ordinary statement does not change the transaction. Text is parsed to identify transaction
+   control before admission; malformed text still receives CD04101 in an aborted transaction.
 3. `RollbackAsync` succeeds, leaves none of the transaction's writes, and returns the session to
    autocommit. Disposing the transaction or the session ends it the same way. A rollback of any
    transaction that did not commit may be repeated and raises nothing; a rollback of a committed
@@ -272,10 +356,10 @@ with its own code, `COHDBD001`:
    before it undoes the transaction (Transactions [DESIGN.md](../../Assimalign.Cohesion.Database.Transactions/docs/DESIGN.md#ending-a-transaction-under-a-running-statement)),
    so the running statement fails with `DatabaseTransactionAbortedException` and writes nothing
    that outlives the rollback. A statement still waiting for the writer lock fails at once.
-4. `CommitAsync` fails with `COHDBD001`, commits nothing, and ends the transaction (`RolledBack`).
+4. `CommitAsync` fails with `CD04101`, commits nothing, and ends the transaction (`RolledBack`).
    It keeps that answer after the transaction has ended some other way (disposed, or rolled back
-   by the caller), so a commit never reports anything but `COHDBD001` for a transaction a
-   statement aborted. A commit after the session closed fails with `COHDBD001` too, naming the
+   by the caller), so a commit never reports anything but `CD04101` for a transaction a
+   statement aborted. A commit after the session closed fails with `CD04101` too, naming the
    closure ("The session closed before the transaction ended.") when no statement failed first,
    or the statement the closure aborted ("The document session closed while the operation was
    running."). A commit while a statement of the transaction still runs is refused ("An operation
@@ -284,8 +368,8 @@ with its own code, `COHDBD001`:
    `DatabaseTransactionAbortedException` and leaves the transaction `Faulted` and ended.
 5. Every failure of a statement that started counts: parse diagnostics of text the session parses
    or of a typed request, planning and execution errors (an unknown collection, a stale expected
-   version, a document whose indexed value outgrows the 1,024-byte index key, OQL collection or
-   index DDL on a `COHESION_SCHEMA` collection), ownership
+   version, a document whose indexed value outgrows the 1,024-byte index key, or any OQL collection
+   or index DDL inside the explicit transaction), ownership
    refusals, kernel aborts such as snapshot conflicts, and cancellation while the statement runs,
    including a wait for the writer lock. Failures that come before a statement starts leave the
    transaction unchanged: argument validation (a null, empty or whitespace id, collection name or
@@ -301,7 +385,7 @@ with its own code, `COHDBD001`:
    and a failed undo is retried by the kernel with the writer lock held), and it aborts a commit it
    cannot complete. Until #1226 a journal or storage failure could leave the context active behind
    a failed rollback, and the session kept the transaction `Faulted`, refusing work with
-   `COHDBD001`, until a later rollback completed; that end-failure state is gone, as it is in Graph.
+   `CD04101`, until a later rollback completed; that end-failure state is gone, as it is in Graph.
    The kernel still refuses a rollback before it starts while the database closes
    (`ObjectDisposedException`: the manager's disposal flags itself before it claims any end, so
    every end refused during the close fails this way). The context then stays active only until
@@ -318,16 +402,16 @@ and a commit whose record was written but could not be made durable as
 durability is unconfirmed, `Database.Transactions` DESIGN.md), never as the kernel's own
 exception types, for statements and for every end of the explicit transaction alike: commit,
 rollback, disposal, the session's closure, and the abort a statement failure starts. One translation (`DocumentDatabase.TranslateKernelFailure`) serves them
-all. The unconfirmed commit's message leads with the model's code on every path, the explicit
+all. The unconfirmed commit's Diagnostics carry the model's code on every path, the explicit
 commit and an automatic statement's own commit alike (owner decision 24 of 2026-10-06, #1272):
-`COHDBD002: Database '{name}' went offline while a transaction was committing: ...`, built by the
+`Database '{name}' went offline while a transaction was committing: ...`, built by the
 root's `DatabaseTransactionCommitUnconfirmedException.Create(code, database, cause)` with the
 kernel's `TransactionCommitUnconfirmedException` as its inner exception. Before #1272 this path
 carried the kernel's message alone, without a code. Storage failures still surface as the
 storage child root's exceptions. Since phase 4 of the concrete-types plan the end state machine
 this section describes is the root `DatabaseTransaction` base's, and the session state, the "already active" check and the
-one-statement hold are the root `DatabaseSession` base's; the model supplies `COHDBD001`,
-`COHDBD002`, the kernel calls and this translation ([Concrete types](#concrete-types-concrete-types-plan-phase-4-1260)).
+one-statement hold are the root `DatabaseSession` base's; the model supplies `CD04101`,
+`CD06102`, the kernel calls and this translation ([Concrete types](#concrete-types-concrete-types-plan-phase-4-1260)).
 
 The explicit-transaction lifecycle, where Faulted is the new state:
 
@@ -338,9 +422,9 @@ stateDiagram-v2
     Idle --> Active: BeginTransactionAsync
     Active --> Active: statement succeeds, or fails before it starts
     Active --> Faulted: statement fails and its transaction's work is rolled back
-    Faulted --> Faulted: statement or BEGIN refused with COHDBD001
+    Faulted --> Faulted: statement or BEGIN refused with CD04101
     Active --> Idle: CommitAsync (committed, or aborted by the kernel), RollbackAsync, or DisposeAsync
-    Faulted --> Idle: RollbackAsync, DisposeAsync, or CommitAsync failing with COHDBD001
+    Faulted --> Idle: RollbackAsync, DisposeAsync, or CommitAsync failing with CD04101
 ```
 
 The reference engines agree on the outcome. PostgreSQL aborts the whole block on any error
@@ -361,8 +445,8 @@ throws (`AbstractTransactionOperationsMerger.cs:906-916`). A failed request ther
 nothing of its own, and the merge never makes one request's failure another's. Citations are to
 PostgreSQL `85f55534e80`, Neo4j `54a7dcf7c25` and RavenDB `83399cb8bc8`.
 
-Documents wire commands use automatic statement transactions; explicit transactions remain in process only
-(`DocumentTransactionFailureTests`).
+Documents wire commands use the connection-owned explicit transaction when present, otherwise
+an automatic statement transaction (`DocumentTransactionTextWireTests`).
 
 Collections created by these APIs or OQL `CREATE COLLECTION` have `DatabaseObjectOwner.Adhoc`. A collection
 directly marked `Schema` refuses `DROP COLLECTION`, `CREATE INDEX`, and `DROP INDEX`,
@@ -374,40 +458,50 @@ compiled-schema provisioning authority in this engine.
 
 Child-root storage and catalog failures cross the engine boundary as DatabaseException with
 Error entries in Diagnostics and the original InnerException (#1247). Offline and common
-COHDBS003 corruption translations take precedence. A failed operation aborts an explicit
+CK06003 corruption translations take precedence. A failed operation aborts an explicit
 transaction; after rollback the in-process session remains usable. The Documents wire returns ExecutionFailure with the carrier and serves the next statement.
 
 
 Planner failures are `DatabaseException` instances with structured `Diagnostics`, an Error
 severity and the offending expression's Start/End/Line when its AST has a location. Their
-Message contains no code prefix. The Documents family is `COHDOCnnn`; paging deliberately uses
-OQL0007 for the same count rule at parse and plan time:
+Message contains no code prefix. The Documents family is `CD#####`; paging deliberately uses
+CD00007 for the same count rule at parse and plan time:
 
 | Code | Meaning |
 | --- | --- |
-| `COHDBD003` | Missing or unrecoverable database files; preserve files and restore the complete file set from backup |
-| `COHDBD004` | Storage operation failure (including I/O); original cause retained |
-| `COHDBD005` | Malformed or unsupported catalog/index metadata |
-| `COHDOC001` | Invalid statement, index definition, expression or grouping context |
-| `COHDOC002` | Collection does not exist |
-| `COHDOC003` | Duplicate projection name; use unique aliases |
-| `COHDOC010` | Collection already exists (PostgreSQL SQLSTATE 42P07) |
-| `COHDOC011` | Collection is owned by the declared schema and cannot be dropped through a session |
-| `COHDOC012` | INSERT found an existing key, or INSERT/UPSERT repeated a key in one statement |
-| `COHDOC013` | Invalid evaluated LIKE escape or a pattern ending in its escape character |
-| `COHDOC014` | DISTINCT ORDER BY expression is absent from the projection |
-| `COHDOC015` | A SELECT array or object constructor exceeds the 256-level result limit |
-| `COHDOC016` | Invalid UPDATE target or an incompatible object/array shape or index |
-| `COHDOC017` | UPDATE targets duplicate or prefix-overlap after alias normalization |
-| `COHDOC018` | UPDATE produces invalid stored JSON or exceeds storage's 128-level depth |
-| `COHDOC019` | A scalar function argument is outside its domain (SQRT, POWER or a fractional ROUND/TRUNC scale) |
-| `COHDOC020` | A UNIQUE index found a duplicate valued scalar key (23505) |
-| `COHDOC021` | A UNIQUE key contains an array or object |
-| `COHDOC022` | An index has fewer than one or more than 32 paths |
-| `COHDOC023` | A direct SELECT AST repeats a FROM/UNNEST binding name or supplies an empty binding name |
-| `COHDOC024` | Index already exists |
-| `COHDOC025` | Index does not exist |
-| `COHDOC026` | Composite index key exceeds the shared 1024-byte limit |
+| `CD06103` | Missing or unrecoverable database files; preserve files and restore the complete file set from backup |
+| `CD06104` | Storage operation failure (including I/O); original cause retained |
+| `CD06105` | Malformed or unsupported catalog/index metadata |
+| `CD05001` | Invalid statement, index definition, expression or grouping context |
+| `CD01002` | Collection does not exist |
+| `CD01003` | Duplicate projection name; use unique aliases |
+| `CD03010` | Collection already exists (PostgreSQL SQLSTATE 42P07) |
+| `CD03011` | Collection is owned by the declared schema and cannot be dropped through a session |
+| `CD03012` | INSERT found an existing key, or INSERT/UPSERT repeated a key in one statement |
+| `CD02013` | Invalid evaluated LIKE escape or a pattern ending in its escape character |
+| `CD01014` | DISTINCT ORDER BY expression is absent from the projection |
+| `CD05015` | A query/RETURNING array or object constructor exceeds the 256-level result limit |
+| `CD05018` | RETURNING retained result exceeds the statement memory budget |
+| `CD05019` | Serialized RETURNING value exceeds 256 levels, including a named projection wrapper |
+| `CD02016` | Invalid UPDATE target or an incompatible object/array shape or index |
+| `CD01017` | UPDATE targets duplicate or prefix-overlap after alias normalization |
+| `CD02018` | UPDATE produces invalid stored JSON or exceeds storage's 128-level depth |
+| `CD02019` | A scalar function argument is outside its domain (SQRT, POWER or a fractional ROUND/TRUNC scale) |
+| `CD03020` | A UNIQUE index found a duplicate valued scalar key (23505) |
+| `CD02021` | A UNIQUE key contains an array or object |
+| `CD03022` | An index has fewer than one or more than 32 paths |
+| `CD01023` | A direct SELECT AST repeats a FROM/UNNEST binding name or supplies an empty binding name |
+| `CD03024` | Index already exists |
+| `CD03025` | Multiple array keys, a UNIQUE array index, or IncludeMissing with a leading array key |
+| `CD03026` | Encoded index definition exceeds the 8,092-byte catalog record limit; refused before building postings |
+| `CD03027` | Array index expression is outside the restricted source, projection or WHEN grammar |
+| `CD03028` | Array index WHEN exceeds 32 levels or 128 predicate nodes |
+| `CD01028` | Array projection or WHEN path does not start with its element variable |
+| `CD02027` | Array index WHEN constant is not a supported scalar literal |
+| `CD01025` | Index does not exist |
+| `CD01026` | A directly constructed RETURNING projection has an empty output name |
+| `CD01027` | A directly constructed comprehension has an empty variable name |
+| `CD02026` | Composite index key exceeds the shared 1024-byte limit |
 
 `DocumentQueryRequest.FromOql` and a directly constructed typed query with parse errors
 throw `DatabaseParseException` carrying the complete, ordered parser diagnostics and the
@@ -478,7 +572,7 @@ persistent chain of named UNNEST bindings. Quantifiers add an inner frame only w
 SATISFIES; their collection expression sees the enclosing tuple. The nearest named variable
 wins, then the explicit FROM alias, then document fields. Names use ordinal comparison.
 FROM and UNNEST form one binding list with unique names, reserving the unaliased collection
-name for duplicate checks (OQL0010 in text, COHDOC023 for a
+name for duplicate checks (CD00010 in text, CD01023 for a
 direct AST); quantifiers may shadow outer bindings. META on a quantified or UNNEST variable
 is invalid, including a quantified name that shadows the FROM alias.
 
@@ -510,9 +604,9 @@ Array IN reuses #1127 structural equality, preserving the distinction from list 
 existing NULL-left rule even for an empty array. The Couchbase NULL IN [] difference remains
 a follow-up. UPDATE and DELETE may use quantified predicates but cannot introduce UNNEST.
 
-Index collection uses only top-level document conjuncts; variable-headed paths cannot select
-a document index, and quantifier predicates are never traversed for seeks. A document-only
-conjunct can still select an index with UNNEST. Array-index pushdown remains deferred.
+Scalar index collection uses top-level document conjuncts. Array index collection considers each
+top-level ANY independently and eligible direct document-path UNNEST bindings; the full predicate
+remains a residual after candidate deduplication and array expansion. See array access planning below.
 EXPLAIN inserts Unnest/LeftUnnest nodes, naming each variable in Detail, between projection
 and access while retaining the existing Select detail string.
 
@@ -532,7 +626,36 @@ repeatedly. Expansion checks cancellation and transaction activity for every row
 and structural-equality loops also observe cancellation. The expansion method is internal for
 the owning test assembly to cancel from borrowed JSON reads and verify per-element checks.
 No reflection or runtime code generation is involved. No catalog, storage or wire layout
-changes, format bump or upgrade path are needed; #1135's index v2 remains unchanged.
+changes, format bump or upgrade path are needed for these expressions; the current index record format is v3 (#1530).
+
+#### ARRAY and FIRST comprehensions (#1728)
+
+The evaluator consumes OqlComprehensionExpression in every scalar context, including RETURNING
+and registered function arguments. Collection evaluation uses the enclosing context; mapping and
+WHEN receive a persistent inner binding. ARRAY streams qualifying non-MISSING mappings through
+DocumentJsonValue.Array into owned JSON. FIRST stops at the first qualifying mapping, including
+a MISSING mapping, and returns MISSING when none qualifies. Input propagation and WHEN Truth
+match ANY. See the [dialect](../../Assimalign.Cohesion.Database.Documents.Language/docs/DIALECT.md#array-and-first-comprehensions-1728).
+
+Planner scope frames are keyed by expression and enclosing frame for both quantifiers and
+comprehensions. Group-key equivalence compares the input in the outer scope and mapping/WHEN
+in corresponding inner scopes, preventing a shadowed variable from matching an outer group key.
+Metadata and input/function walkers traverse all children; aggregates inside comprehensions retain
+the quantifier prohibition. Closed locally bound expressions qualify as VALUES constants; functions
+keep their existing nonconstant rule. CD01027 refuses an empty direct-AST variable. No interface,
+assembly reference, storage or wire contract is added.
+
+Seek-bound evaluation is speculative for every constant expression, including closed comprehensions
+and quantifiers. An OQL evaluation failure discards that bound; the full residual predicate retains
+the error only for rows and branches that execute it. Cancellation and infrastructure failures
+propagate. VALUES and constructor evaluation keep their ordinary short-circuit semantics.
+
+Cancellation is checked before evaluation and per visited element. ARRAY uses the existing
+constructor depth/decimal/encoding rules and does not cache variable-dependent mappings.
+Surrounding retained-result charging includes comprehension JSON, notably RETURNING's CD05018
+estimate and rollback boundary. Ordinary SELECT retains its existing memory policy.
+DocumentQueryTests.Comprehensions, OqlExecutionConformanceTests and DocumentComprehensionWireTests
+cover values, nested scopes, grouping, registered calls, cancellation and both transports.
 
 #### Result paging (#1129)
 
@@ -540,8 +663,8 @@ Both stored and system collections resolve LIMIT/OFFSET in planning, before coll
 or document reads, including EXPLAIN and direct AST requests. Input validation visits count
 parameters through the same normalization and lookup path; wire JsonElement numbers are accepted.
 A bad node kind, NULL, negative, fractional, nonfinite, unsupported CLR value or out-of-Int64 count
-has structured OQL0007 at the operand and the same clause-specific message as bad literals.
-Missing names retain COHDOC005. Integral finite CLR floating-point counts are accepted without
+has structured CD00007 at the operand and the same clause-specific message as bad literals.
+Missing names retain CD01005. Integral finite CLR floating-point counts are accepted without
 rounding; fractional inputs cannot normalize to zero or round into an integer. Counts accept signed Int64, matching SQL #1100 and superseding
 the issue's original Int32 bound under the 2026-10-18 ruling. NULL and LIMIT ALL remain invalid,
 diverging from PostgreSQL (src/backend/executor/nodeLimit.c:359-408).
@@ -560,7 +683,7 @@ ORDER BY ties preserve baseline ordinal order, so pages concatenate without gaps
 data. Writes between separate statements may shift pages; use a shared snapshot for repeatability.
 EXPLAIN's select detail includes resolved limit (none when absent) and offset (zero when absent).
 Unsorted, ungrouped, non-DISTINCT queries whose projections have fixed static result types stop reads
-once the page is complete, including scalar functions from OqlFunctions, unary and binary operators,
+once the page is complete, including registered scalar functions, unary and binary operators,
 META, literals and constructors. LIMIT 0 evaluates no row predicates; a completed window never
 evaluates the next predicate, following PostgreSQL src/backend/executor/nodeLimit.c:153-159.
 Paths and lone stars can observe heterogeneous scalar roots and
@@ -569,9 +692,10 @@ This preserves the metadata contract while making early termination safe where t
 
 #### SQL++ functions and transaction clock (#1137)
 
-Documents.Language's public immutable OqlFunctions table owns the 40 executable names (META,
-five aggregates and 34 scalars), arities, kind constraints, aggregate classification and static
-result types. There is no duplicate engine table or new visibility grant. Scalar validation
+Documents.Language's public immutable OqlFunctions table declares the 40 standard executable
+names (META, five aggregates and 34 scalars), arities, kind constraints and static result types.
+Native registrations use that metadata; the frozen engine function catalog also contains application
+registrations and supplies planning and execution binding. No visibility grant is added. Scalar validation
 passes aggregate permission into its arguments, while aggregates forbid nested aggregates.
 Grouping equivalence is checked before recursing through scalar arguments, so GROUP BY LOWER(x)
 and UPPER(MIN(x)) bind correctly. Literal kinds, including JsonElement numbers and unary minus,
@@ -603,15 +727,15 @@ inside both pattern preparation and matching. TRIM's omitted character set is SQ
 scan is streamed and its distinct trim-character set is bounded. OQL rounds exact digits with
 remainders. ROUND/TRUNC support negative scales and bound extreme scales before rounding
 (PostgreSQL src/backend/utils/adt/numeric.c:1548-1577 also bounds scale). SQRT rejects
-negative arguments with COHDOC019, following PostgreSQL src/backend/utils/adt/float.c:1492-1495;
-POWER invalid domains use that code too. Overflow retains COHDOC007 and division by zero COHDOC006.
+negative arguments with CD02019, following PostgreSQL src/backend/utils/adt/float.c:1492-1495;
+POWER invalid domains use that code too. Overflow retains CD02007 and division by zero CD02006.
 SQRT and fractional POWER preserve the BCL double result through its shortest round-trip
 representation when converting to the decimal scalar domain, avoiding the decimal cast's
-15-significant-digit rounding. Nonfinite or overflowing results retain COHDOC007.
+15-significant-digit rounding. Nonfinite or overflowing results retain CD02007.
 A function error inside an explicit transaction aborts it through the existing statement bracket.
 REPLACE accepts a fourth integer count: the first n nonoverlapping occurrences, all occurrences
 when omitted or negative, and none for zero (Couchbase stringfun.html#replace). A fractional
-count is a COHDOC008 type error; a wrong-kind literal still fails planning. Unchanged results
+count is a CD02008 type error; a wrong-kind literal still fails planning. Unchanged results
 returned directly from REPLACE's empty-pattern or zero-count path need no constructed-string buffer.
 Negative-scale rounding uses the exact decimal remainder before testing the midpoint, avoiding
 the double rounding that a division by the scale factor can introduce just below a midpoint.
@@ -631,7 +755,7 @@ The supported clause matrix lives in the language package's
 SELECT (ALL/DISTINCT and VALUE/RAW), object/array constructors, FROM/UNNEST, quantified predicates, WHERE, GROUP BY, HAVING, ORDER BY, LIMIT, OFFSET, CREATE COLLECTION, DROP COLLECTION,
 CREATE INDEX, DROP INDEX, INSERT, UPSERT, UPDATE, UNSET, DELETE, VALUES, IN, BETWEEN, LIKE and CASE are executed. OQL retains its name with a SQL++ basis.
 Retired ODMG constructs are rejected positionally; nested queries, deferred document mutations
-and server statements are rejected with `COHDBL001`. The parser advertises only clauses this executor
+and server statements are rejected with `CK00001`. The parser advertises only clauses this executor
 supports.
 AST diagnostics are checked both for text requests and directly constructed requests.
 
@@ -660,14 +784,14 @@ deduplicate, and decimal values 2 and 2.0 are equal. Couchbase documents
 its [object collation](https://github.com/couchbase/query/blob/master/value/object.go#L781-L823)
 compares member values through Collate rather than the NULL-propagating Equals function.
 Under DISTINCT, ORDER BY must match a projected expression after alias rewriting, following
-PostgreSQL `src/backend/parser/parse_clause.c:3018` in the reference clone; otherwise COHDOC014
+PostgreSQL `src/backend/parser/parse_clause.c:3018` in the reference clone; otherwise CD01014
 reports `SELECT DISTINCT requires every ORDER BY expression to appear in the projection.`
 Its span is the rejected ORDER BY expression, excluding ASC/DESC.
 Constructors recurse through validation and grouping; array MISSING elements become NULL,
 while object MISSING members are omitted. Duplicate object names retain #1131's keyed semantics.
 SELECT constructors accept nested stored values and parameters up to the result writer's
 256-level limit, including the outer object for named projections. An over-limit array or object
-raises COHDOC015, naming the constructor at its expression span. INSERT retains the 128-level storage limit and COHDOC008 INSERT diagnostic.
+raises CD05015, naming the constructor at its expression span. INSERT retains the 128-level storage limit and CD02008 INSERT diagnostic.
 
 GetBytes returns unquoted UTF-8 for named string columns and empty bytes for named NULL/MISSING
 columns; named JSON objects/arrays return JSON bytes. A bare VALUE/RAW row returns JSON bytes
@@ -725,8 +849,8 @@ an absent value has `IsMissing(ordinal) == true`, `IsNull(ordinal) == false`, an
 `GetValue(ordinal) == null`. Explicit NULL has the reverse predicates. SELECT * keeps the
 whole source value. SQL, Graph and KeyValuePair leaves keep the default unsupported capability.
 The evaluator's sentinel remains internal to Documents; no catalog value or public sentinel
-type is introduced. Index definitions and physical registrations use v2 (#1135); collections,
-documents and content retain their current versions. Leading MISSING omits an index entry;
+type is introduced. Index definitions and physical registrations use v3 (#1530); collections,
+documents and content retain their current versions. Leading MISSING omits a sparse index entry; the typed catalog IncludeMissing mode retains it;
 trailing MISSING and NULL have distinct component tags. See the catalog's key-layout contract.
 Unary NULL/MISSING/VALUED tests never select an index seek.
 
@@ -775,7 +899,7 @@ is MISSING. The existing OQL same-scalar-kind range rule is retained for valued 
 
 This follows [expression/comp_like.go:90-116](https://github.com/couchbase/query/blob/master/expression/comp_like.go#L90-L116).
 Backslash is the default escape; an empty escape disables escaping. A malformed evaluated
-escape or trailing pattern escape raises COHDOC013 with a fixed message and source span.
+escape or trailing pattern escape raises CD02013 with a fixed message and source span.
 The trailing-escape refusal also follows PostgreSQL `85f55534e80`,
 `src/backend/utils/adt/like_match.c:353-356`; the matcher algorithm is independent.
 Matching backtracks only to the latest `%`, with no Regex or recursive suffix exploration.
@@ -832,27 +956,28 @@ collection; a Schema-owned collection still throws `DatabaseObjectLockedExceptio
 `DROP COLLECTION`. System sources remain read-only even with either modifier. Names are local
 to the session's database; `IF` is positional and remains usable as an unquoted name.
 
-Planning rejects null, empty or whitespace-only names with `COHDOC001`, matching the session
+Planning rejects null, empty or whitespace-only names with `CD05001`, matching the session
 API's name rule before either collection core runs. Parsed quoted names carry the name token's
 span, found with the shared lexer on the refusal path; directly constructed nodes retain their
-supplied location. Empty quoted identifiers are already syntax errors (`OQL0002`). These failures
+supplied location. Empty quoted identifiers are already syntax errors (`CD00002`). These failures
 leave an autocommit session usable. Command 69 validates collection names inside the statement
-failure boundary and returns the same unlocated `COHDOC001`, including empty names; malformed
+failure boundary and returns the same unlocated `CD05001`, including empty names; malformed
 payload encodings still terminate the session with a protocol error.
 
-The shared collection cores attach `COHDOC002` to an unconditional missing DROP, `COHDOC010`
-to an unconditional duplicate CREATE, and `COHDOC011` to any schema-owned DROP. OQL refusals
+The shared collection cores attach `CD01002` to an unconditional missing DROP, `CD03010`
+to an unconditional duplicate CREATE, and `CD03011` to any schema-owned DROP. OQL refusals
 carry the statement span; session APIs carry no source location. Exception types and messages
-are unchanged, including `DatabaseObjectLockedException` for ownership. `COHDOC009` is reserved
+are unchanged, including `DatabaseObjectLockedException` for ownership. `CD01009` is reserved
 for #1102. PostgreSQL's duplicate-relation refusal supplies the 42P07 precedent
 (`src/backend/catalog/heap.c:1194-1198`, `src/backend/utils/errcodes.txt:383`).
 
 Under the database writer lock, snapshot conflicts are checked before either conditional no-op.
-A collection committed after a Snapshot transaction began therefore aborts conditional creation.
-DDL is transactional: CREATE is visible to subsequent statements of its transaction; rollback
-removes it. DROP removes documents and indexes together with the collection; rollback restores
-all three, including physical index selection. A failed OQL collection statement aborts an
-explicit transaction under the ordinary failed-statement rule above.
+An autocommit statement captures its snapshot before waiting for that lock: a collection created
+or replaced by the preceding writer therefore raises CD04102 even with IF [NOT] EXISTS.
+The C# collection APIs remain transactional: CREATE is visible to subsequent operations of its
+transaction; rollback removes it. DROP removes documents and indexes together with the collection;
+rollback restores all three, including physical index selection. OQL collection DDL inside any
+explicit transaction raises CD04105 under the ordinary failed-statement rule above.
 
 The existing wire Execute operation carries both clauses. CREATE followed by DocumentClient
 Put/Get works on the new collection. A schema-owned DROP returns ExecutionFailure (6), naming
@@ -868,17 +993,17 @@ Moving an indexed value never revisits a candidate (Halloween safety). A missing
 reports `Collection 'x' does not exist.`; Schema ownership permits content updates.
 
 Targets are compared by ordinal property names and integer indexes after stripping the optional
-source alias. Repeated paths, prefix overlaps and SET/UNSET overlaps fail planning (COHDOC017).
+source alias. Repeated paths, prefix overlaps and SET/UNSET overlaps fail planning (CD01017).
 A segment trie detects all three in time linear in the total number of target segments, checking
 statement cancellation at each target and segment. This follows PostgreSQL's one-pass assignment
 lookup principle (`src/backend/rewrite/rewriteHandler.c:840-870` in the reference clone); the
 document-specific trie also detects prefix overlaps. Bounded regressions plan 200,000 distinct
 UPDATE targets and SELECT projection names, and a deterministic enumeration cancels planning.
-Root replacement (`SET d = ...`) and UNSET ending in an array index fail planning (COHDOC016).
+Root replacement (`SET d = ...`) and UNSET ending in an array index fail planning (CD02016).
 An aliased array root can be updated through an index, for example `SET d[0].name = 'new'`.
 At execution, name segments require objects; missing intermediate objects are created as `{}`
 when a SET needs them. Index segments require an existing array and an in-range index, with
-shape failures identifying the target path (COHDOC016). These index requirements apply equally
+shape failures identifying the target path (CD02016). These index requirements apply equally
 to UNSET and SET-to-MISSING, even beneath missing members; every invalid target fails the
 statement before anything is written. UNSET of an absent object member is a no-op; an existing
 incompatible intermediate value fails. No array is created or expanded implicitly.
@@ -901,7 +1026,7 @@ still escapes supplementary characters. Its pointer-based BCL override signature
 AllowUnsafeBlocks locally, without changing public surface or NativeAOT compatibility.
 The result passes DocumentStorage.ValidateContent, including its 128-level limit, before writing.
 Only the patched document is constrained by storage depth: temporary SET and WHERE constructors
-retain the ordinary 256-level query allowance, even inside CASE conditions. COHDOC018 uses the
+retain the ordinary 256-level query allowance, even inside CASE conditions. CD02018 uses the
 failing target's span for a leaf-value write, and the statement span for whole-document validation.
 
 Every matched document is passed through INSERT/CRUD's existing WriteAsync primitive, even if
@@ -914,7 +1039,7 @@ existing DatabaseTransactionAbortedException conflict path. Any failure rolls ba
 statement, or aborts the whole explicit transaction under #1225. Own writes remain visible to
 later statements of that transaction and invisible to other sessions until commit.
 
-The existing wire completion carries the matched count with no Document frames. Path failures
+Without RETURNING, the existing wire completion carries the matched count with no Document frames. Path failures
 arrive as ExecutionFailure with their diagnostic and leave the session reusable. Tests exercise
 scan/seek parity, swaps, versions, failures before and after the first write, cancellation,
 concurrent committed writers, explicit commit/rollback and process termination. Recovery checks
@@ -936,9 +1061,10 @@ It changes no documents or catalog entries, including when its explicit transact
 | `Distinct` | A separate parent node above Project, ProjectValue or Group, preserving the underlying stage |
 | `Unnest`, `LeftUnnest` | Array expansion between projection/grouping and access, with the variable name in Detail |
 | `CollectionScan` | Candidate retrieval from the named collection |
-| `IndexSeek` | The chosen catalog index name, collection and inclusive/exclusive path bounds |
-| `Delete` | Snapshot-filtered deletion; detail states filter presence and IndexSeek or CollectionScan, with that access as its child |
-| `Update` | Snapshot-filtered partial update; detail states filter presence and its IndexSeek or CollectionScan child |
+| `IndexSeek` | Catalog index name, collection, inclusive/exclusive bounds and bounded index-entry estimate |
+| `IndexIntersection` | Ordinal identity intersection before JSON reads; children are the selected IndexSeek inputs |
+| `Delete` | Snapshot-filtered deletion; detail names its IndexSeek, IndexIntersection or CollectionScan child |
+| `Update` | Snapshot-filtered partial update; detail names its IndexSeek, IndexIntersection or CollectionScan child |
 | `Insert`, `InsertSelect` | Document creation from VALUES or a fully materialized query; SELECT children describe the source access |
 | `Upsert`, `UpsertSelect` | Whole-document insert-or-replace from the same staged inputs; SELECT children describe the source access |
 | `SystemCollection` | A virtual `COHESION_SCHEMA` collection without stored-document access |
@@ -960,17 +1086,18 @@ is recorded for owner review; P8 (#1264) later absorbs the description into its 
 
 ## Index planning and writes
 
-Index definition and physical registration records use catalog v2 (#1135); other record kinds
+Index definition and physical registration records use catalog v3 (#1530); other record kinds
 retain their current versions. Startup validates metadata and tree formats before the recovery
-scrub. V1 index catalogs are refused with a recreate remedy; no legacy reader or upgrade exists.
+scrub. V1/v2 index catalogs are refused with a recreate remedy; no legacy reader or upgrade exists.
 The engine-level refusal names the database, disposes its coordinator and leaves a cleanly closed
-file set byte-identical, for both v1 definition and registration records.
+file set byte-identical, for both v1/v2 definition and registration records.
 
 
 `CREATE [UNIQUE] INDEX [IF NOT EXISTS] <index-name> ON <collection> (<path>, ...)` and
 `DROP INDEX [IF EXISTS] <index-name> ON <collection>` are OQL statements. `DocumentPlanner` binds them to
-catalog-operation plans and `DocumentPlanExecutor` executes those plans under the statement's
-`TransactionContext`. This replaced the former extension-member entry point and gives
+catalog-operation plans and `DocumentPlanExecutor` executes those plans under an autocommit
+statement's `TransactionContext`. The session refuses OQL DDL inside an explicit transaction
+with CD04105 before planning. This replaced the former extension-member entry point and gives
 `DocumentDatabase` and `DocumentDatabaseSession` no index-management members; there is no runtime
 switch on internal database implementations.
 
@@ -992,11 +1119,11 @@ UNIQUE flag. Conditional removal ignores an absent name. Under schema ownership,
 index still refuses removal, while an absent conditional DROP is a no-op. Snapshot conflicts
 are checked before no-ops. After collection-identity checks, a present schema-owned index
 retains its ownership refusal before document/index-set conflict checks; an absent conditional
-DROP still checks those conflicts before returning its no-op. Indexes and documents remain
-in the same logical transaction.
+DROP still checks those conflicts before returning its no-op. Index definitions and populated
+entries share one autocommit transaction; OQL DDL is refused inside an explicit transaction.
 INSERT, UPSERT, UPDATE, DELETE and CRUD share eager atomic maintenance of every index.
-UNIQUE violations use the catalog-owned public DocumentConstraintViolationException, COHDOC020
-(23505); non-scalar UNIQUE components use COHDOC021. NULL and MISSING components never conflict.
+UNIQUE violations use the catalog-owned public DocumentConstraintViolationException, CD03020
+(23505); non-scalar UNIQUE components use CD02021. NULL and MISSING components never conflict.
 Checks are immediate per row, so a swap can fail; a failed explicit transaction requires caller
 RollbackAsync before session reuse (#1225). The wire sends ExecutionFailure (6) and remains usable.
 Randomized fixed-seed tests compare scans, one/two/three-path seeks and post-DROP scans over mixed
@@ -1009,8 +1136,9 @@ of zero; index definition changes are not document-row mutations.
 
 `ChooseAccess` takes a predicate and source alias independently of SELECT, so SELECT, UPDATE and DELETE
 share the same physical access selection. The planner uses applicable equality/range predicates on indexed paths,
-including parameters, reversed operands and conjunctive bounds. Choice ranks longest leading
-equality prefix, then a range on the next path, then UNIQUE, then ordinal index name. A bound
+including parameters, reversed operands and conjunctive bounds. Bounded index-entry probes rank
+candidate cost first; ties rank longest leading equality prefix, then a range on the next path,
+then UNIQUE, then ordinal index name. Comparable complete inputs may intersect identities. A bound
 only on a non-leading path scans. Equality-prefix and trailing-range seeks use prefix successors;
 EXPLAIN names the index and prints all equality and range components. Single-path descriptions
 retain their existing inclusive/exclusive scalar-bound spelling. The executor reapplies
@@ -1020,6 +1148,59 @@ for composite key collation, NULL/MISSING rules, uniqueness arbitration, visibil
 not document paths: META(alias).id comparisons stay residual filters over a scan or a content
 index chosen by another conjunct. T1 has no key-lookup access path.
 
+## RETURNING results (#1727)
+
+The [OQL dialect](../../Assimalign.Cohesion.Database.Documents.Language/docs/DIALECT.md#returning-1727)
+defines the grammar, target binding, image rules and output order. DocumentPlanner validates the
+optional projection with the engine's function catalog and SELECT's naming/type logic, while
+forbidding aggregates. Input validation traverses RETURNING even for empty candidate sets.
+DocumentPlanExecutor projects each successful write's returned Document for INSERT/UPSERT/UPDATE;
+DELETE projects each matched pre-image while reading the statement snapshot, then stages only
+identities and owned projection values before deleting. The statement owns every write
+and projection, so its normal failure path rolls back all writes and indexes before returning.
+Explicit transactions retain the existing abort-until-rollback contract. A result is returned only
+after all projections, frame-size/depth serialization preflight and metadata normalization succeed; JSON cells are cloned before their
+image JsonDocument is disposed, and no unprojected image is retained by the result context.
+Constructor-depth CD05015 names RETURNING and carries the constructor expression span. Token
+enumeration checks serialized depth explicitly, including a named projection's wrapper, for
+CD05019; serialization preflight does not relabel unrelated InvalidOperationException failures.
+DELETE reports its staged count and checks the actual deletion count against it inside the
+transaction. Divergence is an InvalidOperationException invariant failure before commit, so
+the normal rollback path restores every write and no inconsistent completion can escape.
+
+DocumentQueryResult stores an affected count (default -1 for reads) with the owned result rows.
+SELECT's result construction also supplies RETURNING's fixed names, empty-input static types,
+Int64/Decimal promotion and bare MISSING-to-null normalization. Lone star retains original image
+bytes. EXPLAIN emits Returning or ReturningValue child nodes without evaluating projections.
+
+Documents previously had no statement memory budget. The new positive StatementMemoryBudget
+engine option defaults to SQL's existing 64 MiB convention and is snapshotted at construction.
+It bounds retained RETURNING results: metadata, row/value arrays (including normalization/result
+copies), scalar objects/strings, cloned JSON and whole-image bytes. Each JSON clone costs
+128 bytes of ownership overhead plus its raw UTF-8 length plus 12 bytes per JSON token
+(including property names and both container delimiters). JsonMarshal.GetRawUtf8Value and
+struct enumerators measure this without allocating a UTF-16 text copy. This accounts for dense
+arrays by token count while large strings pay for their bytes. A lone star retains one clone
+and one original raw image; each representation is charged once. A 1,024-byte ASCII object
+with one string property costs 2,448 bytes per row (224 row storage + 1,200 clone + 1,024 raw),
+plus 208 bytes of statement metadata. Charges accumulate before rows enter the result list; CD05018 at the clause span rolls
+back the statement on exhaustion. This does not retrofit accounting onto existing SELECT or
+mutation/source staging and is not a process-heap cap. The public option is a model configuration
+capability, not an assembly-visibility bridge. No new public interface or dependency is added.
+
+The server already serializes both counts into Complete; updated Documents.Client accepts an
+Execute result header with affected count -1, or with a nonnegative affected count equal to the
+received row count. Negative values below -1 and disagreeing counts remain protocol violations.
+There is no capability or version negotiation for RETURNING (owner decision 8, 2026-10-25),
+and old clients may reject it. Both InMemory and TCP tests observe Failure before any result header
+for a projection error, owned image metadata, explicit rollback, budget failure and connection
+reuse. The NativeAOT sample exercises all four forms and projection rollback on both transports.
+No disk or frame-layout change is made.
+
+Image reference: RavenDB src/Raven.Server/Documents/Patch/PatchDocumentCommand.cs:354-356 returns
+ModifiedDocument when requested. The SQL++ references and Cohesion's transactional divergence are
+linked in the dialect contract.
+
 ## Data mutation and serialization semantics
 
 OQL UPSERT uses the [SQL++ KEY/VALUE grammar](https://docs.couchbase.com/server/current/n1ql/n1ql-language-reference/upsert.html)
@@ -1028,11 +1209,11 @@ existing key receives the complete replacement value, with omitted properties go
 durable version is allocated even for identical content; other documents retain their versions.
 Both VALUES and SELECT forms validate all rows before writing, and a self-source reads the
 statement snapshot. A repeated ordinal key fails the whole statement with DocumentDuplicateKeyException
-(COHDOC012), without applying last-writer-wins. The failure rolls back autocommit or aborts the
+(CD03012), without applying last-writer-wins. The failure rolls back autocommit or aborts the
 whole explicit transaction under #1225; the caller rolls back that transaction before reuse.
-No statement-level version precondition is supported in T1: OPTIONS remains COHDBL001 and
+No statement-level version precondition is supported in T1: OPTIONS remains CK00001 and
 expiration is not implemented. Optimistic replacement uses PutAsync(expectedVersion) or
-UPDATE WHERE META(d).version = $v. RETURNING remains deferred.
+UPDATE WHERE META(d).version = $v. RETURNING follows the affected-image contract above.
 
 UPSERT calls the same WriteAsync primitive as INSERT, UPDATE and PutAsync, with insert-only
 checking disabled. It writes the new content first, tombstones the old content, then saves
@@ -1040,7 +1221,7 @@ the catalog entry with old/new index-key maintenance, all in one logical transac
 an intervening committed writer with DatabaseTransactionAbortedException. Schema ownership
 permits content writes; virtual system collections are read-only and missing destinations
 are never created. EXPLAIN describes Upsert/UpsertSelect without mutation. Completion reports
-the written-document count and emits no Document frames. The process-exit fixture and its raw
+the written-document count and optional RETURNING frames. The process-exit fixture and its raw
 B-tree assertions prove committed old-key removal and abandoned new-key removal after recovery.
 The catalog layout is unchanged, so no format bump or upgrade path is introduced.
 
@@ -1067,9 +1248,8 @@ deleted documents. Re-inserting a deleted id receives a strictly higher version.
 
 Without WHERE, DELETE removes every document while retaining the collection and its index
 definitions. A zero-match delete succeeds with affected count zero. Schema ownership permits
-content mutation; system sources remain read-only and missing collections give COHDOC002.
-The existing Complete affected count reports deletions with no Document frames. USE KEYS,
-RETURNING and DELETE LIMIT remain deferred. No catalog-format or protocol change is needed.
+content mutation; system sources remain read-only and missing collections give CD01002.
+Without RETURNING, the existing Complete affected count reports deletions with no Document frames. USE KEYS and DELETE LIMIT remain deferred. No catalog-format or protocol change is needed.
 The process-exit fixture checks document reads and index-seek query results after committed
 and interrupted uncommitted deletions. Documents.Catalog restart tests inspect the recovered
 `by_rank` B-tree directly under the latest snapshot: a committed-deleted key has no live entry,
@@ -1087,9 +1267,9 @@ the first write. JSON uses only Utf8JsonWriter and JsonElement with the 128-leve
 Numeric literals retain their JSON digits until evaluation. Before normalizing a numeric
 JsonElement (including numbers nested in parameters), the evaluator delegates exact decimal
 representability to `DocumentStorage.ValidateContent`. Rounding, underflow and overflow raise
-COHDOC007 (SQLSTATE 22003), with the offending literal or parameter span. This also applies to
+CD02007 (SQLSTATE 22003), with the offending literal or parameter span. This also applies to
 computed INSERT SELECT inputs. Final document validation precedes all writes; other invalid
-INSERT JSON carries COHDOC008. PutAsync keeps its existing storage validation and write order.
+INSERT JSON carries CD02008. PutAsync keeps its existing storage validation and write order.
 The input walk validates numeric literals and referenced JsonElement parameters before planning,
 so grouped-expression matching and empty sources retain the same located numeric refusal.
 Unused parameter-map entries remain ignored.
@@ -1102,7 +1282,7 @@ and leaves it Faulted until rollback, as described above. Schema ownership restr
 INSERT accepts Schema-owned collections. Missing collections are never created implicitly.
 
 An existing or repeated key raises DocumentDuplicateKeyException with CollectionName,
-DocumentId and diagnostic COHDOC012. An existing INSERT key reports "Collection 'items' already
+DocumentId and diagnostic CD03012. An existing INSERT key reports "Collection 'items' already
 contains document key 'n'."; an INSERT/UPSERT key repeated within one statement reports
 "Document key 'n' appears more than once in one statement." This follows PostgreSQL's separate
 same-command cardinality refusal (src/backend/executor/nodeModifyTable.c:2828-2830 in the reference clone).
@@ -1117,7 +1297,7 @@ this differs from SQL constraint diagnostics that omit key values. A same-key in
 after the snapshot instead raises DatabaseTransactionAbortedException: current-state conflict
 checks precede duplicate detection. Successful inserts allocate strictly increasing versions;
 rollback may leave sequence gaps. A successful command reports its inserted-document count.
-The existing wire Complete carries that affected count with zero Document frames; duplicates
+Without RETURNING, the existing wire Complete carries that affected count with zero Document frames; duplicates
 are ExecutionFailure and preserve the wire session. No protocol or catalog format changes occur.
 
 A top-level MISSING KEY or VALUE fails the whole statement; KEY must be a nonblank string.
@@ -1179,7 +1359,7 @@ good. `DocumentWorkerResilienceTests` fails a
 checkpoint's and a write-back's page writes (the worker reports, backs off and recovers while
 the other database's work goes on), a group flush's drain or fsync on the flush worker's own
 thread (only its database goes offline, `StorageOfflineCause.JournalFlush` either way), and a
-header slot write (the database goes offline with COHDBD002, naming "a write of the file
+header slot write (the database goes offline with CD06102, naming "a write of the file
 header", and its files stop changing). It also checks that a database whose checkpoints keep
 failing leaves the other database a pace a worker-wide backoff cannot reach: over a shared
 six-second window more than twice the backoff's checkpoints, the floor that fails every
@@ -1188,7 +1368,7 @@ checkpoints as a secondary signal. A smaller worker-wide slowdown can pass; the 
 signal that would catch it is required follow-up work (the SQL engine's DESIGN.md, "Engine-owned
 background workers"). It also checks that a writer
 queued for the database writer lock when the database goes offline (a header slot write, a
-journal fsync or a journal drain failing) gets COHDBD002 at once instead of waiting for the reopen: an offline
+journal fsync or a journal drain failing) gets CD06102 at once instead of waiting for the reopen: an offline
 database undoes nothing, so the writer holding the lock keeps it, and the coordinator ends every
 lock wait instead (`TransactionCoordinator.AbandonLockWaits`, wired to the storage's offline hook).
 
@@ -1211,7 +1391,7 @@ that fails while the database's journal holds `JournalSizeLimit` bytes (an engin
 default, means four times `CheckpointJournalSize`, 1 GiB at its default) takes it offline with
 `JournalSizeLimit`; one failure of a journal that reached the cap with no failure at all (#1283)
 is retried like any other. Either way the database goes offline through the #1243 machinery: every
-operation is refused with `COHDBD002`, its lock waits end, nothing more is written to it, and the
+operation is refused with `CD06102`, its lock waits end, nothing more is written to it, and the
 engine lists it in `OfflineDatabases` until `OpenDatabaseAsync` reopens it (a hosted engine's
 application reopens it with backoff, owner decision 22). The engine takes it offline on a thread-pool thread, never the worker's,
 so a give-up that waits for a hung fsync of that database holds back none of the others, and it
@@ -1319,12 +1499,12 @@ checkpoint deferred, scrubs uncommitted record writers and index changes, and th
 completes the recovery checkpoint. Before the scrub it checks every index tree's
 B-tree page format (`DocumentCatalog.EnsureIndexFormat`, #1194): a database whose
 indexes an engine before #1194 wrote is refused with "Database 'x' cannot be
-opened. COHDBI001: …". A cleanly closed database is left byte-identical. A
+opened. CK06101: …". A cleanly closed database is left byte-identical. A
 crashed one has already had the storage layer's format-agnostic journal redo and
 undo when the check runs, but keeps its journal (the open-time checkpoint is
 deferred), so the engine that wrote it still recovers it. A file set in another storage
 format (#1251) is refused by the storage before its journal is read, and the engine names
-the database: "Database 'x' cannot be opened. COHDBS001: …", the storage's
+the database: "Database 'x' cannot be opened. CK06001: …", the storage's
 `StorageFormatException` as its inner exception, the files byte-identical
 (`DocumentEngineTests`). Both synchronous and grouped durability
 acknowledge commits only after the journal is durable. Memory-backed databases
@@ -1332,7 +1512,7 @@ use the identical storage/transaction implementation over in-memory streams.
 
 ### Interrupted creation (#1421)
 
-Missing journals and backups are refused with COHDBD003 in DatabaseException.Diagnostics,
+Missing journals and backups are refused with CD06103 in DatabaseException.Diagnostics,
 including the DatabaseNotFoundException for a directory without its data file. A complete
 header proves sidecars existed at creation; their absence can mean an interrupted drop or
 lost acknowledged commits. No sidecar is silently recreated, even beside an empty closed
@@ -1358,10 +1538,10 @@ the file set, closing included — PostgreSQL's `PANIC` on a failed WAL fsync (`
 `RecordTransactionCommit`, `src/backend/access/transam/xact.c:1470-1583`; and `data_sync_retry`
 off, `src/backend/storage/file/fd.c:3966-3987`), scoped to the database. The statement whose
 commit flush failed gets `DatabaseTransactionCommitUnconfirmedException`, its message leading
-with `COHDBD002` (owner decision 24). Every later operation —
+with `CD06102` (owner decision 24). Every later operation —
 a new session, an OQL statement or typed request, a collection call, BEGIN, and the COMMIT or
 ROLLBACK of a transaction open at the failure — is refused with `DatabaseOfflineException`, code
-`COHDBD002`, carrying the storage's `StorageOfflineException`. The wire server returns this refusal as an Unavailable failure with structured COHDBD002 diagnostics.
+`CD06102`, carrying the storage's `StorageOfflineException`. The wire server returns this refusal as an Unavailable failure with structured CD06102 diagnostics.
 The workers skip the database; closing its sessions and transactions writes nothing. A storage
 bracket whose commit record was written before its flush failed is reported as unconfirmed,
 never refused (`StorageOfflineException.CommitRecordWritten`). The engine stays `Running`;
@@ -1437,7 +1617,7 @@ The current engine materializes query inputs/results and whole JSON values in
 managed memory. UNNEST multiplies input rows and has no row cap; it is not a join and
 does not add JOIN or cross-collection execution. Chunk persistence handles documents larger than a page but does
 not promise a bounded heap independent of document/query size. Database-wide
-writer locking is conservative; there is no query-cost statistics model, join,
+writer locking is conservative; there are no persisted query statistics, join,
 subquery, external sort, replication, model-specific security,
 ApplicationModel integration, or compiled-schema provisioning.
 
@@ -1521,14 +1701,16 @@ ORDER BY, parameters, nested paths, aggregates, collection DDL and index DDL use
 as embedded execution. `SELECT *` returns whole JSON values; projections return JSON objects
 whose property names are the unique column names. MISSING members are omitted; explicit NULL
 members emit JSON null (for example, `"x":null`). Both use Document (65) frames.
-Document and collection commands use the existing session-bound operations and automatic
-transactions. No transaction-control member or frame is exposed over this wire.
+Document and collection commands use the existing session-bound operations and the connection's
+explicit transaction, or automatic transactions when none is open. Text controls use Execute;
+negotiated Ready status follows both Execute and Command, including complete failures. Pool
+return rolls back active or failed work and requires Idle; no transaction-control frame is added.
 
 ### Envelope and payload layout
 
 The shared envelope is unchanged: `u32be payloadLength`, `u8 messageType`, payload bytes. The length
 excludes the five-byte header and is at most 16,777,216.
-#1126 advanced the shared startup version from 1.0 to 2.0 because Documents projections changed from ResultRow (68) arrays to Document (65) objects carrying MISSING by omission. The shared handshake now negotiates 2.1 (#1105), with an empty capability list for Documents and its existing structured Failure payload. Different majors are refused before authentication; additive future capabilities use negotiation rather than another minor bump.
+#1126 advanced the shared startup version from 1.0 to 2.0 because Documents projections changed from ResultRow (68) arrays to Document (65) objects carrying MISSING by omission. The shared handshake now negotiates 2.1 (#1105), with transaction-status for Documents and its existing structured Failure payload. Different majors are refused before authentication; additive future capabilities use negotiation rather than another minor bump.
 
 All integers below are big-endian. `str(x)` means `i32 byteLength` followed by that many UTF-8
 bytes. `json(x)` means `i32 byteLength` followed by one complete UTF-8 JSON value. Negative lengths,
@@ -1583,7 +1765,8 @@ bytes containing a u64 version. The complete UInt64 domain is retained. Collecti
 identities cannot be blank. Get of a missing document returns no StoredDocument. Put returns the
 stored bytes and assigned version; conditional put/delete use the engine's optimistic-concurrency
 rules. Collection DDL affects zero documents. ResultCount counts row/document/collection result
-frames, excluding the header and completion; query AffectedCount is -1, index DDL zero.
+frames, excluding the header and completion; read-only AffectedCount is -1, index DDL zero.
+RETURNING writes carry equal nonnegative result and affected counts, including two zeros for no matches.
 
 Each diagnostic record is `str(code), str(message), i32 start, i32 end, i32 line, i32 severity,
 i32 location`. For code length C and message length D, code length starts at 0, code bytes at 4,
@@ -1593,7 +1776,7 @@ message length at 4+C, message bytes at 8+C, and the five i32 fields start at 8+
 Database.Types enum values. Failure accepts only ParseFailure, ExecutionFailure and Unavailable.
 The Failure diagnostics come from the exception carrier, preserving code, message, severity,
 location kind and nullable Start/End/Line fields. Older offline and unconfirmed-commit exceptions
-with an empty carrier retain their existing unlocated COHDBD002 fallback; a supplied carrier
+with an empty carrier retain their existing unlocated CD06102 fallback; a supplied carrier
 always takes precedence. Other uncoded engine failures have an empty diagnostics list.
 The server limits failure/diagnostic messages to 4096 UTF-16 characters,
 diagnostic codes to 256 characters and the list to 256 entries. Truncated text is marked and
@@ -1773,19 +1956,19 @@ type behind its `Open` factory. DocumentDatabaseServer is a sealed DatabaseServe
   state, the session's transaction, the "already active" check and the statement hold (the
   model's former reservation flag and operation set, at most one statement at a time); the
   transaction base owns the whole end state machine, the admission of statements (the model's
-  former operation counter) and the abort. The model supplies its vocabulary: `COHDBD001`,
-  `COHDBD002`, the kernel calls and the translation of the kernel's exceptions. It keeps its
+  former operation counter) and the abort. The model supplies its vocabulary: `CD04101`,
+  `CD06102`, the kernel calls and the translation of the kernel's exceptions. It keeps its
   per-statement rule (#1225): a failed statement aborts the explicit transaction through the
   base's `AbortAsync`, and a statement holds the session from its start to its end.
 - **What changed for a caller** (plan §6.4): a closed session fails every operation with "The
   session is closed." (was "The document session is closed."); BEGIN refuses a closed session,
   then an active transaction or operation, then a canceled token, before the isolation-level and
   offline refusals, which came first; on an offline database BEGIN from the session that holds an
-  open transaction fails "already active" (was `COHDBD002`), and a canceled token is refused by
-  `CreateSessionAsync`, both execute seams and BEGIN before `COHDBD002`, and so are the seams'
+  open transaction fails "already active" (was `CD06102`), and a canceled token is refused by
+  `CreateSessionAsync`, both execute seams and BEGIN before `CD06102`, and so are the seams'
   argument errors, a null request and a blank statement (the collection and document operations
   keep their order, the offline refusal first); BEGIN refuses a transaction the kernel ended under
-  its caller with `COHDBD001`, where it reported the disposed database; BEGIN and both execute
+  its caller with `CD04101`, where it reported the disposed database; BEGIN and both execute
   seams refuse a closed session as closed before they check its database, so a closed session of a
   dropped or closed database reports "The session is closed." where it reported
   `ObjectDisposedException` (the collection and document operations check the database first and
@@ -1795,7 +1978,7 @@ type behind its `Open` factory. DocumentDatabaseServer is a sealed DatabaseServe
   transaction is still running; commit after it completes." (was "Dispose every document
   operation before committing its transaction."); a statement refused while the caller's commit
   or rollback runs says "operation" where it said "statement", and one refused after the caller's
-  own end says the transaction "ended before the operation started" where it reported `COHDBD001`
+  own end says the transaction "ended before the operation started" where it reported `CD04101`
   without a cause; a session that fails to close reports "The session failed to close." (was "One
   or more document operations failed to close."); and the engine's disposal aggregate is "One or
   more components of engine '{name}' failed to close." (was "One or more document engine
@@ -1809,7 +1992,7 @@ type behind its `Open` factory. DocumentDatabaseServer is a sealed DatabaseServe
   worker's pump thread is named for the worker (it was `{engine}/{kind}`).
 - **Unchanged for Documents**, though the bases now carry it: the "already active" message (the
   model's was the base's); a second commit of an aborted transaction and a commit after the
-  teardown reporting `COHDBD001` with the cause (the model's teardown already closed the
+  teardown reporting `CD04101` with the cause (the model's teardown already closed the
   transaction with a cause); the `Faulted` state of a transaction whose session closed while its
   database was offline; the one-statement hold's refusal, "Dispose the active document operation
   before starting another operation on this session."; the worker disposal order (last attached
@@ -1910,18 +2093,22 @@ growth when a reader stalls; they do not establish an end-to-end InMemory memory
 
 ## Diagnostic completion (#1103 review)
 
-Catalog-write helpers use COHDOC004 and accept an optional source location: OQL collection and index DDL
+Catalog-write helpers use CD04004 and accept an optional source location: OQL collection and index DDL
 passes its location; direct collection APIs have none. Evaluator and executor rejections
-carry COHDOC001 for unsupported contexts/operators, COHDOC005 for missing parameters,
-COHDOC006 for division/remainder by zero (PostgreSQL SQLSTATE 22012), COHDOC007 for numbers
-outside the decimal domain or arithmetic overflow (22003), and COHDOC008 for invalid
+carry CD05001 for unsupported contexts/operators, CD01005 for missing parameters,
+CD02006 for division/remainder by zero (PostgreSQL SQLSTATE 22012), CD02007 for numbers
+outside the decimal domain or arithmetic overflow (22003), and CD02008 for invalid
 operand/parameter/value types. The innermost evaluator expression supplies its span before
 a failure propagates; outer expressions preserve it. Numeric normalization also codes
 conversion overflow outside expression evaluation. No message embeds its code.
 
 ## Shared startup negotiation (#1105)
 
-The endpoint participates in protocol 2.1: Startup may carry capability names and Ready returns the agreed version with an empty capability list. Negotiated 2.0 still sends empty Ready. Different majors are refused. This model does not register the core Diagnostics capability and its channel rejects that frame in both directions. Documents keeps the existing structured Failure frame (#190/#1103); no second diagnostics frame is needed.
+The endpoint participates in protocol 2.1: Startup may carry capability names and Ready returns
+the agreed version with the transaction-status intersection (#1725). Negotiated 2.0 still sends
+empty Ready. Different majors are refused. This model does not register the core Diagnostics
+capability and its channel rejects that frame in both directions. Documents keeps the existing
+structured Failure frame (#190/#1103); no second diagnostics frame is needed.
 
 
 ## Catalog component
@@ -2052,16 +2239,35 @@ The fields below appear consecutively beginning at offset 18. No trailing fields
 | --- | --- | --- |
 | 1 collection | 0 | GUID collection identity; string name; byte owner; nullable string owning schema |
 | 2 document | 0 | GUID collection identity; string document identity; UInt64 version; UInt64 head; Int64 byte length; UInt32 IEEE CRC-32 |
-| 4 index definition (v2) | 0 | GUID collection identity; string index name; Int32 path count (1..32); ordered path strings; byte unique flag (0 or 1); UInt64 physical generation identity |
-| 5 physical registration (v2) | 1 | UInt64 physical generation identity; Int64 root page; string index name; byte unique flag (0 or 1) |
+| 4 index definition (v3) | 0 | GUID collection identity; string index name; Int32 key count (1..32); ordered key descriptors; byte flags (bit 0 UNIQUE, bit 1 INCLUDE MISSING); UInt64 physical generation identity |
+| 5 physical registration (v3) | 1 | UInt64 physical generation identity; Int64 root page; string index name; byte unique flag (0 or 1) |
 
-Kinds 1 and 2 remain v1. Every index uses v2, including single-path nonunique indexes.
-V1 index records are refused before the recovery scrub writes anything, with found/supported
-versions and a recreate remedy. There is no upgrade path or legacy reader. The preceding v1 index reader
-refuses v2 physical registrations at its pre-scrub fence. Engines predating that fence must
-never open these files, as the compatibility section below records.
-Key-path lists are immutable and compare by value, including catalog conflict checks.
-A default `DocumentIndexMetadata` reports an empty leading `Path` and can be formatted safely.
+Kinds 1 and 2 remain v1. Every index uses v3, including scalar-only definitions and physical
+registrations. V1 and v2 index records are refused at the pre-recovery fence with CD06105,
+found/supported versions and a recreate remedy. There is no upgrade path or legacy reader.
+The v2 reader likewise refuses v3 at its fence. The shared storage and B-tree page formats
+are unchanged. Engines predating the fence must never open these files.
+
+Each key descriptor is a byte kind (0 scalar path, 1 DISTINCT array), then a string path.
+For an array key the path is element-relative (empty means the element itself), followed by
+a string document source path and a predicate. Predicate tags are 0 absent (root only),
+1 comparison, 2 IS NULL, 3 IS MISSING, 4 AND, 5 OR and 6 NOT. Tags 1..3 carry a relative path;
+tag 1 additionally carries a comparison byte (Equal=0 through GreaterThanOrEqual=5), then a
+constant tag (1 NULL, 2 FALSE, 3 TRUE, 4 Decimal, 5 String) and its payload. Decimal is the
+four little-endian Int32 words written by BinaryWriter.Write(Decimal); strings use the length
+encoding above. AND/OR carry two predicate nodes in left/right order; NOT carries one.
+Decode enforces at most 32 levels and 128 nodes before descending or allocating an unbounded
+tree. Unknown tags, unknown flag bits, invalid paths/constants, multiple array keys, UNIQUE
+array definitions and IncludeMissing with a leading array key are malformed current-format data,
+with located CD06105 / CK06003.
+
+`DocumentIndexMetadata.Keys` is an immutable snapshot with descriptor value equality, including
+WHEN and IncludeMissing in conflict checks. `Paths` retains scalar-only definitions; it is
+empty for an array index, preventing the existing scalar planner from inferring completeness
+from an array index's scalar prefix. Array-aware consumers use Keys. Path returns an empty string
+for an array index or default metadata. Both older scalar-path constructors validate every path
+and throw ArgumentException for invalid paths; the list constructor also retains its null-list
+and 1..32 count guards. The default metadata's formatting is safe.
 
 Kind 3 content chunks use the format in
 [Documents.Storage](DESIGN.md#storage-component).
@@ -2071,8 +2277,10 @@ underlying `DatabaseObjectOwner` byte (`Adhoc = 0`, `Schema = 1`). Unknown kinds
 references, duplicate physical generations, and malformed payloads fail closed.
 
 Catalog metadata records fit one slotted-page record. Identity/name/path sizes are consequently
-bounded by `SlottedPage.MaxRecordSize`; very long metadata is rejected by the shared storage
-layer. Document content has its separate multi-page chunk mechanism.
+bounded by `SlottedPage.MaxRecordSize`. An index definition larger than 8,092 encoded bytes
+raises catalog CD03026 immediately after encoding, before document extraction or physical tree
+creation; this includes large WHEN constants and path lists. Other metadata retains the shared
+storage limit. Document content has its separate multi-page chunk mechanism.
 
 #### Catalog: Index definition and key semantics
 
@@ -2082,16 +2290,112 @@ plans, and the plan executor invokes this component under the statement's `Trans
 after lock acquisition and ownership enforcement. `DocumentDatabase` therefore needs no index
 members, and the catalog and B+Tree updates retain the same transaction as the DDL statement.
 
-Each index has 1..32 ordered case-sensitive paths and an immutable UNIQUE flag. The cap
+Each index has 1..32 ordered keys and immutable UNIQUE and IncludeMissing flags. Scalar keys are case-sensitive paths. The cap
 matches PostgreSQL `src/include/pg_config_manual.h:79` (INDEX_MAX_KEYS). Paths retain the
 lossless dotted/bracket-string encoding: `customer.address.zip`, `items[0].price`, and
-`['root.name']`. Wildcards, expansion, expression keys and sort directions are outside T1.
-The single-path catalog overload remains a convenience for a nonunique definition; it writes v2.
+`['root.name']`. Wildcards and sort directions remain unsupported. The typed catalog API additionally admits one DISTINCT array key (#1530).
+The single-path catalog overload remains a convenience for a nonunique, sparse definition; it writes v3.
 
-A document gets one entry when the leading path is not MISSING. Absent members, incompatible
+A scalar-only document index emits one entry when the leading path is not MISSING, or when IncludeMissing is true. Absent members, incompatible
 shapes, navigation through NULL and out-of-range subscripts yield MISSING; reading a NULL
 member itself yields NULL, matching the evaluator. Trailing MISSING and explicit NULL are
 distinct encoded components. No document-identity suffix is needed.
+
+`DocumentIndexKey.DistinctArray(sourcePath, elementPath, when)` normalizes away the bound variable:
+sourcePath is document-relative and elementPath/WHEN paths are relative to one element. An empty
+element path means the element itself. WHEN supports path-to-constant scalar comparisons,
+IS NULL, IS MISSING, AND, OR and NOT; constants normalize to null, Boolean, Decimal or String.
+There are no functions, callbacks, parameters, subqueries, nested comprehensions, document-relative
+WHEN operands or arbitrary engine ASTs. Catalog therefore never depends on the engine evaluator.
+Only TRUE admits an element, with OQL scalar type comparisons, ordinal strings and unknown-value
+propagation. The typed Compare API accepts null, Boolean, Byte, SByte, Int16, UInt16, Int32,
+UInt32, Int64, UInt64, Decimal and String constants. Integral values normalize to Decimal.
+Single and Double are refused with ArgumentException, even for finite exactly representable
+values such as 1.0d. AND, OR and NOT throw ArgumentException if the resulting predicate exceeds
+32 levels or 128 nodes, counting repeated subtrees at each occurrence. These remain uncoded
+typed C# argument guards under the registry convention. OQ-I2's DDL translates unsupported
+constants and predicates beyond those limits into coded refusals before catalog mutation.
+
+Array keys are DISTINCT only, with at most one array key per index and no UNIQUE array index.
+IncludeMissing is refused when the leading array key would control missing coverage (CD03025),
+until #1632 defines empty and fully filtered array semantics. A document emits the set of distinct encoded scalar projections, combined with its
+other scalar document keys. Numeric scales and repeated elements deduplicate by encoded key;
+NULL is a scalar posting. MISSING projections are omitted as in ARRAY comprehension, and complex
+array/object projections have no postings. Empty or fully filtered arrays emit nothing. A missing
+source produces a MISSING component (omitted if leading and sparse); a present non-array source
+produces NULL, following ARRAY/FIRST's source semantics. INCLUDE MISSING includes a missing leading
+scalar path, including when a later key is an array projection; it does not invent an element
+for an empty or filtered array.
+
+Postings carry document-version references, not element identities. A single WHEN tree evaluates
+all its conjuncts on the same element, so a price projection with stock > 0 excludes a price from
+a different element. For arbitrary later ANY planning, the complete ANY must remain a residual:
+intersecting document candidates for price and stock alone cannot prove same-element correlation.
+Reevaluating ANY over the visible stored array proves correctness. It does not alone prove #1530's
+2x fetch bound; array access planning selects restrictive spans/WHEN matches as described below.
+Search deduplicates document identities before returning candidates; UNNEST must still read the
+original array to preserve its element multiplicity.
+
+#### Array index DDL and access planning (#1530, OQ-I2)
+
+OQL accepts one `DISTINCT ARRAY v.p FOR v IN arr [WHEN cond] END` key among 1..32 ordered keys.
+The source is a document path and the projection is the variable itself or a path rooted in it.
+WHEN binds only element paths, scalar literal comparisons, IS NULL/MISSING, AND, OR and NOT;
+negated tests normalize to NOT(test). Numeric text converts directly to Decimal, including scale
+and exponent spellings within its domain. CLR Single/Double literals in a directly constructed
+AST are refused (CD02027), like the typed catalog API. Parameters, computed mappings and sources,
+and other WHEN expressions are refused before catalog mutation with located CD01028/CD02027/
+CD03027/CD03028 diagnostics. Catalog CD03025 still refuses multiple array keys and UNIQUE arrays.
+ALL remains CK00001; INCLUDE MISSING syntax stays deferred. No format changes beyond existing v3.
+`OqlCreateIndexExpression.Keys` snapshots paths/comprehensions; each comprehension denotes DISTINCT.
+Its scalar Paths view remains empty for array indexes, matching the catalog's coverage boundary.
+
+The chooser retains #1527's bounded probes, ranking and identity intersection. Array scope
+collection and captured array-key detection state are created only for eligible ANY/SOME or
+UNNEST shapes. Scalar-only predicates use the scalar Paths view without enumerating array keys;
+the Release regression retains the base chooser's measured allocation budget.
+For an array index, each top-level conjunctive ANY/SOME supplies its own source, variable and element bounds. Separate
+ANY witnesses never share bounds. INNER and LEFT UNNEST over direct document paths are eligible
+when a mandatory scalar comparison on the projected element rejects LEFT's synthetic MISSING row.
+Dependent expansion sources, EVERY, NOT ANY, OR-only predicates, complex projections and presence
+tests alone do not establish a usable array span. A scalar prefix alone never proves coverage of
+empty, missing or fully filtered arrays. Matching uses normalized paths and ignores variable names.
+Every WHEN leaf (or complete OR/NOT subtree) must match a predicate conjunct after normalization;
+conjunction order/association, reversed comparisons and negated tests normalize. There is no general
+inequality implication solver. If implication cannot be established, that array index is excluded.
+
+Candidates are deduplicated by document identity before content reads. The complete ANY remains
+residual on each candidate, preserving same-element semantics even with price and stock on different
+elements. UNNEST expands the stored array after deduplication, keeping `[1,1,2]` as three rows.
+EXPLAIN prints canonical DISTINCT ARRAY keys and `distinct_documents=True; array_residual=True`;
+estimates still count physical postings, which may exceed document counts. System PATH/PATHS render
+the same normalized keys with a canonical `v` variable and quoted source root. Rendering parses
+every catalog path segment, retaining integer subscripts and quoting punctuation, keywords,
+Unicode and embedded quotes in source, projection and WHEN paths so typed definitions reparse.
+
+Ungrouped, non-DISTINCT pages with fixed projection types (including META().id) can stop after
+OFFSET + LIMIT residual survivors when there is no ORDER BY or the sole ordering is document
+identity, ASC or DESC. Projection aliases resolving to META().id have the same behavior. Candidates
+are visited in that identity direction, and every visited document receives the full residual.
+Other orderings, grouping, DISTINCT and projections requiring type inference retain materialization.
+Candidate metadata and index probes are not limited by this content-read optimization.
+
+For the benchmark-shaped `(category, DISTINCT ARRAY v.price FOR v IN variants END)` query with
+category = X and any price <= Y, all candidates satisfy the residual: an identity-ordered page
+fetches at most OFFSET + LIMIT documents. The 256-candidate probe reads 50 documents for LIMIT 50
+and 70 for OFFSET 20 LIMIT 50, in either direction. With interleaved residual rejections it reads
+99/139 ascending and 100/140 descending, within 2 * (OFFSET + LIMIT) because every other candidate
+qualifies. This ratio is not guaranteed for arbitrary residuals. The correlated `price > 10 AND
+stock > 0` probe reads one qualifying document with a matching WHEN stock > 0; without WHEN it
+rejects 1,000 cross-element false positives after 1,001 reads. A matching WHEN narrows candidates
+but does not itself guarantee a bounded fetch ratio for additional residuals or other orderings.
+These probes do not claim execution of the external SF10 benchmark or its result digest harness.
+
+The single-array-key and DISTINCT precedent is [Couchbase array indexing](https://docs.couchbase.com/server/current/n1ql/n1ql-language-reference/indexing-arrays.html),
+and [INCLUDE MISSING](https://docs.couchbase.com/server/current/n1ql/n1ql-language-reference/createindex.html)
+informs the leading-missing metadata. The narrower scalar projection/WHEN grammar is Cohesion's
+boundary. RavenDB's per-element conversion (`src/Raven.Server/Documents/Indexes/Persistence/Corax/CoraxDocumentConverterBase.cs:361-376`)
+informs enumeration, but its list context/element identity is not copied.
 
 Every component starts with one Documents-owned byte: 0 MISSING, 1 NULL, 2 FALSE, 3 TRUE,
 4 number, 5 string, 6 array, 7 object. The first four and the last two have no payload.
@@ -2111,8 +2415,8 @@ probes equal keys while excluding the document's own previous entry. Build detec
 encoded keys before creating any tree or registration. Keys containing NULL or MISSING never
 conflict (PostgreSQL's NULLS DISTINCT default, `doc/src/sgml/ref/create_index.sgml:340-347`),
 including trailing NULL/MISSING. This differs from Cohesion SQL's equal-NULL index policy.
-Arrays and objects in an indexed UNIQUE key fail with COHDOC021 naming the index and path.
-Duplicate writes/builds raise COHDOC020 (SQLSTATE 23505, PostgreSQL
+Arrays and objects in an indexed UNIQUE key fail with CD02021 naming the index and path.
+Duplicate writes/builds raise CD03020 (SQLSTATE 23505, PostgreSQL
 `src/backend/utils/errcodes.txt:239`), naming the collection and index without echoing key data.
 Both use the public `DocumentConstraintViolationException : DatabaseException` owned by this
 catalog package. The physical B+Trees deliberately stay nonunique: the catalog implements
@@ -2129,15 +2433,19 @@ one range component and retains all other conjuncts as residual filters, matchin
 `doc/src/sgml/indices.sgml:461-466`. Candidate documents remain ordered by ordinal identity.
 
 Index leaf entry references are packed metadata page/slot locations. Leaf entries carry writer
-and deleter stamps through the existing index API. Create builds the tree immediately while the
-caller holds the logical database's exclusive writer lock, preserving each visible source
-document's writer stamp. The new index definition is invisible to snapshots predating its
+and deleter stamps through the existing index API. Create snapshots only visible document/reference
+pairs under the catalog monitor. It computes and inserts one document's postings at a time inside
+the physical write bracket, outside that monitor, while the caller holds the database writer lock.
+Build staging is O(documents plus the largest per-document posting set), independent of the total
+expanded posting count; persisted tree pages and the storage/WAL bracket have their own memory
+costs. Only scalar UNIQUE builds retain a collection-wide key set for preflight uniqueness checks.
+Each inserted posting preserves its source document's writer stamp. The new index definition is invisible to snapshots predating its
 creation; those snapshots use scans.
 
 #### Catalog: Mutation, rollback, and recovery
 
-Saving a document prepares old and new composite keys and checks unique constraints, then one shared physical statement bracket
-tombstones prior metadata, inserts new metadata, tombstones old index entries, inserts new index
+Saving a document prepares deduplicated old and new composite-key sets and checks unique constraints, then one shared physical statement bracket
+tombstones prior metadata, inserts new metadata, tombstones every old index entry, inserts every new index
 entries, and persists any changed root registration (a backstop: a tree's root page stays fixed
 through splits since #1159, so registrations change only when a tree is created). Deletion
 tombstones metadata and keys in one
@@ -2145,6 +2453,22 @@ bracket. The surrounding logical transaction also owns all chunk writes/tombston
 publishes its in-memory reference only after the physical bracket succeeds. The shared version
 ledger records record and index mutations, so logical rollback erases the writer's keys and
 restores old tombstones. The caller aborts the logical operation after failure.
+
+Equal old/new values still receive distinct document-version references. Logical undo records each
+posting; physical failure rolls the whole bracket back and reattaches roots before logical undo.
+Cancellation is checked during element extraction, each cursor move and posting application,
+including after the last posting before publication. Extraction errors publish no catalog change.
+The caller continues to abort the logical operation so earlier content brackets are undone.
+Lock/latch order is the database writer lock, coordinator apply gate, B-tree latch, then storage
+page latch. Preparation can take the catalog monitor before storage latches, but never across an
+await or while entering apply/undo. Index cursors release the tree latch before catalog/content
+reads. Non-parallel tests require counted progress through replacement, rollback, pinned reads,
+canceled searches and purge, then more progress after unpinning; the duration is only a minimum
+exercise period and a hang ceiling. Injected failures/cancellation after a counted posting prove
+bracket rollback and subsequent reuse. The catalog test fixture supplies the coordinator's real
+index-pruner callback. Raw-tree reads at a released old snapshot prove physical erasure after
+purge, while registered pinned snapshots retain their postings; race counters require actual
+index-pruner passes and reclaimed postings after unpinning.
 
 Physical tree generations use reserved storage sequences and are never reused. Root registrations
 carry writer/deleter zero because they describe current physical topology, including nodes holding
@@ -2186,7 +2510,7 @@ reading only metadata kind/version headers, the registration records (which carr
 so the scrub does not change them), and each root page. `Open` decodes metadata payloads once,
 after recovery; the fence does not allocate decoded collections, documents or path lists.
 The Documents engine calls it before recovery and refuses a database
-whose indexes an engine before #1194 wrote with "Database 'x' cannot be opened. COHDBI001: …",
+whose indexes an engine before #1194 wrote with "Database 'x' cannot be opened. CK06101: …",
 the `IndexFormatException` as its inner exception. A cleanly closed database is left
 byte-identical; a crashed one has had only the storage layer's format-agnostic journal redo and
 undo, and keeps its journal for the engine that wrote it. There is no upgrade path (owner decision
@@ -2232,7 +2556,7 @@ even after a chunk failure or cancellation (#1244). Earlier chunks remain tracke
 the caller aborts. The engine's failure handler orders the operation completion gate,
 transaction end gate, then coordinator apply gate, serializing abort with rollback and
 session disposal; storage must return the failure to that handler. This keeps
-`COHDBD001` refusals until the caller rolls back. PostgreSQL likewise sends a command
+`CD04101` refusals until the caller rolls back. PostgreSQL likewise sends a command
 error through its transaction end handler (`src/backend/tcop/postgres.c:4629`,
 `AbortCurrentTransaction`); the existing engine end contract supplies the synchronization.
 
@@ -2364,3 +2688,381 @@ worker completions and bounded recorded trigger/lane waits; statement-completed 
 not supply its progress count. The observation remains internal and opt-in; see the
 [root worker design](../../Assimalign.Cohesion.Database/docs/DESIGN.md#why-this-not-that-decisions)
 for publication scope, callback isolation and the limits of the wait budgets.
+
+## Structured failure codes (#1350)
+
+The root statement-failure event reads `DatabaseException.Diagnostics`, preferring the first
+Error diagnostic and then the first entry. Offline refusals and unconfirmed commits carry the
+model's existing code there, with unprefixed Message detail and the original cause. The wire
+writer supplies the legacy error prefix once; negotiated peers also receive the existing
+structured diagnostics. No public signature, on-disk format, protocol version, event schema
+or counter changes. See the root DESIGN, structured failure-event codes, for selection and
+its PostgreSQL `src/backend/utils/error/elog.c:875-884` precedent; no reference code is copied.
+
+## Dedicated test actors (#1285)
+
+Deadline-dependent peers and busy test drivers use the linked Storage test helper's LongRunning threads. Ordinary async driver continuations stay on their actor scheduler, without changing SynchronizationContext. Existing deadlines of 25 seconds or more are hang guards. Runner settings impose no parallel-thread cap. See the [scheduling audit](../../Assimalign.Cohesion.Database.Storage/docs/TEST-HYGIENE-AUDIT.md) for every original Task.Run site, the exact journal counters and the physical index-work guards.
+
+Reference consulted: RavenDB test/StressTests/Voron/InvalidReleasesOfScratchPages.cs:39–68 and :71–103 use LongRunning stress drivers. No code was copied.
+
+## Shared B-tree pruning (#1195, #1239)
+
+This model supplies the coordinator's safe `PruneBound` to its B-tree manager and binds
+the current manager to the coordinator's version-purge pass. Record reclamation and a bounded
+index batch therefore share the existing worker schedule; index pruning runs under the apply
+gate, at most 64 leaf pages per pass, with one leaf's tree write latch held at a time.
+Catalog/store manager replacement is observed by the callback. Unique insertion prunes safely
+dead versions during its single cached descent, while pinned snapshots retain their visible
+history. Exact horizon equality retains the entry. Cancellation rolls back the unfinished page
+and retries it on a later pass. Empty leaves and their separator fences remain allocated.
+
+The independent index-maintenance worker inventory remains stable; it does not schedule this
+prune a second time. No language syntax, diagnostic code, wire bytes, model/storage/index format
+or transaction semantics change. The shared Indexing DESIGN records PostgreSQL references,
+split-path invariants, deterministic mutants and before/after measurements. Root integration
+tests exercise this model's real coordinator and current index manager, including catalog/store
+reattachment for Documents and Graph.
+
+## Confirmed record decoding (D1, #1372)
+
+Catalog open, cached metadata reads and indexed metadata fetches use
+confirmed record copies and retain DocumentCatalogException and its existing code while
+attaching page/slot corruption context. Chunk downloads and tombstoning pass the chunk location
+into decoding. ReadCommitted operations keep a statement snapshot pin. Writes acquire the
+database writer lock and compare the addressed collection/document/index set with LatestSnapshot;
+this audit does not relax their conflict checks (DocumentCollection.cs, DocumentDatabase.cs,
+DocumentPlanExecutor.cs and DocumentIndexConcurrencyTests).
+
+Reference consulted, without copying code: Neo4j
+community/record-storage-engine/src/main/java/org/neo4j/kernel/impl/store/CommonAbstractStore.java:785–792
+retries the page cursor before checking decoding errors; :861–865 checks bounds and cursor errors.
+Its record/RecordLoad.java:155–163 retains the cursor failure as the invalid-record cause.
+Cohesion uses the already-established D1 seqlock rather than adding a page read latch.
+
+Stable malformed copies are reported without speculative retries or waiting for a whole
+physical transaction. The existing storage read confirms both bytes and absence against
+all page mutations (#1365), including the copy-to-confirm window. Storage I/O, cancellation,
+timeout and existing storage exception identities are not caught by decoder-only wrappers.
+No file format, version, protocol frame, event, counter or diagnostic number changes.
+
+Physical B+Tree registrations follow this contract on open and during the pre-recovery format
+fence. Their header/format/name/flags/root and truncated-payload errors retain
+DocumentCatalogException and the decoding cause, with page and slot. Iterator I/O is outside
+the decoder catch. Regression tests repair each damaged committed registration and reopen it.
+
+Recognized unsupported catalog versions retain the existing model format refusal rather than
+acquiring a corruption classification. An internal IsFormatRefusal marker survives contextual
+wrapping; its original message is followed by page/slot details, and the engine keeps CD06105.
+Malformed current-format bytes still carry located CK06003. The existing v1 index-format
+engine tests retain their original message prefix, coordinator-disposal and byte-identical-file
+assertions. Registration truncation retains its exact EndOfStreamException beneath the located
+corruption and catalog wrappers. No format reader, upgrader or public exception member is added.
+
+## Probe costing and identity intersection (D3, #1527)
+
+Planning binds the existing scalar equality prefixes and next-component ranges, then probes
+competing inputs with BTreeIndex.CountRange at the statement snapshot. Each probe examines at
+most 512 physical entries and 32 pages, including descent and invisible entries. A complete
+count measures visible physical index entries; stale catalog references or duplicate identities
+can make it exceed the JSON candidate count. An incomplete count is a lower bound. Cost is
+the complete count, or max(1024, twice the observed count) for an incomplete probe. Equal costs
+retain the prefix/range/UNIQUE/name tie rules. There are no persisted statistics, ANALYZE command,
+format changes or upgrade readers. Counts cannot distinguish every range beyond the probe cap;
+those ties remain heuristic rather than claiming precise selectivity.
+
+An uncontested execution path skips probing because no access choice remains. EXPLAIN also
+probes that sole input to describe its estimate, while still reading no document content and
+executing no mutation. estimated_rows on IndexSeek is the visible-entry count. Detail labels
+exact_index_entries versus lower_bound, with physical probe_entries and probe_pages. actual_rows
+remains NULL. The existing eight-column description and JSON Document wire frames are unchanged.
+
+Intersection requires a complete cheapest input of at least 16 entries. Additional complete
+inputs must cost at most twice that input, contribute a constrained path not already covered,
+and fit the maximum of four inputs. Input order is ascending count then ordinal index name,
+with the cheapest tie-selected path first. This bounds additional metadata work and avoids
+scanning a broad index merely to filter a tiny selective driver. Incomplete inputs keep one
+driver; no unmeasured independence assumption supplies a combined cardinality.
+
+Catalog searches return deduplicated, snapshot-visible metadata in ordinal identity order.
+The executor merges those ordered identities before calling ReadDocument or parsing JSON,
+stopping when the intersection becomes empty. The full predicate, including unused conjuncts,
+is reapplied after the merge. Select, UPDATE, DELETE and INSERT/UPSERT SELECT share this path.
+Mutations still stage all selected identities before writes, preserving Halloween safety and
+rollback. Snapshot pins, own writes, old index generations, NULL/MISSING rules, cancellation,
+corruption and I/O identities retain their existing contracts. Results remain materialized.
+IndexIntersection's estimated_rows is the minimum input count, explicitly an upper bound;
+its actual_rows remains NULL. A session-local internal LastQueryDocumentsRead counter records
+JSON read attempts before residual filtering and resets for each admitted OQL statement. It adds
+no per-query metrics object or process-wide atomic and is not a public event-source counter.
+
+Reference consultation under C:/Source/repos, with no copied code:
+RavenDB ravendb/ravendb/src/Corax/Querying/Matches/BinaryMatch.Boolean.cs:129-191 intersects
+candidate sets, exposes count/confidence and chooses a representation from bounded memory facts.
+Neo4j neo4j/neo4j/community/cypher/runtime-util/src/main/java/org/neo4j/internal/kernel/api/helpers/IntersectionNodeLabelIndexCursor.java:108-143
+advances ordered identity cursors to common nodes. Cohesion uses its already materialized ordinal
+metadata lists instead of adding cursor or bitmap APIs.
+PostgreSQL postgres/postgres/src/backend/optimizer/path/costsize.c:1159-1195 separates bitmap
+intersection work from heap fetches and estimates independent selectivity. That independence
+estimate was rejected here: bounded probes do not establish a joint distribution, so EXPLAIN
+reports the conservative minimum-input upper bound.
+
+Before/after evidence uses the frozen integration-head model assemblies and the final #1527
+assemblies, with copied-DLL hash checks, on Windows ARM64 .NET 10.0.13. One warmup precedes twelve
+sequential batches of fifty pre-parsed queries in one explicit Snapshot transaction, with tiering
+and background GC disabled. Stopwatch/current-thread allocation surround synchronous ExecuteAsync;
+row enumeration, exact identity verification, digesting and disposal are outside the interval.
+The first two fixtures include a 1024-character ASCII JSON payload. These shared-host observations
+locate work changes; they are not the controlled SF10 RavenDB comparison required by F04.T01.
+
+| Shape | Median ns/query before -> after | Median B/query before -> after | After samples <= before median |
+| --- | --- | --- | --- |
+| 600 documents, common status and four rare dates | 4108040 -> 55676 | 2774352 -> 48296 | 12/12 |
+| 200 documents, two 100-entry inputs with one common identity | 728120 -> 100485 | 517496 -> 215976 | 12/12 |
+| Uncontested index point lookup | 12761 -> 12976 | 17696 -> 17856 | 0/12 |
+
+The uncontested path skips counting but pays 160 B/query for added planning state and candidate
+metadata; this tradeoff is retained explicitly. No SQL allocation budget is changed. Output digests
+remain CA964C821139DC21, 0000000000086D51 and 00000000000860D6 respectively. Raw harness, frozen
+assemblies, hashes and twelve-sample JSONL are retained outside the repository at
+Temp/Wave11DocumentCostProbe. Regression work counters reduce the rare-predicate JSON reads from
+550 to four and intersect two 100-entry inputs down to one JSON read. Five-input coverage keeps
+four index inputs and sixteen JSON reads, then the fifth residual returns eight identities.
+
+## Shared server options and TCP composition (#1391, D7 B)
+
+The five sealed model server-options types derive from root DatabaseServerOptions. The base owns
+Listener, Authenticator, MaxSessions, AuthenticationTimeout, IdleTimeout and ShutdownDrainTimeout.
+Defaults stay 100 sessions, ten seconds for authentication, thirty minutes idle and thirty seconds
+for shutdown. TerminalDrainLinger remains on the model leaves, default two seconds. Each model
+still snapshots every value before validation and owns the transferred listener through stop.
+No public Database interface is added; the count remains five.
+
+Database.Tcp replaces Database.Sql.Tcp. Its root-namespace extension
+Listen<TOptions>(this TOptions options, Uri endpoint) where TOptions : DatabaseServerOptions
+returns that same concrete options instance. AddServer(configure) and AddServer(factory) retain
+their existing ownership rules. Engines still reference generic Connections, never the TCP
+integration. App.Database publicly carries Database.Tcp; Connections.Tcp stays runtime-private.
+Consumer source migrates its package reference and imports Assimalign.Cohesion.Database.
+
+Binding preserves the previous SQL helper: Uri.IdnHost, literal IPv4/IPv6, localhost -> IPv4
+loopback, wildcard -> Any; DNS names are refused synchronously with CK07101. Endpoint URIs
+must be absolute, have a host and explicit positive port, and have no user information, query or
+fragment. Port zero remains invalid for a resolved endpoint URI; transport-level ephemeral binds
+remain available through the generic listener option. The old Sql.Tcp design's port-zero claim
+was inconsistent with Uri.ThrowIfNotEndpoint and is not carried forward.
+
+Missing Listener, invalid MaxSessions and invalid timers report model, engine and the exact
+option as ParamName, with kernel resx codes CK08001, CK08002 and CK08003. Existing timer
+policies are retained: Documents permits zero authentication/idle values; Blob requires positive
+values; both accept InfiniteTimeSpan. SQL/Graph/KeyValue retain their existing authentication/
+idle policy. All models require positive finite shutdown/linger values no greater than
+4,294,967,294 milliseconds. Configuration ArgumentExceptions have no SQLSTATE. No wire,
+protocol, storage format, event or counter changes.
+
+The TCP address setup was compared with PostgreSQL src/backend/libpq/pqcomm.c:442-470
+(AI_PASSIVE and pg_getaddrinfo_all) in the local clone. Cohesion deliberately keeps its existing
+literal-only bind policy instead of copying hostname resolution. No reference-engine code is copied.
+
+## Error and construction conventions (#1470)
+
+Exception messages and format templates are generated from `src/Properties/ErrorMessages.resx`;
+format arguments use the current culture. Cancellation and abort templates used during normal
+cleanup are cached before reuse. Error identities remain separate from message text where a
+structured diagnostic carrier exists. Standard .NET guards retain their argument names and exception types.
+Shared Engine source uses the consuming assembly's generated accessor through the internal `EngineErrorMessages` binding; no public resource accessor or cross-assembly internal access is introduced.
+
+## Documents diagnostic conventions (#1470)
+
+Exception and diagnostic templates use the project's build-generated `ErrorMessages` resources.
+Parameterized templates format with the current culture; abort/cancellation templates used in
+normal cleanup are cached. The [Database error-code registry](../../Assimalign.Cohesion.Database/docs/ERROR-CODES.md)
+assigns this family its two-letter prefix and categorized five-digit identities.
+Existing SQLSTATE meanings, numeric wire error kinds, frame layouts and disk formats are preserved.
+Structured diagnostics keep their code outside the message. Compiler diagnostic identifiers and
+standard .NET argument guards retain their own contracts.
+
+
+## Reusable conflict throw member (#1470)
+
+The model-specific snapshot-conflict throw is an internal static extension member of
+`DatabaseTransactionAbortedException`, whose defining assembly is Database. Documents owns the
+resource and the failure condition; a separate public exception/helper is unnecessary.
+`ThrowDocumentConflict()` preserves the exception type, existing message and diagnostic
+translation. Database/collection/executor callers share this member. There is no public API,
+SQLSTATE, wire, storage-format, event or counter change. Local validation predicates remain
+with the objects whose validity they check.
+
+
+## Shared validation message completion (#1470)
+
+Engine option requirements and portable database-name refusal reasons, including their rule
+text, resolve through each consuming model's generated internal resources. Valid name checks
+still avoid resource lookup; the engine-description template is cached for construction.
+Existing message text, parameter names, refused values and pre-I/O validation order remain
+unchanged. No public API, error identity, SQLSTATE, storage or wire format, event or counter changes.
+Local predicate guards remain with the policies they validate; reusable unconditional catalog
+throws use exception-type extension members. Private cold comparison and location-attachment
+paths retain their allocation and exception-identity behavior.
+
+## Internal convention maintenance
+
+Catalog conflict extension members and assembly-local Engine resource bindings live under `src/Internal/`. The bindings retain the shared module's marked namespace exception; public Catalog and Storage namespaces remain the component contracts. Test tuple extensions use the language's `extension(...)` syntax. Private identifiers follow the field and constant conventions without changing their values or validation order.
+
+## Direct catalog diagnostic carriers
+
+`DocumentCatalogException` keeps its existing base class and public constructors and adds
+`public IReadOnlyList<Diagnostic> Diagnostics { get; }`. The collection is never null; existing
+public constructors leave it empty. Internal catalog producers attach `CD06105` for malformed or unsupported catalog data, `CD01002` for an absent collection, and `CD01025` for an absent index.
+Exception types, message text, locations and inner causes remain intact. Engine boundaries
+retain these diagnostics while applying their existing corruption/I/O translation. No catalog
+format, protocol layout or version changes.
+
+## Shared lifecycle diagnostic completion
+
+Duplicate logical database/storage creation carries CK03001, whether the database is open or
+represented only by its closed files. Ordinary logical absence remains the precise
+DatabaseNotFoundException and carries CK03002. Each diagnostic has Error severity, the unchanged
+unprefixed exception message and no statement span. Existing coded interrupted-creation failures
+and original causes are retained. No ownership, file mutation, lifecycle ordering, format or
+protocol message-kind change accompanies these diagnostics.
+
+## Model failure producer completion
+
+Previously uncoded engine refusals now attach an Error diagnostic at their producer. Exception
+types and message detail are preserved; the code stays in Diagnostics. These refusals have no
+statement span, so Start and End remain absent. Existing argument, disposal and cancellation
+exceptions retain their identity, and transaction disposal retains its original abort cause.
+
+| Code | Failure |
+| --- | --- |
+| `CD01002` | Absent collection, including direct GetCollectionAsync |
+| `CD01009` | Duplicate wire parameter names; the existing normalized-key collision identity |
+| `CD04102` | Catalog changed since the transaction snapshot; DatabaseTransactionAbortedException |
+| `CD04103` | Expected document version does not match |
+| `CD05016` | Document result exceeds the committed frame or bounded JSON scratch limit |
+| `CD07001` | Collection and session are not bound to the same database and session |
+| `CD09001` | Collection handle no longer identifies the snapshot-visible collection |
+| `CK04001` | Unsupported transaction isolation |
+| `CK04002` | Statement/operation transaction is no longer active |
+| `CK07003` | Another statement/operation already holds the session |
+| `CK02001` | Result field does not support the requested byte accessor |
+| `CK02002` | Required result field is NULL |
+
+The normal successful paths add no diagnostic allocation, counter or process-wide atomic.
+There is no storage-format or protocol-version change and no new SQLSTATE mapping.
+The structured Failure frame carries the new producer diagnostics, and its message formats
+the first Error code once. Duplicate wire parameter keys reuse `CD01009` before parsing.
+
+## Debugger inspection (#1470)
+
+Documents debugger views expose stored collection identities, request/result metadata and reviewed owned-stream flags/lengths. They omit query parameters, content, synchronized current-transaction getters and engine/session snapshots. Internal helpers with no safe public or protected data have empty views.
+
+Eligible types follow the [Database conventions](../../Assimalign.Cohesion.Database/docs/CONVENTIONS.md) debugger display/proxy rules. Views are private and read-only; inspection does not change the public API, execution paths, error contracts, storage formats or protocol bytes.
+
+## Engine-registered document functions
+
+`DocumentDatabaseEngineBuilder.Functions.Add(DocumentFunction)` registers functions for every
+database of that engine. Build freezes an immutable `DocumentFunctionCatalog` before filesystem
+work or worker startup; later registration is refused, including after a failed build attempt.
+`DocumentDatabaseEngine.Functions` exposes that catalog, and direct `Create` uses the standard
+catalog. Registrations are configuration, never persisted schema or dynamically loaded code.
+
+The public family is `DocumentFunction`, `DocumentScalarFunction`,
+`DocumentAggregateFunction` and `DocumentAggregateAccumulator`, with
+`DocumentValue`, borrowed `DocumentArguments`, and `DocumentFunctionContext`.
+Scalar `Invoke`, aggregate `CreateAccumulator`, accumulator `Add` and `Finish` are
+nonvirtual validation boundaries over protected abstract cores. Native functions use those
+same boundaries. The standard catalog contains 30 scalar registrations and six aggregate
+registrations: COUNT has separate value and star signatures; SUM, AVG, MIN and MAX have one
+each. META and the four lazy conditional forms remain grammar forms, like SQL CASE, rather
+than eager callbacks.
+
+`DocumentFunctionName` is a generated identifier value with implicit string conversion and
+ordinal case-insensitive equality. Its validity rule follows the shared lexer's letter/underscore,
+then letter/digit/underscore grammar (`Database.Language/src/Lexer/TokenLexer.cs:113,331`).
+Function constructors and catalog name boundaries refuse default. Collection registration
+refuses all native names, grammar forms, keywords and reserved nonexecuting function names.
+Application overloads require disjoint arity ranges and one scalar/aggregate kind per name.
+The function metadata owns copies of accepted valued-kind masks. DocumentFunctionArgumentKind
+supports Boolean, Number, String, Array and Object, their unions, Json (Array | Object), and Any.
+None and unknown bits are refused in signatures; an empty mask list means Any. NULL/MISSING
+policy is independent of these masks. Typed JsonElement parameters require the Json union, so
+wrong-kind literals fail binding and primitive stored values do not reach JSON callbacks.
+Adapter-owned fractional or out-of-range integer input conversions retain CD02008 or CD02007
+before the application delegate runs; an overflow thrown by the actual callback remains CD05017. All result collections are
+non-null and read-only.
+
+Typed scalar factories support one through four inputs. The aggregate factory accepts a
+per-group seed, step and finish. Supported CLR values are Boolean, Int32, Int64, Decimal,
+String, nullable Boolean/Int32/Int64/Decimal, DocumentValue, and JSON arrays/objects as JsonElement.
+Int64 results retain Int64 metadata; Int32 and Decimal results use Decimal. A typed callback
+that receives unknown inputs must accept nullable/reference values or DocumentValue.
+An application function instance is shared across sessions and must be stateless or thread-safe;
+each aggregate call creates a fresh accumulator for each group. Reusing an accumulator fails.
+
+Default scalar policy propagates MISSING before NULL without invoking a core. The default
+aggregate policy skips both. Incompatible valued stored inputs give scalar NULL or are skipped
+by typed aggregates; known incompatible literals fail planning before reads. Native SUM and AVG
+retain their established CD02008 numeric-input refusal rather than silently skipping valued
+nonnumbers. TYPE opts into receiving unknown values. Full-control application implementations
+can use DocumentValue to distinguish NULL and MISSING. JSON passed to DocumentValue.FromJson
+is normalized and copied; borrowed arguments and contexts must not be retained beyond a call.
+
+The context carries the database name, statement cancellation token and transaction-start
+timestamp. Native date functions and application functions receive the same transaction clock.
+DatabaseException, out-of-memory, insufficient stack and statement-cancellation exceptions retain
+their identity at the function boundary, following SQL IsFunctionFailure. Application storage,
+I/O, timeout, unrelated cancellation and other external faults fail with
+CD05017, an unprefixed resource-backed message and the original inner exception. Invalid return
+types, null accumulators and reused accumulators use that external-function failure contract.
+Native scalar/aggregate overflow is translated to existing CD02007 before crossing the common
+boundary; other existing native domain/type codes and located spans remain unchanged.
+The existing statement bracket preserves rollback and explicit-transaction failure behavior.
+No Documents SQLSTATE mapping is added.
+
+Ordinary FromOql, session text execution and wire Execute admit named-call ASTs and bind them
+against the executing engine. No caller supplies a catalog argument. The standalone OqlQueryParser
+default still reports CD00008 for unknown calls; its opt-in allowUnregisteredFunctions mode
+defers that binding. Known native arity checks retain CD00006. A request can be reused with
+another engine: the second engine independently validates its own registrations.
+
+Planning resolves kinds, arities, grouping and output metadata from the catalog before reading
+rows. Executing evaluators create their reference-keyed function cache only for the first
+executed call, then reuse resolved function objects per statement to avoid per-row name lookup.
+Metadata overload lookup uses indexed reads without allocating an interface enumerator. Validation,
+paging and index-constant evaluators that execute no calls allocate no function cache. Calls remain nonconstant, including immutable-looking application callbacks: they do
+not become VALUES expressions or index seek bounds. Existing equality/range probes and identity
+intersections still select candidates, and complete predicates remain residual filters.
+EXPLAIN binds metadata without invoking callbacks. Empty and paged results retain declared
+types; no catalog format, storage format, protocol version or frame layout changes.
+
+The call preparation and strict invocation split follows PostgreSQL
+`src/backend/executor/execExpr.c:2696-2730` and
+`src/backend/executor/execExprInterp.c:944-965`; strict aggregate input skipping follows
+`src/backend/executor/nodeAgg.c:717-730`. These local reference-engine behaviors informed the
+design; no code was copied. RavenDB's case-insensitive declaration dictionary
+(`src/Raven.Server/Documents/Queries/AST/Query.cs:39-44`) is a naming comparison, while its
+JavaScript runner (`CollectionQueryEnumerable.cs:88-98`) is deliberately not adopted for
+this statically compiled NativeAOT seam.
+
+DocumentRegisteredFunctionTests covers registration, overloads, context, values, grouping,
+empty inputs, indexed residuals, DML atomicity, callback errors and native-call contracts.
+DocumentRegisteredFunctionWireTests repeats scalar, aggregate, unknown-value and failure
+behavior over InMemory and TCP. The existing recovery fixture registers typed and derived
+functions and executes them after reopening, including NativeAOT publication.
+DocumentFunctionDispatchMeasurementTests retains its existing-API twelve-sample Release
+measurement, with exact values checked and descriptive allocation/time distributions.
+
+Callbacks must not reenter an engine: another session can wait indefinitely for a lock held
+by the invoking statement, without a lock-wait timeout or detected wait-for cycle. Same-session
+reentry is refused before a nested operation executes. Typed delegates do not receive the
+statement cancellation token; derived implementations can observe the borrowed context.
+An aggregate is evaluated once per appearance in projection, HAVING and ORDER BY, including
+its arguments; identical-looking appearances are independent. Unknown names keep CD00008 but
+ordinary engine requests report ExecutionFailure at binding, without StatementParseFailed.
+
+Callback timeouts and I/O leave a completed execution failure on a reusable session.
+Protocol layout and version stay unchanged.
+
+Interleaved same-process Release comparisons did not reproduce the reported native-call
+slowdown; dispatch retains bounded per-statement allocation overhead.

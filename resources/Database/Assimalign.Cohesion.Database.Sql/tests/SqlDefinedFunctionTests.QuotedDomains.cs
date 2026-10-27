@@ -113,10 +113,10 @@ public sealed partial class SqlDefinedFunctionTests
         // Assert
         (await RowsAsync(read, "SELECT \"echo.function:amount\"(value), cast_domain(value) FROM t")).ShouldBe([[3, 3]]);
         await Should.ThrowAsync<DatabaseException>(() => RowsAsync(read, "SELECT \"echo.function:amount\"(-1) FROM t"));
-        (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(read, $"DROP DOMAIN {quoted}"))).Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLD002");
+        (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(read, $"DROP DOMAIN {quoted}"))).Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS03302");
         await ExecuteAsync(read, "DROP TABLE t");
         await ExecuteAsync(read, $"DROP FUNCTION \"echo.function:amount\"({quoted})");
-        (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(read, $"DROP DOMAIN {quoted}"))).Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLD002");
+        (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(read, $"DROP DOMAIN {quoted}"))).Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS03302");
         await ExecuteAsync(read, "DROP FUNCTION cast_domain(INT)");
         await ExecuteAsync(read, $"DROP DOMAIN {quoted}");
     }

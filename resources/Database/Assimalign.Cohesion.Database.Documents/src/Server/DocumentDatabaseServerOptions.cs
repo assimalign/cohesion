@@ -1,7 +1,5 @@
 using System;
 
-using Assimalign.Cohesion.Connections;
-using Assimalign.Cohesion.Database.Security;
 
 using Assimalign.Cohesion.Database.Documents.Protocol;
 
@@ -17,56 +15,23 @@ namespace Assimalign.Cohesion.Database.Documents;
 /// (<see cref="DocumentDatabaseServer.Create"/>, or the
 /// <c>engineBuilder.AddServer(configure)</c> and <c>engineBuilder.AddServer(factory)</c> builder verbs).
 /// </remarks>
-public sealed class DocumentDatabaseServerOptions
+public sealed class DocumentDatabaseServerOptions : DatabaseServerOptions
 {
-    /// <summary>
-    /// Gets or sets the transport listener the server binds and accepts
-    /// connections from. The composition root configures the listener (TCP,
-    /// named pipe, in-memory, …), then transfers its lifecycle to the server.
-    /// Stop terminally disposes the listener.
-    /// </summary>
-    public IDuplexConnectionListener? Listener { get; set; }
-
-    /// <summary>
-    /// Gets or sets the authenticator consulted during the session handshake.
-    /// When null the server uses <see cref="DatabaseAuthenticator.AllowAll"/> —
-    /// the MVP development posture, which accepts every principal. Production
-    /// deployments must supply a real implementation.
-    /// </summary>
-    public DatabaseAuthenticator? Authenticator { get; set; }
-
-    /// <summary>
-    /// Gets or sets the maximum number of concurrent sessions the server accepts.
-    /// Connections beyond the limit are rejected with an unavailable error.
-    /// </summary>
-    public int MaxSessions { get; set; } = 100;
-
-    /// <summary>
-    /// Gets or sets the time an unauthenticated connection may hold a slot before
-    /// it is dropped.
-    /// </summary>
-    public TimeSpan AuthenticationTimeout { get; set; } = TimeSpan.FromSeconds(10);
-
-    /// <summary>
-    /// Gets or sets the idle time after which a session is closed. Set to
-    /// <see cref="System.Threading.Timeout.InfiniteTimeSpan"/> to disable idle eviction.
-    /// </summary>
-    public TimeSpan IdleTimeout { get; set; } = TimeSpan.FromMinutes(30);
-
-    /// <summary>
-    /// Gets or sets the drain budget honored by <see cref="DatabaseServer.StopAsync"/>
-    /// before remaining sessions are aborted. Also bounds a terminal error's write, flush,
-    /// output completion and connection-closure wait with one deadline. Must be positive, finite,
-    /// and at most 4,294,967,294 milliseconds.
-    /// </summary>
-    public TimeSpan ShutdownDrainTimeout { get; set; } = TimeSpan.FromSeconds(30);
-
     /// <summary>
     /// Gets or sets the peer-close wait after terminal output completes. Defaults to two seconds.
     /// Must be positive, finite, and at most 4,294,967,294 milliseconds.
     /// The shutdown drain budget remains the outer limit on all terminal I/O.
     /// </summary>
     public TimeSpan TerminalDrainLinger { get; set; } = TimeSpan.FromSeconds(2);
+
+    internal void ValidateFor(DatabaseName engineName)
+    {
+        ValidateCommon("Documents", engineName);
+        ValidateTimeout(AuthenticationTimeout, nameof(AuthenticationTimeout), "Documents", engineName, allowInfinite: true, allowZero: true);
+        ValidateTimeout(IdleTimeout, nameof(IdleTimeout), "Documents", engineName, allowInfinite: true, allowZero: true);
+        ValidateTimeout(ShutdownDrainTimeout, nameof(ShutdownDrainTimeout), "Documents", engineName);
+        ValidateTimeout(TerminalDrainLinger, nameof(TerminalDrainLinger), "Documents", engineName);
+    }
 
     /// <summary>
     /// Copies every option, so a server keeps settings its caller can no longer change: a later

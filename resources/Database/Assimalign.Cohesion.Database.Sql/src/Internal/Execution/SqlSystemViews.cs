@@ -74,6 +74,7 @@ internal static class SqlSystemViews
             SqlCreateSchemaExpression create => create.Name,
             SqlDropSchemaExpression drop => drop.Name,
             SqlCreateTableExpression create => create.Table.SchemaName,
+            SqlCreateTableAsExpression create => create.Table.SchemaName,
             SqlCreateViewExpression create => create.View.SchemaName,
             _ => null,
         };
@@ -82,9 +83,11 @@ internal static class SqlSystemViews
             SqlCreateViewExpression create => create.View,
             SqlDropViewExpression drop => drop.View,
             SqlInsertExpression insert => insert.Table,
+            SqlMergeExpression merge => merge.Table,
             SqlUpdateExpression update => update.Table,
             SqlDeleteExpression delete => delete.Table,
             SqlCreateTableExpression create => create.Table,
+            SqlCreateTableAsExpression create => create.Table,
             SqlDropTableExpression drop => drop.Table,
             SqlAlterTableExpression alter => alter.Table,
             SqlCreateIndexExpression create => create.Table,
@@ -94,11 +97,11 @@ internal static class SqlSystemViews
 
         if (target is not null && Find(target) is { } view)
         {
-            throw new SqlPlanningException("COHSQLE021", $"System view '{view.Schema}.{view.Name}' is read-only.", expression.Location);
+            throw new SqlPlanningException("CS04021", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExecutorExecuteRenameAsyncSqlPlanning, view.Schema, view.Name), expression.Location);
         }
         if (namespaceTarget is not null && SqlNamespaces.IsReserved(namespaceTarget))
         {
-            throw new SqlPlanningException("COHSQLE021", string.Format(System.Globalization.CultureInfo.CurrentCulture,
+            throw new SqlPlanningException("CS04021", string.Format(System.Globalization.CultureInfo.CurrentCulture,
                 ErrorMessages.SystemNamespaceReadOnly, namespaceTarget), expression.Location);
         }
     }

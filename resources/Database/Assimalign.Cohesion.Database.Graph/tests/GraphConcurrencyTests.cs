@@ -75,7 +75,7 @@ public sealed class GraphConcurrencyTests
         await schema.SaveLabelAsync(label);
         var error = await Should.ThrowAsync<DatabaseException>(async () =>
             await schema.SavePropertyKeyAsync(new GraphPropertyKeyMetadata(label.Id, "value", unsupported)));
-        error.Message.ShouldContain("COHDBG003");
+        error.Message.ShouldContain("CG03003");
         error.Message.ShouldContain(unsupported.ToString());
         (await schema.GetPropertyKeysAsync(label.Id)).ShouldBeEmpty();
         await database.CreateNodeAsync(session, ["Person"]);
@@ -200,7 +200,7 @@ public sealed class GraphConcurrencyTests
             : (await schema.GetLabelsAsync())[0].Id;
         var error = await Should.ThrowAsync<DatabaseException>(async () =>
             await schema.SavePropertyKeyAsync(new GraphPropertyKeyMetadata(definitionId, "age", DatabaseType.Int64, true)));
-        error.Message.ShouldContain("COHDBG003");
+        error.Message.ShouldContain("CG03003");
         (await schema.GetPropertyKeysAsync(definitionId)).ShouldHaveSingleItem().Type.ShouldBeNull();
         (await database.GetNodeAsync(session, first.Id)).ShouldNotBeNull().Properties["age"].ShouldBe("unknown");
     }
@@ -228,7 +228,7 @@ public sealed class GraphConcurrencyTests
                 bool blockedBeforeExpression = !pending.IsCompleted;
                 await transaction.RollbackAsync(token);
                 var error = await Should.ThrowAsync<DatabaseException>(async () => await pending);
-                error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG013");
+                error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG02013");
                 blockedBeforeExpression.ShouldBeTrue("a write statement must wait before evaluating its first LET");
                 blockedErrors++;
             }

@@ -10,6 +10,8 @@ using Xunit;
 
 using Assimalign.Cohesion.Database.Documents.Internal;
 
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
+
 namespace Assimalign.Cohesion.Database.Documents.Tests;
 
 public sealed partial class DocumentQueryTests
@@ -224,7 +226,7 @@ public sealed partial class DocumentQueryTests
         // Assert
         error.Message.ShouldBe(message);
         var diagnostic = error.Diagnostics.ShouldHaveSingleItem();
-        diagnostic.Code.ShouldBe("COHDOC013");
+        diagnostic.Code.ShouldBe("CD02013");
         diagnostic.Start.ShouldBe(escape is null ? 7 : 27);
         diagnostic.End.ShouldBe(7 + expression.Length);
     }
@@ -240,7 +242,7 @@ public sealed partial class DocumentQueryTests
         await PutAsync(collection, session, "one", "{}");
         var parameters = new Dictionary<string, object?> { ["input"] = new string('a', 10_000) };
         // Act
-        var rows = await Task.Run(() => RowsAsync(session, "SELECT @input LIKE '%a%a%a%a%a%a%a%a%b' FROM items", parameters))
+        var rows = await DedicatedTestTask.Run(() => RowsAsync(session, "SELECT @input LIKE '%a%a%a%a%a%a%a%a%b' FROM items", parameters))
             .WaitAsync(TimeSpan.FromSeconds(5));
         // Assert
         rows.Single().GetValue(0).ShouldBe(false);
@@ -331,7 +333,7 @@ public sealed partial class DocumentQueryTests
         // Act
         var error = await Should.ThrowAsync<DatabaseException>(async () => await RowsAsync(session, $"SELECT {expression} FROM items"));
         // Assert
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDOC005");
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD01005");
     }
 
     [Theory(DisplayName = "Cohesion Test [Documents] - Predicates: grouped expressions retain structure and source aliases")]
@@ -374,7 +376,7 @@ public sealed partial class DocumentQueryTests
         // Act
         var error = await Should.ThrowAsync<DatabaseException>(async () => await RowsAsync(session, $"SELECT 1 FROM items d WHERE {predicate}"));
         // Assert
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDOC001");
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD05001");
     }
 
     [Theory(DisplayName = "Cohesion Test [Documents] - IN: list expressions evaluate before membership unknown propagation")]
@@ -392,6 +394,6 @@ public sealed partial class DocumentQueryTests
         // Act
         var error = await Should.ThrowAsync<DatabaseException>(async () => await RowsAsync(session, $"SELECT {expression} FROM items"));
         // Assert
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDOC006");
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD02006");
     }
 }

@@ -17,6 +17,8 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// Encodes individual result frames. Writing statements retain their payloads inside execution,
 /// including the DML apply bracket; read-only statements encode one frame at a time during delivery.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("SqlResultPreparation")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlResultPreparation.DebugView))]
 internal sealed class SqlResultPreparation
 {
     private readonly Func<DatabaseResult>? _resultOverride;
@@ -188,5 +190,13 @@ internal sealed class SqlResultPreparation
     }
 
     private static DatabaseException Failure(string message, Exception? cause = null)
-        => new(message, [new Diagnostic { Code = "COHSQLE045", Message = message, Severity = DiagnosticSeverity.Error }], cause);
+        => new(message, [new Diagnostic { Code = "CS05045", Message = message, Severity = DiagnosticSeverity.Error }], cause);
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlResultPreparation value)
+        {
+            _ = value;
+        }
+    }
 }

@@ -3,4 +3,4 @@ using Assimalign.Cohesion.Database.Documents.Language;
 
 namespace Assimalign.Cohesion.Database.Documents.Internal;
 
-internal sealed record DocumentInsertPlan(DocumentCollectionMetadata Collection, OqlInsertExpression Statement) : DocumentStatementPlan;
+internal sealed record DocumentInsertPlan(DocumentCollectionMetadata Collection, OqlInsertExpression Statement, DocumentLogicalPlan? Returning = null) : DocumentStatementPlan;

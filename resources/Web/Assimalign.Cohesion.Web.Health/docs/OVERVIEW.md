@@ -10,7 +10,7 @@ and `/livez` pipeline endpoints.
 
 - **Model:** `IHealthCheck`, `HealthStatus`, `HealthCheckResult`, `HealthReport`,
   `HealthReportEntry`, and `HealthCheckRegistration`.
-- **Composition:** `HealthChecks.CreateBuilder()`, `IHealthChecksBuilder`, inline and typed checks.
+- **Composition:** `new HealthChecksBuilder()`, `IHealthChecksBuilder`, inline and typed checks.
   Web.Hosting supplies `AddContributor` for host contributors in its `.Hosting.Health` namespace.
 - **Filtering:** `HealthTags` and `HealthCheckPredicates` for aggregate, readiness, and liveness
   views.
@@ -41,7 +41,7 @@ Compose an immutable service, then explicitly map the endpoints that the applica
 using Assimalign.Cohesion.Web.Health;
 using Assimalign.Cohesion.Web.Hosting.Health;
 
-IHealthCheckService health = HealthChecks.CreateBuilder()
+IHealthCheckService health = new HealthChecksBuilder()
     .AddCheck(
         "self",
         () => HealthCheckResult.Healthy("accepting traffic"),
@@ -96,3 +96,12 @@ event-source logging forwarder. It reports status worsening and recovery per ser
 Verbose thrown/timed-out probes, and the exact `failed-checks` total. Health exceptions include
 their type and message in server-side sinks; dependency messages can contain host, database or
 user names. HTTP response sanitization is independent. See [Diagnostics](DESIGN.md#diagnostics).
+
+
+## Health-check builder construction (#1470)
+
+Composition uses the public sealed `HealthChecksBuilder` in `Assimalign.Cohesion.Web.Health`,
+with its public parameterless constructor. The standalone `HealthChecks.CreateBuilder()` factory
+is removed. Existing `IHealthChecksBuilder` adapters, duplicate-name checks and immutable service
+snapshots are preserved; Database's admin endpoint uses the same public constructor. No Database
+interface, protocol, format, diagnostic code, event or counter is added or changed.

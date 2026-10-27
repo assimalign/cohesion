@@ -10,6 +10,8 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// call's context carries. The parameter and result are <see cref="SqlType.AnyElement"/>; a group
 /// with no non-NULL value returns NULL.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("SqlExtremumFunction {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlExtremumFunction.DebugView))]
 internal sealed class SqlExtremumFunction : SqlAggregateFunction
 {
     private readonly bool _maximum;
@@ -28,6 +30,8 @@ internal sealed class SqlExtremumFunction : SqlAggregateFunction
         => new Accumulator(Name, _maximum ? 1 : -1, context.Collation);
 
     /// <summary>One group's extreme value.</summary>
+    [global::System.Diagnostics.DebuggerDisplay("Accumulator")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlExtremumFunction.Accumulator.DebugView))]
     private sealed class Accumulator : SqlAggregateAccumulator
     {
         private readonly string _name;
@@ -44,7 +48,7 @@ internal sealed class SqlExtremumFunction : SqlAggregateFunction
         }
 
         /// <inheritdoc />
-        /// <exception cref="SqlEvaluationException">The row count overflowed (<c>COHSQLE002</c>).</exception>
+        /// <exception cref="SqlEvaluationException">The row count overflowed (<c>CS02002</c>).</exception>
         protected override void AddCore(scoped in SqlArguments arguments)
         {
             var value = arguments[0];
@@ -55,7 +59,7 @@ internal sealed class SqlExtremumFunction : SqlAggregateFunction
             catch (OverflowException exception)
             {
                 throw SqlEvaluationException.NumericValueOutOfRange(
-                    $"{_name} overflowed; the aggregate cannot be represented as a decimal or count.", exception);
+                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.AccumulatorAddCoreSqlEvaluation2, _name), exception);
             }
 
             // A value the engine read from a row keeps the box it was read from, so comparing and
@@ -68,5 +72,31 @@ internal sealed class SqlExtremumFunction : SqlAggregateFunction
 
         /// <inheritdoc />
         protected override SqlValue FinishCore() => _extreme;
+
+        private sealed class DebugView
+        {
+            public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlExtremumFunction.Accumulator value)
+            {
+                _ = value;
+            }
+        }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Sql.Internal.SqlExtremumFunction _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlExtremumFunction value)
+        {
+            _target = value;
+        }
+
+        public string Name => _target.Name;
+        public global::Assimalign.Cohesion.Database.Sql.SqlFunctionKind Kind => _target.Kind;
+        public global::Assimalign.Cohesion.Database.Sql.SqlType? VariadicParameter => _target.VariadicParameter;
+        public global::Assimalign.Cohesion.Database.Sql.SqlType ReturnType => _target.ReturnType;
+        public global::Assimalign.Cohesion.Database.Sql.SqlFunctionVolatility Volatility => _target.Volatility;
+        public global::Assimalign.Cohesion.Database.Sql.SqlNullBehavior NullBehavior => _target.NullBehavior;
+        public bool IsNeverNull => _target.IsNeverNull;
     }
 }

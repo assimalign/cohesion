@@ -20,6 +20,11 @@ internal sealed partial class SqlPlanExecutor
         int ordinal = FindColumnOrdinal(plan.Table, plan.Column.Name);
         SqlCatalogColumn previous = plan.Table.Columns[ordinal];
         var column = plan.Column;
+        if (plan.Conversion is not null)
+        {
+            return await ExecuteAlterColumnTypeAsync(plan, statement, cancellationToken).ConfigureAwait(false);
+        }
+        if (plan.TypeChange) { EnsureNoViewReads(plan.Table, column.Name, rename: true); }
         // PostgreSQL tablecmds.c:15612-15624 refuses changing a type read by a view.
         if (previous.Type.Type != column.Type.Type || previous.Type.MaxLength != column.Type.MaxLength ||
             previous.Type.Precision != column.Type.Precision || previous.Type.Scale != column.Type.Scale) { EnsureNoViewReads(plan.Table, column.Name, rename: true); }
@@ -33,7 +38,7 @@ internal sealed partial class SqlPlanExecutor
             !plan.AllowDefaultChange && !string.Equals(previous.DefaultLiteral,
                 column.DefaultLiteral, StringComparison.Ordinal))
         {
-            throw new SqlPlanningException("COHSQLE013", $"ALTER COLUMN '{column.Name}' requiring a storage-type, domain, collation, scale or default rewrite is not supported. Use an explicit table-copy migration; in-place rewrites are tracked by #1447.");
+            throw new SqlPlanningException("CS05013", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExecuteAlterColumnAsyncSqlPlanning, column.Name));
         }
         if (column.IsNullable && plan.Table.PrimaryKeyColumns.Contains(column.Name, StringComparer.OrdinalIgnoreCase))
         {
@@ -63,8 +68,8 @@ internal sealed partial class SqlPlanExecutor
             }
             catch (DatabaseException failure)
             {
-                throw new SqlPlanningException("COHSQLE013", string.Format(CultureInfo.CurrentCulture,
-                    ErrorMessages.MissingValueConversion, column.Name, column.Type.Type) + ". " + failure.Message);
+                throw new SqlPlanningException("CS05013", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ArgumentTypeMismatchSqlEvaluation, string.Format(CultureInfo.CurrentCulture,
+                    ErrorMessages.MissingValueConversion, column.Name, column.Type.Type) + ". " + failure.Message));
             }
         }
 

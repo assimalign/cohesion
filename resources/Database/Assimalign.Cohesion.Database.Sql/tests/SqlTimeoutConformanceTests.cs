@@ -53,7 +53,7 @@ public sealed class SqlTimeoutConformanceTests
 
         // Assert: no physical mutation or lock from the failed statement survives.
         failure.SqlState.ShouldBe("57014");
-        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE043");
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS05043");
         function.Calls.ShouldBe(1);
         elapsed.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(20));
         ceiling.IsCancellationRequested.ShouldBeFalse();
@@ -103,7 +103,7 @@ public sealed class SqlTimeoutConformanceTests
 
         // Assert: failed waits do not strand new grants or end the explicit transaction.
         failure.SqlState.ShouldBe("55P03");
-        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE044");
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS04044");
         failure.InnerException.ShouldBeOfType<TransactionLockTimeoutException>();
         if (transaction is not null) { transaction.State.ShouldBe(TransactionState.Active); }
         await holder.ExecuteAsync("INSERT INTO items VALUES (3, 3)", cancellationToken: ceiling.Token);
@@ -265,7 +265,7 @@ public sealed class SqlTimeoutConformanceTests
 
         // Assert
         failure.SqlState.ShouldBe("57014");
-        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE043");
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS05043");
         await transaction.RollbackAsync(ceiling.Token);
         (await waiter.ExecuteAsync("INSERT INTO items VALUES (1)", cancellationToken: ceiling.Token)).AffectedCount.ShouldBe(1);
     }
@@ -334,7 +334,7 @@ public sealed class SqlTimeoutConformanceTests
         // Assert
         failure.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
         failure.ConnectionUsable.ShouldBeTrue();
-        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(lockTimeout ? "COHSQLE044" : "COHSQLE043");
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(lockTimeout ? "CS04044" : "CS05043");
         await connection.ExecuteAsync("COMMIT", cancellationToken: TestTimeout.Token());
         (await connection.QueryAsync("SELECT id FROM users WHERE id = 3", cancellationToken: TestTimeout.Token())).ShouldHaveSingleItem()[0].ShouldBe(3);
         harness.Server.Sessions.Count.ShouldBe(1);

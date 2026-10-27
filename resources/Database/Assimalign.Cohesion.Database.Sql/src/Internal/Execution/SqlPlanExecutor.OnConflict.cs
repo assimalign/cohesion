@@ -100,7 +100,7 @@ internal sealed partial class SqlPlanExecutor
                 if (pendingConflict)
                 {
                     if (!plan.DoUpdate) { continue; }
-                    throw new SqlPlanningException("COHSQLE036", ErrorMessages.UpsertRepeatedRow);
+                    throw new SqlPlanningException("CS05036", ErrorMessages.UpsertRepeatedRow);
                 }
                 if (conflict is { } reference)
                 {
@@ -115,11 +115,10 @@ internal sealed partial class SqlPlanExecutor
                     var (pageId, slotIndex) = SqlRecordLocation.Unpack(reference);
                     if (!_storage.TryReadRecord(pageId, slotIndex, table.ObjectId, out var record)) { throw DamagedRow(); }
                     var oldValues = DecodeRow(record, pageId, slotIndex, table, bound.MissingValues, out var writer, out _);
-                    if (oldValues is null) { throw DamagedRow(); }
                     if (statement.Transaction.IsolationLevel != IsolationLevel.ReadCommitted && !statement.Snapshot.IsVisible(writer))
                     { throw SnapshotConflict(); }
                     if (!plan.DoUpdate) { continue; }
-                    if (affected.Contains(reference)) { throw new SqlPlanningException("COHSQLE036", ErrorMessages.UpsertRepeatedRow); }
+                    if (affected.Contains(reference)) { throw new SqlPlanningException("CS05036", ErrorMessages.UpsertRepeatedRow); }
                     var scope = new object?[oldValues.Length * 2];
                     oldValues.CopyTo(scope, 0);
                     proposal.Values.CopyTo(scope, oldValues.Length);

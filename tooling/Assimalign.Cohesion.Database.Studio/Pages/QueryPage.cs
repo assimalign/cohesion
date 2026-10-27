@@ -323,7 +323,7 @@ internal sealed class QueryPage : ContentPage
         }
 
         (string text, int start, int length) = GetRunRange();
-        if (length == 0 || ScriptSplitter.IsBlank(text.Substring(start, length)))
+        if (length == 0 || ScriptSplitter.IsBlank(text.Substring(start, length), _model))
         {
             _messages.Add("Nothing to run.", MessageKind.Warning);
             return;
@@ -367,8 +367,8 @@ internal sealed class QueryPage : ContentPage
         }
     }
 
-    private static bool IsDdl(string statement)
-        => ScriptSplitter.FirstKeyword(statement) is "CREATE" or "DROP" or "ALTER" or "INSERT";
+    private bool IsDdl(string statement)
+        => ScriptSplitter.FirstKeyword(statement, _model) is "CREATE" or "DROP" or "ALTER" or "INSERT";
 
     private void Render(List<StatementOutcome> outcomes, double totalMs)
     {
@@ -543,14 +543,14 @@ internal sealed class QueryPage : ContentPage
         };
 
         DocumentWorkspace Docs() => _workspace as DocumentWorkspace
-            ?? throw new InvalidOperationException("The Documents workspace is not ready.");
+            ?? throw new InvalidOperationException(ErrorMessages.DocumentWorkspaceUnavailable);
 
         ulong? Version() => string.IsNullOrWhiteSpace(version.Text)
             ? null
             : ulong.Parse(version.Text.Trim(), NumberStyles.None, CultureInfo.InvariantCulture);
 
         string Required(Entry entry, string what) => string.IsNullOrWhiteSpace(entry.Text)
-            ? throw new InvalidOperationException($"Enter the {what}.")
+            ? throw new InvalidOperationException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.RequiredValueMissing, what))
             : entry.Text.Trim();
 
         return Ui.Panel(new VerticalStackLayout

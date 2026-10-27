@@ -10,6 +10,8 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// taken (so INTEGER's minimum is representable); approximate and decimal values keep their type.
 /// Non-numeric arguments fail signature validation before row access (#1120).
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("SqlAbsFunction {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlAbsFunction.DebugView))]
 internal sealed class SqlAbsFunction : SqlScalarFunction
 {
     /// <summary>Initializes the function.</summary>
@@ -21,7 +23,7 @@ internal sealed class SqlAbsFunction : SqlScalarFunction
     }
 
     /// <inheritdoc />
-    /// <exception cref="SqlEvaluationException">The BIGINT minimum has no positive counterpart (<c>COHSQLE002</c>).</exception>
+    /// <exception cref="SqlEvaluationException">The BIGINT minimum has no positive counterpart (<c>CS02002</c>).</exception>
     /// <exception cref="DatabaseException">The value is not a number.</exception>
     protected override SqlValue InvokeCore(scoped in SqlArguments arguments)
     {
@@ -37,7 +39,7 @@ internal sealed class SqlAbsFunction : SqlScalarFunction
             case DatabaseType.Int64:
                 long number = value.AsInt64();
                 return number == long.MinValue
-                    ? throw SqlEvaluationException.NumericValueOutOfRange($"ABS of BIGINT {number.ToString(CultureInfo.InvariantCulture)} overflowed.")
+                    ? throw SqlEvaluationException.NumericValueOutOfRange(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlAbsFunctionInvokeCoreSqlEvaluation, number.ToString(CultureInfo.InvariantCulture)))
                     : SqlValue.FromInt64(Math.Abs(number));
             case DatabaseType.Float32:
                 return SqlValue.FromSingle(Math.Abs(value.AsSingle()));
@@ -46,7 +48,25 @@ internal sealed class SqlAbsFunction : SqlScalarFunction
             case DatabaseType.Decimal:
                 return SqlValue.FromDecimal(Math.Abs(value.AsDecimal()));
             default:
-                throw new DatabaseException("ABS requires a numeric argument.");
+                throw new DatabaseException(ErrorMessages.SqlAbsFunctionInvokeCoreDatabase);
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Sql.Internal.SqlAbsFunction _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlAbsFunction value)
+        {
+            _target = value;
+        }
+
+        public string Name => _target.Name;
+        public global::Assimalign.Cohesion.Database.Sql.SqlFunctionKind Kind => _target.Kind;
+        public global::Assimalign.Cohesion.Database.Sql.SqlType? VariadicParameter => _target.VariadicParameter;
+        public global::Assimalign.Cohesion.Database.Sql.SqlType ReturnType => _target.ReturnType;
+        public global::Assimalign.Cohesion.Database.Sql.SqlFunctionVolatility Volatility => _target.Volatility;
+        public global::Assimalign.Cohesion.Database.Sql.SqlNullBehavior NullBehavior => _target.NullBehavior;
+        public bool IsNeverNull => _target.IsNeverNull;
     }
 }

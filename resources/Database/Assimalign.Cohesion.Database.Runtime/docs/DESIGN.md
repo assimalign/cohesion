@@ -21,3 +21,7 @@ Every shipped inventory member is also listed in the Database CI matrix and the 
 release inventory. Validate assembly closure and package contents by packing this runtime
 project after inventory changes. Model schema extraction changes delivery only; host
 composition and runtime service ordering are unchanged.
+
+Public and private framework members use separate unconditioned item groups. Splitting the
+declarations preserves their evaluation order, membership and reference/runtime visibility;
+compiler and AOT settings are inherited from the shared build rather than duplicated here.

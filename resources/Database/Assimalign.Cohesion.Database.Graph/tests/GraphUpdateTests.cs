@@ -151,7 +151,7 @@ public sealed class GraphUpdateTests
             new Dictionary<string, object?> { ["vs"] = new[] { 1 } }));
 
         // Assert
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG003");
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG03003");
         (await Read(await session.ExecuteAsync("MATCH (a:P) RETURN a.x"))).ShouldAllBe(row => row[0] == null);
     }
 
@@ -179,7 +179,7 @@ public sealed class GraphUpdateTests
         var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync($"MATCH (a:P) {update}"));
 
         // Assert
-        error.Message.ShouldContain("COHDBG003", Case.Sensitive);
+        error.Message.ShouldContain("CG03003", Case.Sensitive);
         (await Read(await session.ExecuteAsync("MATCH (a:P) RETURN a.required"))).Single()[0].ShouldBe(1L);
     }
 

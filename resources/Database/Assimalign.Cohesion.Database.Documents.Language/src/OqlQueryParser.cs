@@ -9,19 +9,31 @@ namespace Assimalign.Cohesion.Database.Documents.Language;
 
 /// <summary>Parses the executable OQL profile into an expression tree with diagnostics.</summary>
 /// <remarks>Instances serialize concurrent calls. Offsets are zero-based UTF-16 positions with exclusive ends.</remarks>
+[global::System.Diagnostics.DebuggerDisplay("OqlQueryParser")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Documents.Language.OqlQueryParser.DebugView))]
 public sealed partial class OqlQueryParser : QueryParser
 {
     private readonly object _gate = new();
+    private readonly bool _allowUnregisteredFunctions;
     private string _source = string.Empty;
     private readonly List<Lexeme> _tokens = [];
     private readonly List<Diagnostic> _diagnostics = [];
     private readonly HashSet<int> _parameterFormPositions = [];
+    private bool[] _comprehensionTails = [];
     private int _position;
     private int _depth;
 
     /// <summary>Initializes an OQL parser.</summary>
     /// <param name="options">Optional shared analyzer configuration.</param>
-    public OqlQueryParser(QueryParserOptions? options = null) : base(options ?? new QueryParserOptions()) { }
+    public OqlQueryParser(QueryParserOptions? options = null) : this(false, options) { }
+
+    /// <summary>Initializes a parser which can defer named function resolution to an engine.</summary>
+    /// <param name="allowUnregisteredFunctions">Defers unknown function binding to an engine catalog; the default keeps standalone unknown-name diagnostics.</param>
+    /// <param name="options">Optional shared analyzer configuration.</param>
+    public OqlQueryParser(bool allowUnregisteredFunctions, QueryParserOptions? options = null) : base(options ?? new QueryParserOptions())
+    {
+        _allowUnregisteredFunctions = allowUnregisteredFunctions;
+    }
 
     /// <inheritdoc />
     protected override QueryLanguageProfile Profile => OqlLanguageProfile.Instance;
@@ -60,7 +72,7 @@ public sealed partial class OqlQueryParser : QueryParser
             {
                 if (!IsCompleteComment(item.Text))
                 {
-                    Error("OQL0003", "Unterminated block comment.", item);
+                    Error("CD00003", ErrorMessages.OqlQueryParserParseCoreVoid, item);
                 }
             }
             else
@@ -68,19 +80,20 @@ public sealed partial class OqlQueryParser : QueryParser
                 _tokens.Add(item);
                 if (token.Type is TokenType.String or TokenType.QuotedIdentifier && !IsCompleteQuoted(item.Text))
                 {
-                    Error("OQL0003", "Unterminated quoted text.", item);
+                    Error("CD00003", ErrorMessages.OqlQueryParserParseCoreVoid2, item);
                 }
                 else if (token.Type == TokenType.Unrecognized && token.Value[0] != '?')
                 {
                     // A character OQL does not use is never a name or an expression, so the
                     // statement is not parsed and nothing is bound (#1101).
-                    Error("OQL0002", $"Unexpected character {DescribeCharacter(item.Text)}; it is not part of OQL.", item);
+                    Error("CD00002", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.OqlQueryParserParseCoreVoid3, DescribeCharacter(item.Text)), item);
                 }
             }
         }
         line += TokenLexer.CountLineBreaks(_source.AsSpan(scanned));
 
         _tokens.Add(new Lexeme(TokenType.Eof, string.Empty, _source.Length, _source.Length, line));
+        FindComprehensionTails();
 
         // Capability checks precede syntax parsing, so a known unsupported construct
         // cannot be disguised by the first downstream syntax error it would cause.
@@ -92,7 +105,7 @@ public sealed partial class OqlQueryParser : QueryParser
         }
         else if (Current.Type == TokenType.Eof)
         {
-            Error("OQL0001", "Query text is empty.", Current);
+            Error("CD00001", ErrorMessages.OqlQueryParserParseCoreVoid4, Current);
             expression = EmptyExpression();
         }
         else if (Is("EXPLAIN"))
@@ -124,6 +137,10 @@ public sealed partial class OqlQueryParser : QueryParser
                 _diagnostics.Add(QueryDiagnostics.UnsupportedClause($"EXPLAIN {Current.Text}", Profile.Language, Span(start, Current)));
                 expression = EmptyExpression();
             }
+        }
+        else if (Is("BEGIN") || Is("START") || Is("COMMIT") || Is("ROLLBACK"))
+        {
+            expression = ParseTransaction();
         }
         else if (Is("SELECT"))
         {
@@ -163,7 +180,7 @@ public sealed partial class OqlQueryParser : QueryParser
         }
         else
         {
-            Error("OQL0002", "Expected SELECT, INSERT, UPSERT, UPDATE, DELETE, CREATE INDEX, DROP INDEX, CREATE COLLECTION, or DROP COLLECTION.", Current);
+            Error("CD00002", ErrorMessages.OqlQueryParserParseCoreVoid5, Current);
             expression = EmptyExpression();
         }
 
@@ -179,11 +196,11 @@ public sealed partial class OqlQueryParser : QueryParser
             }
             else if (Take(TokenType.Semicolon) && Current.Type != TokenType.Eof)
             {
-                Error("OQL0002", "Only one statement is accepted per query.", Current);
+                Error("CD00002", ErrorMessages.OqlQueryParserParseCoreVoid6, Current);
             }
             else if (Current.Type != TokenType.Eof)
             {
-                Error("OQL0002", $"Unexpected token '{Current.Text}'.", Current);
+                Error("CD00002", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.OqlQueryParserParseCoreVoid7, Current.Text), Current);
             }
         }
 
@@ -195,7 +212,7 @@ public sealed partial class OqlQueryParser : QueryParser
             if (!_parameterFormPositions.Contains(token.Start))
             {
                 _diagnostics.RemoveAll(diagnostic => diagnostic.Start == token.Start);
-                Error("OQL0002", "Unexpected character '?'; it is not part of OQL.", token);
+                Error("CD00002", ErrorMessages.OqlQueryParserParseCoreVoid8, token);
             }
             expression = EmptyExpression();
         }
@@ -203,7 +220,9 @@ public sealed partial class OqlQueryParser : QueryParser
         var statement = new OqlQueryStatement(expression);
         foreach (var (clause, token) in unsupported)
         {
-            RequireClause(statement, clause, Span(token, token));
+            if (clause == OqlClauses.Returning)
+            { statement.AddDiagnostic(QueryDiagnostics.UnsupportedClause(clause, Profile.Language, Span(token, token))); }
+            else { RequireClause(statement, clause, Span(token, token)); }
         }
 
         foreach (var diagnostic in _diagnostics)
@@ -229,12 +248,14 @@ public sealed partial class OqlQueryParser : QueryParser
                 IsWord(_tokens[statementStart], "DROP"));
         var (updateHeaderEnd, updateClause) = FindUpdateClause(statementStart);
         bool selected = false;
+        bool returningList = false;
         int parentheses = 0;
         bool inSelectList = false;
         int selectHead = -2;
         int fetchHead = -2;
         int pagingHead = -2;
         int openQuantifiers = 0;
+        var expressionScopes = new Stack<bool>();
         var (indexKeyStart, indexKeyEnd) = FindIndexKeyRange();
         for (int index = 0; index < _tokens.Count; index++)
         {
@@ -274,7 +295,7 @@ public sealed partial class OqlQueryParser : QueryParser
             // Only a recognized clause head owns the next word; a path or alias does not.
             if (value == "FIRST" && index == fetchHead + 1 || value == "ALL" && index == pagingHead + 1) { continue; }
 
-            // Array-index keys belong to the DDL parser, which emits one diagnostic at ALL/DISTINCT.
+            // The DDL parser owns array-key quantifiers and the comprehension binding words.
             if (value is ("ALL" or "DISTINCT" or "ARRAY" or "FOR" or "IN" or "END") && indexKeyStart >= 0 && index > indexKeyStart && index < indexKeyEnd) { continue; }
             if (value == "UNIQUE" && index == 1 && IsIndexStatement("CREATE")) { continue; }
 
@@ -298,6 +319,12 @@ public sealed partial class OqlQueryParser : QueryParser
             // ColLabel accepts reserved words after AS; quantifier pins remain positional.
             if (inSelectList && index > 0 && IsWord(_tokens[index - 1], "AS")) { continue; }
             if (value == "FROM") { inSelectList = false; }
+            if (value == "RETURNING" && index > statementStart && parentheses == 0 && EndsOperand(index - 1) &&
+                !IsWord(_tokens[index - 1], "INTO") && !IsWord(_tokens[index - 1], "FROM") && !IsWord(_tokens[index - 1], "AS"))
+            {
+                returningList = true;
+                inSelectList = true;
+            }
 
             // A SQL++ quantified predicate, EVERY x IN ... SATISFIES ... END, is one construct:
             // its binding IN is not the IN predicate, and its text up to END belongs to it.
@@ -309,7 +336,7 @@ public sealed partial class OqlQueryParser : QueryParser
                     openQuantifiers++;
                     index += 2;
                 }
-                else if (value == "CASE" || value == "ARRAY" && index + 1 < _tokens.Count && _tokens[index + 1].Type != TokenType.LeftParen)
+                else if (value == "CASE" || value is "ARRAY" or "FIRST" && IsComprehension(index))
                 {
                     // CASE shares END with quantified predicates. Its END must not expose
                     // the rest of the unsupported predicate to independent capability scans.
@@ -321,8 +348,20 @@ public sealed partial class OqlQueryParser : QueryParser
                 }
                 continue;
             }
+            if (value is "ARRAY" or "FIRST" && IsComprehension(index) &&
+                !(index > 0 && EndsOperand(index - 1) && IsWord(_tokens[index + 1], "FROM")))
+            {
+                string clause = value == "ARRAY" ? OqlClauses.ArrayComprehension : OqlClauses.FirstComprehension;
+                if (!Supports(clause)) { AddUnsupported(result, clause, token); openQuantifiers++; }
+                else { expressionScopes.Push(true); }
+                continue;
+            }
+            if (value == "CASE" && expressionScopes.Count > 0) { expressionScopes.Push(false); }
+            if (value == "END" && expressionScopes.Count > 0) { expressionScopes.Pop(); }
+            if (value == "FOR" && expressionScopes.Count > 0 && expressionScopes.Peek()) { continue; }
             if (quantifier)
             {
+                if (expressionScopes.Count > 0) { expressionScopes.Push(false); }
                 string clause = value == "EVERY" ? OqlClauses.Every : OqlClauses.Any;
                 if (!Supports(clause))
                 {
@@ -333,12 +372,6 @@ public sealed partial class OqlQueryParser : QueryParser
                 continue;
             }
 
-            if (value == "ARRAY" && index + 1 < _tokens.Count && _tokens[index + 1].Type != TokenType.LeftParen)
-            {
-                AddUnsupported(result, "ARRAY", token);
-                openQuantifiers++;
-                continue;
-            }
             if (value == "ANY" && index + 2 < _tokens.Count && IsWord(_tokens[index + 1], "AND") && IsWord(_tokens[index + 2], "EVERY"))
             {
                 AddUnsupported(result, "ANY AND EVERY", token);
@@ -390,7 +423,7 @@ public sealed partial class OqlQueryParser : QueryParser
             {
                 // Only SELECT statements and INSERT/UPSERT SELECT have a query of their own.
                 // A SELECT inside an expression is nested even when it is the first one.
-                if (statementWithoutQuery || selected || parentheses > 0)
+                if (statementWithoutQuery || selected || parentheses > 0 || returningList)
                 {
                     result.Add((OqlClauses.Subquery, token));
                 }
@@ -438,7 +471,7 @@ public sealed partial class OqlQueryParser : QueryParser
                 if (value == "LIMIT") { continue; }
             }
 
-            if (!OqlUnsupportedVocabulary.TryFind(value, out var word) || Supports(word.Construct))
+            if (!OqlUnsupportedVocabulary.TryFind(value, out var word) || Supports(word.Construct) && value != "RETURNING")
             {
                 continue;
             }
@@ -511,6 +544,52 @@ public sealed partial class OqlQueryParser : QueryParser
         if (!Supports(construct))
         {
             result.Add((construct, token));
+        }
+    }
+
+    private bool IsComprehension(int index)
+    {
+        // Parenthesized mappings are legal; the retired ARRAY()/FIRST() calls stay refused.
+        if (index + 1 >= _tokens.Count) { return false; }
+        return _tokens[index + 1].Type != TokenType.LeftParen || _comprehensionTails[index + 1];
+    }
+
+    private void FindComprehensionTails()
+    {
+        // Memoize balanced lookahead in linear work, including inputs much deeper than
+        // the parser's limit. Re-scanning each nested parenthesized mapping is quadratic.
+        _comprehensionTails = new bool[_tokens.Count];
+        var delimiters = new Stack<int>();
+        for (int index = _tokens.Count - 1; index >= 0; index--)
+        {
+            var token = _tokens[index];
+            int next = index + 1;
+            // Reserved words can still name dotted members, AS labels and object keys.
+            bool expressionWord = (index == 0 || _tokens[index - 1].Type != TokenType.Dot && !IsWord(_tokens[index - 1], "AS")) &&
+                (next >= _tokens.Count || _tokens[next].Type != TokenType.Colon);
+            if (token.Type is TokenType.RightParen or TokenType.RightBracket or TokenType.RightBrace ||
+                expressionWord && IsWord(token, "END")) { delimiters.Push(index); }
+            else if (token.Type is TokenType.LeftParen or TokenType.LeftBracket or TokenType.LeftBrace)
+            {
+                TokenType close = token.Type switch
+                {
+                    TokenType.LeftParen => TokenType.RightParen,
+                    TokenType.LeftBracket => TokenType.RightBracket,
+                    _ => TokenType.RightBrace,
+                };
+                next = delimiters.TryPeek(out int end) && _tokens[end].Type == close ? delimiters.Pop() + 1 : _tokens.Count;
+            }
+            else if (expressionWord && (IsWord(token, "CASE") ||
+                (IsWord(token, "ARRAY") || IsWord(token, "FIRST")) && IsComprehension(index) ||
+                (IsWord(token, "ANY") || IsWord(token, "SOME") || IsWord(token, "EVERY")) && IsQuantifierBinding(next)))
+            {
+                // Skip the entire nested expression, including its FOR/WHEN, before looking
+                // for this comprehension's binding. The reverse pass already classified it.
+                next = delimiters.TryPeek(out int end) && IsWord(_tokens[end], "END") ? delimiters.Pop() + 1 : _tokens.Count;
+            }
+            bool stop = token.Type is TokenType.Comma or TokenType.Semicolon or TokenType.Eof or TokenType.RightParen ||
+                expressionWord && (IsWord(token, "FROM") || IsWord(token, "AS") || IsWord(token, "END"));
+            _comprehensionTails[index] = !stop && (IsWord(token, "FOR") || next < _tokens.Count && _comprehensionTails[next]);
         }
     }
 
@@ -592,14 +671,14 @@ public sealed partial class OqlQueryParser : QueryParser
     {
         if (!Take(text))
         {
-            Error("OQL0002", $"Expected {text}.", Current);
+            Error("CD00002", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.OqlQueryParserExpectVoid, text), Current);
         }
     }
     private void Expect(TokenType type, string text)
     {
         if (!Take(type))
         {
-            Error("OQL0002", $"Expected {text}.", Current);
+            Error("CD00002", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.OqlQueryParserExpectVoid, text), Current);
         }
     }
     private static Location Span(Lexeme start, Lexeme end) =>
@@ -625,7 +704,7 @@ public sealed partial class OqlQueryParser : QueryParser
             Advance();
             if (token.Text.Length == 2)
             {
-                Error("OQL0002", "An identifier cannot be empty.", token);
+                Error("CD00002", ErrorMessages.OqlQueryParserIdentifierVoid, token);
             }
 
             return token.Text.Length >= 2 ? token.Text[1..^1].Replace("\"\"", "\"", StringComparison.Ordinal) : string.Empty;
@@ -636,7 +715,7 @@ public sealed partial class OqlQueryParser : QueryParser
             Advance();
             return token.Text;
         }
-        Error("OQL0002", "Expected an identifier.", token);
+        Error("CD00002", ErrorMessages.OqlQueryParserIdentifierVoid2, token);
         return string.Empty;
     }
 
@@ -714,4 +793,12 @@ public sealed partial class OqlQueryParser : QueryParser
     }
 
     private readonly record struct Lexeme(TokenType Type, string Text, int Start, int End, int Line);
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Documents.Language.OqlQueryParser value)
+        {
+            _ = value;
+        }
+    }
 }

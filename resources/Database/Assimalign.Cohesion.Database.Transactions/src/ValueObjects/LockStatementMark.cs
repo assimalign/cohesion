@@ -11,6 +11,8 @@ namespace Assimalign.Cohesion.Database.Transactions;
 /// applied no writes. Existing resources, including upgrades acquired after the mark,
 /// remain held. A mark belongs to one lock manager and one transaction lifetime.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("LockStatementMark")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Transactions.LockStatementMark.DebugView))]
 public readonly struct LockStatementMark : IEquatable<LockStatementMark>
 {
     internal LockStatementMark(LockManager manager, TransactionSequence owner, ulong grantSequence)
@@ -47,4 +49,12 @@ public readonly struct LockStatementMark : IEquatable<LockStatementMark>
     /// <param name="right">The second mark.</param>
     /// <returns>True when the marks identify different boundaries.</returns>
     public static bool operator !=(LockStatementMark left, LockStatementMark right) => !left.Equals(right);
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Transactions.LockStatementMark value)
+        {
+            _ = value;
+        }
+    }
 }

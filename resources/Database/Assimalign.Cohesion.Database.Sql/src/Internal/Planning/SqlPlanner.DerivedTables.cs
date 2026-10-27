@@ -18,7 +18,7 @@ internal sealed partial class SqlPlanner
     private SqlProjectionMetadata? CaptureProjectionMetadata(SqlCollationCandidate candidate, SqlCatalogColumn? source = null,
         SqlExpression? expression = null, SqlExpressionEvaluator? evaluator = null)
     {
-        if (ViewDefinitionBinding is null && !InDerivedBody && _commonTableState?.BindingOperands is null && !(_queryScopes?.SetOperandDepth > 0)) { return null; }
+        if (ViewDefinitionBinding is null && !_inferringTableOutput && !InDerivedBody && _commonTableState?.BindingOperands is null && !(_queryScopes?.SetOperandDepth > 0)) { return null; }
         SqlType? declared = expression is null ? null : UnwrapCollation(expression) switch
         {
             SqlCastExpression cast => SqlDefinitionBinder.ResolveType(cast.TargetType, _functions, cast.Location),
@@ -69,7 +69,7 @@ internal sealed partial class SqlPlanner
         var projections = output.Projections;
         if (names.Count > 0 && names.Count != projections.Count)
         {
-            throw new SqlPlanningException("COHSQLE013",
+            throw new SqlPlanningException("CS05013",
                 string.Format(CultureInfo.CurrentCulture, ErrorMessages.DerivedColumnCount, relationName, projections.Count, names.Count), query.Location);
         }
         var columns = new SqlCatalogColumn[projections.Count];
@@ -83,7 +83,7 @@ internal sealed partial class SqlPlanner
             {
                 scope ??= new SqlExpressionEvaluator(output.Columns, _parameters, output.Bindings,
                     defaultCollation: _catalog.DefaultCollation, subquerySlots: _subquerySlots,
-                    functions: _functions, cancellationToken: _cancellationToken,
+                    functions: _functions, cancellationToken: _cancellationToken, foldConstants: FoldQueryConstants,
                     outerScope: OuterScope, outerDependencies: OuterDependencies);
                 inherited = scope.ColumnMetadata(reference);
             }
@@ -96,7 +96,7 @@ internal sealed partial class SqlPlanner
                 {
                     scope ??= new SqlExpressionEvaluator(output.Columns, _parameters, output.Bindings,
                         defaultCollation: _catalog.DefaultCollation, subquerySlots: _subquerySlots, functions: _functions,
-                        cancellationToken: _cancellationToken, outerScope: OuterScope, outerDependencies: OuterDependencies);
+                        cancellationToken: _cancellationToken, outerScope: OuterScope, outerDependencies: OuterDependencies, foldConstants: FoldQueryConstants);
                     if (scope.ResolveFunction(call)?.ReturnType is { IsPseudo: false } result) { declaredType = result; }
                 }
             }
@@ -105,7 +105,7 @@ internal sealed partial class SqlPlanner
             {
                 scope ??= new SqlExpressionEvaluator(output.Columns, _parameters, output.Bindings,
                     defaultCollation: _catalog.DefaultCollation, subquerySlots: _subquerySlots, functions: _functions,
-                    cancellationToken: _cancellationToken, outerScope: OuterScope, outerDependencies: OuterDependencies);
+                    cancellationToken: _cancellationToken, outerScope: OuterScope, outerDependencies: OuterDependencies, foldConstants: FoldQueryConstants);
                 inferredType = scope.OutputTypeInfo(resultExpression);
             }
             var type = projection.Metadata?.TypeInfo ?? inherited?.Type ?? declaredType?.Storage
@@ -117,7 +117,7 @@ internal sealed partial class SqlPlanner
             string name = names.Count == 0 ? projection.Name : names[i];
             if (string.IsNullOrWhiteSpace(name))
             {
-                throw new SqlPlanningException("COHSQLE013", ErrorMessages.DerivedColumnName, projection.Expression?.Location ?? query.Location);
+                throw new SqlPlanningException("CS05013", ErrorMessages.DerivedColumnName, projection.Expression?.Location ?? query.Location);
             }
             columns[i] = new SqlCatalogColumn(name,
                 type, projection.IsNullable,
@@ -138,6 +138,10 @@ internal sealed partial class SqlPlanner
 
     private bool ReferenceBindsTo(SqlRelationReference? reference, SqlColumnReferenceExpression column, SqlSelectExpression? owner = null)
     {
+        if (reference is SqlJoinedTableReference group)
+        {
+            return SourceRelations([group.Item]).Any(child => ReferenceBindsTo(child, column, owner));
+        }
         if (reference is null || (_queryScopes?.Scopes.Any(scope => ReferenceEquals(scope.Derived, reference)) ?? false) || !SqlExpressionEvaluator.MatchesQualifier(reference, column))
         {
             return false;
@@ -169,7 +173,7 @@ internal sealed partial class SqlPlanner
         }
         if (plan is not SqlRelationPlan relation)
         {
-            throw new SqlPlanningException("COHSQLE013", ErrorMessages.QuerySourceRequired);
+            throw new SqlPlanningException("CS05013", ErrorMessages.QuerySourceRequired);
         }
         return (relation.OutputProjections, relation.OutputColumns, relation.OutputBindings);
     }

@@ -12,7 +12,7 @@ namespace Assimalign.Cohesion.Database.Graph.Language.Tests;
 /// <summary>
 /// Keyword disposition (#1101): every word the GQL profile lexes as a keyword, every entry of
 /// the recognized-unsupported table, contextual EXPLAIN, and every executable label-expression spelling (#1139)
-/// either parses inside a supported clause or is rejected with exactly one <c>COHDBL001</c>
+/// either parses inside a supported clause or is rejected with exactly one <c>CK00001</c>
 /// naming its construct. A word added to any of those lists without a case here fails the
 /// coverage test.
 /// </summary>
@@ -66,8 +66,8 @@ public sealed class GqlKeywordDispositionTests
         ["UNION"] = Rejects("MATCH (a) RETURN a UNION MATCH (b) RETURN b", "UNION"),
         ["DISTINCT"] = Parses("MATCH (a) RETURN DISTINCT a.name"),
         ["ALL"] = Parses("MATCH (a) RETURN ALL a.name"),
-        ["ANY"] = Rejects("MATCH ANY (a)-[]->(b) RETURN a", "ANY PATH SEARCH"),
-        ["SHORTEST"] = Rejects("MATCH SHORTEST 2 (a)-[]->(b) RETURN a", GqlClauses.ShortestPath),
+        ["ANY"] = Parses("MATCH ANY (a)-[]->(b) RETURN a"),
+        ["SHORTEST"] = Parses("MATCH SHORTEST 2 (a)-[]->(b) RETURN a"),
         ["OR"] = Parses("MATCH (a) WHERE a.x = 1 OR a.y = 2 RETURN a"),
         ["NOT"] = Parses("MATCH (a) WHERE NOT a.x = 1 RETURN a"),
         ["XOR"] = Parses("MATCH (a) WHERE a.x = 1 XOR a.y = 2 RETURN a"),
@@ -82,11 +82,11 @@ public sealed class GqlKeywordDispositionTests
         ["BETWEEN"] = Rejects("MATCH (a) WHERE a.x BETWEEN 1 AND 2 RETURN a", "BETWEEN"),
         ["NONE"] = Rejects("MATCH (a) WHERE NONE(a.tags) RETURN a", "NONE"),
         ["SINGLE"] = Rejects("MATCH (a) WHERE SINGLE(a.tags) RETURN a", "SINGLE"),
-        ["CASE"] = Parses(CaseExpression),
-        ["WHEN"] = Parses(CaseExpression),
-        ["THEN"] = Parses(CaseExpression),
-        ["ELSE"] = Parses(CaseExpression),
-        ["END"] = Parses(CaseExpression),
+        ["CASE"] = Parses(caseExpression),
+        ["WHEN"] = Parses(caseExpression),
+        ["THEN"] = Parses(caseExpression),
+        ["ELSE"] = Parses(caseExpression),
+        ["END"] = Parses(caseExpression),
         ["COALESCE"] = Parses("RETURN COALESCE(NULL, 1)"),
         ["NULLIF"] = Parses("RETURN NULLIF(1, 1)"),
         ["GRAPH"] = Rejects("CREATE GRAPH g", "GRAPH"),
@@ -100,13 +100,16 @@ public sealed class GqlKeywordDispositionTests
         ["ALTER"] = Rejects("ALTER GRAPH g", "ALTER"),
         ["GRANT"] = Rejects("GRANT READ ON GRAPH g TO u", "GRANT"),
         ["REVOKE"] = Rejects("REVOKE READ ON GRAPH g FROM u", "REVOKE"),
-        ["BEGIN"] = Rejects("BEGIN TRANSACTION", "BEGIN"),
-        ["COMMIT"] = Rejects("COMMIT", "COMMIT"),
-        ["ROLLBACK"] = Rejects("ROLLBACK", "ROLLBACK"),
+        ["BEGIN"] = Parses("BEGIN TRANSACTION"),
+        ["START"] = Parses("START TRANSACTION"),
+        ["TRANSACTION"] = Parses("BEGIN TRANSACTION"),
+        ["COMMIT"] = Parses("COMMIT"),
+        ["ROLLBACK"] = Parses("ROLLBACK"),
         ["FINISH"] = Rejects("MATCH (a) FINISH", "FINISH"),
         ["NEXT"] = Parses("MATCH (a) RETURN a NEXT MATCH (b) RETURN b"),
         ["FOR"] = Parses("FOR x IN [1, 2] RETURN x"),
         ["HAVING"] = Rejects("MATCH (a) RETURN a HAVING a.x = 1", "HAVING"),
+        ["OVER"] = Rejects("RETURN count(*) OVER ()", "WINDOW OVER"),
         ["STDDEV_SAMP"] = Rejects("MATCH (a) RETURN STDDEV_SAMP(a.age)", "STDDEV_SAMP"),
         ["STDDEV_POP"] = Rejects("MATCH (a) RETURN STDDEV_POP(a.age)", "STDDEV_POP"),
         ["PERCENTILE_CONT"] = Rejects("MATCH (a) RETURN PERCENTILE_CONT(a.age, 0.5)", "PERCENTILE_CONT"),
@@ -117,10 +120,10 @@ public sealed class GqlKeywordDispositionTests
         ["CATALOG"] = Rejects("CREATE CATALOG c", "CATALOG"),
         // ISO/IEC 39075 delete, path and edge constructs
         ["NODETACH"] = Rejects("MATCH (n) NODETACH DELETE n", "NODETACH DELETE"),
-        ["WALK"] = Rejects("MATCH WALK (a)-[]->(b) RETURN a", "WALK PATH MODE"),
-        ["TRAIL"] = Rejects("MATCH TRAIL (a)-[]->(b) RETURN a", "TRAIL PATH MODE"),
-        ["SIMPLE"] = Rejects("MATCH SIMPLE (a)-[]->(b) RETURN a", "SIMPLE PATH MODE"),
-        ["ACYCLIC"] = Rejects("MATCH ACYCLIC (a)-[]->(b) RETURN a", "ACYCLIC PATH MODE"),
+        ["WALK"] = Parses("MATCH WALK (a)-[]->(b) RETURN a"),
+        ["TRAIL"] = Parses("MATCH TRAIL (a)-[]->(b) RETURN a"),
+        ["SIMPLE"] = Parses("MATCH SIMPLE (a)-[]->(b) RETURN a"),
+        ["ACYCLIC"] = Parses("MATCH ACYCLIC (a)-[]->(b) RETURN a"),
         ["~"] = Rejects("MATCH (a)~[r]~(b) RETURN a", GqlUnsupportedVocabulary.UndirectedEdge),
         ["CARDINALITY"] = Rejects("RETURN cardinality(1)", "FUNCTION cardinality"),
         ["LTRIM"] = Rejects("RETURN ltrim(1)", "FUNCTION ltrim"),
@@ -161,7 +164,7 @@ public sealed class GqlKeywordDispositionTests
         ["LABELED"] = Parses("MATCH (n) WHERE n IS NOT LABELED A RETURN n"),
     };
 
-    private const string CaseExpression = "MATCH (a) RETURN CASE WHEN a.x = 1 THEN 1 ELSE 2 END";
+    private const string caseExpression = "MATCH (a) RETURN CASE WHEN a.x = 1 THEN 1 ELSE 2 END";
 
     [Fact(DisplayName = "Cohesion Test [Graph.Language] - Keyword disposition: every keyword and recognized-unsupported entry has a case")]
     public void Corpus_EveryKeywordAndTableEntry_ShouldHaveACase()
@@ -183,7 +186,7 @@ public sealed class GqlKeywordDispositionTests
             .Message.ShouldContain("FUTUREWORD", Case.Sensitive);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Graph.Language] - Keyword disposition: each word parses in a supported clause or reports one COHDBL001 naming its construct")]
+    [Fact(DisplayName = "Cohesion Test [Graph.Language] - Keyword disposition: each word parses in a supported clause or reports one CK00001 naming its construct")]
     public void Parse_EveryCase_ShouldMatchItsDisposition()
     {
         // Arrange
@@ -208,10 +211,10 @@ public sealed class GqlKeywordDispositionTests
                     failures.Add($"{word}: expected a supported parse of '{keywordCase.Gql}' but found {found}");
                 }
             }
-            else if (errors.Length != 1 || errors[0].Code != "COHDBL001" ||
+            else if (errors.Length != 1 || errors[0].Code != "CK00001" ||
                      errors[0].Message?.Contains($"The {keywordCase.Construct} clause", StringComparison.Ordinal) != true)
             {
-                failures.Add($"{word}: expected one COHDBL001 naming '{keywordCase.Construct}' for '{keywordCase.Gql}' but found {found}");
+                failures.Add($"{word}: expected one CK00001 naming '{keywordCase.Construct}' for '{keywordCase.Gql}' but found {found}");
             }
             else if (GqlUnsupportedVocabulary.TryFind(word.ToUpperInvariant(), out var entry) &&
                      !errors[0].Message!.Contains(entry.Construct, StringComparison.Ordinal))
@@ -232,7 +235,7 @@ public sealed class GqlKeywordDispositionTests
 
         // Act / Assert
         GqlUnsupportedVocabulary.Words
-            .Where(word => word.Position is GqlWordPosition.PathMode or GqlWordPosition.BeforeDelete && keywords.Contains(word.Spelling))
+            .Where(word => word.Position == GqlWordPosition.BeforeDelete && keywords.Contains(word.Spelling))
             .Select(word => word.Spelling)
             .ShouldBeEmpty();
     }
@@ -273,7 +276,7 @@ public sealed class GqlKeywordDispositionTests
         var statement = parser.Parse(source);
 
         // Assert
-        statement.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBL001");
+        statement.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CK00001");
     }
 
     private static void RequireCoverage(IEnumerable<string> words, IReadOnlyDictionary<string, KeywordCase> corpus)
@@ -297,6 +300,8 @@ public sealed class GqlKeywordDispositionTests
         => GqlLanguageProfile.Instance.Keywords.ToArray()
             .Concat(GqlUnsupportedVocabulary.Words.Select(word => word.Spelling))
             .Concat(GqlLabelVocabulary.Spellings)
+            .Concat(GqlTransactionVocabulary.Spellings)
+            .Concat(Enum.GetNames<GqlPathMode>())
             .Append("EXPLAIN") // Contextual statement prefix; identifier cases live in this corpus too.
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();

@@ -8,6 +8,8 @@ using Assimalign.Cohesion.Database.Blob.Storage;
 
 namespace Assimalign.Cohesion.Database.Blob.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("BlobReadStream")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Blob.Internal.BlobReadStream.DebugView))]
 internal sealed class BlobReadStream : Stream
 {
     private readonly BlobStorage _storage;
@@ -23,7 +25,7 @@ internal sealed class BlobReadStream : Stream
     {
         if (content.Length < 0 || (content.Head == 0) != (content.Length == 0))
         {
-            throw new StorageCorruptionException("Invalid blob content reference.");
+            throw new StorageCorruptionException(ErrorMessages.BlobReadStreamFailure);
         }
 
         _storage = storage;
@@ -49,7 +51,7 @@ internal sealed class BlobReadStream : Stream
             if (_buffer.IsEmpty)
             {
                 var (page, slot) = BlobStorage.UnpackLocation(_next);
-                var chunk = BlobChunkCodec.Decode(_storage.ReadEntry(page, slot), _content.Length - _position);
+                var chunk = BlobChunkCodec.Decode(_storage.ReadEntry(page, slot), _content.Length - _position, page, slot);
                 _next = chunk.Next;
                 _buffer = chunk.Payload;
             }
@@ -64,7 +66,7 @@ internal sealed class BlobReadStream : Stream
         }
         if (_position == _content.Length && ~_checksum != _content.Checksum)
         {
-            throw new StorageCorruptionException("Blob content checksum disagrees with its catalog metadata.");
+            throw new StorageCorruptionException(ErrorMessages.BlobReadStreamReadFailure);
         }
 
         return total;
@@ -114,4 +116,20 @@ internal sealed class BlobReadStream : Stream
     public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
     public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
     public override void SetLength(long value) => throw new NotSupportedException();
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Blob.Internal.BlobReadStream _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Blob.Internal.BlobReadStream value)
+        {
+            _target = value;
+        }
+
+        public bool CanRead => _target.CanRead;
+        public bool CanSeek => _target.CanSeek;
+        public bool CanWrite => _target.CanWrite;
+        public long Length => _target.Length;
+        public long Position => _target.Position;
+    }
 }

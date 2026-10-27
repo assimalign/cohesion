@@ -58,7 +58,7 @@ internal sealed partial class SqlPlanner
         var second = QueryOutput(right);
         if (first.Projections.Count != second.Projections.Count)
         {
-            throw new SqlPlanningException("COHSQLE013", string.Format(CultureInfo.CurrentCulture,
+            throw new SqlPlanningException("CS05013", string.Format(CultureInfo.CurrentCulture,
                 ErrorMessages.SetColumnCount, set.Operator, first.Projections.Count, second.Projections.Count), set.Location);
         }
 
@@ -87,6 +87,7 @@ internal sealed partial class SqlPlanner
             projections.Add(new SqlProjection(first.Projections[i].Name, null, null, type.Type)
             {
                 Value = new SqlBoundSlot(i), Collation = collation, IsNullable = nullable,
+                HasOutputName = first.Projections[i].HasOutputName,
                 MaxLength = type.MaxLength, Metadata = new SqlProjectionMetadata(candidate, null, type, domain),
             });
             columns.Add(new SqlCatalogColumn(projections[i].Name, type, nullable,
@@ -111,13 +112,13 @@ internal sealed partial class SqlPlanner
                 if (matches.Length == 1) { ordinal = matches[0].index; }
                 else if (matches.Length > 1)
                 {
-                    throw new SqlPlanningException("COHSQLE019", string.Format(CultureInfo.CurrentCulture,
+                    throw new SqlPlanningException("CS01019", string.Format(CultureInfo.CurrentCulture,
                         ErrorMessages.SetOrderAmbiguous, name.ColumnName), order.Expression.Location);
                 }
             }
             if (ordinal < 0)
             {
-                throw new SqlPlanningException("COHSQLE018", ErrorMessages.SetOrderOutput, order.Expression.Location);
+                throw new SqlPlanningException("CS02018", ErrorMessages.SetOrderOutput, order.Expression.Location);
             }
             ordering.Add(new SqlBoundOrdering(new SqlBoundSlot(ordinal), order.IsDescending, NullsFirst(order), projections[ordinal].Collation));
         }

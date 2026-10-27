@@ -41,6 +41,15 @@ public sealed class OqlExecutionConformanceTests
     private static readonly IReadOnlyDictionary<string, ExecutionCase[]> _cases =
         new Dictionary<string, ExecutionCase[]>(StringComparer.OrdinalIgnoreCase)
         {
+            [OqlClauses.Begin] =
+            [
+                new("BEGIN", [[4L]], VerificationStatement: "SELECT COUNT(*) FROM items"),
+                new("START WORK ISOLATION LEVEL READ COMMITTED", [[4L]], VerificationStatement: "SELECT COUNT(*) FROM items"),
+            ],
+            [OqlClauses.Commit] = [new("COMMIT TRANSACTION", [[5L]],
+                ["BEGIN", "INSERT INTO items (KEY, VALUE) VALUES ('committed', 1)"], "SELECT COUNT(*) FROM items")],
+            [OqlClauses.Rollback] = [new("ROLLBACK WORK", [[4L]],
+                ["BEGIN", "DELETE FROM items"], "SELECT COUNT(*) FROM items")],
             [OqlClauses.Explain] =
             [
                 new("EXPLAIN SELECT name FROM items",
@@ -78,6 +87,13 @@ public sealed class OqlExecutionConformanceTests
                 new("DELETE FROM items", [["by_score"]], ["CREATE INDEX by_score ON items (details.score)"],
                     "SELECT INDEX_NAME FROM COHESION_SCHEMA.INDEXES", ExpectedAffectedCount: 4),
             ],
+            [OqlClauses.Returning] =
+            [
+                new("INSERT INTO items (KEY, VALUE) VALUES ('e', {name:'echo'}) RETURNING name", [["echo"]], ExpectedAffectedCount: 1),
+                new("UPSERT INTO items (KEY, VALUE) VALUES ('a', {name:'replaced'}) RETURNING VALUE name", [["replaced"]], ExpectedAffectedCount: 1),
+                new("UPDATE items SET amount = 10 WHERE name = 'alpha' RETURNING RAW amount", [[10m]], ExpectedAffectedCount: 1),
+                new("DELETE FROM items WHERE name = 'alpha' RETURNING name", [["alpha"]], ExpectedAffectedCount: 1),
+            ],
             [OqlClauses.Values] =
             [
                 InsertCase(),
@@ -107,6 +123,21 @@ public sealed class OqlExecutionConformanceTests
             [
                 new("SELECT [name, amount] AS pair FROM items WHERE name = 'beta'", [[Json("[\"beta\",6]")]]),
             ],
+            [OqlClauses.ArrayComprehension] =
+            [
+                new("SELECT ARRAY x FOR x IN [1,2] WHEN x > 1 END AS a FROM items WHERE name = 'alpha'", [[Json("[2]")]]),
+                new("SELECT ARRAY x.a FOR x IN [{},{a:null},{a:2}] END AS a FROM items WHERE name = 'alpha'", [[Json("[null,2]")]]),
+                new("SELECT ARRAY (x) + CASE WHEN TRUE THEN 1 ELSE 2 END FOR x IN [1] WHEN CASE WHEN TRUE THEN TRUE ELSE FALSE END END AS result FROM items WHERE name = 'alpha'", [[Json("[2]")]]),
+                new("SELECT ARRAY (x) IN ARRAY y FOR y IN [x] END FOR x IN [1] WHEN ARRAY y FOR y IN [x] END END AS result FROM items WHERE name = 'alpha'", [[Json("[true]")]]),
+                new("SELECT ARRAY (x) + FIRST y FOR y IN [x] END FOR x IN [1] WHEN FIRST y FOR y IN [x] END END AS result FROM items WHERE name = 'alpha'", [[Json("[2]")]]),
+                new("SELECT ARRAY (x = 1) = ANY y IN [x] SATISFIES y END FOR x IN [1] WHEN ANY y IN [x] SATISFIES y END END AS result FROM items WHERE name = 'alpha'", [[Json("[true]")]]),
+                new("SELECT ARRAY (x = 1) = EVERY y IN [x] SATISFIES y END FOR x IN [1] WHEN EVERY y IN [x] SATISFIES y END END AS result FROM items WHERE name = 'alpha'", [[Json("[true]")]]),
+            ],
+            [OqlClauses.FirstComprehension] =
+            [
+                new("SELECT FIRST x FOR x IN [1,2] WHEN x > 1 END AS f FROM items WHERE name = 'alpha'", [[2m]]),
+                new("SELECT FIRST (x) + CASE WHEN TRUE THEN 1 ELSE 2 END FOR x IN [1] END AS result FROM items WHERE name = 'alpha'", [[2m]]),
+            ],
             [OqlClauses.From] =
             [
                 new("SELECT d.name FROM items d", [["alpha"], ["beta"], ["gamma"], ["delta"]]),
@@ -114,6 +145,8 @@ public sealed class OqlExecutionConformanceTests
             ],
             [OqlClauses.Where] =
             [
+                new("SELECT 1 FROM items WHERE FALSE AND amount = (ANY x IN [0] SATISFIES 1 / x > 0 END)", []),
+                new("SELECT 1 FROM items WHERE FALSE AND amount BETWEEN 0 AND (FIRST 1 / x FOR x IN [0] END)", []),
                 new("SELECT name FROM items WHERE (amount >= @minimum AND amount < 6) OR amount IS NULL",
                     [["gamma"], ["delta"]], Parameters: new Dictionary<string, object?> { ["minimum"] = 3 }),
                 new("SELECT name FROM items WHERE details.score IS NULL AND NOT (amount IS NOT NULL)", []),
@@ -221,6 +254,9 @@ public sealed class OqlExecutionConformanceTests
                     "SELECT INDEX_NAME, PATH, PATHS[0], PATHS[1], IS_UNIQUE FROM COHESION_SCHEMA.INDEXES ORDER BY INDEX_NAME", Missing: [(0, 3)]),
                 new("CREATE INDEX by_tag ON items (tags[0])", [["by_tag", "tags[0]", false]],
                     VerificationStatement: "SELECT INDEX_NAME, PATH, IS_UNIQUE FROM COHESION_SCHEMA.INDEXES"),
+                new("CREATE INDEX by_elements ON items (DISTINCT ARRAY t FOR t IN tags END)",
+                    [["by_elements", "DISTINCT ARRAY v FOR v IN \"tags\" END", false]],
+                    VerificationStatement: "SELECT INDEX_NAME, PATH, IS_UNIQUE FROM COHESION_SCHEMA.INDEXES"),
             ],
             [OqlClauses.DropIndex] =
             [
@@ -263,6 +299,7 @@ public sealed class OqlExecutionConformanceTests
 
                 // Assert: DDL must change catalog state; queries must return the exact values and order.
                 result.Status.ShouldBe(DatabaseResultStatus.Success, context);
+                if (clause == OqlClauses.Returning) { result.AffectedCount.ShouldBe(execution.ExpectedAffectedCount, context); }
                 if (execution.VerificationStatement is string verification)
                 {
                     result.AffectedCount.ShouldBe(execution.ExpectedAffectedCount, context);
@@ -309,9 +346,10 @@ public sealed class OqlExecutionConformanceTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Documents] - Conformance: index catalog user errors have distinct codes and preserve the session")]
-    [InlineData("duplicate", "COHDOC024")]
-    [InlineData("missing", "COHDOC025")]
-    [InlineData("key-size", "COHDOC026")]
+    [InlineData("duplicate", "CD03024")]
+    [InlineData("missing", "CD01025")]
+    [InlineData("key-size", "CD02026")]
+    [InlineData("definition-size", "CD03026")]
     public async Task Execute_IndexUserError_ShouldReturnDistinctCodeAndKeepSession(string scenario, string code)
     {
         // Arrange
@@ -325,6 +363,8 @@ public sealed class OqlExecutionConformanceTests
         {
             "duplicate" => "CREATE INDEX ix ON items (b)",
             "missing" => "DROP INDEX absent ON items",
+            "definition-size" => "CREATE INDEX ix ON items (" + string.Join(',',
+                Enumerable.Range(0, 32).Select(i => new string('p', 260) + i)) + ")",
             _ => "CREATE INDEX ix ON items (a)",
         };
 
@@ -447,6 +487,11 @@ public sealed class OqlExecutionConformanceTests
 
     private static bool ContainsClause(OqlExpression expression, string clause) => clause switch
     {
+        OqlClauses.Returning => expression is OqlInsertExpression { Returning: not null } or OqlUpsertExpression { Returning: not null }
+            or OqlUpdateExpression { Returning: not null } or OqlDeleteExpression { Returning: not null },
+        OqlClauses.Begin => expression is OqlTransactionExpression { Command: OqlTransactionCommand.Begin },
+        OqlClauses.Commit => expression is OqlTransactionExpression { Command: OqlTransactionCommand.Commit },
+        OqlClauses.Rollback => expression is OqlTransactionExpression { Command: OqlTransactionCommand.Rollback },
         OqlClauses.Explain => expression is OqlExplainExpression,
         OqlClauses.Insert => expression is OqlInsertExpression,
         OqlClauses.Upsert => expression is OqlUpsertExpression,
@@ -459,6 +504,8 @@ public sealed class OqlExecutionConformanceTests
         OqlClauses.SelectValue => expression is OqlSelectExpression { IsValue: true },
         OqlClauses.ObjectConstructor => expression is OqlSelectExpression objectQuery && objectQuery.Projections.Any(p => p.Expression is OqlObjectExpression),
         OqlClauses.ArrayConstructor => expression is OqlSelectExpression arrayQuery && arrayQuery.Projections.Any(p => p.Expression is OqlArrayExpression),
+        OqlClauses.ArrayComprehension => expression is OqlSelectExpression arrays && arrays.Projections.Any(p => p.Expression is OqlComprehensionExpression { IsFirst: false }),
+        OqlClauses.FirstComprehension => expression is OqlSelectExpression first && first.Projections.Any(p => p.Expression is OqlComprehensionExpression { IsFirst: true }),
         OqlClauses.From => expression is OqlSelectExpression { Collection.Length: > 0 },
         OqlClauses.Unnest => expression is OqlSelectExpression unnestQuery && unnestQuery.Unnest.Any(binding => !binding.IsLeft),
         OqlClauses.LeftUnnest => expression is OqlSelectExpression leftQuery && leftQuery.Unnest.Any(binding => binding.IsLeft),

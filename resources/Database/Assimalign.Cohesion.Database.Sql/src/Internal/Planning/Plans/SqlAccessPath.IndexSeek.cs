@@ -15,8 +15,29 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// <param name="EqualityValues">The equality prefix values, one per leading key column, coerced to storage types.</param>
 /// <param name="Lower">The optional lower bound on the key column after the prefix.</param>
 /// <param name="Upper">The optional upper bound on the key column after the prefix.</param>
+[global::System.Diagnostics.DebuggerDisplay("SqlIndexSeekPath")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlIndexSeekPath.DebugView))]
 internal sealed record SqlIndexSeekPath(
     SqlCatalogIndex Index,
     IReadOnlyList<object?> EqualityValues,
     SqlSeekBound? Lower,
-    SqlSeekBound? Upper) : SqlAccessPath;
+    SqlSeekBound? Upper) : SqlAccessPath
+{
+    // One optional reference; only competing paths allocate a cost description.
+    internal SqlAccessCost? Cost { get; set; }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Sql.Internal.SqlIndexSeekPath _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlIndexSeekPath value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Sql.Catalog.SqlCatalogIndex Index => _target.Index;
+        public global::System.Collections.Generic.IReadOnlyList<object?> EqualityValues => _target.EqualityValues;
+        public global::Assimalign.Cohesion.Database.Sql.Internal.SqlSeekBound? Lower => _target.Lower;
+        public global::Assimalign.Cohesion.Database.Sql.Internal.SqlSeekBound? Upper => _target.Upper;
+    }
+}

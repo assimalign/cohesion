@@ -16,6 +16,9 @@ public sealed record GqlRelationshipPattern(string? Variable, string? Type,
     /// <summary>Gets the optional repetition bounds; a named quantified relationship binds a list.</summary>
     public GqlQuantifier? Quantifier { get; init; }
 
+    /// <summary>Gets the inline WHERE prefilter, evaluated for each relationship inside path search.</summary>
+    public GqlExpression? Predicate { get; init; }
+
     /// <summary>
     /// Gets the ISO/IEC 39075 label expression the relationship's type must satisfy, such as
     /// <c>T|U</c> or <c>!T</c>, or null when the pattern names no type. An abbreviated edge
@@ -24,7 +27,7 @@ public sealed record GqlRelationshipPattern(string? Variable, string? Type,
     /// <remarks>
     /// When it is set it is the relationship's whole type requirement, and <see cref="Type"/>
     /// must be null or equal the expression's single name; the planner rejects any other
-    /// combination with <c>COHDBG001</c>. A pattern built with <see cref="Type"/> alone keeps its
+    /// combination with <c>CG05001</c>. A pattern built with <see cref="Type"/> alone keeps its
     /// meaning: the relationship has exactly that type.
     /// </remarks>
     public GqlLabelExpression? LabelExpression { get; init; }

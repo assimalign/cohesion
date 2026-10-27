@@ -2,7 +2,7 @@
 
 ## Wire contract ownership
 
-`Assimalign.Cohesion.Database.KeyValuePair.Protocol` owns this model's wire messages, codecs, family singleton and transferred value shapes (5 public types). Both engine and remote client reference that one assembly. Its public namespace and RootNamespace equal its project name. Engine requests, planning, catalog, storage and server lifecycle stay in `Assimalign.Cohesion.Database.KeyValuePair`. This extraction preserves wire bytes and validation; moved public types intentionally change namespace and assembly identity with no forwarders.
+`Assimalign.Cohesion.Database.KeyValuePair.Protocol` owns this model's wire messages, codecs, family singleton and transferred value shapes (6 public top-level types). Both engine and remote client reference that one assembly. Its public namespace and RootNamespace equal its project name. Engine requests, planning, catalog, storage and server lifecycle stay in `Assimalign.Cohesion.Database.KeyValuePair`. This extraction preserves wire bytes and validation; moved public types intentionally change namespace and assembly identity with no forwarders.
 
 
 The key-value model engine: `KeyValueDatabaseEngine`, an ordered key space with
@@ -31,7 +31,7 @@ keys order by unsigned lexicographic byte comparison.
   build, never dropped while declared), and its servers (`AddServer(options => ...)` or a
   factory) and workers. `KeyValueDatabaseEngine.Create(name, options)` creates a standalone
   engine; no options type carries the engine name. Open refuses a missing catalog with
-  `COHDBK006` before opening either storage (#1238). File-system data of at most one page
+  `CV06106` before opening either storage (#1238). File-system data of at most one page
   indicates interrupted creation and requires `DropDatabaseAsync`, then `CreateDatabaseAsync`;
   longer data with a missing catalog requires preserving storage and restoring the complete
   backup. Messages are storage-neutral, including in memory. Existing catalogs are validated before the
@@ -41,15 +41,15 @@ keys order by unsigned lexicographic byte comparison.
   `KeyValueDatabaseTransaction` are its typed session and explicit transaction.
 - Explicit transactions: a failed command writes nothing and leaves the transaction
   active, so later commands stay inside it until the caller commits or rolls back. The
-  exception is a storage, I/O or index failure (`COHDBK005`, or `COHDBS003` for corruption):
-  it aborts the transaction, which then refuses commands and COMMIT with `COHDBK001` naming
+  exception is a storage, I/O or index failure (`CV06105`, or `CK06003` for corruption):
+  it aborts the transaction, which then refuses commands and COMMIT with `CV04101` naming
   that cause until the caller rolls back (#1364). In autocommit the next command can run. A
   rollback can be repeated, and a started rollback always ends the transaction, even when
   its abort record or its undo fails (an undo that fails keeps the written keys locked until
   a retry completes it: about 100 ms later, then at doubling delays up to the maintenance
   interval, #1226; a failed journal write takes the database offline instead, #1252). A
   transaction the kernel ended under its
-  caller refuses commands and COMMIT with `COHDBK001`. A rollback or a closed session ends
+  caller refuses commands and COMMIT with `CV04101`. A rollback or a closed session ends
   the transaction even under a running command, which then fails and writes nothing; a
   commit while a command runs is refused.
 - Sessions address exactly one database (A5). All five typed operations reject
@@ -57,9 +57,10 @@ keys order by unsigned lexicographic byte comparison.
   the receiving session's database. Database/server administration stays on the
   host-owned engine and is absent from the command grammar.
 - The typed request family (`KeyValueGetRequest`, `KeyValuePutRequest`,
-  `KeyValueDeleteRequest`, `KeyValueExistsRequest`, `KeyValueScanRequest`) —
+  `KeyValueDeleteRequest`, `KeyValueExistsRequest`, `KeyValueScanRequest`,
+  `KeyValueKeySpacesRequest`, `KeyValueFunctionRequest`) —
   the model's members of the shared `Database.Execution` request family.
-- The text command grammar (`GET`/`PUT`/`DELETE`/`EXISTS`/`SCAN`) — the contract
+- The text command grammar (`GET`/`PUT`/`DELETE`/`EXISTS`/`SCAN`/`KEYSPACES`/`CALL`) — the contract
   in [COMMANDS.md](COMMANDS.md), parsed by the internal `ExecuteCommandTextAsync` wire entry so the
   wire protocol's Execute message serves the model with zero protocol changes.
 - `KeyValueDatabaseServer` (+ `KeyValueDatabaseServerOptions`) — the model's
@@ -68,7 +69,7 @@ keys order by unsigned lexicographic byte comparison.
   2026-07-14; see DESIGN.md for the placement history).
 - Storage operations: a failed journal or data fsync takes the database offline, both file
   sets at once, and every later operation, in process and over the server, is refused with
-  `DatabaseOfflineException` (`COHDBK002`) until `OpenDatabaseAsync` reopens it and recovery
+  `DatabaseOfflineException` (`CV06102`) until `OpenDatabaseAsync` reopens it and recovery
   decides the unconfirmed commit (#1243); `OfflineDatabases` feeds health. `BufferPoolCapacity` (32 MiB), `CheckpointJournalSize` (256 MiB) and
   `CheckpointInterval` (5 minutes) size the pool and trigger checkpoints (#1254). See
   DESIGN.md, "Storage operations".
@@ -195,3 +196,133 @@ pages, buffer pool, free-space map, WAL, and recovery are the kernel's, unchange
 The engine's storage strategies (`Assimalign.Cohesion.Database.KeyValuePair`'s
 in-memory and file-system strategies) create and open instances; consumers never
 compose this type directly.
+
+Offline refusals and unconfirmed commits expose their existing model code through Diagnostics,
+with unprefixed exception detail and the original cause. Failure tracing reads that carrier;
+legacy wire error text keeps its existing code prefix. See DESIGN, structured failure codes (#1350).
+
+## Dedicated test actors (#1285)
+
+Deadline-dependent peers and busy test drivers use the linked Storage test helper's LongRunning threads. Ordinary async driver continuations stay on their actor scheduler, without changing SynchronizationContext. Existing deadlines of 25 seconds or more are hang guards. Runner settings impose no parallel-thread cap. See the [scheduling audit](../../Assimalign.Cohesion.Database.Storage/docs/TEST-HYGIENE-AUDIT.md) for every original Task.Run site, the exact journal counters and the physical index-work guards.
+
+## Index history reclamation (#1195)
+
+The shared coordinator's purge pass reclaims safe dead B-tree entries in bounded batches;
+unique inserts also prune their key's history while reusing a single descent. Old snapshot
+views remain valid. Empty-leaf reclamation remains deferred, with no format, wire or language
+change. The callback follows the current manager after catalog/store reattachment.
+
+
+## Confirmed decode failures (#1372)
+
+Storage's D1 seqlock confirms private record copies before models decode them. Malformed
+copies report the existing corruption code with page and slot. Direct catalog APIs retain
+their model exception type and cause; engine boundaries use the common corruption exception. The shared version store rejects records shorter than its
+16-byte stamp header and retains failed undo/prune work for retry. StorageCorruptionException
+adds a record-scoped constructor and nullable SlotIndex. Formats and wire frames are unchanged.
+
+All five server-options leaves inherit DatabaseServerOptions. Database.Tcp provides generic
+Listen(Uri), retaining the concrete options type, and is public in App.Database (#1391, D7 B).
+The SQL-specific TCP integration is removed; import Assimalign.Cohesion.Database for the helper.
+
+## Error and construction conventions (#1470)
+
+Exception messages and format templates are generated from `src/Properties/ErrorMessages.resx`;
+format arguments use the current culture. Cancellation and abort templates used during normal
+cleanup are cached before reuse. Error identities remain separate from message text where a
+structured diagnostic carrier exists. Standard .NET guards retain their argument names and exception types.
+Shared Engine source uses the consuming assembly's generated accessor through the internal `EngineErrorMessages` binding; no public resource accessor or cross-assembly internal access is introduced.
+
+## KeyValuePair diagnostic conventions (#1470)
+
+Exception and diagnostic templates use the project's build-generated `ErrorMessages` resources.
+Parameterized templates format with the current culture; abort/cancellation templates used in
+normal cleanup are cached. The [Database error-code registry](../../Assimalign.Cohesion.Database/docs/ERROR-CODES.md)
+assigns this family its two-letter prefix and categorized five-digit identities.
+Existing SQLSTATE meanings, numeric wire error kinds, frame layouts and disk formats are preserved.
+Structured diagnostics keep their code outside the message. Compiler diagnostic identifiers and
+standard .NET argument guards retain their own contracts.
+
+
+## Shared validation message completion (#1470)
+
+Engine option requirements and portable database-name refusal reasons, including their rule
+text, resolve through each consuming model's generated internal resources. Valid name checks
+still avoid resource lookup; the engine-description template is cached for construction.
+Existing message text, parameter names, refused values and pre-I/O validation order remain
+unchanged. No public API, error identity, SQLSTATE, storage or wire format, event or counter changes.
+Local predicate guards remain with the policies they validate; reusable unconditional catalog
+throws use exception-type extension members. Private cold comparison and location-attachment
+paths retain their allocation and exception-identity behavior.
+
+## Internal convention maintenance
+
+Existing-storage refusal text comes from a generated resource, preserving its text and exception contract. Internal placement and private naming follow the coding rules; see [DESIGN.md](DESIGN.md).
+
+## Direct catalog diagnostics
+
+`KeyValueCatalogException.Diagnostics` is non-null and preserves the existing catalog error identities
+without changing exception ancestry or message text. See [DESIGN.md](DESIGN.md#direct-catalog-diagnostic-carriers)
+for producer codes and the legacy public-constructor contract.
+
+## Shared lifecycle diagnostic completion
+
+Duplicate logical database/storage creation carries CK03001, whether the database is open or
+represented only by its closed files. Ordinary logical absence remains the precise
+DatabaseNotFoundException and carries CK03002. Each diagnostic has Error severity, the unchanged
+unprefixed exception message and no statement span. Existing coded interrupted-creation failures
+and original causes are retained. No ownership, file mutation, lifecycle ordering, format or
+protocol message-kind change accompanies these diagnostics.
+
+An orphan directory without its data file refuses creation with CK06004 and the unchanged remedy.
+A directly opened missing physical data/catalog set carries CK06005. In-memory and file-backed
+strategies share the same condition identities. The orphan-directory format text is resourced
+through this assembly's existing Engine binding; no new public helper or reference is required.
+
+## Model failure producer completion
+
+Session-state, result-row and model-specific refusals expose structured codes while preserving
+their exception types and detail. The [producer table](DESIGN.md#model-failure-producer-completion)
+lists each condition. Successful execution, transaction ownership, storage formats and wire
+layouts are unchanged; the existing wire formatter includes an error code once.
+Handshake refusal descriptions resolve through resources with their existing text and numeric
+protocol error categories. Authentication/version negotiation and refusal control flow are unchanged.
+
+## Debugger inspection (#1470)
+
+Key-value debugger inspection uses stored metadata and existing public memory values without reading or copying their contents or evaluating session/storage operations.
+
+Eligible types follow the [Database conventions](../../Assimalign.Cohesion.Database/docs/CONVENTIONS.md) debugger display/proxy rules. Views are private and read-only; inspection does not change the public API, execution paths, error contracts, storage formats or protocol bytes.
+
+## Application scalar functions
+
+Register stateless/thread-safe callbacks before build. The engine freezes the catalog before
+I/O and shares it across its databases; direct `Create` registers none.
+
+```csharp
+var builder = KeyValueDatabaseEngine.CreateBuilder("app-functions");
+builder.Functions.Add(KeyValueFunction.Create<long, long>("increment", value => value + 1));
+builder.AddDatabase("app");
+await using var engine = await builder.BuildAsync();
+var database = await engine.OpenDatabaseAsync("app");
+await using var session = await database.CreateSessionAsync();
+await using var result = (DatabaseResultSet)await session.ExecuteAsync(
+    new KeyValueFunctionRequest("increment", [41L]));
+```
+
+`KeyValueFunction.Create` supports statically compiled delegates with 0–4 primitive arguments;
+subclass `KeyValueFunction` and override protected `InvokeCore` for another fixed arity.
+The metadata uses exact native primitive types, not numeric widening. Strict NULL input skips
+the callback; nullable delegates can explicitly opt into `CalledOnNullInput`. Trusted callbacks
+can have external effects; the context supplies only database identity and cancellation.
+Binary input/output buffers are detached. CALL uses existing Execute/result frames, returning
+one nullable `value` column and one row. [COMMANDS.md](COMMANDS.md) defines overload ambiguity,
+errors and parameter-only grammar. No built-in scalar library or aggregates are introduced.
+
+Binary argument snapshots are deduplicated per request by original backing-buffer and range
+identity, including repeated CALL references to one decoded parameter. Each unique input range
+is copied once, and argument slots share that detached snapshot; equal bytes in independent
+buffers and distinct slices remain separate. Thus owned payload bytes follow unique supplied
+ranges plus the argument slots, rather than multiplying a payload by its alias count. Typed
+`byte[]` delegate access still returns a defensive copy, and binary results remain detached.
+No arity limit, message limit, public API, disk format or wire version is added by this ownership rule.

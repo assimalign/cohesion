@@ -14,6 +14,8 @@ using Assimalign.Cohesion.Database.Types;
 /// Uses recursive-descent parsing dispatched by the leading keyword.
 /// The parser is split into partial class files for maintainability.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("SqlQueryParser")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Language.SqlQueryParser.DebugView))]
 public sealed partial class SqlQueryParser : QueryParser
 {
     /// <summary>
@@ -88,8 +90,8 @@ public sealed partial class SqlQueryParser : QueryParser
             }
             emptyStmt.AddDiagnostic(new Diagnostic
             {
-                Code = "SQL0001",
-                Message = "Query text is empty.",
+                Code = "CS00001",
+                Message = ErrorMessages.SqlQueryParserParseCoreDiagnostic,
                 Start = 0,
                 End = 0,
                 Severity = DiagnosticSeverity.Error,
@@ -135,6 +137,10 @@ public sealed partial class SqlQueryParser : QueryParser
             {
                 expression = ParseInsert(ref lexer);
             }
+            else if (keyword.Equals("MERGE", StringComparison.OrdinalIgnoreCase))
+            {
+                expression = ParseMerge(ref lexer);
+            }
             else if (keyword.Equals("UPDATE", StringComparison.OrdinalIgnoreCase))
             {
                 expression = ParseUpdate(ref lexer);
@@ -150,6 +156,10 @@ public sealed partial class SqlQueryParser : QueryParser
             else if (keyword.Equals("ALTER", StringComparison.OrdinalIgnoreCase))
             {
                 expression = ParseAlterTable(ref lexer);
+            }
+            else if (keyword.Equals("TRUNCATE", StringComparison.OrdinalIgnoreCase))
+            {
+                expression = ParseTruncate(ref lexer);
             }
             else if (keyword.Equals("DROP", StringComparison.OrdinalIgnoreCase))
             {
@@ -187,7 +197,7 @@ public sealed partial class SqlQueryParser : QueryParser
         }
 
         // A supported expression parser may deliberately stop at a clause outside
-        // this profile, which already carries COHDBL001, so the text from that clause
+        // this profile, which already carries CK00001, so the text from that clause
         // on adds no second diagnostic. Otherwise every statement kind must have
         // consumed its whole text: a leftover token means the parse dropped part of
         // what was written (#1068). That includes text the parser stopped at before
@@ -212,7 +222,7 @@ public sealed partial class SqlQueryParser : QueryParser
         }
 
         // A statement that crossed a nesting limit was abandoned at that point (#1151): only
-        // its SQL0006 and what was reported before it describe the text, and only its command
+        // its CS00006 and what was reported before it describe the text, and only its command
         // type is kept, so no consumer ever receives the partial tree.
         if (NestingExceeded)
         {
@@ -241,8 +251,8 @@ public sealed partial class SqlQueryParser : QueryParser
         {
             statement.AddDiagnostic(new Diagnostic
             {
-                Code = "SQL0002",
-                Message = "Unsupported or unknown SQL command.",
+                Code = "CS00002",
+                Message = ErrorMessages.SqlQueryParserParseCoreDiagnostic2,
                 Start = firstTokenPosition,
                 End = firstTokenPosition,
                 Severity = DiagnosticSeverity.Error,
@@ -255,8 +265,8 @@ public sealed partial class SqlQueryParser : QueryParser
         {
             statement.AddDiagnostic(new Diagnostic
             {
-                Code = "SQL0100",
-                Message = "Statement does not end with ';'.",
+                Code = "CS00009",
+                Message = ErrorMessages.SqlQueryParserParseCoreDiagnostic3,
                 Start = _lastTokenEnd,
                 End = _lastTokenEnd,
                 Severity = DiagnosticSeverity.Information,
@@ -306,14 +316,14 @@ public sealed partial class SqlQueryParser : QueryParser
         }
         if (!IsAtEnd(ref lexer) && lexer.Current.Type != TokenType.Semicolon)
         {
-            AddSyntaxDiagnostic(ref lexer, "Expected the end of the transaction-control statement.");
+            AddSyntaxDiagnostic(ref lexer, ErrorMessages.SqlQueryParserParseTransactionVoid);
             ConsumeRemaining(ref lexer);
         }
         return new SqlTransactionExpression(command, Location.Create(1, 1, start, _lastTokenEnd));
     }
 
     /// <summary>
-    /// Reports <c>SQL0003</c> at the current token unless an error already starts there.
+    /// Reports <c>CS00003</c> at the current token unless an error already starts there.
     /// Recovery leaves the offending token in place, so the enclosing parsers that next
     /// expect something at it would otherwise report the same mistake again.
     /// </summary>
@@ -331,8 +341,8 @@ public sealed partial class SqlQueryParser : QueryParser
     /// </summary>
     private void AddExpectedDiagnostic(ref TokenLexer lexer, string what)
         => AddSyntaxDiagnostic(ref lexer, IsAtEnd(ref lexer)
-            ? $"Expected {what} before the end of the statement."
-            : $"Expected {what} but found {DescribeToken(ref lexer)}.");
+            ? string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.QueryParserAddExpectedDiagnosticVoid, what)
+            : string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.QueryParserAddExpectedDiagnosticVoid2, what, DescribeToken(ref lexer)));
 
     /// <summary>
     /// Consumes <paramref name="token"/> when it is current; otherwise reports it as
@@ -439,27 +449,27 @@ public sealed partial class SqlQueryParser : QueryParser
             {
                 case TokenType.String when !IsTerminatedQuoted(value):
                     AddSyntaxDiagnostic(position, position + 1,
-                        "Unterminated string literal: the closing ' is missing, so the literal runs to the end of the text.");
+                        ErrorMessages.SqlQueryParserRejectLexicalErrorsVoid);
                     break;
                 case TokenType.QuotedIdentifier when !IsTerminatedQuoted(value):
                     AddSyntaxDiagnostic(position, position + 1,
-                        "Unterminated quoted identifier: the closing \" is missing, so the identifier runs to the end of the text.");
+                        ErrorMessages.SqlQueryParserRejectLexicalErrorsVoid2);
                     break;
                 case TokenType.Comment when value.StartsWith("/*", StringComparison.Ordinal) && !IsTerminatedBlockComment(value):
                     AddSyntaxDiagnostic(position, position + 2,
-                        "Unterminated block comment: the closing */ is missing, so the comment runs to the end of the text.");
+                        ErrorMessages.SqlQueryParserRejectLexicalErrorsVoid3);
                     break;
                 case TokenType.Unrecognized:
                     _sawUnrecognizedCharacter = true;
                     AddSyntaxDiagnostic(position, position + value.Length,
-                        $"Unexpected character {DescribeCharacter(value)}; it is not part of the SQL dialect.");
+                        string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlQueryParserRejectLexicalErrorsVoid4, DescribeCharacter(value)));
                     break;
                 case TokenType.Float when value[^1] is 'e' or 'E' or '+' or '-':
                     // The lexer takes an exponent marker without digits into the literal, so
                     // SELECT 1e FROM t parsed and then failed at execution with a raw
                     // FormatException naming no code or span (#1101).
                     AddSyntaxDiagnostic(position, position + value.Length,
-                        $"Malformed numeric literal '{value.ToString()}': the exponent has no digits.");
+                        string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlQueryParserRejectLexicalErrorsVoid5, value.ToString()));
                     break;
             }
         }
@@ -537,7 +547,7 @@ public sealed partial class SqlQueryParser : QueryParser
     {
         _parseDiagnostics.Add(new Diagnostic
         {
-            Code = "SQL0003",
+            Code = "CS00003",
             Message = message,
             Start = start,
             End = end,
@@ -586,7 +596,7 @@ public sealed partial class SqlQueryParser : QueryParser
             if (!HasErrorAt(lexer.Current.Position))
             {
                 AddSyntaxDiagnostic(ref lexer,
-                    $"Unexpected {DescribeToken(ref lexer)} after the end of the {StatementName(expression)} statement.{ImplicitAliasHint(ref lexer)}");
+                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.QueryParserRejectTrailingTokensVoid, DescribeToken(ref lexer), StatementName(expression), ImplicitAliasHint(ref lexer)));
             }
 
             return;
@@ -595,20 +605,20 @@ public sealed partial class SqlQueryParser : QueryParser
         if (Advance(ref lexer) && !HasErrorAt(lexer.Current.Position))
         {
             AddSyntaxDiagnostic(ref lexer,
-                $"Unexpected {DescribeToken(ref lexer)} after ';'. A request accepts exactly one statement.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.QueryParserRejectTrailingTokensVoid2, DescribeToken(ref lexer)));
         }
     }
 
     private string ImplicitAliasHint(ref TokenLexer lexer)
         => _implicitAlias is { } alias && alias.NextPosition == lexer.Current.Position
-            ? $" '{alias.Alias}' was read as an alias of table '{alias.Table}'."
+            ? string.Format(System.Globalization.CultureInfo.CurrentCulture, _errorImplicitTableAliasHint, alias.Alias, alias.Table)
             : string.Empty;
 
     private static string DescribeToken(ref TokenLexer lexer)
     {
         if (IsAtEnd(ref lexer))
         {
-            return "end of statement";
+            return _errorEndOfStatement;
         }
 
         string text = CurrentText(ref lexer);
@@ -617,16 +627,18 @@ public sealed partial class SqlQueryParser : QueryParser
             text = string.Concat(text.AsSpan(0, 40), "...");
         }
 
-        return lexer.Current.Type == TokenType.String ? $"string literal {text}" : $"'{text}'";
+        return lexer.Current.Type == TokenType.String ? string.Format(System.Globalization.CultureInfo.CurrentCulture, _errorStringLiteralTokenDescription, text) : $"'{text}'";
     }
 
     private static string StatementName(SqlQueryExpression expression) => expression switch
     {
         SqlCreateTableExpression => "CREATE TABLE",
+        SqlCreateTableAsExpression => "CREATE TABLE AS",
         SqlCreateSchemaExpression => "CREATE SCHEMA",
         SqlCreateViewExpression => "CREATE VIEW",
         SqlCreateIndexExpression => "CREATE INDEX",
         SqlDropTableExpression => "DROP TABLE",
+        SqlTruncateExpression => "TRUNCATE",
         SqlDropSchemaExpression => "DROP SCHEMA",
         SqlDropViewExpression => "DROP VIEW",
         SqlDropIndexExpression => "DROP INDEX",
@@ -815,10 +827,13 @@ public sealed partial class SqlQueryParser : QueryParser
     {
         int start = lexer.Current.Position;
         Advance(ref lexer);
+        bool analyze = IsWord(ref lexer, "ANALYZE");
+        if (analyze) { Advance(ref lexer); }
         SqlQueryExpression statement;
         if (IsWord(ref lexer, "WITH")) { statement = ParseWith(ref lexer); }
         else if (StartsQuery(lexer, queryExpected: true)) { statement = ParseQueryExpression(ref lexer); }
         else if (IsWord(ref lexer, "INSERT")) { statement = ParseInsert(ref lexer); }
+        else if (IsWord(ref lexer, "MERGE")) { statement = ParseMerge(ref lexer); }
         else if (IsWord(ref lexer, "UPDATE")) { statement = ParseUpdate(ref lexer); }
         else if (IsWord(ref lexer, "DELETE")) { statement = ParseDelete(ref lexer); }
         else
@@ -828,7 +843,7 @@ public sealed partial class SqlQueryParser : QueryParser
             ConsumeRemaining(ref lexer);
             statement = new SqlQueryExpression(SqlQueryCommandType.Unknown, null, null);
         }
-        return new SqlExplainExpression(statement, Location.Create(1, 1, start, _lastTokenEnd));
+        return new SqlExplainExpression(statement, Location.Create(1, 1, start, _lastTokenEnd), analyze);
     }
 
     /// <summary>
@@ -903,7 +918,9 @@ public sealed partial class SqlQueryParser : QueryParser
         {
             if (TryPeekToken(lexer, out string next, out _) && next == "(") { return false; }
         }
-        return value.Equals("WHERE", StringComparison.OrdinalIgnoreCase) ||
+        return value.Equals("WHEN", StringComparison.OrdinalIgnoreCase) ||
+               value.Equals("THEN", StringComparison.OrdinalIgnoreCase) ||
+               value.Equals("WHERE", StringComparison.OrdinalIgnoreCase) ||
                value.Equals("SET", StringComparison.OrdinalIgnoreCase) ||
                value.Equals("VALUES", StringComparison.OrdinalIgnoreCase) ||
                value.Equals("DEFAULT", StringComparison.OrdinalIgnoreCase) ||
@@ -941,6 +958,8 @@ public sealed partial class SqlQueryParser : QueryParser
         out Location location)
     {
         bool withStatement = false;
+        bool createTable = false;
+        bool explainPrefix = false;
         bool inWithDefinitions = false;
         HashSet<string>? cteNames = null;
         string? pendingExecutionClause = null;
@@ -988,7 +1007,13 @@ public sealed partial class SqlQueryParser : QueryParser
             string token = CurrentText(ref lexer);
             if (firstToken is null && token.Equals("EXPLAIN", StringComparison.OrdinalIgnoreCase))
             {
+                explainPrefix = true;
                 continue; // Capability checks classify the statement being described.
+            }
+            if (firstToken is null && explainPrefix && token.Equals("ANALYZE", StringComparison.OrdinalIgnoreCase))
+            {
+                explainPrefix = false;
+                continue;
             }
             firstToken ??= token == "(" ? "SELECT" : token;
             // Namespace words stay contextual. Their dedicated grammar owns the complete
@@ -1001,10 +1026,12 @@ public sealed partial class SqlQueryParser : QueryParser
                 location = null!;
                 return false;
             }
-            if (firstToken.Equals("CREATE", StringComparison.OrdinalIgnoreCase) && IsKeyword(ref lexer, "VIEW"))
+            createTable |= firstToken.Equals("CREATE", StringComparison.OrdinalIgnoreCase) && IsKeyword(ref lexer, "TABLE");
+            if (firstToken.Equals("CREATE", StringComparison.OrdinalIgnoreCase) &&
+                (IsKeyword(ref lexer, "VIEW") || (createTable && IsKeyword(ref lexer, "AS") && fromScopes.Count == 0)))
             {
-                // Header syntax is checked by ParseCreateView; AS starts the query's scan.
-                while (lexer.MoveNext())
+                // Dedicated DDL parsing checks the header; AS starts the query's scan.
+                while (!IsKeyword(ref lexer, "AS") && lexer.MoveNext())
                 {
                     if (IsKeyword(ref lexer, "AS")) { break; }
                 }
@@ -1016,7 +1043,7 @@ public sealed partial class SqlQueryParser : QueryParser
             // A WITH-prefixed INSERT's SELECT source can change firstToken below. Retain
             // the outer write identity so its RETURNING subqueries still get their own gate.
             dmlStatement |= fromScopes.Count == 0 &&
-                (IsKeyword(ref lexer, "INSERT") || IsKeyword(ref lexer, "UPDATE") || IsKeyword(ref lexer, "DELETE"));
+                (IsKeyword(ref lexer, "INSERT") || IsKeyword(ref lexer, "UPDATE") || IsKeyword(ref lexer, "DELETE") || IsKeyword(ref lexer, "MERGE"));
             if (fromScopes.Count == 0 && IsWord(ref lexer, "CONFLICT") &&
                 string.Equals(previousToken, "ON", StringComparison.OrdinalIgnoreCase))
             {
@@ -1087,6 +1114,11 @@ public sealed partial class SqlQueryParser : QueryParser
             insertValues |= lexer.Current.Type == TokenType.Keyword &&
                 firstToken.Equals("INSERT", StringComparison.OrdinalIgnoreCase) &&
                 token.Equals("VALUES", StringComparison.OrdinalIgnoreCase);
+
+            // FROM/USING and WHERE admit read subqueries; SET still refuses them.
+            dmlWhere |= fromScopes.Count == 0 &&
+                (IsKeyword(ref lexer, "FROM") && firstToken.Equals("UPDATE", StringComparison.OrdinalIgnoreCase) ||
+                 IsKeyword(ref lexer, "USING") && (firstToken.Equals("DELETE", StringComparison.OrdinalIgnoreCase) || firstToken.Equals("MERGE", StringComparison.OrdinalIgnoreCase)));
 
             dmlWhere |= fromScopes.Count == 0 && IsKeyword(ref lexer, "WHERE") &&
                 (firstToken.Equals("UPDATE", StringComparison.OrdinalIgnoreCase) || firstToken.Equals("DELETE", StringComparison.OrdinalIgnoreCase));
@@ -1190,6 +1222,8 @@ public sealed partial class SqlQueryParser : QueryParser
                     (inWithDefinitions && fromScopes.Count == 0 &&
                         (string.Equals(previousToken, "WITH", StringComparison.OrdinalIgnoreCase) || previousToken == ",") ||
                      string.Equals(previousToken, "FROM", StringComparison.OrdinalIgnoreCase) ||
+                     string.Equals(previousToken, "USING", StringComparison.OrdinalIgnoreCase) &&
+                        fromScopes.Count == 0 && firstToken.Equals("DELETE", StringComparison.OrdinalIgnoreCase) ||
                      string.Equals(previousToken, "JOIN", StringComparison.OrdinalIgnoreCase) ||
                      string.Equals(previousToken, "AS", StringComparison.OrdinalIgnoreCase) ||
                      inFrom && previousToken == "," || previousToken == "." ||
@@ -1216,8 +1250,11 @@ public sealed partial class SqlQueryParser : QueryParser
             }
             else if (lexer.Current.Type == TokenType.Keyword)
             {
-                if (token.Equals("FROM", StringComparison.OrdinalIgnoreCase)) { inFrom = true; }
-                else if (token.Equals("WHERE", StringComparison.OrdinalIgnoreCase) ||
+                if (token.Equals("FROM", StringComparison.OrdinalIgnoreCase) ||
+                    token.Equals("USING", StringComparison.OrdinalIgnoreCase) && fromScopes.Count == 0 && (firstToken.Equals("DELETE", StringComparison.OrdinalIgnoreCase) || firstToken.Equals("MERGE", StringComparison.OrdinalIgnoreCase))) { inFrom = true; }
+                else if (token.Equals("WHEN", StringComparison.OrdinalIgnoreCase) ||
+                    token.Equals("ON", StringComparison.OrdinalIgnoreCase) && firstToken.Equals("MERGE", StringComparison.OrdinalIgnoreCase) ||
+                    token.Equals("WHERE", StringComparison.OrdinalIgnoreCase) ||
                     token.Equals("GROUP", StringComparison.OrdinalIgnoreCase) ||
                     token.Equals("HAVING", StringComparison.OrdinalIgnoreCase) ||
                     token.Equals("ORDER", StringComparison.OrdinalIgnoreCase) ||
@@ -1311,5 +1348,13 @@ public sealed partial class SqlQueryParser : QueryParser
         }
 
         return lexeme;
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Language.SqlQueryParser value)
+        {
+            _ = value;
+        }
     }
 }

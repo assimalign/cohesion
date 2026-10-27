@@ -31,8 +31,7 @@ internal static class SqlValueConverter<T>
     /// <summary>Gets the SQL type of <typeparamref name="T"/>.</summary>
     /// <exception cref="NotSupportedException"><typeparamref name="T"/> has no SQL type.</exception>
     internal static SqlType Type => _type ?? throw new NotSupportedException(
-        $"The CLR type '{typeof(T).Name}' has no SQL type. A typed function takes and returns bool, sbyte, short, int, long, float, " +
-        "double, decimal, string, byte[], DateOnly, TimeOnly, DateTime, DateTimeOffset, TimeSpan or Guid, or a nullable of a value type.");
+        string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlValueConverterNotSupported, typeof(T).Name));
 
     /// <summary>
     /// Checks that an argument of <typeparamref name="T"/> can receive NULL, as one of a function
@@ -47,8 +46,7 @@ internal static class SqlValueConverter<T>
         if (default(T) is not null)
         {
             throw new ArgumentException(
-                $"Function '{function}' is called on NULL input, but argument {position} is '{typeof(T).Name}', which cannot receive NULL; " +
-                $"declare it '{typeof(T).Name}?'.", "nullBehavior");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ValueConverterRequireNullableArgument, function, position, typeof(T).Name, typeof(T).Name), "nullBehavior");
         }
     }
 

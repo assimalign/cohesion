@@ -6,7 +6,7 @@ namespace Assimalign.Cohesion.Database.Graph.Language.Internal;
 /// <c>IS [NOT] LABELED</c>.
 /// </summary>
 /// <remarks>
-/// #1101 recognized the four operators as unsupported (<c>COHDBL001</c>); #1139 made them
+/// #1101 recognized the four operators as unsupported (<c>CK00001</c>); #1139 made them
 /// executable and flipped those pins. The capability scan reads them as label syntax, never as
 /// words to look up, and <c>GqlKeywordDispositionTests</c> keeps a supported case for each
 /// spelling here, so one cannot regress to a capability error unnoticed.

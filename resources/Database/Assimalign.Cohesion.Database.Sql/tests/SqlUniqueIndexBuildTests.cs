@@ -40,7 +40,7 @@ public sealed class SqlUniqueIndexBuildTests
         // Assert: no catalog description or in-memory registration survives failure.
         failure.ConstraintName.ShouldBe("ix");
         failure.Table.ShouldBe("dbo.t");
-        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE037");
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS03037");
         failure.OffendingValue.ShouldBeNull();
         database.Catalog.TryGetTable("dbo", "t", out var table).ShouldBeTrue();
         database.Catalog.GetIndexes(table.ObjectId).ShouldBeEmpty();

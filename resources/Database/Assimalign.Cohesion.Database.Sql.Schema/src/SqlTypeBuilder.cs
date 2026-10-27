@@ -14,6 +14,8 @@ namespace Assimalign.Cohesion.Database.Sql.Schema;
 /// constructor; it replaced the <c>ISqlTypeBuilder</c> interface and its internal implementation.
 /// The <c>Sdk.Database</c> extractor recognizes its calls by its metadata name.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("SqlTypeBuilder")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Schema.SqlTypeBuilder.DebugView))]
 public sealed class SqlTypeBuilder
 {
     private readonly Type _clrType;
@@ -51,4 +53,12 @@ public sealed class SqlTypeBuilder
     /// <returns>The type declaration.</returns>
     internal SqlSchemaType Build()
         => new(_clrType, _precision, _scale);
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Schema.SqlTypeBuilder value)
+        {
+            _ = value;
+        }
+    }
 }

@@ -76,7 +76,7 @@ internal sealed partial class SqlPlanner
         catch (Exception exception) when (IsViewBindingFailure(exception))
         {
             string code = exception is DatabaseException { Diagnostics.Count: > 0 } database
-                ? database.Diagnostics[0].Code ?? "COHSQLE033" : "COHSQLE033";
+                ? database.Diagnostics[0].Code ?? "CS03033" : "CS03033";
             throw new SqlPlanningException(code, string.Format(CultureInfo.CurrentCulture,
                 ErrorMessages.ViewBindingFailed, view.Schema, view.Name, exception.Message), innerException: exception);
         }
@@ -107,7 +107,7 @@ internal sealed partial class SqlPlanner
                 {
                     if (view.Dependencies.Where(key => key.StartsWith("D:", StringComparison.Ordinal)).Any(key =>
                         !functions.Types.Any(type => type.IsDomain && SqlDefinitionBinder.DomainKey(type.Name).Equals(key, StringComparison.OrdinalIgnoreCase))))
-                    { throw new SqlPlanningException("COHSQLE009", ErrorMessages.ViewFunctionMissing); }
+                    { throw new SqlPlanningException("CS01009", ErrorMessages.ViewFunctionMissing); }
                     var query = _parsedViews.GetValue(view, value => new ParsedView(SqlPersistedExpression.LoadQuery(value.Definition, "view " + value.Schema + "." + value.Name))).Query;
                     var functionNodes = SqlViewQuery.Nodes(query).OfType<SqlFunctionCallExpression>()
                         .Where(call => !SqlStandardLibrary.IsEvaluatorForm(call.FunctionName)).ToArray();
@@ -121,7 +121,7 @@ internal sealed partial class SqlPlanner
                     var child = planner.PlanOnce(query);
                     var columns = planner.BindDerivedOutput(child, view.Name, view.Columns.Select(column => column.Name).ToArray(), query).Columns;
                     if (columns.Count != view.Columns.Count || columns.Where((column, index) => !SameViewOutput(column, view.Columns[index])).Any())
-                    { throw new SqlPlanningException("COHSQLE009", ErrorMessages.ViewContractChanged); }
+                    { throw new SqlPlanningException("CS01009", ErrorMessages.ViewContractChanged); }
                     return new ViewPlan(child, columns, planner.ViewDefinitionBinding.SystemRelations);
                 });
                 plans.Entries.Add(view, entry);
@@ -145,15 +145,16 @@ internal sealed partial class SqlPlanner
         if (ViewDefinitionBinding is not { } binding) { return; }
         var ordering = select.OrderBy.Select(order => order.Expression).ToHashSet();
         foreach (var root in SqlViewQuery.Expressions(select).Where(root => !ordering.Contains(root) &&
-            !select.From.SelectMany(item => item.Joins).Any(join => ReferenceEquals(join.Condition, root))))
+            !SourceJoins(select.From).Any(join => ReferenceEquals(join.Condition, root))))
         { CaptureViewExpression(root, columns, bindings, select.From.FirstOrDefault()?.Table, scope); }
         foreach (var column in select.Columns)
         {
             if (column.Expression is SqlColumnReferenceExpression projected && column.Alias is null &&
                 binding.Edits.TryGetValue(projected.Location!.Start, out var rendered) &&
-                (rendered.Text.StartsWith("CAST(", StringComparison.Ordinal) || rendered.Text.StartsWith("CASE ", StringComparison.Ordinal)))
+                (rendered.Text.StartsWith("CAST(", StringComparison.Ordinal) || rendered.Text.StartsWith("CASE ", StringComparison.Ordinal) ||
+                    rendered.Text.StartsWith("COALESCE(", StringComparison.Ordinal)))
             { binding.Edits[projected.Location.Start] = (rendered.Length, rendered.Text + " AS " + SqlObjectIdentity.Quote(projected.ColumnName)); }
-            if (column.Expression is not SqlStarExpression star) { continue; }
+            if (column.Expression is not SqlStarExpression { Location: not null } star) { continue; }
             var names = new List<string>();
             foreach (int ordinal in outputOrdinals ?? Enumerable.Range(0, columns.Count).ToArray())
             {
@@ -208,16 +209,21 @@ internal sealed partial class SqlPlanner
         return relation is SqlTableReference { Alias: null, SchemaName: { } schema }
             ? SqlObjectIdentity.Quote(schema) + "." + result : result;
 
-        string RenderValue(SqlBoundExpression value) => value switch
+        string RenderValue(SqlBoundExpression value)
         {
-            SqlBoundColumn column => RenderViewColumn(column.Ordinal, columns, bindings, relation, scope, merged: false),
-            // A CHAR typmod relabel must keep every character. Bare CAST AS CHAR
-            // means CHAR(1); this equivalent CASE clears only the output modifier.
-            SqlBoundCast { SourceType: DatabaseType.Character, Target.Storage: { Type: DatabaseType.Character, MaxLength: null } } cast
-                => "CASE WHEN TRUE THEN " + RenderValue(cast.Operand) + " ELSE NULL END",
-            SqlBoundCast cast => "CAST(" + RenderValue(cast.Operand) + " AS " + cast.TargetText + ")",
-            _ => throw ViewError(ErrorMessages.ViewRoundTrip),
-        };
+            RuntimeHelpers.EnsureSufficientExecutionStack();
+            return value switch
+            {
+                SqlBoundColumn column => RenderViewColumn(column.Ordinal, columns, bindings, relation, scope, merged: false),
+                // A CHAR typmod relabel must keep every character. Bare CAST AS CHAR
+                // means CHAR(1); this equivalent CASE clears only the output modifier.
+                SqlBoundCast { SourceType: DatabaseType.Character, Target.Storage: { Type: DatabaseType.Character, MaxLength: null } } cast
+                    => "CASE WHEN TRUE THEN " + RenderValue(cast.Operand) + " ELSE NULL END",
+                SqlBoundCast cast => "CAST(" + RenderValue(cast.Operand) + " AS " + cast.TargetText + ")",
+                SqlBoundCoalesce coalesce => "COALESCE(" + string.Join(", ", coalesce.Arguments.Select(RenderValue)) + ")",
+                _ => throw ViewError(ErrorMessages.ViewRoundTrip),
+            };
+        }
     }
 
     private void RecordViewColumn(SqlRelationSource source, int ordinal)
@@ -226,7 +232,7 @@ internal sealed partial class SqlPlanner
         var column = table.Columns[ordinal];
         string identity = SqlObjectIdentity.Column(table.ObjectId, column.Name);
         if (binding.Owner is { } owner && !owner.Dependencies.Contains(identity, StringComparer.OrdinalIgnoreCase))
-        { throw new SqlPlanningException("COHSQLE033", string.Format(CultureInfo.CurrentCulture, ErrorMessages.ViewColumnChanged, owner.Schema, owner.Name)); }
+        { throw new SqlPlanningException("CS03033", string.Format(CultureInfo.CurrentCulture, ErrorMessages.ViewColumnChanged, owner.Schema, owner.Name)); }
         binding.Dependencies.Add(identity);
         if (column.DomainName is { } domain) { binding.Dependencies.Add(SqlDefinitionBinder.DomainKey(domain)); }
     }
@@ -256,9 +262,11 @@ internal sealed partial class SqlPlanner
         var target = expression switch
         {
             SqlInsertExpression insert => insert.Table,
+            SqlMergeExpression merge => merge.Table,
             SqlUpdateExpression update => update.Table,
             SqlDeleteExpression delete => delete.Table,
             SqlCreateTableExpression create => create.Table,
+            SqlCreateTableAsExpression create => create.Table,
             SqlDropTableExpression drop => drop.Table,
             SqlAlterTableExpression alter => alter.Table,
             SqlCreateIndexExpression create => create.Table,
@@ -266,7 +274,7 @@ internal sealed partial class SqlPlanner
             _ => null,
         };
         if (target is not null && _catalog.TryGetView(target.SchemaName ?? DefaultSchema, target.TableName, out var view))
-        { throw new SqlPlanningException("COHSQLE021", string.Format(CultureInfo.CurrentCulture, ErrorMessages.ViewReadOnly, view.Schema, view.Name), expression.Location); }
+        { throw new SqlPlanningException("CS04021", string.Format(CultureInfo.CurrentCulture, ErrorMessages.ViewReadOnly, view.Schema, view.Name), expression.Location); }
     }
 
     private static bool SameViewOutput(SqlCatalogColumn left, SqlCatalogColumn right)
@@ -274,14 +282,26 @@ internal sealed partial class SqlPlanner
             left.Type.Precision == right.Type.Precision && left.Type.Scale == right.Type.Scale &&
             left.Collation == right.Collation && string.Equals(left.DomainName, right.DomainName, StringComparison.OrdinalIgnoreCase);
 
-    private static SqlPlanningException ViewError(string message) => new("COHSQLE033", message);
+    private static SqlPlanningException ViewError(string message) => new("CS03033", message);
     private sealed record ParsedView(SqlQueryBodyExpression Query);
     internal sealed record ViewPlan(SqlPlan Query, IReadOnlyList<SqlCatalogColumn> Columns, IReadOnlyList<SqlTableReference> SystemRelations);
+    [global::System.Diagnostics.DebuggerDisplay("ViewPlans")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlPlanner.ViewPlans.DebugView))]
     internal sealed class ViewPlans
     {
         internal object Sync { get; } = new();
         internal Dictionary<SqlCatalogView, SqlBindingEntry<ViewPlan>> Entries { get; } = new(ReferenceEqualityComparer.Instance);
+
+        private sealed class DebugView
+        {
+            public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlPlanner.ViewPlans value)
+            {
+                _ = value;
+            }
+        }
     }
+    [global::System.Diagnostics.DebuggerDisplay("ViewBinding")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlPlanner.ViewBinding.DebugView))]
     internal sealed class ViewBinding
     {
         internal SqlCatalogView? Owner { get; init; }
@@ -290,5 +310,13 @@ internal sealed partial class SqlPlanner
         internal SqlViewCallCapture Calls { get; } = new();
         internal Dictionary<int, (int Length, string Text)> Edits { get; } = new();
         internal List<SqlTableReference> SystemRelations { get; } = new();
+
+        private sealed class DebugView
+        {
+            public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlPlanner.ViewBinding value)
+            {
+                _ = value;
+            }
+        }
     }
 }

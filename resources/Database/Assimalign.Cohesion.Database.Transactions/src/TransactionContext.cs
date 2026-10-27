@@ -45,6 +45,8 @@ namespace Assimalign.Cohesion.Database.Transactions;
 /// that is not ending.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("TransactionContext")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Transactions.TransactionContext.DebugView))]
 public sealed class TransactionContext
 {
     private readonly TransactionManager _manager;
@@ -270,5 +272,20 @@ public sealed class TransactionContext
             _drained ??= new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             return _drained.Task;
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Transactions.TransactionContext _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Transactions.TransactionContext value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Transactions.TransactionId Id => _target.Id;
+        public global::Assimalign.Cohesion.Database.Transactions.TransactionSequence Sequence => _target.Sequence;
+        public global::Assimalign.Cohesion.Database.Transactions.IsolationLevel IsolationLevel => _target.IsolationLevel;
+        public global::Assimalign.Cohesion.Database.Transactions.TransactionState State => _target.State;
     }
 }

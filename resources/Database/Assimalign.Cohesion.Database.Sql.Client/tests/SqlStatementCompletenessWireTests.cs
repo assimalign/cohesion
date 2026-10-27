@@ -15,7 +15,7 @@ public sealed class SqlStatementCompletenessWireTests
 {
     /// <summary>Each statement used to execute a truncated prefix that would change the seeded users.</summary>
     /// <param name="statement">The statement whose tail the parser used to drop.</param>
-    [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - Completeness: leftover text reports SQL0003 over the wire and changes nothing")]
+    [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - Completeness: leftover text reports CS00003 over the wire and changes nothing")]
     [InlineData("DELETE FROM users WHRE id = 1")]
     [InlineData("UPDATE users SET score = 0 WHRE id = 1")]
     [InlineData("UPDATE users SET score = :score WHERE id = 1")]
@@ -37,7 +37,7 @@ public sealed class SqlStatementCompletenessWireTests
 
         // Assert
         error.Kind.ShouldBe(SqlClientErrorKind.ParseFailure);
-        error.Message.ShouldContain("SQL0003", Case.Sensitive);
+        error.Message.ShouldContain("CS00003", Case.Sensitive);
         error.ConnectionUsable.ShouldBeTrue();
         var users = await connection.QueryAsync("SELECT id, name, score FROM users ORDER BY id",
             cancellationToken: SqlClientTestHarness.Timeout());
@@ -67,7 +67,7 @@ public sealed class SqlStatementCompletenessWireTests
 
         // Assert
         error.Kind.ShouldBe(SqlClientErrorKind.ParseFailure);
-        error.Message.ShouldContain("SQL0005", Case.Sensitive);
+        error.Message.ShouldContain("CS00005", Case.Sensitive);
         error.ConnectionUsable.ShouldBeTrue();
         (await connection.QueryAsync("SELECT COUNT(*) AS total FROM users", cancellationToken: SqlClientTestHarness.Timeout()))
             .ShouldHaveSingleItem()["total"].ShouldBe(2L);

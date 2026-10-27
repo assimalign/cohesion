@@ -10,6 +10,8 @@ namespace Assimalign.Cohesion.Database.Transactions.Internal;
 /// resolved against snapshots newest-first. Used by engines for uncheckpointed
 /// working state and by tests; page-backed stores arrive with the model engines.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("InMemoryVersionStore")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Transactions.Internal.InMemoryVersionStore.DebugView))]
 internal sealed class InMemoryVersionStore : VersionStore
 {
     private readonly Dictionary<(ulong ObjectId, ulong EntryId), List<Version>> _chains = new();
@@ -119,4 +121,12 @@ internal sealed class InMemoryVersionStore : VersionStore
     }
 
     private readonly record struct Version(ulong Writer, byte[] Payload);
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Transactions.Internal.InMemoryVersionStore value)
+        {
+            _ = value;
+        }
+    }
 }

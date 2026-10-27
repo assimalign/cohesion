@@ -33,7 +33,7 @@ public sealed class ParameterBindingTests
 
         // Assert
         var diagnostic = failure.Diagnostics.ShouldHaveSingleItem();
-        diagnostic.Code.ShouldBe("SQL0003");
+        diagnostic.Code.ShouldBe("CS00003");
         diagnostic.Start.ShouldBe(7);
         diagnostic.End.ShouldBe(7 + reference.Length);
     }
@@ -60,7 +60,7 @@ public sealed class ParameterBindingTests
             await session.ExecuteAsync(command, parameters, CancellationToken.None));
 
         // Assert
-        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE023");
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS01023");
         failure.Message.ShouldContain("id");
         session.CurrentTransaction.ShouldBe(previous);
         if (previous is not null)
@@ -183,7 +183,7 @@ public sealed class ParameterBindingTests
             await session.ExecuteAsync(collision ? "SELECT a FROM t" : "SELECT $id AS value FROM t", parameters, CancellationToken.None));
 
         // Assert
-        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(collision ? "COHSQLE023" : "COHSQLE020");
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(collision ? "CS01023" : "CS01020");
         failure.Message.ShouldContain("id");
     }
 
@@ -211,7 +211,7 @@ public sealed class ParameterBindingTests
 
         // Assert
         var diagnostic = failure.Diagnostics.ShouldHaveSingleItem();
-        diagnostic.Code.ShouldBe("COHSQLE020");
+        diagnostic.Code.ShouldBe("CS01020");
         failure.Message.ShouldContain("missing");
         diagnostic.Start.ShouldBe(query.IndexOf("missing", StringComparison.Ordinal) - 1);
         diagnostic.End.ShouldBe(diagnostic.Start + 8);

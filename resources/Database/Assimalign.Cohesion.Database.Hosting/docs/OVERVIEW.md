@@ -54,3 +54,34 @@ forwarded headers. This restricts remote standalone access supported by 10.0.0-p
 Bare `/healthz`, `/readyz`, and `/livez` stay open, and gateway-managed behavior is unchanged.
 
 The model server options take `IDuplexConnectionListener`; client composition supplies an `IDuplexConnectionFactory` for the shared database pool.
+
+## Dedicated test actors (#1285)
+
+Deadline-dependent peers and busy test drivers use the linked Storage test helper's LongRunning threads. Ordinary async driver continuations stay on their actor scheduler, without changing SynchronizationContext. Existing deadlines of 25 seconds or more are hang guards. Runner settings impose no parallel-thread cap. See the [scheduling audit](../../Assimalign.Cohesion.Database.Storage/docs/TEST-HYGIENE-AUDIT.md) for every original Task.Run site, the exact journal counters and the physical index-work guards.
+
+## Error and construction conventions (#1470)
+
+Exception messages and format templates are generated from `src/Properties/ErrorMessages.resx`;
+format arguments use the current culture. Cancellation and abort templates used during normal
+cleanup are cached before reuse. Error identities remain separate from message text where a
+structured diagnostic carrier exists. Standard .NET guards retain their argument names and exception types.
+
+
+## Health-check builder construction (#1470)
+
+Composition uses the public sealed `HealthChecksBuilder` in `Assimalign.Cohesion.Web.Health`,
+with its public parameterless constructor. The standalone `HealthChecks.CreateBuilder()` factory
+is removed. Existing `IHealthChecksBuilder` adapters, duplicate-name checks and immutable service
+snapshots are preserved; Database's admin endpoint uses the same public constructor. No Database
+interface, protocol, format, diagnostic code, event or counter is added or changed.
+
+The rules audit aligns private test identifiers while preserving health checks, reopen behavior and hosted-service ownership. No runtime composition or public contract changes follow from those test naming edits.
+
+
+## Debugger inspection (#1470)
+
+Eligible concrete source types use private nested debugger views of reviewed public/protected
+state; existing inherited display/proxy pairs are reused. See the shared
+[debugger convention](../../Assimalign.Cohesion.Database/docs/CONVENTIONS.md#debugger-inspection).
+Views return stored composition references and identity only; synchronized host state, callbacks, lifecycle operations and service resolution are omitted.
+Runtime APIs, methods, allocation budgets, persistent formats and wire behavior are unchanged.

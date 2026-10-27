@@ -111,4 +111,44 @@ ProtocolMessageTests additionally fixes these payload bytes.
 
 ## Negotiation and coded errors (#1105)
 
-All endpoints negotiate 2.1 through Startup capabilities and a Ready agreement. Key-Value advertises no capabilities and neither sends nor accepts Diagnostics. A negotiated 2.0 session sends empty Ready. ParseFailure and ExecutionFailure retain u16 category + string text, now CODE: message for every command refusal. COMMANDS.md lists COHKV001–019; engine-carried codes take precedence over COHKV019.
+All endpoints negotiate 2.1 through Startup capabilities and a Ready agreement. Key-Value advertises no capabilities and neither sends nor accepts Diagnostics. A negotiated 2.0 session sends empty Ready. ParseFailure and ExecutionFailure retain u16 category + string text, now CODE: message for every command refusal. COMMANDS.md lists CV00001–019; engine-carried codes take precedence over CV04019.
+
+
+## Record decode context (#1372)
+
+Confirmed record decoding errors keep the existing execution-failure frame and corruption code.
+Their message identifies the page and slot; the in-process nullable SlotIndex is not a new wire
+field. Existing diagnostic negotiation, protocol version and session lifetime are unchanged.
+
+## KeyValuePair diagnostic conventions (#1470)
+
+Exception and diagnostic templates use the project's build-generated `ErrorMessages` resources.
+Parameterized templates format with the current culture; abort/cancellation templates used in
+normal cleanup are cached. The [Database error-code registry](../../Assimalign.Cohesion.Database/docs/ERROR-CODES.md)
+assigns this family its two-letter prefix and categorized five-digit identities.
+Existing SQLSTATE meanings, numeric wire error kinds, frame layouts and disk formats are preserved.
+Structured diagnostics keep their code outside the message. Compiler diagnostic identifiers and
+standard .NET argument guards retain their own contracts.
+
+## Model failure producer completion
+
+Existing engine refusals now retain their [producer identities](COMMANDS.md#model-failure-producer-completion)
+in Diagnostics. ExecutionFailure still carries the same category and string payload, formatted
+as `CODE: message` once; an engine-carried identity takes precedence over `CV04019`. No
+Diagnostics frame, capability, message type or protocol version is added.
+
+## Registered scalar CALL
+
+`CALL function-name @p0 @p1` is an additive Execute command, with no new message types,
+capabilities, version or payload layout. Zero arguments encode as `CALL function-name`.
+Names follow the shared `KeyValueFunctionName` ASCII identifier rule. Parameters retain their
+exact native primitive codec types, including NULL. Successful calls send a ResultHeader with
+one `value` column of the declared type (NULL values permitted), one ResultRow and
+ResultComplete affected count -1, then return to the ready loop without an extra Ready frame. CALL never changes the grammar or result shape of the six existing commands.
+
+Missing names use CV00019/ParseFailure; resolution CV01018–21, callback CV05003 and declared
+result CV02016 use ExecutionFailure. Error text carries the code once. Ordinary callback
+failures, including application timeout and I/O, keep the same session usable. Only DatabaseException,
+out-of-memory, insufficient stack and actual statement cancellation bypass callback wrapping;
+application I/O is CV05003 rather than a storage fault.
+See [COMMANDS.md](COMMANDS.md) for overload and NULL semantics.

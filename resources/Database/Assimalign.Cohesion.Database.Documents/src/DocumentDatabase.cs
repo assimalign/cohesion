@@ -47,8 +47,15 @@ namespace Assimalign.Cohesion.Database.Documents;
 /// the disposed flag.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("DocumentDatabase {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Documents.DocumentDatabase.DebugView))]
 public sealed class DocumentDatabase : DatabaseInstance
 {
+    // The callback runs only after database composition has attached its current index manager.
+    private ValueTask<long> PruneIndexesAsync(TransactionSequence bound, CancellationToken cancellationToken)
+        => Catalog.PruneIndexesAsync(bound, cancellationToken);
+
+
     private readonly DocumentDatabaseEngine _engine;
 
     // Test seam at the snapshot cleanup boundary, including operations without a pin.
@@ -59,7 +66,8 @@ public sealed class DocumentDatabase : DatabaseInstance
     {
         _engine = engine;
         DataStorage = storage;
-        Coordinator = new TransactionCoordinator(storage, storage.WriteAheadJournal, storage.Records);
+        Coordinator = new TransactionCoordinator(storage, storage.WriteAheadJournal, storage.Records,
+            PruneIndexesAsync);
 
         // A wait for the database writer lock ends when the database goes offline (#1268 review):
         // an offline database undoes nothing, so the writer that holds the lock keeps it until the
@@ -90,7 +98,7 @@ public sealed class DocumentDatabase : DatabaseInstance
             Coordinator.DisposeAsync().AsTask().GetAwaiter().GetResult();
             string message = string.Format(CultureInfo.CurrentCulture, ErrorMessages.CatalogOpenFailed, name, exception.Message);
             throw new DatabaseException(message, [new Types.Diagnostic
-            { Code = "COHDBD005", Message = message, Severity = Types.DiagnosticSeverity.Error }], exception);
+            { Code = "CD06105", Message = message, Severity = Types.DiagnosticSeverity.Error }], exception);
         }
 
         if (recover)
@@ -149,7 +157,7 @@ public sealed class DocumentDatabase : DatabaseInstance
     /// The code that leads the message of every operation refused because the database is
     /// offline (#1243).
     /// </summary>
-    internal const string OfflineCode = "COHDBD002";
+    internal const string OfflineCode = "CD06102";
 
     /// <summary>
     /// Gets whether a failed durable flush took the database offline.
@@ -171,7 +179,7 @@ public sealed class DocumentDatabase : DatabaseInstance
     /// <returns>A new session.</returns>
     /// <exception cref="ObjectDisposedException">The database has been disposed.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
-    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBD002</c>, #1243).</exception>
+    /// <exception cref="DatabaseOfflineException">The database is offline (<c>CD06102</c>, #1243).</exception>
     public new async ValueTask<DocumentDatabaseSession> CreateSessionAsync(CancellationToken cancellationToken = default)
         => (DocumentDatabaseSession)await base.CreateSessionAsync(cancellationToken).ConfigureAwait(false);
 
@@ -217,7 +225,7 @@ public sealed class DocumentDatabase : DatabaseInstance
     /// <returns>The translated failure, or <paramref name="error"/> itself.</returns>
     internal Exception TranslateOffline(Exception error)
     {
-        if (error is DatabaseException { Diagnostics: [{ Code: "COHDBD001" }, ..] }) { return error; }
+        if (error is DatabaseException { Diagnostics: [{ Code: "CD04101" }, ..] }) { return error; }
         if (error is DatabaseCorruptionException) { return error; }
 
         if (Assimalign.Cohesion.Database.Storage.StorageCorruptionException.Find(error) is { } corruption)
@@ -228,7 +236,7 @@ public sealed class DocumentDatabase : DatabaseInstance
         if (DatabaseFailure.Find<Assimalign.Cohesion.Database.Indexing.IndexCorruptionException>(error) is { } indexCorruption)
         {
             return DatabaseCorruptionException.Create(Name, indexCorruption, [new Types.Diagnostic
-            { Code = "COHDBD005", Message = error.Message, Severity = Types.DiagnosticSeverity.Error }]);
+            { Code = "CD06105", Message = error.Message, Severity = Types.DiagnosticSeverity.Error }]);
         }
 
         if (error is DatabaseOfflineException or DatabaseTransactionCommitUnconfirmedException or TransactionCommitUnconfirmedException
@@ -262,14 +270,14 @@ public sealed class DocumentDatabase : DatabaseInstance
         var previous = Catalog.FindCollection(name, operation.Context.Snapshot);
         if (previous != Catalog.FindCollection(name, LatestSnapshot(operation.Context)))
         {
-            ThrowConflict();
+            DatabaseTransactionAbortedException.ThrowDocumentConflict();
         }
 
         if (previous is not null)
         {
             if (ifNotExists) { return previous.Value; }
             string message = string.Format(CultureInfo.CurrentCulture, ErrorMessages.CollectionAlreadyExists, name);
-            throw new DatabaseException(message, [DocumentPlanningException.CreateDiagnostic("COHDOC010", message, location)]);
+            throw new DatabaseException(message, [DocumentPlanningException.CreateDiagnostic("CD03010", message, location)]);
         }
 
         var metadata = new DocumentCollectionMetadata(Guid.NewGuid(), name);
@@ -281,7 +289,7 @@ public sealed class DocumentDatabase : DatabaseInstance
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         return RunAsync(session, operation => new ValueTask<DocumentCollection>(new DocumentCollection(this,
-            Catalog.FindCollection(name, operation.Context.Snapshot) ?? throw new DatabaseException($"Collection '{name}' does not exist."), session)), token);
+            Catalog.FindCollection(name, operation.Context.Snapshot) ?? throw DatabaseException.CreateDocumentsFailure("CD01002", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CollectionDoesNotExist, name)), session)), token);
     }
 
     internal async ValueTask DropCollectionAsync(string name, DocumentDatabaseSession session, CancellationToken token)
@@ -304,19 +312,19 @@ public sealed class DocumentDatabase : DatabaseInstance
         var previous = Catalog.FindCollection(name, operation.Context.Snapshot);
         if (previous != Catalog.FindCollection(name, LatestSnapshot(operation.Context)))
         {
-            ThrowConflict();
+            DatabaseTransactionAbortedException.ThrowDocumentConflict();
         }
         if (previous is not { } collection)
         {
             if (ifExists) { return; }
             string message = string.Format(CultureInfo.CurrentCulture, ErrorMessages.CollectionDoesNotExist, name);
-            throw new DatabaseException(message, [DocumentPlanningException.CreateDiagnostic("COHDOC002", message, location)]);
+            throw new DatabaseException(message, [DocumentPlanningException.CreateDiagnostic("CD01002", message, location)]);
         }
         // Documents has no provisioning authority, so every schema-owned drop is locked.
         if (collection.Owner == DatabaseObjectOwner.Schema)
         {
             throw new DatabaseObjectLockedException(collection.Name, collection.OwningSchema!, "DROP COLLECTION",
-                diagnostic: DocumentPlanningException.CreateDiagnostic("COHDOC011", null, location));
+                diagnostic: DocumentPlanningException.CreateDiagnostic("CD03011", null, location));
         }
 
         var visible = Catalog.GetDocuments(collection.Id, null, operation.Context.Snapshot);
@@ -324,7 +332,7 @@ public sealed class DocumentDatabase : DatabaseInstance
             !Catalog.GetIndexes(collection.Id, operation.Context.Snapshot)
                 .SequenceEqual(Catalog.GetIndexes(collection.Id, LatestSnapshot(operation.Context))))
         {
-            ThrowConflict();
+            DatabaseTransactionAbortedException.ThrowDocumentConflict();
         }
 
         foreach (var document in visible)
@@ -440,9 +448,9 @@ public sealed class DocumentDatabase : DatabaseInstance
         TransactionDeadlockException => new DatabaseTransactionDeadlockException(error.Message, error),
         TransactionAbortedException => new DatabaseTransactionAbortedException(error.Message, error),
         TransactionCommitUnconfirmedException unconfirmed => DatabaseTransactionCommitUnconfirmedException.Create(OfflineCode, Name, unconfirmed),
-        _ when DatabaseFailure.Find<IOException>(error) is not null || DatabaseFailure.Find<Assimalign.Cohesion.Database.Storage.StorageException>(error) is not null => CodedFailure("COHDBD004", error),
-        _ when DatabaseFailure.Find<Assimalign.Cohesion.Database.Indexing.IndexException>(error) is not null => CodedFailure("COHDBD005", error),
-        DocumentCatalogException catalog => CodedFailure(catalog.Code ?? "COHDBD005", catalog),
+        _ when DatabaseFailure.Find<IOException>(error) is not null || DatabaseFailure.Find<Assimalign.Cohesion.Database.Storage.StorageException>(error) is not null => CodedFailure("CD06104", error),
+        _ when DatabaseFailure.Find<Assimalign.Cohesion.Database.Indexing.IndexException>(error) is not null => CodedFailure("CD06105", error),
+        DocumentCatalogException catalog => CodedFailure(catalog.Code ?? "CD06105", catalog),
         _ => error,
     };
 
@@ -475,7 +483,7 @@ public sealed class DocumentDatabase : DatabaseInstance
             ThrowIfOffline();
             if (context.State != TransactionState.Active)
             {
-                throw new DatabaseException("The document operation's transaction ended while waiting for the writer lock.");
+                throw DatabaseException.CreateDocumentsFailure("CK04002", ErrorMessages.DatabaseLockWriterAsyncDatabase);
             }
         }
         catch
@@ -492,7 +500,6 @@ public sealed class DocumentDatabase : DatabaseInstance
     internal TransactionSnapshot LatestSnapshot(TransactionContext context) => new(context.Sequence,
         TransactionSequence.None, new TransactionSequence(ulong.MaxValue), Coordinator.GetOpenContexts().Where(item => item.State != TransactionState.Committed).Select(item => item.Sequence));
 
-    internal static void ThrowConflict() => throw new DatabaseTransactionAbortedException("The document catalog changed since this transaction's snapshot. Retry the transaction.");
     internal static DocumentContentReference Content(DocumentCatalogEntry entry) => new(entry.HeadLocation, entry.Length, entry.Checksum);
     internal Document ReadDocument(DocumentCatalogEntry entry)
         => new(new DocumentId(entry.Id), new DocumentVersion(entry.Version), DataStorage.ReadContent(Content(entry)));
@@ -535,5 +542,18 @@ public sealed class DocumentDatabase : DatabaseInstance
         {
             await DataStorage.DisposeAsync().ConfigureAwait(false);
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Documents.DocumentDatabase _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Documents.DocumentDatabase value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Documents.DocumentDatabaseEngine Engine => _target.Engine;
+        public global::Assimalign.Cohesion.Database.DatabaseName Name => _target.Name;
     }
 }

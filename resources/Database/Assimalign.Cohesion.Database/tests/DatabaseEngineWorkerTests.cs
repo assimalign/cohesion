@@ -8,6 +8,8 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
+
 namespace Assimalign.Cohesion.Database.Tests;
 
 /// <summary>
@@ -18,6 +20,8 @@ namespace Assimalign.Cohesion.Database.Tests;
 /// loop and ended the worker for good, and before its review one database's failure slowed every
 /// other database's work to one pass a second.
 /// </summary>
+[CollectionDefinition(nameof(DatabaseEngineWorkerTests), DisableParallelization = true)]
+[Collection(nameof(DatabaseEngineWorkerTests))]
 public class DatabaseEngineWorkerTests
 {
     private static readonly TimeSpan _timeout = TimeSpan.FromSeconds(30);
@@ -317,7 +321,7 @@ public class DatabaseEngineWorkerTests
         var callers = new Task[4];
         for (int index = 0; index < callers.Length; index++)
         {
-            callers[index] = Task.Run(() =>
+            callers[index] = DedicatedTestTask.Run(() =>
             {
                 for (int pass = 0; pass < 25; pass++)
                 {
@@ -333,12 +337,16 @@ public class DatabaseEngineWorkerTests
         worker.Passes.ShouldBe(100);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database] - Worker: a database that keeps failing is retried at the backoff pace while the others keep the worker's full pace")]
-    public void Run_DatabaseKeepsFailing_ShouldBackOffThatDatabaseOnly()
+    [Theory(DisplayName = "Cohesion Test [Database] - Worker: a database that keeps failing is retried at the backoff pace while the others keep the worker's full pace")]
+    [InlineData(1)]
+    [InlineData(150)]
+    public void Run_DatabaseKeepsFailing_ShouldBackOffThatDatabaseOnly(int cadenceMilliseconds)
     {
-        // Arrange: a trigger of one millisecond; database a fails on every attempt.
+        // Arrange: exercise both fast and slowly scheduled pumps; a fails on every attempt.
         int attemptsOnA = 0;
         int passesOverB = 0;
+        int skipsOnA = 0;
+        int pumpBackoffs = 0;
         var worker = new ScriptedWorker((self, _) =>
         {
             if (self.Begin("a"))
@@ -346,35 +354,33 @@ public class DatabaseEngineWorkerTests
                 int attempt = Interlocked.Increment(ref attemptsOnA);
                 self.Fail("a", new InvalidOperationException($"attempt {attempt} failed"));
             }
+            else { Interlocked.Increment(ref skipsOnA); }
 
             if (self.Begin("b"))
             {
                 Interlocked.Increment(ref passesOverB);
             }
-        }, TimeSpan.FromMilliseconds(1));
+        }, TimeSpan.FromMilliseconds(cadenceMilliseconds));
         using var stop = new CancellationTokenSource();
-        // The clock starts before the pump: the first attempt runs as soon as the pump does, so a
-        // clock started after it reads short of the time since that attempt (macOS CI: 2.997
-        // backoffs' worth for three attempts).
-        var watch = Stopwatch.StartNew();
+        worker.DelayRequested = _ => Interlocked.Increment(ref pumpBackoffs);
         var thread = StartPump(worker, stop.Token);
 
-        // Act: let a fail for about two backoffs.
-        bool retried = SpinUntil(() => Volatile.Read(ref attemptsOnA) >= 3);
+        // Act: count retries, backoff skips and healthy visits under a 30 s hang guard.
+        bool retried = SpinUntil(() => Volatile.Read(ref attemptsOnA) >= 3
+            && Volatile.Read(ref passesOverB) >= 30 && Volatile.Read(ref skipsOnA) >= 3);
         stop.Cancel();
         bool stopped = thread.Join(_timeout);
-        var elapsed = watch.Elapsed;
         int attempts = Volatile.Read(ref attemptsOnA);
         int passes = Volatile.Read(ref passesOverB);
 
-        // Assert: a was retried no faster than the backoff, and b ran many passes per retry of a
-        // (a one-millisecond trigger gives hundreds a second; a worker-wide backoff gave one).
+        // Assert: a backs off independently; healthy visits never request pump backoff.
         retried.ShouldBeTrue();
         stopped.ShouldBeTrue();
-        ((double)attempts).ShouldBeLessThanOrEqualTo(elapsed / DatabaseEngineWorker.FailureBackoff + 1);
+        pumpBackoffs.ShouldBe(0);
+        skipsOnA.ShouldBeGreaterThanOrEqualTo(3);
         worker.FailureCount.ShouldBe(attempts);
         worker.Fault.ShouldBeOfType<InvalidOperationException>().Message.ShouldBe($"attempt {attempts} failed");
-        ((double)passes / attempts).ShouldBeGreaterThan(10, $"{passes} passes over b, {attempts} attempts on a in {elapsed}");
+        passes.ShouldBeGreaterThanOrEqualTo(30);
     }
 
     [Fact(DisplayName = "Cohesion Test [Database] - Worker: a pass that keeps throwing keeps one record, and retries are paced by the backoff")]
@@ -448,23 +454,50 @@ public class DatabaseEngineWorkerTests
         worker.FailureCount.ShouldBe(1);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database] - Worker: the pump stops at once when cancelled during its backoff")]
-    public void Run_CancelledDuringTheBackoff_ShouldStopPromptly()
+    [Theory(DisplayName = "Cohesion Test [Database] - Worker: cancellation stops the pump at its requested backoff")]
+    [InlineData(0)]
+    [InlineData(750)]
+    public void Run_CancelledDuringTheBackoff_ShouldStopWithoutAnotherPass(int observerPauseMilliseconds)
     {
-        // Arrange
+        // Arrange: hold the observed backoff request so cancellation exercises that boundary.
         var worker = new ScriptedWorker((_, _) => throw new InvalidOperationException("failed"), TimeSpan.FromMilliseconds(1));
         using var stop = new CancellationTokenSource();
+        using var entered = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
+        int requests = 0;
+        TimeSpan requested = TimeSpan.Zero;
+        worker.DelayRequested = duration =>
+        {
+            requested = duration;
+            Interlocked.Increment(ref requests);
+            entered.Set();
+            release.Wait();
+        };
         var thread = StartPump(worker, stop.Token);
-        SpinUntil(() => worker.FailureCount >= 1).ShouldBeTrue();
+        bool stopped = false;
+        try
+        {
+            // Act: observe termination under a 30 s hang guard, including a delayed observer.
+            entered.Wait(_timeout).ShouldBeTrue();
+            stop.Cancel();
+            release.Set();
+            Thread.Sleep(observerPauseMilliseconds);
+            stopped = thread.Join(_timeout);
+        }
+        finally
+        {
+            stop.Cancel();
+            release.Set();
+            thread.Join(_timeout).ShouldBeTrue();
+        }
 
-        // Act
-        var watch = Stopwatch.StartNew();
-        stop.Cancel();
-        bool stopped = thread.Join(_timeout);
-
-        // Assert
+        // Assert: cancellation exits the requested backoff without a retry.
         stopped.ShouldBeTrue();
-        (watch.Elapsed / DatabaseEngineWorker.FailureBackoff).ShouldBeLessThan(0.5);
+        requests.ShouldBe(1);
+        requested.ShouldBe(DatabaseEngineWorker.FailureBackoff);
+        worker.Passes.ShouldBe(1);
+        worker.FailureCount.ShouldBe(1);
+        worker.ObserverFailure.ShouldBeNull();
     }
 
     [Fact(DisplayName = "Cohesion Test [Database] - Worker: reporting a null failure, or a negative backoff, fails the pass as a whole")]

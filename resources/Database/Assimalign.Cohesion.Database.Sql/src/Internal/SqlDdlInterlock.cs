@@ -9,6 +9,8 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// immediately instead of waiting outside the transaction lock manager's deadlock graph.
 /// Ordinary DDL statements may still run concurrently with one another.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("SqlDdlInterlock")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlDdlInterlock.DebugView))]
 internal sealed class SqlDdlInterlock
 {
     private readonly object _sync = new();
@@ -69,6 +71,8 @@ internal sealed class SqlDdlInterlock
         }
     }
 
+    [global::System.Diagnostics.DebuggerDisplay("MetadataLease")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlDdlInterlock.MetadataLease.DebugView))]
     private sealed class MetadataLease : IDisposable
     {
         private SqlDdlInterlock? _owner;
@@ -83,6 +87,14 @@ internal sealed class SqlDdlInterlock
                 owner._metadataChanged?.TrySetResult();
                 owner._metadataChanged = null;
                 _owner = null;
+            }
+        }
+
+        private sealed class DebugView
+        {
+            public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlDdlInterlock.MetadataLease value)
+            {
+                _ = value;
             }
         }
     }
@@ -113,6 +125,8 @@ internal sealed class SqlDdlInterlock
         }
     }
 
+    [global::System.Diagnostics.DebuggerDisplay("Lease")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlDdlInterlock.Lease.DebugView))]
     private sealed class Lease : IDisposable
     {
         private SqlDdlInterlock? _owner;
@@ -142,6 +156,22 @@ internal sealed class SqlDdlInterlock
                 }
                 _owner = null;
             }
+        }
+
+        private sealed class DebugView
+        {
+            public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlDdlInterlock.Lease value)
+            {
+                _ = value;
+            }
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlDdlInterlock value)
+        {
+            _ = value;
         }
     }
 }

@@ -10,6 +10,8 @@ using Assimalign.Cohesion.Database.Types;
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 /// <summary>A tokenized LIKE pattern. Escapes and wildcards are read before literal normalization.</summary>
+[global::System.Diagnostics.DebuggerDisplay("SqlLikePattern")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlLikePattern.DebugView))]
 internal sealed class SqlLikePattern
 {
     // A null literal is %, an empty literal is _, and a nonempty literal is a literal run.
@@ -43,7 +45,7 @@ internal sealed class SqlLikePattern
     {
         if (escape.Length != 0 && (!Rune.TryGetRuneAt(escape, 0, out var rune) || rune.Utf16SequenceLength != escape.Length))
         {
-            throw new SqlPlanningException("COHSQLE034", ErrorMessages.LikeEscapeInvalid);
+            throw new SqlPlanningException("CS02034", ErrorMessages.LikeEscapeInvalid);
         }
     }
 
@@ -61,7 +63,7 @@ internal sealed class SqlLikePattern
             if (escape.Length != 0 && pattern.AsSpan(index).StartsWith(escape, StringComparison.Ordinal))
             {
                 index += escape.Length;
-                if (index == pattern.Length) { throw new SqlPlanningException("COHSQLE034", ErrorMessages.LikeEscapeInvalid); }
+                if (index == pattern.Length) { throw new SqlPlanningException("CS02034", ErrorMessages.LikeEscapeInvalid); }
                 int length = ScalarLength(pattern, index);
                 literal.Append(pattern, index, length);
                 index += length;
@@ -429,7 +431,7 @@ internal sealed class SqlLikePattern
         if (!collation.IsIndexBacked && amount > limit - work)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            throw new SqlPlanningException("COHSQLE040", ErrorMessages.LikeWorkLimit);
+            throw new SqlPlanningException("CS05040", ErrorMessages.LikeWorkLimit);
         }
         work += amount;
     }
@@ -635,4 +637,12 @@ internal sealed class SqlLikePattern
 
     private static int ScalarLength(string text, int position)
         => char.IsHighSurrogate(text[position]) && position + 1 < text.Length && char.IsLowSurrogate(text[position + 1]) ? 2 : 1;
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlLikePattern value)
+        {
+            _ = value;
+        }
+    }
 }

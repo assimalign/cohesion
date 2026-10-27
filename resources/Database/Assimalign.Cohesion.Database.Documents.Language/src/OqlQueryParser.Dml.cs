@@ -34,7 +34,7 @@ public sealed partial class OqlQueryParser
         RejectDmlUnnest();
         if (!Failed && assignments.Count == 0 && unset.Count == 0)
         {
-            Error("OQL0002", "UPDATE requires at least one SET assignment or UNSET path.", Current);
+            Error("CD00002", ErrorMessages.OqlQueryParserParseUpdateVoid, Current);
         }
         OqlExpression? predicate = !Failed && Take("WHERE") ? ParseExpression() : null;
         RejectDmlUnnest();
@@ -43,7 +43,8 @@ public sealed partial class OqlQueryParser
         {
             _diagnostics.Add(QueryDiagnostics.UnsupportedClause("UPDATE " + Current.Text.ToUpperInvariant(), Profile.Language, Span(Current, Current)));
         }
-        return new OqlUpdateExpression(collection, alias, assignments.AsReadOnly(), unset.AsReadOnly(), predicate, Span(start, Previous));
+        var returning = ParseReturning();
+        return new OqlUpdateExpression(collection, alias, assignments.AsReadOnly(), unset.AsReadOnly(), predicate, Span(start, Previous), returning);
     }
 
     private bool IsUpdateAlias() => Current.Type is TokenType.Identifier or TokenType.QuotedIdentifier or TokenType.Function &&
@@ -79,7 +80,8 @@ public sealed partial class OqlQueryParser
         {
             _diagnostics.Add(QueryDiagnostics.UnsupportedClause("DELETE " + Current.Text.ToUpperInvariant(), Profile.Language, Span(Current, Current)));
         }
-        return new OqlDeleteExpression(collection, alias, predicate, Span(start, Previous));
+        var returning = ParseReturning();
+        return new OqlDeleteExpression(collection, alias, predicate, Span(start, Previous), returning);
     }
 
     private void RejectDmlUnnest()
@@ -98,11 +100,12 @@ public sealed partial class OqlQueryParser
         string collection = CollectionName();
         string? alias = Take("AS") ? Identifier() : null;
         string verb = upsert ? "UPSERT" : "INSERT";
+        OqlReturningExpression? returning = null;
         string? keyName = null;
         string? valueName = null;
         if (!Take(TokenType.LeftParen))
         {
-            Error("OQL0002", $"{verb} requires an explicit KEY header; document ids are not generated.", Current);
+            Error("CD00002", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.OqlQueryParserParseWriteVoid, verb), Current);
             return Build([], null);
         }
         Expect("KEY");
@@ -148,8 +151,9 @@ public sealed partial class OqlQueryParser
         }
         else
         {
-            Error("OQL0002", "Expected SELECT after the KEY output binding.", Current);
+            Error("CD00002", ErrorMessages.OqlQueryParserParseWriteVoid2, Current);
         }
+        returning = ParseReturning();
         return Build(values.AsReadOnly(), select);
 
         bool RejectOptions()
@@ -162,7 +166,25 @@ public sealed partial class OqlQueryParser
 
         OqlExpression Build(IReadOnlyList<(OqlExpression Key, OqlExpression Value)> rows, OqlSelectExpression? source)
             => upsert
-                ? new OqlUpsertExpression(collection, alias, rows, source, keyName, valueName, Span(start, Previous))
-                : new OqlInsertExpression(collection, alias, rows, source, keyName, valueName, Span(start, Previous));
+                ? new OqlUpsertExpression(collection, alias, rows, source, keyName, valueName, Span(start, Previous), returning)
+                : new OqlInsertExpression(collection, alias, rows, source, keyName, valueName, Span(start, Previous), returning);
     }
+    private OqlReturningExpression? ParseReturning()
+    {
+        if (Failed || !Is("RETURNING")) { return null; }
+        var start = Current;
+        Advance();
+        bool value = Take("RAW") || Take("VALUE");
+        List<OqlProjection> projections = [];
+        do
+        {
+            var expression = ParseExpression();
+            if (value && expression is OqlStarExpression)
+            { Error("CD00002", ErrorMessages.ReturningValueInvalid, Previous); }
+            string? alias = !value && Take("AS") ? Identifier(allowKeyword: true) : null;
+            projections.Add(new OqlProjection(expression, alias));
+        } while (!value && !Failed && Take(TokenType.Comma));
+        return new OqlReturningExpression(projections.AsReadOnly(), value, Span(start, Previous));
+    }
+
 }

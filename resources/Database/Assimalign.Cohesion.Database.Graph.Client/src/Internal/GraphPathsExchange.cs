@@ -13,6 +13,8 @@ using Assimalign.Cohesion.Database.Protocol;
 
 namespace Assimalign.Cohesion.Database.Graph.Client.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("GraphPathsExchange")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Client.Internal.GraphPathsExchange.DebugView))]
 internal sealed class GraphPathsExchange : DatabaseProtocolExchange<bool>
 {
     private readonly GraphProtocolExecuteMessage _request;
@@ -36,7 +38,7 @@ internal sealed class GraphPathsExchange : DatabaseProtocolExchange<bool>
     internal IReadOnlyList<ProtocolDiagnostic> Diagnostics => _diagnostics;
 
     internal GraphPathsExchange(string statement, IReadOnlyDictionary<string, object?>? parameters, bool compositeValues = false)
-        : base(GraphProtocol.Family)
+        : base(GraphProtocol.Family, transactionStatus: true)
     {
         _request = GraphRequestEncoder.Create(statement, parameters, compositeValues);
         _consumeFrame = ConsumeFrame;
@@ -154,14 +156,14 @@ internal sealed class GraphPathsExchange : DatabaseProtocolExchange<bool>
         {
             if (GraphProtocolPathsCompleteMessage.Decode(frame.Payload.Span).PathCount != _count)
             {
-                throw new ProtocolException("The graph path completion count does not match the received paths.");
+                throw new ProtocolException(ErrorMessages.PathsExchangeConsumeFrameProtocol);
             }
             _pathsComplete = true;
             return;
         }
         if (frame.Type != (ProtocolMessageType)GraphProtocolMessageType.Path)
         {
-            throw new ProtocolException("Expected a graph path or path completion.");
+            throw new ProtocolException(ErrorMessages.PathsExchangeConsumeFrameProtocol2);
         }
         long started = Stopwatch.GetTimestamp();
         GraphProtocolPathMessage decoded;
@@ -190,6 +192,14 @@ internal sealed class GraphPathsExchange : DatabaseProtocolExchange<bool>
         catch (InvalidOperationException exception)
         {
             throw new IOException(ErrorMessages.PathResponseReadClosed, exception);
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Graph.Client.Internal.GraphPathsExchange value)
+        {
+            _ = value;
         }
     }
 }

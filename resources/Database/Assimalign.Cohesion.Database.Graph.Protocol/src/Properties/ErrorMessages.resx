@@ -16,4 +16,20 @@
 
 
 
+  <data name="ProtocolExecuteMessageDecodeProtocol" xml:space="preserve"><value>Malformed payload: invalid parameter count.</value></data>
+  <data name="ProtocolExecuteMessageDecodeProtocol2" xml:space="preserve"><value>Malformed payload: invalid parameter length.</value></data>
+  <data name="ProtocolPathMessageDecodeProtocol" xml:space="preserve"><value>Trailing bytes in graph path payload.</value></data>
+  <data name="ProtocolPathMessageReadCountProtocol" xml:space="preserve"><value>Malformed graph element count.</value></data>
+  <data name="ProtocolPathMessageValidateProtocol" xml:space="preserve"><value>A path requires one more node than relationships.</value></data>
+  <data name="ProtocolPathMessageValidateProtocol2" xml:space="preserve"><value>Graph identities must be nonzero.</value></data>
+  <data name="ProtocolPathMessageValidateProtocol3" xml:space="preserve"><value>A path relationship must connect its consecutive nodes.</value></data>
+  <data name="PathsCompleteMessageEncodeProtocol" xml:space="preserve"><value>A path count cannot be negative.</value></data>
+  <data name="PathsCompleteMessageDecodeProtocol" xml:space="preserve"><value>Malformed path completion payload.</value></data>
+  <data name="ResultHeaderMessageDecodeProtocol" xml:space="preserve"><value>Malformed payload: invalid column count.</value></data>
+  <data name="ResultHeaderMessageDecodeProtocol2" xml:space="preserve"><value>Malformed payload: truncated column type.</value></data>
+  <data name="GraphProtocolPropertiesReadProtocol" xml:space="preserve"><value>Unknown graph property type tag.</value></data>
+  <data name="GraphProtocolPropertiesReadProtocol2" xml:space="preserve"><value>Graph properties require finite numbers.</value></data>
+  <data name="GraphProtocolPropertiesReadProtocol3" xml:space="preserve"><value>Duplicate graph property name.</value></data>
+  <data name="ProtocolPropertiesReadByteProtocol" xml:space="preserve"><value>Truncated graph property payload.</value></data>
+  <data name="ProtocolPropertiesReadDecimalProtocol" xml:space="preserve"><value>Malformed graph decimal flags.</value></data>
 </root>

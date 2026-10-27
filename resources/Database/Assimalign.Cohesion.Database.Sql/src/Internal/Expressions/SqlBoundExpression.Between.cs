@@ -4,6 +4,8 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// <c>[NOT] BETWEEN</c> over bound operands, with the collation of the operand and each bound
 /// resolved when the expression was bound.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("SqlBoundBetween")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlBoundBetween.DebugView))]
 internal sealed class SqlBoundBetween : SqlBoundExpression
 {
     /// <summary>Initializes a bound range test.</summary>
@@ -48,4 +50,12 @@ internal sealed class SqlBoundBetween : SqlBoundExpression
 
     /// <summary>Gets the collation of the operand and the upper end.</summary>
     internal SqlBoundCollation HighCollation { get; }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlBoundBetween value)
+        {
+            _ = value;
+        }
+    }
 }

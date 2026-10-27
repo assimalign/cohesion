@@ -43,7 +43,7 @@ public sealed class DocumentClientWireTests
         count.ShouldHaveSingleItem()[0].ShouldBeOfType<long>().ShouldBe(1L);
         var failure = await Should.ThrowAsync<DocumentClientException>(async () =>
             await connection.QueryAsync("SELECT SQRT(-1) FROM items", cancellationToken: harness.Token));
-        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDOC019");
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD02019");
         (await connection.QueryAsync("SELECT LENGTH(name) FROM items", cancellationToken: harness.Token)).ShouldHaveSingleItem()[0].ShouldBe(6L);
         await connection.PutAsync("items", "b", "{\"name\":\"Beta\",\"tags\":[]}"u8.ToArray(), cancellationToken: harness.Token);
         foreach (string mixed in new[]
@@ -101,7 +101,7 @@ public sealed class DocumentClientWireTests
         row.IsNull(3).ShouldBeTrue();
         var failure = await Should.ThrowAsync<DocumentClientException>(async () =>
             await connection.QueryAsync("SELECT name LIKE 'z\\' FROM items", cancellationToken: harness.Token));
-        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDOC013");
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD02013");
         (await connection.QueryAsync("SELECT name FROM items WHERE name LIKE 'a%'", cancellationToken: harness.Token))
             .ShouldHaveSingleItem()[0].ShouldBe("alpha");
     }
@@ -230,6 +230,14 @@ public sealed class DocumentClientWireTests
         await connection.PutAsync("items", "b", "{\"name\":\"Bob\",\"group\":\"A\",\"score\":4,\"active\":false}"u8.ToArray(), cancellationToken: harness.Token);
         await connection.PutAsync("items", "c", "{\"name\":\"Cy\",\"group\":\"B\",\"score\":1,\"active\":true}"u8.ToArray(), cancellationToken: harness.Token);
 
+        // Transaction clauses join the advertised wire conformance corpus (#1725).
+        (await connection.ExecuteAsync("START WORK", cancellationToken: harness.Token)).ShouldBe(0);
+        await connection.PutAsync("items", "rolled_back", "{}"u8.ToArray(), cancellationToken: harness.Token);
+        (await connection.ExecuteAsync("ROLLBACK TRAN", cancellationToken: harness.Token)).ShouldBe(0);
+        (await connection.GetAsync("items", "rolled_back", harness.Token)).ShouldBeNull();
+        (await connection.ExecuteAsync("BEGIN ISOLATION LEVEL READ COMMITTED", cancellationToken: harness.Token)).ShouldBe(0);
+        (await connection.ExecuteAsync("COMMIT WORK", cancellationToken: harness.Token)).ShouldBe(0);
+
         // Act / Assert: SELECT, FROM alias, WHERE, paths, parameters, ORDER BY and arithmetic.
         var rows = await connection.QueryAsync("SELECT d.name AS person, d.nested.x AS x, d.array[0] AS entry_value, d.score * 2 + 1 AS value FROM items AS d WHERE d.score >= @min AND NOT d.active = false ORDER BY \"value\" DESC",
             new Dictionary<string, object?> { ["min"] = 2 }, harness.Token);
@@ -313,7 +321,7 @@ public sealed class DocumentClientWireTests
         var duplicate = await Should.ThrowAsync<DocumentClientException>(async () => await connection.ExecuteAsync(
             "INSERT INTO items (KEY, VALUE) VALUES ('e', 1)", cancellationToken: harness.Token));
         duplicate.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
-        duplicate.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDOC012");
+        duplicate.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD03012");
         (await connection.QueryAsync("SELECT META(d).id AS id, d.name FROM items d WHERE category = 'z' ORDER BY id", cancellationToken: harness.Token))
             .Select(row => row[0]).ShouldBe(new object?[] { "e", "f" });
 
@@ -329,7 +337,7 @@ public sealed class DocumentClientWireTests
         var failedUpdate = await Should.ThrowAsync<DocumentClientException>(async () => await connection.ExecuteAsync(
             "UPDATE items SET name.first = 'x' WHERE META().id = 'e'", cancellationToken: harness.Token));
         failedUpdate.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
-        failedUpdate.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDOC016");
+        failedUpdate.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD02016");
         (await connection.ExecuteAsync("UPDATE items UNSET tags WHERE nested.score = 9", cancellationToken: harness.Token)).ShouldBe(2);
 
         // DELETE reports affected count in Complete and emits no Document frames.
@@ -385,15 +393,15 @@ public sealed class DocumentClientWireTests
         var failure = await Should.ThrowAsync<DocumentClientException>(async () => await connection.ExecuteAsync(
             "UPSERT INTO items (KEY, VALUE) VALUES ('a', 0), (MISSING, 1)", cancellationToken: harness.Token));
         failure.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
-        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDOC008");
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD02008");
         failure.Diagnostics[0].Message.ShouldBe("UPSERT KEY must evaluate to a nonblank string.");
-        failure.Message.ShouldBe("COHDOC008: UPSERT KEY must evaluate to a nonblank string.");
+        failure.Message.ShouldBe("CD02008: UPSERT KEY must evaluate to a nonblank string.");
         var repeated = await Should.ThrowAsync<DocumentClientException>(async () => await connection.ExecuteAsync(
             "UPSERT INTO items (KEY, VALUE) VALUES ('n', 1), ('n', 2)", cancellationToken: harness.Token));
         repeated.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
-        repeated.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDOC012");
+        repeated.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD03012");
         repeated.Diagnostics[0].Message.ShouldBe("Document key 'n' appears more than once in one statement.");
-        repeated.Message.ShouldBe("COHDOC012: Document key 'n' appears more than once in one statement.");
+        repeated.Message.ShouldBe("CD03012: Document key 'n' appears more than once in one statement.");
         (await connection.GetAsync("items", "n", harness.Token)).ShouldBeNull();
         (await connection.QueryAsync("SELECT name FROM items ORDER BY name", cancellationToken: harness.Token))
             .Select(row => row[0]).ShouldBe(new object?[] { "alpha2", "zeta" });

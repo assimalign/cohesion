@@ -49,6 +49,27 @@ internal sealed class SmokeRunner
         StudioEngines? engines = null;
         try
         {
+            foreach (StudioModel model in new[] { StudioModel.Sql, StudioModel.Documents, StudioModel.Graph })
+            {
+                await runner.StepAsync("splitter", model.FolderName + "-left-arrow", () =>
+                {
+                    // Arrange / Act: SQL and OQL see -- as a comment; GQL sees arrows.
+                    const string script = "  MATCH (a)<-->(b) RETURN a; RETURN 1;";
+                    List<ScriptStatement> statements = ScriptSplitter.Split(script, model);
+
+                    // Assert: retain semicolons, trimming and editor offsets in each language.
+                    int expected = model == StudioModel.Graph ? 2 : 1;
+                    Require(statements.Count == expected && statements[0].Offset == 2
+                        && statements[0].Text == (expected == 2 ? "MATCH (a)<-->(b) RETURN a;" : script.Trim())
+                        && (expected == 1 || statements[1] == new ScriptStatement("RETURN 1;", script.IndexOf("RETURN 1", StringComparison.Ordinal))),
+                        ErrorMessages.ScriptSplitLanguageMismatch);
+                    Require(ScriptSplitter.IsBlank("/* outer /* inner ; */ ; */ -- ;\r ;", model)
+                        && ScriptSplitter.FirstKeyword("/* ; */ ((MATCH (a)<-->(b) RETURN a;", model) == "MATCH",
+                        ErrorMessages.ScriptSplitLanguageMismatch);
+                    return Task.FromResult(true);
+                }).ConfigureAwait(false);
+            }
+
             engines = await runner.StepAsync("engines", "create", () => Task.FromResult(StudioEngines.Create(dataRoot))).ConfigureAwait(false);
             if (engines is not null)
             {
@@ -123,7 +144,7 @@ internal sealed class SmokeRunner
 
             await ScriptStepAsync(scope, "create-insert-select", embedded,
                 "CREATE TABLE smoke_t (id BIGINT PRIMARY KEY, name TEXT NOT NULL); INSERT INTO smoke_t (id, name) VALUES (1, 'alpha'), (2, 'beta'); SELECT id, name FROM smoke_t ORDER BY id;",
-                outcomes => Expect(outcomes[1].AffectedCount == 2, $"insert affected {outcomes[1].AffectedCount}")
+                outcomes => Expect(outcomes[1].AffectedCount == 2, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.InsertAffectedMismatch, outcomes[1].AffectedCount))
                     ?? ExpectRows(outcomes[2], 2, row => row[1] == "beta")).ConfigureAwait(false);
 
             await RegisteredFunctionsStepAsync(scope, embedded, "smoke_t", rows: 2, lastInitial: "B", product: "2").ConfigureAwait(false);
@@ -131,11 +152,11 @@ internal sealed class SmokeRunner
             await StepAsync(scope, "transaction-api-rollback", async () =>
             {
                 await embedded.BeginTransactionAsync(IsolationLevel.Snapshot).ConfigureAwait(false);
-                Require(embedded.InTransaction, "transaction not active after Begin");
+                Require(embedded.InTransaction, ErrorMessages.TransactionNotActive);
                 await RunScriptAsync(embedded, "INSERT INTO smoke_t (id, name) VALUES (3, 'gamma');").ConfigureAwait(false);
                 await embedded.RollbackAsync().ConfigureAwait(false);
                 List<StatementOutcome> count = await RunScriptAsync(embedded, "SELECT COUNT(*) AS n FROM smoke_t;").ConfigureAwait(false);
-                Require(count[0].Table?.Rows[0][0] == "2", $"expected 2 rows after rollback, got {count[0].Table?.Rows[0][0]}");
+                Require(count[0].Table?.Rows[0][0] == "2", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.RollbackRowCountMismatch, count[0].Table?.Rows[0][0]));
                 return true;
             }).ConfigureAwait(false);
 
@@ -159,7 +180,7 @@ internal sealed class SmokeRunner
 
                 await ScriptStepAsync(scope, "create-insert-select", wire,
                     "CREATE TABLE smoke_w (id BIGINT PRIMARY KEY, name TEXT); INSERT INTO smoke_w (id, name) VALUES (1, 'one'), (2, 'two'), (3, 'three'); SELECT id, name FROM smoke_w WHERE id >= 2 ORDER BY id;",
-                    outcomes => Expect(outcomes[1].AffectedCount == 3, $"insert affected {outcomes[1].AffectedCount}")
+                    outcomes => Expect(outcomes[1].AffectedCount == 3, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.InsertAffectedMismatch, outcomes[1].AffectedCount))
                         ?? ExpectRows(outcomes[2], 2, row => row[1] == "three")).ConfigureAwait(false);
 
                 // The server runs statements on the same engine, so the registered functions answer over the wire too.
@@ -175,7 +196,7 @@ internal sealed class SmokeRunner
                     await RunScriptAsync(wire, "INSERT INTO smoke_w (id, name) VALUES (5, 'five');").ConfigureAwait(false);
                     await wire.CommitAsync().ConfigureAwait(false);
                     List<StatementOutcome> count = await RunScriptAsync(wire, "SELECT COUNT(*) FROM smoke_w;").ConfigureAwait(false);
-                    Require(count[0].Table?.Rows[0][0] == "4", $"expected 4 rows after commit, got {count[0].Table?.Rows[0][0]}");
+                    Require(count[0].Table?.Rows[0][0] == "4", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CommitRowCountMismatch, count[0].Table?.Rows[0][0]));
                     return true;
                 }).ConfigureAwait(false);
 
@@ -203,7 +224,7 @@ internal sealed class SmokeRunner
             {
                 int count = await embedded.SeedSampleDataAsync().ConfigureAwait(false);
                 IReadOnlyList<string> collections = await embedded.ListCollectionsAsync().ConfigureAwait(false);
-                Require(collections.Contains("items"), "items collection missing");
+                Require(collections.Contains("items"), ErrorMessages.ItemsCollectionMissing);
                 return count;
             }).ConfigureAwait(false);
 
@@ -211,8 +232,8 @@ internal sealed class SmokeRunner
             {
                 Assimalign.Cohesion.Database.Documents.Protocol.Document saved = await embedded.PutAsync("items", "smoke", """{"name":"smoke","score":9}""", null).ConfigureAwait(false);
                 Assimalign.Cohesion.Database.Documents.Protocol.Document? read = await embedded.GetAsync("items", "smoke").ConfigureAwait(false);
-                Require(read is { } found && Encoding.UTF8.GetString(found.Content.Span).Contains("\"smoke\"", StringComparison.Ordinal), "document not read back");
-                Require(await embedded.DeleteAsync("items", "smoke", saved.Version.Value).ConfigureAwait(false), "delete returned false");
+                Require(read is { } found && Encoding.UTF8.GetString(found.Content.Span).Contains("\"smoke\"", StringComparison.Ordinal), ErrorMessages.DocumentReadBackFailed);
+                Require(await embedded.DeleteAsync("items", "smoke", saved.Version.Value).ConfigureAwait(false), ErrorMessages.DocumentDeleteFailed);
                 return true;
             }).ConfigureAwait(false);
 
@@ -237,30 +258,30 @@ internal sealed class SmokeRunner
                 ConnectionFactory = new Connections.Tcp.TcpConnectionFactory(),
             });
             await using var connection = await client.ConnectAsync(token).ConfigureAwait(false);
-            Require(await connection.CreateCollectionAsync("wire_items", token).ConfigureAwait(false) == "wire_items", "create collection failed");
-            Require(await connection.GetCollectionAsync("wire_items", token).ConfigureAwait(false) == "wire_items", "get collection failed");
+            Require(await connection.CreateCollectionAsync("wire_items", token).ConfigureAwait(false) == "wire_items", ErrorMessages.CollectionCreateFailed);
+            Require(await connection.GetCollectionAsync("wire_items", token).ConfigureAwait(false) == "wire_items", ErrorMessages.CollectionReadFailed);
             Assimalign.Cohesion.Database.Documents.Protocol.Document saved = await connection.PutAsync("wire_items", "one", "{\"name\":\"wire\",\"score\":9}"u8.ToArray(), cancellationToken: token).ConfigureAwait(false);
-            Require((await connection.GetAsync("wire_items", "one", token).ConfigureAwait(false))?.Version == saved.Version, "get did not preserve version");
+            Require((await connection.GetAsync("wire_items", "one", token).ConfigureAwait(false))?.Version == saved.Version, ErrorMessages.DocumentVersionMismatch);
             var rows = await connection.QueryAsync("SELECT name, score FROM wire_items WHERE score > @min ORDER BY score DESC",
                 new Dictionary<string, object?> { ["min"] = 5 }, token).ConfigureAwait(false);
-            Require(rows.Count == 1 && rows[0]["name"] is "wire" && rows.AffectedCount == -1, "OQL row query failed");
+            Require(rows.Count == 1 && rows[0]["name"] is "wire" && rows.AffectedCount == -1, ErrorMessages.OqlRowsMismatch);
             var whole = await connection.QueryAsync("SELECT * FROM wire_items", cancellationToken: token).ConfigureAwait(false);
-            Require(whole.Documents.Count == 1 && whole.Documents[0].GetProperty("score").GetInt32() == 9, "whole document query failed");
+            Require(whole.Documents.Count == 1 && whole.Documents[0].GetProperty("score").GetInt32() == 9, ErrorMessages.WholeDocumentMismatch);
             var catalog = await connection.QueryAsync("SELECT OBJECT_NAME FROM COHESION_SCHEMA.OBJECT_OWNERSHIP", cancellationToken: token).ConfigureAwait(false);
-            Require(catalog.Any(row => row[0] is "wire_items"), "collection catalog missing wire collection");
+            Require(catalog.Any(row => row[0] is "wire_items"), ErrorMessages.WireCollectionCatalogMissing);
             try
             {
                 await connection.QueryAsync("MERGE INTO wire_items", cancellationToken: token).ConfigureAwait(false);
-                throw new InvalidOperationException("unsupported OQL unexpectedly succeeded");
+                throw new InvalidOperationException(ErrorMessages.OqlRejectionMissing);
             }
             catch (Documents.Client.DocumentClientException exception)
             {
-                Require(exception.Code == Protocol.ProtocolErrorCode.ParseFailure && exception.Diagnostics.Any(d => d.Code == "COHDBL001"), "diagnostic code lost on wire");
+                Require(exception.Code == Protocol.ProtocolErrorCode.ParseFailure && exception.Diagnostics.Any(d => d.Code == "CK00001"), ErrorMessages.WireDiagnosticMissing);
             }
-            Require(await connection.DeleteAsync("wire_items", "one", saved.Version, token).ConfigureAwait(false), "delete after statement failure failed");
-            Require(await connection.GetAsync("wire_items", "one", token).ConfigureAwait(false) is null, "deleted document still visible");
+            Require(await connection.DeleteAsync("wire_items", "one", saved.Version, token).ConfigureAwait(false), ErrorMessages.PostFailureDeleteFailed);
+            Require(await connection.GetAsync("wire_items", "one", token).ConfigureAwait(false) is null, ErrorMessages.DeletedDocumentVisible);
             await connection.DropCollectionAsync("wire_items", token).ConfigureAwait(false);
-            Require(!(await connection.GetCollectionsAsync(token).ConfigureAwait(false)).Contains("wire_items"), "dropped collection still visible");
+            Require(!(await connection.GetCollectionsAsync(token).ConfigureAwait(false)).Contains("wire_items"), ErrorMessages.DroppedCollectionVisible);
             return true;
         }).ConfigureAwait(false);
     }
@@ -282,13 +303,28 @@ internal sealed class SmokeRunner
 
             await GraphRoundTripAsync(scope, embedded, "Emb").ConfigureAwait(false);
 
+            // Arrange: a refused GQL arrow must not swallow the following statement (#1647).
+            const string arrowScript = "  MATCH (a)<-->(b) RETURN a; RETURN 1;";
+            await ScriptStepAsync(scope, "split-left-arrow-continue-on-error", embedded, arrowScript,
+                outcomes =>
+                {
+                    // Assert: StopOnError=false still executes the independent RETURN.
+                    if (outcomes.Count != 2 || !outcomes[0].Failed || outcomes[1].Failed || outcomes[1].Skipped
+                        || outcomes[0].StatementOffset != 2 || outcomes[1].StatementOffset != arrowScript.IndexOf("RETURN 1", StringComparison.Ordinal))
+                    {
+                        return ErrorMessages.GqlScriptContinuationFailed;
+                    }
+
+                    return ExpectRows(outcomes[1], 1, row => row.Length == 1 && row[0] == "1");
+                }, allowFailures: true).ConfigureAwait(false);
+
             await StepAsync(scope, "transaction-api-rollback", async () =>
             {
                 await embedded.BeginTransactionAsync(IsolationLevel.Snapshot).ConfigureAwait(false);
                 await RunScriptAsync(embedded, "INSERT (:Smoke {name: 'ghost'});").ConfigureAwait(false);
                 await embedded.RollbackAsync().ConfigureAwait(false);
                 List<StatementOutcome> rows = await RunScriptAsync(embedded, "MATCH (n:Smoke {name: 'ghost'}) RETURN n.name;").ConfigureAwait(false);
-                Require(rows[0].Table is { Rows.Count: 0 }, "rolled-back node is visible");
+                Require(rows[0].Table is { Rows.Count: 0 }, ErrorMessages.RolledBackNodeVisible);
                 return true;
             }).ConfigureAwait(false);
 
@@ -317,7 +353,7 @@ internal sealed class SmokeRunner
         await ScriptStepAsync(scope, "match-paths", workspace,
             $"MATCH p = (a:Smoke {{name: '{tag}A'}})-[r:LINKS]->(b) RETURN p;",
             outcomes => Expect(outcomes[0].Paths is { Count: 1 } paths && paths[0].Contains($"{tag}B", StringComparison.Ordinal) && paths[0].Contains("-[", StringComparison.Ordinal),
-                $"paths: {string.Join(" | ", outcomes[0].Paths ?? [])}")).ConfigureAwait(false);
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.PathResultMismatch, string.Join(" | ", outcomes[0].Paths ?? [])))).ConfigureAwait(false);
 
         await CatalogStepAsync(scope, workspace, "Smoke").ConfigureAwait(false);
     }
@@ -341,7 +377,7 @@ internal sealed class SmokeRunner
                     await embedded.BeginTransactionAsync(IsolationLevel.Snapshot).ConfigureAwait(false);
                     await embedded.PutAsync(Bytes.Parse("ghost", false), Bytes.Parse("x", false), KeyValueCondition.None, null).ConfigureAwait(false);
                     await embedded.RollbackAsync().ConfigureAwait(false);
-                    Require(!await embedded.ExistsAsync(Bytes.Parse("ghost", false)).ConfigureAwait(false), "rolled-back key exists");
+                    Require(!await embedded.ExistsAsync(Bytes.Parse("ghost", false)).ConfigureAwait(false), ErrorMessages.RolledBackKeyVisible);
                     return true;
                 }).ConfigureAwait(false);
             }
@@ -367,9 +403,9 @@ internal sealed class SmokeRunner
         await StepAsync(scope, "put-get", async () =>
         {
             (bool applied, long? etag) = await workspace.PutAsync(Key("user:1"), Key("ada"), KeyValueCondition.None, null).ConfigureAwait(false);
-            Require(applied && etag is not null, "put not applied");
+            Require(applied && etag is not null, ErrorMessages.PutNotApplied);
             KeyValueItem? item = await workspace.GetAsync(Key("user:1")).ConfigureAwait(false);
-            Require(item is { } found && found.ValueText == "ada" && found.ETag == etag, $"get returned {item?.Summary ?? "null"}");
+            Require(item is { } found && found.ValueText == "ada" && found.ETag == etag, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.KeyValueReadMismatch, item?.Summary ?? "null"));
             return true;
         }).ConfigureAwait(false);
 
@@ -377,11 +413,11 @@ internal sealed class SmokeRunner
         {
             KeyValueItem current = (await workspace.GetAsync(Key("user:1")).ConfigureAwait(false))!;
             (bool stale, _) = await workspace.PutAsync(Key("user:1"), Key("nope"), KeyValueCondition.IfETagMatches, current.ETag + 1000).ConfigureAwait(false);
-            Require(!stale, "stale etag write applied");
+            Require(!stale, ErrorMessages.StaleETagAccepted);
             (bool swapped, _) = await workspace.PutAsync(Key("user:1"), Key("ada-2"), KeyValueCondition.IfETagMatches, current.ETag).ConfigureAwait(false);
-            Require(swapped, "matching etag write not applied");
+            Require(swapped, ErrorMessages.MatchingETagRejected);
             (bool absent, _) = await workspace.PutAsync(Key("user:1"), Key("dup"), KeyValueCondition.IfAbsent, null).ConfigureAwait(false);
-            Require(!absent, "IfAbsent applied over an existing key");
+            Require(!absent, ErrorMessages.IfAbsentAcceptedExistingKey);
             return true;
         }).ConfigureAwait(false);
 
@@ -390,18 +426,18 @@ internal sealed class SmokeRunner
             await workspace.PutAsync(Key("user:2"), Key("grace"), KeyValueCondition.None, null).ConfigureAwait(false);
             await workspace.PutAsync(Key("vendor:1"), Key("acme"), KeyValueCondition.None, null).ConfigureAwait(false);
             List<KeyValueItem> users = await workspace.ScanAsync(new KeyValueScan(Key("user:"), null, null, null)).ConfigureAwait(false);
-            Require(users.Count == 2 && users[0].KeyText == "user:1" && users[1].KeyText == "user:2", $"prefix scan returned {users.Count}");
+            Require(users.Count == 2 && users[0].KeyText == "user:1" && users[1].KeyText == "user:2", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.PrefixScanMismatch, users.Count));
             List<KeyValueItem> limited = await workspace.ScanAsync(new KeyValueScan(null, Key("user:2"), null, 1)).ConfigureAwait(false);
-            Require(limited.Count == 1 && limited[0].KeyText == "user:2", $"range scan returned {string.Join(",", limited.Select(i => i.KeyText))}");
-            Require(await workspace.DeleteAsync(Key("vendor:1"), null).ConfigureAwait(false), "delete returned false");
-            Require(!await workspace.ExistsAsync(Key("vendor:1")).ConfigureAwait(false), "deleted key still exists");
+            Require(limited.Count == 1 && limited[0].KeyText == "user:2", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.RangeScanMismatch, string.Join(",", limited.Select(i => i.KeyText))));
+            Require(await workspace.DeleteAsync(Key("vendor:1"), null).ConfigureAwait(false), ErrorMessages.DocumentDeleteFailed);
+            Require(!await workspace.ExistsAsync(Key("vendor:1")).ConfigureAwait(false), ErrorMessages.DeletedKeyVisible);
             return true;
         }).ConfigureAwait(false);
 
         await StepAsync(scope, "keyspaces", async () =>
         {
             TabularResult keySpaces = await workspace.KeySpacesAsync().ConfigureAwait(false);
-            Require(keySpaces.Rows.Count >= 1, "KEYSPACES returned no rows");
+            Require(keySpaces.Rows.Count >= 1, ErrorMessages.KeyspacesMissing);
             return keySpaces.Rows.Count;
         }).ConfigureAwait(false);
     }
@@ -443,7 +479,7 @@ internal sealed class SmokeRunner
         {
             await workspace.CreateContainerAsync(container).ConfigureAwait(false);
             List<string> containers = await workspace.ListContainersAsync().ConfigureAwait(false);
-            Require(containers.Contains(container), "container not listed");
+            Require(containers.Contains(container), ErrorMessages.ContainerNotListed);
             return true;
         }).ConfigureAwait(false);
 
@@ -452,9 +488,9 @@ internal sealed class SmokeRunner
             using var source = new MemoryStream(payload);
             await workspace.UploadAsync(container, "docs/readme.txt", source, "text/plain", overwrite: true).ConfigureAwait(false);
             List<BlobItem> blobs = await workspace.ListBlobsAsync(container, "docs/").ConfigureAwait(false);
-            Require(blobs.Count == 1 && blobs[0].Properties.Length == payload.Length, $"listed {blobs.Count} blobs");
+            Require(blobs.Count == 1 && blobs[0].Properties.Length == payload.Length, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.BlobListCountMismatch, blobs.Count));
             BlobItem? properties = await workspace.GetPropertiesAsync(container, "docs/readme.txt").ConfigureAwait(false);
-            Require(properties is { } found && found.Properties.ContentType == "text/plain", "properties mismatch");
+            Require(properties is { } found && found.Properties.ContentType == "text/plain", ErrorMessages.BlobPropertiesMismatch);
             return true;
         }).ConfigureAwait(false);
 
@@ -462,15 +498,15 @@ internal sealed class SmokeRunner
         {
             using var destination = new MemoryStream();
             await workspace.DownloadAsync(container, "docs/readme.txt", destination).ConfigureAwait(false);
-            Require(destination.ToArray().AsSpan().SequenceEqual(payload), $"downloaded {destination.Length} bytes, expected {payload.Length}");
+            Require(destination.ToArray().AsSpan().SequenceEqual(payload), string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.BlobDownloadLengthMismatch, destination.Length, payload.Length));
             return true;
         }).ConfigureAwait(false);
 
         await StepAsync(scope, "delete-drop", async () =>
         {
-            Require(await workspace.DeleteAsync(container, "docs/readme.txt").ConfigureAwait(false), "delete returned false");
+            Require(await workspace.DeleteAsync(container, "docs/readme.txt").ConfigureAwait(false), ErrorMessages.DocumentDeleteFailed);
             await workspace.DropContainerAsync(container).ConfigureAwait(false);
-            Require(!(await workspace.ListContainersAsync().ConfigureAwait(false)).Contains(container), "container still listed");
+            Require(!(await workspace.ListContainersAsync().ConfigureAwait(false)).Contains(container), ErrorMessages.DroppedContainerListed);
             return true;
         }).ConfigureAwait(false);
     }
@@ -487,7 +523,7 @@ internal sealed class SmokeRunner
         {
             IReadOnlyList<string> names = await workspace.ListDatabasesAsync(discoverOnDisk: false).ConfigureAwait(false);
             Require(names.Contains(StudioEngines.DeclaredDatabase, StringComparer.OrdinalIgnoreCase),
-                $"'{StudioEngines.DeclaredDatabase}' not listed after the engine's build ({string.Join(", ", names)})");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DeclaredDatabaseNotListed, StudioEngines.DeclaredDatabase, string.Join(", ", names)));
             try
             {
                 await workspace.DropDatabaseAsync(StudioEngines.DeclaredDatabase).ConfigureAwait(false);
@@ -498,7 +534,7 @@ internal sealed class SmokeRunner
                 return true;
             }
 
-            throw new InvalidOperationException($"DROP of the declared database '{StudioEngines.DeclaredDatabase}' was not refused.");
+            throw new InvalidOperationException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DeclaredDropRefusalMissing, StudioEngines.DeclaredDatabase));
         }).ConfigureAwait(false);
 
         return declared && await StepAsync(scope, "use-declared-database", async () =>
@@ -518,13 +554,13 @@ internal sealed class SmokeRunner
         string table = StudioSqlExtensions.NotesTable;
         await ScriptStepAsync(scope, "provisioned-schema", workspace,
             $"DELETE FROM {table}; INSERT INTO {table} (Id, Title) VALUES (1, 'Ada Lovelace'); SELECT Id, {StudioSqlExtensions.InitialsFunction}(Title) FROM {table}; DELETE FROM {table};",
-            outcomes => Expect(outcomes[1].AffectedCount == 1, $"insert affected {outcomes[1].AffectedCount}")
+            outcomes => Expect(outcomes[1].AffectedCount == 1, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.InsertAffectedMismatch, outcomes[1].AffectedCount))
                 ?? ExpectRows(outcomes[2], 1, row => row[1] == "AL")).ConfigureAwait(false);
 
         await ScriptStepAsync(scope, "check-calls-registered-function", workspace,
             $"INSERT INTO {table} (Id, Title) VALUES (2, '   ');",
             outcomes => Expect(outcomes[0].Failed && NamesCheck(outcomes[0]),
-                $"a title with no word was not refused by {StudioSqlExtensions.NotesCheck}: {Describe(outcomes[0])}"),
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CheckRefusalMissing, StudioSqlExtensions.NotesCheck, Describe(outcomes[0]))),
             allowFailures: true).ConfigureAwait(false);
 
         static bool NamesCheck(StatementOutcome outcome)
@@ -569,7 +605,7 @@ internal sealed class SmokeRunner
                         var outcome = new StatementOutcome { Statement = $"CREATE TABLE {StudioSqlExtensions.NotesTable} (Id BIGINT PRIMARY KEY, Title TEXT NOT NULL);" };
                         DatabaseResult result = await session.ExecuteAsync(outcome.Statement, null).ConfigureAwait(false);
                         await DatabaseResultReader.FillAsync(outcome, result, CancellationToken.None).ConfigureAwait(false);
-                        Require(!outcome.Failed, $"the conflicting table was not created: {Describe(outcome)}");
+                        Require(!outcome.Failed, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ConflictingTableCreateFailed, Describe(outcome)));
                     }
                 }
 
@@ -579,7 +615,7 @@ internal sealed class SmokeRunner
                     string failure = engines.DeclarationFailures.Count == 1 && engines.DeclarationFailures.TryGetValue(StudioModel.Sql, out string? sqlFailure)
                         ? sqlFailure
                         : throw new InvalidOperationException(
-                            $"expected only SQL's declaration to fail, got [{string.Join("; ", engines.DeclarationFailures.Select(entry => $"{entry.Key}: {entry.Value}"))}]");
+                            string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DeclarationIsolationFailed, string.Join("; ", engines.DeclarationFailures.Select(entry => $"{entry.Key}: {entry.Value}"))));
 
                     (StudioModel Model, DatabaseEngine Engine)[] declaring =
                         [(StudioModel.Documents, engines.Documents), (StudioModel.Graph, engines.Graph), (StudioModel.KeyValue, engines.KeyValue), (StudioModel.Blob, engines.Blob)];
@@ -591,7 +627,7 @@ internal sealed class SmokeRunner
                             listed |= string.Equals(instance.Name.ToString(), StudioEngines.DeclaredDatabase, StringComparison.OrdinalIgnoreCase);
                         }
 
-                        Require(listed, $"{model.DisplayName} did not declare '{StudioEngines.DeclaredDatabase}' next to the failed SQL declaration");
+                        Require(listed, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SiblingDeclarationFailed, model.DisplayName, StudioEngines.DeclaredDatabase));
                     }
 
                     return failure.Length > 120 ? failure[..120] + "..." : failure;
@@ -627,7 +663,7 @@ internal sealed class SmokeRunner
         {
             await workspace.CreateDatabaseAsync(databaseName).ConfigureAwait(false);
             IReadOnlyList<string> names = await workspace.ListDatabasesAsync(discoverOnDisk: false).ConfigureAwait(false);
-            Require(names.Contains(databaseName, StringComparer.OrdinalIgnoreCase), "database not listed after create");
+            Require(names.Contains(databaseName, StringComparer.OrdinalIgnoreCase), ErrorMessages.CreatedDatabaseNotListed);
             return true;
         }).ConfigureAwait(false);
 
@@ -691,7 +727,7 @@ internal sealed class SmokeRunner
             List<CatalogLine> lines = workspace is LanguageWorkspace language
                 ? await language.GetCatalogAsync().ConfigureAwait(false)
                 : [];
-            Require(lines.Any(line => line.Text.Contains(expected, StringComparison.Ordinal)), $"'{expected}' not in catalog ({lines.Count} lines)");
+            Require(lines.Any(line => line.Text.Contains(expected, StringComparison.Ordinal)), string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CatalogObjectMissing, expected, lines.Count));
             return lines.Count;
         }).ConfigureAwait(false);
     }
@@ -706,7 +742,7 @@ internal sealed class SmokeRunner
                 if (expectErrors)
                 {
                     return Expect(outcomes.Any(o => o.Failed) && outcomes.SelectMany(o => o.Diagnostics).Any(d => d.Severity == "Error" || d.Code.Length > 0) || outcomes.Any(o => o.Error is not null),
-                        "expected a failure with diagnostics");
+                        ErrorMessages.ExpectedDiagnosticMissing);
                 }
 
                 return null;
@@ -767,15 +803,15 @@ internal sealed class SmokeRunner
     {
         if (outcome.Table is not { } table)
         {
-            return "no result table";
+            return ErrorMessages.ResultTableMissing;
         }
 
         if (table.Rows.Count != count)
         {
-            return $"expected {count} rows, got {table.Rows.Count}: {string.Join(" | ", table.Rows.Select(r => string.Join(",", r)))}";
+            return string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ResultRowCountMismatch, count, table.Rows.Count, string.Join(" | ", table.Rows.Select(r => string.Join(",", r))));
         }
 
-        return count == 0 || last(table.Rows[^1]) ? null : $"unexpected last row: {string.Join(",", table.Rows[^1])}";
+        return count == 0 || last(table.Rows[^1]) ? null : string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ResultLastRowMismatch, string.Join(",", table.Rows[^1]));
     }
 
     private static void Require(bool condition, string message)

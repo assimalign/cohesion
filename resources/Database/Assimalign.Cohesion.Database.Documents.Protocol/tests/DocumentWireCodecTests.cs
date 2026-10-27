@@ -12,6 +12,19 @@ namespace Assimalign.Cohesion.Database.Documents.Protocol.Tests;
 
 public sealed class DocumentWireCodecTests
 {
+    [Fact(DisplayName = "Cohesion Test [Documents.Protocol] - Transaction status is the Documents capability and is absent from legacy Ready (#1725)")]
+    public void Family_TransactionStatus_ShouldNegotiateWithoutDiagnostics()
+    {
+        // Arrange / Act
+        DocumentProtocol.Family.Capabilities.ShouldHaveSingleItem().ShouldBeSameAs(ProtocolCapability.TransactionStatus);
+        var ready = new ProtocolReadyMessage(ProtocolVersion.Current, [ProtocolCapability.TransactionStatus.Name]);
+
+        // Assert
+        ProtocolReadyMessage.Decode(ready.Encode()).Capabilities.ShouldBe([ProtocolCapability.TransactionStatus.Name]);
+        ProtocolReadyMessage.Decode([]).Capabilities.ShouldBeEmpty();
+        new DocumentProtocolCompleteMessage(0, 0).Encode().Length.ShouldBe(16);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Documents] - Completion has two big-endian signed counts")]
     public void Complete_QueryAndWrite_ShouldEncodeAffectedCount()
     {
@@ -44,7 +57,7 @@ public sealed class DocumentWireCodecTests
             69 => new DocumentProtocolCommandMessage(DocumentProtocolOperation.Put, "items", "one", new(ulong.MaxValue), "{}"u8.ToArray()).Encode(),
             70 => new DocumentProtocolStoredDocumentMessage(new("one", new(ulong.MaxValue), "[1]"u8.ToArray())).Encode(),
             71 => new DocumentProtocolCollectionMessage("items").Encode(),
-            _ => new DocumentProtocolFailureMessage(ProtocolErrorCode.ParseFailure, "invalid", [new Diagnostic { Code = "COHDBL001", Message = "detail", Start = 1, End = 2, Severity = DiagnosticSeverity.Error }]).Encode(),
+            _ => new DocumentProtocolFailureMessage(ProtocolErrorCode.ParseFailure, "invalid", [new Diagnostic { Code = "CK00001", Message = "detail", Start = 1, End = 2, Severity = DiagnosticSeverity.Error }]).Encode(),
         };
 
         // Act / Assert
@@ -88,7 +101,7 @@ public sealed class DocumentWireCodecTests
     public void Failure_DiagnosticLocations_ShouldRoundTripWithoutParsingText()
     {
         // Arrange
-        var diagnostic = new Diagnostic { Code = "COHDBL001", Message = "detail", Start = 5, Severity = DiagnosticSeverity.Error };
+        var diagnostic = new Diagnostic { Code = "CK00001", Message = "detail", Start = 5, Severity = DiagnosticSeverity.Error };
         var message = new DocumentProtocolFailureMessage(ProtocolErrorCode.ParseFailure, "summary", [diagnostic]);
 
         // Act

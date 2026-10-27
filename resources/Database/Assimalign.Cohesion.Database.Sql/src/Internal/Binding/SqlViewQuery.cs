@@ -23,7 +23,7 @@ internal static class SqlViewQuery
         }
         if (query is SqlSelectExpression select)
         {
-            foreach (var relation in select.From.SelectMany(item => new[] { item.Table }.Concat(item.Joins.Select(join => join.Table))))
+            foreach (var relation in Relations(select.From))
             {
                 if (relation is SqlDerivedTableReference derived)
                 { foreach (var node in Nodes(derived.Query)) { yield return node; } }
@@ -33,12 +33,45 @@ internal static class SqlViewQuery
         { foreach (var node in Nodes(root)) { yield return node; } }
     }
 
+    internal static IEnumerable<SqlRelationReference> Relations(IReadOnlyList<SqlFromItem> sources)
+    {
+        foreach (var item in sources)
+        {
+            foreach (var relation in RelationLeaves(item.Table)) { yield return relation; }
+            foreach (var join in item.Joins)
+            { foreach (var relation in RelationLeaves(join.Table)) { yield return relation; } }
+        }
+    }
+
+    internal static IEnumerable<SqlRelationReference> RelationLeaves(SqlRelationReference reference)
+    {
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+        if (reference is not SqlJoinedTableReference group) { yield return reference; }
+        else { foreach (var relation in Relations([group.Item])) { yield return relation; } }
+    }
+
+    internal static IEnumerable<SqlJoinClause> Joins(IReadOnlyList<SqlFromItem> sources)
+    {
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+        foreach (var item in sources)
+        {
+            if (item.Table is SqlJoinedTableReference first)
+            { foreach (var join in Joins([first.Item])) { yield return join; } }
+            foreach (var join in item.Joins)
+            {
+                if (join.Table is SqlJoinedTableReference right)
+                { foreach (var child in Joins([right.Item])) { yield return child; } }
+                yield return join;
+            }
+        }
+    }
+
     internal static IEnumerable<SqlExpression> Expressions(SqlQueryBodyExpression query)
     {
         if (query is SqlSelectExpression select)
         {
             foreach (var column in select.Columns) { yield return column.Expression; }
-            foreach (var join in select.From.SelectMany(item => item.Joins)) { if (join.Condition is { } condition) { yield return condition; } }
+            foreach (var join in Joins(select.From)) { if (join.Condition is { } condition) { yield return condition; } }
             if (select.Where is { } where) { yield return where; }
             foreach (var key in select.GroupBy) { yield return key; }
             if (select.Having is { } having) { yield return having; }
@@ -57,6 +90,7 @@ internal static class SqlViewQuery
             SqlSubqueryExpression scalar => scalar.Select,
             SqlExistsExpression exists => exists.Subquery,
             SqlInExpression member => member.Subquery,
+            SqlQuantifiedComparisonExpression quantified => quantified.Subquery,
             _ => null,
         };
         if (queries && query is not null)

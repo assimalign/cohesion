@@ -15,7 +15,7 @@ internal sealed partial class SqlPlanner
         {
             if (ContainsAggregate(column.Expression))
             {
-                throw new SqlPlanningException("COHSQLE017", ErrorMessages.ReturningAggregate, column.Expression.Location);
+                throw new SqlPlanningException("CS05017", ErrorMessages.ReturningAggregate, column.Expression.Location);
             }
         }
         // INSERT SELECT's input namespace is deliberately absent here, as in PostgreSQL
@@ -25,6 +25,24 @@ internal sealed partial class SqlPlanner
             defaultCollation: _catalog.DefaultCollation, functions: _functions,
             cancellationToken: _cancellationToken, relation: target, foldConstants: false);
         return BindProjections(returning, table.Columns, evaluator);
+    }
+
+    private IReadOnlyList<SqlProjection>? BindSourceReturning(IReadOnlyList<SqlSelectColumn>? returning,
+        SqlDmlSource source, SqlTableReference target)
+    {
+        if (returning is null) { return null; }
+        foreach (var column in returning)
+        {
+            if (ContainsAggregate(column.Expression))
+            {
+                throw new SqlPlanningException("CS05017", ErrorMessages.ReturningAggregate, column.Expression.Location);
+            }
+        }
+        var associations = source.Associations;
+        var evaluator = DmlEvaluator(associations.Columns, associations.Bindings, target, foldConstants: false);
+        // PostgreSQL parse_target.c:1301-1321 expands the visible namespace, preserving
+        // merged USING output order rather than exposing every physical association slot.
+        return BindProjections(returning, associations.Columns, evaluator, source.VisibleOrdinals);
     }
 
     private List<SqlProjection> BindProjections(IReadOnlyList<SqlSelectColumn> selectColumns,
@@ -55,6 +73,7 @@ internal sealed partial class SqlPlanner
                     column.Alias ?? (column.Expression is SqlColumnReferenceExpression outerColumn
                         ? outerColumn.ColumnName : $"column{projections.Count + 1}"), null, column.Expression,
                     GroupExpressionType(column.Expression, columns, evaluator)) { Value = value, Collation = collation,
+                        HasOutputName = column.Alias is not null || column.Expression is SqlColumnReferenceExpression,
                         Metadata = CaptureProjectionMetadata(candidate,
                             UnwrapCollation(column.Expression) is SqlColumnReferenceExpression projectedColumn ? evaluator.ColumnMetadata(projectedColumn) : null,
                             column.Expression, evaluator),

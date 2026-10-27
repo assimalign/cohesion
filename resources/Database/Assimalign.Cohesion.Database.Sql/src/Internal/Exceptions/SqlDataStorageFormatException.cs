@@ -20,7 +20,7 @@ internal sealed class SqlDataStorageFormatException : DatabaseException
     /// </summary>
     /// <param name="message">The refusal: the database, the format found, the format supported and the remedy.</param>
     public SqlDataStorageFormatException(string message)
-        : base(message, [new Diagnostic { Code = "COHSQLE041", Message = message, Severity = DiagnosticSeverity.Error }])
+        : base(message, [new Diagnostic { Code = "CS06041", Message = message, Severity = DiagnosticSeverity.Error }])
     {
     }
 
@@ -34,7 +34,7 @@ internal sealed class SqlDataStorageFormatException : DatabaseException
     public SqlDataStorageFormatException(string message, System.Exception inner)
         : base(message, [new Diagnostic
         { Code = inner is StorageFormatException ? StorageFormatException.ErrorCode :
-            inner is IndexFormatException ? IndexFormatException.ErrorCode : "COHSQLE041",
+            inner is IndexFormatException ? IndexFormatException.ErrorCode : "CS06041",
             Message = message, Severity = DiagnosticSeverity.Error }], inner)
     {
     }

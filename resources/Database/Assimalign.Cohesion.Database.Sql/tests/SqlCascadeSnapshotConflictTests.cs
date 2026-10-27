@@ -25,9 +25,9 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 /// </summary>
 public sealed class SqlCascadeSnapshotConflictTests
 {
-    private const string Delete = "DELETE FROM p WHERE id = 1";
+    private const string delete = "DELETE FROM p WHERE id = 1";
 
-    private const string CreateGrandchildTable = "CREATE TABLE g (id INT PRIMARY KEY, cid INT, CONSTRAINT fk_g FOREIGN KEY(cid) REFERENCES c(id) ON DELETE CASCADE)";
+    private const string createGrandchildTable = "CREATE TABLE g (id INT PRIMARY KEY, cid INT, CONSTRAINT fk_g FOREIGN KEY(cid) REFERENCES c(id) ON DELETE CASCADE)";
 
     /// <summary>
     /// The #1363 repro at <see cref="IsolationLevel.Snapshot"/>, in an explicit transaction and in
@@ -60,7 +60,7 @@ public sealed class SqlCascadeSnapshotConflictTests
             : null;
 
         // Act: the delete waits for the parent row while the child writer commits.
-        var pending = deleterSession.ExecuteAsync(Delete, cancellationToken: TestTimeout.Token()).AsTask();
+        var pending = deleterSession.ExecuteAsync(delete, cancellationToken: TestTimeout.Token()).AsTask();
         pending.IsCompleted.ShouldBeFalse();
         await writer.CommitAsync(TestTimeout.Token());
         var conflict = await Should.ThrowAsync<DatabaseTransactionAbortedException>(async () => await pending);
@@ -76,7 +76,7 @@ public sealed class SqlCascadeSnapshotConflictTests
         var seek = await RowsAsync(setup, "SELECT id, pid FROM c WHERE id = 10");
         var duplicate = await SqlConstraintAssertions.ThrowAsync(async () =>
             await setup.ExecuteAsync("INSERT INTO c (id, pid) VALUES (10, 1)", cancellationToken: TestTimeout.Token()));
-        var retried = await deleterSession.ExecuteAsync(Delete, cancellationToken: TestTimeout.Token());
+        var retried = await deleterSession.ExecuteAsync(delete, cancellationToken: TestTimeout.Token());
         var childrenAfterRetry = await RowsAsync(setup, "SELECT id FROM c");
         await setup.ExecuteAsync("INSERT INTO p (id) VALUES (1)", cancellationToken: TestTimeout.Token());
         var reinserted = await setup.ExecuteAsync("INSERT INTO c (id, pid) VALUES (10, 1), (11, 1)", cancellationToken: TestTimeout.Token());
@@ -125,7 +125,7 @@ public sealed class SqlCascadeSnapshotConflictTests
         await using var engine = CreateEngine();
         var database = await CreateDatabaseAsync(engine);
         await using var setup = await database.CreateSessionAsync();
-        await setup.ExecuteAsync(CreateGrandchildTable, cancellationToken: TestTimeout.Token());
+        await setup.ExecuteAsync(createGrandchildTable, cancellationToken: TestTimeout.Token());
         await setup.ExecuteAsync("INSERT INTO g (id, cid) VALUES (100, 10)", cancellationToken: TestTimeout.Token());
         await using var writerSession = await database.CreateSessionAsync();
         await using var deleterSession = await database.CreateSessionAsync();
@@ -135,7 +135,7 @@ public sealed class SqlCascadeSnapshotConflictTests
         var deleter = await deleterSession.BeginTransactionAsync(IsolationLevel.Snapshot, TestTimeout.Token());
 
         // Act: the delete waits for the child row while the grandchild writer commits.
-        var pending = deleterSession.ExecuteAsync(Delete, cancellationToken: TestTimeout.Token()).AsTask();
+        var pending = deleterSession.ExecuteAsync(delete, cancellationToken: TestTimeout.Token()).AsTask();
         pending.IsCompleted.ShouldBeFalse();
         await writer.CommitAsync(TestTimeout.Token());
         var conflict = await Should.ThrowAsync<DatabaseTransactionAbortedException>(async () => await pending);
@@ -148,7 +148,7 @@ public sealed class SqlCascadeSnapshotConflictTests
         var seek = await RowsAsync(setup, $"SELECT id, cid FROM g WHERE id = {grandchildKey}");
         var duplicate = await SqlConstraintAssertions.ThrowAsync(async () =>
             await setup.ExecuteAsync($"INSERT INTO g (id, cid) VALUES ({grandchildKey}, 10)", cancellationToken: TestTimeout.Token()));
-        var retried = await setup.ExecuteAsync(Delete, cancellationToken: TestTimeout.Token());
+        var retried = await setup.ExecuteAsync(delete, cancellationToken: TestTimeout.Token());
         var grandchildrenAfterRetry = await RowsAsync(setup, "SELECT id FROM g");
         await setup.ExecuteAsync("INSERT INTO p (id) VALUES (1)", cancellationToken: TestTimeout.Token());
         await setup.ExecuteAsync("INSERT INTO c (id, pid) VALUES (10, 1)", cancellationToken: TestTimeout.Token());
@@ -203,7 +203,7 @@ public sealed class SqlCascadeSnapshotConflictTests
 
         // Act: the delete fails while the writer is still in flight; then the writer ends.
         var conflict = await Should.ThrowAsync<DatabaseTransactionAbortedException>(async () =>
-            await deleterSession.ExecuteAsync(Delete, cancellationToken: TestTimeout.Token()));
+            await deleterSession.ExecuteAsync(delete, cancellationToken: TestTimeout.Token()));
         var stateAfter = deleter.State;
         if (childCommits)
         {
@@ -217,7 +217,7 @@ public sealed class SqlCascadeSnapshotConflictTests
         await deleter.RollbackAsync(TestTimeout.Token());
         var parents = await RowsAsync(setup, "SELECT id, name FROM p");
         var children = await RowsAsync(setup, "SELECT id, pid FROM c ORDER BY id");
-        var retried = await setup.ExecuteAsync(Delete, cancellationToken: TestTimeout.Token());
+        var retried = await setup.ExecuteAsync(delete, cancellationToken: TestTimeout.Token());
         var childrenAfterRetry = await RowsAsync(setup, "SELECT id FROM c");
         await setup.ExecuteAsync("INSERT INTO p (id) VALUES (1)", cancellationToken: TestTimeout.Token());
         var reinserted = await setup.ExecuteAsync("INSERT INTO c (id, pid) VALUES (10, 1), (12, 1)", cancellationToken: TestTimeout.Token());
@@ -262,7 +262,7 @@ public sealed class SqlCascadeSnapshotConflictTests
         var deleter = await deleterSession.BeginTransactionAsync(IsolationLevel.ReadCommitted, TestTimeout.Token());
 
         // Act
-        var pending = deleterSession.ExecuteAsync(Delete, cancellationToken: TestTimeout.Token()).AsTask();
+        var pending = deleterSession.ExecuteAsync(delete, cancellationToken: TestTimeout.Token()).AsTask();
         pending.IsCompleted.ShouldBeFalse();
         await writer.CommitAsync(TestTimeout.Token());
         var deleted = await pending;
@@ -301,7 +301,7 @@ public sealed class SqlCascadeSnapshotConflictTests
         var deleter = await deleterSession.BeginTransactionAsync(IsolationLevel.ReadCommitted, TestTimeout.Token());
 
         // Act
-        var pending = deleterSession.ExecuteAsync(Delete, cancellationToken: TestTimeout.Token()).AsTask();
+        var pending = deleterSession.ExecuteAsync(delete, cancellationToken: TestTimeout.Token()).AsTask();
         pending.IsCompleted.ShouldBeFalse();
         await writer.CommitAsync(TestTimeout.Token());
         var deleted = await pending;
@@ -321,7 +321,7 @@ public sealed class SqlCascadeSnapshotConflictTests
             duplicates.Add(duplicate.ConstraintKind);
         }
 
-        var redeleted = await setup.ExecuteAsync(Delete, cancellationToken: TestTimeout.Token());
+        var redeleted = await setup.ExecuteAsync(delete, cancellationToken: TestTimeout.Token());
         var childrenAfterRedelete = await RowsAsync(setup, "SELECT id FROM c");
 
         // Assert: the cascade deleted the writer's versions inside the transaction.
@@ -359,7 +359,7 @@ public sealed class SqlCascadeSnapshotConflictTests
         var deleter = await coordinator.BeginAsync(IsolationLevel.Serializable, TestTimeout.Token());
 
         // Act
-        var pending = ExecuteAsync(database, deleter, Delete);
+        var pending = ExecuteAsync(database, deleter, delete);
         pending.IsCompleted.ShouldBeFalse();
         await writer.CommitAsync(TestTimeout.Token());
         var conflict = await Should.ThrowAsync<TransactionAbortedException>(async () => await pending);
@@ -392,7 +392,7 @@ public sealed class SqlCascadeSnapshotConflictTests
         await using var engine = CreateEngine();
         var database = await CreateDatabaseAsync(engine);
         await using var setup = await database.CreateSessionAsync();
-        await setup.ExecuteAsync(CreateGrandchildTable, cancellationToken: TestTimeout.Token());
+        await setup.ExecuteAsync(createGrandchildTable, cancellationToken: TestTimeout.Token());
         await setup.ExecuteAsync("INSERT INTO p (id) VALUES (2)", cancellationToken: TestTimeout.Token());
         await setup.ExecuteAsync("INSERT INTO c (id, pid) VALUES (11, 1), (20, 2)", cancellationToken: TestTimeout.Token());
         await setup.ExecuteAsync("INSERT INTO g (id, cid) VALUES (100, 10), (101, 11), (200, 20)", cancellationToken: TestTimeout.Token());
@@ -409,7 +409,7 @@ public sealed class SqlCascadeSnapshotConflictTests
             var transaction = await coordinator.BeginAsync(isolationLevel, TestTimeout.Token());
             await ExecuteAsync(database, transaction, ownChild);
             await ExecuteAsync(database, transaction, ownGrandchild);
-            deleted = await ExecuteAsync(database, transaction, Delete);
+            deleted = await ExecuteAsync(database, transaction, delete);
             childrenInside = await ReadRowsAsync(await ExecuteAsync(database, transaction, "SELECT id FROM c ORDER BY id"));
             grandchildrenInside = await ReadRowsAsync(await ExecuteAsync(database, transaction, "SELECT id FROM g ORDER BY id"));
             await coordinator.CommitAsync(transaction, TestTimeout.Token());
@@ -420,7 +420,7 @@ public sealed class SqlCascadeSnapshotConflictTests
             var transaction = await session.BeginTransactionAsync(isolationLevel, TestTimeout.Token());
             await session.ExecuteAsync(ownChild, cancellationToken: TestTimeout.Token());
             await session.ExecuteAsync(ownGrandchild, cancellationToken: TestTimeout.Token());
-            deleted = await session.ExecuteAsync(Delete, cancellationToken: TestTimeout.Token());
+            deleted = await session.ExecuteAsync(delete, cancellationToken: TestTimeout.Token());
             childrenInside = await RowsAsync(session, "SELECT id FROM c ORDER BY id");
             grandchildrenInside = await RowsAsync(session, "SELECT id FROM g ORDER BY id");
             await transaction.CommitAsync(TestTimeout.Token());

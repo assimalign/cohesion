@@ -152,7 +152,7 @@ public sealed class GqlQuantifiedPathTests
         foreach (string prefix in new[] { "", "EXPLAIN " })
         {
             var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(prefix + source));
-            error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG003");
+            error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG03003");
         }
     }
 
@@ -213,18 +213,22 @@ public sealed class GqlQuantifiedPathTests
         await session.ExecuteAsync("MATCH (a:V {k:64}) INSERT (a)-[:Other]->(:V {k:65})");
         (await Rows(session, "MATCH (a:V {k:0})-[:T]->+(b) RETURN count(*)")).ShouldHaveSingleItem()[0].ShouldBe(64L);
         await session.ExecuteAsync("MATCH (a:V {k:64}) INSERT (a)-[:T]->(:V {k:66})");
-        foreach (string tail in new[] { "RETURN b.k", "WHERE b.k=-1 RETURN b.k", "RETURN b.k LIMIT 1" })
+        foreach (string tail in new[] { "RETURN b.k", "WHERE b.k=-1 RETURN b.k", "RETURN b.k ORDER BY b.k LIMIT 1" })
         {
             var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("MATCH (a:V {k:0})-[:T]->+(b) " + tail));
-            error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG004");
+            error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG05004");
             error.Message.ShouldContain("64 relationships", Case.Sensitive);
         }
+        // D4 permits an unordered LIMIT to leave later branches unvisited. A visited 65th hop
+        // still fails above, including when ORDER BY needs the complete expansion.
+        (await Rows(session, "MATCH (a:V {k:0})-[:T]->+(b) RETURN b.k LIMIT 1")).ShouldHaveSingleItem()[0].ShouldBe(1L);
+        session.LastStatementMetrics!.Memory.ActiveLeases.ShouldBe(0);
     }
 
     [Theory(DisplayName = "Cohesion Test [Graph] - Quantified paths: both expansion and binding budgets apply to repeated segments")]
-    [InlineData(18, "", "100000 path matches")]
-    [InlineData(32, " {k:-1}", "1000000 candidate expansions")]
-    public async Task Execute_ExpansionBudgets_ShouldFailWithoutTruncatingAsync(int count, string endpoint, string message)
+    [InlineData(18, "", "retained execution-memory budget", "CG05020")]
+    [InlineData(32, " {k:-1}", "1000000 candidate expansions", "CG05004")]
+    public async Task Execute_ExpansionBudgets_ShouldFailWithoutTruncatingAsync(int count, string endpoint, string message, string code)
     {
         // Arrange
         using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(2));
@@ -234,14 +238,22 @@ public sealed class GqlQuantifiedPathTests
         await session.ExecuteAsync("FOR k IN [" + string.Join(',', Enumerable.Range(0, count)) + "] INSERT (:V {k:k})", cancellationToken: timeout.Token);
         await session.ExecuteAsync("MATCH (a:V),(b:V) INSERT (a)-[:T]->(b)", cancellationToken: timeout.Token);
         // Act
-        var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("MATCH (a:V)-[:T]->{1,3}(b:V" + endpoint + ") RETURN a.k", cancellationToken: timeout.Token));
+        var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(GraphQueryRequest.FromGql("MATCH (a:V)-[:T]->{1,3}(b:V" + endpoint + ") RETURN a.k", null,
+            new() { MemoryBytes = code == "CG05020" ? 65536 : null }), timeout.Token));
         // Assert
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG004");
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(code);
         error.Message.ShouldContain(message, Case.Sensitive);
+        session.LastStatementMetrics!.Memory.RetainedBytes.ShouldBe(0);
+        session.LastStatementMetrics.Memory.ActiveLeases.ShouldBe(0);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Graph] - Quantified paths: cancellation is observed after expansion has started")]
-    public async Task MatchAsync_MidExpansionCancellation_ShouldObserveTokenAsync()
+    [Theory(DisplayName = "Cohesion Test [Graph] - Quantified paths: every mode observes cancellation after expansion has started")]
+    [InlineData("")]
+    [InlineData("WALK")]
+    [InlineData("TRAIL")]
+    [InlineData("SIMPLE")]
+    [InlineData("ACYCLIC")]
+    public async Task MatchAsync_MidExpansionCancellation_ShouldObserveTokenAsync(string mode)
     {
         // Arrange
         using var cancellation = new CancellationTokenSource();
@@ -253,14 +265,69 @@ public sealed class GqlQuantifiedPathTests
         // Act
         await database.RunAsync(session, async operation =>
         {
-            var plan = new GraphPlanner(database, operation.Context.Snapshot).Plan(GraphQueryRequest.FromGql("MATCH (a:V {name:'A'})-[:T]->+(b) RETURN b").Statement.GqlExpression);
+            var plan = new GraphPlanner(database, operation.Context.Snapshot).Plan(GraphQueryRequest.FromGql("MATCH " + mode + " (a:V {name:'A'})-[:T]->{1,3}(b) RETURN b").Statement.GqlExpression);
             await Should.ThrowAsync<OperationCanceledException>(async () => await GraphPlanExecutor.MatchAsync(database, operation,
                 plan.MatchClauses[0].Paths[0], new(StringComparer.Ordinal), [], budget, null, cancellation.Token));
             return true;
         }, CancellationToken.None);
         // Assert
         budget.Consumed.ShouldBe(4);
+        budget.Memory.RetainedBytes.ShouldBe(0);
+        budget.Memory.ActiveLeases.ShouldBe(0);
         cancellation.IsCancellationRequested.ShouldBeTrue();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Graph] - Quantified paths: unbounded default TRAIL observes cancellation in the expansion dispatcher (#1733)")]
+    public async Task MatchAsync_UnboundedTrailCancellation_ShouldStopBeforeNextFrontierAsync()
+    {
+        // Arrange
+        using var cancellation = new CancellationTokenSource();
+        await using var engine = GraphDatabaseEngine.Create("quantified", new());
+        var database = await engine.CreateDatabaseAsync("graph");
+        await using var session = await database.CreateSessionAsync();
+        await session.ExecuteAsync("FOR k IN [" + string.Join(',', Enumerable.Range(0, 12)) + "] INSERT (:V {k:k})");
+        await session.ExecuteAsync("MATCH (a:V),(b:V) INSERT (a)-[:T]->(b)");
+        int frontierVisits = 0;
+        int visitsAtCancellation = 0;
+        GraphPlanExecutor.ExpansionBudget? budget = null;
+        budget = new()
+        {
+            OnFrontier = _ =>
+            {
+                // A successful quantified hop queues EndIterationTask. Cancel before that
+                // continuation is dispatched: without its own check it would queue RepeatTask
+                // and reach this hook again, before any storage/materialization token check.
+                cancellation.IsCancellationRequested.ShouldBeFalse();
+                frontierVisits++;
+                if (budget!.Viable == 32)
+                {
+                    visitsAtCancellation = frontierVisits;
+                    cancellation.Cancel();
+                }
+            },
+        };
+
+        // Act
+        await database.RunAsync(session, async operation =>
+        {
+            var plan = new GraphPlanner(database, operation.Context.Snapshot).Plan(
+                GraphQueryRequest.FromGql("MATCH (a:V {k:0})-[:T]->+(b) RETURN b").Statement.GqlExpression);
+            plan.MatchClauses[0].Paths[0].Mode.ShouldBe(GqlPathMode.Trail);
+            var error = await Should.ThrowAsync<OperationCanceledException>(async () =>
+                await GraphPlanExecutor.MatchAsync(database, operation, plan.MatchClauses[0].Paths[0],
+                    new(StringComparer.Ordinal), [], budget, null, cancellation.Token));
+            error.CancellationToken.ShouldBe(cancellation.Token);
+            return true;
+        }, CancellationToken.None);
+
+        // Assert
+        cancellation.IsCancellationRequested.ShouldBeTrue();
+        visitsAtCancellation.ShouldBeGreaterThan(0);
+        frontierVisits.ShouldBe(visitsAtCancellation);
+        budget.Viable.ShouldBe(32);
+        budget.Consumed.ShouldBeGreaterThan(32);
+        budget.Memory.RetainedBytes.ShouldBe(0);
+        budget.Memory.ActiveLeases.ShouldBe(0);
     }
 
     [Fact(DisplayName = "Cohesion Test [Graph] - Quantified paths: malformed and deeply nested direct ASTs fail before execution")]
@@ -291,11 +358,11 @@ public sealed class GqlQuantifiedPathTests
         {
             var query = new GqlQueryStatement(new GqlQueryExpression([path], null, [], [], false, [new GqlProjection(new GqlVariableExpression("a"))]));
             var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(new GraphQueryRequest(query)));
-            error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG001");
+            error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG05001");
         }
         var insertion = new GqlQueryStatement(new GqlQueryExpression([], null, [inner], [], false, []));
         (await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(new GraphQueryRequest(insertion))))
-            .Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG001");
+            .Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG05001");
         (await Rows(session, "MATCH (a) RETURN count(*)")).ShouldHaveSingleItem()[0].ShouldBe(0L);
     }
 
@@ -337,7 +404,7 @@ public sealed class GqlQuantifiedPathTests
         {
             var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(
                 "MATCH (a:V {k:0})-[:T " + map + "]->+(b), (c:V {k:1}) RETURN count(*)"));
-            error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG004");
+            error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG05004");
         }
     }
 

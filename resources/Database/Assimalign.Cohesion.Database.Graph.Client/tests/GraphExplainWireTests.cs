@@ -49,7 +49,7 @@ public sealed class GraphExplainWireTests
             await foreach (var path in connection.QueryPathsAsync("EXPLAIN MATCH (a:Person) RETURN a", cancellationToken: harness.Token)) { _ = path; }
         });
         // Assert
-        error.Message.ShouldContain("COHDBG001", Case.Sensitive);
+        error.Message.ShouldContain("CG05001", Case.Sensitive);
         connection.IsOpen.ShouldBeTrue();
         (await connection.QueryAsync("EXPLAIN MATCH (n) RETURN n", cancellationToken: harness.Token)).ShouldNotBeEmpty();
     }

@@ -30,7 +30,7 @@ public readonly record struct BlobChunkMessage(ReadOnlyMemory<byte> Content)
     {
         if (length == 0 || length > BlobProtocol.MaxChunkLength)
         {
-            throw new ProtocolException($"A Blob chunk must contain 1 through {BlobProtocol.MaxChunkLength} bytes.");
+            throw new ProtocolException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ChunkMessageValidateLengthProtocol, BlobProtocol.MaxChunkLength));
         }
     }
 }

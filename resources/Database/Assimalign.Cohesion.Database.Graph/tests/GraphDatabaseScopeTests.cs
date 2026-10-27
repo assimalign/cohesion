@@ -45,10 +45,10 @@ public sealed class GraphDatabaseScopeTests
     /// <summary>
     /// The typed operations and <see cref="GraphSchema.Open"/> take the typed session and database
     /// (concrete-types plan, phase 4): a null one is an argument error, where the interface-typed
-    /// members reported it as a session of another database (<c>COHDBG005</c>), and a session of
-    /// another database is still <c>COHDBG005</c>.
+    /// members reported it as a session of another database (<c>CG07005</c>), and a session of
+    /// another database is still <c>CG07005</c>.
     /// </summary>
-    [Fact(DisplayName = "Cohesion Test [Database.Graph] - Scope: a null session or database is an argument error, another database's session is COHDBG005")]
+    [Fact(DisplayName = "Cohesion Test [Database.Graph] - Scope: a null session or database is an argument error, another database's session is CG07005")]
     public async Task CreateNodeAsync_NullOrForeignSession_ShouldRefuseByArgumentOrCode()
     {
         // Arrange
@@ -70,7 +70,7 @@ public sealed class GraphDatabaseScopeTests
         nullRead.ParamName.ShouldBe("session");
         nullSchemaSession.ParamName.ShouldBe("session");
         nullSchemaDatabase.ParamName.ShouldBe("database");
-        foreignSession.Message.ShouldStartWith("COHDBG005", Case.Sensitive);
-        foreignSchema.Message.ShouldStartWith("COHDBG005", Case.Sensitive);
+        foreignSession.Message.ShouldStartWith("CG07005", Case.Sensitive);
+        foreignSchema.Message.ShouldStartWith("CG07005", Case.Sensitive);
     }
 }

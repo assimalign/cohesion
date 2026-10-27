@@ -6,6 +6,24 @@ namespace Assimalign.Cohesion.Database.Graph.Language;
 
 public sealed partial class GqlQueryParser
 {
+    private GqlExpression ParseNamedFunction()
+    {
+        var start = Current;
+        if (!HasStackToNest(start)) { return new GqlLiteralExpression(null, Span(start, start)); }
+        string name = Current.Text;
+        Advance();
+        Expect(TokenType.LeftParen, "'('");
+        bool distinct = Take("DISTINCT");
+        if (!distinct) { Take("ALL"); }
+        var arguments = new System.Collections.Generic.List<GqlExpression>();
+        if (Current.Type != TokenType.RightParen)
+        {
+            do { arguments.Add(ParsePredicate()); } while (Take(TokenType.Comma));
+        }
+        Expect(TokenType.RightParen, "')'");
+        return new GqlNamedFunctionCallExpression(name, arguments, distinct, Span(start, Previous));
+    }
+
     private GqlExpression ParseFunction()
     {
         var start = Current;
@@ -17,13 +35,13 @@ public sealed partial class GqlQueryParser
         if (Current.Type != TokenType.RightParen)
         {
             if (Is("DISTINCT") || Is("ALL"))
-            { Error("GQL0002", $"Function {start.Text} does not accept a set quantifier.", Current); }
+            { Error("CG00002", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.GqlQueryParserParseFunctionVoid, start.Text), Current); }
             if (!Failed)
             { do { arguments.Add(ParseExpression(0)); } while (!Failed && Take(TokenType.Comma)); }
         }
         Expect(TokenType.RightParen, "')'");
         if (!Failed && (arguments.Count < signature.Min || arguments.Count > signature.Max))
-        { Error("GQL0002", $"Function {start.Text} requires {signature.Min} to {signature.Max} arguments.", start); }
+        { Error("CG00002", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.GqlQueryParserParseFunctionVoid2, start.Text, signature.Min, signature.Max), start); }
         return new GqlFunctionCallExpression(signature.Function, arguments, Span(start, Previous));
     }
 
@@ -74,7 +92,7 @@ public sealed partial class GqlQueryParser
             case "LIST": case "DURATION": case "BYTES": case "TIME":
                 Unsupported("CAST " + target, type); break;
             default:
-                if (kind == GqlCastType.Timestamp) { Error("GQL0002", $"Unknown CAST target '{target}'.", type); }
+                if (kind == GqlCastType.Timestamp) { Error("CG00002", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.GqlQueryParserParseCastVoid, target), type); }
                 break;
         }
         Expect(TokenType.RightParen, "')'");

@@ -52,7 +52,7 @@ public sealed class VersionPurgeRefusalTests
                 holder.Pages.ShouldBeGreaterThan(0);
                 await transaction.RollbackAsync(token);
                 database.Coordinator.VersionStore.PendingAbortedPurges.ShouldNotBeEmpty();
-                await Task.Run(() =>
+                await DedicatedTestTask.Run(() =>
                 {
                     for (int pass = 0; pass < 12; pass++)
                     {
@@ -268,7 +268,7 @@ public sealed class VersionPurgeRefusalTests
 
             // Act: force real undo retries at 100, 300 and 700 ms, spanning only 600 ms.
             // The local worker has no pump; the kernel's system-clock due time cannot race it.
-            await Task.Run(() =>
+            await DedicatedTestTask.Run(() =>
             {
                 foreach (int milliseconds in new[] { 100, 200, 400 })
                 {
@@ -373,9 +373,9 @@ public sealed class VersionPurgeRefusalTests
         await existing.SendAsync(BlobProtocolMessageType.List, new BlobListMessage("missing", "").Encode());
         var response = await existing.ExpectAsync(ProtocolMessageType.Error);
 
-        // Assert: the operation is served and reports its missing container, not COHDBB003.
+        // Assert: the operation is served and reports its missing container, not CB06003.
         var error = ProtocolErrorMessage.Decode(response.Payload.Span);
-        error.Message.ShouldNotContain("COHDBB003", Case.Sensitive);
+        error.Message.ShouldNotContain("CB06003", Case.Sensitive);
         engine.HasFailingWorker(database.Name).ShouldBeFalse();
         worker.BeforeFullPass = null;
     }

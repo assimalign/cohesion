@@ -11,6 +11,8 @@ using Xunit;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Storage.Tests;
 
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
+
 namespace Assimalign.Cohesion.Database.Transactions.Tests;
 
 /// <summary>
@@ -20,6 +22,84 @@ namespace Assimalign.Cohesion.Database.Transactions.Tests;
 [Collection("Journal enrollment")]
 public class TransactionCoordinatorRecoveryTests
 {
+    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Version purge: apply callback refuses reentrancy before any work (w11 review)")]
+    public async Task RunVersionPurgePass_InsideApply_ShouldRefuseBeforePruning()
+    {
+        // Arrange: the escape token makes the base failure terminate instead of hanging.
+        using var storage = CoordinatorStorage.Create();
+        using var escape = new CancellationTokenSource(TimeSpan.FromSeconds(1));
+        int pruned = 0;
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records,
+            (_, _) => { pruned++; return new ValueTask<long>(0); });
+        var context = await coordinator.BeginAsync(IsolationLevel.ReadCommitted, CancellationToken.None);
+
+        // Act / Assert: reentrancy is a storage-transaction refusal, never cancellation.
+        await coordinator.ApplyStatementAsync(context, _ =>
+        {
+            Should.Throw<StorageTransactionException>(() => coordinator.RunVersionPurgePass(escape.Token));
+            pruned.ShouldBe(0);
+            return true;
+        }, CancellationToken.None);
+        await coordinator.RollbackAsync(context, CancellationToken.None);
+        coordinator.RunVersionPurgePass(CancellationToken.None).ShouldBe(0);
+        pruned.ShouldBe(1);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Index prune: its callback owns the apply gate and reports reclaimed work (#1195)")]
+    public async Task RunVersionPurgePass_IndexCallback_ShouldHoldApplyGateAndReportItsWork()
+    {
+        // Arrange
+        using var storage = CoordinatorStorage.Create();
+        using var entered = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
+        using var applied = new ManualResetEventSlim();
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records, (bound, token) =>
+        {
+            bound.Value.ShouldBeGreaterThan(0UL);
+            entered.Set();
+            release.Wait(TimeSpan.FromSeconds(30), token).ShouldBeTrue("hang guard only");
+            return new ValueTask<long>(7);
+        });
+        var context = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+        // Act
+        var purge = DedicatedTestTask.Run(() => coordinator.RunVersionPurgePass(CancellationToken.None));
+        bool blocked;
+        Task<bool>? statement = null;
+        try
+        {
+            entered.Wait(TimeSpan.FromSeconds(30)).ShouldBeTrue("hang guard only");
+            statement = coordinator.ApplyStatementAsync(context, _ => { applied.Set(); return true; }).AsTask();
+            blocked = !statement.IsCompleted && !applied.IsSet;
+        }
+        finally { release.Set(); }
+        // Assert: thirty-second waits above and below are hang guards only.
+        (await purge.WaitAsync(TimeSpan.FromSeconds(30))).ShouldBe(7);
+        (await statement!.WaitAsync(TimeSpan.FromSeconds(30))).ShouldBeTrue();
+        blocked.ShouldBeTrue();
+        await coordinator.RollbackAsync(context);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Transactions] - Index prune: failure and cancellation retain identity and release the gate (#1195)")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RunVersionPurgePass_IndexCallbackFails_ShouldPreserveIdentityAndReleaseGate(bool cancellation)
+    {
+        // Arrange
+        using var storage = CoordinatorStorage.Create();
+        var failure = cancellation ? (Exception)new OperationCanceledException("provider cancelled") : new IOException("index read failed");
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records,
+            (_, _) => ValueTask.FromException<long>(failure));
+        Exception? observed = null;
+        // Act
+        try { coordinator.RunVersionPurgePass(CancellationToken.None); }
+        catch (Exception exception) { observed = exception; }
+        // Assert: the wait is a hang guard for the subsequent gate admission.
+        observed.ShouldBeSameAs(failure);
+        var context = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+        (await coordinator.ApplyStatementAsync(context, _ => true).AsTask().WaitAsync(TimeSpan.FromSeconds(30))).ShouldBeTrue();
+        await coordinator.RollbackAsync(context);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Checkpoint: readers begin, pin and end while the physical checkpoint owns both gates (#1269)")]
     public async Task BeginAsync_CheckpointBlockedInDataIo_ShouldAllowReadersAndPreserveLateWriter()
     {
@@ -44,7 +124,7 @@ public class TransactionCoordinatorRecoveryTests
             entered.Set();
             release.Wait(TimeSpan.FromSeconds(20)).ShouldBeTrue();
         };
-        var checkpoint = Task.Run(coordinator.Checkpoint);
+        var checkpoint = DedicatedTestTask.Run(coordinator.Checkpoint);
         TransactionContext? late = null;
         int completed = 0;
         try
@@ -53,7 +133,7 @@ public class TransactionCoordinatorRecoveryTests
 
             // Act: reservation cannot take the physical checkpoint's transaction lock;
             // begin/commit/rollback cannot take its lifecycle gate, nor pins its pool lock.
-            await Task.Run(async () =>
+            await DedicatedTestTask.Run(async () =>
             {
                 using var canceled = new CancellationTokenSource();
                 canceled.Cancel();
@@ -165,7 +245,7 @@ public class TransactionCoordinatorRecoveryTests
                 entered.Set();
                 release.Wait(TimeSpan.FromSeconds(10)).ShouldBeTrue();
             };
-            var checkpoint = Task.Run(coordinator.Checkpoint);
+            var checkpoint = DedicatedTestTask.Run(coordinator.Checkpoint);
             TransactionContext? reader = null;
             Task<int>? applying = null;
             try

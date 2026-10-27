@@ -64,7 +64,7 @@ internal sealed class KeyValueWorkspace : ModelWorkspace
 
     // The typed embedded session: key-value requests execute on the session's typed member, which
     // the lifecycle-only ModelWorkspace.RequireSession() does not reach.
-    private KeyValueDatabaseSession KeyValueSession => _session ?? throw new InvalidOperationException("Select a database first.");
+    private KeyValueDatabaseSession KeyValueSession => _session ?? throw new InvalidOperationException(ErrorMessages.SessionSelectionMissing);
 
     protected override async Task OpenSessionAsync(string database, CancellationToken cancellationToken)
     {
@@ -145,7 +145,7 @@ internal sealed class KeyValueWorkspace : ModelWorkspace
         {
             if (condition == KeyValueCondition.IfETagMatches && expectedETag is null)
             {
-                throw new ArgumentException("Enter the expected ETag.");
+                throw new ArgumentException(ErrorMessages.ExpectedETagMissing);
             }
 
             if (Mode == ConnectionMode.Embedded)
@@ -314,8 +314,8 @@ internal sealed class KeyValueWorkspace : ModelWorkspace
         {
             string detail = result.Diagnostics is { Count: > 0 } diagnostics
                 ? string.Join("; ", diagnostics.Select(d => $"{d.Code}: {d.Message}"))
-                : "no diagnostics";
-            throw new InvalidOperationException($"Key-value request returned {result.Status}: {detail}");
+                : ErrorMessages.DiagnosticsMissing;
+            throw new InvalidOperationException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.KeyValueRequestFailed, result.Status, detail));
         }
     }
 }

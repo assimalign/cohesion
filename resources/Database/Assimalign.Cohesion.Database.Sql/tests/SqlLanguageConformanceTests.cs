@@ -21,6 +21,122 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 /// </summary>
 public sealed class SqlLanguageConformanceTests
 {
+    [Theory(DisplayName = "Cohesion Test [Sql] - Conformance: TYPE narrowing preserves only excess trailing spaces (#1447)")]
+    [InlineData("TEXT")]
+    [InlineData("VARCHAR(8)")]
+    public async Task ExecuteAsync_AlterTypeNarrowingCorpus_ShouldUseAssignment(string source)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("alter-trim-conformance", new());
+        var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await ExecuteAsync(session, $"CREATE TABLE t(v {source})");
+        await ExecuteAsync(session, "INSERT INTO t VALUES('ab    ')");
+
+        // Act
+        await ExecuteAsync(session, "ALTER TABLE t ALTER v TYPE VARCHAR(3)");
+
+        // Assert
+        (await RowsAsync(session, "SELECT v FROM t")).ShouldHaveSingleItem()[0].ShouldBe("ab ");
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql] - Conformance: ALTER TYPE converts original literal defaults (#1447)")]
+    [InlineData("7", "INT", 7)]
+    [InlineData("TRUE", "BOOLEAN", true)]
+    public async Task ExecuteAsync_AlterTypeDefaultCorpus_ShouldConvertOriginalDefault(string expression, string target, object expected)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("alter-default-conformance", new());
+        var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await ExecuteAsync(session, $"CREATE TABLE t(v TEXT DEFAULT {expression})");
+
+        // Act
+        await ExecuteAsync(session, $"ALTER TABLE t ALTER v TYPE {target} USING CAST(v AS {target})");
+        await ExecuteAsync(session, "INSERT INTO t DEFAULT VALUES");
+
+        // Assert
+        (await RowsAsync(session, "SELECT v FROM t")).ShouldHaveSingleItem()[0].ShouldBe(expected);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql] - Conformance: ALTER TYPE grammar converts old-row values (#1447)")]
+    [InlineData("ALTER COLUMN v TYPE BIGINT", 7L)]
+    [InlineData("ALTER v SET DATA TYPE BIGINT USING v+1", 8L)]
+    [InlineData("ALTER v TYPE VARCHAR(10) COLLATE binary USING CAST(v AS TEXT)", "7")]
+    public async Task ExecuteAsync_AlterTypeCorpus_ShouldConvertOriginalRow(string action, object expected)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("alter-type-conformance", new());
+        var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await ExecuteAsync(session, "CREATE TABLE t(v INT)");
+        await ExecuteAsync(session, "INSERT INTO t VALUES(7)");
+
+        // Act
+        await ExecuteAsync(session, "ALTER TABLE t " + action);
+
+        // Assert
+        (await RowsAsync(session, "SELECT v FROM t")).ShouldHaveSingleItem()[0].ShouldBe(expected);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql] - Rewrite: empty input and NULL foreign keys commit across a parent replacement (#1265)")]
+    [InlineData("UPDATE child SET note=1 WHERE false", 0)]
+    [InlineData("INSERT INTO child VALUES (NULL,1),(NULL,2)", 2)]
+    [InlineData("INSERT INTO child SELECT 1,1 WHERE false", 0)]
+    public async Task RewriteTableAsync_NoParentProbe_ShouldCommitOldSnapshot(string sql, int count)
+    {
+        // Arrange
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        await using var engine = SqlDatabaseEngine.Create("rewrite-no-parent-probe", new());
+        var database = await engine.CreateDatabaseAsync("db", timeout.Token);
+        await using var session = await database.CreateSessionAsync(timeout.Token);
+        await using var stale = await database.CreateSessionAsync(timeout.Token);
+        await ExecuteAsync(session, "CREATE TABLE t (id INT PRIMARY KEY)");
+        await ExecuteAsync(session, "INSERT INTO t VALUES (1)");
+        await ExecuteAsync(session, "CREATE TABLE child (pid INT REFERENCES t(id), note INT)");
+        await using var snapshot = await stale.BeginTransactionAsync(timeout.Token);
+        await database.RewriteTableAsync("dbo", "t", timeout.Token);
+
+        // Act
+        (await stale.ExecuteAsync(sql, cancellationToken: timeout.Token)).AffectedCount.ShouldBe(count);
+        await snapshot.CommitAsync(timeout.Token);
+
+        // Assert
+        (await RowsAsync(session, "SELECT * FROM child")).Count.ShouldBe(count);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Conformance: TRUNCATE retains joining views and indexed snapshot access (#1716)")]
+    public async Task ExecuteAsync_TruncateSnapshot_ShouldRetainJoiningViewAndSeek()
+    {
+        // Arrange
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        await using var engine = SqlDatabaseEngine.Create("truncate-conformance", new());
+        var database = await engine.CreateDatabaseAsync("db", timeout.Token);
+        await using var writer = await database.CreateSessionAsync(timeout.Token);
+        await using var reader = await database.CreateSessionAsync(timeout.Token);
+        await ExecuteAsync(writer, "CREATE TABLE p (id INT PRIMARY KEY)");
+        await ExecuteAsync(writer, "CREATE TABLE c (id INT PRIMARY KEY, pid INT REFERENCES p(id))");
+        await ExecuteAsync(writer, "CREATE TABLE destination (id INT)");
+        await ExecuteAsync(writer, "INSERT INTO p VALUES (1)");
+        await ExecuteAsync(writer, "INSERT INTO c VALUES (2,1)");
+        await ExecuteAsync(writer, "CREATE VIEW v AS SELECT c.id AS cid, p.id AS pid FROM c JOIN p ON c.pid=p.id");
+        await using var snapshot = await reader.BeginTransactionAsync(timeout.Token);
+
+        // Act
+        await ExecuteAsync(writer, "TRUNCATE p CASCADE");
+
+        // Assert
+        await ExpectRowsAsync(reader, "SELECT cid, pid FROM v", [[2, 1]]);
+        await ExpectRowsAsync(reader, "SELECT id FROM p WHERE id=1", [[1]]);
+        reader.LastStatementMetrics!.RecordsExamined.ShouldBe(1);
+        reader.LastStatementMetrics.AccessPath.ShouldStartWith("seek:");
+        await ExpectRowsAsync(writer, "SELECT cid, pid FROM v", []);
+        var staleSource = await Should.ThrowAsync<DatabaseTransactionAbortedException>(async () =>
+            await ExecuteAsync(reader, "INSERT INTO destination SELECT cid FROM v"));
+        staleSource.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS04006");
+        await ExpectRowsAsync(writer, "SELECT id FROM destination", []);
+    }
+
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Conformance: embedded identifier quotes survive tables, columns and persisted views (#1235)")]
     public async Task ExecuteAsync_DoubledIdentifierQuotes_ShouldPreserveCatalogAndViewNames()
     {
@@ -51,21 +167,21 @@ public sealed class SqlLanguageConformanceTests
     /// <param name="table">The constrained table, or empty for a domain CAST.</param>
     /// <returns>The asynchronous verification.</returns>
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - Conformance: constraint failures retain exact diagnostics and roll back the statement (#1666)")]
-    [InlineData("INSERT INTO t VALUES (3,10,3,3,1)", "COHSQLE037", "uq_t", "dbo.t")]
-    [InlineData("INSERT INTO t VALUES (1,30,3,3,1)", "COHSQLE037", "pk_t", "dbo.t")]
-    [InlineData("INSERT INTO t VALUES (3,30,3,1,1)", "COHSQLE037", "uq_d", "dbo.t")]
-    [InlineData("INSERT INTO t VALUES (3,30,3,3,1),(4,10,4,4,1)", "COHSQLE037", "uq_t", "dbo.t")]
-    [InlineData("INSERT INTO t SELECT * FROM source", "COHSQLE037", "uq_t", "dbo.t")]
-    [InlineData("UPDATE t SET u = 10 WHERE id = 2", "COHSQLE037", "uq_t", "dbo.t")]
-    [InlineData("INSERT INTO t VALUES (3,30,3,3,1),(1,40,4,4,1) ON CONFLICT(id) DO UPDATE SET u = 20", "COHSQLE037", "uq_t", "dbo.t")]
-    [InlineData("INSERT INTO t VALUES (3,30,0,3,1)", "COHSQLE038", "ck_t", "dbo.t")]
-    [InlineData("UPDATE t SET qty = 0 WHERE id = 1", "COHSQLE038", "ck_t", "dbo.t")]
-    [InlineData("INSERT INTO t VALUES (3,30,3,0,1)", "COHSQLE038", "positive", "dbo.t")]
-    [InlineData("UPDATE t SET d = 0 WHERE id = 1", "COHSQLE038", "positive", "dbo.t")]
-    [InlineData("SELECT CAST(0 AS positive) FROM t", "COHSQLE038", "positive", "")]
-    [InlineData("INSERT INTO t VALUES (3,30,3,3,99)", "COHSQLE039", "fk_t", "dbo.t")]
-    [InlineData("UPDATE t SET pid = 99 WHERE id = 1", "COHSQLE039", "fk_t", "dbo.t")]
-    [InlineData("DELETE FROM p WHERE id = 1", "COHSQLE039", "fk_t", "dbo.t")]
+    [InlineData("INSERT INTO t VALUES (3,10,3,3,1)", "CS03037", "uq_t", "dbo.t")]
+    [InlineData("INSERT INTO t VALUES (1,30,3,3,1)", "CS03037", "pk_t", "dbo.t")]
+    [InlineData("INSERT INTO t VALUES (3,30,3,1,1)", "CS03037", "uq_d", "dbo.t")]
+    [InlineData("INSERT INTO t VALUES (3,30,3,3,1),(4,10,4,4,1)", "CS03037", "uq_t", "dbo.t")]
+    [InlineData("INSERT INTO t SELECT * FROM source", "CS03037", "uq_t", "dbo.t")]
+    [InlineData("UPDATE t SET u = 10 WHERE id = 2", "CS03037", "uq_t", "dbo.t")]
+    [InlineData("INSERT INTO t VALUES (3,30,3,3,1),(1,40,4,4,1) ON CONFLICT(id) DO UPDATE SET u = 20", "CS03037", "uq_t", "dbo.t")]
+    [InlineData("INSERT INTO t VALUES (3,30,0,3,1)", "CS03038", "ck_t", "dbo.t")]
+    [InlineData("UPDATE t SET qty = 0 WHERE id = 1", "CS03038", "ck_t", "dbo.t")]
+    [InlineData("INSERT INTO t VALUES (3,30,3,0,1)", "CS03038", "positive", "dbo.t")]
+    [InlineData("UPDATE t SET d = 0 WHERE id = 1", "CS03038", "positive", "dbo.t")]
+    [InlineData("SELECT CAST(0 AS positive) FROM t", "CS03038", "positive", "")]
+    [InlineData("INSERT INTO t VALUES (3,30,3,3,99)", "CS03039", "fk_t", "dbo.t")]
+    [InlineData("UPDATE t SET pid = 99 WHERE id = 1", "CS03039", "fk_t", "dbo.t")]
+    [InlineData("DELETE FROM p WHERE id = 1", "CS03039", "fk_t", "dbo.t")]
     public async Task ExecuteAsync_ConstraintViolation_ShouldCarryOneLocatedDiagnostic(string sql, string code, string constraint, string table)
     {
         // Arrange
@@ -129,8 +245,10 @@ public sealed class SqlLanguageConformanceTests
     {
         // The profile drives enumeration. A newly advertised clause cannot silently escape this test.
         var cases = CreateCases();
-        // #1118 adds ON CONFLICT: exactly one over #1117's 50.
-        SqlLanguageProfile.Instance.Clauses.Count().ShouldBe(51);
+        // #1714 adds UPDATE FROM and DELETE USING and #1718 adds quantified comparisons:
+        // exactly three over #1118's 51. TRUNCATE and CREATE TABLE AS (#1716) and binding-only
+        // MERGE (#1715) add one each.
+        SqlLanguageProfile.Instance.Clauses.Count().ShouldBe(57);
         RequireExecutionCases(SqlLanguageProfile.Instance.Clauses, cases);
         cases.Keys.Except(SqlLanguageProfile.Instance.Clauses).ShouldBeEmpty("Cases must describe the current profile.");
 
@@ -219,7 +337,7 @@ public sealed class SqlLanguageConformanceTests
         var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None));
         // Assert
         var diagnostic = error.Diagnostics.ShouldHaveSingleItem();
-        diagnostic.Code.ShouldBe("COHSQLE040");
+        diagnostic.Code.ShouldBe("CS05040");
         diagnostic.Location.ShouldBe(DiagnosticLocation.Absolute);
         diagnostic.Start.ShouldNotBeNull();
         diagnostic.End.ShouldNotBeNull();
@@ -372,7 +490,7 @@ public sealed class SqlLanguageConformanceTests
         session.LastStatementMetrics.ShouldNotBeNull().RecordsExamined.ShouldBe(0);
         var failure = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(
             "SELECT id FROM bounded_rows ORDER BY 10 / (id - 3) LIMIT 1", cancellationToken: CancellationToken.None));
-        failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE001");
+        failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS02001");
     }
 
     /// <summary>Keeps invalid count diagnostics unchanged before a row window executes.</summary>
@@ -595,7 +713,18 @@ public sealed class SqlLanguageConformanceTests
             async (_, result) =>
             {
                 var rows = await ReadRowsAsync(result);
-                rows.ShouldContain(row => Equals(row[2], "IndexSeek") && Equals(row[4], "by_age") && Equals(row[5], "age = 36"));
+                var seek = rows.Single(row => Equals(row[2], "IndexSeek"));
+                seek[4].ShouldBe("by_age");
+                seek[5].ShouldBe("age = 36; estimate_kind=exact_probe; probe_entries=2; probe_pages=1");
+                seek[6].ShouldBe(1L);
+                seek[7].ShouldBeNull();
+            }),
+        [SqlClauses.Merge] = new("MERGE INTO t USING t AS s ON t.id=s.id WHEN MATCHED THEN DELETE RETURNING merge_action();",
+            _seed, expression => expression is SqlMergeExpression,
+            async (session, result) =>
+            {
+                (await ReadRowsAsync(result)).Select(row => row[0]).ShouldBe(["DELETE", "DELETE", "DELETE"]);
+                await ExpectRowsAsync(session, "SELECT id FROM t", []);
             }),
         [SqlClauses.Select] = new("SELECT id, age + 1 AS next_age FROM t ORDER BY id;", _seed,
             expression => expression is SqlSelectExpression,
@@ -621,6 +750,8 @@ public sealed class SqlLanguageConformanceTests
                 (await session.ExecuteAsync("WITH a AS (SELECT id FROM t WHERE age > 40) DELETE FROM t WHERE id IN (SELECT id FROM a);", cancellationToken: CancellationToken.None)).AffectedCount.ShouldBe(2);
                 await ExpectRowsAsync(session, "SELECT id FROM t;", [[1]]);
             }),
+        [SqlClauses.QuantifiedComparison] = Query("SELECT id FROM t WHERE age >= ALL (SELECT age FROM t) AND id = SOME (SELECT id FROM t) AND id = ANY (SELECT id FROM t) ORDER BY id;",
+            expression => expression is SqlSelectExpression { Where: SqlLogicalExpression }, [[2]]),
         [SqlClauses.Subquery] = new("SELECT id, (SELECT MAX(age) FROM t) AS oldest FROM t WHERE id IN (SELECT id FROM t WHERE age > 40) AND EXISTS (SELECT id FROM t WHERE age = 36) ORDER BY id;", _seed,
             expression => expression is SqlSelectExpression select && select.Columns.Any(column => column.Expression is SqlSubqueryExpression),
             async (session, result) =>
@@ -640,6 +771,13 @@ public sealed class SqlLanguageConformanceTests
                 await ExpectRowsAsync(session, "SELECT t.name, p.email FROM profiles p JOIN t ON p.user_id = t.id WHERE t.id = 1;",
                     [["Ada", "ada@example.test"]]);
                 await ExpectRowsAsync(session, "SELECT t.id FROM t LEFT JOIN profiles p ON t.id = p.user_id WHERE p.user_id IS NULL;", [[2]]);
+                await ExpectRowsAsync(session, "SELECT t.id, p.email FROM profiles p RIGHT OUTER JOIN t ON p.user_id = t.id ORDER BY t.id;",
+                    [[1, "ada@example.test"], [2, null], [3, "alan@example.test"]]);
+                await ExpectRowsAsync(session, "SELECT id FROM (t RIGHT JOIN t copy USING (id)) ORDER BY id;", [[1], [2], [3]]);
+                await ExpectRowsAsync(session, "SELECT id FROM t FULL OUTER JOIN t copy USING (id) ORDER BY id;", [[1], [2], [3]]);
+                await ExpectRowsAsync(session, "SELECT id FROM t FULL JOIN (SELECT 4 AS id) copy USING (id) ORDER BY id;", [[1], [2], [3], [4]]);
+                await ExpectRowsAsync(session, "SELECT d.id, p.email FROM ((SELECT id FROM t) d LEFT JOIN profiles p ON d.id = p.user_id) ORDER BY d.id;",
+                    [[1, "ada@example.test"], [2, null], [3, "alan@example.test"]]);
                 await ExpectRowsAsync(session, "SELECT c.COLUMN_NAME FROM INFORMATION_SCHEMA.TABLES t " +
                     "JOIN INFORMATION_SCHEMA.COLUMNS c ON t.TABLE_NAME = c.TABLE_NAME WHERE t.TABLE_NAME = 'profiles' ORDER BY c.ORDINAL_POSITION;",
                     [["user_id"], ["email"]]);
@@ -658,7 +796,7 @@ public sealed class SqlLanguageConformanceTests
                     "SELECT TRUE OR age FROM t", "SELECT FALSE AND age FROM t", "SELECT NOT age FROM t" })
                 {
                     var failure = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None));
-                    failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE003");
+                    failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS02003");
                 }
             }),
         [SqlClauses.Collate] = Query("SELECT id FROM t WHERE name = 'ada' COLLATE case_insensitive;",
@@ -727,6 +865,15 @@ public sealed class SqlLanguageConformanceTests
                 result.AffectedCount.ShouldBe(1);
                 await ExpectRowsAsync(session, "SELECT age FROM t ORDER BY id;", [[46], [45], [41]]);
             }),
+        [SqlClauses.UpdateFrom] = new("UPDATE t SET age=s.age FROM t AS s WHERE t.id=1 AND s.id=2 RETURNING t.age,s.name;", _seed,
+            expression => expression is SqlUpdateExpression { From.Count: > 0 },
+            async (session, result) =>
+            {
+                result.AffectedCount.ShouldBe(1);
+                session.LastStatementMetrics.ShouldNotBeNull().RecordsExamined.ShouldBe(2);
+                CheckRows(await ReadRowsAsync(result), [[45, "Grace"]]);
+                await ExpectRowsAsync(session, "SELECT age FROM t ORDER BY id;", [[45], [45], [41]]);
+            }),
         [SqlClauses.Returning] = new("UPDATE t SET age = age + 1 WHERE id = 1 RETURNING id, age;", _seed,
             expression => expression is SqlUpdateExpression { Returning: not null },
             async (_, result) =>
@@ -741,6 +888,15 @@ public sealed class SqlLanguageConformanceTests
             async (session, result) =>
             {
                 result.AffectedCount.ShouldBe(1);
+                await ExpectRowsAsync(session, "SELECT id FROM t ORDER BY id;", [[1], [3]]);
+            }),
+        [SqlClauses.DeleteUsing] = new("DELETE FROM t USING t AS s WHERE t.id=s.id AND s.id=2 RETURNING t.id,s.name;", _seed,
+            expression => expression is SqlDeleteExpression { Using.Count: > 0 },
+            async (session, result) =>
+            {
+                result.AffectedCount.ShouldBe(1);
+                session.LastStatementMetrics.ShouldNotBeNull().RecordsExamined.ShouldBe(2);
+                CheckRows(await ReadRowsAsync(result), [[2, "Grace"]]);
                 await ExpectRowsAsync(session, "SELECT id FROM t ORDER BY id;", [[1], [3]]);
             }),
         [SqlClauses.Identity] = new("CREATE TABLE identities (id BIGINT GENERATED BY DEFAULT AS IDENTITY (START WITH 100 INCREMENT BY 5), label TEXT);", [],
@@ -762,6 +918,13 @@ public sealed class SqlLanguageConformanceTests
                 await ExpectRowsAsync(session, "SELECT DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'created' ORDER BY ORDINAL_POSITION;",
                     [["INTEGER"], ["CHARACTER VARYING"], ["DOUBLE PRECISION"], ["CHARACTER"], ["TIMESTAMP WITH TIME ZONE"]]);
             }),
+        [SqlClauses.CreateTableAs] = new("CREATE TABLE copied (key,label) AS SELECT id,name FROM t WITH DATA;", _seed,
+            expression => expression is SqlCreateTableAsExpression,
+            async (session, result) =>
+            {
+                result.AffectedCount.ShouldBe(3);
+                await ExpectRowsAsync(session, "SELECT key, label FROM copied ORDER BY key;", [[1, "Ada"], [2, "Grace"], [3, "Alan"]]);
+            }),
         [SqlClauses.AlterTable] = new("ALTER TABLE t ADD COLUMN extra INT NOT NULL DEFAULT 7;", _seed,
             expression => expression is SqlAlterTableExpression { Action: SqlAlterAddColumnAction }, VerifyAlterAsync),
         [SqlClauses.DropTable] = new("DROP TABLE t;", _seed,
@@ -773,6 +936,15 @@ public sealed class SqlLanguageConformanceTests
                 (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "SELECT * FROM t;")))
                     .Message.ShouldContain("does not exist", Case.Sensitive);
                 (await ExecuteAsync(session, "DROP TABLE IF EXISTS t;")).Status.ShouldBe(DatabaseResultStatus.Success);
+            }),
+        [SqlClauses.Truncate] = new("TRUNCATE TABLE ONLY t CONTINUE IDENTITY RESTRICT;", _seed,
+            expression => expression is SqlTruncateExpression,
+            async (session, result) =>
+            {
+                result.AffectedCount.ShouldBe(0);
+                await ExpectRowsAsync(session, "SELECT * FROM t;", []);
+                await ExecuteAsync(session, "INSERT INTO t VALUES (9, 'after', 99);");
+                await ExpectRowsAsync(session, "SELECT id FROM t;", [[9]]);
             }),
         [SqlClauses.CreateView] = new("CREATE VIEW v AS SELECT id FROM t;", _seed,
             expression => expression is SqlCreateViewExpression,

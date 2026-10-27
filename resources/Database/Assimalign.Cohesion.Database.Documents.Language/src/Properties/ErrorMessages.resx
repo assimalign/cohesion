@@ -6,4 +6,40 @@
 <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
   <data name="PagingCountInvalid" xml:space="preserve"><value>{0} requires a non-negative integer in the signed 64-bit range.</value></data>
   <data name="BindingNameDuplicate" xml:space="preserve"><value>An OQL binding list cannot repeat a variable name.</value></data>
+  <data name="TransactionKindRequired" xml:space="preserve"><value>START requires WORK, TRAN or TRANSACTION.</value></data>
+  <data name="TransactionIsolationRequired" xml:space="preserve"><value>Expected SNAPSHOT or READ COMMITTED after ISOLATION LEVEL.</value></data>
+  <data name="OqlQueryParserParseCoreVoid" xml:space="preserve"><value>Unterminated block comment.</value></data>
+  <data name="OqlQueryParserParseCoreVoid2" xml:space="preserve"><value>Unterminated quoted text.</value></data>
+  <data name="OqlQueryParserParseCoreVoid3" xml:space="preserve"><value>Unexpected character {0}; it is not part of OQL.</value></data>
+  <data name="OqlQueryParserParseCoreVoid4" xml:space="preserve"><value>Query text is empty.</value></data>
+  <data name="OqlQueryParserParseCoreVoid5" xml:space="preserve"><value>Expected SELECT, INSERT, UPSERT, UPDATE, DELETE, CREATE INDEX, DROP INDEX, CREATE COLLECTION, or DROP COLLECTION.</value></data>
+  <data name="OqlQueryParserParseCoreVoid6" xml:space="preserve"><value>Only one statement is accepted per query.</value></data>
+  <data name="OqlQueryParserParseCoreVoid7" xml:space="preserve"><value>Unexpected token '{0}'.</value></data>
+  <data name="OqlQueryParserParseCoreVoid8" xml:space="preserve"><value>Unexpected character '?'; it is not part of OQL.</value></data>
+  <data name="OqlQueryParserExpectVoid" xml:space="preserve"><value>Expected {0}.</value></data>
+  <data name="OqlQueryParserIdentifierVoid" xml:space="preserve"><value>An identifier cannot be empty.</value></data>
+  <data name="OqlQueryParserIdentifierVoid2" xml:space="preserve"><value>Expected an identifier.</value></data>
+  <data name="OqlQueryParserParseCreateIndexVoid" xml:space="preserve"><value>An index supports at most 32 key paths.</value></data>
+  <data name="OqlQueryParserParseCreateIndexVoid2" xml:space="preserve"><value>Index key paths must be distinct.</value></data>
+  <data name="OqlQueryParserParseUpdateVoid" xml:space="preserve"><value>UPDATE requires at least one SET assignment or UNSET path.</value></data>
+  <data name="OqlQueryParserParseWriteVoid" xml:space="preserve"><value>{0} requires an explicit KEY header; document ids are not generated.</value></data>
+  <data name="OqlQueryParserParseWriteVoid2" xml:space="preserve"><value>Expected SELECT after the KEY output binding.</value></data>
+  <data name="OqlQueryParserParseExpressionVoid" xml:space="preserve"><value>Expression nesting exceeds 128 levels.</value></data>
+  <data name="OqlQueryParserParseExpressionVoid2" xml:space="preserve"><value>LIKE ESCAPE must be empty or one Unicode scalar.</value></data>
+  <data name="OqlQueryParserParseExpressionVoid3" xml:space="preserve"><value>Expected IN, BETWEEN, or LIKE after NOT.</value></data>
+  <data name="OqlQueryParserParseExpressionVoid4" xml:space="preserve"><value>Expected NULL, MISSING, or VALUED.</value></data>
+  <data name="OqlQueryParserParsePrimaryVoid" xml:space="preserve"><value>CASE requires a WHEN branch.</value></data>
+  <data name="OqlQueryParserParsePrimaryVoid2" xml:space="preserve"><value>A parameter name must be an identifier (a letter or _, then letters, digits or _) or digits only; use $name, @name, or $1.</value></data>
+  <data name="OqlQueryParserParsePrimaryVoid3" xml:space="preserve"><value>The numeric literal is invalid.</value></data>
+  <data name="OqlQueryParserParsePrimaryVoid4" xml:space="preserve"><value>Unknown OQL function '{0}'.</value></data>
+  <data name="OqlQueryParserParsePrimaryVoid5" xml:space="preserve"><value>Invalid argument for OQL function '{0}'; only COUNT accepts '*'.</value></data>
+  <data name="OqlQueryParserParsePrimaryVoid6" xml:space="preserve"><value>Invalid argument count for OQL function '{0}'.</value></data>
+  <data name="OqlQueryParserParsePrimaryVoid7" xml:space="preserve"><value>Expected an expression.</value></data>
+  <data name="OqlQueryParserParsePathVoid" xml:space="preserve"><value>Expected a nonnegative array index or quoted property name.</value></data>
+  <data name="OqlQueryParserParseSelectVoid" xml:space="preserve"><value>SELECT VALUE requires an expression.</value></data>
+  <data name="OqlQueryParserParseSelectVoid2" xml:space="preserve"><value>SELECT VALUE requires an expression other than star.</value></data>
+  <data name="ReturningValueInvalid" xml:space="preserve"><value>RETURNING RAW or VALUE requires one expression without a star or alias.</value></data>
+  <data name="OqlQueryParserParseSelectVoid3" xml:space="preserve"><value>UNNEST requires an alias for an expression without a final path name.</value></data>
+  <data name="OqlQueryParserParseSelectVoid4" xml:space="preserve"><value>Multiple {0} clauses are not allowed.</value></data>
+  <data name="OqlQueryParserParseCountVoid" xml:space="preserve"><value>Expected an integer literal or parameter after {0}.</value></data>
 </root>

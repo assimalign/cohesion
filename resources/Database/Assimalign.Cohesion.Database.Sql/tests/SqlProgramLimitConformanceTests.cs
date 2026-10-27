@@ -81,7 +81,7 @@ public sealed class SqlProgramLimitConformanceTests
         // Assert
         failure.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
         failure.ConnectionUsable.ShouldBeTrue();
-        failure.Message.ShouldStartWith("COHSQLE042: ");
+        failure.Message.ShouldStartWith("CS05042: ");
         CheckFailure(failure.Diagnostics.ShouldHaveSingleItem().Message!, failure.Diagnostics, name);
         var after = await connection.QueryAsync(Query(name), cancellationToken: TestTimeout.Token());
         after.Count.ShouldBe(before.Count);
@@ -108,7 +108,7 @@ public sealed class SqlProgramLimitConformanceTests
 
         // Assert
         record.Length.ShouldBe(SlottedPage.MaxRecordSize);
-        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE042");
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS05042");
         failure.Message.ShouldContain((SlottedPage.MaxRecordSize + 1).ToString(CultureInfo.CurrentCulture), Case.Sensitive);
     }
 
@@ -134,7 +134,7 @@ public sealed class SqlProgramLimitConformanceTests
             await session.ExecuteAsync("INSERT INTO t VALUES (2, @v)", new Dictionary<string, object?> { ["v"] = new string('x', length + 1) }, timeout.Token));
 
         // Assert: inserting the boundary key exercises Indexing's public insertion path too.
-        failure.Code.ShouldBe("COHSQLE042");
+        failure.Code.ShouldBe("CS05042");
         failure.Message.ShouldContain("size 1025 bytes, maximum size 1024 bytes", Case.Sensitive);
         await using var result = (DatabaseResultSet)await session.ExecuteAsync("SELECT id FROM t", cancellationToken: timeout.Token);
         (await SqlT1ScalarTests.ReadAsync(result)).ShouldHaveSingleItem()[0].ShouldBe(1);
@@ -213,7 +213,7 @@ public sealed class SqlProgramLimitConformanceTests
 
     private static void CheckFailure(string message, IReadOnlyList<Diagnostic> diagnostics, string name)
     {
-        diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE042");
+        diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS05042");
         diagnostics[0].Severity.ShouldBe(DiagnosticSeverity.Error);
         message.ShouldBe(diagnostics[0].Message);
         message.ShouldContain(name == "SetDefault" ? "dbo.c" : "dbo.t", Case.Sensitive);

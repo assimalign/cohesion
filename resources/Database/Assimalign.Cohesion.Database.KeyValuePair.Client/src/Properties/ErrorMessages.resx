@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
+  <resheader name="version"><value>2.0</value></resheader>
+  <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms</value></resheader>
+  <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
+  <data name="KeyValueClientCreateArgument" xml:space="preserve"><value>Connection settings are required.</value></data>
+  <data name="KeyValueClientCreateArgument2" xml:space="preserve"><value>A connection factory is required.</value></data>
+  <data name="KeyValueConnectionScanAsyncArgument" xml:space="preserve"><value>A prefix scan cannot combine with explicit start/end bounds.</value></data>
+  <data name="MalformedResultKeyValueClient" xml:space="preserve"><value>The server's result for '{0}' does not match the key-value result contract ({1}).</value></data>
+  <data name="ValueConnectionPutAsyncKeyValueClient" xml:space="preserve"><value>an applied write must carry its new etag</value></data>
+  <data name="ConnectionExistsAsyncKeyValueClient" xml:space="preserve"><value>expected one boolean row</value></data>
+  <data name="ConnectionDecodeEntryKeyValueClient" xml:space="preserve"><value>expected [key, value, etag] rows</value></data>
+  <data name="DecodeWriteOutcomeKeyValueClient" xml:space="preserve"><value>expected one [applied, etag] outcome row</value></data>
+  <data name="ExecuteCoreAsyncDatabaseClient" xml:space="preserve"><value>The server closed the connection mid-exchange.</value></data>
+  <data name="ExecuteCoreAsyncDatabaseClient2" xml:space="preserve"><value>Unexpected {0} frame in a KeyValue execute exchange.</value></data>
+  <data name="FunctionNameRequired" xml:space="preserve"><value>A function name must be initialized.</value></data>
+  <data name="FunctionArgumentUnsupported" xml:space="preserve"><value>Function arguments must use supported native primitive CLR values.</value></data>
+  <data name="FunctionResultInvalid" xml:space="preserve"><value>A function result must contain one nullable primitive value column and exactly one row.</value></data>
+</root>

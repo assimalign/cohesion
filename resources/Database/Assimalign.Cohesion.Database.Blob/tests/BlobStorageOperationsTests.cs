@@ -15,6 +15,7 @@ using Assimalign.Cohesion.Connections.InMemory;
 using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
+using Assimalign.Cohesion.Database.Tests;
 using Assimalign.Cohesion.Database.Transactions;
 
 using Assimalign.Cohesion.Database.Blob.Protocol;
@@ -26,15 +27,16 @@ namespace Assimalign.Cohesion.Database.Blob.Tests;
 /// until it is reopened (#1243), the buffer pool and the checkpoint triggers are options (#1254),
 /// and a deferred undo is retried on its own backoff (#1226).
 /// </summary>
+[Collection(nameof(BlobWorkerResilienceTests))]
 public sealed class BlobStorageOperationsTests
 {
-    private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan _timeout = TimeSpan.FromSeconds(10);
 
     /// <summary>
     /// An upload's commit fsync fails: the caller gets the unconfirmed commit, and from then on
     /// every operation — a new session, an upload, a download, a read of a download stream opened
     /// before the failure, BEGIN, COMMIT and ROLLBACK of an open transaction, over the wire too —
-    /// is refused with COHDBB002, and nothing reaches the file set, through the workers' passes
+    /// is refused with CB06002, and nothing reaches the file set, through the workers' passes
     /// and the sessions' close included. The root bases' checks come first (concrete-types plan
     /// §6.4): BEGIN on the session holding the open transaction is refused as already active, a
     /// canceled token is refused before the offline refusal of a new session and BEGIN, and the
@@ -108,7 +110,7 @@ public sealed class BlobStorageOperationsTests
         // The root bases' order (concrete-types plan §6.4): BEGIN on the session that holds the
         // open transaction is refused as already active before the offline refusal, and a canceled
         // token is refused before the offline refusal of a new session and BEGIN. Before the bases,
-        // each of these was refused with COHDBB002. A blob session has no execute member; the
+        // each of these was refused with CB06002. A blob session has no execute member; the
         // container and blob operations check the database first, so their order holds.
         var activeBegin = await Should.ThrowAsync<DatabaseException>(async () => await other.BeginTransactionAsync(token));
         using var canceled = new CancellationTokenSource();
@@ -153,17 +155,18 @@ public sealed class BlobStorageOperationsTests
 
         // Assert
         unconfirmed.InnerException.ShouldBeOfType<TransactionCommitUnconfirmedException>();
-        unconfirmed.Message.ShouldStartWith("COHDBB002: Database 'blobs' went offline while a transaction was committing", Case.Sensitive);
+        unconfirmed.Diagnostics.ShouldContain(d => d.Code == "CB06002");
+        unconfirmed.Message.ShouldStartWith("Database 'blobs' went offline while a transaction was committing", Case.Sensitive);
         StorageOfflineException.Find(unconfirmed).ShouldNotBeNull();
-        refusals.ShouldAllBe(refusal => refusal.Code == "COHDBB002" && refusal.Message.StartsWith("COHDBB002", StringComparison.Ordinal));
+        refusals.ShouldAllBe(refusal => refusal.Code == "CB06002" && refusal.Diagnostics.Count == 1 && refusal.Diagnostics[0].Code == "CB06002" && refusal.Message.StartsWith("Database", StringComparison.Ordinal));
         activeBegin.Message.ShouldBe("A transaction or operation is already active on this session.");
         canceledCalls.ShouldAllBe(refusal => refusal.CancellationToken == canceled.Token);
-        containerRefusals.ShouldAllBe(refusal => refusal.Code == "COHDBB002");
+        containerRefusals.ShouldAllBe(refusal => refusal.Code == "CB06002");
         closedState.ShouldBe(TransactionState.Faulted);
         operationError.Code.ShouldBe(ProtocolErrorCode.Unavailable);
-        operationError.Message.ShouldStartWith("COHDBB002", Case.Sensitive);
+        operationError.Message.ShouldStartWith("CB06002", Case.Sensitive);
         handshakeError.Code.ShouldBe(ProtocolErrorCode.Unavailable);
-        handshakeError.Message.ShouldStartWith("COHDBB002", Case.Sensitive);
+        handshakeError.Message.ShouldStartWith("CB06002", Case.Sensitive);
         engine.State.ShouldBe(EngineState.Running);
         beforeTheReopen.Data.ShouldBe(atTheFailure.Data);
         beforeTheReopen.Journal.ShouldBe(atTheFailure.Journal);
@@ -244,8 +247,10 @@ public sealed class BlobStorageOperationsTests
     {
         // Arrange: a time backstop far out of the way, so only the size can trigger.
         const long size = 4 * 1024 * 1024;
+        var strategy = new FaultInjectingJournalStorageStrategy();
         await using var engine = BlobDatabaseEngine.Create("blob-engine", new()
         {
+            StorageStrategy = strategy,
             CheckpointJournalSize = size,
             CheckpointInterval = TimeSpan.FromHours(1),
         });
@@ -256,22 +261,22 @@ public sealed class BlobStorageOperationsTests
         Random.Shared.NextBytes(payload);
 
         // Each writer overwrites its own blob, so the writers never conflict.
-        var writers = Enumerable.Range(0, 4).Select(writer => Task.Run(async () =>
+        var writers = Enumerable.Range(0, 4).Select(writer => DedicatedTestTask.Run(async () =>
         {
             await using var session = await database.CreateSessionAsync();
             var files = await session.GetContainerAsync("files");
-            while (!stop.IsCancellationRequested)
+            while (!stop.IsCancellationRequested && strategy.JournalCounters(database.Name.ToString()).Written < 40 * size)
             {
                 await using var stream = await files.OpenWriteAsync($"writer-{writer}");
                 await stream.WriteAsync(payload);
             }
         })).ToArray();
 
-        // Act: sample the journal while the writers push well past the size many times over,
+        // Act: read exact stream counters while writers stop at forty journal sizes,
         // counting the checkpoints that truncated it.
-        var journal = await JournalSamples.CollectAsync(() => database.DataStorage.JournalLength, 40 * size, Task.WhenAll(writers));
+        var journal = await JournalSamples.CollectAsync(() => strategy.JournalCounters(database.Name.ToString()), 40 * size, Task.WhenAll(writers));
         stop.Cancel();
-        await Task.WhenAll(writers).WaitAsync(Timeout);
+        await Task.WhenAll(writers).WaitAsync(_timeout);
 
         // Assert: tens of journal sizes were written, and checkpoints truncated the journal before
         // it held four sizes on average.
@@ -282,14 +287,11 @@ public sealed class BlobStorageOperationsTests
     }
 
     /// <summary>
-    /// A rollback's undo fails once. The undo is retried on its own backoff, about 100 ms later,
-    /// so the writer waiting for the rolled-back transaction's writer lock proceeds within about a
-    /// second although the maintenance interval is an hour (#1226 owner decision of 2026-10-04).
-    /// The engine's wiring is checked exactly (the first retry is due within 100 ms of the
-    /// deferral), and the release end to end as a ratio to that first delay.
+    /// A refused undo retries on the coordinator's own schedule, independently of full maintenance.
+    /// A recorded undo-only worker completion and the next writer prove release; elapsed time is diagnostic.
     /// </summary>
-    [Fact(DisplayName = "Cohesion Test [Database.Blob] - Deferred undo: a transient undo failure releases the writer within about a second")]
-    public async Task RollbackAsync_TransientUndoFailure_ShouldReleaseTheWriterWithinAboutASecond()
+    [Fact(DisplayName = "Cohesion Test [Database.Blob] - Deferred undo: a transient undo failure releases the writer through an undo-only worker pass")]
+    public async Task RollbackAsync_TransientUndoFailure_ShouldReleaseTheWriterAfterRecordedUndoRetry()
     {
         // Arrange
         var maintenance = TimeSpan.FromHours(1);
@@ -314,17 +316,19 @@ public sealed class BlobStorageOperationsTests
         // bracket cannot touch the first page it undoes and the undo is deferred with the database
         // writer lock held; the pages are released at once. (Until #1252 a failed journal write was
         // the transient fault; a journal write failure now takes the database offline.)
+        using var undo = CheckpointPace.ObserveDeferredUndo(
+            engine.Workers.OfType<DatabaseVersionPurgeWorker<BlobDatabase>>().Single(), database.Name, database.Coordinator.DeferredUndoRetryDelay);
         var watch = Stopwatch.StartNew();
         using (PageWriteLockHolder.LockEveryPage(database.DataStorage))
         {
             await transaction.RollbackAsync();
+            database.Coordinator.VersionStore.PendingAbortedPurges.ShouldNotBeEmpty();
+            database.Coordinator.NextDeferredUndoRetry.ShouldNotBeNull("the refused undo must be scheduled while its pages stay held");
         }
 
-        // The engine handed the coordinator its first retry delay: the retry is due within it.
-        var firstRetry = database.Coordinator.NextDeferredUndoRetry;
-
-        await WriteAsync(otherFiles, "other", "other").WaitAsync(Timeout);
+        await WriteAsync(otherFiles, "other", "other").WaitAsync(TimeSpan.FromSeconds(30));
         watch.Stop();
+        await undo.VerifyAsync();
 
         // Assert
         transaction.State.ShouldBe(TransactionState.RolledBack);
@@ -332,12 +336,8 @@ public sealed class BlobStorageOperationsTests
         (await NamesAsync(container)).ShouldBe(["keep", "other"]);
         (await ReadAsync(container, "keep")).ShouldBe("original");
         options.DeferredUndoRetryDelay.ShouldBe(TimeSpan.FromMilliseconds(100));
-        firstRetry.ShouldNotBeNull().ShouldBeLessThanOrEqualTo(options.DeferredUndoRetryDelay);
-        // The regression this guards against waits a full MaintenanceInterval (an hour here) per retry.
-        // 100 retry delays (10 s) still catches it by a factor of 360 and leaves room for a loaded CI
-        // runner; the exact wiring is the firstRetry check above.
-        (watch.Elapsed / options.DeferredUndoRetryDelay).ShouldBeLessThan(100);
-        engine.State.ShouldBe(EngineState.Running);
+        database.Coordinator.DeferredUndoRetryDelay.ShouldBe(options.DeferredUndoRetryDelay);
+        engine.State.ShouldBe(EngineState.Running, $"writer released after {watch.Elapsed}");
     }
 
     /// <summary>

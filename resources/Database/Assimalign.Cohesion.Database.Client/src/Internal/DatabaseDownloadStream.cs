@@ -10,6 +10,8 @@ using Assimalign.Cohesion.Database.Protocol;
 namespace Assimalign.Cohesion.Database.Client.Internal;
 
 // The worker owns all frame I/O. Only bounded copies of content cross into the caller's stream.
+[global::System.Diagnostics.DebuggerDisplay("DatabaseDownloadStream CanRead = {CanRead}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Client.Internal.DatabaseDownloadStream.DebugView))]
 internal sealed class DatabaseDownloadStream : Stream
 {
     private const int chunkSize = 64 * 1024;
@@ -52,7 +54,7 @@ internal sealed class DatabaseDownloadStream : Stream
             ArgumentNullException.ThrowIfNull(exchange);
             if (!ReferenceEquals(connection.Family, exchange.Family))
             {
-                throw new ArgumentException("The exchange belongs to a different message family.", nameof(exchange));
+                throw new ArgumentException(ErrorMessages.ClientExecuteStreamingAsyncArgument, nameof(exchange));
             }
         }
         catch
@@ -108,7 +110,7 @@ internal sealed class DatabaseDownloadStream : Stream
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
         if (Interlocked.Exchange(ref _reading, 1) != 0)
         {
-            throw new InvalidOperationException("Concurrent reads are not supported on a database download stream.");
+            throw new InvalidOperationException(ErrorMessages.DownloadStreamReadAsyncFailure);
         }
         try
         {
@@ -275,6 +277,8 @@ internal sealed class DatabaseDownloadStream : Stream
 
     // The materialized exchange that carries a streaming one: the connection's exchange lock and
     // health handling cover the whole transfer. It never certifies a failed response complete.
+    [global::System.Diagnostics.DebuggerDisplay("StreamingExchange")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Client.Internal.DatabaseDownloadStream.StreamingExchange.DebugView))]
     private sealed class StreamingExchange : DatabaseProtocolExchange<bool>
     {
         private readonly DatabaseDownloadStream _owner;
@@ -301,7 +305,7 @@ internal sealed class DatabaseDownloadStream : Stream
             using CancellationTokenRegistration registration = cancellationToken.UnsafeRegister(
                 static state => ((DatabaseDownloadStream)state!).Cancel(), _owner);
             var streamingReader = new ClientFrameReader(reader);
-            var streamingWriter = new ClientFrameWriter(writer);
+            var streamingWriter = new ClientFrameWriter(writer, _exchange.Family);
             await _exchange.OpenAsync(streamingReader, streamingWriter, cancellationToken).ConfigureAwait(false);
             _owner._started.TrySetResult();
             // Model code may use synchronous destination writes. Let stream creation return before
@@ -310,8 +314,22 @@ internal sealed class DatabaseDownloadStream : Stream
             await _exchange.CopyToAsync(streamingReader, streamingWriter, new DownloadDestination(_owner), cancellationToken).ConfigureAwait(false);
             return true;
         }
+
+        private sealed class DebugView
+        {
+            private readonly global::Assimalign.Cohesion.Database.Client.Internal.DatabaseDownloadStream.StreamingExchange _target;
+
+            public DebugView(global::Assimalign.Cohesion.Database.Client.Internal.DatabaseDownloadStream.StreamingExchange value)
+            {
+                _target = value;
+            }
+
+            public global::Assimalign.Cohesion.Database.Protocol.ProtocolMessageFamily Family => _target.Family;
+        }
     }
 
+    [global::System.Diagnostics.DebuggerDisplay("DownloadDestination")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Client.Internal.DatabaseDownloadStream.DownloadDestination.DebugView))]
     private sealed class DownloadDestination : Stream
     {
         private readonly DatabaseDownloadStream _owner;
@@ -362,12 +380,40 @@ internal sealed class DatabaseDownloadStream : Stream
                 // Wait before copying, so even a model's very large write cannot grow queued content.
                 if (!await _owner._chunks.Writer.WaitToWriteAsync(operationToken).ConfigureAwait(false))
                 {
-                    throw new InvalidOperationException("The download content destination is complete.");
+                    throw new InvalidOperationException(ErrorMessages.DownloadDestinationWriteAsyncFailure);
                 }
                 int count = Math.Min(buffer.Length, chunkSize);
                 await _owner._chunks.Writer.WriteAsync(buffer[..count].ToArray(), operationToken).ConfigureAwait(false);
                 buffer = buffer[count..];
             }
         }
+
+        private sealed class DebugView
+        {
+            private readonly global::Assimalign.Cohesion.Database.Client.Internal.DatabaseDownloadStream.DownloadDestination _target;
+
+            public DebugView(global::Assimalign.Cohesion.Database.Client.Internal.DatabaseDownloadStream.DownloadDestination value)
+            {
+                _target = value;
+            }
+
+            public bool CanRead => _target.CanRead;
+            public bool CanSeek => _target.CanSeek;
+            public bool CanWrite => _target.CanWrite;
+        }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Client.Internal.DatabaseDownloadStream _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Client.Internal.DatabaseDownloadStream value)
+        {
+            _target = value;
+        }
+
+        public bool CanRead => _target.CanRead;
+        public bool CanSeek => _target.CanSeek;
+        public bool CanWrite => _target.CanWrite;
     }
 }

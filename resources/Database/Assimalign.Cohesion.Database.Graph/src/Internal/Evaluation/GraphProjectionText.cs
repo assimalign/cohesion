@@ -17,6 +17,7 @@ internal static class GraphProjectionText
         return expression switch
         {
             GqlFunctionCallExpression call => GraphScalarFunctions.Name(call.Function) + (call.IsNiladic ? "" : "(" + string.Join(", ", call.Arguments.Select(Describe)) + ")"),
+            GqlNamedFunctionCallExpression call => call.Name + "(" + (call.Distinct ? "DISTINCT " : "") + string.Join(", ", call.Arguments.Select(Describe)) + ")",
             GqlCastExpression cast => "CAST(" + Describe(cast.Operand) + " AS " + GraphScalarFunctions.Name(cast.Target) + ")",
             GqlAggregateExpression aggregate => (aggregate.Function == GqlAggregateFunction.CollectList ? "collect_list" : aggregate.Function.ToString().ToLowerInvariant()) +
                 "(" + (aggregate.Distinct ? "DISTINCT " : "") + (aggregate.Operand is null ? "*" : Describe(aggregate.Operand)) + ")",
@@ -46,7 +47,7 @@ internal static class GraphProjectionText
             GqlStringPredicateExpression predicate => Describe(predicate.Left) + " " + (predicate.Operator switch
                 { GqlStringPredicateOperator.StartsWith => "STARTS WITH", GqlStringPredicateOperator.EndsWith => "ENDS WITH", _ => "CONTAINS" }) + " " + Describe(predicate.Right),
             GqlLabeledPredicate labeled => Name(labeled.Variable) + (labeled.IsNegated ? " IS NOT LABELED " : " IS LABELED ") + labeled.LabelExpression,
-            _ => throw new GraphPlanningException("COHDBG001", ErrorMessages.ProjectionUnsupported, expression.Location),
+            _ => throw new GraphPlanningException("CG05001", ErrorMessages.ProjectionUnsupported, expression.Location),
         };
     }
 

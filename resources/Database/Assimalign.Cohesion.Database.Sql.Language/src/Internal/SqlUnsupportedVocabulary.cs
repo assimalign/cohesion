@@ -3,7 +3,7 @@ namespace Assimalign.Cohesion.Database.Sql.Language.Internal;
 /// <summary>
 /// The SQL recognized-unsupported table (#1101): every word or operator outside the profile's
 /// keyword list that the parser recognizes as an unsupported construct and rejects with
-/// <c>COHDBL001</c>, plus the clause keywords the preflight scan matches through this table,
+/// <c>CK00001</c>, plus the clause keywords the preflight scan matches through this table,
 /// each with the construct its diagnostic names.
 /// </summary>
 /// <remarks>
@@ -56,8 +56,8 @@ internal static class SqlUnsupportedVocabulary
         new("GROUPING_ID", "GROUPING_ID", SqlWordPosition.Rule),
         new("FILTER", "FILTER", SqlWordPosition.Rule),
         new("WITHIN", "WITHIN GROUP", SqlWordPosition.Rule),
-        new("ANY", "ANY quantified comparison", SqlWordPosition.Rule),
-        new("SOME", "SOME quantified comparison", SqlWordPosition.Rule),
+        new("ANY", "ANY array comparison", SqlWordPosition.Rule),
+        new("SOME", "SOME array comparison", SqlWordPosition.Rule),
         new("LATERAL", "LATERAL subquery", SqlWordPosition.Rule),
         // Window functions awaiting execution.
         new("ROW_NUMBER", "ROW_NUMBER", SqlWordPosition.WindowFunction),

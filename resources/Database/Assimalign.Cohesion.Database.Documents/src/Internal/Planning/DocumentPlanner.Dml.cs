@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Globalization;
+using System.Linq;
 
 using Assimalign.Cohesion.Database.Documents.Language;
 
@@ -17,20 +18,21 @@ internal sealed partial class DocumentPlanner
         {
             Add(assignment.Path, assignment.Value);
             ValidateMetadata(assignment.Value, update.Alias, storedSource: true);
-            Validate(assignment.Value, allowAggregate: false);
+            Validate(assignment.Value, allowAggregate: false, functions: _functions);
         }
         foreach (var path in update.Unset) { Add(path, null); }
         if (targets.Count == 0)
         {
-            throw new DocumentPlanningException("COHDOC016", ErrorMessages.UpdateTargetsMissing, update.Location);
+            throw new DocumentPlanningException("CD02016", ErrorMessages.UpdateTargetsMissing, update.Location);
         }
         if (update.Predicate is { } predicate)
         {
             ValidateMetadata(predicate, update.Alias, storedSource: true);
-            Validate(predicate, allowAggregate: false);
+            Validate(predicate, allowAggregate: false, functions: _functions);
         }
         return new DocumentUpdatePlan(collection, update, targets.AsReadOnly(),
-            ChooseAccess(update.Predicate, update.Alias, _catalog.GetIndexes(collection.Id, _snapshot)));
+            ChooseAccess(update.Predicate, update.Alias, _catalog.GetIndexes(collection.Id, _snapshot)),
+            PlanReturning(update.Returning, update.Collection, update.Alias));
 
         void Add(OqlPathExpression path, OqlExpression? value)
         {
@@ -41,14 +43,14 @@ internal sealed partial class DocumentPlanner
                 _cancellationToken.ThrowIfCancellationRequested();
                 if ((segment.Name is null) == (segment.Index is null) || segment.Index < 0)
                 {
-                    throw new DocumentPlanningException("COHDOC016", ErrorMessages.UpdateTargetInvalid, path.Location);
+                    throw new DocumentPlanningException("CD02016", ErrorMessages.UpdateTargetInvalid, path.Location);
                 }
                 segments.Add(segment);
             }
             if (segments.Count == 0 ||
                 value is null && segments[^1].Index is not null)
             {
-                throw new DocumentPlanningException("COHDOC016", ErrorMessages.UpdateTargetInvalid, path.Location);
+                throw new DocumentPlanningException("CD02016", ErrorMessages.UpdateTargetInvalid, path.Location);
             }
             var node = paths;
             foreach (var segment in segments)
@@ -56,7 +58,7 @@ internal sealed partial class DocumentPlanner
                 _cancellationToken.ThrowIfCancellationRequested();
                 if (node.IsTarget)
                 {
-                    throw new DocumentPlanningException("COHDOC017", ErrorMessages.UpdateTargetsOverlap, path.Location);
+                    throw new DocumentPlanningException("CD01017", ErrorMessages.UpdateTargetsOverlap, path.Location);
                 }
                 if (!node.Children.TryGetValue(segment, out var child))
                 {
@@ -67,17 +69,27 @@ internal sealed partial class DocumentPlanner
             }
             if (node.IsTarget || node.Children.Count > 0)
             {
-                throw new DocumentPlanningException("COHDOC017", ErrorMessages.UpdateTargetsOverlap, path.Location);
+                throw new DocumentPlanningException("CD01017", ErrorMessages.UpdateTargetsOverlap, path.Location);
             }
             node.IsTarget = true;
             targets.Add(new DocumentUpdateTarget(path, segments.AsReadOnly(), value));
         }
     }
 
+    [global::System.Diagnostics.DebuggerDisplay("UpdatePathNode")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Documents.Internal.DocumentPlanner.UpdatePathNode.DebugView))]
     private sealed class UpdatePathNode
     {
         internal Dictionary<OqlPathSegment, UpdatePathNode> Children { get; } = new();
         internal bool IsTarget { get; set; }
+
+        private sealed class DebugView
+        {
+            public DebugView(global::Assimalign.Cohesion.Database.Documents.Internal.DocumentPlanner.UpdatePathNode value)
+            {
+                _ = value;
+            }
+        }
     }
 
     private DocumentDeletePlan PlanDelete(OqlDeleteExpression delete)
@@ -87,10 +99,11 @@ internal sealed partial class DocumentPlanner
         if (delete.Predicate is { } predicate)
         {
             ValidateMetadata(predicate, delete.Alias, storedSource: true);
-            Validate(predicate, allowAggregate: false);
+            Validate(predicate, allowAggregate: false, functions: _functions);
         }
         return new DocumentDeletePlan(collection, delete,
-            ChooseAccess(delete.Predicate, delete.Alias, _catalog.GetIndexes(collection.Id, _snapshot)));
+            ChooseAccess(delete.Predicate, delete.Alias, _catalog.GetIndexes(collection.Id, _snapshot)),
+            PlanReturning(delete.Returning, delete.Collection, delete.Alias));
     }
 
     private DocumentStatementPlan PlanWrite(OqlExpression statement, string destination,
@@ -100,11 +113,17 @@ internal sealed partial class DocumentPlanner
         string verb = statement is OqlUpsertExpression ? "UPSERT" : "INSERT";
         DocumentSystemCollections.EnsureReadOnly(destination, statement.Location);
         var collection = ResolveCollection(destination, statement.Location);
+        var returning = statement switch
+        {
+            OqlInsertExpression insert => PlanReturning(insert.Returning, destination, insert.Alias),
+            OqlUpsertExpression upsert => PlanReturning(upsert.Returning, destination, upsert.Alias),
+            _ => null,
+        };
         if (select is null)
         {
             if (values.Count == 0)
             {
-                throw new DocumentPlanningException("COHDOC001", string.Format(CultureInfo.CurrentCulture, ErrorMessages.WriteValuesContext, verb), statement.Location);
+                throw new DocumentPlanningException("CD05001", string.Format(CultureInfo.CurrentCulture, ErrorMessages.WriteValuesContext, verb), statement.Location);
             }
             foreach (var pair in values)
             {
@@ -112,22 +131,22 @@ internal sealed partial class DocumentPlanner
                 {
                     if (!IsConstant(expression))
                     {
-                        throw new DocumentPlanningException("COHDOC001", string.Format(CultureInfo.CurrentCulture, ErrorMessages.WriteValuesContext, verb), expression.Location);
+                        throw new DocumentPlanningException("CD05001", string.Format(CultureInfo.CurrentCulture, ErrorMessages.WriteValuesContext, verb), expression.Location);
                     }
-                    Validate(expression, allowAggregate: false);
+                    Validate(expression, allowAggregate: false, functions: _functions);
                 }
             }
             return statement is OqlUpsertExpression upsert
-                ? new DocumentUpsertPlan(collection, upsert)
-                : new DocumentInsertPlan(collection, (OqlInsertExpression)statement);
+                ? new DocumentUpsertPlan(collection, upsert, Returning: returning)
+                : new DocumentInsertPlan(collection, (OqlInsertExpression)statement, returning);
         }
         var source = Plan((OqlExpression)select);
         var logical = source is DocumentPlan plan ? plan.Logical : ((DocumentSystemCollectionPlan)source).Logical;
         int keyOrdinal = Bind(keyName);
         int? valueOrdinal = valueName is null ? null : Bind(valueName);
         return statement is OqlUpsertExpression upsertSelect
-            ? new DocumentUpsertPlan(collection, upsertSelect, source, keyOrdinal, valueOrdinal)
-            : new DocumentInsertSelectPlan(collection, (OqlInsertExpression)statement, source, keyOrdinal, valueOrdinal);
+            ? new DocumentUpsertPlan(collection, upsertSelect, source, keyOrdinal, valueOrdinal, returning)
+            : new DocumentInsertSelectPlan(collection, (OqlInsertExpression)statement, source, keyOrdinal, valueOrdinal, returning);
 
         int Bind(string? name)
         {
@@ -135,15 +154,39 @@ internal sealed partial class DocumentPlanner
             {
                 if (logical.Projections[i].Name == name) { return i; }
             }
-            throw new DocumentPlanningException("COHDOC001", string.Format(CultureInfo.CurrentCulture,
+            throw new DocumentPlanningException("CD05001", string.Format(CultureInfo.CurrentCulture,
                 ErrorMessages.WriteOutputMissing, verb, name), statement.Location);
         }
+    }
+
+    private DocumentLogicalPlan? PlanReturning(OqlReturningExpression? returning, string collection, string? alias)
+    {
+        if (returning is null) { return null; }
+        foreach (var projection in returning.Projections)
+        {
+            _cancellationToken.ThrowIfCancellationRequested();
+            if (projection.Alias is { Length: 0 })
+            { throw new DocumentPlanningException("CD01026", ErrorMessages.ReturningNameInvalid, projection.Expression.Location); }
+            Validate(projection.Expression, allowAggregate: false, allowStar: !returning.IsValue, functions: _functions);
+        }
+        // A destination without AS is its own binding, independently of an INSERT SELECT source.
+        var logical = CreateLogicalPlan(new OqlSelectExpression(collection, alias ?? collection, returning.Projections,
+            null, [], null, [], false, returning.IsValue, location: returning.Location), _cancellationToken, _parameters, _functions);
+        if (logical.Projections.Any(projection => projection.Name.Length == 0))
+        { throw new DocumentPlanningException("CD01026", ErrorMessages.ReturningNameInvalid, returning.Location); }
+        return logical;
     }
 
     private static void ValidateMetadata(OqlExpression expression, string? alias, bool storedSource)
     {
         switch (expression)
         {
+            case OqlComprehensionExpression comprehension:
+                ValidateMetadata(comprehension.Collection, alias, storedSource);
+                ValidateMetadata(comprehension.Projection, comprehension.Variable == alias ? null : alias, storedSource);
+                if (comprehension.Predicate is not null)
+                { ValidateMetadata(comprehension.Predicate, comprehension.Variable == alias ? null : alias, storedSource); }
+                break;
             case OqlQuantifiedExpression quantified:
                 ValidateMetadata(quantified.Collection, alias, storedSource);
                 ValidateMetadata(quantified.Predicate, quantified.Variable == alias ? null : alias, storedSource);
@@ -156,7 +199,7 @@ internal sealed partial class DocumentPlanner
                     meta.Arguments.Count == 1 && (alias is null || meta.Arguments[0] is not OqlPathExpression { Segments.Count: 1 } path ||
                         path.Segments[0].Name != alias))
                 {
-                    throw new DocumentPlanningException("COHDOC001", ErrorMessages.MetaContextInvalid, meta.Location);
+                    throw new DocumentPlanningException("CD05001", ErrorMessages.MetaContextInvalid, meta.Location);
                 }
                 break;
             case OqlBinaryExpression binary:

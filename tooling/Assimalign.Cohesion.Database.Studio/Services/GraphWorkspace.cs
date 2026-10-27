@@ -37,7 +37,7 @@ internal sealed partial class GraphWorkspace : LanguageWorkspace
 
     // The typed embedded session: GQL text and path requests execute on the graph session's
     // members, which the lifecycle-only ModelWorkspace.RequireSession() does not reach.
-    private GraphDatabaseSession GraphSession => _session ?? throw new InvalidOperationException("Select a database first.");
+    private GraphDatabaseSession GraphSession => _session ?? throw new InvalidOperationException(ErrorMessages.SessionSelectionMissing);
 
     protected override async Task OpenSessionAsync(string database, CancellationToken cancellationToken)
     {
@@ -91,7 +91,7 @@ internal sealed partial class GraphWorkspace : LanguageWorkspace
     /// <summary>Path execution needs a read-only MATCH that returns exactly one bare variable.</summary>
     public static bool LooksLikePathQuery(string statement)
     {
-        if (ScriptSplitter.FirstKeyword(statement) != "MATCH")
+        if (ScriptSplitter.FirstKeyword(statement, StudioModel.Graph) != "MATCH")
         {
             return false;
         }

@@ -11,6 +11,7 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.Database.Indexing;
+using Assimalign.Cohesion.Database.Blob.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Transactions;
 using Assimalign.Cohesion.Database.Types;
 
@@ -43,7 +44,8 @@ public sealed class DocumentProcessTests
     {
         // SearchIndexAsync filters catalog tombstones; only a raw cursor can expose leftover old keys.
         await using var engine = DocumentDatabaseEngine.Create("document-recovery-index", new() { RootPath = root });
-        var database = await engine.OpenDatabaseAsync("crash", CancellationToken.None);
+        var database = await CrashReopen.OpenAsync(Path.Combine(root, "crash", "document.dat"),
+            token => engine.OpenDatabaseAsync("crash", token), CancellationToken.None);
         var latest = new TransactionSnapshot(TransactionSequence.None, TransactionSequence.None, new TransactionSequence(ulong.MaxValue), []);
         var definitions = database.Catalog.GetIndexes(database.Catalog.FindCollection("items", latest).ShouldNotBeNull().Id, latest);
         definitions.Count.ShouldBe(2);
@@ -54,7 +56,7 @@ public sealed class DocumentProcessTests
             while (registrations.MoveNext())
             {
                 var bytes = registrations.Current.Data;
-                bytes.Span[16].ShouldBe((byte)5); bytes.Span[17].ShouldBe((byte)2);
+                bytes.Span[16].ShouldBe((byte)5); bytes.Span[17].ShouldBe((byte)3);
                 ulong objectId = BinaryPrimitives.ReadUInt64LittleEndian(bytes.Span[18..]);
                 var metadata = definitions.Single(index => index.ObjectId == objectId);
                 long rootPage = BinaryPrimitives.ReadInt64LittleEndian(bytes.Span[26..]);
@@ -74,7 +76,7 @@ public sealed class DocumentProcessTests
             manager.TryGetIndex(metadata.ObjectId, metadata.Name, out var tree).ShouldBeTrue();
             foreach (var (rank, count) in new[] { (1m, 0), (11m, 1), (99m, 0), (2m, 0), (3m, 1), (4m, 0), (14m, 1), (98m, 0) })
             {
-                // Documents' v2 component prefix 4 precedes a DatabaseKeyWriter decimal.
+                // Documents' v3 component prefix 4 precedes a DatabaseKeyWriter decimal.
                 var bytes = new byte[] { 4 }.Concat(IndexKey.From(new DatabaseKeyWriter().AppendDecimal(rank)).Encoded.ToArray()).ToList();
                 if (metadata.IsUnique)
                 {
@@ -107,7 +109,13 @@ public sealed class DocumentProcessTests
         var error = process.StandardError.ReadToEndAsync();
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(45));
         try { await process.WaitForExitAsync(timeout.Token); }
-        catch { process.Kill(entireProcessTree: true); throw; }
+        catch
+        {
+            if (!process.HasExited) { process.Kill(entireProcessTree: true); }
+            using var cleanup = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            await process.WaitForExitAsync(cleanup.Token);
+            throw;
+        }
         process.ExitCode.ShouldBe(0, await output + await error);
     }
 }

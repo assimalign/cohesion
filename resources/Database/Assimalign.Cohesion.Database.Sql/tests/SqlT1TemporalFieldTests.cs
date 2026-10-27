@@ -116,7 +116,7 @@ public sealed class SqlT1TemporalFieldTests
 
         // Act / Assert
         var failure = await Should.ThrowAsync<DatabaseException>(() => session.ExecuteAsync($"SELECT {expression} FROM t", cancellationToken: CancellationToken.None).AsTask());
-        failure.Diagnostics[0].Code.ShouldBe("COHSQLE006");
+        failure.Diagnostics[0].Code.ShouldBe("CS01006");
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - T1 scalars: NULL in every later strict argument returns NULL")]

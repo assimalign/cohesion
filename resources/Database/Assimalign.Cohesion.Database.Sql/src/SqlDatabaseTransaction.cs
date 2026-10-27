@@ -23,10 +23,10 @@ namespace Assimalign.Cohesion.Database.Sql;
 /// a token is observed only before a commit or rollback starts; a commit while a statement of the
 /// transaction still runs is refused and leaves it active; and a transaction the kernel ended under
 /// its caller (its database was dropped or closed, say) reports <see cref="TransactionState.Faulted"/>
-/// and refuses statements, BEGIN and COMMIT with <c>COHSQLT005</c> until the caller rolls it back.
+/// and refuses statements, BEGIN and COMMIT with <c>CS04005</c> until the caller rolls it back.
 /// This type supplies the model's vocabulary only: the kernel state, the kernel commit and rollback
-/// with the engine's exception translation, the offline refusal (<c>COHSQLT004</c>, #1243) and the
-/// <c>COHSQLT005</c> aborted error.
+/// with the engine's exception translation, the offline refusal (<c>CS04004</c>, #1243) and the
+/// <c>CS04005</c> aborted error.
 /// </para>
 /// <para>
 /// <b>A statement is statement-atomic</b>, so a failed statement leaves the transaction active (a
@@ -44,13 +44,15 @@ namespace Assimalign.Cohesion.Database.Sql;
 /// an internal constructor; the session that began it is the only way to create one.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("SqlDatabaseTransaction")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.SqlDatabaseTransaction.DebugView))]
 public sealed class SqlDatabaseTransaction : DatabaseTransaction
 {
     /// <summary>
     /// The code that leads the message of work refused because the session's transaction is
     /// aborted: the kernel ended it under its caller, or the session's teardown ended it.
     /// </summary>
-    internal const string AbortedCode = "COHSQLT005";
+    internal const string AbortedCode = "CS04005";
 
     // Aborted refusals are created on a normal path, so their messages are read once.
     private static readonly string _commitAborted = ErrorMessages.TransactionCommitAborted;
@@ -213,8 +215,21 @@ public sealed class SqlDatabaseTransaction : DatabaseTransaction
     {
         TransactionCommitUnconfirmedException unconfirmed => _database.CreateUnconfirmedCommit(unconfirmed),
         _ when _database.TranslateFailure(error) is var offline && !ReferenceEquals(offline, error) => offline,
-        TransactionDeadlockException => new DatabaseTransactionDeadlockException(error.Message, error),
+        TransactionDeadlockException deadlock => SqlExecutionException.Deadlock(deadlock),
         TransactionAbortedException => new DatabaseTransactionAbortedException(error.Message, error),
         _ => error,
     };
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Sql.SqlDatabaseTransaction _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.SqlDatabaseTransaction value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Transactions.TransactionId Id => _target.Id;
+        public global::Assimalign.Cohesion.Database.Transactions.IsolationLevel IsolationLevel => _target.IsolationLevel;
+    }
 }

@@ -22,7 +22,7 @@ namespace Assimalign.Cohesion.Database.Transactions.Internal;
 /// source covers the transactions of all five engines. The <c>database</c> payload is the storage's
 /// name, which the coordinator hands to the manager and the lock manager it builds; a standalone
 /// <see cref="TransactionManager.Create(LockManager, VersionStore, Func{TransactionSequence})"/> or
-/// <see cref="LockManager.Create"/> reports an empty one.
+/// <see cref="LockManager"/> reports an empty one.
 /// </para>
 /// <para>
 /// A lock wait that lasts at least <see cref="SlowLockWaitThresholdMilliseconds"/> also writes

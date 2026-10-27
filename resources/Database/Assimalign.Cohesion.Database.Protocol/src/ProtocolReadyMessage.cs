@@ -9,6 +9,8 @@ namespace Assimalign.Cohesion.Database.Protocol;
 /// <param name="Version">The agreed version.</param>
 /// <param name="Capabilities">The agreed capability names, in server registration order.</param>
 /// <exception cref="ArgumentNullException">The collection is null, including an init assignment.</exception>
+[global::System.Diagnostics.DebuggerDisplay("ProtocolReadyMessage")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Protocol.ProtocolReadyMessage.DebugView))]
 public sealed record ProtocolReadyMessage(ProtocolVersion Version, IReadOnlyList<string> Capabilities)
 {
     private IReadOnlyList<string> _capabilities = Capabilities ?? throw new ArgumentNullException(nameof(Capabilities));
@@ -50,5 +52,18 @@ public sealed record ProtocolReadyMessage(ProtocolVersion Version, IReadOnlyList
         var version = new ProtocolVersion(ProtocolPayload.ReadUInt16(payload, ref position), ProtocolPayload.ReadUInt16(payload, ref position));
         if (version.Major != 2 || version.Minor < 1) { throw new ProtocolException(ErrorMessages.ReadyInvalid); }
         return new(version, ProtocolCapabilityCodec.Read(payload, ref position));
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Protocol.ProtocolReadyMessage _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Protocol.ProtocolReadyMessage value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Protocol.ProtocolVersion Version => _target.Version;
+        public global::System.Collections.Generic.IReadOnlyList<string> Capabilities => _target.Capabilities;
     }
 }

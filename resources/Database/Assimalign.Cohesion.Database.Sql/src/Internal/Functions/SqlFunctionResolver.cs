@@ -20,7 +20,7 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// argument count matches, a variadic overload taking any number from its fixed parameters up. A
 /// call <c>name(*)</c> matches only an aggregate without parameters, which nothing else calls:
 /// <c>COUNT()</c> is not <c>COUNT(*)</c>, as in PostgreSQL. A call no candidate accepts by count is
-/// <c>COHSQLE006</c>, the message naming the counts the function accepts and its call forms, as
+/// <c>CS01006</c>, the message naming the counts the function accepts and its call forms, as
 /// before typed signatures.
 /// </para>
 /// <para>
@@ -32,7 +32,7 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// literal, a NULL parameter — matches any parameter for nothing; a grouping key or aggregate
 /// result has its type over the input row. Every
 /// <see cref="SqlType.AnyElement"/> argument of one candidate must have one type. The unique
-/// cheapest candidate wins; none is <c>COHSQLE006</c>, several are <c>COHSQLE008</c> (SQLSTATE
+/// cheapest candidate wins; none is <c>CS01006</c>, several are <c>CS01008</c> (SQLSTATE
 /// 42725). When the candidates by count are a single overload over <see cref="SqlType.Any"/> and at
 /// most one <see cref="SqlType.AnyElement"/>, as every standard-library scalar is, no type is needed
 /// and none is computed, so resolving a deep nest of built-in calls stays linear.
@@ -53,7 +53,7 @@ internal static class SqlFunctionResolver
     /// <param name="name">The function name as written.</param>
     /// <param name="overloads">The name's overloads.</param>
     /// <param name="arguments">The call's arguments.</param>
-    /// <exception cref="SqlEvaluationException">No overload accepts them (<c>COHSQLE006</c>).</exception>
+    /// <exception cref="SqlEvaluationException">No overload accepts them (<c>CS01006</c>).</exception>
     internal static void CheckArity(string name, SqlFunction[] overloads, IReadOnlyList<SqlExpression> arguments)
     {
         foreach (var overload in overloads)
@@ -130,7 +130,7 @@ internal static class SqlFunctionResolver
     /// </param>
     /// <returns>The overload.</returns>
     /// <exception cref="SqlEvaluationException">
-    /// No overload accepts the argument types (<c>COHSQLE006</c>), or several accept them equally well (<c>COHSQLE008</c>).
+    /// No overload accepts the argument types (<c>CS01006</c>), or several accept them equally well (<c>CS01008</c>).
     /// </exception>
     internal static SqlFunction Choose(string name, SqlFunction[] overloads, IReadOnlyList<SqlExpression> arguments, ReadOnlySpan<DatabaseType> types)
     {
@@ -167,7 +167,7 @@ internal static class SqlFunctionResolver
         }
         if (tie is not null)
         {
-            throw SqlEvaluationException.AmbiguousFunctionCall(name, DescribeTypes(types), $"{best} and {tie}");
+            throw SqlEvaluationException.AmbiguousFunctionCall(name, DescribeTypes(types), string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.AmbiguousOverloadPair, best, tie));
         }
 
         return best;
@@ -260,7 +260,7 @@ internal static class SqlFunctionResolver
     /// <param name="function">The function, for the message.</param>
     /// <param name="index">The argument's position, for the message.</param>
     /// <returns>The converted argument; CHAR always applies its declared width, even when the storage type already matches.</returns>
-    /// <exception cref="OverflowException">An integer does not fit the parameter's type; the evaluator codes it <c>COHSQLE002</c>.</exception>
+    /// <exception cref="OverflowException">An integer does not fit the parameter's type; the evaluator codes it <c>CS02002</c>.</exception>
     /// <exception cref="DatabaseException">The value's type does not convert to the parameter's.</exception>
     internal static SqlValue Coerce(in SqlValue value, DatabaseType target, SqlFunction function, int index)
     {
@@ -305,8 +305,7 @@ internal static class SqlFunctionResolver
             catch (OverflowException exception)
             {
                 throw new OverflowException(
-                    $"{SqlType.NameOf(value.Type)} {number.ToString(CultureInfo.InvariantCulture)} does not fit argument {index + 1} " +
-                    $"of function '{function.Name}', which is {SqlType.NameOf(target)}.", exception);
+                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlFunctionResolverCoerceOverflow, SqlType.NameOf(value.Type), number.ToString(CultureInfo.InvariantCulture), index + 1, function.Name, SqlType.NameOf(target)), exception);
             }
         }
         else if (value.Type == DatabaseType.Decimal && target == DatabaseType.Float64)
@@ -319,7 +318,7 @@ internal static class SqlFunctionResolver
         }
 
         throw new DatabaseException(
-            $"Function '{function.Name}' takes {function.ParameterAt(index).Name} for argument {index + 1}, but the value is {SqlType.NameOf(value.Type)}.");
+            string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlFunctionResolverCoerceDatabase, function.Name, function.ParameterAt(index).Name, index + 1, SqlType.NameOf(value.Type)));
     }
 
     /// <summary>
@@ -507,30 +506,30 @@ internal static class SqlFunctionResolver
             text = variadic switch
             {
                 null => string.Empty,
-                0 => "any number of arguments",
-                int minimum => $"{Count(minimum)} or more arguments",
+                0 => ErrorMessages.AnyArgumentCount,
+                int minimum => string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.MinimumArgumentCount, Count(minimum)),
             };
         }
         else if (counts.Count == 1 && variadic is null)
         {
             int only = counts.Min;
-            text = only == 0 ? "no arguments" : $"exactly {Count(only)} {(only == 1 ? "argument" : "arguments")}";
+            text = only == 0 ? ErrorMessages.NoArgumentsExpected : string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExactArgumentCount, Count(only), (only == 1 ? ErrorMessages.ExpectedArgumentSingular : ErrorMessages.ExpectedArgumentPlural));
         }
         else
         {
             var listed = counts.Select(Count).ToList();
             if (variadic is null && counts.Max - counts.Min + 1 == counts.Count)
             {
-                text = $"{listed[0]} to {listed[^1]} arguments";
+                text = string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ArgumentCountRange, listed[0], listed[^1]);
             }
             else
             {
                 if (variadic is int minimum)
                 {
-                    listed.Add($"{Count(minimum)} or more");
+                    listed.Add(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.MinimumArgumentCountFragment, Count(minimum)));
                 }
 
-                text = $"{string.Join(", ", listed.Take(listed.Count - 1))} or {listed[^1]} arguments";
+                text = string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ListedArgumentCounts, string.Join(", ", listed.Take(listed.Count - 1)), listed[^1]);
             }
         }
 
@@ -539,7 +538,7 @@ internal static class SqlFunctionResolver
             return text;
         }
 
-        return text.Length == 0 ? "only '*'" : $"{text} or '*'";
+        return text.Length == 0 ? ErrorMessages.StarOnlyExpected : string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.AlternativeStarExpected, text);
 
         static string Count(int count) => count.ToString(CultureInfo.InvariantCulture);
     }
@@ -561,9 +560,9 @@ internal static class SqlFunctionResolver
 
         return arguments.Count switch
         {
-            0 => "none",
+            0 => ErrorMessages.NoArgumentsReceived,
             1 when star => "'*'",
-            _ when star => $"{count} arguments including '*'",
+            _ when star => string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StarArgumentCountReceived, count),
             _ => count,
         };
     }

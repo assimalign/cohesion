@@ -55,6 +55,9 @@ internal static class SqlTreeDump
             case SqlLiteralExpression literal:
                 builder.Append("Literal(").Append(literal.LiteralType).Append(", ").Append(Text(literal.Value)).Append(')');
                 break;
+            case SqlDefaultExpression:
+                builder.Append("Default");
+                break;
             case SqlColumnReferenceExpression column:
                 builder.Append("Column(").Append(Text(column.SchemaName)).Append(", ").Append(Text(column.TableAlias))
                        .Append(", ").Append(Text(column.ColumnName)).Append(')');
@@ -89,6 +92,13 @@ internal static class SqlTreeDump
                 Append(builder, between.Low);
                 builder.Append(", ");
                 Append(builder, between.High);
+                builder.Append(')');
+                break;
+            case SqlQuantifiedComparisonExpression quantified:
+                builder.Append("Quantified(").Append(quantified.Operator).Append(", ").Append(quantified.Quantifier).Append(", ");
+                Append(builder, quantified.Operand);
+                builder.Append(", ");
+                Append(builder, quantified.Subquery);
                 builder.Append(')');
                 break;
             case SqlInExpression inExpression:
@@ -258,6 +268,11 @@ internal static class SqlTreeDump
 
     private static string Table(SqlRelationReference? relation)
     {
+        if (relation is SqlJoinedTableReference group)
+        {
+            return "Group(" + Table(group.Item.Table) + "; " + string.Join("; ", group.Item.Joins.Select(join =>
+                join.JoinType + " " + Table(join.Table) + " USING " + string.Join(",", join.UsingColumns) + " ON " + Dump(join.Condition))) + ")";
+        }
         if (relation is SqlDerivedTableReference derived)
         {
             var builder = new StringBuilder("Derived(");

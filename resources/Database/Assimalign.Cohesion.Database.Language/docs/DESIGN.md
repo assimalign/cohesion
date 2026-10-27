@@ -15,7 +15,20 @@ CTS, timer or task list and ignores AnalyzerTimeout, including zero. After a tim
 observes a late aggregate fault so it cannot become an unobserved task exception.
 `QueryStatement.AddDiagnostic` rejects null before adding to its concurrent bag;
 diagnostic enumeration retains severity and source-end ordering. The mutable analyzer list and
-public virtual surface remain for the separate #1264 API audit.
+public virtual surface remain for the separate #1264 API audit. `QueryAnalyzerContext` is a
+sealed leaf constructed internally by the parser; its existing read-only `Statement` member and
+analyzer behavior are unchanged. No new overridable analyzer or parser member is introduced.
+
+## Left-arrow configuration (#1647)
+
+`QueryLanguageProfile.RecognizeLeftArrow` projects into `TokenLexerOptions` and defaults to
+false. SQL and OQL therefore tokenize `a<-1` as `a`, `<`, `-`, `1`; GQL explicitly enables the
+option for incoming and left-or-right relationship patterns. This is configuration, not a
+language-name check in the lexer. The right-arrow token is unchanged. PostgreSQL's local
+`src/backend/parser/scan.l:861-932` stops operators at comment starts and splits trailing signs
+from SQL operators. Accordingly `a<--1` in SQL/OQL contains `<` followed by comment `--1`,
+leaving a missing comparison operand; it is not double negation. Shared token/offset tests and
+each language's left-arrow conformance corpus pin these rules without a new diagnostic.
 
 ## Delimited identifiers (#1235)
 
@@ -61,11 +74,11 @@ including GQL; it is not an ISO GQL or openCypher spelling.
 | OQL | `$name`, `@name`, `$_x`, `$1`, `@1` | Parsing and execution under this contract |
 | GQL | `$name`, `@name`, `$_x`, `$1`, `@1` | Parsing and scalar binding in property maps, WHERE and RETURN (#1138, #1141) |
 
-SQL uses `SQL0003`, OQL `OQL0002` and GQL `GQL0002` for unsupported forms.
+SQL uses `CS00003`, OQL `CD00002` and GQL `CG00002` for unsupported forms.
 `QueryDiagnostics.UnsupportedParameterForm` owns their shared message. SQL unbound
-parameters carry `COHSQLE020`, normalized-key collisions `COHSQLE023`; OQL uses
-`COHDOC005` and `COHDOC009` respectively, through `DatabaseException.Diagnostics`. GQL uses `COHDBG001` for unbound references and
-`COHDBG014` for collisions; unsupported scalar values use `COHDBG003`.
+parameters carry `CS01020`, normalized-key collisions `CS01023`; OQL uses
+`CD01005` and `CD01009` respectively, through `DatabaseException.Diagnostics`. GQL uses `CG05001` for unbound references and
+`CG01014` for collisions; unsupported scalar values use `CG03003`.
 The wire protocol is unchanged. PostgreSQL's scanner separately recognizes `$` plus
 ASCII digits (`decdigit`, `src/backend/parser/scan.l:377`, `:398`) and rejects numeric-name
 junk (`:415-420`, `:969-983`, local reference clone); Cohesion extends that grammar to named sigils and
@@ -95,7 +108,7 @@ therefore cannot silently inherit a flat, database-wide grammar.
   read-only view. Registration code can safely reuse its source arrays without mutating a running
   parser's grammar surface.
 - **One unsupported-clause diagnostic.** `QueryDiagnostics.UnsupportedClause` emits stable code
-  `COHDBL001` and a shared message naming the rejected clause and model language. Conformance
+  `CK00001` and a shared message naming the rejected clause and model language. Conformance
   corpora can distinguish an intentionally unsupported capability from malformed syntax.
 - **Parser-level gating.** Model parsers call `RequireClause` at the recognized clause boundary.
   The helper records the shared diagnostic and returns whether parsing may continue; the shared
@@ -104,7 +117,7 @@ therefore cannot silently inherit a flat, database-wide grammar.
 ## Keyword disposition and stray characters (#1101)
 
 Every word a language recognizes has one of two dispositions: it parses inside a supported
-clause, or it is rejected with exactly one `COHDBL001` at its own span whose message names the
+clause, or it is rejected with exactly one `CK00001` at its own span whose message names the
 construct. It is never bound as a name. A character no language uses is rejected with that
 language's syntax code. The rules, shared by SQL, OQL and GQL:
 
@@ -120,7 +133,7 @@ language's syntax code. The rules, shared by SQL, OQL and GQL:
   identifier, so a field or variable of that name still parses. The table's position rule decides
   where the word starts a construct instead. Examples: the start of the statement, the token
   after an operand, or the token before a path pattern.
-- **`COHDBL001` is for recognized constructs.** That covers a clause, a statement, a multi-word
+- **`CK00001` is for recognized constructs.** That covers a clause, a statement, a multi-word
   prefix such as GQL `ALL SHORTEST`, a quantified predicate, a label-expression operator, or an
   operator such as SQL `~`. A statement whose first word is unsupported is one construct; the
   scan reports that word and nothing after it. A construct owns its modifiers and its operand:
@@ -130,17 +143,17 @@ language's syntax code. The rules, shared by SQL, OQL and GQL:
 - **Each table has a corpus.** `SqlKeywordDispositionTests`, `OqlKeywordDispositionTests` and
   `GqlKeywordDispositionTests` enumerate the profile's keywords plus the table. They fail unless
   every word has a positive case inside a supported clause, or a case with exactly one
-  `COHDBL001` naming its construct. For a table entry, that diagnostic must also name the
+  `CK00001` naming its construct. For a table entry, that diagnostic must also name the
   construct the table records, so the table's construct cannot drift from the parser's message.
   A self-test proves that a word added without a case fails. So an item that adds a keyword or a
   table entry adds its corpus case in the same change.
-- **Pins, and who flips them.** These stay `COHDBL001`, with no T1 item lifting them: GQL path
+- **Pins, and who flips them.** These stay `CK00001`, with no T1 item lifting them: GQL path
   modes, GQL shortest-path prefixes, GQL `MERGE`, GQL `NODETACH DELETE`, and OQL `MERGE`. #1101
   owns the OQL `MERGE` pin, so oql-upsert does not re-pin it. Each of these items depends on #1101
   and flips its own pins, corpus cases included, in its own change: oql-limit-offset (OQL `LIMIT`
   and `OFFSET`), oql-upsert (`UPSERT`), oql-arrays (`UNNEST` and quantified predicates, flipped by #1136), and
   gql-label-direction (label-expression operators and `IS`). gql-label-direction (#1139) has
-  flipped its pins and added one: the GQL tilde edge, `UNDIRECTED EDGE`, stays `COHDBL001` until
+  flipped its pins and added one: the GQL tilde edge, `UNDIRECTED EDGE`, stays `CK00001` until
   the graph engine stores undirected relationships.
 - **A stray character is `TokenType.Unrecognized`.** The lexer reports a character outside every
   language as `Unrecognized`, never as `Identifier`. Examples are `?`, `#`, `^`, `§`, a
@@ -149,7 +162,7 @@ language's syntax code. The rules, shared by SQL, OQL and GQL:
   is `Unrecognized` too; `char.IsDigit` used to lex it as an integer that the engines could not
   convert. Inside a name such a digit stays part of the identifier. `Unrecognized` is appended
   after `Eof`, so every existing member keeps its value. Each parser reports the character with its own
-  syntax code at the character's span: `SQL0003`, `OQL0002` or `GQL0002`. The message is
+  syntax code at the character's span: `CS00003`, `CD00002` or `CG00002`. The message is
   `Unexpected character '<c>'`, or `U+<hex>` for an invisible or supplementary character. The
   statement then binds nothing. OQL and GQL stop before syntax parsing for these characters,
   except `?`: they defer its rejection until syntax parsing can distinguish an operand from a
@@ -162,7 +175,7 @@ language's syntax code. The rules, shared by SQL, OQL and GQL:
 - **`--` stays a line comment in every language.** It is SQL's comment and ISO/IEC 39075's
   `<simple comment>`, so there is no per-language lexer switch. A Cypher arrow written with `--`
   directly after a GQL node's `)` or edge's `]` reads as a comment; the GQL parser reports it as
-  `GQL0008` (#1139) without any lexer change. Where the comment ends is the next section's rule.
+  `CG00008` (#1139) without any lexer change. Where the comment ends is the next section's rule.
 
 ## Line terminators and line comments (#1150)
 
@@ -187,7 +200,7 @@ needs the same boundary calls `IsLineTerminator` instead of keeping its own list
   comment may span lines, so a terminator inside it ends nothing, and `--` inside a literal starts
   no comment. The escape spelling `\r` or `\n`, written as two characters, is text everywhere.
 - **`//` is not a comment in any language.** The lexer reads `/` as the division operator, so
-  `//` is two `Slash` tokens and each parser rejects it (GQL with `GQL0002`). ISO/IEC 39075 also
+  `//` is two `Slash` tokens and each parser rejects it (GQL with `CG00002`). ISO/IEC 39075 also
   spells a `<simple comment>` with `//`; an item that adds that form needs a per-language lexer
   switch, because `//` must stay an error in SQL and OQL, and it ends the comment through the same
   scan and terminator set as `--`.
@@ -202,11 +215,11 @@ needs the same boundary calls `IsLineTerminator` instead of keeping its own list
 - **Consistency with #1101 and gql-label-direction (#1139).** Every terminator is whitespace to
   `char.IsWhiteSpace`, so outside a comment it separates tokens and is never `Unrecognized`; the
   stray-character rule is unchanged. The rule moves where a comment ends, never where it starts,
-  so `GQL0008` (#1139), keyed on a `--` comment beginning exactly where a node's `)` or an edge's
+  so `CG00008` (#1139), keyed on a `--` comment beginning exactly where a node's `)` or an edge's
   `]` ends, holds whichever terminator ends the comment. Between #1150 and #1139,
   `(a)-->(b)` followed by any line terminator read as `(a)` plus a comment, so
   `MATCH (a:Person)-->(b:Person)<CR>DETACH DELETE a` deleted every Person; it now fails with
-  `GQL0008`, pinned at every terminator (`Graph.Language/docs/DESIGN.md`, "Label expressions and
+  `CG00008`, pinned at every terminator (`Graph.Language/docs/DESIGN.md`, "Label expressions and
   edge directions").
 - **Tests.** `TokenLexerLineCommentTests` pins each terminator, CR LF, a comment at the end of
   the input, terminator escapes in literals and comments, and terminators inside string literals,
@@ -239,7 +252,7 @@ the in-process message. SQL and Graph compose `CODE: message` for ExecutionFailu
 [negotiated diagnostics](../../Assimalign.Cohesion.Database.Protocol/docs/DESIGN.md#negotiated-statement-diagnostics-1105) add structured delivery.
 
 `QueryLanguageProfile.Functions` is the executable built-in set. Recognized non-executing
-functions live in each language's unsupported vocabulary and report COHDBL001 at parse time.
+functions live in each language's unsupported vocabulary and report CK00001 at parse time.
 The single function guard in each engine's execution-conformance suite requires live evidence
 for every declared name and rejects evidence for undeclared names. OQL's
 [temporary exemptions were removed by #1126](../../Assimalign.Cohesion.Database.Documents.Language/docs/DESIGN.md#function-declaration-and-diagnostic-delivery-1103).
@@ -251,3 +264,19 @@ diagnostic creation require no reflection, dynamic code generation, or dependenc
 The recognized-unsupported tables are static arrays scanned by ordinary loops. The line-terminator
 set is one static `SearchValues<char>` built from a literal, which needs no reflection or runtime
 code generation.
+
+## Error and construction conventions (#1470)
+
+Exception messages and format templates are generated from `src/Properties/ErrorMessages.resx`;
+format arguments use the current culture. Cancellation and abort templates used during normal
+cleanup are cached before reuse. Error identities remain separate from message text where a
+structured diagnostic carrier exists. Standard .NET guards retain their argument names and exception types.
+
+
+## Debugger inspection (#1470)
+
+Eligible concrete source types use private nested debugger views of reviewed public/protected
+state; existing inherited display/proxy pairs are reused. See the shared
+[debugger convention](../../Assimalign.Cohesion.Database/docs/CONVENTIONS.md#debugger-inspection).
+Borrowed token spans and lazy statement diagnostics are omitted. The lexer view retains no ref-like instance; profile views expose already stored vocabulary metadata without enumeration.
+Runtime APIs, methods, allocation budgets, persistent formats and wire behavior are unchanged.

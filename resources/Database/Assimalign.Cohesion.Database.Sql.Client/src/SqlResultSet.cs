@@ -14,6 +14,8 @@ namespace Assimalign.Cohesion.Database.Sql.Client;
 /// to ordinals once and every
 /// row shares that lookup, so name-based access across a large set stays cheap.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("SqlResultSet, Count = {Count}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Client.SqlResultSet.DebugView))]
 public sealed class SqlResultSet : IReadOnlyList<SqlRow>
 {
     private readonly IReadOnlyList<SqlRow> _rows;
@@ -82,5 +84,20 @@ public sealed class SqlResultSet : IReadOnlyList<SqlRow>
         }
 
         return new SqlResultSet(columns, rows, result.Diagnostics, result.AffectedCount);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Sql.Client.SqlResultSet _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Client.SqlResultSet value)
+        {
+            _target = value;
+        }
+
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.Protocol.ProtocolDiagnostic> Diagnostics => _target.Diagnostics;
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.Sql.Client.SqlColumn> Columns => _target.Columns;
+        public int Count => _target.Count;
+        public long AffectedCount => _target.AffectedCount;
     }
 }

@@ -19,6 +19,8 @@ namespace Assimalign.Cohesion.Database.Documents;
 /// normalized collisions and unbound references before data rows are read or written,
 /// and ignores unused keys. Numeric names bind their exact digits; null is a bound value.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("DocumentQueryRequest")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Documents.DocumentQueryRequest.DebugView))]
 public sealed class DocumentQueryRequest : DatabaseRequest
 {
     private readonly OqlQueryStatement _statement;
@@ -49,12 +51,24 @@ public sealed class DocumentQueryRequest : DatabaseRequest
     public static DocumentQueryRequest FromOql(string oql, IReadOnlyDictionary<string, object?>? parameters = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(oql);
-        var statement = (OqlQueryStatement)new OqlQueryParser().Parse(oql);
+        var statement = (OqlQueryStatement)new OqlQueryParser(allowUnregisteredFunctions: true).Parse(oql);
         var error = statement.Diagnostics.FirstOrDefault(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
         if (error is not null)
         {
-            throw new DatabaseParseException($"OQL parse error {error.Code}: {error.Message}", statement.Diagnostics);
+            throw new DatabaseParseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.QueryRequestFromOqlDatabaseParse, error.Code, error.Message), statement.Diagnostics);
         }
         return new DocumentQueryRequest(statement, parameters);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Documents.DocumentQueryRequest _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Documents.DocumentQueryRequest value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Documents.Language.OqlQueryStatement Statement => _target.Statement;
     }
 }

@@ -18,13 +18,13 @@ internal static class GraphCatalogIntrospection
         if (query.Creates.Count != 0 || query.DeleteVariables.Count != 0 || query.DetachDelete ||
             query.Stages.Any(stage => stage is GqlInsertStage or GqlDeleteStage))
         {
-            throw new GraphPlanningException("GQL0007", "Graph catalog introspection is read-only.", query.Location);
+            throw new GraphPlanningException("CG00007", ErrorMessages.IntrospectionExecuteGraphPlanning, query.Location);
         }
         if (query.Stages.Count != 0 || query.MatchClauses is null || query.MatchClauses.Count != 0 || query.Projections.Count != 0 ||
             query.ReturnStar || query.SetQuantifier != GqlSetQuantifier.All || query.OrderBy is null ||
             query.OrderBy.Count != 0 || query.Offset is not null || query.Limit is not null)
         {
-            throw new GraphPlanningException("COHDBG001", "SHOW cannot be composed with graph clauses.", query.Location);
+            throw new GraphPlanningException("CG05001", ErrorMessages.IntrospectionExecuteGraphPlanning2, query.Location);
         }
 
         var columns = Columns(surface);
@@ -100,7 +100,7 @@ internal static class GraphCatalogIntrospection
                 [("DATABASE_NAME", DatabaseType.String), ("DEFINITION_TYPE", DatabaseType.String), ("DEFINITION_ID", DatabaseType.Guid),
                  ("DEFINITION_NAME", DatabaseType.String), ("OBJECT_TYPE", DatabaseType.String), ("OBJECT_NAME", DatabaseType.String),
                  ("OWNER", DatabaseType.String), ("OWNING_SCHEMA", DatabaseType.String)],
-            _ => throw new GraphPlanningException("COHDBG001", "Unknown graph catalog introspection subject."),
+            _ => throw new GraphPlanningException("CG05001", ErrorMessages.IntrospectionColumnsGraphPlanning),
         };
         var columns = new DatabaseColumn[definitions.Length];
         for (int ordinal = 0; ordinal < definitions.Length; ordinal++)

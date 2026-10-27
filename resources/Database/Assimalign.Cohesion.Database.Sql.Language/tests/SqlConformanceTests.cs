@@ -21,8 +21,28 @@ public class SqlConformanceTests
 
     // ── The supported-statement corpus ─────────────────────────────────
 
+    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Conformance: binding-only DML sources preserve contextual identifiers (#1714)")]
+    [InlineData("WITH \"recursive\" AS (SELECT id FROM s) DELETE FROM t USING recursive WHERE t.id=recursive.id;")]
+    [InlineData("UPDATE t SET id=s.id FROM s RETURNING \"old\".id;")]
+    [InlineData("DELETE FROM t USING s RETURNING \"new\".id;")]
+    public void Parse_BindingOnlyDmlCorpus_ShouldParseWithoutErrors(string sql)
+    {
+        // Arrange / Act
+        var statement = Parse(sql);
+
+        // Assert
+        statement.Diagnostics.ShouldNotContain(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
+    }
+
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - Conformance: supported statements parse without errors")]
+    [InlineData("ALTER TABLE t ALTER v TYPE \"a space\" USING v;", SqlQueryCommandType.Alter)]
+    [InlineData("ALTER TABLE t ALTER v TYPE \"a\"\"quote\";", SqlQueryCommandType.Alter)]
+    [InlineData("ALTER TABLE t ALTER v TYPE \"\"\"odd\"\"\";", SqlQueryCommandType.Alter)]
     [InlineData("SELECT * FROM users;", SqlQueryCommandType.Select)]
+    [InlineData("SELECT * FROM a FULL JOIN b USING(id);", SqlQueryCommandType.Select)]
+    [InlineData("SELECT * FROM a LEFT OUTER JOIN b ON a.id = b.id FULL OUTER JOIN c ON b.id = c.id;", SqlQueryCommandType.Select)]
+    [InlineData("SELECT * FROM ((SELECT * FROM a) d RIGHT JOIN b ON d.id = b.id);", SqlQueryCommandType.Select)]
+    [InlineData("SELECT id FROM ((a RIGHT JOIN b USING (id)) q RIGHT JOIN c USING (id));", SqlQueryCommandType.Select)]
     [InlineData("SELECT a FROM t UNION SELECT a FROM u;", SqlQueryCommandType.Select)]
     [InlineData("SELECT a FROM t INTERSECT ALL SELECT a FROM u;", SqlQueryCommandType.Select)]
     [InlineData("SELECT a FROM t EXCEPT DISTINCT SELECT a FROM u;", SqlQueryCommandType.Select)]
@@ -37,7 +57,14 @@ public class SqlConformanceTests
     [InlineData("INSERT INTO users (name) DEFAULT VALUES;", SqlQueryCommandType.Insert)]
     [InlineData("UPDATE dbo.users SET name = 'Ada', age = age + 1 WHERE id = @id;", SqlQueryCommandType.Update)]
     [InlineData("UPDATE dbo.users AS u SET age = age + 1 WHERE u.id BETWEEN 1 AND 10 RETURNING id, age;", SqlQueryCommandType.Update)]
+    [InlineData("MERGE INTO t USING s ON t.id=s.id WHEN MATCHED AND s.v>0 THEN UPDATE SET v=s.v WHEN MATCHED THEN DELETE WHEN NOT MATCHED THEN INSERT(id,v) VALUES(s.id,s.v) WHEN NOT MATCHED BY SOURCE THEN DO NOTHING RETURNING merge_action();", SqlQueryCommandType.Merge)]
+    [InlineData("MERGE INTO t USING s CROSS JOIN u ON t.id=s.id WHEN MATCHED THEN DO NOTHING;", SqlQueryCommandType.Merge)]
+    [InlineData("MERGE INTO t USING s ON t.id>s.id WHEN NOT MATCHED AND FALSE THEN INSERT VALUES(s.id,s.v);", SqlQueryCommandType.Merge)]
+    [InlineData("UPDATE t SET v=s.v FROM s WHERE t.id>s.id;", SqlQueryCommandType.Update)]
+    [InlineData("DELETE FROM t USING s WHERE t.id>s.id;", SqlQueryCommandType.Delete)]
     [InlineData("UPDATE dbo.users SET name = DEFAULT WHERE id = 1;", SqlQueryCommandType.Update)]
+    [InlineData("UPDATE t SET v=s.v FROM s WHERE t.id=s.id RETURNING t.v,s.v;", SqlQueryCommandType.Update)]
+    [InlineData("DELETE FROM t USING s WHERE t.id=s.id RETURNING t.id,s.v;", SqlQueryCommandType.Delete)]
     [InlineData("DELETE FROM users WHERE id = $1;", SqlQueryCommandType.Delete)]
     [InlineData("DELETE FROM dbo.users AS u WHERE u.id = @id AND EXISTS (SELECT a.id FROM admins a WHERE a.id = u.id) RETURNING id;", SqlQueryCommandType.Delete)]
     [InlineData("DELETE FROM users;", SqlQueryCommandType.Delete)]
@@ -50,7 +77,10 @@ public class SqlConformanceTests
     [InlineData("SELECT INTERVAL '12', CAST('-12.5' AS INTERVAL), CAST('13:45' AS TIME);", SqlQueryCommandType.Select)]
     [InlineData("ALTER TABLE users ADD COLUMN email VARCHAR(255);", SqlQueryCommandType.Alter)]
     [InlineData("ALTER TABLE users DROP COLUMN email;", SqlQueryCommandType.Alter)]
+    [InlineData("ALTER TABLE users ALTER COLUMN age TYPE BIGINT;", SqlQueryCommandType.Alter)]
+    [InlineData("ALTER TABLE users ALTER age SET DATA TYPE INT USING CAST(age AS INT);", SqlQueryCommandType.Alter)]
     [InlineData("DROP TABLE IF EXISTS users;", SqlQueryCommandType.Drop)]
+    [InlineData("TRUNCATE TABLE users;", SqlQueryCommandType.Truncate)]
     [InlineData("CREATE INDEX ix_users_name ON users (name);", SqlQueryCommandType.Create)]
     [InlineData("CREATE UNIQUE INDEX IF NOT EXISTS ix_users_email ON dbo.users (email, tenant_id);", SqlQueryCommandType.Create)]
     [InlineData("DROP INDEX IF EXISTS ix_users_name ON users;", SqlQueryCommandType.Drop)]
@@ -69,7 +99,13 @@ public class SqlConformanceTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - Conformance: executable subqueries parse without errors")]
+    [InlineData("SELECT id = (SELECT 2), COUNT(*) FROM candidates GROUP BY id = (SELECT 2) HAVING id = (SELECT 2) ORDER BY id = (SELECT 2);", SqlQueryCommandType.Select)]
+    [InlineData("SELECT EXISTS (SELECT 2 WHERE id = 2), COUNT(*) FROM candidates GROUP BY EXISTS (SELECT 2 WHERE id = 2) HAVING EXISTS (SELECT 2 WHERE id = 2) ORDER BY EXISTS (SELECT 2 WHERE id = 2);", SqlQueryCommandType.Select)]
+    [InlineData("SELECT id = ANY (SELECT 2), COUNT(*) FROM candidates GROUP BY id = ANY (SELECT 2) HAVING id = ANY (SELECT 2) ORDER BY id = ANY (SELECT 2);", SqlQueryCommandType.Select)]
     [InlineData("SELECT id FROM users WHERE id IN (SELECT user_id FROM admins);", SqlQueryCommandType.Select)]
+    [InlineData("SELECT id FROM users WHERE id = ANY (SELECT user_id FROM admins);", SqlQueryCommandType.Select)]
+    [InlineData("SELECT id FROM users WHERE id <> SOME (SELECT user_id FROM admins);", SqlQueryCommandType.Select)]
+    [InlineData("SELECT id FROM users u WHERE id >= ALL (SELECT a.user_id FROM admins a WHERE a.user_id = u.id);", SqlQueryCommandType.Select)]
     [InlineData("INSERT INTO archive SELECT * FROM users WHERE inactive = TRUE;", SqlQueryCommandType.Insert)]
     [InlineData("WITH a AS (SELECT id FROM users), b AS (SELECT id FROM a) SELECT * FROM b;", SqlQueryCommandType.Select)]
     [InlineData("WITH a AS (SELECT id FROM users) INSERT INTO archive SELECT id FROM a;", SqlQueryCommandType.Insert)]
@@ -85,29 +121,16 @@ public class SqlConformanceTests
         statement.SqlExpression.Text.ShouldBe(sql);
     }
 
-    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Conformance: unexecuted statements report model diagnostics")]
-    [InlineData("SELECT * FROM a LEFT OUTER JOIN b ON a.id = b.id FULL OUTER JOIN c ON b.id = c.id;", SqlQueryCommandType.Select)]
-    public void Parse_UnexecutedCorpus_ShouldReportModelDiagnostic(string sql, SqlQueryCommandType expected)
-    {
-        // Outer joins retain explicit unsupported diagnostics (#1019).
-        var statement = Parse(sql);
-
-        statement.SqlExpression.CommandType.ShouldBe(expected);
-        statement.Diagnostics.ShouldContain(d =>
-            d.Code == "COHDBL001" && d.Severity == DiagnosticSeverity.Error);
-        statement.SqlExpression.Text.ShouldBe(sql); // the raw text is stamped (#170)
-    }
-
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - Conformance: temporal suffix lookahead leaves modifier validation to the grammar")]
-    [InlineData("()", "SQL0005")]
-    [InlineData("(-1)", "SQL0005")]
-    [InlineData("(x)", "SQL0005")]
-    [InlineData("(1,2,3)", "SQL0005")]
-    [InlineData("(x, (1))", "SQL0005")]
-    [InlineData("( /*arg*/ x)", "SQL0005")]
-    [InlineData("(0)", "COHDBL001")]
-    [InlineData("(6)", "COHDBL001")]
-    [InlineData("(7)", "COHDBL001")]
+    [InlineData("()", "CS00005")]
+    [InlineData("(-1)", "CS00005")]
+    [InlineData("(x)", "CS00005")]
+    [InlineData("(1,2,3)", "CS00005")]
+    [InlineData("(x, (1))", "CS00005")]
+    [InlineData("( /*arg*/ x)", "CS00005")]
+    [InlineData("(0)", "CK00001")]
+    [InlineData("(6)", "CK00001")]
+    [InlineData("(7)", "CK00001")]
     public void Parse_TemporalModifierBeforeSuffix_ShouldReportOnlyModifierDiagnostic(string modifier, string code)
     {
         // Arrange
@@ -152,8 +175,7 @@ public class SqlConformanceTests
     [InlineData("SELECT * FROM t WHERE x = ;")]
     [InlineData("SELECT CASE WHEN THEN END FROM t;")]
     [InlineData("SELECT CAST(x AS) FROM t;")]
-    [InlineData("MERGE INTO t USING s ON 1=1;")]
-    [InlineData("TRUNCATE TABLE t;")]
+    [InlineData("GRANT SELECT ON t TO guest;")]
     [InlineData("GRANT ALL ON t TO role;")]
     [InlineData("🙃 emoji soup ¯\\_(ツ)_/¯;")]
     [InlineData("SELECT \0 FROM t;")]
@@ -166,13 +188,13 @@ public class SqlConformanceTests
         statement.ShouldNotBeNull();
     }
 
-    [Fact(DisplayName = "Cohesion Test [Sql.Language] - Conformance: unknown commands carry SQL0002, empty input SQL0001")]
+    [Fact(DisplayName = "Cohesion Test [Sql.Language] - Conformance: unknown commands carry CS00002, empty input CS00001")]
     public void Parse_UnknownAndEmpty_ShouldCarryDeclaredDiagnostics()
     {
-        Parse("MERGE INTO t;").Diagnostics.ShouldContain(d => d.Code == "SQL0002");
-        Parse("").Diagnostics.ShouldContain(d => d.Code == "SQL0001");
-        Parse("SELECT 1").Diagnostics.ShouldContain(d => d.Code == "SQL0100");
-        Parse("SELECT 1;").Diagnostics.ShouldNotContain(d => d.Code == "SQL0100");
+        Parse("GRANT SELECT ON t TO guest;").Diagnostics.ShouldContain(d => d.Code == "CS00002");
+        Parse("").Diagnostics.ShouldContain(d => d.Code == "CS00001");
+        Parse("SELECT 1").Diagnostics.ShouldContain(d => d.Code == "CS00009");
+        Parse("SELECT 1;").Diagnostics.ShouldNotContain(d => d.Code == "CS00009");
     }
 
     // ── Literal handling (#174) ────────────────────────────────────────
@@ -262,7 +284,7 @@ public class SqlConformanceTests
 
     // ── Builtin function recognition (#173) ────────────────────────────
 
-    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Builtins: executable functions parse and unsupported names report COHDBL001")]
+    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Builtins: executable functions parse and unsupported names report CK00001")]
     [InlineData("COUNT", "SELECT COUNT(*) FROM t;")]
     [InlineData("SUM", "SELECT SUM(x) FROM t;")]
     [InlineData("COALESCE", "SELECT COALESCE(a, b, 0) FROM t;")]
@@ -277,7 +299,7 @@ public class SqlConformanceTests
         if (!SqlLanguageProfile.Instance.Functions.Contains(function, StringComparer.OrdinalIgnoreCase))
         {
             var diagnostic = statement.Diagnostics.ShouldHaveSingleItem();
-            diagnostic.Code.ShouldBe("COHDBL001");
+            diagnostic.Code.ShouldBe("CK00001");
             diagnostic.Message.ShouldNotBeNull().ShouldContain(function, Case.Sensitive);
             return;
         }

@@ -123,7 +123,7 @@ The module holds no schema knowledge and provisions nothing. A model's engine bu
 - **What was deleted** (owner decisions 49 to 54 of 2026-10-09): `Provision(engine, schema)` and `Provision(engineName, schema)`, `AddDatabase(engine, name, schema)` and `AddDatabase(engineName, name, schema)`, `Schemas`, their validators, and the internal `DefaultDatabaseProvisioner` host service that opened or created a database and applied a compiled schema in `StartAsync`, under `StartupTimeout`.
 - **The cost, revised by decision 49a:** open, recovery and cheap migration steps run in application Build, outside StartupTimeout. Build accepts a caller cancellation token. Populated-table data-scaling steps run on the engine-owned worker after Build has reserved their tables; the admin endpoint can then listen and report Degraded progress.
 - **Failed inline provisioning fails Build.** The model's build disposes its engine before it throws, and the application's Build rollback disposes every product built before it.
-- **Failed deferred provisioning takes only that database offline.** Build may already have returned. Invalid existing rows or another deferred-step failure retain the durable target for recovery, report `COHSQLP004`, and change that database's health from Degraded to Unhealthy. The application's other databases continue serving; the existing reopen policy governs retry.
+- **Failed deferred provisioning takes only that database offline.** Build may already have returned. Invalid existing rows or another deferred-step failure retain the durable target for recovery, report `CS03104`, and change that database's health from Degraded to Unhealthy. The application's other databases continue serving; the existing reopen policy governs retry.
 
 `DatabaseApplication` remains `Host<DatabaseApplicationContext>` and its context remains `HostContext` / `IHealthContributor`. `Run`, `RunAsync`, and `AsService` use the Hosting extensions. Embedded applications can use engines immediately after Build, or Run to wait for host shutdown without a listener.
 
@@ -279,3 +279,36 @@ Command keys and ResolveEngine use OrdinalIgnoreCase for the engine segment, mat
 existing command ownership dictionary. Database names use the same comparison required by
 the area name rule. An engine selected by a case variant therefore resolves consistently
 with key validation and replay ownership.
+
+## Dedicated test actors (#1285)
+
+Deadline-dependent peers and busy test drivers use the linked Storage test helper's LongRunning threads. Ordinary async driver continuations stay on their actor scheduler, without changing SynchronizationContext. Existing deadlines of 25 seconds or more are hang guards. Runner settings impose no parallel-thread cap. See the [scheduling audit](../../Assimalign.Cohesion.Database.Storage/docs/TEST-HYGIENE-AUDIT.md) for every original Task.Run site, the exact journal counters and the physical index-work guards.
+
+Reference consulted: RavenDB test/StressTests/Voron/InvalidReleasesOfScratchPages.cs:39–68 and :71–103 use LongRunning stress drivers. No code was copied.
+
+## Error and construction conventions (#1470)
+
+Exception messages and format templates are generated from `src/Properties/ErrorMessages.resx`;
+format arguments use the current culture. Cancellation and abort templates used during normal
+cleanup are cached before reuse. Error identities remain separate from message text where a
+structured diagnostic carrier exists. Standard .NET guards retain their argument names and exception types.
+
+
+## Health-check builder construction (#1470)
+
+Composition uses the public sealed `HealthChecksBuilder` in `Assimalign.Cohesion.Web.Health`,
+with its public parameterless constructor. The standalone `HealthChecks.CreateBuilder()` factory
+is removed. Existing `IHealthChecksBuilder` adapters, duplicate-name checks and immutable service
+snapshots are preserved; Database's admin endpoint uses the same public constructor. No Database
+interface, protocol, format, diagnostic code, event or counter is added or changed.
+
+The rules audit aligns private test identifiers while preserving health checks, reopen behavior and hosted-service ownership. No runtime composition or public contract changes follow from those test naming edits.
+
+
+## Debugger inspection (#1470)
+
+Eligible concrete source types use private nested debugger views of reviewed public/protected
+state; existing inherited display/proxy pairs are reused. See the shared
+[debugger convention](../../Assimalign.Cohesion.Database/docs/CONVENTIONS.md#debugger-inspection).
+Views return stored composition references and identity only; synchronized host state, callbacks, lifecycle operations and service resolution are omitted.
+Runtime APIs, methods, allocation budgets, persistent formats and wire behavior are unchanged.

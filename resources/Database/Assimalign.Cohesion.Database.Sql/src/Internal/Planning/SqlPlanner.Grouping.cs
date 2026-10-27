@@ -16,13 +16,13 @@ internal sealed partial class SqlPlanner
     /// <summary>Binds aggregation above a normal filtered relation plan.</summary>
     private SqlGroupPlan PlanGroup(SqlSelectExpression select, SqlCatalogTable? table,
         SqlSystemViewDefinition? view, IReadOnlyList<SqlCatalogColumn> columns,
-        IReadOnlyList<SqlRelationBinding>? bindings, SqlExpressionEvaluator evaluator, IReadOnlyList<SqlJoinStep> steps)
+        IReadOnlyList<SqlRelationBinding>? bindings, SqlExpressionEvaluator evaluator, IReadOnlyList<SqlJoinStep> steps, SqlJoinTree? tree = null)
     {
         foreach (var key in select.GroupBy)
         {
             if (ContainsAggregate(key))
             {
-                throw new SqlPlanningException("COHSQLE017", "Aggregate functions are not allowed in GROUP BY.", key.Location);
+                throw new SqlPlanningException("CS05017", ErrorMessages.SqlPlannerPlanGroupSqlPlanning, key.Location);
             }
             ValidateExpression(key, evaluator, _subqueryTypes);
         }
@@ -45,6 +45,8 @@ internal sealed partial class SqlPlanner
             });
             projections.Add(new SqlProjection(name, null, column.Expression, GroupExpressionType(column.Expression, columns, evaluator))
             {
+                HasOutputName = column.Alias is not null || column.Expression is SqlColumnReferenceExpression ||
+                    column.Expression is SqlFunctionCallExpression namedCall && IsAggregate(namedCall),
                 MaxLength = evaluator.MaximumLengthOf(column.Expression),
                 // A bare COUNT never returns NULL, even over no rows; every other projection may.
                 IsNullable = !(column.Expression is SqlFunctionCallExpression projected && IsAggregate(projected)
@@ -68,18 +70,18 @@ internal sealed partial class SqlPlanner
         // then aggregate results, then the projected outputs that ordering may name). Both scopes
         // resolve columns through the same relation references as the input scope.
         var sourceScope = new SqlExpressionEvaluator(columns, _parameters, bindings, defaultCollation: _catalog.DefaultCollation,
-            subquerySlots: _subquerySlots, functions: _functions, cancellationToken: _cancellationToken,
+            subquerySlots: _subquerySlots, functions: _functions, cancellationToken: _cancellationToken, foldConstants: FoldQueryConstants,
             outerScope: OuterScope, outerDependencies: OuterDependencies, relation: select.From.Count == 0 ? null : select.From[0].Table);
         // A call over a key or an aggregate result resolves by the slot's type over the input row,
         // as the same call does outside a grouping: describe(COUNT(*)) is describe(BIGINT).
         var groupScope = new SqlExpressionEvaluator(columns, _parameters, bindings, slots, _catalog.DefaultCollation,
-            subquerySlots: _subquerySlots, functions: _functions, cancellationToken: _cancellationToken,
+            subquerySlots: _subquerySlots, functions: _functions, cancellationToken: _cancellationToken, foldConstants: FoldQueryConstants,
             outerScope: OuterScope, outerDependencies: OuterDependencies, slotScope: sourceScope, relation: select.From.Count == 0 ? null : select.From[0].Table);
 
         var source = columns.Select((column, index) => PassThrough(column.Name, index, columns, sourceScope)).ToArray();
         var where = select.Where is null ? null : evaluator.BindPredicate(select.Where);
         SqlPlan input = bindings is not null
-            ? PushJoinPredicates(new SqlJoinPlan(bindings, columns, steps, source, where, [], null, null, false))
+            ? PushJoinPredicates(new SqlJoinPlan(bindings, columns, steps, source, where, [], null, null, false) { Tree = tree })
             : view is not null
                 ? new SqlSystemViewPlan(view, source, where, [], null, null, false)
                 : table is null
@@ -140,19 +142,19 @@ internal sealed partial class SqlPlanner
             if (expression is SqlFunctionCallExpression call && IsAggregate(call))
             {
                 // The overload is chosen by its arguments' types over the input row: SUM and AVG
-                // take a numeric argument, so SUM over text fails here with COHSQLE006, whatever
+                // take a numeric argument, so SUM over text fails here with CS01006, whatever
                 // the rows (#1189). The grouping executor creates the chosen function's accumulators.
                 if (call.FunctionName.Equals("LISTAGG", StringComparison.OrdinalIgnoreCase) &&
                     (!call.HasWithinGroupOrdering || call.OrderBy.Count == 0))
                 {
-                    throw new SqlPlanningException("SQL0003", ErrorMessages.ListaggRequiresWithinGroup, call.Location);
+                    throw new SqlPlanningException("CS00003", ErrorMessages.ListaggRequiresWithinGroup, call.Location);
                 }
                 var function = (SqlAggregateFunction)evaluator.ResolveFunction(call)!;
                 foreach (var argument in Children(call))
                 {
                     if (ContainsAggregate(argument))
                     {
-                        throw new SqlPlanningException("COHSQLE017", "Nested aggregate functions are not allowed.", call.Location);
+                        throw new SqlPlanningException("CS05017", ErrorMessages.SqlPlannerPlanGroupSqlPlanning2, call.Location);
                     }
                     if (argument is not SqlStarExpression)
                     {
@@ -162,7 +164,7 @@ internal sealed partial class SqlPlanner
                 if (call.Quantifier == SqlSetQuantifier.Distinct && call.OrderBy.Any(key =>
                     !call.Arguments.Any(argument => SameGroupExpression(argument, key.Expression, evaluator))))
                 {
-                    throw new SqlPlanningException("COHSQLE032", ErrorMessages.DistinctOrderingArgument, call.Location);
+                    throw new SqlPlanningException("CS05032", ErrorMessages.DistinctOrderingArgument, call.Location);
                 }
                 if (function is SqlStringAggregateFunction && call.Arguments.Count > 1 &&
                     call.Arguments[1] is not (SqlLiteralExpression { LiteralType: SqlLiteralType.String or SqlLiteralType.Null } or SqlParameterExpression))
@@ -192,11 +194,11 @@ internal sealed partial class SqlPlanner
             if (expression is SqlColumnReferenceExpression reference)
             {
                 if (evaluator.IsOuterColumn(reference)) { return; }
-                throw new SqlPlanningException("COHSQLE017", $"Column '{reference.ColumnName}' must appear in GROUP BY or be used in an aggregate function.", reference.Location);
+                throw new SqlPlanningException("CS05017", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlPlannerPlanGroupSqlPlanning3, reference.ColumnName), reference.Location);
             }
             if (expression is SqlStarExpression)
             {
-                throw new SqlPlanningException("COHSQLE017", "SELECT * is not allowed in a grouped query; project GROUP BY expressions or aggregate functions.", expression.Location);
+                throw new SqlPlanningException("CS05017", ErrorMessages.SqlPlannerPlanGroupSqlPlanning4, expression.Location);
             }
             ValidateExpression(expression, evaluator, _subqueryTypes, outputSlots);
             foreach (var child in Children(expression))
@@ -224,10 +226,12 @@ internal sealed partial class SqlPlanner
         RuntimeHelpers.EnsureSufficientExecutionStack();
         bool same = (left, right) switch
         {
-            // Two subqueries are the same group key only when they are the same node;
-            // structurally identical children do not make separate queries one key.
-            (SqlSubqueryExpression a, SqlSubqueryExpression b) => ReferenceEquals(a, b),
-            (SqlExistsExpression a, SqlExistsExpression b) => ReferenceEquals(a, b),
+            // Repeated subqueries in one scope share a group key when their complete bodies
+            // match structurally. The ordinary child comparison still binds scalar operands.
+            (SqlSubqueryExpression a, SqlSubqueryExpression b) => SqlPersistedExpression.SameQuery(a.Select, b.Select),
+            (SqlExistsExpression a, SqlExistsExpression b) => a.IsNegated == b.IsNegated && SqlPersistedExpression.SameQuery(a.Subquery, b.Subquery),
+            (SqlQuantifiedComparisonExpression a, SqlQuantifiedComparisonExpression b) => a.Operator == b.Operator &&
+                a.Quantifier == b.Quantifier && SqlPersistedExpression.SameQuery(a.Subquery, b.Subquery),
             (SqlColumnReferenceExpression a, SqlColumnReferenceExpression b) => SameColumn(a, b),
             (SqlLiteralExpression a, SqlLiteralExpression b) => a.LiteralType == b.LiteralType && a.Value == b.Value,
             (SqlParameterExpression a, SqlParameterExpression b) => ParameterBindings.BareName(a.ParameterName) == ParameterBindings.BareName(b.ParameterName),
@@ -252,7 +256,8 @@ internal sealed partial class SqlPlanner
             (SqlBooleanTestExpression a, SqlBooleanTestExpression b) => a.IsNegated == b.IsNegated && a.TruthValue == b.TruthValue,
             (SqlIsNullExpression a, SqlIsNullExpression b) => a.IsNegated == b.IsNegated,
             (SqlBetweenExpression a, SqlBetweenExpression b) => a.IsNegated == b.IsNegated,
-            (SqlInExpression a, SqlInExpression b) => a.IsNegated == b.IsNegated,
+            (SqlInExpression a, SqlInExpression b) => a.IsNegated == b.IsNegated &&
+                SqlPersistedExpression.SameQuery(a.Subquery, b.Subquery),
             (SqlLikeExpression a, SqlLikeExpression b) => a.IsNegated == b.IsNegated,
             (SqlCaseExpression a, SqlCaseExpression b) => (a.Input is null) == (b.Input is null)
                 && (a.ElseResult is null) == (b.ElseResult is null) && a.WhenClauses.Count == b.WhenClauses.Count,
@@ -279,6 +284,8 @@ internal sealed partial class SqlPlanner
     }
 
     /// <summary>Structural equality is used for binding only, without expression hashing.</summary>
+    [global::System.Diagnostics.DebuggerDisplay("GroupExpressionComparer")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlPlanner.GroupExpressionComparer.DebugView))]
     private sealed class GroupExpressionComparer : IEqualityComparer<SqlExpression>
     {
         private readonly SqlPlanner _planner;
@@ -296,6 +303,14 @@ internal sealed partial class SqlPlanner
         public bool Equals(SqlExpression? left, SqlExpression? right)
             => left is not null && right is not null && _planner.SameGroupExpression(left, right, _evaluator);
         public int GetHashCode(SqlExpression expression) => 0;
+
+        private sealed class DebugView
+        {
+            public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlPlanner.GroupExpressionComparer value)
+            {
+                _ = value;
+            }
+        }
     }
 
     /// <summary>Declares aggregate result types even when no source rows exist.</summary>
@@ -303,14 +318,14 @@ internal sealed partial class SqlPlanner
         SqlExpressionEvaluator evaluator)
     {
         RuntimeHelpers.EnsureSufficientExecutionStack();
-        return GroupExpressionTypeCore(expression, columns, evaluator);
+        return evaluator.IsBoundValue(expression) ? evaluator.StaticTypeOf(expression) : GroupExpressionTypeCore(expression, columns, evaluator);
     }
 
     private DatabaseType GroupExpressionTypeCore(SqlExpression expression, IReadOnlyList<SqlCatalogColumn> columns,
         SqlExpressionEvaluator evaluator) => expression switch
     {
         SqlColumnReferenceExpression column => evaluator.ColumnMetadata(column).Type.Type,
-        SqlSubqueryExpression or SqlExistsExpression or SqlInExpression { Subquery: not null }
+        SqlSubqueryExpression or SqlExistsExpression or SqlQuantifiedComparisonExpression or SqlInExpression { Subquery: not null }
             when _subqueryTypes.TryGetValue(expression, out var subqueryType) => subqueryType,
         SqlCollateExpression collate => GroupExpressionType(collate.Operand, columns, evaluator),
         SqlCastExpression cast => cast.TargetTypeInfo?.Type ?? ResolveCastTarget(cast, _functions.Types).Storage.Type,
@@ -348,7 +363,7 @@ internal sealed partial class SqlPlanner
         SqlBinaryExpression binary when binary.Operator is SqlBinaryOperator.Add or SqlBinaryOperator.Subtract
             or SqlBinaryOperator.Multiply or SqlBinaryOperator.Divide or SqlBinaryOperator.Modulo
             => SqlExpressionEvaluator.ArithmeticType(binary.Operator, GroupExpressionType(binary.Left, columns, evaluator), GroupExpressionType(binary.Right, columns, evaluator)),
-        SqlLogicalExpression or SqlBinaryExpression or SqlDistinctExpression or SqlBooleanTestExpression or SqlIsNullExpression or SqlBetweenExpression or SqlInExpression
+        SqlLogicalExpression or SqlBinaryExpression or SqlDistinctExpression or SqlBooleanTestExpression or SqlIsNullExpression or SqlBetweenExpression or SqlInExpression or SqlQuantifiedComparisonExpression
             or SqlLikeExpression => DatabaseType.Boolean,
         SqlCaseExpression @case => CaseGroupType(@case, columns, evaluator),
         _ => DatabaseType.Null,
@@ -435,7 +450,7 @@ internal sealed partial class SqlPlanner
         {
             return a >= b ? left : right;
         }
-        throw new SqlPlanningException("COHSQLE017", $"Grouped CASE/COALESCE results require compatible types; found {left} and {right}.");
+        throw new SqlPlanningException("CS05017", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlPlannerCommonGroupTypeSqlPlanning, left, right));
     }
 
     /// <summary>Preserves parameter type metadata without reflection.</summary>

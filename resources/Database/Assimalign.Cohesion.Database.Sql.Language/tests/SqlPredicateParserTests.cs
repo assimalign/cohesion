@@ -91,7 +91,7 @@ public sealed class SqlPredicateParserTests
         var statement = new SqlQueryParser().Parse(sql);
         // Assert
         var error = statement.Diagnostics.ShouldHaveSingleItem();
-        error.Code.ShouldBe("SQL0003");
+        error.Code.ShouldBe("CS00003");
         error.Start.ShouldBe(sql.LastIndexOf(token, System.StringComparison.Ordinal));
     }
 
@@ -118,22 +118,21 @@ public sealed class SqlPredicateParserTests
         var statement = new SqlQueryParser().Parse("SELECT " + text + ";");
         // Assert
         var error = statement.Diagnostics.ShouldHaveSingleItem();
-        error.Code.ShouldBe("COHDBL001");
+        error.Code.ShouldBe("CK00001");
         error.Message.ShouldNotBeNull().ShouldContain(form, Case.Sensitive);
         error.Start.ShouldBe(text.Contains(' ') ? 9 : 8);
         error.End.ShouldBe(error.Start + (text.Contains("::", System.StringComparison.Ordinal) ? 2 : form.Length));
     }
 
-    [Fact(DisplayName = "Cohesion Test [Sql.Language] - Predicates: adjacent left-arrow keeps its syntax rejection")]
-    public void Parse_AdjacentLeftArrow_ShouldRetainSyntaxError()
+    [Fact(DisplayName = "Cohesion Test [Sql.Language] - Predicates: adjacent less-than and minus form a comparison (#1647)")]
+    public void Parse_AdjacentLeftArrow_ShouldCompareWithNegativeLiteral()
     {
         // Arrange / Act
-        var statement = new SqlQueryParser().Parse("SELECT a<-1;");
+        var statement = (SqlQueryStatement)new SqlQueryParser().Parse("SELECT a<-1;");
         // Assert
-        var error = statement.Diagnostics.ShouldHaveSingleItem();
-        error.Code.ShouldBe("SQL0003");
-        error.Start.ShouldBe(8);
-        error.End.ShouldBe(10);
+        statement.Diagnostics.ShouldBeEmpty();
+        var expression = statement.SqlExpression.ShouldBeOfType<SqlSelectExpression>().Columns.ShouldHaveSingleItem().Expression;
+        SqlExpressionRenderer.Render(expression).ShouldBe("a < -1");
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql.Language] - Predicates: contextual operator words remain ordinary identifiers")]
@@ -159,7 +158,7 @@ public sealed class SqlPredicateParserTests
         // Act
         var statement = parser.Parse(text);
         // Assert
-        statement.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("SQL0006");
+        statement.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS00006");
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - Predicates: nonassociative rungs refuse the second operator once")]
@@ -176,7 +175,7 @@ public sealed class SqlPredicateParserTests
         var statement = new SqlQueryParser().Parse(sql);
         // Assert
         var error = statement.Diagnostics.ShouldHaveSingleItem();
-        error.Code.ShouldBe("SQL0003");
+        error.Code.ShouldBe("CS00003");
         error.Start.ShouldBe(sql.LastIndexOf(second, System.StringComparison.Ordinal));
         error.End.ShouldBe(error.Start + second.Length);
     }
@@ -204,7 +203,7 @@ public sealed class SqlPredicateParserTests
         var statement = new SqlQueryParser().Parse("SELECT a NOT NULL FROM t;");
         // Assert
         var error = statement.Diagnostics.ShouldHaveSingleItem();
-        error.Code.ShouldBe("SQL0003");
+        error.Code.ShouldBe("CS00003");
         error.Message.ShouldNotBeNull().ShouldContain("write IS NOT NULL", Case.Sensitive);
     }
 

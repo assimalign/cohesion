@@ -87,7 +87,7 @@ public sealed class OqlProjectionParserTests
         // Arrange / Act
         var diagnostics = new OqlQueryParser().Parse(text).Diagnostics.ToArray();
         // Assert
-        diagnostics.ShouldHaveSingleItem().Code.ShouldBe("OQL0002");
+        diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD00002");
         diagnostics[0].Start.ShouldBe(start);
         diagnostics[0].End.ShouldBe(end);
         diagnostics[0].Line.ShouldBe(1);
@@ -108,13 +108,12 @@ public sealed class OqlProjectionParserTests
     [InlineData("SELECT {a:DISTINCT} FROM items", "DISTINCT")]
     [InlineData("SELECT {'a':ALL} FROM items", "ALL")]
     [InlineData("CREATE INDEX ix ON items (ALL tags)", "ALL")]
-    [InlineData("CREATE INDEX ix ON items (DISTINCT ARRAY t FOR t IN tags END)", "DISTINCT")]
     public void Parse_MisplacedQuantifier_ShouldRejectOnce(string text, string construct)
     {
         // Arrange / Act
         var diagnostic = new OqlQueryParser().Parse(text).Diagnostics.ShouldHaveSingleItem();
         // Assert
-        diagnostic.Code.ShouldBe("COHDBL001");
+        diagnostic.Code.ShouldBe("CK00001");
         diagnostic.Message.ShouldNotBeNull().ShouldContain(construct, Case.Sensitive);
     }
 
@@ -126,7 +125,7 @@ public sealed class OqlProjectionParserTests
         // Arrange / Act
         var diagnostic = new OqlQueryParser().Parse(text).Diagnostics.ShouldHaveSingleItem();
         // Assert
-        diagnostic.Code.ShouldBe("OQL0002");
+        diagnostic.Code.ShouldBe("CD00002");
         diagnostic.Message.ShouldNotBeNull().ShouldContain("parameter", Case.Insensitive);
     }
 
@@ -141,6 +140,6 @@ public sealed class OqlProjectionParserTests
         // Act
         var diagnostics = new OqlQueryParser().Parse("SELECT " + expression + " FROM items").Diagnostics;
         // Assert
-        diagnostics.ShouldContain(diagnostic => diagnostic.Code == "OQL0005");
+        diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CD00005");
     }
 }

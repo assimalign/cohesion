@@ -10,6 +10,8 @@ namespace Assimalign.Cohesion.Database.Protocol;
 /// <summary>A framed stream permanently bound to one endpoint's message family.</summary>
 /// <remarks>The channel validates identifiers in both directions. The endpoint's session
 /// owns message ordering and payload codecs. A connection cannot switch families.</remarks>
+[global::System.Diagnostics.DebuggerDisplay("ProtocolChannel")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Protocol.ProtocolChannel.DebugView))]
 public sealed class ProtocolChannel : IAsyncDisposable
 {
     private readonly Stream _stream;
@@ -101,7 +103,7 @@ public sealed class ProtocolChannel : IAsyncDisposable
     {
         if (!Family.Supports(type))
         {
-            throw new ProtocolException($"Message identifier {(byte)type} is not defined by endpoint family '{Family.Name}'.");
+            throw new ProtocolException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ProtocolChannelValidateProtocol, (byte)type, Family.Name));
         }
     }
 
@@ -114,6 +116,8 @@ public sealed class ProtocolChannel : IAsyncDisposable
         }
     }
 
+    [global::System.Diagnostics.DebuggerDisplay("FamilyReader")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Protocol.ProtocolChannel.FamilyReader.DebugView))]
     private sealed class FamilyReader : ProtocolFrameReader
     {
         private readonly ProtocolFrameReader _reader;
@@ -163,8 +167,22 @@ public sealed class ProtocolChannel : IAsyncDisposable
         }
 
         protected override ValueTask DisposeAsyncCore() => _reader.DisposeAsync();
+
+        private sealed class DebugView
+        {
+            private readonly global::Assimalign.Cohesion.Database.Protocol.ProtocolChannel.FamilyReader _target;
+
+            public DebugView(global::Assimalign.Cohesion.Database.Protocol.ProtocolChannel.FamilyReader value)
+            {
+                _target = value;
+            }
+
+            public bool SupportsBorrowedPayloads => _target.SupportsBorrowedPayloads;
+        }
     }
 
+    [global::System.Diagnostics.DebuggerDisplay("FamilyWriter")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Protocol.ProtocolChannel.FamilyWriter.DebugView))]
     private sealed class FamilyWriter : ProtocolFrameWriter
     {
         private readonly ProtocolFrameWriter _writer;
@@ -190,5 +208,28 @@ public sealed class ProtocolChannel : IAsyncDisposable
 
         protected override ValueTask FlushCoreAsync(CancellationToken cancellationToken) => _writer.FlushAsync(cancellationToken);
         protected override ValueTask DisposeAsyncCore() => _writer.DisposeAsync();
+
+        private sealed class DebugView
+        {
+            public DebugView(global::Assimalign.Cohesion.Database.Protocol.ProtocolChannel.FamilyWriter value)
+            {
+                _ = value;
+            }
+        }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Protocol.ProtocolChannel _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Protocol.ProtocolChannel value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Protocol.ProtocolMessageFamily Family => _target.Family;
+        public global::Assimalign.Cohesion.Database.Protocol.ProtocolFrameReader Reader => _target.Reader;
+        public global::Assimalign.Cohesion.Database.Protocol.ProtocolFrameWriter Writer => _target.Writer;
+        public global::System.Collections.Generic.IReadOnlyList<string> Capabilities => _target.Capabilities;
     }
 }

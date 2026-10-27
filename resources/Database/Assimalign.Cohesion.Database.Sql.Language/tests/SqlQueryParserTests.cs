@@ -20,7 +20,7 @@ public class SqlQueryParserTests
         var statement = (SqlQueryStatement)parser.Parse(sql);
 
         statement.SqlExpression.CommandType.ShouldBe(commandType);
-        statement.Diagnostics.ShouldNotContain(x => x.Code == "SQL0002");
+        statement.Diagnostics.ShouldNotContain(x => x.Code == "CS00002");
     }
 
     [Fact]
@@ -31,7 +31,7 @@ public class SqlQueryParserTests
         var statement = (SqlQueryStatement)parser.Parse("   \r\n  ");
 
         statement.SqlExpression.CommandType.ShouldBe(SqlQueryCommandType.Unknown);
-        statement.Diagnostics.ShouldContain(x => x.Code == "SQL0001");
+        statement.Diagnostics.ShouldContain(x => x.Code == "CS00001");
     }
 
     [Fact]
@@ -39,10 +39,10 @@ public class SqlQueryParserTests
     {
         var parser = new SqlQueryParser();
 
-        var statement = (SqlQueryStatement)parser.Parse("MERGE INTO dbo.Users u USING dbo.Users2 u2 ON u.Id = u2.Id;");
+        var statement = (SqlQueryStatement)parser.Parse("GRANT SELECT ON dbo.Users TO guest;");
 
         statement.SqlExpression.CommandType.ShouldBe(SqlQueryCommandType.Unknown);
-        statement.Diagnostics.ShouldContain(x => x.Code == "SQL0002");
+        statement.Diagnostics.ShouldContain(x => x.Code == "CS00002");
     }
 
     [Fact]
@@ -53,6 +53,6 @@ public class SqlQueryParserTests
         var statement = (SqlQueryStatement)parser.Parse("SELECT Id FROM dbo.Users");
 
         statement.SqlExpression.CommandType.ShouldBe(SqlQueryCommandType.Select);
-        statement.Diagnostics.ShouldContain(x => x.Code == "SQL0100");
+        statement.Diagnostics.ShouldContain(x => x.Code == "CS00009");
     }
 }

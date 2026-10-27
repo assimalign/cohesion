@@ -48,8 +48,7 @@ internal static class SqlPersistedExpression
     /// What a persisted definition that does not load means, and what to do about it. Canonical
     /// text always reloads, so such a definition was not written by this engine's DDL.
     /// </summary>
-    internal const string DamagedCatalogHint =
-        "The catalog is damaged or was written by an incompatible engine build; restore the database from a backup.";
+    internal static readonly string DamagedCatalogHint = ErrorMessages.DamagedCatalogHint;
 
     /// <summary>
     /// What a persisted definition whose function call has arguments its function does not
@@ -57,13 +56,11 @@ internal static class SqlPersistedExpression
     /// build that did not match calls against their signatures stored it, and a backup holds the
     /// same definition, so restoring one does not help.
     /// </summary>
-    internal const string UncheckedCallHint =
-        "An engine build that did not check function arguments stored it, and this engine cannot evaluate it; " +
-        "open the database with that build and drop the constraint or replace it with a valid one.";
+    internal static readonly string UncheckedCallHint = ErrorMessages.UncheckedCallHint;
 
     // The parser's code for text within the nesting limits that the calling thread has too
     // little stack left to parse (#1151): the same text parses on a larger stack.
-    private const string ParserOutOfStackCode = "SQL0007";
+    private const string parserOutOfStackCode = "CS00007";
 
     /// <summary>
     /// Renders the canonical text to persist for a parsed expression and proves it reloads to
@@ -94,9 +91,9 @@ internal static class SqlPersistedExpression
         if (outOfStack)
         {
             // The text is within the dialect's limits; this thread cannot recurse far enough to
-            // read it back. The statement fails as too complex for the thread (COHSQLE004).
+            // read it back. The statement fails as too complex for the thread (CS05004).
             throw new InsufficientExecutionStackException(
-                $"{subject} cannot be stored on this thread: reading its canonical text back needs more stack than the thread has left.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExpressionCanonicalizeFailure, subject));
         }
 
         if (!parsed || !AreEquivalent(expression, reloaded))
@@ -145,7 +142,7 @@ internal static class SqlPersistedExpression
     /// <remarks>
     /// It stays an exhausted-stack signal rather than a <see cref="DatabaseException"/>, because
     /// what to do about it depends on who was reading: a definition bound on first use inside a
-    /// statement fails that statement with <c>COHSQLE004</c> like any other walk out of stack,
+    /// statement fails that statement with <c>CS05004</c> like any other walk out of stack,
     /// and <see cref="SqlBoundTableCache.BindCatalog"/> fails the open with advice to open the
     /// database on a thread with a larger stack.
     /// </remarks>
@@ -153,8 +150,7 @@ internal static class SqlPersistedExpression
     /// <param name="innerException">The exhausted-stack signal a walker raised, when one did.</param>
     /// <returns>The failure.</returns>
     internal static InsufficientExecutionStackException OutOfStack(string subject, Exception? innerException = null)
-        => new($"{subject} cannot be loaded on this thread: reading its persisted definition needs more stack than the thread " +
-            "has left. The catalog is not damaged.", innerException);
+        => new(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.PersistedExpressionOutOfStackFailure, subject), innerException);
 
     /// <summary>
     /// Parses a persisted column DEFAULT, which is the canonical text of one non-NULL literal, and
@@ -205,12 +201,12 @@ internal static class SqlPersistedExpression
     /// own statement with the evaluator's coded error, as for any other expression. A call's
     /// argument count is not such a rule: a call no signature of its function accepts has no
     /// value on any row (one used to evaluate to NULL, #1189), so it fails the bind with
-    /// <c>COHSQLE006</c>, and through it the open.
+    /// <c>CS01006</c>, and through it the open.
     /// </remarks>
     /// <param name="expression">The loaded expression.</param>
     /// <param name="evaluator">The evaluator over the row shape the expression binds to.</param>
     /// <exception cref="DatabaseException">A column or collation does not resolve, or the expression is not a row expression.</exception>
-    /// <exception cref="SqlEvaluationException">A function call's arguments do not match its signature (<c>COHSQLE006</c>).</exception>
+    /// <exception cref="SqlEvaluationException">A function call's arguments do not match its signature (<c>CS01006</c>).</exception>
     internal static void Bind(SqlExpression expression, SqlExpressionEvaluator evaluator, bool declaring = false)
     {
         ArgumentNullException.ThrowIfNull(expression);
@@ -230,7 +226,7 @@ internal static class SqlPersistedExpression
             case SqlCastExpression { TargetTypeInfo: null } cast:
                 SqlPlanner.ResolveCastTarget(cast, evaluator.Functions.Types);
                 break;
-            case SqlParameterExpression or SqlSubqueryExpression or SqlExistsExpression or SqlStarExpression or SqlInExpression { Values: null }:
+            case SqlParameterExpression or SqlSubqueryExpression or SqlExistsExpression or SqlQuantifiedComparisonExpression or SqlStarExpression or SqlInExpression { Values: null }:
                 throw new SqlExecutionException(SqlExecutionException.InvalidDefinitionCode, ErrorMessages.PersistedRowExpressionInvalid);
             case SqlFunctionCallExpression call when evaluator.Functions.Catalog.IsAggregate(call.FunctionName):
                 throw new SqlExecutionException(SqlExecutionException.InvalidDefinitionCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.PersistedAggregateInvalid, call.FunctionName));
@@ -254,7 +250,7 @@ internal static class SqlPersistedExpression
     /// operands, or the overload its argument count and types match. A name outside the catalog is
     /// left to the CHECK rules, which refuse it.
     /// </summary>
-    /// <exception cref="SqlEvaluationException">No overload accepts the call (<c>COHSQLE006</c>), or several do (<c>COHSQLE008</c>).</exception>
+    /// <exception cref="SqlEvaluationException">No overload accepts the call (<c>CS01006</c>), or several do (<c>CS01008</c>).</exception>
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static void ResolveCall(SqlFunctionCallExpression call, SqlExpressionEvaluator evaluator)
     {
@@ -289,7 +285,7 @@ internal static class SqlPersistedExpression
         {
             if (outOfStack)
             {
-                throw new InsufficientExecutionStackException("Reading the declared SQL text needs more stack than the thread has left.");
+                throw new InsufficientExecutionStackException(ErrorMessages.ExpressionParseDeclarationFailure);
             }
 
             throw new SqlExecutionException(SqlExecutionException.InvalidDefinitionCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExpressionDeclarationInvalid, text, problem));
@@ -309,7 +305,7 @@ internal static class SqlPersistedExpression
         // stored is read under the engine's own limit instead, as its DDL will be.
         var statement = new SqlQueryParser(parserOptions ?? SqlQueryRequest.CeilingParserOptions).Parse($"SELECT * FROM {carrierTable} WHERE {text}");
         var error = statement.Diagnostics.FirstOrDefault(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
-        outOfStack = error?.Code == ParserOutOfStackCode;
+        outOfStack = error?.Code == parserOutOfStackCode;
         if (error is not null)
         {
             problem = $"{error.Code}: {error.Message}";
@@ -407,6 +403,8 @@ internal static class SqlPersistedExpression
             : a.TargetTypeInfo is null && b.TargetTypeInfo is null && SqlTypeRules.SameTypeName(a.TargetType, b.TargetType),
         (SqlExistsExpression a, SqlExistsExpression b) => a.IsNegated == b.IsNegated && SameQuery(a.Subquery, b.Subquery),
         (SqlSubqueryExpression a, SqlSubqueryExpression b) => SameQuery(a.Select, b.Select),
+        (SqlQuantifiedComparisonExpression a, SqlQuantifiedComparisonExpression b) => a.Operator == b.Operator &&
+            a.Quantifier == b.Quantifier && SameQuery(a.Subquery, b.Subquery),
         _ => false,
     };
 
@@ -445,9 +443,18 @@ internal static class SqlPersistedExpression
             : Same(left.Alias, right.Alias) && (left, right) switch
             {
                 (SqlTableReference a, SqlTableReference b) => Same(a.TableName, b.TableName) && Same(a.SchemaName, b.SchemaName),
+                (SqlJoinedTableReference a, SqlJoinedTableReference b) => SameJoinItem(a.Item, b.Item),
                 (SqlDerivedTableReference a, SqlDerivedTableReference b) => SameQuery(a.Query, b.Query) && SameList(a.Columns, b.Columns, Same),
                 _ => false,
             };
+
+    private static bool SameJoinItem(SqlFromItem left, SqlFromItem right)
+    {
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+        return SameTable(left.Table, right.Table) && SameList(left.Joins, right.Joins,
+            (a, b) => a.JoinType == b.JoinType && SameTable(a.Table, b.Table) &&
+                SameList(a.UsingColumns, b.UsingColumns, Same) && AreEquivalent(a.Condition, b.Condition));
+    }
 
     private static bool SameList<T>(IReadOnlyList<T> left, IReadOnlyList<T> right, Func<T, T, bool> same)
     {

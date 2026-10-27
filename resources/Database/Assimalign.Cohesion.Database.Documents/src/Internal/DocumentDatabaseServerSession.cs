@@ -32,6 +32,8 @@ namespace Assimalign.Cohesion.Database.Documents.Internal;
 /// which the handshake records once each; the engine session is re-exposed typed by a covariant
 /// override.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("DocumentDatabaseServerSession Id={Id}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Documents.Internal.DocumentDatabaseServerSession.DebugView))]
 internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
 {
     private static readonly string _shutdownMessage = ErrorMessages.ServerShuttingDown;
@@ -310,7 +312,7 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
             {
                 // The database went offline after a failed durable flush (#1243): every session is
                 // refused, with the coded reason, until it is reopened.
-                await RefuseHandshakeAsync(ProtocolErrorCode.Unavailable, exception.Message, startup.Database, startup.Principal).ConfigureAwait(false);
+                await RefuseHandshakeAsync(ProtocolErrorCode.Unavailable, $"{exception.Code}: {exception.Message}", startup.Database, startup.Principal).ConfigureAwait(false);
                 return false;
             }
 
@@ -374,6 +376,15 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
                     // Executions run on the session lifetime token, not the soft-stop
                     // token: a drain lets in-flight statements finish.
                     await ExecuteAsync(frame.Value, _lifetimeSource.Token).ConfigureAwait(false);
+                    if (_channel!.Capabilities.Contains(ProtocolCapability.TransactionStatus.Name))
+                    {
+                        var transaction = _databaseSession!.CurrentTransaction;
+                        var status = transaction is null ? ProtocolTransactionStatus.Idle
+                            : transaction.State == Assimalign.Cohesion.Database.Transactions.TransactionState.Faulted
+                                ? ProtocolTransactionStatus.Failed : ProtocolTransactionStatus.Active;
+                        await WriteFrameAsync(ProtocolMessageType.Ready,
+                            new ProtocolTransactionStatusMessage(status).Encode(), _lifetimeSource.Token).ConfigureAwait(false);
+                    }
                     break;
 
                 case ProtocolMessageType.Ping:
@@ -401,18 +412,22 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
         {
             if (execute is not null)
             {
-                using var parametersJson = JsonDocument.Parse(execute.Parameters, new JsonDocumentOptions { MaxDepth = 256 });
-                var parameters = new Dictionary<string, object?>(StringComparer.Ordinal);
-                foreach (var property in parametersJson.RootElement.EnumerateObject())
+                var statement = (OqlQueryStatement)new OqlQueryParser(allowUnregisteredFunctions: true).Parse(execute.Statement);
+                if (statement.OqlExpression is OqlTransactionExpression &&
+                    !_channel!.Capabilities.Contains(ProtocolCapability.TransactionStatus.Name))
                 {
-                    if (!parameters.TryAdd(property.Name, property.Value.Clone()))
-                    {
-                        throw new DatabaseException(ErrorMessages.ParameterNameDuplicate);
-                    }
+                    // Refuse before statement admission or failure cleanup can touch a transaction.
+                    // Capability-free drivers cannot certify a clean session on pool return.
+                    var diagnostic = new Diagnostic { Code = "CD07002", Message = ErrorMessages.TextTransactionStatusRequired, Severity = DiagnosticSeverity.Error };
+                    string message = string.Format(System.Globalization.CultureInfo.CurrentCulture,
+                        ErrorMessages.ServerSessionExecuteAsyncFailure, diagnostic.Code, diagnostic.Message);
+                    await WriteFrameAsync((ProtocolMessageType)DocumentProtocolMessageType.Failure,
+                        CreateFailure(ProtocolErrorCode.ExecutionFailure, message, [diagnostic]).Encode(), cancellationToken).ConfigureAwait(false);
+                    return;
                 }
+                using var parametersJson = JsonDocument.Parse(execute.Parameters, new JsonDocumentOptions { MaxDepth = 256 });
                 var result = await _databaseSession!.ExecuteStatementAsync(() =>
                 {
-                    var statement = (OqlQueryStatement)new OqlQueryParser().Parse(execute.Statement);
                     var diagnostics = statement.Diagnostics.ToArray();
                     if (string.IsNullOrWhiteSpace(execute.Statement) || diagnostics.Any(d => d.Severity == DiagnosticSeverity.Error))
                     {
@@ -420,6 +435,19 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
                         var error = new DatabaseParseException(detail.Length == 0 ? ErrorMessages.StatementInvalid : detail, diagnostics);
                         DocumentDatabaseEventSource.Log.StatementParseFailed(this, _databaseSession!.Database.Name, error);
                         throw error;
+                    }
+                    // Controls ignore supplied parameters. Ordinary parameter validation belongs
+                    // inside statement admission so a failure also faults an explicit transaction.
+                    var parameters = new Dictionary<string, object?>(StringComparer.Ordinal);
+                    if (statement.OqlExpression is not OqlTransactionExpression)
+                    {
+                        foreach (var property in parametersJson.RootElement.EnumerateObject())
+                        {
+                            if (!parameters.TryAdd(property.Name, property.Value.Clone()))
+                            {
+                                throw DatabaseException.CreateDocumentsFailure("CD01009", ErrorMessages.ParameterNameDuplicate);
+                            }
+                        }
                     }
                     return new DocumentQueryRequest(statement, parameters);
                 }, cancellationToken).ConfigureAwait(false);
@@ -432,6 +460,10 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
         }
         catch (Exception exception) when (exception is DatabaseException or DatabaseTypeException or JsonException)
         {
+            // Preflight and response encoding can fail outside an engine operation. Abort active
+            // explicit work before reporting Failure; an already faulted or ended transaction
+            // keeps its original cause/outcome. The single pump owns this session access.
+            await _databaseSession!.AbortTransactionAsync(exception).ConfigureAwait(false);
             ProtocolErrorCode code = exception is DatabaseParseException ? ProtocolErrorCode.ParseFailure :
                 exception is DatabaseOfflineException ? ProtocolErrorCode.Unavailable : ProtocolErrorCode.ExecutionFailure;
             IReadOnlyList<Diagnostic> diagnostics = exception is DatabaseException databaseException ? databaseException.Diagnostics : [];
@@ -447,7 +479,7 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
             }
             var diagnostic = diagnostics.FirstOrDefault(item => item.Severity == DiagnosticSeverity.Error);
             string errorText = diagnostic?.Code is { } diagnosticCode && !exception.Message.Contains(diagnosticCode + ":", StringComparison.Ordinal)
-                ? $"{diagnosticCode}: {exception.Message}" : exception.Message;
+                ? string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ServerSessionExecuteAsyncFailure, diagnosticCode, exception.Message) : exception.Message;
             await WriteFrameAsync((ProtocolMessageType)DocumentProtocolMessageType.Failure,
                 CreateFailure(code, errorText, diagnostics).Encode(), cancellationToken).ConfigureAwait(false);
             return;
@@ -514,11 +546,12 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
 
     private async Task RunCommandAsync(DocumentProtocolCommandMessage command, CancellationToken cancellationToken)
     {
+        var session = _databaseSession!;
+        session.ThrowIfCommandRefuses();
         if (command.Operation != DocumentProtocolOperation.ListCollections && string.IsNullOrWhiteSpace(command.Collection))
         {
-            throw new DocumentPlanningException("COHDOC001", ErrorMessages.CollectionNameMissing);
+            throw new DocumentPlanningException("CD05001", ErrorMessages.CollectionNameMissing);
         }
-        var session = _databaseSession!;
         long count = 0;
         long affected = -1;
         switch (command.Operation)
@@ -611,7 +644,7 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
     {
         if ((uint)payload.Length > ProtocolFrameHeader.MaxPayloadLength)
         {
-            throw new DatabaseException(ErrorMessages.ResultTooLarge);
+            throw DatabaseException.CreateDocumentsFailure("CD05016", ErrorMessages.ResultTooLarge);
         }
         return new ProtocolFrame((ProtocolMessageType)type, payload);
     }
@@ -803,5 +836,18 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
             _lifetimeSource.Dispose();
             _server.OnSessionCompleted(this);
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Documents.Internal.DocumentDatabaseServerSession _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Documents.Internal.DocumentDatabaseServerSession value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Documents.DocumentDatabaseSession? DatabaseSession => _target.DatabaseSession;
+        public global::System.Guid Id => _target.Id;
     }
 }

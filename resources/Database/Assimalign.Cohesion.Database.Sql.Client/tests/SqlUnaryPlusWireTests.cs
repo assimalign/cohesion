@@ -17,7 +17,7 @@ namespace Assimalign.Cohesion.Database.Sql.Client.Tests;
 /// </summary>
 public sealed class SqlUnaryPlusWireTests
 {
-    private const string InvalidOperandType = "COHSQLE003";
+    private const string invalidOperandType = "CS02003";
 
     [Fact(DisplayName = "Cohesion Test [Database.Sql.Client] - Unary plus: values keep their type over the wire")]
     public async Task QueryAsync_UnaryPlus_ShouldReturnOperandUnchanged()
@@ -58,7 +58,7 @@ public sealed class SqlUnaryPlusWireTests
         failure.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
         failure.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
         failure.ConnectionUsable.ShouldBeTrue();
-        failure.Message.ShouldStartWith(InvalidOperandType + ": Invalid operand type: unary", Case.Sensitive);
+        failure.Message.ShouldStartWith(invalidOperandType + ": Invalid operand type: unary", Case.Sensitive);
         SqlResultSet scores = await connection.QueryAsync("SELECT id, score FROM users ORDER BY id",
             cancellationToken: SqlClientTestHarness.Timeout());
         scores.Select(row => (row["id"], row["score"])).ShouldBe([(1, 100L), (2, 200L)]);
@@ -79,6 +79,6 @@ public sealed class SqlUnaryPlusWireTests
         // Assert
         failure.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
         failure.ConnectionUsable.ShouldBeTrue();
-        failure.Message.ShouldBe(InvalidOperandType + ": Invalid operand type: unary '+' requires a numeric operand, but the operand is String.");
+        failure.Message.ShouldBe(invalidOperandType + ": Invalid operand type: unary '+' requires a numeric operand, but the operand is String.");
     }
 }

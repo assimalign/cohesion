@@ -51,16 +51,16 @@ public sealed class OqlCollectionDdlParserTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Documents.Language] - Collection DDL: invalid syntax retains exact code and offset")]
-    [InlineData("CREATE COLLECTION other.items", "OQL0002", 23)]
-    [InlineData("CREATE COLLECTION", "OQL0002", 17)]
-    [InlineData("CREATE COLLECTION b.s.c", "OQL0002", 19)]
-    [InlineData("CREATE COLLECTION IF EXISTS c", "OQL0002", 21)]
-    [InlineData("DROP COLLECTION", "OQL0002", 15)]
-    [InlineData("DROP COLLECTION IF NOT EXISTS c", "OQL0002", 19)]
-    [InlineData("CREATE COLLECTION c extra", "OQL0002", 20)]
-    [InlineData("CREATE COLLECTION c; SELECT * FROM c", "OQL0002", 21)]
-    [InlineData("DROP COLLECTION c extra", "OQL0002", 18)]
-    [InlineData("DROP COLLECTION c; SELECT * FROM c", "OQL0002", 19)]
+    [InlineData("CREATE COLLECTION other.items", "CD00002", 23)]
+    [InlineData("CREATE COLLECTION", "CD00002", 17)]
+    [InlineData("CREATE COLLECTION b.s.c", "CD00002", 19)]
+    [InlineData("CREATE COLLECTION IF EXISTS c", "CD00002", 21)]
+    [InlineData("DROP COLLECTION", "CD00002", 15)]
+    [InlineData("DROP COLLECTION IF NOT EXISTS c", "CD00002", 19)]
+    [InlineData("CREATE COLLECTION c extra", "CD00002", 20)]
+    [InlineData("CREATE COLLECTION c; SELECT * FROM c", "CD00002", 21)]
+    [InlineData("DROP COLLECTION c extra", "CD00002", 18)]
+    [InlineData("DROP COLLECTION c; SELECT * FROM c", "CD00002", 19)]
     public void Parse_InvalidCollectionDdl_ShouldReportSyntax(string text, string code, int offset)
     {
         // Arrange / Act
@@ -70,7 +70,7 @@ public sealed class OqlCollectionDdlParserTests
         errors.ShouldNotBeEmpty();
         errors[0].Code.ShouldBe(code);
         errors[0].Start.ShouldBe(offset);
-        errors.ShouldAllBe(error => error.Code != "COHDBL001");
+        errors.ShouldAllBe(error => error.Code != "CK00001");
     }
 
     [Theory(DisplayName = "Cohesion Test [Documents.Language] - Collection DDL: unsupported constructs stay positional")]
@@ -89,7 +89,7 @@ public sealed class OqlCollectionDdlParserTests
         var error = Parse(text).Diagnostics.ShouldHaveSingleItem();
 
         // Assert
-        error.Code.ShouldBe("COHDBL001");
+        error.Code.ShouldBe("CK00001");
         error.Start.ShouldBe(offset);
         error.End.ShouldBe(offset + construct.Length);
         error.Message!.ShouldContain($"The {construct} clause", Case.Sensitive);

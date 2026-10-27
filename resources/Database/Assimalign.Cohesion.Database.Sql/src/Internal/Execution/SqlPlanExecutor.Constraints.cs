@@ -17,12 +17,36 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 internal sealed partial class SqlPlanExecutor
 {
+    internal static Action<SqlCatalogTable>? ReferenceIntentsDiscovered { get; set; }
+
+    private static readonly string _errorEnsureSnapshotSeesCascadeRowFailure3 = ErrorMessages.EnsureSnapshotSeesCascadeRowFailure3;
+
+    private static readonly string _errorEnsureSnapshotSeesCascadeRowFailure = ErrorMessages.EnsureSnapshotSeesCascadeRowFailure;
+
     private sealed record SqlConstraintDelete(SqlCatalogTable Table, (PageId PageId, int SlotIndex) Location, object?[] Values);
+    [global::System.Diagnostics.DebuggerDisplay("SqlConstraintUpdate")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlPlanExecutor.SqlConstraintUpdate.DebugView))]
     private sealed record SqlConstraintUpdate(SqlCatalogTable Table, (PageId PageId, int SlotIndex) Location,
         object?[] OldValues, object?[] NewValues, HashSet<int> Assigned)
     {
         // Referential actions fill this only after every assignment to the final row is known.
         internal byte[] NewVersion { get; set; } = [];
+
+        private sealed class DebugView
+        {
+            private readonly global::Assimalign.Cohesion.Database.Sql.Internal.SqlPlanExecutor.SqlConstraintUpdate _target;
+
+            public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlPlanExecutor.SqlConstraintUpdate value)
+            {
+                _target = value;
+            }
+
+            public global::Assimalign.Cohesion.Database.Sql.Catalog.SqlCatalogTable Table => _target.Table;
+            public (global::Assimalign.Cohesion.Database.Storage.PageId PageId, int SlotIndex) Location => _target.Location;
+            public object?[] OldValues => _target.OldValues;
+            public object?[] NewValues => _target.NewValues;
+            public global::System.Collections.Generic.HashSet<int> Assigned => _target.Assigned;
+        }
     }
 
     /// <summary>
@@ -137,12 +161,12 @@ internal sealed partial class SqlPlanExecutor
     // unwritten arbitration's new grants, waits through the lock manager, then restarts
     // the whole arbitration (#1668). Plain INSERT takes parent rows before unique keys.
 
-    // Prepare adjacent IS before own IX. Never wait while retaining grants from this
-    // unwritten preparation attempt: FK DDL takes own X then referenced-parent X.
-    // A failed try releases only new grants, waits, and rebuilds the live graph. Prior
-    // transaction/row grants remain protected and use ordinary deadlock detection.
+    // Prepare adjacent IS before own IX. Non-cascade preparation releases new grants
+    // before waiting: FK DDL takes own X then referenced-parent X. Cascades report a
+    // refusal to the statement's bounded release/retry policy; from its third refusal
+    // it retains closure grants and queues with ordinary deadlock detection.
     private async ValueTask AcquireReferenceIntentLocksAsync(SqlCatalogTable table, SqlStatementContext statement,
-        CancellationToken cancellationToken, bool incoming = true, bool outgoing = true)
+        CancellationToken cancellationToken, bool incoming = true, bool outgoing = true, bool cascade = false)
     {
         var references = statement.References;
         incoming &= !references.IncomingLocks.Contains(table.ObjectId);
@@ -154,7 +178,7 @@ internal sealed partial class SqlPlanExecutor
         while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            ulong generation = _catalog.DdlGeneration;
+            var generation = _catalog.BindingGeneration;
             var adjacent = new SortedSet<ulong>();
             if (outgoing)
             {
@@ -175,6 +199,7 @@ internal sealed partial class SqlPlanExecutor
                     adjacent.Add(reference.Child.ObjectId);
                 }
             }
+            ReferenceIntentsDiscovered?.Invoke(table);
             adjacent.Remove(table.ObjectId);
             ulong blocked = table.ObjectId;
             LockMode mode = LockMode.IntentExclusive;
@@ -192,6 +217,7 @@ internal sealed partial class SqlPlanExecutor
             if (acquired) { acquired = locks.TryAcquire(owner, LockResource.Object(table.ObjectId), LockMode.IntentExclusive); }
             if (!acquired)
             {
+                if (cascade) { throw new SqlCascadeLockRetry(LockResource.Object(blocked), mode); }
                 locks.ReleaseSince(mark);
                 // Waiting owns no new table grants; completion is only a rendezvous.
                 // Reacquire the entire graph because publication can precede the wakeup.
@@ -201,8 +227,10 @@ internal sealed partial class SqlPlanExecutor
                 continue;
             }
             EnsureCurrentDefinition(table);
-            if (generation != _catalog.DdlGeneration)
+            if (generation != _catalog.BindingGeneration)
             {
+                // Physical publication can replace an outgoing parent between discovery
+                // and its IS grant. Refresh parents before probing or locking their rows.
                 // Under own IX no new incoming FK can publish (it needs parent X).
                 // Rebuild once under that lock and try any newly discovered children.
                 if (incoming) { references.Incoming.Remove(table.ObjectId); }
@@ -246,7 +274,7 @@ internal sealed partial class SqlPlanExecutor
     /// </param>
     /// <exception cref="TransactionAbortedException">A matched parent version was removed by a concurrently committed transaction.</exception>
     private async ValueTask AcquireParentRowLocksAsync(List<SqlParentReference> references, SqlStatementContext statement,
-        CancellationToken cancellationToken, bool validate = true)
+        CancellationToken cancellationToken, bool validate = true, bool cascade = false)
     {
         if (references.Count == 0)
         {
@@ -266,8 +294,8 @@ internal sealed partial class SqlPlanExecutor
             }
 
             previous = (reference.Parent.ObjectId, reference.EntryId);
-            await statement.Coordinator.LockManager.AcquireAsync(statement.Transaction.Sequence,
-                LockResource.Entry(reference.Parent.ObjectId, reference.EntryId), LockMode.Shared, cancellationToken).ConfigureAwait(false);
+            await AcquirePreparationLockAsync(statement,
+                LockResource.Entry(reference.Parent.ObjectId, reference.EntryId), LockMode.Shared, cascade, cancellationToken).ConfigureAwait(false);
 
             if (validate)
             {
@@ -340,7 +368,7 @@ internal sealed partial class SqlPlanExecutor
         {
             string message = string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StatementTableChanged, expected.Schema, expected.Name);
             throw new DatabaseTransactionAbortedException(message,
-                [new Diagnostic { Code = "COHSQLT006", Severity = DiagnosticSeverity.Error, Message = message }]);
+                [new Diagnostic { Code = "CS04006", Severity = DiagnosticSeverity.Error, Message = message }]);
         }
     }
 
@@ -425,14 +453,15 @@ internal sealed partial class SqlPlanExecutor
                 string.Equals(c.ReferencedTable, parent.Name, StringComparison.OrdinalIgnoreCase))
             .Select(c => (child, c)));
 
-    private SqlConstraintLookup ConstraintLookup(SqlBoundConstraintKey key, SqlStatementContext statement)
+    private SqlConstraintLookup ConstraintLookup(SqlBoundConstraintKey key, SqlStatementContext statement,
+        IReadOnlyList<SqlCatalogIndex>? preparedIndexes = null)
     {
         var lookups = statement.References.Lookups;
         if (lookups.TryGetValue(key, out var lookup)) { return lookup; }
         SqlCatalogIndex? selected = null;
         int[] prefix = [], indexOrdinals = [];
         var bound = _definitions.Get(key.Table);
-        foreach (var metadata in _catalog.GetIndexes(key.Table.ObjectId))
+        foreach (var metadata in preparedIndexes ?? _catalog.GetIndexes(key.Table.ObjectId))
         {
             int[] ordinals = bound.GetKey(metadata.ColumnNames).Ordinals;
             var mapping = new List<int>();
@@ -511,7 +540,7 @@ internal sealed partial class SqlPlanExecutor
     /// Checks the values a write assigns to columns of a domain (phase E3): each domain's check is
     /// evaluated on its column's value as a column CHECK is, so only FALSE refuses the row, and a
     /// column whose domain the engine does not register refuses any write that assigns it with
-    /// <c>COHSQLE010</c>. PostgreSQL likewise checks a domain where a value is coerced to it, on
+    /// <c>CS02010</c>. PostgreSQL likewise checks a domain where a value is coerced to it, on
     /// INSERT for every column, its default included, and on UPDATE for the columns it sets
     /// (<c>ExecEvalConstraintCheck</c>, <c>src/backend/executor/execExprInterp.c</c>).
     /// </summary>
@@ -520,7 +549,7 @@ internal sealed partial class SqlPlanExecutor
     /// <param name="evaluator">The statement's evaluator.</param>
     /// <param name="ordinals">The columns the write assigns; null for every column.</param>
     /// <exception cref="SqlConstraintViolationException">A domain's check returned FALSE.</exception>
-    /// <exception cref="SqlEvaluationException">A column's domain does not resolve (<c>COHSQLE010</c>), or a check failed (<c>COHSQLE007</c>).</exception>
+    /// <exception cref="SqlEvaluationException">A column's domain does not resolve (<c>CS02010</c>), or a check failed (<c>CS05007</c>).</exception>
     private static void CheckDomains(SqlBoundTable bound, object?[] values, SqlExpressionEvaluator evaluator, int[]? ordinals = null)
     {
         if (bound.Domains.Count == 0)
@@ -630,6 +659,7 @@ internal sealed partial class SqlPlanExecutor
                     selfKeys.Add(ordinals.Select(ordinal => candidate[ordinal]).ToArray());
                 }
             }
+            bool snapshotChecked = false;
             foreach (var row in rows)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -643,6 +673,20 @@ internal sealed partial class SqlPlanExecutor
                 if (selfKeys?.Contains(keys) == true)
                 {
                     continue;
+                }
+
+                if (!current && !snapshotChecked)
+                {
+                    // Only a real parent probe needs historical versions. ON CONFLICT
+                    // under RC probes with refreshed visibility after arbitration waits.
+                    if (_catalog.SnapshotPredatesReplacement(parent, foreignKeySnapshot ?? statement.Snapshot))
+                    {
+                        string message = string.Format(System.Globalization.CultureInfo.CurrentCulture,
+                            ErrorMessages.StatementTableChanged, parent.Schema, parent.Name);
+                        throw new DatabaseTransactionAbortedException(message,
+                            [new Diagnostic { Code = "CS04006", Severity = DiagnosticSeverity.Error, Message = message }]);
+                    }
+                    snapshotChecked = true;
                 }
 
                 var matches = FinalConstraintRows(reference.ParentKey, keys, statement, cancellationToken,
@@ -780,7 +824,13 @@ internal sealed partial class SqlPlanExecutor
             return null;
         }
 
-        await AcquireRowWriteLocksAsync(statement, table.ObjectId, [location], cancellationToken).ConfigureAwait(false);
+        if (statement.Metrics.DmlMemory(_definitions.StatementMemoryBudget) is { } memory)
+        {
+            memory.Retain(values);
+            memory.Reserve(256); // deletion record, dictionary growth and cascade work
+        }
+
+        await AcquireRowWriteLocksAsync(statement, table.ObjectId, [location], cancellationToken, cascade: true).ConfigureAwait(false);
 
         // A child row was found in latest state, which can be newer than a snapshot fixed at the
         // transaction's begin; a target of the statement itself was found through that snapshot.
@@ -792,7 +842,7 @@ internal sealed partial class SqlPlanExecutor
         if (scannedTables.Add(table.ObjectId))
         {
             EnsureCurrentDefinition(table);
-            await AcquireReferenceIntentLocksAsync(table, statement, cancellationToken).ConfigureAwait(false);
+            await AcquireReferenceIntentLocksAsync(table, statement, cancellationToken, cascade: true).ConfigureAwait(false);
         }
 
         // Deleting the row releases every reference it holds. The edge it was
@@ -875,27 +925,25 @@ internal sealed partial class SqlPlanExecutor
             return;
         }
 
+        statement.Metrics.RecordRowRead();
         if (!_storage.TryReadRecord(location.PageId, location.SlotIndex, table.ObjectId, out var record))
         {
             throw new TransactionAbortedException(
-                $"Write-write conflict on '{table.Schema}.{table.Name}': ON DELETE {action} reached a row version that was rolled back after the walk found it, " +
-                "which this transaction's snapshot does not see (first-updater-wins). Retry the transaction.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, _errorEnsureSnapshotSeesCascadeRowFailure, table.Schema, table.Name, action));
         }
 
         if (record.Length < SqlRowCodec.StampHeaderSize)
         {
             throw new StorageCorruptionException(
                 location.PageId,
-                $"The row record in slot {location.SlotIndex} of page {(long)location.PageId} of table '{table.Schema}.{table.Name}' holds " +
-                $"{record.Length} bytes, fewer than its {SqlRowCodec.StampHeaderSize}-byte version-stamp header.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.EnsureSnapshotSeesCascadeRowFailure2, location.SlotIndex, (long)location.PageId, table.Schema, table.Name, record.Length, SqlRowCodec.StampHeaderSize));
         }
 
         var (writer, _) = SqlRowCodec.ReadStamps(record.Span);
         if (!statement.Snapshot.IsVisible(writer))
         {
             throw new TransactionAbortedException(
-                $"Write-write conflict on '{table.Schema}.{table.Name}': ON DELETE {action} reached a row version written by transaction {writer}, " +
-                "which this transaction's snapshot does not see (first-updater-wins). Retry the transaction.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, _errorEnsureSnapshotSeesCascadeRowFailure3, table.Schema, table.Name, action, writer));
         }
     }
 
@@ -971,7 +1019,8 @@ internal sealed partial class SqlPlanExecutor
                 continue;
             }
 
-            frame.Matches = FindConstraintRows(reference.ChildKey, keys, statement, cancellationToken, ConstraintCurrentSnapshot(statement)).ToList();
+            frame.Matches = CollectConstraintMatches(FindConstraintRows(reference.ChildKey, keys, statement, cancellationToken,
+                ConstraintCurrentSnapshot(statement)), statement);
             frame.Match = 0;
         }
     }
@@ -1019,7 +1068,7 @@ internal sealed partial class SqlPlanExecutor
     {
         foreach (var group in deletions.GroupBy(deletion => deletion.Table.ObjectId).OrderBy(group => group.Key))
         {
-            await AcquireRowWriteLocksAsync(statement, group.Key, group.Select(row => row.Location).ToList(), cancellationToken).ConfigureAwait(false);
+            await AcquireRowWriteLocksAsync(statement, group.Key, group.Select(row => row.Location).ToList(), cancellationToken, cascade: true).ConfigureAwait(false);
             var hashes = new List<ulong>();
             var indexes = GetLiveIndexes(group.First().Table, statement);
             foreach (var row in group)
@@ -1027,7 +1076,7 @@ internal sealed partial class SqlPlanExecutor
                 CollectUniqueKeyHashes(indexes, row.Table, row.Values, hashes);
             }
 
-            await AcquireUniqueKeyLocksAsync(statement, group.Key, hashes, cancellationToken).ConfigureAwait(false);
+            await AcquireUniqueKeyLocksAsync(statement, group.Key, hashes, cancellationToken, cascade: true).ConfigureAwait(false);
         }
     }
 
@@ -1070,6 +1119,8 @@ internal sealed partial class SqlPlanExecutor
     /// <param name="defaultCollation">The database default collation.</param>
     /// <param name="functions">The engine's function catalog and the database.</param>
     /// <param name="functionCalls">The persisted calls' exact normalized identities in preorder.</param>
+    /// <param name="retyping">Whether ALTER TYPE must validate changed operand types.</param>
+    /// <param name="previous">The original definition, used to identify changed operand types.</param>
     /// <returns>
     /// The predicate compiled to the bound tree every write to the table version evaluates: its
     /// columns as ordinals of the version's rows, its calls bound to their functions and each
@@ -1077,19 +1128,24 @@ internal sealed partial class SqlPlanExecutor
     /// </returns>
     /// <exception cref="DatabaseException">The predicate cannot be evaluated against the table's rows.</exception>
     internal static SqlBoundExpression BindPersistedCheck(SqlExpression expression, SqlCatalogTable table, Collation defaultCollation,
-        SqlFunctionEnvironment functions, IReadOnlyList<string> functionCalls, CancellationToken cancellationToken)
+        SqlFunctionEnvironment functions, IReadOnlyList<string> functionCalls, CancellationToken cancellationToken, bool retyping = false,
+        SqlCatalogTable? previous = null)
     {
         var scope = new SqlExpressionEvaluator(table.Columns, null, defaultCollation: defaultCollation, functions: functions, cancellationToken: cancellationToken);
         SqlDefinitionBinder.PinCalls(expression, scope, functionCalls);
         SqlPersistedExpression.Bind(expression, scope);
-        new SqlCheckSyntax(table, scope, declaring: false).Validate(expression, requireBoolean: true);
+        var previousScope = previous is null ? null : new SqlExpressionEvaluator(previous.Columns, null,
+            defaultCollation: defaultCollation, functions: functions, cancellationToken: cancellationToken);
+        if (previousScope is not null) { SqlDefinitionBinder.PinCalls(expression, previousScope, functionCalls); }
+        new SqlCheckSyntax(table, scope, declaring: false, retyping: retyping, previousScope: previousScope).Validate(expression, requireBoolean: true);
         return scope.BindPredicate(expression);
     }
 
     private static string ConstraintName(SqlCatalogTable table, SqlConstraintDefinition definition, int ordinal)
         => SqlConstraintDeclaration.Name(table.Name, definition, ordinal);
 
-    private IReadOnlyList<SqlCatalogConstraint> BindConstraints(SqlCatalogTable table, IReadOnlyList<SqlConstraintDefinition> definitions)
+    private IReadOnlyList<SqlCatalogConstraint> BindConstraints(SqlCatalogTable table, IReadOnlyList<SqlConstraintDefinition> definitions,
+        SortedDictionary<ulong, SqlCatalogTable>? parents = null)
     {
         var result = new List<SqlCatalogConstraint>();
         var names = new HashSet<string>(table.Constraints.Select(c => c.Name), StringComparer.OrdinalIgnoreCase);
@@ -1151,6 +1207,9 @@ internal sealed partial class SqlPlanExecutor
             {
                 throw new SqlExecutionException(SqlExecutionException.UndefinedTableCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ForeignKeyTableMissing, schema, referenced.TableName));
             }
+            // Preserve the first binding's exact identity, even if the name disappears
+            // before lock acquisition starts. Self-references already hold the target lock.
+            if (!self) { parents?.TryAdd(parent.ObjectId, parent); }
 
             if (definition.Columns.Count != definition.ReferencedColumns.Count || definition.Columns.Count == 0)
             {
@@ -1208,12 +1267,16 @@ internal sealed partial class SqlPlanExecutor
     /// (owner decision 64); a stored predicate is not held to it again, so a function whose
     /// registration changed does not stop its database from opening.
     /// </remarks>
+    [global::System.Diagnostics.DebuggerDisplay("SqlCheckSyntax")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlPlanExecutor.SqlCheckSyntax.DebugView))]
     private sealed class SqlCheckSyntax
     {
         private readonly SqlCatalogTable _table;
         private readonly SqlExpressionEvaluator _scope;
         private readonly bool _declaring;
         private readonly bool _validateQualifiers;
+        private readonly bool _retyping;
+        private readonly SqlExpressionEvaluator? _previousScope;
 
         /// <summary>Initializes the check of one predicate.</summary>
         /// <param name="table">The table version the predicate constrains.</param>
@@ -1224,12 +1287,17 @@ internal sealed partial class SqlPlanExecutor
         /// the catalog's persisted predicate binds.
         /// </param>
         /// <param name="validateQualifiers">Whether to enforce qualifier identity for a new or changed schema.</param>
-        internal SqlCheckSyntax(SqlCatalogTable table, SqlExpressionEvaluator scope, bool declaring, bool validateQualifiers = true)
+        /// <param name="retyping">Whether to revalidate operand types for ALTER COLUMN TYPE.</param>
+        /// <param name="previousScope">The original operand types, when retyping an existing definition.</param>
+        internal SqlCheckSyntax(SqlCatalogTable table, SqlExpressionEvaluator scope, bool declaring, bool validateQualifiers = true, bool retyping = false,
+            SqlExpressionEvaluator? previousScope = null)
         {
             _table = table;
             _scope = scope;
             _declaring = declaring;
             _validateQualifiers = validateQualifiers;
+            _retyping = retyping;
+            _previousScope = previousScope;
         }
 
         /// <summary>Checks one node.</summary>
@@ -1254,7 +1322,7 @@ internal sealed partial class SqlPlanExecutor
                  qualifiedColumn.SchemaName is not null && !string.Equals(qualifiedColumn.SchemaName, _table.Schema, StringComparison.OrdinalIgnoreCase)))
             {
                 string name = string.Join('.', new[] { qualifiedColumn.SchemaName, qualifiedColumn.TableAlias, qualifiedColumn.ColumnName }.Where(part => part is not null));
-                throw new SqlPlanningException("COHSQLE015", string.Format(System.Globalization.CultureInfo.CurrentCulture,
+                throw new SqlPlanningException("CS01015", string.Format(System.Globalization.CultureInfo.CurrentCulture,
                     ErrorMessages.MissingFromClauseEntry, name), qualifiedColumn.Location);
             }
 
@@ -1356,6 +1424,7 @@ internal sealed partial class SqlPlanExecutor
                     break;
                 case SqlBinaryExpression binary when binary.Operator is SqlBinaryOperator.Add or SqlBinaryOperator.Subtract
                     or SqlBinaryOperator.Multiply or SqlBinaryOperator.Divide or SqlBinaryOperator.Modulo:
+                    if (_retyping && !TypeChanged(binary.Left) && !TypeChanged(binary.Right)) { break; }
                     SqlPlanner.ValidateTemporalArithmetic(binary, _scope);
                     var leftType = _scope.StaticTypeOf(binary.Left);
                     var rightType = _scope.StaticTypeOf(binary.Right);
@@ -1378,17 +1447,36 @@ internal sealed partial class SqlPlanExecutor
                         CheckComparable(list.Operand, value);
                     }
                     break;
+                case SqlCaseExpression { Input: { } input } conditional when _retyping:
+                    foreach (var branch in conditional.WhenClauses) { CheckComparable(input, branch.Condition); }
+                    break;
+                case SqlUnaryExpression { Operator: SqlUnaryOperator.Negate or SqlUnaryOperator.Plus } unary when _retyping:
+                    if (unary.Operator != SqlUnaryOperator.Negate || _scope.StaticTypeOf(unary.Operand) != DatabaseType.TimeSpan)
+                    { CheckNumber(unary.Operand); }
+                    break;
             }
         }
 
+        // LIKE accepts every SQL storage type through the evaluator's LikeText conversion.
+        // Its normal binder already checks constant patterns and escape lengths.
+        private bool TypeChanged(SqlExpression expression)
+            => _retyping && (_previousScope is null || _scope.StaticTypeOf(expression) != _previousScope.StaticTypeOf(expression));
+
         private void CheckComparable(SqlExpression left, SqlExpression right)
         {
+            if (_retyping && !TypeChanged(left) && !TypeChanged(right)) { return; }
             var (leftCall, leftType) = Operand(left);
             var (rightCall, rightType) = Operand(right);
-            if (leftCall is null && rightCall is null || leftType == DatabaseType.Null || rightType == DatabaseType.Null ||
+            if (!_retyping && leftCall is null && rightCall is null || leftType == DatabaseType.Null || rightType == DatabaseType.Null ||
                 Comparable(leftType, rightType))
             {
                 return;
+            }
+
+            if (_retyping)
+            {
+                throw new SqlExecutionException(SqlExecutionException.DatatypeMismatchCode,
+                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ValuesNotComparable, leftType, rightType, ""));
             }
 
             var (call, type, other) = leftCall is not null ? (leftCall, leftType, rightType) : (rightCall!, rightType, leftType);
@@ -1406,7 +1494,12 @@ internal sealed partial class SqlPlanExecutor
 
         private void CheckNumber(SqlExpression operand)
         {
+            if (_retyping && !TypeChanged(operand)) { return; }
             var (call, type) = Operand(operand);
+            if (_retyping && type != DatabaseType.Null && !IsNumber(type))
+            {
+                throw SqlEvaluationException.InvalidOperandType("CHECK arithmetic", SqlType.NameOf(type));
+            }
             if (call is not null && type != DatabaseType.Null && !IsNumber(type))
             {
                 throw new SqlFunctionResultMismatchException(call, SqlType.NameOf(type), "a number");
@@ -1419,6 +1512,7 @@ internal sealed partial class SqlPlanExecutor
         /// </summary>
         private (SqlFunctionCallExpression? Call, DatabaseType Type) Operand(SqlExpression expression)
         {
+            if (_retyping) { return (null, _scope.StaticTypeOf(expression)); }
             while (expression is SqlCollateExpression collate)
             {
                 expression = collate.Operand;
@@ -1476,6 +1570,14 @@ internal sealed partial class SqlPlanExecutor
             }
 
             return function;
+        }
+
+        private sealed class DebugView
+        {
+            public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlPlanExecutor.SqlCheckSyntax value)
+            {
+                _ = value;
+            }
         }
     }
 }

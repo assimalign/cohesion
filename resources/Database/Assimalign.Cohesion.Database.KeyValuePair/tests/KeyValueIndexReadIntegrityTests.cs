@@ -58,7 +58,7 @@ public sealed class KeyValueIndexReadIntegrityTests
             faults.WrapCorruption = corruption =>
             {
                 var coded = new DatabaseException("Storage read failed.", [new Diagnostic
-                { Code = "COHDBK002", Message = "Storage read failed.", Severity = DiagnosticSeverity.Error }], corruption);
+                { Code = "CV06102", Message = "Storage read failed.", Severity = DiagnosticSeverity.Error }], corruption);
                 return wrapper == 1 ? coded : new AggregateException(new InvalidOperationException("Cleanup failed."), coded);
             };
         }
@@ -230,15 +230,15 @@ public sealed class KeyValueIndexReadIntegrityTests
 
             // Assert
             failure.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
-            failure.Message.ShouldStartWith(failureKind == 0 ? "COHDBS003: " : "COHDBK005: ", Case.Sensitive);
+            failure.Message.ShouldStartWith(failureKind == 0 ? "CK06003: " : "CV06105: ", Case.Sensitive);
             faults.RottenPageReads.ShouldBeGreaterThan(0);
             if (transaction is not null)
             {
                 transaction.State.ShouldBe(TransactionState.Faulted);
                 var refusal = await Should.ThrowAsync<DatabaseException>(() => database.GetAsync(engineSession, Bytes("alpha"), CancellationToken.None).AsTask());
-                refusal.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBK001");
+                refusal.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CV04101");
                 refusal.InnerException.ShouldNotBeNull().ShouldBeAssignableTo<DatabaseException>().Diagnostics.ShouldHaveSingleItem().Code
-                    .ShouldBe(failureKind == 0 ? "COHDBS003" : "COHDBK005");
+                    .ShouldBe(failureKind == 0 ? "CK06003" : "CV06105");
             }
         }
         finally { faults.Clear(); }
@@ -284,7 +284,7 @@ public sealed class KeyValueIndexReadIntegrityTests
             // Assert
             aborts.ShouldBe(1);
             faults.RottenPageReads.ShouldBeGreaterThan(0);
-            failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(corruptRead ? "COHDBS003" : "COHDBK005");
+            failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(corruptRead ? "CK06003" : "CV06105");
             if (corruptRead) { failure.ShouldBeOfType<DatabaseCorruptionException>(); }
             transaction.CreateCommandRefusal().InnerException.ShouldBeSameAs(failure);
             var cleanup = recorder.Events.Where(item => item.EventId == 11).ShouldHaveSingleItem();

@@ -14,14 +14,22 @@ representation — model-specific layouts live in the Storage components of each
 - **Buffer pool** — an internal pin/unpin cache over a `StorageStream`;
   checksum stamped on write-back, verified on load. 4,096 pages (32 MiB) by default,
   resizable through `Storage.BufferPoolCapacity`; engines expose it as an option (#1254).
+  Clock replacement and frame-local cached pins avoid the global mapping monitor on
+  Release hits. Coalesced cold reads, dirty eviction, growth and raw stored-page reads
+  run outside that monitor; frame ownership, checksum validation and WAL-before-data
+  ordering remain enforced (#1541). The pin API remains synchronous.
+  Shrinking releases surplus recycled buffers as well as evicting residents, including
+  after a partially failed shrink; retained memory follows the resulting capacity.
 - **Page management** — the sealed `StoragePageManager` (allocation/free/retrieval/flush);
-  the sealed `StorageFreeSpaceMap` allocation tracking, rebuilt from page headers on open.
+  the sealed `StorageFreeSpaceMap` allocation tracking, rebuilt from page headers on open,
+  and internal per-owner free-byte hints for refilling older partially empty record pages.
   Owner-tagged data/index pages can be reclaimed in bounded transactional batches; reuse
   begins only after commit, and recovery rebuilds the owner directories alongside the FSM.
 - **Records** — `Storage` abstract base with insert/read/update/delete over slotted
   pages, storage transactions (`StorageTransaction`), and `StorageUnitIterator` full scans.
-  A rollback restores each page in one copy that record reads confirm against, so a committed
-  record beside a failed bracket's changes is never read as reclaimed; a structure whose readers
+  Every in-place write advances a frame-local sequence: unlatched record reads copy, confirm
+  and retry an overlapping forward write or rollback. Allocation identities stay unpublished
+  until initialization and transaction ownership are ready (D1, #1365). A structure whose readers
   take no page write lock (a B-tree) writes its pages under its `StoragePageLatch`, and a
   rollback restores them last, under that latch (#1371).
 - **Journal** — `StorageJournal` write-ahead logging with begin/commit/rollback
@@ -38,7 +46,7 @@ representation — model-specific layouts live in the Storage components of each
 - **Offline on a failed journal write, fsync or header write** — a durable flush of the journal
   or the data file (#1243), a write of the journal's buffer (#1252), or a header slot write
   that fails once issued (#1268) takes the storage offline (`StorageOfflineException`,
-  `COHDBS002`): nothing more is written to either file, closing included, until the file set
+  `CK06002`): nothing more is written to either file, closing included, until the file set
   is reopened and its recovery
   decides every unconfirmed commit (PostgreSQL's PANIC on a failed WAL fsync).
   `StorageOfflineException.Cause` (`StorageOfflineCause`: `JournalFlush`, `DataFlush`,
@@ -53,12 +61,13 @@ representation — model-specific layouts live in the Storage components of each
   separately checksummed header slots (LSN and sequence floors, checkpoint anchor, and a
   copy of the identity block), so a torn header write cannot make a file set unopenable.
   A half-page read error permits fallback only with verified journal coverage and emits a
-  Warning; an unreadable half plus a damaged surviving slot is page-0 corruption (`COHDBS003`).
+  Warning; an unreadable half plus a damaged surviving slot is page-0 corruption (`CK06003`).
   Page 0 is never a data page: the page manager refuses to pin or free it. Storage format 4;
-  any other format is refused with `StorageFormatException` (`COHDBS001`), with no upgrade
+  any other format is refused with `StorageFormatException` (`CK06001`), with no upgrade
   path (#1152).
 - **File set** — each storage instance owns three streams: data (`.dat`), journal
-  (`.log`), and backup (`.bak`), wrapped by `StorageStream`.
+  (`.log`), and backup (`.bak`), wrapped by the sealed `StorageStream` adapter. Its existing
+  public constructors and file factories retain their signatures and ownership contracts.
 
 ## Dependencies
 
@@ -91,3 +100,80 @@ kernel. Deleting a record releases its page transactionally once its last live
 slot disappears. `StorageJournal.ReadSequential` streams records with owned payloads;
 startup storage recovery uses an internal borrowed reader without retaining WAL payloads.
 `ReadAll` returns a materialized snapshot. See [DESIGN.md](DESIGN.md) for replay and reclamation.
+
+## Dedicated test actors (#1285)
+
+Deadline-dependent peers and busy test drivers use the linked Storage test helper's LongRunning threads. Ordinary async driver continuations stay on their actor scheduler, without changing SynchronizationContext. Existing deadlines of 25 seconds or more are hang guards. Runner settings impose no parallel-thread cap. See the [scheduling audit](TEST-HYGIENE-AUDIT.md) for every original Task.Run site, the exact journal counters and the physical index-work guards.
+
+## Signed page-identity validation
+
+Negative PageId sentinels are never allocated pages. The free map returns false for their
+allocation checks and refuses an attempted free without changing allocator state. This closes
+the negative-free/next-negative-allocation defect found during #1365, without changing valid
+page allocation, public signatures or storage format 4. DESIGN records the reproduction and
+measured check cost.
+
+## Confirmed unlatched reads (D1, #1365)
+
+A writable page handle brackets all mutations, including changes after `MarkDirty`.
+Nested handles keep the frame unstable until the last closes; a synchronous writer reads its
+own changes while other threads wait. Completion ends the mutable lifetime even when a pin
+outlives its transaction, and its eventual disposal cannot release a later writer. Rollback
+still builds a private image before the short live-page copy. The 64-bit frame sequence and
+reserved allocation identities are memory-only: storage format 4, public signatures, error
+codes and the wire protocol do not change.
+
+## Automatic record-page compaction (#1161)
+
+An insert compacts its current write page before allocating another page when dead bytes
+can satisfy the request. A growing update packs around the replaced record when that
+replacement fits in the page's aggregate capacity. Repeated grow/shrink cycles retain
+their page and slot references. Compaction validates the whole plan before mutation,
+preserves borrowed input, and retains deleted slot identities. Existing physical writer
+ownership and D1's mutable frame scope protect the rewrite; readers retry and WAL covers
+both committed and aborted layouts, including torn stolen writes. Older partly empty
+pages are revisited by #1288's free-byte map. Formats and public APIs are unchanged.
+
+## Refilling older record pages (#1288)
+
+Inserts prefer the current page, then select an older page with sufficient packed capacity
+before extending the file. Deletes/purge and shrinking updates make their space discoverable;
+fragmented candidates compact under D1 writer ownership. Hints use one reusable heap node per
+page and include slot-directory cost. Selection rechecks the allocation generation, so a free
+and same-owner reuse cannot grant a stale writer the replacement page. All hint locks close
+before pinning or I/O.
+
+The map is memory only. Open's existing header scan and rollback seed unmeasured hints, which
+an owned insertion probe validates lazily; raw writable handles invalidate them, and nested
+probes leave them unmeasured until an outer writer can no longer change the layout. There is
+no new eager open-time scan or corruption boundary, format, diagnostic code, public API or
+wire change. Deleted slot identities remain reserved; directory exhaustion can still require
+another page. DESIGN records deterministic space-growth evidence and reference-engine citations.
+
+Storage's exact allocation tests use a guarded test-host configuration with background GC
+disabled to exclude the upstream runtime's allocation-context accounting artifact. The
+node-update bound remains zero, a deliberate allocating mutant still fails, and runner
+parallelism stays uncapped. Product GC configuration is supplied by its consumer.
+
+
+## Confirmed decode failures (#1372)
+
+Storage's D1 seqlock confirms private record copies before models decode them. Malformed
+copies report the existing corruption code with page and slot. Direct catalog APIs retain
+their model exception type and cause; engine boundaries use the common corruption exception. The shared version store rejects records shorter than its
+16-byte stamp header and retains failed undo/prune work for retry. StorageCorruptionException
+adds a record-scoped constructor and nullable SlotIndex. Formats and wire frames are unchanged.
+
+## Error and construction conventions (#1470)
+
+Exception messages and format templates are generated from `src/Properties/ErrorMessages.resx`;
+format arguments use the current culture. Cancellation and abort templates used during normal
+cleanup are cached before reuse. Error identities remain separate from message text where a
+structured diagnostic carrier exists. Standard .NET guards retain their argument names and exception types.
+`StoragePageLatch()` is public; the parameterless `Create()` factory is removed. Its creation-order rule is unchanged.
+
+## Debugger inspection convention
+
+Storage debugger views filter nonpublic implementation state and expose only reviewed public/protected value reads. StorageStream has an empty projection: inspection does not invoke delegated stream/handle properties. Pool/free-space counts that acquire locks, journal getters that initialize storage, disposed-page guards and pointer-backed SlottedPage reads are omitted. Public identity/value/count reads and existing volatile flags remain observable without page I/O or mutation.
+
+Concrete eligible types carry their own concise display and private nested DebugView at the end of the type; an effective inherited display/proxy pair is reused. Projections are public read-only members of that private view and never reveal private/internal data. Empty views use the constant type name. Debugger attributes and nested infrastructure add no public API, instance fields to existing runtime types, storage/wire format change or successful-path work.

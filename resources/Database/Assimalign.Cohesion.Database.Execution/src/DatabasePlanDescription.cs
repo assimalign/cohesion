@@ -12,9 +12,12 @@ namespace Assimalign.Cohesion.Database.Execution;
 
 /// <summary>A materialized EXPLAIN result with the same eight columns for every language.</summary>
 /// <remarks>
-/// Nodes appear in depth-first pre-order. Estimated and actual row counts are null in Tier 1.
+/// Nodes appear in depth-first pre-order. Counts are optional model-defined candidate work.
+/// Nonexecuting descriptions never supply observed counts.
 /// The shape describes a chosen plan; it does not define a shared operator algebra.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("DatabasePlanDescription {Status}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Execution.DatabasePlanDescription.DebugView))]
 public sealed class DatabasePlanDescription : DatabaseResultSet
 {
     private static readonly IReadOnlyList<DatabaseColumn> _columns = Array.AsReadOnly<DatabaseColumn>(
@@ -70,4 +73,19 @@ public sealed class DatabasePlanDescription : DatabaseResultSet
 
     /// <inheritdoc />
     public override ValueTask DisposeAsync() => ValueTask.CompletedTask;
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Execution.DatabasePlanDescription _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Execution.DatabasePlanDescription value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Execution.DatabaseResultStatus Status => _target.Status;
+        public long AffectedCount => _target.AffectedCount;
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.Types.Diagnostic> Diagnostics => _target.Diagnostics;
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.Execution.DatabaseColumn> Columns => _target.Columns;
+    }
 }

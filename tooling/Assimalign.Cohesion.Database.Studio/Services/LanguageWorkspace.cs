@@ -59,7 +59,7 @@ internal abstract class LanguageWorkspace : ModelWorkspace
             var outcomes = new List<StatementOutcome>();
             bool failed = false;
 
-            foreach (ScriptStatement statement in ScriptSplitter.Split(script))
+            foreach (ScriptStatement statement in ScriptSplitter.Split(script, Model))
             {
                 var outcome = new StatementOutcome { Statement = statement.Text, StatementOffset = start + statement.Offset };
                 outcomes.Add(outcome);
@@ -121,7 +121,7 @@ internal abstract class LanguageWorkspace : ModelWorkspace
         if (outcome.Failed || outcome.Table is null)
         {
             string detail = outcome.Error ?? string.Join("; ", outcome.Diagnostics.Select(d => $"{d.Code}: {d.Message}"));
-            throw new InvalidOperationException($"Catalog query failed ({statement}): {(detail.Length == 0 ? "no result set" : detail)}");
+            throw new InvalidOperationException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CatalogQueryFailed, statement, (detail.Length == 0 ? ErrorMessages.ResultSetMissing : detail)));
         }
 
         return outcome.Table;

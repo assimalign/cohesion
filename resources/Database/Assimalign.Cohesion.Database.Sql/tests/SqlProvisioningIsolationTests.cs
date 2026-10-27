@@ -10,6 +10,8 @@ using Assimalign.Cohesion.Database.Sql.Schema;
 using Assimalign.Cohesion.Database.Sql.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Types;
 
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
+
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 [Collection(SqlLockWaitCollection.Name)]
@@ -119,7 +121,7 @@ public sealed class SqlProvisioningIsolationTests
                 }
             }
         };
-        Task<SqlSchemaMigrationResult> applying = Task.Run(async () => await database.ApplySchemaAsync(schema, timeout.Token));
+        Task<SqlSchemaMigrationResult> applying = DedicatedTestTask.Run(async () => await database.ApplySchemaAsync(schema, timeout.Token));
         Task<Execution.DatabaseResult>? writing = null;
         int reads = 0;
         int writes = 0;

@@ -100,13 +100,14 @@ public sealed class SqlCatalogDroppedColumnTests
         // Arrange: the dropped count, then the ordinals, after two live columns.
         using var storage = SqlStorage.Create(new MemoryStream(), new MemoryStream(), new MemoryStream(), "damaged");
         var record = TableRecordPrefix(1, "dbo", "damaged", ("id", false), ("note", true))
-            .AppendInt32(6).AppendInt32(0).AppendInt32(-1).AppendInt32(-1);
+            .AppendInt32(7).AppendInt32(0).AppendInt32(-1).AppendInt32(-1);
         foreach (int value in persisted)
         {
             record.AppendInt32(value);
         }
         // Complete the current format: no column domains and no function calls in either default.
-        record.AppendNull().AppendNull().AppendInt32(0).AppendInt32(0).AppendBoolean(false).AppendBoolean(false).AppendNull().AppendNull();
+        record.AppendNull().AppendNull().AppendInt32(0).AppendInt32(0).AppendBoolean(false).AppendBoolean(false)
+            .AppendNull().AppendBoolean(false).AppendNull().AppendBoolean(false);
 
         Insert(storage, record.ToArray());
 
@@ -190,7 +191,7 @@ public sealed class SqlCatalogDroppedColumnTests
         cycles.ShouldBeGreaterThan(1_000);
         failure.Message.ShouldStartWith("The definition of table 'dbo.t' encodes to ", Case.Sensitive);
         failure.Message.ShouldContain($"It keeps the physical positions of {cycles} dropped columns, which are never reused (#1241); " +
-            "recreating the table and copying its rows (CREATE TABLE, INSERT ... SELECT) reclaims them.", Case.Sensitive);
+            "RewriteTableAsync compacts them, or recreate the table and copy its rows (CREATE TABLE, INSERT ... SELECT).", Case.Sensitive);
 
         // The refused alteration changed nothing, in memory or on reopen.
         catalog.TryGetTable("dbo", "t", out var table).ShouldBeTrue();

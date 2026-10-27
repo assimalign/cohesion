@@ -6,6 +6,8 @@ using Assimalign.Cohesion.Database.Types;
 /// <summary>
 /// Represents a <c>CAST</c> expression such as <c>CAST(x AS INT)</c>.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("SqlCastExpression")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Language.SqlCastExpression.DebugView))]
 public sealed class SqlCastExpression : SqlExpression
 {
     /// <summary>
@@ -49,4 +51,18 @@ public sealed class SqlCastExpression : SqlExpression
     /// where an application registers domains, and reports a name that is not there.
     /// </remarks>
     public DatabaseTypeInfo? TargetTypeInfo { get; }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Sql.Language.SqlCastExpression _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Language.SqlCastExpression value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Sql.Language.SqlExpression Operand => _target.Operand;
+        public string TargetType => _target.TargetType;
+        public global::Assimalign.Cohesion.Database.Types.DatabaseTypeInfo? TargetTypeInfo => _target.TargetTypeInfo;
+    }
 }

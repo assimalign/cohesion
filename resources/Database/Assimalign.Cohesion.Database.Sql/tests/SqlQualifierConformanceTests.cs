@@ -40,7 +40,7 @@ public sealed class SqlQualifierConformanceTests
         var failure = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None));
 
         // Assert
-        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE015");
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS01015");
         failure.Message.ShouldContain(sql.Contains("nosuch") ? "nosuch.a" : "t.a", Case.Sensitive);
     }
 
@@ -64,7 +64,7 @@ public sealed class SqlQualifierConformanceTests
 
         // Assert
         var diagnostic = failure.Diagnostics.ShouldHaveSingleItem();
-        diagnostic.Code.ShouldBe("COHSQLE015");
+        diagnostic.Code.ShouldBe("CS01015");
         diagnostic.Start.ShouldNotBeNull();
         failure.Message.ShouldContain(sql.Contains("missing") ? "missing.d.a" : sql.Contains("extra") ? "nosuch.extra" : "nosuch.a", Case.Sensitive);
         await session.ExecuteAsync("CREATE TABLE d (a INT CHECK(d.a > 0 AND dbo.d.a < 100))", cancellationToken: CancellationToken.None);
@@ -93,7 +93,7 @@ public sealed class SqlQualifierConformanceTests
         var failure = await Should.ThrowAsync<SqlClientException>(async () => await connection.ExecuteAsync(sql, cancellationToken: TestTimeout.Token()));
 
         // Assert
-        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE015");
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS01015");
         failure.Message.ShouldContain("nosuch.a", Case.Sensitive);
         failure.ConnectionUsable.ShouldBeTrue();
         await connection.ExecuteAsync("INSERT INTO t VALUES (1)", cancellationToken: TestTimeout.Token());
@@ -151,7 +151,7 @@ public sealed class SqlQualifierConformanceTests
                 {
                     var changed = await Should.ThrowAsync<SqlSchemaMigrationException>(async () =>
                         await reopened.ApplySchemaAsync(QualifierSchema(changed: true).Compile(), CancellationToken.None));
-                    changed.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE015");
+                    changed.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS01015");
                 }
                 reopened.Catalog.SchemaState.ShouldNotBeNull().ContentHash.ShouldBe(schema.Hash);
             }
@@ -161,7 +161,7 @@ public sealed class SqlQualifierConformanceTests
             changedBuilder.AddDatabase(QualifierSchema(changed: true));
             var refused = await Should.ThrowAsync<SqlSchemaMigrationException>(async () =>
                 await changedBuilder.BuildAsync(CancellationToken.None));
-            refused.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE015");
+            refused.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS01015");
             refused.Message.ShouldContain("nosuch.a", Case.Sensitive);
         }
         finally

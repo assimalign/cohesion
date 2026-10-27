@@ -75,6 +75,8 @@
 			<_CohesionDatabaseClientCompile Include="@(Compile)">
 				<GuardDirectory>$([System.IO.Path]::GetDirectoryName('%(FullPath)').Replace('\', '/'))</GuardDirectory>
 			</_CohesionDatabaseClientCompile>
+		</ItemGroup>
+		<ItemGroup Condition="'$(_CohesionDatabaseClientGuardApplies)' == 'true' AND '@(Compile)' != ''">
 			<_CohesionDatabaseClientForbiddenCompile Include="@(_CohesionDatabaseClientCompile)"
 			    Condition="$([System.Text.RegularExpressions.Regex]::IsMatch('%(GuardDirectory)', '$(_CohesionDatabaseClientForbiddenDirectoryPattern)'))" />
 		</ItemGroup>

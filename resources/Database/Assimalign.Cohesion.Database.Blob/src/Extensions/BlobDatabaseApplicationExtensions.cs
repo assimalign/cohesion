@@ -3,7 +3,7 @@ using System;
 namespace Assimalign.Cohesion.Database.Blob;
 
 /// <summary>Registers deferred blob engines through the dependency-free Database application seam.</summary>
-public static class BlobDatabaseApplicationExtensions
+public static partial class BlobDatabaseApplicationExtensions
 {
     extension(IDatabaseApplicationBuilder builder)
     {

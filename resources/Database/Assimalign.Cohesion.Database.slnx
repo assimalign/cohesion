@@ -175,6 +175,9 @@
 	<Folder Name="/Database/Models/Graph/Assimalign.Cohesion.Database.Graph/fixtures/Assimalign.Cohesion.Database.Graph.RecoveryFixture/">
 		<Project Path="Assimalign.Cohesion.Database.Graph/fixtures/Assimalign.Cohesion.Database.Graph.RecoveryFixture/Assimalign.Cohesion.Database.Graph.RecoveryFixture.csproj" />
 	</Folder>
+	<Folder Name="/Database/Models/Graph/Assimalign.Cohesion.Database.Graph/samples/Assimalign.Cohesion.Database.Graph.AotSample/">
+		<Project Path="Assimalign.Cohesion.Database.Graph/samples/Assimalign.Cohesion.Database.Graph.AotSample/Assimalign.Cohesion.Database.Graph.AotSample.csproj" />
+	</Folder>
 	<Folder Name="/Database/Models/Graph/Assimalign.Cohesion.Database.Graph/src/">
 		<Project Path="Assimalign.Cohesion.Database.Graph/src/Assimalign.Cohesion.Database.Graph.csproj" />
 	</Folder>
@@ -399,8 +402,8 @@
 		<Project Path="../../libraries/Hosting/Assimalign.Cohesion.Hosting/src/Assimalign.Cohesion.Hosting.csproj" />
 		<Project Path="../../libraries/Connections/Assimalign.Cohesion.Connections.InMemory/src/Assimalign.Cohesion.Connections.InMemory.csproj" />
 	</Folder>
-  <Folder Name="/Database/Models/Sql/Assimalign.Cohesion.Database.Sql.Tcp/src/">
-    <Project Path="Assimalign.Cohesion.Database.Sql.Tcp/src/Assimalign.Cohesion.Database.Sql.Tcp.csproj" />
+  <Folder Name="/Database/Kernel/Assimalign.Cohesion.Database.Tcp/src/">
+    <Project Path="Assimalign.Cohesion.Database.Tcp/src/Assimalign.Cohesion.Database.Tcp.csproj" />
   </Folder>
 	<Folder Name="/Database/analyzers/Assimalign.Cohesion.CodeFixes.Database/src/">
 		<Project Path="../../analyzers/Assimalign.Cohesion.CodeFixes.Database/src/Assimalign.Cohesion.CodeFixes.Database.csproj" />
@@ -469,4 +472,18 @@
     <Folder Name="/Database/Models/Blob/Assimalign.Cohesion.Database.Blob.Protocol/tests/">
         <Project Path="Assimalign.Cohesion.Database.Blob.Protocol/tests/Assimalign.Cohesion.Database.Blob.Protocol.Tests.csproj" />
     </Folder>
+  <Folder Name="/Database/Kernel/Assimalign.Cohesion.Database.Tcp/tests/">
+    <Project Path="Assimalign.Cohesion.Database.Tcp/tests/Assimalign.Cohesion.Database.Tcp.Tests.csproj" />
+  </Folder>
+  <Folder Name="/Database/Kernel/Assimalign.Cohesion.Database.Tcp/samples/">
+    <Project Path="Assimalign.Cohesion.Database.Tcp/samples/Assimalign.Cohesion.Database.Tcp.AotSample/Assimalign.Cohesion.Database.Tcp.AotSample.csproj" />
+  </Folder>
+	<Folder Name="/Database/Core/Assimalign.Cohesion.Database.Testing/fixtures/Assimalign.Cohesion.Database.TcpSdkHost/">
+		<Project Path="Assimalign.Cohesion.Database.Testing/fixtures/Assimalign.Cohesion.Database.TcpSdkHost/Assimalign.Cohesion.Database.TcpSdkHost.csproj" />
+		<File Path="Assimalign.Cohesion.Database.Testing/fixtures/Assimalign.Cohesion.Database.TcpSdkHost/README.md" />
+	</Folder>
+	<Folder Name="/Database/Core/Assimalign.Cohesion.Database.Testing/fixtures/Assimalign.Cohesion.Database.TcpSdkHost/docs/">
+		<File Path="Assimalign.Cohesion.Database.Testing/fixtures/Assimalign.Cohesion.Database.TcpSdkHost/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.Database.Testing/fixtures/Assimalign.Cohesion.Database.TcpSdkHost/docs/OVERVIEW.md" />
+	</Folder>
 </Solution>

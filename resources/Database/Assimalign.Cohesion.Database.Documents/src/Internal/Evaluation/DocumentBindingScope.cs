@@ -1,5 +1,7 @@
 namespace Assimalign.Cohesion.Database.Documents.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("DocumentBindingScope")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Documents.Internal.DocumentBindingScope.DebugView))]
 internal sealed class DocumentBindingScope
 {
     private readonly string _name;
@@ -19,5 +21,13 @@ internal sealed class DocumentBindingScope
             if (scope._name == name) { return scope; }
         }
         return null;
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Documents.Internal.DocumentBindingScope value)
+        {
+            _ = value;
+        }
     }
 }

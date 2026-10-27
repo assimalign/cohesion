@@ -17,13 +17,13 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 /// Phase E2 part 2: what a stored or declared definition does with the engine's functions. A
 /// compiled schema's <c>table.Check(name, sql)</c> binds to the frozen catalog in the build's phase 3,
 /// before any file is touched (owner decision 64); a stored CHECK that calls a function the opening
-/// engine does not register opens, keeps its reads and fails each write with <c>COHSQLE009</c>, and
+/// engine does not register opens, keeps its reads and fails each write with <c>CS01009</c>, and
 /// fails the build of an engine that declares its database (decision 65); and
 /// <c>COHESION_SCHEMA.FUNCTIONS</c> lists the catalog and the special forms (decision 66).
 /// </summary>
 public sealed partial class SqlFunctionExtensibilityTests
 {
-    private const string UnregisteredFunction = "COHSQLE009";
+    private const string unregisteredFunction = "CS01009";
 
     /// <summary>
     /// A declared CHECK over a registered immutable function provisions as a schema-owned constraint,
@@ -78,7 +78,7 @@ public sealed partial class SqlFunctionExtensibilityTests
 
     /// <summary>
     /// The build binds every declared CHECK to the frozen catalog in phase 3 and refuses one that does
-    /// not bind with <c>COHSQLP001</c>, naming the engine, the database, the table and the constraint,
+    /// not bind with <c>CS03101</c>, naming the engine, the database, the table and the constraint,
     /// before the engine exists, so no file is touched.
     /// </summary>
     /// <param name="predicate">The declared predicate.</param>
@@ -94,9 +94,9 @@ public sealed partial class SqlFunctionExtensibilityTests
         "Function 'is_email_volatile' is VOLATILE, and a CHECK admits only IMMUTABLE functions. Register the function as " +
         "SqlFunctionVolatility.Immutable if its result depends on nothing but its arguments.")]
     [InlineData("is_email(Email, 1)",
-        "COHSQLE006: Function 'is_email' takes exactly 1 argument but was called with 2. Accepted: is_email(TEXT).")]
+        "CS01006: Function 'is_email' takes exactly 1 argument but was called with 2. Accepted: is_email(TEXT).")]
     [InlineData("is_email(Id)",
-        "COHSQLE006: Function 'is_email' has no overload that accepts argument types (BIGINT). Accepted: is_email(TEXT).")]
+        "CS01006: Function 'is_email' has no overload that accepts argument types (BIGINT). Accepted: is_email(TEXT).")]
     [InlineData("Id > 0) OR (1 = 1", "its SQL text 'Id > 0) OR (1 = 1' is not exactly one SQL expression (")]
     [InlineData("Id > 0 ORDER BY Id", "its SQL text 'Id > 0 ORDER BY Id' is not exactly one SQL expression (")]
     [InlineData("COUNT(Id) > 0", "Function 'COUNT' is not supported in CHECK.")]
@@ -118,14 +118,14 @@ public sealed partial class SqlFunctionExtensibilityTests
             var failure = await Should.ThrowAsync<SqlSchemaMigrationException>(async () => await builder.BuildAsync());
 
             // Assert
-            if (reason.StartsWith("COHSQLE006: ", StringComparison.Ordinal))
+            if (reason.StartsWith("CS01006: ", StringComparison.Ordinal))
             {
-                failure.ShouldHaveDiagnostic("COHSQLE006");
-                reason = reason["COHSQLE006: ".Length..];
+                failure.ShouldHaveDiagnostic("CS01006");
+                reason = reason["CS01006: ".Length..];
             }
 
             failure.Message.ShouldStartWith(
-                "COHSQLP001: SQL engine 'sql-functions' cannot provision database 'shop': CHECK constraint 'ck_email' on table " +
+                "CS03101: SQL engine 'sql-functions' cannot provision database 'shop': CHECK constraint 'ck_email' on table " +
                 $"'customers' does not bind: {reason}", Case.Sensitive);
             failure.Message.ShouldEndWith(" Nothing was opened or written.", Case.Sensitive);
             failure.InnerException.ShouldBeAssignableTo<DatabaseException>();
@@ -141,17 +141,17 @@ public sealed partial class SqlFunctionExtensibilityTests
     /// <summary>
     /// A stored CHECK whose function the opening engine does not resolve binds as unresolved (owner
     /// decision 65): the database opens and its reads proceed; a write that would evaluate the CHECK
-    /// fails with <c>COHSQLE009</c> naming the function, the table and the constraint, on a session
+    /// fails with <c>CS01009</c> naming the function, the table and the constraint, on a session
     /// that stays usable; a DELETE, an unrelated DROP COLUMN and the constraint's own DROP still run,
     /// after which the table accepts writes again.
     /// </summary>
     /// <param name="registration">How the reopening engine registers <c>is_email</c>.</param>
     /// <param name="reason">The reason the failure gives.</param>
-    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Functions: a stored CHECK over a function the engine no longer registers opens and refuses writes with COHSQLE009")]
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Functions: a stored CHECK over a function the engine no longer registers opens and refuses writes with CS01009")]
     [InlineData("none", "which this engine does not register")]
     [InlineData("aggregate", "which this engine registers as an aggregate")]
     [InlineData("other-signature",
-        "which no overload this engine registers accepts (COHSQLE006: Function 'is_email' has no overload that accepts argument types (TEXT). " +
+        "which no overload this engine registers accepts (CS01006: Function 'is_email' has no overload that accepts argument types (TEXT). " +
         "Accepted: is_email(BIGINT).)")]
     public async Task Open_StoredCheckOverUnregisteredFunction_ShouldOpenReadAndRefuseWrites(string registration, string reason)
     {
@@ -187,7 +187,7 @@ public sealed partial class SqlFunctionExtensibilityTests
             await ExecuteAsync(session, "INSERT INTO customers (id, email) VALUES (3, 'nobody')");
 
             // Assert
-            string expected = $"{UnregisteredFunction}: CHECK constraint 'ck_email' on table 'dbo.customers' calls function 'is_email(TEXT)', " +
+            string expected = $"{unregisteredFunction}: CHECK constraint 'ck_email' on table 'dbo.customers' calls function 'is_email(TEXT)', " +
                 $"{reason}, so the constraint cannot be evaluated and the write is refused. Register the function on the engine's builder " +
                 "(SqlDatabaseEngineBuilder.Functions), or drop the constraint.";
             rows.ShouldBe([[1L, "ann@example.com"]]);
@@ -205,14 +205,14 @@ public sealed partial class SqlFunctionExtensibilityTests
     /// An application that keeps a registered function's name and parameters but changes its result
     /// type changed its code, not the catalog (owner decision 65): a stored CHECK whose call no longer
     /// fits (a BOOLEAN predicate, a comparison) opens and serves reads, each write that would evaluate
-    /// it fails with <c>COHSQLE009</c> naming the call and what it now returns, dropping the CHECK
+    /// it fails with <c>CS01009</c> naming the call and what it now returns, dropping the CHECK
     /// restores writes, and an engine that declares the database fails its build with the same code.
     /// </summary>
     /// <param name="change">How the reopening engine registers the function.</param>
     /// <param name="check">The stored predicate.</param>
     /// <param name="signature">The call as the failure names it.</param>
     /// <param name="reason">The reason the failure gives.</param>
-    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Functions: a stored CHECK over a function whose result type changed opens and refuses writes with COHSQLE009")]
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Functions: a stored CHECK over a function whose result type changed opens and refuses writes with CS01009")]
     [InlineData("text", "is_email(email)", "is_email(TEXT)", "which this engine registers returning TEXT, where the CHECK needs BOOLEAN")]
     [InlineData("anyelement", "is_email(email)", "is_email(TEXT)", "whose recorded identity 'IS_EMAIL(TEXT)' this engine does not register")]
     [InlineData("score-text", "score(email) < 100", "score(TEXT)",
@@ -247,7 +247,7 @@ public sealed partial class SqlFunctionExtensibilityTests
             // Assert
             rows.ShouldBe([[1L, "ann@example.com"]]);
             insert.ShouldHaveMessage(
-                $"{UnregisteredFunction}: CHECK constraint 'ck_email' on table 'dbo.customers' calls function '{signature}', {reason}, so the " +
+                $"{unregisteredFunction}: CHECK constraint 'ck_email' on table 'dbo.customers' calls function '{signature}', {reason}, so the " +
                 "constraint cannot be evaluated and the write is refused. Register the function on the engine's builder " +
                 "(SqlDatabaseEngineBuilder.Functions), or drop the constraint.");
         }
@@ -259,10 +259,10 @@ public sealed partial class SqlFunctionExtensibilityTests
 
     /// <summary>
     /// A declaring build verifies stored definitions whose function changed its result as it verifies
-    /// missing ones (step 6, owner decision 65): the build fails with <c>COHSQLE009</c> and the engine
+    /// missing ones (step 6, owner decision 65): the build fails with <c>CS01009</c> and the engine
     /// is disposed.
     /// </summary>
-    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Functions: a declaring build fails with COHSQLE009 when a stored CHECK's function changed its result")]
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Functions: a declaring build fails with CS01009 when a stored CHECK's function changed its result")]
     public async Task Build_DeclaredDatabaseWhoseCheckFunctionChangedItsResult_ShouldFailWithCohsqle009()
     {
         string root = NewRoot();
@@ -280,7 +280,7 @@ public sealed partial class SqlFunctionExtensibilityTests
 
             // Assert
             failure.ShouldStartWithMessage(
-                $"{UnregisteredFunction}: SQL engine 'sql-functions', database 'shop': CHECK constraint 'ck_email' on table 'dbo.customers' " +
+                $"{unregisteredFunction}: SQL engine 'sql-functions', database 'shop': CHECK constraint 'ck_email' on table 'dbo.customers' " +
                 "calls function 'is_email(TEXT)', which this engine registers returning TEXT, where the CHECK needs BOOLEAN.", Case.Sensitive);
         }
         finally
@@ -294,19 +294,19 @@ public sealed partial class SqlFunctionExtensibilityTests
     /// have called an application's overload of that name (DDL checks every call's arguments, #1189,
     /// and no format before the current one opens): once the next engine no longer registers the
     /// overload, the database opens and each write that would evaluate the CHECK fails with
-    /// <c>COHSQLE009</c>, as for any application function (owner decision 65).
+    /// <c>CS01009</c>, as for any application function (owner decision 65).
     /// </summary>
     /// <param name="stored">How the CHECK was stored: by DDL over the overload, or straight into the catalog.</param>
     /// <param name="predicate">The stored predicate.</param>
     /// <param name="signature">The call as the failure names it.</param>
     /// <param name="mismatch">The arity failure the reason quotes.</param>
-    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Functions: a stored call of a standard-library name no built-in takes opens and refuses writes with COHSQLE009")]
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Functions: a stored call of a standard-library name no built-in takes opens and refuses writes with CS01009")]
     [InlineData("ddl", "upper(email, 2) <> ''", "upper(TEXT, INTEGER)",
-        "COHSQLE006: Function 'upper' takes exactly 1 argument but was called with 2. Accepted: UPPER(TEXT).")]
+        "CS01006: Function 'upper' takes exactly 1 argument but was called with 2. Accepted: UPPER(TEXT).")]
     [InlineData("catalog", "ABS(id, 1) > 0", "ABS(BIGINT, INTEGER)",
-        "COHSQLE006: Function 'ABS' takes exactly 1 argument but was called with 2. Accepted: ABS(numeric).")]
+        "CS01006: Function 'ABS' takes exactly 1 argument but was called with 2. Accepted: ABS(numeric).")]
     [InlineData("catalog", "id > 0 AND UPPER(email, email) IS NOT NULL", "UPPER(TEXT, TEXT)",
-        "COHSQLE006: Function 'UPPER' takes exactly 1 argument but was called with 2. Accepted: UPPER(TEXT).")]
+        "CS01006: Function 'UPPER' takes exactly 1 argument but was called with 2. Accepted: UPPER(TEXT).")]
     public async Task Open_StoredStandardNameCallNoBuiltInTakes_ShouldOpenAndRefuseWrites(string stored, string predicate, string signature, string mismatch)
     {
         string root = NewRoot();
@@ -347,7 +347,7 @@ public sealed partial class SqlFunctionExtensibilityTests
             // Assert
             rows.ShouldBe([[1L]]);
             insert.ShouldHaveMessage(
-                $"{UnregisteredFunction}: CHECK constraint 'ck_email' on table 'dbo.customers' calls function '{signature}', which no overload " +
+                $"{unregisteredFunction}: CHECK constraint 'ck_email' on table 'dbo.customers' calls function '{signature}', which no overload " +
                 $"this engine registers accepts ({mismatch}), so the constraint cannot be evaluated and the write is refused. Register the " +
                 "function on the engine's builder (SqlDatabaseEngineBuilder.Functions), or drop the constraint.");
         }
@@ -387,11 +387,11 @@ public sealed partial class SqlFunctionExtensibilityTests
     /// <summary>
     /// An engine that declares the database verifies its stored definitions after provisioning
     /// (step 6, owner decision 65): one that calls a function the engine does not register fails the
-    /// build with <c>COHSQLE009</c>, naming the engine, the database, the table, the constraint and
+    /// build with <c>CS01009</c>, naming the engine, the database, the table, the constraint and
     /// the function, and the engine is disposed; nothing was damaged, so a build that registers the
     /// function again succeeds.
     /// </summary>
-    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Functions: an engine that declares a database whose stored CHECK it cannot resolve fails its build with COHSQLE009")]
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Functions: an engine that declares a database whose stored CHECK it cannot resolve fails its build with CS01009")]
     public async Task Build_DeclaredDatabaseWithUnresolvedStoredCheck_ShouldFailWithCohsqle009()
     {
         string root = NewRoot();
@@ -411,11 +411,11 @@ public sealed partial class SqlFunctionExtensibilityTests
 
             // Assert
             failure.ShouldHaveMessage(
-                $"{UnregisteredFunction}: SQL engine 'sql-functions', database 'shop': CHECK constraint 'ck_email' on table 'dbo.customers' " +
+                $"{unregisteredFunction}: SQL engine 'sql-functions', database 'shop': CHECK constraint 'ck_email' on table 'dbo.customers' " +
                 "calls function 'is_email(TEXT)', which this engine does not register. The engine declares this database, so its build " +
                 "fails before the engine accepts work: register the function on the engine's builder (SqlDatabaseEngineBuilder.Functions), " +
                 "or drop the constraint through an engine that does not declare the database.");
-            failure.InnerException.ShouldNotBeNull().ShouldStartWithMessage($"{UnregisteredFunction}: CHECK constraint 'ck_email'", Case.Sensitive);
+            failure.InnerException.ShouldNotBeNull().ShouldStartWithMessage($"{unregisteredFunction}: CHECK constraint 'ck_email'", Case.Sensitive);
             product.ShouldNotBeNull().State.ShouldBe(EngineState.Disposed);
             repaired.TryGetDatabase("shop", out SqlDatabase? shop).ShouldBeTrue();
             await using var session = await shop!.CreateSessionAsync(CancellationToken.None);
@@ -430,7 +430,7 @@ public sealed partial class SqlFunctionExtensibilityTests
 
     /// <summary>
     /// The imperative apply binds a schema's declared CHECKs before any step runs, as the build does,
-    /// and refuses one that does not bind with <c>COHSQLP005</c>.
+    /// and refuses one that does not bind with <c>CS03105</c>.
     /// </summary>
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Functions: an imperative apply refuses a declared CHECK that does not bind before any step")]
     public async Task ApplySchemaAsync_CheckThatDoesNotBind_ShouldBeRefusedBeforeAnyStep()
@@ -450,7 +450,7 @@ public sealed partial class SqlFunctionExtensibilityTests
 
         // Assert
         failure.Message.ShouldStartWith(
-            "COHSQLP005: SQL engine 'sql-functions', database 'shop': SQL schema 'shop': CHECK constraint 'ck_email' on table " +
+            "CS03105: SQL engine 'sql-functions', database 'shop': SQL schema 'shop': CHECK constraint 'ck_email' on table " +
             "'customers' does not bind: Function 'is_email_volatile' is VOLATILE", Case.Sensitive);
         failure.Message.ShouldEndWith(" Nothing was changed.", Case.Sensitive);
         shop.Catalog.Tables.ShouldBeEmpty();
@@ -519,7 +519,7 @@ public sealed partial class SqlFunctionExtensibilityTests
         folded.ShouldBe([[-42L, 5L, 7L], [-42L, 5L, 7L], [-42L, 5L, 7L]]);
         doubled.Calls.ShouldBe(1);
         overEmpty.ShouldBeEmpty();
-        overflow.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE002");
+        overflow.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS02002");
     }
 
     // A database 'shop' whose ad-hoc CHECK calls is_email, holding one row, written by an engine that

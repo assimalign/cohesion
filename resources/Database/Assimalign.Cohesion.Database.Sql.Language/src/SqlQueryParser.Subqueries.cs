@@ -7,7 +7,7 @@ using Assimalign.Cohesion.Database.Language;
 
 public sealed partial class SqlQueryParser
 {
-    private const int MaximumSubqueryDepth = 32;
+    private const int maximumSubqueryDepth = 32;
     private int _subqueryDepth;
     private int _paginationDepth;
     private string _paginationClause = "LIMIT or OFFSET";
@@ -38,14 +38,14 @@ public sealed partial class SqlQueryParser
         {
             AddUnsupportedSurfaceDiagnostic(lexer.Current.Position,
                 lexer.Current.Position + lexer.Current.Value.Length,
-                $"SQL subqueries in {_paginationClause} expressions are not supported.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlQueryParserParseSubqueryVoid, _paginationClause));
         }
 
-        if (_subqueryDepth >= MaximumSubqueryDepth)
+        if (_subqueryDepth >= maximumSubqueryDepth)
         {
             AddUnsupportedSurfaceDiagnostic(lexer.Current.Position,
                 lexer.Current.Position + lexer.Current.Value.Length,
-                $"SQL subquery nesting exceeds the supported limit of {MaximumSubqueryDepth} levels.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlQueryParserParseSubqueryVoid2, maximumSubqueryDepth));
 
             // Skip this query iteratively, leaving its closing parenthesis to the
             // caller. Never recurse into input beyond the declared depth limit.
@@ -71,7 +71,7 @@ public sealed partial class SqlQueryParser
                 null, null, false, null, null);
         }
 
-        // The subquery node (scalar, IN or EXISTS) encloses the query's clauses, so they parse
+        // The subquery node (scalar, IN, EXISTS or quantified) encloses the query's clauses, so they parse
         // one level deeper; the expression limit spans the whole statement (#1151).
         if (!TryEnterOperand(ref lexer))
         {
@@ -126,15 +126,7 @@ public sealed partial class SqlQueryParser
         }
 
         string token = CurrentText(ref lexer);
-        if ((token.Equals("ANY", StringComparison.OrdinalIgnoreCase) ||
-             token.Equals("ALL", StringComparison.OrdinalIgnoreCase) ||
-             token.Equals("SOME", StringComparison.OrdinalIgnoreCase)) &&
-            previousToken is "=" or "<>" or "!=" or "<" or ">" or "<=" or ">=" &&
-            TryPeekToken(lexer, out string next, out _) && next == "(")
-        {
-            clause = $"{token.ToUpperInvariant()} quantified comparison";
-        }
-        else if (token.Equals("LATERAL", StringComparison.OrdinalIgnoreCase) &&
+        if (token.Equals("LATERAL", StringComparison.OrdinalIgnoreCase) &&
                  (string.Equals(previousToken, "FROM", StringComparison.OrdinalIgnoreCase) ||
                   string.Equals(previousToken, "JOIN", StringComparison.OrdinalIgnoreCase) || previousToken == "," && followsFromComma))
         {

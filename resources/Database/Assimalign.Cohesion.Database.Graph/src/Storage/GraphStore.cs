@@ -13,15 +13,21 @@ using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Graph.Storage;
 
-/// <summary>Transactional graph records, label postings, adjacency, and exact node-property indexes over a shared coordinator.</summary>
+/// <summary>Transactional graph records, label and relationship-type postings, adjacency, and exact node-property indexes over a shared coordinator.</summary>
 /// <remarks>
 /// <b>Shape (concrete-types plan, phase 4, #1260).</b> One sealed type with a private constructor
 /// behind <see cref="Open"/>: it replaces the former <c>IGraphStore</c> interface, the
 /// <c>GraphStore</c> static factory and their internal implementation (the triplet of
 /// <c>database-area.md</c> rule 1).
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("GraphStore")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Storage.GraphStore.DebugView))]
 public sealed partial class GraphStore
 {
+    private static readonly string _errorGraphStoreEnsureUnchangedFailure = ErrorMessages.GraphStoreEnsureUnchangedFailure;
+
+    private static readonly string _errorGraphStoreLockAsyncFailure2 = ErrorMessages.GraphStoreLockAsyncFailure2;
+
     private readonly GraphStorage _storage;
     private readonly TransactionCoordinator _coordinator;
     private readonly object _sync = new();
@@ -40,7 +46,7 @@ public sealed partial class GraphStore
         while (iterator.MoveNext())
         {
             var unit = iterator.Current;
-            var record = GraphRecordCodec.Decode(unit.Data);
+            var record = GraphRecordCodec.Decode(unit.Data, unit.PageId, unit.SlotIndex);
             var (writer, _) = RecordVersionStamp.ReadStamps(unit.Data.Span);
             Add(record, GraphStorage.PackLocation(unit.PageId, unit.SlotIndex), writer, prune: false);
             if (record.Kind == 3) { _definitionIds.Add(record.Id); }
@@ -52,7 +58,7 @@ public sealed partial class GraphStore
             var ordered = new List<Reference> { versions.Head };
             for (var older = versions.Older; older is not null; older = older.Next) { ordered.Add(older.Reference); }
             ordered.Sort((left, right) => right.Revision.CompareTo(left.Revision));
-            versions = new VersionChain { Head = ordered[0] };
+            versions = new VersionChain { Head = ordered[0], RelationshipType = versions.RelationshipType };
             for (int i = ordered.Count - 1; i > 0; i--) { versions.Older = new History(ordered[i], versions.Older); }
             _records[key] = versions;
         }
@@ -72,7 +78,7 @@ public sealed partial class GraphStore
     }
 
     /// <summary>
-    /// Checks graph record format 4 and that every index tree the storage registers is in the B-tree page format
+    /// Checks graph record format 5 and that every index tree the storage registers is in the B-tree page format
     /// this engine reads (<see cref="BTreeIndexManager.FormatVersion"/>), reading record
     /// headers, registrations and each tree's root page. An engine calls it before the
     /// coordinator's recovery scrub, so a database whose indexes it cannot read is
@@ -83,12 +89,16 @@ public sealed partial class GraphStore
     /// <param name="storage">Graph file set.</param>
     /// <exception cref="ArgumentNullException"><paramref name="storage"/> is null.</exception>
     /// <exception cref="IndexFormatException">An index tree is in another B-tree page format.</exception>
-    /// <exception cref="StorageCorruptionException">A graph record or registration has an unsupported format (<c>COHDBG017</c>), or a persisted index registration is malformed.</exception>
+    /// <exception cref="StorageCorruptionException">A graph record or registration has an unsupported format (<c>CG06017</c>), or a persisted index registration is malformed.</exception>
     public static void EnsureIndexFormat(GraphStorage storage)
     {
         ArgumentNullException.ThrowIfNull(storage);
         using var records = storage.GetUnitIterator(2);
-        while (records.MoveNext()) { GraphRecordCodec.EnsureFormat(records.Current.Data.Span); }
+        while (records.MoveNext())
+        {
+            var record = records.Current;
+            GraphRecordCodec.EnsureFormat(record.Data.Span, record.PageId, record.SlotIndex);
+        }
         BTreeIndexManager.EnsureFormat(storage, ReadRegistrations(storage).Select(entry => entry.Registration));
     }
 
@@ -161,7 +171,20 @@ public sealed partial class GraphStore
             .Select(node => node!.Value).OrderBy(node => node.Id).ToArray();
     }
 
-    /// <summary>Atomically creates a relationship and both endpoint adjacency entries.</summary>
+    internal IEnumerable<StoredGraphNode> StreamAllNodes(TransactionSnapshot snapshot, CancellationToken token,
+        Action visit, Action<long> reserve)
+    {
+        var ids = Ids(1, reserve);
+        Array.Sort(ids);
+        foreach (ulong id in ids)
+        {
+            token.ThrowIfCancellationRequested();
+            visit();
+            if (FindNode(id, snapshot) is { } node) { yield return node; }
+        }
+    }
+
+    /// <summary>Atomically creates a relationship, its type posting and both endpoint adjacency entries.</summary>
     /// <param name="relationship">The complete relationship with an identity reserved from the backing storage.</param>
     /// <param name="typeId">The stable catalog identity of the relationship type; never a name hash. The store does not verify that this identity matches <c>relationship.Type</c>; the engine resolves it from the catalog.</param>
     /// <param name="context">Owning transaction.</param><param name="cancellationToken">Cancellation token.</param><returns>The created relationship.</returns>
@@ -188,7 +211,7 @@ public sealed partial class GraphStore
         { throw new TransactionAbortedException(ErrorMessages.EndpointDeleted); }
         if (FindNode(sourceId, latest) is null || FindNode(targetId, latest) is null)
         {
-            throw new InvalidOperationException("A relationship requires two visible existing endpoints.");
+            throw new InvalidOperationException(ErrorMessages.StoreCreateRelationshipAsyncFailure);
         }
         ulong id = relationship.Id;
         EnsureNew(2, id);
@@ -197,8 +220,10 @@ public sealed partial class GraphStore
         var inserted = await ApplyAsync(context, async bracket =>
         {
             await EnsureAdjacencyAsync(context, cancellationToken).ConfigureAwait(false);
+            await EnsureRelationshipTypesAsync(context, cancellationToken).ConfigureAwait(false);
             var location = Insert(bracket, bytes, context);
             await InsertAdjacencyAsync(record, location, context, cancellationToken).ConfigureAwait(false);
+            await InsertRelationshipTypeAsync(record, location, context, cancellationToken).ConfigureAwait(false);
             SaveRegistrations(bracket);
             return location;
         }, cancellationToken).ConfigureAwait(false);
@@ -325,7 +350,7 @@ public sealed partial class GraphStore
         if (node is null) { return; }
         var incident = await GetIncidentAsync(id, Latest(context), cancellationToken).ConfigureAwait(false);
         foreach (var relationship in incident) { EnsureUnchanged(2, relationship.Id, context); }
-        if (incident.Count != 0 && !detach) { throw new InvalidOperationException("Cannot delete a connected node without DETACH DELETE."); }
+        if (incident.Count != 0 && !detach) { throw new InvalidOperationException(ErrorMessages.ConnectedNodeDeletion); }
         var indexes = Definitions(Latest(context));
         await ApplyAsync(context, async bracket =>
         {
@@ -348,7 +373,7 @@ public sealed partial class GraphStore
         }, cancellationToken).ConfigureAwait(false);
     }
 
-    /// <summary>Deletes a relationship and its adjacency entries atomically.</summary>
+    /// <summary>Deletes a relationship, its type posting and its adjacency entries atomically.</summary>
     /// <param name="id">Relationship identity.</param><param name="context">Owning transaction.</param><param name="cancellationToken">Cancellation token.</param><returns>A task representing deletion.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="context"/> is null.</exception>
     /// <exception cref="InvalidOperationException"><paramref name="context"/> is not active.</exception>
@@ -374,6 +399,7 @@ public sealed partial class GraphStore
         var relationship = found.Record.Relationship!.Value;
         await DeleteIndexEntryAsync(adjacencyId, AdjacencyKey(relationship.SourceId, GraphIncidentDirection.Outgoing, found.Record.TypeId, relationship.Id), found.Reference.Location, context, cancellationToken).ConfigureAwait(false);
         await DeleteIndexEntryAsync(adjacencyId, AdjacencyKey(relationship.TargetId, GraphIncidentDirection.Incoming, found.Record.TypeId, relationship.Id), found.Reference.Location, context, cancellationToken).ConfigureAwait(false);
+        await DeleteRelationshipTypeAsync(found.Record, found.Reference.Location, context, cancellationToken).ConfigureAwait(false);
         Tombstone(bracket, found.Reference, context);
     }
 
@@ -405,6 +431,7 @@ public sealed partial class GraphStore
         lock (_sync)
         {
             RememberLabels(record);
+            RememberRelationshipType(record);
             var next = new Reference(page, slot, writer, record.Revision);
             if (!_records.TryGetValue((record.Kind, record.Id), out var versions))
             { versions = new VersionChain { Head = next }; }
@@ -414,15 +441,18 @@ public sealed partial class GraphStore
                 versions.Older = new History(versions.Head, versions.Older);
                 versions.Head = next;
             }
+            versions.RelationshipType = record.Relationship?.Type;
             _records[(record.Kind, record.Id)] = versions;
             if (record.Kind == 3) { _definitionIds.Add(record.Id); }
         }
     }
 
-    private ulong[] Ids(byte kind)
+    private ulong[] Ids(byte kind, Action<long>? reserve = null)
     {
         lock (_sync)
         {
+            if (reserve is not null)
+            { reserve(32 + 8L * (kind == 3 ? _definitionIds.Count : _records.Keys.Count(key => key.Kind == kind))); }
             return kind == 3 ? _definitionIds.ToArray() : _records.Keys.Where(key => key.Kind == kind).Select(key => key.Id).ToArray();
         }
     }
@@ -441,7 +471,7 @@ public sealed partial class GraphStore
                 {
                     var (writer, deleter) = RecordVersionStamp.ReadStamps(bytes.Span);
                     if (snapshot.IsVisible(writer) && (deleter == TransactionSequence.None || !snapshot.IsVisible(deleter)))
-                    { return new Found(reference, DecodeRead(bytes)); }
+                    { return new Found(reference, DecodeRead(bytes, reference.PageId, reference.SlotIndex)); }
                     if (current is not null) { previous = current; }
                 }
                 else
@@ -470,10 +500,17 @@ public sealed partial class GraphStore
     private bool TryRead(Reference reference, byte kind, ulong id, out ReadOnlyMemory<byte> bytes)
     {
         if (!_storage.TryReadRecord(reference.PageId, reference.SlotIndex, 2, out bytes)) { return false; }
-        GraphRecordCodec.EnsureFormat(bytes.Span);
-        if (bytes.Length < 34) { throw new StorageCorruptionException(ErrorMessages.RecordTruncated); }
-        return RecordVersionStamp.ReadStamps(bytes.Span).Writer == reference.Writer && bytes.Span[16] == kind &&
-            BinaryPrimitives.ReadUInt64LittleEndian(bytes.Span.Slice(18, 8)) == id;
+        GraphRecordCodec.EnsureFormat(bytes.Span, reference.PageId, reference.SlotIndex);
+        if (bytes.Length < 34) { throw new StorageCorruptionException(reference.PageId, reference.SlotIndex, ErrorMessages.RecordTruncated); }
+        byte storedKind = bytes.Span[16];
+        ulong storedId = BinaryPrimitives.ReadUInt64LittleEndian(bytes.Span.Slice(18, 8));
+        if (storedKind is < 1 or > 3 || storedId == 0)
+        {
+            throw new StorageCorruptionException(reference.PageId, reference.SlotIndex, string.Format(
+                System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.RecordHeaderInvalid,
+                storedKind, storedId));
+        }
+        return RecordVersionStamp.ReadStamps(bytes.Span).Writer == reference.Writer && storedKind == kind && storedId == id;
     }
 
     private void Sweep(ref VersionChain versions, byte kind, ulong id)
@@ -491,18 +528,40 @@ public sealed partial class GraphStore
     }
 
     // The common single-version identity stores its reference directly in the dictionary.
+    [global::System.Diagnostics.DebuggerDisplay("VersionChain")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Storage.GraphStore.VersionChain.DebugView))]
     private struct VersionChain
     {
         internal Reference Head;
         internal History? Older;
         internal History? SweepPrevious;
+        // A relationship's type is immutable across all versions of its identity.
+        internal string? RelationshipType;
+
+        private sealed class DebugView
+        {
+            public DebugView(global::Assimalign.Cohesion.Database.Graph.Storage.GraphStore.VersionChain value)
+            {
+                _ = value;
+            }
+        }
     }
 
+    [global::System.Diagnostics.DebuggerDisplay("History")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Storage.GraphStore.History.DebugView))]
     private sealed class History
     {
         internal readonly Reference Reference;
         internal History? Next;
         internal History(Reference reference, History? next) { Reference = reference; Next = next; }
+
+        private sealed class DebugView
+        {
+            public DebugView(global::Assimalign.Cohesion.Database.Graph.Storage.GraphStore.History value)
+            {
+                _ = value;
+            }
+        }
     }
 
     private Found? ReadAt(ulong location, TransactionSnapshot snapshot, ulong? skipSourceId = null)
@@ -510,29 +569,29 @@ public sealed partial class GraphStore
         var (page, slot) = GraphStorage.UnpackLocation(location);
         // A reclaimed location reads as a stale reference; CRC and I/O errors propagate (#1342).
         if (!_storage.TryReadRecord(page, slot, 2, out var bytes)) { return null; }
-        if (bytes.Length < 26) { throw new StorageCorruptionException("Truncated graph record."); }
+        if (bytes.Length < 26) { throw new StorageCorruptionException(page, slot, ErrorMessages.RecordTruncated); }
         var (writer, deleter) = RecordVersionStamp.ReadStamps(bytes.Span);
         if (!snapshot.IsVisible(writer) || (deleter != TransactionSequence.None && snapshot.IsVisible(deleter))) { return null; }
-        GraphRecordCodec.EnsureFormat(bytes.Span);
+        GraphRecordCodec.EnsureFormat(bytes.Span, page, slot);
         // Both already returned self-loops in its outgoing pass. Inspect the fixed source
         // field instead of retaining a set proportional to the outgoing degree or decoding twice.
         if (skipSourceId is { } source && bytes.Length >= 50 && bytes.Span[16] == 2 &&
             BinaryPrimitives.ReadUInt64LittleEndian(bytes.Span.Slice(34, 8)) == source) { return null; }
-        var record = DecodeRead(bytes);
+        var record = DecodeRead(bytes, page, slot);
         return new Found(new Reference(page, slot, writer, record.Revision), record);
     }
 
     private async ValueTask LockAsync(TransactionContext context, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(context);
-        if (context.State != TransactionState.Active) { throw new InvalidOperationException("Graph mutation requires an active transaction."); }
+        if (context.State != TransactionState.Active) { throw new InvalidOperationException(ErrorMessages.GraphStoreLockAsyncFailure); }
         await _coordinator.LockManager.AcquireAsync(context.Sequence, LockResource.Database(), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (context.State != TransactionState.Active)
             {
-                throw new TransactionAbortedException("Graph transaction ended while waiting for the writer lock.");
+                throw new TransactionAbortedException(_errorGraphStoreLockAsyncFailure2);
             }
         }
         catch
@@ -551,7 +610,7 @@ public sealed partial class GraphStore
         var latest = Find(kind, id, Latest(context));
         if (prior?.Reference != latest?.Reference)
         {
-            throw new TransactionAbortedException("Graph write conflict: the addressed record changed after the transaction snapshot.");
+            throw new TransactionAbortedException(_errorGraphStoreEnsureUnchangedFailure);
         }
     }
 
@@ -561,10 +620,35 @@ public sealed partial class GraphStore
         catch { OpenIndexes(); throw; }
     }
 
+    [global::System.Diagnostics.DebuggerDisplay("Reference")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Storage.GraphStore.Reference.DebugView))]
     private readonly record struct Reference(PageId PageId, int SlotIndex, TransactionSequence Writer, ulong Revision)
     {
         internal ulong Location => GraphStorage.PackLocation(PageId, SlotIndex);
+
+        private sealed class DebugView
+        {
+            private readonly global::Assimalign.Cohesion.Database.Graph.Storage.GraphStore.Reference _target;
+
+            public DebugView(global::Assimalign.Cohesion.Database.Graph.Storage.GraphStore.Reference value)
+            {
+                _target = value;
+            }
+
+            public global::Assimalign.Cohesion.Database.Storage.PageId PageId => _target.PageId;
+            public int SlotIndex => _target.SlotIndex;
+            public global::Assimalign.Cohesion.Database.Transactions.TransactionSequence Writer => _target.Writer;
+            public ulong Revision => _target.Revision;
+        }
     }
 
     private readonly record struct Found(Reference Reference, GraphRecord Record);
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Graph.Storage.GraphStore value)
+        {
+            _ = value;
+        }
+    }
 }

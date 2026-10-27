@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Graph.Internal;
+using Assimalign.Cohesion.Database.Graph.Language;
 using Assimalign.Cohesion.Database.Types;
 using Assimalign.Cohesion.Database.Transactions;
 
@@ -30,7 +31,7 @@ namespace Assimalign.Cohesion.Database.Graph;
 /// <para>
 /// <b>A failed statement aborts the explicit transaction (#1188).</b> The transaction stays the
 /// session's transaction until the caller commits, rolls back or disposes it; the session then
-/// refuses every statement and BEGIN with <c>COHDBG007</c> until the caller rolls back. A failure
+/// refuses every statement and BEGIN with <c>CG04007</c> until the caller rolls back. A failure
 /// never turns later statements into autocommit writes. A statement holds the session (the base's
 /// operation hold) from its start to its end, so a second statement on the session is refused
 /// meanwhile, and so is a BEGIN.
@@ -45,8 +46,12 @@ namespace Assimalign.Cohesion.Database.Graph;
 /// typed with <c>new</c> members over the base's public members.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("GraphDatabaseSession")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.GraphDatabaseSession.DebugView))]
 public sealed class GraphDatabaseSession : DatabaseLanguageSession<GraphRequest>
 {
+    private static readonly string _errorSessionDisposeAsyncCoreDatabase = ErrorMessages.SessionDisposeAsyncCoreDatabase;
+
     private readonly GraphDatabase _database;
     private readonly object _sync = new();
 
@@ -84,9 +89,9 @@ public sealed class GraphDatabaseSession : DatabaseLanguageSession<GraphRequest>
     /// </exception>
     /// <exception cref="DatabaseException">
     /// The session is closed; a transaction or operation is already active on it; or the session's
-    /// transaction refuses work (<c>COHDBG007</c>).
+    /// transaction refuses work (<c>CG04007</c>).
     /// </exception>
-    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBG012</c>, #1243).</exception>
+    /// <exception cref="DatabaseOfflineException">The database is offline (<c>CG06012</c>, #1243).</exception>
     public new async ValueTask<GraphDatabaseTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default)
         => (GraphDatabaseTransaction)await base.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
 
@@ -106,10 +111,10 @@ public sealed class GraphDatabaseSession : DatabaseLanguageSession<GraphRequest>
     /// </exception>
     /// <exception cref="DatabaseException">
     /// The session is closed; a transaction or operation is already active on it; the session's
-    /// transaction refuses work (<c>COHDBG007</c>); or the graph engine does not support
+    /// transaction refuses work (<c>CG04007</c>); or the graph engine does not support
     /// <paramref name="isolationLevel"/>.
     /// </exception>
-    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBG012</c>, #1243).</exception>
+    /// <exception cref="DatabaseOfflineException">The database is offline (<c>CG06012</c>, #1243).</exception>
     /// <remarks>
     /// The base refuses a closed session and an active transaction or operation before the
     /// isolation level, the disposed database and the offline database are checked.
@@ -118,8 +123,9 @@ public sealed class GraphDatabaseSession : DatabaseLanguageSession<GraphRequest>
         => (GraphDatabaseTransaction)await base.BeginTransactionAsync(isolationLevel, cancellationToken).ConfigureAwait(false);
 
     /// <summary>
-    /// Parses and executes one statement. An aborted transaction refuses the statement before it is
-    /// parsed; a parse or request-validation failure aborts the explicit transaction exactly as an
+    /// Parses and executes one statement. An aborted transaction permits only ROLLBACK (or failed
+    /// COMMIT); other statements retain the transaction refusal, including malformed text. A parse or
+    /// request-validation failure aborts the explicit transaction exactly as an
     /// execution failure does, so every failed statement has one outcome. The wire server runs its
     /// statements through it.
     /// </summary>
@@ -130,7 +136,6 @@ public sealed class GraphDatabaseSession : DatabaseLanguageSession<GraphRequest>
     {
         ThrowIfNotOpen();
         _database.ThrowIfOffline();
-        ThrowIfTransactionRefuses();
         GraphRequest request;
         try
         {
@@ -138,6 +143,7 @@ public sealed class GraphDatabaseSession : DatabaseLanguageSession<GraphRequest>
         }
         catch (DatabaseException error)
         {
+            ThrowIfTransactionRefuses();
             await AbortTransactionAsync(error).ConfigureAwait(false);
             throw;
         }
@@ -153,13 +159,13 @@ public sealed class GraphDatabaseSession : DatabaseLanguageSession<GraphRequest>
     /// <returns>The explicit transaction the statement runs in, or null for autocommit.</returns>
     /// <exception cref="DatabaseException">
     /// The session is closed; another statement or a BEGIN holds it; or its transaction refuses
-    /// statements (<c>COHDBG007</c>).
+    /// statements (<c>CG04007</c>).
     /// </exception>
     internal GraphDatabaseTransaction? EnterOperation()
     {
         if (!TryEnterOperation())
         {
-            throw new DatabaseException("Dispose the active graph operation before starting another operation on this session.");
+            throw DatabaseException.CreateGraphFailure("CK07003", ErrorMessages.DatabaseSessionEnterOperationDatabase);
         }
 
         var transaction = CurrentTransaction;
@@ -262,7 +268,7 @@ public sealed class GraphDatabaseSession : DatabaseLanguageSession<GraphRequest>
     {
         if (isolationLevel is not (IsolationLevel.Snapshot or IsolationLevel.ReadCommitted))
         {
-            throw new DatabaseException("The graph engine supports Snapshot and ReadCommitted isolation.");
+            throw DatabaseException.CreateGraphFailure("CK04001", ErrorMessages.BeginTransactionCoreAsyncDatabase);
         }
 
         _database.EnsureNotDisposed();
@@ -297,8 +303,14 @@ public sealed class GraphDatabaseSession : DatabaseLanguageSession<GraphRequest>
     {
         _database.EnsureNotDisposed();
         _database.ThrowIfOffline();
+        if (request.Statement.GqlExpression.TransactionCommand != GqlTransactionCommand.None &&
+            !request.Statement.Diagnostics.Any(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error))
+        {
+            return ExecuteTransactionControlAsync(request, cancellationToken);
+        }
         return _database.RunAsync(this, operation =>
         {
+            StartQueryBudget(operation, request.Limits, request.Statement.GqlExpression.Location);
             // Error-recovery trees still go through the normal diagnostic refusal path.
             if (request.Statement.GqlExpression.IsExplain &&
                 !request.Statement.Diagnostics.Any(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error))
@@ -307,15 +319,63 @@ public sealed class GraphDatabaseSession : DatabaseLanguageSession<GraphRequest>
                 cancellationToken.ThrowIfCancellationRequested();
                 if (request.Paths)
                 {
-                    throw new GraphPlanningException("COHDBG001", "EXPLAIN returns rows and cannot run on ExecutePaths.", request.Statement.GqlExpression.Location);
+                    throw new GraphPlanningException("CG05001", ErrorMessages.SessionExecuteCoreAsyncGraphPlanning, request.Statement.GqlExpression.Location);
                 }
                 var planner = new GraphPlanner(_database, operation.Context.Snapshot);
                 var plan = planner.Plan(request.Statement.GqlExpression, request.Parameters);
-                return ValueTask.FromResult<DatabaseResult>(planner.Describe(plan));
+                return ValueTask.FromResult<DatabaseResult>(planner.Describe(plan, operation.QueryBudget));
             }
             return GraphPlanExecutor.ExecuteAsync(_database, operation, request.Statement,
                 request.Parameters, cancellationToken, paths: request.Paths, scalarsOnly: request.ScalarsOnly, compositeValues: request.CompositeValues);
         }, cancellationToken);
+    }
+
+    internal GraphPlanExecutor.ExpansionBudget? LastStatementMetrics { get; private set; }
+
+    private async ValueTask<DatabaseResult> ExecuteTransactionControlAsync(GraphRequest request, CancellationToken cancellationToken)
+    {
+        ThrowIfNotOpen();
+        cancellationToken.ThrowIfCancellationRequested();
+        var expression = request.Statement.GqlExpression;
+        if (request.Paths)
+        {
+            var error = new GraphPlanningException("CG05001", ErrorMessages.TransactionPathsInvalid, expression.Location);
+            await AbortTransactionAsync(error).ConfigureAwait(false);
+            throw error;
+        }
+        var transaction = CurrentTransaction;
+        if (expression.TransactionCommand == GqlTransactionCommand.Start)
+        {
+            ThrowIfTransactionRefuses();
+            if (transaction is not null)
+            {
+                var error = new GraphPlanningException("CG04022", ErrorMessages.TransactionAlreadyOpen, expression.Location);
+                await AbortTransactionAsync(error).ConfigureAwait(false);
+                throw error;
+            }
+            await BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+        }
+        else
+        {
+            if (transaction is null)
+            { throw new GraphPlanningException("CG04023", ErrorMessages.TransactionNotOpen, expression.Location); }
+            if (expression.TransactionCommand == GqlTransactionCommand.Commit)
+            { await transaction.CommitAsync(cancellationToken).ConfigureAwait(false); }
+            else { await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false); }
+        }
+        return new GraphMutationResult(0, []);
+    }
+    private readonly GraphQueryMemoryPool _queryMemoryPool = new();
+
+    internal GraphPlanExecutor.ExpansionBudget StartQueryBudget(GraphOperation operation, Assimalign.Cohesion.Database.Graph.Protocol.GraphQueryLimits? limits,
+        Assimalign.Cohesion.Database.Language.Location? location = null)
+    {
+        var options = _database.Engine.EngineOptions;
+        long memory = limits?.MemoryBytes ?? options.QueryMemoryBudget;
+        long work = limits?.WorkUnits ?? options.QueryWorkBudget;
+        if (memory <= 0 || work <= 0 || memory > options.QueryMemoryBudget || work > options.QueryWorkBudget)
+        { throw new GraphPlanningException("CG08021", ErrorMessages.QueryLimitsInvalid, location); }
+        return operation.QueryBudget = LastStatementMetrics = new GraphPlanExecutor.ExpansionBudget(work, memory, _queryMemoryPool);
     }
 
     /// <inheritdoc />
@@ -337,6 +397,7 @@ public sealed class GraphDatabaseSession : DatabaseLanguageSession<GraphRequest>
     /// </remarks>
     protected override async ValueTask DisposeAsyncCore()
     {
+        _queryMemoryPool.Dispose();
         GraphOperation? operation;
         lock (_sync)
         {
@@ -345,7 +406,19 @@ public sealed class GraphDatabaseSession : DatabaseLanguageSession<GraphRequest>
 
         if (operation is not null)
         {
-            await operation.AbortAsync(new DatabaseException("The graph session closed while the operation was running.")).ConfigureAwait(false);
+            await operation.AbortAsync(new DatabaseException(_errorSessionDisposeAsyncCoreDatabase)).ConfigureAwait(false);
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Graph.GraphDatabaseSession _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Graph.GraphDatabaseSession value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Graph.GraphDatabase Database => _target.Database;
     }
 }

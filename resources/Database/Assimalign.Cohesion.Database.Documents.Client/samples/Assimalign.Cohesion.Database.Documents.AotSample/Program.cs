@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Net;
 using System.Threading;
@@ -10,7 +11,10 @@ using Assimalign.Cohesion.Connections.InMemory;
 using Assimalign.Cohesion.Connections.Tcp;
 using Assimalign.Cohesion.Database.Client;
 using Assimalign.Cohesion.Database.Documents.Client;
+using Assimalign.Cohesion.Database.Documents.Catalog;
+using Assimalign.Cohesion.Database.Documents.Storage;
 using Assimalign.Cohesion.Database.Protocol;
+using Assimalign.Cohesion.Database.Transactions;
 
 using Assimalign.Cohesion.Database.Documents.Protocol;
 
@@ -25,6 +29,7 @@ internal static class Program
     {
         try
         {
+            await RunArrayCatalogAsync(CancellationToken.None);
             await RunAsync(false);
             await RunAsync(true);
             Console.WriteLine($"SUMMARY: {_passed} passed, 0 failed, 0 skipped");
@@ -36,6 +41,52 @@ internal static class Program
             Console.WriteLine($"SUMMARY: {_passed} passed, 1 failed, 0 skipped");
             return 1;
         }
+    }
+
+    private static async Task RunArrayCatalogAsync(CancellationToken cancellationToken = default)
+    {
+        using var storage = DocumentStorage.Create(new MemoryStream(), new MemoryStream(), new MemoryStream(), "array-aot");
+        await using var coordinator = new TransactionCoordinator(storage, storage.WriteAheadJournal, storage.Records);
+        var catalog = DocumentCatalog.Open(storage, coordinator);
+        var collection = new DocumentCollectionMetadata(Guid.NewGuid(), "items");
+        var writer = await coordinator.BeginAsync(IsolationLevel.Snapshot, cancellationToken);
+        await catalog.SaveCollectionAsync(collection, writer, cancellationToken);
+        var content = await storage.WriteContentAsync(coordinator, writer,
+            "{\"items\":[{\"price\":20,\"stock\":5},{\"price\":20.0,\"stock\":8},{\"price\":1,\"stock\":0}]}"u8.ToArray(), cancellationToken);
+        await catalog.SaveDocumentAsync(new DocumentCatalogEntry(collection.Id, "a", 1, content.Head, content.Length, content.Checksum), writer, cancellationToken);
+        var when = DocumentIndexPredicate.And(
+            DocumentIndexPredicate.Compare("stock", DocumentIndexComparison.GreaterThan, 0),
+            DocumentIndexPredicate.Not(DocumentIndexPredicate.IsNull("price")));
+        var definition = await catalog.CreateIndexAsync(collection.Id, "prices", [DocumentIndexKey.DistinctArray("items", "price", when)],
+            false, false, writer, cancellationToken);
+        await coordinator.CommitAsync(writer, cancellationToken);
+        var reader = await coordinator.BeginAsync(IsolationLevel.Snapshot, cancellationToken);
+        try
+        {
+            var matches = await catalog.SearchIndexAsync(collection.Id, "prices", 10m, false, null, false, reader.Snapshot, cancellationToken);
+            Check(matches.Count == 1 && matches[0].Id == "a", "catalog DISTINCT array candidate");
+            var reopened = DocumentCatalog.Open(storage, coordinator);
+            Check(reopened.GetIndexes(collection.Id, reader.Snapshot).Single() == definition, "catalog v3 descriptor round trip");
+            writer = await coordinator.BeginAsync(IsolationLevel.Snapshot, cancellationToken);
+            await catalog.DeleteDocumentAsync(collection.Id, "a", writer, cancellationToken);
+            await coordinator.RollbackAsync(writer, cancellationToken);
+            async Task<bool> HasPostingAsync()
+            {
+                var afterEnd = await coordinator.BeginAsync(IsolationLevel.Snapshot, cancellationToken);
+                try
+                {
+                    return (await catalog.SearchIndexAsync(collection.Id, "prices", 20m, true, 20m, true, afterEnd.Snapshot, cancellationToken)).Count == 1;
+                }
+                finally { await coordinator.RollbackAsync(afterEnd, CancellationToken.None); }
+            }
+            Check(await HasPostingAsync(),
+                "catalog array delete rollback");
+            writer = await coordinator.BeginAsync(IsolationLevel.Snapshot, cancellationToken);
+            await catalog.DeleteDocumentAsync(collection.Id, "a", writer, cancellationToken);
+            await coordinator.CommitAsync(writer, cancellationToken);
+            Check(!await HasPostingAsync(), "catalog array committed-delete negative control");
+        }
+        finally { await coordinator.RollbackAsync(reader, CancellationToken.None); }
     }
 
     private static async Task RunAsync(bool tcp)
@@ -55,8 +106,24 @@ internal static class Program
             listener = memory;
             factory = memory.CreateFactory();
         }
-        await using var engine = await DocumentDatabaseEngine.CreateBuilder("native-documents")
-            .AddDatabase("documents").AddServer(options => options.Listener = listener).BuildAsync(token);
+        var builder = DocumentDatabaseEngine.CreateBuilder("native-documents")
+            .AddDatabase("documents").AddServer(options => options.Listener = listener);
+        builder.Functions.Add(DocumentScalarFunction.Create<string, string>("lower_tag", value => value.ToLowerInvariant()));
+        builder.Functions.Add(DocumentAggregateFunction.Create<decimal, decimal, decimal>("rank_total",
+            () => 0m, (state, value) => state + value, state => state));
+        builder.Functions.Add(new HasValueFunction());
+        await using var engine = await builder.BuildAsync(token);
+        var database = await engine.OpenDatabaseAsync("documents", token);
+        await using (var session = await database.CreateSessionAsync(token))
+        {
+            await session.ExecuteAsync("BEGIN", cancellationToken: token);
+            Check(session.CurrentTransaction?.IsolationLevel == Transactions.IsolationLevel.Snapshot, "text default Snapshot");
+            await session.ExecuteAsync("ROLLBACK", cancellationToken: token);
+            await session.ExecuteAsync("START WORK ISOLATION LEVEL READ COMMITTED", cancellationToken: token);
+            Check(session.CurrentTransaction?.IsolationLevel == Transactions.IsolationLevel.ReadCommitted, "text ReadCommitted");
+            await session.ExecuteAsync("COMMIT TRAN", cancellationToken: token);
+            Check(session.CurrentTransaction is null, "text transaction ended");
+        }
         var server = (DocumentDatabaseServer)engine.Servers.Single();
         await server.StartAsync(token);
         await using var client = DocumentClient.Create(new()
@@ -66,6 +133,8 @@ internal static class Program
         });
         await using (var connection = await client.ConnectAsync(token))
         {
+            Check(await connection.ExecuteAsync("BEGIN", cancellationToken: token) == 0, "wire begin");
+            Check(await connection.ExecuteAsync("ROLLBACK", cancellationToken: token) == 0, "wire rollback");
             Check(await connection.ExecuteAsync("CREATE COLLECTION items", cancellationToken: token) == 0, "create collection");
             Check(await connection.ExecuteAsync("CREATE COLLECTION IF NOT EXISTS items", cancellationToken: token) == 0, "existing collection");
             Check(await connection.GetCollectionAsync("items", token) == "items", "get collection");
@@ -82,6 +151,16 @@ internal static class Program
             Check(functions["l"] is long length && length == 2, "scalar code points Int64");
             var count = await connection.QueryAsync("SELECT COUNT(*) AS n FROM items", cancellationToken: token);
             Check(count.Columns[0].Type == Assimalign.Cohesion.Database.Types.DatabaseType.Int64 && count.Single()[0] is long number && number == 1, "COUNT Int64");
+            var registered = await connection.QueryAsync(
+                "SELECT lower_tag('READY') AS tag, has_value(absent) AS missing_value, has_value(NULL) AS null_value, has_value(score) AS valued FROM items",
+                cancellationToken: token);
+            Check(registered.Count == 1 && registered.Columns[0].Type == Assimalign.Cohesion.Database.Types.DatabaseType.String &&
+                registered[0][0] is "ready", "registered typed scalar");
+            Check(registered.Columns.Skip(1).All(column => column.Type == Assimalign.Cohesion.Database.Types.DatabaseType.Boolean) &&
+                registered[0][1] is false && registered[0][2] is false && registered[0][3] is true, "registered MISSING-aware scalar");
+            var registeredTotal = await connection.QueryAsync("SELECT rank_total(score) AS total FROM items", cancellationToken: token);
+            Check(registeredTotal.Count == 1 && registeredTotal.Columns[0].Type == Assimalign.Cohesion.Database.Types.DatabaseType.Decimal &&
+                registeredTotal[0][0] is 3m, "registered typed aggregate");
             Check((await connection.GetAsync("items", "one", token))?.Version == saved.Version, "get version");
             var rows = await connection.QueryAsync("SELECT name, score + @offset AS n FROM items WHERE score >= 2 ORDER BY n DESC",
                 new Dictionary<string, object?> { ["offset"] = 4 }, token);
@@ -106,6 +185,13 @@ internal static class Program
             Check(unnested.Count == 2 && unnested[0].IsNull(0) && unnested[1][0] is 1m && unnested[1][1] is 1L, "UNNEST grouped rows");
             var quantified = await connection.QueryAsync("SELECT ANY x IN nested SATISFIES x = 1 END AS a, EVERY x IN nested SATISFIES x = 1 END AS e, 1 IN nested AS i FROM items", cancellationToken: token);
             Check(quantified[0][0] is true && quantified[0][1] is false && quantified[0][2] is true, "ANY EVERY array IN");
+            var comprehensions = await connection.QueryAsync("SELECT ARRAY x FOR x IN nested WHEN x IS VALUED END AS a, FIRST x FOR x IN [] END AS f, ARRAY lower_tag(x) FOR x IN ['READY'] END AS s FROM items", cancellationToken: token);
+            Check(comprehensions[0][0] is System.Text.Json.JsonElement array && array.GetArrayLength() == 1 && array[0].GetInt32() == 1, "ARRAY comprehension");
+            Check(comprehensions[0].IsMissing(1), "FIRST empty MISSING");
+            Check(comprehensions[0][2] is System.Text.Json.JsonElement mapped && mapped[0].GetString() == "ready", "comprehension registered mapping");
+            var comprehensionReturning = await connection.QueryAsync("INSERT INTO items (KEY, VALUE) VALUES ('comprehension', {nested:[1]}) RETURNING FIRST x FOR x IN nested END AS f", cancellationToken: token);
+            Check(comprehensionReturning.AffectedCount == 1 && comprehensionReturning[0][0] is 1m, "FIRST RETURNING");
+            Check(await connection.ExecuteAsync("DELETE FROM items WHERE META().id = 'comprehension'", cancellationToken: token) == 1, "comprehension cleanup");
             var synthetic = await connection.QueryAsync("SELECT * FROM items d UNNEST d.nested t", cancellationToken: token);
             Check(synthetic.IsDocumentQuery && synthetic.Documents.Count == 2 && synthetic.Documents[0].GetProperty("d").GetProperty("name").GetString() == "東京" &&
                 synthetic.Documents[0].GetProperty("t").GetInt32() == 1, "UNNEST synthetic documents");
@@ -114,10 +200,17 @@ internal static class Program
             var explained = await connection.QueryAsync("EXPLAIN SELECT score FROM items WHERE score >= 2", cancellationToken: token);
             Check(explained.IsDocumentQuery && explained.Documents.Any(document =>
                 document.GetProperty("operator").GetString() == "IndexSeek" && document.GetProperty("index").GetString() == "by_score" &&
-                document.GetProperty("estimated_rows").ValueKind == System.Text.Json.JsonValueKind.Null &&
+                document.GetProperty("estimated_rows").GetInt64() == 1 &&
                 document.GetProperty("actual_rows").ValueKind == System.Text.Json.JsonValueKind.Null), "EXPLAIN documents");
             Check((await connection.QueryAsync("SELECT * FROM COHESION_SCHEMA.INDEXES", cancellationToken: token)).Count == 1, "catalog");
             Check(await connection.ExecuteAsync("DROP INDEX by_score ON items", cancellationToken: token) == 0, "index drop");
+            Check(await connection.ExecuteAsync("CREATE INDEX by_nested ON items (DISTINCT ARRAY t FOR t IN nested WHEN t IS NOT NULL END)", cancellationToken: token) == 0, "array index DDL");
+            var arrayPlan = await connection.QueryAsync("EXPLAIN SELECT score FROM items WHERE ANY x IN nested SATISFIES x = 1 AND x IS NOT NULL END", cancellationToken: token);
+            Check(arrayPlan.Documents.Any(document => document.GetProperty("operator").GetString() == "IndexSeek" &&
+                document.GetProperty("detail").GetString()!.Contains("array_residual=True", StringComparison.Ordinal)), "array seek EXPLAIN");
+            Check((await connection.QueryAsync("SELECT score FROM items WHERE ANY x IN nested SATISFIES x = 1 AND x IS NOT NULL END", cancellationToken: token)).Count == 1, "array ANY residual");
+            Check((await connection.QueryAsync("SELECT t FROM items d UNNEST d.nested t WHERE t = 1 AND t IS NOT NULL", cancellationToken: token)).Count == 1, "array UNNEST seek");
+            Check(await connection.ExecuteAsync("DROP INDEX by_nested ON items", cancellationToken: token) == 0, "array index drop");
             Check(await connection.ExecuteAsync("CREATE UNIQUE INDEX by_name_score ON items (name,score)", cancellationToken: token) == 0, "composite unique create");
             Check(await connection.ExecuteAsync("CREATE INDEX IF NOT EXISTS by_name_score ON items (score)", cancellationToken: token) == 0, "index if not exists");
             Check((await connection.QueryAsync("SELECT score FROM items WHERE name = '東京' AND score >= 3", cancellationToken: token)).Count == 1, "composite seek");
@@ -129,7 +222,7 @@ internal static class Program
                 throw new InvalidOperationException("Unique index accepted a duplicate.");
             }
             catch (DocumentClientException exception)
-            { Check(exception.Code == ProtocolErrorCode.ExecutionFailure && exception.Diagnostics.Any(d => d.Code == "COHDOC020"), "unique execution failure"); }
+            { Check(exception.Code == ProtocolErrorCode.ExecutionFailure && exception.Diagnostics.Any(d => d.Code == "CD03020"), "unique execution failure"); }
             Check(await connection.ExecuteAsync("DROP INDEX IF EXISTS by_name_score ON items", cancellationToken: token) == 0, "conditional index drop");
             Check(await connection.ExecuteAsync("DROP INDEX IF EXISTS absent ON items", cancellationToken: token) == 0, "absent index drop");
             try
@@ -139,7 +232,7 @@ internal static class Program
             }
             catch (DocumentClientException exception)
             {
-                Check(exception.Code == ProtocolErrorCode.ParseFailure && exception.Diagnostics.Any(d => d.Code == "COHDBL001"), "typed diagnostics");
+                Check(exception.Code == ProtocolErrorCode.ParseFailure && exception.Diagnostics.Any(d => d.Code == "CK00001"), "typed diagnostics");
             }
             var paged = await connection.QueryAsync("SELECT name AS n FROM items ORDER BY n LIMIT @n OFFSET 0",
                 new Dictionary<string, object?> { ["n"] = 1 }, token);
@@ -168,7 +261,7 @@ internal static class Program
             }
             catch (DocumentClientException exception)
             {
-                Check(exception.Code == ProtocolErrorCode.ExecutionFailure && exception.Diagnostics.Any(d => d.Code == "COHDOC012"), "INSERT duplicate diagnostic");
+                Check(exception.Code == ProtocolErrorCode.ExecutionFailure && exception.Diagnostics.Any(d => d.Code == "CD03012"), "INSERT duplicate diagnostic");
             }
             Check(await connection.ExecuteAsync("DELETE FROM archive WHERE META().id = 'e'", cancellationToken: token) == 1, "DELETE META affected count");
             Check(await connection.GetAsync("archive", "e", token) is null, "DELETE readback");
@@ -185,7 +278,7 @@ internal static class Program
             }
             catch (DocumentClientException exception)
             {
-                Check(exception.Code == ProtocolErrorCode.ExecutionFailure && exception.Diagnostics.Any(d => d.Code == "COHDOC016"), "UPDATE path diagnostic");
+                Check(exception.Code == ProtocolErrorCode.ExecutionFailure && exception.Diagnostics.Any(d => d.Code == "CD02016"), "UPDATE path diagnostic");
             }
             var deletePlan = await connection.QueryAsync("EXPLAIN DELETE FROM archive WHERE amount >= 1", cancellationToken: token);
             Check(deletePlan.Documents.Any(document => document.GetProperty("operator").GetString() == "Delete" &&
@@ -206,17 +299,63 @@ internal static class Program
             }
             catch (DocumentClientException exception)
             {
-                Check(exception.Code == ProtocolErrorCode.ExecutionFailure && exception.Diagnostics.Any(d => d.Code == "COHDOC008"), "UPSERT invalid key");
+                Check(exception.Code == ProtocolErrorCode.ExecutionFailure && exception.Diagnostics.Any(d => d.Code == "CD02008"), "UPSERT invalid key");
             }
             Check(await connection.ExecuteAsync("UPSERT INTO items (KEY k, VALUE v) SELECT META().id AS k, 1 AS v FROM items", cancellationToken: token) == 3, "UPSERT SELECT session reuse");
+            var insertedRows = await connection.QueryAsync("INSERT INTO items AS d (KEY, VALUE) VALUES ('returned', {n:1}) RETURNING META(d).id AS id, META(d).version AS version, d.n AS n", cancellationToken: token);
+            var insertedImage = await connection.GetAsync("items", "returned", token);
+            Check(insertedRows.AffectedCount == 1 && insertedRows.Count == 1 && insertedRows[0]["id"] is "returned" &&
+                insertedRows[0]["version"] is decimal version && version == insertedImage.GetValueOrDefault().Version.Value, "INSERT RETURNING stored metadata");
+            var upsertRows = await connection.QueryAsync("UPSERT INTO items (KEY, VALUE) VALUES ('returned', {n:2}) RETURNING RAW items.n", cancellationToken: token);
+            Check(upsertRows.AffectedCount == 1 && upsertRows.Documents[0].GetInt32() == 2, "UPSERT RETURNING RAW");
+            var updateRows = await connection.QueryAsync("UPDATE items SET n = 3 WHERE META().id = 'returned' RETURNING VALUE n", cancellationToken: token);
+            Check(updateRows.AffectedCount == 1 && updateRows.Documents[0].GetInt32() == 3, "UPDATE RETURNING post-image");
+            try
+            {
+                await connection.QueryAsync("DELETE FROM items WHERE META().id = 'returned' RETURNING 1 / 0", cancellationToken: token);
+                throw new InvalidOperationException("RETURNING projection failure succeeded.");
+            }
+            catch (DocumentClientException exception)
+            { Check(exception.Diagnostics.Any(d => d.Code == "CD02006"), "RETURNING projection rollback diagnostic"); }
+            Check(await connection.GetAsync("items", "returned", token) is not null, "RETURNING projection rollback preserved document");
+            var deleteRows = await connection.QueryAsync("DELETE FROM items WHERE META().id = 'returned' RETURNING *", cancellationToken: token);
+            Check(deleteRows.AffectedCount == 1 && deleteRows.Documents[0].GetProperty("n").GetInt32() == 3, "DELETE RETURNING pre-image");
             Check(await connection.ExecuteAsync("DROP COLLECTION items", cancellationToken: token) == 0, "OQL drop collection");
             Check(await connection.ExecuteAsync("DROP COLLECTION IF EXISTS items", cancellationToken: token) == 0, "absent collection");
+            await connection.CreateCollectionAsync("intersection", token);
+            await connection.ExecuteAsync("INSERT INTO intersection (KEY, VALUE) VALUES " + string.Join(',', Enumerable.Range(0, 200)
+                .Select(i => $"('{i:D3}',{{'a':{(i < 100 ? 1 : 0)},'b':{(i is >= 99 and < 199 ? 1 : 0)}}})")), cancellationToken: token);
+            await connection.ExecuteAsync("CREATE INDEX by_a ON intersection(a)", cancellationToken: token);
+            await connection.ExecuteAsync("CREATE INDEX by_b ON intersection(b)", cancellationToken: token);
+            const string intersectionQuery = "SELECT META().id AS id FROM intersection WHERE a=1 AND b=1";
+            var intersected = await connection.QueryAsync(intersectionQuery, cancellationToken: token);
+            Check(intersected.Count == 1 && intersected[0]["id"] is "099", "intersection result");
+            var intersectionPlan = await connection.QueryAsync("EXPLAIN " + intersectionQuery, cancellationToken: token);
+            Check(intersectionPlan.Documents.Any(document => document.GetProperty("operator").GetString() == "IndexIntersection" &&
+                document.GetProperty("estimated_rows").GetInt64() == 100 &&
+                document.GetProperty("detail").GetString() == "inputs=2; estimate_kind=upper_bound") &&
+                intersectionPlan.Documents.Count(document => document.GetProperty("operator").GetString() == "IndexSeek") == 2 &&
+                intersectionPlan.Documents.All(document => document.GetProperty("actual_rows").ValueKind == System.Text.Json.JsonValueKind.Null),
+                "intersection EXPLAIN estimates");
+            var unaffected = await connection.QueryAsync("SELECT COUNT(*) AS n FROM intersection", cancellationToken: token);
+            Check(unaffected[0]["n"] is 200L, "intersection EXPLAIN has no effects");
+            await connection.ExecuteAsync("DROP COLLECTION intersection", cancellationToken: token);
             Check((await connection.GetCollectionsAsync(token)).Count == 0, "drop collection");
+            await connection.CreateCollectionAsync("reset", token);
+            await connection.ExecuteAsync("BEGIN", cancellationToken: token);
+            await connection.PutAsync("reset", "pending", "{}"u8.ToArray(), cancellationToken: token);
         }
         var sessionId = server.Sessions.Single().Id;
         await using (var rented = await client.ConnectAsync(token))
         {
-            Check((await rented.GetCollectionsAsync(token)).Count == 0 && server.Sessions.Single().Id == sessionId, "pooled connection");
+            Check(server.Sessions.Single().Id == sessionId && server.Sessions.Single().DatabaseSession!.CurrentTransaction is null, "pooled transaction reset");
+            Check(await rented.GetAsync("reset", "pending", token) is null, "pooled rollback removed writes");
+            await rented.ExecuteAsync("START TRANSACTION ISOLATION LEVEL READ COMMITTED", cancellationToken: token);
+            await rented.PutAsync("reset", "committed", "{}"u8.ToArray(), cancellationToken: token);
+            await rented.ExecuteAsync("COMMIT", cancellationToken: token);
+            Check(await rented.GetAsync("reset", "committed", token) is not null, "wire commit retained writes");
+            await rented.DropCollectionAsync("reset", token);
+            Check((await rented.GetCollectionsAsync(token)).Count == 0, "pooled connection");
         }
     }
 

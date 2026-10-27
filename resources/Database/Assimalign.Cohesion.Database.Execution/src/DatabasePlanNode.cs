@@ -21,4 +21,10 @@ public sealed class DatabasePlanNode
 
     /// <summary>Gets model-specific details, including seek bounds when present.</summary>
     public string? Detail { get; init; }
+
+    /// <summary>Gets the model's candidate-row estimate, or null when unavailable. Details identify incomplete bounds.</summary>
+    public long? EstimatedRows { get; init; }
+
+    /// <summary>Gets observed candidate work for an executed description, or null when unmeasured.</summary>
+    public long? ActualRows { get; init; }
 }

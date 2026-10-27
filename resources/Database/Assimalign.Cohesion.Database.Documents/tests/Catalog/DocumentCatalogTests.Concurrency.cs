@@ -7,6 +7,8 @@ using Xunit;
 
 using Assimalign.Cohesion.Database.Transactions;
 
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
+
 namespace Assimalign.Cohesion.Database.Documents.Catalog.Tests;
 
 public sealed partial class DocumentCatalogTests
@@ -45,7 +47,7 @@ public sealed partial class DocumentCatalogTests
             catch (OperationCanceledException) when (stop.IsCancellationRequested) { }
         }
 
-        var writerTask = Task.Run(() => Run(async () =>
+        var writerTask = DedicatedTestTask.Run(() => Run(async () =>
         {
             var writer = await coordinator.BeginAsync(IsolationLevel.Snapshot, stop.Token);
             try
@@ -64,7 +66,7 @@ public sealed partial class DocumentCatalogTests
                 if (writer.State == TransactionState.Active) { await coordinator.RollbackAsync(writer); }
             }
         }), CancellationToken.None);
-        var readerTask = Task.Run(() => Run(async () =>
+        var readerTask = DedicatedTestTask.Run(() => Run(async () =>
         {
             var reader = await coordinator.BeginAsync(IsolationLevel.Snapshot, stop.Token);
             try
@@ -75,7 +77,7 @@ public sealed partial class DocumentCatalogTests
             }
             finally { await coordinator.RollbackAsync(reader); }
         }), CancellationToken.None);
-        var purgeTask = Task.Run(() => Run(() =>
+        var purgeTask = DedicatedTestTask.Run(() => Run(() =>
         {
             Interlocked.Add(ref purged, catalog.RunVersionPurgePass(stop.Token));
             Interlocked.Increment(ref passes);

@@ -18,8 +18,20 @@ namespace Assimalign.Cohesion.Database.Documents;
 /// or <see cref="DocumentDatabaseEngine.Create(string, DocumentDatabaseEngineOptions)"/> (owner decision 52 of
 /// 2026-10-09).
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("DocumentDatabaseEngineOptions")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Documents.DocumentDatabaseEngineOptions.DebugView))]
 public sealed class DocumentDatabaseEngineOptions
 {
+    /// <summary>
+    /// Gets or sets the maximum retained memory charged to a statement's RETURNING rows.
+    /// Defaults to 64 MiB and must be positive. Charges include row storage, scalar values,
+    /// JSON clones (128 bytes plus UTF-8 length plus 12 bytes per JSON token), and
+    /// preserved whole-document bytes. A lone star retains one clone and one raw image;
+    /// each representation is charged once. JSON measurement allocates no text copy.
+    /// Exhaustion fails the statement and rolls back its writes with CD05018.
+    /// </summary>
+    public long StatementMemoryBudget { get; set; } = 64L * 1024 * 1024;
+
     /// <summary>
     /// Gets or sets how commits reach stable storage. When unset, opening a
     /// database selects <see cref="StorageCommitDurability.Synchronous"/> for
@@ -78,7 +90,7 @@ public sealed class DocumentDatabaseEngineOptions
     /// <see cref="DatabaseEngine.MaximumWorkerFailureWindow"/>.
     /// </summary>
     /// <remarks>
-    /// An offline database refuses every operation with <c>COHDBD002</c> until it is reopened
+    /// An offline database refuses every operation with <c>CD06102</c> until it is reopened
     /// (<see cref="DocumentDatabaseEngine.OpenDatabaseAsync(DatabaseName, System.Threading.CancellationToken)"/>),
     /// whose recovery reads its journal; a hosted engine is reopened by the hosting module with
     /// backoff. A pass that finishes the database's work ends the streak, and the window starts
@@ -185,6 +197,7 @@ public sealed class DocumentDatabaseEngineOptions
     /// </remarks>
     internal DocumentDatabaseEngineOptions Snapshot() => new()
     {
+        StatementMemoryBudget = StatementMemoryBudget,
         Durability = Durability,
         GroupCommitWindow = GroupCommitWindow,
         CheckpointInterval = CheckpointInterval,
@@ -201,4 +214,27 @@ public sealed class DocumentDatabaseEngineOptions
         RootPath = RootPath,
         StorageStrategy = StorageStrategy,
     };
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Documents.DocumentDatabaseEngineOptions _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Documents.DocumentDatabaseEngineOptions value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Storage.StorageCommitDurability? Durability => _target.Durability;
+        public long StatementMemoryBudget => _target.StatementMemoryBudget;
+        public global::System.TimeSpan GroupCommitWindow => _target.GroupCommitWindow;
+        public global::System.TimeSpan CheckpointInterval => _target.CheckpointInterval;
+        public long CheckpointJournalSize => _target.CheckpointJournalSize;
+        public global::System.TimeSpan WorkerFailureWindow => _target.WorkerFailureWindow;
+        public int WorkerFailureMinimumPasses => _target.WorkerFailureMinimumPasses;
+        public long JournalSizeLimit => _target.JournalSizeLimit;
+        public global::System.TimeSpan PageWriteBackInterval => _target.PageWriteBackInterval;
+        public int PageWriteBackBatchSize => _target.PageWriteBackBatchSize;
+        public global::System.TimeSpan MaintenanceInterval => _target.MaintenanceInterval;
+        public global::System.IO.FileSystemPath? RootPath => _target.RootPath;
+    }
 }

@@ -22,11 +22,14 @@ namespace Assimalign.Cohesion.Database.Storage;
 /// the same page to two transactions.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("StorageFreeSpaceMap")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Storage.StorageFreeSpaceMap.DebugView))]
 public sealed class StorageFreeSpaceMap
 {
     private readonly object _sync = new();
     private readonly Queue<long> _freeQueue = new();
     private readonly HashSet<long> _freeSet = new();
+    private readonly HashSet<long> _reserved = new();
     // Retain generations across reuse while a bracket can hold an earlier lookup.
     // Storage resets these at quiescence under its transaction lock (#1273).
     private readonly Dictionary<long, long> _freeGenerations = new();
@@ -80,7 +83,16 @@ public sealed class StorageFreeSpaceMap
     /// Allocates the next available free page identifier.
     /// </summary>
     /// <returns>The identifier of the newly allocated page.</returns>
-    public PageId Allocate()
+    public PageId Allocate() => Allocate(publish: true);
+
+    internal PageId Reserve() => Allocate(publish: false);
+
+    internal void Publish(PageId pageId)
+    {
+        lock (_sync) { _reserved.Remove((long)pageId); }
+    }
+
+    private PageId Allocate(bool publish)
     {
         lock (_sync)
         {
@@ -91,11 +103,14 @@ public sealed class StorageFreeSpaceMap
                 // Entries may be stale when MarkAllocated reclaimed the id during reopen.
                 if (_freeSet.Remove(recycled))
                 {
+                    if (!publish) { _reserved.Add(recycled); }
                     return (PageId)recycled;
                 }
             }
 
-            return (PageId)_nextPageId++;
+            long allocated = _nextPageId++;
+            if (!publish) { _reserved.Add(allocated); }
+            return (PageId)allocated;
         }
     }
 
@@ -111,11 +126,12 @@ public sealed class StorageFreeSpaceMap
 
         lock (_sync)
         {
-            if (id >= _nextPageId)
+            if (id < 0 || id >= _nextPageId)
             {
-                throw new StorageIOException($"Cannot free page {id}: the page was never allocated.");
+                throw new StorageIOException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageFreeSpaceMapFreeStorageIO, id));
             }
 
+            _reserved.Remove(id);
             added = _freeSet.Add(id);
             if (added)
             {
@@ -141,7 +157,7 @@ public sealed class StorageFreeSpaceMap
 
         lock (_sync)
         {
-            return id < _nextPageId && !_freeSet.Contains(id);
+            return id >= 0 && id < _nextPageId && !_freeSet.Contains(id) && !_reserved.Contains(id);
         }
     }
 
@@ -152,7 +168,7 @@ public sealed class StorageFreeSpaceMap
         lock (_sync)
         {
             generation = _freeGenerations.GetValueOrDefault(id);
-            return id < _nextPageId && !_freeSet.Contains(id);
+            return id >= 0 && id < _nextPageId && !_freeSet.Contains(id) && !_reserved.Contains(id);
         }
     }
 
@@ -165,7 +181,7 @@ public sealed class StorageFreeSpaceMap
         long id = (long)pageId;
         lock (_sync)
         {
-            return id < _nextPageId && !_freeSet.Contains(id)
+            return id >= 0 && id < _nextPageId && !_freeSet.Contains(id) && !_reserved.Contains(id)
                 && _freeGenerations.GetValueOrDefault(id) == generation;
         }
     }
@@ -220,6 +236,14 @@ public sealed class StorageFreeSpaceMap
                 // Opening has no active transactions: generation zero is sufficient.
                 _freeQueue.Enqueue(id);
             }
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Storage.StorageFreeSpaceMap value)
+        {
+            _ = value;
         }
     }
 }

@@ -34,7 +34,7 @@ public sealed class SqlStatementCompletenessTests
         ],
         [SqlClauses.From] = ["SELECT * FROM t", "SELECT * FROM dbo.t AS u", "SELECT * FROM t u"],
         [SqlClauses.Using] = ["SELECT * FROM t JOIN u USING (id)"],
-        [SqlClauses.Join] = ["SELECT * FROM t JOIN u ON t.id = u.id", "SELECT * FROM t INNER JOIN u v ON t.id = v.id"],
+        [SqlClauses.Join] = ["SELECT * FROM t JOIN u ON t.id = u.id", "SELECT * FROM t INNER JOIN u v ON t.id = v.id", "SELECT * FROM t RIGHT JOIN u USING (id)", "SELECT * FROM t FULL JOIN u USING (id)", "SELECT * FROM t FULL OUTER JOIN u ON t.id = u.id", "SELECT * FROM (t LEFT JOIN u USING (id)) RIGHT OUTER JOIN v USING (id)"],
         [SqlClauses.Where] =
         [
             "SELECT * FROM t WHERE a = 1",
@@ -56,6 +56,7 @@ public sealed class SqlStatementCompletenessTests
         [SqlClauses.Intersect] = ["SELECT a FROM t INTERSECT ALL SELECT a FROM u"],
         [SqlClauses.Except] = ["SELECT a FROM t EXCEPT DISTINCT SELECT a FROM u"],
         [SqlClauses.Cte] = ["WITH c AS (SELECT a FROM t) SELECT * FROM c", "WITH c AS (SELECT a FROM t) DELETE FROM t WHERE a IN (SELECT a FROM c)", "INSERT INTO t WITH c AS (SELECT a FROM t) SELECT * FROM c"],
+        [SqlClauses.QuantifiedComparison] = ["SELECT a = ANY (SELECT b FROM u) FROM t", "SELECT a <> SOME (SELECT b FROM u) FROM t", "SELECT a < ALL (SELECT b FROM u) FROM t"],
         [SqlClauses.Subquery] =
         [
             "SELECT a FROM t WHERE a IN (SELECT b FROM u)",
@@ -71,6 +72,7 @@ public sealed class SqlStatementCompletenessTests
         [SqlClauses.Case] = ["SELECT CASE WHEN a = 1 THEN 'x' ELSE 'y' END FROM t", "SELECT a FROM t WHERE CASE a WHEN 1 THEN TRUE END"],
         [SqlClauses.Cast] = ["SELECT CAST(a AS INT) FROM t", "SELECT a FROM t WHERE CAST(a AS TEXT) = '1'"],
         [SqlClauses.Collate] = ["SELECT a FROM t WHERE a = 'x' COLLATE binary", "SELECT a COLLATE case_insensitive FROM t"],
+        [SqlClauses.Merge] = ["MERGE INTO t USING s ON t.id=s.id WHEN MATCHED THEN DELETE", "MERGE INTO t USING s ON TRUE WHEN NOT MATCHED THEN INSERT DEFAULT VALUES WHEN NOT MATCHED BY SOURCE THEN DO NOTHING RETURNING merge_action()"],
         [SqlClauses.Insert] = ["INSERT INTO t VALUES (1)", "INSERT INTO t (a, b) VALUES (1, 'x')", "INSERT INTO t (b, a) DEFAULT VALUES"],
         [SqlClauses.OnConflict] =
         [
@@ -80,9 +82,12 @@ public sealed class SqlStatementCompletenessTests
             "INSERT INTO t SELECT u.id FROM u JOIN w ON u.id = w.id ON CONFLICT DO NOTHING",
         ],
         [SqlClauses.Update] = ["UPDATE t SET a = 1", "UPDATE t SET a = DEFAULT", "UPDATE dbo.t SET a = 1, b = 'x' WHERE id = 1"],
+        [SqlClauses.UpdateFrom] = ["UPDATE t SET a = s.a FROM s WHERE t.id=s.id RETURNING s.a"],
+        [SqlClauses.DeleteUsing] = ["DELETE FROM t USING s WHERE t.id=s.id RETURNING s.id"],
         [SqlClauses.Delete] = ["DELETE FROM t", "DELETE FROM t WHERE id = 1"],
         [SqlClauses.Returning] = ["INSERT INTO t VALUES (1) RETURNING *", "INSERT INTO t SELECT a FROM u RETURNING a", "UPDATE t SET a = 1 RETURNING a AS updated", "DELETE FROM t RETURNING *"],
         [SqlClauses.CreateTable] = ["CREATE TABLE t (id INT PRIMARY KEY, name TEXT NOT NULL DEFAULT 'x')", "CREATE TABLE IF NOT EXISTS dbo.t (id INT)"],
+        [SqlClauses.CreateTableAs] = ["CREATE TABLE t AS SELECT 1 AS n", "CREATE TABLE t (n) AS SELECT 1 WITH DATA", "CREATE TABLE t AS WITH q AS (SELECT 1 AS n) SELECT n FROM q WITH NO DATA"],
         [SqlClauses.Identity] = ["CREATE TABLE t (id BIGINT GENERATED ALWAYS AS IDENTITY)", "ALTER TABLE t ADD id INT IDENTITY(100, 5)"],
         [SqlClauses.CreateIndex] = ["CREATE INDEX ix ON t (a)", "CREATE UNIQUE INDEX IF NOT EXISTS ix ON dbo.t (a, b)"],
         [SqlClauses.AlterTable] =
@@ -103,6 +108,7 @@ public sealed class SqlStatementCompletenessTests
         [SqlClauses.CreateView] = ["CREATE VIEW v AS SELECT a FROM t", "CREATE OR REPLACE VIEW dbo.v (a) AS SELECT a FROM t"],
         [SqlClauses.DropView] = ["DROP VIEW v", "DROP VIEW IF EXISTS dbo.v RESTRICT", "DROP VIEW v CASCADE"],
         [SqlClauses.DropTable] = ["DROP TABLE t", "DROP TABLE IF EXISTS dbo.t"],
+        [SqlClauses.Truncate] = ["TRUNCATE t", "TRUNCATE TABLE ONLY dbo.t, u RESTART IDENTITY CASCADE", "TRUNCATE t CONTINUE IDENTITY RESTRICT"],
         [SqlClauses.CreateSchema] = ["CREATE SCHEMA sales", "CREATE SCHEMA IF NOT EXISTS sales"],
         [SqlClauses.DropSchema] = ["DROP SCHEMA sales", "DROP SCHEMA IF EXISTS sales RESTRICT", "DROP SCHEMA sales CASCADE"],
         [SqlClauses.DropIndex] = ["DROP INDEX ix ON t", "DROP INDEX IF EXISTS ix ON dbo.t"],
@@ -218,13 +224,13 @@ public sealed class SqlStatementCompletenessTests
         failures.ShouldBeEmpty("Each statement must report an error at or after the end of its complete form.");
     }
 
-    /// <summary>The issue's regression cases: each is one SQL0003 at the dropped text.</summary>
+    /// <summary>The issue's regression cases: each is one CS00003 at the dropped text.</summary>
     /// <param name="marked">A statement whose tail the parser used to drop; '^' marks where the diagnostic starts.</param>
     /// <param name="located">The source text the diagnostic covers.</param>
-    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Completeness: dropped clauses and predicates report SQL0003 where they start")]
+    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Completeness: dropped clauses and predicates report CS00003 where they start")]
     [InlineData("DELETE FROM t WHRE ^id = 1;", "id")]
     [InlineData("UPDATE t SET a = 1 ^WHRE id = 1;", "WHRE")]
-    [InlineData("UPDATE t SET a = 1 ^FROM u WHERE t.id = u.id;", "FROM")]
+    [InlineData("UPDATE t SET a = 1 FROM u ^FROM v WHERE t.id = u.id;", "FROM")]
     [InlineData("SELECT id FROM t LIMIT 1 ^FETCH FIRST 1 ROW ONLY;", "FETCH")]
     [InlineData("SELECT id FROM t WHERE id = ^:id;", ":id")]
     [InlineData("UPDATE t SET a = ^:a WHERE id = 1;", ":a")]
@@ -249,7 +255,7 @@ public sealed class SqlStatementCompletenessTests
     /// </summary>
     /// <param name="marked">A malformed statement; '^' marks where the diagnostic starts.</param>
     /// <param name="located">The source text the diagnostic covers.</param>
-    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Completeness: missing tokens, keywords and names report one SQL0003 where expected")]
+    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Completeness: missing tokens, keywords and names report one CS00003 where expected")]
     [InlineData("DELETE FROM t WHERE (id = 1^;", ";")]
     [InlineData("DELETE FROM t WHERE id IN (1, 2^;", ";")]
     [InlineData("DELETE FROM t WHERE id IN ^1;", "1")]
@@ -297,7 +303,7 @@ public sealed class SqlStatementCompletenessTests
     public void Parse_MissingToken_ShouldReportOneSyntaxErrorWhereExpected(string marked, string located)
         => AssertOneSyntaxErrorAt(marked, located);
 
-    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Completeness: malformed modifiers report SQL0005 at the offending token")]
+    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Completeness: malformed modifiers report CS00005 at the offending token")]
     [InlineData("CREATE TABLE z (a VARCHAR(25 ^5));", "5")]
     [InlineData("CREATE TABLE z (b DECIMAL(10, 2^, 5));", ",")]
     [InlineData("CREATE TABLE z (c VARCHAR(^-5));", "-")]
@@ -314,7 +320,7 @@ public sealed class SqlStatementCompletenessTests
         var error = Errors(Parse(sql)).ShouldHaveSingleItem();
 
         // Assert
-        error.Code.ShouldBe("SQL0005");
+        error.Code.ShouldBe("CS00005");
         error.Start.ShouldBe(position);
         sql[error.Start!.Value..error.End!.Value].ShouldBe(located);
     }
@@ -365,7 +371,7 @@ public sealed class SqlStatementCompletenessTests
         var errors = Errors(Parse(sql));
 
         // Assert
-        errors.Where(error => error.Code == "SQL0003").ShouldHaveSingleItem().Message!.ShouldStartWith(message, Case.Sensitive);
+        errors.Where(error => error.Code == "CS00003").ShouldHaveSingleItem().Message!.ShouldStartWith(message, Case.Sensitive);
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql.Language] - Completeness: a sign applies to a signed operand")]
@@ -384,20 +390,20 @@ public sealed class SqlStatementCompletenessTests
             .Operator.ShouldBe(SqlUnaryOperator.Negate);
 
         // ~ is outside the dialect since #1101; its signed operand still leaves no text behind.
-        Errors(Parse("SELECT ~ -a FROM t;")).ShouldHaveSingleItem().Code.ShouldBe("COHDBL001");
+        Errors(Parse("SELECT ~ -a FROM t;")).ShouldHaveSingleItem().Code.ShouldBe("CK00001");
     }
 
     /// <summary>
-    /// A recognized clause outside the profile reports COHDBL001, and text from that clause
+    /// A recognized clause outside the profile reports CK00001, and text from that clause
     /// on adds no second diagnostic. Text the parser stopped at before reaching the clause
-    /// still reports SQL0003, so fixing the clause does not reveal a new error.
+    /// still reports CS00003, so fixing the clause does not reveal a new error.
     /// </summary>
     /// <param name="sql">A statement with a clause outside the profile.</param>
     /// <param name="expected">The error codes, in order.</param>
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - Completeness: excluded and restored clauses retain precise boundaries")]
-    [InlineData("DELETE FROM t WHERE id = 1 WINDOW w AS ();", new[] { "COHDBL001" })]
-    [InlineData("DELETE FROM t WHERE id = 1 WINDOW w AS (); DELETE FROM t;", new[] { "COHDBL001" })]
-    [InlineData("DELETE FROM t WHRE id = 1 WINDOW w AS ();", new[] { "SQL0003", "COHDBL001" })]
+    [InlineData("DELETE FROM t WHERE id = 1 WINDOW w AS ();", new[] { "CK00001" })]
+    [InlineData("DELETE FROM t WHERE id = 1 WINDOW w AS (); DELETE FROM t;", new[] { "CK00001" })]
+    [InlineData("DELETE FROM t WHRE id = 1 WINDOW w AS ();", new[] { "CS00003", "CK00001" })]
     // Derived output ordering is classified by the planner; its execution test verifies resolved output ordering.
     [InlineData("SELECT * FROM (SELECT id FROM u) d ORDER BY id;", new string[0])]
     [InlineData("SELECT * FROM t JOIN (SELECT id FROM u) q ON t.id = q.id;", new string[0])]
@@ -421,7 +427,7 @@ public sealed class SqlStatementCompletenessTests
 
         // Assert
         var error = Errors(statement).ShouldHaveSingleItem();
-        error.Code.ShouldBe("SQL0003");
+        error.Code.ShouldBe("CS00003");
         error.Start.ShouldBe(start);
         sql[error.Start!.Value..error.End!.Value].ShouldBe(located);
     }
@@ -449,7 +455,7 @@ public sealed class SqlStatementCompletenessTests
         var error = Errors(Parse(sql)).ShouldHaveSingleItem();
 
         // Assert
-        error.Code.ShouldBe("SQL0003");
+        error.Code.ShouldBe("CS00003");
         error.Message!.ShouldContain("after ';'. A request accepts exactly one statement.", Case.Sensitive);
         error.Start!.Value.ShouldBeGreaterThan(sql.IndexOf(';', StringComparison.Ordinal));
     }
@@ -466,7 +472,7 @@ public sealed class SqlStatementCompletenessTests
         var error = Errors(Parse(sql)).ShouldHaveSingleItem();
 
         // Assert
-        error.Code.ShouldBe("SQL0003");
+        error.Code.ShouldBe("CS00003");
         error.Message.ShouldBe(message);
         sql[error.Start!.Value..error.End!.Value].ShouldBe(located);
     }
@@ -483,12 +489,12 @@ public sealed class SqlStatementCompletenessTests
 
         // Assert
         var error = Errors(statement).ShouldHaveSingleItem();
-        error.Code.ShouldBe("SQL0003");
+        error.Code.ShouldBe("CS00003");
         error.Message!.ShouldContain($"'{action}'", Case.Sensitive);
         sql[error.Start!.Value..error.End!.Value].ToUpperInvariant().ShouldBe(action);
         statement.SqlExpression.CommandType.ShouldBe(SqlQueryCommandType.Alter);
         statement.SqlExpression.ShouldNotBeOfType<SqlAlterTableExpression>();
-        statement.Diagnostics.ShouldNotContain(diagnostic => diagnostic.Code == "SQL0002");
+        statement.Diagnostics.ShouldNotContain(diagnostic => diagnostic.Code == "CS00002");
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - Completeness: ALTER TABLE without a complete action is an error")]
@@ -502,7 +508,7 @@ public sealed class SqlStatementCompletenessTests
         var error = Errors(Parse(sql)).ShouldHaveSingleItem();
 
         // Assert
-        error.Code.ShouldBe("SQL0003");
+        error.Code.ShouldBe("CS00003");
         error.Message!.ShouldContain(message, Case.Sensitive);
     }
 

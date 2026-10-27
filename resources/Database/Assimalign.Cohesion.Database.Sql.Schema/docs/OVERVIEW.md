@@ -37,3 +37,54 @@ The SQL engine validates defaults before provisioning, and they survive canonica
 and catalog reconstruction after an interrupted migration.
 
 See [DESIGN.md](DESIGN.md) for boundaries, canonicalization, and AOT decisions.
+
+## Sql diagnostic conventions (#1470)
+
+Exception and diagnostic templates use the project's build-generated `ErrorMessages` resources.
+Parameterized templates format with the current culture; abort/cancellation templates used in
+normal cleanup are cached. The [Database error-code registry](../../Assimalign.Cohesion.Database/docs/ERROR-CODES.md)
+assigns this family its two-letter prefix and categorized five-digit identities.
+Existing SQLSTATE meanings, numeric wire error kinds, frame layouts and disk formats are preserved.
+Structured diagnostics keep their code outside the message. Compiler diagnostic identifiers and
+standard .NET argument guards retain their own contracts.
+
+
+## Shared defaults and diagnostic resources (#1470)
+
+The Defaults shared module resolves incompatible-value text through a consuming-assembly-local
+`SqlDefaultLiteralErrorMessages` binding to the generated internal resource accessor. SQL schema
+and SDK extraction therefore retain identical ArgumentException text and the `value` parameter,
+without a resource lookup on successful rendering. SQL explanatory message fragments also use
+resources. SDK compiler identifiers remain `COHDBSDK`; embedded runtime identities use `CK00001`
+for language syntax and `CS03101` for unsupported principal declarations. Schema format remains
+`cohesion/database-schema/v8`; SQLSTATE, wire, diagnostics carriers and public APIs are unchanged.
+
+
+The shared Types module also binds modifier-refusal templates to each consumer's own generated
+resources through internal `SqlTypeModifierErrorMessages`. Unsupported type/modifier text and
+codes are preserved. Numeric modifier spelling remains invariant SQL text; message templates
+format with the current culture. Successful type validation adds no resource lookup.
+
+## Rules audit after main cleanup
+
+Assembly-local Defaults/Types resource bindings live under Internal while preserving their
+linked owning namespaces. SqlSchemaMigrationResult lives in ValueObjects with the same public
+namespace, positional properties and construction. Canonical documents, hashes and format
+cohesion/database-schema/v8 are unchanged.
+
+## Debugger inspection
+
+Concrete source types with explicit nonpublic instance state use a private nested DebugView
+and debugger display/proxy attributes. The view is the last member in the same type file and
+exposes only reviewed public/protected state through read-only properties. Exception and
+EventSource types remain excluded. A type with no state to filter keeps its normal member view;
+a type whose base supplies both debugger attributes inherits that view.
+
+Inspection does not perform I/O, take lifecycle locks, mutate state, invoke application callbacks,
+or materialize lazy results. The additions are debugger metadata and nested helper types; existing
+instance fields, runtime operations, error identities, data formats and protocol contracts do
+not change. SDK and Studio source are outside this rule's scope.
+
+Compiled-schema views expose already constructed declaration metadata. CanonicalDocument
+and Hash are omitted: those getters serialize/hash lazily and update computation counters.
+Inspection does not call Compile, evaluate a schema callback, or expose private builder records.

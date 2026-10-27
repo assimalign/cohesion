@@ -44,30 +44,30 @@ public sealed class GraphLinearCompositionWireTests
         await connection.ExecuteAsync("INSERT (:P {k:1})", cancellationToken: harness.Token);
         var sessionId = harness.Server.Sessions.ShouldHaveSingleItem().Id;
         var cases = new (string Source, string Code)[] {
-            ("LET x=1 WITH DISTINCT x AS y WHERE x=1 RETURN y", "COHDBG001"),
-            ("MATCH (a:P) WITH DISTINCT a.k AS k WHERE a.k > 1 RETURN k", "COHDBG001"),
-            ("MATCH (a:P) WITH DISTINCT a AS b WHERE a.k > 1 RETURN b", "COHDBG001"),
-            ("MATCH (a:P) WITH a.k AS k, count(*) AS c WHERE a.k > 1 RETURN k", "COHDBG001"),
-            ("MATCH (a:P) WITH a AS b, count(*) AS c WHERE a.k > 1 RETURN b", "COHDBG001"),
-            ("MATCH (a:P) WITH a.k AS k, count(*) AS c WHERE count(*) > 1 RETURN k", "COHDBG001"),
-            ("INSERT (a:T {k:a.k})", "COHDBG001"),
-            ("INSERT (a:T)-[r:R {w:1}]->(b:T {w:r.w})", "COHDBG001"),
-            ("INSERT (a:T)-[r:R {w:r.w}]->(b:T)", "COHDBG001"),
-            ("CREATE (a:T {k:a.k})", "COHDBG001"),
-            ("CREATE (a:T)-[r:R {w:1}]->(b:T {w:r.w})", "COHDBG001"),
-            ("CREATE (a:T)-[r:R {w:r.w}]->(b:T)", "COHDBG001"),
-            ("LET x=1 WITH x,(x) RETURN x", "COHDBG015"),
-            ("MATCH (a) RETURN a,\"a\" NEXT RETURN a", "COHDBG015"),
-            ("LET x=1 RETURN x.k", "COHDBG003"),
-            ("FOR m IN [{k:1},2] RETURN m.k", "COHDBG013"),
-            ("MATCH (a) WITH a NEXT RETURN a", "GQL0002"),
-            ("NEXT RETURN 1", "GQL0002"),
-            ("EXPLAIN NEXT RETURN 1", "GQL0002"),
+            ("LET x=1 WITH DISTINCT x AS y WHERE x=1 RETURN y", "CG05001"),
+            ("MATCH (a:P) WITH DISTINCT a.k AS k WHERE a.k > 1 RETURN k", "CG05001"),
+            ("MATCH (a:P) WITH DISTINCT a AS b WHERE a.k > 1 RETURN b", "CG05001"),
+            ("MATCH (a:P) WITH a.k AS k, count(*) AS c WHERE a.k > 1 RETURN k", "CG05001"),
+            ("MATCH (a:P) WITH a AS b, count(*) AS c WHERE a.k > 1 RETURN b", "CG05001"),
+            ("MATCH (a:P) WITH a.k AS k, count(*) AS c WHERE count(*) > 1 RETURN k", "CG05001"),
+            ("INSERT (a:T {k:a.k})", "CG05001"),
+            ("INSERT (a:T)-[r:R {w:1}]->(b:T {w:r.w})", "CG05001"),
+            ("INSERT (a:T)-[r:R {w:r.w}]->(b:T)", "CG05001"),
+            ("CREATE (a:T {k:a.k})", "CG05001"),
+            ("CREATE (a:T)-[r:R {w:1}]->(b:T {w:r.w})", "CG05001"),
+            ("CREATE (a:T)-[r:R {w:r.w}]->(b:T)", "CG05001"),
+            ("LET x=1 WITH x,(x) RETURN x", "CG01015"),
+            ("MATCH (a) RETURN a,\"a\" NEXT RETURN a", "CG01015"),
+            ("LET x=1 RETURN x.k", "CG03003"),
+            ("FOR m IN [{k:1},2] RETURN m.k", "CG02013"),
+            ("MATCH (a) WITH a NEXT RETURN a", "CG00002"),
+            ("NEXT RETURN 1", "CG00002"),
+            ("EXPLAIN NEXT RETURN 1", "CG00002"),
         };
         // Act / Assert
         foreach (var item in cases)
         {
-            foreach (string prefix in item.Code is "COHDBG001" or "COHDBG003" or "COHDBG015" ? new[] { "", "EXPLAIN " } : new[] { "" })
+            foreach (string prefix in item.Code is "CG05001" or "CG03003" or "CG01015" ? new[] { "", "EXPLAIN " } : new[] { "" })
             {
                 var error = await Should.ThrowAsync<GraphClientException>(async () => await connection.QueryAsync(prefix + item.Source, cancellationToken: harness.Token));
                 error.Message.ShouldContain(item.Code, Case.Sensitive);
@@ -166,13 +166,13 @@ public sealed class GraphLinearCompositionWireTests
         { names.Add(path.Nodes.ShouldHaveSingleItem().Properties["name"]); }
         names.OrderBy(name => name).ShouldBe(new object?[] { "Alice", "Bob", "Cara", "Dan" });
         var gate = await Should.ThrowAsync<GraphClientException>(async () => await connection.QueryAsync(pathsSource, cancellationToken: harness.Token));
-        gate.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG001");
+        gate.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG05001");
         foreach (string source in new[] { "FOR n IN [1] WITH n DETACH DELETE n", "MATCH (a:P) WITH [a,1] AS ns UNWIND ns AS n MATCH (n) RETURN n.name" })
         {
             foreach (string prefix in new[] { "", "EXPLAIN " })
             {
                 var error = await Should.ThrowAsync<GraphClientException>(async () => await connection.QueryAsync(prefix + source, cancellationToken: harness.Token));
-                error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG003");
+                error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG03003");
                 (await connection.QueryAsync("RETURN 7", cancellationToken: harness.Token)).ShouldHaveSingleItem()[0].ShouldBe(7L);
             }
         }
@@ -208,7 +208,7 @@ public sealed class GraphLinearCompositionWireTests
         {
             var error = await Should.ThrowAsync<GraphClientException>(async () =>
             { await foreach (var path in connection.QueryPathsAsync(source, cancellationToken: harness.Token)) { } });
-            error.Message.ShouldContain("COHDBG001", Case.Sensitive);
+            error.Message.ShouldContain("CG05001", Case.Sensitive);
         }
         (await connection.QueryAsync("MATCH (a:P) RETURN count(a)", cancellationToken: harness.Token)).ShouldHaveSingleItem()[0].ShouldBe(2L);
     }

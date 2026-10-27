@@ -19,13 +19,27 @@ public sealed partial class GqlQueryParser
         do
         {
             string? variable = null;
-            if (allowPathVariable && IsVariableToken)
+            if (allowPathVariable && IsVariableToken && _tokens[_position + 1].Type == TokenType.Equals)
             {
                 variable = Identifier();
                 Expect(TokenType.Equals, "'='");
             }
+            GqlPathMode? mode = null;
+            var prefix = Current;
+            var prefixEnd = prefix;
+            GqlPathSelector? selector = null;
+            if (allowPathVariable && (Is("ANY") || Is("ALL") || Is("SHORTEST")))
+            { selector = ParsePathSelector(out mode); prefixEnd = Previous; }
+            else if (allowPathVariable && TryPathModeAt(_position, out var explicitMode))
+            {
+                mode = explicitMode;
+                Advance();
+                if (Is("PATH") || Is("PATHS")) { prefixEnd = Current; Advance(); }
+            }
             var path = ParsePath(allowQuantifiers: allowPathVariable, out _);
-            paths.Add(path with { Variable = variable });
+            if (!Failed && selector is null && mode == GqlPathMode.Walk && ContainsUnboundedQuantifier(path))
+            { UnsupportedConstruct("UNBOUNDED WALK", prefix, prefixEnd); }
+            paths.Add(path with { Variable = variable, Mode = mode, Selector = selector });
         } while (!Failed && Take(TokenType.Comma));
         return paths.AsReadOnly();
     }
@@ -44,7 +58,7 @@ public sealed partial class GqlQueryParser
             {
                 var start = Current;
                 if (!allowQuantifiers)
-                { Error("GQL0002", "INSERT and CREATE patterns cannot contain parenthesized paths or quantifiers.", start); break; }
+                { Error("CG00002", ErrorMessages.GqlQueryParserParsePathVoid, start); break; }
                 if (!HasStackToNest(start)) { break; }
                 Advance();
                 if (IsPathModeAt(_position))
@@ -52,7 +66,7 @@ public sealed partial class GqlQueryParser
                 if (IsVariableToken)
                 { Unsupported("SUBPATH VARIABLE", Current); break; }
                 var inner = ParsePath(allowQuantifiers, out long innerBound);
-                if (!Failed && Is("WHERE")) { Unsupported("PARENTHESIZED PATH WHERE", Current); break; }
+                if (!Failed && Take("WHERE")) { inner = inner with { Predicate = ParsePredicate() }; }
                 Expect(TokenType.RightParen, "')'");
                 RejectLineCommentAfterElement();
                 var quantifierStart = Current;
@@ -60,7 +74,7 @@ public sealed partial class GqlQueryParser
                 if (!Failed && quantifier is not null && ContainsQuantifier(inner))
                 { Unsupported("NESTED QUANTIFIER", quantifierStart); }
                 if (!Failed && quantifier is not null && innerBound == 0)
-                { Error("GQL0002", "A quantified parenthesized path requires a relationship.", start); }
+                { Error("CG00002", ErrorMessages.GqlQueryParserParsePathVoid2, start); }
                 elements.Add(new GqlParenthesizedPathPattern(inner, quantifier));
                 bound += innerBound * (quantifier?.Max ?? quantifier?.Min ?? 1);
                 needsNode = false;
@@ -68,11 +82,11 @@ public sealed partial class GqlQueryParser
             else if (Current.Type == TokenType.LeftParen)
             {
                 if (!needsNode && elements[^1] is GqlPathNode)
-                { Error("GQL0002", "Consecutive node patterns require an intervening edge or parenthesized path.", Current); break; }
+                { Error("CG00002", ErrorMessages.GqlQueryParserParsePathVoid3, Current); break; }
                 elements.Add(new GqlPathNode(ParseNode()));
                 needsNode = false;
                 if (!Failed && IsQuantifier)
-                { Error("GQL0002", "A node pattern cannot be quantified.", Current); }
+                { Error("CG00002", ErrorMessages.GqlQueryParserParsePathVoid4, Current); }
             }
             else if (!needsNode && Current.Type is TokenType.Minus or TokenType.LeftArrow or TokenType.RightArrow)
             {
@@ -82,7 +96,7 @@ public sealed partial class GqlQueryParser
                 if (!Failed && edge.Quantifier is not null && quantifier is not null)
                 { Unsupported("NESTED QUANTIFIER", start); }
                 if (!allowQuantifiers && edge.Quantifier is not null && !Failed)
-                { Error("GQL0002", "INSERT and CREATE patterns cannot contain quantifiers.", start); }
+                { Error("CG00002", ErrorMessages.GqlQueryParserParsePathVoid5, start); }
                 elements.Add(new GqlPathRelationship(edge with { Quantifier = quantifier ?? edge.Quantifier }));
                 var bounds = quantifier ?? edge.Quantifier;
                 bound += bounds?.Max ?? bounds?.Min ?? 1;
@@ -92,9 +106,9 @@ public sealed partial class GqlQueryParser
             { UnsupportedConstruct(GqlUnsupportedVocabulary.UndirectedEdge, Current, _tokens[last]); break; }
             else { break; }
             if (!Failed && bound > 64)
-            { Error("GQL0005", "The sum of path repetition bounds cannot exceed 64 relationships.", Previous); }
+            { Error("CG00005", ErrorMessages.GqlQueryParserParsePathVoid6, Previous); }
         } while (!Failed);
-        if (!Failed && (elements.Count == 0 || needsNode)) { Error("GQL0002", "Expected a node pattern.", Current); }
+        if (!Failed && (elements.Count == 0 || needsNode)) { Error("CG00002", ErrorMessages.GqlQueryParserParsePathVoid7, Current); }
         bool parenthesized = elements.Any(element => element is GqlParenthesizedPathPattern);
         return new GqlPathPattern(parenthesized ? [] : elements.OfType<GqlPathNode>().Select(element => element.Pattern).ToArray(),
             parenthesized ? [] : elements.OfType<GqlPathRelationship>().Select(element => element.Pattern).ToArray())
@@ -105,10 +119,20 @@ public sealed partial class GqlQueryParser
     {
         if (index >= _tokens.Count) { return false; }
         var end = _tokens[index];
-        if (GqlUnsupportedVocabulary.TryFind(end.Text.ToUpperInvariant(), out var word) && word.Position == GqlWordPosition.PathMode)
+        if (TryPathModeAt(index, out _))
         { return StartsPathPattern(index + 1, ref end); }
         return end.Text.ToUpperInvariant() is "ALL" or "ANY" or "SHORTEST" &&
             TryPathSearchPrefix(index, out _, out int last) && last + 1 < _tokens.Count && _tokens[last + 1].Type == TokenType.LeftParen;
+    }
+
+    private bool TryPathModeAt(int index, out GqlPathMode mode)
+    {
+        if (IsWordAt(index, "WALK")) { mode = GqlPathMode.Walk; return true; }
+        if (IsWordAt(index, "TRAIL")) { mode = GqlPathMode.Trail; return true; }
+        if (IsWordAt(index, "SIMPLE")) { mode = GqlPathMode.Simple; return true; }
+        if (IsWordAt(index, "ACYCLIC")) { mode = GqlPathMode.Acyclic; return true; }
+        mode = default;
+        return false;
     }
 
     private void RejectPathMode()
@@ -133,7 +157,7 @@ public sealed partial class GqlQueryParser
             return null;
         }
         if (!allowQuantifiers)
-        { Error("GQL0002", "INSERT and CREATE patterns cannot contain quantifiers.", start); return null; }
+        { Error("CG00002", ErrorMessages.GqlQueryParserParsePathVoid5, start); return null; }
         int min;
         int? max;
         if (cypher)
@@ -157,7 +181,7 @@ public sealed partial class GqlQueryParser
         }
         RejectLineCommentAfterElement();
         if (!Failed && (max < min || !cypher && max == 0))
-        { Error("GQL0002", "A quantifier requires ordered bounds and a positive upper bound.", start); }
+        { Error("CG00002", ErrorMessages.GqlQueryParserParseQuantifierVoid, start); }
         if (!Failed && IsQuantifier)
         {
             if (Current.Text == "?") { _questionedPathPositions.Add(Current.Start); }
@@ -171,7 +195,7 @@ public sealed partial class GqlQueryParser
         var token = Current;
         Advance();
         if (int.TryParse(token.Text, NumberStyles.None, CultureInfo.InvariantCulture, out int bound)) { return bound; }
-        Error("GQL0004", "Invalid or out-of-range numeric literal.", token);
+        Error("CG00004", ErrorMessages.QueryParserParseQuantifierBoundVoid, token);
         return 0;
     }
 
@@ -191,6 +215,23 @@ public sealed partial class GqlQueryParser
         return false;
     }
 
+    private static bool ContainsUnboundedQuantifier(GqlPathPattern path)
+    {
+        var pending = new Stack<GqlPathPattern>();
+        pending.Push(path);
+        while (pending.TryPop(out var current))
+        {
+            if (current.Relationships.Any(edge => edge.Quantifier is { Max: null })) { return true; }
+            foreach (var element in current.Elements ?? [])
+            {
+                if (element is GqlPathRelationship { Pattern.Quantifier: { Max: null } } ||
+                    element is GqlParenthesizedPathPattern { Quantifier: { Max: null } }) { return true; }
+                if (element is GqlParenthesizedPathPattern group) { pending.Push(group.Pattern); }
+            }
+        }
+        return false;
+    }
+
     private GqlNodePattern ParseNode()
     {
         Expect(TokenType.LeftParen, "'('");
@@ -200,9 +241,10 @@ public sealed partial class GqlQueryParser
         var labels = ParseLabelSpecification(node: true);
         if (!Failed && (variable is not null || labels is not null) && Current.Type == TokenType.Parameter) { RejectUnsupportedParameter("WHOLE-MAP PARAMETER"); }
         var properties = ParseProperties();
+        var predicate = Take("WHERE") ? ParsePredicate() : null;
         Expect(TokenType.RightParen, "')'");
         RejectLineCommentAfterElement();
-        return new GqlNodePattern(variable, ConjunctionNames(labels), properties) { LabelExpression = labels };
+        return new GqlNodePattern(variable, ConjunctionNames(labels), properties) { LabelExpression = labels, Predicate = predicate };
     }
 
     /// <summary>
@@ -234,6 +276,7 @@ public sealed partial class GqlQueryParser
         var quantifier = Current.Type == TokenType.Asterisk ? ParseQuantifier(cypher: true, allowQuantifiers: true) : null;
         if (!Failed && (variable is not null || labels is not null) && Current.Type == TokenType.Parameter) { RejectUnsupportedParameter("WHOLE-MAP PARAMETER"); }
         var properties = ParseProperties();
+        var predicate = Take("WHERE") ? ParsePredicate() : null;
         Expect(TokenType.RightBracket, "']'");
         RejectLineCommentAfterElement();
         GqlPatternDirection direction;
@@ -243,7 +286,7 @@ public sealed partial class GqlQueryParser
             Expect(TokenType.Minus, "'-' or '->'");
             direction = pointsLeft ? GqlPatternDirection.Incoming : GqlPatternDirection.Undirected;
         }
-        return new GqlRelationshipPattern(variable, (labels as GqlLabelName)?.Name, direction, properties) { LabelExpression = labels, Quantifier = quantifier };
+        return new GqlRelationshipPattern(variable, (labels as GqlLabelName)?.Name, direction, properties) { LabelExpression = labels, Quantifier = quantifier, Predicate = predicate };
     }
 
     /// <summary>
@@ -256,8 +299,7 @@ public sealed partial class GqlQueryParser
         if (!Failed && (IsVariableToken || Current.Type is TokenType.Colon or
             TokenType.LeftBracket || Current.Type == TokenType.LeftBrace && !IsQuantifier || Current.Type == TokenType.Keyword && Is("IS")))
         {
-            Error("GQL0002", "An abbreviated edge pattern cannot carry a variable, label expression or property map; " +
-                "write the bracketed form, such as -[r:TYPE]->.", Current);
+            Error("CG00002", ErrorMessages.GqlQueryParserAbbreviatedEdgeVoid, Current);
         }
         return new GqlRelationshipPattern(null, null, direction, _noProperties);
     }
@@ -266,14 +308,12 @@ public sealed partial class GqlQueryParser
     /// ISO/IEC 39075 reads <c>--</c> as a simple comment, so the Cypher arrows <c>--&gt;</c> and
     /// <c>--</c> written directly after a node's <c>)</c> or an edge's <c>]</c> would silently
     /// hide the rest of the line. A comment that begins at exactly that offset is
-    /// <c>GQL0008</c>; one separated by whitespace keeps its ISO meaning.
+    /// <c>CG00008</c>; one separated by whitespace keeps its ISO meaning.
     /// </summary>
     private void RejectLineCommentAfterElement()
     {
         if (Failed || !_lineComments.TryGetValue(Previous.End, out var comment)) { return; }
-        Error("GQL0008", "'--' directly after a node or edge pattern starts a GQL comment that hides the rest of the line; " +
-            "write the edge as '->', '<-' or '-' (Cypher '-->', '<--', '--' and '<-->' are not GQL), " +
-            "or put a space before the comment.", comment with { Text = "--", End = comment.Start + 2 });
+        Error("CG00008", ErrorMessages.RejectLineCommentAfterElementVoid, comment with { Text = "--", End = comment.Start + 2 });
     }
 
     private IReadOnlyDictionary<string, GqlExpression> ParseProperties()
@@ -292,7 +332,7 @@ public sealed partial class GqlQueryParser
                     if (Current.Type is TokenType.LeftBracket or TokenType.LeftBrace)
                     { _ = ParseScalar(); break; }
                     var value = ParsePredicate();
-                    if (!properties.TryAdd(name, value)) { Error("GQL0006", $"Duplicate property '{name}'.", start); }
+                    if (!properties.TryAdd(name, value)) { Error("CG00006", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.GqlQueryParserParsePropertiesVoid, name), start); }
                 } while (!Failed && Take(TokenType.Comma));
             }
             Expect(TokenType.RightBrace, "'}'");

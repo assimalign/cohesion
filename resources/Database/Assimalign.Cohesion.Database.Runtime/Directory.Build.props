@@ -48,7 +48,7 @@
              dialect, catalog, model storage, and the typed client. -->
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Sql" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Sql.Protocol" />
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Sql.Tcp" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Tcp" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Sql.Language" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Sql.Schema" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Sql.Client" />
@@ -76,6 +76,8 @@
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Graph.Protocol" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Graph.Language" />
 
+    </ItemGroup>
+    <ItemGroup>
         <!--
             Deliberately EXCLUDED from the MVP framework:
             - Database.Testing - the packaged resource-program test harness. It

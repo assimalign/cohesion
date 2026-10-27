@@ -11,6 +11,8 @@ namespace Assimalign.Cohesion.Database.Hosting;
 
 /// <summary>A complete database composition with ordered hosting and explicit product ownership.</summary>
 /// <remarks>Services start before servers. Disposal stops the host, disposes owned services and engines, then infrastructure.</remarks>
+[global::System.Diagnostics.DebuggerDisplay("DatabaseApplication")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Hosting.DatabaseApplication.DebugView))]
 public sealed class DatabaseApplication : Host<DatabaseApplicationContext>, IDatabaseApplication
 {
     private readonly DatabaseApplicationContext _context;
@@ -69,7 +71,7 @@ public sealed class DatabaseApplication : Host<DatabaseApplicationContext>, IDat
 
         if (_startAttempted)
         {
-            throw new InvalidOperationException("A database application supports only one start lifecycle.");
+            throw new InvalidOperationException(ErrorMessages.ApplicationOnStartingAsyncFailure);
         }
 
         _startAttempted = true;
@@ -136,11 +138,24 @@ public sealed class DatabaseApplication : Host<DatabaseApplicationContext>, IDat
         if (failures.Count > 0)
         {
             DatabaseHostingEventSource.Log.ApplicationDisposeFailed(_context, failures.Count, failures[0]);
-            throw new AggregateException("Database application disposal failed.", failures);
+            throw new AggregateException(ErrorMessages.ApplicationDisposeCoreAsyncAggregate, failures);
         }
     }
 
     IDatabaseApplicationContext IDatabaseApplication.Context => _context;
     Task IDatabaseApplication.StartAsync(CancellationToken cancellationToken) => ((IHost)this).StartAsync(cancellationToken);
     Task IDatabaseApplication.StopAsync(CancellationToken cancellationToken) => ((IHost)this).StopAsync(cancellationToken);
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Hosting.DatabaseApplication _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Hosting.DatabaseApplication value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Hosting.DatabaseApplicationContext Context => _target.Context;
+        public global::Assimalign.Cohesion.Hosting.HostId Id => _target.Id;
+    }
 }

@@ -58,11 +58,10 @@ internal sealed partial class SqlPlanner
     }
 
     private IReadOnlyList<SqlSubqueryBinding> BindSubqueries(IEnumerable<SqlExpression> sources,
-        SqlSelectExpression? owner = null, SqlTableReference? dml = null)
+        SqlSelectExpression? owner = null, SqlTableReference? dml = null, SqlCorrelationScope? scope = null)
     {
         RuntimeHelpers.EnsureSufficientExecutionStack();
         var queries = new List<SqlSubqueryBinding>();
-        SqlCorrelationScope? scope = null;
         foreach (var expression in sources)
         {
             switch (expression)
@@ -72,6 +71,9 @@ internal sealed partial class SqlPlanner
                     break;
                 case SqlExistsExpression exists:
                     BindSubquery(exists, exists.Subquery, SqlSubqueryKind.Exists, exists.IsNegated, queries, owner, dml, ref scope);
+                    break;
+                case SqlQuantifiedComparisonExpression quantified:
+                    BindSubquery(quantified, quantified.Subquery, SqlSubqueryKind.Set, false, queries, owner, dml, ref scope);
                     break;
                 case SqlInExpression { Subquery: not null } member:
                     BindSubquery(member, member.Subquery, SqlSubqueryKind.Set, false, queries, owner, dml, ref scope);
@@ -126,8 +128,8 @@ internal sealed partial class SqlPlanner
         var projections = SubqueryProjections(child);
         if (kind != SqlSubqueryKind.Exists && projections.Count != 1)
         {
-            throw new SqlPlanningException("COHSQLE013", string.Format(CultureInfo.CurrentCulture,
-                ErrorMessages.SubqueryColumnCount, kind == SqlSubqueryKind.Scalar ? "Scalar" : "IN", projections.Count), source.Location);
+            throw new SqlPlanningException("CS05013", string.Format(CultureInfo.CurrentCulture,
+                ErrorMessages.SubqueryColumnCount, kind == SqlSubqueryKind.Scalar ? "Scalar" : source is SqlQuantifiedComparisonExpression quantified ? quantified.Quantifier.ToString().ToUpperInvariant() : "IN", projections.Count), source.Location);
         }
         var type = kind == SqlSubqueryKind.Exists ? DatabaseType.Boolean : projections[0].Type;
         var collation = kind == SqlSubqueryKind.Exists ? _catalog.DefaultCollation : SubqueryCollation(child);
@@ -161,7 +163,7 @@ internal sealed partial class SqlPlanner
         {
             yield return column.Expression;
         }
-        if (select.From.Count > 1 || select.From.Count == 1 && select.From[0].Joins.Count > 0)
+        if (select.From.Count > 1 || select.From.Count == 1 && (select.From[0].Joins.Count > 0 || select.From[0].Table is SqlJoinedTableReference))
         {
             foreach (var condition in JoinConditions(select))
             {
@@ -215,15 +217,9 @@ internal sealed partial class SqlPlanner
     // SELECT never creates this iterator and retains its original allocation footprint.
     private static IEnumerable<SqlExpression> JoinConditions(SqlSelectExpression select)
     {
-        foreach (var item in select.From)
+        foreach (var join in SourceJoins(select.From))
         {
-            foreach (var join in item.Joins)
-            {
-                if (join.Condition is not null)
-                {
-                    yield return join.Condition;
-                }
-            }
+            if (join.Condition is not null) { yield return join.Condition; }
         }
     }
 

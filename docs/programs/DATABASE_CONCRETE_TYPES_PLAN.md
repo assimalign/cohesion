@@ -1,5 +1,9 @@
 # Database concrete-first types: plan of record
 
+Current Database diagnostic identities and their historical mappings are maintained in the
+[error-code registry](../../resources/Database/Assimalign.Cohesion.Database/docs/ERROR-CODES.md).
+Use those identities when implementing the dated phase records below.
+
 **Status:** Phase 0 landed with this file; phases 1 (#1257) and 2 (#1258, kernel and wire tracks)
 re-verified and implemented on 2026-10-05 (§7, §6.9); phase 3 (#1259) re-verified, implemented
 and reviewed on 2026-10-05, with two owner questions open at its merge (§7, §6.4, §6.5); step
@@ -485,7 +489,7 @@ an internal mode of the one type:
 - an internal, unfiltered release member that the transaction manager calls;
 - the public `ReleaseAll`, which consults the filter.
 
-A standalone `LockManager.Create()`, such as the Indexing harness uses, has no filter and behaves
+A standalone `new LockManager()`, such as the Indexing harness uses, has no filter and behaves
 as today. The #1226 tests in `TransactionCoordinatorRollbackTests.cs` gate this change.
 
 **At P2:** the view had grown after this note was written. #1268's review gave it a second job:

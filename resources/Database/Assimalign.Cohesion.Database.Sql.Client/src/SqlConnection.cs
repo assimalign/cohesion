@@ -22,8 +22,10 @@ namespace Assimalign.Cohesion.Database.Sql.Client;
 /// Connections are not thread-safe: one command at a time, mirroring the engine-session contract. A
 /// connection rented from a <see cref="SqlClient"/> returns to its pool on dispose (with its
 /// authenticated session intact when it is still healthy).
-/// End or roll back an explicit transaction before disposing a connection. The pool does not yet
-/// reset transaction state on return; server-reported status and pool rollback are tracked by #1540.
+/// Pool return rolls back an unfinished explicit transaction before reusing its session.
+/// After acquiring the database writer lock, an idle transaction holds it until COMMIT, ROLLBACK,
+/// disconnect, pool return or server IdleTimeout (30 minutes by default). Servers without
+/// negotiated transaction-status (pre-#1540) are not pooled.
 /// </para>
 /// <para>
 /// Disposal is final for this instance: the pool may rent the session to another caller, so every
@@ -31,6 +33,8 @@ namespace Assimalign.Cohesion.Database.Sql.Client;
 /// ignored here instead of reaching that caller's rental.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("SqlConnection")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Client.SqlConnection.DebugView))]
 public sealed class SqlConnection : IAsyncDisposable
 {
     private readonly DatabaseConnection _connection;
@@ -302,5 +306,17 @@ public sealed class SqlConnection : IAsyncDisposable
             // A telemetry observer must never mask the original failure.
             SqlClientEventSource.Log.ObserverFailed(this, nameof(SqlClientObserver.OnFailed), observerException);
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Sql.Client.SqlConnection _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Client.SqlConnection value)
+        {
+            _target = value;
+        }
+
+        public string Database => _target.Database;
     }
 }

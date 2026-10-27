@@ -1,5 +1,22 @@
 # Documents client design
 
+## Array-posting NativeAOT guard (#1530)
+
+The engine-linked NativeAOT consumer additionally exercises the catalog's typed DISTINCT array
+descriptor, WHEN filter, v3 metadata round trip and delete rollback. Posting checks open a snapshot
+after rollback; a committed-delete negative control uses the same check to prove it detects a
+deletion that survived transaction end. Leading array definitions keep IncludeMissing false.
+These are catalog checks;
+the client API and wire contract do not change. OQL array-index DDL and planning follow in OQ-I2.
+
+## Comprehension wire conformance (#1728)
+
+ARRAY/FIRST use the existing OQL request text, JSON result cells and MISSING bitmap on InMemory
+and TCP. DocumentComprehensionWireTests cover nested scope, unknown inputs, mapped MISSING,
+UPDATE RETURNING and statement rollback on scalar failure or retained-array budget exhaustion.
+No client API, frame, capability or format change is required. The NativeAOT consumer exercises
+both operators, registered arguments and RETURNING on both transports.
+
 ## Terminal TCP conformance (#1087)
 
 The real DocumentClient and model server run missing-database handshakes on InMemory and
@@ -45,7 +62,7 @@ SELECT lists arrive as objects in projection order. SELECT VALUE/RAW uses the ex
 whole-value header mode and exposes a single `value` column and its JSON values in Documents.
 LIMIT/OFFSET use the ordinary JSON parameter path; Complete counts only the returned Document
 frames, while query AffectedCount stays -1. Empty pages retain headers, IsDocumentQuery and static
-function column types. OQL0007 survives parse or plan failure at the operand and keeps the session
+function column types. CD00007 survives parse or plan failure at the operand and keeps the session
 reusable. Both transports and the NativeAOT guard exercise paging.
 DISTINCT completion counts follow duplicate removal; object/array constructors need no codec
 extension. A lone SELECT * preserves stored bytes on the wire, including scalar roots.
@@ -54,10 +71,13 @@ and array variable names; MISSING LEFT bindings are omitted, actual null element
 Array expansion, grouped Int64 counts, ANY/SOME/EVERY and array IN use the ordinary query
 exchange, without new messages or format versions. The advertised-clause test exercises
 grouped UNNEST and ANY on both transports; the AOT consumer covers these shapes too.
+Array-index DDL and matching ANY/UNNEST plans (#1530) use these same messages. Wire probes and
+the AOT consumer verify IndexSeek EXPLAIN, same-element residuals, repeated UNNEST rows and
+located restricted-WHEN failures with connection reuse; no codec or protocol version changes.
 VALUE/RAW MISSING becomes NULL during engine projection, before DISTINCT and projected ordering,
 so embedded and wire rows agree on IsMissing=false and completion counts. Embedded MISSING
 object members remain omitted and MISSING array elements become NULL.
-GetBytes preserves exact bare-frame JSON bytes (a lone SELECT *, or VALUE/RAW). Named string
+GetBytes preserves exact bare-frame JSON bytes (a lone SELECT/RETURNING *, or VALUE/RAW). Named string
 columns return unquoted UTF-8 and named NULL/MISSING columns return empty bytes, matching the engine.
 Constructed and bare scalar rows use the engine's RFC 8259 encoder, retaining non-ASCII,
 HTML-sensitive characters and U+2028/U+2029 as UTF-8 while escaping quotes, backslashes and controls.
@@ -110,27 +130,27 @@ sequenceDiagram
 ```
 
 `DocumentResultSet` exposes ordinal/name-indexed rows, columns and `AffectedCount`. Queries use
-`-1`; collection and index DDL use zero. INSERT uses the inserted-document count and emits
-no Document frames. UPSERT uses the written-document count for inserts and complete replacements,
+`-1` for read-only queries; collection and index DDL use zero. INSERT uses the inserted-document count and emits
+Document frames only with RETURNING. UPSERT uses the written-document count for inserts and complete replacements,
 with fresh versions and the same MISSING validation as INSERT. Repeated keys fail the whole
-statement with COHDOC012; invalid keys use COHDOC008. Both preserve the connection. EXPLAIN UPSERT
+statement with CD03012; invalid keys use CD02008. Both preserve the connection. EXPLAIN UPSERT
 describes Upsert/UpsertSelect without writing. DELETE uses the deleted-document count, including zero, and likewise
-emits only Complete. UPDATE uses the matched-document count, including byte-identical rewrites
+emits only Complete without RETURNING. UPDATE uses the matched-document count, including byte-identical rewrites
 and no-op UNSET, with fresh versions for every match. SET and UNSET preserve the engine's
 nested-path, array-index, MISSING and atomicity rules. Invalid paths return ExecutionFailure
-with COHDOC016 and leave the connection reusable. EXPLAIN UPDATE describes its access path
+with CD02016 and leave the connection reusable. EXPLAIN UPDATE describes its access path
 without writing. DELETE's scan/seek selection, full-predicate filtering and rollback behavior
 are the embedded engine's. EXPLAIN DELETE includes its chosen access without mutating.
-Duplicate keys preserve COHDOC012 as ExecutionFailure and the next statement can reuse the
+Duplicate keys preserve CD03012 as ExecutionFailure and the next statement can reuse the
 session. The advertised-clause suite covers VALUES, UPSERT, SELECT, UPDATE, UNSET, DELETE and META.
 The advertised-predicate corpus also covers IN, BETWEEN, LIKE, searched/simple
 CASE, grouped CASE and CASE under SUM over InMemory and TCP. It preserves embedded rows,
-MISSING versus NULL, COHDOC013 and reuse after a malformed LIKE pattern.
+MISSING versus NULL, CD02013 and reuse after a malformed LIKE pattern.
 `CREATE COLLECTION [IF NOT EXISTS]` and
 `DROP COLLECTION [IF EXISTS]` use the existing Execute exchange and retain collection ownership
 and conditional no-op semantics. A schema-owned drop returns ExecutionFailure (6), and the
 connection remains usable. `IsDocumentQuery` means one bare JSON value per frame
-(a lone SELECT *, or VALUE/RAW), even for an empty result.
+(a lone SELECT/RETURNING *, or VALUE/RAW), even for an empty result.
 `Documents` holds owned `JsonElement` values in that case; positional queries leave it empty.
 Bare-value rows contain the same owned JsonElement as Documents, including scalar and constructed values;
 the row also owns the original frame bytes for GetBytes.
@@ -153,12 +173,79 @@ a server-side `DocumentCollection` is bound to an engine session and cannot cros
 Catalog queries use `COHESION_SCHEMA.INDEXES` and `COHESION_SCHEMA.OBJECT_OWNERSHIP`.
 
 Composite and UNIQUE index DDL and IF modifiers use Execute without new frames. Duplicate Put
-and CREATE UNIQUE INDEX over duplicates return ExecutionFailure (6), preserve COHDOC020 and
+and CREATE UNIQUE INDEX over duplicates return ExecutionFailure (6), preserve CD03020 and
 name index/collection without key contents; the same connection accepts the next query. Non-scalar
-UNIQUE keys retain COHDOC021. The AOT guard exercises the composite seek, metadata and duplicate
+UNIQUE keys retain CD02021. The AOT guard exercises the composite seek, metadata and duplicate
 failure over InMemory and TCP (#1135).
 
+## RETURNING completion (#1727)
+
+QueryAsync returns rows and AffectedCount together for INSERT, UPSERT, UPDATE and DELETE with
+RETURNING; ExecuteAsync drains the same result and returns its affected count. Named projections
+and RAW/VALUE reuse the existing result header, Document frames, owned JSON and missing/null
+accessors. Empty results retain column metadata and bare-value shape. DELETE uses pre-images;
+the other writes use stored post-images and fresh metadata. Complete keeps its two Int64 fields.
+
+DocumentExchange.ValidateCompletion now accepts an Execute result header with affected count -1
+or a nonnegative value equal to the received row count. Mismatched result/affected counts and
+negative affected counts below -1 still discard the connection. Owner decision 8 (2026-10-25)
+requires no capability or negotiation; older clients that insist on -1 reject these responses.
+This deliberately changes validation semantics without a byte-layout or version change.
+That rejection is a client-side ProtocolViolation and closes the connection after the server
+has already committed an autocommit statement. Its writes remain committed even though the
+client reports failure; retrying a non-idempotent write can apply it again (for example,
+`SET n = n + 10` changes 1 to 11, then a retry changes 11 to 21). In an explicit transaction,
+the disconnect rolls back the uncommitted writes instead. Use an updated client for RETURNING;
+a legacy client's rejection does not certify that an autocommit write was rolled back.
+
+The engine materializes RETURNING inside the statement transaction and charges retained rows to
+its StatementMemoryBudget (64 MiB by default). Projection, serialization preflight or budget failure rolls back all writes,
+returns a terminal Failure before any header/row, and preserves the connection. Existing explicit
+transaction failures remain faulted until rollback. DocumentReturningWireTests checks all forms,
+metadata, ownership, raw completion bytes, failure ordering, CD05018 and transaction/session reuse
+over InMemory and TCP. The AOT guard exercises the same completion contract on both transports.
+Permanent wire probes also cover UPDATE/DELETE of a document written earlier in the same
+explicit transaction, and the pre-RETURNING completion predicate on both transports, including
+autocommit retry and explicit disconnect cleanup. The malformed-peer zero-affected case has
+a valid decoded Complete and a matching result count, so it reaches ValidateCompletion's
+affected-count predicate directly.
+
 ## Failures and pooling
+
+### Text transactions and pool return (#1725)
+
+BEGIN/START, COMMIT and ROLLBACK use ordinary Execute on the connection-owned session.
+Snapshot is the default and READ COMMITTED is explicit. Command CRUD and collection operations
+share that transaction. OQL DDL retains CD04105; failed work retains CD04101 until ROLLBACK,
+or a failed COMMIT that ends it without committing. CD07002 refuses every text control when
+transaction-status was not negotiated, before touching any transaction; ordinary autocommit
+work remains available. Capability-free pooled-driver regressions verify refusal and clean reuse
+over InMemory and TCP, including after a statement failure.
+
+Documents advertises transaction-status. Every Execute and Command terminal response is followed
+by negotiated Ready (Idle, Active or Failed), including decoded Failure. The shared client observes
+both request identifiers, drains status before completing the operation, and rolls back active or
+failed transactions before pooling. Reset validates Execute 64 / Complete 66 with two zero counts
+and Idle status. Missing, malformed, unnegotiated or failed reset evidence discards the session.
+A 2.0 or unnegotiated 2.1 peer remains usable for its rental but cannot be pooled.
+
+Status bookkeeping after Complete uses the shared bounded cleanup token, so caller cancellation
+cannot turn acknowledged COMMIT into caller cancellation. Any exception from COMMIT leaves its
+outcome unknown to the caller and discards the connection, including when Complete acknowledged
+the commit but its Ready status postamble was lost. A missing Ready times out with
+OperationCanceledException from the five-second internal bound, independent of the caller's token;
+a closed connection before Ready reports DocumentClientException (ProtocolViolation).
+Disconnect cleanup never retries COMMIT. Abandoning an unfinished exchange discards the connection.
+Postamble failures retain the shared protocol, transport or cleanup exception and discard the
+session; they never retry an acknowledged statement or claim that committed work was rolled back.
+InMemory and TCP tests cover visibility, isolation, failed commands, pooled rollback, disconnect,
+cancellation/disposal races, invalid status/reset and cancellation after COMMIT acknowledgement.
+Frame relays on both transports drop Complete before the client receives it, or close/withhold
+Ready after forwarding Complete. They assert caller failure, a fresh physical connection on the
+next rental, exactly one COMMIT on the wire, and atomic visibility from an independent session.
+The NativeAOT sample exercises wire controls and reset on both transports.
+
+### Terminal response ownership
 
 The typed connection captures its immutable database name when it receives the shared lease
 (#1313). Operation diagnostics can finish after disposal returns that lease, whose members then
@@ -169,7 +256,7 @@ including after partial rows or documents, with no `Complete` after it. The clie
 accumulated results and throws the typed error; the authenticated session remains reusable. Failure
 carries the shared classification
 and the server's structured `Diagnostic` values, including codes and nullable locations. Parser
-diagnostics, planning and evaluation diagnostics (`COHDOC001`–`COHDOC018`), and offline `COHDBD002`
+diagnostics, planning and evaluation diagnostics (`CD05001`–`CD02018`), and offline `CD06102`
 survive intact. The server reads the database exception carrier and composes `CODE: message`
 once; the client preserves that text without adding a prefix. Located diagnostics retain their
 spans; direct collection APIs retain unlocated diagnostics. An engine failure without structured diagnostics
@@ -178,18 +265,22 @@ text to 4096 UTF-16 characters and diagnostics to 256 (codes to 256 characters),
 truncation/omission markers. Codes and locations of retained diagnostics are unchanged. This
 keeps even a near-frame-sized failing identifier from turning a statement error into a broken wire.
 
-Blank OQL collection names return `COHDOC001` at the quoted name's span; empty quoted names
-return the parser's `OQL0002`. Both preserve the connection. The typed command API rejects blank
+Blank OQL collection names return `CD05001` at the quoted name's span; empty quoted names
+return the parser's `CD00002`. Both preserve the connection. The typed command API rejects blank
 names locally with its existing argument guard. A peer sending one through Command (69) receives
-an unlocated `COHDOC001` Failure and can continue using the same server session.
+an unlocated `CD05001` Failure and can continue using the same server session.
+Within an explicit transaction, that semantic command failure aborts pending work and requires
+an end control before further statements. Oversized Put response preflight and query response
+serialization failures follow the same rule, retaining CD05016 for the original failure and
+CD04101 for later statements.
 
-Collection refusals preserve `COHDOC002` (missing DROP), `COHDOC010` (duplicate CREATE), and
-`COHDOC011` (schema-owned DROP) through both OQL and Command exchanges. Their OQL diagnostics
+Collection refusals preserve `CD01002` (missing DROP), `CD03010` (duplicate CREATE), and
+`CD03011` (schema-owned DROP) through both OQL and Command exchanges. Their OQL diagnostics
 carry the statement span; command diagnostics have no source location. All are ExecutionFailure
 and preserve the session, including conditional schema-owned drops.
 
 INSERT rejects numeric literals and JsonElement parameters outside the exact decimal domain
-with COHDOC007 before normalization, including underflow and excess fractional precision.
+with CD02007 before normalization, including underflow and excess fractional precision.
 VALUES and computed SELECT inputs preserve the collection on failure over both InMemory and
 TCP; the diagnostic span and the reusable session survive the wire unchanged.
 
@@ -243,7 +334,7 @@ The sample executes every scalar category and verifies code-point LENGTH and Int
 both InMemory and TCP (#1137), alongside the existing advertised-clause checks.
 
 Documents.Client is inventoried and built in the Database workflow, but remains NuGet-only like
-Graph.Client. Model-specific Documents security remains deferred within the engine. Transactions, remote database administration,
+Graph.Client. Model-specific Documents security remains deferred within the engine. Remote database administration,
 replication and model-specific security policies are outside this wire slice. OQL INSERT, UPSERT, UPDATE and DELETE
 return their affected counts through the existing completion field. Wire negotiation remains
 the shared protocol's responsibility, with no model-specific version exchange. The startup version
@@ -282,4 +373,57 @@ JSON uses fixed, one-level objects and cannot carry arbitrary nested content.
 
 ## Shared startup 2.1 (#1105)
 
-The shared client reads the negotiated Ready version and capability intersection. Documents agrees 2.1 with an empty list and retains its existing structured Failure payload; it does not adopt the core Diagnostics frame. A negotiated 2.0 peer still sends empty Ready.
+The shared client reads the negotiated Ready version and capability intersection. Documents agrees 2.1 with transaction-status and retains its existing structured Failure payload; it does not adopt the core Diagnostics frame. A negotiated 2.0 peer still sends empty Ready.
+
+## Dedicated test actors (#1285)
+
+Deadline-dependent peers and busy test drivers use the linked Storage test helper's LongRunning threads. Ordinary async driver continuations stay on their actor scheduler, without changing SynchronizationContext. Existing deadlines of 25 seconds or more are hang guards. Runner settings impose no parallel-thread cap. See the [scheduling audit](../../Assimalign.Cohesion.Database.Storage/docs/TEST-HYGIENE-AUDIT.md) for every original Task.Run site, the exact journal counters and the physical index-work guards.
+
+Reference consulted: RavenDB test/StressTests/Voron/InvalidReleasesOfScratchPages.cs:39–68 and :71–103 use LongRunning stress drivers. No code was copied.
+
+## Document access estimates (#1527)
+
+EXPLAIN remains a nonexecuting query returning one JSON document per plan row. IndexSeek now
+includes an Int64 index-entry estimate and labels complete counts or lower bounds in Detail.
+IndexIntersection has IndexSeek children and a minimum-input upper bound, before JSON reads;
+actual_rows remains JSON null. The existing nullable count members and Document frames carry
+these values over InMemory and TCP, without a protocol-version or client API change. The AOT
+consumer checks intersection results, both input descriptions and nonexecuting behavior.
+
+## Documents diagnostic conventions (#1470)
+
+Exception and diagnostic templates use the project's build-generated `ErrorMessages` resources.
+Parameterized templates format with the current culture; abort/cancellation templates used in
+normal cleanup are cached. The [Database error-code registry](../../Assimalign.Cohesion.Database/docs/ERROR-CODES.md)
+assigns this family its two-letter prefix and categorized five-digit identities.
+Existing SQLSTATE meanings, numeric wire error kinds, frame layouts and disk formats are preserved.
+Structured diagnostics keep their code outside the message. Compiler diagnostic identifiers and
+standard .NET argument guards retain their own contracts.
+
+## Debugger inspection (#1470)
+
+Client debugger views expose the captured database name, stored result metadata and counts from arrays materialized by the result/row constructors. They omit live connection state, transport settings and row-value buffers, and never enumerate results.
+
+Eligible types follow the [Database conventions](../../Assimalign.Cohesion.Database/docs/CONVENTIONS.md) debugger display/proxy rules. Views are private and read-only; inspection does not change the public API, execution paths, error contracts, storage formats or protocol bytes.
+
+## Engine-registered function execution
+
+Execute/Query send ordinary OQL text; no client-side registration or catalog argument is needed.
+The server binds application scalar and aggregate names against its engine-wide frozen catalog.
+Existing result headers preserve declared types, including empty results. CD05017 callback
+failures use the existing Failure exchange with one message prefix and structured spans; the
+connection remains reusable under the existing policy. DocumentRegisteredFunctionWireTests
+covers registered scalars, aggregates and NULL/MISSING-aware calls over InMemory and loopback TCP.
+No client production API, frame layout, format version or dependency changes.
+
+
+The model client NativeAOT sample independently registers lower_tag, rank_total and the
+compiled derived has_value function before building its real server. Each existing transport run
+executes three additional checks: exact string/metadata for the typed scalar, Boolean results
+and metadata for MISSING/NULL/valued inputs through the protected core, and exact Decimal
+aggregate result/metadata. This client/server sample is separate from the engine recovery fixture;
+both require their own publish/execution evidence. No sample project reference changes are needed.
+
+Unknown engine-resolved function names use ExecutionFailure rather than ParseFailure, with
+no StatementParseFailed event. Application callback timeout and I/O errors use the model
+callback diagnostic and leave the exact wire session reusable after a completed failure.

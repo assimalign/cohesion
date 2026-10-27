@@ -3,6 +3,8 @@ using Assimalign.Cohesion.Database.Language;
 namespace Assimalign.Cohesion.Database.Documents.Language;
 
 /// <summary>An ordinal, case-sensitive string pattern predicate.</summary>
+[global::System.Diagnostics.DebuggerDisplay("OqlLikeExpression")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Documents.Language.OqlLikeExpression.DebugView))]
 public sealed class OqlLikeExpression : OqlExpression
 {
     /// <summary>Initializes a LIKE predicate.</summary>
@@ -27,4 +29,21 @@ public sealed class OqlLikeExpression : OqlExpression
     public OqlExpression? Escape { get; }
     /// <summary>Gets whether the result is negated.</summary>
     public bool Negated { get; }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Documents.Language.OqlLikeExpression _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Documents.Language.OqlLikeExpression value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Documents.Language.OqlExpression Operand => _target.Operand;
+        public global::Assimalign.Cohesion.Database.Documents.Language.OqlExpression Pattern => _target.Pattern;
+        public global::Assimalign.Cohesion.Database.Documents.Language.OqlExpression? Escape => _target.Escape;
+        public bool Negated => _target.Negated;
+        public string? Text => _target.Text;
+        public global::Assimalign.Cohesion.Database.Language.Location? Location => _target.Location;
+    }
 }

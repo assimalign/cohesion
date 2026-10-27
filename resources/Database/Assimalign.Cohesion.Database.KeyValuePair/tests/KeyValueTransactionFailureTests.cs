@@ -22,7 +22,7 @@ using static KeyValueTestHarness;
 /// explicit transaction active, as a failed SQL statement does; later commands stay inside the
 /// transaction and ROLLBACK undoes them. The transaction's own end follows the #1188 contract:
 /// a rollback can be repeated, a token is observed only before a commit or rollback starts, and a
-/// transaction the kernel ended under its caller refuses COMMIT with COHDBK001. A started rollback
+/// transaction the kernel ended under its caller refuses COMMIT with CV04101. A started rollback
 /// always ends the transaction (#1226), even when its abort record cannot be written.
 /// </summary>
 public sealed class KeyValueTransactionFailureTests
@@ -227,12 +227,12 @@ public sealed class KeyValueTransactionFailureTests
 
     /// <summary>
     /// A transaction the kernel ended under its caller (its database was dropped while the session
-    /// held it) refuses work with COHDBK001, and the root bases order that refusal against a
+    /// held it) refuses work with CV04101, and the root bases order that refusal against a
     /// canceled token (concrete-types plan §6.4): both execute seams check the token first, and
     /// BEGIN refuses the open transaction before it checks the token. Before the bases, both
-    /// execute seams reported COHDBK001 and BEGIN the canceled token.
+    /// execute seams reported CV04101 and BEGIN the canceled token.
     /// </summary>
-    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Session: a transaction the kernel ended refuses work with COHDBK001; the execute seams check a canceled token first, BEGIN after")]
+    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Session: a transaction the kernel ended refuses work with CV04101; the execute seams check a canceled token first, BEGIN after")]
     public async Task ExecuteAndBegin_TransactionEndedByTheKernel_ShouldOrderTheTokenAroundTheRefusal()
     {
         // Arrange
@@ -258,9 +258,9 @@ public sealed class KeyValueTransactionFailureTests
         state.ShouldBe(TransactionState.Faulted);
         canceledText.CancellationToken.ShouldBe(canceled.Token);
         canceledTyped.CancellationToken.ShouldBe(canceled.Token);
-        canceledBegin.Diagnostics[0].Code.ShouldBe("COHDBK001");
-        text.Diagnostics[0].Code.ShouldBe("COHDBK001");
-        typed.Diagnostics[0].Code.ShouldBe("COHDBK001");
+        canceledBegin.Diagnostics[0].Code.ShouldBe("CV04101");
+        text.Diagnostics[0].Code.ShouldBe("CV04101");
+        typed.Diagnostics[0].Code.ShouldBe("CV04101");
         session.CurrentTransaction.ShouldBeNull();
     }
 
@@ -427,7 +427,8 @@ public sealed class KeyValueTransactionFailureTests
         // Assert
         unspent.ShouldBe(0);
         StorageOfflineException.Find(error).ShouldNotBeNull();
-        error.Message.ShouldStartWith("COHDBK002: Database 'kv' went offline while a transaction was committing", Case.Sensitive);
+        error.Diagnostics.ShouldContain(d => d.Code == "CV06102");
+        error.Message.ShouldStartWith("Database 'kv' went offline while a transaction was committing", Case.Sensitive);
         stateAfterCommit.ShouldBe(TransactionState.Committed);
         session.CurrentTransaction.ShouldBeNull();
         (await Keys(recovered, observer)).ShouldBeEmpty();
@@ -475,7 +476,7 @@ public sealed class KeyValueTransactionFailureTests
         // Assert
         unspent.ShouldBe(0);
         StorageOfflineException.Find(error).ShouldNotBeNull();
-        error.Code.ShouldBe("COHDBK002");
+        error.Code.ShouldBe("CV06102");
         stateAfterCommit.ShouldBe(TransactionState.Faulted);
         session.CurrentTransaction.ShouldBeNull();
         (await Keys(recovered, observer)).ShouldBeEmpty();
@@ -494,9 +495,9 @@ public sealed class KeyValueTransactionFailureTests
 
     /// <summary>
     /// Closing a session ends its transaction: the caller's rollback afterwards raises nothing, and
-    /// its commit fails with COHDBK001 naming the closure and commits nothing.
+    /// its commit fails with CV04101 naming the closure and commits nothing.
     /// </summary>
-    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Transaction: closing the session ends the transaction; a later rollback is a no-op and a commit fails with COHDBK001")]
+    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Transaction: closing the session ends the transaction; a later rollback is a no-op and a commit fails with CV04101")]
     public async Task DisposeAsync_SessionWithTransaction_ShouldEndTransactionAndAcceptRollback()
     {
         // Arrange
@@ -513,7 +514,7 @@ public sealed class KeyValueTransactionFailureTests
 
         // Assert
         transaction.State.ShouldBe(TransactionState.RolledBack);
-        commit.Diagnostics[0].Code.ShouldBe("COHDBK001");
+        commit.Diagnostics[0].Code.ShouldBe("CV04101");
         commit.Message.ShouldContain("nothing was committed", Case.Sensitive);
         commit.Message.ShouldContain("The session closed before the transaction ended.", Case.Sensitive);
         session.CurrentTransaction.ShouldBeNull();

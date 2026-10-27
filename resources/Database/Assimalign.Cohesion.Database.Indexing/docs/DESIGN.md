@@ -65,8 +65,8 @@ writer-stamp tiebreakers are separate. Both insertion paths accept 1,024 bytes a
   sequence stamps; reads filter through the caller's snapshot (writer visible,
   deleter absent-or-invisible). Deletes stamp — never remove — so old snapshots
   keep seeing the entry; an aborted deleter's stamp reverts physically with its
-  page image. Physical reclamation and node merges belong to vacuum, which follows
-  version pruning (post-MVP).
+  page image. Safe dead entries are removed by the bounded purge pass and unique-insert
+  walk (#1195); empty-leaf reclamation and node merges remain separate work.
 - **Uniqueness checks the LATEST state, not the snapshot.** Two transactions that
   began before each other's commits would both pass a snapshot-visibility check
   (write skew). Instead: unique inserts *and deletes* first take an exclusive
@@ -144,8 +144,8 @@ CurrentKey owns its bytes and survives later moves/disposal. Cursors have one re
 moves or disposal are unsupported.
 
 The caller retains its statement/transaction snapshot pin for the entire enumeration; the cursor
-does not create a second kernel transaction or extend a statement's lifetime. Future pruning must
-respect that same horizon before removing snapshot-visible entries. Physical page rollback remains
+does not create a second kernel transaction or extend a statement's lifetime. Pruning respects
+that same horizon before removing snapshot-visible entries. Physical page rollback remains
 the owner-selected default (#1393): continuation is by logical identity, with no statement stamps,
 logical-only page rollback, new interface or visibility grant.
 
@@ -298,7 +298,7 @@ knows:
 | Clear-deleter (logical undo of a tombstone) | `(key, reference, +inf)`, read backward | one descent: the reference's newest version |
 | Equality and inclusive range seek | `(key, -inf)` | one descent, then the range's entries |
 | Exclusive range start | `(key, +inf)` | one descent, then the range's entries |
-| Unique check | `(key, -inf)` | one descent, then the key's entries until a live one |
+| Unique insert and its check (#1239) | `(key, reference, writer)` | one descent; check the key's run around the insertion leaf and reuse its slot |
 
 A full identity lands on the leaf that holds it. A partial position lands on the
 leaf where its entries begin — or end, when they begin on the next leaf — and the
@@ -356,23 +356,29 @@ decides either: a row's delete is decided on the heap tuple under its lock, and 
 index tuples leave the tree later, through VACUUM or simple deletion of tuples known
 dead (`src/backend/access/nbtree/README:166`, `:510`).
 
-The unique check is the one lookup still linear in a key's history. It must prove
-no live version exists among the key's versions, and a live version can sit
-anywhere among the dead ones, so it reads the key's run from `(key, -inf)` until it
-finds a live entry or passes the key — one descent and a forward walk over
-consecutive leaves, the cheapest walk the semantics allow. PostgreSQL's
-`_bt_check_unique` walks the same way (`nbtinsert.c:440-449`). Pruning dead versions
-(#1195) bounds it.
+The unique check must prove no live version exists anywhere in the key's retained
+history. Insert now descends by full identity once, checks that leaf's matching entries
+and any adjoining leaves containing the key, removes safely dead entries, and reuses the
+adjusted insertion slot (#1195, #1239). A standalone latest-live lookup still starts at
+`(key, -inf)` under a read latch. A snapshot pin can retain a long history, so the
+uniqueness proof remains proportional to that retained history; it checks cancellation
+per entry. With no old reader, opportunistic removal bounds repeated hot-key updates.
 
-**Known limit until #1195: a row updated many times under a UNIQUE index.** Every
-UPDATE of a row leaves its old version's entry under the same key, so the unique
-check of the next UPDATE reads one more dead entry. `UPDATE t SET v = v + 1 WHERE
-id = 2`, repeated 20,000 times on a table whose primary key is the unique index,
-costs 0.40 ms per update over the first 2,500 updates, 3.67 ms over updates
-10,001–12,500 and 5.98 ms over the last 2,500 (Release; before #1194, 0.55, 4.19
-and 8.29 ms). #1194 makes the tombstone half of each UPDATE one descent, but the
-unique check still grows with the row's history; these numbers are #1195's
-baseline.
+The insertion walk holds the existing key lock then the tree write latch. Pruning joins
+the caller's statement bracket, so a refused or canceled statement restores all of it.
+Splits repair the cached ancestor child slots, including root relocation and recursive
+internal splits; insertion resumes in the selected half without another root descent.
+`ChooseLeafSplit` and its shape policy are unchanged. PostgreSQL's cached insertion
+state is the reference (`src/backend/access/nbtree/nbtinsert.c:118-124`, `:170`, `:213`,
+`:258-264`); Cohesion's full-identity descent checks both sides of its insertion leaf
+because entry references and writer stamps are part of its order. No reference code copied.
+
+**Measured hot-key work (#1195).** A 20,000-autocommit-update SQL workload with
+background maintenance disabled examines 687.9258 / 101,108.4766 entry-directory slots
+per update in the first/last 256 updates before the fix (146.9759× growth), versus
+27.9688 / 28.0195 after (1.0018×). The guard requires positive counts and less than
+2× growth, plus the final value. This replaces the issue's timing guard with deterministic
+physical work. Disabling opportunistic removal fails at 127.4697× growth; restoration passes.
 
 ### Splits
 
@@ -534,22 +540,22 @@ PostgreSQL's metapage test (`btm_magic` and `btm_version`, `nbtpage.c:155-168`;
 never moves and from which one engine wrote the whole tree. `BTreeIndexManager.Create`
 reads every registered root before it attaches any tree, and a root in any other
 format refuses the attach with `IndexFormatException`, whose message starts with
-`COHDBI001` and names the index, the format found and the one supported ("uses
+`CK06101` and names the index, the format found and the one supported ("uses
 B-tree page format 1, but this engine supports only format 2", with the export,
 drop and recreate remedy and #1152), or says the root is no B-tree page at all.
 `BTreeIndexManager.EnsureFormat(storage, registrations)` makes the same check alone,
 writing nothing, for a model whose open recovers its record space before it attaches
 its trees. Every node read after attach also checks the magic and version, like
 PostgreSQL's `_bt_checkpage` (`nbtpage.c:782-811`); a page that fails is damage, and
-the operation fails with `IndexCorruptionException` (`COHDBI002`, PostgreSQL's
+the operation fails with `IndexCorruptionException` (`CK06102`, PostgreSQL's
 `ERRCODE_INDEX_CORRUPTED`). There is no upgrade path (owner decision of 2026-10-02;
 upgrades are #1152). How each model surfaces the refusal:
 
 | Model | Where its open checks | Error |
 |---|---|---|
-| SQL | Its catalog's data-storage format marker, bumped from 4 to 5 by #1194 (current format 25, #1111), before the data file set opens; then the attach check, before recovery | `SqlDataStorageFormatException` "uses data-storage format 4, but this engine supports only format 25"; a marker that does not describe its trees, the attach check's `COHDBI001` |
-| Key-value | Its catalog's entry-space format marker, bumped from 1 to 2, before the attach; then the attach check, before recovery | `DatabaseException` "uses entry-space format 1, but this engine supports only format 2"; a marker that does not describe its tree, "Database 'x' cannot be opened. COHDBI001: …" |
-| Document | `DocumentCatalog.EnsureIndexFormat`, before the recovery scrub; the attach check again in the catalog's open | "Database 'x' cannot be opened. COHDBI001: …" |
+| SQL | Its catalog's data-storage format marker, bumped from 4 to 5 by #1194 (current format 25, #1111), before the data file set opens; then the attach check, before recovery | `SqlDataStorageFormatException` "uses data-storage format 4, but this engine supports only format 25"; a marker that does not describe its trees, the attach check's `CK06101` |
+| Key-value | Its catalog's entry-space format marker, bumped from 1 to 2, before the attach; then the attach check, before recovery | `DatabaseException` "uses entry-space format 1, but this engine supports only format 2"; a marker that does not describe its tree, "Database 'x' cannot be opened. CK06101: …" |
+| Document | `DocumentCatalog.EnsureIndexFormat`, before the recovery scrub; the attach check again in the catalog's open | "Database 'x' cannot be opened. CK06101: …" |
 | Graph | `GraphStore.EnsureIndexFormat`, before the recovery scrub; the attach check again in the store's open | the same |
 
 Every refusal comes before the model's own recovery — its scrub, index purge and
@@ -633,13 +639,13 @@ torn read:
   storage now closes it (below, and `Database.Storage` DESIGN, "No reader sees a
   rollback's restore half done");
 - the root, or any node, read while its header was cleared failed the node check as
-  `IndexCorruptionException` (`COHDBI002`) on an undamaged tree. The message's "found
+  `IndexCorruptionException` (`CK06102`) on an undamaged tree. The message's "found
   format 2" is a second read of the header, made after the restore had written it back.
 
 `SqlUniqueViolationRollbackRaceTests`' workload (two sessions inserting 40 fresh keys
 and then a committed one under a unique index, four sessions seeking committed keys)
 failed every one-second run against `f17d8bc0`: 40 of 40 in Release, 27 as
-`COHDBI002` on the root, 9 as an empty seek and 4 as page 0, within 0.2–1 s of the
+`CK06102` on the root, 9 as an empty seek and 4 as page 0, within 0.2–1 s of the
 start. With the fix, 0 of 40 one-second runs and one 40-second run failed (5.0 million
 seeks against 177,000 rolled-back statements).
 
@@ -659,7 +665,7 @@ while this one holds their page write locks. `BTreeRollbackLatchTests` pins both
 against the tree: a rollback waits while a reader holds the latch (the root still the
 grown tree's under the hold, the committed one after), and cursors racing rolled-back
 splits read exactly the committed entries (both fail against a rollback that takes no
-latch: a cursor read 62 or 304 of 400 entries, or met `COHDBI002`).
+latch: a cursor read 62 or 304 of 400 entries, or met `CK06102`).
 
 - **No new wait cycle.** A rollback waits only for the latch's readers (a cursor holds
   one latch, briefly, and waits for nothing else while it holds it) and its writers
@@ -682,8 +688,8 @@ latch: a cursor read 62 or 304 of 400 entries, or met `COHDBI002`).
   per call without a latch and 89.4–173.8 ns with one (round medians per run): inside the
   run-to-run spread, on a path a B-tree insert takes a few times per entry.
 
-**The design question this leaves: should an index page be physically rolled back at
-all?** PostgreSQL never does. nbtree changes a page only under that page's buffer
+**Decision #1393 (owner approved 2026-10-19): keep physical index-page rollback.**
+PostgreSQL never does. nbtree changes a page only under that page's buffer
 content lock (`_bt_doinsert`, `src/backend/access/nbtree/nbtinsert.c:105`; readers
 take a share lock on each page they read, `README:63-68`), and an aborted inserter's
 tuples stay where they are: they are invisible because the heap tuple's inserting
@@ -703,8 +709,14 @@ statement-level stamp (PostgreSQL's subtransaction ids) or a logical statement u
 through the tree (the `EraseAsync` the transaction rollback already uses, under the
 latch), and a bracket that commits its index pages while it rolls back its heap pages,
 which the storage cannot do: a bracket commits or rolls back whole. Both are larger
-than #1371, which closes the race inside the existing design; the question is recorded
-for the owner. The heap pages the same rollback restores are read under a pin, without a
+than #1371, which closes the race inside the existing design. The accepted status quo
+keeps failed statements invisible to their continuing transaction, preserves the existing
+atomic heap/index WAL replay and recovery scrub, and accepts page pre-images plus tree-latch
+acquisition/restoration cost. PostgreSQL's alternative avoids index undo writes but requires
+heap/statement visibility machinery; Voron's alternative avoids shared-page restore races but
+requires private-page ownership and publication throughout storage. Neither is adopted, so
+there is no phased conversion. The latch cost is measured above; delta WAL already reduces
+write amplification. The heap pages the same rollback restores are read under a pin, without a
 latch, and the first version of this fix left them as they were: SQL range seeks beside
 failing inserts and committing updates missed committed rows 56 to 247 times a minute,
 each a row read that found its page half restored and skipped the row (#1371 review).
@@ -769,7 +781,7 @@ ascending" holds at a 128-page pool and is still partial at the 4,096-page (32 M
 The issue's own measurements of the same baseline (#1194: 124 µs and 7.2 ms per
 delete; 76 ms, 442 ms and 4,526 ms per cascade) were taken on the same kind of
 build; the rows above vary with the machine's other load by up to 2×, which is why
-the timing guards compare ratios. The random-delete rows still grow with the run
+the former timing guards compared ratios (replaced by physical-work counters in #1285). The random-delete rows still grow with the run
 because the storage layer journaled an 8 KiB before-image the first time a
 transaction wrote a page (25–50 µs; since #1253 a pre-image in memory and a delta at commit), and
 random deletes in a longer run touch more distinct leaves; the block rows hold the leaves touched constant and show the
@@ -777,30 +789,23 @@ descent itself does not grow. That before-image is also what the versions rows'
 flat 26 µs is: one first write per delete. With the entry order but a reference's
 versions read oldest first (#1194's first commit, `f2f9a7f2`), the same versions
 deletes cost 27 / 37 / 139–141 / 289–371 µs, linear in V. The duplicate-run insert rows
-are the cost described under "Splits"; the hot-row row is the unique check's known
-limit (#1195). The 100,000-row chain has one entry per key, so #1194 does not
-change its asymptotics. The timing guards compare growth ratios, not absolute
-times, so CI speed and load cancel out:
+are the cost described under "Splits"; the hot-row row records the historical unique-check
+limit fixed by #1195 above. The 100,000-row chain has one entry per key, so #1194 does not
+change its asymptotics. #1285 replaces the timing decisions with physical entry-directory reads:
 
-- `BTreeEntryTimingTests`, delete, erase and clear-deleter in a 40,000-entry run
-  against a 2,500-entry run of the same tree: allowed growth 4×; the baseline
-  measured 317–510×, the entry order 0.8–1.2×.
-- `BTreeEntryTimingTests`, delete and clear-deleter of 16 references with 2,048
-  versions each against 16 with 16 versions each, every newest version on its own
-  leaf: allowed growth 2.5×; the oldest-first walk measured 12.6–14.3×, the
-  newest-first lookup 0.87–1.21× (Release and Debug).
-- `SqlCascadeFanOutTests`, 16,000 children against 4,000: allowed growth 2×; the
-  baseline measured 10×. Each round times one 16,000-child cascade against four
-  4,000-child cascades back to back, so both blocks run about as long; one
-  4,000-child cascade against one of 16,000 measured up to 2.2× under load with the
-  walk linear. Load still swung a round's wall-clock cost two to four times, so the
-  blocks are timed in the process's CPU time (the timing collection runs alone in its
-  process), after an unmeasured warm-up round of both blocks: pinned to three cores
-  or beside another suite on them, the linear walk measured 0.77–1.27× (the wall
-  clock reached 2.42× once in 40 loaded runs) and the duplicate-run walk #1194
-  removed 2.58–3.58×, failing 20 runs of 20 (on the wall clock it passed 5 of 10
-  loaded runs).
+- `BTreeEntryTimingTests` retains its historical name, but compares physical reads for delete,
+  erase and clear-deleter in 40,000-entry and 2,500-entry runs of the same tree. Allowed growth
+  remains 4×. Delete and clear-deleter with 2,048 versus 16 versions retain the 2.5× work bound.
+- `SqlCascadeFanOutTests` compares four 4,000-child cascades with one 16,000-child cascade in
+  the same tree, retaining the 2× work bound. It also verifies the deleted children and the
+  surviving bystander. The restored Debug path performs 47.3359 versus 47.2959 reads per child,
+  growth 0.9992. The duplicate-run mutant performs 4,044.3091 versus 16,044.2848 reads
+  per child, growth 3.9671, and fails. No elapsed duration participates in any of these guards.
 
+`BTreeIndex.EntryAccessed` is an internal, null-by-default observer invoked on every entry-directory
+read, including sequential leaf walks. Tests isolate and restore it; the ordinary path has no
+counter and no process-wide atomic. This observes physical work rather than counting calls to
+an algorithm that a mutant could replace without increasing the count.
 ## Transactional binding
 
 `BTreeIndex` mutations take a `TransactionContext` — index entries are stamped and become visible under the same MVCC rules as the data they reference. There is no "non-transactional index write" surface; recovery replays index changes from the same WAL as data changes. Unique enforcement happens at insert against the *latest* state under the key lock (above); a competing in-flight writer of the same key is resolved by the lock manager, not the index.
@@ -874,9 +879,9 @@ directly, not the area's `DatabaseException` — this package is a child root th
 area root rolls up (2026-07-13 inversion), so it must stay independently
 consumable. `IndexUniqueViolationException : IndexException` is the typed
 unique-violation surface. `IndexFormatException : IndexException` is the typed
-page-format refusal at attach (`COHDBI001`, with the index, its object, its root
+page-format refusal at attach (`CK06101`, with the index, its object, its root
 page and the format found). `IndexCorruptionException : IndexException` is the
-typed damage surface (`COHDBI002`, with the index, the page and the format the page
+typed damage surface (`CK06102`, with the index, the page and the format the page
 claims): a page reached inside an attached tree that is not a node of the current
 format, PostgreSQL's `ERRCODE_INDEX_CORRUPTED` from `_bt_checkpage`, and the
 counterpart of the storage child root's `StorageCorruptionException`. Each code
@@ -913,8 +918,8 @@ Keyword: `Splits = 0x1`; the other events check `EventKeywords.None`.
 | --- | --- | --- | --- | --- | --- |
 | 1 | `IndexCreated` | Verbose | — | `database`, `objectId`, `index`, `kind` | `BTreeIndexManager.CreateIndexAsync`, once the tree's root is allocated and registered |
 | 2 | `IndexDropped` | Verbose | — | `database`, `objectId`, `index` | `BTreeIndexManager.DropIndexAsync` |
-| 3 | `IndexFormatRefused` | Error | — | `database`, `objectId`, `index`, `rootPageId`, `foundFormat` | the attach-time format check (`BTreeIndexManager.Create`/`EnsureFormat`), before `IndexFormatException` (`COHDBI001`) |
-| 4 | `IndexCorruptionDetected` | Error | — | `database`, `index`, `pageId`, `formatVersion` (what the page claims) | any operation that reaches a page of an attached tree that is not a current-format node, before `IndexCorruptionException` (`COHDBI002`); once per failing operation |
+| 3 | `IndexFormatRefused` | Error | — | `database`, `objectId`, `index`, `rootPageId`, `foundFormat` | the attach-time format check (`BTreeIndexManager.Create`/`EnsureFormat`), before `IndexFormatException` (`CK06101`) |
+| 4 | `IndexCorruptionDetected` | Error | — | `database`, `index`, `pageId`, `formatVersion` (what the page claims) | any operation that reaches a page of an attached tree that is not a current-format node, before `IndexCorruptionException` (`CK06102`); once per failing operation |
 | 5 | `IndexInvariantViolated` | Error | — | `database`, `index`, `pageId`, `detail` (the `IndexException` message, which names pages and positions, never keys) | the five split checks: a leaf or internal node too small to split, a leaf out of order, a separator position out of range, a separator that would misorder its parent |
 | 6 | `PageSplit` | Verbose | Splits | `database`, `index`, `pageId`, `leaf`, `entries` (before the split) | `SplitLeaf` and `SplitInternal`, once the page's halves are written and before the parent takes the separator |
 | 7 | `RootGrown` | Verbose | Splits | `database`, `index`, `rootPageId` | `GrowRoot`: the root split in place and the tree grew a level |
@@ -953,3 +958,98 @@ strings, integers and booleans, which bind to the trim-safe `WriteEvent` overloa
 application receives its events only with `<EventSourceSupport>true</EventSourceSupport>`, and
 nothing depends on delivery. The assembly grants `InternalsVisibleTo` to its own test assembly
 only, for the event source's tests (`src/Properties/AssemblyInfo.cs`).
+
+## Dedicated test actors (#1285)
+
+Deadline-dependent peers and busy test drivers use the linked Storage test helper's LongRunning threads. Ordinary async driver continuations stay on their actor scheduler, without changing SynchronizationContext. Existing deadlines of 25 seconds or more are hang guards. Runner settings impose no parallel-thread cap. See the [scheduling audit](../../Assimalign.Cohesion.Database.Storage/docs/TEST-HYGIENE-AUDIT.md) for every original Task.Run site, the exact journal counters and the physical index-work guards.
+
+Reference consulted: RavenDB test/StressTests/Voron/InvalidReleasesOfScratchPages.cs:39–68 and :71–103 use LongRunning stress drivers. No code was copied.
+
+## Bounded dead-version removal (#1195)
+
+`ValueTask<long> BTreeIndexManager.PruneAsync(TransactionSequence pruneBound,
+CancellationToken cancellationToken = default)` removes entries only when the deleter is
+nonzero and strictly below a proven safe snapshot bound. Callers serialize catalog changes
+and physical statement rollback with the coordinator's apply gate. The coordinator supplies
+the horizon; Indexing does not inspect transaction commit state or model pages.
+
+One call visits at most 64 leaf pages across the directory, resuming at its saved tree/leaf.
+An empty leaf consumes one page of the budget. The directory tracks create/drop in constant
+time and a drop swaps the last registration into the vacated position; the saved directory
+position remains valid and later passes reach the remaining trees. Each page takes the tree write latch for its entry walk, checks
+cancellation per entry, lazily opens a storage bracket on its first removal, releases the
+latch, then commits. Failed/canceled pages roll back under their enlisted tree latch and
+publish no continuation. Earlier committed pages remain reclaimed. Empty leaves, separator
+fences and page identities stay valid; no page reclamation, merge or format change occurs.
+Orphaned entry bytes are reclaimed by the existing insert-time leaf rebuild before splitting.
+
+The page-at-a-time maintenance pattern follows PostgreSQL's `btvacuumpage`
+(`src/backend/access/nbtree/nbtree.c:1403-1415`); its deletion delegates eligibility to the
+table access method (`nbtpage.c:1523-1536`). Cohesion instead proves eligibility from its
+coordinator's stamp horizon. No code copied. Unlike PostgreSQL VACUUM, this cut retains empty
+leaves and does not recycle tree pages.
+
+`Func<TransactionSequence>? BTreeIndexManagerOptions.PruneBound { get; init; }` supplies
+the same horizon for opportunistic unique-insert pruning. Without it, inserts retain history;
+standalone callers can still invoke explicit pruning with a proven bound. The four B-tree
+models provide `TransactionCoordinator.PruneBound`. Read cursors and latest-live read probes
+remain read-only under their read latch: the old issue's `CollectVisible` walk has been replaced
+by bounded cursors, so mutation belongs to the unique insert's existing exclusive walk and the
+coordinator pass, rather than upgrading reader latches. Uniqueness may still walk an old
+snapshot's retained run; this necessary proof is cancellable per entry, whereas maintenance's
+write-latch hold is bounded to one leaf.
+
+Tests cover a held snapshot across 1,000 updates, including a snapshot whose minimum comes
+from an older active writer; after it ends, the next pass leaves only the live physical entry.
+Other guards cover exact horizon equality, cancellation/rollback/resume, more than 64 leaves,
+100 separate indexes with drop/create during the continuation, and one descent per unique
+insert through recursive internal/root splits with 5,000 maximum-length keys. Existing #1196
+shape tests retain their original policy and bounds. `DescentStarted` is an internal null
+observer; the normal path adds no counter or process-wide atomic.
+
+### Unique insertion measurement (2026-10-22)
+
+Windows ARM64, .NET 10.0.13 / SDK 10.0.401, Release with tiering disabled, shared machine.
+Temporary probe: one warmup followed by twelve samples in each build, 100,000 shuffled INT keys
+(seed 1194), 1,000 inserts per transaction, fresh real harness storage with its 64-page pool.
+Key preparation and the complete sorted-result verification are outside the insertion interval;
+logical begin/commit and physical durability are inside. Total managed allocation is sampled
+across the interval; the harness has no background maintenance. The optional prune provider is
+absent in this standalone insertion probe. Probe source/project additions were restored afterward.
+
+| Build | Median inserts/s | Median allocated bytes/insert |
+| --- | ---: | ---: |
+| Wave-11 base `cf3739b7b` | 240,309.4877 | 3,466.6690 |
+| Single descent | 243,814.6389 | 3,350.8712 |
+
+Nine of twelve new samples exceed the base median; median throughput is 1.4586% higher and
+allocation falls by 115.7978 bytes/insert. All twelve exceed the recorded pre-#1194 random
+baseline of 18,241 inserts/s. The historical machine/runtime differ, so that absolute comparison
+is an acceptance observation, not a causal speedup claim. The controlled local comparison
+supports no insertion regression; permanent regression assertions use deterministic descent
+and physical-work counts, never a duration ratio.
+
+## Bounded range counts (#1522)
+
+BTreeIndex.CountRange(TransactionSnapshot, IndexKeyRange, int entryLimit = 512,
+int pageLimit = 32, CancellationToken = default) returns BTreeRangeCount: Count,
+IsComplete, EntriesExamined and PagesVisited. The caller keeps its statement snapshot pinned.
+A shared tree hold protects descent and leaf walking; no key or page escapes. Physical entry work
+includes invisible versions and the stopping key; page visits include descent and empty leaves.
+Both limits must be positive. Cancellation preserves its token and releases all ownership.
+An incomplete result is a visible-entry lower bound, never an exact statistic or extrapolation.
+It writes no pages, adds no format/version state, and uses no process-global counter or atomic.
+D3's transient probes use this surface; estimates and SQL-specific cost heuristics belong to SQL.
+
+## Error and construction conventions (#1470)
+
+Exception messages and format templates are generated from `src/Properties/ErrorMessages.resx`;
+format arguments use the current culture. Cancellation and abort templates used during normal
+cleanup are cached before reuse. Error identities remain separate from message text where a
+structured diagnostic carrier exists. Standard .NET guards retain their argument names and exception types.
+
+## Debugger inspection convention
+
+Index debugger views filter nonpublic traversal and page state. BTreeIndex exposes its existing Name, Kind and IsUnique values; IndexKey exposes Length. Cursor positioning guards, entry/key construction and pointer-backed node/search-key state are omitted. The ref-struct views retain no stack-only instance or span; internal-only views can be empty.
+
+Concrete eligible types carry their own concise display and private nested DebugView at the end of the type; an effective inherited display/proxy pair is reused. Projections are public read-only members of that private view and never reveal private/internal data. Empty views use the constant type name. Debugger attributes and nested infrastructure add no public API, instance fields to existing runtime types, storage/wire format change or successful-path work.

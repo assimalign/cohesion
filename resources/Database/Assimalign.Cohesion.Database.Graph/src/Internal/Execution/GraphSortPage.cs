@@ -8,12 +8,19 @@ namespace Assimalign.Cohesion.Database.Graph.Internal;
 
 internal static class GraphSortPage
 {
-    internal static object?[] Keys(GraphPlan plan, Dictionary<string, object?> binding, object?[] row, GraphEvaluationContext context, CancellationToken token)
+    internal static object?[] Keys(GraphPlan plan, IReadOnlyDictionary<string, object?> binding, object?[] row, GraphEvaluationContext context, CancellationToken token)
     {
         if (plan.SortPage is not { Keys.Count: > 0 } stage) { return []; }
-        Dictionary<string, object?> scope = binding is GraphGroupedBinding grouped
+        var slots = binding is GraphBindingRow current ? current.Fork() : null;
+        Dictionary<string, object?>? dictionary = slots is not null ? null : binding is GraphGroupedBinding grouped
             ? new GraphGroupedBinding(grouped.ValuesByExpression, stage.GroupedExpressions) : new Dictionary<string, object?>(binding, StringComparer.Ordinal);
-        for (int i = 0; i < plan.Projections.Count; i++) { token.ThrowIfCancellationRequested(); scope[plan.Projections[i].Name] = row[i]; }
+        for (int i = 0; i < plan.Projections.Count; i++)
+        {
+            token.ThrowIfCancellationRequested();
+            if (slots is not null) { slots[plan.Projections[i].Name] = row[i]; }
+            else { dictionary![plan.Projections[i].Name] = row[i]; }
+        }
+        IReadOnlyDictionary<string, object?> scope = slots is not null ? slots : dictionary!;
         var keys = new object?[stage.Keys.Count];
         for (int i = 0; i < keys.Length; i++)
         {
@@ -48,7 +55,7 @@ internal static class GraphSortPage
         return result;
     }
 
-    private static int Compare(GraphOrderedRow left, GraphOrderedRow right, IReadOnlyList<GraphSortKeyPlan> keys, CancellationToken token)
+    internal static int Compare(GraphOrderedRow left, GraphOrderedRow right, IReadOnlyList<GraphSortKeyPlan> keys, CancellationToken token)
     {
         token.ThrowIfCancellationRequested();
         for (int i = 0; i < keys.Count; i++)

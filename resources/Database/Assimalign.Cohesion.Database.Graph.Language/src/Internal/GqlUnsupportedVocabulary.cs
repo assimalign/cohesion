@@ -2,7 +2,7 @@ namespace Assimalign.Cohesion.Database.Graph.Language.Internal;
 
 /// <summary>
 /// The GQL recognized-unsupported table (#1101): every word and edge spelling the capability
-/// scan recognizes but the Graph engine does not run, with the construct its <c>COHDBL001</c>
+/// scan recognizes but the Graph engine does not run, with the construct its <c>CK00001</c>
 /// names.
 /// </summary>
 /// <remarks>
@@ -23,6 +23,7 @@ internal static class GqlUnsupportedVocabulary
         new("UNION", "UNION", GqlWordPosition.Clause),
         new("CALL", "CALL", GqlWordPosition.Clause),
         new("YIELD", "YIELD", GqlWordPosition.Clause),
+        // MATCH selector prefixes are parsed; these retain refusals in other positions.
         new("ALL", "ALL", GqlWordPosition.Clause),
         new("EXISTS", "EXISTS", GqlWordPosition.Clause),
         new("ANY", "ANY", GqlWordPosition.Clause),
@@ -39,12 +40,14 @@ internal static class GqlUnsupportedVocabulary
         new("ALTER", "ALTER", GqlWordPosition.Clause),
         new("GRANT", "GRANT", GqlWordPosition.Clause),
         new("REVOKE", "REVOKE", GqlWordPosition.Clause),
-        new("BEGIN", "BEGIN", GqlWordPosition.Clause),
-        new("COMMIT", "COMMIT", GqlWordPosition.Clause),
-        new("ROLLBACK", "ROLLBACK", GqlWordPosition.Clause),
+        // Standalone controls execute; these entries preserve refusal of query composition.
+        new(GqlTransactionVocabulary.Begin, GqlTransactionVocabulary.Begin, GqlWordPosition.Clause),
+        new(GqlTransactionVocabulary.Commit, GqlTransactionVocabulary.Commit, GqlWordPosition.Clause),
+        new(GqlTransactionVocabulary.Rollback, GqlTransactionVocabulary.Rollback, GqlWordPosition.Clause),
         new("FINISH", "FINISH", GqlWordPosition.Clause),
         new("HAVING", "HAVING", GqlWordPosition.Clause),
-        // Function-only words remain legal variables and property names.
+        // Invocation-only words remain legal variables and property names.
+        new("OVER", "WINDOW OVER", GqlWordPosition.FunctionCall),
         new("CARDINALITY", "FUNCTION cardinality", GqlWordPosition.FunctionCall),
         new("LTRIM", "FUNCTION ltrim", GqlWordPosition.FunctionCall),
         new("RTRIM", "FUNCTION rtrim", GqlWordPosition.FunctionCall),
@@ -86,12 +89,8 @@ internal static class GqlUnsupportedVocabulary
         new("SCHEMA", "SCHEMA", GqlWordPosition.Clause),
         new("INDEX", "INDEX", GqlWordPosition.Clause),
         new("CATALOG", "CATALOG", GqlWordPosition.Clause),
-        // ISO/IEC 39075 delete and path prefixes. These stay pins with no T1 item lifting them.
+        // ISO/IEC 39075 delete prefix. Path modes execute since #1733.
         new("NODETACH", "NODETACH DELETE", GqlWordPosition.BeforeDelete),
-        new("WALK", "WALK PATH MODE", GqlWordPosition.PathMode),
-        new("TRAIL", "TRAIL PATH MODE", GqlWordPosition.PathMode),
-        new("SIMPLE", "SIMPLE PATH MODE", GqlWordPosition.PathMode),
-        new("ACYCLIC", "ACYCLIC PATH MODE", GqlWordPosition.PathMode),
         // ISO/IEC 39075 undirected (tilde) edges: the engine stores only directed relationships
         // (#1139). The label-expression operators #1101 listed here are executable since #1139;
         // GqlLabelVocabulary lists them.

@@ -58,19 +58,19 @@ internal static class SqlSchemaCompiler
             if (!CompiledSchemaTypeNames.IsIdentifier(name))
             {
                 errors.Add(Error(SqlSchemaValidationErrorCode.UnsupportedType, TypeId(declaration.ClrType),
-                    $"The custom type's name '{name}' is not a SQL identifier, so it cannot name a domain."));
+                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlSchemaCompilerCompileTypesFailure, name)));
                 continue;
             }
 
             if (!names.Add(name) || result.ContainsKey(declaration.ClrType))
             {
-                errors.Add(Error(SqlSchemaValidationErrorCode.DuplicateDeclaration, name, "The custom type is declared more than once."));
+                errors.Add(Error(SqlSchemaValidationErrorCode.DuplicateDeclaration, name, ErrorMessages.SqlSchemaCompilerCompileTypesFailure2));
                 continue;
             }
 
             if (declaration.Precision is null || declaration.Scale is null)
             {
-                errors.Add(Error(SqlSchemaValidationErrorCode.IncompleteDeclaration, name, "A custom type must declare its storage representation."));
+                errors.Add(Error(SqlSchemaValidationErrorCode.IncompleteDeclaration, name, ErrorMessages.SqlSchemaCompilerCompileTypesFailure3));
                 continue;
             }
 
@@ -97,13 +97,13 @@ internal static class SqlSchemaCompiler
         {
             if (!names.Add(table.Name))
             {
-                errors.Add(Error(SqlSchemaValidationErrorCode.DuplicateDeclaration, table.Name, "The table name is declared more than once."));
+                errors.Add(Error(SqlSchemaValidationErrorCode.DuplicateDeclaration, table.Name, ErrorMessages.SchemaValidatorCollectTablesVoid2));
                 continue;
             }
 
             if (!rows.TryAdd(table.RowType, table))
             {
-                errors.Add(Error(SqlSchemaValidationErrorCode.DuplicateDeclaration, table.Name, $"CLR row type '{TypeId(table.RowType)}' is mapped more than once."));
+                errors.Add(Error(SqlSchemaValidationErrorCode.DuplicateDeclaration, table.Name, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SchemaValidatorCollectTablesVoid3, TypeId(table.RowType))));
             }
         }
 
@@ -121,7 +121,7 @@ internal static class SqlSchemaCompiler
             {
                 if (!columnNames.Contains(table.PrimaryKey))
                 {
-                    errors.Add(Error(SqlSchemaValidationErrorCode.UnknownReference, $"{table.Name}.{table.PrimaryKey}", "The primary-key column is not declared."));
+                    errors.Add(Error(SqlSchemaValidationErrorCode.UnknownReference, $"{table.Name}.{table.PrimaryKey}", ErrorMessages.SqlSchemaCompilerCompileTablesFailure));
                 }
                 else
                 {
@@ -135,11 +135,11 @@ internal static class SqlSchemaCompiler
             {
                 if (!columnNames.Contains(member))
                 {
-                    errors.Add(Error(SqlSchemaValidationErrorCode.UnknownReference, $"{table.Name}.{member}", "The index column is not declared."));
+                    errors.Add(Error(SqlSchemaValidationErrorCode.UnknownReference, $"{table.Name}.{member}", ErrorMessages.SqlSchemaCompilerCompileTablesFailure2));
                 }
                 else if (!indexMembers.Add(member))
                 {
-                    errors.Add(Error(SqlSchemaValidationErrorCode.DuplicateDeclaration, $"{table.Name}.{member}", "The index is declared more than once."));
+                    errors.Add(Error(SqlSchemaValidationErrorCode.DuplicateDeclaration, $"{table.Name}.{member}", ErrorMessages.SqlSchemaCompilerCompileTablesFailure3));
                 }
                 else
                 {
@@ -153,19 +153,19 @@ internal static class SqlSchemaCompiler
             {
                 if (!rows.TryGetValue(reference.TargetType, out SqlSchemaTable? target))
                 {
-                    errors.Add(Error(SqlSchemaValidationErrorCode.UnknownReference, $"{table.Name}.{reference.Member}", $"Referenced row type '{TypeId(reference.TargetType)}' is not declared."));
+                    errors.Add(Error(SqlSchemaValidationErrorCode.UnknownReference, $"{table.Name}.{reference.Member}", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlSchemaCompilerCompileTablesFailure4, TypeId(reference.TargetType))));
                     continue;
                 }
 
                 if (!columnNames.Contains(reference.Member))
                 {
-                    errors.Add(Error(SqlSchemaValidationErrorCode.UnknownReference, $"{table.Name}.{reference.Member}", "The reference column is not declared."));
+                    errors.Add(Error(SqlSchemaValidationErrorCode.UnknownReference, $"{table.Name}.{reference.Member}", ErrorMessages.SqlSchemaCompilerCompileTablesFailure5));
                     continue;
                 }
 
                 if (target.PrimaryKey is null)
                 {
-                    errors.Add(Error(SqlSchemaValidationErrorCode.IncompleteDeclaration, target.Name, "A referenced table must declare a primary key."));
+                    errors.Add(Error(SqlSchemaValidationErrorCode.IncompleteDeclaration, target.Name, ErrorMessages.SqlSchemaCompilerCompileTablesFailure6));
                     continue;
                 }
 
@@ -175,7 +175,7 @@ internal static class SqlSchemaCompiler
                     errors.Add(Error(
                         SqlSchemaValidationErrorCode.DuplicateDeclaration,
                         constraintName,
-                        "The reference constraint is declared more than once."));
+                        ErrorMessages.SqlSchemaCompilerCompileTablesFailure7));
                     continue;
                 }
 
@@ -201,8 +201,8 @@ internal static class SqlSchemaCompiler
                         SqlSchemaValidationErrorCode.DuplicateDeclaration,
                         $"{table.Name}.{check.Name}",
                         namesIndex
-                            ? "The constraint name is the name of the table's primary key or one of its indexes."
-                            : "The constraint name is declared more than once."));
+                            ? ErrorMessages.SqlSchemaCompilerCompileTablesFailure8
+                            : ErrorMessages.ValidatorValidateTableConstraintsVoid2));
                     continue;
                 }
 
@@ -264,7 +264,7 @@ internal static class SqlSchemaCompiler
                     errors.Add(Error(
                         SqlSchemaValidationErrorCode.UnsupportedType,
                         $"{table.Name}.{source.Name}",
-                        $"The reference type does not match '{target.Name}.{referenced.Name}'."));
+                        string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CompilerValidateReferenceTypesFailure, target.Name, referenced.Name)));
                 }
             }
         }
@@ -282,13 +282,13 @@ internal static class SqlSchemaCompiler
         {
             if (!names.Add(column.Name))
             {
-                errors.Add(Error(SqlSchemaValidationErrorCode.DuplicateDeclaration, $"{owner}.{column.Name}", "The column is declared more than once."));
+                errors.Add(Error(SqlSchemaValidationErrorCode.DuplicateDeclaration, $"{owner}.{column.Name}", ErrorMessages.SchemaCompilerCompileColumnsFailure));
                 continue;
             }
 
             if (!TryResolveType(column.ClrType, customTypes, out DatabaseType type, out string? custom, out int? precision, out int? scale))
             {
-                errors.Add(Error(SqlSchemaValidationErrorCode.UnsupportedType, $"{owner}.{column.Name}", $"CLR type '{TypeId(column.ClrType)}' is not supported."));
+                errors.Add(Error(SqlSchemaValidationErrorCode.UnsupportedType, $"{owner}.{column.Name}", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SchemaCompilerCompileColumnsFailure2, TypeId(column.ClrType))));
                 continue;
             }
 
@@ -302,7 +302,7 @@ internal static class SqlSchemaCompiler
 
         if (result.Count == 0)
         {
-            errors.Add(Error(SqlSchemaValidationErrorCode.IncompleteDeclaration, owner, "A table must declare at least one column."));
+            errors.Add(Error(SqlSchemaValidationErrorCode.IncompleteDeclaration, owner, ErrorMessages.SchemaValidatorValidateTablesVoid));
         }
 
         return Array.AsReadOnly(result.ToArray());
@@ -321,7 +321,7 @@ internal static class SqlSchemaCompiler
         {
             if (!names.Add(principal.Name))
             {
-                errors.Add(Error(SqlSchemaValidationErrorCode.DuplicateDeclaration, principal.Name, "The principal name is declared more than once."));
+                errors.Add(Error(SqlSchemaValidationErrorCode.DuplicateDeclaration, principal.Name, ErrorMessages.SchemaValidatorValidatePrincipalsVoid2));
                 continue;
             }
 
@@ -339,7 +339,7 @@ internal static class SqlSchemaCompiler
                 {
                     if (!objects.Contains(grantedObject))
                     {
-                        errors.Add(Error(SqlSchemaValidationErrorCode.UnknownReference, $"{principal.Name}.{grantedObject}", "The granted schema object is not declared."));
+                        errors.Add(Error(SqlSchemaValidationErrorCode.UnknownReference, $"{principal.Name}.{grantedObject}", ErrorMessages.SchemaValidatorValidatePrincipalsVoid8));
                     }
                 }
 

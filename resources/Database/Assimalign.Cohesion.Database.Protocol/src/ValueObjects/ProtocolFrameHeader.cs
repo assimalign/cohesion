@@ -33,7 +33,7 @@ public readonly record struct ProtocolFrameHeader(ProtocolMessageType Type, uint
     {
         if (destination.Length < Size)
         {
-            throw new ArgumentException($"Destination must be at least {Size} bytes.", nameof(destination));
+            throw new ArgumentException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ProtocolFrameHeaderWriteToArgument, Size), nameof(destination));
         }
         BinaryPrimitives.WriteUInt32BigEndian(destination, PayloadLength);
         destination[4] = (byte)Type;

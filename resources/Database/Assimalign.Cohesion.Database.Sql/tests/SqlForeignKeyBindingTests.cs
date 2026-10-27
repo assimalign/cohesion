@@ -10,6 +10,8 @@ using Xunit;
 using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Internal;
 
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
+
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 [Collection(SqlTimingCollection.Name)]
@@ -81,7 +83,7 @@ public sealed class SqlForeignKeyBindingTests
         var timer = Stopwatch.StartNew();
 
         // Act: release four first users together, then run for a minimum time and work count.
-        var workers = Enumerable.Range(0, 4).Select(_ => Task.Run(async () =>
+        var workers = Enumerable.Range(0, 4).Select(_ => DedicatedTestTask.Run(async () =>
         {
             Interlocked.Increment(ref ready);
             await start.Task.WaitAsync(deadline.Token);

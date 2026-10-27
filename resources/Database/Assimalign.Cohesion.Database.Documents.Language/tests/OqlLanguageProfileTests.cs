@@ -24,17 +24,23 @@ public class OqlLanguageProfileTests
     }
 
     [Theory]
+    [InlineData(OqlClauses.Begin)]
+    [InlineData(OqlClauses.Commit)]
+    [InlineData(OqlClauses.Rollback)]
     [InlineData(OqlClauses.Insert)]
     [InlineData(OqlClauses.Upsert)]
     [InlineData(OqlClauses.Update)]
     [InlineData(OqlClauses.Unset)]
     [InlineData(OqlClauses.Delete)]
+    [InlineData(OqlClauses.Returning)]
     [InlineData(OqlClauses.Values)]
     [InlineData(OqlClauses.Select)]
     [InlineData(OqlClauses.Distinct)]
     [InlineData(OqlClauses.SelectValue)]
     [InlineData(OqlClauses.ObjectConstructor)]
     [InlineData(OqlClauses.ArrayConstructor)]
+    [InlineData(OqlClauses.ArrayComprehension)]
+    [InlineData(OqlClauses.FirstComprehension)]
     [InlineData(OqlClauses.Explain)]
     [InlineData(OqlClauses.From)]
     [InlineData(OqlClauses.Unnest)]
@@ -67,7 +73,6 @@ public class OqlLanguageProfileTests
     }
 
     [Theory]
-    [InlineData("RETURNING")]
     [InlineData(OqlClauses.Subquery)]
     public void Instance_UnimplementedClause_IsNotSupported(string clause)
     {

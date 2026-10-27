@@ -15,7 +15,7 @@ public enum SqlProvisioningMode : byte
 
     /// <summary>
     /// The build runs no DDL and creates nothing: the database must exist, and its recorded schema
-    /// and live catalog must match the declaration, or the build fails with <c>COHSQLP003</c>. For
+    /// and live catalog must match the declaration, or the build fails with <c>CS03103</c>. For
     /// pipelines that migrate out of band.
     /// </summary>
     Verify = 1,

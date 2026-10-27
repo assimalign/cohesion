@@ -3,6 +3,8 @@ using Assimalign.Cohesion.Database.Types;
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 /// <summary>A <c>COLLATE</c> over a deferred operand: an inner explicit collation still wins.</summary>
+[global::System.Diagnostics.DebuggerDisplay("SqlCollationCollateTerm")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlCollationCollateTerm.DebugView))]
 internal sealed class SqlCollationCollateTerm : SqlCollationTerm
 {
     private readonly SqlCollationCandidate _operand;
@@ -29,5 +31,13 @@ internal sealed class SqlCollationCollateTerm : SqlCollationTerm
     {
         var inner = _operand.Resolve(subqueries);
         return inner.Priority == 3 ? inner : new SqlCollationCandidate(_collation ?? Collation.FromName(_name), 3);
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlCollationCollateTerm value)
+        {
+            _ = value;
+        }
     }
 }

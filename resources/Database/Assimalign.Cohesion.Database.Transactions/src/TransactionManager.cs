@@ -61,8 +61,20 @@ using Assimalign.Cohesion.Database.Transactions.Internal;
 /// granted after the release sees the end and gives the grant back.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("TransactionManager")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Transactions.TransactionManager.DebugView))]
 public sealed class TransactionManager : IAsyncDisposable
 {
+    private static readonly string _errorTransactionManagerClaimEndFailure3 = ErrorMessages.TransactionManagerClaimEndFailure3;
+
+    private static readonly string _errorTransactionManagerClaimEndFailure2 = ErrorMessages.TransactionManagerClaimEndFailure2;
+
+    private static readonly string _errorTransactionManagerClaimEndFailure = ErrorMessages.TransactionManagerClaimEndFailure;
+
+    private static readonly string _errorTransactionManagerEnterApplyFailure = ErrorMessages.TransactionManagerEnterApplyFailure;
+
+    private static readonly string _errorTransactionManagerCommitAsyncFailure = ErrorMessages.TransactionManagerCommitAsyncFailure;
+
     private readonly TransactionLog _log;
     private readonly LockManager _lockManager;
     private readonly VersionStore _versionStore;
@@ -497,7 +509,7 @@ public sealed class TransactionManager : IAsyncDisposable
                 await EndAbortedAsync(owned, TransactionState.Faulted).ConfigureAwait(false);
                 TransactionEventSource.Log.CommitRecordWriteFailed(_database, owned.Sequence, exception);
                 throw new TransactionAbortedException(
-                    $"Transaction {owned.Sequence} aborted: the commit record could not be written.", exception);
+                    string.Format(System.Globalization.CultureInfo.CurrentCulture, _errorTransactionManagerCommitAsyncFailure, owned.Sequence), exception);
             }
 
             EndCommitted(owned);
@@ -591,7 +603,7 @@ public sealed class TransactionManager : IAsyncDisposable
         if (owned is null || !owned.TryEnterApply())
         {
             throw new TransactionAbortedException(
-                $"Transaction {context.Sequence} ended while its statement was running; the statement was not applied.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, _errorTransactionManagerEnterApplyFailure, context.Sequence));
         }
 
         try
@@ -941,7 +953,7 @@ public sealed class TransactionManager : IAsyncDisposable
         var owned = context;
         if (owned.IsStatementView || !ReferenceEquals(owned.Manager, this))
         {
-            throw new TransactionAbortedException("The transaction context was not created by this manager.");
+            throw new TransactionAbortedException(_errorTransactionManagerClaimEndFailure);
         }
 
         lock (_sync)
@@ -957,13 +969,13 @@ public sealed class TransactionManager : IAsyncDisposable
             if (owned.State != TransactionState.Active)
             {
                 throw new TransactionAbortedException(
-                    $"Transaction {owned.Sequence} is not active (state: {owned.State}).");
+                    string.Format(System.Globalization.CultureInfo.CurrentCulture, _errorTransactionManagerClaimEndFailure2, owned.Sequence, owned.State));
             }
 
             if (!owned.TryClaimEnd())
             {
                 throw new TransactionAbortedException(
-                    $"Transaction {owned.Sequence} is already ending: its commit or rollback is running.");
+                    string.Format(System.Globalization.CultureInfo.CurrentCulture, _errorTransactionManagerClaimEndFailure3, owned.Sequence));
             }
 
             _runningEnds++;
@@ -988,5 +1000,13 @@ public sealed class TransactionManager : IAsyncDisposable
         }
 
         drained?.TrySetResult();
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Transactions.TransactionManager value)
+        {
+            _ = value;
+        }
     }
 }

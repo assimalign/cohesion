@@ -28,21 +28,21 @@ public sealed class IndexFailureTranslationTests
         var translated = database.TranslateFailure(error).ShouldBeOfType<DatabaseCorruptionException>();
 
         // Assert
-        translated.Diagnostics.Select(d => d.Code).ShouldBe(["COHDBS003", "COHDBI002", "COHDBK005"]);
+        translated.Diagnostics.Select(d => d.Code).ShouldBe(["CK06003", "CK06102", "CV06105"]);
         translated.InnerException.ShouldBeSameAs(cause);
         translated.PageId.ShouldBe((PageId)42);
-        translated.Message.ShouldNotStartWith("COHDBS003:", Case.Sensitive);
+        translated.Message.ShouldNotStartWith("CK06003:", Case.Sensitive);
         database.TranslateFailure(translated).ShouldBeSameAs(translated);
         var coded = new DatabaseException("Coded wrapper.", [new Types.Diagnostic
-        { Code = "COHDBK005", Message = "Coded wrapper.", Severity = Types.DiagnosticSeverity.Error }], cause);
+        { Code = "CV06105", Message = "Coded wrapper.", Severity = Types.DiagnosticSeverity.Error }], cause);
         database.TranslateFailure(coded).ShouldBeOfType<DatabaseCorruptionException>().InnerException.ShouldBeSameAs(cause);
         var aggregate = new DatabaseException("Aggregate wrapper.", coded.Diagnostics,
             new AggregateException(coded, new StorageCorruptionException((PageId)43, "Damaged storage page.")));
         database.TranslateFailure(aggregate).ShouldBeOfType<DatabaseCorruptionException>().PageId.ShouldBe((PageId)43);
         var ordinary = database.TranslateFailure(new Exception("Wrapper.", new IndexException("Index failed."))).ShouldBeOfType<DatabaseException>();
-        ordinary.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBK005");
+        ordinary.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CV06105");
         var storage = database.TranslateFailure(new StorageIOException("Device failed.")).ShouldBeOfType<DatabaseException>();
-        storage.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBK005");
+        storage.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CV06105");
         storage.Message.ShouldBe("Device failed.");
     }
 }

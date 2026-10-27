@@ -5,6 +5,8 @@ namespace Assimalign.Cohesion.Database.Storage;
 /// <summary>
 /// A strongly-typed unique identifier for a storage resource, backed by a <see cref="Guid"/>.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("StorageId")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Storage.StorageId.DebugView))]
 public readonly struct StorageId : IEquatable<StorageId>
 {
     private readonly Guid _value;
@@ -56,4 +58,16 @@ public readonly struct StorageId : IEquatable<StorageId>
 
     /// <summary>Inequality operator.</summary>
     public static bool operator !=(StorageId left, StorageId right) => left._value != right._value;
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Storage.StorageId _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Storage.StorageId value)
+        {
+            _target = value;
+        }
+
+        public global::System.Guid Value => _target.Value;
+    }
 }

@@ -47,7 +47,7 @@ public sealed class KeyValueApplicationEndToEndTests : IDisposable
         }
     }
 
-    private const string DatabaseName = "kv";
+    private const string databaseName = "kv";
 
     private static CancellationToken TestTimeout(int seconds = 30)
         => new CancellationTokenSource(TimeSpan.FromSeconds(seconds)).Token;
@@ -82,7 +82,7 @@ public sealed class KeyValueApplicationEndToEndTests : IDisposable
         {
             Settings = new DatabaseConnectionSettings
             {
-                Database = DatabaseName,
+                Database = databaseName,
                 Principal = "e2e",
                 EndPoint = new IPEndPoint(IPAddress.Loopback, port),
             },
@@ -128,7 +128,7 @@ public sealed class KeyValueApplicationEndToEndTests : IDisposable
             {
                 // Code-first provisioning before the endpoint accepts (the area
                 // principle: the wire carries no database-management verbs).
-                await engine.CreateDatabaseAsync(DatabaseName, TestTimeout());
+                await engine.CreateDatabaseAsync(databaseName, TestTimeout());
 
                 await application.StartAsync(TestTimeout());
                 int port = await WaitForBoundPortAsync(listener);
@@ -175,7 +175,7 @@ public sealed class KeyValueApplicationEndToEndTests : IDisposable
 
             await using (application)
             {
-                await engine.OpenDatabaseAsync(DatabaseName, TestTimeout());
+                await engine.OpenDatabaseAsync(databaseName, TestTimeout());
 
                 await application.StartAsync(TestTimeout());
                 int port = await WaitForBoundPortAsync(listener);

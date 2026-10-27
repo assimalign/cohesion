@@ -112,7 +112,7 @@ public partial class SqlCatalogTests
         var error = await Should.ThrowAsync<SqlCatalogException>(() => catalog.CreateViewAsync(replacement, true, CancellationToken.None).AsTask());
 
         // Assert
-        error.Diagnostics[0].Code.ShouldBe("COHSQLE033");
+        error.Diagnostics[0].Code.ShouldBe("CS03033");
         catalog.Views.ShouldHaveSingleItem().ShouldBeSameAs(original);
         catalog.DdlGeneration.ShouldBe(before);
     }

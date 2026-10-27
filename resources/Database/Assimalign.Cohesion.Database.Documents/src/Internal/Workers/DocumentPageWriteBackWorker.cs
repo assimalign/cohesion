@@ -31,6 +31,8 @@ namespace Assimalign.Cohesion.Database.Documents.Internal;
 /// two would share one failure record.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("DocumentPageWriteBackWorker {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Documents.Internal.DocumentPageWriteBackWorker.DebugView))]
 internal sealed class DocumentPageWriteBackWorker : DatabaseWriteWorker<DocumentDatabase>
 {
     private readonly DocumentDatabaseEngine _engine;
@@ -57,5 +59,20 @@ internal sealed class DocumentPageWriteBackWorker : DatabaseWriteWorker<Document
         int batch = _engine.EngineOptions.PageWriteBackBatchSize;
         TryWrite(() => database.DataStorage.WriteBackDirtyPages(batch), ref failures);
         return failures;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Documents.Internal.DocumentPageWriteBackWorker _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Documents.Internal.DocumentPageWriteBackWorker value)
+        {
+            _target = value;
+        }
+
+        public bool CompletionOnly => _target.CompletionOnly;
+        public string Name => _target.Name;
+        public global::Assimalign.Cohesion.Database.DatabaseEngineWorkerKind Kind => _target.Kind;
+        public global::System.TimeSpan Interval => _target.Interval;
     }
 }

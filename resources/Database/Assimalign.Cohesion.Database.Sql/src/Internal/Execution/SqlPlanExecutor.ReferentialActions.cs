@@ -52,6 +52,8 @@ internal sealed partial class SqlPlanExecutor
 
     // Built after all SET assignments are collected. Each table/key projection is indexed once,
     // using the same numeric, binary and collation equality as constraint probes.
+    [global::System.Diagnostics.DebuggerDisplay("SqlConstraintUpdates")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlPlanExecutor.SqlConstraintUpdates.DebugView))]
     private sealed class SqlConstraintUpdates
     {
         private readonly Dictionary<(ulong ObjectId, ulong Location), SqlConstraintUpdate> _rows;
@@ -85,6 +87,14 @@ internal sealed partial class SqlPlanExecutor
             }
             return index.TryGetValue(keys, out var found) ? found : [];
         }
+
+        private sealed class DebugView
+        {
+            public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlPlanExecutor.SqlConstraintUpdates value)
+            {
+                _ = value;
+            }
+        }
     }
 
     private async Task<SqlConstraintUpdates> CollectReferentialUpdatesAsync(
@@ -101,8 +111,8 @@ internal sealed partial class SqlPlanExecutor
                 if (constraint.OnDelete is not (SqlCatalogReferentialAction.SetNull or SqlCatalogReferentialAction.SetDefault)) { continue; }
                 var keys = reference.ParentKey.Read(deletion.Values);
                 if (keys.Any(value => value is null)) { continue; }
-                var matches = FindConstraintRows(reference.ChildKey, keys, statement, cancellationToken,
-                    ConstraintCurrentSnapshot(statement)).ToList();
+                var matches = CollectConstraintMatches(FindConstraintRows(reference.ChildKey, keys, statement, cancellationToken,
+                    ConstraintCurrentSnapshot(statement)), statement);
                 var bound = _definitions.Get(child, cancellationToken);
                 foreach (var match in matches)
                 {
@@ -111,15 +121,21 @@ internal sealed partial class SqlPlanExecutor
                     if (deletions.ContainsKey(key)) { continue; }
                     if (!updates.TryGetValue(key, out var update))
                     {
-                        await AcquireRowWriteLocksAsync(statement, child.ObjectId, [match.Location], cancellationToken).ConfigureAwait(false);
+                        await AcquireRowWriteLocksAsync(statement, child.ObjectId, [match.Location], cancellationToken, cascade: true).ConfigureAwait(false);
                         EnsureSnapshotSeesCascadeRow(child, match.Location, statement,
                             constraint.OnDelete == SqlCatalogReferentialAction.SetNull ? "SET NULL" : "SET DEFAULT");
                         if (scannedTables.Add(child.ObjectId))
                         {
                             EnsureCurrentDefinition(child);
-                            await AcquireReferenceIntentLocksAsync(child, statement, cancellationToken).ConfigureAwait(false);
+                            await AcquireReferenceIntentLocksAsync(child, statement, cancellationToken, cascade: true).ConfigureAwait(false);
                         }
                         update = new SqlConstraintUpdate(child, match.Location, match.Values, (object?[])match.Values.Clone(), []);
+                        if (statement.Metrics.DmlMemory(_definitions.StatementMemoryBudget) is { } memory)
+                        {
+                            memory.Retain(match.Values);
+                            memory.Retain(update.NewValues);
+                            memory.Reserve(384L + 32L * child.Columns.Count);
+                        }
                         updates.Add(key, update);
                     }
                     foreach (int ordinal in reference.ChildKey.Ordinals)
@@ -135,6 +151,7 @@ internal sealed partial class SqlPlanExecutor
                         update.NewValues[ordinal] = CoerceForColumn(value, child.Columns[ordinal]);
                         update.Assigned.Add(ordinal);
                     }
+                    statement.Metrics.DmlMemory(_definitions.StatementMemoryBudget)?.Retain(update.NewValues);
                 }
             }
         }
@@ -152,6 +169,7 @@ internal sealed partial class SqlPlanExecutor
                 CheckDomains(bound, update.NewValues, ExecutionEvaluator(null, cancellationToken, transactionTimestamp: statement.TransactionStart), update.Assigned.ToArray());
                 ValidateParentUpdate(table, update.OldValues, update.NewValues, statement, cancellationToken, deletions, indexed);
                 update.NewVersion = SqlRowCodec.Encode(table, update.NewValues, statement.Transaction.Sequence);
+                statement.Metrics.DmlMemory(_definitions.StatementMemoryBudget)?.Retain(update.NewVersion);
             }
             // PostgreSQL ri_triggers.c:2800-2813 uses current parent visibility for ReadCommitted
             // RI writes while transaction snapshots retain their crosscheck.
@@ -160,8 +178,8 @@ internal sealed partial class SqlPlanExecutor
                 references: references, deletions: deletions, updates: indexed);
             CollectReleasedReferences(table, group.Select(update => update.OldValues).ToList(), released, statement, cancellationToken);
         }
-        await AcquireParentRowLocksAsync(references, statement, cancellationToken).ConfigureAwait(false);
-        await AcquireParentRowLocksAsync(released, statement, cancellationToken, validate: false).ConfigureAwait(false);
+        await AcquireParentRowLocksAsync(references, statement, cancellationToken, cascade: true).ConfigureAwait(false);
+        await AcquireParentRowLocksAsync(released, statement, cancellationToken, validate: false, cascade: true).ConfigureAwait(false);
         // All row and reference locks precede unique-key locks and the physical bracket.
         foreach (var group in updates.Values.GroupBy(update => update.Table).OrderBy(group => group.Key.ObjectId))
         {
@@ -173,7 +191,7 @@ internal sealed partial class SqlPlanExecutor
                 CollectUniqueKeyHashes(indexes, group.Key, update.OldValues, hashes);
                 ValidateIndexKeysAndCollectUniqueHashes(indexes, group.Key, update.NewValues, hashes);
             }
-            await AcquireUniqueKeyLocksAsync(statement, group.Key.ObjectId, hashes, cancellationToken).ConfigureAwait(false);
+            await AcquireUniqueKeyLocksAsync(statement, group.Key.ObjectId, hashes, cancellationToken, cascade: true).ConfigureAwait(false);
         }
         return indexed;
     }

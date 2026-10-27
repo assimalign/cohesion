@@ -40,6 +40,8 @@ using Assimalign.Cohesion.Database.Storage;
 /// storage.FlushChanges();
 /// </code>
 /// </example>
+[global::System.Diagnostics.DebuggerDisplay("DocumentStorage {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Documents.Storage.DocumentStorage.DebugView))]
 public sealed partial class DocumentStorage : Assimalign.Cohesion.Database.Storage.Storage
 {
     private DocumentStorage(StorageStream data, StorageStream journal, StorageStream backup)
@@ -154,5 +156,20 @@ public sealed partial class DocumentStorage : Assimalign.Cohesion.Database.Stora
     public void FlushChanges()
     {
         Flush();
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Documents.Storage.DocumentStorage _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Documents.Storage.DocumentStorage value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Transactions.TransactionRecordSpace Records => _target.Records;
+        public global::Assimalign.Cohesion.Database.Storage.StorageId Id => _target.Id;
+        public global::Assimalign.Cohesion.Database.Storage.Name Name => _target.Name;
+        public global::Assimalign.Cohesion.Database.Storage.StorageModel Model => _target.Model;
     }
 }

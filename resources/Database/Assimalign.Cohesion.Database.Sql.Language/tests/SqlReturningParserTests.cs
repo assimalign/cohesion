@@ -59,7 +59,7 @@ public sealed class SqlReturningParserTests
         var statement = new SqlQueryParser().Parse(sql);
 
         // Assert
-        var diagnostic = statement.Diagnostics.Where(item => item.Code == "COHDBL001").ShouldHaveSingleItem();
+        var diagnostic = statement.Diagnostics.Where(item => item.Code == "CK00001").ShouldHaveSingleItem();
         diagnostic.Message!.ShouldContain(construct, Case.Sensitive);
     }
 
@@ -76,7 +76,7 @@ public sealed class SqlReturningParserTests
         var statement = new SqlQueryParser().Parse(sql);
 
         // Assert
-        statement.Diagnostics.ShouldContain(item => item.Code == "SQL0003" && item.Severity == DiagnosticSeverity.Error);
+        statement.Diagnostics.ShouldContain(item => item.Code == "CS00003" && item.Severity == DiagnosticSeverity.Error);
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - RETURNING: contextual names preserve ordinary identifiers")]

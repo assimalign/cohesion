@@ -42,7 +42,7 @@ public sealed class SqlResultDeliveryConformanceTests
         {
             var failure = await Should.ThrowAsync<SqlClientException>(async () =>
                 await connection.QueryAsync(statement, cancellationToken: TestTimeout.Token()));
-            failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE045");
+            failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS05045");
         }
         else { (await connection.QueryAsync(statement, cancellationToken: TestTimeout.Token())).Count.ShouldBe(1); }
 
@@ -93,7 +93,7 @@ public sealed class SqlResultDeliveryConformanceTests
 
         // Assert: no completion remained from the failed statement; this is the next header.
         error.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
-        error.Message.ShouldStartWith(failure == "enumeration" ? "COHSQLE041:" : "COHSQLE045:", Case.Sensitive);
+        error.Message.ShouldStartWith(failure == "enumeration" ? "CS06041:" : "CS05045:", Case.Sensitive);
         if (failure is "oversized" or "binary")
         {
             error.Message.ShouldContain(failure == "binary" ? "16777219" : "16777220", Case.Sensitive);
@@ -119,6 +119,8 @@ public sealed class SqlResultDeliveryConformanceTests
     [InlineData(true, "update")]
     [InlineData(false, "delete")]
     [InlineData(true, "delete")]
+    [InlineData(false, "merge")]
+    [InlineData(true, "merge")]
     public async Task QueryAsync_InjectedResultFailure_ShouldRollbackStatementAndKeepTransaction(bool explicitTransaction, string mutation)
     {
         // Arrange
@@ -144,6 +146,7 @@ public sealed class SqlResultDeliveryConformanceTests
             "upsert" => "INSERT INTO users VALUES (1, 'changed') ON CONFLICT(id) DO UPDATE SET name = EXCLUDED.name RETURNING id",
             "update" => "UPDATE users SET name = 'changed' RETURNING id",
             "delete" => "DELETE FROM users RETURNING id",
+            "merge" => "MERGE INTO users t USING (SELECT 1 AS id UNION ALL SELECT 5) s ON t.id=s.id WHEN MATCHED THEN UPDATE SET name='changed' WHEN NOT MATCHED THEN INSERT VALUES(s.id,'failed') WHEN NOT MATCHED BY SOURCE THEN DELETE RETURNING t.id",
             _ => "INSERT INTO users VALUES (5, 'failed') RETURNING id",
         };
 
@@ -154,8 +157,8 @@ public sealed class SqlResultDeliveryConformanceTests
 
         // Assert
         failure.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
-        failure.Message.ShouldStartWith("COHSQLE045:", Case.Sensitive);
-        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE045");
+        failure.Message.ShouldStartWith("CS05045:", Case.Sensitive);
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS05045");
         failure.ConnectionUsable.ShouldBeTrue();
         result.Disposed.ShouldBeTrue();
         if (explicitTransaction)
@@ -193,7 +196,7 @@ public sealed class SqlResultDeliveryConformanceTests
 
         // Assert: no result frame preceded the error, and neither commit boundary was crossed.
         error.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
-        error.Message.ShouldStartWith("COHSQLE045:", Case.Sensitive);
+        error.Message.ShouldStartWith("CS05045:", Case.Sensitive);
         result.Disposed.ShouldBeTrue();
         if (transaction is not null) { transaction.State.ShouldBe(TransactionState.Active); }
         await using var rows = (Assimalign.Cohesion.Database.Execution.DatabaseResultSet)await session.DatabaseSession!.ExecuteAsync(

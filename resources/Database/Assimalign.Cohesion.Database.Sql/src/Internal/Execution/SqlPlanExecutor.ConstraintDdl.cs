@@ -15,6 +15,7 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 internal sealed partial class SqlPlanExecutor
 {
+    internal static Action? ReferencedTablesLocked { get; set; }
     private async Task CreateConstrainedTableAsync(SqlCreateTablePlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
         // Every DEFAULT must convert to its column before anything is reserved, as ADD COLUMN
@@ -31,8 +32,9 @@ internal sealed partial class SqlPlanExecutor
         }
 
         var provisional = new SqlCatalogTable(0, plan.Schema, plan.Name, plan.Columns, plan.PrimaryKey);
-        var constraints = BindConstraints(provisional, plan.Constraints);
-        await LockReferencedTablesAsync(constraints, statement, cancellationToken).ConfigureAwait(false);
+        var parents = new SortedDictionary<ulong, SqlCatalogTable>();
+        var constraints = BindConstraints(provisional, plan.Constraints, parents);
+        await LockReferencedTablesAsync(parents, statement, cancellationToken).ConfigureAwait(false);
         // Rebind after waiting: a parent definition might have changed while acquiring its lock.
         constraints = BindConstraints(provisional, plan.Constraints);
         // Durable, but not a self-commit the session counts (#1272): the reservation persists only
@@ -69,21 +71,24 @@ internal sealed partial class SqlPlanExecutor
         await PublishConstrainedTableAsync(table, plan.Constraints, statement, cancellationToken, replaceExisting: false, publication).ConfigureAwait(false);
     }
 
-    private async Task LockReferencedTablesAsync(IReadOnlyList<SqlCatalogConstraint> constraints, SqlStatementContext statement, CancellationToken cancellationToken)
+    private async Task LockReferencedTablesAsync(SortedDictionary<ulong, SqlCatalogTable> parents, SqlStatementContext statement, CancellationToken cancellationToken)
     {
-        var parents = new SortedSet<ulong>();
-        foreach (var constraint in constraints.Where(c => c.Kind == SqlCatalogConstraintKind.Reference))
-        {
-            if (_catalog.TryGetTable(constraint.ReferencedSchema!, constraint.ReferencedTable!, out var parent))
-            {
-                parents.Add(parent.ObjectId);
-            }
-        }
-
-        foreach (ulong parent in parents)
+        foreach (ulong parent in parents.Keys)
         {
             await statement.Coordinator.LockManager.AcquireAsync(statement.DdlLockOwner, LockResource.Object(parent),
                 LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
+        }
+        ReferencedTablesLocked?.Invoke();
+        // Object locks protect identities, not names. Rebinding a replacement after
+        // waiting on its retired owner's lock would read uncommitted parent rows.
+        foreach (var parent in parents.Values)
+        {
+            if (!_catalog.TryGetTable(parent.Schema, parent.Name, out var current))
+            {
+                throw new SqlExecutionException(SqlExecutionException.SerializationFailureCode,
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.TableIdentityReplaced, parent.Schema, parent.Name));
+            }
+            EnsureSameIdentity(parent, current);
         }
     }
 
@@ -203,12 +208,13 @@ internal sealed partial class SqlPlanExecutor
             throw SqlConstraintDeclaration.MultiplePrimaryKeys(plan.Table.Name, ConstraintName(plan.Table, plan.Constraint, 0));
         }
 
-        var constraints = BindConstraints(plan.Table, [plan.Constraint]);
-        await LockReferencedTablesAsync(constraints, statement, cancellationToken).ConfigureAwait(false);
+        var parents = new SortedDictionary<ulong, SqlCatalogTable>();
+        var constraints = BindConstraints(plan.Table, [plan.Constraint], parents);
+        await LockReferencedTablesAsync(parents, statement, cancellationToken).ConfigureAwait(false);
         constraints = BindConstraints(plan.Table, [plan.Constraint]);
         var primary = plan.Constraint.Kind == SqlConstraintKind.PrimaryKey ? plan.Constraint.Columns : plan.Table.PrimaryKeyColumns;
         var columns = plan.Table.Columns.Select(column => primary.Contains(column.Name, StringComparer.OrdinalIgnoreCase)
-            ? new SqlCatalogColumn(column.Name, column.Type, false, column.DefaultLiteral, column.Collation, column.DomainName, column.DefaultFunctionCalls, column.Identity, column.MissingValueLiteral) : column).ToArray();
+            ? new SqlCatalogColumn(column.Name, column.Type, false, column.DefaultLiteral, column.Collation, column.DomainName, column.DefaultFunctionCalls, column.Identity, column.MissingValueLiteral) { RecastDefault = column.RecastDefault } : column).ToArray();
         var replacement = new SqlCatalogTable(plan.Table.ObjectId, plan.Table.Schema, plan.Table.Name, columns,
             primary, plan.Table.Owner, plan.Table.OwningSchema, plan.Table.Constraints.Concat(constraints).ToArray(),
             plan.Table.DroppedColumnOrdinals);
@@ -263,7 +269,7 @@ internal sealed partial class SqlPlanExecutor
             if (volatility == SqlFunctionVolatility.Volatile &&
                 Scan(table, statement, cancellationToken, ConstraintCurrentSnapshot(statement)).Any())
             {
-                throw new SqlPlanningException("COHSQLE027", string.Format(CultureInfo.CurrentCulture, ErrorMessages.VolatileDefaultBackfill, column.Name));
+                throw new SqlPlanningException("CS03027", string.Format(CultureInfo.CurrentCulture, ErrorMessages.VolatileDefaultBackfill, column.Name));
             }
             boundDefault = BindDefaultExpression(column, $"DEFAULT of column '{column.Name}' on table '{plan.Schema}.{plan.Name}'",
                 _definitions.Functions, _catalog.DefaultCollation, cancellationToken, declaring: true);
@@ -296,8 +302,9 @@ internal sealed partial class SqlPlanExecutor
         // refuses a replacement that does not).
         var provisional = new SqlCatalogTable(table.ObjectId, table.Schema, table.Name, columns, primary, table.Owner, table.OwningSchema,
             table.Constraints, table.DroppedColumnOrdinals);
-        var constraints = BindConstraints(provisional, plan.Constraints);
-        await LockReferencedTablesAsync(constraints, statement, cancellationToken).ConfigureAwait(false);
+        var parents = new SortedDictionary<ulong, SqlCatalogTable>();
+        var constraints = BindConstraints(provisional, plan.Constraints, parents);
+        await LockReferencedTablesAsync(parents, statement, cancellationToken).ConfigureAwait(false);
         constraints = BindConstraints(provisional, plan.Constraints);
         var replacement = new SqlCatalogTable(table.ObjectId, table.Schema, table.Name, columns, primary, table.Owner, table.OwningSchema,
             table.Constraints.Concat(constraints).ToArray(), table.DroppedColumnOrdinals);
@@ -465,6 +472,6 @@ internal sealed partial class SqlPlanExecutor
         }
 
         DatabaseException UsedByConstraint(SqlCatalogConstraint constraint, Exception? cause = null)
-            => new($"Column '{columnName}' is referenced by constraint '{constraint.Name}'. Drop the constraint first.", cause);
+            => new(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CatalogDropColumnCoreAsyncSqlCatalog2, columnName, constraint.Name), cause);
     }
 }

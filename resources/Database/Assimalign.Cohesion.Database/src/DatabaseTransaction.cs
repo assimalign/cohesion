@@ -219,7 +219,7 @@ public abstract class DatabaseTransaction : IAsyncDisposable
                         // the outcome never depends on whether the session's teardown ended it first.
                         throw _failure is not null
                             ? CreateAbortedException(_failure, commit: true)
-                            : new DatabaseException($"The transaction is {state}.");
+                            : DatabaseException.CreateRootFailure("CK04005", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.TransactionCommitAsyncDatabase, state));
                     }
 
                     failure = _failure;
@@ -232,7 +232,7 @@ public abstract class DatabaseTransaction : IAsyncDisposable
                     {
                         // The operation would race the commit record. The caller completes it first, as
                         // with any statement of an explicit transaction.
-                        throw new DatabaseException("An operation of the transaction is still running; commit after it completes.");
+                        throw DatabaseException.CreateRootFailure("CK04007", ErrorMessages.TransactionCommitAsyncDatabase2);
                     }
 
                     _ended = true;
@@ -294,7 +294,7 @@ public abstract class DatabaseTransaction : IAsyncDisposable
             {
                 if (GetKernelState() == TransactionState.Committed)
                 {
-                    throw new DatabaseException("The transaction is Committed; a committed transaction cannot roll back.");
+                    throw DatabaseException.CreateRootFailure("CK04005", ErrorMessages.TransactionRollbackAsyncDatabase);
                 }
 
                 _ended = true;
@@ -463,7 +463,7 @@ public abstract class DatabaseTransaction : IAsyncDisposable
         {
             if (_operations == 0)
             {
-                throw new InvalidOperationException("No operation of the transaction is running.");
+                throw new InvalidOperationException(ErrorMessages.TransactionEndOperationFailure);
             }
 
             _operations--;
@@ -489,8 +489,8 @@ public abstract class DatabaseTransaction : IAsyncDisposable
             if (_ended)
             {
                 return GetKernelState() == TransactionState.Active
-                    ? new DatabaseException("The session's transaction is being committed or rolled back; start the operation after it ends.")
-                    : new DatabaseException("The session's transaction ended before the operation started; nothing was written.");
+                    ? DatabaseException.CreateRootFailure("CK04006", ErrorMessages.TransactionCreateRefusalDatabase)
+                    : DatabaseException.CreateRootFailure("CK04005", ErrorMessages.TransactionCreateRefusalDatabase2);
             }
 
             return CreateAbortedException(null, commit: false);
@@ -533,7 +533,7 @@ public abstract class DatabaseTransaction : IAsyncDisposable
 
     /// <summary>
     /// Creates the model's coded error for work refused by an aborted transaction (for example
-    /// <c>COHDBG007</c> in the graph model). The cause travels in the message as well as the inner
+    /// <c>CG04007</c> in the graph model). The cause travels in the message as well as the inner
     /// exception, because the wire carries message text only. Called under the base's lock: it
     /// must only build the exception.
     /// </summary>

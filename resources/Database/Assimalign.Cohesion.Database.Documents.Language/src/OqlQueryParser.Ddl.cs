@@ -79,16 +79,23 @@ public sealed partial class OqlQueryParser
         Expect("ON");
         string collection = CollectionName();
         Expect(TokenType.LeftParen, "'('");
-        var paths = new List<OqlPathExpression>();
+        var paths = new List<OqlExpression>();
         do
         {
             var token = Current;
-            if (paths.Count == 32) { Error("OQL0009", "An index supports at most 32 key paths.", token); break; }
-            if (Is("ALL") || Is("DISTINCT"))
+            if (paths.Count == 32) { Error("CD00009", ErrorMessages.OqlQueryParserParseCreateIndexVoid, token); break; }
+            if (Is("ALL"))
             {
-                string form = Is("ALL") ? "ALL array index key" : "DISTINCT ARRAY array index key";
-                _diagnostics.Add(QueryDiagnostics.UnsupportedClause(form, Profile.Language, Span(token, token)));
+                _diagnostics.Add(QueryDiagnostics.UnsupportedClause("ALL array index key", Profile.Language, Span(token, token)));
                 break;
+            }
+            if (Take("DISTINCT"))
+            {
+                if (!Is("ARRAY")) { Expect("ARRAY"); break; }
+                var array = ParsePrimary();
+                if (Failed) { break; }
+                paths.Add(array);
+                continue;
             }
             OqlPathExpression path;
             if (Take(TokenType.LeftBracket))
@@ -100,8 +107,8 @@ public sealed partial class OqlQueryParser
             }
             else { path = ParseDocumentPath(); }
             if (Failed) { break; }
-            if (paths.Any(prior => prior.Segments.SequenceEqual(path.Segments)))
-            { Error("OQL0002", "Index key paths must be distinct.", token); break; }
+            if (paths.OfType<OqlPathExpression>().Any(prior => prior.Segments.SequenceEqual(path.Segments)))
+            { Error("CD00002", ErrorMessages.OqlQueryParserParseCreateIndexVoid2, token); break; }
             paths.Add(path);
         } while (Take(TokenType.Comma));
         if (!Failed) { Expect(TokenType.RightParen, "')'"); }

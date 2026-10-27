@@ -28,18 +28,18 @@ namespace Assimalign.Cohesion.Database.Storage.Internal;
 /// </remarks>
 internal static class Crc32C
 {
-    private const uint InitialState = 0xFFFFFFFFu;
+    private const uint initialState = 0xFFFFFFFFu;
 
     /// <summary>
     /// Computes the CRC-32C of <paramref name="data"/>.
     /// </summary>
-    internal static uint Compute(ReadOnlySpan<byte> data) => Finalize(Append(InitialState, data));
+    internal static uint Compute(ReadOnlySpan<byte> data) => Finalize(Append(initialState, data));
 
     /// <summary>
     /// Begins an incremental CRC computation. Feed segments with <see cref="Append"/> or
     /// <see cref="AppendZeros"/> and complete with <see cref="Finalize"/>.
     /// </summary>
-    internal static uint Begin() => InitialState;
+    internal static uint Begin() => initialState;
 
     /// <summary>
     /// Folds <paramref name="data"/> into an incremental CRC computation.

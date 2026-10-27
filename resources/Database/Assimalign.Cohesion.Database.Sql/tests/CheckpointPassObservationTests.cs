@@ -11,6 +11,8 @@ using Xunit;
 using Assimalign.Cohesion.Database.Sql.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Storage;
 
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
+
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 [Collection(nameof(SqlWorkerResilienceTests))]
@@ -136,7 +138,7 @@ public sealed class CheckpointPassObservationTests
         {
             using var recorded = new ManualResetEventSlim();
             using var release = new ManualResetEventSlim();
-            var pump = Task.Run(() =>
+            var pump = DedicatedTestTask.Run(() =>
             {
                 worker.RecordPumpBackoff(delay);
                 recorded.Set();
@@ -221,7 +223,7 @@ public sealed class CheckpointPassObservationTests
             bool fail = disposed % 3 == 0;
             var visit = new DatabaseWorkerPass.Visit("stalled");
             lanes.BeginPass();
-            var run = Task.Run(() =>
+            var run = DedicatedTestTask.Run(() =>
             {
                 try
                 {
@@ -405,7 +407,7 @@ public sealed class CheckpointPassObservationTests
                 return true;
             };
             // Act: cancellation ends the waiting pass, then the lane observes that same token.
-            var run = Task.Run(() => worker.RunIteration(stop.Token));
+            var run = DedicatedTestTask.Run(() => worker.RunIteration(stop.Token));
             try
             {
                 signal.Wait(TimeSpan.FromSeconds(30)).ShouldBeTrue();

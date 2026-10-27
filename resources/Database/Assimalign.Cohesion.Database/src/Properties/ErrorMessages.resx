@@ -8,4 +8,57 @@
   <data name="StoragePageCorrupt" xml:space="preserve"><value>Database '{0}' is corrupt on page {1}. {2} Restore the database from a verified backup.</value></data>
   <data name="ObjectOwnedBySchema" xml:space="preserve"><value>Object '{0}' is owned by schema '{1}' and cannot be changed by {2}. Alter the schema and redeploy it.</value></data>
   <data name="MaintenanceLaneDelayed" xml:space="preserve"><value>Database '{0}' maintenance worker '{1}' ({2}) is delayed by {3}; the admission cap is 64 and the hard thread ceiling is 128 (running for {4}).</value></data>
+  <data name="DatabaseOffline" xml:space="preserve"><value>Database '{0}' is offline: {1}, so nothing more is written to it. Every operation is refused until the database is reopened (OpenDatabaseAsync); the reopen's recovery reads the journal and decides the outcome of every commit that was not confirmed.</value></data>
+  <data name="OperationCommitUnconfirmed" xml:space="preserve"><value>Database '{0}' went offline while the operation was committing: {1} after the operation's work reached the journal. The operation may or may not have been applied; do not retry it. Reopen the database (OpenDatabaseAsync): its recovery keeps the work if its records reached stable storage and discards it if not, and reading the data back then tells which.</value></data>
+  <data name="TransactionCommitUnconfirmed" xml:space="preserve"><value>Database '{0}' went offline while a transaction was committing: {1} after the transaction's commit record was written. The transaction may or may not have committed; do not retry it. Reopen the database (OpenDatabaseAsync): its recovery keeps the commit if its record reached stable storage and discards it if not, and reading the data back then tells which.</value></data>
+  <data name="ServerListenerRequired" xml:space="preserve"><value>CK08001: {0} server for engine '{1}': Listener is required.</value></data>
+  <data name="ServerSessionLimitInvalid" xml:space="preserve"><value>CK08002: {0} server for engine '{1}': MaxSessions must be positive.</value></data>
+  <data name="ServerTimeoutInvalid" xml:space="preserve"><value>CK08003: {0} server for engine '{1}': {2} must be {3}.</value></data>
+  <data name="ServerTimeoutPositiveFinite" xml:space="preserve"><value>positive and finite, and at most 4,294,967,294 milliseconds</value></data>
+  <data name="ServerTimeoutPositiveOrInfinite" xml:space="preserve"><value>positive and at most 4,294,967,294 milliseconds, or infinite</value></data>
+  <data name="ServerTimeoutNonnegativeOrInfinite" xml:space="preserve"><value>nonnegative and at most 4,294,967,294 milliseconds, or infinite</value></data>
+  <data name="DatabaseEngineDisposeAsyncAggregate" xml:space="preserve"><value>One or more components of engine '{0}' failed to close.</value></data>
+  <data name="DatabaseEngineAttachWorkerFailure" xml:space="preserve"><value>A composition product cannot be registered twice.</value></data>
+  <data name="DatabaseEngineAttachWorkerFailure2" xml:space="preserve"><value>Worker name '{0}' is already registered.</value></data>
+  <data name="DatabaseEngineAttachWorkerFailure3" xml:space="preserve"><value>Worker '{0}' belongs to one engine: another engine owns it, or it was released.</value></data>
+  <data name="DatabaseEngineAttachServerFailure" xml:space="preserve"><value>A nested server must front its owning engine.</value></data>
+  <data name="DatabaseEnginePumpFailure" xml:space="preserve"><value>Worker '{0}' returned from Run before its engine stopped it; the engine runs it again.</value></data>
+  <data name="EngineOpenUnclosedAsyncFailure" xml:space="preserve"><value>Engine '{0}' still tracks database '{1}' after its close ended; the engine did not forget it.</value></data>
+  <data name="DatabaseEngineThrowIfComposedFailure" xml:space="preserve"><value>Engine composition is frozen; workers and servers attach only before it completes.</value></data>
+  <data name="DatabaseEngineThrowIfEmptyArgument" xml:space="preserve"><value>A database name is required.</value></data>
+  <data name="WorkerTakeDatabaseOfflineFailure" xml:space="preserve"><value>A worker gives up on a database only with a cause an engine owns: a worker whose work kept failing, or the journal size limit.</value></data>
+  <data name="WorkerThrowIfNoPassLockedFailure" xml:space="preserve"><value>A worker reports on a database only from within a pass (RunIterationCore).</value></data>
+  <data name="SessionSetNegotiatedVersionFailure" xml:space="preserve"><value>The session's protocol version was already negotiated.</value></data>
+  <data name="SetAuthenticatedPrincipalFailure" xml:space="preserve"><value>The session's principal was already authenticated.</value></data>
+  <data name="SessionBeginTransactionAsyncFailure" xml:space="preserve"><value>The session's transaction core returned null.</value></data>
+  <data name="DatabaseSessionDisposeAsyncDatabase" xml:space="preserve"><value>The session closed before the transaction ended.</value></data>
+  <data name="DatabaseSessionDisposeAsyncAggregate" xml:space="preserve"><value>The session failed to close.</value></data>
+  <data name="SessionCreateClosedExceptionDatabase" xml:space="preserve"><value>The session is closed.</value></data>
+  <data name="TransactionCommitAsyncDatabase" xml:space="preserve"><value>The transaction is {0}.</value></data>
+  <data name="TransactionCommitAsyncDatabase2" xml:space="preserve"><value>An operation of the transaction is still running; commit after it completes.</value></data>
+  <data name="TransactionRollbackAsyncDatabase" xml:space="preserve"><value>The transaction is Committed; a committed transaction cannot roll back.</value></data>
+  <data name="TransactionEndOperationFailure" xml:space="preserve"><value>No operation of the transaction is running.</value></data>
+  <data name="TransactionCreateRefusalDatabase" xml:space="preserve"><value>The session's transaction is being committed or rolled back; start the operation after it ends.</value></data>
+  <data name="TransactionCreateRefusalDatabase2" xml:space="preserve"><value>The session's transaction ended before the operation started; nothing was written.</value></data>
+  <data name="GetEngineFailure" xml:space="preserve"><value>Database engine '{0}' is a {1}, not a {2}.</value></data>
+  <data name="DatabaseNameArgument" xml:space="preserve"><value>Database name cannot be null or empty.</value></data>
+<data name="DatabaseDeclarationsRefuseDropFailure" xml:space="preserve"><value>{0} engine '{1}' declares database '{2}' ({3}.AddDatabase), so DROP DATABASE is refused. Remove the declaration from the engine builder and rebuild the engine before dropping it.</value></data>
+<data name="BuilderStateEnsureMutableFailure" xml:space="preserve"><value>{0} engine '{1}': composition is frozen after a build attempt.</value></data>
+<data name="EngineBuilderStateCompleteFailure" xml:space="preserve"><value>The compose method returned before it attached every product.</value></data>
+<data name="EngineBuilderStateProduceFailure2" xml:space="preserve"><value>The compose method requested a server before it attached every worker.</value></data>
+<data name="EngineOptionChecksRefuseFailure" xml:space="preserve"><value>{0}: {1} {2}</value></data>
+<data name="DatabaseMemoryFilesTryOpenFailure" xml:space="preserve"><value>The in-memory file set '{0}' was opened or created again while an open copied it.</value></data>
+  <data name="DatabaseSessionDatabase" xml:space="preserve"><value>A transaction or operation is already active on this session.</value></data>
+  <data name="DescribeFailureDatabaseOffline" xml:space="preserve"><value>{0} of its storage failed ({1})</value></data>
+  <data name="DescribeFailureDatabaseOffline2" xml:space="preserve"><value>{0} ({1})</value></data>
+  <data name="ExceptionDescribeDatabaseOffline" xml:space="preserve"><value>a write or flush of the journal</value></data>
+  <data name="ExceptionDescribeDatabaseOffline2" xml:space="preserve"><value>a durable flush of the data file</value></data>
+  <data name="ExceptionDescribeDatabaseOffline3" xml:space="preserve"><value>a write of the file header</value></data>
+  <data name="ExceptionDescribeDatabaseOffline4" xml:space="preserve"><value>its checkpoints kept failing and its engine gave up on it</value></data>
+  <data name="ExceptionDescribeDatabaseOffline5" xml:space="preserve"><value>its page write-backs kept failing and its engine gave up on it</value></data>
+  <data name="ExceptionDescribeDatabaseOffline6" xml:space="preserve"><value>its write-ahead flushes kept failing and its engine gave up on it</value></data>
+  <data name="ExceptionDescribeDatabaseOffline7" xml:space="preserve"><value>its version purge kept failing and its engine gave up on it</value></data>
+  <data name="ExceptionDescribeDatabaseOffline8" xml:space="preserve"><value>its journal grew past its engine's limit while its checkpoints kept failing</value></data>
+  <data name="ExceptionDescribeDatabaseOffline9" xml:space="preserve"><value>a write</value></data>
+  <data name="UnconfirmedExceptionCreateFailure" xml:space="preserve"><value>the durable flush of its commit record failed ({0})</value></data>
 </root>

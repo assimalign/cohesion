@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Buffers;
 using System.Collections;
 using System.Collections.Generic;
@@ -13,6 +13,8 @@ namespace Assimalign.Cohesion.Database.Language;
 /// foreach (var token in lexer) { /* ... */ }
 /// </code>
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("TokenLexer")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Language.TokenLexer.DebugView))]
 public ref struct TokenLexer
 {
     // The line terminators every language shares: LF, CR, NEL, LINE SEPARATOR and PARAGRAPH
@@ -23,6 +25,7 @@ public ref struct TokenLexer
     private readonly ReadOnlySpan<string> _keywords;
     private readonly ReadOnlySpan<string> _functions;
     private readonly bool _caseSensitive;
+    private readonly bool _recognizeLeftArrow;
 
     private int _pos;
     private Token _current;
@@ -36,6 +39,7 @@ public ref struct TokenLexer
         _keywords = options.Keywords;
         _functions = options.Functions;
         _caseSensitive = options.IsCaseSensitive;
+        _recognizeLeftArrow = options.RecognizeLeftArrow;
         _pos = 0;
         _current = default;
     }
@@ -470,7 +474,7 @@ public ref struct TokenLexer
                     _pos += 2;
                     return new Token(TokenType.NotEquals, _source[start.._pos], start);
                 }
-                if (next == '-')
+                if (next == '-' && _recognizeLeftArrow)
                 {
                     _pos += 2;
                     return new Token(TokenType.LeftArrow, _source[start.._pos], start);
@@ -527,6 +531,14 @@ public ref struct TokenLexer
                     _pos++;
                 }
                 return new Token(TokenType.Unrecognized, _source[start.._pos], start);
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Language.TokenLexer value)
+        {
+            _ = value;
         }
     }
 }

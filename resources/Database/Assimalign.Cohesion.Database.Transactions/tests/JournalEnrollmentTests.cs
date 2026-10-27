@@ -24,7 +24,7 @@ public sealed class JournalEnrollmentTests
         // Arrange
         using var media = new CrashSimulationStream();
         using var journal = StorageJournal.Create(media, leaveOpen: true);
-        var locks = LockManager.Create();
+        var locks = new LockManager();
         await using var manager = TransactionManager.Create(
             TransactionLog.CreateJournalBound(journal), locks, VersionStore.CreateInMemory());
         long length = journal.Length;
@@ -72,7 +72,7 @@ public sealed class JournalEnrollmentTests
         using var media = new CrashSimulationStream();
         using var journal = StorageJournal.Create(media, leaveOpen: true);
         await using var manager = TransactionManager.Create(
-            TransactionLog.CreateJournalBound(journal), LockManager.Create(), VersionStore.CreateInMemory());
+            TransactionLog.CreateJournalBound(journal), new LockManager(), VersionStore.CreateInMemory());
         var reader = await manager.BeginAsync(cancellationToken: CancellationToken.None);
         journal.Dispose();
 

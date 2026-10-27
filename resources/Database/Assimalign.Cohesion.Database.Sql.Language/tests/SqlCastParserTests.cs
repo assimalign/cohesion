@@ -92,7 +92,7 @@ public class SqlCastParserTests
         string sql = $"SELECT CAST(x AS {target});";
         var statement = Parse(sql);
 
-        // The parser does not know the engine's domains: no SQL0004, and the name as written.
+        // The parser does not know the engine's domains: no CS00004, and the name as written.
         statement.Diagnostics.ShouldNotContain(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
         var cast = GetCast(statement);
         cast.TargetTypeInfo.ShouldBeNull();
@@ -107,7 +107,7 @@ public class SqlCastParserTests
     {
         var statement = Parse($"SELECT CAST(x AS {target});");
 
-        var diagnostic = statement.Diagnostics.Single(item => item.Code == "SQL0005");
+        var diagnostic = statement.Diagnostics.Single(item => item.Code == "CS00005");
 
         diagnostic.Message.ShouldNotBeNull().ShouldContain("unsigned integer literals", Case.Sensitive);
         GetCast(statement).TargetTypeInfo.ShouldBeNull();
@@ -142,7 +142,7 @@ public class SqlCastParserTests
     {
         var statement = Parse($"SELECT CAST(NULL AS {target});");
 
-        statement.Diagnostics.Single(item => item.Code == "SQL0005").Message.ShouldNotBeNull().ShouldContain(message, Case.Sensitive);
+        statement.Diagnostics.Single(item => item.Code == "CS00005").Message.ShouldNotBeNull().ShouldContain(message, Case.Sensitive);
         GetCast(statement).TargetTypeInfo.ShouldBeNull();
     }
 
@@ -168,7 +168,7 @@ public class SqlCastParserTests
     {
         var statement = Parse($"SELECT CAST('123' AS {target});");
 
-        var diagnostic = statement.Diagnostics.Single(item => item.Code == "SQL0005");
+        var diagnostic = statement.Diagnostics.Single(item => item.Code == "CS00005");
 
         diagnostic.Message.ShouldNotBeNull().ShouldContain(message, Case.Sensitive);
         diagnostic.Severity.ShouldBe(DiagnosticSeverity.Error);
@@ -184,7 +184,7 @@ public class SqlCastParserTests
     {
         var statement = Parse(sql);
 
-        statement.Diagnostics.ShouldContain(item => item.Code == "SQL0003" && item.Message == message);
+        statement.Diagnostics.ShouldContain(item => item.Code == "CS00003" && item.Message == message);
     }
 
     private static SqlQueryStatement Parse(string sql) => (SqlQueryStatement)new SqlQueryParser().Parse(sql);

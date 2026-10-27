@@ -33,7 +33,7 @@ public static partial class DatabaseResourceCommandExtensions
             ArgumentException.ThrowIfNullOrWhiteSpace(name);
             if (name.Contains('/'))
             {
-                throw new ArgumentException("Database names must not contain '/' in declarative commands.", nameof(name));
+                throw new ArgumentException(ErrorMessages.AddDatabaseArgument, nameof(name));
             }
             if (engine is not null)
             {
@@ -60,7 +60,7 @@ public static partial class DatabaseResourceCommandExtensions
             ArgumentException.ThrowIfNullOrWhiteSpace(name);
             if (database.Contains('/'))
             {
-                throw new ArgumentException("Database names must not contain '/' in declarative commands.", nameof(database));
+                throw new ArgumentException(ErrorMessages.AddDatabaseArgument, nameof(database));
             }
             descriptor.AddCommand("database.add-principal", $"{database}/{name}", new AddPrincipalCommandPayload(database, name),
                 DatabaseCommandJsonContext.Default.AddPrincipalCommandPayload, optional);

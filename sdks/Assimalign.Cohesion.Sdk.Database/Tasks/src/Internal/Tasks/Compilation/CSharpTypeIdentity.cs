@@ -27,7 +27,7 @@ internal static class CSharpTypeIdentity
         }
         if (type is not INamedTypeSymbol named)
         {
-            throw new NotSupportedException($"CLR type '{type.ToDisplayString()}' has no portable metadata identity.");
+            throw new NotSupportedException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.PortableTypeIdentityUnsupported, type.ToDisplayString()));
         }
 
         INamedTypeSymbol identityType = named.IsGenericType ? named.OriginalDefinition : named;

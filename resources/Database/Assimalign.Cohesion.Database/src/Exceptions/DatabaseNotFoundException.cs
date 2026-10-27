@@ -1,4 +1,7 @@
 using System;
+using System.Collections.Generic;
+
+using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database;
 
@@ -27,4 +30,13 @@ public sealed class DatabaseNotFoundException : DatabaseException
     /// <param name="innerException">The underlying cause. Structured diagnostics are preserved when it is a <see cref="DatabaseException"/>.</param>
     public DatabaseNotFoundException(string message, Exception? innerException)
         : base(message, (innerException as DatabaseException)?.Diagnostics ?? [], innerException) { }
+
+    /// <summary>Initializes precise database absence with copied structured diagnostics.</summary>
+    /// <param name="message">The error message without a diagnostic code prefix.</param>
+    /// <param name="diagnostics">The diagnostics, copied and ordered by source offset.</param>
+    /// <param name="innerException">The original cause, or null when absence has no underlying cause.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="diagnostics"/> is null.</exception>
+    /// <remarks>The explicit third argument preserves the existing two-argument null-inner call.</remarks>
+    public DatabaseNotFoundException(string message, IEnumerable<Diagnostic> diagnostics, Exception? innerException)
+        : base(message, diagnostics, innerException) { }
 }

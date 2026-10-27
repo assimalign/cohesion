@@ -26,6 +26,8 @@ namespace Assimalign.Cohesion.Database.Sql.Schema;
 /// non-static class keeps.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("SqlSchema {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Schema.SqlSchema.DebugView))]
 public sealed class SqlSchema
 {
     private readonly SqlSchemaDeclaration _declaration;
@@ -87,5 +89,17 @@ public sealed class SqlSchema
         var builder = new SqlSchemaBuilder(name);
         configure(builder);
         return new SqlSchema(builder.Build());
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Sql.Schema.SqlSchema _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Schema.SqlSchema value)
+        {
+            _target = value;
+        }
+
+        public string Name => _target.Name;
     }
 }

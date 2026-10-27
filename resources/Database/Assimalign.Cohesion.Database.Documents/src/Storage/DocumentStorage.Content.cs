@@ -63,7 +63,7 @@ public sealed partial class DocumentStorage
     {
         if (content.Length <= 0 || content.Length > int.MaxValue)
         {
-            throw new StorageCorruptionException("Document content length must be positive and fit in a memory buffer.");
+            throw new StorageCorruptionException(ErrorMessages.DocumentStorageReadContentFailure);
         }
         using var stream = OpenRead(content);
         var result = new byte[(int)content.Length];
@@ -74,7 +74,7 @@ public sealed partial class DocumentStorage
         }
         catch (JsonException error)
         {
-            throw new StorageCorruptionException($"Stored document is outside the JSON format: {error.Message}");
+            throw new StorageCorruptionException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DocumentStorageReadContentFailure2, error.Message));
         }
         return result;
     }
@@ -96,7 +96,7 @@ public sealed partial class DocumentStorage
                 {
                     if (!names.Add(property.Name))
                     {
-                        throw new JsonException($"Duplicate document property '{property.Name}'.");
+                        throw new JsonException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DocumentStorageValidateJson, property.Name));
                     }
                     Validate(property.Value);
                 }
@@ -111,7 +111,7 @@ public sealed partial class DocumentStorage
                 if (!element.TryGetDecimal(out var number)
                     || NormalizeNumber(element.GetRawText()) != NormalizeNumber(number.ToString("G29", CultureInfo.InvariantCulture)))
                 {
-                    throw new JsonException("Document numbers must be exactly representable as System.Decimal without rounding or underflow.");
+                    throw new JsonException(ErrorMessages.DocumentStorageValidateJson2);
                 }
                 break;
         }

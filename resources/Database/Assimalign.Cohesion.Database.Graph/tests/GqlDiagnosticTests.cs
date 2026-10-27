@@ -12,11 +12,11 @@ namespace Assimalign.Cohesion.Database.Graph.Tests;
 
 public sealed class GqlDiagnosticTests
 {
-    [Fact(DisplayName = "Cohesion Test [Graph] - Diagnostics: ANY SHORTEST and UNION reach every request seam")]
+    [Fact(DisplayName = "Cohesion Test [Graph] - Diagnostics: MERGE and UNION reach every request seam")]
     public async Task Execute_ErrorStatement_ShouldCarryCompleteDiagnosticsAsync()
     {
         // Arrange
-        const string gql = "MATCH ANY SHORTEST (a)->(b) RETURN a UNION MATCH (c) RETURN c";
+        const string gql = "MATCH (a)->(b) MERGE (d) RETURN a UNION MATCH (c) RETURN c";
         var parsed = (GqlQueryStatement)new GqlQueryParser().Parse(gql);
         parsed.Diagnostics.Count().ShouldBe(2);
         await using var engine = GraphDatabaseEngine.Create("diagnostics", new());
@@ -53,7 +53,7 @@ public sealed class GqlDiagnosticTests
 
         // Assert
         var diagnostic = failure.Diagnostics.ShouldHaveSingleItem();
-        diagnostic.Code.ShouldBe("COHDBG001");
+        diagnostic.Code.ShouldBe("CG05001");
         diagnostic.Start.ShouldBe(parsed.GqlExpression.Location!.Start);
         diagnostic.End.ShouldBe(parsed.GqlExpression.Location.End);
         diagnostic.Severity.ShouldBe(DiagnosticSeverity.Error);
@@ -75,7 +75,7 @@ public sealed class GqlDiagnosticTests
 
         // Assert
         var warning = result.Diagnostics.ShouldNotBeNull().ShouldHaveSingleItem();
-        warning.Code.ShouldBe("COHDBG010");
+        warning.Code.ShouldBe("CG01010");
         warning.Severity.ShouldBe(DiagnosticSeverity.Warning);
         warning.Start.ShouldBe(parsed.GqlExpression.Predicate!.Location!.Start);
         warning.End.ShouldBe(parsed.GqlExpression.Predicate.Location.End);

@@ -20,7 +20,7 @@ namespace Assimalign.Cohesion.Database.Transactions.Tests;
 /// </summary>
 public sealed class TransactionCoordinatorCheckpointCrashTests
 {
-    private const int WriterCount = 40;
+    private const int writerCount = 40;
 
     [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Coordinator checkpoint: a crash at every write of a checkpoint keeps in-flight writers' versions invisible and LSNs increasing")]
     public async Task Checkpoint_CrashAtEveryWrite_ShouldKeepUncommittedVersionsInvisible()
@@ -99,7 +99,7 @@ public sealed class TransactionCoordinatorCheckpointCrashTests
     }
 
     /// <summary>
-    /// One committed version, <see cref="WriterCount"/> writers that each inserted a version and
+    /// One committed version, <see cref="writerCount"/> writers that each inserted a version and
     /// are still in flight, and a reader, over write-through crash-simulation streams. Unless
     /// <paramref name="drain"/> is false the journal's append buffer is drained last, so the
     /// writers' records are on the media before the checkpoint, as any commit or stolen page leaves
@@ -115,7 +115,7 @@ public sealed class TransactionCoordinatorCheckpointCrashTests
         await coordinator.CommitAsync(committed);
 
         var writers = new List<TransactionSequence>();
-        for (int i = 0; i < WriterCount; i++)
+        for (int i = 0; i < writerCount; i++)
         {
             var writer = await coordinator.BeginAsync(IsolationLevel.Snapshot);
             await InsertAsync(coordinator, storage, writer);

@@ -5,6 +5,8 @@ using Assimalign.Cohesion.Database.Types;
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 /// <summary>A cast pair's storage ordinals and case-insensitive domain names, without formatted lookup strings.</summary>
+[global::System.Diagnostics.DebuggerDisplay("SqlCastKey")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlCastKey.DebugView))]
 internal readonly struct SqlCastKey : IEquatable<SqlCastKey>
 {
     private readonly DatabaseType _source;
@@ -30,4 +32,12 @@ internal readonly struct SqlCastKey : IEquatable<SqlCastKey>
     public override int GetHashCode() => HashCode.Combine(_source, _target,
         _sourceDomain is null ? 0 : StringComparer.OrdinalIgnoreCase.GetHashCode(_sourceDomain),
         _targetDomain is null ? 0 : StringComparer.OrdinalIgnoreCase.GetHashCode(_targetDomain));
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlCastKey value)
+        {
+            _ = value;
+        }
+    }
 }

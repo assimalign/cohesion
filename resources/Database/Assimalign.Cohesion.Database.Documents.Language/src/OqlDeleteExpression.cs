@@ -3,6 +3,8 @@ using Assimalign.Cohesion.Database.Language;
 namespace Assimalign.Cohesion.Database.Documents.Language;
 
 /// <summary>Deletes documents matching an optional predicate from one collection.</summary>
+[global::System.Diagnostics.DebuggerDisplay("OqlDeleteExpression")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Documents.Language.OqlDeleteExpression.DebugView))]
 public sealed class OqlDeleteExpression : OqlExpression
 {
     /// <summary>Initializes a DELETE statement.</summary>
@@ -10,9 +12,11 @@ public sealed class OqlDeleteExpression : OqlExpression
     /// <param name="alias">The optional source alias.</param>
     /// <param name="predicate">The filter, or null to delete every document.</param>
     /// <param name="location">The source span.</param>
-    public OqlDeleteExpression(string collection, string? alias, OqlExpression? predicate, Location? location = null)
+    /// <param name="returning">The optional affected-document projection.</param>
+    public OqlDeleteExpression(string collection, string? alias, OqlExpression? predicate, Location? location = null, OqlReturningExpression? returning = null)
         : base(location)
     {
+        Returning = returning;
         Collection = collection;
         Alias = alias;
         Predicate = predicate;
@@ -24,4 +28,24 @@ public sealed class OqlDeleteExpression : OqlExpression
     public string? Alias { get; }
     /// <summary>Gets the filter, or null to delete every document.</summary>
     public OqlExpression? Predicate { get; }
+
+    /// <summary>Gets the optional affected-document projection.</summary>
+    public OqlReturningExpression? Returning { get; }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Documents.Language.OqlDeleteExpression _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Documents.Language.OqlDeleteExpression value)
+        {
+            _target = value;
+        }
+
+        public OqlReturningExpression? Returning => _target.Returning;
+        public string Collection => _target.Collection;
+        public string? Alias => _target.Alias;
+        public global::Assimalign.Cohesion.Database.Documents.Language.OqlExpression? Predicate => _target.Predicate;
+        public string? Text => _target.Text;
+        public global::Assimalign.Cohesion.Database.Language.Location? Location => _target.Location;
+    }
 }

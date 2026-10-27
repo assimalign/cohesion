@@ -93,7 +93,7 @@ public sealed record GraphProtocolPathMessage(IReadOnlyList<GraphNode> Nodes, IR
             string type = ProtocolPayload.ReadString(payload, ref position);
             relationships[i] = new(id, type, from, to, GraphProtocolProperties.Read(payload, ref position));
         }
-        if (position != payload.Length) { throw new ProtocolException("Trailing bytes in graph path payload."); }
+        if (position != payload.Length) { throw new ProtocolException(ErrorMessages.ProtocolPathMessageDecodeProtocol); }
         var result = new GraphProtocolPathMessage(nodes, relationships);
         result.Validate();
         return result;
@@ -104,7 +104,7 @@ public sealed record GraphProtocolPathMessage(IReadOnlyList<GraphNode> Nodes, IR
         int count = ProtocolPayload.ReadInt32(payload, ref position);
         if (count < 0 || count > (payload.Length - position) / minimumSize)
         {
-            throw new ProtocolException("Malformed graph element count.");
+            throw new ProtocolException(ErrorMessages.ProtocolPathMessageReadCountProtocol);
         }
         return count;
     }
@@ -113,11 +113,11 @@ public sealed record GraphProtocolPathMessage(IReadOnlyList<GraphNode> Nodes, IR
     {
         if (Nodes.Count == 0 || Relationships.Count != Nodes.Count - 1)
         {
-            throw new ProtocolException("A path requires one more node than relationships.");
+            throw new ProtocolException(ErrorMessages.ProtocolPathMessageValidateProtocol);
         }
         for (int i = 0; i < Nodes.Count; i++)
         {
-            if (Nodes[i].Id.Value == 0) { throw new ProtocolException("Graph identities must be nonzero."); }
+            if (Nodes[i].Id.Value == 0) { throw new ProtocolException(ErrorMessages.ProtocolPathMessageValidateProtocol2); }
         }
         for (int i = 0; i < Relationships.Count; i++)
         {
@@ -126,7 +126,7 @@ public sealed record GraphProtocolPathMessage(IReadOnlyList<GraphNode> Nodes, IR
                 !((edge.From == Nodes[i].Id && edge.To == Nodes[i + 1].Id) ||
                   (edge.To == Nodes[i].Id && edge.From == Nodes[i + 1].Id)))
             {
-                throw new ProtocolException("A path relationship must connect its consecutive nodes.");
+                throw new ProtocolException(ErrorMessages.ProtocolPathMessageValidateProtocol3);
             }
         }
     }

@@ -12,7 +12,7 @@ namespace Assimalign.Cohesion.Database.KeyValuePair;
 /// and <see cref="Operation"/> names which one. A session executes these through its typed execute
 /// member, the only execute member it has. The command grammar (<c>docs/COMMANDS.md</c>) is the
 /// wire encoding of these requests: the model's wire server parses each command it receives into
-/// the same request types, so both paths execute identically. All six leaves live in this
+/// the same request types, so both paths execute identically. All seven leaves live in this
 /// assembly, so the constructor is <c>private protected</c>.
 /// </remarks>
 public abstract class KeyValueRequest : DatabaseRequest

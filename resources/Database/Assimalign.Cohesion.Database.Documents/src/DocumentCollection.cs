@@ -4,6 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Documents.Catalog;
+using Assimalign.Cohesion.Database.Documents.Internal;
 using Assimalign.Cohesion.Database.Transactions;
 
 using Assimalign.Cohesion.Database.Documents.Protocol;
@@ -32,6 +33,8 @@ namespace Assimalign.Cohesion.Database.Documents;
 /// implementation; its operations take the typed <see cref="DocumentDatabaseSession"/>.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("DocumentCollection {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Documents.DocumentCollection.DebugView))]
 public sealed class DocumentCollection
 {
     private readonly DocumentDatabase _database;
@@ -70,9 +73,9 @@ public sealed class DocumentCollection
     /// <exception cref="DatabaseException">
     /// The session belongs to another database, or the collection is bound to another session; the
     /// session is closed, another statement holds it, or its transaction refuses statements
-    /// (<c>COHDBD001</c>); or the collection is no longer available in the statement's snapshot.
+    /// (<c>CD04101</c>); or the collection is no longer available in the statement's snapshot.
     /// </exception>
-    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBD002</c>, #1243).</exception>
+    /// <exception cref="DatabaseOfflineException">The database is offline (<c>CD06102</c>, #1243).</exception>
     /// <exception cref="DatabaseTransactionCommitUnconfirmedException">An autocommit statement's commit record could not be confirmed durable.</exception>
     public ValueTask<Document?> GetAsync(DocumentDatabaseSession session, DocumentId id, CancellationToken cancellationToken = default)
     {
@@ -101,10 +104,10 @@ public sealed class DocumentCollection
     /// <exception cref="DatabaseException">
     /// <paramref name="expectedVersion"/> is set and does not match; the session belongs to another
     /// database, or the collection is bound to another session; the session is closed, another
-    /// statement holds it, or its transaction refuses statements (<c>COHDBD001</c>); or the
+    /// statement holds it, or its transaction refuses statements (<c>CD04101</c>); or the
     /// collection is no longer available in the statement's snapshot.
     /// </exception>
-    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBD002</c>, #1243).</exception>
+    /// <exception cref="DatabaseOfflineException">The database is offline (<c>CD06102</c>, #1243).</exception>
     /// <exception cref="DatabaseTransactionAbortedException">The document, the collection or its indexes changed since the transaction's snapshot (retryable).</exception>
     /// <exception cref="DatabaseTransactionCommitUnconfirmedException">An autocommit statement's commit record could not be confirmed durable.</exception>
     /// <exception cref="DocumentCatalogException">The composite index key exceeds 1024 bytes.</exception>
@@ -155,10 +158,10 @@ public sealed class DocumentCollection
     /// <exception cref="DatabaseException">
     /// <paramref name="expectedVersion"/> is set and does not match; the session belongs to another
     /// database, or the collection is bound to another session; the session is closed, another
-    /// statement holds it, or its transaction refuses statements (<c>COHDBD001</c>); or the
+    /// statement holds it, or its transaction refuses statements (<c>CD04101</c>); or the
     /// collection is no longer available in the statement's snapshot.
     /// </exception>
-    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBD002</c>, #1243).</exception>
+    /// <exception cref="DatabaseOfflineException">The database is offline (<c>CD06102</c>, #1243).</exception>
     /// <exception cref="DatabaseTransactionAbortedException">The document, the collection or its indexes changed since the transaction's snapshot (retryable).</exception>
     /// <exception cref="DatabaseTransactionCommitUnconfirmedException">An autocommit statement's commit record could not be confirmed durable.</exception>
     public ValueTask<bool> DeleteAsync(DocumentDatabaseSession session, DocumentId id, DocumentVersion? expectedVersion = null, CancellationToken cancellationToken = default)
@@ -188,7 +191,7 @@ public sealed class DocumentCollection
         ArgumentNullException.ThrowIfNull(session);
         if (!ReferenceEquals(session.Database, _database) || !ReferenceEquals(_boundSession, session))
         {
-            throw new DatabaseException("The document collection and session must belong to the same bound database and session.");
+            throw DatabaseException.CreateDocumentsFailure("CD07001", ErrorMessages.CollectionValidateSessionDatabase);
         }
         session.ThrowIfNotOpen();
         return session;
@@ -198,21 +201,33 @@ public sealed class DocumentCollection
 
     private void EnsureCurrent(TransactionContext context, DocumentId id, DocumentCatalogEntry? previous, DocumentVersion? expectedVersion)
     {
-        if (previous != _database.Catalog.FindDocument(_collection.Id, id.Value, _database.LatestSnapshot(context))) { DocumentDatabase.ThrowConflict(); }
+        if (previous != _database.Catalog.FindDocument(_collection.Id, id.Value, _database.LatestSnapshot(context))) { DatabaseTransactionAbortedException.ThrowDocumentConflict(); }
         if (expectedVersion is not null && previous?.Version != expectedVersion.Value.Value)
         {
-            throw new DatabaseException($"Document '{id}' does not match expected version '{expectedVersion}'.");
+            throw DatabaseException.CreateDocumentsFailure("CD04103", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CollectionEnsureCurrentDatabase, id, expectedVersion));
         }
     }
 
     private void EnsureCollection(TransactionContext context, bool writing = false)
     {
         var current = _database.Catalog.FindCollection(Name, context.Snapshot);
-        if (current?.Id != _collection.Id) { throw new DatabaseException($"Collection '{Name}' is no longer available in this transaction."); }
+        if (current?.Id != _collection.Id) { throw DatabaseException.CreateDocumentsFailure("CD09001", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CollectionEnsureCollectionDatabase, Name)); }
         if (writing && (current != _database.Catalog.FindCollection(Name, _database.LatestSnapshot(context)) ||
             !_database.Catalog.GetIndexes(_collection.Id, context.Snapshot).SequenceEqual(_database.Catalog.GetIndexes(_collection.Id, _database.LatestSnapshot(context)))))
         {
-            DocumentDatabase.ThrowConflict();
+            DatabaseTransactionAbortedException.ThrowDocumentConflict();
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Documents.DocumentCollection _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Documents.DocumentCollection value)
+        {
+            _target = value;
+        }
+
+        public string Name => _target.Name;
     }
 }

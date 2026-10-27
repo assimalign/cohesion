@@ -34,7 +34,7 @@ public sealed class SqlQuotedIdentifierTests
         var statement = new SqlQueryParser().Parse(sql);
 
         // Assert
-        statement.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "SQL0003");
+        statement.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS00003");
     }
 
     [Fact]
@@ -69,7 +69,7 @@ public sealed class SqlQuotedIdentifierTests
     public void QuotedCommand_DoesNotBecomeAStatementKeyword()
     {
         var statement = new SqlQueryParser().Parse("\"SELECT\" * FROM \"items\";").ShouldBeOfType<SqlQueryStatement>();
-        statement.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "SQL0002");
+        statement.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS00002");
     }
 
     [Fact]
@@ -139,7 +139,7 @@ public sealed class SqlQuotedIdentifierTests
     private static SqlQueryExpression Parse(string sql)
     {
         var statement = new SqlQueryParser().Parse(sql).ShouldBeOfType<SqlQueryStatement>();
-        statement.Diagnostics.ShouldNotContain(diagnostic => diagnostic.Code == "SQL0002" || diagnostic.Code == "SQL0003" || diagnostic.Code == "COHDBL001");
+        statement.Diagnostics.ShouldNotContain(diagnostic => diagnostic.Code == "CS00002" || diagnostic.Code == "CS00003" || diagnostic.Code == "CK00001");
         return statement.SqlExpression;
     }
 }

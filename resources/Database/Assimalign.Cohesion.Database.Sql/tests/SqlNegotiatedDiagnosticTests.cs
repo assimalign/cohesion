@@ -63,7 +63,7 @@ public sealed class SqlNegotiatedDiagnosticTests
         if (diagnostics)
         {
             var frame = await client.ExpectAsync(ProtocolMessageType.Diagnostics);
-            ProtocolDiagnosticsMessage.Decode(frame.Payload.Span).Entries.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE015");
+            ProtocolDiagnosticsMessage.Decode(frame.Payload.Span).Entries.ShouldHaveSingleItem().Code.ShouldBe("CS01015");
         }
         var error = await client.ExpectAsync(ProtocolMessageType.Error);
         ProtocolErrorMessage.Decode(error.Payload.Span).Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);

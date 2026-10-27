@@ -85,7 +85,7 @@ public sealed class SqlRowWindowWireTests
         error.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
         error.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
         // #1103 composes the structured engine code at the existing wire boundary.
-        error.Message.ShouldBe($"COHSQLE018: {clause} requires a non-negative integer.");
+        error.Message.ShouldBe($"CS02018: {clause} requires a non-negative integer.");
         error.ConnectionUsable.ShouldBeTrue();
         var rows = await connection.QueryAsync("SELECT id FROM users ORDER BY id", cancellationToken: SqlClientTestHarness.Timeout());
         rows.Select(row => row[0]).ShouldBe(new object?[] { 1, 2 });

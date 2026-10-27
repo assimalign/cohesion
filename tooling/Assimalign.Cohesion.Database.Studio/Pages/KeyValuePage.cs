@@ -135,12 +135,12 @@ internal sealed class KeyValuePage : ContentPage
 
     private KeyValueWorkspace Workspace()
     {
-        KeyValueWorkspace workspace = _workspace ?? throw new InvalidOperationException("The Key-Value workspace is not ready (see the Workspace page).");
-        return workspace.CurrentDatabase is null ? throw new InvalidOperationException("Select or create a database first.") : workspace;
+        KeyValueWorkspace workspace = _workspace ?? throw new InvalidOperationException(ErrorMessages.KeyValueWorkspaceUnavailable);
+        return workspace.CurrentDatabase is null ? throw new InvalidOperationException(ErrorMessages.DatabaseSelectionMissing) : workspace;
     }
 
     private byte[] Key() => string.IsNullOrEmpty(_key.Text)
-        ? throw new InvalidOperationException("Enter a key.")
+        ? throw new InvalidOperationException(ErrorMessages.KeyMissing)
         : Bytes.Parse(_key.Text, _keyEncoding.SelectedIndex == 1);
 
     private byte[]? Bound(Entry entry) => string.IsNullOrEmpty(entry.Text) ? null : Bytes.Parse(entry.Text, _keyEncoding.SelectedIndex == 1);

@@ -103,7 +103,7 @@ public sealed class GqlFunctionParserTests
         var rejected = new GqlQueryParser().Parse(string.Format(template, name));
         var quoted = new GqlQueryParser().Parse(string.Format(template, "\"" + name + "\""));
         // Assert
-        rejected.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("GQL0002");
+        rejected.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG00002");
         quoted.Diagnostics.ShouldBeEmpty();
     }
 
@@ -124,7 +124,7 @@ public sealed class GqlFunctionParserTests
         // Arrange / Act
         var statement = new GqlQueryParser().Parse(source);
         // Assert
-        statement.Diagnostics.ShouldContain(error => error.Code == "GQL0002");
+        statement.Diagnostics.ShouldContain(error => error.Code == "CG00002");
     }
 
     [Theory(DisplayName = "Cohesion Test [Graph.Language] - Functions: unknown calls have a distinct located diagnostic in every linear value position")]
@@ -142,7 +142,7 @@ public sealed class GqlFunctionParserTests
         // Arrange / Act
         var error = new GqlQueryParser().Parse(source).Diagnostics.ShouldHaveSingleItem();
         // Assert
-        error.Code.ShouldBe("GQL0010"); error.Message!.ShouldContain("foo", Case.Sensitive);
+        error.Code.ShouldBe("CG00010"); error.Message!.ShouldContain("foo", Case.Sensitive);
         error.Start.ShouldNotBeNull(); error.End.ShouldNotBeNull();
     }
 
@@ -189,6 +189,6 @@ public sealed class GqlFunctionParserTests
         // Arrange / Act
         var error = new GqlQueryParser().Parse($"RETURN CAST(NULL AS {target})").Diagnostics.ShouldHaveSingleItem();
         // Assert
-        error.Code.ShouldBe("COHDBL001"); error.Message!.ShouldContain("CAST " + target, Case.Sensitive);
+        error.Code.ShouldBe("CK00001"); error.Message!.ShouldContain("CAST " + target, Case.Sensitive);
     }
 }

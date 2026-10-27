@@ -8,7 +8,7 @@ namespace Assimalign.Cohesion.ApplicationModel;
 /// <summary>
 /// Composition extensions for adding database manifests to an application model.
 /// </summary>
-public static class DatabaseResourceExtensions
+public static partial class DatabaseResourceExtensions
 {
     extension(IApplicationBuilder builder)
     {
@@ -46,7 +46,7 @@ public static class DatabaseResourceExtensions
             ArgumentNullException.ThrowIfNull(declaration);
             if (!string.Equals(declaration.Manifest?.Kind, "Database", StringComparison.Ordinal))
             {
-                throw new ArgumentException("A typed Database reference requires an Database manifest.", nameof(declaration));
+                throw new ArgumentException(ErrorMessages.RemoteReferenceDatabaseArgument, nameof(declaration));
             }
             return new DatabaseResourceDescriptor(builder.RemoteReference(declaration, configure));
         }

@@ -67,7 +67,7 @@ public sealed class SqlCollationParserTests
     [InlineData("CREATE FULLTEXT INDEX text_idx ON t (name COLLATE case_insensitive);")]
     public void Parse_DeferredCollationFeature_ShouldReportModelDiagnostic(string sql)
     {
-        Parse(sql).Diagnostics.ShouldContain(item => item.Code == "COHDBL001" && item.Severity == DiagnosticSeverity.Error);
+        Parse(sql).Diagnostics.ShouldContain(item => item.Code == "CK00001" && item.Severity == DiagnosticSeverity.Error);
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - COLLATE: names resolve during binding (#1653)")]

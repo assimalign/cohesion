@@ -48,7 +48,7 @@ public sealed class GraphClientWireTests
         var error = await Should.ThrowAsync<GraphClientException>(async () => await connection.ExecuteAsync(
             "INSERT (:Unwritten {k: $missing})", cancellationToken: harness.Token));
         error.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
-        error.Message.ShouldContain("COHDBG001", Case.Sensitive);
+        error.Message.ShouldContain("CG05001", Case.Sensitive);
         (await connection.QueryAsync("MATCH (n:Person) RETURN n.name", cancellationToken: harness.Token)).Count.ShouldBe(2);
         harness.Server.Sessions.ShouldHaveSingleItem().Id.ShouldBe(sessionId);
     }
@@ -122,7 +122,7 @@ public sealed class GraphClientWireTests
         var error = await Should.ThrowAsync<GraphClientException>(async () =>
             await connection.ExecuteAsync("MATCH (n:Vertex) DELETE n", cancellationToken: harness.Token));
         error.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
-        error.Message.ShouldContain("COHDBG", Case.Sensitive);
+        error.Message.ShouldStartWith("CG03003: ", Case.Sensitive);
         connection.IsOpen.ShouldBeTrue();
         (await connection.QueryAsync("MATCH (n:Vertex) RETURN n.name", cancellationToken: harness.Token))
             .Select(row => (string)row[0]!).Order(StringComparer.Ordinal).ShouldBe(["A", "B", "Isolated"]);
@@ -154,7 +154,7 @@ public sealed class GraphClientWireTests
         var error = await Should.ThrowAsync<GraphClientException>(async () =>
             await connection.ExecuteAsync("CREATE (:Managed {name: 7})", cancellationToken: harness.Token));
         error.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
-        error.Message.ShouldContain("COHDBG003", Case.Sensitive);
+        error.Message.ShouldContain("CG03003", Case.Sensitive);
         (await connection.QueryAsync("MATCH (n:Managed) RETURN n.name", cancellationToken: harness.Token)).ShouldBeEmpty();
         await connection.ExecuteAsync("CREATE (:Managed {name: 'Allowed', extra: TRUE})", cancellationToken: harness.Token);
         var keys = await connection.QueryAsync("SHOW PROPERTY KEYS", cancellationToken: harness.Token);
@@ -233,7 +233,7 @@ public sealed class GraphClientWireTests
         var error = await Should.ThrowAsync<GraphClientException>(async () =>
             await connection.QueryAsync(statement, cancellationToken: harness.Token));
         error.Code.ShouldBe(ProtocolErrorCode.ParseFailure);
-        error.Message.ShouldContain("GQL0007: Graph catalog introspection is read-only.", Case.Sensitive);
+        error.Message.ShouldContain("CG00007: Graph catalog introspection is read-only.", Case.Sensitive);
         connection.IsOpen.ShouldBeTrue();
         (await connection.QueryAsync("SHOW LABELS", cancellationToken: harness.Token)).ShouldBeEmpty();
     }
@@ -245,9 +245,9 @@ public sealed class GraphClientWireTests
     [InlineData("MATCH (a) RETURN *", ProtocolErrorCode.ExecutionFailure)]
     [InlineData("MATCH (a) RETURN b.name", ProtocolErrorCode.ExecutionFailure)]
     [InlineData("MATCH (a) RETURN a", ProtocolErrorCode.ExecutionFailure)]
-    [InlineData("BEGIN", ProtocolErrorCode.ParseFailure)]
-    [InlineData("COMMIT", ProtocolErrorCode.ParseFailure)]
-    [InlineData("ROLLBACK", ProtocolErrorCode.ParseFailure)]
+    [InlineData("BEGIN TRANSACTION READ ONLY", ProtocolErrorCode.ParseFailure)]
+    [InlineData("COMMIT", ProtocolErrorCode.ExecutionFailure)]
+    [InlineData("ROLLBACK", ProtocolErrorCode.ExecutionFailure)]
     public async Task QueryAsync_StatementFailure_ShouldReuseExactSession(string statement, ProtocolErrorCode code)
     {
         // Arrange
@@ -341,7 +341,7 @@ public sealed class GraphClientWireTests
 
             // Assert: only a failure before ResultHeader certifies completion and permits reuse.
             error.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
-            error.Message.ShouldStartWith("COHDBG013: ", Case.Sensitive);
+            error.Message.ShouldStartWith("CG02013: ", Case.Sensitive);
             connection.IsOpen.ShouldBeTrue();
         }
         await using var reused = await harness.Client.ConnectAsync(harness.Token);

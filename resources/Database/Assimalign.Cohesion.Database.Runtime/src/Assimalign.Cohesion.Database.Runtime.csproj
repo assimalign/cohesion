@@ -5,7 +5,6 @@
 		<AssemblyName>Assimalign.Cohesion.App.Database</AssemblyName>
 
 		<ProduceReferenceAssembly>true</ProduceReferenceAssembly>
-		<IsAotCompatible>true</IsAotCompatible>
 
 		<PackageId Condition="'$(RuntimeIdentifier)' != ''">Assimalign.Cohesion.App.Database.Runtime.$(RuntimeIdentifier)</PackageId>
 		<PackageId Condition="'$(RuntimeIdentifier)' == ''">Assimalign.Cohesion.App.Database.Runtime</PackageId>

@@ -22,8 +22,8 @@ public class SqlInsertParserTests
         var statement = _parser.Parse("INSERT INTO t VALUES (1) " + clause + ";");
 
         // Assert
-        statement.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "SQL0003");
-        statement.Diagnostics.ShouldNotContain(diagnostic => diagnostic.Code == "COHDBL001");
+        statement.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS00003");
+        statement.Diagnostics.ShouldNotContain(diagnostic => diagnostic.Code == "CK00001");
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - Upsert: all conflict targets consume their complete statement and RETURNING")]
@@ -77,7 +77,7 @@ public class SqlInsertParserTests
         var statement = _parser.Parse(sql + ";");
 
         // Assert
-        statement.Diagnostics.Where(item => item.Code == "COHDBL001").ShouldHaveSingleItem().Message!.ShouldContain(construct, Case.Sensitive);
+        statement.Diagnostics.Where(item => item.Code == "CK00001").ShouldHaveSingleItem().Message!.ShouldContain(construct, Case.Sensitive);
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - Upsert: contextual words remain ordinary identifiers")]

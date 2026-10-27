@@ -277,7 +277,7 @@ public sealed class SqlPersistedDefinitionTests : IDisposable
             await reopenedSession.ExecuteAsync("SELECT stored(1)", cancellationToken: CancellationToken.None));
 
         // Assert
-        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE003");
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS02003");
         failure.Diagnostics[0].Start.ShouldNotBeNull();
         (await RowsAsync(reopenedSession, "SELECT 1")).ShouldHaveSingleItem();
     }
@@ -392,7 +392,7 @@ public sealed class SqlPersistedDefinitionTests : IDisposable
             await using var session = await database.CreateSessionAsync(CancellationToken.None);
             await session.ExecuteAsync("CREATE TABLE t (id INT, label TEXT, qty INT, extra INT)");
             (await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("ALTER TABLE t ADD CONSTRAINT signed CHECK (-label IS NULL)")))
-                .Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE003");
+                .Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS02003");
             (await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("ALTER TABLE t ADD CONSTRAINT via_cast CHECK (CAST(qty AS VARCHAR(5)) <> '13')")))
                 .Message.ShouldContain("casts", Case.Sensitive);
 
@@ -416,7 +416,7 @@ public sealed class SqlPersistedDefinitionTests : IDisposable
         await WriteFailsAsync(reopened, reopenedSession, "INSERT INTO t (id, qty) VALUES (2, 13)");
         var typeError = await Should.ThrowAsync<DatabaseException>(async () =>
             await reopenedSession.ExecuteAsync("INSERT INTO t (id, label) VALUES (3, 'x')"));
-        typeError.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE003");
+        typeError.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS02003");
         await DdlAsync(reopened, reopenedSession, "ALTER TABLE t DROP COLUMN extra");
         (await RowsAsync(reopenedSession, "SELECT id, label, qty FROM t")).ShouldHaveSingleItem().ShouldBe(new object?[] { 1, null, 1 });
     }

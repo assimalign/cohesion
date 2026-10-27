@@ -34,9 +34,10 @@ internal sealed class DocumentClientTestHarness : IAsyncDisposable
     internal DocumentClient Client { get; }
     internal CancellationToken Token => _timeout.Token;
 
-    internal static async Task<DocumentClientTestHarness> StartAsync(bool tcp = false, Action<DocumentDatabaseServerOptions>? configure = null)
+    internal static async Task<DocumentClientTestHarness> StartAsync(bool tcp = false, Action<DocumentDatabaseServerOptions>? configure = null, Action<DocumentDatabaseEngineBuilder>? configureEngine = null)
     {
         var builder = DocumentDatabaseEngine.CreateBuilder("documents-wire").AddDatabase("documents");
+        configureEngine?.Invoke(builder);
         IDuplexConnectionListener listener;
         IDuplexConnectionFactory factory;
         if (tcp)

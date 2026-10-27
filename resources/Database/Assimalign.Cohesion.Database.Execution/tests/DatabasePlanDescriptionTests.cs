@@ -10,6 +10,24 @@ namespace Assimalign.Cohesion.Database.Execution.Tests;
 
 public sealed class DatabasePlanDescriptionTests
 {
+    [Fact(DisplayName = "Cohesion Test [Execution] - Plan description: optional estimate and actual counts retain their typed values (#1522)")]
+    public async Task Create_Counts_ShouldPreserveZeroAndNonzeroValues()
+    {
+        await using var result = DatabasePlanDescription.Create([new DatabasePlanNode
+        { NodeId = 0, Operator = "IndexSeek", EstimatedRows = 17, ActualRows = 0 }]);
+        int count = 0;
+        await foreach (var row in result.GetRowsAsync(CancellationToken.None))
+        {
+            row.FieldCount.ShouldBe(8);
+            row.IsNull(6).ShouldBeFalse();
+            row.IsNull(7).ShouldBeFalse();
+            row.GetInt64(6).ShouldBe(17);
+            row.GetInt64(7).ShouldBe(0);
+            count++;
+        }
+        count.ShouldBe(1);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Execution] - Plan description: materialization snapshots input and preserves nullable typed fields")]
     public async Task Create_MutableInput_ShouldSnapshotNodesAndPreserveNullsAsync()
     {

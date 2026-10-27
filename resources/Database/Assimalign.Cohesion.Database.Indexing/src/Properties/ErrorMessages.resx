@@ -6,4 +6,21 @@
   <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
   <data name="CursorNotPositioned" xml:space="preserve"><value>The cursor is not positioned on an entry.</value></data>
   <data name="LiveLookupRequiresUnique" xml:space="preserve"><value>Latest live-entry lookup requires a unique index.</value></data>
+  <data name="BTreeIndexInsertAsyncIndex" xml:space="preserve"><value>Index key of {0} bytes exceeds the {1}-byte maximum.</value></data>
+  <data name="BTreeIndexInsertCoreIndex" xml:space="preserve"><value>Index '{0}' already holds the entry for reference {1} written by transaction {2} under this key; an entry's (key, reference, writer) identity must be unique.</value></data>
+  <data name="TreeIndexManagerCreateIndexAsyncIndex" xml:space="preserve"><value>Index kind {0} is not supported yet; only BTree indexes exist in the MVP.</value></data>
+  <data name="TreeIndexManagerCreateIndexAsyncIndex2" xml:space="preserve"><value>An index named '{0}' already exists on object {1}.</value></data>
+  <data name="BTreeIndexManagerDropIndexAsyncIndex" xml:space="preserve"><value>No index named '{0}' exists on object {1}.</value></data>
+  <data name="BTreeIndexSplitLeafIndex" xml:space="preserve"><value>Index '{0}' cannot split leaf page {1} holding {2} entries.</value></data>
+  <data name="BTreeIndexSplitIndex" xml:space="preserve"><value>Index '{0}' cannot split internal page {1} holding {2} entries.</value></data>
+  <data name="BTreeIndexEnsureLeafSeparatorIndex" xml:space="preserve"><value>Index '{0}' cannot split leaf page {1}: its entries {2} and {3} are out of order.</value></data>
+  <data name="BTreeIndexEnsureSeparatorOrderIndex" xml:space="preserve"><value>Index '{0}' split would insert a separator at position {1} of the {2}-entry directory on page {3}.</value></data>
+  <data name="BTreeIndexEnsureSeparatorOrderIndex2" xml:space="preserve"><value>Index '{0}' split would misorder separators on page {1}.</value></data>
+  <data name="IndexCorruptionExceptionIndex" xml:space="preserve"><value>{0}: Index '{1}' reached page {2}, which is not a B-tree node of page format {3} (found format {4}); the index is damaged.</value></data>
+  <data name="IndexUniqueViolationExceptionIndex" xml:space="preserve"><value>Unique index '{0}' already contains an entry for key {1}.</value></data>
+  <data name="IndexFormatExceptionDescribeIndex" xml:space="preserve"><value>{0} has a root page ({1}) that is not a B-tree page of any known format, and this engine supports only B-tree page format {2}: the index is damaged.</value></data>
+  <data name="IndexFormatExceptionDescribeIndex2" xml:space="preserve"><value>{0} uses B-tree page format {1}, but this engine supports only format {2}. {3}</value></data>
+  <data name="FormatExceptionDescribeIndexFormat" xml:space="preserve"><value>{0}: Index '{1}' on object {2}</value></data>
+  <data name="FormatExceptionDescribeIndexFormat2" xml:space="preserve"><value>This engine does not upgrade index pages: export the data with the engine that wrote it, drop the database and create it again with this engine (on-disk format upgrades are tracked by assimalign/cohesion#1152).</value></data>
+  <data name="FormatExceptionDescribeIndexFormat3" xml:space="preserve"><value>The index was written by a newer engine; open it with that engine.</value></data>
 </root>

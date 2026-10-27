@@ -52,6 +52,8 @@ namespace Assimalign.Cohesion.Database.Graph;
 /// </para>
 /// </remarks>
 // Deviates from the repo interface-first rule per design decision: Database engines are concrete-first — abstract bases with protected cores and sealed model leaves (owner, 2026-10-04; database-area.md).
+[global::System.Diagnostics.DebuggerDisplay("GraphDatabaseEngineBuilder {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.GraphDatabaseEngineBuilder.DebugView))]
 public sealed class GraphDatabaseEngineBuilder
 {
     private readonly DatabaseEngineBuilderState<GraphDatabaseEngine> _state;
@@ -64,6 +66,7 @@ public sealed class GraphDatabaseEngineBuilder
     internal GraphDatabaseEngineBuilder(string name)
     {
         _state = new(name, GraphDatabaseEngine.ModelName);
+        Functions = new GraphFunctionCollection(_state.EnsureMutable);
     }
 
     /// <summary>
@@ -82,6 +85,9 @@ public sealed class GraphDatabaseEngineBuilder
     /// engine.
     /// </remarks>
     public GraphDatabaseEngineOptions Options => _options;
+
+    /// <summary>Gets native and developer functions, mutable until this builder begins its one build attempt.</summary>
+    public GraphFunctionCollection Functions { get; }
 
     /// <summary>
     /// Declares a database the engine owns: the build opens it, or creates it when it does not
@@ -207,7 +213,7 @@ public sealed class GraphDatabaseEngineBuilder
     /// </exception>
     /// <exception cref="DatabaseException">
     /// A declared database's storage format was refused, or opening it failed with corruption
-    /// (<c>COHDBS003</c>) or coded I/O failure (<c>COHDBG006</c>); the engine was disposed.
+    /// (<c>CK06003</c>) or coded I/O failure (<c>CG06006</c>); the engine was disposed.
     /// </exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled; a created engine was disposed.</exception>
     /// <exception cref="AggregateException">The failure, together with a failure to dispose what it rejected.</exception>
@@ -223,7 +229,8 @@ public sealed class GraphDatabaseEngineBuilder
 
         // Phases 2 and 3: the engine and its built-in workers, then the factories' products. A
         // failure here disposes what the engine and the composition hold.
-        var engine = GraphDatabaseEngine.CreateUncomposed(Name, options);
+        GraphFunctionCatalog functions = Functions.Freeze();
+        var engine = GraphDatabaseEngine.CreateUncomposed(Name, options, functions);
         _state.Complete(engine, engine.Compose, GraphDatabaseEngine.ReleaseRefusedWorkerAsync);
 
         // Phase 4: each declared database, in declaration order; a failure disposes the engine.
@@ -239,4 +246,18 @@ public sealed class GraphDatabaseEngineBuilder
     /// </summary>
     /// <param name="failure">The failure that abandoned the engine.</param>
     internal void Abort(Exception failure) => _state.Abort(failure);
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Graph.GraphDatabaseEngineBuilder _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Graph.GraphDatabaseEngineBuilder value)
+        {
+            _target = value;
+        }
+
+        public string Name => _target.Name;
+        public global::Assimalign.Cohesion.Database.Graph.GraphDatabaseEngineOptions Options => _target.Options;
+        public GraphFunctionCollection Functions => _target.Functions;
+    }
 }

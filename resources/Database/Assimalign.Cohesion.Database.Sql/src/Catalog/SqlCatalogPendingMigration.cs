@@ -22,7 +22,7 @@ public sealed class SqlCatalogPendingMigration
         ArgumentNullException.ThrowIfNull(steps);
         if (steps.Count == 0 || stepCount < steps.Count)
         {
-            throw new ArgumentException("A pending migration must contain steps within its total.", nameof(steps));
+            throw new ArgumentException(ErrorMessages.SqlCatalogPendingMigrationArgument, nameof(steps));
         }
 
         int previous = 0;
@@ -30,7 +30,7 @@ public sealed class SqlCatalogPendingMigration
         {
             if (step is null || step.Position <= previous || step.Position > stepCount)
             {
-                throw new ArgumentException("Pending step positions must increase within the migration's total.", nameof(steps));
+                throw new ArgumentException(ErrorMessages.SqlCatalogPendingMigrationArgument2, nameof(steps));
             }
             previous = step.Position;
         }

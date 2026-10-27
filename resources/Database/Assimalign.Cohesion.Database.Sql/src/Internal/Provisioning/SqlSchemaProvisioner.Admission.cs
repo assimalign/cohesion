@@ -173,6 +173,7 @@ internal sealed partial class SqlSchemaProvisioner
                 break;
             case SqlUpdateExpression update:
                 yield return update.Table;
+                foreach (var table in SourceReferences(update.From)) { yield return table; }
                 foreach (var expression in update.Assignments.Select(value => value.Value).Append(update.Where))
                 {
                     foreach (var table in References(expression))
@@ -183,9 +184,20 @@ internal sealed partial class SqlSchemaProvisioner
                 break;
             case SqlDeleteExpression delete:
                 yield return delete.Table;
+                foreach (var table in SourceReferences(delete.Using)) { yield return table; }
                 foreach (var table in References(delete.Where))
                 {
                     yield return table;
+                }
+                break;
+            case SqlMergeExpression merge:
+                yield return merge.Table;
+                foreach (var table in SourceReferences([merge.Source])) { yield return table; }
+                foreach (var expression in merge.Actions.SelectMany(action =>
+                    action.Assignments.Select(assignment => assignment.Value).Concat(action.Values ?? []).Append(action.Condition))
+                    .Concat(merge.Returning?.Select(column => column.Expression) ?? []).Append(merge.Condition))
+                {
+                    foreach (var table in References(expression)) { yield return table; }
                 }
                 break;
             case SqlAlterTableExpression alter:
@@ -203,6 +215,9 @@ internal sealed partial class SqlSchemaProvisioner
                         yield return parent;
                     }
                 }
+                break;
+            case SqlCreateTableAsExpression createAs:
+                foreach (var table in References(createAs.Query)) { yield return table; }
                 break;
             case SqlCreateViewExpression createView:
                 foreach (var table in References(createView.Query)) { yield return table; }
@@ -225,12 +240,33 @@ internal sealed partial class SqlSchemaProvisioner
             case SqlDropTableExpression drop:
                 yield return drop.Table;
                 break;
+            case SqlTruncateExpression truncate:
+                foreach (var target in truncate.Tables) { yield return target.Table; }
+                break;
+        }
+    }
+
+    private static IEnumerable<SqlTableReference> SourceReferences(IReadOnlyList<SqlFromItem> sources)
+    {
+        foreach (var item in sources)
+        {
+            foreach (var table in References(item.Table)) { yield return table; }
+            foreach (var join in item.Joins)
+            {
+                foreach (var table in References(join.Table)) { yield return table; }
+                foreach (var table in References(join.Condition)) { yield return table; }
+            }
         }
     }
 
     private static IEnumerable<SqlTableReference> References(SqlRelationReference relation)
     {
         if (relation is SqlTableReference table) { yield return table; }
+        else if (relation is SqlJoinedTableReference group)
+        {
+            RuntimeHelpers.EnsureSufficientExecutionStack();
+            foreach (var nested in SourceReferences([group.Item])) { yield return nested; }
+        }
         else if (relation is SqlDerivedTableReference derived)
         {
             foreach (var nested in References(derived.Query)) { yield return nested; }
@@ -245,6 +281,7 @@ internal sealed partial class SqlSchemaProvisioner
             SqlSubqueryExpression scalar => scalar.Select,
             SqlExistsExpression exists => exists.Subquery,
             SqlInExpression member => member.Subquery,
+            SqlQuantifiedComparisonExpression quantified => quantified.Subquery,
             _ => null,
         };
         if (query is not null)

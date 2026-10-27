@@ -6,6 +6,8 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 // Shared by copies of the statement context. Definitions are read under object intent locks;
 // this state never survives into the next statement, including in an explicit transaction.
+[global::System.Diagnostics.DebuggerDisplay("SqlStatementReferences")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlStatementReferences.DebugView))]
 internal sealed class SqlStatementReferences
 {
     internal Dictionary<ulong, IReadOnlyList<SqlBoundReference>> Incoming { get; } = [];
@@ -15,4 +17,20 @@ internal sealed class SqlStatementReferences
     internal Dictionary<SqlCatalogTable, List<SqlLiveIndex>> LiveIndexes { get; } = [];
     internal HashSet<ulong> IncomingLocks { get; } = [];
     internal HashSet<ulong> OutgoingLocks { get; } = [];
+
+    // Every definition/lock-coverage claim was made while grants that may have just
+    // been released were held. Rebuild all attempt-local caches after a wait.
+    internal void ClearAfterCascadeRetry()
+    {
+        Incoming.Clear(); Parents.Clear(); Bindings.Clear(); Lookups.Clear();
+        LiveIndexes.Clear(); IncomingLocks.Clear(); OutgoingLocks.Clear();
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlStatementReferences value)
+        {
+            _ = value;
+        }
+    }
 }

@@ -49,8 +49,8 @@ public sealed class SqlUpsertWireTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql.Client] - Upsert: arbiter, cardinality and constraint failures preserve usable connections")]
-    [InlineData("INSERT INTO t VALUES (3, 30) ON CONFLICT (age) DO NOTHING", "COHSQLE035")]
-    [InlineData("INSERT INTO t VALUES (1, 30), (1, 40) ON CONFLICT (id) DO UPDATE SET age = EXCLUDED.age", "COHSQLE036")]
+    [InlineData("INSERT INTO t VALUES (3, 30) ON CONFLICT (age) DO NOTHING", "CS03035")]
+    [InlineData("INSERT INTO t VALUES (1, 30), (1, 40) ON CONFLICT (id) DO UPDATE SET age = EXCLUDED.age", "CS05036")]
     [InlineData("INSERT INTO t VALUES (3, 30), (1, 40) ON CONFLICT (id) DO UPDATE SET age = 20", "UNIQUE")]
     [InlineData("INSERT INTO t VALUES (1, 30) ON CONFLICT (id) DO UPDATE SET age = -1", "CHECK")]
     public async Task ExecuteAsync_UpsertFailure_ShouldKeepConnectionUsable(string sql, string message)
@@ -71,8 +71,8 @@ public sealed class SqlUpsertWireTests
         failure.Message.ShouldContain(message, Case.Sensitive);
         failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(message switch
         {
-            "UNIQUE" => "COHSQLE037",
-            "CHECK" => "COHSQLE038",
+            "UNIQUE" => "CS03037",
+            "CHECK" => "CS03038",
             _ => message,
         });
         failure.ConnectionUsable.ShouldBeTrue();
@@ -80,7 +80,7 @@ public sealed class SqlUpsertWireTests
         rows.Select(row => (row.GetInt32(0), row.GetInt32(1))).ShouldBe([(1, 10), (2, 20)]);
     }
 
-    [Theory(DisplayName = "Cohesion Test [Sql.Client] - Upsert: excluded spellings carry COHDBL001 ParseFailure without writes")]
+    [Theory(DisplayName = "Cohesion Test [Sql.Client] - Upsert: excluded spellings carry CK00001 ParseFailure without writes")]
     [InlineData("INSERT INTO t VALUES (2, 20) ON DUPLICATE KEY UPDATE age = 3", "ON DUPLICATE KEY UPDATE")]
     [InlineData("INSERT OR IGNORE INTO t VALUES (2, 20)", "ON CONFLICT")]
     [InlineData("INSERT OR REPLACE INTO t VALUES (2, 20)", "ON CONFLICT")]
@@ -104,7 +104,7 @@ public sealed class SqlUpsertWireTests
 
         // Assert
         failure.Kind.ShouldBe(SqlClientErrorKind.ParseFailure);
-        failure.Message.ShouldContain("COHDBL001", Case.Sensitive);
+        failure.Message.ShouldContain("CK00001", Case.Sensitive);
         failure.Message.ShouldContain(construct, Case.Sensitive);
         failure.ConnectionUsable.ShouldBeTrue();
         var rows = await connection.QueryAsync("SELECT id, age FROM t", cancellationToken: SqlClientTestHarness.Timeout());

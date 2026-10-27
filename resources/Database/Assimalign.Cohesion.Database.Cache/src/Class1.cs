@@ -1,6 +1,7 @@
-﻿namespace Assimalign.Cohesion.Database.CacheDb;
+namespace Assimalign.Cohesion.Database.CacheDb;
 
-public class Class1
+/// <summary>Preserves the deferred Cache model's placeholder surface.</summary>
+public sealed class Class1
 {
 
 }

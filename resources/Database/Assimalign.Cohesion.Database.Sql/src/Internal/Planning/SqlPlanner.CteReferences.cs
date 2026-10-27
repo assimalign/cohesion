@@ -22,6 +22,7 @@ internal sealed partial class SqlPlanner
     // The normal binder still checks every definition, including all unknown names/types.
     private static HashSet<SqlCommonTableExpression>? FindReferencedCommonTables(SqlQueryExpression statement)
     {
+        if (statement is SqlCreateTableAsExpression create) { statement = create.Query; }
         if (CommonTablesOf(statement).Count == 0 && statement is not SqlInsertExpression { SelectSource.CommonTables.Count: > 0 })
         {
             return null;
@@ -62,19 +63,39 @@ internal sealed partial class SqlPlanner
                     if (insert.SelectSource is { } source) { pending.Push((source, scope, visible)); }
                     break;
                 case SqlUpdateExpression update:
+                    Sources(update.From, scope, visible);
                     Expressions(update.Where, scope, visible);
                     foreach (var assignment in update.Assignments) { Expressions(assignment.Value, scope, visible); }
                     break;
                 case SqlDeleteExpression delete:
+                    Sources(delete.Using, scope, visible);
                     Expressions(delete.Where, scope, visible);
                     break;
             }
         }
         return referenced;
 
+        void Sources(IReadOnlyList<SqlFromItem> sources, CommonTableScope? scope, int visible)
+        {
+            foreach (var item in sources)
+            {
+                Relation(item.Table, scope, visible);
+                foreach (var join in item.Joins)
+                {
+                    Relation(join.Table, scope, visible);
+                    Expressions(join.Condition, scope, visible);
+                }
+            }
+        }
+
         void Relation(SqlRelationReference relation, CommonTableScope? scope, int visible)
         {
-            if (relation is SqlDerivedTableReference derived) { pending.Push((derived.Query, scope, visible)); }
+            if (relation is SqlJoinedTableReference group)
+            {
+                System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
+                Sources([group.Item], scope, visible);
+            }
+            else if (relation is SqlDerivedTableReference derived) { pending.Push((derived.Query, scope, visible)); }
             else if (relation is SqlTableReference { SchemaName: null } named && scope is not null &&
                 scope.TryResolve(named.TableName, visible, out var owner, out int index))
             {
@@ -96,12 +117,15 @@ internal sealed partial class SqlPlanner
                 SqlSubqueryExpression scalar => scalar.Select,
                 SqlExistsExpression exists => exists.Subquery,
                 SqlInExpression member => member.Subquery,
+                SqlQuantifiedComparisonExpression quantified => quantified.Subquery,
                 _ => null,
             };
             if (child is not null) { pending.Push((child, scope, visible)); }
         }
     }
 
+    [global::System.Diagnostics.DebuggerDisplay("CommonTableScope")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlPlanner.CommonTableScope.DebugView))]
     private sealed class CommonTableScope
     {
         private readonly CommonTableScope? _parent;
@@ -135,6 +159,14 @@ internal sealed partial class SqlPlanner
             owner = null!;
             index = -1;
             return false;
+        }
+
+        private sealed class DebugView
+        {
+            public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlPlanner.CommonTableScope value)
+            {
+                _ = value;
+            }
         }
     }
 }

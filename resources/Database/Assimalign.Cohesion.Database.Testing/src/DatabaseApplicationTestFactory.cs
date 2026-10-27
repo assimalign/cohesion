@@ -36,13 +36,15 @@ namespace Assimalign.Cohesion.Database.Testing;
 /// only composition path; the factory does not require a test-only bootstrap or interface.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("DatabaseApplicationTestFactory")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Testing.DatabaseApplicationTestFactory.DebugView))]
 public sealed class DatabaseApplicationTestFactory : IDatabaseApplicationTestFactory
 {
-    private const string AdminEndpointName = "admin";
-    private const string DatabaseEndpointName = "db";
-    private const string DataMountName = "data";
-    private const string ReadinessPath = "/readyz";
-    private const string StopPath = "/cohesion/v1/stop";
+    private const string adminEndpointName = "admin";
+    private const string databaseEndpointName = "db";
+    private const string dataMountName = "data";
+    private const string readinessPath = "/readyz";
+    private const string stopPath = "/cohesion/v1/stop";
 
     private readonly Assembly _assembly;
     private readonly string[] _arguments;
@@ -72,21 +74,21 @@ public sealed class DatabaseApplicationTestFactory : IDatabaseApplicationTestFac
             throw new ArgumentOutOfRangeException(
                 nameof(options),
                 options.StartupTimeout,
-                "The startup timeout must be greater than zero.");
+                ErrorMessages.DatabaseApplicationTestFactoryFailure);
         }
         if (options.ShutdownTimeout <= TimeSpan.Zero)
         {
             throw new ArgumentOutOfRangeException(
                 nameof(options),
                 options.ShutdownTimeout,
-                "The shutdown timeout must be greater than zero.");
+                ErrorMessages.DatabaseApplicationTestFactoryFailure2);
         }
         if (options.ProbeInterval <= TimeSpan.Zero)
         {
             throw new ArgumentOutOfRangeException(
                 nameof(options),
                 options.ProbeInterval,
-                "The probe interval must be greater than zero.");
+                ErrorMessages.DatabaseApplicationTestFactoryFailure3);
         }
 
         _assembly = entryPoint.DeclaringType!.Assembly;
@@ -104,10 +106,10 @@ public sealed class DatabaseApplicationTestFactory : IDatabaseApplicationTestFac
             ResourceContext = options.ResourceContext;
         }
 
-        if (!ResourceContext.Endpoints.ContainsKey(AdminEndpointName))
+        if (!ResourceContext.Endpoints.ContainsKey(adminEndpointName))
         {
             throw new ArgumentException(
-                $"The test resource context must provide the Database '{AdminEndpointName}' endpoint.",
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ApplicationTestFactoryArgument, adminEndpointName),
                 nameof(options));
         }
     }
@@ -215,7 +217,7 @@ public sealed class DatabaseApplicationTestFactory : IDatabaseApplicationTestFac
             _startupCancellation.Cancel();
             await TryAbortStartAsync().ConfigureAwait(false);
             throw new TimeoutException(
-                $"The Database resource did not report ready within {_startupTimeout}.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.TestFactoryStartAsyncTimeout, _startupTimeout));
         }
     }
 
@@ -321,7 +323,7 @@ public sealed class DatabaseApplicationTestFactory : IDatabaseApplicationTestFac
 
     private async Task WaitForReadinessAsync(Task program, CancellationToken cancellationToken)
     {
-        Uri admin = ResourceContext.Endpoints[AdminEndpointName];
+        Uri admin = ResourceContext.Endpoints[adminEndpointName];
         using var client = new HttpClient { BaseAddress = admin };
 
         while (true)
@@ -331,13 +333,13 @@ public sealed class DatabaseApplicationTestFactory : IDatabaseApplicationTestFac
             {
                 await program.ConfigureAwait(false);
                 throw new InvalidOperationException(
-                    "The resource program exited before its Database control plane reported ready.");
+                    ErrorMessages.FactoryWaitForReadinessAsyncFailure);
             }
 
             try
             {
                 using HttpResponseMessage response = await client
-                    .GetAsync(ReadinessPath, cancellationToken)
+                    .GetAsync(readinessPath, cancellationToken)
                     .ConfigureAwait(false);
                 if (response.StatusCode == HttpStatusCode.OK)
                 {
@@ -355,7 +357,7 @@ public sealed class DatabaseApplicationTestFactory : IDatabaseApplicationTestFac
 
     private async Task RequestStopAsync(Task program, CancellationToken cancellationToken)
     {
-        Uri admin = ResourceContext.Endpoints[AdminEndpointName];
+        Uri admin = ResourceContext.Endpoints[adminEndpointName];
         using var client = new HttpClient { BaseAddress = admin };
 
         while (!program.IsCompleted)
@@ -363,7 +365,7 @@ public sealed class DatabaseApplicationTestFactory : IDatabaseApplicationTestFac
             cancellationToken.ThrowIfCancellationRequested();
             try
             {
-                using var request = new HttpRequestMessage(HttpMethod.Post, StopPath);
+                using var request = new HttpRequestMessage(HttpMethod.Post, stopPath);
                 AuthorizeControlPlaneRequest(request);
                 using HttpResponseMessage response = await client
                     .SendAsync(request, cancellationToken)
@@ -374,7 +376,7 @@ public sealed class DatabaseApplicationTestFactory : IDatabaseApplicationTestFac
                 }
 
                 throw new HttpRequestException(
-                    $"The Database control plane rejected graceful stop with HTTP {(int)response.StatusCode}.");
+                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.FactoryRequestStopAsyncHttpRequest, (int)response.StatusCode));
             }
             catch (HttpRequestException) when (!program.IsCompleted)
             {
@@ -450,17 +452,16 @@ public sealed class DatabaseApplicationTestFactory : IDatabaseApplicationTestFac
         Type programType = typeof(TProgram);
         MethodInfo entryPoint = programType.Assembly.EntryPoint
             ?? throw new InvalidOperationException(
-                $"Assembly '{programType.Assembly.GetName().Name}' has no executable entry point.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.TestFactoryResolveEntryPointFailure, programType.Assembly.GetName().Name));
 
         if (!ReferenceEquals(entryPoint.DeclaringType, programType))
         {
             throw new InvalidOperationException(
-                $"Type '{programType.FullName}' is not the entry-point Program for assembly " +
-                $"'{programType.Assembly.GetName().Name}'.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.TestFactoryResolveEntryPointFailure2, programType.FullName, programType.Assembly.GetName().Name));
         }
         if (!entryPoint.IsStatic)
         {
-            throw new InvalidOperationException("The resource program entry point must be static.");
+            throw new InvalidOperationException(ErrorMessages.TestFactoryResolveEntryPointFailure3);
         }
 
         ParameterInfo[] parameters = entryPoint.GetParameters();
@@ -468,7 +469,7 @@ public sealed class DatabaseApplicationTestFactory : IDatabaseApplicationTestFac
             (parameters.Length == 1 && parameters[0].ParameterType != typeof(string[])))
         {
             throw new InvalidOperationException(
-                "The resource program entry point must accept no parameters or one string[] parameter.");
+                ErrorMessages.TestFactoryResolveEntryPointFailure4);
         }
 
         Type returnType = entryPoint.ReturnType;
@@ -478,7 +479,7 @@ public sealed class DatabaseApplicationTestFactory : IDatabaseApplicationTestFac
             returnType != typeof(Task<int>))
         {
             throw new InvalidOperationException(
-                $"The resource program entry point return type '{returnType.FullName}' is not supported.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.TestFactoryResolveEntryPointFailure5, returnType.FullName));
         }
 
         return entryPoint;
@@ -502,12 +503,12 @@ public sealed class DatabaseApplicationTestFactory : IDatabaseApplicationTestFac
 
         var endpoints = new Dictionary<string, Uri>(StringComparer.OrdinalIgnoreCase)
         {
-            [DatabaseEndpointName] = Uri.CreateEndpoint("cohesion-db", "127.0.0.1", databasePort),
-            [AdminEndpointName] = Uri.CreateEndpoint("http", "127.0.0.1", adminPort),
+            [databaseEndpointName] = Uri.CreateEndpoint("cohesion-db", "127.0.0.1", databasePort),
+            [adminEndpointName] = Uri.CreateEndpoint("http", "127.0.0.1", adminPort),
         };
         var mounts = new Dictionary<string, ResourceMount>(StringComparer.OrdinalIgnoreCase)
         {
-            [DataMountName] = new ResourceMount(dataPath),
+            [dataMountName] = new ResourceMount(dataPath),
         };
 
         string resourceName = programType.Assembly.GetName().Name ?? programType.Name;
@@ -573,5 +574,17 @@ public sealed class DatabaseApplicationTestFactory : IDatabaseApplicationTestFac
         {
             // A failed assertion should not be hidden by best-effort fixture cleanup.
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Testing.DatabaseApplicationTestFactory _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Testing.DatabaseApplicationTestFactory value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Hosting.Resources.ResourceContext ResourceContext => _target.ResourceContext;
     }
 }

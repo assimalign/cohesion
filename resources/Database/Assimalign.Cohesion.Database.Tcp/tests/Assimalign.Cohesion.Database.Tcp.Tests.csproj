@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><RootNamespace>Assimalign.Cohesion.Database.Tcp.Tests</RootNamespace><OutputType>Exe</OutputType><IsPackable>false</IsPackable></PropertyGroup>
+  <ItemGroup>
+    <CohesionProjectReference Include="Assimalign.Cohesion.Database.Tcp" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Database.Graph" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Database.Documents" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Database.Blob" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Database.KeyValuePair" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Connections.Tcp" />
+  </ItemGroup>
+  <ItemGroup><Compile Include="../samples/Assimalign.Cohesion.Database.Tcp.AotSample/TcpServerSmoke.cs" Link="TestObjects/TcpServerSmoke.cs" /></ItemGroup>
+  <ItemGroup>
+    <CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
+    <CohesionPackageReference Include="xunit" />
+    <CohesionPackageReference Include="xunit.runner.visualstudio" />
+    <CohesionPackageReference Include="coverlet.collector" />
+    <CohesionPackageReference Include="Shouldly" />
+  </ItemGroup>
+</Project>

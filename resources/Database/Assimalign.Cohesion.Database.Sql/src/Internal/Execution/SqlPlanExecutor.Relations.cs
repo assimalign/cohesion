@@ -23,6 +23,7 @@ internal sealed partial class SqlPlanExecutor
         var rows = new List<object?[]>();
         try
         {
+            using var analysis = statement.Metrics.EnterRelationAnalysis(relation);
             await using var result = (DatabaseResultSet)await ExecuteAsync(relation.Query, statement, cancellationToken).ConfigureAwait(false);
             await foreach (var row in result.GetRowsAsync(cancellationToken).ConfigureAwait(false))
             {
@@ -30,6 +31,11 @@ internal sealed partial class SqlPlanExecutor
                 var values = new object?[row.FieldCount];
                 for (int i = 0; i < values.Length; i++)
                 { values[i] = SqlBinaryValue.CopyShared(SqlCharacter.Input(row.GetValue(i), result.Columns[i].Type)); }
+                if (statement.Metrics.DmlMemory(_definitions.StatementMemoryBudget) is { } memory)
+                {
+                    memory.Retain(values);
+                    memory.Reserve(32);
+                }
                 rows.Add(values);
             }
         }

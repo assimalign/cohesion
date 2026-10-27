@@ -8,6 +8,8 @@ namespace Assimalign.Cohesion.Database.Language;
 /// clauses its parser accepts. A clause outside the profile is reported as unsupported by that
 /// model rather than failing as a generic syntax error.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("QueryLanguageProfile {Language,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Language.QueryLanguageProfile.DebugView))]
 public sealed class QueryLanguageProfile
 {
     private readonly string[] _keywords;
@@ -25,13 +27,15 @@ public sealed class QueryLanguageProfile
     /// <param name="isCaseSensitive">
     /// Whether keyword, function, and clause matching is case-sensitive.
     /// </param>
+    /// <param name="recognizeLeftArrow">Whether the lexer recognizes the GQL left arrow; defaults to false.</param>
     /// <exception cref="ArgumentNullException">A required argument is null.</exception>
     public QueryLanguageProfile(
         string language,
         string[] keywords,
         string[] functions,
         string[] clauses,
-        bool isCaseSensitive = false)
+        bool isCaseSensitive = false,
+        bool recognizeLeftArrow = false)
     {
         ArgumentNullException.ThrowIfNull(language);
         ArgumentNullException.ThrowIfNull(keywords);
@@ -40,6 +44,7 @@ public sealed class QueryLanguageProfile
 
         Language = language;
         IsCaseSensitive = isCaseSensitive;
+        RecognizeLeftArrow = recognizeLeftArrow;
 
         _keywords = (string[])keywords.Clone();
         _functions = (string[])functions.Clone();
@@ -66,6 +71,9 @@ public sealed class QueryLanguageProfile
     /// <summary>Whether keyword, function, and clause matching is case-sensitive.</summary>
     public bool IsCaseSensitive { get; }
 
+    /// <summary>Whether the lexer recognizes <c>&lt;-</c> as a GQL left arrow.</summary>
+    public bool RecognizeLeftArrow { get; }
+
     /// <summary>Whether <paramref name="clause"/> is accepted by this model.</summary>
     /// <param name="clause">The language-specific clause name to inspect.</param>
     /// <returns><see langword="true"/> when the profile accepts the clause.</returns>
@@ -83,5 +91,21 @@ public sealed class QueryLanguageProfile
         Keywords = _keywords,
         Functions = _functions,
         IsCaseSensitive = IsCaseSensitive,
+        RecognizeLeftArrow = RecognizeLeftArrow,
     };
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Language.QueryLanguageProfile _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Language.QueryLanguageProfile value)
+        {
+            _target = value;
+        }
+
+        public string Language => _target.Language;
+        public global::System.Collections.Generic.IReadOnlyCollection<string> Clauses => _target.Clauses;
+        public bool IsCaseSensitive => _target.IsCaseSensitive;
+        public bool RecognizeLeftArrow => _target.RecognizeLeftArrow;
+    }
 }

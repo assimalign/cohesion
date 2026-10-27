@@ -10,6 +10,8 @@ namespace Assimalign.Cohesion.Database.Hosting.Internal;
 
 // The core supplies its own observations. Tracing never reads an engine again or
 // adds a cancellation point; only completed checks enter the transition gate.
+[global::System.Diagnostics.DebuggerDisplay("DatabaseHealthTrace")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Hosting.Internal.DatabaseHealthTrace.DebugView))]
 internal sealed class DatabaseHealthTrace
 {
     private readonly Lock _gate = new();
@@ -95,6 +97,8 @@ internal sealed class DatabaseHealthTrace
         }
     }
 
+    [global::System.Diagnostics.DebuggerDisplay("Observation")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Hosting.Internal.DatabaseHealthTrace.Observation.DebugView))]
     internal sealed class Observation
     {
         internal Dictionary<DatabaseEngine, Dictionary<string, Condition>> Conditions { get; } = new(ReferenceEqualityComparer.Instance);
@@ -118,9 +122,25 @@ internal sealed class DatabaseHealthTrace
             }
             return conditions;
         }
+
+        private sealed class DebugView
+        {
+            public DebugView(global::Assimalign.Cohesion.Database.Hosting.Internal.DatabaseHealthTrace.Observation value)
+            {
+                _ = value;
+            }
+        }
     }
 
     internal sealed record Condition(DatabaseInstance? Instance, string? Reason, StorageOfflineCause? Cause, DatabaseProvisioningProgress? Progress);
 
     private sealed record Change(DatabaseEngine Engine, string Database, Condition Condition, bool Restored);
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Hosting.Internal.DatabaseHealthTrace value)
+        {
+            _ = value;
+        }
+    }
 }

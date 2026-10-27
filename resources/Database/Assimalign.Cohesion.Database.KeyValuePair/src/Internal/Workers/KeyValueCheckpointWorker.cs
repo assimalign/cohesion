@@ -22,6 +22,8 @@ namespace Assimalign.Cohesion.Database.KeyValuePair.Internal;
 /// its holder closed is never due (<see cref="IsCheckpointDue"/>), so a failure recorded for it
 /// ends with the first pass after its backoff.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("KeyValueCheckpointWorker {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.KeyValuePair.Internal.KeyValueCheckpointWorker.DebugView))]
 internal sealed class KeyValueCheckpointWorker : DatabaseCheckpointWorker<KeyValueDatabase>
 {
     private readonly KeyValueDatabaseEngine _engine;
@@ -101,5 +103,20 @@ internal sealed class KeyValueCheckpointWorker : DatabaseCheckpointWorker<KeyVal
         }
 
         return finished;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.KeyValuePair.Internal.KeyValueCheckpointWorker _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.KeyValuePair.Internal.KeyValueCheckpointWorker value)
+        {
+            _target = value;
+        }
+
+        public bool CompletionOnly => _target.CompletionOnly;
+        public string Name => _target.Name;
+        public global::Assimalign.Cohesion.Database.DatabaseEngineWorkerKind Kind => _target.Kind;
+        public global::System.TimeSpan Interval => _target.Interval;
     }
 }

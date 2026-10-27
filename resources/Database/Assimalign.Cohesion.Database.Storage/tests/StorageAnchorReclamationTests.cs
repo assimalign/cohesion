@@ -181,6 +181,6 @@ public sealed class StorageAnchorReclamationTests
 
         // Assert
         failure.PageId.ShouldBe((PageId)pageId);
-        failure.Code.ShouldBe("COHDBS003");
+        failure.Code.ShouldBe("CK06003");
     }
 }

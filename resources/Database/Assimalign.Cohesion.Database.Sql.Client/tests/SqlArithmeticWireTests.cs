@@ -17,25 +17,25 @@ namespace Assimalign.Cohesion.Database.Sql.Client.Tests;
 /// </summary>
 public sealed class SqlArithmeticWireTests
 {
-    private const string DivisionByZero = "COHSQLE001";
-    private const string OutOfRange = "COHSQLE002";
+    private const string divisionByZero = "CS02001";
+    private const string outOfRange = "CS02002";
 
     /// <summary>Every fault reaches the client as a coded execution failure on a still-usable connection.</summary>
     /// <param name="statement">The faulting command.</param>
     /// <param name="code">The expected engine diagnostic code.</param>
     [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - Arithmetic: faults are coded execution failures that keep the connection")]
-    [InlineData("SELECT score / 0 FROM users", DivisionByZero)]
-    [InlineData("SELECT score % (id - id) FROM users", DivisionByZero)]
-    [InlineData("SELECT CAST(score AS DECIMAL) / 0 FROM users", DivisionByZero)]
-    [InlineData("SELECT id FROM users WHERE score / (id - 1) > 0", DivisionByZero)]
-    [InlineData("UPDATE users SET score = score / (id - 2)", DivisionByZero)]
-    [InlineData("SELECT score + 9223372036854775708 FROM users", OutOfRange)]
-    [InlineData("SELECT score * 92233720368547759 FROM users", OutOfRange)]
-    [InlineData("SELECT -(-9223372036854775807 - 1) FROM users", OutOfRange)]
-    [InlineData("SELECT ABS(-9223372036854775807 - 1) FROM users", OutOfRange)]
-    [InlineData("SELECT (-9223372036854775807 - 1) / -1 FROM users", OutOfRange)]
-    [InlineData("SELECT SUM(CAST('79228162514264337593543950335' AS DECIMAL)) FROM users", OutOfRange)]
-    [InlineData("UPDATE users SET id = id + 2147483647", OutOfRange)]
+    [InlineData("SELECT score / 0 FROM users", divisionByZero)]
+    [InlineData("SELECT score % (id - id) FROM users", divisionByZero)]
+    [InlineData("SELECT CAST(score AS DECIMAL) / 0 FROM users", divisionByZero)]
+    [InlineData("SELECT id FROM users WHERE score / (id - 1) > 0", divisionByZero)]
+    [InlineData("UPDATE users SET score = score / (id - 2)", divisionByZero)]
+    [InlineData("SELECT score + 9223372036854775708 FROM users", outOfRange)]
+    [InlineData("SELECT score * 92233720368547759 FROM users", outOfRange)]
+    [InlineData("SELECT -(-9223372036854775807 - 1) FROM users", outOfRange)]
+    [InlineData("SELECT ABS(-9223372036854775807 - 1) FROM users", outOfRange)]
+    [InlineData("SELECT (-9223372036854775807 - 1) / -1 FROM users", outOfRange)]
+    [InlineData("SELECT SUM(CAST('79228162514264337593543950335' AS DECIMAL)) FROM users", outOfRange)]
+    [InlineData("UPDATE users SET id = id + 2147483647", outOfRange)]
     public async Task QueryAsync_ArithmeticFault_ShouldReturnCodedExecutionFailure(string statement, string code)
     {
         // Arrange
@@ -58,7 +58,7 @@ public sealed class SqlArithmeticWireTests
 
     /// <summary>A bound zero divisor of every numeric runtime type is caught, not only literal zero.</summary>
     /// <param name="divisor">The bound divisor.</param>
-    [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - Arithmetic: bound zero divisors of every numeric type fail with COHSQLE001")]
+    [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - Arithmetic: bound zero divisors of every numeric type fail with CS02001")]
     [MemberData(nameof(ZeroDivisors))]
     public async Task QueryAsync_BoundZeroDivisor_ShouldFailWithCode(object divisor)
     {
@@ -73,7 +73,7 @@ public sealed class SqlArithmeticWireTests
             SqlClientException failure = await Should.ThrowAsync<SqlClientException>(async () =>
                 await connection.QueryAsync($"SELECT score {op} @divisor FROM users", parameters, SqlClientTestHarness.Timeout()));
             failure.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
-            failure.Message.ShouldStartWith(DivisionByZero + ":", Case.Sensitive);
+            failure.Message.ShouldStartWith(divisionByZero + ":", Case.Sensitive);
         }
 
         (await connection.QueryAsync("SELECT COUNT(*) AS total FROM users", cancellationToken: SqlClientTestHarness.Timeout()))
@@ -82,7 +82,7 @@ public sealed class SqlArithmeticWireTests
 
     /// <summary>A bound nonzero divisor too small for Decimal is out of range, never reported as zero.</summary>
     /// <param name="divisor">The bound nonzero divisor.</param>
-    [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - Arithmetic: a nonzero approximate divisor below Decimal's step fails with COHSQLE002")]
+    [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - Arithmetic: a nonzero approximate divisor below Decimal's step fails with CS02002")]
     [MemberData(nameof(UnderflowingDivisors))]
     public async Task QueryAsync_UnderflowingApproximateDivisor_ShouldFailOutOfRange(object divisor)
     {
@@ -98,7 +98,7 @@ public sealed class SqlArithmeticWireTests
                 await connection.QueryAsync($"SELECT score {op} @divisor FROM users", parameters, SqlClientTestHarness.Timeout()));
             failure.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
             failure.ConnectionUsable.ShouldBeTrue();
-            failure.Message.ShouldStartWith(OutOfRange + ":", Case.Sensitive);
+            failure.Message.ShouldStartWith(outOfRange + ":", Case.Sensitive);
             failure.Message.ShouldContain("underflows DECIMAL", Case.Sensitive);
         }
 
@@ -126,8 +126,8 @@ public sealed class SqlArithmeticWireTests
         // Assert
         failure.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
         failure.ConnectionUsable.ShouldBeTrue();
-        failure.Message.ShouldStartWith("COHSQLE055: Cannot compare values of types", Case.Sensitive);
-        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE055");
+        failure.Message.ShouldStartWith("CS02055: Cannot compare values of types", Case.Sensitive);
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS02055");
         (await connection.QueryAsync("SELECT COUNT(*) AS total FROM users", cancellationToken: SqlClientTestHarness.Timeout()))
             .ShouldHaveSingleItem()["total"].ShouldBe(2L);
     }
@@ -169,7 +169,7 @@ public sealed class SqlArithmeticWireTests
         // Act: the update faults on its second row, after the first row's value was computed.
         SqlClientException failure = await Should.ThrowAsync<SqlClientException>(async () =>
             await connection.ExecuteAsync("UPDATE users SET score = score / (id - 2)", cancellationToken: SqlClientTestHarness.Timeout()));
-        failure.Message.ShouldStartWith(DivisionByZero + ":", Case.Sensitive);
+        failure.Message.ShouldStartWith(divisionByZero + ":", Case.Sensitive);
         SqlResultSet inside = await connection.QueryAsync("SELECT id, score FROM users ORDER BY id",
             cancellationToken: SqlClientTestHarness.Timeout());
         SqlResultSet outside = await observer.QueryAsync("SELECT COUNT(*) AS total FROM users",

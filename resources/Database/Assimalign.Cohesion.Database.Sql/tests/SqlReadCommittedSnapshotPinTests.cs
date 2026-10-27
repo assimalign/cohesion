@@ -1,10 +1,12 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Execution;
+using Assimalign.Cohesion.Database.Indexing;
 using Assimalign.Cohesion.Database.Sql.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Transactions;
 
@@ -28,7 +30,7 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 [Collection(SqlReadCommittedStressCollection.Name)]
 public sealed class SqlReadCommittedSnapshotPinTests
 {
-    private const string Join = "SELECT a.id, b.id FROM a JOIN b ON a.id = b.id ORDER BY a.id";
+    private const string join = "SELECT a.id, b.id FROM a JOIN b ON a.id = b.id ORDER BY a.id";
 
     private readonly ITestOutputHelper _output;
 
@@ -61,7 +63,7 @@ public sealed class SqlReadCommittedSnapshotPinTests
         var blocker = await coordinator.BeginAsync(IsolationLevel.ReadCommitted, TestTimeout.Token());
         await coordinator.LockManager.AcquireAsync(blocker.Sequence, LockResource.Object(TableId(database, "a")), LockMode.Exclusive, TestTimeout.Token());
         int openBefore = coordinator.GetOpenContexts().Count;
-        var pending = readerSession.ExecuteAsync(Join, cancellationToken: TestTimeout.Token()).AsTask();
+        var pending = readerSession.ExecuteAsync(join, cancellationToken: TestTimeout.Token()).AsTask();
         pending.IsCompleted.ShouldBeFalse();
         int openWhileWaiting = coordinator.GetOpenContexts().Count;
 
@@ -71,8 +73,12 @@ public sealed class SqlReadCommittedSnapshotPinTests
         await coordinator.RollbackAsync(blocker, CancellationToken.None);
         var rows = await ReadRowsAsync(await pending);
         int openAfter = coordinator.GetOpenContexts().Count;
+        int retainedRecordsBefore = coordinator.VersionStore.TrackedVersionCount;
+        long physicalEntriesBefore = await PhysicalEntriesAsync(database);
         long prunedAfterTheStatement = coordinator.RunVersionPurgePass(CancellationToken.None);
-        var refreshed = await RowsAsync(readerSession, Join);
+        int retainedRecordsAfter = coordinator.VersionStore.TrackedVersionCount;
+        long physicalEntriesAfter = await PhysicalEntriesAsync(database);
+        var refreshed = await RowsAsync(readerSession, join);
         await reader.CommitAsync(TestTimeout.Token());
 
         // Assert: the statement saw the writer in flight, so it returned row 2; its pin held the
@@ -82,7 +88,13 @@ public sealed class SqlReadCommittedSnapshotPinTests
         prunedWhileWaiting.ShouldBe(0);
         openWhileWaiting.ShouldBe(openBefore + 1);
         openAfter.ShouldBe(openBefore - 2);
-        prunedAfterTheStatement.ShouldBe(1);
+        // #1195 adds the dead index entry to the total only when the index exists.
+        // Observe record and physical-index reclamation independently as well.
+        retainedRecordsBefore.ShouldBe(1);
+        retainedRecordsAfter.ShouldBe(0);
+        physicalEntriesBefore.ShouldBe(indexed ? 3 : 0);
+        physicalEntriesAfter.ShouldBe(indexed ? 2 : 0);
+        prunedAfterTheStatement.ShouldBe(indexed ? 2 : 1);
         refreshed.ShouldBe(["1,1", "3,3"]);
     }
 
@@ -154,7 +166,7 @@ public sealed class SqlReadCommittedSnapshotPinTests
         await coordinator.LockManager.AcquireAsync(blocker.Sequence, LockResource.Object(TableId(database, "a")), LockMode.Exclusive, TestTimeout.Token());
         int openBefore = coordinator.GetOpenContexts().Count;
         using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        string sql = outcome == "fails" ? "SELECT a.id / 0, b.id FROM a JOIN b ON a.id = b.id" : Join;
+        string sql = outcome == "fails" ? "SELECT a.id / 0, b.id FROM a JOIN b ON a.id = b.id" : join;
 
         // Act
         var pending = session.ExecuteAsync(sql, cancellationToken: cancellation.Token).AsTask();
@@ -185,7 +197,7 @@ public sealed class SqlReadCommittedSnapshotPinTests
             await coordinator.RollbackAsync(blocker, CancellationToken.None);
         }
 
-        var rows = await RowsAsync(session, Join);
+        var rows = await RowsAsync(session, join);
         var stateAfter = transaction.State;
         await transaction.CommitAsync(TestTimeout.Token());
 
@@ -200,7 +212,7 @@ public sealed class SqlReadCommittedSnapshotPinTests
                 failure.ShouldBeNull();
                 break;
             case "fails":
-                failure.ShouldBeAssignableTo<DatabaseException>().ShouldNotBeNull().Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE001");
+                failure.ShouldBeAssignableTo<DatabaseException>().ShouldNotBeNull().Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS02001");
                 break;
             default:
                 failure.ShouldBeAssignableTo<OperationCanceledException>();
@@ -257,6 +269,27 @@ public sealed class SqlReadCommittedSnapshotPinTests
         await setup.ExecuteAsync("INSERT INTO b (id) VALUES (1), (2), (3)", cancellationToken: TestTimeout.Token());
         return database;
     }
+
+    private static async Task<long> PhysicalEntriesAsync(SqlDatabase database)
+    {
+        var reader = await database.Coordinator.BeginAsync(IsolationLevel.Snapshot, TestTimeout.Token());
+        try
+        {
+            long examined = 0;
+            foreach (var registration in database.IndexManager.ExportRegistrations())
+            {
+                database.IndexManager.TryGetIndex(registration.ObjectId, registration.Definition.Name, out var index).ShouldBeTrue();
+                await using var cursor = index.OpenCursor(reader, IndexKeyRange.All);
+                while (await cursor.MoveNextAsync(TestTimeout.Token())) { }
+                examined += EntriesExamined(cursor);
+            }
+            return examined;
+        }
+        finally { await database.Coordinator.RollbackAsync(reader, CancellationToken.None); }
+    }
+
+    [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "get_EntriesExamined")]
+    private static extern long EntriesExamined(BTreeCursor cursor);
 
     private static ulong TableId(SqlDatabase database, string name)
     {

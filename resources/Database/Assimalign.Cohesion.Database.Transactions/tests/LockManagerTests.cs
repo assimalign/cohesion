@@ -21,7 +21,7 @@ public class LockManagerTests
     public async Task AcquireAsync_ExclusiveBehindIntentWriter_ShouldBlockEveryLaterWriter()
     {
         // Arrange: an admitted writer keeps DDL queued while new writers arrive.
-        var locks = LockManager.Create();
+        var locks = new LockManager();
         var table = LockResource.Object(1163);
         locks.TryAcquire(_t1, table, LockMode.IntentExclusive).ShouldBeTrue();
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
@@ -53,7 +53,7 @@ public class LockManagerTests
     public async Task AcquireAsync_SharedWithShared_ShouldGrantImmediately()
     {
         // Arrange
-        var locks = LockManager.Create();
+        var locks = new LockManager();
         var resource = LockResource.Entry(1, 1);
 
         // Act / Assert: both complete synchronously without waiting.
@@ -64,7 +64,7 @@ public class LockManagerTests
     [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Locks: Intent modes follow the hierarchy matrix")]
     public void TryAcquire_IntentModes_ShouldFollowMatrix()
     {
-        var locks = LockManager.Create();
+        var locks = new LockManager();
         var table = LockResource.Object(10);
 
         locks.TryAcquire(_t1, table, LockMode.IntentExclusive).ShouldBeTrue();
@@ -77,7 +77,7 @@ public class LockManagerTests
     public async Task AcquireAsync_ExclusiveHeld_ShouldBlockUntilReleaseAll()
     {
         // Arrange
-        var locks = LockManager.Create();
+        var locks = new LockManager();
         var resource = LockResource.Entry(1, 5);
         await locks.AcquireAsync(_t1, resource, LockMode.Exclusive);
 
@@ -96,7 +96,7 @@ public class LockManagerTests
     public async Task TryAcquire_Conflicting_ShouldReturnFalse()
     {
         // Arrange
-        var locks = LockManager.Create();
+        var locks = new LockManager();
         var resource = LockResource.Entry(2, 2);
         await locks.AcquireAsync(_t1, resource, LockMode.Exclusive);
 
@@ -109,7 +109,7 @@ public class LockManagerTests
     public async Task AcquireAsync_SoleHolderUpgrade_ShouldGrant()
     {
         // Arrange
-        var locks = LockManager.Create();
+        var locks = new LockManager();
         var resource = LockResource.Entry(3, 3);
         await locks.AcquireAsync(_t1, resource, LockMode.Shared);
 
@@ -124,7 +124,7 @@ public class LockManagerTests
     public async Task AcquireAsync_CircularWait_ShouldAbortVictim()
     {
         // Arrange: T1 holds A, T2 holds B, T1 waits on B.
-        var locks = LockManager.Create();
+        var locks = new LockManager();
         var resourceA = LockResource.Entry(1, 100);
         var resourceB = LockResource.Entry(1, 200);
 
@@ -148,7 +148,7 @@ public class LockManagerTests
     public async Task AcquireAsync_Cancelled_ShouldAbandonWait()
     {
         // Arrange
-        var locks = LockManager.Create();
+        var locks = new LockManager();
         var resource = LockResource.Entry(4, 4);
         await locks.AcquireAsync(_t1, resource, LockMode.Exclusive);
 
@@ -174,7 +174,7 @@ public class LockManagerTests
     public async Task ReleaseAll_OwnerWithQueuedRequest_ShouldFailTheRequestAndNeverGrantIt()
     {
         // Arrange: T1 holds the resource; T2 waits for it.
-        var locks = LockManager.Create();
+        var locks = new LockManager();
         var resource = LockResource.Entry(5, 5);
         await locks.AcquireAsync(_t1, resource, LockMode.Exclusive);
         var waiting = locks.AcquireAsync(_t2, resource, LockMode.Exclusive).AsTask();
@@ -199,7 +199,7 @@ public class LockManagerTests
     public async Task ReleaseAll_OwnerAmongOthers_ShouldFreeOnlyItsResourcesAndWakeTheirWaiters()
     {
         // Arrange: T1 holds A, T2 holds B, and T3 waits for each of them.
-        var locks = LockManager.Create();
+        var locks = new LockManager();
         var resourceA = LockResource.Entry(6, 1);
         var resourceB = LockResource.Entry(6, 2);
         await locks.AcquireAsync(_t1, resourceA, LockMode.Exclusive);
@@ -233,7 +233,7 @@ public class LockManagerTests
     public async Task ReleaseAll_AfterACanceledWaitAndALateGrant_ShouldFreeEverything()
     {
         // Arrange: T2 waits for T1's resource and cancels; T2 holds a second resource.
-        var locks = LockManager.Create();
+        var locks = new LockManager();
         var resourceA = LockResource.Entry(7, 1);
         var resourceB = LockResource.Entry(7, 2);
         await locks.AcquireAsync(_t1, resourceA, LockMode.Exclusive);
@@ -269,7 +269,7 @@ public class LockManagerTests
     public async Task AcquireAsync_CycleThroughAWaiterWhoseHolderAReleaseReplaced_ShouldAbortTheRequester()
     {
         // Arrange: T1 holds R; T2 queues for R, then T3, which holds S.
-        var locks = LockManager.Create();
+        var locks = new LockManager();
         var resourceR = LockResource.Entry(8, 1);
         var resourceS = LockResource.Entry(8, 2);
         await locks.AcquireAsync(_t1, resourceR, LockMode.Exclusive);
@@ -309,7 +309,7 @@ public class LockManagerTests
         // Arrange: T1 holds R shared and T2 holds it intent-shared; T4 waits for R exclusively,
         // which T2's grant blocks; T3, which holds S, queues behind it for R intent-exclusively,
         // which T1's grant blocks and T2's does not. T2 is granted R shared past both.
-        var locks = LockManager.Create();
+        var locks = new LockManager();
         var t4 = new TransactionSequence(4);
         var resourceR = LockResource.Entry(9, 1);
         var resourceS = LockResource.Entry(9, 2);
@@ -350,7 +350,7 @@ public class LockManagerTests
     public async Task AcquireAsync_RequestAGrantPastAQueuedRequestWouldHaveDeadlocked_ShouldQueueWithoutADeadlock()
     {
         // Arrange: T1 waits for P, which T2 holds; T2 waits for R exclusively, which T3 holds shared.
-        var locks = LockManager.Create();
+        var locks = new LockManager();
         var resourceP = LockResource.Entry(10, 1);
         var resourceR = LockResource.Entry(10, 2);
         await locks.AcquireAsync(_t2, resourceP, LockMode.Exclusive);
@@ -385,7 +385,7 @@ public class LockManagerTests
     public async Task AcquireAsync_OneOfTwoWaitsCanceled_ShouldKeepTheOtherWaitsEdges()
     {
         // Arrange: T1 holds C and waits for A (T2's) and for B (T3's).
-        var locks = LockManager.Create();
+        var locks = new LockManager();
         var resourceA = LockResource.Entry(11, 1);
         var resourceB = LockResource.Entry(11, 2);
         var resourceC = LockResource.Entry(11, 3);
@@ -426,7 +426,7 @@ public class LockManagerTests
     public async Task AcquireAsync_SharedRequestBehindAQueuedExclusiveRequest_ShouldQueueBehindIt()
     {
         // Arrange: T1 holds R shared; T2 waits for R exclusively.
-        var locks = LockManager.Create();
+        var locks = new LockManager();
         var resource = LockResource.Entry(12, 1);
         await locks.AcquireAsync(_t1, resource, LockMode.Shared);
         var exclusive = locks.AcquireAsync(_t2, resource, LockMode.Exclusive).AsTask();
@@ -458,7 +458,7 @@ public class LockManagerTests
     public async Task AcquireAsync_HoldersRequestBehindAQueuedRequestThatWaitsForIt_ShouldBeGrantedAtOnce()
     {
         // Arrange: T1 holds R shared; T2 waits for R exclusively.
-        var locks = LockManager.Create();
+        var locks = new LockManager();
         var resource = LockResource.Entry(13, 1);
         await locks.AcquireAsync(_t1, resource, LockMode.Shared);
         var exclusive = locks.AcquireAsync(_t2, resource, LockMode.Exclusive).AsTask();
@@ -492,7 +492,7 @@ public class LockManagerTests
     {
         // Arrange: T1 holds R shared; T2 waits for R intent-exclusively; T3 is granted R
         // intent-shared, which both allow.
-        var locks = LockManager.Create();
+        var locks = new LockManager();
         var resource = LockResource.Entry(19, 1);
         await locks.AcquireAsync(_t1, resource, LockMode.Shared);
         var intentExclusive = locks.AcquireAsync(_t2, resource, LockMode.IntentExclusive).AsTask();
@@ -519,18 +519,14 @@ public class LockManagerTests
     }
 
     /// <summary>
-    /// A cycle through a request queued behind another owner's request (#1390 review): the request
-    /// waits for the owner of the one ahead, which is a wait-for edge like a conflicting grant, so
-    /// the detector follows it. PostgreSQL calls it a soft edge and first tries to rearrange the
-    /// queue to break the cycle (<c>src/backend/storage/lmgr/deadlock.c:624-768</c>, <c>TopoSort</c>);
-    /// this lock manager aborts the requester, as for every other cycle.
+    /// A cycle with a queued edge can be resolved without a victim (#1420): queue the
+    /// compatible shared request ahead of the exclusive request, then retain every
+    /// real held-lock dependency until its owner releases.
     /// </summary>
-    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Locks: A cycle through a request queued behind another owner's request aborts the requester (#1390)")]
-    public async Task AcquireAsync_CycleThroughARequestQueuedBehindAnother_ShouldAbortTheRequester()
+    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Locks: A soft cycle reorders the queue while held-lock blockers remain (#1420)")]
+    public async Task AcquireAsync_CycleThroughARequestQueuedBehindAnother_ShouldReorderTheCompatibleWaiter()
     {
-        // Arrange: T1 holds R shared; T2 holds P and waits for R exclusively; T3 holds Q and queues
-        // for R shared behind T2's request.
-        var locks = LockManager.Create();
+        var locks = new LockManager();
         var resourceR = LockResource.Entry(14, 1);
         var resourceP = LockResource.Entry(14, 2);
         var resourceQ = LockResource.Entry(14, 3);
@@ -540,21 +536,26 @@ public class LockManagerTests
         var secondWaits = locks.AcquireAsync(_t2, resourceR, LockMode.Exclusive).AsTask();
         var thirdWaits = locks.AcquireAsync(_t3, resourceR, LockMode.Shared).AsTask();
         bool thirdQueued = !thirdWaits.IsCompleted;
-
-        // Act: T1 requesting Q closes T1 -> T3 -> T2 -> T1, whose edge from T3 is the queue's.
-        var closing = locks.AcquireAsync(_t1, resourceQ, LockMode.Exclusive).AsTask();
-        var victim = await Should.ThrowAsync<TransactionDeadlockException>(async () => await closing.WaitAsync(TimeSpan.FromSeconds(5)));
-        locks.ReleaseAll(_t1);
-        await secondWaits.WaitAsync(TimeSpan.FromSeconds(5));
-        bool thirdStillWaiting = !thirdWaits.IsCompleted;
-        locks.ReleaseAll(_t2);
-        await thirdWaits.WaitAsync(TimeSpan.FromSeconds(5));
-        locks.ReleaseAll(_t3);
-
-        // Assert
-        thirdQueued.ShouldBeTrue();
-        victim.Message.ShouldStartWith($"Transaction {_t1} was chosen as the deadlock victim requesting {LockMode.Exclusive} on {resourceQ}", Case.Sensitive);
-        thirdStillWaiting.ShouldBeTrue();
+        Task? closing = null;
+        try
+        {
+            closing = locks.AcquireAsync(_t1, resourceQ, LockMode.Exclusive).AsTask();
+            // Thirty seconds is only a hang guard; grants decide each assertion.
+            await thirdWaits.WaitAsync(TimeSpan.FromSeconds(30));
+            thirdQueued.ShouldBeTrue();
+            closing.IsCompleted.ShouldBeFalse();
+            secondWaits.IsCompleted.ShouldBeFalse();
+            locks.ReleaseAll(_t3);
+            await closing.WaitAsync(TimeSpan.FromSeconds(30));
+            secondWaits.IsCompleted.ShouldBeFalse();
+            locks.ReleaseAll(_t1);
+            await secondWaits.WaitAsync(TimeSpan.FromSeconds(30));
+        }
+        finally
+        {
+            locks.ReleaseAll(_t1); locks.ReleaseAll(_t2); locks.ReleaseAll(_t3);
+            await Task.WhenAll(closing is null ? [secondWaits, thirdWaits] : [secondWaits, thirdWaits, closing]).WaitAsync(TimeSpan.FromSeconds(30));
+        }
     }
 
     /// <summary>
@@ -566,7 +567,7 @@ public class LockManagerTests
     public async Task AcquireAsync_QueuedRequestAheadCanceled_ShouldGrantTheRequestBehindIt()
     {
         // Arrange: T1 holds R shared; T2 waits for R exclusively; T3 queues for R shared behind it.
-        var locks = LockManager.Create();
+        var locks = new LockManager();
         var resource = LockResource.Entry(15, 1);
         await locks.AcquireAsync(_t1, resource, LockMode.Shared);
         using var cancellation = new CancellationTokenSource();
@@ -593,7 +594,7 @@ public class LockManagerTests
     public async Task ReleaseAll_OwnerWithARequestQueuedAheadOfAnother_ShouldGrantTheRequestBehindIt()
     {
         // Arrange: T1 holds R shared; T2 waits for R exclusively; T3 queues for R shared behind it.
-        var locks = LockManager.Create();
+        var locks = new LockManager();
         var resource = LockResource.Entry(16, 1);
         await locks.AcquireAsync(_t1, resource, LockMode.Shared);
         var exclusive = locks.AcquireAsync(_t2, resource, LockMode.Exclusive).AsTask();
@@ -625,7 +626,7 @@ public class LockManagerTests
     {
         // Arrange: T3 holds R intent-exclusive; T1 holds Q shared and queues for R shared; T3 is
         // granted R update as well.
-        var locks = LockManager.Create();
+        var locks = new LockManager();
         var resourceR = LockResource.Entry(17, 1);
         var resourceQ = LockResource.Entry(17, 2);
         await locks.AcquireAsync(_t3, resourceR, LockMode.IntentExclusive);
@@ -655,7 +656,7 @@ public class LockManagerTests
     public async Task TryAcquire_HolderOfIntentExclusiveAndShared_ShouldRefuseAnotherOwnersIntentExclusive()
     {
         // Arrange: T3 holds R intent-exclusive and shared.
-        var locks = LockManager.Create();
+        var locks = new LockManager();
         var resource = LockResource.Entry(18, 1);
         await locks.AcquireAsync(_t3, resource, LockMode.IntentExclusive);
         await locks.AcquireAsync(_t3, resource, LockMode.Shared);

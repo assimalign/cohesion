@@ -37,16 +37,18 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// parameter's supplied value.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("SqlExpressionEvaluator")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlExpressionEvaluator.DebugView))]
 internal sealed partial class SqlExpressionEvaluator
 {
     /// <summary>The boxed Boolean results every predicate returns, shared rather than boxed per row.</summary>
-    private static readonly object True = true;
+    private static readonly object _true = true;
 
     /// <summary>The boxed Boolean results every predicate returns, shared rather than boxed per row.</summary>
-    private static readonly object False = false;
+    private static readonly object _false = false;
 
     /// <summary>Backs <see cref="ForExecution"/> for a statement without subquery values.</summary>
-    private static readonly SqlExpressionEvaluator RowEvaluator = new(Array.Empty<SqlCatalogColumn>(), null);
+    private static readonly SqlExpressionEvaluator _rowEvaluator = new(Array.Empty<SqlCatalogColumn>(), null);
 
     private readonly IReadOnlyList<SqlCatalogColumn> _columns;
     private readonly SqlBindingContext _bindingContext;
@@ -150,7 +152,7 @@ internal sealed partial class SqlExpressionEvaluator
     internal static SqlExpressionEvaluator ForExecution(SqlSubqueryValues? subqueryValues, CancellationToken cancellationToken = default,
         bool[]? sharedColumns = null, DateTimeOffset? transactionStart = null)
         => subqueryValues is null && !cancellationToken.CanBeCanceled && sharedColumns is null && transactionStart is null && Volatile.Read(ref BeforeLikeMatch) is null
-            ? RowEvaluator
+            ? _rowEvaluator
             : new SqlExpressionEvaluator(Array.Empty<SqlCatalogColumn>(), null, subqueryValues: subqueryValues,
                 cancellationToken: cancellationToken, sharedColumns: sharedColumns,
                 functions: transactionStart is { } instant ? SqlFunctionEnvironment.Standard.At(instant) : null);
@@ -197,7 +199,7 @@ internal sealed partial class SqlExpressionEvaluator
         return new SqlExpressionEvaluator(_columns, _parameters, _relations as IReadOnlyList<SqlRelationBinding>, ordinals,
             _defaultCollation, sources, _subquerySlots, _subqueryValues, _functions, _cancellationToken, _typing?.SlotScope, _bindingContext,
             relation: _relations as SqlRelationReference, outerScope: _typing?.OuterScope,
-            outerDependencies: _typing?.OuterDependencies);
+            outerDependencies: _typing?.OuterDependencies, foldConstants: _foldConstants);
     }
 
     /// <summary>
@@ -326,6 +328,8 @@ internal sealed partial class SqlExpressionEvaluator
                 return EvaluateBetween((SqlBoundBetween)expression, row);
             case SqlBoundExpressionKind.In:
                 return EvaluateIn((SqlBoundIn)expression, row);
+            case SqlBoundExpressionKind.QuantifiedComparison:
+                return EvaluateQuantifiedComparison((SqlBoundQuantifiedComparison)expression, row);
             case SqlBoundExpressionKind.InSubquery:
                 return EvaluateInSubquery((SqlBoundInSubquery)expression, row);
             case SqlBoundExpressionKind.Like:
@@ -341,7 +345,7 @@ internal sealed partial class SqlExpressionEvaluator
             case SqlBoundExpressionKind.Failure:
                 return ((SqlBoundFailure)expression).Raise();
             default:
-                throw new SqlPlanningException("COHSQLE013", $"Bound expression '{expression.Kind}' is not supported by the executor yet.");
+                throw new SqlPlanningException("CS05013", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.EvaluatorEvaluateCoreSqlPlanning, expression.Kind));
         }
     }
 
@@ -355,7 +359,7 @@ internal sealed partial class SqlExpressionEvaluator
     }
 
     /// <summary>Returns the shared box of a Boolean result.</summary>
-    private static object Box(bool value) => value ? True : False;
+    private static object Box(bool value) => value ? _true : _false;
 
     private static object? Deliver(object? value, bool copySharedBinary)
         => copySharedBinary ? SqlBinaryValue.CopyShared(value) : value;
@@ -415,7 +419,7 @@ internal sealed partial class SqlExpressionEvaluator
 
                     if (resolved >= 0)
                     {
-                        throw new SqlPlanningException("COHSQLE015", $"Ambiguous column '{ColumnName(column)}'; qualify it with a table name or alias.", column.Location);
+                        throw new SqlPlanningException("CS01015", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ResolveLocalColumnSqlPlanning, ColumnName(column)), column.Location);
                     }
 
                     resolved = binding.Offset + i;
@@ -442,7 +446,7 @@ internal sealed partial class SqlExpressionEvaluator
     }
 
     private static SqlPlanningException UnknownColumn(SqlColumnReferenceExpression column, bool localQualifier = false)
-        => new("COHSQLE015", string.Format(CultureInfo.CurrentCulture,
+        => new("CS01015", string.Format(CultureInfo.CurrentCulture,
             !localQualifier && column.TableAlias is not null ? ErrorMessages.MissingFromClauseEntry : ErrorMessages.UnknownColumn,
             ColumnName(column)), column.Location)
         { UnresolvedColumn = column, HasLocalQualifier = localQualifier };
@@ -499,7 +503,8 @@ internal sealed partial class SqlExpressionEvaluator
 
     internal SqlExpressionEvaluator ForRelations(IReadOnlyList<SqlRelationBinding> bindings)
         => new(_columns, _parameters, bindings, defaultCollation: _defaultCollation,
-            subquerySlots: _subquerySlots, functions: _functions, cancellationToken: _cancellationToken);
+            subquerySlots: _subquerySlots, functions: _functions, cancellationToken: _cancellationToken,
+            foldConstants: _foldConstants);
 
     /// <summary>The collation a column contributes: 2 when declared on the column, 1 when inherited.</summary>
     private SqlCollationCandidate ColumnCollation(int ordinal)
@@ -521,7 +526,7 @@ internal sealed partial class SqlExpressionEvaluator
     private SqlCollationCandidate FindCollation(SqlExpression? expression, bool bound)
     {
         RuntimeHelpers.EnsureSufficientExecutionStack();
-        if (expression is null)
+        if (expression is null || expression is SqlQuantifiedComparisonExpression)
         {
             return default;
         }
@@ -625,18 +630,18 @@ internal sealed partial class SqlExpressionEvaluator
     /// <summary>A column reference's collation; one that does not resolve fails now or, bound, when compared.</summary>
     private SqlCollationCandidate ColumnReferenceCollation(SqlColumnReferenceExpression column, bool bound)
     {
-        if (!bound)
-        {
-            return ColumnCollation(ResolveColumn(column));
-        }
+        if (!bound) { return Resolve(); }
+        try { return Resolve(); }
+        catch (Exception exception) when (IsDeferrable(exception)) { return ColumnCollationFailure(column); }
 
-        try
+        SqlCollationCandidate Resolve()
         {
-            return ColumnCollation(ResolveColumn(column));
-        }
-        catch (Exception exception) when (IsDeferrable(exception))
-        {
-            return ColumnCollationFailure(column);
+            int ordinal = ResolveColumn(column);
+            if (ordinal >= 0 && column.TableAlias is null && column.SchemaName is null && MergedColumn(ordinal) is { } merged)
+            {
+                return new(merged.Column.Collation ?? _defaultCollation, merged.Column.Collation is null ? 1 : 2);
+            }
+            return ColumnCollation(ordinal);
         }
     }
 
@@ -683,7 +688,7 @@ internal sealed partial class SqlExpressionEvaluator
         => string.Join('.', new[] { column.SchemaName, column.TableAlias, column.ColumnName }.Where(part => part is not null));
 
     /// <summary>The magnitude of the BIGINT minimum, which only a negated literal can spell.</summary>
-    private const ulong BigIntMinimumMagnitude = 9223372036854775808UL;
+    private const ulong bigIntMinimumMagnitude = 9223372036854775808UL;
 
     /// <remarks>
     /// A numeric literal its type cannot hold raises <see cref="OverflowException"/> with
@@ -706,7 +711,7 @@ internal sealed partial class SqlExpressionEvaluator
             SqlLiteralType.TimestampWithTimeZone => SqlTemporalText.ParseTimestampWithTimeZone(literal.Value),
             SqlLiteralType.Interval => SqlTemporalText.ParseInterval(literal.Value),
             SqlLiteralType.Binary => SqlLiteralText.ParseBinary(literal.Value),
-            _ => throw new SqlPlanningException("COHSQLE013", $"Literal type {literal.LiteralType} is not supported.", literal.Location),
+            _ => throw new SqlPlanningException("CS05013", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.EvaluatorEvaluateLiteralSqlPlanning, literal.LiteralType), literal.Location),
         };
     }
 
@@ -719,7 +724,7 @@ internal sealed partial class SqlExpressionEvaluator
         }
         catch (OverflowException exception)
         {
-            throw new OverflowException($"integer literal {text} exceeds BIGINT.", exception);
+            throw new OverflowException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.EvaluatorParseIntegerLiteralOverflow, text), exception);
         }
     }
 
@@ -731,7 +736,7 @@ internal sealed partial class SqlExpressionEvaluator
         }
         catch (OverflowException exception)
         {
-            throw new OverflowException($"numeric literal {text} cannot be represented exactly as DECIMAL.", exception);
+            throw new OverflowException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ParseFractionalLiteralOverflow, text), exception);
         }
     }
 
@@ -752,7 +757,7 @@ internal sealed partial class SqlExpressionEvaluator
         }
         catch (Exception exception) when (exception is FormatException or OverflowException)
         {
-            throw SqlEvaluationException.CastValueFailed($"CAST to {cast.TargetText} failed: operand cannot be represented exactly.", exception).At(cast.Location);
+            throw SqlEvaluationException.CastValueFailed(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.EvaluatorEvaluateCastSqlEvaluation, cast.TargetText), exception).At(cast.Location);
         }
 
         try
@@ -809,7 +814,7 @@ internal sealed partial class SqlExpressionEvaluator
     /// The first term that decides the chain (<see langword="false"/> for <c>AND</c>,
     /// <see langword="true"/> for <c>OR</c>) ends it, and no later term is evaluated, so a guard
     /// such as <c>d &lt;&gt; 0 AND x / d &gt; 1</c> never divides by zero. Otherwise the chain is
-    /// unknown when any term was NULL. A non-null, non-Boolean term raises COHSQLE003. The
+    /// unknown when any term was NULL. A non-null, non-Boolean term raises CS02003. The
     /// operator's identity is returned when no term was unknown. This preserves the nested
     /// operators' order and faults: evaluating
     /// <c>(a AND b) AND c</c> left operand first visits a, b, c in turn and stops at the same
@@ -861,7 +866,7 @@ internal sealed partial class SqlExpressionEvaluator
                 SqlBinaryOperator.Add or SqlBinaryOperator.Subtract or SqlBinaryOperator.Multiply
                     or SqlBinaryOperator.Divide or SqlBinaryOperator.Modulo => Arithmetic(binary.Operator, leftValue, rightValue),
                 SqlBinaryOperator.Concat => SqlCastText.Format(leftValue) + SqlCastText.Format(rightValue),
-                _ => throw new SqlPlanningException("COHSQLE013", $"Operator {binary.Operator} is not supported by the executor yet.", binary.Location),
+                _ => throw new SqlPlanningException("CS05013", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.EvaluatorEvaluateBinarySqlPlanning, binary.Operator), binary.Location),
             };
         }
         catch (SqlEvaluationException exception) when (exception.Diagnostics[0].Start is null && binary.Location is not null)
@@ -898,7 +903,7 @@ internal sealed partial class SqlExpressionEvaluator
                     int value => -(long)value,
                     // Two's complement has no positive counterpart for the minimum BIGINT.
                     long value => value == long.MinValue
-                        ? throw SqlEvaluationException.NumericValueOutOfRange($"negating BIGINT {value.ToString(CultureInfo.InvariantCulture)} overflowed.")
+                        ? throw SqlEvaluationException.NumericValueOutOfRange(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.EvaluatorEvaluateUnarySqlEvaluation, value.ToString(CultureInfo.InvariantCulture)))
                         : -value,
                     double value => -value,
                     float value => -(double)value,
@@ -911,7 +916,7 @@ internal sealed partial class SqlExpressionEvaluator
                     ? operand
                     : throw SqlEvaluationException.InvalidOperandType("+", OperandTypeName(operand)),
                 SqlUnaryOperator.Not => Box(!BooleanValue(operand, "NOT", unary.Location)!.Value),
-                _ => throw new SqlPlanningException("COHSQLE013", $"Unary operator {unary.Operator} is not supported.", unary.Location),
+                _ => throw new SqlPlanningException("CS05013", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.EvaluatorEvaluateUnarySqlPlanning, unary.Operator), unary.Location),
             };
         }
         catch (SqlEvaluationException exception) when (exception.Diagnostics[0].Start is null && unary.Location is not null)
@@ -1003,6 +1008,35 @@ internal sealed partial class SqlExpressionEvaluator
         return hasUnknown ? null : Box(expression.IsNegated);
     }
 
+    private object? EvaluateQuantifiedComparison(SqlBoundQuantifiedComparison expression, object?[] row)
+    {
+        var candidates = SqlSubqueryValues.Get(_subqueryValues, expression.Slot);
+        // Empty ANY/SOME is FALSE; empty ALL is TRUE, including for NULL operands.
+        if (candidates.Length == 0) { return Box(expression.All); }
+        object? value = EvaluateCore(expression.Operand, row);
+        if (value is null) { return null; }
+        bool unknown = false;
+        foreach (var candidate in candidates)
+        {
+            _cancellationToken.ThrowIfCancellationRequested();
+            if (candidate is null) { unknown = true; continue; }
+            int comparison = Compare(value, candidate, expression.Collation.Resolve(_subqueryValues));
+            bool matches = expression.Operator switch
+            {
+                SqlBinaryOperator.Equal => comparison == 0,
+                SqlBinaryOperator.NotEqual => comparison != 0,
+                SqlBinaryOperator.LessThan => comparison < 0,
+                SqlBinaryOperator.LessOrEqual => comparison <= 0,
+                SqlBinaryOperator.GreaterThan => comparison > 0,
+                SqlBinaryOperator.GreaterOrEqual => comparison >= 0,
+                _ => throw new SqlPlanningException("CS05013", string.Format(CultureInfo.CurrentCulture,
+                    ErrorMessages.EvaluatorEvaluateBinarySqlPlanning, expression.Operator), expression.Location),
+            };
+            if (matches != expression.All) { return Box(matches); }
+        }
+        return unknown ? null : Box(expression.All);
+    }
+
     private object? EvaluateInSubquery(SqlBoundInSubquery expression, object?[] row)
     {
         // A subquery contributes its whole result set as the candidate list, resolved
@@ -1064,7 +1098,7 @@ internal sealed partial class SqlExpressionEvaluator
         object? value = EvaluateCore(expression.Operand, row);
         if (value is not null and not bool)
         {
-            throw new SqlPlanningException("COHSQLE003", ErrorMessages.BooleanTestOperand, expression.Location);
+            throw new SqlPlanningException("CS02003", ErrorMessages.BooleanTestOperand, expression.Location);
         }
         bool matches = expression.TruthValue switch
         {
@@ -1127,7 +1161,7 @@ internal sealed partial class SqlExpressionEvaluator
     /// any row was read (a call no overload accepts bound as a <see cref="SqlBoundFailure"/>), so each
     /// row evaluates the arguments, returns NULL without calling a strict function over a NULL
     /// argument, and makes one call through the function's internal <c>InvokeResolved</c>, which
-    /// converts the arguments, codes what the function throws as <c>COHSQLE007</c> and checks its
+    /// converts the arguments, codes what the function throws as <c>CS05007</c> and checks its
     /// result, as the public <see cref="SqlScalarFunction.Invoke"/> does.
     /// </summary>
     /// <remarks>
@@ -1318,13 +1352,13 @@ internal sealed partial class SqlExpressionEvaluator
                 float v => Convert.ToDecimal(v),
                 double v => Convert.ToDecimal(v),
                 decimal v => v,
-                _ => throw new SqlPlanningException("COHSQLE003", "Arithmetic requires numeric operands."),
+                _ => throw new SqlPlanningException("CS02003", ErrorMessages.ToArithmeticNumberSqlPlanning),
             };
         }
         catch (OverflowException exception)
         {
             throw SqlEvaluationException.NumericValueOutOfRange(
-                $"approximate operand {ApproximateText(value)} cannot be represented as DECIMAL for arithmetic.", exception);
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ToArithmeticNumberSqlEvaluation, ApproximateText(value)), exception);
         }
     }
 
@@ -1352,7 +1386,7 @@ internal sealed partial class SqlExpressionEvaluator
         }
         if (!IsArithmeticNumber(left) || !IsArithmeticNumber(right))
         {
-            throw new SqlPlanningException("COHSQLE003", "Arithmetic requires numeric operands.");
+            throw new SqlPlanningException("CS02003", ErrorMessages.ToArithmeticNumberSqlPlanning);
         }
 
         if (IsExactInteger(left) && IsExactInteger(right))
@@ -1380,7 +1414,7 @@ internal sealed partial class SqlExpressionEvaluator
             }
             catch (OverflowException exception)
             {
-                throw SqlEvaluationException.NumericValueOutOfRange($"BIGINT '{OperatorText(op)}' overflowed.", exception);
+                throw SqlEvaluationException.NumericValueOutOfRange(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.EvaluatorArithmeticSqlEvaluation, OperatorText(op)), exception);
             }
         }
 
@@ -1394,7 +1428,7 @@ internal sealed partial class SqlExpressionEvaluator
             if (right is float single && single != 0f || right is double number && number != 0d)
             {
                 throw SqlEvaluationException.NumericValueOutOfRange(
-                    $"approximate divisor {ApproximateText(right)} underflows DECIMAL for '{OperatorText(op)}'.");
+                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.EvaluatorArithmeticSqlEvaluation2, ApproximateText(right), OperatorText(op)));
             }
 
             throw SqlEvaluationException.DivisionByZero(OperatorText(op));
@@ -1413,7 +1447,7 @@ internal sealed partial class SqlExpressionEvaluator
         }
         catch (OverflowException exception)
         {
-            throw SqlEvaluationException.NumericValueOutOfRange($"DECIMAL '{OperatorText(op)}' overflowed.", exception);
+            throw SqlEvaluationException.NumericValueOutOfRange(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.EvaluatorArithmeticSqlEvaluation3, OperatorText(op)), exception);
         }
     }
 
@@ -1429,4 +1463,12 @@ internal sealed partial class SqlExpressionEvaluator
     /// <summary>Matches LIKE using the PostgreSQL default backslash escape.</summary>
     internal static bool LikeMatches(string input, string pattern, Collation? collation = null)
         => SqlLikePattern.Compile(pattern, "\\", default).Match(input, collation ?? Collation.Binary, default);
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlExpressionEvaluator value)
+        {
+            _ = value;
+        }
+    }
 }

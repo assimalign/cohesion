@@ -112,7 +112,7 @@ public sealed class GqlReturnParserTests
         var diagnostic = Parse(source).Diagnostics.ShouldHaveSingleItem();
 
         // Assert
-        diagnostic.Code.ShouldBe("COHDBL001");
+        diagnostic.Code.ShouldBe("CK00001");
         diagnostic.Message!.ShouldContain(construct, Case.Sensitive);
     }
 

@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
+  <resheader name="version"><value>2.0</value></resheader>
+  <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms</value></resheader>
+  <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
+  <data name="SqlCompiledSchemaSnapshotFailure" xml:space="preserve"><value>The compiled schema collection cannot be null.</value></data>
+  <data name="SqlCompiledSchemaSnapshotFailure2" xml:space="preserve"><value>The compiled schema collection cannot contain a null entry.</value></data>
+  <data name="SchemaSerializerDeserializeFailure" xml:space="preserve"><value>The compiled schema document cannot be empty.</value></data>
+  <data name="SchemaSerializerDeserializeFailure2" xml:space="preserve"><value>The compiled schema document was empty.</value></data>
+  <data name="SchemaSerializerDeserializeFailure3" xml:space="preserve"><value>The compiled schema document is malformed.</value></data>
+  <data name="SqlPrincipalBuilderGrantArgument" xml:space="preserve"><value>At least one schema object is required.</value></data>
+  <data name="SqlSchemaMigrationPlannerPlanFailure" xml:space="preserve"><value>Cannot migrate database '{0}' with schema '{1}'.</value></data>
+  <data name="SqlSchemaMigrationPlannerPlanFailure2" xml:space="preserve"><value>Destructive migration step '{0}' for '{1}' was refused. Call schema.AllowDestructiveChanges() in the database declaration to opt in.</value></data>
+  <data name="PlannerUnsupportedMetadataFailure" xml:space="preserve"><value>Schema '{0}' changes principals, but the shipped migration statement models cannot apply those metadata dimensions yet.</value></data>
+  <data name="SqlTableBuilderColumnFailure" xml:space="preserve"><value>'{0}' is not a SQL type name: an identifier, optionally followed by one or two unsigned Int32 arguments.</value></data>
+  <data name="SqlTableBuilderColumnArgument" xml:space="preserve"><value>Column '{0}' is already declared with SQL type '{1}'.</value></data>
+  <data name="SqlTableBuilderSetDefaultArgument" xml:space="preserve"><value>Column '{0}' is already declared with DEFAULT '{1}'.</value></data>
+  <data name="SqlTableBuilderSelectMemberArgument" xml:space="preserve"><value>A schema member selector must select one row member.</value></data>
+  <data name="SqlSchemaValidationExceptionArgument" xml:space="preserve"><value>At least one schema validation error is required.</value></data>
+  <data name="ExceptionCreateMessageDatabase" xml:space="preserve"><value>Database schema validation failed.</value></data>
+  <data name="ExceptionCreateMessageDatabase2" xml:space="preserve"><value>Database schema validation failed for '{0}': {1}</value></data>
+  <data name="CompiledSchemaSnapshotsCopyArgument" xml:space="preserve"><value>Compiled schema collections cannot contain null values.</value></data>
+  <data name="SchemaValidatorValidateFormatFailure" xml:space="preserve"><value>Compiled schema format '{0}' is not supported; expected '{1}'. Rebuild schema artifacts and recreate databases that record an older schema format.</value></data>
+  <data name="SchemaValidatorValidateTypesVoid" xml:space="preserve"><value>The custom type entry cannot be null.</value></data>
+  <data name="SchemaValidatorValidateTypesVoid2" xml:space="preserve"><value>The custom type name '{0}' is not a SQL identifier, so it cannot name a domain.</value></data>
+  <data name="SchemaValidatorValidateTypesVoid3" xml:space="preserve"><value>The custom type name is declared more than once.</value></data>
+  <data name="SchemaValidatorCollectTablesVoid" xml:space="preserve"><value>The table entry cannot be null.</value></data>
+  <data name="SchemaValidatorCollectTablesVoid2" xml:space="preserve"><value>The table name is declared more than once.</value></data>
+  <data name="SchemaValidatorCollectTablesVoid3" xml:space="preserve"><value>CLR row type '{0}' is mapped more than once.</value></data>
+  <data name="SchemaValidatorValidateTablesVoid" xml:space="preserve"><value>A table must declare at least one column.</value></data>
+  <data name="ValidatorValidateTableConstraintsVoid" xml:space="preserve"><value>The constraint entry cannot be null.</value></data>
+  <data name="ValidatorValidateTableConstraintsVoid2" xml:space="preserve"><value>The constraint name is declared more than once.</value></data>
+  <data name="ValidatorValidateTableConstraintsVoid3" xml:space="preserve"><value>Constraint kind '{0}' is not defined.</value></data>
+  <data name="ValidatorValidateTableConstraintsVoid4" xml:space="preserve"><value>The referential delete action is invalid for this constraint.</value></data>
+  <data name="ValidatorValidateTableConstraintsVoid5" xml:space="preserve"><value>Referenced table '{0}' is not declared.</value></data>
+  <data name="ValidatorValidateTableConstraintsVoid6" xml:space="preserve"><value>A reference must pair every local column with one referenced column.</value></data>
+  <data name="ValidatorValidateTableConstraintsVoid7" xml:space="preserve"><value>Reference column type does not match '{0}.{1}'.</value></data>
+  <data name="SchemaValidatorValidatePrincipalsVoid" xml:space="preserve"><value>The principal entry cannot be null.</value></data>
+  <data name="SchemaValidatorValidatePrincipalsVoid2" xml:space="preserve"><value>The principal name is declared more than once.</value></data>
+  <data name="SchemaValidatorValidatePrincipalsVoid3" xml:space="preserve"><value>The grant entry cannot be null.</value></data>
+  <data name="SchemaValidatorValidatePrincipalsVoid4" xml:space="preserve"><value>SqlPermission '{0}' is not defined.</value></data>
+  <data name="SchemaValidatorValidatePrincipalsVoid5" xml:space="preserve"><value>SqlPermission '{0}' is granted more than once.</value></data>
+  <data name="SchemaValidatorValidatePrincipalsVoid6" xml:space="preserve"><value>A grant must name at least one schema object.</value></data>
+  <data name="SchemaValidatorValidatePrincipalsVoid7" xml:space="preserve"><value>The grant names the same object more than once.</value></data>
+  <data name="SchemaValidatorValidatePrincipalsVoid8" xml:space="preserve"><value>The granted schema object is not declared.</value></data>
+  <data name="SchemaValidatorValidateColumnsVoid" xml:space="preserve"><value>The column or field entry cannot be null.</value></data>
+  <data name="SchemaValidatorValidateColumnsVoid2" xml:space="preserve"><value>The column or field name is declared more than once.</value></data>
+  <data name="SchemaValidatorValidateColumnsVoid3" xml:space="preserve"><value>A declared DEFAULT literal cannot be empty or white space.</value></data>
+  <data name="SchemaValidatorValidateKeyVoid" xml:space="preserve"><value>A key must declare at least one column or field.</value></data>
+  <data name="SchemaValidatorValidateIndexesVoid" xml:space="preserve"><value>The index entry cannot be null.</value></data>
+  <data name="SchemaValidatorValidateIndexesVoid2" xml:space="preserve"><value>The index name is declared more than once.</value></data>
+  <data name="SchemaValidatorValidateIndexesVoid3" xml:space="preserve"><value>An index must declare at least one column or field.</value></data>
+  <data name="ValidatorValidateMemberNamesVoid" xml:space="preserve"><value>The same column or field is named more than once.</value></data>
+  <data name="ValidatorValidateMemberNamesVoid2" xml:space="preserve"><value>The column or field is not declared.</value></data>
+  <data name="ValidatorValidateTypeReferenceVoid" xml:space="preserve"><value>Database type '{0}' is not a supported stored value type.</value></data>
+  <data name="ValidatorValidateTypeReferenceVoid2" xml:space="preserve"><value>'{0}' is not a SQL type name: an identifier, optionally followed by one or two unsigned integer arguments.</value></data>
+  <data name="ValidatorValidateTypeReferenceVoid3" xml:space="preserve"><value>Custom type '{0}' uses {1}, not {2}.</value></data>
+  <data name="SchemaValidatorValidateExpressionVoid" xml:space="preserve"><value>A canonical expression is required.</value></data>
+  <data name="SchemaValidatorRequireNameVoid" xml:space="preserve"><value>A non-empty declaration name is required.</value></data>
+  <data name="SqlSchemaCompilerCompileTypesFailure" xml:space="preserve"><value>The custom type's name '{0}' is not a SQL identifier, so it cannot name a domain.</value></data>
+  <data name="SqlSchemaCompilerCompileTypesFailure2" xml:space="preserve"><value>The custom type is declared more than once.</value></data>
+  <data name="SqlSchemaCompilerCompileTypesFailure3" xml:space="preserve"><value>A custom type must declare its storage representation.</value></data>
+  <data name="SqlSchemaCompilerCompileTablesFailure" xml:space="preserve"><value>The primary-key column is not declared.</value></data>
+  <data name="SqlSchemaCompilerCompileTablesFailure2" xml:space="preserve"><value>The index column is not declared.</value></data>
+  <data name="SqlSchemaCompilerCompileTablesFailure3" xml:space="preserve"><value>The index is declared more than once.</value></data>
+  <data name="SqlSchemaCompilerCompileTablesFailure4" xml:space="preserve"><value>Referenced row type '{0}' is not declared.</value></data>
+  <data name="SqlSchemaCompilerCompileTablesFailure5" xml:space="preserve"><value>The reference column is not declared.</value></data>
+  <data name="SqlSchemaCompilerCompileTablesFailure6" xml:space="preserve"><value>A referenced table must declare a primary key.</value></data>
+  <data name="SqlSchemaCompilerCompileTablesFailure7" xml:space="preserve"><value>The reference constraint is declared more than once.</value></data>
+  <data name="SqlSchemaCompilerCompileTablesFailure8" xml:space="preserve"><value>The constraint name is the name of the table's primary key or one of its indexes.</value></data>
+  <data name="CompilerValidateReferenceTypesFailure" xml:space="preserve"><value>The reference type does not match '{0}.{1}'.</value></data>
+  <data name="SchemaCompilerCompileColumnsFailure" xml:space="preserve"><value>The column is declared more than once.</value></data>
+  <data name="SchemaCompilerCompileColumnsFailure2" xml:space="preserve"><value>CLR type '{0}' is not supported.</value></data>
+  <data name="DefaultValueIncompatible" xml:space="preserve"><value>The default value cannot be represented as a {0} column literal.</value></data>
+  <data name="TypeArgumentShape" xml:space="preserve"><value>Type arguments must be one or two unsigned integer literals within the Int32 range.</value></data>
+  <data name="TimeZoneStorageUnsupported" xml:space="preserve"><value>TIME WITH TIME ZONE has no shared storage type; use TIME WITHOUT TIME ZONE or TIMESTAMP WITH TIME ZONE.</value></data>
+  <data name="BitStorageUnsupported" xml:space="preserve"><value>BIT denotes PostgreSQL bit strings, which are not supported; use BOOLEAN for a truth value.</value></data>
+  <data name="SmallDateTimeUnsupported" xml:space="preserve"><value>SMALLDATETIME range and minute precision cannot be honored; use TIMESTAMP.</value></data>
+  <data name="SerialTypeUnsupported" xml:space="preserve"><value>{0} is not supported; use GENERATED BY DEFAULT AS IDENTITY.</value></data>
+  <data name="IntervalPrecisionArgument" xml:space="preserve"><value>Only the SECOND interval field accepts one nonnegative precision argument.</value></data>
+  <data name="IntervalFieldUnsupported" xml:space="preserve"><value>Interval field modifier '{0}' is recognized but not supported by the SQL model surface; field restrictions are not enforced, so use bare INTERVAL.</value></data>
+  <data name="FloatArgumentCount" xml:space="preserve"><value>FLOAT accepts one precision argument in bits.</value></data>
+  <data name="FloatPrecisionMinimum" xml:space="preserve"><value>Precision for type float must be at least 1 bit.</value></data>
+  <data name="FloatPrecisionMaximum" xml:space="preserve"><value>Precision for type float must be less than 54 bits.</value></data>
+  <data name="TemporalPrecisionArgument" xml:space="preserve"><value>Temporal types accept one nonnegative precision argument.</value></data>
+  <data name="TemporalPrecisionUnsupported" xml:space="preserve"><value>Temporal precision modifier '{0}({1})' is recognized but not supported by the SQL model surface.</value></data>
+  <data name="DecimalLengthInvalid" xml:space="preserve"><value>Decimal types accept precision and scale, not a length.</value></data>
+  <data name="DecimalPrecisionInvalid" xml:space="preserve"><value>The decimal precision must be between 1 and 28.</value></data>
+  <data name="DecimalScaleInvalid" xml:space="preserve"><value>The decimal scale must be between 0 and precision.</value></data>
+  <data name="TypeLengthInvalid" xml:space="preserve"><value>String and binary types accept one positive length argument between 1 and 10485760.</value></data>
+  <data name="TypeArgumentsUnsupported" xml:space="preserve"><value>This type does not accept type arguments.</value></data>
+</root>

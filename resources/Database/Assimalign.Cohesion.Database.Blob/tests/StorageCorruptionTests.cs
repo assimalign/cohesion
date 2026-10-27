@@ -13,7 +13,7 @@ namespace Assimalign.Cohesion.Database.Blob.Tests;
 
 public sealed class StorageCorruptionTests
 {
-    [Theory(DisplayName = "Cohesion Test [Database.Blob] - Conformance: a corrupt page fails the operation with database, page and COHDBS003")]
+    [Theory(DisplayName = "Cohesion Test [Database.Blob] - Conformance: a corrupt page fails the operation with database, page and CK06003")]
     [InlineData(0)]
     [InlineData(1)]
     [InlineData(2)]
@@ -45,7 +45,7 @@ public sealed class StorageCorruptionTests
             faults.WrapCorruption = corruption =>
             {
                 var coded = new DatabaseException("Storage read failed.", [new Diagnostic
-                { Code = "COHDBB004", Message = "Storage read failed.", Severity = DiagnosticSeverity.Error }], corruption);
+                { Code = "CB06004", Message = "Storage read failed.", Severity = DiagnosticSeverity.Error }], corruption);
                 return wrapper == 1 ? coded : new AggregateException(new InvalidOperationException("Cleanup failed."), coded);
             };
         }
@@ -60,7 +60,7 @@ public sealed class StorageCorruptionTests
             });
 
             // Assert
-            failure.Code.ShouldBe("COHDBS003");
+            failure.Code.ShouldBe("CK06003");
             failure.Database.ShouldBe((DatabaseName)"corrupt");
             failure.PageId.ShouldBe(pageId);
             failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(failure.Code);
@@ -84,17 +84,17 @@ public sealed class StorageCorruptionTests
         await database.DisposeAsync();
         var cause = new StorageCorruptionException((PageId)9L, "Page 9 failed checksum verification.");
         var coded = new DatabaseException("Storage open failed.", [new Diagnostic
-        { Code = "COHDBB004", Message = "Storage open failed.", Severity = DiagnosticSeverity.Error }], cause);
+        { Code = "CB06004", Message = "Storage open failed.", Severity = DiagnosticSeverity.Error }], cause);
         strategy.OpenFailure = aggregate ? new AggregateException(new InvalidOperationException("Cleanup failed."), coded) : coded;
 
         // Act
         var failure = await Should.ThrowAsync<DatabaseCorruptionException>(() => engine.OpenDatabaseAsync("corrupt", CancellationToken.None).AsTask());
 
         // Assert: a failed open publishes nothing, and the files remain usable after the fault clears.
-        failure.Code.ShouldBe("COHDBS003");
+        failure.Code.ShouldBe("CK06003");
         failure.PageId.ShouldBe((PageId)9L);
         failure.InnerException.ShouldBeSameAs(cause);
-        failure.Diagnostics.Select(diagnostic => diagnostic.Code).ShouldBe(["COHDBS003", "COHDBB004"]);
+        failure.Diagnostics.Select(diagnostic => diagnostic.Code).ShouldBe(["CK06003", "CB06004"]);
         strategy.OpenFailure = null;
         (await engine.OpenDatabaseAsync("corrupt", CancellationToken.None)).Name.ShouldBe((DatabaseName)"corrupt");
     }

@@ -63,22 +63,22 @@ public sealed class GraphFunctionWireTests
             // Act / Assert
             foreach (var (source, code) in new[]
             {
-                ("MATCH (a:Person) RETURN upper(a.age)", "COHDBG013"),
-                ("RETURN sqrt(-1)", "COHDBG013"),
-                ("RETURN CAST(2.5 AS INTEGER)", "COHDBG013"),
-                ("RETURN CAST('1e-1000' AS DOUBLE)", "COHDBG013"),
-                ("RETURN CAST(1e-100 AS REAL)", "COHDBG013"),
-                ("INSERT (:Unwritten {at:CURRENT_TIMESTAMP})", "COHDBG003"),
-                ("INSERT (:Unwritten) RETURN toBoolean(1.5)", "COHDBG003"),
-                ("INSERT (:Unwritten) RETURN CAST(TRUE AS INTEGER)", "COHDBG003"),
-                ("MATCH p=()-[r]->() INSERT (:Unwritten) RETURN nodes(p)", "COHDBG001"),
-                ("MATCH p=()-[r]->() INSERT (:Unwritten) RETURN edges(p)", "COHDBG001"),
-                ("MATCH p=()-[r]->() INSERT (:Unwritten) RETURN relationships(p)", "COHDBG001"),
-                ("MATCH ()-[r]->() INSERT (:Unwritten) RETURN startNode(r)", "COHDBG001"),
-                ("MATCH ()-[r]->() INSERT (:Unwritten) RETURN endNode(r)", "COHDBG001"),
-                ("MATCH p=()-[r]->() INSERT (:Unwritten) RETURN nodes(p)[0]", "COHDBG001"),
-                ("MATCH (a:Person) INSERT (:Unwritten) RETURN properties({n:a})", "COHDBG001"),
-                ("MATCH (a:Person) INSERT (:Unwritten) RETURN properties({m:{n:a}}).m", "COHDBG001"),
+                ("MATCH (a:Person) RETURN upper(a.age)", "CG02013"),
+                ("RETURN sqrt(-1)", "CG02013"),
+                ("RETURN CAST(2.5 AS INTEGER)", "CG02013"),
+                ("RETURN CAST('1e-1000' AS DOUBLE)", "CG02013"),
+                ("RETURN CAST(1e-100 AS REAL)", "CG02013"),
+                ("INSERT (:Unwritten {at:CURRENT_TIMESTAMP})", "CG03003"),
+                ("INSERT (:Unwritten) RETURN toBoolean(1.5)", "CG03003"),
+                ("INSERT (:Unwritten) RETURN CAST(TRUE AS INTEGER)", "CG03003"),
+                ("MATCH p=()-[r]->() INSERT (:Unwritten) RETURN nodes(p)", "CG05001"),
+                ("MATCH p=()-[r]->() INSERT (:Unwritten) RETURN edges(p)", "CG05001"),
+                ("MATCH p=()-[r]->() INSERT (:Unwritten) RETURN relationships(p)", "CG05001"),
+                ("MATCH ()-[r]->() INSERT (:Unwritten) RETURN startNode(r)", "CG05001"),
+                ("MATCH ()-[r]->() INSERT (:Unwritten) RETURN endNode(r)", "CG05001"),
+                ("MATCH p=()-[r]->() INSERT (:Unwritten) RETURN nodes(p)[0]", "CG05001"),
+                ("MATCH (a:Person) INSERT (:Unwritten) RETURN properties({n:a})", "CG05001"),
+                ("MATCH (a:Person) INSERT (:Unwritten) RETURN properties({m:{n:a}}).m", "CG05001"),
             })
             {
                 var error = await Should.ThrowAsync<GraphClientException>(async () => await connection.QueryAsync(source, cancellationToken: harness.Token));
@@ -109,12 +109,12 @@ public sealed class GraphFunctionWireTests
         // Act / Assert
         foreach (var (source, code) in new[]
         {
-            ("MATCH (a:P) RETURN labels(a)", "COHDBG016"),
-            ("MATCH (a:P) RETURN keys(a)", "COHDBG016"),
-            ("MATCH (a:P) RETURN properties(a)", "COHDBG016"),
-            ("RETURN properties({nested:{x:1}}).nested", "COHDBG016"),
-            ("MATCH (a:P) RETURN upper(a.age)", "COHDBG013"),
-            ("RETURN sqrt(-1)", "COHDBG013"),
+            ("MATCH (a:P) RETURN labels(a)", "CG07016"),
+            ("MATCH (a:P) RETURN keys(a)", "CG07016"),
+            ("MATCH (a:P) RETURN properties(a)", "CG07016"),
+            ("RETURN properties({nested:{x:1}}).nested", "CG07016"),
+            ("MATCH (a:P) RETURN upper(a.age)", "CG02013"),
+            ("RETURN sqrt(-1)", "CG02013"),
         })
         {
             await ExecuteAsync(source);

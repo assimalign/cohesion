@@ -2,19 +2,30 @@
 
 This package parses the Documents engine's executable SQL++ profile, retaining the OQL name, into typed statement and
 expression trees. It provides `OqlLanguageProfile`, stable `OqlClauses` names, `OqlQueryParser`,
-`OqlQueryStatement`,
+`OqlQueryStatement`, `OqlTransactionExpression`, `OqlTransactionCommand`, `OqlTransactionIsolation`,
 `OqlSelectExpression`, `OqlInsertExpression`, `OqlUpsertExpression`, `OqlUpdateExpression`, `OqlUpdateAssignment`, `OqlDeleteExpression`, `OqlMetaExpression`, `OqlObjectExpression`, `OqlCreateCollectionExpression`, `OqlDropCollectionExpression`,
 `OqlCreateIndexExpression`, `OqlDropIndexExpression`, and expression nodes
 for projection, filtering, grouping, aggregates, ordering, nested properties, and array access.
-One immutable function table declares META, five aggregates and 34 SQL++ scalars, with parse-time
-arity checks, OQL0008 for unknown calls, and static result types consumed by the Documents engine.
+One immutable standard-function table declares META, five aggregates and 34 SQL++ scalars, with
+native parse-time arity checks and static result types used by native registrations. The standalone
+parser default reports CD00008 for unknown calls; engine requests defer additional named calls to
+the executing engine's function catalog.
+BEGIN/START, COMMIT and ROLLBACK execute on in-process and wire sessions. Snapshot is the default;
+explicit SNAPSHOT and READ COMMITTED are supported. Wire sessions negotiate transaction status;
+pool return rolls back open or failed work and discards peers that cannot certify a clean session.
+OQL collection/index DDL is refused in an explicit transaction (CD04105). See DIALECT.md for
+exact spellings, fault recovery and the deferred savepoint forms.
 SELECT LIMIT/OFFSET accept signed integer literals or parameters in either order, with non-negative
-Int64 values and OQL0007 for invalid counts. LIMIT and OFFSET are reserved field names; quoting
+Int64 values and CD00007 for invalid counts. LIMIT and OFFSET are reserved field names; quoting
 or a preceding dot keeps them usable, and AS labels still accept them.
 Chainable INNER/LEFT UNNEST, ANY/SOME/EVERY ... SATISFIES ... END and array-value IN execute.
 `OqlSelectExpression.Unnest`, `OqlUnnestExpression` and `OqlQuantifiedExpression` retain the
 bindings. The new words remain contextual; END retains its existing reservation. See the
 [array contract](DESIGN.md#array-bindings-and-quantified-predicates-1136) for scope and truth rules.
+ARRAY/FIRST comprehensions retain one lexical IN binding in `OqlComprehensionExpression`, with
+optional WHEN filtering. ARRAY omits mapped MISSING values; FIRST returns the first qualifying
+mapping or MISSING. They compose with current scalar contexts, including RETURNING and registered
+arguments; the [comprehension contract](DIALECT.md#array-and-first-comprehensions-1728) lists defaults.
 
 ```csharp
 var parser = new OqlQueryParser();
@@ -34,13 +45,45 @@ create externally keyed documents. UPSERT uses the same forms to insert or wholl
 and versions independently of JSON content. `DELETE FROM collection [AS? alias] [WHERE expression]`
 deletes snapshot-selected documents and retains the collection and indexes. EXPLAIN accepts
 SELECT, INSERT, UPSERT, UPDATE and DELETE. UPDATE accepts SET and/or UNSET over nested properties and
-array indexes; SET-to-MISSING removes a property. USE KEYS, RETURNING, FOR comprehensions and
-UPDATE/DELETE LIMIT remain deferred.
+array indexes; SET-to-MISSING removes a property. RETURNING named expressions or RAW/VALUE return each affected image with the mutation count.
+DELETE returns the pre-image; the other writes return the stored post-image. Projection,
+serialization or budget failure rolls back writes before any results are exposed.
+USE KEYS, OBJECT transformations, multiple bindings, position variables, WITHIN and UPDATE/DELETE LIMIT remain deferred.
 `DEFINE` is recognized statement-initially, and `ELEMENT` / `FLATTEN` in call position, to
-produce `COHDBL001`; all three remain usable field names. Subqueries remain unsupported.
+produce `CK00001`; all three remain usable field names. Subqueries remain unsupported.
 MISSING has its own AST node, distinct from NULL, and `IS [NOT] MISSING` / `IS [NOT] VALUED`
 are executable presence predicates. NIL remains a NULL synonym.
 
 See [DESIGN.md](DESIGN.md) for the supported-clause matrix, statement/expression grammar,
 diagnostics, scope restrictions, and extension rules. Co-located Shouldly tests provide the
 parser and lexer conformance corpora.
+
+## Access estimates (#1527)
+
+The engine costs competing equality-prefix/range paths using bounded snapshot-visible B+Tree
+probes and may intersect selected identity sets before JSON reads. EXPLAIN retains its existing
+grammar and nonexecuting contract, naming IndexSeek/IndexIntersection with entry estimates or
+explicit bounds in the existing nullable count columns. actual_rows remains NULL; EXPLAIN ANALYZE
+and standalone ANALYZE remain unsupported in OQL. No persisted statistics or language AST changes.
+
+## Documents diagnostic conventions (#1470)
+
+Exception and diagnostic templates use the project's build-generated `ErrorMessages` resources.
+Parameterized templates format with the current culture; abort/cancellation templates used in
+normal cleanup are cached. The [Database error-code registry](../../Assimalign.Cohesion.Database/docs/ERROR-CODES.md)
+assigns this family its two-letter prefix and categorized five-digit identities.
+Existing SQLSTATE meanings, numeric wire error kinds, frame layouts and disk formats are preserved.
+Structured diagnostics keep their code outside the message. Compiler diagnostic identifiers and
+standard .NET argument guards retain their own contracts.
+
+## Debugger inspection (#1470)
+
+AST debugger views use stored properties without sorting diagnostics, indexing caller collections or initializing parser profiles.
+
+Eligible types follow the [Database conventions](../../Assimalign.Cohesion.Database/docs/CONVENTIONS.md) debugger display/proxy rules. Views are private and read-only; inspection does not change the public API, execution paths, error contracts, storage formats or protocol bytes.
+
+## Engine-registered function calls
+
+OqlQueryParser's optional allowUnregisteredFunctions mode admits named-call ASTs for engine
+binding while its default retains standalone CD00008 behavior. Document requests and wire execution
+select deferred binding automatically. Native metadata remains private; engine adapters use the existing AcceptsArgument predicate.

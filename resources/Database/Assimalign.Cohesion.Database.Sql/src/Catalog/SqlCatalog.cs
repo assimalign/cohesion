@@ -58,6 +58,8 @@ namespace Assimalign.Cohesion.Database.Sql.Catalog;
 /// <see cref="Open(SqlStorage, Collation)"/>, are the only ways to create it.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("SqlCatalog")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Catalog.SqlCatalog.DebugView))]
 public sealed partial class SqlCatalog
 {
     private const int tableRecordKind = 1;
@@ -67,7 +69,7 @@ public sealed partial class SqlCatalog
     private const int indexRecordKind = 5;
     private const int schemaStateRecordKind = 6;
     private const int defaultCollationRecordKind = SqlCatalogCreation.CollationRecordKind;
-    private const int _pendingMigrationRecordKind = 9;
+    private const int pendingMigrationRecordKind = 9;
 
     // The record-space format marker from version 4 on (#1099). Catalogs written
     // before format 4 (through 10.0.0-preview.1) load kinds 1-7 only and refuse
@@ -80,9 +82,10 @@ public sealed partial class SqlCatalog
     private const int schemaStateChunkSize = 3 * 1024;
 
     // The version of a table record's trailing extension this catalog writes; it reads
-    // only the current version. Version 6 adds frozen missing values; version 5 adds identity facets; version 3 adds the dropped columns' physical ordinals (#1241),
+    // only the current version. Version 7 adds TYPE default assignment coercion;
+    // version 6 adds frozen missing values; version 5 adds identity facets; version 3 adds the dropped columns' physical ordinals (#1241),
     // version 4 (data-storage format 7, phase E3) each column's domain name.
-    private const int tableExtensionVersion = 6;
+    private const int tableExtensionVersion = 7;
 
     private static readonly Encoding _strictUtf8 = new UTF8Encoding(
         encoderShouldEmitUTF8Identifier: false,
@@ -91,7 +94,7 @@ public sealed partial class SqlCatalog
     private readonly SqlStorage _storage;
     private readonly Dictionary<(string Schema, string Name), TableSlot> _tables = new(TableNameComparer.Instance);
     private readonly Dictionary<(ulong TableObjectId, string Name), IndexSlot> _indexes = new(IndexNameComparer.Instance);
-    private readonly Dictionary<ulong, (PageId PageId, int SlotIndex)> _pendingReclamations = new();
+    private readonly Dictionary<ulong, SqlReclamationIntent> _pendingReclamations = new();
     private readonly object _sync = new();
     private ulong _nextObjectId = 1;
     private ulong _ddlGeneration;
@@ -171,16 +174,21 @@ public sealed partial class SqlCatalog
     }
 
     // The catalog owns committed reclamation state and its retirement, as it owns pending
-    // migrations and script receipts; the reclamation worker receives identities only.
-    /// <summary>Captures the retired table identities whose storage reclamation is pending.</summary>
-    /// <returns>A read-only snapshot unaffected by later drops or completed reclamations.</returns>
+    // migrations and script receipts; the worker captures immutable intent incarnations.
+    /// <summary>Captures permanently retired table-owner identities whose storage reclamation is pending.</summary>
+    /// <returns>A read-only snapshot unaffected by later publications or completed reclamations.</returns>
+    /// <remarks>Prepared TRUNCATE and CTAS owners remain internal while they can become live.
+    /// Abandoned CTAS owners become pending as soon as the build exits, including a lost name race.
+    /// Reclamation must wait for transaction and statement pins before freeing owner pages. Retired owners become
+    /// discoverable after the TRUNCATE visibility marker ends, so the fence covers every old reader.</remarks>
     /// <exception cref="StorageOfflineException">The catalog is offline.</exception>
     public IReadOnlyList<ulong> GetPendingTableReclamations()
     {
         lock (_sync)
         {
             ThrowIfOffline();
-            return Array.AsReadOnly(_pendingReclamations.Keys.ToArray());
+            return Array.AsReadOnly(_pendingReclamations.Keys.Where(id =>
+                !_preparedTruncateOwners.Contains(id) && !_truncateRetirementsPublishing.Contains(id)).ToArray());
         }
     }
 
@@ -198,6 +206,12 @@ public sealed partial class SqlCatalog
     /// <exception cref="OperationCanceledException">Cancellation was requested before retirement began.</exception>
     /// <exception cref="StorageOfflineException">The catalog is offline or the retirement commit is unconfirmed.</exception>
     public ValueTask CompleteTableReclamationAsync(ulong objectId, CancellationToken cancellationToken = default)
+        => CompleteTableReclamationCoreAsync(objectId, null, cancellationToken);
+
+    internal ValueTask CompleteTableReclamationAsync(ulong objectId, SqlReclamationIntent intent, CancellationToken cancellationToken)
+        => CompleteTableReclamationCoreAsync(objectId, intent, cancellationToken);
+
+    private ValueTask CompleteTableReclamationCoreAsync(ulong objectId, SqlReclamationIntent? intent, CancellationToken cancellationToken)
     {
         ArgumentOutOfRangeException.ThrowIfZero(objectId);
         cancellationToken.ThrowIfCancellationRequested();
@@ -206,10 +220,19 @@ public sealed partial class SqlCatalog
             ThrowIfOffline();
             cancellationToken.ThrowIfCancellationRequested();
             if (!_pendingReclamations.TryGetValue(objectId, out var location)) { return default; }
+            if (_truncateRetirementsPublishing.Contains(objectId) ||
+                (intent is null ? _preparedTruncateOwners.Contains(objectId) : !ReferenceEquals(intent, location))) { return default; }
             using var transaction = _storage.BeginTransaction();
             _storage.DeleteRow(transaction, location.PageId, location.SlotIndex);
             transaction.Commit();
             _pendingReclamations.Remove(objectId);
+            _truncateRetirementsPublishing.Remove(objectId);
+            _preparedTruncateOwners.Remove(objectId);
+            if (_truncatedTables.Remove(objectId, out var retired))
+            {
+                foreach (var index in retired.Before.GetIndexes(objectId)) { _truncatedIndexes.Remove(index); }
+                RemoveOrderedTruncation(objectId);
+            }
             return default;
         }
     }
@@ -255,7 +278,7 @@ public sealed partial class SqlCatalog
             }
             if (_tables.Count > 0)
             {
-                throw new SqlCatalogException("COHSQLE057", "The database default collation cannot change after tables are created; existing index keys depend on it.");
+                throw new SqlCatalogException("CS05057", ErrorMessages.InitializeDefaultCollationSqlCatalog);
             }
 
             var writer = new DatabaseKeyWriter();
@@ -300,12 +323,12 @@ public sealed partial class SqlCatalog
     }
 
     /// <summary>
-    /// Gets the durable generation of committed catalog changes. Schema application state
+    /// Gets the durable generation of committed logical catalog definitions. Schema application state
     /// records this value to detect later DDL, including changes to ad-hoc objects.
     /// </summary>
     /// <remarks>
     /// The counter and the metadata change share one transaction. Recording applied-schema
-    /// state or saving an unchanged index directory does not advance the generation.
+    /// state, saving an unchanged index directory or replacing storage with TRUNCATE does not advance it.
     /// </remarks>
     /// <exception cref="StorageOfflineException">The catalog storage is offline; reopen the database before reading or changing its metadata.</exception>
     public ulong DdlGeneration
@@ -452,7 +475,7 @@ public sealed partial class SqlCatalog
             ThrowIfOffline();
             if (_tables.ContainsKey((schema, name)) || _views.ContainsKey(SqlObjectIdentity.View(schema, name)))
             {
-                throw new SqlCatalogException("COHSQLE049", $"Table '{schema}.{name}' already exists.");
+                throw new SqlCatalogException("CS03049", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.RenameTableCollision, schema, name));
             }
 
             ValidateColumns(schema, name, columns, primaryKeyColumns);
@@ -528,7 +551,7 @@ public sealed partial class SqlCatalog
                     CommitScriptAbsence(publication, SqlObjectIdentity.Table(schema, name));
                     return default;
                 }
-                throw new SqlCatalogException("COHSQLE051", $"Table '{schema}.{name}' does not exist.");
+                throw new SqlCatalogException("CS01051", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.TableMissing, schema, name));
             }
 
             EnsureNoViewReads(slot.Table);
@@ -539,7 +562,7 @@ public sealed partial class SqlCatalog
                     string.Equals(constraint.ReferencedSchema, schema, StringComparison.OrdinalIgnoreCase) &&
                     string.Equals(constraint.ReferencedTable, name, StringComparison.OrdinalIgnoreCase)))
                 {
-                    throw new SqlCatalogException("COHSQLE056", $"Table '{schema}.{name}' is referenced by '{dependent.Table.Schema}.{dependent.Table.Name}'. Drop the foreign key first.");
+                    throw new SqlCatalogException("CS03056", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CatalogDropTableCoreAsyncSqlCatalog, schema, name, dependent.Table.Schema, dependent.Table.Name));
                 }
             }
 
@@ -587,7 +610,7 @@ public sealed partial class SqlCatalog
 
                 CommitCatalogChange(transaction, publication: publication, actualObject: SqlObjectIdentity.Table(schema, name));
                 _registrationsLocation = registrationsLocation;
-                _pendingReclamations.Add(slot.Table.ObjectId, reclamationLocation);
+                _pendingReclamations.Add(slot.Table.ObjectId, new SqlReclamationIntent(reclamationLocation.PageId, reclamationLocation.SlotIndex));
             }
 
             _tables.Remove((schema, name));
@@ -679,7 +702,7 @@ public sealed partial class SqlCatalog
 
             if (slot.Table.FindColumn(column.Name) is not null)
             {
-                throw new SqlCatalogException("COHSQLE061", $"Table '{schema}.{name}' already has a column named '{column.Name}'.");
+                throw new SqlCatalogException("CS03061", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CatalogAddColumnCoreAsyncSqlCatalog, schema, name, column.Name));
             }
 
             // The new column takes the next physical ordinal, after every live and dropped
@@ -776,12 +799,12 @@ public sealed partial class SqlCatalog
 
             if (ordinal < 0)
             {
-                throw new SqlCatalogException("COHSQLE015", $"Table '{schema}.{name}' has no column named '{columnName}'.");
+                throw new SqlCatalogException("CS01015", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ColumnNameMissing, schema, name, columnName));
             }
 
             if (slot.Table.PrimaryKeyColumns.Any(pk => string.Equals(pk, columnName, StringComparison.OrdinalIgnoreCase)))
             {
-                throw new SqlCatalogException("COHSQLE056", $"Column '{columnName}' is part of the primary key of '{schema}.{name}' and cannot be dropped.");
+                throw new SqlCatalogException("CS03056", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CatalogDropColumnCoreAsyncSqlCatalog, columnName, schema, name));
             }
 
             foreach (var dependent in _tables.Values)
@@ -796,7 +819,7 @@ public sealed partial class SqlCatalog
                         constraint.ReferencedColumns.Any(column => string.Equals(column, columnName, StringComparison.OrdinalIgnoreCase));
                     if (local || referenced)
                     {
-                        throw new SqlCatalogException("COHSQLE056", $"Column '{columnName}' is referenced by constraint '{constraint.Name}'. Drop the constraint first.");
+                        throw new SqlCatalogException("CS03056", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CatalogDropColumnCoreAsyncSqlCatalog2, columnName, constraint.Name));
                     }
                 }
             }
@@ -807,14 +830,14 @@ public sealed partial class SqlCatalog
                 if (indexSlot.Index.TableObjectId == slot.Table.ObjectId &&
                     indexSlot.Index.ColumnNames.Any(column => string.Equals(column, columnName, StringComparison.OrdinalIgnoreCase)))
                 {
-                    throw new SqlCatalogException("COHSQLE056",
-                        $"Column '{columnName}' is referenced by index '{indexSlot.Index.Name}' on '{schema}.{name}'. Drop the index first.");
+                    throw new SqlCatalogException("CS03056",
+                        string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CatalogDropColumnCoreAsyncSqlCatalog3, columnName, indexSlot.Index.Name, schema, name));
                 }
             }
 
             if (slot.Table.Columns.Count == 1)
             {
-                throw new SqlCatalogException("COHSQLE053", $"Cannot drop the last column of '{schema}.{name}'.");
+                throw new SqlCatalogException("CS03053", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CatalogDropColumnCoreAsyncSqlCatalog4, schema, name));
             }
 
             // The whole of DROP COLUMN: the column leaves the live list and its physical
@@ -945,15 +968,15 @@ public sealed partial class SqlCatalog
         {
             ThrowIfOffline();
             var table = FindTableByObjectId(index.TableObjectId)
-                ?? throw new SqlCatalogException("COHSQLE051", $"No table with object id {index.TableObjectId} exists.");
+                ?? throw new SqlCatalogException("CS01051", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CatalogCreateIndexCoreAsyncSqlCatalog, index.TableObjectId));
 
             if (_indexes.ContainsKey((index.TableObjectId, index.Name)))
             {
-                throw new SqlCatalogException("COHSQLE049", $"An index named '{index.Name}' already exists on '{table.Schema}.{table.Name}'.");
+                throw new SqlCatalogException("CS03049", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExecutionIndexExists, index.Name, table.Schema, table.Name));
             }
             if (table.Constraints.Any(constraint => string.Equals(constraint.Name, index.Name, StringComparison.OrdinalIgnoreCase)))
             {
-                throw new SqlCatalogException("COHSQLE050", string.Format(System.Globalization.CultureInfo.CurrentCulture,
+                throw new SqlCatalogException("CS03050", string.Format(System.Globalization.CultureInfo.CurrentCulture,
                     ErrorMessages.ConstraintNameExists, index.Name, table.Name));
             }
 
@@ -961,7 +984,7 @@ public sealed partial class SqlCatalog
             {
                 if (table.FindColumn(column) is null)
                 {
-                    throw new SqlCatalogException("COHSQLE015", $"Index '{index.Name}': table '{table.Schema}.{table.Name}' has no column named '{column}'.");
+                    throw new SqlCatalogException("CS01015", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CatalogCreateIndexCoreAsyncSqlCatalog2, index.Name, table.Schema, table.Name, column));
                 }
             }
 
@@ -1050,7 +1073,7 @@ public sealed partial class SqlCatalog
                     CommitScriptAbsence(publication, SqlObjectIdentity.Index(existingTable.Schema, existingTable.Name, name));
                     return default;
                 }
-                throw new SqlCatalogException("COHSQLE052", $"No index named '{name}' exists on object {tableObjectId}.");
+                throw new SqlCatalogException("CS01052", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CatalogDropIndexCoreAsyncSqlCatalog, name, tableObjectId));
             }
 
             var table = FindTableByObjectId(tableObjectId)!;
@@ -1085,8 +1108,8 @@ public sealed partial class SqlCatalog
             if (matches.Length != 1 || matches[0].Definition.IsUnique != index.IsUnique ||
                 matches[0].Definition.Kind != IndexKind.BTree || matches[0].RootPageId <= 0)
             {
-                throw new SqlCatalogException("COHSQLE060",
-                    $"Index '{index.Name}' requires exactly one matching B-tree registration with a positive root page id in the same publication.");
+                throw new SqlCatalogException("CS05060",
+                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.MergePublishedRegistrationsSqlCatalog, index.Name));
             }
             merged[(index.TableObjectId, index.Name)] = matches[0];
         }
@@ -1228,7 +1251,7 @@ public sealed partial class SqlCatalog
                 state.Generation,
                 index,
                 chunkCount,
-                document.AsSpan(offset, length), pending is null ? schemaStateRecordKind : _pendingMigrationRecordKind));
+                document.AsSpan(offset, length), pending is null ? schemaStateRecordKind : pendingMigrationRecordKind));
         }
 
         lock (_sync)
@@ -1236,7 +1259,7 @@ public sealed partial class SqlCatalog
             ThrowIfOffline();
             if (state.Generation != _ddlGeneration)
             {
-                throw new SqlCatalogException("The applied-schema state does not describe the current DDL generation.");
+                throw new SqlCatalogException("CS04064", ErrorMessages.CatalogSaveSchemaDocumentSqlCatalog);
             }
 
             var locations = new List<(PageId PageId, int SlotIndex)>(records.Count);
@@ -1293,137 +1316,148 @@ public sealed partial class SqlCatalog
         while (iterator.MoveNext())
         {
             var unit = iterator.Current;
-            var reader = new DatabaseKeyReader(unit.Data.Span);
-            int kind = reader.ReadInt32();
-
-            switch (kind)
+            try
             {
-                case _viewRecordKind:
-                    LoadView(reader.ReadString(out _), (unit.PageId, unit.SlotIndex));
-                    if (!reader.IsAtEnd) { throw new SqlCatalogException("COHSQLE033", ErrorMessages.ViewMetadataInvalid); }
-                    break;
-                case namespaceRecordKind:
-                    LoadNamespace(reader.ReadString(out _), (unit.PageId, unit.SlotIndex));
-                    if (!reader.IsAtEnd) { throw new SqlCatalogException(ErrorMessages.NamespaceRecordMalformed); }
-                    break;
-                case SqlReclamationRecord.Kind:
-                    var intent = SqlReclamationRecord.Decode(ref reader);
-                    if (!_pendingReclamations.TryAdd(intent.ObjectId, (unit.PageId, unit.SlotIndex))) { throw new System.IO.InvalidDataException(); }
-                    _nextObjectId = Math.Max(_nextObjectId, intent.ObjectId + 1);
-                    break;
-                case identityCounterRecordKind:
-                    LoadIdentityCounter(ref reader, unit.PageId, unit.SlotIndex);
-                    break;
-                case tableRecordKind:
-                    var table = DecodeTable(ref reader);
-                    _tables[(table.Schema, table.Name)] = new TableSlot(table, (unit.PageId, unit.SlotIndex));
+                var reader = new DatabaseKeyReader(unit.Data.Span);
+                int kind = reader.ReadInt32();
 
-                    if (table.ObjectId >= _nextObjectId)
-                    {
-                        _nextObjectId = table.ObjectId + 1;
-                    }
-
-                    break;
-
-                case counterRecordKind:
-                    ulong persisted = (ulong)reader.ReadInt64();
-
-                    if (persisted > _nextObjectId)
-                    {
-                        _nextObjectId = persisted;
-                    }
-
-                    if (reader.IsAtEnd)
-                    {
-                        throw new SqlCatalogException(
-                            "Unsupported catalog counter format: DDL generations require record-space format 8. Recreate the database; no upgrade is available.");
-                    }
-                    _ddlGeneration = (ulong)reader.ReadInt64();
-                    if (!reader.IsAtEnd || _counterLocation is not null)
-                    {
-                        throw new SqlCatalogException("Malformed catalog counter record.");
-                    }
-
-                    _counterLocation = (unit.PageId, unit.SlotIndex);
-                    break;
-
-                case indexRegistrationsKind:
-                    _registrations = DecodeRegistrations(ref reader);
-                    _registrationsLocation = (unit.PageId, unit.SlotIndex);
-                    break;
-
-                case recordSpaceFormatKind:
-                case fencedRecordSpaceFormatKind:
-                    _recordSpaceFormatVersion = reader.ReadInt32();
-                    _formatLocation = (unit.PageId, unit.SlotIndex);
-                    break;
-
-                case indexRecordKind:
-                    var index = DecodeIndex(ref reader);
-                    _indexes[(index.TableObjectId, index.Name)] = new IndexSlot(index, (unit.PageId, unit.SlotIndex));
-                    break;
-
-                case schemaStateRecordKind:
-                case _pendingMigrationRecordKind:
-                    var chunk = DecodeSchemaStateChunk(ref reader);
-                    (kind == schemaStateRecordKind ? schemaStateChunks : pendingChunks).Add(new SchemaStateChunk(
-                        chunk.ContentHash,
-                        chunk.Generation,
-                        chunk.Index,
-                        chunk.Count,
-                        chunk.Document,
-                        (unit.PageId, unit.SlotIndex)));
-                    break;
-
-                case defaultCollationRecordKind:
-                    _defaultCollation = Collation.FromId((byte)reader.ReadInt8());
-                    if (!reader.IsAtEnd)
-                    {
-                        throw new SqlCatalogException("The persisted default collation contains trailing values.");
-                    }
-                    _defaultCollationLocation = (unit.PageId, unit.SlotIndex);
-                    break;
-
-                case 12:
+                switch (kind)
                 {
-                    try
-                    {
-                        var receipt = JsonSerializer.Deserialize(reader.ReadString(out _), SqlCatalogJsonContext.Default.SqlCatalogScript)
-                            ?? throw new SqlCatalogException("COHSQLS001", ErrorMessages.ScriptReceiptMalformed);
-                        if (!reader.IsAtEnd || !_scripts.TryAdd(receipt.Name, new DefinitionSlot<SqlCatalogScript>(receipt, (unit.PageId, unit.SlotIndex))))
-                        {
-                            throw new SqlCatalogException("COHSQLS001", ErrorMessages.ScriptReceiptDuplicate);
-                        }
-                    }
-                    catch (Exception failure) when (failure is JsonException or ArgumentException)
-                    {
-                        throw new SqlCatalogException("COHSQLS001", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ScriptReceiptReadFailed, failure.Message), failure);
-                    }
-                    break;
-                }
-                case 13:
-                    if (_scriptState is not null)
-                    {
-                        throw new SqlCatalogException("Duplicate declared script-set marker.");
-                    }
-                    _scriptState = new SqlCatalogScriptState(reader.ReadString(out _), (ulong)reader.ReadInt64());
-                    if (!reader.IsAtEnd)
-                    {
-                        throw new SqlCatalogException("Malformed declared script-set marker.");
-                    }
-                    _scriptStateLocation = (unit.PageId, unit.SlotIndex);
-                    break;
-                case functionRecordKind:
-                case domainRecordKind:
-                    LoadDefinition(kind, reader.ReadString(out _), (unit.PageId, unit.SlotIndex));
-                    if (!reader.IsAtEnd)
-                    {
-                        throw new SqlCatalogException("Malformed SQL definition record.");
-                    }
-                    break;
+                    case viewRecordKind:
+                        LoadView(reader.ReadString(out _), (unit.PageId, unit.SlotIndex));
+                        if (!reader.IsAtEnd) { throw new SqlCatalogException("CS03033", ErrorMessages.ViewMetadataInvalid); }
+                        break;
+                    case namespaceRecordKind:
+                        LoadNamespace(reader.ReadString(out _), (unit.PageId, unit.SlotIndex));
+                        if (!reader.IsAtEnd) { throw new SqlCatalogException("CS06059", ErrorMessages.NamespaceRecordMalformed); }
+                        break;
+                    case SqlReclamationRecord.Kind:
+                        var intent = SqlReclamationRecord.Decode(ref reader);
+                        if (!_pendingReclamations.TryAdd(intent.ObjectId, new SqlReclamationIntent(unit.PageId, unit.SlotIndex))) { throw new System.IO.InvalidDataException(); }
+                        _nextObjectId = Math.Max(_nextObjectId, intent.ObjectId + 1);
+                        break;
+                    case identityCounterRecordKind:
+                        LoadIdentityCounter(ref reader, unit.PageId, unit.SlotIndex);
+                        break;
+                    case tableRecordKind:
+                        var table = DecodeTable(ref reader);
+                        _tables[(table.Schema, table.Name)] = new TableSlot(table, (unit.PageId, unit.SlotIndex));
 
-                default:
-                    throw new SqlCatalogException($"Malformed catalog record of kind {kind}.");
+                        if (table.ObjectId >= _nextObjectId)
+                        {
+                            _nextObjectId = table.ObjectId + 1;
+                        }
+
+                        break;
+
+                    case counterRecordKind:
+                        ulong persisted = (ulong)reader.ReadInt64();
+
+                        if (persisted > _nextObjectId)
+                        {
+                            _nextObjectId = persisted;
+                        }
+
+                        if (reader.IsAtEnd)
+                        {
+                            throw new SqlCatalogException("CS06060",
+                                ErrorMessages.SqlCatalogLoadSqlCatalog);
+                        }
+                        _ddlGeneration = (ulong)reader.ReadInt64();
+                        if (!reader.IsAtEnd || _counterLocation is not null)
+                        {
+                            throw new SqlCatalogException("CS06059", ErrorMessages.SqlCatalogLoadSqlCatalog2);
+                        }
+
+                        _counterLocation = (unit.PageId, unit.SlotIndex);
+                        break;
+
+                    case indexRegistrationsKind:
+                        _registrations = DecodeRegistrations(ref reader);
+                        _registrationsLocation = (unit.PageId, unit.SlotIndex);
+                        break;
+
+                    case recordSpaceFormatKind:
+                    case fencedRecordSpaceFormatKind:
+                        _recordSpaceFormatVersion = reader.ReadInt32();
+                        _formatLocation = (unit.PageId, unit.SlotIndex);
+                        break;
+
+                    case indexRecordKind:
+                        var index = DecodeIndex(ref reader);
+                        _indexes[(index.TableObjectId, index.Name)] = new IndexSlot(index, (unit.PageId, unit.SlotIndex));
+                        break;
+
+                    case schemaStateRecordKind:
+                    case pendingMigrationRecordKind:
+                        var chunk = DecodeSchemaStateChunk(ref reader);
+                        (kind == schemaStateRecordKind ? schemaStateChunks : pendingChunks).Add(new SchemaStateChunk(
+                            chunk.ContentHash,
+                            chunk.Generation,
+                            chunk.Index,
+                            chunk.Count,
+                            chunk.Document,
+                            (unit.PageId, unit.SlotIndex)));
+                        break;
+
+                    case defaultCollationRecordKind:
+                        _defaultCollation = Collation.FromId((byte)reader.ReadInt8());
+                        if (!reader.IsAtEnd)
+                        {
+                            throw new SqlCatalogException("CS06059", ErrorMessages.SqlCatalogLoadSqlCatalog3);
+                        }
+                        _defaultCollationLocation = (unit.PageId, unit.SlotIndex);
+                        break;
+
+                    case 12:
+                    {
+                        try
+                        {
+                            var receipt = JsonSerializer.Deserialize(reader.ReadString(out _), SqlCatalogJsonContext.Default.SqlCatalogScript)
+                                ?? throw new SqlCatalogException("CS03201", ErrorMessages.ScriptReceiptMalformed);
+                            if (!reader.IsAtEnd || !_scripts.TryAdd(receipt.Name, new DefinitionSlot<SqlCatalogScript>(receipt, (unit.PageId, unit.SlotIndex))))
+                            {
+                                throw new SqlCatalogException("CS03201", ErrorMessages.ScriptReceiptDuplicate);
+                            }
+                        }
+                        catch (Exception failure) when (failure is JsonException or ArgumentException)
+                        {
+                            throw new SqlCatalogException("CS03201", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ScriptReceiptReadFailed, failure.Message), failure);
+                        }
+                        break;
+                    }
+                    case 13:
+                        if (_scriptState is not null)
+                        {
+                            throw new SqlCatalogException("CS06059", ErrorMessages.SqlCatalogLoadSqlCatalog4);
+                        }
+                        _scriptState = new SqlCatalogScriptState(reader.ReadString(out _), (ulong)reader.ReadInt64());
+                        if (!reader.IsAtEnd)
+                        {
+                            throw new SqlCatalogException("CS06059", ErrorMessages.SqlCatalogLoadSqlCatalog5);
+                        }
+                        _scriptStateLocation = (unit.PageId, unit.SlotIndex);
+                        break;
+                    case functionRecordKind:
+                    case domainRecordKind:
+                        LoadDefinition(kind, reader.ReadString(out _), (unit.PageId, unit.SlotIndex));
+                        if (!reader.IsAtEnd)
+                        {
+                            throw new SqlCatalogException("CS06059", ErrorMessages.SqlCatalogLoadSqlCatalog6);
+                        }
+                        break;
+
+                    default:
+                        throw new SqlCatalogException("CS06059", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlCatalogLoadSqlCatalog7, kind));
+                }
+            }
+            catch (Exception error) when (error is SqlCatalogException or DatabaseTypeException
+                or System.IO.InvalidDataException or FormatException or ArgumentException or OverflowException or JsonException)
+            {
+                var corruption = new StorageCorruptionException(unit.PageId, unit.SlotIndex, error.Message, error);
+                throw new SqlCatalogException(corruption.Message,
+                    error is SqlCatalogException { Diagnostics.Count: > 0 } catalog ? catalog.Diagnostics :
+                        [new Diagnostic { Code = "CS06059", Message = error.Message, Severity = DiagnosticSeverity.Error }], corruption);
             }
         }
 
@@ -1449,15 +1483,15 @@ public sealed partial class SqlCatalog
             {
                 _pendingMigration = JsonSerializer.Deserialize(pending.CanonicalDocument,
                     SqlCatalogJsonContext.Default.SqlCatalogPendingMigration)
-                    ?? throw new SqlCatalogException("Malformed pending migration: no intent.");
+                    ?? throw new SqlCatalogException("CS06059", ErrorMessages.SqlCatalogLoadSqlCatalog8);
                 if (!string.Equals(pending.ContentHash, _pendingMigration.ContentHash, StringComparison.Ordinal))
                 {
-                    throw new SqlCatalogException("Malformed pending migration: target hashes differ.");
+                    throw new SqlCatalogException("CS06059", ErrorMessages.SqlCatalogLoadSqlCatalog9);
                 }
             }
             catch (Exception failure) when (failure is JsonException or ArgumentException)
             {
-                throw new SqlCatalogException($"Malformed pending migration: {failure.Message}");
+                throw new SqlCatalogException("CS06059", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlCatalogLoadSqlCatalog10, failure.Message));
             }
             _pendingMigrationLocations = pendingChunks.Select(chunk => chunk.Location).ToList();
         }
@@ -1475,7 +1509,7 @@ public sealed partial class SqlCatalog
     {
         if (!_tables.TryGetValue((schema, name), out var slot))
         {
-            throw new SqlCatalogException("COHSQLE051", $"Table '{schema}.{name}' does not exist.");
+            throw new SqlCatalogException("CS01051", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.TableMissing, schema, name));
         }
 
         return slot;
@@ -1547,7 +1581,7 @@ public sealed partial class SqlCatalog
     {
         if (_ddlGeneration == ulong.MaxValue)
         {
-            throw new SqlCatalogException("COHSQLE042", "The catalog DDL generation is exhausted.");
+            throw new SqlCatalogException("CS05042", ErrorMessages.CatalogCommitCatalogChangeSqlCatalog);
         }
         if (publication is not null)
         {
@@ -1595,19 +1629,19 @@ public sealed partial class SqlCatalog
             {
                 if (column.Type.Type is not (DatabaseType.Int8 or DatabaseType.Int16 or DatabaseType.Int32 or DatabaseType.Int64))
                 {
-                    throw new SqlCatalogException("COHSQLE053", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.IdentityMetadataInvalid, column.Name));
+                    throw new SqlCatalogException("CS03053", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.IdentityMetadataInvalid, column.Name));
                 }
                 var (minimum, maximum) = IdentityBounds(column.Type.Type, identity.Increment);
                 if (hasIdentity || column.IsNullable || column.DefaultLiteral is not null || column.DomainName is not null ||
                     identity.Start < minimum || identity.Start > maximum)
                 {
-                    throw new SqlCatalogException("COHSQLE053", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.IdentityMetadataInvalid, column.Name));
+                    throw new SqlCatalogException("CS03053", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.IdentityMetadataInvalid, column.Name));
                 }
                 hasIdentity = true;
             }
             if (!seen.Add(column.Name))
             {
-                throw new SqlCatalogException("COHSQLE061", $"Table '{schema}.{name}' declares column '{column.Name}' more than once.");
+                throw new SqlCatalogException("CS03061", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlCatalogValidateColumnsSqlCatalog, schema, name, column.Name));
             }
         }
 
@@ -1617,7 +1651,7 @@ public sealed partial class SqlCatalog
             {
                 if (!seen.Contains(pk))
                 {
-                    throw new SqlCatalogException("COHSQLE015", $"Primary-key column '{pk}' is not a column of '{schema}.{name}'.");
+                    throw new SqlCatalogException("CS01015", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlCatalogValidateColumnsSqlCatalog2, pk, schema, name));
                 }
             }
         }
@@ -1641,9 +1675,8 @@ public sealed partial class SqlCatalog
     {
         if (record.Length > SlottedPage.MaxRecordSize)
         {
-            throw new SqlCatalogException("COHSQLE042",
-                $"The definition of {description} encodes to {record.Length} bytes, more than the {SlottedPage.MaxRecordSize} bytes a catalog record can hold." +
-                (remedy is null ? string.Empty : " " + remedy));
+            throw new SqlCatalogException("CS05042",
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlCatalogEnsureStorableSqlCatalog, description, record.Length, SlottedPage.MaxRecordSize, (remedy is null ? string.Empty : " " + remedy)));
         }
 
         return record;
@@ -1657,9 +1690,8 @@ public sealed partial class SqlCatalog
         // (#1241), so a table that has dropped many columns can refuse ADD or DROP COLUMN with
         // few live ones. Only a new table starts without them; say so.
         int dropped = table.DroppedColumnOrdinals.Count;
-        return EnsureStorable(record, $"table '{table.Schema}.{table.Name}'", dropped == 0 ? null :
-            $"It keeps the physical positions of {dropped} dropped columns, which are never reused (#1241); " +
-            "recreating the table and copying its rows (CREATE TABLE, INSERT ... SELECT) reclaims them.");
+        return EnsureStorable(record, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CatalogTableSubject, table.Schema, table.Name), dropped == 0 ? null :
+            string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.RetainedDroppedColumnHint, dropped));
     }
 
     private static byte[] EncodeTableRecord(SqlCatalogTable table)
@@ -1752,6 +1784,7 @@ public sealed partial class SqlCatalog
         foreach (var column in table.Columns)
         {
             AppendOptionalString(ref writer, column.MissingValueLiteral);
+            writer.AppendBoolean(column.RecastDefault);
         }
         return writer.ToArray();
     }
@@ -1762,7 +1795,7 @@ public sealed partial class SqlCatalog
     {
         if (calls.Count > expressionLength)
         {
-            throw new SqlCatalogException("The function-call count exceeds its canonical expression length.");
+            throw new SqlCatalogException("CS06059", ErrorMessages.CatalogAppendFunctionCallsSqlCatalog);
         }
         int runs = 0;
         for (int index = 0; index < calls.Count; index++)
@@ -1784,7 +1817,7 @@ public sealed partial class SqlCatalog
         int runs = reader.ReadInt32();
         if (runs < 0 || runs > expressionLength)
         {
-            throw new SqlCatalogException("The persisted function-call run count is invalid.");
+            throw new SqlCatalogException("CS06059", ErrorMessages.SqlCatalogReadFunctionCallsSqlCatalog);
         }
         var calls = new List<string>();
         for (int index = 0; index < runs; index++)
@@ -1795,7 +1828,7 @@ public sealed partial class SqlCatalog
             // bound rejects damaged expansion counts before allocating, without summation overflow.
             if (string.IsNullOrWhiteSpace(identity) || count <= 0 || count > expressionLength - calls.Count)
             {
-                throw new SqlCatalogException("The persisted function-call identity or repetition count is invalid.");
+                throw new SqlCatalogException("CS06059", ErrorMessages.SqlCatalogReadFunctionCallsSqlCatalog2);
             }
             for (int repeat = 0; repeat < count; repeat++) { calls.Add(identity); }
         }
@@ -1857,12 +1890,12 @@ public sealed partial class SqlCatalog
             int version = reader.ReadInt32();
             if (version != tableExtensionVersion)
             {
-                throw new SqlCatalogException($"Unsupported table-constraint metadata version {version}.");
+                throw new SqlCatalogException("CS06060", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlCatalogDecodeTableSqlCatalog, version));
             }
             int count = reader.ReadInt32();
             if (count < 0)
             {
-                throw new SqlCatalogException("The persisted constraint count is invalid.");
+                throw new SqlCatalogException("CS06059", ErrorMessages.SqlCatalogDecodeTableSqlCatalog2);
             }
             for (int index = 0; index < count; index++)
             {
@@ -1881,7 +1914,7 @@ public sealed partial class SqlCatalog
                 }
                 catch (ArgumentException exception)
                 {
-                    throw new SqlCatalogException($"The persisted constraint '{constraintName}' is invalid: {exception.Message}");
+                    throw new SqlCatalogException("CS06059", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlCatalogDecodeTableSqlCatalog3, constraintName, exception.Message));
                 }
             }
             if (version >= 2)
@@ -1891,7 +1924,7 @@ public sealed partial class SqlCatalog
                     int id = reader.ReadInt32();
                     if (id < -1 || id > byte.MaxValue)
                     {
-                        throw new SqlCatalogException($"The persisted column collation identifier {id} is invalid.");
+                        throw new SqlCatalogException("CS06059", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlCatalogDecodeTableSqlCatalog4, id));
                     }
                     var column = columns[index];
                     columns[index] = new SqlCatalogColumn(column.Name, column.Type, column.IsNullable,
@@ -1903,7 +1936,7 @@ public sealed partial class SqlCatalog
                 int droppedCount = reader.ReadInt32();
                 if (droppedCount < 0)
                 {
-                    throw new SqlCatalogException($"The persisted dropped-column count {droppedCount} of '{schema}.{name}' is invalid.");
+                    throw new SqlCatalogException("CS06059", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlCatalogDecodeTableSqlCatalog5, droppedCount, schema, name));
                 }
                 for (int index = 0; index < droppedCount; index++)
                 {
@@ -1921,7 +1954,7 @@ public sealed partial class SqlCatalog
                     }
                     if (string.IsNullOrWhiteSpace(domain))
                     {
-                        throw new SqlCatalogException($"The persisted domain name of column '{columns[index].Name}' of '{schema}.{name}' is empty.");
+                        throw new SqlCatalogException("CS06059", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlCatalogDecodeTableSqlCatalog6, columns[index].Name, schema, name));
                     }
                     var column = columns[index];
                     columns[index] = new SqlCatalogColumn(column.Name, column.Type, column.IsNullable,
@@ -1933,7 +1966,7 @@ public sealed partial class SqlCatalog
         {
             if (reader.IsAtEnd)
             {
-                throw new SqlCatalogException($"The persisted table '{schema}.{name}' is missing format 10 function-call identities.");
+                throw new SqlCatalogException("CS06059", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlCatalogDecodeTableSqlCatalog7, schema, name));
             }
             var column = columns[index];
             columns[index] = new SqlCatalogColumn(column.Name, column.Type, column.IsNullable,
@@ -1943,7 +1976,7 @@ public sealed partial class SqlCatalog
         {
             if (reader.IsAtEnd)
             {
-                throw new SqlCatalogException($"The persisted table '{schema}.{name}' is missing format 10 function-call identities.");
+                throw new SqlCatalogException("CS06059", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlCatalogDecodeTableSqlCatalog7, schema, name));
             }
             var constraint = constraints[index];
             constraints[index] = new SqlCatalogConstraint(constraint.Name, constraint.Kind, constraint.Columns,
@@ -1960,7 +1993,7 @@ public sealed partial class SqlCatalog
                 var column = columns[index];
                 if (increment == 0 || column.IsNullable)
                 {
-                    throw new SqlCatalogException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.IdentityMetadataInvalid, column.Name));
+                    throw new SqlCatalogException("CS06059", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.IdentityMetadataInvalid, column.Name));
                 }
                 var identity = new SqlCatalogIdentity(always, start, increment);
                 columns[index] = new SqlCatalogColumn(column.Name, column.Type, column.IsNullable,
@@ -1972,12 +2005,12 @@ public sealed partial class SqlCatalog
             var column = columns[index];
             columns[index] = new SqlCatalogColumn(column.Name, column.Type, column.IsNullable,
                 column.DefaultLiteral, column.Collation, column.DomainName, column.DefaultFunctionCalls, column.Identity,
-                ReadOptionalString(ref reader));
+                ReadOptionalString(ref reader)) { RecastDefault = reader.ReadBoolean() };
         }
         ValidateColumns(schema, name, columns, primaryKey);
         if (!reader.IsAtEnd)
         {
-            throw new SqlCatalogException("The persisted table constraint metadata contains trailing values.");
+            throw new SqlCatalogException("CS06059", ErrorMessages.SqlCatalogDecodeTableSqlCatalog8);
         }
         SqlCatalogTable table;
         try
@@ -1986,14 +2019,14 @@ public sealed partial class SqlCatalog
         }
         catch (ArgumentException exception)
         {
-            throw new SqlCatalogException($"The persisted definition of '{schema}.{name}' is invalid: {exception.Message}");
+            throw new SqlCatalogException("CS06059", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlCatalogDecodeTableSqlCatalog9, schema, name, exception.Message));
         }
         ValidateConstraints(table);
         return table;
     }
 
     private static byte[] EncodeIndex(SqlCatalogIndex index)
-        => EnsureStorable(EncodeIndexRecord(index), $"index '{index.Name}'");
+        => EnsureStorable(EncodeIndexRecord(index), string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CatalogIndexSubject, index.Name));
 
     private static byte[] EncodeIndexRecord(SqlCatalogIndex index)
     {
@@ -2034,13 +2067,13 @@ public sealed partial class SqlCatalog
             int version = reader.ReadInt32();
             if (version != 1)
             {
-                throw new SqlCatalogException($"Unsupported index metadata version {version}.");
+                throw new SqlCatalogException("CS06060", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlCatalogDecodeIndexSqlCatalog, version));
             }
             isPrimaryKey = reader.ReadBoolean();
         }
         if (!reader.IsAtEnd || (isPrimaryKey && !isUnique))
         {
-            throw new SqlCatalogException("The persisted primary-key index metadata is invalid.");
+            throw new SqlCatalogException("CS06059", ErrorMessages.SqlCatalogDecodeIndexSqlCatalog2);
         }
         return new SqlCatalogIndex(tableObjectId, name, columns, isUnique, owner, owningSchema, isPrimaryKey);
     }
@@ -2052,13 +2085,13 @@ public sealed partial class SqlCatalog
         {
             if (!names.Add(constraint.Name))
             {
-                throw new SqlCatalogException("COHSQLE050", $"Constraint '{constraint.Name}' is declared more than once on '{table.Schema}.{table.Name}'.");
+                throw new SqlCatalogException("CS03050", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CatalogValidateConstraintsSqlCatalog, constraint.Name, table.Schema, table.Name));
             }
             foreach (string column in constraint.Columns)
             {
                 if (table.FindColumn(column) is null)
                 {
-                    throw new SqlCatalogException("COHSQLE015", $"Constraint '{constraint.Name}' refers to unknown column '{column}'.");
+                    throw new SqlCatalogException("CS01015", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CatalogValidateConstraintsSqlCatalog2, constraint.Name, column));
                 }
             }
         }
@@ -2069,7 +2102,7 @@ public sealed partial class SqlCatalog
         int count = reader.ReadInt32();
         if (count < 0)
         {
-            throw new SqlCatalogException("The persisted constraint column count is invalid.");
+            throw new SqlCatalogException("CS06059", ErrorMessages.SqlCatalogReadColumnNamesSqlCatalog);
         }
         var columns = new List<string>();
         for (int index = 0; index < count; index++)
@@ -2190,7 +2223,8 @@ public sealed partial class SqlCatalog
         DatabaseObjectOwner owner,
         string? owningSchema,
         CancellationToken cancellationToken,
-        SqlCatalogScriptPublication? publication)
+        SqlCatalogScriptPublication? publication,
+        bool prepareOwner = false)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(schema);
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
@@ -2202,15 +2236,24 @@ public sealed partial class SqlCatalog
             ThrowIfOffline();
             if (_tables.ContainsKey((schema, name)) || _views.ContainsKey(SqlObjectIdentity.View(schema, name)))
             {
-                throw new SqlCatalogException("COHSQLE049", $"Table '{schema}.{name}' already exists.");
+                throw new SqlCatalogException("CS03049", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.RenameTableCollision, schema, name));
             }
             ValidateColumns(schema, name, columns, primaryKeyColumns);
             var table = new SqlCatalogTable(_nextObjectId, schema, name, columns, primaryKeyColumns, owner, owningSchema, constraints);
             ValidateConstraints(table);
             // Persist the identity before physical trees are created. A crash can
             // leave unused trees, but can never reuse their identity for a table.
+            // Refuse an unstorable definition before reserving an owner or evaluating CTAS.
+            _ = EncodeTable(table);
             using var transaction = _storage.BeginTransaction();
+            var intent = prepareOwner ? _storage.InsertRow(transaction, table.ObjectId,
+                SqlReclamationRecord.Encode(table.ObjectId, schema, name)) : ((PageId PageId, int SlotIndex)?)null;
             CommitCatalogChange(transaction, checked(_nextObjectId + 1), publication, reservationOnly: true, actualObject: SqlObjectIdentity.Table(schema, name));
+            if (intent is { } location)
+            {
+                _pendingReclamations.Add(table.ObjectId, new SqlReclamationIntent(location.PageId, location.SlotIndex));
+                _preparedTruncateOwners.Add(table.ObjectId);
+            }
             return new ValueTask<SqlCatalogTable>(table);
         }
     }
@@ -2313,15 +2356,20 @@ public sealed partial class SqlCatalog
             ThrowIfOffline();
             if (!replaceExisting && (table.ObjectId == 0 || table.ObjectId >= _nextObjectId))
             {
-                throw new SqlCatalogException("COHSQLE060", $"Table '{table.Schema}.{table.Name}' has no reserved catalog identity.");
+                throw new SqlCatalogException("CS05060", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.PublishTableCoreAsyncSqlCatalog, table.Schema, table.Name));
             }
             _tables.TryGetValue((table.Schema, table.Name), out TableSlot? existing);
+            if (!replaceExisting && existing is not null)
+            {
+                throw new SqlCatalogException("CS03049", string.Format(System.Globalization.CultureInfo.CurrentCulture,
+                    ErrorMessages.RenameTableCollision, table.Schema, table.Name));
+            }
             if (replaceExisting ? existing is null || existing.Table.ObjectId != table.ObjectId :
                 existing is not null || FindTableByObjectId(table.ObjectId) is not null)
             {
-                throw new SqlCatalogException("COHSQLE060", $"Table '{table.Schema}.{table.Name}' has an unexpected catalog identity.");
+                throw new SqlCatalogException("CS05060", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.PublishTableCoreAsyncSqlCatalog2, table.Schema, table.Name));
             }
-            if (_views.ContainsKey(SqlObjectIdentity.View(table.Schema, table.Name))) { throw new SqlCatalogException("COHSQLE033", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ViewExists, table.Schema, table.Name)); }
+            if (_views.ContainsKey(SqlObjectIdentity.View(table.Schema, table.Name))) { throw new SqlCatalogException("CS03033", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ViewExists, table.Schema, table.Name)); }
             if (existing is not null)
             {
                 foreach (var column in existing.Table.Columns)
@@ -2341,7 +2389,7 @@ public sealed partial class SqlCatalog
             {
                 if (!names.Add(index.Name) || index.ColumnNames.Any(column => table.FindColumn(column) is null))
                 {
-                    throw new SqlCatalogException("COHSQLE060", $"Index '{index.Name}' conflicts with the replacement table definition.");
+                    throw new SqlCatalogException("CS05060", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.PublishTableCoreAsyncSqlCatalog3, index.Name));
                 }
             }
             foreach (SqlCatalogIndex index in indexes)
@@ -2349,7 +2397,7 @@ public sealed partial class SqlCatalog
                 if (index.TableObjectId != table.ObjectId || !names.Add(index.Name) ||
                     index.ColumnNames.Any(column => table.FindColumn(column) is null))
                 {
-                    throw new SqlCatalogException("COHSQLE060", $"Index '{index.Name}' does not describe a new index on '{table.Schema}.{table.Name}'.");
+                    throw new SqlCatalogException("CS05060", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.PublishTableCoreAsyncSqlCatalog4, index.Name, table.Schema, table.Name));
                 }
             }
             var mergedRegistrations = MergePublishedRegistrations(registrations, indexes);
@@ -2357,7 +2405,20 @@ public sealed partial class SqlCatalog
             var tableLocation = UpsertRecord(transaction, existing?.Location, EncodeTable(table));
             var slots = indexes.Select(index => new IndexSlot(index, _storage.InsertRow(transaction, EncodeIndex(index)))).ToArray();
             var registrationsLocation = UpsertRecord(transaction, _registrationsLocation, EncodeRegistrations(mergedRegistrations));
+            // CTAS's unreachable owner stays reclaimable until this same catalog commit
+            // publishes its complete definition. Format 26 already understands kind 14.
+            bool prepared = !replaceExisting && _preparedTruncateOwners.Contains(table.ObjectId);
+            if (prepared)
+            {
+                var intent = _pendingReclamations[table.ObjectId];
+                _storage.DeleteRow(transaction, intent.PageId, intent.SlotIndex);
+            }
             CommitCatalogChange(transaction, publication: publication, actualObject: SqlObjectIdentity.Table(table.Schema, table.Name), createsObject: !replaceExisting);
+            if (prepared)
+            {
+                _pendingReclamations.Remove(table.ObjectId);
+                _preparedTruncateOwners.Remove(table.ObjectId);
+            }
             _tables[(table.Schema, table.Name)] = new TableSlot(table, tableLocation);
             foreach (IndexSlot slot in slots)
             {
@@ -2387,7 +2448,7 @@ public sealed partial class SqlCatalog
         {
             if (table.DroppedColumnOrdinals.Count > 0)
             {
-                throw new SqlCatalogException("COHSQLE060", $"Table '{table.Schema}.{table.Name}' cannot be created with dropped columns.");
+                throw new SqlCatalogException("CS05060", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.EnsurePhysicalLayoutKeptSqlCatalog, table.Schema, table.Name));
             }
 
             return;
@@ -2400,15 +2461,14 @@ public sealed partial class SqlCatalog
             kept = string.Equals(existing.Columns[ordinal].Name, table.Columns[ordinal].Name, StringComparison.OrdinalIgnoreCase);
             if (!string.Equals(existing.Columns[ordinal].MissingValueLiteral, table.Columns[ordinal].MissingValueLiteral, StringComparison.Ordinal))
             {
-                throw new SqlCatalogException("COHSQLE060", $"The frozen missing value of column '{existing.Columns[ordinal].Name}' cannot be changed by replacement publication.");
+                throw new SqlCatalogException("CS05060", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.EnsurePhysicalLayoutKeptSqlCatalog2, existing.Columns[ordinal].Name));
             }
         }
 
         if (!kept)
         {
-            throw new SqlCatalogException("COHSQLE060",
-                $"The replacement definition of '{table.Schema}.{table.Name}' does not keep the physical column layout of the current one: " +
-                "it may only append columns.");
+            throw new SqlCatalogException("CS05060",
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.EnsurePhysicalLayoutKeptSqlCatalog3, table.Schema, table.Name));
         }
     }
 
@@ -2428,7 +2488,7 @@ public sealed partial class SqlCatalog
             var slot = GetSlot(schema, name);
             if (_indexes.ContainsKey((slot.Table.ObjectId, constraint.Name)))
             {
-                throw new SqlCatalogException("COHSQLE050", $"Constraint or index '{constraint.Name}' already exists on '{schema}.{name}'.");
+                throw new SqlCatalogException("CS03050", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CatalogAddConstraintAsyncSqlCatalog, constraint.Name, schema, name));
             }
             var updated = new SqlCatalogTable(slot.Table.ObjectId, schema, name, slot.Table.Columns,
                 slot.Table.PrimaryKeyColumns, slot.Table.Owner, slot.Table.OwningSchema,
@@ -2507,7 +2567,7 @@ public sealed partial class SqlCatalog
                 !string.Equals(constraint.Name, constraintName, StringComparison.OrdinalIgnoreCase)).ToArray();
             if (constraints.Length == slot.Table.Constraints.Count)
             {
-                throw new SqlCatalogException("COHSQLE052", $"Constraint '{constraintName}' does not exist on '{schema}.{name}'.");
+                throw new SqlCatalogException("CS01052", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DropConstraintCoreAsyncSqlCatalog, constraintName, schema, name));
             }
             var updated = new SqlCatalogTable(slot.Table.ObjectId, schema, name, slot.Table.Columns,
                 slot.Table.PrimaryKeyColumns, slot.Table.Owner, slot.Table.OwningSchema, constraints, slot.Table.DroppedColumnOrdinals);
@@ -2553,7 +2613,7 @@ public sealed partial class SqlCatalog
             owner is not DatabaseObjectOwner.Adhoc and not DatabaseObjectOwner.Schema ||
             (owner == DatabaseObjectOwner.Schema ? string.IsNullOrWhiteSpace(owningSchema) : owningSchema is not null))
         {
-            throw new SqlCatalogException("The persisted object ownership metadata is invalid.");
+            throw new SqlCatalogException("CS06059", ErrorMessages.SqlCatalogReadOwnershipSqlCatalog);
         }
 
         return (owner, owningSchema);
@@ -2573,7 +2633,7 @@ public sealed partial class SqlCatalog
                   .AppendInt64(registration.RootPageId);
         }
 
-        return EnsureStorable(writer.ToArray(), $"the database's {registrations.Count} index registrations");
+        return EnsureStorable(writer.ToArray(), string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CatalogRegistrationsSubject, registrations.Count));
     }
 
     private static IReadOnlyList<BTreeIndexRegistration> DecodeRegistrations(ref DatabaseKeyReader reader)
@@ -2622,13 +2682,13 @@ public sealed partial class SqlCatalog
         byte[] document = reader.ReadBinary();
         if (reader.IsAtEnd)
         {
-            throw new SqlCatalogException(
-                "Unsupported applied-schema state format: DDL generations require record-space format 8. Recreate the database; no upgrade is available.");
+            throw new SqlCatalogException("CS06060",
+                ErrorMessages.DecodeSchemaStateChunkSqlCatalog);
         }
         ulong generation = (ulong)reader.ReadInt64();
         if (!reader.IsAtEnd)
         {
-            throw new SqlCatalogException("Malformed applied-schema state: a chunk contains trailing values.");
+            throw new SqlCatalogException("CS06059", ErrorMessages.DecodeSchemaStateChunkSqlCatalog2);
         }
         return new SchemaStateChunk(contentHash, generation, index, count, document, default);
     }
@@ -2638,7 +2698,7 @@ public sealed partial class SqlCatalog
         SchemaStateChunk first = chunks[0];
         if (first.Count <= 0 || first.Count != chunks.Count)
         {
-            throw new SqlCatalogException("Malformed applied-schema state: its chunk count is inconsistent.");
+            throw new SqlCatalogException("CS06059", ErrorMessages.CatalogAssembleSchemaStateSqlCatalog);
         }
 
         var ordered = new byte[first.Count][];
@@ -2652,7 +2712,7 @@ public sealed partial class SqlCatalog
                 chunk.Index >= ordered.Length ||
                 ordered[chunk.Index] is not null)
             {
-                throw new SqlCatalogException("Malformed applied-schema state: its chunks do not describe one complete document.");
+                throw new SqlCatalogException("CS06059", ErrorMessages.CatalogAssembleSchemaStateSqlCatalog2);
             }
 
             ordered[chunk.Index] = chunk.Document;
@@ -2665,7 +2725,7 @@ public sealed partial class SqlCatalog
         {
             if (chunk is null)
             {
-                throw new SqlCatalogException("Malformed applied-schema state: a document chunk is missing.");
+                throw new SqlCatalogException("CS06059", ErrorMessages.CatalogAssembleSchemaStateSqlCatalog3);
             }
 
             chunk.CopyTo(document, offset);
@@ -2678,7 +2738,7 @@ public sealed partial class SqlCatalog
         }
         catch (DecoderFallbackException)
         {
-            throw new SqlCatalogException("Malformed applied-schema state: its canonical document is not valid UTF-8.");
+            throw new SqlCatalogException("CS06059", ErrorMessages.CatalogAssembleSchemaStateSqlCatalog4);
         }
     }
 
@@ -2718,5 +2778,13 @@ public sealed partial class SqlCatalog
             => HashCode.Combine(
                 StringComparer.OrdinalIgnoreCase.GetHashCode(value.Schema),
                 StringComparer.OrdinalIgnoreCase.GetHashCode(value.Name));
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Catalog.SqlCatalog value)
+        {
+            _ = value;
+        }
     }
 }

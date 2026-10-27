@@ -44,6 +44,9 @@ public static class OqlLanguageProfile
 
     private static readonly string[] _clauses =
     [
+        OqlClauses.Begin,
+        OqlClauses.Commit,
+        OqlClauses.Rollback,
         OqlClauses.CreateCollection,
         OqlClauses.DropCollection,
         OqlClauses.CreateIndex,
@@ -53,12 +56,15 @@ public static class OqlLanguageProfile
         OqlClauses.Update,
         OqlClauses.Unset,
         OqlClauses.Delete,
+        OqlClauses.Returning,
         OqlClauses.Values,
         OqlClauses.Select,
         OqlClauses.Distinct,
         OqlClauses.SelectValue,
         OqlClauses.ObjectConstructor,
         OqlClauses.ArrayConstructor,
+        OqlClauses.ArrayComprehension,
+        OqlClauses.FirstComprehension,
         OqlClauses.Explain,
         OqlClauses.From,
         OqlClauses.Unnest,

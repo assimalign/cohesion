@@ -3,7 +3,7 @@ using Assimalign.Cohesion.Database.Protocol;
 namespace Assimalign.Cohesion.Database.KeyValuePair.Protocol;
 
 /// <summary>The immutable KeyValuePair endpoint message family.</summary>
-public static class KeyValueProtocol
+public static partial class KeyValueProtocol
 {
     /// <summary>Gets the family bound to every KeyValuePair protocol connection.</summary>
     public static ProtocolMessageFamily Family { get; } = new("KeyValuePair", 5, 6, 7, 8, 9);

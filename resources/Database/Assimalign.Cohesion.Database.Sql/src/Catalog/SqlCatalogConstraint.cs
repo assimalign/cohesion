@@ -37,7 +37,7 @@ public sealed class SqlCatalogConstraint
         if (kind is not SqlCatalogConstraintKind.Reference and not SqlCatalogConstraintKind.Check ||
             onDelete is < SqlCatalogReferentialAction.Restrict or > SqlCatalogReferentialAction.SetDefault)
         {
-            throw new ArgumentException("The constraint kind or referential action is invalid.");
+            throw new ArgumentException(ErrorMessages.SqlCatalogConstraintArgument);
         }
 
         if (kind == SqlCatalogConstraintKind.Reference)
@@ -46,13 +46,13 @@ public sealed class SqlCatalogConstraint
             ArgumentException.ThrowIfNullOrWhiteSpace(referencedTable);
             if (columns.Count == 0 || referencedColumns is null || referencedColumns.Count != columns.Count || checkExpression is not null)
             {
-                throw new ArgumentException("A foreign key must pair its columns with referenced columns and cannot contain a check expression.");
+                throw new ArgumentException(ErrorMessages.SqlCatalogConstraintArgument2);
             }
         }
         else if (string.IsNullOrWhiteSpace(checkExpression) || referencedSchema is not null || referencedTable is not null ||
                  referencedColumns is { Count: > 0 } || onDelete != SqlCatalogReferentialAction.Restrict)
         {
-            throw new ArgumentException("A check constraint requires an expression and cannot declare a reference or referential action.");
+            throw new ArgumentException(ErrorMessages.SqlCatalogConstraintArgument3);
         }
 
         Name = name;
@@ -66,7 +66,7 @@ public sealed class SqlCatalogConstraint
         CheckFunctionCalls = Array.AsReadOnly((checkFunctionCalls ?? []).ToArray());
         if (CheckFunctionCalls.Any(string.IsNullOrWhiteSpace))
         {
-            throw new ArgumentException("A check function identity cannot be blank.", nameof(checkFunctionCalls));
+            throw new ArgumentException(ErrorMessages.SqlCatalogConstraintArgument4, nameof(checkFunctionCalls));
         }
     }
 
@@ -102,7 +102,7 @@ public sealed class SqlCatalogConstraint
             ArgumentException.ThrowIfNullOrWhiteSpace(values[index]);
             if (!names.Add(values[index]))
             {
-                throw new ArgumentException($"Constraint column '{values[index]}' is repeated.");
+                throw new ArgumentException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlCatalogConstraintSnapshotArgument, values[index]));
             }
             copy[index] = values[index];
         }

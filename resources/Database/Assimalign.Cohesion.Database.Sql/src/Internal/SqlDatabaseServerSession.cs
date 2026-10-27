@@ -28,6 +28,8 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// which the handshake records once each through the base's one-shot setters; the engine session
 /// is re-exposed typed by a covariant override.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("SqlDatabaseServerSession")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlDatabaseServerSession.DebugView))]
 internal sealed class SqlDatabaseServerSession : DatabaseServerSession
 {
     private readonly SqlDatabaseServer _server;
@@ -116,7 +118,7 @@ internal sealed class SqlDatabaseServerSession : DatabaseServerSession
         try
         {
             _lifetimeSource.Cancel();
-            _connection.Abort(new ConnectionAbortedException("The server is shutting down."));
+            _connection.Abort(new ConnectionAbortedException(ErrorMessages.SqlDatabaseServerSessionAbortFailure));
         }
         catch (ObjectDisposedException)
         {
@@ -172,7 +174,7 @@ internal sealed class SqlDatabaseServerSession : DatabaseServerSession
             // cancels that final handshake flush, the authenticated peer still needs its
             // terminal notice, just as one already inside the ready loop does.
             _closeReason = SqlDatabaseEventSource.CloseReason.Shutdown;
-            await TryWriteErrorAsync(ProtocolErrorCode.Unavailable, "The server is shutting down.").ConfigureAwait(false);
+            await TryWriteErrorAsync(ProtocolErrorCode.Unavailable, ErrorMessages.SqlDatabaseServerSessionAbortFailure).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -191,7 +193,7 @@ internal sealed class SqlDatabaseServerSession : DatabaseServerSession
             // The peer gets an internal error frame only; the event carries the failure.
             _closeReason = SqlDatabaseEventSource.CloseReason.Faulted;
             SqlDatabaseEventSource.Log.SessionFaulted(this, exception);
-            await TryWriteErrorAsync(ProtocolErrorCode.Internal, "An unexpected server error terminated the session.").ConfigureAwait(false);
+            await TryWriteErrorAsync(ProtocolErrorCode.Internal, ErrorMessages.ServerSessionRunAsyncValueTask).ConfigureAwait(false);
         }
         finally
         {
@@ -241,7 +243,7 @@ internal sealed class SqlDatabaseServerSession : DatabaseServerSession
 
             if (frame.Value.Type != ProtocolMessageType.Startup)
             {
-                await RefuseHandshakeAsync(ProtocolErrorCode.ProtocolViolation, $"Expected a startup frame but received {frame.Value.Type}.", string.Empty, string.Empty).ConfigureAwait(false);
+                await RefuseHandshakeAsync(ProtocolErrorCode.ProtocolViolation, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StartupFrameExpected, frame.Value.Type), string.Empty, string.Empty).ConfigureAwait(false);
                 return false;
             }
 
@@ -249,7 +251,7 @@ internal sealed class SqlDatabaseServerSession : DatabaseServerSession
 
             if (!ProtocolVersion.TryNegotiate(startup.Version, out var negotiatedVersion))
             {
-                await RefuseHandshakeAsync(ProtocolErrorCode.UnsupportedVersion, $"Protocol major version {startup.Version.Major} is not supported; the server speaks {ProtocolVersion.Current}.", startup.Database, startup.Principal).ConfigureAwait(false);
+                await RefuseHandshakeAsync(ProtocolErrorCode.UnsupportedVersion, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ProtocolVersionUnsupported, startup.Version.Major, ProtocolVersion.Current), startup.Database, startup.Principal).ConfigureAwait(false);
                 return false;
             }
 
@@ -273,7 +275,7 @@ internal sealed class SqlDatabaseServerSession : DatabaseServerSession
 
             if (database is null)
             {
-                await RefuseHandshakeAsync(ProtocolErrorCode.DatabaseNotFound, $"The server's engine has no database named '{startup.Database}'.", startup.Database, startup.Principal).ConfigureAwait(false);
+                await RefuseHandshakeAsync(ProtocolErrorCode.DatabaseNotFound, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.HandshakeDatabaseMissing, startup.Database), startup.Database, startup.Principal).ConfigureAwait(false);
                 return false;
             }
 
@@ -300,7 +302,7 @@ internal sealed class SqlDatabaseServerSession : DatabaseServerSession
 
             if (frame.Value.Type != ProtocolMessageType.AuthenticateResponse)
             {
-                await RefuseHandshakeAsync(ProtocolErrorCode.ProtocolViolation, $"Expected an authenticate response but received {frame.Value.Type}.", startup.Database, startup.Principal).ConfigureAwait(false);
+                await RefuseHandshakeAsync(ProtocolErrorCode.ProtocolViolation, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.AuthenticationResponseExpected, frame.Value.Type), startup.Database, startup.Principal).ConfigureAwait(false);
                 return false;
             }
 
@@ -308,7 +310,7 @@ internal sealed class SqlDatabaseServerSession : DatabaseServerSession
 
             if (!authenticated)
             {
-                await RefuseHandshakeAsync(ProtocolErrorCode.AuthenticationFailed, $"Authentication failed for principal '{startup.Principal}'.", startup.Database, startup.Principal).ConfigureAwait(false);
+                await RefuseHandshakeAsync(ProtocolErrorCode.AuthenticationFailed, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.PrincipalAuthenticationFailed, startup.Principal), startup.Database, startup.Principal).ConfigureAwait(false);
                 return false;
             }
 
@@ -320,7 +322,7 @@ internal sealed class SqlDatabaseServerSession : DatabaseServerSession
             {
                 // The database went offline after a failed durable flush (#1243): every session is
                 // refused, with the coded reason, until it is reopened.
-                await RefuseHandshakeAsync(ProtocolErrorCode.Unavailable, exception.Message, startup.Database, startup.Principal).ConfigureAwait(false);
+                await RefuseHandshakeAsync(ProtocolErrorCode.Unavailable, $"{exception.Code}: {exception.Message}", startup.Database, startup.Principal).ConfigureAwait(false);
                 return false;
             }
 
@@ -359,14 +361,14 @@ internal sealed class SqlDatabaseServerSession : DatabaseServerSession
                 {
                     // Graceful drain: the session was idle at the frame boundary.
                     _closeReason = SqlDatabaseEventSource.CloseReason.Shutdown;
-                    await TryWriteErrorAsync(ProtocolErrorCode.Unavailable, "The server is shutting down.").ConfigureAwait(false);
+                    await TryWriteErrorAsync(ProtocolErrorCode.Unavailable, ErrorMessages.SqlDatabaseServerSessionAbortFailure).ConfigureAwait(false);
                     return;
                 }
                 catch (OperationCanceledException) when (!_lifetimeSource.IsCancellationRequested)
                 {
                     // Idle timeout eviction.
                     _closeReason = SqlDatabaseEventSource.CloseReason.IdleTimeout;
-                    await TryWriteErrorAsync(ProtocolErrorCode.Unavailable, "The session was closed after exceeding the idle timeout.").ConfigureAwait(false);
+                    await TryWriteErrorAsync(ProtocolErrorCode.Unavailable, ErrorMessages.ServerSessionReadyLoopAsyncValueTask).ConfigureAwait(false);
                     return;
                 }
             }
@@ -383,6 +385,15 @@ internal sealed class SqlDatabaseServerSession : DatabaseServerSession
                     // Executions run on the session lifetime token, not the soft-stop
                     // token: a drain lets in-flight statements finish.
                     await ExecuteAsync(frame.Value, _lifetimeSource.Token).ConfigureAwait(false);
+                    if (_channel!.Capabilities.Contains(ProtocolCapability.TransactionStatus.Name))
+                    {
+                        var transaction = _databaseSession!.CurrentTransaction;
+                        var status = transaction is null ? ProtocolTransactionStatus.Idle
+                            : transaction.State == Assimalign.Cohesion.Database.Transactions.TransactionState.Faulted
+                                ? ProtocolTransactionStatus.Failed : ProtocolTransactionStatus.Active;
+                        await WriteFrameAsync(ProtocolMessageType.Ready,
+                            new ProtocolTransactionStatusMessage(status).Encode(), _lifetimeSource.Token).ConfigureAwait(false);
+                    }
                     break;
 
                 case ProtocolMessageType.Ping:
@@ -419,7 +430,7 @@ internal sealed class SqlDatabaseServerSession : DatabaseServerSession
                 {
                     // A malformed parameter component is a wire violation, not a
                     // statement failure.
-                    throw new ProtocolException($"Malformed component encoding for parameter '{name}'.", exception);
+                    throw new ProtocolException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ServerSessionExecuteAsyncProtocol, name), exception);
                 }
             }
         }
@@ -444,13 +455,13 @@ internal sealed class SqlDatabaseServerSession : DatabaseServerSession
             // The database is offline (#1243): every statement is refused, with the coded
             // reason, until it is reopened; the session stays ready to report it.
             await WriteDiagnosticsAsync(PrepareDiagnostics(exception.Diagnostics), cancellationToken).ConfigureAwait(false);
-            await WriteErrorAsync(ProtocolErrorCode.Unavailable, exception.Message, cancellationToken).ConfigureAwait(false);
+            await WriteErrorAsync(ProtocolErrorCode.Unavailable, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ServerSessionExecuteAsyncValueTask, exception.Code, exception.Message), cancellationToken).ConfigureAwait(false);
             return;
         }
         catch (DatabaseException exception)
         {
             var diagnostic = exception.Diagnostics.FirstOrDefault(item => item.Severity == DiagnosticSeverity.Error);
-            string errorText = diagnostic?.Code is { } code && !exception.Message.StartsWith(code + ":", StringComparison.Ordinal) ? $"{code}: {exception.Message}" : exception.Message;
+            string errorText = diagnostic?.Code is { } code && !exception.Message.StartsWith(code + ":", StringComparison.Ordinal) ? string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ServerSessionExecuteAsyncValueTask, code, exception.Message) : exception.Message;
             await WriteDiagnosticsAsync(PrepareDiagnostics(exception.Diagnostics), cancellationToken).ConfigureAwait(false);
             await WriteErrorAsync(ProtocolErrorCode.ExecutionFailure, errorText, cancellationToken).ConfigureAwait(false);
             return;
@@ -500,8 +511,8 @@ internal sealed class SqlDatabaseServerSession : DatabaseServerSession
         if (result.Status != DatabaseResultStatus.Success)
         {
             string detail = result.Diagnostics is { Count: > 0 } diagnostics && diagnostics[0].Message is { } diagnosticMessage
-                ? $"{diagnostics[0].Code}: {diagnosticMessage}"
-                : $"The statement completed with status {result.Status}.";
+                ? string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ServerSessionExecuteAsyncValueTask, diagnostics[0].Code, diagnosticMessage)
+                : string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SessionWriteResultAsyncValueTask, result.Status);
 
             await WriteDiagnosticsAsync(diagnosticPayload, cancellationToken).ConfigureAwait(false);
             await WriteErrorAsync(ProtocolErrorCode.ExecutionFailure, detail, cancellationToken).ConfigureAwait(false);
@@ -550,7 +561,7 @@ internal sealed class SqlDatabaseServerSession : DatabaseServerSession
     {
         var diagnostic = exception.Diagnostics.FirstOrDefault(item => item.Severity == DiagnosticSeverity.Error);
         string errorText = diagnostic?.Code is { } code && !exception.Message.StartsWith(code + ":", StringComparison.Ordinal)
-            ? $"{code}: {exception.Message}" : exception.Message;
+            ? string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ServerSessionExecuteAsyncValueTask, code, exception.Message) : exception.Message;
         await WriteDiagnosticsAsync(PrepareDiagnostics(exception.Diagnostics), cancellationToken).ConfigureAwait(false);
         await WriteErrorAsync(ProtocolErrorCode.ExecutionFailure, errorText, cancellationToken).ConfigureAwait(false);
     }
@@ -618,9 +629,9 @@ internal sealed class SqlDatabaseServerSession : DatabaseServerSession
             {
                 string notice = FormattableString.Invariant($"Diagnostic overflow: retained the first {entries.Count} of {total} Warning/Error entries in source order; omitted the remaining {total - entries.Count}. Limits: 4096 entries and 1048576 encoded bytes.");
                 if (entries.Count < ProtocolDiagnosticsMessage.MaxEntryCount &&
-                    DiagnosticSize("COHDBP001", notice) <= ProtocolDiagnosticsMessage.MaxPayloadLength - size)
+                    DiagnosticSize("CK07001", notice) <= ProtocolDiagnosticsMessage.MaxPayloadLength - size)
                 {
-                    entries.Add(new ProtocolDiagnostic(ProtocolDiagnosticSeverity.Warning, "COHDBP001", notice, null, null, 1));
+                    entries.Add(new ProtocolDiagnostic(ProtocolDiagnosticSeverity.Warning, "CK07001", notice, null, null, 1));
                     break;
                 }
                 ProtocolDiagnostic last = entries[^1];
@@ -697,7 +708,7 @@ internal sealed class SqlDatabaseServerSession : DatabaseServerSession
     /// </summary>
     private ValueTask RejectUnexpectedFrameAsync(ProtocolMessageType type)
     {
-        string violation = $"Unexpected {type} frame in the ready state.";
+        string violation = string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.RejectUnexpectedFrameAsyncValueTask, type);
         _closeReason = SqlDatabaseEventSource.CloseReason.ProtocolViolation;
         SqlDatabaseEventSource.Log.SessionProtocolViolation(this, violation);
         return TryWriteErrorAsync(ProtocolErrorCode.ProtocolViolation, violation);
@@ -793,5 +804,19 @@ internal sealed class SqlDatabaseServerSession : DatabaseServerSession
             _lifetimeSource.Dispose();
             _server.OnSessionCompleted(this);
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Sql.Internal.SqlDatabaseServerSession _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlDatabaseServerSession value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Sql.SqlDatabaseSession? DatabaseSession => _target.DatabaseSession;
+        public global::System.Guid Id => _target.Id;
+        public string? Principal => _target.Principal;
     }
 }

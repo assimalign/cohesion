@@ -115,7 +115,7 @@ public sealed class SqlPagingExecutionTests
 
         // Assert
         error.Message.ShouldBe($"{clause} requires a non-negative integer.");
-        error.Diagnostics.ShouldContain(item => item.Code == "COHSQLE018");
+        error.Diagnostics.ShouldContain(item => item.Code == "CS02018");
     }
 
     private static async Task<List<long>> ValuesAsync(SqlDatabaseSession session, string sql, IReadOnlyDictionary<string, object?>? parameters = null)

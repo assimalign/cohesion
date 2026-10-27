@@ -20,7 +20,7 @@ internal static class SqlCatalogOwnership
         }
         else if (owningSchema is not null)
         {
-            throw new ArgumentException("An ad-hoc object cannot name an owning compiled schema.", nameof(owningSchema));
+            throw new ArgumentException(ErrorMessages.SqlCatalogOwnershipValidateArgument, nameof(owningSchema));
         }
     }
 }

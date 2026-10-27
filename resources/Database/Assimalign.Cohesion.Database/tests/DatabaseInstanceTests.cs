@@ -5,6 +5,8 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
+
 namespace Assimalign.Cohesion.Database.Tests;
 
 /// <summary>
@@ -86,15 +88,15 @@ public class DatabaseInstanceTests
         var engine = new TestEngine();
         var database = new TestDatabase("appdb", engine, closeGate: gate);
         var first = database.DisposeAsync().AsTask();
-        await database.Closing.WaitAsync(Timeout);
+        await database.Closing.WaitAsync(_timeout);
 
         // Act
         var second = database.DisposeAsync().AsTask();
-        var blocking = Task.Run(database.Dispose);
+        var blocking = DedicatedTestTask.Run(database.Dispose);
         bool secondWaited = !await CompletesWithin(second, TimeSpan.FromMilliseconds(200));
         bool blockingWaited = !await CompletesWithin(blocking, TimeSpan.FromMilliseconds(50));
         gate.SetResult();
-        await Task.WhenAll(first, second, blocking).WaitAsync(Timeout);
+        await Task.WhenAll(first, second, blocking).WaitAsync(_timeout);
 
         // Assert
         secondWaited.ShouldBeTrue();
@@ -128,7 +130,7 @@ public class DatabaseInstanceTests
         engine.Forgets.ShouldBe(2);
     }
 
-    private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan _timeout = TimeSpan.FromSeconds(30);
 
     private static async Task<bool> CompletesWithin(Task task, TimeSpan wait)
         => await Task.WhenAny(task, Task.Delay(wait)) == task;

@@ -73,10 +73,10 @@ public sealed class DocumentClientEventSourceTests
         // Act
         for (int index = 0; index < 10; index++)
         {
-            await Should.ThrowAsync<DocumentClientException>(async () => await connection.QueryAsync("BEGIN", cancellationToken: harness.Token));
+            await Should.ThrowAsync<DocumentClientException>(async () => await connection.QueryAsync("MERGE INTO items", cancellationToken: harness.Token));
         }
         await Task.Delay(1100, harness.Token);
-        await Should.ThrowAsync<DocumentClientException>(async () => await connection.QueryAsync("BEGIN", cancellationToken: harness.Token));
+        await Should.ThrowAsync<DocumentClientException>(async () => await connection.QueryAsync("MERGE INTO items", cancellationToken: harness.Token));
 
         // Assert
         events.Events.Count(e => e.EventName == "QueryStart").ShouldBe(11);

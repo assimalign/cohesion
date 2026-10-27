@@ -55,6 +55,8 @@ namespace Assimalign.Cohesion.Database.Graph.Internal;
 /// a backoff, not only on its coordinator's doubling schedule.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("GraphVersionPurgeWorker {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Internal.GraphVersionPurgeWorker.DebugView))]
 internal sealed class GraphVersionPurgeWorker : DatabaseVersionPurgeWorker<GraphDatabase>
 {
     private readonly GraphDatabaseEngine _engine;
@@ -74,4 +76,19 @@ internal sealed class GraphVersionPurgeWorker : DatabaseVersionPurgeWorker<Graph
     protected override TransactionCoordinator GetCoordinator(GraphDatabase database) => database.Coordinator;
     protected override void Purge(GraphDatabase database, CancellationToken cancellationToken)
         => database.Coordinator.RunVersionPurgePass(cancellationToken);
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Graph.Internal.GraphVersionPurgeWorker _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Graph.Internal.GraphVersionPurgeWorker value)
+        {
+            _target = value;
+        }
+
+        public bool CompletionOnly => _target.CompletionOnly;
+        public string Name => _target.Name;
+        public global::Assimalign.Cohesion.Database.DatabaseEngineWorkerKind Kind => _target.Kind;
+        public global::System.TimeSpan Interval => _target.Interval;
+    }
 }

@@ -11,6 +11,8 @@ using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Graph.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("GraphQueryResult")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Internal.GraphQueryResult.DebugView))]
 internal sealed class GraphQueryResult : DatabaseResultSet
 {
     private readonly IReadOnlyList<DatabaseColumn> _columns;
@@ -48,6 +50,8 @@ internal sealed class GraphQueryResult : DatabaseResultSet
     }
     public override ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
+    [global::System.Diagnostics.DebuggerDisplay("GraphQueryRow FieldCount={FieldCount}")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Internal.GraphQueryResult.GraphQueryRow.DebugView))]
     private sealed class GraphQueryRow : DatabaseRow
     {
         private readonly object?[] _values;
@@ -73,12 +77,39 @@ internal sealed class GraphQueryResult : DatabaseResultSet
             null => ReadOnlyMemory<byte>.Empty,
             JsonElement json => Encoding.UTF8.GetBytes(json.GetRawText()),
             string text => Encoding.UTF8.GetBytes(text),
-            _ => throw new DatabaseException($"Field {ordinal} is not JSON or a string."),
+            _ => throw DatabaseException.CreateGraphFailure("CK02001", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.GraphQueryRowGetBytesDatabase, ordinal)),
         };
         public override int GetInt32(int ordinal) => Convert.ToInt32(Required(ordinal), CultureInfo.InvariantCulture);
         public override long GetInt64(int ordinal) => Convert.ToInt64(Required(ordinal), CultureInfo.InvariantCulture);
         public override double GetDouble(int ordinal) => Convert.ToDouble(Required(ordinal), CultureInfo.InvariantCulture);
         public override bool GetBoolean(int ordinal) => Convert.ToBoolean(Required(ordinal), CultureInfo.InvariantCulture);
-        private object Required(int ordinal) => _values[ordinal] ?? throw new DatabaseException($"Field {ordinal} is null.");
+        private object Required(int ordinal) => _values[ordinal] ?? throw DatabaseException.CreateGraphFailure("CK02002", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.GraphQueryRowRequiredDatabase, ordinal));
+
+        private sealed class DebugView
+        {
+            private readonly global::Assimalign.Cohesion.Database.Graph.Internal.GraphQueryResult.GraphQueryRow _target;
+
+            public DebugView(global::Assimalign.Cohesion.Database.Graph.Internal.GraphQueryResult.GraphQueryRow value)
+            {
+                _target = value;
+            }
+
+            public int FieldCount => _target.FieldCount;
+        }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Graph.Internal.GraphQueryResult _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Graph.Internal.GraphQueryResult value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Execution.DatabaseResultStatus Status => _target.Status;
+        public long AffectedCount => _target.AffectedCount;
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.Types.Diagnostic> Diagnostics => _target.Diagnostics;
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.Execution.DatabaseColumn> Columns => _target.Columns;
     }
 }

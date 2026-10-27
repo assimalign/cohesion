@@ -35,7 +35,10 @@ exe, and exits non-zero when a step fails. It covers, per model, the declared `s
 over loopback TCP, transactions, the catalog, and every Samples script; for SQL also the declared
 database's provisioned schema and its CHECK, and the registered functions embedded and over the
 wire; and, on a scratch root of its own, that a declaration failing its build stops only its own
-model. A run over a fresh temporary root gives 100 passed, 0 failed, 0 skipped, including Documents TCP OQL, whole documents, versioned CRUD, collection/catalog reads and reusable coded failures.
+model. A run over a fresh temporary root gives 104 passed, 0 failed, 0 skipped, including Documents TCP OQL, whole documents, versioned CRUD, collection/catalog reads and reusable coded failures.
+The splitter smoke cases pin SQL/OQL comment boundaries and GQL left-arrow boundaries, statement
+text and editor offsets. A refused `MATCH (a)<-->(b) RETURN a;` followed by `RETURN 1;` must still
+execute the independent second statement with `StopOnError=false` (#1647).
 Unhandled MAUI crashes are logged to `studio-crash.log` next to the exe; the UI marks them handled and keeps
 running.
 
@@ -75,7 +78,7 @@ One engine per model runs in-process under `<data root>\<model>` (default
 | Wire (loopback) | The Studio starts that model's server on `127.0.0.1:<port>` (0 = OS-assigned) over the same engine and uses the real client (`Sql/Graph/KeyValuePair/Blob.Client`). Database list/create/drop, KEYSPACES and blob containers still go through the engine: the wire has no management verbs. |
 | Wire (external) | The real client against an already-running server (for example the SampleHost fixture). Type the database name; nothing can be listed or created. |
 
-The Documents diagnostics sample uses USE KEYS, which remains unsupported through T1 and yields COHDBL001.
+The Documents diagnostics sample uses USE KEYS, which remains unsupported through T1 and yields CK00001.
 
 The Documents editor remains **embedded only**. Its smoke run separately exercises the shipped Documents server/client over TCP; editor connection-mode integration is a later UI task.
 
@@ -84,7 +87,8 @@ The Documents editor remains **embedded only**. Its smoke run separately exercis
 - **SQL / Documents (OQL) / Graph (GQL)**: editor (F5 or Ctrl+Enter runs the selection, or
   everything), statement-by-statement execution (the script is cut at each `;` the engines' shared
   `TokenLexer` reads, so comments and quotes end where the engines end them, and the text is sent as
-  typed, CR line breaks included), result grid (tap a row for full values, Copy TSV),
+  typed, CR line breaks included; GQL enables left-arrow recognition while SQL/OQL retain the
+  default comment boundaries), result grid (tap a row for full values, Copy TSV),
   Messages with status, affected count, elapsed ms and every diagnostic (click one to select it in the
   editor), catalog explorer (click a highlighted entry to insert a query; SQL also lists the
   registered functions from `COHESION_SCHEMA.FUNCTIONS`), session history, Samples (SQL's
@@ -135,3 +139,17 @@ The Documents editor remains **embedded only**. Its smoke run separately exercis
   start/end bounds".
 - No KEYSPACES verb on `KeyValueConnection`; no container verbs on `BlobConnection`.
 - OQL `COUNT(*)` is typed `Decimal`, while SQL `COUNT(*)` is `Int64`.
+
+## Repository conventions audit
+
+Workspace refusals and smoke assertion templates use the build-generated internal ErrorMessages
+accessor from Properties/ErrorMessages.resx. Existing exception types, messages, model diagnostics
+and smoke pass/fail decisions are preserved. Extension containers are partial. The documented
+throw-away layout, documentation and MAUI dependency exceptions still apply; this tool is excluded
+from the repository debugger-proxy rule. No runtime Database error identity is added for a Studio
+assertion.
+
+The Studio project generates that accessor before WinUI's early C# XamlPreCompile pass. WinUI
+otherwise reaches that pass before ordinary resource generation, leaving the internal accessor
+unavailable. The local target runs PrepareResourceNames and ResGen directly, preserving the
+resource text and avoiding a cycle through PrepareResources.

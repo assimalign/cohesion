@@ -31,8 +31,12 @@ namespace Assimalign.Cohesion.Database.Graph.Internal;
 /// which the handshake records once each; the engine session is re-exposed typed by a covariant
 /// override.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("GraphDatabaseServerSession Id={Id}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Internal.GraphDatabaseServerSession.DebugView))]
 internal sealed class GraphDatabaseServerSession : DatabaseServerSession
 {
+    private static readonly string _errorDatabaseServerSessionAbortFailure = ErrorMessages.DatabaseServerSessionAbortFailure;
+
     private readonly GraphDatabaseServer _server;
     private readonly IDuplexConnection _connection;
     private readonly GraphDatabaseServerOptions _options;
@@ -123,7 +127,7 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
         try
         {
             _lifetimeSource.Cancel();
-            _connection.Abort(new ConnectionAbortedException("The server is shutting down."));
+            _connection.Abort(new ConnectionAbortedException(_errorDatabaseServerSessionAbortFailure));
         }
         catch (ObjectDisposedException)
         {
@@ -180,7 +184,7 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
             // can still be sent. If it canceled the batch write itself, the faulted writer
             // refuses this best-effort notice rather than append to an uncertain frame stream.
             _closeReason = GraphDatabaseEventSource.CloseReason.Shutdown;
-            await TryWriteErrorAsync(ProtocolErrorCode.Unavailable, "The server is shutting down.").ConfigureAwait(false);
+            await TryWriteErrorAsync(ProtocolErrorCode.Unavailable, ErrorMessages.DatabaseServerSessionAbortFailure).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -206,7 +210,7 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
             // The peer gets an internal error frame only; the event carries the failure.
             _closeReason = GraphDatabaseEventSource.CloseReason.Faulted;
             GraphDatabaseEventSource.Log.SessionFaulted(this, exception);
-            await TryWriteErrorAsync(ProtocolErrorCode.Internal, "An unexpected server error terminated the session.").ConfigureAwait(false);
+            await TryWriteErrorAsync(ProtocolErrorCode.Internal, ErrorMessages.ServerSessionRunAsyncValueTask).ConfigureAwait(false);
         }
         finally
         {
@@ -256,7 +260,7 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
 
             if (frame.Value.Type != ProtocolMessageType.Startup)
             {
-                await RefuseHandshakeAsync(ProtocolErrorCode.ProtocolViolation, $"Expected a startup frame but received {frame.Value.Type}.", string.Empty, string.Empty).ConfigureAwait(false);
+                await RefuseHandshakeAsync(ProtocolErrorCode.ProtocolViolation, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StartupExpected, frame.Value.Type), string.Empty, string.Empty).ConfigureAwait(false);
                 return false;
             }
 
@@ -264,7 +268,7 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
 
             if (!ProtocolVersion.TryNegotiate(startup.Version, out var negotiated))
             {
-                await RefuseHandshakeAsync(ProtocolErrorCode.UnsupportedVersion, $"Protocol major version {startup.Version.Major} is not supported; the server speaks {ProtocolVersion.Current}.", startup.Database, startup.Principal).ConfigureAwait(false);
+                await RefuseHandshakeAsync(ProtocolErrorCode.UnsupportedVersion, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ProtocolVersionUnsupported, startup.Version.Major, ProtocolVersion.Current), startup.Database, startup.Principal).ConfigureAwait(false);
                 return false;
             }
 
@@ -274,7 +278,7 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
 
             if (database is null)
             {
-                await RefuseHandshakeAsync(ProtocolErrorCode.DatabaseNotFound, $"The server's engine has no database named '{startup.Database}'.", startup.Database, startup.Principal).ConfigureAwait(false);
+                await RefuseHandshakeAsync(ProtocolErrorCode.DatabaseNotFound, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabaseNotFound, startup.Database), startup.Database, startup.Principal).ConfigureAwait(false);
                 return false;
             }
 
@@ -301,7 +305,7 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
 
             if (frame.Value.Type != ProtocolMessageType.AuthenticateResponse)
             {
-                await RefuseHandshakeAsync(ProtocolErrorCode.ProtocolViolation, $"Expected an authenticate response but received {frame.Value.Type}.", startup.Database, startup.Principal).ConfigureAwait(false);
+                await RefuseHandshakeAsync(ProtocolErrorCode.ProtocolViolation, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.AuthenticationResponseExpected, frame.Value.Type), startup.Database, startup.Principal).ConfigureAwait(false);
                 return false;
             }
 
@@ -309,7 +313,7 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
 
             if (!authenticated)
             {
-                await RefuseHandshakeAsync(ProtocolErrorCode.AuthenticationFailed, $"Authentication failed for principal '{startup.Principal}'.", startup.Database, startup.Principal).ConfigureAwait(false);
+                await RefuseHandshakeAsync(ProtocolErrorCode.AuthenticationFailed, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.AuthenticationFailed, startup.Principal), startup.Database, startup.Principal).ConfigureAwait(false);
                 return false;
             }
 
@@ -321,7 +325,7 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
             {
                 // The database went offline after a failed durable flush (#1243): every session is
                 // refused, with the coded reason, until it is reopened.
-                await RefuseHandshakeAsync(ProtocolErrorCode.Unavailable, exception.Message, startup.Database, startup.Principal).ConfigureAwait(false);
+                await RefuseHandshakeAsync(ProtocolErrorCode.Unavailable, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ServerSessionExecuteAsyncValueTask, exception.Code, exception.Message), startup.Database, startup.Principal).ConfigureAwait(false);
                 return false;
             }
 
@@ -361,14 +365,14 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
                 {
                     // Graceful drain: the session was idle at the frame boundary.
                     _closeReason = GraphDatabaseEventSource.CloseReason.Shutdown;
-                    await TryWriteErrorAsync(ProtocolErrorCode.Unavailable, "The server is shutting down.").ConfigureAwait(false);
+                    await TryWriteErrorAsync(ProtocolErrorCode.Unavailable, ErrorMessages.DatabaseServerSessionAbortFailure).ConfigureAwait(false);
                     return;
                 }
                 catch (OperationCanceledException) when (!_lifetimeSource.IsCancellationRequested)
                 {
                     // Idle timeout eviction.
                     _closeReason = GraphDatabaseEventSource.CloseReason.IdleTimeout;
-                    await TryWriteErrorAsync(ProtocolErrorCode.Unavailable, "The session was closed after exceeding the idle timeout.").ConfigureAwait(false);
+                    await TryWriteErrorAsync(ProtocolErrorCode.Unavailable, ErrorMessages.ServerSessionReadyLoopAsyncValueTask).ConfigureAwait(false);
                     return;
                 }
             }
@@ -386,6 +390,15 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
                     // Executions run on the session lifetime token, not the soft-stop
                     // token: a drain lets in-flight statements finish.
                     await ExecuteAsync(frame.Value, rowWriter, _lifetimeSource.Token).ConfigureAwait(false);
+                    if (_channel!.Capabilities.Contains(ProtocolCapability.TransactionStatus.Name))
+                    {
+                        var transaction = _databaseSession!.CurrentTransaction;
+                        var status = transaction is null ? ProtocolTransactionStatus.Idle
+                            : transaction.State == Assimalign.Cohesion.Database.Transactions.TransactionState.Faulted
+                                ? ProtocolTransactionStatus.Failed : ProtocolTransactionStatus.Active;
+                        await WriteFrameAsync(ProtocolMessageType.Ready,
+                            new ProtocolTransactionStatusMessage(status).Encode(), _lifetimeSource.Token).ConfigureAwait(false);
+                    }
                     break;
 
                 case ProtocolMessageType.Ping:
@@ -425,7 +438,7 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
                 {
                     // A malformed parameter component is a wire violation, not a
                     // statement failure.
-                    throw new ProtocolException($"Malformed component encoding for parameter '{name}'.", exception);
+                    throw new ProtocolException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ServerSessionExecuteAsyncProtocol, name), exception);
                 }
             }
         }
@@ -437,10 +450,10 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
             {
                 // The root never sees an empty wire statement either, so it is reported as a
                 // parse failure, as the parse delegates below report theirs.
-                var empty = new DatabaseParseException("A graph statement must not be empty.", [new Diagnostic
+                var empty = new DatabaseParseException(ErrorMessages.SessionExecuteAsyncDatabaseParse, [new Diagnostic
                 {
-                    Code = "GQL0001",
-                    Message = "A graph statement must not be empty.",
+                    Code = "CG00001",
+                    Message = ErrorMessages.SessionExecuteAsyncDatabaseParse,
                     Severity = DiagnosticSeverity.Error,
                     Location = DiagnosticLocation.Absolute,
                     Start = _statementLocation.Start,
@@ -499,7 +512,7 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
             // Statement-level failures keep the session in the ready state.
             var diagnostic = exception.Diagnostics.FirstOrDefault(item => item.Severity == DiagnosticSeverity.Error);
             string errorText = diagnostic?.Code is { } code && !exception.Message.Contains(code + ":", StringComparison.Ordinal)
-                ? $"{code}: {exception.Message}" : exception.Message;
+                ? string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ServerSessionExecuteAsyncValueTask, code, exception.Message) : exception.Message;
             await WriteDiagnosticsAsync(PrepareDiagnostics(exception.Diagnostics), cancellationToken).ConfigureAwait(false);
             await WriteErrorAsync(ProtocolErrorCode.ParseFailure, errorText, cancellationToken).ConfigureAwait(false);
             return;
@@ -509,13 +522,13 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
             // The database is offline (#1243): every statement is refused, with the coded
             // reason, until it is reopened; the session stays ready to report it.
             await WriteDiagnosticsAsync(PrepareDiagnostics(exception.Diagnostics), cancellationToken).ConfigureAwait(false);
-            await WriteErrorAsync(ProtocolErrorCode.Unavailable, exception.Message, cancellationToken).ConfigureAwait(false);
+            await WriteErrorAsync(ProtocolErrorCode.Unavailable, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ServerSessionExecuteAsyncValueTask, exception.Code, exception.Message), cancellationToken).ConfigureAwait(false);
             return;
         }
         catch (DatabaseException exception)
         {
             var diagnostic = exception.Diagnostics.FirstOrDefault(item => item.Severity == DiagnosticSeverity.Error);
-            string errorText = diagnostic?.Code is { } code && !exception.Message.StartsWith(code + ":", StringComparison.Ordinal) ? $"{code}: {exception.Message}" : exception.Message;
+            string errorText = diagnostic?.Code is { } code && !exception.Message.StartsWith(code + ":", StringComparison.Ordinal) ? string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ServerSessionExecuteAsyncValueTask, code, exception.Message) : exception.Message;
             await WriteDiagnosticsAsync(PrepareDiagnostics(exception.Diagnostics), cancellationToken).ConfigureAwait(false);
             await WriteErrorAsync(ProtocolErrorCode.ExecutionFailure, errorText, cancellationToken).ConfigureAwait(false);
             return;
@@ -526,7 +539,7 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
             // their direct-API contract while answering a disposed wire statement with a code.
             var reported = (DatabaseException)_databaseSession!.Database.TranslateKernelFailure(exception);
             await WriteDiagnosticsAsync(PrepareDiagnostics(reported.Diagnostics), cancellationToken).ConfigureAwait(false);
-            await WriteErrorAsync(ProtocolErrorCode.ExecutionFailure, "COHDBG019: " + reported.Message, cancellationToken).ConfigureAwait(false);
+            await WriteErrorAsync(ProtocolErrorCode.ExecutionFailure, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ServerSessionExecuteAsyncValueTask2, reported.Message), cancellationToken).ConfigureAwait(false);
             return;
         }
         catch (DatabaseTypeException exception)
@@ -572,7 +585,7 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
     {
         if (result is not GraphPathsQueryResult paths)
         {
-            throw new GraphPlanningException("COHDBG001", "A path request did not produce a graph path result.", _statementLocation);
+            throw new GraphPlanningException("CG05001", ErrorMessages.SessionWritePathsAsyncGraphPlanning, _statementLocation);
         }
         byte[]? diagnosticPayload = PrepareDiagnostics(paths.Diagnostics);
         long batchStarted = Stopwatch.GetTimestamp();
@@ -634,7 +647,7 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
 
                 using var encoder = new GraphResultRowEncoder(rowWriter, (resultSet as GraphQueryResult)?.CompositeColumns);
                 byte[] header = new GraphProtocolResultHeaderMessage(columns).Encode();
-                if (header.Length > GraphValueCodec.MaxPayloadLength) { throw new DatabaseTypeException(ErrorMessages.CompositeLimit); }
+                if (header.Length > GraphValueCodec.MaxPayloadLength) { throw new GraphPlanningException("CG02013", ErrorMessages.CompositeLimit); }
                 await WriteFrameAsync((ProtocolMessageType)GraphProtocolMessageType.ResultHeader, header, cancellationToken).ConfigureAwait(false);
                 await foreach (DatabaseRow row in resultSet.GetRowsAsync(cancellationToken).ConfigureAwait(false))
                 {
@@ -653,7 +666,7 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
             var diagnostics = result.Diagnostics;
             string detail = diagnostics.FirstOrDefault(item => item.Severity == DiagnosticSeverity.Error)?.Message
                 ?? diagnostics.FirstOrDefault()?.Message
-                ?? $"The statement completed with status {result.Status}.";
+                ?? string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ServerSessionWriteResultAsyncDatabase, result.Status);
 
             // Reported as an ExecutionFailure by the caller, which aborts an explicit transaction first.
             throw new DatabaseException(detail, diagnostics);
@@ -722,11 +735,11 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
         {
             while (true)
             {
-                string notice = FormattableString.Invariant($"Diagnostic overflow: retained the first {entries.Count} of {total} Warning/Error entries in source order; omitted the remaining {total - entries.Count}. Limits: 4096 entries and 1048576 encoded bytes.");
+                string notice = string.Format(System.Globalization.CultureInfo.InvariantCulture, ErrorMessages.DiagnosticsOverflow, entries.Count, total, total - entries.Count);
                 if (entries.Count < ProtocolDiagnosticsMessage.MaxEntryCount &&
-                    DiagnosticSize("COHDBP001", notice) <= ProtocolDiagnosticsMessage.MaxPayloadLength - size)
+                    DiagnosticSize("CK07001", notice) <= ProtocolDiagnosticsMessage.MaxPayloadLength - size)
                 {
-                    entries.Add(new ProtocolDiagnostic(ProtocolDiagnosticSeverity.Warning, "COHDBP001", notice, null, null, 1));
+                    entries.Add(new ProtocolDiagnostic(ProtocolDiagnosticSeverity.Warning, "CK07001", notice, null, null, 1));
                     break;
                 }
                 ProtocolDiagnostic last = entries[^1];
@@ -829,7 +842,7 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
     /// </summary>
     private ValueTask RejectUnexpectedFrameAsync(ProtocolMessageType type)
     {
-        string violation = $"Unexpected {type} frame in the ready state.";
+        string violation = string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.RejectUnexpectedFrameAsyncValueTask, type);
         _closeReason = GraphDatabaseEventSource.CloseReason.ProtocolViolation;
         GraphDatabaseEventSource.Log.SessionProtocolViolation(this, violation);
         return TryWriteErrorAsync(ProtocolErrorCode.ProtocolViolation, violation);
@@ -925,5 +938,18 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
             _lifetimeSource.Dispose();
             _server.OnSessionCompleted(this);
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Graph.Internal.GraphDatabaseServerSession _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Graph.Internal.GraphDatabaseServerSession value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Graph.GraphDatabaseSession? DatabaseSession => _target.DatabaseSession;
+        public global::System.Guid Id => _target.Id;
     }
 }

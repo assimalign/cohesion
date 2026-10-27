@@ -42,3 +42,16 @@ only; its server uses an internal command-text parser. A variable typed as `Data
 offers lifecycle, state and transactions. Use the concrete model session to execute its requests.
 
 See [DESIGN.md](DESIGN.md) for the decisions and deferred result-contract work.
+
+Plan descriptions keep eight columns. Optional DatabasePlanNode.EstimatedRows/ActualRows carry
+model-defined candidate counts; unavailable measurements remain NULL. SQL SELECT-only EXPLAIN
+ANALYZE can populate actual work while plain EXPLAIN remains nonexecuting (#1522).
+
+
+## Debugger inspection (#1470)
+
+Eligible concrete source types use private nested debugger views of reviewed public/protected
+state; existing inherited display/proxy pairs are reused. See the shared
+[debugger convention](../../Assimalign.Cohesion.Database/docs/CONVENTIONS.md#debugger-inspection).
+Only stored fields and reviewed pure getters are projected; inspection does not execute queries, enumerate results, invoke clocks or mutate lifecycle state.
+Runtime APIs, methods, allocation budgets, persistent formats and wire behavior are unchanged.

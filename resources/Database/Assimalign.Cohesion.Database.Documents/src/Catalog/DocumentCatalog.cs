@@ -28,6 +28,8 @@ namespace Assimalign.Cohesion.Database.Documents.Catalog;
 /// triplet of <c>database-area.md</c> rule 1).
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("DocumentCatalog")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Documents.Catalog.DocumentCatalog.DebugView))]
 public sealed partial class DocumentCatalog
 {
     private readonly DocumentStorage _storage;
@@ -67,7 +69,7 @@ public sealed partial class DocumentCatalog
         while (iterator.MoveNext())
         {
             var unit = iterator.Current;
-            var record = DocumentCatalogCodec.Decode(unit.Data.Span);
+            var record = DocumentCatalogCodec.Decode(unit.Data.Span, unit.PageId, unit.SlotIndex);
             var (writer, deleter) = RecordVersionStamp.ReadStamps(unit.Data.Span);
             catalog.Add(record, new Reference(unit.PageId, unit.SlotIndex, writer), deleter);
         }
@@ -97,12 +99,8 @@ public sealed partial class DocumentCatalog
             while (iterator.MoveNext())
             {
                 // Open decodes payloads after recovery; the fence needs only kind and version.
-                var header = iterator.Current.Data.Span;
-                if (header.Length < 18 || header[16] is not (1 or 2 or 4))
-                {
-                    throw new DocumentCatalogException(ErrorMessages.CatalogHeaderMalformed);
-                }
-                DocumentCatalogCodec.EnsureVersion(header[16], header[17]);
+                var unit = iterator.Current;
+                DocumentCatalogCodec.EnsureHeader(unit.Data.Span, unit.PageId, unit.SlotIndex);
             }
         }
         BTreeIndexManager.EnsureFormat(storage, ReadRegistrations(storage).Select(entry => entry.Registration));
@@ -164,12 +162,12 @@ public sealed partial class DocumentCatalog
         ArgumentException.ThrowIfNullOrWhiteSpace(collection.Name);
         if (collection.Id == Guid.Empty)
         {
-            throw new ArgumentException("A collection must have a nonempty identity.", nameof(collection));
+            throw new ArgumentException(ErrorMessages.CatalogSaveCollectionAsyncArgument, nameof(collection));
         }
         if (collection.Owner is not (DatabaseObjectOwner.Adhoc or DatabaseObjectOwner.Schema)
             || (collection.Owner == DatabaseObjectOwner.Schema && string.IsNullOrWhiteSpace(collection.OwningSchema)))
         {
-            throw new ArgumentException("A schema-owned collection must name its owning schema.", nameof(collection));
+            throw new ArgumentException(ErrorMessages.CatalogSaveCollectionAsyncArgument2, nameof(collection));
         }
 
         Found? previous;
@@ -269,7 +267,7 @@ public sealed partial class DocumentCatalog
         ArgumentException.ThrowIfNullOrWhiteSpace(document.Name);
         if (document.CollectionId == Guid.Empty || document.Length <= 0 || document.Length > int.MaxValue || document.HeadLocation == 0 || document.Version == 0)
         {
-            throw new ArgumentException("Document metadata requires a collection identity and a head for nonempty content.", nameof(document));
+            throw new ArgumentException(ErrorMessages.CatalogSaveDocumentAsyncArgument, nameof(document));
         }
 
         Found? previous;
@@ -307,7 +305,7 @@ public sealed partial class DocumentCatalog
     {
         EnsureActive(context);
         byte[] bytes = DocumentCatalogCodec.Encode(record, context.Sequence);
-        var changes = PrepareIndexChanges(record.Document, previous, context.Snapshot);
+        var changes = PrepareIndexChanges(record.Document, previous, context.Snapshot, cancellationToken);
         if (record.Document is not null) { await CheckUniqueAsync(changes, context, cancellationToken).ConfigureAwait(false); }
         var location = await ApplyAsync(context, async bracket =>
         {
@@ -338,7 +336,7 @@ public sealed partial class DocumentCatalog
         {
             return;
         }
-        var changes = PrepareIndexChanges(null, previous, context.Snapshot);
+        var changes = PrepareIndexChanges(null, previous, context.Snapshot, cancellationToken);
         await ApplyAsync(context, async bracket =>
         {
             Tombstone(bracket, old.Reference, context.Sequence);
@@ -578,11 +576,11 @@ public sealed partial class DocumentCatalog
         if (!_storage.TryReadRecord(reference.PageId, reference.SlotIndex, 0, out var bytes)) { return null; }
         if (bytes.Length < RecordVersionStamp.HeaderSize + 2)
         {
-            throw new DocumentCatalogException("Truncated document catalog record.");
+            DocumentCatalogCodec.Decode(bytes.Span, reference.PageId, reference.SlotIndex);
         }
         var (writer, deleter) = RecordVersionStamp.ReadStamps(bytes.Span);
         if (writer != reference.Writer) { return null; }
-        var record = DocumentCatalogCodec.Decode(bytes.Span);
+        var record = DocumentCatalogCodec.Decode(bytes.Span, reference.PageId, reference.SlotIndex);
         return matches(record) ? (record, deleter) : null;
     }
 
@@ -590,9 +588,17 @@ public sealed partial class DocumentCatalog
     {
         if (context.State != TransactionState.Active)
         {
-            throw new InvalidOperationException("Catalog mutations require an active transaction.");
+            throw new InvalidOperationException(ErrorMessages.DocumentCatalogEnsureActiveFailure);
         }
     }
 
     private readonly record struct Found(Reference Reference, CatalogRecord Record);
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Documents.Catalog.DocumentCatalog value)
+        {
+            _ = value;
+        }
+    }
 }

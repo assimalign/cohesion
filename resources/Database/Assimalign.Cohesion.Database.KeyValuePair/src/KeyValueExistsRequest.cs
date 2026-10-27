@@ -6,6 +6,8 @@ namespace Assimalign.Cohesion.Database.KeyValuePair;
 /// A visibility probe: returns whether a key has a visible, live entry, as a
 /// one-row result set with the column <c>exists</c> (boolean).
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("KeyValueExistsRequest Operation={Operation}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.KeyValuePair.KeyValueExistsRequest.DebugView))]
 public sealed class KeyValueExistsRequest : KeyValueRequest
 {
     /// <summary>
@@ -18,7 +20,7 @@ public sealed class KeyValueExistsRequest : KeyValueRequest
     {
         if (key.IsEmpty)
         {
-            throw new ArgumentException("The key cannot be empty.", nameof(key));
+            throw new ArgumentException(ErrorMessages.KeyValueDeleteRequestArgument, nameof(key));
         }
 
         Key = key;
@@ -28,4 +30,17 @@ public sealed class KeyValueExistsRequest : KeyValueRequest
     /// Gets the key to probe.
     /// </summary>
     public ReadOnlyMemory<byte> Key { get; }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.KeyValuePair.KeyValueExistsRequest _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.KeyValuePair.KeyValueExistsRequest value)
+        {
+            _target = value;
+        }
+
+        public global::System.ReadOnlyMemory<byte> Key => _target.Key;
+        public global::Assimalign.Cohesion.Database.KeyValuePair.KeyValueOperation Operation => _target.Operation;
+    }
 }

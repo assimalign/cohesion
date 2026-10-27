@@ -43,11 +43,11 @@ public sealed class SqlCatalogColumn
         ArgumentNullException.ThrowIfNull(type);
         if (collation is not null && type.Type is not (DatabaseType.String or DatabaseType.Character))
         {
-            throw new ArgumentException("Only string columns may declare a collation.", nameof(collation));
+            throw new ArgumentException(ErrorMessages.SqlCatalogColumnArgument, nameof(collation));
         }
         if (domainName is not null && string.IsNullOrWhiteSpace(domainName))
         {
-            throw new ArgumentException("A column's domain name cannot be empty or white space.", nameof(domainName));
+            throw new ArgumentException(ErrorMessages.SqlCatalogColumnArgument2, nameof(domainName));
         }
 
         Identity = identity;
@@ -61,7 +61,7 @@ public sealed class SqlCatalogColumn
         DefaultFunctionCalls = Array.AsReadOnly((defaultFunctionCalls ?? []).ToArray());
         if (DefaultFunctionCalls.Any(string.IsNullOrWhiteSpace))
         {
-            throw new ArgumentException("A default function identity cannot be blank.", nameof(defaultFunctionCalls));
+            throw new ArgumentException(ErrorMessages.SqlCatalogColumnArgument3, nameof(defaultFunctionCalls));
         }
     }
 
@@ -89,6 +89,11 @@ public sealed class SqlCatalogColumn
     /// <c>DEFAULT 'it''s'</c> is <c>'it''s'</c>), never the text as written.
     /// </summary>
     public string? DefaultLiteral { get; }
+
+    // TYPE keeps non-immutable expression text and pins, but rebinds its assignment
+    // cast on load. Ordinary declarations retain their original evaluation contract.
+    [System.Diagnostics.DebuggerBrowsable(System.Diagnostics.DebuggerBrowsableState.Never)]
+    internal bool RecastDefault { get; init; }
 
     /// <summary>Gets the frozen ADD COLUMN value for physically absent fields, independent of the current insert default.</summary>
     public string? MissingValueLiteral { get; }

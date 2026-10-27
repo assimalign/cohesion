@@ -3,10 +3,10 @@ using Assimalign.Cohesion.Database.Protocol;
 namespace Assimalign.Cohesion.Database.Sql.Protocol;
 
 /// <summary>The immutable Sql endpoint message family.</summary>
-public static class SqlProtocol
+public static partial class SqlProtocol
 {
     /// <summary>Gets the family bound to every Sql protocol connection.</summary>
-    public static ProtocolMessageFamily Family { get; } = new("Sql", [ProtocolCapability.Diagnostics], 5, 6, 7, 8, 9);
+    public static ProtocolMessageFamily Family { get; } = new("Sql", [ProtocolCapability.Diagnostics, ProtocolCapability.TransactionStatus], 5, 6, 7, 8, 9);
 
     extension(ProtocolMessageType)
     {

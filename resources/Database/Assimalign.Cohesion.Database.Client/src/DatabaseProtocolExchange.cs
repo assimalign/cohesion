@@ -12,7 +12,8 @@ namespace Assimalign.Cohesion.Database.Client;
 /// <para>
 /// A model client derives from this type and implements
 /// <see cref="ExecuteCoreAsync(ProtocolFrameReader, ProtocolFrameWriter, CancellationToken)"/>: it writes
-/// the request and consumes the entire response before it returns. Only
+/// the request and consumes the entire model response before it returns. The connector consumes
+/// the negotiated transaction-status Ready postamble after Execute/ExecutePaths. Only
 /// <see cref="DatabaseConnection.ExecuteAsync{TResult}(DatabaseProtocolExchange{TResult}, CancellationToken)"/>
 /// runs an exchange, so the entry point is internal to Database.Client and the constructor is protected:
 /// Database.Client drives the type, and the model clients and the application implement it. The frame
@@ -38,13 +39,27 @@ public abstract class DatabaseProtocolExchange<TResult>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="family"/> is null.</exception>
     /// <remarks>
     /// Protected, not private protected: the exchanges live in the Sql, KeyValuePair, Graph and Blob
-    /// clients as well as here.
+    /// clients as well as here. Execute/ExecutePaths status is detected from written frames, so
+    /// application exchanges using this constructor also drain their negotiated postamble.
     /// </remarks>
     protected DatabaseProtocolExchange(ProtocolMessageFamily family)
+        : this(family, false)
+    {
+    }
+
+    /// <summary>Initializes an exchange with an explicit transaction-status requirement.</summary>
+    /// <param name="family">The exact message family required by this operation.</param>
+    /// <param name="transactionStatus">Whether to require a status postamble explicitly. The connector
+    /// also detects Execute/ExecutePaths frames and consumes their negotiated status regardless of this value.</param>
+    /// <exception cref="ArgumentNullException">The family is null.</exception>
+    protected DatabaseProtocolExchange(ProtocolMessageFamily family, bool transactionStatus)
     {
         ArgumentNullException.ThrowIfNull(family);
         Family = family;
+        ExpectsTransactionStatus = transactionStatus;
     }
+
+    internal bool ExpectsTransactionStatus { get; }
 
     /// <summary>Gets the exact family instance required by this operation.</summary>
     /// <remarks>A connection bound to another instance rejects the exchange before it sends any bytes,

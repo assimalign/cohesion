@@ -13,6 +13,8 @@
   </PropertyGroup>
   <ItemGroup Condition="'$(_DatabaseArchitectureTest)' == 'true'">
     <CohesionPackageReference Include="Microsoft.CodeAnalysis.CSharp" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(_DatabaseArchitectureTest)' == 'true'">
     <Compile Include="$(MSBuildThisFileDirectory)Assimalign.Cohesion.Database\tests\TestObjects\ModelArchitecture.cs" Link="TestObjects\ModelArchitecture.cs" />
   </ItemGroup>
   <Target Name="ExportDatabaseArchitectureInputs" AfterTargets="CoreCompile" Condition="'$(_DatabaseArchitectureSource)' == 'true'">

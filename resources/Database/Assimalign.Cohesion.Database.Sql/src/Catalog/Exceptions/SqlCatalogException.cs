@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 
 using Assimalign.Cohesion.Database.Types;
 
@@ -18,6 +19,9 @@ public sealed class SqlCatalogException : DatabaseException
         : base(message)
     {
     }
+
+    internal SqlCatalogException(string message, IReadOnlyList<Diagnostic> diagnostics, Exception innerException)
+        : base(message, diagnostics, innerException) { }
 
     internal SqlCatalogException(string code, string message, Exception? innerException = null, Diagnostic? location = null)
         : base(message, [new Diagnostic

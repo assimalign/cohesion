@@ -17,7 +17,7 @@ Web application and resource authors can register typed checks, inline probes, o
 using Assimalign.Cohesion.Web.Health;
 using Assimalign.Cohesion.Web.Hosting.Health;
 
-IHealthCheckService health = HealthChecks.CreateBuilder()
+IHealthCheckService health = new HealthChecksBuilder()
     .AddCheck(
         "self",
         () => HealthCheckResult.Healthy(),
@@ -30,7 +30,7 @@ pipeline.MapReadinessCheck(health);
 pipeline.MapLivenessCheck(health);
 ```
 
-`HealthChecks.CreateBuilder()` is the container-free composition seam. Registrations are mutable
+`new HealthChecksBuilder()` is the container-free composition seam. Registrations are mutable
 only while composing the builder; `Build()` snapshots them into an immutable
 `IHealthCheckService`. The service is supplied to endpoint middleware explicitly, so request-time
 service location is unnecessary.
@@ -208,3 +208,12 @@ preserves the existing exception text and input-disclosure rules, including any 
 type-only exclusions. EventSource templates, log messages and response bodies retain their
 existing ownership. This is a conventions change with no public API or behavior break against
 10.0.0-preview.1.
+
+
+## Health-check builder construction (#1470)
+
+Composition uses the public sealed `HealthChecksBuilder` in `Assimalign.Cohesion.Web.Health`,
+with its public parameterless constructor. The standalone `HealthChecks.CreateBuilder()` factory
+is removed. Existing `IHealthChecksBuilder` adapters, duplicate-name checks and immutable service
+snapshots are preserved; Database's admin endpoint uses the same public constructor. No Database
+interface, protocol, format, diagnostic code, event or counter is added or changed.

@@ -134,7 +134,7 @@ public sealed partial class DocumentStorage : Assimalign.Cohesion.Database.Stora
             cancellationToken.ThrowIfCancellationRequested();
             var (page, slot) = UnpackLocation(location);
             var bytes = ReadEntry(page, slot);
-            var chunk = DocumentChunkCodec.Decode(bytes, remaining);
+            var chunk = DocumentChunkCodec.Decode(bytes, remaining, page, slot);
             await coordinator.ApplyStatementAsync(context, bracket =>
             {
                 UpdateEntry(bracket, page, slot, RecordVersionStamp.WithDeleter(bytes.Span, context.Sequence));
@@ -146,7 +146,7 @@ public sealed partial class DocumentStorage : Assimalign.Cohesion.Database.Stora
         }
         if (remaining != 0)
         {
-            throw new StorageCorruptionException("Document chain ends before its catalog length.");
+            throw new StorageCorruptionException(ErrorMessages.StorageTombstoneContentAsyncFailure);
         }
     }
 

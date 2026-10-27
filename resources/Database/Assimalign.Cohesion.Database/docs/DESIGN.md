@@ -1,5 +1,23 @@
 # Assimalign.Cohesion.Database — Design
 
+## Shared plan-description contract (#1522)
+
+SQL, Documents and Graph retain the same eight-column DatabasePlanDescription contract owned by
+Database.Execution. Optional estimates and actual candidate counts belong to each model. Plain
+EXPLAIN never executes its described statement. SQL alone supports SELECT-only EXPLAIN ANALYZE;
+it executes before returning measured counts through the existing nullable Int64 columns.
+Documents and Graph continue to reject their ANALYZE prefixes. Cross-model contract tests verify
+column names, types, order, nullability and SQL's measured SELECT/TableScan counts.
+
+## Shared-source authoring modules (#1705)
+
+Each `CohesionSharedSource` declaration names its owner and required `Module`. Database's engine
+helpers live in `shared/Engine/`, with the model projects selecting `Module="Engine"`. Other
+Database owners expose `Diagnostics`, `Parameters`, `Encoding`, `Types` and `Defaults` modules.
+The move preserves helper contents and their internal, assembly-local type identities. Test-only
+linked support remains ordinary Compile items. Every project ItemGroup contains one item type,
+preserving declaration metadata and evaluation order when groups split during integration.
+
 ## Engine failure diagnostics (#1247, #1364)
 
 An engine error code always appears in `Diagnostics`. Only wire writers add a code prefix
@@ -7,8 +25,8 @@ when formatting a response message; embedded messages remain ordinary explanator
 Classification searches inner exceptions and every aggregate branch. A wrapped `IOException`
 is still I/O. Corruption takes precedence over I/O, and existing coded failures are retained.
 `DatabaseCorruptionException.Create` also accepts the genuine index-corruption variant:
-it retains the `IndexCorruptionException` and page, leads with `COHDBS003`, and carries
-`COHDBI002` plus the engine's model code as additional diagnostics. This owning-root operation
+it retains the `IndexCorruptionException` and page, leads with `CK06003`, and carries
+`CK06102` plus the engine's model code as additional diagnostics. This owning-root operation
 serves every B-tree model without a new child-to-root dependency or visibility grant.
 The stateless shared `DatabaseFailure` walker avoids allocation for unwrapped failures.
 
@@ -16,11 +34,15 @@ The stateless shared `DatabaseFailure` walker avoids allocation for unwrapped fa
 as `DatabaseException`. Models can retain a retryable abort's exception kind and its plain
 message while attaching the model code; only the wire writer adds that code to the message.
 The abort remains a base because the shipped deadlock exception derives from it.
+`DatabaseTransactionDeadlockException` accepts the same diagnostic carrier. SQL supplies
+`CS04065`, mapped to SQLSTATE `40P01`, through embedded and negotiated wire failures.
+Under statement atomicity a hard deadlock refuses the statement; the explicit victim
+transaction stays active with earlier work and locks until its caller rolls it back.
 
 
 ## Storage corruption (#1160)
 
-Storage corruption is `COHDBS003` (#1160). The engine translates a
+Storage corruption is `CK06003` (#1160). The engine translates a
 `StorageCorruptionException` into `DatabaseCorruptionException`, retaining the storage
 cause and page id, naming the database and page, and advising restoration from a verified
 backup. Its structured diagnostic crosses the existing wire execution-failure path; a
@@ -33,11 +55,11 @@ Corruption translation searches coded inner exceptions and every aggregate branc
 `StorageCorruptionException.Find`; an existing `DatabaseCorruptionException` is retained.
 This applies to read/statement and transaction failures as well as synchronous and deferred
 create/open failures. A refused open retains any existing model diagnostics in addition to the
-outer `COHDBS003`; Graph, Documents and Blob also carry their unrecoverable-files diagnostic
-(`COHDBG018`, `COHDBD003` and `COHDBB004` respectively). The original storage exception remains
+outer `CK06003`; Graph, Documents and Blob also carry their unrecoverable-files diagnostic
+(`CG06018`, `CD06103` and `CB06004` respectively). The original storage exception remains
 the inner cause, preserving its page context. Graph abort messages prefix a cause's code only
 when the message does not already contain that prefix.
-Lifecycle translation removes an existing `COHDBS003` from the carried diagnostics before
+Lifecycle translation removes an existing `CK06003` from the carried diagnostics before
 adding the common corruption diagnostic, so coded and aggregate wrappers report it once.
 
 Lifecycle integrity translation preserves synchronous core throws and returns successful
@@ -164,7 +186,7 @@ carried: `DatabaseEngine` and `DatabaseInstance` are `IAsyncDisposable` and `IDi
   `COHESION_DATABASE_ENGINE_PUMP_IN_BASE` constant the adopted models defined to compile it to
   nothing.
 - **The shared build state composes through the leaf** (plan step P4.0, §6.5). Every model's
-  builder compiles `shared/DatabaseEngineBuilderState<TEngine> where TEngine : DatabaseEngine`
+  builder compiles `shared/Engine/DatabaseEngineBuilderState<TEngine> where TEngine : DatabaseEngine`
   (phase 6 collapsed its former `<TEngine, TWorker, TServer>` and fixed the products to the
   bases), which runs typed factories (`Func<TEngine, DatabaseEngineWorker>`,
   `Func<TEngine, DatabaseServer>`) and hands their products to the
@@ -222,8 +244,8 @@ carried: `DatabaseEngine` and `DatabaseInstance` are `IAsyncDisposable` and `IDi
   to keep (PostgreSQL holds interrupts through `AbortTransaction`). A
   transaction that did not commit accepts any number of rollbacks; a commit ends it whatever its
   outcome, and one after an abort completes the rollback and fails with the model's coded error
-  (`COHDBG007`, `COHDBD001`, `COHDBB001`, `COHDBK001` in the models' vocabularies; SQL, which
-  never aborts, refuses work on a transaction the kernel ended with `COHSQLT005`). `State`
+  (`CG04007`, `CD04101`, `CB04001`, `CV04101` in the models' vocabularies; SQL, which
+  never aborts, refuses work on a transaction the kernel ended with `CS04005`). `State`
   reports `Faulted` while an operation's failure or the kernel ended the transaction under its
   caller, until the caller ends it. A commit is refused while an operation of the transaction
   runs (`TryBeginOperation`/`EndOperation`). An offline database (#1243) refuses a commit and a
@@ -245,7 +267,7 @@ carried: `DatabaseEngine` and `DatabaseInstance` are `IAsyncDisposable` and `IDi
   stayed registered until it was dropped, and every later open handed back the disposed instance
   or refused it. Now `DatabaseInstance` disposal completes a close task once its core ends and
   then tells its engine, which calls the leaf's `protected abstract ForgetClosedDatabaseCore`;
-  the five leaves implement it through the shared `shared/DatabaseRegistry.Forget`, so the next
+  the five leaves implement it through the shared `shared/Engine/DatabaseRegistry.Forget`, so the next
   `OpenDatabaseAsync` opens the database again from its files. The rules that make it race-free:
   - **The leaf keeps tracking the database until its close ends**, so every worker's closed-database
     skip (the `IsClosed` guards) still covers the window between the close and the forget.
@@ -280,7 +302,7 @@ carried: `DatabaseEngine` and `DatabaseInstance` are `IAsyncDisposable` and `IDi
   - **Engine-initiated closes are unchanged**: a drop, an offline reopen and the engine's disposal
     remove the database first, so its forget finds nothing to do.
 
-  In-memory databases reopen with their data too (#1272): `shared/DatabaseMemoryFiles` keeps each
+  In-memory databases reopen with their data too (#1272): `shared/Engine/DatabaseMemoryFiles` keeps each
   in-memory file set's streams until it is dropped or the engine is disposed (the disposal
   releases every file set, so a disposed engine still referenced holds none of its databases), and
   an open copies the closed streams' bytes into new streams outside its lock, each allocated once
@@ -290,7 +312,7 @@ carried: `DatabaseEngine` and `DatabaseInstance` are `IAsyncDisposable` and `IDi
   open, a canceled open, a drop and the engine's disposal during a holder's close, the refusal
   of a leaf that never forgets, and a second disposal that waits.
 - **A database's name maps to its files through one shared function** (#1392):
-  `shared/DatabaseFileNames`, compiled into each model assembly beside `DatabaseMemoryFiles`.
+  `shared/Engine/DatabaseFileNames`, compiled into each model assembly beside `DatabaseMemoryFiles`.
   `DatabaseName` compares ordinally ignoring case, so the mapping has to give every spelling the
   same files on a case-sensitive file system too. Each model used to build the directory from the
   caller's spelling, and on Linux an open or declaration of `SALES` after a create of `sales` made
@@ -542,18 +564,20 @@ ordinary storage transaction contention is retried as busy.
   A separate elapsed inter-pass wait ends at the next pass entry, including settlement and
   pauses on either side of the trigger call.
   Lane timing includes monitor acquisition and runner dispatch, including a late parking runner.
-  The shared pace helper includes each healthy attempted visit, including a visit left running;
+  The failing-checkpoint pace helper (#1284) includes each healthy attempted visit, including a visit left running;
   request counts and requested durations remain strictly bounded per visit.
-  For each measured wait category it collects at least 12 samples within the 30-second safety
-  ceiling and requires the median and at least 75% of samples below the configured 100 ms budget.
-  Durations in the per-pass record are judged by the median rather than the maximum because
-  scheduler hiccups affect a few samples while a persistent slowdown affects every pass.
-  The helper compares recorded monotonic wait durations with that budget,
-  requires every due healthy visit to attempt work, and requires worker completions. Its overall
-  stopwatch supplies a minimum race exercise and a safety ceiling, never a throughput ratio.
-  This proves the named wait and skipped-visit regressions on the in-memory fixture, not a
-  deterministic operating-system scheduling latency or a bound on real device checkpoint I/O.
-  No embedded source guard decides these tests.
+  The failing-checkpoint helper requires at least twelve signalled trigger waits and healthy
+  attempted visits, four completed due batches, two failing attempts and three backing-off visits
+  under a 30-second hang guard. Trigger request counts and totals, lane request counts and totals,
+  pump backoff requests and runner availability at completion publication decide correctness.
+  Recorded elapsed times are diagnostics only; a delayed test observer exercises scheduler pauses.
+  A completion records runner availability in the publication critical section, before Park can
+  conceal late availability. Additional pump pauses use the existing observed delay operation;
+  signal pauses use the observed signal-wait operation. No embedded source guard decides these tests.
+  Deferred-undo tests require a collected undo-only completion, a positive-work DeferredUndoCompleted
+  event, an empty pending-undo set and a released writer independently of the hour-long maintenance
+  interval, under 30-second hang guards. Failed undo attempts are counted from passes to check
+  requested waits against the configured doubling backoff; scheduler latency is not an input.
 
   Pending waits belong to their pump thread. Thread-local state is created on first attachment,
   and no record, history, per-pass allocation or process-wide atomic is added when unobserved.
@@ -563,9 +587,20 @@ ordinary storage transaction contention is retried as busy.
   with or without observation. DatabaseLaneWorker now owns publication and trigger/delay accounting for all lane workers;
   DatabaseWorkerPass carries the common identity, typed database outcome and lane wait evidence
   (#1279). Checkpoint due-state evidence remains optional checkpoint-specific data. Hung-work
-  tests require at least 12 healthy worker completions while the other database stays held;
-  median and 75-percent share judge waits, and slowdown mutants verify the evidence. There
-  are no per-pass process-wide atomics. The root failure ordering and _giveUpFaultPass retention
+  tests require K = 4 healthy positive-work completions while exactly one runner stays held,
+  assert lane-wait counters, then release the gate and require the held worker to complete.
+  Completion and violation evidence is cumulative; only the last 64 diagnostic passes are retained,
+  so skipped-work spin loops cannot grow the observer history or erase recorded progress.
+  Page-write setup gates dispatch before dirtying and arming device I/O, preventing a foreground
+  writer from waiting on its own deliberately stalled page. Their 30-second ceilings are hang guards;
+  elapsed durations are diagnostic only. A legitimate
+  stuck-lane advisory may appear while held, but operational failures/offline visits are refused
+  and collection must clear the advisory after release. The #1284
+  failing-checkpoint helper likewise uses requested waits and completed work. Root pump isolation likewise counts
+  healthy visits and database skips and rejects pump-wide backoff requests instead of a rate ratio.
+  Cancellation gates the observed backoff request, cancels it, and requires pump exit without a retry;
+  delayed observation cannot turn cancellation into a latency failure. There are no per-pass
+  process-wide atomics. The root failure ordering and _giveUpFaultPass retention
   are unchanged; purge refusals retain their observation-only reporting. Lane threads start
   without caller ExecutionContext and restore their clean context after each job, preventing an
   apply-gate reentrancy flag or other AsyncLocal state from crossing databases. Detached outcomes carry
@@ -730,7 +765,7 @@ ordinary storage transaction contention is retried as busy.
     engine's state, refused every start, connection, handshake and exchange while the engine was
     not `Running`, so one database's failing checkpoint made the whole server unavailable for
     the window; it now refuses a database's handshakes and exchanges with `Unavailable` and
-    `COHDBB003` while that database has a failing worker, serves the others, and refuses
+    `CB06003` while that database has a failing worker, serves the others, and refuses
     everything only while the engine is disposed or has an engine-wide failure (Blob
     `DESIGN.md`). The Sql, KeyValuePair and Graph servers never gated on the engine's state (a
     session limit, shutdown, an idle timeout and an offline database's refusal are their only
@@ -938,7 +973,7 @@ the in-process message. SQL and Graph compose `CODE: message` for ExecutionFailu
 [negotiated diagnostics](../../Assimalign.Cohesion.Database.Protocol/docs/DESIGN.md#negotiated-statement-diagnostics-1105) add structured delivery.
 
 `QueryLanguageProfile.Functions` is the executable built-in set. Recognized non-executing
-functions live in each language's unsupported vocabulary and report COHDBL001 at parse time.
+functions live in each language's unsupported vocabulary and report CK00001 at parse time.
 The single function guard in each engine's execution-conformance suite requires live evidence
 for every declared name and rejects evidence for undeclared names. OQL's
 [temporary exemptions were removed by #1126](../../Assimalign.Cohesion.Database.Documents.Language/docs/DESIGN.md#function-declaration-and-diagnostic-delivery-1103).
@@ -971,11 +1006,11 @@ commit whose record was written but whose fsync failed: the work may have commit
 so retrying it could apply it twice. `DatabaseOfflineException` (#1243) is what every
 operation gets after such a failure, or after any failed fsync of a database's journal
 or data files: the storage stopped writing (the storage's `StorageOfflineException`,
-`COHDBS002`, is its inner exception), and the database refuses everything until
+`CK06002`, is its inner exception), and the database refuses everything until
 `DatabaseEngine.OpenDatabaseAsync` reopens it and recovery decides the unconfirmed
 commit — PostgreSQL's `PANIC` on a failed WAL fsync, scoped to one database instead of
-the process. Its `Code` leads the message and names the model: `COHSQLT004`,
-`COHDBK002`, `COHDBD002`, `COHDBG012`, `COHDBB002`. Every wire server reports it as
+the process. Its `Diagnostics` carry the model code (also exposed by the existing `Code` getter): `CS04004`,
+`CV06102`, `CD06102`, `CG06012`, `CB06002`. Every wire server reports it as
 `Unavailable`. `DatabaseOfflineException.Create` builds it from the storage error, and its
 message names what failed from the storage's typed `StorageOfflineException.Cause`
 (`JournalFlush`, `DataFlush`, `HeaderWrite` for a device operation; `CheckpointFailures`,
@@ -989,7 +1024,7 @@ flush failed, `StorageOfflineException.CommitRecordWritten`) is never reported a
 because its work can survive the reopen; one that committed nothing is refused (#1272: SQL
 records each durable self-commit per statement, so the classification is exact).
 `DatabaseTransactionCommitUnconfirmedException` has two factories, and every unconfirmed commit
-in every model goes through one of them, so its message always leads with the model's code
+in every model goes through one of them, so its Diagnostics always carry the model's code
 (owner decision 24 of 2026-10-06, #1272): `Create(code, database, StorageOfflineException)` for
 an operation that met the offline storage ("… went offline while the operation was committing
 …"), and `Create(code, database, TransactionCommitUnconfirmedException)` for a transaction whose
@@ -1146,7 +1181,7 @@ forwards, so keywords scope out-of-process tools only.
 | 25 | `StatementStart` | Verbose | `Statements` | `database`, `sessionNumber`, `requestKind` (the request type's name, or `Text`) | `DatabaseExecutionSession<TRequest>.ExecuteAsync` and `DatabaseLanguageSession<TRequest>.ExecuteAsync`, outermost call only; KeyValuePair wire requests use the parsed verb request type |
 | 26 | `StatementStop` | Verbose | `Statements` | `database`, `sessionNumber`, `status` (`DatabaseResultStatus` name; `Error` or `Cancelled` for a core that threw), `affectedCount` (`-1` for a core that threw), `durationMilliseconds` | the same, only for a statement whose `StatementStart` was written (`System.Net.Http`'s `RequestStop` shape); events 27 and 28 are written either way |
 | 27 | `SlowStatement` | Warning | — | `engineName`, `model`, `database`, `sessionNumber`, `requestKind`, `status`, `durationMilliseconds`, `thresholdMilliseconds` | the same, when the statement ran at least `SlowStatementThresholdMs` |
-| 28 | `StatementFailed` | Error | — | `database`, `sessionNumber`, `requestKind`, `code`, `exceptionType`, `durationMilliseconds` | the same: for an `Error` result, `code` is its first error diagnostic's code (its first diagnostic's when it holds no error; empty when it holds none) and `exceptionType` is empty; for a core that threw, `exceptionType` is the exception's full type name and `code` is an offline refusal's model code (`DatabaseOfflineException.Code`), empty otherwise; never the message, which can quote the statement; never for a cancellation |
+| 28 | `StatementFailed` | Error | — | `database`, `sessionNumber`, `requestKind`, `code`, `exceptionType`, `durationMilliseconds` | the same: for an `Error` result, `code` is its first error diagnostic's code (its first diagnostic's when it holds no error; empty when it holds none) and `exceptionType` is empty; for a core that threw, `exceptionType` is the exception's full type name and `code` is selected from `DatabaseException.Diagnostics` by the same first-error rule, empty when absent; never the message, which can quote the statement; never for a cancellation |
 | 29 | `TransactionBegun` | Verbose | `Transactions` | `database`, `sessionNumber`, `transactionId`, `isolationLevel` | `DatabaseSession.BeginTransactionAsync`, once the transaction is the session's |
 | 30 | `TransactionCommitted` | Verbose | `Transactions` | `transactionId`, `durationMilliseconds` (the commit's own) | `DatabaseTransaction.CommitAsync` |
 | 31 | `TransactionRolledBack` | Verbose | `Transactions` | `transactionId`, `cause` (`Rollback`, `Dispose`, `SessionClosed`) | `RollbackAsync`, `DisposeAsync` and the session's teardown, when a kernel rollback ran |
@@ -1299,3 +1334,154 @@ The root test project owns the stateless ModelArchitecture helper, linked into t
 The guard checks owner.ContainingAssembly against per-layer external allowlists seeded with git show from the retired satellite csprojs at a64426436. Storage permits Database.Storage, Transactions and Indexing; Catalog also permits the Database root and Types. The BCL allowance is the exact assembly-name set in the compiler's Microsoft.NETCore.App reference-pack inputs, never a System.* wildcard. Graph Storage additionally permits Types for index-key encoding, already in its old Indexing reference closure. Protocol assemblies remain disallowed in both constrained layers; the current Protocol imports in Documents Catalog resolve no used types. Current model symbol checks validate these limits; engine code is unrestricted. The seed Storage projects referenced shared Storage (all five), Transactions (Blob/Documents/Graph) and Indexing (Graph); Catalog referenced the root and model/shared Storage, plus Transactions (Blob/Documents/Graph), Types (Sql/KeyValuePair/Documents/Graph) and Indexing (Sql/KeyValuePair/Documents). The layer-wide sets preserve this kernel vocabulary without admitting the root's other transitive dependencies.
 
 Engine-owned strategies and catalog-aware persistence composition live under Internal/Engine/Storage. Every TransactionRecordSpace implementation and physical location-packing helper belongs to Storage, including nested adapters; the test enforces adapter and strategy placement. Resource accessors and assembly metadata are common infrastructure. Negative probes cover aliases, generic arguments, inheritance, member calls, a disallowed external assembly with a System namespace in both constrained layers, unrestricted engine usage, and misplaced adapters/strategies. This is test-only support and adds no model dependency to the shipped root assembly.
+
+## Structured failure-event codes (#1350)
+
+Thrown failures use the existing non-null `DatabaseException.Diagnostics` carrier. Statement
+failure event 28 applies the same selection as an Error result: the first Error diagnostic,
+otherwise the first diagnostic, otherwise an empty code. It writes the exception type and
+never reads Message to discover a code. Graph parse event 12 and KeyValuePair parse event 10
+use the same rule; cancellation remains outside these failure events. No payload field, event
+identifier or counter changes. PostgreSQL likewise keeps the code independently of detail
+text (`src/backend/utils/error/elog.c:875-884`, local reference clone); no code is copied.
+
+Offline refusals and both unconfirmed-commit factories populate the existing carrier with
+an Error diagnostic. Their Message is unprefixed detail from root resx resources, and their
+original inner exception survives. The existing `DatabaseOfflineException.Code` getter stays;
+no nullable Code property is added to DatabaseException and no public signature changes.
+Servers compose the legacy wire error prefix once and emit the existing negotiated diagnostic
+frame. There is no storage-format or protocol-version change. The model codes remain
+CS04004, CV06102, CD06102, CG06012 and CB06002. SQL division by zero remains
+CS02001 / SQLSTATE 22012; Graph syntax remains CG00008. Error locations come from the
+existing carriers and are not synthesized by tracing.
+
+## Dedicated test actors (#1285)
+
+Deadline-dependent peers and busy test drivers use the linked Storage test helper's LongRunning threads. Ordinary async driver continuations stay on their actor scheduler, without changing SynchronizationContext. Existing deadlines of 25 seconds or more are hang guards. Runner settings impose no parallel-thread cap. See the [scheduling audit](../../Assimalign.Cohesion.Database.Storage/docs/TEST-HYGIENE-AUDIT.md) for every original Task.Run site, the exact journal counters and the physical index-work guards.
+
+Reference consulted: RavenDB test/StressTests/Voron/InvalidReleasesOfScratchPages.cs:39–68 and :71–103 use LongRunning stress drivers. No code was copied.
+
+## Cross-model index-purge conformance (#1195)
+
+The root integration suite proves SQL, KeyValuePair, Documents and Graph compose the shared
+coordinator's bounded index-prune callback against real storage. Documents and Graph tests
+reattach their index managers before the pass, covering replacement after DDL rollback.
+The coordinator owns the horizon/apply gate; models supply their current manager without new
+interfaces, model-specific vacuum loops or root access to index-page internals. Blob has no
+B-tree manager. Indexing DESIGN owns the physical rollback decision #1393 and pruning details.
+
+## Shared server options and TCP composition (#1391, D7 B)
+
+The five sealed model server-options types derive from root DatabaseServerOptions. The base owns
+Listener, Authenticator, MaxSessions, AuthenticationTimeout, IdleTimeout and ShutdownDrainTimeout.
+Defaults stay 100 sessions, ten seconds for authentication, thirty minutes idle and thirty seconds
+for shutdown. TerminalDrainLinger remains on the model leaves, default two seconds. Each model
+still snapshots every value before validation and owns the transferred listener through stop.
+No public Database interface is added; the count remains five.
+
+Database.Tcp replaces Database.Sql.Tcp. Its root-namespace extension
+Listen<TOptions>(this TOptions options, Uri endpoint) where TOptions : DatabaseServerOptions
+returns that same concrete options instance. AddServer(configure) and AddServer(factory) retain
+their existing ownership rules. Engines still reference generic Connections, never the TCP
+integration. App.Database publicly carries Database.Tcp; Connections.Tcp stays runtime-private.
+Consumer source migrates its package reference and imports Assimalign.Cohesion.Database.
+
+Binding preserves the previous SQL helper: Uri.IdnHost, literal IPv4/IPv6, localhost -> IPv4
+loopback, wildcard -> Any; DNS names are refused synchronously with CK07101. Endpoint URIs
+must be absolute, have a host and explicit positive port, and have no user information, query or
+fragment. Port zero remains invalid for a resolved endpoint URI; transport-level ephemeral binds
+remain available through the generic listener option. The old Sql.Tcp design's port-zero claim
+was inconsistent with Uri.ThrowIfNotEndpoint and is not carried forward.
+
+Missing Listener, invalid MaxSessions and invalid timers report model, engine and the exact
+option as ParamName, with kernel resx codes CK08001, CK08002 and CK08003. Existing timer
+policies are retained: Documents permits zero authentication/idle values; Blob requires positive
+values; both accept InfiniteTimeSpan. SQL/Graph/KeyValue retain their existing authentication/
+idle policy. All models require positive finite shutdown/linger values no greater than
+4,294,967,294 milliseconds. Configuration ArgumentExceptions have no SQLSTATE. No wire,
+protocol, storage format, event or counter changes.
+
+The TCP address setup was compared with PostgreSQL src/backend/libpq/pqcomm.c:442-470
+(AI_PASSIVE and pg_getaddrinfo_all) in the local clone. Cohesion deliberately keeps its existing
+literal-only bind policy instead of copying hostname resolution. No reference-engine code is copied.
+
+## Error and construction conventions (#1470)
+
+Exception messages and format templates are generated from `src/Properties/ErrorMessages.resx`;
+format arguments use the current culture. Cancellation and abort templates used during normal
+cleanup are cached before reuse. Error identities remain separate from message text where a
+structured diagnostic carrier exists. Standard .NET guards retain their argument names and exception types.
+The [error-code registry](ERROR-CODES.md) assigns two-character model prefixes and five decimal digits. Existing SQLSTATE classifications are preserved. PostgreSQL `src/backend/utils/errcodes.txt:52-62` informs the separation of stable classes from detailed conditions; no code is copied.
+
+The convention review also inspected Neo4j `community/common/src/main/java/org/neo4j/kernel/api/exceptions/Status.java:877-886` (portable classification/category/title identities) and RavenDB `src/Raven.Client/Exceptions/RavenException.cs:26-29` (exception-owned construction). Cohesion keeps the approved short numeric identities and generated resources; neither engine's code or naming scheme is copied.
+
+
+## Shared validation message completion (#1470)
+
+Engine option requirements and portable database-name refusal reasons, including their rule
+text, resolve through each consuming model's generated internal resources. Valid name checks
+still avoid resource lookup; the engine-description template is cached for construction.
+Existing message text, parameter names, refused values and pre-I/O validation order remain
+unchanged. No public API, error identity, SQLSTATE, storage or wire format, event or counter changes.
+Local predicate guards remain with the policies they validate; reusable unconditional catalog
+throws use exception-type extension members. Private cold comparison and location-attachment
+paths retain their allocation and exception-identity behavior.
+
+The existing portable-name policy was rechecked against RavenDB src/Raven.Client/Util/ResourceNameValidator.cs:55-71 (length and reserved-name refusals) and Neo4j community/common/src/main/java/org/neo4j/kernel/database/NormalizedDatabaseName.java:27-30 (root-locale normalization). This change preserves Cohesion's existing ASCII policy and only moves its messages; no reference code is copied.
+
+The [convention audit](CONVENTIONS.md) records the reusable-throw migration, retained local
+guards and shared-source resource ownership.
+
+## Structured lifecycle refusals (rules audit)
+
+Root-owned session and transaction refusals carry unlocated Error diagnostics while retaining
+exact exception kinds, explanatory messages and state transitions. CK04004 identifies an already
+active transaction; CK04005 an ended transaction; CK04006 an end in progress; CK04007 an operation
+that prevents commit; CK07003 overlapping session operations; and CK07004 a closed session.
+A model's coded abort, original cause and disposal abort-reason instance remain unchanged. The
+normal session-teardown reason reuses a cached resource string. Successful operations gain no
+allocation, counter or process-wide atomic.
+
+The precise absence exception adds
+`DatabaseNotFoundException(string message, IEnumerable<Diagnostic> diagnostics, Exception? innerException)`.
+The third argument is required, so the existing `(message, null)` call remains unambiguous.
+Both legacy constructors keep their contracts. The new overload copies and orders diagnostics
+through DatabaseException and preserves the actual cause, including null; no artificial wrapper
+is introduced. Shared Engine extensions are internal to each model assembly and operate on
+foreign root-owned exception types. The root does not compile that module itself.
+
+All models attach CK03001 to duplicate logical database/storage creation and CK03002 to ordinary
+logical absence. SQL and KeyValuePair attach CK06004 to orphan-directory creation refusal and
+CK06005 to a missing physical data/catalog set. Existing coded interrupted-creation paths in
+Documents, Graph and Blob remain model-specific. Messages and pre-I/O/file-preservation behavior
+are unchanged. Code identities belong to the carrier, never a second message prefix. Protocol
+message kinds and layouts, SQLSTATEs, public interface count and on-disk formats do not change.
+Existing statement writers may now deliver these previously missing codes through their existing
+structured diagnostic and single-prefix paths; absence handshakes retain their existing mapping.
+
+Lower child roots retain their typed exception contracts: ProtocolException maps to the existing
+ProtocolViolation category at the model/client boundary; storage and transaction types map to
+existing coded model failures. Public arbitrary-message constructors and BCL invariant guards
+remain unchanged. Execution's parameterless InvalidOperationException/Convert row failures retain
+their BCL kinds; adding a root carrier there would create a dependency cycle and expand the
+deferred #1264 P8 result contract. This audit introduces no such result API change.
+
+
+## Debugger inspection (#1470)
+
+Eligible concrete source types use private nested debugger views of reviewed public/protected
+state; existing inherited display/proxy pairs are reused. See the shared
+[debugger convention](../../Assimalign.Cohesion.Database/docs/CONVENTIONS.md#debugger-inspection).
+Only stored fields and reviewed pure getters are projected; inspection does not execute queries, enumerate results, invoke clocks or mutate lifecycle state.
+Runtime APIs, methods, allocation budgets, persistent formats and wire behavior are unchanged.
+
+
+## TCP delivery completion (#1391)
+
+The shared abstract DatabaseServerOptions carries the concrete-first deviation marker because it
+represents the five sealed model options. The release inventory, Database CI project matrix and
+solution entries name Database.Tcp. SDK smoke watches its source, and the Linux NativeAOT job
+publishes and runs its five-model handshake/Ping guard with compiler and trimming warnings refused.
+The installed-SDK acceptance fixture compiles without explicit model or transport references and
+serves KeyValuePair, Graph and Blob through the framework-public Listen(Uri) extension. Public
+signatures, option defaults, coded refusals, protocol layouts and storage formats remain unchanged.

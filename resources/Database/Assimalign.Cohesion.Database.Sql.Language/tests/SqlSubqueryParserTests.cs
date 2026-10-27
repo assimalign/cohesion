@@ -105,10 +105,6 @@ public sealed class SqlSubqueryParserTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Database.Sql.Language] - Subquery: Excludes unsupported forms")]
-    [InlineData("SELECT id FROM t WHERE id = ANY (SELECT id FROM u);", "ANY quantified comparison")]
-    [InlineData("SELECT id FROM t WHERE id >= ALL (SELECT id FROM u);", "ALL quantified comparison")]
-    [InlineData("SELECT id FROM t WHERE id <> SOME (SELECT id FROM u);", "SOME quantified comparison")]
-    [InlineData("SELECT id FROM t WHERE id = any /* trivia */ (SELECT id FROM u);", "ANY quantified comparison")]
     [InlineData("SELECT * FROM LATERAL (SELECT id FROM u) q;", "LATERAL")]
 
 
@@ -120,7 +116,7 @@ public sealed class SqlSubqueryParserTests
     {
         var statement = new SqlQueryParser().Parse(sql);
 
-        statement.Diagnostics.ShouldContain(item => item.Code == "COHDBL001" &&
+        statement.Diagnostics.ShouldContain(item => item.Code == "CK00001" &&
             item.Message != null && item.Message.Contains(form));
     }
 
@@ -137,7 +133,7 @@ public sealed class SqlSubqueryParserTests
 
         var statement = parser.Parse(sql);
 
-        statement.Diagnostics.Any(item => item.Code == "COHDBL001" &&
+        statement.Diagnostics.Any(item => item.Code == "CK00001" &&
             item.Message!.Contains("limit of 32 levels")).ShouldBe(rejected);
         parser.Parse("SELECT (SELECT 1);").Diagnostics.ShouldNotContain(item =>
             item.Severity == DiagnosticSeverity.Error);

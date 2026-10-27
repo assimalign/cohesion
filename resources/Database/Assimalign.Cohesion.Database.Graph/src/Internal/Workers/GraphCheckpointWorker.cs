@@ -20,6 +20,8 @@ namespace Assimalign.Cohesion.Database.Graph.Internal;
 /// A database its holder closed is never due (<see cref="IsCheckpointDue"/>), so a failure recorded
 /// for it ends with the first pass after its backoff.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("GraphCheckpointWorker {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Internal.GraphCheckpointWorker.DebugView))]
 internal sealed class GraphCheckpointWorker : DatabaseCheckpointWorker<GraphDatabase>
 {
     private readonly GraphDatabaseEngine _engine;
@@ -80,4 +82,19 @@ internal sealed class GraphCheckpointWorker : DatabaseCheckpointWorker<GraphData
     /// </remarks>
     protected override bool Checkpoint(GraphDatabase database, TimeSpan interval, CancellationToken cancellationToken)
         => database.Coordinator.TryCheckpoint(TimeSpan.Zero, cancellationToken);
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Graph.Internal.GraphCheckpointWorker _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Graph.Internal.GraphCheckpointWorker value)
+        {
+            _target = value;
+        }
+
+        public bool CompletionOnly => _target.CompletionOnly;
+        public string Name => _target.Name;
+        public global::Assimalign.Cohesion.Database.DatabaseEngineWorkerKind Kind => _target.Kind;
+        public global::System.TimeSpan Interval => _target.Interval;
+    }
 }

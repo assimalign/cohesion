@@ -21,7 +21,7 @@ public sealed partial class SqlQueryParser
     //   ParseAddition            → ParseMultiplication ((+|-) ParseMultiplication)*
     //   ParseMultiplication     → ParseCollate ((*|/|%) ParseCollate)*
     //   ParseUnary              → (-|+|~) ParseUnary | ParsePrimary
-    //                            (a prefix ~ reports COHDBL001; a + directly before a
+    //                            (a prefix ~ reports CK00001; a + directly before a
     //                            numeric literal is part of the literal, see ParsePrimary)
     //   ParseCollate            → ParseUnary (COLLATE name)*
     //   ParsePrimary            → literal | column_ref | param | function(...)
@@ -168,7 +168,7 @@ public sealed partial class SqlQueryParser
                     if (IsWord(ref next, "NOT")) { while (next.MoveNext() && next.Current.Type == TokenType.Comment) { } }
                     if (!IsWord(ref next, "DISTINCT")) { break; }
                 }
-                if (previous == 1) { AddSyntaxDiagnostic(ref lexer, "IS DISTINCT FROM predicates require parentheses to chain."); SkipQueryRemainder(ref lexer); break; }
+                if (previous == 1) { AddSyntaxDiagnostic(ref lexer, ErrorMessages.SqlQueryParserParsePredicatesVoid); SkipQueryRemainder(ref lexer); break; }
                 Advance(ref lexer);
                 bool negated = IsWord(ref lexer, "NOT");
                 if (negated) { Advance(ref lexer); }
@@ -247,11 +247,20 @@ public sealed partial class SqlQueryParser
                     break;
                 }
                 if (minimum > 2) { break; }
-                if (previous == 2) { AddSyntaxDiagnostic(ref lexer, "Comparison operators require parentheses to chain."); SkipQueryRemainder(ref lexer); break; }
+                if (previous == 2) { AddSyntaxDiagnostic(ref lexer, ErrorMessages.SqlQueryParserParsePredicatesVoid2); SkipQueryRemainder(ref lexer); break; }
                 Advance(ref lexer);
-                var right = SkipQuantifiedComparison(ref lexer) ?? ParseOperand(ref lexer, restricted ? OperandRule.RestrictedPredicate : OperandRule.PredicateOperand);
-                left = Nest(ref lexer, new SqlBinaryExpression(left, op.Value, right, Location.Create(1, 1, pos, pos)));
-                previous = 2;
+                if ((IsWord(ref lexer, "ANY") || IsWord(ref lexer, "SOME") || IsWord(ref lexer, "ALL")) &&
+                    TryPeekToken(lexer, out string quantifierNext, out _) && quantifierNext == "(")
+                {
+                    left = ParseQuantifiedComparison(ref lexer, left, op.Value, pos);
+                    previous = 0; // A parenthesized sublink is complete, like IN (query).
+                }
+                else
+                {
+                    var right = ParseOperand(ref lexer, restricted ? OperandRule.RestrictedPredicate : OperandRule.PredicateOperand);
+                    left = Nest(ref lexer, new SqlBinaryExpression(left, op.Value, right, Location.Create(1, 1, pos, pos)));
+                    previous = 2;
+                }
                 continue;
             }
 
@@ -264,7 +273,7 @@ public sealed partial class SqlQueryParser
             bool predicate = notBefore || IsWord(ref lexer, "BETWEEN") || IsWord(ref lexer, "IN") ||
                 IsWord(ref lexer, "LIKE") || IsWord(ref lexer, "ILIKE") || IsWord(ref lexer, "SIMILAR");
             if (restricted || !predicate || minimum > 3) { break; }
-            if (previous == 3) { AddSyntaxDiagnostic(ref lexer, "Predicates require parentheses to chain."); SkipQueryRemainder(ref lexer); break; }
+            if (previous == 3) { AddSyntaxDiagnostic(ref lexer, ErrorMessages.SqlQueryParserParsePredicatesVoid3); SkipQueryRemainder(ref lexer); break; }
             if (notBefore) { Advance(ref lexer); }
             if (IsWord(ref lexer, "ILIKE") || IsWord(ref lexer, "SIMILAR"))
             {
@@ -304,7 +313,7 @@ public sealed partial class SqlQueryParser
             {
                 if (notBefore && IsWord(ref lexer, "NULL"))
                 {
-                    AddSyntaxDiagnostic(ref lexer, "Unexpected NULL after NOT; write IS NOT NULL.");
+                    AddSyntaxDiagnostic(ref lexer, ErrorMessages.SqlQueryParserParsePredicatesVoid4);
                     Advance(ref lexer);
                 }
                 else { AddExpectedDiagnostic(ref lexer, "BETWEEN, IN or LIKE after NOT"); }
@@ -358,7 +367,7 @@ public sealed partial class SqlQueryParser
             if (!IsAtEnd(ref lexer) && StartsQuery(lexer))
             {
                 var subquery = ParseSubquery(ref lexer);
-                Expect(ref lexer, TokenType.RightParen, "')' after the IN subquery");
+                Expect(ref lexer, TokenType.RightParen, _errorInSubqueryClosingParenthesisExpected);
 
                 return Nest(ref lexer, new SqlInExpression(left, null, subquery, notBefore, Location.Create(1, 1, pos, pos)));
             }
@@ -374,7 +383,7 @@ public sealed partial class SqlQueryParser
                     values.Add(ParseOperand(ref lexer, OperandRule.Expression));
                 }
             }
-            Expect(ref lexer, TokenType.RightParen, "')' after the IN list");
+            Expect(ref lexer, TokenType.RightParen, _errorInListClosingParenthesisExpected);
 
             return Nest(ref lexer, new SqlInExpression(left, values, null, notBefore, Location.Create(1, 1, pos, pos)));
         }
@@ -383,26 +392,26 @@ public sealed partial class SqlQueryParser
         return Nest(ref lexer, new SqlInExpression(left, Array.Empty<SqlExpression>(), null, notBefore, Location.Create(1, 1, pos, pos)));
     }
 
-    /// <summary>
-    /// Skips the quantified operand of <c>op ANY|SOME|ALL (subquery)</c> after reporting the
-    /// construct once. It used to parse as a call to a function named ANY whose argument was a
-    /// SELECT, so it also reported "Expected ')' after the ANY arguments" (#1101).
-    /// </summary>
-    /// <returns>A placeholder that never executes, or <see langword="null"/> when no quantifier is current.</returns>
-    private SqlLiteralExpression? SkipQuantifiedComparison(ref TokenLexer lexer)
+    private SqlExpression ParseQuantifiedComparison(ref TokenLexer lexer, SqlExpression operand,
+        SqlBinaryOperator comparison, int position)
     {
-        if (!(IsWord(ref lexer, "ANY") || IsWord(ref lexer, "SOME") || IsWord(ref lexer, "ALL")) ||
-            !TryPeekToken(lexer, out string next, out _) || next != "(")
-        {
-            return null;
-        }
-
         int start = lexer.Current.Position;
-        string quantifier = CurrentText(ref lexer).ToUpperInvariant();
-        RequireSkippedConstruct(start, start + quantifier.Length, $"{quantifier} quantified comparison");
+        string word = CurrentText(ref lexer).ToUpperInvariant();
+        var quantifier = IsWord(ref lexer, "ALL") ? SqlComparisonQuantifier.All :
+            IsWord(ref lexer, "SOME") ? SqlComparisonQuantifier.Some : SqlComparisonQuantifier.Any;
         Advance(ref lexer);
-        SkipParenthesized(ref lexer);
-        return new SqlLiteralExpression("NULL", SqlLiteralType.Null, Location.Create(1, 1, start, start));
+        Expect(ref lexer, TokenType.LeftParen, "'(' after comparison quantifier");
+        if (IsAtEnd(ref lexer) || !StartsQuery(lexer, queryExpected: true))
+        {
+            RequireSkippedConstruct(start, start + word.Length, $"{word} array comparison");
+            SkipQueryRemainder(ref lexer);
+            Expect(ref lexer, TokenType.RightParen, _errorSubqueryClosingParenthesisExpected);
+            return operand;
+        }
+        var query = ParseSubquery(ref lexer);
+        Expect(ref lexer, TokenType.RightParen, _errorSubqueryClosingParenthesisExpected);
+        return Nest(ref lexer, new SqlQuantifiedComparisonExpression(operand, comparison, quantifier, query,
+            Location.Create(1, 1, position, _lastTokenEnd)));
     }
 
     private static SqlBinaryOperator? GetComparisonOperator(ref TokenLexer lexer)
@@ -540,7 +549,7 @@ public sealed partial class SqlQueryParser
             }
 
             AddUnsupportedSurfaceDiagnostic(pos, end,
-                "The prefix ~ operator (bitwise NOT) is not supported by the SQL surface.");
+                ErrorMessages.SqlQueryParserParseUnaryVoid);
             var operand = ParseOperand(ref lexer, OperandRule.Unary);
             return new SqlUnaryExpression(operand, SqlUnaryOperator.BitwiseNot,
                 Location.Create(1, 1, pos, pos));
@@ -608,7 +617,7 @@ public sealed partial class SqlQueryParser
         string spelling = _sourceText.Substring(start, end - start);
         string meaning = spelling.Contains("~~", StringComparison.Ordinal) ? "LIKE match" : "regular-expression match";
         AddUnsupportedSurfaceDiagnostic(start, end,
-            $"The infix {spelling} operator ({meaning}) is not supported by the SQL surface.");
+            string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlQueryParserRejectInfixTildeVoid, spelling, meaning));
         if (CanStartOperand(ref lexer))
         {
             ParseOperand(ref lexer, afterPredicate ? OperandRule.Addition : OperandRule.Multiplication);
@@ -635,7 +644,7 @@ public sealed partial class SqlQueryParser
         if (IsKeyword(ref lexer, "DEFAULT"))
         {
             int end = pos + lexer.Current.Value.Length;
-            AddSyntaxDiagnostic(ref lexer, "DEFAULT is not allowed in this context.");
+            AddSyntaxDiagnostic(ref lexer, ErrorMessages.SqlQueryParserParsePrimaryVoid);
             Advance(ref lexer);
             return new SqlLiteralExpression("NULL", SqlLiteralType.Null, Location.Create(1, 1, pos, end));
         }
@@ -696,8 +705,8 @@ public sealed partial class SqlQueryParser
         if (lexer.Current.Type == TokenType.Unrecognized && lexer.Current.Value.SequenceEqual("?"))
         {
             // Lexical preflight owns stray '?'; an operand replaces that generic diagnostic.
-            _parseDiagnostics.RemoveAll(diagnostic => diagnostic.Start == pos && diagnostic.Code == "SQL0003");
-            _parseDiagnostics.Add(QueryDiagnostics.UnsupportedParameterForm("SQL0003", Location.Create(1, 1, pos, pos + 1)));
+            _parseDiagnostics.RemoveAll(diagnostic => diagnostic.Start == pos && diagnostic.Code == "CS00003");
+            _parseDiagnostics.Add(QueryDiagnostics.UnsupportedParameterForm("CS00003", Location.Create(1, 1, pos, pos + 1)));
             Advance(ref lexer);
             return new SqlLiteralExpression("NULL", SqlLiteralType.Null, Location.Create(1, 1, pos, pos + 1));
         }
@@ -710,7 +719,7 @@ public sealed partial class SqlQueryParser
                 end += lexer.Current.Value.Length;
                 Advance(ref lexer);
             }
-            _parseDiagnostics.Add(QueryDiagnostics.UnsupportedParameterForm("SQL0003", Location.Create(1, 1, pos, end)));
+            _parseDiagnostics.Add(QueryDiagnostics.UnsupportedParameterForm("CS00003", Location.Create(1, 1, pos, end)));
             return new SqlLiteralExpression("NULL", SqlLiteralType.Null, Location.Create(1, 1, pos, end));
         }
 
@@ -720,7 +729,7 @@ public sealed partial class SqlQueryParser
             var name = CurrentText(ref lexer);
             if (!ParameterBindings.IsValidReference(name))
             {
-                AddSyntaxDiagnostic(ref lexer, "A parameter name must be an identifier (a letter or _, then letters, digits or _) or digits only; use $name, @name, or $1.");
+                AddSyntaxDiagnostic(ref lexer, ErrorMessages.SqlQueryParserParsePrimaryVoid2);
             }
             Advance(ref lexer);
             return new SqlParameterExpression(name, Location.Create(1, 1, pos, pos + name.Length));
@@ -777,7 +786,7 @@ public sealed partial class SqlQueryParser
             if (!IsAtEnd(ref lexer) && StartsQuery(lexer))
             {
                 var subSelect = ParseSubquery(ref lexer);
-                Expect(ref lexer, TokenType.RightParen, "')' after the subquery");
+                Expect(ref lexer, TokenType.RightParen, _errorSubqueryClosingParenthesisExpected);
 
                 return new SqlSubqueryExpression(subSelect, Location.Create(1, 1, pos, pos));
             }
@@ -832,8 +841,8 @@ public sealed partial class SqlQueryParser
         if (!HasErrorAt(position))
         {
             AddSyntaxDiagnostic(ref lexer, IsAtEnd(ref lexer)
-                ? "Expected an expression before the end of the statement."
-                : $"Expected an expression but found {DescribeToken(ref lexer)}.");
+                ? ErrorMessages.SqlQueryParserMissingExpressionVoid
+                : string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlQueryParserMissingExpressionVoid2, DescribeToken(ref lexer)));
         }
 
         return new SqlLiteralExpression("NULL", SqlLiteralType.Null,
@@ -907,7 +916,7 @@ public sealed partial class SqlQueryParser
     {
         int end = lexer.Current.Position + 1;
         AddUnsupportedSurfaceDiagnostic(start, end,
-            "Qualified SQL wildcard projections are not supported; select explicit columns or use unqualified *.");
+            ErrorMessages.ParseUnsupportedQualifiedStarVoid);
         Advance(ref lexer);
         return new SqlStarExpression(Location.Create(1, 1, start, end));
     }
@@ -947,7 +956,7 @@ public sealed partial class SqlQueryParser
             if (!SqlUnsupportedVocabulary.IsWindowFunction(name) || _preflightClauseStart < 0)
             {
                 AddUnsupportedSurfaceDiagnostic(pos, pos + name.Length + (quoted ? 2 : 0),
-                    $"The SQL function {name.ToUpperInvariant()} is not supported.");
+                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.QueryParserParseFunctionCallArgsVoid, name.ToUpperInvariant()));
             }
             SkipParenthesized(ref lexer);
             SkipCallExtensions(ref lexer);
@@ -1001,17 +1010,17 @@ public sealed partial class SqlQueryParser
             SkipQueryRemainder(ref lexer);
         }
         int callEnd = CurrentTokenEnd(ref lexer);
-        Expect(ref lexer, TokenType.RightParen, $"')' after the {name} arguments");
+        Expect(ref lexer, TokenType.RightParen, string.Format(System.Globalization.CultureInfo.CurrentCulture, _errorFunctionArgumentsClosingExpected, name));
         if (listagg)
         {
             if (IsWord(ref lexer, "WITHIN")) { Advance(ref lexer); }
             else { AddExpectedDiagnostic(ref lexer, "WITHIN GROUP after LISTAGG"); }
             ExpectKeyword(ref lexer, "GROUP", "GROUP after WITHIN");
-            Expect(ref lexer, TokenType.LeftParen, "'(' after WITHIN GROUP");
+            Expect(ref lexer, TokenType.LeftParen, _errorWithinGroupOpeningExpected);
             if (ordering.Count > 0) { AddExpectedDiagnostic(ref lexer, "only WITHIN GROUP ordering for LISTAGG"); }
             ParseAggregateOrdering(ref lexer, ordering);
             callEnd = CurrentTokenEnd(ref lexer);
-            Expect(ref lexer, TokenType.RightParen, "')' after WITHIN GROUP ordering");
+            Expect(ref lexer, TokenType.RightParen, _errorWithinGroupClosingExpected);
         }
         SkipCallExtensions(ref lexer);
         return new SqlFunctionCallExpression(name, args, Location.Create(1, 1, pos, callEnd), quantifier, ordering, listagg);
@@ -1054,7 +1063,7 @@ public sealed partial class SqlQueryParser
     /// <summary>
     /// Skips <c>WITHIN GROUP (...)</c> and <c>FILTER (...)</c> after a call, reporting each once.
     /// <c>WITHIN</c> used to become the column alias and <c>GROUP (ORDER BY ...)</c> a malformed
-    /// GROUP BY, so the construct also reported two SQL0003 diagnostics (#1101).
+    /// GROUP BY, so the construct also reported two CS00003 diagnostics (#1101).
     /// </summary>
     private void SkipCallExtensions(ref TokenLexer lexer)
     {
@@ -1131,7 +1140,7 @@ public sealed partial class SqlQueryParser
         Advance(ref lexer); // consume EXISTS
 
         SqlQueryBodyExpression? subquery = null;
-        if (Expect(ref lexer, TokenType.LeftParen, "'(' after EXISTS"))
+        if (Expect(ref lexer, TokenType.LeftParen, _errorExistsOpeningExpected))
         {
             if (StartsQuery(lexer, queryExpected: true))
             {
@@ -1142,7 +1151,7 @@ public sealed partial class SqlQueryParser
                 AddExpectedDiagnostic(ref lexer, "a SELECT subquery after EXISTS (");
             }
 
-            Expect(ref lexer, TokenType.RightParen, "')' after the EXISTS subquery");
+            Expect(ref lexer, TokenType.RightParen, _errorExistsClosingExpected);
         }
 
         subquery ??= new SqlSelectExpression(

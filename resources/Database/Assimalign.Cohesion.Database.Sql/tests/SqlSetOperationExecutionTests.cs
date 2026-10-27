@@ -163,7 +163,7 @@ public sealed class SqlSetOperationExecutionTests
         rows.ShouldBe(all ? count : 1);
     }
 
-    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Mixed set chains: recursive execution fails with COHSQLE004 on an explicit small stack")]
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Mixed set chains: recursive execution fails with CS05004 on an explicit small stack")]
     public async Task Execute_DeepMixedChain_ShouldGuardStack()
     {
         // Arrange
@@ -185,7 +185,7 @@ public sealed class SqlSetOperationExecutionTests
             .AsTask().GetAwaiter().GetResult());
 
         // Assert
-        failure.ShouldBeAssignableTo<DatabaseException>()!.Diagnostics!.ShouldContain(item => item.Code == "COHSQLE004");
+        failure.ShouldBeAssignableTo<DatabaseException>()!.Diagnostics!.ShouldContain(item => item.Code == "CS05004");
         (await RowsAsync(session, "SELECT id FROM t;")).ShouldHaveSingleItem()[0].ShouldBe(1);
     }
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - Set operations: duplicate and NULL multiplicities follow SQL bags")]
@@ -272,17 +272,17 @@ public sealed class SqlSetOperationExecutionTests
     }
 
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - Set operations: compatibility and output ordering fail at plan time on empty inputs")]
-    [InlineData("SELECT id FROM a WHERE id < 0 UNION SELECT id, id FROM b WHERE id < 0;", "COHSQLE013", "1", "2")]
-    [InlineData("SELECT id FROM a WHERE id < 0 UNION SELECT CAST(id AS TEXT) FROM b WHERE id < 0;", "COHSQLE003", "Int32", "String")]
-    [InlineData("SELECT id, id FROM a UNION SELECT id, CAST('1' AS TEXT) FROM b;", "COHSQLE003", "column 2", "String")]
-    [InlineData("INSERT INTO a SELECT id FROM a UNION SELECT id, id FROM b;", "COHSQLE013", "1", "2")]
-    [InlineData("INSERT INTO a SELECT id FROM a UNION SELECT CAST('1' AS TEXT) FROM b;", "COHSQLE003", "column 1", "String")]
-    [InlineData("SELECT id FROM a WHERE id < 0 UNION SELECT 'invalid' FROM b WHERE id < 0;", "COHSQLE022", "INTEGER", "numeric text")]
-    [InlineData("SELECT id FROM a UNION SELECT id FROM b ORDER BY id + 1;", "COHSQLE018", "output", "ordinal")]
-    [InlineData("SELECT id FROM a UNION SELECT id FROM b ORDER BY a.id;", "COHSQLE018", "output", "qualified")]
-    [InlineData("SELECT id FROM a UNION SELECT id FROM b ORDER BY 9;", "COHSQLE018", "output", "ordinal")]
-    [InlineData("SELECT id FROM a UNION SELECT ABS() FROM b;", "COHSQLE006", "ABS", "argument")]
-    [InlineData("SELECT ABS() FROM a UNION SELECT id FROM b ORDER BY LENGTH();", "COHSQLE006", "ABS", "argument")]
+    [InlineData("SELECT id FROM a WHERE id < 0 UNION SELECT id, id FROM b WHERE id < 0;", "CS05013", "1", "2")]
+    [InlineData("SELECT id FROM a WHERE id < 0 UNION SELECT CAST(id AS TEXT) FROM b WHERE id < 0;", "CS02003", "Int32", "String")]
+    [InlineData("SELECT id, id FROM a UNION SELECT id, CAST('1' AS TEXT) FROM b;", "CS02003", "column 2", "String")]
+    [InlineData("INSERT INTO a SELECT id FROM a UNION SELECT id, id FROM b;", "CS05013", "1", "2")]
+    [InlineData("INSERT INTO a SELECT id FROM a UNION SELECT CAST('1' AS TEXT) FROM b;", "CS02003", "column 1", "String")]
+    [InlineData("SELECT id FROM a WHERE id < 0 UNION SELECT 'invalid' FROM b WHERE id < 0;", "CS02022", "INTEGER", "numeric text")]
+    [InlineData("SELECT id FROM a UNION SELECT id FROM b ORDER BY id + 1;", "CS02018", "output", "ordinal")]
+    [InlineData("SELECT id FROM a UNION SELECT id FROM b ORDER BY a.id;", "CS02018", "output", "qualified")]
+    [InlineData("SELECT id FROM a UNION SELECT id FROM b ORDER BY 9;", "CS02018", "output", "ordinal")]
+    [InlineData("SELECT id FROM a UNION SELECT ABS() FROM b;", "CS01006", "ABS", "argument")]
+    [InlineData("SELECT ABS() FROM a UNION SELECT id FROM b ORDER BY LENGTH();", "CS01006", "ABS", "argument")]
     public async Task Plan_InvalidCombinedOutput_ShouldRejectBeforeRows(string sql, string code, string first, string second)
     {
         // Arrange
@@ -298,7 +298,7 @@ public sealed class SqlSetOperationExecutionTests
         exception.Message.ShouldContain(first);
         exception.Message.ShouldContain(second);
         exception.Diagnostics.ShouldContain(item => item.Code == code);
-        if (code == "COHSQLE003") { exception.Message.ShouldContain(sql.Contains("id, id") ? "column 2" : "column 1", Case.Sensitive); }
+        if (code == "CS02003") { exception.Message.ShouldContain(sql.Contains("id, id") ? "column 2" : "column 1", Case.Sensitive); }
     }
 
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - Set operations: values coerce before duplicate comparison")]

@@ -20,6 +20,152 @@ using Assimalign.Cohesion.Database.Storage.Units;
 /// </summary>
 public class RecordSpaceVersionStoreTests
 {
+    [Theory(DisplayName = "Cohesion Test [Database.Transactions] - Version decoding: a present short record is corruption with its location (#1372)")]
+    [InlineData(1)]
+    [InlineData(15)]
+    public async Task GetVisibleVersionAsync_ShortPresentRecord_ShouldReportItsLocation(int length)
+    {
+        // Arrange
+        using var storage = new RecordStorage();
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
+        (PageId PageId, int SlotIndex) location;
+        using (var bracket = storage.BeginTransaction())
+        {
+            location = storage.Insert(bracket, new byte[length]);
+            bracket.Commit();
+        }
+        var reader = await coordinator.BeginAsync(IsolationLevel.Snapshot, CancellationToken.None);
+        try
+        {
+            // Act
+            var failure = await Should.ThrowAsync<StorageCorruptionException>(async () =>
+                await coordinator.VersionStore.GetVisibleVersionAsync(0,
+                    storage.PackLocation(location.PageId, location.SlotIndex), reader.Snapshot, CancellationToken.None));
+
+            // Assert
+            failure.PageId.ShouldBe(location.PageId);
+            failure.Code.ShouldBe("CK06003");
+            failure.Message.ShouldContain($"slot {location.SlotIndex}", Case.Sensitive);
+        }
+        finally { await coordinator.RollbackAsync(reader, CancellationToken.None); }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Transactions] - Recovery decoding: a short stamped record cannot disappear from scrub (#1372)")]
+    [InlineData(1)]
+    [InlineData(15)]
+    public async Task ScrubRecovered_ShortPresentRecord_ShouldReportItsLocation(int length)
+    {
+        // Arrange
+        using var storage = new RecordStorage();
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
+        (PageId PageId, int SlotIndex) location;
+        using (var bracket = storage.BeginTransaction())
+        {
+            location = storage.Insert(bracket, new byte[length]);
+            bracket.Commit();
+        }
+
+        // Act
+        var failure = Should.Throw<StorageCorruptionException>(() =>
+            coordinator.VersionStore.ScrubRecovered(new HashSet<TransactionSequence>(), CancellationToken.None));
+
+        // Assert
+        failure.PageId.ShouldBe(location.PageId);
+        failure.Code.ShouldBe("CK06003");
+        failure.Message.ShouldContain($"slot {location.SlotIndex}", Case.Sensitive);
+        CountRecords(storage).ShouldBe(1);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Transactions] - Version decoding: short undo and prune targets remain tracked until repaired (#1372)")]
+    [InlineData("created")]
+    [InlineData("tombstone")]
+    [InlineData("prune")]
+    public async Task PurgeVersion_ShortTarget_ShouldRetainItsWorkAndRetryAfterRepair(string operation)
+    {
+        // Arrange
+        using var storage = new RecordStorage();
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
+        var writer = await coordinator.BeginAsync(IsolationLevel.Snapshot, CancellationToken.None);
+        var versions = coordinator.VersionStore;
+        byte[] valid = Stamped(operation == "created" ? writer.Sequence : TransactionSequence.None,
+            operation == "created" ? TransactionSequence.None : writer.Sequence, 9);
+        (PageId PageId, int SlotIndex) location = default;
+        await coordinator.ApplyStatementAsync(writer, bracket =>
+        {
+            location = storage.Insert(bracket, valid);
+            if (operation == "created") { versions.RecordCreated(writer.Sequence, location.PageId, location.SlotIndex); }
+            else { versions.RecordTombstoned(writer.Sequence, location.PageId, location.SlotIndex); }
+            return 0;
+        }, CancellationToken.None);
+        if (operation == "prune") { await coordinator.CommitAsync(writer, CancellationToken.None); }
+        using (var bracket = storage.BeginTransaction())
+        {
+            storage.Update(bracket, location.PageId, location.SlotIndex, new byte[15]);
+            bracket.Commit();
+        }
+        bool settled = false;
+        try
+        {
+            // Act
+            var failure = await Should.ThrowAsync<StorageCorruptionException>(async () =>
+            {
+                if (operation == "prune")
+                {
+                    await versions.PruneAsync(new TransactionSequence(ulong.MaxValue), CancellationToken.None);
+                }
+                else { await versions.PurgeWriterAsync(writer.Sequence, CancellationToken.None); }
+            });
+
+            // Assert: damage cannot settle an outstanding undo or prune candidate.
+            failure.PageId.ShouldBe(location.PageId);
+            failure.Message.ShouldContain($"slot {location.SlotIndex}", Case.Sensitive);
+            versions.TrackedVersionCount.ShouldBe(1);
+            if (operation != "prune") { versions.PendingAbortedPurges.ShouldContain(writer.Sequence.Value); }
+            using (var bracket = storage.BeginTransaction())
+            {
+                storage.Update(bracket, location.PageId, location.SlotIndex, valid);
+                bracket.Commit();
+            }
+            long repaired = operation == "prune"
+                ? await versions.PruneAsync(new TransactionSequence(ulong.MaxValue), CancellationToken.None)
+                : await versions.PurgeWriterAsync(writer.Sequence, CancellationToken.None);
+            repaired.ShouldBe(1);
+            settled = true;
+            versions.TrackedVersionCount.ShouldBe(0);
+            versions.PendingAbortedPurges.ShouldBeEmpty();
+            CountRecords(storage).ShouldBe(operation == "tombstone" ? 1 : 0);
+        }
+        finally
+        {
+            if (!settled)
+            {
+                using var repair = storage.BeginTransaction();
+                storage.Update(repair, location.PageId, location.SlotIndex, valid);
+                repair.Commit();
+            }
+            if (writer.State == TransactionState.Active) { await coordinator.RollbackAsync(writer, CancellationToken.None); }
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Version decoding: the exact stamp header remains a valid empty payload (#1372)")]
+    public async Task GetVisibleVersionAsync_ExactStampHeader_ShouldRemainVisible()
+    {
+        using var storage = new RecordStorage();
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
+        (PageId PageId, int SlotIndex) location;
+        using (var bracket = storage.BeginTransaction())
+        {
+            location = storage.Insert(bracket, new byte[16]);
+            bracket.Commit();
+        }
+        var reader = await coordinator.BeginAsync(IsolationLevel.Snapshot, CancellationToken.None);
+        var visible = await coordinator.VersionStore.GetVisibleVersionAsync(0,
+            storage.PackLocation(location.PageId, location.SlotIndex), reader.Snapshot, CancellationToken.None);
+        visible.HasValue.ShouldBeTrue();
+        visible.GetValueOrDefault().Length.ShouldBe(16);
+        await coordinator.RollbackAsync(reader, CancellationToken.None);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Database.Transactions] - MVCC: a version page that fails its checksum fails lookup with its page and code (#1160)")]
     public async Task GetVisibleVersionAsync_CorruptPage_ShouldThrowInsteadOfReturningAbsence()
     {
@@ -48,7 +194,7 @@ public class RecordSpaceVersionStoreTests
 
         // Assert: failed loads never enter the cache; a repaired device returns the version.
         failure.PageId.ShouldBe(location.PageId);
-        failure.Code.ShouldBe("COHDBS003");
+        failure.Code.ShouldBe("CK06003");
         media.GetBuffer()[offset] ^= 0x80;
         (await coordinator.VersionStore.GetVisibleVersionAsync(0,
             storage.PackLocation(location.PageId, location.SlotIndex), reader.Snapshot, CancellationToken.None)).HasValue.ShouldBeTrue();

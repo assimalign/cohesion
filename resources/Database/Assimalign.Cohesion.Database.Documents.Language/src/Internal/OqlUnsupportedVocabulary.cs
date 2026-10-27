@@ -2,7 +2,7 @@ namespace Assimalign.Cohesion.Database.Documents.Language.Internal;
 
 /// <summary>
 /// The OQL recognized-unsupported table (#1101): every word the capability scan recognizes
-/// but the Documents engine does not run, with the construct its <c>COHDBL001</c> names.
+/// but the Documents engine does not run, with the construct its <c>CK00001</c> names.
 /// </summary>
 /// <remarks>
 /// Words outside <see cref="OqlLanguageProfile"/>'s keyword list stay identifiers to the
@@ -51,15 +51,19 @@ internal static class OqlUnsupportedVocabulary
         // Statements and clauses of other languages.
         new("ALTER", "ALTER", OqlWordPosition.Clause),
         new("INSERT", "INSERT", OqlWordPosition.Clause),
+        // Enabled for DML; retained for contextual coverage and prefix/SELECT refusal.
         new("RETURNING", "RETURNING", OqlWordPosition.Trailing),
         // Enabled by OqlClauses.Update; SET's positional exemption belongs to UPDATE.
         new("UPDATE", "UPDATE", OqlWordPosition.Clause),
         // Enabled by OqlClauses.Delete; retained here for contextual keyword coverage.
         new("DELETE", "DELETE", OqlWordPosition.Clause),
         new("USE", "USE", OqlWordPosition.Clause),
-        new("BEGIN", "BEGIN", OqlWordPosition.Clause),
-        new("COMMIT", "COMMIT", OqlWordPosition.Clause),
-        new("ROLLBACK", "ROLLBACK", OqlWordPosition.Clause),
+        // Enabled transaction controls retain contextual keyword coverage.
+        new("BEGIN", OqlClauses.Begin, OqlWordPosition.Clause),
+        new("START", OqlClauses.Begin, OqlWordPosition.Statement),
+        new("COMMIT", OqlClauses.Commit, OqlWordPosition.Clause),
+        new("ROLLBACK", OqlClauses.Rollback, OqlWordPosition.Clause),
+        new("SAVEPOINT", "SAVEPOINT", OqlWordPosition.Statement),
         new("WITH", "WITH", OqlWordPosition.Clause),
         new("JOIN", "JOIN", OqlWordPosition.Clause),
         new("NEST", "NEST", OqlWordPosition.Clause),

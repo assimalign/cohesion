@@ -17,7 +17,8 @@ internal readonly record struct ScriptStatement(string Text, int Offset);
 /// <remarks>
 /// The splitter lexes rather than scanning for quotes and comments itself, so a statement ends
 /// exactly where the engines read one: a <c>--</c> comment ends at any line terminator (#1150),
-/// block comments nest, and <c>&lt;--</c> is an arrow followed by a minus sign. A character
+/// block comments nest, and in GQL <c>&lt;--</c> is an arrow followed by a minus sign. SQL and
+/// OQL keep <c>&lt;</c> followed by a line comment. A character
 /// scanner used to end a block comment at its first <c>*/</c>, so
 /// <c>/* a /* b */ ; DELETE FROM t; */</c> ran a DELETE every engine reads as a comment. There is
 /// no <c>//</c> comment in any language, so a <c>//</c> line reaches the engine, which rejects it,
@@ -25,31 +26,31 @@ internal readonly record struct ScriptStatement(string Text, int Offset);
 /// </remarks>
 internal static class ScriptSplitter
 {
-    public static List<ScriptStatement> Split(string text)
+    public static List<ScriptStatement> Split(string text, StudioModel model)
     {
         var statements = new List<ScriptStatement>();
         int start = 0;
 
-        TokenLexer lexer = Lex(text);
+        TokenLexer lexer = Lex(text, model);
         while (lexer.MoveNext())
         {
             Token token = lexer.Current;
             if (token.Type == TokenType.Semicolon)
             {
                 int end = token.Position + token.Value.Length;
-                Add(statements, text, start, end);
+                Add(statements, text, start, end, model);
                 start = end;
             }
         }
 
-        Add(statements, text, start, text.Length);
+        Add(statements, text, start, text.Length, model);
         return statements;
     }
 
     /// <summary>True when the text holds nothing but whitespace, comments and semicolons.</summary>
-    public static bool IsBlank(string segment)
+    public static bool IsBlank(string segment, StudioModel model)
     {
-        TokenLexer lexer = Lex(segment);
+        TokenLexer lexer = Lex(segment, model);
         while (lexer.MoveNext())
         {
             if (lexer.Current.Type is not (TokenType.Comment or TokenType.Semicolon))
@@ -65,9 +66,9 @@ internal static class ScriptSplitter
     /// The first word of a statement, skipping comments and opening parentheses (upper-case), or
     /// an empty string when the statement starts with anything else.
     /// </summary>
-    public static string FirstKeyword(string statement)
+    public static string FirstKeyword(string statement, StudioModel model)
     {
-        TokenLexer lexer = Lex(statement);
+        TokenLexer lexer = Lex(statement, model);
         while (lexer.MoveNext())
         {
             Token token = lexer.Current;
@@ -83,7 +84,7 @@ internal static class ScriptSplitter
         return string.Empty;
     }
 
-    private static void Add(List<ScriptStatement> statements, string text, int start, int end)
+    private static void Add(List<ScriptStatement> statements, string text, int start, int end, StudioModel model)
     {
         if (end <= start)
         {
@@ -91,7 +92,7 @@ internal static class ScriptSplitter
         }
 
         string segment = text[start..end];
-        if (IsBlank(segment))
+        if (IsBlank(segment, model))
         {
             return;
         }
@@ -105,7 +106,11 @@ internal static class ScriptSplitter
         statements.Add(new ScriptStatement(segment.Trim(), start + leading));
     }
 
-    // Splitting needs only token boundaries, never a word's role, so no language's keywords are
-    // passed: the lexer treats comments, literals and punctuation the same in every language.
-    private static TokenLexer Lex(string text) => new(text, new TokenLexerOptions { Keywords = ReadOnlySpan<string>.Empty });
+    // Splitting needs token boundaries, never a word's role. Only GQL recognizes left arrows;
+    // enabling them for SQL/OQL would consume the start of a valid -- comment after < (#1647).
+    private static TokenLexer Lex(string text, StudioModel model) => new(text, new TokenLexerOptions
+    {
+        Keywords = ReadOnlySpan<string>.Empty,
+        RecognizeLeftArrow = model == StudioModel.Graph,
+    });
 }

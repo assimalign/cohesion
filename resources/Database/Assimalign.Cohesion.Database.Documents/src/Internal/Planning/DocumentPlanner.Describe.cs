@@ -61,11 +61,25 @@ internal sealed partial class DocumentPlanner
             _ => null,
         };
         string? detail = plan is DocumentDeletePlan delete
-            ? $"filter={delete.Statement.Predicate is not null}; access={(delete.Access is DocumentIndexPath ? "IndexSeek" : "CollectionScan")}"
+            ? $"filter={delete.Statement.Predicate is not null}; access={AccessName(delete.Access)}"
             : plan is DocumentUpdatePlan update
-            ? $"filter={update.Statement.Predicate is not null}; access={(update.Access is DocumentIndexPath ? "IndexSeek" : "CollectionScan")}"
+            ? $"filter={update.Statement.Predicate is not null}; access={AccessName(update.Access)}"
             : logical is null ? null : SelectDetail(logical);
         Add(DescribeOperator(plan), null, indexName, detail);
+        var returning = plan switch
+        {
+            DocumentInsertPlan p => p.Returning,
+            DocumentInsertSelectPlan p => p.Returning,
+            DocumentUpsertPlan p => p.Returning,
+            DocumentUpdatePlan p => p.Returning,
+            DocumentDeletePlan p => p.Returning,
+            _ => null,
+        };
+        if (returning is not null)
+        {
+            Add(returning.Query.IsValue ? "ReturningValue" : "Returning", 0,
+                detail: $"columns={returning.Projections.Count}");
+        }
         if (plan is DocumentDeletePlan deletion) { AddAccess(deletion.Access, 0); }
         if (plan is DocumentUpdatePlan mutation) { AddAccess(mutation.Access, 0); }
         var select = plan as DocumentPlan;
@@ -79,7 +93,7 @@ internal sealed partial class DocumentPlanner
         };
         if (writeSource is not null)
         {
-            sourceParent = 1;
+            sourceParent = nodes.Count;
             if (writeSource is DocumentPlan source)
             {
                 select = source;
@@ -143,20 +157,41 @@ internal sealed partial class DocumentPlanner
                 case DocumentIndexPath seek:
                     var bounds = new List<string>();
                     var prefix = seek.EqualityPrefix ?? [];
-                    for (int i = 0; i < prefix.Count; i++) { bounds.Add($"{seek.Index.Paths[i]} = {Value(prefix[i])}"); }
-                    string rangePath = seek.Index.Paths[Math.Min(prefix.Count, seek.Index.Paths.Count - 1)];
+                    for (int i = 0; i < prefix.Count; i++) { bounds.Add($"{DocumentIndexRendering.Key(seek.Index.Keys[i])} = {Value(prefix[i])}"); }
+                    string rangePath = DocumentIndexRendering.Key(seek.Index.Keys[Math.Min(prefix.Count, seek.Index.Keys.Count - 1)]);
                     if (seek.Lower is { } lower) { bounds.Add($"{rangePath} {(lower.Inclusive ? ">=" : ">")} {Value(lower.Value)}"); }
                     if (seek.Upper is { } upper) { bounds.Add($"{rangePath} {(upper.Inclusive ? "<=" : "<")} {Value(upper.Value)}"); }
-                    Add("IndexSeek", parent, seek.Index.Name, string.Join(" AND ", bounds));
+                    string description = string.Join(" AND ", bounds);
+                    if (System.Linq.Enumerable.Any(seek.Index.Keys, key => key.ArraySource is not null))
+                    { description += "; distinct_documents=True; array_residual=True"; }
+                    if (seek.Estimate is { } estimate)
+                    {
+                        description += $"; estimate_kind={(estimate.IsComplete ? "exact_index_entries" : "lower_bound")}; probe_entries={estimate.EntriesExamined}; probe_pages={estimate.PagesVisited}";
+                    }
+                    Add("IndexSeek", parent, seek.Index.Name, description, seek.Estimate?.Count);
+                    break;
+                case DocumentIntersectionPath intersection:
+                    int id = nodes.Count;
+                    Add("IndexIntersection", parent, detail: $"inputs={intersection.Inputs.Count}; estimate_kind=upper_bound",
+                        estimated: System.Linq.Enumerable.Min(intersection.Inputs, path => path.Estimate!.Value.Count));
+                    foreach (var input in intersection.Inputs) { AddAccess(input, id); }
                     break;
                 default:
                     throw new UnreachableException();
             }
         }
 
-        void Add(string name, int? parent, string? index = null, string? detail = null)
-            => nodes.Add(new DatabasePlanNode { NodeId = nodes.Count, ParentId = parent, Operator = name, Target = target, Index = index, Detail = detail });
+        void Add(string name, int? parent, string? index = null, string? detail = null, long? estimated = null)
+            => nodes.Add(new DatabasePlanNode { NodeId = nodes.Count, ParentId = parent, Operator = name, Target = target,
+                Index = index, Detail = detail, EstimatedRows = estimated });
     }
+
+    private static string AccessName(DocumentAccessPath access) => access switch
+    {
+        DocumentIndexPath => "IndexSeek",
+        DocumentIntersectionPath => "IndexIntersection",
+        _ => "CollectionScan",
+    };
 
     private static string SelectDetail(DocumentLogicalPlan logical)
         => $"filter={logical.Query.Predicate is not null}; grouped={logical.IsGrouped}; order_keys={logical.Query.OrderBy.Count}; limit={logical.Limit?.ToString(CultureInfo.InvariantCulture) ?? "none"}; offset={logical.Offset.ToString(CultureInfo.InvariantCulture)}";

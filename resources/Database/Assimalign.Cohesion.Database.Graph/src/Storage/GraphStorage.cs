@@ -6,6 +6,8 @@ using Assimalign.Cohesion.Database.Transactions;
 namespace Assimalign.Cohesion.Database.Graph.Storage;
 
 /// <summary>Owns graph pages and delegates journaling, allocation, and recovery to the shared kernel.</summary>
+[global::System.Diagnostics.DebuggerDisplay("GraphStorage {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Storage.GraphStorage.DebugView))]
 public sealed class GraphStorage : Assimalign.Cohesion.Database.Storage.Storage
 {
     private GraphStorage(StorageStream data, StorageStream journal, StorageStream backup) : base(StorageModel.Graph, data, journal, backup)
@@ -83,6 +85,8 @@ public sealed class GraphStorage : Assimalign.Cohesion.Database.Storage.Storage
     /// <param name="location">Packed location.</param><returns>The page and slot.</returns>
     public static (PageId PageId, int SlotIndex) UnpackLocation(ulong location) => ((PageId)(long)(location >> 16), (int)(location & 0xffff));
     internal (PageId PageId, int SlotIndex) InsertOwned(StorageTransaction transaction, ulong owner, ReadOnlySpan<byte> bytes) => InsertRecord(transaction, owner, bytes);
+    [global::System.Diagnostics.DebuggerDisplay("RecordSpace")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Storage.GraphStorage.RecordSpace.DebugView))]
     private sealed class RecordSpace : TransactionRecordSpace
     {
         private readonly GraphStorage _storage;
@@ -97,5 +101,28 @@ public sealed class GraphStorage : Assimalign.Cohesion.Database.Storage.Storage
         protected override void DeleteCore(StorageTransaction transaction, PageId pageId, int slotIndex) => _storage.DeleteEntry(transaction, pageId, slotIndex);
         protected override ulong PackLocationCore(PageId pageId, int slotIndex) => GraphStorage.PackLocation(pageId, slotIndex);
         protected override (PageId PageId, int SlotIndex) UnpackLocationCore(ulong location) => GraphStorage.UnpackLocation(location);
+
+        private sealed class DebugView
+        {
+            public DebugView(global::Assimalign.Cohesion.Database.Graph.Storage.GraphStorage.RecordSpace value)
+            {
+                _ = value;
+            }
+        }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Graph.Storage.GraphStorage _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Graph.Storage.GraphStorage value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Transactions.TransactionRecordSpace Records => _target.Records;
+        public global::Assimalign.Cohesion.Database.Storage.StorageId Id => _target.Id;
+        public global::Assimalign.Cohesion.Database.Storage.Name Name => _target.Name;
+        public global::Assimalign.Cohesion.Database.Storage.StorageModel Model => _target.Model;
     }
 }

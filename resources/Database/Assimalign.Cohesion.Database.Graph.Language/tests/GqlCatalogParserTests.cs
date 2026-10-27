@@ -33,7 +33,7 @@ public sealed class GqlCatalogParserTests
     {
         var statement = new GqlQueryParser().Parse(command);
         var error = statement.Diagnostics.Single();
-        error.Code.ShouldBe("GQL0007");
+        error.Code.ShouldBe("CG00007");
         error.Message.ShouldBe("Graph catalog introspection is read-only.");
     }
 

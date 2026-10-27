@@ -8,15 +8,18 @@ using System.Threading;
 using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Language;
 using Assimalign.Cohesion.Database.Types;
+using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 /// <summary>
-/// The rule-based planner: binds a parsed statement against the catalog, validates
+/// The binder: resolves a parsed statement against the catalog, validates
 /// it against the executor's supported surface, and produces a <see cref="SqlPlan"/>.
 /// Unsupported dialect features fail here with precise messages rather than
 /// misexecuting.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("SqlPlanner")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlPlanner.DebugView))]
 internal sealed partial class SqlPlanner
 {
     /// <summary>
@@ -62,19 +65,27 @@ internal sealed partial class SqlPlanner
         _statementMetrics = previous._statementMetrics;
     }
 
-    internal SqlPlan Plan(SqlQueryExpression expression)
+    internal SqlPlan Plan(SqlQueryExpression expression, TransactionSnapshot? snapshot = null)
     {
         var planner = this;
         while (true)
         {
             _cancellationToken.ThrowIfCancellationRequested();
-            ulong generation = _catalog.DdlGeneration;
+            var generation = _catalog.BindingGeneration;
             try
             {
+                // Carry visibility on the planning call stack, preserving the ordinary
+                // planner's allocation budget. Retry uses this same fixed statement snapshot.
+                // DML targets retain the read image too, so definition validation refuses
+                // stale writers before they can mutate a replacement owner.
+                if (expression is SqlQueryBodyExpression or SqlInsertExpression or SqlUpdateExpression or SqlDeleteExpression or SqlMergeExpression or SqlCreateTableAsExpression)
+                {
+                    planner.UseTruncateSnapshot(snapshot);
+                }
                 var plan = planner.PlanOnce(expression);
-                if (_catalog.DdlGeneration == generation) { return plan; }
+                if (_catalog.BindingGeneration == generation) { return plan; }
             }
-            catch (DatabaseException) when (_catalog.DdlGeneration != generation)
+            catch (DatabaseException) when (_catalog.BindingGeneration != generation)
             {
                 // A concurrent publication may pair an old table with new index key names.
                 // Discard both successful and failed mixed-generation plans before execution.
@@ -125,18 +136,21 @@ internal sealed partial class SqlPlanner
                 => new SqlDefinitionPlan(expression),
             SqlQueryBodyExpression query => PlanQuery(query),
             SqlInsertExpression insert => PlanInsert(insert),
+            SqlMergeExpression merge => PlanMerge(merge),
             SqlUpdateExpression update => PlanUpdate(update),
             SqlDeleteExpression delete => PlanDelete(delete),
             SqlCreateViewExpression create => PlanCreateView(create),
             SqlDropViewExpression drop => new SqlDropViewPlan(drop.View.SchemaName ?? DefaultSchema, drop.View.TableName, drop.IfExists, drop.Cascade),
             SqlCreateTableExpression create => PlanCreateTable(create),
+            SqlCreateTableAsExpression create => PlanCreateTableAs(create),
             SqlCreateSchemaExpression create => new SqlCreateSchemaPlan(create.Name, create.IfNotExists),
             SqlDropTableExpression drop => PlanDropTable(drop),
+            SqlTruncateExpression truncate => new SqlTruncatePlan(truncate),
             SqlDropSchemaExpression drop => new SqlDropSchemaPlan(drop.Name, drop.IfExists, drop.Cascade),
             SqlAlterTableExpression alter => PlanAlterTable(alter),
             SqlCreateIndexExpression createIndex => PlanCreateIndex(createIndex),
             SqlDropIndexExpression dropIndex => PlanDropIndex(dropIndex),
-            _ => throw new SqlPlanningException("COHSQLE013", $"Statement type {expression.CommandType} is not supported by the executor yet.", expression.Location),
+            _ => throw new SqlPlanningException("CS05013", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.PlannerPlanStatementCoreSqlPlanning, expression.CommandType), expression.Location),
         };
     }
 
@@ -152,7 +166,7 @@ internal sealed partial class SqlPlanner
     {
         if (select.Where is not null && ContainsAggregate(select.Where))
         {
-            throw new SqlPlanningException("COHSQLE017", "Aggregate functions are not allowed in WHERE; use HAVING to filter groups.", select.Where?.Location);
+            throw new SqlPlanningException("CS05017", ErrorMessages.SqlPlannerPlanSelectCoreSqlPlanning, select.Where?.Location);
         }
         if (select.From.Count == 0)
         {
@@ -166,18 +180,19 @@ internal sealed partial class SqlPlanner
         IReadOnlyList<SqlCatalogColumn> columns = source.Columns;
         IReadOnlyList<SqlJoinStep> steps = [];
         IReadOnlyList<int>? outputOrdinals = null;
-        if (select.From.Count > 1 || select.From[0].Joins.Count > 0 || source.Derived is not null)
+        SqlJoinTree? tree = null;
+        if (select.From.Count > 1 || select.From[0].Joins.Count > 0 || source.Derived is not null || select.From[0].Table is SqlJoinedTableReference)
         {
-            bindings = BindJoin(select, source, out columns, out steps, out outputOrdinals);
+            bindings = BindJoin(select, source, out columns, out steps, out outputOrdinals, out tree);
         }
         var evaluator = new SqlExpressionEvaluator(columns, _parameters, bindings, defaultCollation: _catalog.DefaultCollation,
-            subquerySlots: _subquerySlots, functions: _functions, cancellationToken: _cancellationToken,
+            subquerySlots: _subquerySlots, functions: _functions, cancellationToken: _cancellationToken, foldConstants: FoldQueryConstants,
             outerScope: OuterScope, outerDependencies: OuterDependencies, relation: select.From[0].Table);
 
         if (ViewDefinitionBinding is not null) { CaptureViewSelect(select, columns, bindings, outputOrdinals, evaluator); }
         if (select.GroupBy.Count > 0 || select.Having is not null || ProjectsOrOrdersByAggregate(select))
         {
-            return PlanGroup(select, table, systemView, columns, bindings, evaluator, steps);
+            return PlanGroup(select, table, systemView, columns, bindings, evaluator, steps, tree);
         }
 
         var projections = BindProjections(select.Columns, columns, evaluator, outputOrdinals);
@@ -206,7 +221,7 @@ internal sealed partial class SqlPlanner
             return PushJoinPredicates(new SqlJoinPlan(bindings, columns, steps, projections,
                 where, ordering, BindCount(select.Limit, LimitClause(select)),
                 BindCount(select.Offset, "OFFSET"), select.IsDistinct,
-                orderByProjections));
+                orderByProjections) { Tree = tree });
         }
 
         if (systemView is not null)
@@ -241,6 +256,11 @@ internal sealed partial class SqlPlanner
 
     private SqlRelationSource ResolveRelationCore(SqlRelationReference reference, SqlSelectExpression? owner)
     {
+        if (reference is SqlJoinedTableReference group)
+        {
+            RuntimeHelpers.EnsureSufficientExecutionStack();
+            return ResolveRelation(group.Item.Table, owner);
+        }
         if (reference is SqlDerivedTableReference derived)
         {
             return BindDerivedTable(derived, owner);
@@ -273,7 +293,7 @@ internal sealed partial class SqlPlanner
         if (named.SchemaName is null && _commonTableState?.Future?.Contains(named.TableName) == true &&
             !TryReadTable(DefaultSchema, named.TableName, out _))
         {
-            throw new SqlPlanningException("COHSQLE026", string.Format(CultureInfo.CurrentCulture,
+            throw new SqlPlanningException("CS01026", string.Format(CultureInfo.CurrentCulture,
                 ErrorMessages.CteForwardReference, named.TableName), owner?.Location);
         }
         return new SqlRelationSource(ResolveTable(named));
@@ -287,7 +307,7 @@ internal sealed partial class SqlPlanner
         var column = output?.Column ?? columns[ordinal];
         return new(name, output is null ? ordinal : null, null, column.Type.Type)
         {
-            Value = output?.Value, Collation = new SqlBoundCollation(scope.ResolveColumnCollation(ordinal)),
+            Value = output?.Value, Collation = new SqlBoundCollation(output is null ? scope.ResolveColumnCollation(ordinal) : column.Collation ?? _catalog.DefaultCollation),
             Metadata = CaptureProjectionMetadata(new SqlCollationCandidate(column.Collation, column.Collation is null ? 0 : 2), column),
             MaxLength = column.Type.MaxLength, IsNullable = column.IsNullable,
         };
@@ -327,14 +347,14 @@ internal sealed partial class SqlPlanner
         return usesOutput;
     }
 
-    // ── Access-path selection (rule-based, by design) ──────────────────
+    // ── Bound access-path candidates and deterministic tie-break ──────
 
     /// <summary>
     /// Picks a statement's access path: an index seek when the WHERE clause has
     /// sargable predicates on an index's leading key columns, the per-object
-    /// scan otherwise. Selection is rule-based (the MVP planner's contract —
-    /// no cost model): the index with the longest equality prefix wins; ties
+    /// scan otherwise. Binding initially prefers the longest equality prefix; ties
     /// prefer a usable range bound, then uniqueness, then name (deterministic).
+    /// Statement-local probe costing can then rank the compatible alternatives.
     /// The full WHERE always remains the residual predicate, so a wrong-looking
     /// choice can cost performance but never correctness.
     /// </summary>
@@ -345,12 +365,12 @@ internal sealed partial class SqlPlanner
     // Keep predicate collection independent of SELECT/DML binding (and of future join pushdown).
     private SqlAccessPath SelectAccessPath(SqlCatalogTable table, IReadOnlyList<SqlExpression> conjuncts, SqlExpressionEvaluator? scope)
     {
-        if (ViewDefinitionBinding is not null || conjuncts.Count == 0 || _commonTableState?.BindingUnused == true)
+        if (_queryScopes?.DeferQueryEvaluation == true || ViewDefinitionBinding is not null || _inferringTableOutput && !_tableAsWithData || conjuncts.Count == 0 || _commonTableState?.BindingUnused == true)
         {
             return SqlScanPath.Instance;
         }
 
-        var indexes = _catalog.GetIndexes(table.ObjectId);
+        var indexes = ReadIndexes(table.ObjectId);
 
         if (indexes.Count == 0)
         {
@@ -373,12 +393,14 @@ internal sealed partial class SqlPlanner
     private SqlAccessPath SelectAccessPath(SqlCatalogTable table,
         Dictionary<int, List<(SqlBinaryOperator Op, object? Value)>> predicates, IReadOnlyList<SqlCatalogIndex>? indexes = null)
     {
-        if (ViewDefinitionBinding is not null || predicates.Count == 0 || _commonTableState?.BindingUnused == true)
+        if (_queryScopes?.DeferQueryEvaluation == true || ViewDefinitionBinding is not null || _inferringTableOutput && !_tableAsWithData || predicates.Count == 0 || _commonTableState?.BindingUnused == true)
         {
             return SqlScanPath.Instance;
         }
-        indexes ??= _catalog.GetIndexes(table.ObjectId);
+        indexes ??= ReadIndexes(table.ObjectId);
         SqlIndexSeekPath? best = null;
+        List<SqlIndexSeekPath>? alternatives = null;
+        SqlIndexSeekPath? firstCandidate = null;
         int bestPrefix = -1;
         bool bestHasRange = false;
 
@@ -389,6 +411,13 @@ internal sealed partial class SqlPlanner
             if (seek is null)
             {
                 continue;
+            }
+
+            if (firstCandidate is null) { firstCandidate = seek; }
+            else
+            {
+                alternatives ??= [firstCandidate];
+                alternatives.Add(seek);
             }
 
             bool better =
@@ -404,6 +433,7 @@ internal sealed partial class SqlPlanner
             }
         }
 
+        if (best is not null && alternatives is not null) { best.Cost = new(alternatives); }
         return (SqlAccessPath?)best ?? SqlScanPath.Instance;
     }
 
@@ -703,7 +733,7 @@ internal sealed partial class SqlPlanner
     {
         if (!insert.IsDefaultValues && insert.SelectSource is null && (insert.Values is null || insert.Values.Count == 0))
         {
-            throw new SqlPlanningException("COHSQLE013", "INSERT requires a VALUES list, DEFAULT VALUES or SELECT source.", insert.Location);
+            throw new SqlPlanningException("CS05013", ErrorMessages.SqlPlannerPlanInsertSqlPlanning, insert.Location);
         }
 
         var table = ResolveTable(insert.Table);
@@ -722,7 +752,7 @@ internal sealed partial class SqlPlanner
                 int ordinal = FindColumnOrdinal(table, name);
                 if (ordinals.Contains(ordinal))
                 {
-                    throw new SqlPlanningException("COHSQLE019", $"INSERT target column '{name}' is specified more than once.", insert.Location);
+                    throw new SqlPlanningException("CS01019", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlPlannerPlanInsertSqlPlanning2, name), insert.Location);
                 }
                 ordinals.Add(ordinal);
             }
@@ -763,8 +793,8 @@ internal sealed partial class SqlPlanner
         {
             if (row.Count != targetOrdinals.Count)
             {
-                throw new SqlPlanningException("COHSQLE013",
-                    $"INSERT row has {row.Count} values but {targetOrdinals.Count} target columns.", insert.Location);
+                throw new SqlPlanningException("CS05013",
+                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.InsertRowWidth, row.Count, targetOrdinals.Count), insert.Location);
             }
         }
 
@@ -818,8 +848,8 @@ internal sealed partial class SqlPlanner
     /// <param name="clause">The clause, as diagnostics name it.</param>
     /// <param name="alternative">The clause's own way to read table columns, or null when it has none.</param>
     /// <exception cref="SqlEvaluationException">
-    /// The expression references a column (<c>COHSQLE005</c>), or signs an operand the plan
-    /// already knows is not a number (<c>COHSQLE003</c>).
+    /// The expression references a column (<c>CS01005</c>), or signs an operand the plan
+    /// already knows is not a number (<c>CS02003</c>).
     /// </exception>
     /// <exception cref="DatabaseException">
     /// The expression contains an aggregate, <c>*</c> or a subquery.
@@ -829,11 +859,11 @@ internal sealed partial class SqlPlanner
         RejectColumnReferences(expression, clause, alternative);
         if (ContainsAggregate(expression))
         {
-            throw new SqlPlanningException("COHSQLE017", $"Aggregate functions are not allowed in {clause}.", expression.Location);
+            throw new SqlPlanningException("CS05017", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ScopelessExpressionSqlPlanning, clause), expression.Location);
         }
         if (ContainsStar(expression))
         {
-            throw new SqlPlanningException("COHSQLE013", $"'*' is not allowed in {clause}.", expression.Location);
+            throw new SqlPlanningException("CS05013", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ScopelessExpressionSqlPlanning2, clause), expression.Location);
         }
 
         ValidateExpression(expression, ScopelessEvaluator);
@@ -844,7 +874,7 @@ internal sealed partial class SqlPlanner
     /// created on first use and shared by the statement.
     /// </summary>
     private SqlExpressionEvaluator ScopelessEvaluator => _scopelessEvaluator ??=
-        new SqlExpressionEvaluator(Array.Empty<SqlCatalogColumn>(), _parameters, defaultCollation: _catalog.DefaultCollation, functions: _functions, cancellationToken: _cancellationToken);
+        new SqlExpressionEvaluator(Array.Empty<SqlCatalogColumn>(), _parameters, defaultCollation: _catalog.DefaultCollation, functions: _functions, cancellationToken: _cancellationToken, foldConstants: FoldQueryConstants);
 
     /// <summary>Whether <c>*</c> appears anywhere in an expression, outside a subquery.</summary>
     /// <param name="expression">The expression to search.</param>
@@ -859,7 +889,7 @@ internal sealed partial class SqlPlanner
     /// <param name="expression">The expression to search.</param>
     /// <param name="clause">The clause, as diagnostics name it.</param>
     /// <param name="alternative">The clause's own way to read table columns, or null when it has none.</param>
-    /// <exception cref="SqlEvaluationException">The expression references a column (<c>COHSQLE005</c>).</exception>
+    /// <exception cref="SqlEvaluationException">The expression references a column (<c>CS01005</c>).</exception>
     internal static void RejectColumnReferences(SqlExpression expression, string clause, string? alternative)
     {
         RuntimeHelpers.EnsureSufficientExecutionStack();
@@ -890,11 +920,7 @@ internal sealed partial class SqlPlanner
     /// <exception cref="DatabaseException">An assignment or the filter contains an aggregate.</exception>
     private SqlPlan PlanUpdate(SqlUpdateExpression update)
     {
-        var queries = BindDmlSubqueries(update.Where, update.Table);
-        var table = ResolveTable(update.Table);
-        var evaluator = new SqlExpressionEvaluator(table.Columns, _parameters,
-            defaultCollation: _catalog.DefaultCollation, subquerySlots: _subquerySlots, functions: _functions, cancellationToken: _cancellationToken,
-            outerScope: OuterScope, outerDependencies: OuterDependencies, relation: update.Table);
+        var (table, evaluator, source, queries) = BindDmlSources(update.Table, update.From, update.Where, update);
 
         var assignments = new List<(int Ordinal, SqlBoundExpression Value)>(update.Assignments.Count);
         var assigned = new HashSet<int>();
@@ -904,7 +930,7 @@ internal sealed partial class SqlPlanner
             // PostgreSQL rewriteHandler.c:1168 rejects repeated whole-column assignments.
             if (!assigned.Add(ordinal))
             {
-                throw new SqlPlanningException("COHSQLE019", string.Format(CultureInfo.CurrentCulture,
+                throw new SqlPlanningException("CS01019", string.Format(CultureInfo.CurrentCulture,
                     ErrorMessages.DuplicateAssignment, assignment.ColumnName), assignment.Value.Location);
             }
             if (table.Columns[ordinal].Identity is { IsAlways: true })
@@ -918,7 +944,7 @@ internal sealed partial class SqlPlanner
             }
             if (ContainsAggregate(assignment.Value))
             {
-                throw new SqlPlanningException("COHSQLE017", "Aggregate functions are not allowed in UPDATE SET.", assignment.Value.Location ?? update.Location);
+                throw new SqlPlanningException("CS05017", ErrorMessages.SqlPlannerPlanUpdateSqlPlanning, assignment.Value.Location ?? update.Location);
             }
             ValidateExpression(assignment.Value, evaluator);
             assignments.Add((ordinal, evaluator.Bind(assignment.Value)));
@@ -932,8 +958,13 @@ internal sealed partial class SqlPlanner
             where = evaluator.BindPredicate(update.Where);
         }
 
-        var input = new SqlUpdatePlan(table, assignments, where, SelectAccessPath(table, update.Where, evaluator))
-        { Returning = BindReturning(update.Returning, table, update.Table) };
+        var input = new SqlUpdatePlan(table, assignments, where,
+            source is null ? SelectAccessPath(table, update.Where, evaluator) : SqlScanPath.Instance)
+        {
+            Source = source is null ? null : source with { Associations = PlanDmlAssociations(source.Associations, where) },
+            Returning = source is null ? BindReturning(update.Returning, table, update.Table)
+                : BindSourceReturning(update.Returning, source, update.Table),
+        };
         return WrapSubqueries(input, queries);
     }
 
@@ -942,11 +973,7 @@ internal sealed partial class SqlPlanner
     /// <exception cref="DatabaseException">The filter contains an aggregate.</exception>
     private SqlPlan PlanDelete(SqlDeleteExpression delete)
     {
-        var queries = BindDmlSubqueries(delete.Where, delete.Table);
-        var table = ResolveTable(delete.Table);
-        var evaluator = new SqlExpressionEvaluator(table.Columns, _parameters,
-            defaultCollation: _catalog.DefaultCollation, subquerySlots: _subquerySlots, functions: _functions, cancellationToken: _cancellationToken,
-            outerScope: OuterScope, outerDependencies: OuterDependencies, relation: delete.Table);
+        var (table, evaluator, source, queries) = BindDmlSources(delete.Table, delete.Using, delete.Where, delete);
 
         SqlBoundExpression? where = null;
         if (delete.Where is not null)
@@ -956,8 +983,13 @@ internal sealed partial class SqlPlanner
             where = evaluator.BindPredicate(delete.Where);
         }
 
-        var input = new SqlDeletePlan(table, where, SelectAccessPath(table, delete.Where, evaluator))
-        { Returning = BindReturning(delete.Returning, table, delete.Table) };
+        var input = new SqlDeletePlan(table, where,
+            source is null ? SelectAccessPath(table, delete.Where, evaluator) : SqlScanPath.Instance)
+        {
+            Source = source is null ? null : source with { Associations = PlanDmlAssociations(source.Associations, where) },
+            Returning = source is null ? BindReturning(delete.Returning, table, delete.Table)
+                : BindSourceReturning(delete.Returning, source, delete.Table),
+        };
         return WrapSubqueries(input, queries);
     }
 
@@ -971,7 +1003,7 @@ internal sealed partial class SqlPlanner
     {
         if (ContainsAggregate(where))
         {
-            throw new SqlPlanningException("COHSQLE017", "Aggregate functions are not allowed in WHERE.", where.Location);
+            throw new SqlPlanningException("CS05017", ErrorMessages.RejectAggregateInDmlWhereSqlPlanning, where.Location);
         }
     }
 
@@ -1016,7 +1048,7 @@ internal sealed partial class SqlPlanner
             var column = columns[i];
             if (primaryKey.Contains(column.Name, StringComparer.OrdinalIgnoreCase))
             {
-                columns[i] = new SqlCatalogColumn(column.Name, column.Type, false, column.DefaultLiteral, column.Collation, column.DomainName, column.DefaultFunctionCalls, column.Identity, column.MissingValueLiteral);
+                columns[i] = new SqlCatalogColumn(column.Name, column.Type, false, column.DefaultLiteral, column.Collation, column.DomainName, column.DefaultFunctionCalls, column.Identity, column.MissingValueLiteral) { RecastDefault = column.RecastDefault };
             }
         }
         return new SqlCreateTablePlan(schema, create.Table.TableName, columns, primaryKey, create.IfNotExists, create.Constraints);
@@ -1055,7 +1087,7 @@ internal sealed partial class SqlPlanner
             };
             if (literalType is { } declared && declared != type.Storage.Type)
             {
-                throw new SqlPlanningException("COHSQLE013", $"Column '{columnName}': typed DEFAULT {typed.LiteralType} does not match {type.Storage.Type}.", typed.Location);
+                throw new SqlPlanningException("CS05013", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ResolveDefaultLiteralSqlPlanning, columnName, typed.LiteralType, type.Storage.Type), typed.Location);
             }
         }
         if (!SqlPersistedExpression.IsDefaultLiteral(expression))
@@ -1087,12 +1119,13 @@ internal sealed partial class SqlPlanner
     }
 
     // PostgreSQL heap.c:3409 admits defaults with the same assignment coercion as INSERT.
-    internal static void ValidateDefaultType(SqlExpression expression, SqlExpressionEvaluator scope, DatabaseType target, string column)
+    internal static void ValidateDefaultType(SqlExpression expression, SqlExpressionEvaluator scope, DatabaseType target, string column,
+        bool assignmentCast = false)
     {
         var source = scope.StaticTypeOf(expression);
-        if (!CanAssignInsertType(source, target) && !(source == DatabaseType.DateTimeOffset && target == DatabaseType.DateTime))
+        if (!assignmentCast && !CanAssignInsertType(source, target) && !(source == DatabaseType.DateTimeOffset && target == DatabaseType.DateTime))
         {
-            throw new SqlPlanningException("COHSQLE013", string.Format(CultureInfo.CurrentCulture,
+            throw new SqlPlanningException("CS05013", string.Format(CultureInfo.CurrentCulture,
                 ErrorMessages.DefaultTypeIncompatible, column, source, target), expression.Location);
         }
     }
@@ -1100,10 +1133,10 @@ internal sealed partial class SqlPlanner
     private void ValidateDefaultSyntax(SqlExpression expression, string column)
     {
         RuntimeHelpers.EnsureSufficientExecutionStack();
-        if (expression is SqlColumnReferenceExpression or SqlParameterExpression or SqlSubqueryExpression or SqlExistsExpression or SqlStarExpression ||
+        if (expression is SqlColumnReferenceExpression or SqlParameterExpression or SqlSubqueryExpression or SqlExistsExpression or SqlQuantifiedComparisonExpression or SqlStarExpression ||
             expression is SqlFunctionCallExpression call && _functions.Catalog.IsAggregate(call.FunctionName))
         {
-            throw new SqlPlanningException("COHSQLE013", string.Format(CultureInfo.CurrentCulture,
+            throw new SqlPlanningException("CS05013", string.Format(CultureInfo.CurrentCulture,
                 ErrorMessages.DefaultVariablesForbidden, column), expression.Location);
         }
         foreach (var child in Children(expression)) { ValidateDefaultSyntax(child, column); }
@@ -1126,7 +1159,7 @@ internal sealed partial class SqlPlanner
         }
         if (type.Type is not (DatabaseType.String or DatabaseType.Character))
         {
-            throw new SqlPlanningException("COHSQLE013", $"COLLATE requires a string column; '{definition.ColumnName}' is {type.Type}.");
+            throw new SqlPlanningException("CS05013", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ResolveColumnCollationSqlPlanning, definition.ColumnName, type.Type));
         }
         try { return Collation.FromName(definition.CollationName); }
         catch (DatabaseTypeException failure)
@@ -1148,12 +1181,12 @@ internal sealed partial class SqlPlanner
     {
         if (string.IsNullOrWhiteSpace(create.IndexName) || create.IndexName == "?")
         {
-            throw new SqlPlanningException("COHSQLE013", "CREATE INDEX requires an index name.", create.Location);
+            throw new SqlPlanningException("CS05013", ErrorMessages.SqlPlannerPlanCreateIndexSqlPlanning, create.Location);
         }
 
         if (create.Columns.Count == 0)
         {
-            throw new SqlPlanningException("COHSQLE013", $"CREATE INDEX '{create.IndexName}' requires at least one key column.", create.Location);
+            throw new SqlPlanningException("CS05013", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlPlannerPlanCreateIndexSqlPlanning2, create.IndexName), create.Location);
         }
 
         SqlNamespaces.Require(_catalog, create.Table.SchemaName ?? DefaultSchema);
@@ -1165,7 +1198,7 @@ internal sealed partial class SqlPlanner
             if (table.Columns[ordinal].Type.Type is DatabaseType.String or DatabaseType.Character or DatabaseType.Json
                 && !(table.Columns[ordinal].Collation ?? _catalog.DefaultCollation).IsIndexBacked)
             {
-                throw new SqlPlanningException("COHSQLE013", $"Collation 'invariant' is not index-backed; column '{column}' cannot have an index or indexed constraint.", create.Location);
+                throw new SqlPlanningException("CS05013", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ConstraintCollationUnsupported, column), create.Location);
             }
         }
 
@@ -1176,12 +1209,12 @@ internal sealed partial class SqlPlanner
     {
         if (string.IsNullOrWhiteSpace(drop.IndexName) || drop.IndexName == "?")
         {
-            throw new SqlPlanningException("COHSQLE013", "DROP INDEX requires an index name.", drop.Location);
+            throw new SqlPlanningException("CS05013", ErrorMessages.SqlPlannerPlanDropIndexSqlPlanning, drop.Location);
         }
 
         if (drop.Table.TableName == "?")
         {
-            throw new SqlPlanningException("COHSQLE013", "DROP INDEX requires the table-qualified form: DROP INDEX <name> ON <table>.", drop.Location);
+            throw new SqlPlanningException("CS05013", ErrorMessages.SqlPlannerPlanDropIndexSqlPlanning2, drop.Location);
         }
 
         SqlNamespaces.Require(_catalog, drop.Table.SchemaName ?? DefaultSchema);
@@ -1200,13 +1233,14 @@ internal sealed partial class SqlPlanner
             SqlAlterAddConstraintAction add => new SqlAddConstraintPlan(ResolveTable(alter.Table), add.Constraint),
             SqlAlterDropConstraintAction drop => new SqlDropConstraintPlan(ResolveTable(alter.Table), drop.ConstraintName),
             SqlAlterColumnAction change => PlanAlterColumn(alter.Table, change),
+            SqlAlterColumnTypeAction change => PlanAlterColumnType(alter.Table, change),
             SqlAlterRenameTableAction rename => new SqlRenamePlan(ResolveTable(alter.Table), null, rename.NewName),
             SqlAlterRenameColumnAction rename => new SqlRenamePlan(ResolveTable(alter.Table), rename.ColumnName, rename.NewName),
             SqlAlterSetDefaultAction change => PlanColumnFacet(alter.Table, change.ColumnName, change.DefaultValue, false, null),
             SqlAlterDropDefaultAction change => PlanColumnFacet(alter.Table, change.ColumnName, null, true, null),
             SqlAlterSetNotNullAction change => PlanColumnFacet(alter.Table, change.ColumnName, null, false, false),
             SqlAlterDropNotNullAction change => PlanColumnFacet(alter.Table, change.ColumnName, null, false, true),
-            _ => throw new SqlPlanningException("COHSQLE013", "This ALTER TABLE action is not supported by the executor yet.", alter.Location),
+            _ => throw new SqlPlanningException("CS05013", ErrorMessages.SqlPlannerPlanAlterTableSqlPlanning, alter.Location),
         };
     }
 
@@ -1220,7 +1254,7 @@ internal sealed partial class SqlPlanner
         }
         if (nullable == true && table.PrimaryKeyColumns.Contains(name, StringComparer.OrdinalIgnoreCase))
         {
-            throw new SqlPlanningException("SQL0003", string.Format(CultureInfo.CurrentCulture, ErrorMessages.ColumnNullabilityConflict, name));
+            throw new SqlPlanningException("CS00003", string.Format(CultureInfo.CurrentCulture, ErrorMessages.ColumnNullabilityConflict, name));
         }
         var type = SqlType.ForStorage(previous.Type);
         if ((value is not null || dropDefault) && previous.DomainName is { } domainName)
@@ -1238,7 +1272,8 @@ internal sealed partial class SqlPlanner
             : dropDefault ? type.DefaultLiteral : previous.DefaultLiteral;
         return new SqlAlterColumnPlan(table, new SqlCatalogColumn(previous.Name, previous.Type, nullable ?? previous.IsNullable,
             text, previous.Collation, previous.DomainName, value is not null ? DefaultCalls(text) : dropDefault ? [] : previous.DefaultFunctionCalls,
-            previous.Identity, previous.MissingValueLiteral), AllowDefaultChange: value is not null || dropDefault);
+            previous.Identity, previous.MissingValueLiteral)
+            { RecastDefault = value is null && !dropDefault && previous.RecastDefault }, AllowDefaultChange: value is not null || dropDefault);
     }
 
     private SqlAlterColumnPlan PlanAlterColumn(SqlTableReference reference, SqlAlterColumnAction change)
@@ -1246,7 +1281,7 @@ internal sealed partial class SqlPlanner
         var table = ResolveTable(reference);
         if (change.Column.Constraints.Count != 0 || change.Column.IsPrimaryKey)
         {
-            throw new SqlPlanningException("COHSQLE013", "ALTER COLUMN does not change constraints or primary keys.");
+            throw new SqlPlanningException("CS05013", ErrorMessages.SqlPlannerPlanAlterColumnSqlPlanning);
         }
         var previous = table.Columns[FindColumnOrdinal(table, change.Column.ColumnName)];
         if (change.Column.Identity is not null || previous.Identity is not null &&
@@ -1256,15 +1291,38 @@ internal sealed partial class SqlPlanner
         }
         if (change.Column.IsNullable && table.PrimaryKeyColumns.Contains(change.Column.ColumnName, StringComparer.OrdinalIgnoreCase))
         {
-            throw new SqlPlanningException("SQL0003", string.Format(CultureInfo.CurrentCulture,
+            throw new SqlPlanningException("CS00003", string.Format(CultureInfo.CurrentCulture,
                 ErrorMessages.ColumnNullabilityConflict, change.Column.ColumnName));
         }
         var type = ResolveColumnType(change.Column);
+        if (previous.Identity is not null && previous.Type.Type != type.Storage.Type)
+        {
+            // The existing full-definition identity contract remains validation-only;
+            // explicit TYPE selects identity conversion through the rewrite path.
+            throw SqlPlanningException.IdentityViolation(change.Column.ColumnName, ErrorMessages.IdentityTypeChangeForbidden);
+        }
         string? defaultText = ResolveDefaultLiteral(change.Column, $"{table.Schema}.{table.Name}");
-        return new SqlAlterColumnPlan(table, new SqlCatalogColumn(change.Column.ColumnName, type.Storage,
+        var collation = ResolveColumnCollation(change.Column, type.Storage);
+        // Full definitions retain decision 49a's explicit facet contract even when
+        // the type requires a rewrite. SET/DROP DEFAULT owns default changes.
+        if (!string.Equals(previous.DefaultLiteral, defaultText, StringComparison.Ordinal))
+        {
+            throw new SqlPlanningException("CS05013", string.Format(CultureInfo.CurrentCulture,
+                ErrorMessages.ExecuteAlterColumnAsyncSqlPlanning, previous.Name));
+        }
+        if (change.Column.CollationName is null &&
+            (previous.Collation ?? _catalog.DefaultCollation).Id != (collation ?? _catalog.DefaultCollation).Id)
+        {
+            throw new SqlPlanningException("CS05013", string.Format(CultureInfo.CurrentCulture,
+                ErrorMessages.AlterColumnImplicitCollation, previous.Name));
+        }
+        var column = new SqlCatalogColumn(change.Column.ColumnName, type.Storage,
             change.Column.IsNullable, defaultText,
-            ResolveColumnCollation(change.Column, type.Storage), type.IsDomain ? type.Name : null,
-            DefaultCalls(defaultText), previous.Identity, previous.MissingValueLiteral));
+            collation, type.IsDomain ? type.Name : null,
+            DefaultCalls(defaultText), previous.Identity, previous.MissingValueLiteral) { RecastDefault = previous.RecastDefault };
+        return RequiresColumnRewrite(previous, column)
+            ? PlanColumnRewrite(table, column, type, null, reference, recastDefault: false)
+            : new SqlAlterColumnPlan(table, column);
     }
 
     private SqlAddColumnPlan PlanAddColumn(string schema, string table, SqlAlterAddColumnAction add)
@@ -1272,7 +1330,7 @@ internal sealed partial class SqlPlanner
         var type = ResolveColumnType(add.Column);
         if (!_catalog.TryGetTable(schema, table, out var current))
         {
-            throw new SqlPlanningException("COHSQLE014", string.Format(CultureInfo.CurrentCulture, ErrorMessages.TableMissing, schema, table));
+            throw new SqlPlanningException("CS01014", string.Format(CultureInfo.CurrentCulture, ErrorMessages.TableMissing, schema, table));
         }
         var identity = ResolveIdentity(add.Column, type.Storage, current.Columns.Any(column => column.Identity is not null));
         string? defaultLiteral = identity is null ? ResolveDefaultLiteral(add.Column, $"{schema}.{table}") : null;
@@ -1295,7 +1353,7 @@ internal sealed partial class SqlPlanner
 
         if (!HasReadNamespace(schema) || !TryReadTable(schema, reference.TableName, out var table))
         {
-            throw new SqlPlanningException("COHSQLE014", string.Format(CultureInfo.CurrentCulture, ErrorMessages.TableMissing, schema, reference.TableName));
+            throw new SqlPlanningException("CS01014", string.Format(CultureInfo.CurrentCulture, ErrorMessages.TableMissing, schema, reference.TableName));
         }
 
         return table;
@@ -1311,7 +1369,7 @@ internal sealed partial class SqlPlanner
             }
         }
 
-        throw new SqlPlanningException("COHSQLE015", $"Table '{table.Schema}.{table.Name}' has no column named '{columnName}'.");
+        throw new SqlPlanningException("CS01015", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ColumnNameMissing, table.Schema, table.Name, columnName));
     }
 
     /// <summary>
@@ -1320,7 +1378,7 @@ internal sealed partial class SqlPlanner
     /// (phase E3), whose column stores its base type.
     /// </summary>
     /// <exception cref="DatabaseException">The arguments are malformed, or a domain is given arguments.</exception>
-    /// <exception cref="SqlEvaluationException">The name is neither a built-in type nor a registered domain (<c>COHSQLE010</c>).</exception>
+    /// <exception cref="SqlEvaluationException">The name is neither a built-in type nor a registered domain (<c>CS02010</c>).</exception>
     private SqlType ResolveColumnType(SqlColumnDefinition column)
     {
         if (column.ResolvedType is { } builtIn) { return SqlType.ForStorage(builtIn); }
@@ -1335,7 +1393,7 @@ internal sealed partial class SqlPlanner
 
         if (error is not null)
         {
-            throw new SqlPlanningException("COHSQLE013", $"Column '{columnName}': {error}.");
+            throw new SqlPlanningException("CS05013", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.PlannerResolveColumnTypeSqlPlanning, columnName, error));
         }
 
         throw SqlEvaluationException.UnknownType(dataType, $"Column '{columnName}'");
@@ -1350,7 +1408,7 @@ internal sealed partial class SqlPlanner
     /// <param name="types">The engine's type catalog.</param>
     /// <returns>The target type.</returns>
     /// <exception cref="DatabaseException">A domain is given type arguments.</exception>
-    /// <exception cref="SqlEvaluationException">The name is neither a built-in type nor a registered domain (<c>COHSQLE010</c>).</exception>
+    /// <exception cref="SqlEvaluationException">The name is neither a built-in type nor a registered domain (<c>CS02010</c>).</exception>
     internal static SqlType ResolveCastTarget(SqlCastExpression cast, SqlTypeCatalog types)
     {
         if (cast.TargetTypeInfo is { } builtIn)
@@ -1365,7 +1423,7 @@ internal sealed partial class SqlPlanner
 
         if (error is not null)
         {
-            throw new SqlPlanningException("COHSQLE018", $"CAST target '{cast.TargetType}': {error}.", cast.Location);
+            throw new SqlPlanningException("CS02018", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.PlannerResolveCastTargetSqlPlanning, cast.TargetType, error), cast.Location);
         }
 
         throw SqlEvaluationException.UnknownType(cast.TargetType, "CAST target");
@@ -1385,7 +1443,7 @@ internal sealed partial class SqlPlanner
         var bound = ScopelessEvaluator.Bind(expression);
         if (_commonTableState?.BindingUnused == true &&
             GroupExpressionType(expression, [], ScopelessEvaluator) is not (DatabaseType.Int8 or DatabaseType.Int16 or DatabaseType.Int32 or DatabaseType.Int64))
-        { throw new SqlPlanningException("COHSQLE018", string.Format(CultureInfo.CurrentCulture, ErrorMessages.CountNonNegative, clause), expression.Location); }
+        { throw new SqlPlanningException("CS02018", string.Format(CultureInfo.CurrentCulture, ErrorMessages.CountNonNegative, clause), expression.Location); }
         // nodeLimit.c:348 evaluates counts at executor startup/rescan, never in a cached plan.
         return new SqlRowCount(bound, clause, expression.Location);
     }
@@ -1478,11 +1536,16 @@ internal sealed partial class SqlPlanner
         {
             return;
         }
+        if (expression is SqlFunctionCallExpression mergeCall && IsMergeAction(mergeCall))
+        {
+            if (evaluator.IsBoundValue(expression)) { return; }
+            throw new SqlPlanningException("CS01053", ErrorMessages.MergeActionContext, expression.Location);
+        }
         bool isBound = boundSubqueries is not null && boundSubqueries.ContainsKey(expression);
         switch (expression)
         {
             case SqlParameterExpression parameter when !evaluator.TryGetParameterValue(parameter, out _):
-                throw new SqlPlanningException("COHSQLE020", $"No value was supplied for parameter '{parameter.ParameterName[1..]}'.", parameter.Location);
+                throw new SqlPlanningException("CS01020", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.EvaluatorMissingParameterSqlPlanning, parameter.ParameterName[1..]), parameter.Location);
             case SqlCollateExpression collate:
                 try { Collation.FromName(collate.CollationName); }
                 catch (DatabaseTypeException failure)
@@ -1491,13 +1554,13 @@ internal sealed partial class SqlPlanner
             case SqlCastExpression cast:
                 ValidateCast(cast, evaluator, boundSubqueries, boundValues);
                 break;
-            case SqlSubqueryExpression or SqlExistsExpression when !isBound:
-                throw new SqlPlanningException("COHDBL001", "Subqueries are supported only in SELECT expressions and INSERT ... SELECT.", expression.Location);
+            case SqlSubqueryExpression or SqlExistsExpression or SqlQuantifiedComparisonExpression when !isBound:
+                throw new SqlPlanningException("CK00001", ErrorMessages.ValidateExpressionCoreSqlPlanning, expression.Location);
             case SqlColumnReferenceExpression reference:
                 evaluator.ResolveColumn(reference); // resolves innermost first, then enclosing query scopes
                 break;
             case SqlInExpression { Values: null } when !isBound:
-                throw new SqlPlanningException("COHDBL001", "IN subqueries are supported only in SELECT expressions and INSERT ... SELECT.", expression.Location);
+                throw new SqlPlanningException("CK00001", ErrorMessages.ValidateExpressionCoreSqlPlanning2, expression.Location);
             case SqlUnaryExpression { Operator: SqlUnaryOperator.Negate or SqlUnaryOperator.Plus } sign
                 when StaticOperandType(sign.Operand, evaluator, boundSubqueries, boundValues) is { } type && !IsNumeric(type) && !(sign.Operator == SqlUnaryOperator.Negate && type == DatabaseType.TimeSpan):
                 // A sign over a value the plan already knows is not a number fails here, the same
@@ -1632,8 +1695,8 @@ internal sealed partial class SqlPlanner
     /// <summary>
     /// Checks a <c>CAST</c> while planning, the same over an empty table as over a populated one: its
     /// target resolves (a name the parser does not know is a domain of the engine's type catalog, or
-    /// <c>COHSQLE010</c>), and when the plan knows the operand's type, a registered cast converts it
-    /// to the target, or the operand has the target's storage type already (<c>COHSQLE011</c>
+    /// <c>CS02010</c>), and when the plan knows the operand's type, a registered cast converts it
+    /// to the target, or the operand has the target's storage type already (<c>CS02011</c>
     /// otherwise, PostgreSQL's "cannot cast type ... to ..." at parse analysis). An operand whose
     /// type only its value reveals, a parameter or NULL, is checked when it is evaluated.
     /// </summary>
@@ -1695,7 +1758,7 @@ internal sealed partial class SqlPlanner
 
     /// <summary>
     /// Resolves a call to its overload while planning: a call no overload's types accept fails here
-    /// with <c>COHSQLE006</c>, and one several accept equally well with <c>COHSQLE008</c>, the same
+    /// with <c>CS01006</c>, and one several accept equally well with <c>CS01008</c>, the same
     /// over an empty table as over a populated one.
     /// </summary>
     /// <param name="call">The call.</param>
@@ -1746,7 +1809,7 @@ internal sealed partial class SqlPlanner
             SqlBinaryExpression { Operator: SqlBinaryOperator.Concat } => DatabaseType.String,
             SqlBinaryExpression { Operator: not (SqlBinaryOperator.Add or SqlBinaryOperator.Subtract or SqlBinaryOperator.Multiply
                 or SqlBinaryOperator.Divide or SqlBinaryOperator.Modulo) } => DatabaseType.Boolean,
-            SqlDistinctExpression or SqlBooleanTestExpression or SqlIsNullExpression or SqlBetweenExpression or SqlInExpression or SqlLikeExpression or SqlExistsExpression => DatabaseType.Boolean,
+            SqlDistinctExpression or SqlBooleanTestExpression or SqlIsNullExpression or SqlBetweenExpression or SqlInExpression or SqlQuantifiedComparisonExpression or SqlLikeExpression or SqlExistsExpression => DatabaseType.Boolean,
             SqlSubqueryExpression when boundSubqueries is not null && boundSubqueries.TryGetValue(expression, out var type) => type,
             // A scalar call's resolved result type: UPPER and LOWER take their argument's type, so
             // UPPER over text is text. CAST's binder fallback also types aggregate results.
@@ -1870,7 +1933,7 @@ internal sealed partial class SqlPlanner
     /// parsed tree is at most the engine's configured expression nesting limit deep (256 levels
     /// by default, at most 4096), so the check fails for a statement within a high limit that the
     /// thread has too little stack for, or on a thread created with a small stack, and the
-    /// statement then fails with <c>COHSQLE004</c> instead of the process overflowing the stack.
+    /// statement then fails with <c>CS05004</c> instead of the process overflowing the stack.
     /// An <c>AND</c> or <c>OR</c> chain yields all of its terms at one level, so a walker iterates
     /// a chain of any length instead of recursing once per term. A new walker follows the same
     /// rule.
@@ -1886,7 +1949,7 @@ internal sealed partial class SqlPlanner
         SqlFunctionCallExpression function => function.OrderBy.Count == 0 ? function.Arguments :
             function.Arguments.Concat(function.OrderBy.Select(key => key.Expression)),
         SqlCollateExpression or SqlBinaryExpression or SqlUnaryExpression or SqlDistinctExpression or SqlBooleanTestExpression or SqlIsNullExpression or SqlBetweenExpression
-            or SqlInExpression or SqlLikeExpression or SqlCaseExpression or SqlCastExpression => Operands(expression),
+            or SqlInExpression or SqlQuantifiedComparisonExpression or SqlLikeExpression or SqlCaseExpression or SqlCastExpression => Operands(expression),
         _ => [],
     };
 
@@ -1919,6 +1982,9 @@ internal sealed partial class SqlPlanner
                 yield return between.Operand;
                 yield return between.Low;
                 yield return between.High;
+                break;
+            case SqlQuantifiedComparisonExpression quantified:
+                yield return quantified.Operand;
                 break;
             case SqlInExpression inExpression:
                 yield return inExpression.Operand;
@@ -1953,6 +2019,14 @@ internal sealed partial class SqlPlanner
             case SqlCastExpression cast:
                 yield return cast.Operand;
                 break;
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlPlanner value)
+        {
+            _ = value;
         }
     }
 }

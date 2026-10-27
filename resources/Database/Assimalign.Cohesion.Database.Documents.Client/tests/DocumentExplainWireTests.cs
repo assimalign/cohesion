@@ -46,6 +46,7 @@ public sealed class DocumentExplainWireTests
                 object? actual = value.ValueKind switch
                 {
                     JsonValueKind.Null => null,
+                    JsonValueKind.Number when column.Ordinal >= 6 => value.GetInt64(),
                     JsonValueKind.Number => value.GetInt32(),
                     _ => value.GetString(),
                 };

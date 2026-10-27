@@ -1,5 +1,7 @@
 using System;
 
+using Assimalign.Cohesion.Database.Types;
+
 namespace Assimalign.Cohesion.Database.KeyValuePair.Catalog;
 
 /// <summary>
@@ -8,6 +10,14 @@ namespace Assimalign.Cohesion.Database.KeyValuePair.Catalog;
 /// </summary>
 public sealed class KeyValueCatalogException : DatabaseException
 {
+    internal KeyValueCatalogException(string code, string message, Exception? innerException = null)
+        : base(message, [new Diagnostic
+        {
+            Code = code,
+            Message = message,
+            Severity = DiagnosticSeverity.Error,
+        }], innerException) { }
+
     /// <summary>
     /// Initializes a new <see cref="KeyValueCatalogException"/>.
     /// </summary>

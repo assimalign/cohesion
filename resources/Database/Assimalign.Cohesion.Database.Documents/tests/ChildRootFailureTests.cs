@@ -32,7 +32,7 @@ public sealed class ChildRootFailureTests
             _ => ValueTask.FromException<int>(cause), CancellationToken.None).AsTask());
 
         // Assert
-        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(catalog ? "COHDBD005" : "COHDBD004");
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(catalog ? "CD06105" : "CD06104");
         failure.InnerException.ShouldBeSameAs(cause);
         if (transaction is not null)
         {
