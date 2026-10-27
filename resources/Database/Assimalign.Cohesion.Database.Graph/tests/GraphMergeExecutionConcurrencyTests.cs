@@ -90,6 +90,7 @@ public sealed class GraphMergeExecutionConcurrencyTests
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         ulong id = 0;
         int waits = 0;
+        long beforeProbe = 0;
         string target = relationship ? "r" : "a";
         var pending = db.RunAsync(session, async operation =>
         {
@@ -112,9 +113,13 @@ public sealed class GraphMergeExecutionConcurrencyTests
                 waited =>
                 {
                     if (waited) { waits++; }
+                    beforeProbe = budget.Consumed;
                     entered.TrySetResult();
                 }))
-            { (relationship ? ((Protocol.GraphRelationship)row[target]!).Properties : ((Protocol.GraphNode)row[target]!).Properties)["c"].ShouldBe(2L); }
+            {
+                (relationship ? ((Protocol.GraphRelationship)row[target]!).Properties : ((Protocol.GraphNode)row[target]!).Properties)["c"].ShouldBe(2L);
+                (budget.Consumed - beforeProbe).ShouldBeGreaterThanOrEqualTo(2); // Both incoming entity reads consume work.
+            }
             await operation.Updates.PublishAsync(token);
             return true;
         }, token).AsTask();

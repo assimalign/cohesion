@@ -433,7 +433,8 @@ match. Its freshness read set includes all matched elements and bound node ident
 when the remaining path has no match. Each probe re-reads incoming node and relationship values
 at its supplied view, including overlays, so ON MATCH expressions and replacement construction
 cannot republish stale incoming properties after a ReadCommitted pattern wait. That refreshed
-view also supplies incoming aliases outside the pattern to ON CREATE. Work and both probe result tables are
+view also supplies incoming aliases outside the pattern to ON CREATE. Each incoming entity
+refresh checks cancellation and consumes one work unit. Work and both probe result tables are
 charged to the statement budget and released per input row. Output copies leave probe tables
 immutable while branch SET updates and binding cleanup run. Creation reuses bound nodes;
 later bare occurrences reuse the first node slot without merging labels or property maps.

@@ -154,6 +154,8 @@ internal static partial class GraphPlanExecutor
                     var probeBinding = new Dictionary<string, object?>(binding, StringComparer.Ordinal);
                     foreach (string name in probeBinding.Keys.ToArray())
                     {
+                        ct.ThrowIfCancellationRequested();
+                        if (probeBinding[name] is GraphNode or GraphRelationship) { budget.Consume(); }
                         probeBinding[name] = probeBinding[name] switch
                         {
                             GraphNode node when operation.Updates.FindNode(node.Id.Value) is { } stored => GraphDatabase.Materialize(stored),
