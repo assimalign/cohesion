@@ -142,8 +142,15 @@ public sealed class DocumentStatementMemoryTests
             rows++;
         }
         rows.ShouldBe(40);
-        _output.WriteLine($"ARRAY_AGG: peak charge={peak}; retained output charge={final}; measured live peak={peakLive}; live result={resultLive}. Review: charge=1962240; live peak=221944; live result=92928.");
-        peak.ShouldBeLessThanOrEqualTo(2L * peakLive);
+        // At sort completion forty result arrays and forty independent key arrays
+        // are simultaneously live. Their UTF-8 payload alone is 80 * 2004 bytes.
+        // This lower bound excludes JSON metadata, source/groups, rows and strings,
+        // so the 2x test is stricter than a bound against the complete live graph.
+        // Process-wide GC deltas are diagnostic: unrelated worker cleanup can make
+        // them negative, especially after the complete Release suite.
+        const long livePayload = 80L * 2004;
+        _output.WriteLine($"ARRAY_AGG: peak charge={peak}; retained output charge={final}; live UTF-8 payload lower bound={livePayload}; diagnostic GC peak delta={peakLive}; result delta={resultLive}. Review: charge=1962240; live peak=221944; live result=92928.");
+        peak.ShouldBeLessThanOrEqualTo(2L * livePayload);
         final.ShouldBe(98_240L); // Forty independently owned arrays and row storage; no HAVING/order input lists.
     }
 

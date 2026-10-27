@@ -17,7 +17,7 @@ Decimal headers; COUNT remains Int64. DocumentAggregateWireTests verifies groupe
 values, HAVING, ordering, EXPLAIN detail, NULL/MISSING, sample singleton zero and located
 syntax/context/overflow/budget diagnostics over InMemory and TCP. Budget failure aborts explicit
 work; rollback permits reuse of the connection. The NativeAOT sample exercises all six names
-and quantifiers on both transports. No client API, capability, codec, frame or version changes.
+and quantifiers on both transports. Source/group staging now shares the statement counter (#1753); aggregate-span fixtures admit source retention before testing the aggregate limit. The 32 MiB response fixtures explicitly allow 256 MiB of statement retention while retaining their existing 8 MiB formatter allocation assertion. No client API, capability, codec, frame or version changes.
 
 ## Comprehension wire conformance (#1728)
 

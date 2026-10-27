@@ -78,7 +78,7 @@ public sealed class DocumentAggregateWireTests
     {
         // Arrange
         await using var harness = await DocumentClientTestHarness.StartAsync(tcp,
-            configureEngine: builder => builder.Options.StatementMemoryBudget = 1000);
+            configureEngine: builder => builder.Options.StatementMemoryBudget = 6144);
         await using var connection = await harness.Client.ConnectAsync(harness.Token);
         await connection.CreateCollectionAsync("items", harness.Token);
         await connection.PutAsync("items", "a", System.Text.Encoding.UTF8.GetBytes("{\"v\":\"" + new string('x',2000) + "\"}"), cancellationToken: harness.Token);
@@ -121,7 +121,7 @@ public sealed class DocumentAggregateWireTests
     {
         // Arrange
         await using var harness = await DocumentClientTestHarness.StartAsync(tcp,
-            configureEngine: builder => builder.Options.StatementMemoryBudget = 1000);
+            configureEngine: builder => builder.Options.StatementMemoryBudget = 6144);
         await using var connection = await harness.Client.ConnectAsync(harness.Token);
         await connection.CreateCollectionAsync("items", harness.Token);
         await connection.CreateCollectionAsync("sink", harness.Token);
