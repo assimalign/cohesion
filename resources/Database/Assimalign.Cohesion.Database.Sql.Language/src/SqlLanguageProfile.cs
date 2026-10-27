@@ -19,7 +19,7 @@ public static class SqlLanguageProfile
         "SET", "VALUES", "INTO", "RETURNING",
         "FUNCTION", "DOMAIN", "RETURNS", "RETURN", "IMMUTABLE", "STABLE", "VOLATILE", "STRICT", "CALLED", "INPUT",
         // DDL
-        "CREATE", "DROP", "ALTER", "TABLE", "INDEX", "VIEW", "IF",
+        "CREATE", "DROP", "TRUNCATE", "ALTER", "TABLE", "INDEX", "VIEW", "IF",
         "ADD", "COLUMN",
         "PRIMARY", "KEY", "FOREIGN", "REFERENCES",
         "CONSTRAINT", "DEFAULT", "CHECK", "UNIQUE", "COLLATE",
@@ -86,6 +86,7 @@ public static class SqlLanguageProfile
         SqlClauses.CreateIndex,
         SqlClauses.AlterTable,
         SqlClauses.DropTable,
+        SqlClauses.Truncate,
         SqlClauses.CreateView,
         SqlClauses.DropView,
         SqlClauses.DropSchema,
@@ -146,9 +147,9 @@ public static class SqlLanguageProfile
 
     /// <summary>
     /// Reports whether a join type executes in the SQL surface. Supported joins
-    /// run left-deep in written order. INNER and LEFT require ON or USING; CROSS has neither.
+    /// associate in written order. INNER, LEFT and RIGHT require ON or USING; CROSS has neither.
     /// </summary>
     /// <param name="joinType">The parsed join type.</param>
-    /// <returns><see langword="true"/> for INNER (including bare JOIN), LEFT OUTER and CROSS JOIN.</returns>
-    public static bool SupportsJoin(SqlJoinType joinType) => joinType is SqlJoinType.Inner or SqlJoinType.LeftOuter or SqlJoinType.Cross;
+    /// <returns><see langword="true"/> for INNER (including bare JOIN), LEFT OUTER, RIGHT OUTER and CROSS JOIN.</returns>
+    public static bool SupportsJoin(SqlJoinType joinType) => joinType is SqlJoinType.Inner or SqlJoinType.LeftOuter or SqlJoinType.RightOuter or SqlJoinType.Cross;
 }

@@ -973,6 +973,74 @@ GQL's projected `a,r,b` values expose the actual frozen `GraphNode`/`GraphRelati
 through `DatabaseRow.GetValue`. Property projections return scalars. This does not add a path member
 to the frozen traversal contract.
 
+### Typed shortest distance and path (#1536, GQ-SP1)
+
+`GraphDatabase.FindShortestDistanceAsync(session, GraphShortestPathSearch, token)` returns
+`int?`; `FindShortestPathAsync` returns `GraphShortestPathResult?`, with `Distance` and an
+ordered `GraphPath`. A null result means no path, or an endpoint absent from the statement's
+snapshot. A visible start equal to the target returns zero and a singleton path, even with
+an unknown type. Default direction is Outgoing; Both supplies the undirected KNOWS benchmark
+operation. A null type accepts all types; a supplied name compares ordinally and case-sensitively.
+Unknown, empty and whitespace type names accept no edges and produce no warning, matching the
+typed traversal's diagnostic surface. Identities are database-local and the session must belong
+to this exact database. Default/zero identities are absent nodes.
+
+The search runs as one ordinary read statement, using Snapshot or a pinned ReadCommitted
+horizon and seeing earlier own writes. It has no GQL 64-hop limit. Identity-based BFS retains
+one predecessor and distance per visited vertex and a FIFO frontier; cycles, self-loops and
+parallel relationships cannot create path-history states. Equal-length ties use the
+lexicographically smallest complete relationship-identity sequence from start to target,
+deliberately strengthening Neo4j's arbitrary single-path choice. Stored relationship directions
+remain intact when traversed backwards. Only the selected path's entities are materialized;
+the distance-only call retains no explored entity payloads.
+
+Adjacency ranges stream sequentially through one bounded cursor. For each expanded vertex,
+new neighbors keep their smallest relationship identity, then enter the FIFO in that order
+through a priority queue. This keeps search memory O(visited vertices + frontier), plus a
+constant cursor/key batch and one decoded record, even for arbitrarily many types or parallel
+edges between two nodes. It avoids the general executor's one-merge-head-per-type storage.
+CPU work is O(selected candidates + sum of k log k), where k is each vertex's newly discovered
+neighbors, plus index seeks/batches. The complete selected incident range of an expanded vertex
+is read before accepting its target, so range order cannot change ties. A budget can therefore
+refuse even after a target edge was seen. Bidirectional search remains an optional optimization.
+
+`GraphShortestPathSearch.Limits` uses existing engine ceilings: 256 MiB of accounted retained
+memory and 1,000,000 physical work units by default; per-search limits may only lower them.
+Endpoint probes consume work (one for an equal/absent start, otherwise two); selected adjacency
+candidates consume work before decoding, including dead ends and the second stored adjacency
+entry of a self-loop. Path reconstruction additionally charges its node and relationship reads.
+Container growth, cursor buffers, current edge properties and returned path payloads share the
+memory grant. Cancellation is checked at frontier dispatch, candidate reads, neighbor ordering
+and reconstruction. All owners/cursors unwind on success, refusal or cancellation. Work and
+memory exhaustion raise existing CG05004/CG05020, never a partial path or a false no-path result;
+invalid limits use CG08021. Invalid direction uses structured CG05001 before admission;
+pre-cancellation also precedes admission. Admitted failures abort an explicit transaction under
+the normal Graph statement contract. The APIs add no interfaces or boundary grants.
+
+Expansion and reconstruction check the operation's database, session and transaction lifecycle,
+including after record reads. A close during the search reports the existing CK07004 session
+refusal; an ended operation reports CK04002. Reconstruction handles absent node and relationship
+records explicitly: lifecycle refusals take precedence, and an absent selected record while the
+operation remains active raises structured CG05022, never an unchecked nullable lookup or partial
+path. Deterministic teardown, rollback and record-removal tests exercise both reconstruction reads
+under Snapshot and ReadCommitted and assert released memory leases. This follows Neo4j's
+closed/terminated transaction check before operations
+(`community/kernel/src/main/java/org/neo4j/kernel/impl/coreapi/TransactionImpl.java:529-537,550-552`
+in `C:/Source/repos/neo4j/neo4j`); no reference code is copied.
+
+Deterministic tests compare the existing reachability traversal's retained wide entity payloads
+with distance search over the same reachable set, and prove unchanged peak state for one versus
+128 parallel relationship types, using the minimum of three rounds. External benchmark digests
+and SF10 measurements remain integration gates. GQL selectors, all-shortest output and richer
+predicate/path-history searches belong to GQ-SP2/SP3, with separately budgeted retained state;
+neither Graph.Language nor query planning changes here. No wire or disk format changes.
+
+Local reference behavior consulted, no code copied: Neo4j
+`community/cypher/slotted-runtime/src/main/scala/org/neo4j/cypher/internal/runtime/slotted/pipes/ShortestPathSlottedPipe.scala:90-120`
+checks endpoint presence and supplies type, direction, maximum depth, memory tracking and
+single-path selection to its BFS factory. Cohesion exposes these typed search results directly,
+and selects the stable identity tie policy approved by the owner on 2026-10-25.
+
 `GraphPathsQueryRequest.FromGql` selects real path execution through the existing
 `GraphDatabaseSession.ExecuteAsync(GraphRequest)` capability. Both row and path requests derive
 from `GraphRequest`, whose private protected constructor fixes their result shape. The returned `GraphPathsQueryResult.Paths` contains
@@ -1378,6 +1446,7 @@ to exercise that enforcement path; compiled provisioning is not included.
 | `CG06018` | Missing or unrecoverable files; preserve the complete file set for recovery and restore missing sidecars from backup |
 | `CG09019` | The database or a resource used by a statement was disposed. ExecutionFailure on the wire; the session remains ready. Pre-statement direct-API lifetime guards retain ObjectDisposedException |
 | `CG05020` | Accounted retained execution memory exceeds the statement limit; no partial result escapes and every owned cursor/lease is released |
+| `CG05022` | A selected shortest-path node or relationship is absent from the statement snapshot while the operation remains active; reconstruction fails without a partial path |
 | `CG08021` | Query limits are nonpositive or exceed the configured engine ceilings; invalid engine ceilings use the same code in the configuration exception message |
 | `CK06101` | `Database.Indexing`'s code, carried unchanged: opening a database whose property-index pages are in a B-tree page format this engine does not read (format 1, written before #1194) fails with "Database 'x' cannot be opened. CK06101: …", checked before recovery's scrub, so a cleanly closed database's files stay as they were (a crashed one has had only the storage layer's journal redo and undo, and keeps its journal) |
 | `CK06001` | `Database.Storage`'s code, carried unchanged: opening a database whose file set is in another storage format (#1251) fails with "Database 'x' cannot be opened. CK06001: …", the storage's `StorageFormatException` as its inner exception, refused before its journal is read, so the files stay as they were |

@@ -25,7 +25,7 @@ internal sealed partial class SqlPlanner
         var directory = _viewImages.GetValue(_catalog, _ => new());
         lock (directory.Sync)
         {
-            ulong generation = _catalog.DdlGeneration;
+            var generation = _catalog.BindingGeneration;
             if (directory.Current is { } current && directory.Generation == generation) { return current; }
             var snapshot = _catalog.CaptureSnapshot();
             var functions = new SqlFunctionEnvironment(_functions.Catalog, _functions.Database, _functions.Types);
@@ -56,9 +56,18 @@ internal sealed partial class SqlPlanner
     }
 
     private static bool SameImage(SqlCatalogSnapshot left, SqlCatalogSnapshot right)
-        => left.DefaultCollation == right.DefaultCollation && left.Tables.SequenceEqual(right.Tables) &&
-            left.Views.SequenceEqual(right.Views) && left.Functions.SequenceEqual(right.Functions) &&
-            left.Domains.SequenceEqual(right.Domains) && left.Namespaces.SequenceEqual(right.Namespaces);
+    {
+        if (left.DefaultCollation != right.DefaultCollation || !left.Tables.SequenceEqual(right.Tables) ||
+            !left.Views.SequenceEqual(right.Views) || !left.Functions.SequenceEqual(right.Functions) ||
+            !left.Domains.SequenceEqual(right.Domains) || !left.Namespaces.SequenceEqual(right.Namespaces)) { return false; }
+        // Retained access paths use this image's index descriptions too. Index DDL
+        // changes those without replacing its table or view description instances.
+        foreach (var table in left.Tables)
+        {
+            if (!left.GetIndexes(table.ObjectId).SequenceEqual(right.GetIndexes(table.ObjectId))) { return false; }
+        }
+        return true;
+    }
 
     private bool TryReadView(string schema, string name, out SqlCatalogView view)
     {
@@ -83,12 +92,15 @@ internal sealed partial class SqlPlanner
     private bool TryReadTable(string schema, string name, out SqlCatalogTable table)
         => ViewImageState is { } image ? image.Snapshot.TryGetTable(schema, name, out table!) : _catalog.TryGetTable(schema, name, out table!);
 
+    private IReadOnlyList<SqlCatalogIndex> ReadIndexes(ulong objectId)
+        => ViewImageState is { } image ? image.Snapshot.GetIndexes(objectId) : _catalog.GetIndexes(objectId);
+
     [global::System.Diagnostics.DebuggerDisplay("ViewImageDirectory")]
     [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlPlanner.ViewImageDirectory.DebugView))]
     private sealed class ViewImageDirectory
     {
         internal object Sync { get; } = new();
-        internal ulong Generation { get; set; }
+        internal (ulong Definition, ulong Storage) Generation { get; set; }
         internal ViewImage? Current { get; set; }
         internal List<WeakReference<ViewImage>> Images { get; } = new();
         internal ConditionalWeakTable<SqlCatalogSnapshot, ViewImage> Captures { get; } = new();

@@ -64,6 +64,12 @@ objects, preserves property order and reports the number matched with fresh vers
 removes named properties and becomes null in array elements. Shape and overlapping-target failures
 abort the statement; EXPLAIN UPDATE includes its chosen access path without writing.
 
+All four writes accept RETURNING named expressions or RAW/VALUE and return owned rows with
+the affected count. DELETE returns its pre-image; INSERT/UPSERT/UPDATE return stored post-images.
+Projection and serialization preflight run inside the transaction, and retained rows spend the
+positive StatementMemoryBudget (64 MiB by default). Failure rolls back all statement writes.
+The existing wire completion carries both counts without a capability flag.
+
 OQL DELETE FROM collection [AS? alias] [WHERE predicate] reports the number deleted. It
 reuses query index seeks, filters the statement snapshot before writing, and retains the
 collection and its index definitions. EXPLAIN DELETE describes the access without writing.

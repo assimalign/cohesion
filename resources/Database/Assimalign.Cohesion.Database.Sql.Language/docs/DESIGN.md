@@ -1,5 +1,16 @@
 # Assimalign.Cohesion.Database.Sql.Language — Design
 
+## TRUNCATE (#1716, SQ-T1)
+
+SqlTruncateExpression stores an immutable ordered list of SqlTruncateTable targets, each with
+its ONLY modifier, plus effective restart/cascade flags. TABLE is optional; CONTINUE IDENTITY
+and RESTRICT are the defaults. Canonical rendering supplies TABLE and both effective policies.
+TRUNCATE adds one keyword and one advertised clause; RESTART/CONTINUE/IDENTITY remain contextual.
+Completeness and live conformance cases cover the new command; CTAS retains CS00003.
+The engine's snapshot, closure, identity and reclamation contract is recorded in DIALECT.md.
+No public construction bridge or interface is added. Truncate is appended to SqlQueryCommandType;
+the existing Begin, Commit and Rollback values remain 9, 10 and 11.
+
 ## Repeated subquery grouping keys (#1718)
 
 DIALECT.md records structural matching of complete scalar-subquery, EXISTS and quantified
@@ -258,6 +269,23 @@ PostgreSQL `src/backend/parser/parse_utilcmd.c:873`. INSERT target parsing leave
 OVERRIDING clause token unconsumed while explicit AS aliases retain their lexical meaning.
 SERIAL spellings live in the shared rejected-type table and cannot declare domains.
 Sql.Catalog has its own SQL-independent facet.
+
+## RIGHT and parenthesized join AST (#1525)
+
+The profile admits RIGHT [OUTER] JOIN with ON or ordered USING columns; FULL retains CK00001.
+SqlJoinedTableReference preserves an unaliased parenthesized item and its constituent
+namespaces. A group alias lowers to SqlDerivedTableReference over SELECT *, hiding the
+constituents and retaining optional complete column-alias lists and the existing 32-level derived binding limit. Parser parenthesis guards, expression
+depth, canonical rendering and the conformance corpus cover both forms. The engine keeps
+written ordinals and RIGHT USING's coerced right representative while normalizing physical
+children to LEFT. Direct RIGHT/grouped DML sources fail CS05069 at binding; derived SELECT
+sources can contain RIGHT. No clause, keyword, format or protocol count changes.
+
+Relation lookahead checks the token after each leading query wrapper's matching close.
+An alias there starts a derived first relation inside a joined group; SELECT itself and
+query continuations retain the query grammar. This follows PostgreSQL
+src/backend/parser/gram.y:13938-13965,14000-14022 and applies to INNER/LEFT/RIGHT/CROSS,
+including nested groups and the derived SELECT introduced by canonical group-alias rendering.
 
 ## Design intent
 

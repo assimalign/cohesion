@@ -57,7 +57,7 @@ grouped UNNEST and ANY on both transports; the AOT consumer covers these shapes 
 VALUE/RAW MISSING becomes NULL during engine projection, before DISTINCT and projected ordering,
 so embedded and wire rows agree on IsMissing=false and completion counts. Embedded MISSING
 object members remain omitted and MISSING array elements become NULL.
-GetBytes preserves exact bare-frame JSON bytes (a lone SELECT *, or VALUE/RAW). Named string
+GetBytes preserves exact bare-frame JSON bytes (a lone SELECT/RETURNING *, or VALUE/RAW). Named string
 columns return unquoted UTF-8 and named NULL/MISSING columns return empty bytes, matching the engine.
 Constructed and bare scalar rows use the engine's RFC 8259 encoder, retaining non-ASCII,
 HTML-sensitive characters and U+2028/U+2029 as UTF-8 while escaping quotes, backslashes and controls.
@@ -110,12 +110,12 @@ sequenceDiagram
 ```
 
 `DocumentResultSet` exposes ordinal/name-indexed rows, columns and `AffectedCount`. Queries use
-`-1`; collection and index DDL use zero. INSERT uses the inserted-document count and emits
-no Document frames. UPSERT uses the written-document count for inserts and complete replacements,
+`-1` for read-only queries; collection and index DDL use zero. INSERT uses the inserted-document count and emits
+Document frames only with RETURNING. UPSERT uses the written-document count for inserts and complete replacements,
 with fresh versions and the same MISSING validation as INSERT. Repeated keys fail the whole
 statement with CD03012; invalid keys use CD02008. Both preserve the connection. EXPLAIN UPSERT
 describes Upsert/UpsertSelect without writing. DELETE uses the deleted-document count, including zero, and likewise
-emits only Complete. UPDATE uses the matched-document count, including byte-identical rewrites
+emits only Complete without RETURNING. UPDATE uses the matched-document count, including byte-identical rewrites
 and no-op UNSET, with fresh versions for every match. SET and UNSET preserve the engine's
 nested-path, array-index, MISSING and atomicity rules. Invalid paths return ExecutionFailure
 with CD02016 and leave the connection reusable. EXPLAIN UPDATE describes its access path
@@ -130,7 +130,7 @@ MISSING versus NULL, CD02013 and reuse after a malformed LIKE pattern.
 `DROP COLLECTION [IF EXISTS]` use the existing Execute exchange and retain collection ownership
 and conditional no-op semantics. A schema-owned drop returns ExecutionFailure (6), and the
 connection remains usable. `IsDocumentQuery` means one bare JSON value per frame
-(a lone SELECT *, or VALUE/RAW), even for an empty result.
+(a lone SELECT/RETURNING *, or VALUE/RAW), even for an empty result.
 `Documents` holds owned `JsonElement` values in that case; positional queries leave it empty.
 Bare-value rows contain the same owned JsonElement as Documents, including scalar and constructed values;
 the row also owns the original frame bytes for GetBytes.
@@ -157,6 +157,38 @@ and CREATE UNIQUE INDEX over duplicates return ExecutionFailure (6), preserve CD
 name index/collection without key contents; the same connection accepts the next query. Non-scalar
 UNIQUE keys retain CD02021. The AOT guard exercises the composite seek, metadata and duplicate
 failure over InMemory and TCP (#1135).
+
+## RETURNING completion (#1727)
+
+QueryAsync returns rows and AffectedCount together for INSERT, UPSERT, UPDATE and DELETE with
+RETURNING; ExecuteAsync drains the same result and returns its affected count. Named projections
+and RAW/VALUE reuse the existing result header, Document frames, owned JSON and missing/null
+accessors. Empty results retain column metadata and bare-value shape. DELETE uses pre-images;
+the other writes use stored post-images and fresh metadata. Complete keeps its two Int64 fields.
+
+DocumentExchange.ValidateCompletion now accepts an Execute result header with affected count -1
+or a nonnegative value equal to the received row count. Mismatched result/affected counts and
+negative affected counts below -1 still discard the connection. Owner decision 8 (2026-10-25)
+requires no capability or negotiation; older clients that insist on -1 reject these responses.
+This deliberately changes validation semantics without a byte-layout or version change.
+That rejection is a client-side ProtocolViolation and closes the connection after the server
+has already committed an autocommit statement. Its writes remain committed even though the
+client reports failure; retrying a non-idempotent write can apply it again (for example,
+`SET n = n + 10` changes 1 to 11, then a retry changes 11 to 21). In an explicit transaction,
+the disconnect rolls back the uncommitted writes instead. Use an updated client for RETURNING;
+a legacy client's rejection does not certify that an autocommit write was rolled back.
+
+The engine materializes RETURNING inside the statement transaction and charges retained rows to
+its StatementMemoryBudget (64 MiB by default). Projection, serialization preflight or budget failure rolls back all writes,
+returns a terminal Failure before any header/row, and preserves the connection. Existing explicit
+transaction failures remain faulted until rollback. DocumentReturningWireTests checks all forms,
+metadata, ownership, raw completion bytes, failure ordering, CD05018 and transaction/session reuse
+over InMemory and TCP. The AOT guard exercises the same completion contract on both transports.
+Permanent wire probes also cover UPDATE/DELETE of a document written earlier in the same
+explicit transaction, and the pre-RETURNING completion predicate on both transports, including
+autocommit retry and explicit disconnect cleanup. The malformed-peer zero-affected case has
+a valid decoded Complete and a matching result count, so it reaches ValidateCompletion's
+affected-count predicate directly.
 
 ## Failures and pooling
 

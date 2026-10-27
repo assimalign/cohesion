@@ -163,7 +163,7 @@ internal sealed partial class SqlPlanner
         {
             yield return column.Expression;
         }
-        if (select.From.Count > 1 || select.From.Count == 1 && select.From[0].Joins.Count > 0)
+        if (select.From.Count > 1 || select.From.Count == 1 && (select.From[0].Joins.Count > 0 || select.From[0].Table is SqlJoinedTableReference))
         {
             foreach (var condition in JoinConditions(select))
             {
@@ -217,15 +217,9 @@ internal sealed partial class SqlPlanner
     // SELECT never creates this iterator and retains its original allocation footprint.
     private static IEnumerable<SqlExpression> JoinConditions(SqlSelectExpression select)
     {
-        foreach (var item in select.From)
+        foreach (var join in SourceJoins(select.From))
         {
-            foreach (var join in item.Joins)
-            {
-                if (join.Condition is not null)
-                {
-                    yield return join.Condition;
-                }
-            }
+            if (join.Condition is not null) { yield return join.Condition; }
         }
     }
 

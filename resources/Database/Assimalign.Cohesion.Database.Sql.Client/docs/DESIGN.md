@@ -16,6 +16,14 @@ abort, and idle eviction must release the sole session slot for a fresh client a
 
 Direct references are Database.Client, Sql.Protocol, Database.Types, Database.Protocol and Connections. Wire contracts live in each model Protocol assembly, shared by client and engine. This client has no engine, area-root, storage, transaction, indexing, model parser or schema reference. Cache.Client remains an empty placeholder. Engine-free trimming and NativeAOT coverage lives in Database.Client/samples/Assimalign.Cohesion.Database.Client.AotSample.
 
+## TRUNCATE (#1716, SQ-T1)
+
+The existing execute exchange carries table lists, FK policies and identity policies with zero
+completion count. InMemory and TCP tests pin old rows after publication, CS03067 for incomplete
+FK sets, CS04066 inside BEGIN, identity continuity/restart, and usable connections after refusal.
+Engine-owned wire tests also run reclamation while the old snapshot remains active and verify
+no frees until it ends. No client surface, result shape or protocol version changes.
+
 ## Quantified comparisons (#1718)
 
 The existing execute exchange carries scalar ANY/SOME/ALL subqueries without a
@@ -191,7 +199,7 @@ No wire or client API changes.
 LEFT null values, N-way, CROSS, comma and USING results use the existing SQL frames and
 production materializer. No nullability field or frame-writing change is introduced.
 Wire tests run every join case over InMemory and loopback TCP, pin exact values and
-multiplicities, and retain RIGHT/FULL/NATURAL and qualified-wildcard exclusions. USING
+multiplicities, and retain FULL/NATURAL and qualified-wildcard exclusions. RIGHT [OUTER] and RIGHT USING (#1525) carry null-extended written-left values, merged right spelling, coerced decimal values, original column ordinals and cleared lengths on both transports; direct joined-DML refusals carry CS05069 and keep the connection usable. Engine nullability remains engine metadata; no nullability field is added to the wire. USING
 wildcard alias/ordinal ordering, decimal common-type values in both input orders, qualified
 types and cleared character lengths use the same production frames and materializer.
 

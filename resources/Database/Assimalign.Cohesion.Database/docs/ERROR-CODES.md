@@ -146,6 +146,7 @@ structured-carrier messages remain unprefixed.
 | COHSQLE061 | CS03061 | Schema/constraints |
 | COHSQLE065 | CS03065 | Schema/constraints |
 | COHSQLE066 | CS03066 | Schema/constraints |
+| New (#1716) | CS03067 | Schema/constraints — TRUNCATE omits a required referencing table (0A000) |
 | COHSQLP001 | CS03101 | Schema/constraints |
 | COHSQLP002 | CS03102 | Schema/constraints |
 | COHSQLP003 | CS03103 | Schema/constraints |
@@ -170,6 +171,7 @@ structured-carrier messages remain unprefixed.
 | COHSQLE044 | CS04044 | Transactions/locking |
 | COHSQLE064 | CS04064 | Transactions/locking |
 | New (w11 review) | CS04065 | Transactions/locking — hard deadlock (`40P01`) |
+| New (#1716) | CS04066 | Transactions/locking — TRUNCATE inside an explicit transaction (25001) |
 | COHSQLE004 | CS05004 | Execution/budgets |
 | COHSQLE007 | CS05007 | Execution/budgets |
 | COHSQLE013 | CS05013 | Execution/budgets |
@@ -184,12 +186,21 @@ structured-carrier messages remain unprefixed.
 | COHSQLE060 | CS05060 | Execution/budgets |
 | COHSQLE067 | CS05067 | Execution/budgets |
 | New (#1714) | CS05068 | Execution/budgets — UPDATE target matched by multiple source associations (before writes) |
+| New (#1525, SQ-J1) | CS05069 | Execution/budgets — direct RIGHT or parenthesized joined DML source would require a different target-outer execution tree |
 | COHSQLE041 | CS06041 | Storage/durability |
 | COHSQLE058 | CS06058 | Storage/durability |
 
 SQLSTATE meanings remain those in [the SQL dialect](../../Assimalign.Cohesion.Database.Sql.Language/docs/DIALECT.md); the Cohesion identities changed, not ISO/PostgreSQL SQLSTATE values.
 
 ## Documents migration
+
+OQL RETURNING (#1727) preserves existing syntax, binding and value identities for malformed
+projections, duplicate names, missing parameters and scalar failures. Unsupported subqueries
+and ELEMENT calls retain CK00001. CD01026 rejects empty output names in direct ASTs, CD05018
+identifies retained-result budget exhaustion, and CD05019 identifies serialized result depth
+including the named wrapper. Existing CD05016 covers frame-size preflight. A failure
+rolls back statement writes before results become visible. The existing two-count Complete
+payload accepts rows plus a matching affected count without capability negotiation.
 
 | Previous code | Code | Category |
 |---|---|---|
@@ -211,6 +222,7 @@ SQLSTATE meanings remain those in [the SQL dialect](../../Assimalign.Cohesion.Da
 | COHDOC017 | CD01017 | Binding/names |
 | COHDOC023 | CD01023 | Binding/names |
 | COHDOC025 | CD01025 | Binding/names |
+| New (#1727) | CD01026 | Binding/names — empty RETURNING output name in a directly constructed AST |
 | COHDOC006 | CD02006 | Values/types |
 | COHDOC007 | CD02007 | Values/types |
 | COHDOC008 | CD02008 | Values/types |
@@ -270,6 +282,7 @@ transaction-state diagnostics; it allocates no new identity. These changes add n
 | COHDBG004 | CG05004 | Execution/budgets |
 | COHDBG008 | CG05008 | Execution/budgets |
 | COHDBG020 | CG05020 | Execution/budgets |
+| New (#1536) | CG05022 | Execution — selected shortest-path record is absent while reconstruction's operation remains active |
 | COHDBG006 | CG06006 | Storage/durability |
 | COHDBG012 | CG06012 | Storage/durability |
 | COHDBG017 | CG06017 | Storage/durability |
@@ -351,6 +364,8 @@ and invariant exceptions and lower child-root typed failures retain their docume
 | CD04104 | No explicit document transaction is open for COMMIT or ROLLBACK (#1725) | — |
 | CD04105 | OQL collection/index DDL inside an explicit transaction (#1725) | — |
 | CD05016 | Result byte/frame limit exceeded | — |
+| CD05018 | RETURNING retained result exceeds the statement memory budget (#1727) | — |
+| CD05019 | Serialized RETURNING value exceeds 256 levels, including the named projection wrapper (#1727) | — |
 | CD07001 | Session belongs to another database | — |
 | CD07002 | Text transaction control requires the negotiated transaction-status capability (#1725) | — |
 | CD09001 | Collection handle is stale | — |

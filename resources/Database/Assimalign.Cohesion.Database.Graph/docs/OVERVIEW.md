@@ -26,6 +26,23 @@ await using var result = await session.ExecuteAsync(
     "MATCH (a:Person {name:'Ada'})-[r:KNOWS]->(b) RETURN a,r,b");
 ```
 
+For a native shortest distance, use the typed API with database-local node IDs:
+
+```csharp
+int? distance = await graph.FindShortestDistanceAsync(session,
+    new GraphShortestPathSearch(startId, targetId, GraphDirection.Both, "KNOWS"));
+GraphShortestPathResult? shortest = await graph.FindShortestPathAsync(session,
+    new GraphShortestPathSearch(startId, targetId, GraphDirection.Both, "KNOWS"));
+```
+
+Null means disconnected or an absent endpoint. A visible node to itself has distance zero.
+The path result includes the actual distance and ordered entities; ties use the smallest
+relationship-identity sequence. Search runs in one statement snapshot with
+O(visited vertices + frontier) state, cancellation, and configurable memory/work limits through the search's
+`Limits`. Exhaustion fails the statement. The defaults are the engine's 256 MiB and 1,000,000
+work units; path materialization also consumes these budgets. See [typed shortest search](DESIGN.md#typed-shortest-distance-and-path-1536-gq-sp1).
+GQL shortest selectors follow in separate runs.
+
 `GraphSchema.Open` supplies session-bound label/type discovery, property metadata, ownership
 enforcement and node-property index creation. `AddGraph(name, graph => ...)` captures
 construction through `IDatabaseApplicationBuilder` and returns that builder. At Build the callback

@@ -38,6 +38,7 @@ internal sealed partial class SqlPlanner
         SqlCreateViewPlan => "CreateView",
         SqlDropViewPlan => "DropView",
         SqlDropTablePlan => "DropTable",
+        SqlTruncatePlan => "Truncate",
         SqlDropSchemaPlan => "DropSchema",
         SqlAddColumnPlan => "AddColumn",
         SqlRenamePlan => "Rename",
@@ -121,6 +122,41 @@ internal sealed partial class SqlPlanner
                     Access(select.Table, select.Access, id, actual: metrics?.ActualCandidates(select));
                     break;
                 case SqlJoinPlan join:
+                    if (join.Tree is { } root)
+                    {
+                        var pending = new Stack<(SqlJoinTree Node, int Parent, bool AfterOuter)>();
+                        pending.Push((root, id, false));
+                        while (pending.TryPop(out var next))
+                        {
+                            if (next.Node.Step is not { } treeStep)
+                            {
+                                JoinInput(next.Node.Binding, next.Parent);
+                                continue;
+                            }
+                            if (next.AfterOuter)
+                            {
+                                var treeSeek = treeStep.Access!;
+                                string bounds = string.Join(" AND ", treeSeek.InnerColumns.Select((column, i) =>
+                                    $"{column.Name} = {JoinProbeReference(join.Bindings, treeSeek.OuterOrdinals[i])}"));
+                                Add("IndexSeek", next.Parent, Target(join.Bindings[treeSeek.InnerBinding].Source), treeSeek.Index.Name, bounds);
+                                continue;
+                            }
+                            int treeId = nodes.Count;
+                            string algorithm = treeStep.Hash is not null ? "HashJoin" : treeStep.Access is not null ? "IndexNestedLoop" : "NestedLoop";
+                            string normalization = treeStep.Kind == SqlJoinType.RightOuter ? "; normalized RIGHT to LEFT; physical=LeftOuter" : string.Empty;
+                            Add("JoinStep", next.Parent, Target(join.Bindings[treeStep.Binding].Source),
+                                detail: $"{treeStep.Kind}; {algorithm}{normalization}; hash_budget=no_spill",
+                                actual: metrics?.ActualCandidates(treeStep));
+                            if (treeStep.Access is not null)
+                            {
+                                // Emit the inner probe only after the complete physical outer subtree.
+                                pending.Push((next.Node, treeId, true));
+                            }
+                            else { pending.Push((next.Node.Right!, treeId, false)); }
+                            pending.Push((next.Node.Left!, treeId, false));
+                        }
+                        break;
+                    }
                     int first = join.FirstBinding;
                     JoinInput(first, id);
                     foreach (var step in join.Steps)

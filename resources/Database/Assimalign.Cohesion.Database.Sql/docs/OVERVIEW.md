@@ -1,5 +1,9 @@
 # Assimalign.Cohesion.Database.Sql — Overview
 
+TRUNCATE table lists execute through atomic storage replacement, with recursive FK closure,
+identity restart/continuation and deferred reclamation that preserves older snapshots (#1716).
+CTAS remains deferred to SQ-T2.
+
 ## Wire contract ownership
 
 `Assimalign.Cohesion.Database.Sql.Protocol` owns this model's wire messages, codecs, family singleton and transferred value shapes (5 public types). Both engine and remote client reference that one assembly. Its public namespace and RootNamespace equal its project name. Engine requests, planning, catalog, storage and server lifecycle stay in `Assimalign.Cohesion.Database.Sql`. This extraction preserves wire bytes and validation; moved public types intentionally change namespace and assembly identity with no forwarders.
@@ -54,7 +58,7 @@ shared storage, with DDL flowing through this assembly's relational Catalog comp
   full pool, so unrelated runtime retention cannot decide its bound (DESIGN, bounded build validation).
 - **SQL execution** — the declared dialect (`Database.Sql.Language/docs/DIALECT.md`)
   planned with rules and executed over stored, system and derived relations: `SELECT` with `WHERE`,
-  projection, aliased derived sources, `ORDER BY` with per-key `NULLS FIRST/LAST`, `LIMIT/OFFSET`, `DISTINCT`, grouping and aggregates;
+  projection, INNER/LEFT/RIGHT/CROSS joins with parenthesized groups and RIGHT-to-LEFT normalization, aliased derived sources, `ORDER BY` with per-key `NULLS FIRST/LAST`, `LIMIT/OFFSET`, `DISTINCT`, grouping and aggregates;
   non-recursive `WITH` before SELECT/INSERT/UPDATE/DELETE, with ordered SELECT definitions
   materialized once per statement and optional complete output column lists;
   `INSERT` (multi-row, whole-item `DEFAULT`, `DEFAULT VALUES`, nullability);

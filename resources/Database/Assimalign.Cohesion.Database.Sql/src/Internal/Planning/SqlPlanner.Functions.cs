@@ -134,42 +134,35 @@ internal sealed partial class SqlPlanner
 
     private void ValidateSourceFunctionCalls(System.Collections.Generic.IReadOnlyList<SqlFromItem> sources)
     {
-        foreach (var item in sources)
+        for (int i = 0; i < sources.Count; i++)
         {
-            if (item.Table is SqlDerivedTableReference derived) { ValidateFunctionCalls(derived.Query); }
-            foreach (var join in item.Joins)
+            ValidateRelationFunctionCalls(sources[i].Table);
+            foreach (var join in sources[i].Joins)
             {
-                if (join.Table is SqlDerivedTableReference joined) { ValidateFunctionCalls(joined.Query); }
+                ValidateRelationFunctionCalls(join.Table);
                 ValidateFunctionCalls(join.Condition);
             }
         }
     }
 
+    private void ValidateRelationFunctionCalls(SqlRelationReference relation)
+    {
+        if (relation is SqlDerivedTableReference derived) { ValidateFunctionCalls(derived.Query); }
+        else if (relation is SqlJoinedTableReference group)
+        {
+            RuntimeHelpers.EnsureSufficientExecutionStack();
+            ValidateSourceFunctionCalls([group.Item]);
+        }
+    }
+
     private void ValidateFunctionCalls(SqlSelectExpression select)
     {
-        foreach (var column in select.Columns)
-        {
-            ValidateFunctionCalls(column.Expression);
-        }
-        for (int i = 0; i < select.From.Count; i++)
-        {
-            if (select.From[i].Table is SqlDerivedTableReference derived) { ValidateFunctionCalls(derived.Query); }
-            foreach (var join in select.From[i].Joins)
-            {
-                if (join.Table is SqlDerivedTableReference joined) { ValidateFunctionCalls(joined.Query); }
-                ValidateFunctionCalls(join.Condition);
-            }
-        }
+        foreach (var column in select.Columns) { ValidateFunctionCalls(column.Expression); }
+        ValidateSourceFunctionCalls(select.From);
         ValidateFunctionCalls(select.Where);
-        foreach (var key in select.GroupBy)
-        {
-            ValidateFunctionCalls(key);
-        }
+        foreach (var key in select.GroupBy) { ValidateFunctionCalls(key); }
         ValidateFunctionCalls(select.Having);
-        foreach (var order in select.OrderBy)
-        {
-            ValidateFunctionCalls(order.Expression);
-        }
+        foreach (var order in select.OrderBy) { ValidateFunctionCalls(order.Expression); }
         ValidateFunctionCalls(select.Limit);
         ValidateFunctionCalls(select.Offset);
     }

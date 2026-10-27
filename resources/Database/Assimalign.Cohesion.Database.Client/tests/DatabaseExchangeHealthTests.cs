@@ -17,7 +17,7 @@ namespace Assimalign.Cohesion.Database.Client.Tests;
 public sealed class DatabaseExchangeHealthTests
 {
     [Theory(DisplayName = "Cohesion Test [Database.Client] - Exchange health: complete statement failures preserve the next pool rental")]
-    [InlineData("TRUNCATE TABLE users;", ProtocolErrorCode.ParseFailure)]
+    [InlineData("MERGE INTO users;", ProtocolErrorCode.ParseFailure)]
     [InlineData("SELECT id FROM missing_table", ProtocolErrorCode.ExecutionFailure)]
     public async Task ExecuteAsync_CompleteStatementFailure_ShouldReuseSameSession(string statement, ProtocolErrorCode code)
     {

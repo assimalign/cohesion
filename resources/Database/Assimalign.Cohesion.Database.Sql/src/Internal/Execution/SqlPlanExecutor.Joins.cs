@@ -33,7 +33,9 @@ internal sealed partial class SqlPlanExecutor
         {
             await statement.Coordinator.LockManager.AcquireAsync(statement.Transaction.Sequence,
                 LockResource.Object(table.ObjectId), LockMode.IntentShared, cancellationToken).ConfigureAwait(false);
-            EnsureCurrentDefinition(table);
+            // Only read-only statements may use an immutable retired TRUNCATE owner.
+            // INSERT sources and DML subqueries inherit the enclosing statement's check.
+            if (_isDml || !_catalog.IsTruncatedTable(table)) { EnsureCurrentDefinition(table); }
         }
         // Require binding's image even when an empty outer input would skip virtual enumeration.
         if (plan.Bindings.Any(binding => binding.Source.View is not null))
@@ -83,6 +85,15 @@ internal sealed partial class SqlPlanExecutor
         {
             if (plan.Inputs[i].Access is SqlIndexSeekPath seek &&
                 TryResolveSeekTree(plan.Bindings[i].Source.Table!, seek.Index, out var tree)) { inputIndexes[i] = tree; }
+        }
+        if (plan.Tree is not null)
+        {
+            // All tree inputs may be reused by a parent; delivery detaches selected cells.
+            await foreach (var row in EnumerateNormalizedJoinRowsAsync(plan, statement, ReadInput, cancellationToken).ConfigureAwait(false))
+            {
+                yield return row;
+            }
+            yield break;
         }
         if (plan.Steps.Count == 0)
         {

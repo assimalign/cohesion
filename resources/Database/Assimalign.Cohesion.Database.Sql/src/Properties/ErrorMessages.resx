@@ -157,6 +157,9 @@
   <data name="ColumnNameMissing" xml:space="preserve"><value>Table '{0}.{1}' has no column named '{2}'.</value></data>
   <data name="WriteIndexUnavailable" xml:space="preserve"><value>Index '{0}' on '{1}.{2}' is unavailable; writes cannot bypass its constraints.</value></data>
   <data name="TableProvisioningCollision" xml:space="preserve"><value>Table '{0}.{1}' already exists; schema provisioning cannot adopt it.</value></data>
+  <data name="TruncateClosureChanged" xml:space="preserve"><value>The foreign-key set of TRUNCATE changed while the statement was waiting. Retry the statement.</value></data>
+  <data name="TruncateForeignKeyDependent" xml:space="preserve"><value>TRUNCATE must also include referencing table '{0}.{1}'; include it explicitly or specify CASCADE.</value></data>
+  <data name="TruncateExplicitTransaction" xml:space="preserve"><value>TRUNCATE cannot execute inside an explicit transaction.</value></data>
   <data name="TableForeignKeyDependent" xml:space="preserve"><value>Table '{0}' is referenced by a foreign key and cannot be dropped.</value></data>
   <data name="IndexProvisioningCollision" xml:space="preserve"><value>Index '{0}' already exists on '{1}.{2}'; schema provisioning cannot adopt it.</value></data>
   <data name="ExecutionIndexExists" xml:space="preserve"><value>An index named '{0}' already exists on '{1}.{2}'.</value></data>
@@ -623,7 +626,8 @@
   <data name="SqlPlannerPlanInsertSelectSqlPlanning" xml:space="preserve"><value>INSERT SELECT source column {0} of type {1} is incompatible with target column '{2}' of type {3}.</value></data>
   <data name="SqlPlannerBindJoinSqlPlanning" xml:space="preserve"><value>Aggregate functions are not allowed in JOIN ON.</value></data>
   <data name="SqlPlannerBindJoinSqlPlanning2" xml:space="preserve"><value>Column '{0}' appears more than once in USING.</value></data>
-  <data name="SqlPlannerBindJoinSqlPlanning3" xml:space="preserve"><value>INNER and LEFT JOIN require ON or USING; CROSS JOIN accepts neither.</value></data>
+  <data name="RightJoinDmlSource" xml:space="preserve"><value>RIGHT or parenthesized joins in a joined DML source are not supported; the mutation target must remain the outer input.</value></data>
+  <data name="SqlPlannerBindJoinSqlPlanning3" xml:space="preserve"><value>INNER, LEFT and RIGHT JOIN require ON or USING; CROSS JOIN accepts neither.</value></data>
   <data name="SqlPlannerBindJoinSqlPlanning4" xml:space="preserve"><value>USING column '{0}' is {1} on the {2} input.</value></data>
   <data name="SqlPlannerBindJoinSqlPlanning5" xml:space="preserve"><value>Duplicate table name or alias '{0}'; use distinct aliases for a self join.</value></data>
   <data name="SqlPlannerUsingTypeSqlPlanning" xml:space="preserve"><value>USING column '{0}' requires a common type; found {1} and {2}.</value></data>

@@ -24,6 +24,10 @@ using Assimalign.Cohesion.Database.Types;
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlQueryExecutor.DebugView))]
 internal sealed class SqlQueryExecutor
 {
+    // Deterministic snapshot-versus-publication tests stop before any table binding.
+    internal static Action<SqlQueryRequest>? BeforePlan { get; set; }
+    internal static Action? BeforeCatalogCapture { get; set; }
+
     private readonly SqlStorage _storage;
     private readonly SqlCatalog _catalog;
     private readonly BTreeIndexManager _indexManager;
@@ -41,7 +45,11 @@ internal sealed class SqlQueryExecutor
         => ParameterBindings.Normalize(parameters, name =>
             new SqlPlanningException("CS01023", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.NormalizeParametersSqlPlanning, name)));
 
-    internal SqlCatalogSnapshot CaptureCatalogSnapshot() => _catalog.CaptureSnapshot();
+    internal SqlCatalogSnapshot CaptureCatalogSnapshot()
+    {
+        BeforeCatalogCapture?.Invoke();
+        return _catalog.CaptureSnapshot();
+    }
 
     /// <summary>
     /// Executes a statement inside the statement's transaction context: the MVCC
@@ -55,11 +63,12 @@ internal sealed class SqlQueryExecutor
 
         var parameters = NormalizeParameters(request.Parameters);
         _definitions.EnsureDefinitions(cancellationToken);
+        BeforePlan?.Invoke(request);
         var planner = new SqlPlanner(_catalog, parameters, _definitions.Functions, cancellationToken, statement);
         SqlPlan plan;
         try
         {
-            plan = planner.Plan(request.Statement.SqlExpression);
+            plan = planner.Plan(request.Statement.SqlExpression, statement.Snapshot);
         }
         catch (SqlUnsupportedQueryException exception)
         {

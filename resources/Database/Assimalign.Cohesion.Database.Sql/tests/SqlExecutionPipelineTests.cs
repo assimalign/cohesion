@@ -408,6 +408,6 @@ public class SqlExecutionPipelineTests : IDisposable
         }
 
         // Parse failures surface as the dedicated parse-exception category.
-        await Should.ThrowAsync<DatabaseParseException>(async () => await session.ExecuteAsync("TRUNCATE TABLE t;"));
+        await Should.ThrowAsync<DatabaseParseException>(async () => await session.ExecuteAsync("MERGE INTO t;"));
     }
 }

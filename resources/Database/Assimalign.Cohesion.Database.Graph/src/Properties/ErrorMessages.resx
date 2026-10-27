@@ -141,6 +141,7 @@
   <data name="FileNamesThrowIfInvalidArgument" xml:space="preserve"><value>{0} {1}</value></data>
   <data name="DatabaseMemoryFilesTryOpenFailure" xml:space="preserve"><value>The in-memory file set '{0}' was opened or created again while an open copied it.</value></data>
   <data name="DatabaseMemoryFilesThrowIfOpenFailure" xml:space="preserve"><value>The in-memory file set '{0}' is still open: its database's storage has not closed, so it cannot be opened again.</value></data>
+  <data name="ShortestPathDirectionInvalid" xml:space="preserve"><value>A shortest-path search requires a defined graph direction.</value></data>
   <data name="GraphDatabaseTraverseAsyncDatabase" xml:space="preserve"><value>CG05001: Traversal depth and direction must be valid.</value></data>
   <data name="DatabaseRequireOwnSessionDatabase" xml:space="preserve"><value>CG07005: The session belongs to another database or engine.</value></data>
   <data name="ValidatePropertiesAsyncDatabase" xml:space="preserve"><value>CG03003: Property '{0}' does not match the graph definition.</value></data>
@@ -269,4 +270,6 @@
   <data name="FunctionNullParameterInvalid" xml:space="preserve"><value>A function called on NULL input must use nullable CLR argument types.</value></data>
   <data name="FunctionSignatureDuplicate" xml:space="preserve"><value>A function with this name and signature is already registered.</value></data>
   <data name="FunctionArgumentConversion" xml:space="preserve"><value>A function argument cannot be read as its declared CLR type.</value></data>
+  <data name="ShortestPathNodeMissing" xml:space="preserve"><value>The selected shortest path contains a node absent from this statement snapshot.</value></data>
+  <data name="ShortestPathRelationshipMissing" xml:space="preserve"><value>The selected shortest path contains a relationship absent from this statement snapshot.</value></data>
 </root>

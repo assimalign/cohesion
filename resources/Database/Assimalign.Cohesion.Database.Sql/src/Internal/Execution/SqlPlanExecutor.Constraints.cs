@@ -1110,7 +1110,8 @@ internal sealed partial class SqlPlanExecutor
     private static string ConstraintName(SqlCatalogTable table, SqlConstraintDefinition definition, int ordinal)
         => SqlConstraintDeclaration.Name(table.Name, definition, ordinal);
 
-    private IReadOnlyList<SqlCatalogConstraint> BindConstraints(SqlCatalogTable table, IReadOnlyList<SqlConstraintDefinition> definitions)
+    private IReadOnlyList<SqlCatalogConstraint> BindConstraints(SqlCatalogTable table, IReadOnlyList<SqlConstraintDefinition> definitions,
+        SortedDictionary<ulong, SqlCatalogTable>? parents = null)
     {
         var result = new List<SqlCatalogConstraint>();
         var names = new HashSet<string>(table.Constraints.Select(c => c.Name), StringComparer.OrdinalIgnoreCase);
@@ -1172,6 +1173,9 @@ internal sealed partial class SqlPlanExecutor
             {
                 throw new SqlExecutionException(SqlExecutionException.UndefinedTableCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ForeignKeyTableMissing, schema, referenced.TableName));
             }
+            // Preserve the first binding's exact identity, even if the name disappears
+            // before lock acquisition starts. Self-references already hold the target lock.
+            if (!self) { parents?.TryAdd(parent.ObjectId, parent); }
 
             if (definition.Columns.Count != definition.ReferencedColumns.Count || definition.Columns.Count == 0)
             {

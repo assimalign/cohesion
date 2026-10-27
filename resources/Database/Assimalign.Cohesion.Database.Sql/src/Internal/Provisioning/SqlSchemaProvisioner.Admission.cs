@@ -227,6 +227,9 @@ internal sealed partial class SqlSchemaProvisioner
             case SqlDropTableExpression drop:
                 yield return drop.Table;
                 break;
+            case SqlTruncateExpression truncate:
+                foreach (var target in truncate.Tables) { yield return target.Table; }
+                break;
         }
     }
 
@@ -246,6 +249,11 @@ internal sealed partial class SqlSchemaProvisioner
     private static IEnumerable<SqlTableReference> References(SqlRelationReference relation)
     {
         if (relation is SqlTableReference table) { yield return table; }
+        else if (relation is SqlJoinedTableReference group)
+        {
+            RuntimeHelpers.EnsureSufficientExecutionStack();
+            foreach (var nested in SourceReferences([group.Item])) { yield return nested; }
+        }
         else if (relation is SqlDerivedTableReference derived)
         {
             foreach (var nested in References(derived.Query)) { yield return nested; }

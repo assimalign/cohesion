@@ -29,11 +29,11 @@ internal static partial class DocumentPlanExecutor
         {
             DocumentDeletePlan delete => await ExecuteDeleteAsync(database, operation, delete, parameters, cancellationToken).ConfigureAwait(false),
             DocumentUpdatePlan update => await ExecuteUpdateAsync(database, operation, update, parameters, cancellationToken).ConfigureAwait(false),
-            DocumentInsertPlan insert => await ExecuteWriteAsync(database, operation, insert.Collection, insert.Statement, insert.Statement.Values, null, true, parameters, cancellationToken).ConfigureAwait(false),
-            DocumentInsertSelectPlan insert => await ExecuteWriteAsync(database, operation, insert.Collection, insert.Statement, insert.Statement.Values, (insert.Source, insert.KeyOrdinal, insert.ValueOrdinal), true, parameters, cancellationToken).ConfigureAwait(false),
+            DocumentInsertPlan insert => await ExecuteWriteAsync(database, operation, insert.Collection, insert.Statement, insert.Statement.Values, null, true, insert.Returning, parameters, cancellationToken).ConfigureAwait(false),
+            DocumentInsertSelectPlan insert => await ExecuteWriteAsync(database, operation, insert.Collection, insert.Statement, insert.Statement.Values, (insert.Source, insert.KeyOrdinal, insert.ValueOrdinal), true, insert.Returning, parameters, cancellationToken).ConfigureAwait(false),
             DocumentUpsertPlan upsert => await ExecuteWriteAsync(database, operation, upsert.Collection, upsert.Statement,
                 upsert.Statement.Values, upsert.Source is { } source ? (source, upsert.KeyOrdinal, upsert.ValueOrdinal) : null,
-                false, parameters, cancellationToken).ConfigureAwait(false),
+                false, upsert.Returning, parameters, cancellationToken).ConfigureAwait(false),
             DocumentSystemCollectionPlan system => ExecuteSystemCollection(database, operation, system, parameters, cancellationToken),
             DocumentPlan select => await ExecuteSelectAsync(database, operation, select, parameters, cancellationToken).ConfigureAwait(false),
             DocumentCreateCollectionPlan createCollection => await ExecuteCreateCollectionAsync(database, operation, createCollection, cancellationToken).ConfigureAwait(false),
@@ -260,6 +260,20 @@ internal static partial class DocumentPlanExecutor
                 return left.Ordinal.CompareTo(right.Ordinal);
             });
         }
+        return CreateResult(logical, output, cancellationToken);
+
+        void Project(DocumentEvaluationContext document, IReadOnlyList<DocumentEvaluationContext>? group)
+        {
+            var values = logical.Projections.Select(projection => evaluator.EvaluateProjection(projection.Expression, document, group, query.IsValue)).ToArray();
+            if (query.IsValue && values[0] is DocumentMissing) { values[0] = null; }
+            output.Add(new EvaluatedRow(values, document, group, output.Count));
+        }
+    }
+
+    private static DocumentQueryResult CreateResult(DocumentLogicalPlan logical, List<EvaluatedRow> output,
+        CancellationToken cancellationToken, long affectedCount = -1)
+    {
+        var query = logical.Query;
         var columns = new DatabaseColumn[logical.Projections.Count];
         for (int i = 0; i < columns.Length; i++)
         {
@@ -284,15 +298,7 @@ internal static partial class DocumentPlanExecutor
         if (start != 0 || take != output.Count) { output = output.GetRange(start, take); }
         bool wholeDocument = query.Projections.Count == 1 && query.Projections[0].Expression is OqlStarExpression;
         return new DocumentQueryResult(columns, output.Select(row => row.Values).ToList(),
-            query.IsValue || wholeDocument, wholeDocument ? output.Select(row => row.Document.RawContent).ToArray() : null);
-
-        void Project(DocumentEvaluationContext document, IReadOnlyList<DocumentEvaluationContext>? group)
-        {
-            var values = logical.Projections.Select(projection => evaluator.EvaluateProjection(projection.Expression, document, group, query.IsValue)).ToArray();
-            // Normalize the JSON root before DISTINCT, projected ordering and counting.
-            if (query.IsValue && values[0] is DocumentMissing) { values[0] = null; }
-            output.Add(new EvaluatedRow(values, document, group, output.Count));
-        }
+            query.IsValue || wholeDocument, wholeDocument ? output.Select(row => row.Document.RawContent).ToArray() : null, affectedCount);
     }
 
     private static async ValueTask<DatabaseResult> ExecuteCreateCollectionAsync(DocumentDatabase database, DocumentOperation operation,

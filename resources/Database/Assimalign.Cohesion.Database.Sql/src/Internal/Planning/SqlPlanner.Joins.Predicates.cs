@@ -14,6 +14,11 @@ internal sealed partial class SqlPlanner
     /// <summary>Attaches proven non-throwing singleton restrictions without changing ON/WHERE residuals.</summary>
     private SqlJoinPlan PushJoinPredicates(SqlJoinPlan plan, bool pinFirst = false)
     {
+        if (plan.Tree is not null)
+        {
+            // Restrictions retain their written level across grouped and swapped boundaries.
+            return plan with { Inputs = plan.Bindings.Select(_ => new SqlJoinInput(SqlScanPath.Instance, null)).ToArray() };
+        }
         var filters = plan.Bindings.Select(_ => new List<SqlBoundExpression>()).ToArray();
         var predicates = plan.Bindings.Select(_ => new Dictionary<int, List<(SqlBinaryOperator Op, object? Value)>>()).ToArray();
         var nullable = new bool[plan.Bindings.Count];

@@ -23,6 +23,16 @@ namespace Assimalign.Cohesion.Database.Documents;
 public sealed class DocumentDatabaseEngineOptions
 {
     /// <summary>
+    /// Gets or sets the maximum retained memory charged to a statement's RETURNING rows.
+    /// Defaults to 64 MiB and must be positive. Charges include row storage, scalar values,
+    /// JSON clones (128 bytes plus UTF-8 length plus 12 bytes per JSON token), and
+    /// preserved whole-document bytes. A lone star retains one clone and one raw image;
+    /// each representation is charged once. JSON measurement allocates no text copy.
+    /// Exhaustion fails the statement and rolls back its writes with CD05018.
+    /// </summary>
+    public long StatementMemoryBudget { get; set; } = 64L * 1024 * 1024;
+
+    /// <summary>
     /// Gets or sets how commits reach stable storage. When unset, opening a
     /// database selects <see cref="StorageCommitDurability.Synchronous"/> for
     /// durable backing and <see cref="StorageCommitDurability.None"/> otherwise.
@@ -187,6 +197,7 @@ public sealed class DocumentDatabaseEngineOptions
     /// </remarks>
     internal DocumentDatabaseEngineOptions Snapshot() => new()
     {
+        StatementMemoryBudget = StatementMemoryBudget,
         Durability = Durability,
         GroupCommitWindow = GroupCommitWindow,
         CheckpointInterval = CheckpointInterval,
@@ -214,6 +225,7 @@ public sealed class DocumentDatabaseEngineOptions
         }
 
         public global::Assimalign.Cohesion.Database.Storage.StorageCommitDurability? Durability => _target.Durability;
+        public long StatementMemoryBudget => _target.StatementMemoryBudget;
         public global::System.TimeSpan GroupCommitWindow => _target.GroupCommitWindow;
         public global::System.TimeSpan CheckpointInterval => _target.CheckpointInterval;
         public long CheckpointJournalSize => _target.CheckpointJournalSize;

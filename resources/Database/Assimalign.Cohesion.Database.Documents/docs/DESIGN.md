@@ -480,7 +480,9 @@ CD00007 for the same count rule at parse and plan time:
 | `CD03012` | INSERT found an existing key, or INSERT/UPSERT repeated a key in one statement |
 | `CD02013` | Invalid evaluated LIKE escape or a pattern ending in its escape character |
 | `CD01014` | DISTINCT ORDER BY expression is absent from the projection |
-| `CD05015` | A SELECT array or object constructor exceeds the 256-level result limit |
+| `CD05015` | A query/RETURNING array or object constructor exceeds the 256-level result limit |
+| `CD05018` | RETURNING retained result exceeds the statement memory budget |
+| `CD05019` | Serialized RETURNING value exceeds 256 levels, including a named projection wrapper |
 | `CD02016` | Invalid UPDATE target or an incompatible object/array shape or index |
 | `CD01017` | UPDATE targets duplicate or prefix-overlap after alias normalization |
 | `CD02018` | UPDATE produces invalid stored JSON or exceeds storage's 128-level depth |
@@ -491,6 +493,7 @@ CD00007 for the same count rule at parse and plan time:
 | `CD01023` | A direct SELECT AST repeats a FROM/UNNEST binding name or supplies an empty binding name |
 | `CD03024` | Index already exists |
 | `CD01025` | Index does not exist |
+| `CD01026` | A directly constructed RETURNING projection has an empty output name |
 | `CD02026` | Composite index key exceeds the shared 1024-byte limit |
 
 `DocumentQueryRequest.FromOql` and a directly constructed typed query with parse errors
@@ -1000,7 +1003,7 @@ existing DatabaseTransactionAbortedException conflict path. Any failure rolls ba
 statement, or aborts the whole explicit transaction under #1225. Own writes remain visible to
 later statements of that transaction and invisible to other sessions until commit.
 
-The existing wire completion carries the matched count with no Document frames. Path failures
+Without RETURNING, the existing wire completion carries the matched count with no Document frames. Path failures
 arrive as ExecutionFailure with their diagnostic and leave the session reusable. Tests exercise
 scan/seek parity, swaps, versions, failures before and after the first write, cancellation,
 concurrent committed writers, explicit commit/rollback and process termination. Recovery checks
@@ -1109,6 +1112,59 @@ for composite key collation, NULL/MISSING rules, uniqueness arbitration, visibil
 not document paths: META(alias).id comparisons stay residual filters over a scan or a content
 index chosen by another conjunct. T1 has no key-lookup access path.
 
+## RETURNING results (#1727)
+
+The [OQL dialect](../../Assimalign.Cohesion.Database.Documents.Language/docs/DIALECT.md#returning-1727)
+defines the grammar, target binding, image rules and output order. DocumentPlanner validates the
+optional projection with the engine's function catalog and SELECT's naming/type logic, while
+forbidding aggregates. Input validation traverses RETURNING even for empty candidate sets.
+DocumentPlanExecutor projects each successful write's returned Document for INSERT/UPSERT/UPDATE;
+DELETE projects each matched pre-image while reading the statement snapshot, then stages only
+identities and owned projection values before deleting. The statement owns every write
+and projection, so its normal failure path rolls back all writes and indexes before returning.
+Explicit transactions retain the existing abort-until-rollback contract. A result is returned only
+after all projections, frame-size/depth serialization preflight and metadata normalization succeed; JSON cells are cloned before their
+image JsonDocument is disposed, and no unprojected image is retained by the result context.
+Constructor-depth CD05015 names RETURNING and carries the constructor expression span. Token
+enumeration checks serialized depth explicitly, including a named projection's wrapper, for
+CD05019; serialization preflight does not relabel unrelated InvalidOperationException failures.
+DELETE reports its staged count and checks the actual deletion count against it inside the
+transaction. Divergence is an InvalidOperationException invariant failure before commit, so
+the normal rollback path restores every write and no inconsistent completion can escape.
+
+DocumentQueryResult stores an affected count (default -1 for reads) with the owned result rows.
+SELECT's result construction also supplies RETURNING's fixed names, empty-input static types,
+Int64/Decimal promotion and bare MISSING-to-null normalization. Lone star retains original image
+bytes. EXPLAIN emits Returning or ReturningValue child nodes without evaluating projections.
+
+Documents previously had no statement memory budget. The new positive StatementMemoryBudget
+engine option defaults to SQL's existing 64 MiB convention and is snapshotted at construction.
+It bounds retained RETURNING results: metadata, row/value arrays (including normalization/result
+copies), scalar objects/strings, cloned JSON and whole-image bytes. Each JSON clone costs
+128 bytes of ownership overhead plus its raw UTF-8 length plus 12 bytes per JSON token
+(including property names and both container delimiters). JsonMarshal.GetRawUtf8Value and
+struct enumerators measure this without allocating a UTF-16 text copy. This accounts for dense
+arrays by token count while large strings pay for their bytes. A lone star retains one clone
+and one original raw image; each representation is charged once. A 1,024-byte ASCII object
+with one string property costs 2,448 bytes per row (224 row storage + 1,200 clone + 1,024 raw),
+plus 208 bytes of statement metadata. Charges accumulate before rows enter the result list; CD05018 at the clause span rolls
+back the statement on exhaustion. This does not retrofit accounting onto existing SELECT or
+mutation/source staging and is not a process-heap cap. The public option is a model configuration
+capability, not an assembly-visibility bridge. No new public interface or dependency is added.
+
+The server already serializes both counts into Complete; updated Documents.Client accepts an
+Execute result header with affected count -1, or with a nonnegative affected count equal to the
+received row count. Negative values below -1 and disagreeing counts remain protocol violations.
+There is no capability or version negotiation for RETURNING (owner decision 8, 2026-10-25),
+and old clients may reject it. Both InMemory and TCP tests observe Failure before any result header
+for a projection error, owned image metadata, explicit rollback, budget failure and connection
+reuse. The NativeAOT sample exercises all four forms and projection rollback on both transports.
+No disk or frame-layout change is made.
+
+Image reference: RavenDB src/Raven.Server/Documents/Patch/PatchDocumentCommand.cs:354-356 returns
+ModifiedDocument when requested. The SQL++ references and Cohesion's transactional divergence are
+linked in the dialect contract.
+
 ## Data mutation and serialization semantics
 
 OQL UPSERT uses the [SQL++ KEY/VALUE grammar](https://docs.couchbase.com/server/current/n1ql/n1ql-language-reference/upsert.html)
@@ -1121,7 +1177,7 @@ statement snapshot. A repeated ordinal key fails the whole statement with Docume
 whole explicit transaction under #1225; the caller rolls back that transaction before reuse.
 No statement-level version precondition is supported in T1: OPTIONS remains CK00001 and
 expiration is not implemented. Optimistic replacement uses PutAsync(expectedVersion) or
-UPDATE WHERE META(d).version = $v. RETURNING remains deferred.
+UPDATE WHERE META(d).version = $v. RETURNING follows the affected-image contract above.
 
 UPSERT calls the same WriteAsync primitive as INSERT, UPDATE and PutAsync, with insert-only
 checking disabled. It writes the new content first, tombstones the old content, then saves
@@ -1129,7 +1185,7 @@ the catalog entry with old/new index-key maintenance, all in one logical transac
 an intervening committed writer with DatabaseTransactionAbortedException. Schema ownership
 permits content writes; virtual system collections are read-only and missing destinations
 are never created. EXPLAIN describes Upsert/UpsertSelect without mutation. Completion reports
-the written-document count and emits no Document frames. The process-exit fixture and its raw
+the written-document count and optional RETURNING frames. The process-exit fixture and its raw
 B-tree assertions prove committed old-key removal and abandoned new-key removal after recovery.
 The catalog layout is unchanged, so no format bump or upgrade path is introduced.
 
@@ -1157,8 +1213,7 @@ deleted documents. Re-inserting a deleted id receives a strictly higher version.
 Without WHERE, DELETE removes every document while retaining the collection and its index
 definitions. A zero-match delete succeeds with affected count zero. Schema ownership permits
 content mutation; system sources remain read-only and missing collections give CD01002.
-The existing Complete affected count reports deletions with no Document frames. USE KEYS,
-RETURNING and DELETE LIMIT remain deferred. No catalog-format or protocol change is needed.
+Without RETURNING, the existing Complete affected count reports deletions with no Document frames. USE KEYS and DELETE LIMIT remain deferred. No catalog-format or protocol change is needed.
 The process-exit fixture checks document reads and index-seek query results after committed
 and interrupted uncommitted deletions. Documents.Catalog restart tests inspect the recovered
 `by_rank` B-tree directly under the latest snapshot: a committed-deleted key has no live entry,
@@ -1206,7 +1261,7 @@ this differs from SQL constraint diagnostics that omit key values. A same-key in
 after the snapshot instead raises DatabaseTransactionAbortedException: current-state conflict
 checks precede duplicate detection. Successful inserts allocate strictly increasing versions;
 rollback may leave sequence gaps. A successful command reports its inserted-document count.
-The existing wire Complete carries that affected count with zero Document frames; duplicates
+Without RETURNING, the existing wire Complete carries that affected count with zero Document frames; duplicates
 are ExecutionFailure and preserve the wire session. No protocol or catalog format changes occur.
 
 A top-level MISSING KEY or VALUE fails the whole statement; KEY must be a nonblank string.
@@ -1674,7 +1729,8 @@ bytes containing a u64 version. The complete UInt64 domain is retained. Collecti
 identities cannot be blank. Get of a missing document returns no StoredDocument. Put returns the
 stored bytes and assigned version; conditional put/delete use the engine's optimistic-concurrency
 rules. Collection DDL affects zero documents. ResultCount counts row/document/collection result
-frames, excluding the header and completion; query AffectedCount is -1, index DDL zero.
+frames, excluding the header and completion; read-only AffectedCount is -1, index DDL zero.
+RETURNING writes carry equal nonnegative result and affected counts, including two zeros for no matches.
 
 Each diagnostic record is `str(code), str(message), i32 start, i32 end, i32 line, i32 severity,
 i32 location`. For code length C and message length D, code length starts at 0, code bytes at 4,

@@ -33,6 +33,7 @@ public class SqlLanguageProfileTests
     [InlineData(SqlClauses.CreateIndex, "CREATE INDEX ix_t_id ON t (id);")]
     [InlineData(SqlClauses.AlterTable, "ALTER TABLE t ADD COLUMN name TEXT;")]
     [InlineData(SqlClauses.DropTable, "DROP TABLE t;")]
+    [InlineData(SqlClauses.Truncate, "TRUNCATE TABLE ONLY t RESTART IDENTITY CASCADE;")]
     [InlineData(SqlClauses.CreateView, "CREATE VIEW v AS SELECT a FROM t;")]
     [InlineData(SqlClauses.DropView, "DROP VIEW v;")]
     [InlineData(SqlClauses.DropIndex, "DROP INDEX ix_t_id ON t;")]
@@ -95,7 +96,7 @@ public class SqlLanguageProfileTests
     [Theory(DisplayName = "Cohesion Test [Database.Sql.Language] - JOIN: Profile advertises only executable join types")]
     [InlineData(SqlJoinType.Inner, true)]
     [InlineData(SqlJoinType.LeftOuter, true)]
-    [InlineData(SqlJoinType.RightOuter, false)]
+    [InlineData(SqlJoinType.RightOuter, true)]
     [InlineData(SqlJoinType.FullOuter, false)]
     [InlineData(SqlJoinType.Cross, true)]
     public void Profile_JoinType_DeclaresExactExecutionSurface(SqlJoinType joinType, bool supported)

@@ -66,6 +66,20 @@ internal sealed partial class DocumentPlanner
             ? $"filter={update.Statement.Predicate is not null}; access={AccessName(update.Access)}"
             : logical is null ? null : SelectDetail(logical);
         Add(DescribeOperator(plan), null, indexName, detail);
+        var returning = plan switch
+        {
+            DocumentInsertPlan p => p.Returning,
+            DocumentInsertSelectPlan p => p.Returning,
+            DocumentUpsertPlan p => p.Returning,
+            DocumentUpdatePlan p => p.Returning,
+            DocumentDeletePlan p => p.Returning,
+            _ => null,
+        };
+        if (returning is not null)
+        {
+            Add(returning.Query.IsValue ? "ReturningValue" : "Returning", 0,
+                detail: $"columns={returning.Projections.Count}");
+        }
         if (plan is DocumentDeletePlan deletion) { AddAccess(deletion.Access, 0); }
         if (plan is DocumentUpdatePlan mutation) { AddAccess(mutation.Access, 0); }
         var select = plan as DocumentPlan;
@@ -79,7 +93,7 @@ internal sealed partial class DocumentPlanner
         };
         if (writeSource is not null)
         {
-            sourceParent = 1;
+            sourceParent = nodes.Count;
             if (writeSource is DocumentPlan source)
             {
                 select = source;

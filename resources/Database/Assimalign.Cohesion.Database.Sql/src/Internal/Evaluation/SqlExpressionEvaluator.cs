@@ -629,18 +629,18 @@ internal sealed partial class SqlExpressionEvaluator
     /// <summary>A column reference's collation; one that does not resolve fails now or, bound, when compared.</summary>
     private SqlCollationCandidate ColumnReferenceCollation(SqlColumnReferenceExpression column, bool bound)
     {
-        if (!bound)
-        {
-            return ColumnCollation(ResolveColumn(column));
-        }
+        if (!bound) { return Resolve(); }
+        try { return Resolve(); }
+        catch (Exception exception) when (IsDeferrable(exception)) { return ColumnCollationFailure(column); }
 
-        try
+        SqlCollationCandidate Resolve()
         {
-            return ColumnCollation(ResolveColumn(column));
-        }
-        catch (Exception exception) when (IsDeferrable(exception))
-        {
-            return ColumnCollationFailure(column);
+            int ordinal = ResolveColumn(column);
+            if (ordinal >= 0 && column.TableAlias is null && column.SchemaName is null && MergedColumn(ordinal) is { } merged)
+            {
+                return new(merged.Column.Collation ?? _defaultCollation, merged.Column.Collation is null ? 1 : 2);
+            }
+            return ColumnCollation(ordinal);
         }
     }
 

@@ -34,7 +34,7 @@ public sealed class SqlStatementCompletenessTests
         ],
         [SqlClauses.From] = ["SELECT * FROM t", "SELECT * FROM dbo.t AS u", "SELECT * FROM t u"],
         [SqlClauses.Using] = ["SELECT * FROM t JOIN u USING (id)"],
-        [SqlClauses.Join] = ["SELECT * FROM t JOIN u ON t.id = u.id", "SELECT * FROM t INNER JOIN u v ON t.id = v.id"],
+        [SqlClauses.Join] = ["SELECT * FROM t JOIN u ON t.id = u.id", "SELECT * FROM t INNER JOIN u v ON t.id = v.id", "SELECT * FROM t RIGHT JOIN u USING (id)", "SELECT * FROM (t LEFT JOIN u USING (id)) RIGHT OUTER JOIN v USING (id)"],
         [SqlClauses.Where] =
         [
             "SELECT * FROM t WHERE a = 1",
@@ -106,6 +106,7 @@ public sealed class SqlStatementCompletenessTests
         [SqlClauses.CreateView] = ["CREATE VIEW v AS SELECT a FROM t", "CREATE OR REPLACE VIEW dbo.v (a) AS SELECT a FROM t"],
         [SqlClauses.DropView] = ["DROP VIEW v", "DROP VIEW IF EXISTS dbo.v RESTRICT", "DROP VIEW v CASCADE"],
         [SqlClauses.DropTable] = ["DROP TABLE t", "DROP TABLE IF EXISTS dbo.t"],
+        [SqlClauses.Truncate] = ["TRUNCATE t", "TRUNCATE TABLE ONLY dbo.t, u RESTART IDENTITY CASCADE", "TRUNCATE t CONTINUE IDENTITY RESTRICT"],
         [SqlClauses.CreateSchema] = ["CREATE SCHEMA sales", "CREATE SCHEMA IF NOT EXISTS sales"],
         [SqlClauses.DropSchema] = ["DROP SCHEMA sales", "DROP SCHEMA IF EXISTS sales RESTRICT", "DROP SCHEMA sales CASCADE"],
         [SqlClauses.DropIndex] = ["DROP INDEX ix ON t", "DROP INDEX IF EXISTS ix ON dbo.t"],
