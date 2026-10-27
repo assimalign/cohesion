@@ -16,6 +16,37 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed partial class SqlTableRewriteTests
 {
+    [Fact(DisplayName = "Cohesion Test [Sql] - Rewrite: metadata admission refuses under pre-queued table X and releases the transaction (#1265)")]
+    public async Task RewriteTableAsync_MetadataAdmissionConflict_ShouldRefuseAndRollbackSourceLock()
+    {
+        // Arrange: a definition lease can coexist with schema admission, but must
+        // never make the worker wait for metadata while it owns source-table X.
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        await using var engine = SqlDatabaseEngine.Create("rewrite-metadata-admission", new());
+        var database = await engine.CreateDatabaseAsync("db", timeout.Token);
+        await using var session = await database.CreateSessionAsync(timeout.Token);
+        await PrepareAsync(session, timeout.Token);
+        ulong source = Table(database).ObjectId;
+        using (database.DdlInterlock.EnterMetadata(database.Name, definition: true))
+        {
+            // Act: completion is required while the conflicting lease is still held.
+            await Should.ThrowAsync<DatabaseObjectLockedException>(
+                () => database.RewriteTableAsync(Table(database), timeout.Token).AsTask());
+
+            // Assert: pre-queue acquisition was rolled back on fail-fast refusal.
+            var probe = await database.Coordinator.BeginAsync(IsolationLevel.ReadCommitted, timeout.Token);
+            try
+            {
+                database.Coordinator.LockManager.TryAcquire(probe.Sequence,
+                    LockResource.Object(source), LockMode.Exclusive).ShouldBeTrue();
+            }
+            finally { await database.Coordinator.RollbackAsync(probe, CancellationToken.None); }
+            database.Coordinator.GetOpenContexts().ShouldBeEmpty();
+            database.Catalog.GetPendingTableReclamations().ShouldBeEmpty();
+        }
+        await database.RewriteTableAsync(Table(database), timeout.Token);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Sql] - Rewrite: a lock waiter leaves the shared provisioning pump available for a peer migration")]
     public async Task RewriteTableAsync_IdleTableLockHolder_ShouldNotStallAnotherDatabaseMigration()
     {
