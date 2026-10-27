@@ -14,7 +14,7 @@ namespace Assimalign.Cohesion.Database.Graph.Storage;
 
 public sealed partial class GraphStore
 {
-    private const ulong relationshipTypesId = ulong.MaxValue - 2;
+    private const ulong relationshipTypesId = GraphLockNamespaces.RelationshipTypes;
     private readonly Dictionary<string, HashSet<Guid>> _relationshipTypeTokens = new(StringComparer.Ordinal);
     private long _relationshipTypeEntriesVisited;
     internal long RelationshipTypeEntriesVisited => Interlocked.Read(ref _relationshipTypeEntriesVisited);

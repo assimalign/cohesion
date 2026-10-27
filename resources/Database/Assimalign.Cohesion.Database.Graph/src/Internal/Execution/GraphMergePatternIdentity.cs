@@ -23,29 +23,36 @@ internal sealed class GraphMergePatternIdentity
         if (nodes.Count == 0) { throw InvalidIdentity(); }
         var hash = new HashCode();
         var bound = new HashSet<GraphMergeEntity>();
+        var slots = new int[nodes.Count];
         hash.Add(nodes.Count);
-        foreach (var node in nodes)
+        for (int slot = 0; slot < nodes.Count; slot++)
         {
+            var node = nodes[slot];
             if (node.Labels is null || node.Properties is null) { throw InvalidIdentity(); }
-            hash.Add(node.BoundId);
+            var nodeHash = new HashCode();
+            nodeHash.Add(node.BoundId);
             AddBound(true, node.BoundId);
             var labels = node.Labels.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
-            hash.Add(labels.Length);
+            nodeHash.Add(labels.Length);
             foreach (string label in labels)
             {
                 if (string.IsNullOrWhiteSpace(label)) { throw InvalidIdentity(); }
-                hash.Add(label, StringComparer.Ordinal);
+                nodeHash.Add(label, StringComparer.Ordinal);
             }
-            AddProperties(ref hash, node.Properties);
+            AddProperties(ref nodeHash, node.Properties);
+            slots[slot] = nodeHash.ToHashCode();
         }
+        foreach (int node in slots.Order()) { hash.Add(node); }
         // Incoming is represented by swapping endpoint slots. Undirected endpoints have no order.
-        // Sorting edge hashes also makes the order of independent pattern parts irrelevant.
+        // Endpoint tokens depend on node contents, never source positions. Equal node tokens
+        // may conservatively collapse distinct topologies, like any other lock-hash collision.
+        // Sorting both multisets makes reordered nodes and independent parts equivalent.
         var edges = new List<int>(relationships.Count);
         foreach (var edge in relationships)
         {
             if ((uint)edge.From >= (uint)nodes.Count || (uint)edge.To >= (uint)nodes.Count ||
                 string.IsNullOrWhiteSpace(edge.Type) || edge.Properties is null) { throw InvalidIdentity(); }
-            int from = edge.From, to = edge.To;
+            int from = slots[edge.From], to = slots[edge.To];
             if (edge.Undirected && from > to) { (from, to) = (to, from); }
             var edgeHash = new HashCode();
             edgeHash.Add(from); edgeHash.Add(to); edgeHash.Add(edge.Undirected);
@@ -59,7 +66,7 @@ internal sealed class GraphMergePatternIdentity
         foreach (int edge in edges.Order()) { hash.Add(edge); }
         // Graph reserves this object namespace for logical MERGE patterns. Hash collisions only
         // over-serialize; the database writer lock remains mandatory even for different hashes.
-        Resource = LockResource.Entry(ulong.MaxValue, (uint)hash.ToHashCode());
+        Resource = LockResource.Entry(GraphLockNamespaces.MergePatterns, (uint)hash.ToHashCode());
         BoundEntities = Array.AsReadOnly(bound.ToArray());
 
         void AddBound(bool node, ulong? id)

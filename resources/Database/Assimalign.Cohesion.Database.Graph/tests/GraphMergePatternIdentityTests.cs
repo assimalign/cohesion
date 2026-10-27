@@ -46,6 +46,35 @@ public sealed class GraphMergePatternIdentityTests
         second.BoundEntities.ShouldBe([new(true, 10), new(true, 20), new(false, 30)], ignoreOrder: true);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Database.Graph] - MERGE canonical slots ignore incoming spelling and reordered node-only parts (#1735)")]
+    public void Constructor_ReorderedNodeSlots_ShouldUseSameResource()
+    {
+        // Arrange
+        var empty = new Dictionary<string, object?>();
+        GraphMergeNodeIdentity a = new(null, ["A"], empty), b = new(null, ["B"], empty);
+        var outgoing = new GraphMergePatternIdentity([a, b], [new(0, 1, "R", false, null, empty)]);
+        var nodes = new GraphMergePatternIdentity([a, b], []);
+
+        // Act / Assert: (a:A)-[:R]->(b:B) and (b:B)<-[:R]-(a:A).
+        new GraphMergePatternIdentity([b, a], [new(1, 0, "R", false, null, empty)]).Resource.ShouldBe(outgoing.Resource);
+        new GraphMergePatternIdentity([b, a], []).Resource.ShouldBe(nodes.Resource);
+        new GraphMergePatternIdentity([b, a], [new(0, 1, "R", true, null, empty)]).Resource.ShouldBe(
+            new GraphMergePatternIdentity([a, b], [new(0, 1, "R", true, null, empty)]).Resource);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Graph] - MERGE namespace avoids reserved posting indexes (#1735)")]
+    public void Constructor_PatternNamespace_ShouldAvoidPostingIndexIds()
+    {
+        // Arrange
+        var identity = new GraphMergePatternIdentity([new(null, ["N"], new Dictionary<string, object?>())], []);
+
+        // Act / Assert: adjacency, labels and relationship-type postings own the top three ids.
+        identity.Resource.ObjectId.ShouldBe(ulong.MaxValue - 3);
+        identity.Resource.ObjectId.ShouldBeGreaterThan((ulong)long.MaxValue);
+        new[] { GraphLockNamespaces.Adjacency, GraphLockNamespaces.Labels, GraphLockNamespaces.RelationshipTypes }
+            .ShouldNotContain(identity.Resource.ObjectId);
+    }
+
     [Theory(DisplayName = "Cohesion Test [Database.Graph] - MERGE identity refuses unsupported equality operands (#1735)")]
     [InlineData(null)]
     [InlineData(double.NaN)]

@@ -14,7 +14,7 @@ namespace Assimalign.Cohesion.Database.Graph.Storage;
 
 public sealed partial class GraphStore
 {
-    private const ulong labelsId = ulong.MaxValue - 1;
+    private const ulong labelsId = GraphLockNamespaces.Labels;
     private readonly Dictionary<string, HashSet<Guid>> _labelTokens = new(StringComparer.Ordinal);
     private readonly Dictionary<string, long> _labelCardinalities = new(StringComparer.Ordinal);
     private long _nodeRecordsDecoded;

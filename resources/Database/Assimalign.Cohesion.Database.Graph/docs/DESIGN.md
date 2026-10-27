@@ -413,14 +413,20 @@ Call it inside the existing operation failure bracket, before choosing match or 
 `GraphMergePatternIdentity` after binding: node binding slots with bound IDs, ordinal labels and
 evaluated property equalities, and fixed relationships with endpoint slots, type, orientation,
 optional bound ID and equalities. Repeated variables reuse a node slot; variable names are absent.
-Incoming edges swap endpoint slots. Label/property order, duplicate labels, relationship-part
-order and undirected endpoint order do not change the resource; equal numeric values share the
+Incoming edges swap endpoint slots. Node slots are canonical content tokens: sorting the node
+and relationship multisets makes incoming/outgoing spellings, reordered node-only parts,
+label/property order, duplicate labels, relationship-part order and undirected endpoint order
+independent of source positions. Equal node tokens can conservatively collapse different
+topologies, just as any lock-hash collision can over-serialize. Equal numeric values share the
 existing exact-fraction hash. Null, non-finite and composite equalities, zero bound IDs, empty
 patterns and invalid endpoint slots are refused with structured CG05023. This validates the
 internal identity only; language admission and matching remain GQ-M2 responsibilities.
 
 The seam takes the existing exclusive database writer lock, then an exclusive logical pattern
-entry in Graph's reserved `ObjectId = ulong.MaxValue` lock namespace. The entry is a process-local
+entry in Graph's reserved `ObjectId = ulong.MaxValue - 3` lock namespace.
+`GraphLockNamespaces` defines it once beside adjacency, label and relationship-type posting
+namespaces (`ulong.MaxValue - 2 .. ulong.MaxValue`). All four exceed the signed sequence
+allocator's range, so no allocated catalog/property-index object can collide. The entry is a process-local
 32-bit equality hash; collisions only over-serialize. An absent pattern is still a resource.
 No registry, public API, Transactions change or storage format is needed. These locks belong to
 the transaction and remain held through commit/rollback, including an empty or matched return.
