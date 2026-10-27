@@ -27,6 +27,20 @@ internal sealed class SqlDmlMemory : IDisposable
         _reserved += bytes;
     }
 
+    internal void Release(long bytes)
+    {
+        _metrics.ReleaseHashMemory(bytes);
+        _reserved -= bytes;
+    }
+
+    // Projected constraint arrays are exclusive to their index. Their cells alias
+    // retained final rows, so only the array leaves the ledger; spare slots are reused.
+    internal void ReleaseProjection(object?[] key)
+    {
+        if (_objects.Remove(key, out var entry))
+        { Release(Math.Max(0, entry.Bytes - entry.HashBytes)); }
+    }
+
     internal void Retain(object?[] row)
     {
         Track(row, 24L + 8L * row.Length, retain: true, 0);

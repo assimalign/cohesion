@@ -3135,6 +3135,13 @@ Only a failed target recheck or EnsureLatestVersion check receives CS04064. Host
 transactions and abandoned lock owners retain the ordinary uncoded transaction-abort contract.
 A MERGE-only constraint-state subtype and call-site filtering preserve ordinary DML object
 sizes and the existing Release allocation budgets.
+SET NULL/DEFAULT refreshes only added or changed final rows. Mutable constraint projections
+keep a reverse location directory, replace only changed keys, and release empty buckets and
+their exclusive projected arrays; ledger capacity is reused and shared row cells stay retained.
+Unchanged iterations reserve nothing. Discarded cascade-discovery projections are disposed before
+the final-state view is built, and final projections are disposed on every statement exit.
+The self-table and cross-table memory corpus compares both SET policies with CASCADE under the
+default grant; the joined-DML refusal corpus still checks genuinely oversized statements.
 Disk and wire formats and assembly boundaries are unchanged.
 Deviates from interface-first (database-area.md); new public syntax leaves are sealed.
 

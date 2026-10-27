@@ -316,7 +316,8 @@ internal sealed partial class SqlPlanExecutor
             memory.Retain(values);
             memory.Reserve(256L + 32L * write.Action.Assignments.Count);
         }
-        SqlConstraintUpdates pending = new SqlMergeConstraintUpdates(updates, statement.Metrics.DmlMemory(_definitions.StatementMemoryBudget)!);
+        using var initialPending = new SqlMergeConstraintUpdates(updates, statement.Metrics.DmlMemory(_definitions.StatementMemoryBudget)!);
+        SqlConstraintUpdates pending = initialPending;
         var scanned = new HashSet<ulong>();
         var released = new List<SqlParentReference>();
         foreach (var write in writes.Where(write => write.Action.Action == SqlMergeAction.Delete))
@@ -326,6 +327,7 @@ internal sealed partial class SqlPlanExecutor
                 deletions, scanned, released, statement, cancellationToken, pending).ConfigureAwait(false);
         }
         await AcquireParentRowLocksAsync(released, statement, cancellationToken, validate: false, cascade: true).ConfigureAwait(false);
+        initialPending.Dispose();
         var cascadedUpdates = new List<SqlConstraintUpdate>();
         foreach (var key in deletions.Keys)
         {
@@ -335,7 +337,8 @@ internal sealed partial class SqlPlanExecutor
                 statement.Metrics.DmlMemory(_definitions.StatementMemoryBudget)!.Reserve(32);
             }
         }
-        pending = await CollectReferentialUpdatesAsync(deletions, scanned, statement, cancellationToken, updates).ConfigureAwait(false);
+        using var finalPending = (SqlMergeConstraintUpdates)await CollectReferentialUpdatesAsync(deletions, scanned, statement, cancellationToken, updates).ConfigureAwait(false);
+        pending = finalPending;
         var references = new List<SqlParentReference>();
         released.Clear();
         ExceptionDispatchInfo? foreignKeyFailure = null;
