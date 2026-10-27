@@ -1520,8 +1520,9 @@ direct-proposal uniqueness takes precedence over final-state foreign-key failure
 NOT NULL, CHECK, domain or identity failures on SET NULL/DEFAULT rows, following PostgreSQL
 executor/nodeModifyTable.c:2371-2383 and utils/adt/ri_triggers.c:887,923-955. A retained failure
 performs no further parent-row locking, so a stale matched parent cannot mask the statement error.
-CS04064 identifies actual target-version conflicts; host-ended transactions and abandoned lock
-owners retain the ordinary uncoded transaction-abort contract. The
+CS04064 identifies actual target-version conflicts. Cascade snapshot crosschecks and matched-parent
+version checks retain plain DML's uncoded transaction-abort contract, as do host-ended transactions
+and abandoned lock owners. The
 [review regression corpus](../../Assimalign.Cohesion.Database.Sql/tests/SqlMergeReviewRegressionTests.cs)
 pins these conditions and unchanged tables on refusal.
 The [engine recheck corpus](../../Assimalign.Cohesion.Database.Sql/tests/SqlMergeConcurrencyTests.cs),

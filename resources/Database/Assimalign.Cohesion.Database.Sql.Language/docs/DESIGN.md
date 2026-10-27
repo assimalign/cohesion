@@ -19,7 +19,9 @@ The final-state corpus also checks old parent keys of directly updated rows remo
 cascade and immediate uniqueness before FK or SET action constraint failures, including
 NOT NULL, CHECK, domain and identity. Retained failures skip parent-row locking, preserving
 the statement's diagnostic when an earlier matched parent is stale. Actual target-version conflicts carry
-CS04064; host-ended transactions and abandoned lock owners keep their ordinary uncoded abort.
+CS04064; shared RI cascade snapshot and matched-parent version checks, host-ended transactions
+and abandoned lock owners keep their ordinary uncoded abort. The review corpus pins both RI
+checks alongside the existing coded direct-target conflicts.
 The recorded two-session cascade corpus checks transaction-duration old-parent locks when a
 direct child update moves into a cascade, for both commit and rollback.
 

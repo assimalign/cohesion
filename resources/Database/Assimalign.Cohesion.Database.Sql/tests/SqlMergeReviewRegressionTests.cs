@@ -235,6 +235,37 @@ public sealed class SqlMergeReviewRegressionTests
         finally { SqlPlanExecutor.MergeActionsSelected = null; }
     }
 
+    [Theory(DisplayName = "Cohesion Test [Sql] - MERGE: parent and cascade snapshot conflicts retain plain DML's uncoded abort (#1715)")]
+    [InlineData("parent")]
+    [InlineData("cascade")]
+    public async Task ExecuteAsync_NonTargetVersionConflict_ShouldKeepUncodedAbort(string conflict)
+    {
+        // Arrange: the transaction snapshot predates the referenced version change.
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        await using var engine = SqlDatabaseEngine.Create("merge-nontarget-conflict", new());
+        var database = await engine.CreateDatabaseAsync("db", timeout.Token);
+        await using var session = await database.CreateSessionAsync(timeout.Token);
+        await using var writer = await database.CreateSessionAsync(timeout.Token);
+        await session.ExecuteAsync("CREATE TABLE p(id INT PRIMARY KEY)", cancellationToken: timeout.Token);
+        await session.ExecuteAsync("CREATE TABLE t(id INT PRIMARY KEY,pid INT REFERENCES p(id) ON DELETE CASCADE)", cancellationToken: timeout.Token);
+        await session.ExecuteAsync("INSERT INTO p VALUES(1)", cancellationToken: timeout.Token);
+        await session.ExecuteAsync("INSERT INTO t VALUES(2,NULL)", cancellationToken: timeout.Token);
+        await using var transaction = await session.BeginTransactionAsync(IsolationLevel.Snapshot, timeout.Token);
+        await writer.ExecuteAsync(conflict == "parent" ? "DELETE FROM p" : "INSERT INTO t VALUES(3,1)", cancellationToken: timeout.Token);
+
+        // Act
+        string sql = conflict == "parent"
+            ? "MERGE INTO t USING (SELECT 2 AS id) s ON t.id=s.id WHEN MATCHED THEN UPDATE SET pid=1"
+            : "MERGE INTO p USING (SELECT 1 AS id) s ON p.id=s.id WHEN MATCHED THEN DELETE";
+        var failure = await Should.ThrowAsync<DatabaseTransactionAbortedException>(async () => await session.ExecuteAsync(sql, cancellationToken: timeout.Token));
+
+        // Assert: CS04064 belongs to direct target-version rechecks, not shared RI checks.
+        failure.Diagnostics.ShouldBeEmpty();
+        failure.InnerException.ShouldBeOfType<TransactionAbortedException>();
+        await transaction.RollbackAsync(timeout.Token);
+        (await RowsAsync(writer, "SELECT id,pid FROM t ORDER BY id", timeout.Token)).ShouldBe(conflict == "parent" ? ["2,"] : ["2,", "3,1"]);
+    }
+
     [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "AbandonPending")]
     private static extern void AbandonPending(LockManager manager, TransactionSequence owner);
 

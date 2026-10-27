@@ -3145,8 +3145,10 @@ index-before-AFTER-trigger ordering (executor/nodeModifyTable.c:2371-2383). A pe
 skips further parent-row and final-write locks: no row can be written, and a stale parent
 version or a needless wait must not replace the statement's error. Direct unique-key locks
 still precede the precheck; every lock wait remains outside the apply gate.
-Only a failed target recheck or EnsureLatestVersion check receives CS04064. Host-ended
-transactions and abandoned lock owners retain the ordinary uncoded transaction-abort contract.
+In MERGE's row-concurrency path, CS04064 identifies a failed target recheck or an apply-phase
+EnsureLatestVersion check on a row being modified. Cascade snapshot crosschecks
+(EnsureSnapshotSeesCascadeRow) and matched-parent EnsureLatestVersion checks retain plain
+DML's uncoded transaction-abort contract, as do host-ended transactions and abandoned lock owners.
 A MERGE-only constraint-state subtype and call-site filtering preserve ordinary DML object
 sizes and the existing Release allocation budgets.
 SET NULL/DEFAULT refreshes only added or changed final rows. Mutable constraint projections
