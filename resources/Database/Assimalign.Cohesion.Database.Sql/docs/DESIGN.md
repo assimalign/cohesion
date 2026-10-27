@@ -6735,6 +6735,8 @@ Preparation, queue cancellation, failed enqueue and disposal retain one transact
 owner and join its rollback before completion. Deterministic regressions observe the lock wait,
 complete another database's deferred index migration before releasing the holder, and assert
 the caller-held conflict's coded timeout without an elapsed-time assertion.
+Cleanup assertions finish reclamation first: discovery briefly owns a coordinator snapshot
+fence, which must not be mistaken for a leaked maintenance transaction.
 
 TRUNCATE and rewrite use one ReplaceTableStorageAsync preparation/publication path and one
 catalog reservation/publication transaction. Rewrite decodes the old physical layout, including
