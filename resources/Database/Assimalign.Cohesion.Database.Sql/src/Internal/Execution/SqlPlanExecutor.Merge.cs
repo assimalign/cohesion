@@ -7,12 +7,17 @@ using System.Threading.Tasks;
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Indexing;
 using Assimalign.Cohesion.Database.Sql.Language;
+using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Transactions;
+using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 internal sealed partial class SqlPlanExecutor
 {
+    internal static Action<SqlStatementMetrics>? MergeActionsSelected { get; set; }
+    internal static Action<SqlStatementMetrics>? MergeTargetRechecked { get; set; }
+
     private sealed record MergeCandidate(DmlAssociation? Target, object?[] Values, SqlMergeMatchKind MatchKind);
     private sealed record MergeWrite(MergeCandidate Candidate, SqlMergeActionPlan Action, object?[]? Values);
 
@@ -24,6 +29,9 @@ internal sealed partial class SqlPlanExecutor
         var retryMark = scope.Mark;
         int refusals = 0;
         List<MergeWrite>? writes = null;
+        var parent = _subqueryValues;
+        var frames = plan.Actions.Select(action => action.Queries.Count == 0 ? null
+            : new SqlSubqueryValues(parent, action.Queries[0].ScopeId, action.Queries, lazy: true)).ToArray();
         while (true)
         {
             try
@@ -31,7 +39,12 @@ internal sealed partial class SqlPlanExecutor
                 await AcquireDmlSourceIntentLocksAsync(scope.Plan, statement, cancellationToken, cascade: true).ConfigureAwait(false);
                 await AcquireReferenceIntentLocksAsync(plan.Table, statement, cancellationToken, cascade: true).ConfigureAwait(false);
                 // Keep volatile selection/defaults across a referential lock back-off.
-                writes ??= await SelectMergeActionsAsync(plan, statement, cancellationToken).ConfigureAwait(false);
+                if (writes is null)
+                {
+                    writes = await SelectMergeActionsAsync(plan, statement, cancellationToken, frames).ConfigureAwait(false);
+                    MergeActionsSelected?.Invoke(statement.Metrics);
+                }
+                await RecheckMergeActionsAsync(plan, writes, statement, cancellationToken, frames).ConfigureAwait(false);
                 return await ApplyMergeAsync(plan, writes, statement, cancellationToken).ConfigureAwait(false);
             }
             catch (SqlCascadeLockRetry refused)
@@ -40,6 +53,11 @@ internal sealed partial class SqlPlanExecutor
                 await locks.AcquireAsync(statement.Transaction.Sequence, refused.Resource, refused.Mode, cancellationToken).ConfigureAwait(false);
                 retryMark = locks.MarkStatement(statement.Transaction.Sequence);
                 statement.References.ClearAfterCascadeRetry();
+            }
+            catch (TransactionAbortedException exception) when (exception is not TransactionDeadlockException)
+            {
+                throw new DatabaseTransactionAbortedException(exception.Message,
+                    [new Diagnostic { Code = SqlExecutionException.SerializationFailureCode, Severity = DiagnosticSeverity.Error, Message = exception.Message }], exception);
             }
         }
     }
@@ -85,15 +103,12 @@ internal sealed partial class SqlPlanExecutor
     }
 
     private async Task<List<MergeWrite>> SelectMergeActionsAsync(SqlMergePlan plan, SqlStatementContext statement,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, SqlSubqueryValues?[] frames, List<MergeCandidate>? candidates = null)
     {
         // Drain every association before selecting or writing, preventing Halloween revisits.
-        var candidates = await CollectMergeCandidatesAsync(plan, statement, cancellationToken).ConfigureAwait(false);
+        candidates ??= await CollectMergeCandidatesAsync(plan, statement, cancellationToken).ConfigureAwait(false);
         var parent = _subqueryValues;
-        var frames = plan.Actions.Select(action => action.Queries.Count == 0 ? null
-            : new SqlSubqueryValues(parent, action.Queries[0].ScopeId, action.Queries, lazy: true)).ToArray();
         var writes = new List<MergeWrite>();
-        var modified = new HashSet<ulong>();
         var bound = _definitions.Get(plan.Table, cancellationToken);
         var shared = Enumerable.Repeat(true, plan.Source.Associations.Columns.Count + 2).ToArray();
         try
@@ -110,10 +125,6 @@ internal sealed partial class SqlPlanExecutor
                     await PrepareSubqueriesAsync(action.Condition, candidate.Values, statement, cancellationToken).ConfigureAwait(false);
                     if (!evaluator.Matches(action.Condition, candidate.Values)) { continue; }
                     if (action.Action == SqlMergeAction.DoNothing) { break; }
-                    // PostgreSQL nodeModifyTable.c:3521-3551: only an attempted second
-                    // modification fails; extra matches handled by DO NOTHING are harmless.
-                    if (candidate.Target is { } target && !modified.Add(SqlRecordLocation.Pack(target.PageId, target.SlotIndex)))
-                    { throw new SqlExecutionException("CS05036", ErrorMessages.MergeRepeatedRow); }
                     object?[]? values = null;
                     if (action.Action == SqlMergeAction.Update)
                     {
@@ -178,57 +189,190 @@ internal sealed partial class SqlPlanExecutor
         return writes;
     }
 
+    private async Task RecheckMergeActionsAsync(SqlMergePlan plan, List<MergeWrite> writes,
+        SqlStatementContext statement, CancellationToken cancellationToken, SqlSubqueryValues?[] frames)
+    {
+        // Lock order: source/reference table intents, sorted original row locks, then
+        // successor rows and referential rows, parent rows, unique keys, coordinator apply
+        // gate, storage/index latches. All scans dispose before waits. Row grants use the
+        // cascade release/retry policy; no wait holds the lineage monitor, gate or latch.
+        await AcquireRowWriteLocksAsync(statement, plan.Table.ObjectId,
+            writes.Where(write => write.Candidate.Target is not null)
+                .Select(write => (write.Candidate.Target!.PageId, write.Candidate.Target.SlotIndex)).ToList(),
+            cancellationToken, cascade: true).ConfigureAwait(false);
+        for (int index = 0; index < writes.Count; index++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var original = writes[index].Candidate;
+            if (original.Target is not { } target) { continue; }
+            bool changed = false;
+            while (true)
+            {
+                var (_, deleter) = ReadVersionStamps(plan.Table, target.PageId, target.SlotIndex);
+                if (deleter == TransactionSequence.None || deleter == statement.Transaction.Sequence) { break; }
+                if (statement.Transaction.IsolationLevel != IsolationLevel.ReadCommitted)
+                { EnsureLatestVersion(plan.Table, target.PageId, target.SlotIndex, statement.Transaction.Sequence); }
+                changed = true;
+                if (!_storage.RowVersionLinks.TryGet(SqlRecordLocation.Pack(target.PageId, target.SlotIndex), deleter, out var successor))
+                { target = null; break; }
+                var location = SqlRecordLocation.Unpack(successor);
+                await AcquireRowWriteLocksAsync(statement, plan.Table.ObjectId, [location], cancellationToken, cascade: true).ConfigureAwait(false);
+                statement.Metrics.RecordRowRead();
+                var record = _storage.ReadRow(location.PageId, location.SlotIndex);
+                var values = DecodeRow(record, location.PageId, location.SlotIndex, plan.Table,
+                    _definitions.Get(plan.Table, cancellationToken).MissingValues, out var writer, out _);
+                if (writer != deleter)
+                { throw new TransactionAbortedException(string.Format(System.Globalization.CultureInfo.CurrentCulture,
+                    ErrorMessages.DmlTargetVersionChanged, plan.Table.Schema, plan.Table.Name)); }
+                target = new(location.PageId, location.SlotIndex, writer, values, values);
+                var memory = statement.Metrics.DmlMemory(_definitions.StatementMemoryBudget)!;
+                memory.Retain(values);
+                memory.Reserve(128);
+            }
+            if (!changed) { continue; }
+            MergeTargetRechecked?.Invoke(statement.Metrics);
+            var candidates = new List<MergeCandidate>(2);
+            if (target is null)
+            {
+                // PostgreSQL nodeModifyTable.c:3557-3577,3727-3744: a deleted
+                // MATCHED target becomes BY TARGET; a deleted BY SOURCE row vanishes.
+                if (original.MatchKind == SqlMergeMatchKind.Matched)
+                { candidates.Add(Reframe(null, SqlMergeMatchKind.NotMatchedByTarget)); }
+            }
+            else
+            {
+                var current = Reframe(target, original.MatchKind);
+                bool matched = original.MatchKind == SqlMergeMatchKind.NotMatchedBySource;
+                if (!matched)
+                {
+                    await PrepareSubqueriesAsync(plan.Condition, current.Values, statement, cancellationToken).ConfigureAwait(false);
+                    matched = ExecutionEvaluator(_subqueryValues, cancellationToken).Matches(plan.Condition, current.Values);
+                }
+                if (matched) { candidates.Add(current); }
+                else
+                {
+                    // nodeModifyTable.c:3579-3724: EPQ restarts ordered WHEN selection.
+                    // A broken match produces BOTH unmatched directions. BY SOURCE never
+                    // becomes MATCHED, and new INSERT conflicts never re-arbitrate ON.
+                    candidates.Add(Reframe(target, SqlMergeMatchKind.NotMatchedBySource));
+                    candidates.Add(Reframe(null, SqlMergeMatchKind.NotMatchedByTarget));
+                }
+            }
+            var selected = await SelectMergeActionsAsync(plan, statement, cancellationToken, frames, candidates).ConfigureAwait(false);
+            // Persist completed rechecks across a later cascade-lock backoff, including
+            // selected volatile expressions and generated defaults.
+            writes.RemoveAt(index);
+            writes.InsertRange(index, selected);
+            index += selected.Count - 1;
+
+            MergeCandidate Reframe(DmlAssociation? latest, SqlMergeMatchKind kind)
+            {
+                var values = (object?[])original.Values.Clone();
+                if (latest is null) { Array.Clear(values, 0, plan.Table.Columns.Count); }
+                else { latest.TargetValues.CopyTo(values, 0); }
+                if (kind == SqlMergeMatchKind.NotMatchedBySource)
+                { Array.Clear(values, plan.Table.Columns.Count, plan.Source.Associations.Columns.Count - plan.Table.Columns.Count); }
+                statement.Metrics.DmlMemory(_definitions.StatementMemoryBudget)!.Retain(values);
+                statement.Metrics.DmlMemory(_definitions.StatementMemoryBudget)!.Reserve(96);
+                return new(latest, values, kind);
+            }
+        }
+        var modified = new HashSet<ulong>();
+        foreach (var write in writes)
+        {
+            // nodeModifyTable.c:3521-3551: only a second attempted direct modification
+            // fails; DO NOTHING and referential actions do not count as direct actions.
+            if (write.Candidate.Target is { } target && !modified.Add(SqlRecordLocation.Pack(target.PageId, target.SlotIndex)))
+            { throw new SqlExecutionException("CS05036", ErrorMessages.MergeRepeatedRow); }
+        }
+    }
+
     private async Task<DatabaseResult> ApplyMergeAsync(SqlMergePlan plan, List<MergeWrite> writes,
         SqlStatementContext statement, CancellationToken cancellationToken)
     {
         var targets = writes.Where(write => write.Candidate.Target is not null).Select(write => write.Candidate.Target!).ToArray();
         await AcquireRowWriteLocksAsync(statement, plan.Table.ObjectId, targets.Select(row => (row.PageId, row.SlotIndex)).ToList(),
             cancellationToken, cascade: true).ConfigureAwait(false);
+        // Row-local constraints precede AFTER-style referential actions, even if a
+        // cascade subsequently removes the proposed row (nodeModifyTable.c:2327).
+        ValidateRows(plan.Table, writes.Where(write => write.Values is not null).Select(write => write.Values!).ToList(),
+            statement, cancellationToken, checksOnly: true);
+        foreach (var write in writes)
+        { if (write.Values is { } values) { _ = SqlRowCodec.Encode(plan.Table, values, statement.Transaction.Sequence); } }
         var deletions = new Dictionary<(ulong ObjectId, ulong Location), SqlConstraintDelete>();
+        var updates = new Dictionary<(ulong ObjectId, ulong Location), SqlConstraintUpdate>();
+        int insertion = 0;
+        foreach (var write in writes.Where(write => write.Values is not null))
+        {
+            var target = write.Candidate.Target;
+            // Negative pages are statement-local insert identities, never storage or lock
+            // resources. Packing is injective over this budget-bounded statement's rows.
+            var location = target is null ? (PageId: new PageId(-1L - insertion++), SlotIndex: 0) : (target.PageId, target.SlotIndex);
+            var values = (object?[])write.Values!.Clone();
+            updates.Add((plan.Table.ObjectId, SqlRecordLocation.Pack(location.PageId, location.SlotIndex)),
+                new(plan.Table, location, target?.TargetValues ?? [], values,
+                    write.Action.Assignments.Select(assignment => assignment.Ordinal).ToHashSet()));
+            var memory = statement.Metrics.DmlMemory(_definitions.StatementMemoryBudget)!;
+            memory.Retain(values);
+            memory.Reserve(256L + 32L * write.Action.Assignments.Count);
+        }
+        SqlConstraintUpdates pending = new SqlMergeConstraintUpdates(updates, statement.Metrics.DmlMemory(_definitions.StatementMemoryBudget)!);
         var scanned = new HashSet<ulong>();
         var released = new List<SqlParentReference>();
         foreach (var write in writes.Where(write => write.Action.Action == SqlMergeAction.Delete))
         {
             var target = write.Candidate.Target!;
             await CollectCascadeDeletesAsync(plan.Table, (target.PageId, target.SlotIndex), target.TargetValues,
-                deletions, scanned, released, statement, cancellationToken).ConfigureAwait(false);
+                deletions, scanned, released, statement, cancellationToken, pending).ConfigureAwait(false);
         }
         await AcquireParentRowLocksAsync(released, statement, cancellationToken, validate: false, cascade: true).ConfigureAwait(false);
-        var cascades = await CollectReferentialUpdatesAsync(deletions, scanned, statement, cancellationToken).ConfigureAwait(false);
-        var updates = cascades.Values.ToDictionary(update => (update.Table.ObjectId, SqlRecordLocation.Pack(update.Location.PageId, update.Location.SlotIndex)));
-        foreach (var write in writes.Where(write => write.Action.Action == SqlMergeAction.Update))
-        {
-            var target = write.Candidate.Target!;
-            var key = (plan.Table.ObjectId, SqlRecordLocation.Pack(target.PageId, target.SlotIndex));
-            if (deletions.ContainsKey(key) || updates.ContainsKey(key)) { throw new SqlExecutionException("CS05036", ErrorMessages.MergeRepeatedRow); }
-            updates.Add(key, new(plan.Table, (target.PageId, target.SlotIndex), target.TargetValues, write.Values!,
-                write.Action.Assignments.Select(assignment => assignment.Ordinal).ToHashSet()));
-            statement.Metrics.DmlMemory(_definitions.StatementMemoryBudget)!.Reserve(256L + 32L * write.Action.Assignments.Count);
-        }
-        var pending = new SqlConstraintUpdates(updates);
+        foreach (var key in deletions.Keys) { updates.Remove(key); }
+        pending = await CollectReferentialUpdatesAsync(deletions, scanned, statement, cancellationToken, updates).ConfigureAwait(false);
         ValidateRestrictedDeletes(deletions, pending, statement, cancellationToken);
         var references = new List<SqlParentReference>();
-        ValidateRows(plan.Table, writes.Where(write => write.Values is not null).Select(write => write.Values!).ToList(),
-            statement, cancellationToken, references: references, deletions: deletions, updates: pending);
-        await AcquireParentRowLocksAsync(references, statement, cancellationToken, cascade: true).ConfigureAwait(false);
         released.Clear();
-        foreach (var update in updates.Values)
+        foreach (var group in updates.Values.GroupBy(update => update.Table))
         {
-            ValidateParentUpdate(update.Table, update.OldValues, update.NewValues, statement, cancellationToken, deletions, pending);
-            CollectReleasedReferences(update.Table, [update.OldValues], released, statement, cancellationToken);
-            update.NewVersion = SqlRowCodec.Encode(update.Table, update.NewValues, statement.Transaction.Sequence);
-            statement.Metrics.DmlMemory(_definitions.StatementMemoryBudget)!.Retain(update.NewVersion);
+            var table = group.Key;
+            foreach (var update in group)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                CheckDomains(_definitions.Get(table, cancellationToken), update.NewValues, ExecutionEvaluator(null, cancellationToken),
+                    update.Location.PageId.Value < 0 ? null : update.Assigned.ToArray());
+                if (update.Location.PageId.Value >= 0)
+                {
+                    ValidateParentUpdate(table, update.OldValues, update.NewValues, statement, cancellationToken, deletions, pending);
+                    CollectReleasedReferences(table, [update.OldValues], released, statement, cancellationToken);
+                }
+                update.NewVersion = SqlRowCodec.Encode(table, update.NewValues, statement.Transaction.Sequence);
+                statement.Metrics.DmlMemory(_definitions.StatementMemoryBudget)!.Retain(update.NewVersion);
+            }
+            ValidateRows(table, group.Select(update => update.NewValues).ToList(), statement, cancellationToken,
+                references: references, deletions: deletions, updates: pending,
+                foreignKeySnapshot: statement.Transaction.IsolationLevel == IsolationLevel.ReadCommitted ? statement.Transaction.Snapshot : null);
         }
+        await AcquireParentRowLocksAsync(references, statement, cancellationToken, cascade: true).ConfigureAwait(false);
         await AcquireParentRowLocksAsync(released, statement, cancellationToken, validate: false, cascade: true).ConfigureAwait(false);
-        await LockConstraintDeletesAsync(deletions.Values, statement, cancellationToken).ConfigureAwait(false);
-        var indexes = GetLiveIndexes(plan.Table, statement);
-        var hashes = new List<ulong>();
-        foreach (var target in targets) { CollectUniqueKeyHashes(indexes, plan.Table, target.TargetValues, hashes); }
+        await LockConstraintDeletesAsync(deletions.Values.Where(deletion => deletion.Location.PageId.Value >= 0), statement, cancellationToken).ConfigureAwait(false);
+        foreach (var group in updates.Values.GroupBy(update => update.Table).OrderBy(group => group.Key.ObjectId))
+        {
+            var hashes = new List<ulong>();
+            var live = GetLiveIndexes(group.Key, statement);
+            foreach (var update in group)
+            {
+                if (update.Location.PageId.Value >= 0) { CollectUniqueKeyHashes(live, group.Key, update.OldValues, hashes); }
+                ValidateIndexKeysAndCollectUniqueHashes(live, group.Key, update.NewValues, hashes);
+            }
+            await AcquireUniqueKeyLocksAsync(statement, group.Key.ObjectId, hashes, cancellationToken, cascade: true).ConfigureAwait(false);
+        }
+        var directIndexes = GetLiveIndexes(plan.Table, statement);
+        var directHashes = new List<ulong>();
         foreach (var write in writes)
         {
-            if (write.Values is { } values) { ValidateIndexKeysAndCollectUniqueHashes(indexes, plan.Table, values, hashes); }
+            if (write.Values is not { } values) { continue; }
+            ValidateIndexKeysAndCollectUniqueHashes(directIndexes, plan.Table, values, directHashes);
         }
-        await AcquireUniqueKeyLocksAsync(statement, plan.Table.ObjectId, hashes, cancellationToken, cascade: true).ConfigureAwait(false);
+        await AcquireUniqueKeyLocksAsync(statement, plan.Table.ObjectId, directHashes, cancellationToken, cascade: true).ConfigureAwait(false);
         var returned = plan.Returning is null ? null : new List<object?[]>(writes.Count);
         var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken,
             Enumerable.Repeat(true, plan.ReturningActionOrdinal + 1).ToArray());
@@ -236,8 +380,26 @@ internal sealed partial class SqlPlanExecutor
         {
             return await statement.Coordinator.ApplyStatementAsync(statement.Transaction, async bracket =>
             {
+                // Immediate unique constraints see every direct proposal, including rows
+                // that an AFTER-style cascade will remove. Direct UPDATE key swaps retain
+                // the existing statement-level unique discipline shared with UPDATE FROM.
+                var removed = targets.Select(target => SqlRecordLocation.Pack(target.PageId, target.SlotIndex)).ToHashSet();
+                var proposedKeys = new HashSet<(string Index, IndexKey Key)>();
+                foreach (var write in writes)
+                {
+                    if (write.Values is not { } values) { continue; }
+                    foreach (var live in directIndexes.Where(index => index.Metadata.IsUnique))
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        var key = BuildIndexKey(plan.Table, live.KeyOrdinals, values);
+                        statement.Metrics.DmlMemory(_definitions.StatementMemoryBudget)!.Reserve(128L + key.Length);
+                        var conflict = await live.Index.FindLiveEntryAsync(statement.Transaction, key, cancellationToken).ConfigureAwait(false);
+                        if (!proposedKeys.Add((live.Metadata.Name, key)) || conflict is { } location && !removed.Contains(location))
+                        { throw TranslateUniqueViolation(plan.Table, new IndexUniqueViolationException(live.Metadata.Name, key)); }
+                    }
+                }
                 foreach (var target in targets) { EnsureLatestVersion(plan.Table, target.PageId, target.SlotIndex, statement.Transaction.Sequence); }
-                foreach (var deletion in deletions.Values)
+                foreach (var deletion in deletions.Values.Where(deletion => deletion.Location.PageId.Value >= 0))
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     EnsureLatestVersion(deletion.Table, deletion.Location.PageId, deletion.Location.SlotIndex, statement.Transaction.Sequence);
@@ -246,7 +408,7 @@ internal sealed partial class SqlPlanExecutor
                         SqlRecordLocation.Pack(deletion.Location.PageId, deletion.Location.SlotIndex), cancellationToken).ConfigureAwait(false);
                 }
                 // Release old mappings before publishing replacements, as in joined UPDATE.
-                foreach (var update in updates.Values)
+                foreach (var update in updates.Values.Where(update => update.Location.PageId.Value >= 0))
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     EnsureLatestVersion(update.Table, update.Location.PageId, update.Location.SlotIndex, statement.Transaction.Sequence);
@@ -258,6 +420,9 @@ internal sealed partial class SqlPlanExecutor
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     var location = _storage.InsertRow(bracket, update.Table.ObjectId, update.NewVersion);
+                    if (update.Location.PageId.Value >= 0)
+                    { _storage.RowVersionLinks.Add(SqlRecordLocation.Pack(update.Location.PageId, update.Location.SlotIndex),
+                        SqlRecordLocation.Pack(location.PageId, location.SlotIndex), statement.Transaction.Sequence); }
                     statement.Coordinator.VersionStore.RecordCreated(statement.Transaction.Sequence, location.PageId, location.SlotIndex);
                     try
                     {
@@ -269,13 +434,6 @@ internal sealed partial class SqlPlanExecutor
                 foreach (var write in writes)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    if (write.Action.Action == SqlMergeAction.Insert)
-                    {
-                        var location = _storage.InsertRow(bracket, plan.Table.ObjectId, SqlRowCodec.Encode(plan.Table, write.Values!, statement.Transaction.Sequence));
-                        statement.Coordinator.VersionStore.RecordCreated(statement.Transaction.Sequence, location.PageId, location.SlotIndex);
-                        await InsertIndexEntriesAsync(statement, indexes, plan.Table, write.Values!,
-                            SqlRecordLocation.Pack(location.PageId, location.SlotIndex), cancellationToken).ConfigureAwait(false);
-                    }
                     if (returned is not null)
                     {
                         var output = new object?[plan.ReturningActionOrdinal + 1];

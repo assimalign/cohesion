@@ -126,7 +126,7 @@ internal sealed partial class SqlPlanner
             Tree = kind == SqlJoinType.RightOuter ? new(-1, root.Right, root.Left, step) : root with { Step = step },
         };
         var input = source with { Associations = PushJoinPredicates(associations) };
-        return WrapSubqueries(new SqlMergePlan(table, input, actions, BindMergeReturning(merge, input), columns.Length), queries);
+        return WrapSubqueries(new SqlMergePlan(table, input, actions, on, BindMergeReturning(merge, input), columns.Length), queries);
 
         static SqlCatalogColumn NullableColumn(SqlCatalogColumn column) => column.IsNullable ? column
             : new SqlCatalogColumn(column.Name, column.Type, true, column.DefaultLiteral,

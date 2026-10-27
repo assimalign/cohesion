@@ -75,7 +75,10 @@ internal sealed class SqlVersionPurgeWorker : DatabaseVersionPurgeWorker<SqlData
     protected override bool IsOpen(SqlDatabase database) => _engine.IsOpen(database);
     protected override TransactionCoordinator GetCoordinator(SqlDatabase database) => database.Coordinator;
     protected override void Purge(SqlDatabase database, CancellationToken cancellationToken)
-        => database.Coordinator.RunVersionPurgePass(cancellationToken);
+    {
+        database.Coordinator.RunVersionPurgePass(cancellationToken);
+        database.DataStorage.RowVersionLinks.Prune(database.Coordinator.PruneBound, cancellationToken);
+    }
 
     protected override bool HasReclamationSupport => true;
     protected override bool ReclamationReady => _engine.ProvisioningBuildComplete;

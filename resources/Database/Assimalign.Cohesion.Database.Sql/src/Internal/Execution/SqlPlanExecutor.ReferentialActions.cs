@@ -46,18 +46,19 @@ internal sealed partial class SqlPlanExecutor
         if (updates is null) { yield break; }
         foreach (var row in updates.Find(projection, keys, statement.Metrics, cancellationToken))
         {
-            yield return row;
+            var key = (table.ObjectId, SqlRecordLocation.Pack(row.Location.PageId, row.Location.SlotIndex));
+            if (deletions?.ContainsKey(key) != true) { yield return row; }
         }
     }
 
-    // Built after all SET assignments are collected. Each table/key projection is indexed once,
-    // using the same numeric, binary and collation equality as constraint probes.
+    // Built after SET assignments are collected. Stable table/key projections are indexed
+    // once, using constraint equality; MERGE invalidates them after compositional changes.
     [global::System.Diagnostics.DebuggerDisplay("SqlConstraintUpdates")]
     [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlPlanExecutor.SqlConstraintUpdates.DebugView))]
-    private sealed class SqlConstraintUpdates
+    private class SqlConstraintUpdates
     {
         private readonly Dictionary<(ulong ObjectId, ulong Location), SqlConstraintUpdate> _rows;
-        private readonly Dictionary<ulong, SqlConstraintUpdate[]> _tables;
+        private Dictionary<ulong, SqlConstraintUpdate[]> _tables;
         private readonly Dictionary<SqlBoundConstraintKey, Dictionary<object?[], List<((PageId PageId, int SlotIndex) Location, object?[] Values)>>> _indexes = [];
 
         internal SqlConstraintUpdates(Dictionary<(ulong ObjectId, ulong Location), SqlConstraintUpdate> rows)
@@ -66,6 +67,20 @@ internal sealed partial class SqlPlanExecutor
             _tables = rows.Values.GroupBy(row => row.Table.ObjectId).ToDictionary(group => group.Key, group => group.ToArray());
         }
 
+        internal void Refresh()
+        {
+            _tables = _rows.Values.GroupBy(row => row.Table.ObjectId).ToDictionary(group => group.Key, group => group.ToArray());
+            _indexes.Clear();
+            ChargeDirectory();
+        }
+
+        internal void ChargeDirectory()
+        {
+            if (this is SqlMergeConstraintUpdates merge)
+            { merge.Memory.Reserve(128L + 32L * _rows.Count + 128L * _tables.Count); }
+        }
+
+        internal bool TryGet((ulong ObjectId, ulong Location) key, out SqlConstraintUpdate row) => _rows.TryGetValue(key, out row!);
         internal IEnumerable<SqlConstraintUpdate> Values => _rows.Values;
         internal bool ContainsKey((ulong ObjectId, ulong Location) key) => _rows.ContainsKey(key);
 
@@ -80,6 +95,11 @@ internal sealed partial class SqlPlanExecutor
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     object?[] key = projection.Read(row.NewValues);
+                    if (this is SqlMergeConstraintUpdates merge)
+                    {
+                        merge.Memory.Retain(key);
+                        merge.Memory.Reserve(192); // projected key directory, tuple list and growth
+                    }
                     if (!index.TryGetValue(key, out var matches)) { index.Add(key, matches = []); }
                     matches.Add((row.Location, row.NewValues));
                 }
@@ -97,11 +117,27 @@ internal sealed partial class SqlPlanExecutor
         }
     }
 
+    // Keep MERGE-only memory state out of ordinary constraint objects and their exact
+    // Release allocation budgets. The base constructor retains its original allocation.
+    private sealed class SqlMergeConstraintUpdates : SqlConstraintUpdates
+    {
+        internal SqlMergeConstraintUpdates(Dictionary<(ulong ObjectId, ulong Location), SqlConstraintUpdate> rows, SqlDmlMemory memory)
+            : base(rows)
+        {
+            Memory = memory;
+            ChargeDirectory();
+        }
+
+        internal SqlDmlMemory Memory { get; }
+    }
+
     private async Task<SqlConstraintUpdates> CollectReferentialUpdatesAsync(
         Dictionary<(ulong ObjectId, ulong Location), SqlConstraintDelete> deletions,
-        HashSet<ulong> scannedTables, SqlStatementContext statement, CancellationToken cancellationToken)
+        HashSet<ulong> scannedTables, SqlStatementContext statement, CancellationToken cancellationToken,
+        Dictionary<(ulong ObjectId, ulong Location), SqlConstraintUpdate>? finalRows = null)
     {
-        var updates = new Dictionary<(ulong ObjectId, ulong Location), SqlConstraintUpdate>();
+        var updates = finalRows ?? new Dictionary<(ulong ObjectId, ulong Location), SqlConstraintUpdate>();
+        var final = finalRows is null ? null : new SqlMergeConstraintUpdates(updates, statement.Metrics.DmlMemory(_definitions.StatementMemoryBudget)!);
         foreach (var deletion in deletions.Values)
         {
             foreach (var reference in IncomingReferences(deletion.Table, statement, cancellationToken))
@@ -109,10 +145,11 @@ internal sealed partial class SqlPlanExecutor
                 var (child, constraint) = reference;
                 cancellationToken.ThrowIfCancellationRequested();
                 if (constraint.OnDelete is not (SqlCatalogReferentialAction.SetNull or SqlCatalogReferentialAction.SetDefault)) { continue; }
-                var keys = reference.ParentKey.Read(deletion.Values);
+                var keys = reference.ParentKey.Read(deletion.EffectiveValues ?? deletion.Values);
                 if (keys.Any(value => value is null)) { continue; }
-                var matches = CollectConstraintMatches(FindConstraintRows(reference.ChildKey, keys, statement, cancellationToken,
-                    ConstraintCurrentSnapshot(statement)), statement);
+                var matches = CollectConstraintMatches(final is null
+                    ? FindConstraintRows(reference.ChildKey, keys, statement, cancellationToken, ConstraintCurrentSnapshot(statement))
+                    : FinalConstraintRows(reference.ChildKey, keys, statement, cancellationToken, deletions, final, ConstraintCurrentSnapshot(statement)), statement);
                 var bound = _definitions.Get(child, cancellationToken);
                 foreach (var match in matches)
                 {
@@ -153,10 +190,14 @@ internal sealed partial class SqlPlanExecutor
                     }
                     statement.Metrics.DmlMemory(_definitions.StatementMemoryBudget)?.Retain(update.NewValues);
                 }
+                final?.Refresh();
             }
         }
 
-        var indexed = new SqlConstraintUpdates(updates);
+        SqlConstraintUpdates indexed = finalRows is null ? new SqlConstraintUpdates(updates)
+            : new SqlMergeConstraintUpdates(updates, statement.Metrics.DmlMemory(_definitions.StatementMemoryBudget)!);
+        // MERGE validates and locks only after direct and referential actions compose.
+        if (finalRows is not null) { return indexed; }
         var references = new List<SqlParentReference>();
         var released = new List<SqlParentReference>();
         foreach (var group in updates.Values.GroupBy(update => update.Table))

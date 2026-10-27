@@ -44,8 +44,9 @@ binding SQL DDL/CAST type names to the shared type system (`Database.Types`).
 
 MERGE executes ordered actions, BY SOURCE and RETURNING/merge_action(), using the existing
 read-source forms. Repeated target modifications fail with CS05036. FULL associations require
-a safe mandatory hash equality and complete ON safety proof (CS05070). SQ-M3 supplies
-concurrent-target rechecks and complete mixed-action final-state constraints (#1715).
+a safe mandatory hash equality and complete ON safety proof (CS05070). ReadCommitted
+rechecks changed targets and reselects actions; Snapshot retains CS04064. Foreign keys validate
+the composed final action state (#1715).
 
 UPDATE FROM and DELETE USING execute and belong to the executable clause profile. EXPLAIN
 exposes target access paths and source join algorithms. UPDATE refuses multiple matches before
