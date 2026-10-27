@@ -14,10 +14,20 @@ namespace Assimalign.Cohesion.Database.Graph.Internal;
 
 internal static partial class GraphPlanExecutor
 {
-    private readonly record struct PathMatch(Dictionary<string, object?> Bindings, MatchedProperties? Properties, GraphPath? Path, long Discovery = 0);
-
-    private sealed class PathSearch
+    // Ordinary matches carry deferred properties; selected matches carry an already checked
+    // path. Sharing the second slot keeps the unselected iterator's base two-reference layout.
+    private readonly record struct PathMatch(Dictionary<string, object?> Bindings, object? Detail)
     {
+        public MatchedProperties? Properties => Detail as MatchedProperties;
+        public GraphPath? Path => Detail as GraphPath;
+    }
+
+    // Carry runtime search metadata only on selected plans, rather than adding retained
+    // parameters to every ordinary match iterator.
+    private sealed record PathSearch : GraphPathPlan
+    {
+        public PathSearch(GraphPathPlan plan) : base(plan.Pattern, plan.Anchor)
+        { Shape = plan.Shape; Selection = plan.Selection; }
         public ulong Start { get; init; }
         public ulong End { get; init; }
         public int HopLimit { get; init; }
@@ -112,10 +122,10 @@ internal static partial class GraphPlanExecutor
                 {
                     using var outputMemory = new GraphMemoryOwner(budget.Memory);
                     outputMemory.Add(640); // One retained truncation prefix, at most 65 identities.
-                    var matches = new List<PathMatch>();
-                    var search = new PathSearch { Start = start.Id, End = target, HopLimit = length, ExactLength = selection.OrderByLength };
-                    await foreach (var match in SearchPathStreamAsync(database, operation, searchPlan, input, budget,
-                        parameters, token, search: search).ConfigureAwait(false))
+                    var matches = new List<(PathMatch Match, long Discovery)>();
+                    var search = new PathSearch(searchPlan) { Start = start.Id, End = target, HopLimit = length, ExactLength = selection.OrderByLength };
+                    await foreach (var match in SearchPathStreamAsync(database, operation, search, input, budget,
+                        parameters, token).ConfigureAwait(false))
                     {
                         budget.Consume();
                         budget.SelectorCandidates++;
@@ -126,7 +136,7 @@ internal static partial class GraphPlanExecutor
                         outputMemory.RetainValue(match.Path, token);
                         // Completed checks belong to the matcher's borrowed state, not
                         // the retained sorting buffer. The buffer needs only row/path data.
-                        matches.Add(match with { Properties = null, Discovery = matches.Count });
+                        matches.Add((match, matches.Count));
                     }
                     if (!selection.OrderByLength && !any && search.Truncated)
                     { throw new GraphPlanningException("CG05004", ErrorMessages.PathHopLimitExceeded); }
@@ -137,7 +147,7 @@ internal static partial class GraphPlanExecutor
                             token.ThrowIfCancellationRequested();
                             operation.EnsureActive();
                             budget.Consume();
-                            int compared = ComparePathIdentity(left.Path!, right.Path!);
+                            int compared = ComparePathIdentity(left.Match.Path!, right.Match.Path!);
                             return compared != 0 ? compared : left.Discovery.CompareTo(right.Discovery);
                         });
                     }
@@ -151,15 +161,16 @@ internal static partial class GraphPlanExecutor
                     // ANY is identity-ranked, not length-ranked. A candidate is final
                     // only when no truncated prefix could precede it lexicographically.
                     if (any && search.Truncated && (matches.Count == 0 ||
-                        ComparePrefix(matches[0].Path!, search.FirstTruncatedPrefix!) > 0))
+                        ComparePrefix(matches[0].Match.Path!, search.FirstTruncatedPrefix!) > 0))
                     {
                         if (length == maximum) { throw new GraphPlanningException("CG05004", ErrorMessages.PathHopLimitExceeded); }
                         continue;
                     }
                     GraphPath? previous = null;
                     bool hasGroup = false;
-                    foreach (var match in matches)
+                    foreach (var item in matches)
                     {
+                        var match = item.Match;
                         token.ThrowIfCancellationRequested();
                         operation.EnsureActive();
                         if (previous is not null && ComparePathIdentity(previous, match.Path!) == 0) { continue; }
@@ -323,10 +334,10 @@ internal static partial class GraphPlanExecutor
         return true;
     }
 
-    private static bool CheckIteration(ref PathState state, EndIterationTask end, GraphOperation operation,
+    private static bool CheckIteration(ref PathState state, FilteredIterationTask end, GraphOperation operation,
         IReadOnlyDictionary<string, object?>? parameters)
     {
-        var stop = (end as FilteredIterationTask)?.Predicates;
+        var stop = end.Predicates;
         var predicates = stop;
         var properties = end.Properties;
         Dictionary<string, object?>? locals = null;

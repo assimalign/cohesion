@@ -888,6 +888,10 @@ are allocated lazily; Release planning checks retain the base budgets for node, 
 quantified paths without selectors or prefilters. Unselected execution dispatches directly to
 the ordinary matcher; it allocates neither
 a forwarding iterator nor search-only continuation grants or repeated-body predicate locals.
+Ordinary match results keep the base two-reference carrier and unfiltered iteration tasks keep
+their two-reference continuation layout; predicate/property checkpoints live only in filtered tasks.
+A private execution variant of the internal path plan holds selector state, keeping search
+arguments out of the ordinary iterator's retained parameter layout.
 Release minimum-of-five-round checks pin node, one-hop and quantified execution below the
 reviewed base allocation ceilings (9,160, 28,696 and 204,546 bytes per match).
 Ordinary MATCH WHERE remains a post-selection

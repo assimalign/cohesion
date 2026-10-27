@@ -52,9 +52,9 @@ internal static partial class GraphPlanExecutor
         }
     }
     private sealed record RepeatTask(GraphPathSegment Segment, bool Forward, int Count, string[] Names, PathTask? Next) : PathTask;
-    private record EndIterationTask(RepeatTask Repeat, PathTask? Next, MatchedProperties? Properties) : PathTask;
+    private record EndIterationTask(RepeatTask Repeat, PathTask? Next) : PathTask;
     private sealed record FilteredIterationTask(RepeatTask Repeat, PathTask? Next,
-        MatchedProperties? Properties, MatchedPredicate? Predicates) : EndIterationTask(Repeat, Next, Properties);
+        MatchedProperties? Properties, MatchedPredicate? Predicates) : EndIterationTask(Repeat, Next);
     private sealed record PredicateTask(IReadOnlyList<GraphPathPrefilter> Filters, PathTask? Next) : PathTask;
     private sealed record StartLeftTask(GraphNode Anchor, PathTask? Next) : PathTask;
 
@@ -141,7 +141,7 @@ internal static partial class GraphPlanExecutor
     private static async IAsyncEnumerable<PathMatch> SearchPathStreamAsync(
         GraphDatabase database, GraphOperation operation, GraphPathPlan plan, Dictionary<string, object?> input,
         ExpansionBudget budget, IReadOnlyDictionary<string, object?>? parameters,
-        [EnumeratorCancellation] CancellationToken token, bool deferUnbound = false, PathSearch? search = null)
+        [EnumeratorCancellation] CancellationToken token, bool deferUnbound = false)
     {
         token.ThrowIfCancellationRequested();
         operation.EnsureActive();
@@ -162,8 +162,8 @@ internal static partial class GraphPlanExecutor
         }
         IAsyncEnumerable<StoredGraphNode>? candidates;
         var anchorNode = shape.Nodes[anchor.NodeIndex].FirstOrDefault(node => node.Variable is { } name && input.ContainsKey(name));
-        if (search is not null)
-        { candidates = StreamBoundNodesAsync(operation.Updates.FindNode(search.Start) is { } seed ? [seed] : [], budget, token); }
+        if (plan is PathSearch)
+        { candidates = StreamBoundNodesAsync(operation.Updates.FindNode(((PathSearch)plan).Start) is { } seed ? [seed] : [], budget, token); }
         else if (anchorNode?.Variable is { } variable && input[variable] is GraphNode bound)
         { candidates = StreamBoundNodesAsync(operation.Updates.FindNode(bound.Id.Value) is { } node ? [node] : [], budget, token); }
         else if (anchor.NodeIndex < shape.Segments.Count && shape.Segments[anchor.NodeIndex] is
@@ -188,7 +188,7 @@ internal static partial class GraphPlanExecutor
             // Continuations for nullable segments can outnumber the 64 actual hops.
             // Reserve their retained chain before constructing it for a search.
             using var frontier = new PathFrontier(budget.Memory);
-            if (search is not null || shape.HasPrefilters)
+            if (plan is PathSearch || shape.HasPrefilters)
             { frontier.ReserveTasks(128L * (shape.Nodes.Count + shape.Segments.Count)); }
             PathTask? left = null;
             // Prepend continuations in reverse execution order: right, then left from the anchor.
@@ -204,7 +204,7 @@ internal static partial class GraphPlanExecutor
             }
             var initial = new PathState(node, new(input, StringComparer.Ordinal), [node], [], [], new(StringComparer.Ordinal), null,
                 new NodeTask(shape.Nodes[anchor.NodeIndex], tasks));
-            frontier.Push(search is not null || shape.HasPrefilters ? new FilteredPathState(initial) : initial);
+            frontier.Push(plan is PathSearch || shape.HasPrefilters ? new FilteredPathState(initial) : initial);
             var incidents = new Dictionary<IAsyncEnumerator<StoredGraphRelationship>, IncidentTask>();
             try
             {
@@ -217,19 +217,19 @@ internal static partial class GraphPlanExecutor
                     Dispatch:
                     token.ThrowIfCancellationRequested();
                     operation.EnsureActive();
-                    if (search is not null) { budget.Consume(); budget.SelectorStates++; }
+                    if (plan is PathSearch) { budget.Consume(); budget.SelectorStates++; }
                     switch (state.Task)
                     {
                         case null:
-                            if (search is not null && (state.Nodes[^1].Id.Value != search.End ||
-                                search.ExactLength && state.Relationships.Count != search.HopLimit)) { break; }
+                            if (plan is PathSearch && (state.Nodes[^1].Id.Value != ((PathSearch)plan).End ||
+                                ((PathSearch)plan).ExactLength && state.Relationships.Count != ((PathSearch)plan).HopLimit)) { break; }
                             if (plan.Pattern.Variable is { } pathVariable)
                             { state.Bindings.Add(pathVariable, new GraphPath(state.Nodes.AsReadOnly(), state.Relationships.AsReadOnly())); }
                             frontier.ResizeActive(state, ref stateBytes);
                             // Fixed chains retain the base matcher's source-ordered nodes, then edges,
                             // independently of the anchor. Repetitions retain reverse encounter order.
                             var finalProperties = shape.HasQuantifier ? state.Properties : FixedProperties(shape, state);
-                            if (!shape.HasQuantifier && (search is not null || shape.HasPrefilters))
+                            if (!shape.HasQuantifier && (plan is PathSearch || shape.HasPrefilters))
                             {
                                 state = state with { Properties = finalProperties };
                                 frontier.ResizeActive(state, ref stateBytes);
@@ -241,8 +241,8 @@ internal static partial class GraphPlanExecutor
                             if (matches)
                             {
                                 var path = plan.Pattern.Variable is { } name ? (GraphPath)state.Bindings[name]!
-                                    : search is null ? null : new GraphPath(state.Nodes.AsReadOnly(), state.Relationships.AsReadOnly());
-                                yield return new PathMatch(state.Bindings, finalProperties, path);
+                                    : plan is not PathSearch ? null : new GraphPath(state.Nodes.AsReadOnly(), state.Relationships.AsReadOnly());
+                                yield return new PathMatch(state.Bindings, plan is not PathSearch ? finalProperties : path);
                             }
                             break;
                         case StartLeftTask start:
@@ -282,7 +282,7 @@ internal static partial class GraphPlanExecutor
                                 foreach (string name in repeat.Names) { iteration.Bindings.Remove(name); }
                                 EndIterationTask end = state is FilteredPathState filtered
                                     ? new FilteredIterationTask(repeat, repeat.Next, state.Properties, filtered.Predicates)
-                                    : new EndIterationTask(repeat, repeat.Next, state.Properties);
+                                    : new EndIterationTask(repeat, repeat.Next);
                                 frontier.Push(iteration with { Task = BodyTasks(repeat.Segment.Body, repeat.Forward, end) });
                             }
                             if (repeat.Count >= (repeat.Segment.Quantifier?.Min ?? 1))
@@ -294,7 +294,7 @@ internal static partial class GraphPlanExecutor
                             goto Dispatch;
                         case EndIterationTask end:
                             // Repeated-body predicates see this iteration's singleton bindings.
-                            if ((search is not null || shape.HasPrefilters) && !CheckIteration(ref state, end, operation, parameters)) { break; }
+                            if (end is FilteredIterationTask filteredEnd && !CheckIteration(ref state, filteredEnd, operation, parameters)) { break; }
                             foreach (string name in end.Repeat.Names)
                             {
                                 var previous = state.Groups[name];
@@ -338,13 +338,13 @@ internal static partial class GraphPlanExecutor
                             if (plan.Mode == GqlPathMode.Trail && state.Used.Contains(edge.Id) || !GraphLabelEvaluator.Accepts(hop.Pattern, edge.Type) ||
                                 outgoing && edge.SourceId != from || incoming && edge.TargetId != from) { break; }
                             ulong next = edge.SourceId == from ? edge.TargetId : edge.SourceId;
-                            if (search?.Identity is { } identity && state.Relationships.Count < identity.Count &&
+                            if (plan is PathSearch { Identity: { } identity } && state.Relationships.Count < identity.Count &&
                                 edge.Id != identity[state.Relationships.Count]) { break; }
-                            if (search is not null && state.Relationships.Count < search.HopLimit)
+                            if (plan is PathSearch && state.Relationships.Count < ((PathSearch)plan).HopLimit)
                             {
-                                int remaining = search.HopLimit - state.Relationships.Count - 1;
-                                if (search.Distances is { } distances && (!distances.TryGetValue(next, out int distance) || distance != remaining) ||
-                                    search.Layers is { } layers && !layers[remaining].Contains(next)) { break; }
+                                int remaining = ((PathSearch)plan).HopLimit - state.Relationships.Count - 1;
+                                if (((PathSearch)plan).Distances is { } distances && (!distances.TryGetValue(next, out int distance) || distance != remaining) ||
+                                    ((PathSearch)plan).Layers is { } layers && !layers[remaining].Contains(next)) { break; }
                             }
                             // Nodes is the accounted, source-ordered identity state (at most 65
                             // entries). SIMPLE can repeat only the opposite endpoint, then stops.
@@ -362,8 +362,9 @@ internal static partial class GraphPlanExecutor
                                 { if (!PredicateMatches(edgePredicate, bindings, operation, parameters)) { break; } }
                                 else { edgePredicates = new MatchedPredicate(edgePredicate, edgePredicates); }
                             }
-                            if (search is not null && state.Relationships.Count == search.HopLimit)
+                            if (plan is PathSearch && state.Relationships.Count == ((PathSearch)plan).HopLimit)
                             {
+                                var search = (PathSearch)plan;
                                 search.Truncated = true;
                                 if (search.FirstTruncatedPrefix is null || CompareExtendedPrefix(state.Relationships, edge.Id, search.FirstTruncatedPrefix) < 0)
                                 { search.FirstTruncatedPrefix = state.Relationships.Select(item => item.Id.Value).Append(edge.Id).ToArray(); }

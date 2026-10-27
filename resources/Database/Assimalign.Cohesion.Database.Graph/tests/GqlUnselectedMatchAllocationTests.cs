@@ -21,10 +21,10 @@ public sealed class GqlUnselectedMatchAllocationTests
     [Theory(DisplayName = "Cohesion Test [Graph] - Unselected MATCH retains base execution allocation budgets (#1734)")]
     // Review measurements at e0e776aac: 9,160 / 28,696 / 204,546 bytes per match.
     // The smaller fixture below measured 8,448 / 26,920 / 138,015 with the base matcher.
-    // Its tighter ceilings also catch forwarding on every query (256 bytes allow iterator metadata).
-    [InlineData("MATCH (a:Start) RETURN a.k", 9160L, 8704L)]
-    [InlineData("MATCH (a:Start)->(b) RETURN a.k", 28696L, 27176L)]
-    [InlineData("MATCH (a:Start) ((x)->(y)){0,3} (b) RETURN a.k", 204546L, 138271L)]
+    // Enforce those exact fixture baselines as well as the review's broader ceilings.
+    [InlineData("MATCH (a:Start) RETURN a.k", 9160L, 8448L)]
+    [InlineData("MATCH (a:Start)->(b) RETURN a.k", 28696L, 26920L)]
+    [InlineData("MATCH (a:Start) ((x)->(y)){0,3} (b) RETURN a.k", 204546L, 138015L)]
     public async Task MatchAsync_UnselectedPaths_ShouldKeepBaseAllocationBudgetAsync(string source, long baseline, long fixtureCeiling)
     {
         // Arrange: keep parsing, planning, snapshot acquisition and warmup outside measurement.
@@ -58,7 +58,7 @@ public sealed class GqlUnselectedMatchAllocationTests
             return ValueTask.FromResult(minimum / 100);
         }, CancellationToken.None);
         // Assert
-        _output.WriteLine($"{source}: {bytes} bytes/match; base ceiling={baseline}");
+        _output.WriteLine($"{source}: {bytes} bytes/match; review ceiling={baseline}; fixture base={fixtureCeiling}");
         bytes.ShouldBeLessThanOrEqualTo(baseline);
         bytes.ShouldBeLessThanOrEqualTo(fixtureCeiling);
     }

@@ -170,17 +170,17 @@ internal static partial class GraphPlanExecutor
             // identity order; a fixed start and relationship sequence also fix the node sequence.
             foreach (var identity in identities)
             {
-                var search = new PathSearch
+                var search = new PathSearch(plan)
                 {
                     Start = start.Id, End = target.Id, HopLimit = length, ExactLength = true, Identity = identity,
                     Distances = shortestDag ? distances : null, Layers = shortestDag ? null : layers,
                 };
-                await foreach (var match in SearchPathStreamAsync(database, operation, plan, input, budget, parameters,
-                    token, search: search).ConfigureAwait(false))
+                await foreach (var match in SearchPathStreamAsync(database, operation, search, input, budget, parameters,
+                    token).ConfigureAwait(false))
                 {
                     budget.Consume(); budget.SelectorCandidates++;
                     budget.Consume(); budget.SelectorSelected++;
-                    yield return match with { Properties = null };
+                    yield return match;
                     if (--remaining == 0) { yield break; }
                     if (identity is not null) { break; } // First source-ordered decomposition owns the bindings.
                 }
