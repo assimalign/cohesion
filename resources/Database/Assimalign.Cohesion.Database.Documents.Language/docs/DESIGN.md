@@ -83,7 +83,8 @@ Lexical recognition preserves the established vocabulary so rejected constructs 
 | `BETWEEN` | Yes | Inclusive same-scalar-kind range, optionally NOT |
 | `LIKE` | Yes | Ordinal string patterns, optionally NOT, with Unicode scalar wildcards and ESCAPE |
 | `CASE` | Yes | Searched and simple conditional expressions, including aggregate arguments |
-| `GROUP BY` | Yes | One or more grouping expressions |
+| `GROUP BY` | Yes | One or more grouping expressions, optionally aliased with or without AS |
+| `GROUP AS` | Yes | Array of input binding wrappers, including group-term aliases |
 | `HAVING` | Yes | Group filtering, including aggregate calls |
 | `ORDER BY` | Yes | One or more expressions, each optionally `ASC` or `DESC` |
 | `LIMIT` | Yes | Non-negative signed Int64 integer literal or parameter, applied after ordering |
@@ -161,7 +162,20 @@ including inside an aggregate argument. Function tokens remain usable as names. 
 syntax uses CD00011, direct-AST binding uses CD01029, and existing arity/context/value/budget
 identities remain in use. The [dialect](DIALECT.md#aggregate-quantifiers-and-native-aggregates-1729-oq-g1)
 records every input rule, equality, statistic, memory estimate and no-order promise. Parser and
-engine conformance corpora cover all eleven names and both transports. Native aggregate retention shares the statement counter with SELECT source/group staging (#1753); scratch reservations release at expression and sort boundaries. GROUP AS remains OQ-G2 and can reuse the executor reservation owner for wrappers.
+engine conformance corpora cover all eleven names and both transports. Native aggregate retention shares the statement counter with SELECT source/group staging (#1753); scratch reservations release at expression and sort boundaries. GROUP AS wrappers use the same reservation owner.
+
+### GROUP AS and group-term aliases (#1729, OQ-G2)
+
+OqlSelectExpression retains parallel GroupAliases and optional GroupAs metadata with the existing
+GroupBy list. Ordinary nodes have no additional instance fields or metadata allocation; optional
+metadata follows the list through planner copies. Terms accept `expr [AS] alias`; GROUP AS requires
+at least one GROUP BY term (CD00012). Binding validates direct-AST list shape, nonempty names and
+collisions with other group/FROM/UNNEST declarations (CD01030). A group array is a post-group
+binding and cannot supply an aggregate's row input (CD01031). Inner ARRAY/FIRST and quantified
+variables retain their own lexical identity. LETTING remains a named CK00001 refusal.
+The [dialect](DIALECT.md#group-as-and-group-term-aliases-1729-oq-g2) records wrapper shape,
+empty/MISSING behavior, visibility and budget lifetimes. Parser, engine conformance, InMemory/TCP
+and NativeAOT checks cover these contracts without a new disk or wire format.
 
 ### Array index keys (#1530)
 
@@ -467,7 +481,7 @@ they do not open or close expression scopes. ARRAY()/FIRST() retain their dedica
 ```text
 statement    := (query | insert | upsert | update | delete | EXPLAIN (query | insert | upsert | update | delete) | create-collection | drop-collection | create-index | drop-index) [';']
 query        := SELECT [ALL | DISTINCT] select-kind from-clause
-                [WHERE expression] [GROUP BY expression (',' expression)*]
+                [WHERE expression] [GROUP BY expression [[AS] alias] (',' expression [[AS] alias])* [GROUP AS alias]]
                 [HAVING expression] [ORDER BY ordering (',' ordering)*]
                 [LIMIT count [OFFSET count] | OFFSET count [LIMIT count]]
 count        := ['+' | '-'] integer-literal | parameter

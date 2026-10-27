@@ -273,18 +273,41 @@ internal static partial class DocumentPlanExecutor
                         groups.Add(key, group = []);
                     }
                     groupMemory.Charge(128);
-                    group.Add(document);
+                    var member = document;
+                    for (int index = 0; index < query.GroupAliases.Count; index++)
+                    {
+                        if (query.GroupAliases[index] is not string name) { continue; }
+                        groupMemory.Charge(64);
+                        groupMemory.Retain(key[index]);
+                        member = member.Bind(name, key[index]);
+                    }
+                    group.Add(member);
                 }
             }
             foreach (var group in groups.Values)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var document = group.Count > 0 ? group[0] : default;
+                long wrapperStart = groupMemory.Bytes;
+                if (query.GroupAs is string groupAs)
+                {
+                    try
+                    {
+                        var array = GroupArray(query, group, memory, cancellationToken);
+                        // Passing the ordinary group reservation into a materializer would
+                        // make it escape, adding 32 bytes even to queries without GROUP AS.
+                        groupMemory.Adopt(array.RetainedBytes);
+                        document = document.Bind(groupAs, array.Value);
+                    }
+                    catch (DocumentPlanningException error) when (error.Diagnostics[0].Start is null && query.Location is not null)
+                    { throw error.At(query.Location); }
+                }
                 long before = memory.Bytes;
                 bool matchesHaving;
                 try { matchesHaving = evaluator.Matches(query.Having, document, group); }
                 finally { memory.Release(memory.Bytes - before); }
                 if (matchesHaving) { Project(document, group); }
+                else { groupMemory.Rewind(wrapperStart); }
             }
         }
         else

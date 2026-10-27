@@ -202,10 +202,17 @@ public sealed class OqlExecutionConformanceTests
             ],
             [OqlClauses.GroupBy] =
             [
+                new("SELECT key, COUNT(*) AS n FROM items GROUP BY category AS key ORDER BY key", [["a", 3L], ["b", 1L]]),
                 new("SELECT category, COUNT(*) AS total, COUNT(amount) AS present, SUM(amount) AS sum, AVG(amount) AS average, MIN(amount) AS minimum, MAX(amount) AS maximum FROM items GROUP BY category ORDER BY category",
                     [["a", 3L, 2L, 8m, 4m, 2m, 6m], ["b", 1L, 1L, 4m, 4m, 4m, 4m]]),
                 new("SELECT category, tags[0] AS tag, COUNT(*) AS total FROM items GROUP BY category, tags[0] ORDER BY category, tag",
                     [["a", null, 1L], ["a", "blue", 1L], ["a", "green", 1L], ["b", "blue", 1L]], Missing: [(0, 1)]),
+            ],
+            [OqlClauses.GroupAs] =
+            [
+                new("SELECT key, ARRAY_LENGTH(g) AS n, FIRST r.d.name FOR r IN g WHEN r.d.name = 'gamma' END AS found FROM items d GROUP BY category AS key GROUP AS g HAVING ANY r IN g SATISFIES r.d.amount > 0 END ORDER BY key",
+                    [["a", 3L, null], ["b", 1L, "gamma"]], Missing: [(0, 2)]),
+                new("SELECT g FROM items WHERE FALSE GROUP BY TRUE GROUP AS g", []),
             ],
             [OqlClauses.Having] =
             [
@@ -528,6 +535,7 @@ public sealed class OqlExecutionConformanceTests
         OqlClauses.Like => expression is OqlSelectExpression { Predicate: OqlLikeExpression },
         OqlClauses.Case => expression is OqlSelectExpression select && select.Projections.Any(projection => ContainsCase(projection.Expression)),
         OqlClauses.GroupBy => expression is OqlSelectExpression { GroupBy.Count: > 0 },
+        OqlClauses.GroupAs => expression is OqlSelectExpression { GroupAs: not null },
         OqlClauses.Having => expression is OqlSelectExpression { Having: not null },
         OqlClauses.OrderBy => expression is OqlSelectExpression { OrderBy.Count: > 0 },
         OqlClauses.Limit => expression is OqlSelectExpression { Limit: not null },

@@ -53,6 +53,7 @@ public class OqlLanguageProfileTests
     [InlineData(OqlClauses.Like)]
     [InlineData(OqlClauses.Case)]
     [InlineData(OqlClauses.GroupBy)]
+    [InlineData(OqlClauses.GroupAs)]
     [InlineData(OqlClauses.Having)]
     [InlineData(OqlClauses.OrderBy)]
     [InlineData(OqlClauses.Limit)]

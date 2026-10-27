@@ -724,7 +724,7 @@ retained SELECT source rows (including JSON, IDs, raw star bytes and expanded bi
 keys and membership, native accumulator state, DISTINCT sets, array inputs, scratch expressions,
 and projected output. It reuses CD05018 for retained statement memory exhaustion (#1753, #1097).
 Source and group reservations release on every executor exit; a reservation can also own the
-GROUP AS wrappers planned for OQ-G2. Fixed transition-state estimates include the bounded exact
+GROUP AS wrappers and arrays (#1729, OQ-G2). Fixed transition-state estimates include the bounded exact
 statistic moments. Planning never creates this execution-only state.
 
 A set reserves 128 bytes plus 64 bytes per entry and scalar ownership. An array input list
@@ -736,9 +736,48 @@ Duplicate and paged-away results release their row charges. Statement completion
 charges. Budget refusal or cancellation publishes no partial result and uses ordinary rollback.
 These lifetimes follow the separation of input, transition and output contexts described in the
 local PostgreSQL src/backend/executor/nodeAgg.c:66-80; no reference-engine code was copied.
-The limit remains a retained-storage estimate; mutation pending-write buffers and application
+The limit remains a retained-storage estimate; DML pending buffers share it (#1755), while application
 callback-owned state are outside these native estimates. Parser, execution-conformance and
 InMemory/TCP corpora and the NativeAOT sample cover the contract.
+
+#### GROUP AS and group aliases (#1729, OQ-G2)
+
+The language [dialect](../../Assimalign.Cohesion.Database.Documents.Language/docs/DIALECT.md#group-as-and-group-term-aliases-1729-oq-g2)
+is authoritative for wrapper shape, visibility and refusal codes. The logical plan carries optional
+GroupAliases/GroupAs through the query key list. A lexical group frame distinguishes aliases
+from input paths when checking grouped expressions, DISTINCT and projected ordering; inner
+comprehensions and quantifiers retain their existing frames. Explicit group-term aliases bind
+per-row computed keys before aggregate evaluation. The GROUP AS array binds only the group
+representative, after input grouping, so aggregate row inputs cannot read it (CD01031).
+
+Each array element wraps the FROM value, UNNEST bindings and explicit group-term aliases in an
+object. MISSING members are omitted; NULL survives. Empty GROUP BY inputs produce zero groups.
+Temporary wrapper owners reserve 128 bytes of list storage plus 64 bytes and the existing JSON
+ownership/token estimate per wrapper. Before final array construction the group reservation
+charges 128 bytes of JSON ownership, raw wrapper payloads/commas/array delimiters, 12 bytes per
+token and 128 bytes of binding/slot storage. Temporary and final representations are both charged
+while they coexist. The materializer transfers its successful final reservation to the group owner
+without releasing the shared charge; the ordinary group reservation remains local, preserving its
+base stack allocation. Arrays survive through ordering; HAVING-rejected groups release their array
+reservations immediately. Projection clones independently charge output and no group context
+escapes in the returned result. Scoped reservations release on failure and cancellation before
+operation cleanup. Exhaustion retains CD05018. No GROUP AS path runs for ordinary queries, whose
+base allocation measurements are preserved.
+
+EXPLAIN adds group_as and group_aliases to Group details (or system-source details), without
+executing terms or reading data. CD00012 rejects GROUP AS without GROUP BY; CD01030 rejects
+invalid or colliding declarations, including direct AST shape; CD01031 rejects a group array in
+an aggregate row input. Existing CD05015 governs wrapper/array constructor depth and CD05018
+governs retention. No new public interface, dependency, visibility grant or format is needed.
+The wrapper precedent is Couchbase groupby.adoc:47-81 at c3bb1549af4887019b9983e371d9e8b4f569052c;
+no reference-engine code was copied. Embedded, conformance, both transports and NativeAOT tests
+exercise binding, output ownership, empty metadata, EXPLAIN and refusal/release behavior.
+
+| Code | Grouping refusal |
+| --- | --- |
+| `CD00012` | GROUP AS lacks preceding GROUP BY terms; located at GROUP |
+| `CD01030` | Invalid/duplicate group alias or collision with FROM/UNNEST; statement span |
+| `CD01031` | Group array referenced in an aggregate's row input; path span |
 
 #### SQL++ functions and transaction clock (#1137)
 
@@ -1234,7 +1273,7 @@ arrays by token count while large strings pay for their bytes. A lone star retai
 and one original raw image; each representation is charged once. A 1,024-byte ASCII object
 with one string property costs 2,448 bytes per row (224 row storage + 1,200 clone + 1,024 raw),
 plus 208 bytes of statement metadata. Charges accumulate before rows enter the result list; CD05018 at the clause span rolls
-back the statement on exhaustion. SELECT source/group staging, native accumulators and aggregate results share this limit and release reservations according to their lifetimes, as described above. OQL mutation pending buffers share this owner (#1755). UPDATE reserves 160 bytes plus twice the key length and the patched UTF-8 length per row; DELETE reserves 96 bytes plus twice the key length per identity. INSERT/UPSERT reserve 192 bytes plus twice the key length for the pending list and duplicate-key set, then 32 bytes plus the encoded content length. SELECT source results remain charged while INSERT/UPSERT SELECT builds pending writes. Every buffer is completely staged before mutation, so a pending-buffer CD05018 occurs before the first write. Scoped reservations release on success, validation failure and cancellation, independently of operation cleanup. The public option is a model configuration
+back the statement on exhaustion. SELECT source/group staging, native accumulators and aggregate results share this limit and release reservations according to their lifetimes, as described above. OQL mutation pending buffers share this owner (#1755). UPDATE reserves 160 bytes plus twice the key length and the patched UTF-8 length per row; DELETE reserves 96 bytes plus twice the key length per identity. INSERT/UPSERT reserve 192 bytes plus twice the key length for the pending list and duplicate-key set, then 32 bytes plus the encoded content length. Repeated keys are checked before reserving another slot: a duplicate retains no additional key and keeps CD03012 even near the grant limit. SELECT source results remain charged while INSERT/UPSERT SELECT builds pending writes. Every buffer is completely staged before mutation, so a pending-buffer CD05018 occurs before the first write. Scoped reservations release on success, validation failure and cancellation, independently of operation cleanup. The public option is a model configuration
 capability, not an assembly-visibility bridge. No new public interface or dependency is added.
 
 The server already serializes both counts into Complete; updated Documents.Client accepts an

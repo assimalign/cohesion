@@ -69,10 +69,27 @@ public sealed partial class OqlQueryParser
 
         OqlExpression? predicate = Take("WHERE") ? ParseExpression() : null;
         List<OqlExpression> groups = [];
+        List<string?>? groupAliases = null;
+        string? groupAs = null;
         if (Take("GROUP"))
         {
+            if (Is("AS")) { Error("CD00012", ErrorMessages.GroupAsRequiresBy, Previous); return EmptyExpression(); }
             Expect("BY");
-            do { groups.Add(ParseExpression()); } while (!Failed && Take(TokenType.Comma));
+            do
+            {
+                groups.Add(ParseExpression());
+                string? name = null;
+                if (Take("AS")) { name = Identifier(); }
+                else if (Current.Type is TokenType.Identifier or TokenType.QuotedIdentifier or TokenType.Function &&
+                    !Is("LETTING") && !Is("RETURNING")) { name = Identifier(); }
+                if (name is not null && groupAliases is null)
+                {
+                    groupAliases = [];
+                    for (int index = 1; index < groups.Count; index++) { groupAliases.Add(null); }
+                }
+                groupAliases?.Add(name);
+            } while (!Failed && Take(TokenType.Comma));
+            if (Take("GROUP")) { Expect("AS"); groupAs = Identifier(); }
         }
         OqlExpression? having = Take("HAVING") ? ParseExpression() : null;
         List<OqlOrdering> ordering = [];
@@ -115,7 +132,8 @@ public sealed partial class OqlQueryParser
             else { offset = count; }
         }
         return new OqlSelectExpression(collection, alias, projections.AsReadOnly(), predicate,
-            groups.AsReadOnly(), having, ordering.AsReadOnly(), distinct, value, limit, offset, Span(start, Previous), unnest.AsReadOnly());
+            groups.AsReadOnly(), having, ordering.AsReadOnly(), distinct, value, limit, offset, Span(start, Previous), unnest.AsReadOnly(),
+            groupAliases?.AsReadOnly(), groupAs);
     }
 
     private bool IsUnnestClause() => IsUnnestClause(_position);

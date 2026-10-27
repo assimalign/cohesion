@@ -65,6 +65,8 @@
   <data name="FunctionArgumentsInvalid" xml:space="preserve"><value>The OQL function name or argument count is not executable.</value></data>
   <data name="FunctionArgumentKindInvalid" xml:space="preserve"><value>The OQL function argument has an incompatible literal kind.</value></data>
   <data name="AggregateContextMissing" xml:space="preserve"><value>An aggregate requires a grouping context.</value></data>
+  <data name="GroupBindingInvalid" xml:space="preserve"><value>Grouping bindings require group terms and distinct nonempty names, separate from FROM and UNNEST bindings.</value></data>
+  <data name="GroupArrayAggregateInput" xml:space="preserve"><value>GROUP AS is not available in an aggregate's row input.</value></data>
   <data name="FunctionClockMissing" xml:space="preserve"><value>OQL clock functions require an executing transaction.</value></data>
   <data name="FunctionOutsideDomain" xml:space="preserve"><value>The OQL function argument is outside its domain.</value></data>
   <data name="FunctionStringTooLarge" xml:space="preserve"><value>The OQL function string exceeds 1,048,576 UTF-16 units.</value></data>
