@@ -6819,6 +6819,8 @@ under Synchronous, Grouped and None (None models process loss), including copy c
 abandonment reclamation. Nonparallel stress runs for a minimum interval and then until hidden-owner,
 complete-read, build and concurrent reclamation counters all move, with a 90-second hang guard.
 NativeAOT smoke copies rows and verifies no-data evaluation suppression over the wire.
+Destination assignment is tested independently of source evaluation: a conversion failure after a
+checkpointed copied batch leaves no table and reclaims the whole owner, both in process and after crash.
 PostgreSQL references: createas.c:90-109,167-185,242-283,342-349 (SELECT n completion),
 rewrite/rewriteHandler.c:1301-1312 (domain default fallback) and makefuncs.c:565-582. Source constraint omission and complete
 output-list validation are explicit dialect choices recorded in DIALECT.md.
