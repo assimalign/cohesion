@@ -193,6 +193,46 @@ public sealed class GraphMergeReviewRegressionTests
         budget.Memory.RetainedBytes.ShouldBe(0);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Database.Graph] - MERGE carries retained lock charges without pinning completed query workspaces (#1735)")]
+    public async Task MatchAsync_RetainedPatternsAcrossStatements_ShouldChargeWithoutPinningWorkspaces()
+    {
+        // Arrange
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        var token = timeout.Token;
+        await using var engine = GraphDatabaseEngine.Create("merge", new());
+        await using var database = await engine.CreateDatabaseAsync("patterns", token);
+        await using var session = await database.CreateSessionAsync(cancellationToken: token);
+        await using var transaction = await session.BeginTransactionAsync(IsolationLevel.Snapshot, token);
+        var first = new GraphPlanExecutor.ExpansionBudget();
+        var next = new GraphPlanExecutor.ExpansionBudget(memoryLimit: 1024);
+        var identity = Identity(7);
+
+        // Act: force a value-accounting workspace in the first query, then retain its pattern.
+        await database.RunAsync(session, async operation =>
+        {
+            operation.QueryBudget = first;
+            using var values = new GraphMemoryOwner(first.Memory);
+            values.RetainValue(new Dictionary<string, object?> { ["value"] = new string('x', 100_000) }, token);
+            await GraphMergeConcurrency.MatchAsync(database, operation, identity, Empty, token);
+            return true;
+        }, token);
+
+        // Assert: locks remain transaction-owned, but their old query workspace does not.
+        transaction.State.ShouldBe(TransactionState.Active);
+        first.Memory.ActiveLeases.ShouldBe(0);
+        first.Memory.RetainedBytes.ShouldBe(0);
+        first.Memory.RetainedBufferCapacity.ShouldBe(0);
+        var error = await Should.ThrowAsync<DatabaseException>(database.RunAsync(session, operation =>
+        {
+            operation.QueryBudget = next;
+            return GraphMergeConcurrency.MatchAsync(database, operation, identity, Empty, token);
+        }, token).AsTask());
+        error.Diagnostics.Single().Code.ShouldBe("CG05020");
+        next.Memory.ActiveLeases.ShouldBe(0);
+        next.Memory.RetainedBytes.ShouldBe(0);
+        await transaction.RollbackAsync(token);
+    }
+
     [Theory(DisplayName = "Cohesion Test [Database.Graph] - MERGE reuses statement views while retaining the writer (#1735)")]
     [InlineData(IsolationLevel.Snapshot)]
     [InlineData(IsolationLevel.ReadCommitted)]

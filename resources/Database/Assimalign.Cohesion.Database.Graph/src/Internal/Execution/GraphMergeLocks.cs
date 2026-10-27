@@ -13,12 +13,24 @@ namespace Assimalign.Cohesion.Database.Graph.Internal;
 internal sealed class GraphMergeLocks : IDisposable
 {
     internal const int EntryLimit = 128;
+    internal const int EntryBytes = 640;
     private readonly object _sync = new();
     private readonly HashSet<LockResource> _entries = [];
-    private readonly List<GraphMemoryLease> _charges = [];
     private bool _parent;
     private bool _escalated;
     private bool _disposed;
+
+    internal long RetainedBytes
+    {
+        get
+        {
+            lock (_sync)
+            {
+                ObjectDisposedException.ThrowIf(_disposed, this);
+                return EntryBytes * (long)(_entries.Count + (_parent ? 1 : 0));
+            }
+        }
+    }
 
     internal async ValueTask AcquireAsync(GraphDatabase database, GraphOperation operation,
         LockResource resource, CancellationToken token = default)
@@ -65,7 +77,7 @@ internal sealed class GraphMergeLocks : IDisposable
         }
         await manager.AcquireAsync(owner, resource, LockMode.Exclusive, token).ConfigureAwait(false);
 
-        void Charge() => _charges.Add(operation.QueryBudget!.Memory.Reserve(640));
+        void Charge() => operation.Merge.ChargeLock();
     }
 
     public void Dispose()
@@ -74,8 +86,6 @@ internal sealed class GraphMergeLocks : IDisposable
         {
             if (_disposed) { return; }
             _disposed = true;
-            foreach (var charge in _charges) { charge.Dispose(); }
-            _charges.Clear();
             _entries.Clear();
         }
     }

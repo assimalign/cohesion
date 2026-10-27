@@ -469,8 +469,11 @@ cannot grow with distinct input rows; GQ-M2 owns accounting for the evaluated op
 
 GraphMergeLocks is lazy and transaction-owned, including across statements. A new parent/entry
 charges 640 bytes to the acquiring operation's existing query-memory budget (CG05020 on refusal),
-covering manager state and local bookkeeping. Charges stay until transaction end; 256 additional
-bytes cover each statement cache until that statement ends. Each pattern first takes parent
+covering manager state and local bookkeeping. Each MERGE statement also accounts for all retained
+pattern state from earlier statements; 256 additional bytes cover its statement cache. All query
+leases end with the statement, so the tracker never retains a completed query's budget or value
+workspaces. A smaller later query budget refuses even a previously held pattern if the retained
+state exceeds that limit. Each pattern first takes parent
 IntentExclusive. After 128 distinct entry resources, new patterns use a single Exclusive object
 lock in the same namespace. The earlier, at most 128 entry grants remain held through undo and
 normal coordinator release; escalation never grows that set. This caps both retained lock state

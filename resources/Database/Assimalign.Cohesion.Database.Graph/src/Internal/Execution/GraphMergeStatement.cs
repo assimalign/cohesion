@@ -18,7 +18,7 @@ internal sealed class GraphMergeStatement : IDisposable
     private bool _refreshed;
     private object? _identityKey;
     private GraphMergePatternIdentity? _identity;
-    private GraphMemoryLease _memory;
+    private readonly GraphMemoryOwner _memory;
 
     internal GraphMergeStatement(GraphDatabase database, GraphOperation operation, GraphMergeLocks? locks)
     {
@@ -27,12 +27,16 @@ internal sealed class GraphMergeStatement : IDisposable
         _ownsLocks = locks is null;
         Locks = locks ?? new();
         operation.QueryBudget ??= new(database.Engine.EngineOptions.QueryWorkBudget, database.Engine.EngineOptions.QueryMemoryBudget);
-        _memory = operation.QueryBudget.Memory.Reserve(256);
+        var memory = new GraphMemoryOwner(operation.QueryBudget.Memory);
+        try { memory.Add(256 + Locks.RetainedBytes); }
+        catch { memory.Dispose(); throw; }
+        _memory = memory;
     }
 
     internal GraphMergeLocks Locks { get; }
     internal TransactionSnapshot Latest => _latest ??= _database.LatestSnapshot(_operation.Context);
     internal bool SnapshotCaptured => _refreshed;
+    internal void ChargeLock() => _memory.Add(GraphMergeLocks.EntryBytes);
 
     internal async ValueTask RefreshAsync(bool waited, CancellationToken token = default)
     {
