@@ -355,7 +355,7 @@ public sealed partial class DocumentQueryTests
     public async Task Execute_AggregateSourceReturningBudget_ShouldRollbackCombinedRetentionAsync()
     {
         // Arrange
-        await using var engine = DocumentDatabaseEngine.Create("combined-budget", new() { StatementMemoryBudget = 1100 });
+        await using var engine = DocumentDatabaseEngine.Create("combined-budget", new() { StatementMemoryBudget = 1000 });
         var database = await engine.CreateDatabaseAsync("test", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         await session.CreateCollectionAsync("items", CancellationToken.None);
