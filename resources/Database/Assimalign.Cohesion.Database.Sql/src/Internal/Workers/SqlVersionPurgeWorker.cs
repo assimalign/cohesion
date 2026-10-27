@@ -76,8 +76,8 @@ internal sealed class SqlVersionPurgeWorker : DatabaseVersionPurgeWorker<SqlData
     protected override TransactionCoordinator GetCoordinator(SqlDatabase database) => database.Coordinator;
     protected override void Purge(SqlDatabase database, CancellationToken cancellationToken)
     {
-        database.Coordinator.RunVersionPurgePass(cancellationToken);
-        database.DataStorage.RowVersionLinks.Prune(database.Coordinator.PruneBound, cancellationToken);
+        try { database.Coordinator.RunVersionPurgePass(cancellationToken); }
+        finally { database.DataStorage.RowVersionLinks.Prune(database.Coordinator.PruneBound, cancellationToken); }
     }
 
     protected override bool HasReclamationSupport => true;

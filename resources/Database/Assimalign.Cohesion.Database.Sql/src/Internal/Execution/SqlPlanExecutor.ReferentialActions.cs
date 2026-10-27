@@ -287,7 +287,7 @@ internal sealed partial class SqlPlanExecutor
                     }
                 }
             }
-            }
+        }
         catch
         {
             // A preparation retry abandons this projected view but retains the outer

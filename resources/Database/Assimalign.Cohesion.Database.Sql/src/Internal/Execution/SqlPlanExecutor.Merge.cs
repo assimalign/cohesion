@@ -372,7 +372,7 @@ internal sealed partial class SqlPlanExecutor
                     references: references, deletions: deletions, updates: pending,
                     foreignKeySnapshot: statement.Transaction.IsolationLevel == IsolationLevel.ReadCommitted ? statement.Transaction.Snapshot : null);
             }
-            }
+        }
         catch (SqlConstraintViolationException failure) when (failure.ConstraintKind == "FOREIGN KEY")
         {
             // Index uniqueness is immediate; FK triggers run after index insertion

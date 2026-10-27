@@ -3112,6 +3112,12 @@ same safe MVCC horizon in cancellable batches of at most 1024. No statement surv
 these links require no persisted identity or format bump. Source/reference intents precede sorted
 original row locks, then successor/referential rows, parent rows, unique keys, the coordinator apply
 gate and page/index latches. The lineage monitor never surrounds a wait or storage operation.
+Link pruning runs in a finally even when record/index reclamation reports a deferred failure.
+At the end of a prune, backing dictionaries and retirement queues above 1024 slots trim when
+their counts fall below one quarter of capacity. Links remain recorded by every UPDATE path:
+reader admission and replacement publication have no shared atomic reader-registration seam,
+so sampling a ReadCommitted-reader count could miss a statement admitted between that sample
+and publication. The existing pinned-snapshot horizon remains the safety proof for retention.
 
 Constraint preparation composes direct INSERT/UPDATE rows and deletions before applying incoming
 referential actions. Statement-local negative page identities represent pending inserts and never

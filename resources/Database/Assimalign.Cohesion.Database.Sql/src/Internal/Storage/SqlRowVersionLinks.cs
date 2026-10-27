@@ -68,6 +68,15 @@ internal sealed class SqlRowVersionLinks
                     { _links.Remove(entry.Predecessor); }
                     removed++;
                 }
+                if (removed < 1024)
+                {
+                    // Hysteresis avoids repeatedly copying growing/steady-state storage.
+                    // Trim under the same monitor as publication and lookup.
+                    if (_links.EnsureCapacity(0) > 1024 && _links.Count < _links.EnsureCapacity(0) / 4)
+                    { _links.TrimExcess(); }
+                    if (_retired.EnsureCapacity(0) > 1024 && _retired.Count < _retired.EnsureCapacity(0) / 4)
+                    { _retired.TrimExcess(); }
+                }
             }
             if (removed < 1024) { return; }
         }
