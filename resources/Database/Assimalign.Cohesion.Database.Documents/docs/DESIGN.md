@@ -712,7 +712,7 @@ The evaluator applies DISTINCT before Add, using grouping comparison with cancel
 structural comparisons. It retains separate state per call/group, deduplicates 1 and 1.0 and
 structurally equal objects regardless of member order, and releases set charges after Finish.
 ARRAY_AGG returns independently owned JSON through the ordinary constructor writer; no input-order
-promise is made. Each appearance in projection/HAVING/ORDER BY remains independent, as #1711 states.
+promise is made. Each appearance in projection/HAVING/ORDER BY remains independent, as #1711 states. Quantified predicates inherit aggregate permission and carry the enclosing group through collection and SATISFIES evaluation; aggregate arguments still disable nested aggregates.
 EXPLAIN names aggregate kinds/quantifiers on Group without calling an accumulator or reading data.
 PostgreSQL src/backend/executor/nodeAgg.c:888-906 also removes DISTINCT duplicates before the
 transition function; src/backend/utils/adt/float.c:2937-2955 explains why stable online moments

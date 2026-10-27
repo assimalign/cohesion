@@ -427,7 +427,7 @@ superseding the original issue's three-valued element table. IN uses structural 
 with a match winning over a NULL element. A MISSING operand on either side gives MISSING;
 a NULL or non-array right operand gives NULL. Cohesion retains NULL for `NULL IN []`,
 diverging from [Couchbase coll_in.go:57-71](https://github.com/couchbase/query/blob/master/expression/coll_in.go#L57-L71).
-Aggregates are forbidden inside UNNEST operands and quantified expressions. META accepts
+Aggregates are forbidden inside UNNEST operands. Quantified collections and predicates inherit aggregate permission from SELECT, HAVING and ORDER BY and evaluate with the enclosing group; nested aggregates remain forbidden. META accepts
 only the stored FROM binding; META on an inner variable is an error even if it shadows FROM.
 
 ### ARRAY and FIRST comprehensions (#1728)
@@ -448,7 +448,7 @@ without visiting later elements; with no qualifying element it returns MISSING. 
 MISSING input, and return NULL for NULL or non-array input. The
 [dialect](DIALECT.md#array-and-first-comprehensions-1728) records the reference and defaults.
 All child expressions participate in parameter/numeric, function, aggregate and metadata
-validation even for empty input. As with quantifiers, aggregates inside a comprehension are
+validation even for empty input. Aggregates inside a comprehension are
 refused; a comprehension may be an aggregate argument. Closed comprehensions and quantified
 predicates are constant for VALUES/constructor validation when all paths bind local variables;
 registered calls remain nonconstant. No rendering, wire or storage contract changes.

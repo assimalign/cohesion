@@ -76,7 +76,7 @@ internal sealed partial class DocumentExpressionEvaluator
                 OqlBinaryExpression binary => Binary(binary, document, group),
                 OqlInExpression membership => In(membership, document, group),
                 OqlComprehensionExpression comprehension => Comprehend(comprehension, document, group),
-                OqlQuantifiedExpression quantified => Quantify(quantified, document),
+                OqlQuantifiedExpression quantified => Quantify(quantified, document, group),
                 OqlBetweenExpression between => Between(between, document, group),
                 OqlLikeExpression like => Like(like, document, group),
                 OqlCaseExpression conditional => Case(conditional, document, group),
@@ -260,9 +260,10 @@ internal sealed partial class DocumentExpressionEvaluator
         }
     }
 
-    private object? Quantify(OqlQuantifiedExpression expression, DocumentEvaluationContext document)
+    private object? Quantify(OqlQuantifiedExpression expression, DocumentEvaluationContext document,
+        IReadOnlyList<DocumentEvaluationContext>? group)
     {
-        var value = Evaluate(expression.Collection, document);
+        var value = Evaluate(expression.Collection, document, group);
         if (value is DocumentMissing) { return value; }
         if (value is not JsonElement { ValueKind: JsonValueKind.Array } array) { return null; }
         // Couchbase expression/coll_any.go and coll_every.go test sv.Truth(), so
@@ -270,7 +271,7 @@ internal sealed partial class DocumentExpressionEvaluator
         foreach (var item in array.EnumerateArray())
         {
             _cancellationToken.ThrowIfCancellationRequested();
-            bool truth = Truth(Evaluate(expression.Predicate, document.Bind(expression.Variable, ReadJson(item)))) is true;
+            bool truth = Truth(Evaluate(expression.Predicate, document.Bind(expression.Variable, ReadJson(item)), group)) is true;
             if (truth != expression.IsEvery) { return !expression.IsEvery; }
         }
         return expression.IsEvery;

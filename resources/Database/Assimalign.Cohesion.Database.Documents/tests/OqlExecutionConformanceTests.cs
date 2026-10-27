@@ -100,6 +100,8 @@ public sealed class OqlExecutionConformanceTests
             ],
             [OqlClauses.Select] =
             [
+                new("SELECT EVERY x IN [TRUE] SATISFIES EVERY(amount > 0) END FROM items", [[true]]),
+                new("SELECT STDDEV(v) FROM items UNNEST [-79228162514264337593543950335,0,79228162514264337593543950335] v WHERE name = 'alpha'", [[decimal.MaxValue]]),
                 new("SELECT d.name AS label, d.details.score + @increment AS adjusted, d.tags[0] AS tag FROM items AS d WHERE d.name = 'alpha'",
                     [["alpha", 3m, "blue"]], Parameters: new Dictionary<string, object?> { ["increment"] = 2 }),
                 new("SELECT COUNT(*) AS total, COUNT(amount) AS present, SUM(amount) AS sum, AVG(amount) AS average, MIN(amount) AS minimum, MAX(amount) AS maximum FROM items",
@@ -174,7 +176,6 @@ public sealed class OqlExecutionConformanceTests
             ],
             [OqlClauses.Every] =
             [
-                new("SELECT STDDEV(v) FROM items UNNEST [-79228162514264337593543950335,0,79228162514264337593543950335] v WHERE name = 'alpha'", [[decimal.MaxValue]]),
                 new("SELECT name FROM items d WHERE EVERY t IN d.tags SATISFIES t = 'blue' END", [["alpha"], ["gamma"], ["delta"]]),
             ],
             [OqlClauses.In] =

@@ -169,7 +169,7 @@ public sealed partial class DocumentQueryTests
     [InlineData("SELECT STDDEV(SUM(v)) FROM items", "CD05001")]
     [InlineData("SELECT * FROM items WHERE EVERY(v)", "CD05001")]
     [InlineData("SELECT COUNT(*) FROM items GROUP BY ARRAY_AGG(v)", "CD05001")]
-    [InlineData("SELECT ANY x IN [1] SATISFIES EVERY(x) END FROM items", "CD05001")]
+    [InlineData("SELECT EVERY(ANY x IN [1] SATISFIES EVERY(v) END) FROM items", "CD05001")]
     [InlineData("SELECT VARIANCE(v * 100000000000000000000) FROM items", "CD02007")]
     [InlineData("SELECT SUM(DISTINCT 'x') FROM items", "CD02008")]
     public async Task Execute_InvalidAggregate_ShouldKeepDiagnosticAsync(string text, string code)

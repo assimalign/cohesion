@@ -121,7 +121,7 @@ ORDER BY; the existing prohibition in WHERE, GROUP BY, RETURNING and nested aggr
 ARRAY_AGG promises no input ordering. Its DISTINCT variant includes at most one explicit NULL;
 all-MISSING input gives NULL. Boolean aggregates are Cohesion extensions and do not coerce SQL++
 Truth values: BOOL_AND(1) is NULL. EVERY(expr) is an aggregate call; the existing quantified
-predicate EVERY v IN arr SATISFIES cond END retains its own AST and empty-array TRUE rule.
+predicate EVERY v IN arr SATISFIES cond END retains its own AST and empty-array TRUE rule. Quantified collections and predicates may contain aggregate calls wherever the enclosing clause allows aggregates; those calls use the enclosing group. An aggregate inside another aggregate remains CD05001.
 STDDEV and VARIANCE divide by n - 1 for n > 1 and return zero for one numeric input. They use
 exact integer moments at decimal scale 28; retained state is bounded by the decimal domain and
 Int64 input count. VARIANCE rounds the final rational value to decimal using nearest-even rounding.
@@ -158,8 +158,7 @@ ANY/SOME/EVERY expressions without extra parentheses. Mapping and WHEN may nest 
 The expressions compose with all current scalar contexts,
 including registered arguments, grouped projections, aggregate arguments, UNNEST and RETURNING.
 Closed mappings using only local paths also execute in INSERT/UPSERT VALUES. Calls in VALUES
-retain their existing refusal. Aggregates inside a comprehension retain the quantifier
-restriction (CD05001); collection, mapping and WHEN are all validated even on empty inputs.
+retain their existing refusal. Aggregates inside a comprehension remain forbidden (CD05001); collection, mapping and WHEN are all validated even on empty inputs.
 
 Closed comprehensions and quantified predicates preserve ordinary short-circuit evaluation in
 WHERE, VALUES and constructors. A failed speculative index-bound evaluation is discarded; its

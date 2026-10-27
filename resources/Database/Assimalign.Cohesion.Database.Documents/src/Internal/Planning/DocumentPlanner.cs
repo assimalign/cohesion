@@ -533,8 +533,8 @@ internal sealed partial class DocumentPlanner
                 foreach (var child in PredicateChildren(comprehension)) { Validate(child, false, functions: functions); }
                 return;
             case OqlQuantifiedExpression quantified:
-                Validate(quantified.Collection, false, functions: functions);
-                Validate(quantified.Predicate, false, functions: functions);
+                Validate(quantified.Collection, allowAggregate, functions: functions);
+                Validate(quantified.Predicate, allowAggregate, functions: functions);
                 return;
             case OqlInExpression or OqlBetweenExpression or OqlLikeExpression or OqlCaseExpression:
                 foreach (var child in PredicateChildren(expression)) { Validate(child, allowAggregate, functions: functions); }
