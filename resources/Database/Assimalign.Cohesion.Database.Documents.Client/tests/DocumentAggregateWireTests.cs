@@ -121,7 +121,7 @@ public sealed class DocumentAggregateWireTests
     {
         // Arrange
         await using var harness = await DocumentClientTestHarness.StartAsync(tcp,
-            configureEngine: builder => builder.Options.StatementMemoryBudget = 6144);
+            configureEngine: builder => builder.Options.StatementMemoryBudget = 1100);
         await using var connection = await harness.Client.ConnectAsync(harness.Token);
         await connection.CreateCollectionAsync("items", harness.Token);
         await connection.CreateCollectionAsync("sink", harness.Token);
