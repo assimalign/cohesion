@@ -25,6 +25,14 @@ public sealed partial class SqlCatalog
         }
     }
 
+    // A failed or losing build can no longer publish. Keep its durable intent discoverable
+    // until reclamation finishes, just as it is after reopen. This volatile cleanup also
+    // runs when storage is offline; it must not replace the original failure.
+    internal void AbandonTableAs(ulong objectId)
+    {
+        lock (_sync) { _preparedTruncateOwners.Remove(objectId); }
+    }
+
     internal ValueTask<bool> PublishTableAsAsync(SqlCatalogTable table, bool ifNotExists,
         SqlCatalogScriptPublication? publication, CancellationToken cancellationToken)
     {

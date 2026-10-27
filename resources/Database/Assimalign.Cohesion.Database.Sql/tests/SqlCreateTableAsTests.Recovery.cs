@@ -60,6 +60,7 @@ public sealed partial class SqlCreateTableAsTests
             // Act
             var failure = await Should.ThrowAsync<DatabaseException>(() => executor.ExecuteAsync(plan, statement, timeout.Token));
             failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS02022");
+            database.Catalog.GetPendingTableReclamations().ShouldContain(owner);
         }
         finally
         {

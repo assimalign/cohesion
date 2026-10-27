@@ -171,13 +171,24 @@ public sealed partial class SqlCreateTableAsTests
             if (cancel) { cancellation.Cancel(); }
             else { throw new InvalidOperationException("Injected CTAS interruption"); }
         };
+        long epoch = database.TableReclamation.EnterStatement();
         try
         {
             // Act
             if (cancel) { await Should.ThrowAsync<OperationCanceledException>(() => ExecAsync(session, "CREATE TABLE copy AS SELECT id FROM src", cancellation.Token)); }
             else { await Should.ThrowAsync<InvalidOperationException>(() => ExecAsync(session, "CREATE TABLE copy AS SELECT id FROM src", timeout.Token)); }
+
+            // Assert while the statement pin prevents reclamation from freeing this owner.
+            database.Catalog.GetPendingTableReclamations().ShouldContain(owner);
+            database.TableReclamation.Request();
+            database.TableReclamation.RunBatch(timeout.Token);
+            database.Catalog.GetPendingTableReclamations().ShouldContain(owner);
         }
-        finally { SqlPlanExecutor.TableAsStage = null; }
+        finally
+        {
+            SqlPlanExecutor.TableAsStage = null;
+            database.TableReclamation.ExitStatement(epoch);
+        }
 
         // Assert
         observed.ShouldBe(1);

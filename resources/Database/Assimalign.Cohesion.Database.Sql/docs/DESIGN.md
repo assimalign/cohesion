@@ -6807,8 +6807,11 @@ One catalog transaction publishes the complete table and removes its abandonment
 the logical DDL generation and any declared-script receipt together. Under the same catalog monitor,
 a newly occupied table name reports CS03049 (42P07); IF NOT EXISTS instead completes with zero rows
 and retains the losing owner's abandonment intent for reclamation. Source disposal finishes before
-this irrevocable boundary. Earlier failures leave no table; the existing worker reclaims the abandoned
-owner after the statement/snapshot fences clear. Recovery restores either no table plus reclamation
+this irrevocable boundary. Every exit after reservation clears the owner's volatile prepared mark,
+including reservation-hook, lock, binding and builder failures and a lost name race. Its durable
+intent is then listed as pending until reclamation finishes, matching reopen. Earlier failures leave
+no table; the existing worker reclaims the abandoned owner after the statement/snapshot fences
+clear. Recovery restores either no table plus reclamation
 work, or the entire table with no intent. SQL stays format 26: ordinary table records and kind 14
 already express this protocol. There is no public catalog seam, friend grant or new interface.
 CTAS follows existing self-committing DDL and is refused inside BEGIN with CS04003 (25001);
@@ -6820,8 +6823,13 @@ under Synchronous, Grouped and None (None models process loss), including copy c
 abandonment reclamation. Nonparallel stress runs for a minimum interval and then until hidden-owner,
 complete-read, build and concurrent reclamation counters all move, with a 90-second hang guard.
 NativeAOT smoke copies rows and verifies no-data evaluation suppression over the wire.
-Destination assignment is tested independently of source evaluation: a conversion failure after a
-checkpointed copied batch leaves no table and reclaims the whole owner, both in process and after crash.
+Tests pin snapshots before builder commit, between commit and publication, and after publication;
+actual data-journal flush counts stay zero through every copy bracket and advance at builder commit.
+Abandonment tests capture the owner through TableAsStage, assert it is listed pending while a
+statement pin prevents reclamation, and assert HasOwnerPages is false after the pin ends and the
+worker drains. Destination assignment is tested independently of source evaluation: a conversion
+failure after a checkpointed copied batch leaves no table and reclaims the whole owner, both in
+process and after crash.
 PostgreSQL references: createas.c:90-109,167-185,242-283,342-349 (SELECT n completion),
 rewrite/rewriteHandler.c:1301-1312 (domain default fallback) and makefuncs.c:565-582. Source constraint omission and complete
 output-list validation are explicit dialect choices recorded in DIALECT.md.

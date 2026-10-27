@@ -38,14 +38,14 @@ internal sealed partial class SqlPlanExecutor
             statement.ProvisioningSchema, statement.ScriptReceipt, plan.IfNotExists && statement.ProvisioningSchema is null,
             cancellationToken).ConfigureAwait(false);
         if (table is null) { return await CompleteAsync(0).ConfigureAwait(false); }
-        TableAsStage?.Invoke("Reserved", table.ObjectId);
-        await statement.Coordinator.LockManager.AcquireAsync(statement.DdlLockOwner,
-            LockResource.Object(table.ObjectId), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
-        var bound = _definitions.Get(table, cancellationToken);
         long written = 0;
         TransactionContext? builder = null;
         try
         {
+            TableAsStage?.Invoke("Reserved", table.ObjectId);
+            await statement.Coordinator.LockManager.AcquireAsync(statement.DdlLockOwner,
+                LockResource.Object(table.ObjectId), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
+            var bound = _definitions.Get(table, cancellationToken);
             if (plan.WithData)
             {
                 builder = await statement.Coordinator.BeginAsync(IsolationLevel.ReadCommitted, cancellationToken).ConfigureAwait(false);
@@ -141,8 +141,12 @@ internal sealed partial class SqlPlanExecutor
         }
         finally
         {
-            if (builder is { State: TransactionState.Active } && !_storage.IsOffline)
-            { await statement.Coordinator.RollbackAsync(builder, CancellationToken.None).ConfigureAwait(false); }
+            try
+            {
+                if (builder is { State: TransactionState.Active } && !_storage.IsOffline)
+                { await statement.Coordinator.RollbackAsync(builder, CancellationToken.None).ConfigureAwait(false); }
+            }
+            finally { _catalog.AbandonTableAs(table.ObjectId); }
         }
 
         ValueTask<DatabaseResult> CompleteAsync(long count)

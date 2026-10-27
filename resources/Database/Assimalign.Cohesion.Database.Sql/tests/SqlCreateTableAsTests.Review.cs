@@ -55,14 +55,30 @@ public sealed partial class SqlCreateTableAsTests
         await ExecAsync(session, "CREATE TABLE src (id INT, value TEXT)", timeout.Token);
         await ExecAsync(session, "INSERT INTO src VALUES " + string.Join(',', Enumerable.Range(1, 65).Select(id => $"({id},'{new string('x', 1024)}')")), timeout.Token);
 
-        // Act
-        var failure = await Should.ThrowAsync<DatabaseException>(() => ExecAsync(session, "CREATE TABLE copy AS SELECT * FROM src ORDER BY id", timeout.Token));
+        ulong owner = 0;
+        SqlPlanExecutor.TableAsStage = (stage, id) => { if (stage == "Reserved") { owner = id; } };
+        long epoch = database.TableReclamation.EnterStatement();
+        try
+        {
+            // Act
+            var failure = await Should.ThrowAsync<DatabaseException>(() => ExecAsync(session, "CREATE TABLE copy AS SELECT * FROM src ORDER BY id", timeout.Token));
+
+            // Assert before the worker can reclaim the abandoned build.
+            failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS05067");
+            owner.ShouldBeGreaterThan(0UL);
+            database.Catalog.GetPendingTableReclamations().ShouldContain(owner);
+        }
+        finally
+        {
+            SqlPlanExecutor.TableAsStage = null;
+            database.TableReclamation.ExitStatement(epoch);
+        }
 
         // Assert
-        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS05067");
         session.LastStatementMetrics.ShouldNotBeNull().HashMemoryBytes.ShouldBe(0);
         database.Catalog.TryGetTable("dbo", "copy", out _).ShouldBeFalse();
         await ReclaimAsync(database, timeout.Token);
+        database.DataStorage.HasOwnerPages(owner).ShouldBeFalse();
         database.Catalog.GetPendingTableReclamations().ShouldBeEmpty();
         database.Coordinator.GetOpenContexts().ShouldBeEmpty();
         await ExecAsync(session, "CREATE TABLE copy AS SELECT * FROM src WITH NO DATA", timeout.Token);
@@ -94,6 +110,7 @@ public sealed partial class SqlCreateTableAsTests
             owner = id;
             ExecAsync(winner, competing, timeout.Token).GetAwaiter().GetResult();
         };
+        long epoch = database.TableReclamation.EnterStatement();
         try
         {
             // Act
@@ -104,8 +121,16 @@ public sealed partial class SqlCreateTableAsTests
                 var failure = await Should.ThrowAsync<DatabaseException>(() => ExecAsync(session, sql, timeout.Token));
                 failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS03049");
             }
+
+            // Assert before releasing the pin that keeps the losing owner's pages alive.
+            database.Catalog.GetPendingTableReclamations().ShouldContain(owner);
+            database.DataStorage.HasOwnerPages(owner).ShouldBeTrue();
         }
-        finally { SqlPlanExecutor.TableAsStage = null; }
+        finally
+        {
+            SqlPlanExecutor.TableAsStage = null;
+            database.TableReclamation.ExitStatement(epoch);
+        }
 
         // Assert
         raced.ShouldBe(1);
@@ -146,7 +171,7 @@ public sealed partial class SqlCreateTableAsTests
         await using var reader = await database.CreateSessionAsync(timeout.Token);
         await SeedAsync(writer, timeout.Token);
         SqlDatabaseTransaction? snapshot = null;
-        SqlPlanExecutor.TableAsStage = (stage, _) =>
+        SqlPlanExecutor.TableAsStage = (stage, owner) =>
         {
             if (stage == point && snapshot is null)
             { snapshot = reader.BeginTransactionAsync(IsolationLevel.Snapshot, timeout.Token).AsTask().GetAwaiter().GetResult(); }

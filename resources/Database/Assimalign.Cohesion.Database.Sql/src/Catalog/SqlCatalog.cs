@@ -176,7 +176,8 @@ public sealed partial class SqlCatalog
     // migrations and script receipts; the worker captures immutable intent incarnations.
     /// <summary>Captures permanently retired table-owner identities whose storage reclamation is pending.</summary>
     /// <returns>A read-only snapshot unaffected by later publications or completed reclamations.</returns>
-    /// <remarks>Prepared TRUNCATE owners remain internal because they can become live.
+    /// <remarks>Prepared TRUNCATE and CTAS owners remain internal while they can become live.
+    /// Abandoned CTAS owners become pending as soon as the build exits, including a lost name race.
     /// Reclamation must wait for transaction and statement pins before freeing owner pages. Retired owners become
     /// discoverable after the TRUNCATE visibility marker ends, so the fence covers every old reader.</remarks>
     /// <exception cref="StorageOfflineException">The catalog is offline.</exception>
