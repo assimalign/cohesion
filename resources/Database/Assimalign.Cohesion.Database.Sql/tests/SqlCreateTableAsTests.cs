@@ -147,9 +147,11 @@ public sealed partial class SqlCreateTableAsTests
     [InlineData("Reserved", false)]
     [InlineData("Copied", false)]
     [InlineData("Prepared", false)]
+    [InlineData("BuilderCommitted", false)]
     [InlineData("Reserved", true)]
     [InlineData("Copied", true)]
     [InlineData("Prepared", true)]
+    [InlineData("BuilderCommitted", true)]
     public async Task ExecuteAsync_InterruptedBuild_ShouldReclaimAndAllowRetry(string stage, bool cancel)
     {
         // Arrange
@@ -180,6 +182,7 @@ public sealed partial class SqlCreateTableAsTests
         // Assert
         observed.ShouldBe(1);
         owner.ShouldBeGreaterThan(0UL);
+        session.LastStatementMetrics.ShouldNotBeNull().HashMemoryBytes.ShouldBe(0);
         database.Catalog.TryGetTable("dbo", "copy", out _).ShouldBeFalse();
         database.Coordinator.GetOpenContexts().ShouldBeEmpty();
         await ReclaimAsync(database, timeout.Token);

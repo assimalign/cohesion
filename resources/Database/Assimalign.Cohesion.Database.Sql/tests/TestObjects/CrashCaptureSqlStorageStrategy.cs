@@ -46,6 +46,11 @@ internal sealed class CrashCaptureSqlStorageStrategy : SqlStorageStrategy
 
     internal StorageCommitDurability Durability => _durability;
 
+    internal int JournalFlushes(string databaseName)
+    {
+        lock (_sync) { return _live[Key(databaseName, false)].Journal.FlushCount; }
+    }
+
     /// <summary>
     /// Captures the durable byte image of every storage this strategy has created
     /// or opened — the state a process crash would leave on disk — and returns a
@@ -362,6 +367,8 @@ internal sealed class CrashCaptureSqlStorageStrategy : SqlStorageStrategy
         private readonly Action _onWriteStarting;
         private byte[] _durable;
 
+        internal int FlushCount { get; private set; }
+
         internal GatedStream(bool writeThrough, Action onDurableChange, Action onWriteStarting)
         {
             _liveBuffer = new MemoryStream();
@@ -398,6 +405,7 @@ internal sealed class CrashCaptureSqlStorageStrategy : SqlStorageStrategy
 
         public override void Flush()
         {
+            FlushCount++;
             _durable = _liveBuffer.ToArray();
             _onDurableChange();
         }

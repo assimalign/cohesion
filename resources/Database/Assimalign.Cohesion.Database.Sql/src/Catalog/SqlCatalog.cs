@@ -2356,6 +2356,11 @@ public sealed partial class SqlCatalog
                 throw new SqlCatalogException("CS05060", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.PublishTableCoreAsyncSqlCatalog, table.Schema, table.Name));
             }
             _tables.TryGetValue((table.Schema, table.Name), out TableSlot? existing);
+            if (!replaceExisting && existing is not null)
+            {
+                throw new SqlCatalogException("CS03049", string.Format(System.Globalization.CultureInfo.CurrentCulture,
+                    ErrorMessages.RenameTableCollision, table.Schema, table.Name));
+            }
             if (replaceExisting ? existing is null || existing.Table.ObjectId != table.ObjectId :
                 existing is not null || FindTableByObjectId(table.ObjectId) is not null)
             {

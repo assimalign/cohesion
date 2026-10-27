@@ -210,7 +210,7 @@ internal sealed class SqlStatementMetrics
 
     internal void ReserveHashMemory(long bytes, long budget)
     {
-        if (_accessPath is not JoinWork work) { work = new([]); _accessPath = work; }
+        if (_accessPath is not JoinWork work) { work = new([]) { ScalarPath = _accessPath as string }; _accessPath = work; }
         if (bytes > budget - work.MemoryBytes)
         {
             throw new SqlExecutionException(SqlExecutionException.StatementMemoryBudgetCode,
@@ -225,7 +225,7 @@ internal sealed class SqlStatementMetrics
         if (_accessPath is JoinWork work) { work.MemoryBytes -= bytes; }
     }
 
-    // Join-only telemetry shares the existing path slot. Scalar statements keep
+    // Budget and join telemetry share the existing path slot. Ordinary scalar statements keep
     // exactly their previous instance layout and allocate no new telemetry object.
     [global::System.Diagnostics.DebuggerDisplay("JoinWork")]
     [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlStatementMetrics.JoinWork.DebugView))]

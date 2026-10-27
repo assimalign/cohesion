@@ -854,7 +854,11 @@ public sealed class SqlLanguageConformanceTests
             }),
         [SqlClauses.CreateTableAs] = new("CREATE TABLE copied (key,label) AS SELECT id,name FROM t WITH DATA;", _seed,
             expression => expression is SqlCreateTableAsExpression,
-            async (session, _) => await ExpectRowsAsync(session, "SELECT key FROM copied ORDER BY key LIMIT 1;", [[1]])),
+            async (session, result) =>
+            {
+                result.AffectedCount.ShouldBe(3);
+                await ExpectRowsAsync(session, "SELECT key FROM copied ORDER BY key LIMIT 1;", [[1]]);
+            }),
         [SqlClauses.AlterTable] = new("ALTER TABLE t ADD COLUMN extra INT NOT NULL DEFAULT 7;", _seed,
             expression => expression is SqlAlterTableExpression { Action: SqlAlterAddColumnAction }, VerifyAlterAsync),
         [SqlClauses.DropTable] = new("DROP TABLE t;", _seed,

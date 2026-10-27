@@ -40,6 +40,34 @@ internal sealed class SqlMaterializedResultSet : DatabaseResultSet
     /// <inheritdoc />
     public override IReadOnlyList<DatabaseColumn> Columns => _columns;
 
+    // Admit query output retained by CTAS alongside its encoded batch and any other
+    // statement reservations. The caller releases this grant after source disposal.
+    internal long ReserveMemory(SqlStatementMetrics metrics, long budget, CancellationToken cancellationToken)
+    {
+        long reserved = 0;
+        try
+        {
+            Reserve(24L + 8L * _rows.Capacity);
+            foreach (var row in _rows)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                Reserve(SqlHashJoinTable.RowBytes(row));
+            }
+            return reserved;
+        }
+        catch
+        {
+            metrics.ReleaseHashMemory(reserved);
+            throw;
+        }
+
+        void Reserve(long bytes)
+        {
+            metrics.ReserveHashMemory(bytes, budget);
+            reserved += bytes;
+        }
+    }
+
     /// <inheritdoc />
     public override async IAsyncEnumerable<DatabaseRow> GetRowsAsync([EnumeratorCancellation] CancellationToken cancellationToken = default)
     {

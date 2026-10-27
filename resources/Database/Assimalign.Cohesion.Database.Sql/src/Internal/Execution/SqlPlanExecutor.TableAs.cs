@@ -24,7 +24,7 @@ internal sealed partial class SqlPlanExecutor
                 throw new SqlExecutionException(SqlExecutionException.DuplicateTableCode,
                     string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.TableProvisioningCollision, plan.Schema, plan.Name));
             }
-            return new SqlQueryResult(DatabaseResultStatus.Success, 0);
+            return await CompleteAsync(0).ConfigureAwait(false);
         }
         if (plan.Source is null) { throw new SqlCatalogException("CS04064", ErrorMessages.TableAsTargetChanged); }
 
@@ -35,70 +35,122 @@ internal sealed partial class SqlPlanExecutor
         // spans reservation, source disposal and every failure/rollback path, so a worker
         // discovering the abandonment intent cannot reclaim pages while we build them.
         var table = await _catalog.ReserveTableAsAsync(plan.Schema, plan.Name, plan.Columns,
-            statement.ProvisioningSchema, statement.ScriptReceipt, cancellationToken).ConfigureAwait(false);
+            statement.ProvisioningSchema, statement.ScriptReceipt, plan.IfNotExists && statement.ProvisioningSchema is null,
+            cancellationToken).ConfigureAwait(false);
+        if (table is null) { return await CompleteAsync(0).ConfigureAwait(false); }
         TableAsStage?.Invoke("Reserved", table.ObjectId);
         await statement.Coordinator.LockManager.AcquireAsync(statement.DdlLockOwner,
             LockResource.Object(table.ObjectId), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
         var bound = _definitions.Get(table, cancellationToken);
-        if (plan.WithData)
+        long written = 0;
+        TransactionContext? builder = null;
+        try
         {
-            // Query operators currently materialize their output, as INSERT SELECT does.
-            // Storage brackets are bounded to 64 rows and release the apply gate between
-            // batches. Nothing is reachable through the catalog until all batches commit.
-            await using var source = (DatabaseResultSet)await ExecuteAsync(
-                Cost(plan.Source, statement, cancellationToken), statement, cancellationToken).ConfigureAwait(false);
-            var batch = new List<byte[]>(64);
-            var domains = bound.Domains.Count == 0 ? null : ExecutionEvaluator(null, cancellationToken,
-                transactionTimestamp: statement.TransactionStart);
-            await foreach (var row in source.GetRowsAsync(cancellationToken).ConfigureAwait(false))
+            if (plan.WithData)
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                var values = new object?[table.Columns.Count];
-                for (int ordinal = 0; ordinal < values.Length; ordinal++)
+                builder = await statement.Coordinator.BeginAsync(IsolationLevel.ReadCommitted, cancellationToken).ConfigureAwait(false);
+                // Query operators currently materialize their output, as INSERT SELECT does.
+                // Storage brackets are bounded to 64 rows and release the apply gate between
+                // batches. Nothing is reachable through the catalog until all batches commit.
+                long sourceBytes = 0, batchBytes = 0, bufferBytes = 0;
+                try
                 {
-                    values[ordinal] = CoerceForColumn(SqlCharacter.Input(row.GetValue(ordinal), source.Columns[ordinal].Type),
-                        table.Columns[ordinal]);
-                }
-                if (domains is not null) { CheckDomains(bound, values, domains); }
-                // These frozen rows have no transactional writer. Their durable storage
-                // precedes the single catalog commit; publication makes all rows visible
-                // together, including to a reader admitted before the CTAS session ends.
-                batch.Add(SqlRowCodec.Encode(table, values, TransactionSequence.None));
-                if (batch.Count == 64) { await FlushAsync().ConfigureAwait(false); }
-            }
-            if (batch.Count != 0) { await FlushAsync().ConfigureAwait(false); }
-
-            async Task FlushAsync()
-            {
-                await statement.Coordinator.ApplyStatementAsync(statement.Transaction, bracket =>
-                {
-                    foreach (var record in batch)
+                    await using var source = (SqlMaterializedResultSet)await ExecuteAsync(
+                        Cost(plan.Source, statement, cancellationToken), statement, cancellationToken).ConfigureAwait(false);
+                    sourceBytes = source.ReserveMemory(statement.Metrics, _definitions.StatementMemoryBudget, cancellationToken);
+                    statement.Metrics.ReserveHashMemory(24L + 64L * 8, _definitions.StatementMemoryBudget);
+                    bufferBytes = 24L + 64L * 8;
+                    var batch = new List<byte[]>(64);
+                    var domains = bound.Domains.Count == 0 ? null : ExecutionEvaluator(null, cancellationToken,
+                        transactionTimestamp: statement.TransactionStart);
+                    await foreach (var row in source.GetRowsAsync(cancellationToken).ConfigureAwait(false))
                     {
                         cancellationToken.ThrowIfCancellationRequested();
-                        _storage.InsertRow(bracket, table.ObjectId, record);
+                        // Defer a full batch until another row arrives, so even exact multiples
+                        // of 64 have one final durable flush. Earlier brackets only append WAL.
+                        if (batch.Count == 64) { await FlushAsync(false).ConfigureAwait(false); }
+                        var values = new object?[table.Columns.Count];
+                        for (int ordinal = 0; ordinal < values.Length; ordinal++)
+                        {
+                            values[ordinal] = CoerceForColumn(SqlCharacter.Input(row.GetValue(ordinal), source.Columns[ordinal].Type),
+                                table.Columns[ordinal]);
+                        }
+                        if (domains is not null) { CheckDomains(bound, values, domains); }
+                        byte[] record = SqlRowCodec.Encode(table, values, builder.Sequence);
+                        long bytes = 32L + record.Length;
+                        statement.Metrics.ReserveHashMemory(bytes, _definitions.StatementMemoryBudget);
+                        batchBytes += bytes;
+                        batch.Add(record);
+                        written++;
                     }
-                    return ValueTask.FromResult(true);
-                }, durable: true, cancellationToken).ConfigureAwait(false);
-                batch.Clear();
-                TableAsStage?.Invoke("Copied", table.ObjectId);
+                    if (batch.Count != 0) { await FlushAsync(true).ConfigureAwait(false); }
+
+                    async Task FlushAsync(bool durable)
+                    {
+                        await statement.Coordinator.ApplyStatementAsync(builder, bracket =>
+                        {
+                            foreach (var record in batch)
+                            {
+                                cancellationToken.ThrowIfCancellationRequested();
+                                // The abandonment intent undoes the entire unreachable owner;
+                                // no per-row undo ledger needs to survive each bounded bracket.
+                                _storage.InsertRow(bracket, table.ObjectId, record);
+                            }
+                            return ValueTask.FromResult(true);
+                        }, durable, cancellationToken).ConfigureAwait(false);
+                        batch.Clear();
+                        statement.Metrics.ReleaseHashMemory(batchBytes);
+                        batchBytes = 0;
+                        TableAsStage?.Invoke("Copied", table.ObjectId);
+                    }
+                }
+                finally { statement.Metrics.ReleaseHashMemory(sourceBytes + batchBytes + bufferBytes); }
             }
+            TableAsStage?.Invoke("Prepared", table.ObjectId);
+            var publication = statement.ScriptReceipt;
+            if (publication is { } expected)
+            {
+                var previous = expected.Previous!;
+                ulong generation = checked(expected.ExpectedGeneration + 1);
+                var reserved = new SqlCatalogScript(previous.Name, previous.ContentHash, previous.StatementCount,
+                    previous.CompletedStatements, previous.BaseGeneration, generation, previous.SchemaHash,
+                    previous.Objects, previous.StatementObjects, previous.StatementParameterTypes);
+                publication = new SqlCatalogScriptPublication(expected.Name, expected.ContentHash, expected.StatementCount,
+                    reserved, generation, expected.SchemaHash, expected.ExpectedObject);
+            }
+            // Prepare the actual completion before either irrevocable publication or an
+            // observer of it. A duplicate-name no-op can still prepare its zero completion.
+            var result = await CompleteAsync(written).ConfigureAwait(false);
+            await _catalog.TableAsSnapshotGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                // Snapshot admission shares this gate: there is no SQL snapshot between
+                // the durable writer commit and catalog publication. Older snapshots retain
+                // the builder in their active set (or beyond their maximum) and see no rows.
+                if (builder is not null)
+                {
+                    await statement.Coordinator.CommitAsync(builder, cancellationToken).ConfigureAwait(false);
+                    builder = null;
+                }
+                TableAsStage?.Invoke("BuilderCommitted", table.ObjectId);
+                if (!await _catalog.PublishTableAsAsync(table, plan.IfNotExists && statement.ProvisioningSchema is null,
+                    publication, cancellationToken).ConfigureAwait(false))
+                {
+                    return await CompleteAsync(0).ConfigureAwait(false);
+                }
+                statement.Metrics.RecordSelfCommit();
+            }
+            finally { _catalog.TableAsSnapshotGate.Release(); }
+            AfterSelfCommit?.Invoke();
+            return result;
         }
-        TableAsStage?.Invoke("Prepared", table.ObjectId);
-        var publication = statement.ScriptReceipt;
-        if (publication is { } expected)
+        finally
         {
-            var previous = expected.Previous!;
-            ulong generation = checked(expected.ExpectedGeneration + 1);
-            var reserved = new SqlCatalogScript(previous.Name, previous.ContentHash, previous.StatementCount,
-                previous.CompletedStatements, previous.BaseGeneration, generation, previous.SchemaHash,
-                previous.Objects, previous.StatementObjects, previous.StatementParameterTypes);
-            publication = new SqlCatalogScriptPublication(expected.Name, expected.ContentHash, expected.StatementCount,
-                reserved, generation, expected.SchemaHash, expected.ExpectedObject);
+            if (builder is { State: TransactionState.Active } && !_storage.IsOffline)
+            { await statement.Coordinator.RollbackAsync(builder, CancellationToken.None).ConfigureAwait(false); }
         }
-        // No caller cancellation or fallible source disposal after this irrevocable commit.
-        await SelfCommitAsync(statement, publication is null
-            ? _catalog.PublishTableAsync(table, [], [], cancellationToken: cancellationToken)
-            : _catalog.PublishTableAsync(table, [], [], false, publication, cancellationToken)).ConfigureAwait(false);
-        return new SqlQueryResult(DatabaseResultStatus.Success, 0);
+
+        ValueTask<DatabaseResult> CompleteAsync(long count)
+            => statement.PrepareResultAsync(new SqlQueryResult(DatabaseResultStatus.Success, count), cancellationToken);
     }
 }

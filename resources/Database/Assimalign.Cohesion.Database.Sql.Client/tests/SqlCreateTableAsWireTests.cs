@@ -76,8 +76,8 @@ public sealed class SqlCreateTableAsWireTests
         await connection.ExecuteAsync("INSERT INTO src VALUES(1,'one',1.25),(2,NULL,2.5)", cancellationToken: timeout.Token);
 
         // Act
-        (await connection.ExecuteAsync("CREATE TABLE copy (key,word,value) AS WITH q AS (SELECT * FROM src) SELECT * FROM q WITH DATA", cancellationToken: timeout.Token)).ShouldBe(0);
-        await connection.ExecuteAsync("CREATE TABLE empty AS SELECT CAST('bad' AS INT) AS n WITH NO DATA", cancellationToken: timeout.Token);
+        (await connection.ExecuteAsync("CREATE TABLE copy (key,word,value) AS WITH q AS (SELECT * FROM src) SELECT * FROM q WITH DATA", cancellationToken: timeout.Token)).ShouldBe(2);
+        (await connection.ExecuteAsync("CREATE TABLE empty AS SELECT CAST('bad' AS INT) AS n WITH NO DATA", cancellationToken: timeout.Token)).ShouldBe(0);
 
         // Assert
         var copy = await connection.QueryAsync("SELECT * FROM copy ORDER BY key", cancellationToken: timeout.Token);
@@ -86,7 +86,7 @@ public sealed class SqlCreateTableAsWireTests
         copy[0][1].ShouldBe("one");
         copy[0][2].ShouldBe(1.25m);
         (await connection.QueryAsync("SELECT * FROM empty", cancellationToken: timeout.Token)).ShouldBeEmpty();
-        await connection.ExecuteAsync("CREATE TABLE IF NOT EXISTS copy AS SELECT missing FROM absent", cancellationToken: timeout.Token);
+        (await connection.ExecuteAsync("CREATE TABLE IF NOT EXISTS copy AS SELECT missing FROM absent", cancellationToken: timeout.Token)).ShouldBe(0);
         var conversion = await Should.ThrowAsync<SqlClientException>(async () =>
             await connection.ExecuteAsync("CREATE TABLE bad AS SELECT CAST('bad' AS INT) AS n FROM src", cancellationToken: timeout.Token));
         conversion.ConnectionUsable.ShouldBeTrue();

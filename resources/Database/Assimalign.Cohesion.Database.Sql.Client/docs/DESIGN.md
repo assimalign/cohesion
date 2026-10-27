@@ -549,13 +549,16 @@ leave the connection usable.
 
 ## CREATE TABLE AS (#1716, SQ-T2)
 
-CTAS uses the existing Execute request and zero-count DDL completion, with no client ABI,
+CTAS uses the existing Execute request and affected-row completion, with no client ABI,
 protocol or format change. InMemory and TCP tests verify inferred/renamed copies, WITH NO DATA,
 conversion cleanup, structured CS03068 output-name refusals, CS04003 explicit-transaction
 refusal with prior writes preserved, and connection reuse after every refusal. Publication is
 atomic; as with other committed DDL, a lost response can leave the committed table present.
 Disposing a running server session during a CTAS function call cancels its unpublished build;
 both transport tests await session cleanup and successfully retry from a new connection.
+Completion reports copied rows for WITH DATA and zero for WITH NO DATA or an IF NOT EXISTS skip.
+The engine prepares the actual count before its catalog commit, preserving result-encoding
+failure atomicity and committed-result delivery after cancellation.
 
 ## Read-only persisted views (#1124)
 

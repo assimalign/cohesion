@@ -315,7 +315,7 @@
   <data name="ScriptPublicationMismatch" xml:space="preserve"><value>The statement target, script identity or expected preceding receipt state does not match this publication.</value></data>
   <data name="StoredRowDecodeFailed" xml:space="preserve"><value>Row of table '{0}.{1}' (object {2}) does not decode: {3}</value></data>
   <data name="StatementMemoryBudgetExceeded" xml:space="preserve">
-    <value>The statement hash-build memory budget of {0} bytes was exceeded.</value>
+    <value>The statement memory budget of {0} bytes was exceeded.</value>
   </data>
   <data name="ExplainAnalyzeSelectOnly" xml:space="preserve">
     <value>EXPLAIN ANALYZE supports SELECT queries only.</value>

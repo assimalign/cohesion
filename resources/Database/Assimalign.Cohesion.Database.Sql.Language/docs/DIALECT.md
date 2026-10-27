@@ -369,16 +369,31 @@ with no persisted query or source dependency.
 
 WITH NO DATA binds and validates output without running the source, its predicates, projections,
 aggregates, row limits or functions. IF NOT EXISTS against an existing table skips source binding
-and execution; a view or system relation with the target name is still refused. CTAS returns
-the ordinary DDL zero affected-count completion. It follows existing self-committing DDL:
+and execution; a view or system relation with the target name is still refused. A table name
+claimed concurrently by CREATE TABLE, another CTAS or ALTER TABLE RENAME is checked atomically
+at publication: the loser reports CS03049 (42P07), or completes as a zero-row no-op with IF NOT EXISTS.
+CTAS reports the number of rows written as its affected count in process and over the wire,
+matching PostgreSQL's SELECT n completion; WITH NO DATA, empty input and IF NOT EXISTS skips
+report zero. It follows existing self-committing DDL:
 inside BEGIN it fails with CS04003 (25001), leaving earlier work and the transaction active.
 This differs from PostgreSQL's statement-transaction publication. A completed catalog publication
 is irrevocable; cancellation after it returns the committed result. A disconnect may lose that
-response. The source uses one statement MVCC snapshot. The destination remains absent until
-its entire data build is durable; conversion, domain, cancellation and storage failures before
+response. The source uses one statement MVCC snapshot. Retained query output and encoded batch
+buffers share StatementMemoryBudget; exhaustion reports CS05067 and leaves no table.
+The destination remains absent until its entire data build and dedicated writer transaction
+are durable. A snapshot admitted before publication sees an empty destination; one admitted
+afterwards sees every row. Snapshot admission waits through the short writer-commit/catalog-
+publication interval, including BEGIN, auto-commit and explicit ReadCommitted statement snapshots.
+No snapshot sees a partial row set. Conversion, domain, budget, cancellation and storage failures before
 publication leave no table. Crash recovery sees no table or the complete table, and reclaims
 abandoned owners. SQL remains format 26; existing kind-14 reclamation records suffice.
-References: local PostgreSQL src/backend/commands/createas.c:90-109,185-189,242-283,342-346
+
+CTAS holds the shared metadata lease for its entire source query and build, following CREATE
+INDEX's precedent. Other sessions' CREATE/DROP of views, functions, domains and schemas fail
+immediately during that lease. Its statement epoch also delays reclamation of owners retired
+meanwhile. Source reads retain their single statement snapshot while table DML/DDL runs concurrently.
+References: local PostgreSQL src/backend/commands/createas.c:90-109,167-185,242-283,342-349
+(SELECT n completion), src/backend/rewrite/rewriteHandler.c:1301-1312 (domain default fallback)
 and src/backend/nodes/makefuncs.c:565-582 (CTAS creates columns without source constraints).
 
 A snapshot captured before publication can read the same old rows after TRUNCATE commits,
@@ -3804,7 +3819,8 @@ An ON condition referencing any derived String/Json/Character column retains nes
 preserve deferred collation errors. No hash spill exists.
 
 `SqlDatabaseEngineOptions.StatementMemoryBudget` defaults to 67108864 bytes and must be positive.
-It limits accounted concurrently live hash-build storage per statement. Budget exhaustion reports
+It limits accounted concurrently live hash-build storage per statement. CTAS also charges its
+retained source result and copy buffers, as described in the CTAS contract. Budget exhaustion reports
 `CS05067` (53200, out_of_memory). It does not cap result materialization or transient planning.
 SELECT-only `EXPLAIN ANALYZE` runs normal query expressions, including application functions, and
 returns the existing eight-column plan description. `actual_rows` counts candidates before
