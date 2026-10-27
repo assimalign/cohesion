@@ -336,9 +336,11 @@ including nested groups and the derived SELECT introduced by canonical group-ali
 Decision 49a adds `SqlAlterColumnAction`, a full column-definition action:
 `ALTER TABLE t ALTER COLUMN c INT NOT NULL`. It reuses column parsing, including bounds,
 DEFAULT and collation, and the executor checks which changes preserve storage representation.
-SqlAlterColumnTypeAction retains the PostgreSQL TYPE/SET DATA TYPE target and original-row
-USING expression (#1447). Canonical rendering emits ALTER COLUMN ... TYPE with optional
-COLLATE/USING. This adds no keyword or clause count: TYPE and DATA are contextual and USING
+The public sealed SqlAlterColumnTypeAction retains the PostgreSQL TYPE/SET DATA TYPE target
+and original-row USING expression (#1447). The public SqlExpressionRenderer.Render(SqlAlterTableExpression)
+overload emits ALTER COLUMN ... TYPE with optional COLLATE/USING and quotes decoded domain
+names when required, preserving spaces, embedded quotes and keyword names on reparse.
+These are public API additions; no public interface is added. This adds no keyword or clause count: TYPE and DATA are contextual and USING
 already exists. Separate typed actions
 for SET/DROP DEFAULT and SET/DROP NOT NULL lower onto the existing column replacement path
 (#1122); RENAME TO and RENAME [COLUMN] have their own immutable action leaves. RENAME and TO

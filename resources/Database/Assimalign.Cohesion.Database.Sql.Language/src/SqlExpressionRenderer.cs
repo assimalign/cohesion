@@ -48,8 +48,17 @@ public static class SqlExpressionRenderer
         }
         return "ALTER TABLE " + (query.Table.SchemaName is { } schema ? Identifier(schema) + "." : "") +
             Identifier(query.Table.TableName) + " ALTER COLUMN " + Identifier(change.Column.ColumnName) +
-            " TYPE " + change.Column.DataType + (change.Column.CollationName is { } collation ? " COLLATE " + Identifier(collation) : "") +
+            " TYPE " + AlterTypeTarget(change.Column) + (change.Column.CollationName is { } collation ? " COLLATE " + Identifier(collation) : "") +
             (change.UsingExpression is { } conversion ? " USING " + Render(conversion) : "");
+    }
+
+    private static string AlterTypeTarget(SqlColumnDefinition column)
+    {
+        if (column.ResolvedType is not null) { return CastTarget(column.DataType); }
+        string type = column.DataType;
+        // Parsed domain declarations retain their SQL delimiters. Internal ASTs
+        // may also carry a bare name; quote that name without quoting twice.
+        return type.Length >= 2 && type[0] == '"' && type[^1] == '"' ? type : Identifier(type);
     }
 
     // Precedence ladder of SqlQueryParser.Expressions.cs, loosest first. An operand whose own

@@ -81,6 +81,33 @@ public sealed class SqlAlterTableParserTests
         SqlExpressionRenderer.Render(roundtrip.ShouldBeOfType<SqlQueryStatement>().SqlExpression.ShouldBeOfType<SqlAlterTableExpression>()).ShouldBe(rendered);
     }
 
+    [Theory(DisplayName = "Cohesion Test [Sql.Language] - ALTER TYPE review: type names render with required quoting and retain existing delimiters")]
+    [InlineData("a space", false)]
+    [InlineData("a\"quote", false)]
+    [InlineData("select", false)]
+    [InlineData("a space", true)]
+    [InlineData("a\"quote", true)]
+    [InlineData("select", true)]
+    public void Render_AlterTypeDomain_ShouldPreserveTypeName(string name, bool alreadyQuoted)
+    {
+        // Arrange
+        string quoted = "\"" + name.Replace("\"", "\"\"") + "\"";
+        var parsed = new SqlQueryParser().Parse("ALTER TABLE t ALTER v TYPE " + quoted);
+        var original = parsed.ShouldBeOfType<SqlQueryStatement>().SqlExpression.ShouldBeOfType<SqlAlterTableExpression>();
+        var alter = alreadyQuoted ? original : new SqlAlterTableExpression(original.Table,
+            new SqlAlterColumnTypeAction(new SqlColumnDefinition("v", name, true, false, null), null), null, null);
+
+        // Act
+        string rendered = SqlExpressionRenderer.Render(alter);
+        var reloaded = new SqlQueryParser().Parse(rendered);
+
+        // Assert
+        rendered.ShouldContain("TYPE " + quoted, Case.Sensitive);
+        reloaded.Diagnostics.ShouldNotContain(d => d.Severity == DiagnosticSeverity.Error);
+        reloaded.ShouldBeOfType<SqlQueryStatement>().SqlExpression.ShouldBeOfType<SqlAlterTableExpression>()
+            .Action.ShouldBeOfType<SqlAlterColumnTypeAction>().Column.DataType.ShouldBe(quoted);
+    }
+
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - ALTER TYPE: incomplete clauses are syntax errors")]
     [InlineData("ALTER c TYPE")]
     [InlineData("ALTER c SET DATA")]
