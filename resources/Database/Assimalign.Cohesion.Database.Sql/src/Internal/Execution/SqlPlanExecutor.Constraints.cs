@@ -1119,7 +1119,8 @@ internal sealed partial class SqlPlanExecutor
     /// <param name="defaultCollation">The database default collation.</param>
     /// <param name="functions">The engine's function catalog and the database.</param>
     /// <param name="functionCalls">The persisted calls' exact normalized identities in preorder.</param>
-    /// <param name="retyping">Whether ALTER TYPE must validate every statically known operand type.</param>
+    /// <param name="retyping">Whether ALTER TYPE must validate changed operand types.</param>
+    /// <param name="previous">The original definition, used to identify changed operand types.</param>
     /// <returns>
     /// The predicate compiled to the bound tree every write to the table version evaluates: its
     /// columns as ordinals of the version's rows, its calls bound to their functions and each
@@ -1127,13 +1128,16 @@ internal sealed partial class SqlPlanExecutor
     /// </returns>
     /// <exception cref="DatabaseException">The predicate cannot be evaluated against the table's rows.</exception>
     internal static SqlBoundExpression BindPersistedCheck(SqlExpression expression, SqlCatalogTable table, Collation defaultCollation,
-        SqlFunctionEnvironment functions, IReadOnlyList<string> functionCalls, CancellationToken cancellationToken, bool retyping = false)
+        SqlFunctionEnvironment functions, IReadOnlyList<string> functionCalls, CancellationToken cancellationToken, bool retyping = false,
+        SqlCatalogTable? previous = null)
     {
         var scope = new SqlExpressionEvaluator(table.Columns, null, defaultCollation: defaultCollation, functions: functions, cancellationToken: cancellationToken);
         SqlDefinitionBinder.PinCalls(expression, scope, functionCalls);
         SqlPersistedExpression.Bind(expression, scope);
-        if (retyping) { SqlPlanner.ValidateExpression(expression, scope); }
-        new SqlCheckSyntax(table, scope, declaring: retyping, retyping: retyping).Validate(expression, requireBoolean: true);
+        var previousScope = previous is null ? null : new SqlExpressionEvaluator(previous.Columns, null,
+            defaultCollation: defaultCollation, functions: functions, cancellationToken: cancellationToken);
+        if (previousScope is not null) { SqlDefinitionBinder.PinCalls(expression, previousScope, functionCalls); }
+        new SqlCheckSyntax(table, scope, declaring: false, retyping: retyping, previousScope: previousScope).Validate(expression, requireBoolean: true);
         return scope.BindPredicate(expression);
     }
 
@@ -1272,6 +1276,7 @@ internal sealed partial class SqlPlanExecutor
         private readonly bool _declaring;
         private readonly bool _validateQualifiers;
         private readonly bool _retyping;
+        private readonly SqlExpressionEvaluator? _previousScope;
 
         /// <summary>Initializes the check of one predicate.</summary>
         /// <param name="table">The table version the predicate constrains.</param>
@@ -1283,13 +1288,16 @@ internal sealed partial class SqlPlanExecutor
         /// </param>
         /// <param name="validateQualifiers">Whether to enforce qualifier identity for a new or changed schema.</param>
         /// <param name="retyping">Whether to revalidate operand types for ALTER COLUMN TYPE.</param>
-        internal SqlCheckSyntax(SqlCatalogTable table, SqlExpressionEvaluator scope, bool declaring, bool validateQualifiers = true, bool retyping = false)
+        /// <param name="previousScope">The original operand types, when retyping an existing definition.</param>
+        internal SqlCheckSyntax(SqlCatalogTable table, SqlExpressionEvaluator scope, bool declaring, bool validateQualifiers = true, bool retyping = false,
+            SqlExpressionEvaluator? previousScope = null)
         {
             _table = table;
             _scope = scope;
             _declaring = declaring;
             _validateQualifiers = validateQualifiers;
             _retyping = retyping;
+            _previousScope = previousScope;
         }
 
         /// <summary>Checks one node.</summary>
@@ -1416,6 +1424,7 @@ internal sealed partial class SqlPlanExecutor
                     break;
                 case SqlBinaryExpression binary when binary.Operator is SqlBinaryOperator.Add or SqlBinaryOperator.Subtract
                     or SqlBinaryOperator.Multiply or SqlBinaryOperator.Divide or SqlBinaryOperator.Modulo:
+                    if (_retyping && !TypeChanged(binary.Left) && !TypeChanged(binary.Right)) { break; }
                     SqlPlanner.ValidateTemporalArithmetic(binary, _scope);
                     var leftType = _scope.StaticTypeOf(binary.Left);
                     var rightType = _scope.StaticTypeOf(binary.Right);
@@ -1441,11 +1450,6 @@ internal sealed partial class SqlPlanExecutor
                 case SqlCaseExpression { Input: { } input } conditional when _retyping:
                     foreach (var branch in conditional.WhenClauses) { CheckComparable(input, branch.Condition); }
                     break;
-                case SqlLikeExpression like when _retyping:
-                    CheckCharacter(like.Operand);
-                    CheckCharacter(like.Pattern);
-                    if (like.Escape is { } escape) { CheckCharacter(escape); }
-                    break;
                 case SqlUnaryExpression { Operator: SqlUnaryOperator.Negate or SqlUnaryOperator.Plus } unary when _retyping:
                     if (unary.Operator != SqlUnaryOperator.Negate || _scope.StaticTypeOf(unary.Operand) != DatabaseType.TimeSpan)
                     { CheckNumber(unary.Operand); }
@@ -1453,15 +1457,14 @@ internal sealed partial class SqlPlanExecutor
             }
         }
 
-        private void CheckCharacter(SqlExpression expression)
-        {
-            var type = _scope.StaticTypeOf(expression);
-            if (type is not (DatabaseType.Null or DatabaseType.String or DatabaseType.Character or DatabaseType.Json))
-            { throw SqlEvaluationException.InvalidOperandType("LIKE", SqlType.NameOf(type)); }
-        }
+        // LIKE accepts every SQL storage type through the evaluator's LikeText conversion.
+        // Its normal binder already checks constant patterns and escape lengths.
+        private bool TypeChanged(SqlExpression expression)
+            => _retyping && (_previousScope is null || _scope.StaticTypeOf(expression) != _previousScope.StaticTypeOf(expression));
 
         private void CheckComparable(SqlExpression left, SqlExpression right)
         {
+            if (_retyping && !TypeChanged(left) && !TypeChanged(right)) { return; }
             var (leftCall, leftType) = Operand(left);
             var (rightCall, rightType) = Operand(right);
             if (!_retyping && leftCall is null && rightCall is null || leftType == DatabaseType.Null || rightType == DatabaseType.Null ||
@@ -1491,6 +1494,7 @@ internal sealed partial class SqlPlanExecutor
 
         private void CheckNumber(SqlExpression operand)
         {
+            if (_retyping && !TypeChanged(operand)) { return; }
             var (call, type) = Operand(operand);
             if (_retyping && type != DatabaseType.Null && !IsNumber(type))
             {

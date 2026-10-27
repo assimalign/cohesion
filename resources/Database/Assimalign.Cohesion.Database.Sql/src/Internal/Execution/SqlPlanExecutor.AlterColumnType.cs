@@ -80,7 +80,7 @@ internal sealed partial class SqlPlanExecutor
         {
             var value = i == ordinal ? column : columns[i];
             columns[i] = new SqlCatalogColumn(value.Name, value.Type, value.IsNullable, value.DefaultLiteral,
-                value.Collation, value.DomainName, value.DefaultFunctionCalls, value.Identity);
+                value.Collation, value.DomainName, value.DefaultFunctionCalls, value.Identity) { RecastDefault = value.RecastDefault };
         }
         var definition = new SqlCatalogTable(plan.Table.ObjectId, plan.Table.Schema, plan.Table.Name, columns,
             plan.Table.PrimaryKeyColumns, plan.Table.Owner, plan.Table.OwningSchema, plan.Table.Constraints);
@@ -90,7 +90,7 @@ internal sealed partial class SqlPlanExecutor
         {
             var constraint = check.Constraint;
             BindPersistedCheck(SqlPersistedExpression.Load(constraint.CheckExpression!, constraint.Name), definition,
-                _catalog.DefaultCollation, _definitions.Functions, constraint.CheckFunctionCalls, cancellationToken, retyping: true);
+                _catalog.DefaultCollation, _definitions.Functions, constraint.CheckFunctionCalls, cancellationToken, retyping: true, previous: plan.Table);
         }
         var defaults = _definitions.Get(plan.Table, cancellationToken).DefaultValues.ToArray();
         defaults[ordinal] = column.DefaultLiteral is null ? null : BindDefaultExpression(column,

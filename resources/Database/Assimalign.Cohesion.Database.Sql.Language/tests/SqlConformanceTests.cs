@@ -37,6 +37,7 @@ public class SqlConformanceTests
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - Conformance: supported statements parse without errors")]
     [InlineData("ALTER TABLE t ALTER v TYPE \"a space\" USING v;", SqlQueryCommandType.Alter)]
     [InlineData("ALTER TABLE t ALTER v TYPE \"a\"\"quote\";", SqlQueryCommandType.Alter)]
+    [InlineData("ALTER TABLE t ALTER v TYPE \"\"\"odd\"\"\";", SqlQueryCommandType.Alter)]
     [InlineData("SELECT * FROM users;", SqlQueryCommandType.Select)]
     [InlineData("SELECT * FROM a FULL JOIN b USING(id);", SqlQueryCommandType.Select)]
     [InlineData("SELECT * FROM a LEFT OUTER JOIN b ON a.id = b.id FULL OUTER JOIN c ON b.id = c.id;", SqlQueryCommandType.Select)]

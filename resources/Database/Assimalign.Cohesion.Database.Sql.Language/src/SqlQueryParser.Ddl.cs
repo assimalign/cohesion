@@ -635,6 +635,7 @@ public sealed partial class SqlQueryParser
 
     private SqlAlterAction ParseAlterColumnType(ref TokenLexer lexer, string column)
     {
+        string typeName = CurrentIdentifierText(ref lexer);
         string type = ParseDefinitionType(ref lexer, column, out var resolved);
         string? collation = null;
         if (IsWord(ref lexer, "COLLATE"))
@@ -649,7 +650,7 @@ public sealed partial class SqlQueryParser
             conversion = ParseOperand(ref lexer, OperandRule.Expression);
         }
         return new SqlAlterColumnTypeAction(new SqlColumnDefinition(column, type, true, false, null,
-            collationName: collation, resolvedType: resolved), conversion);
+            collationName: collation, resolvedType: resolved, typeName: typeName), conversion);
     }
 
     private string ReadAlterName(ref TokenLexer lexer, string subject)

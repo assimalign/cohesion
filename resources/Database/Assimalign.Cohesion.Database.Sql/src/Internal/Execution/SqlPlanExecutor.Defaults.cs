@@ -128,29 +128,29 @@ internal sealed partial class SqlPlanExecutor
             {
                 throw new SqlExecutionException(SqlExecutionException.DamagedDefinitionCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DefaultSignaturesUnresolved, string.Join(", ", column.DefaultFunctionCalls)));
             }
-            if (declaring)
-            {
-                SqlPlanner.ValidateExpression(expression, scope);
-                SqlPlanner.ValidateDefaultType(expression, scope, column.Type.Type, column.Name);
-            }
-            var volatility = DefaultVolatility(expression, scope);
             // A missing native domain remains readable under the stored base type;
             // the bound domain checker owns its existing CS02010 write refusal.
             var target = (column.DomainName is { } name ? functions.Types.Find(name) : null) ?? SqlType.ForStorage(column.Type);
             // DEFAULT text stores the original expression, without implicit column
             // coercion. Rebind that assignment, including a domain's base modifiers,
             // rather than persisting an explicit CAST that can truncate characters.
-            var casts = functions.Types.ResolveCasts(scope.SourceDomain(expression), target);
+            var casts = column.RecastDefault ? functions.Types.ResolveCasts(scope.SourceDomain(expression), target) : null;
             var source = scope.StaticTypeOf(expression);
-            SqlBoundExpression value = scope.Bind(expression);
-            // Standard assignments already belong to CoerceForColumn, including
-            // its established DEFAULT diagnostics. Only application conversion
-            // pathways need a registry node before that assignment.
-            if (casts[(int)source] is { } cast && !SqlStandardCasts.Contains(cast))
+            bool assignmentCast = casts?[(int)source] is { Context: not SqlCastContext.Explicit };
+            if (declaring)
             {
-                value = new SqlBoundCast(value, target.Name, SqlType.ForStorage(column.Type), casts,
+                SqlPlanner.ValidateExpression(expression, scope);
+                SqlPlanner.ValidateDefaultType(expression, scope, column.Type.Type, column.Name, assignmentCast);
+            }
+            // Only TYPE recasts defaults. Existing ordinary expression defaults keep
+            // their established CoerceForColumn behavior, including application domains.
+            SqlBoundExpression value = scope.Bind(expression);
+            if (assignmentCast)
+            {
+                value = new SqlBoundCast(value, target.Name, SqlType.ForStorage(column.Type), casts!,
                     functions.Database, collation, sourceType: source, assignment: true);
             }
+            var volatility = DefaultVolatility(expression, scope);
             var bound = new SqlBoundDefault(value, column, volatility != SqlFunctionVolatility.Immutable);
             // Immutable defaults are proved at definition time, even on an empty table.
             // Loading retains the tree; stable and volatile calls run when a value is assigned.

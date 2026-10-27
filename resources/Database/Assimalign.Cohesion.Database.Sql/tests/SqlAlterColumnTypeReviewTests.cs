@@ -133,7 +133,6 @@ public sealed partial class SqlAlterColumnTypeReviewTests
 
     [Theory(DisplayName = "Cohesion Test [Sql] - ALTER TYPE review: CHECK operators rebind on empty tables")]
     [InlineData("CASE v WHEN 'a' THEN TRUE ELSE FALSE END")]
-    [InlineData("v LIKE 'a%'")]
     public async Task ExecuteAsync_IncompatibleCheck_ShouldRefuseBeforeReservation(string predicate)
     {
         // Arrange

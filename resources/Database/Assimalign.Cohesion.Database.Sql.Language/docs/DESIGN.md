@@ -15,6 +15,14 @@ renderer and grammar are unchanged. Live clause conformance executes MERGE rathe
 measuring only EXPLAIN; SQL's design records transaction admission and SQ-M3's remaining
 concurrent-target rechecks and mixed-action final-state constraints.
 
+## ALTER TYPE domain rendering (#1447)
+
+SqlColumnDefinition retains the parser's decoded type name separately from its type spelling.
+ALTER TYPE renders this structured name with identifier escaping, so a decoded domain name
+beginning and ending in quote characters cannot be confused with SQL delimiters. Parser and
+direct-AST round trips cover both forms. DIALECT.md records TYPE's assignment-default casts,
+narrowing rewrites and persisted CHECK rules; the engine's live conformance corpus exercises them.
+
 ## TRUNCATE (#1716, SQ-T1)
 
 SqlTruncateExpression stores an immutable ordered list of SqlTruncateTable targets, each with

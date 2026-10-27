@@ -82,9 +82,10 @@ public sealed partial class SqlCatalog
     private const int schemaStateChunkSize = 3 * 1024;
 
     // The version of a table record's trailing extension this catalog writes; it reads
-    // only the current version. Version 6 adds frozen missing values; version 5 adds identity facets; version 3 adds the dropped columns' physical ordinals (#1241),
+    // only the current version. Version 7 adds TYPE default assignment coercion;
+    // version 6 adds frozen missing values; version 5 adds identity facets; version 3 adds the dropped columns' physical ordinals (#1241),
     // version 4 (data-storage format 7, phase E3) each column's domain name.
-    private const int tableExtensionVersion = 6;
+    private const int tableExtensionVersion = 7;
 
     private static readonly Encoding _strictUtf8 = new UTF8Encoding(
         encoderShouldEmitUTF8Identifier: false,
@@ -1783,6 +1784,7 @@ public sealed partial class SqlCatalog
         foreach (var column in table.Columns)
         {
             AppendOptionalString(ref writer, column.MissingValueLiteral);
+            writer.AppendBoolean(column.RecastDefault);
         }
         return writer.ToArray();
     }
@@ -2003,7 +2005,7 @@ public sealed partial class SqlCatalog
             var column = columns[index];
             columns[index] = new SqlCatalogColumn(column.Name, column.Type, column.IsNullable,
                 column.DefaultLiteral, column.Collation, column.DomainName, column.DefaultFunctionCalls, column.Identity,
-                ReadOptionalString(ref reader));
+                ReadOptionalString(ref reader)) { RecastDefault = reader.ReadBoolean() };
         }
         ValidateColumns(schema, name, columns, primaryKey);
         if (!reader.IsAtEnd)

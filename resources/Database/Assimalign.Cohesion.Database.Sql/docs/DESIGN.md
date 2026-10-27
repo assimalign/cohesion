@@ -2645,7 +2645,7 @@ utility.c:1480-1483 and namespace.c:526-531.
 
 AUTHORIZATION and nested schema elements are rejected with CK00001. Atomic nested statements
 would require a separate DDL execution contract because each existing statement self-commits.
-Record-space format 26 has no upgrade reader: export older databases, recreate and explicitly
+Record-space format 27 has no upgrade reader: export older databases, recreate and explicitly
 CREATE SCHEMA for non-dbo table namespaces before importing. Namespace records are not synthesized.
 
 The area root carries only the model-independent ownership contracts (`DatabaseObjectOwner`,
@@ -3388,7 +3388,7 @@ project reference or InternalsVisibleTo change is required.
   format, no upgrade path.** The catalog stores the format version of the whole
   data file set, rows and the index trees that ride it (a kind-4 record for
   versions 1–3, a kind-8 record from version 4). The engine reads and writes
-  format 26 only: format 6's stamped rows in per-object page chains whose index keys use the
+  format 27 only: format 6's stamped rows in per-object page chains whose index keys use the
   temporal identity encoding (#1099, below), in index trees of B-tree page format
   2, which order entries by key, entry reference and writer (#1194,
   `Database.Indexing` DESIGN), decoded through each table's physical column
@@ -3414,7 +3414,7 @@ project reference or InternalsVisibleTo change is required.
   after a crash. No format bump is needed: the claim is consulted only for marker-free catalogs
   (RecordSpaceFormatVersion == 1), which carry no format number. Older engines harmlessly
   ignore the claim, so a bump would fence no interrupted catalog and would unnecessarily
-  refuse every intact format-26 database. Claim-file creation and deletion are not directory-fsynced.
+  refuse every intact format-27 database. Claim-file creation and deletion are not directory-fsynced.
   A lost create loses the proof and refuses adoption; a lost delete leaves a stale claim fenced
   by the checkpointed data header. Neither permits adopting committed data as creation.
   Create and open complete a marker-free catalog only when the catalog-owned internal
@@ -6779,7 +6779,7 @@ All columns, constraints, ownership, physical ordinals
 and frozen missing values are copied. CONTINUE moves the exact volatile cursor/block and the
 durable last reservation; RESTART removes the counter so allocation resumes at START. No new
 record layout, durable record kind, public catalog member, interface or format version is needed:
-SQL remains format 26. Failed preparation and crash recovery use kind 14 unchanged.
+SQL remains format 27. Failed preparation and crash recovery use kind 14 unchanged.
 
 A short-lived coordinator snapshot pin brackets catalog publication: it is active before the
 swap and rolled back just afterwards. Its sequence is a visibility marker, with no persisted
@@ -6905,7 +6905,7 @@ including reservation-hook, lock, binding and builder failures and a lost name r
 intent is then listed as pending until reclamation finishes, matching reopen. Earlier failures leave
 no table; the existing worker reclaims the abandoned owner after the statement/snapshot fences
 clear. Recovery restores either no table plus reclamation
-work, or the entire table with no intent. SQL stays format 26: ordinary table records and kind 14
+work, or the entire table with no intent. SQL stays format 27: ordinary table records and kind 14
 already express this protocol. There is no public catalog seam, friend grant or new interface.
 CTAS follows existing self-committing DDL and is refused inside BEGIN with CS04003 (25001);
 commit-time transactional DDL needs broader catalog machinery and remains outside this run.
@@ -6951,22 +6951,30 @@ Full-definition storage-type, scale, domain and collation changes share this rew
 CS05013 if the resulting default differs, or if collation changes without an explicit COLLATE;
 SET/DROP DEFAULT remains the default-changing operation even when a rewrite is needed. TYPE
 without USING also uses the validation-only path when storage identity, scale, domain and
-collation remain unchanged, except CHAR width changes that can require repadding. Such changes
+collation remain unchanged and length/precision only widen (or become unbounded), except CHAR
+width changes that can require repadding. Narrowing uses the copier and assignment semantics:
+VARCHAR discards only excess trailing spaces and refuses other overflow. Such widenings
 retain the heap owner and index trees. PostgreSQL's corresponding rewrite test is
-tablecmds.c:15156-15194 (ATColumnChangeRequiresRewrite). The existing
+tablecmds.c:15142-15199 (ATColumnChangeRequiresRewrite and its binary-coercibility contract);
+varchar.c:620-648 supplies trailing-space assignment trimming. The existing
 full-definition identity-type refusal remains; explicit TYPE permits integer identity conversion.
 
 Defaults are tested independently of USING from the original expression without implicit column
 coercion (tablecmds.c:15269-15304). Numeric and Boolean literals retain their expression identity;
 unknown string literals retain their resolved old identity. Immutable results persist as canonical
-literals, preventing CAST accumulation across repeated changes and reopen. Expression defaults
-retain their original text and pinned calls; the DEFAULT binder supplies assignment coercion on
-each evaluation, including target-domain base modifiers, so character overflow refuses rather
-than truncating. A missing native domain still opens with readable stored values; its bound domain
+literals and lose their function pins, preventing CAST accumulation across repeated changes and
+reopen. Only non-immutable defaults retain their original text and pinned calls. An internal
+persisted RecastDefault column flag makes the DEFAULT binder supply a resolved standard or
+application assignment cast on each evaluation, including DATE to TIMESTAMP and TIMESTAMP to
+TIMESTAMPTZ and target-domain base modifiers. Ordinary defaults retain their prior evaluation
+behavior, including application-domain expressions; SET/DROP DEFAULT clears the flag. Character
+overflow refuses rather than truncating. A missing native domain still opens with readable stored values; its bound domain
 checker retains CS02010 for writes, including columns with expression defaults. A column with no default inherits the target domain's default, as CREATE TABLE
 and CTAS do. Volatile defaults are bound without execution; immutable defaults are evaluated
-before reservation. Referencing CHECKs use the declaration binder against the target definition,
-including CASE input/WHEN, LIKE operand/pattern/escape and empty-table operand compatibility, pin existing function identities, and
+before reservation. Referencing CHECKs keep persisted-definition rules (declaring: false), pin
+existing function identities, and validate only operands whose static type changes, including
+CASE input/WHEN compatibility on empty tables. LIKE retains runtime's invariant text conversion
+for numeric and other non-character operands (SqlExpressionEvaluator.cs:1122). CHECKs
 evaluate over every converted row. Domain checks and NOT NULL use the shared write validators.
 All indexes are rebuilt and uniqueness is checked under the target collation before publication.
 FK compatibility retains the engine's declaration rule: identical storage identity and character
@@ -6977,9 +6985,9 @@ The affected adjacent tables take exclusive locks, so their rows and definitions
 through validation/publication. Dependent views refuse even
 a same-type USING expression; views reading only other columns retain the shared owner remapping.
 CHAR defaults retain their old declared width when resolving unknown literals and use assignment
-modifiers on future calls. A dependent default requiring an application CHAR/TEXT conversion
-that cannot retain this assignment behavior refuses with CK00001; drop it before TYPE and set
-the desired default afterward. Immutable target-domain defaults validate even on empty tables.
+modifiers on future calls. Application CHAR/TEXT defaults use the registered assignment cast;
+the former CK00001 refusal is unnecessary because no explicit truncating CAST is persisted.
+Immutable target-domain defaults validate even on empty tables.
 
 The inline path holds session schema/metadata admission, source table X, adjacent FK X in id
 order, reserved owner X, then the apply gate and tree/page latches. The lock manager detects
@@ -6997,11 +7005,13 @@ The populated-table worker handoff and expanded crash/wire convergence coverage 
 
 CS02064 identifies a missing assignment cast for an old value, USING result or default (42804).
 Existing constraint, conversion, view, locking and storage codes retain their conditions.
-SQL format 26 and compiled-schema v8 are unchanged: this uses existing column/type/default
-records, dense row encoding, replacement markers and reclamation intents. The language assembly
+SQL format 27 gates table extension 7's RecastDefault Boolean beside each missing-value literal;
+earlier SQL files are refused without an upgrade reader. Compiled-schema v8, dense row encoding,
+replacement markers and reclamation intents are unchanged. The language assembly
 adds the public sealed SqlAlterColumnTypeAction leaf and SqlExpressionRenderer.Render(SqlAlterTableExpression)
-overload; canonical rendering quotes decoded domain names when required. No persisted shape,
-wire message, public interface, visibility grant or project reference changes. NativeAOT smoke
+overload; canonical rendering quotes the AST's decoded domain name, including names whose actual
+first and last characters are quotes. No wire message, public interface, visibility grant or
+project reference changes. NativeAOT smoke
 executes TYPE USING; nonparallel tests force stale-writer waits/retries until counters prove the
 race, and inject failure/cancellation at each preparation stage to verify ownership release.
 TYPE crash-image tests reopen success and cancellation images under all three durability policies,
@@ -7084,8 +7094,8 @@ child between discovery and IS grant, assert rediscovery, and verify rollback ca
 orphan. Parent DELETE must wait for the child's shared lock on the replacement parent's row.
 The null-key shortcut follows local PostgreSQL src/backend/utils/adt/ri_triggers.c:458-496;
 no reference-engine code is copied.
-Existing codes retain their conditions. SQL remains format 26: ordinary dense table records,
-kind-14 intents and the existing TRUNCATE publication contract are readable by the format-26
+Existing codes retain their conditions. SQL remains format 27: ordinary dense table records,
+kind-14 intents and the existing TRUNCATE publication contract are readable by the format-27
 engine, so this operation changes no persisted contract. Compiled-schema v8 and catalog record
 shapes stay unchanged. The existing coded open gate refuses all earlier files; no upgrade or legacy reader is added.
 
@@ -7179,7 +7189,7 @@ would tell every caller the value is changeable and then guard that promise at
 runtime.
 
 Table metadata extension version 2 introduced one collation identifier per column
-after the existing constraints. Current format 26 requires the complete table extension 6 record,
+after the existing constraints. Current format 27 requires the complete table extension 7 record,
 including resolved-call vectors, identity facets and frozen missing-value literals described below. Column additions,
 drops, and restart preserve explicit overrides. An index inherits its key
 columns' effective collations; the SQL engine verifies index eligibility and
@@ -7257,7 +7267,7 @@ codec, the key encoding and every comparison read, so they do not consult the do
   column (the primary key's implicit NOT NULL).
 - **Persistence: table extension version 4** (data-storage format 7). After the dropped
   ordinals, one optional string per live column, NULL for a column of a built-in type,
-  which this catalog always writes. Current format 26 also requires the call vectors, identity facets and extension 6 missing-value literals;
+  which this catalog always writes. Current format 27 also requires the call vectors, identity facets and extension 7 missing-value literals and TYPE default-assignment flags;
   the format gate refuses earlier databases rather than loading their definitions. A persisted blank
   name fails the load with `SqlCatalogException`, as does a blank `domainName` at the
   column's constructor (`ArgumentException`).
