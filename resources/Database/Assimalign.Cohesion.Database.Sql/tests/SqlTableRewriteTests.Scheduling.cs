@@ -87,6 +87,9 @@ public sealed partial class SqlTableRewriteTests
         await transaction.RollbackAsync(timeout.Token);
         await ExecAsync(session, "ALTER TABLE t ADD n INT", timeout.Token);
         await database.RewriteTableAsync(Table(database), timeout.Token);
+        // The successful retry retires an owner. Its reclamation fence is an open
+        // snapshot context too; finish that work before checking transaction cleanup.
+        await ReclaimAsync(database, timeout.Token);
         database.Coordinator.GetOpenContexts().ShouldBeEmpty();
     }
 }
