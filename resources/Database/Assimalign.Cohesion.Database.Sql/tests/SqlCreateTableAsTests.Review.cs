@@ -259,11 +259,11 @@ public sealed partial class SqlCreateTableAsTests
         }
     }
 
-    [Theory(DisplayName = "Cohesion Test [Sql] - CTAS: intermediate batches append without flushing and the final batch is durable")]
+    [Theory(DisplayName = "Cohesion Test [Sql] - CTAS: all copy batches append without flushing and the builder commit supplies durability")]
     [InlineData(65)]
     [InlineData(128)]
     [InlineData(129)]
-    public async Task ExecuteAsync_MultipleBatches_ShouldFlushOnlyTheLast(int count)
+    public async Task ExecuteAsync_MultipleBatches_ShouldFlushOnlyAtBuilderCommit(int count)
     {
         // Arrange
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
@@ -275,13 +275,21 @@ public sealed partial class SqlCreateTableAsTests
         if (count > 65)
         { await ExecAsync(session, "INSERT INTO src VALUES " + string.Join(',', Enumerable.Range(66, count - 65).Select(n => $"({n})")), timeout.Token); }
         int flushes = strategy.JournalFlushes("db");
-        int copied = 0;
-        SqlPlanExecutor.TableAsStage = (stage, _) =>
+        int copied = 0, committed = 0;
+        SqlPlanExecutor.TableAsStage = (stage, owner) =>
         {
-            if (stage != "Copied") { return; }
-            copied++;
             // Observe actual data-journal flush calls, independent of the executor's arguments.
-            (strategy.JournalFlushes("db") - flushes).ShouldBe(copied == (count + 63) / 64 ? 1 : 0);
+            if (stage == "Copied")
+            {
+                copied++;
+                (strategy.JournalFlushes("db") - flushes).ShouldBe(0);
+            }
+            if (stage == "BuilderCommitted")
+            {
+                committed++;
+                (strategy.JournalFlushes("db") - flushes).ShouldBe(1);
+                database.Catalog.TryGetTable("dbo", "copy", out _).ShouldBeFalse();
+            }
         };
         try
         {
@@ -292,6 +300,7 @@ public sealed partial class SqlCreateTableAsTests
 
         // Assert
         copied.ShouldBe((count + 63) / 64);
+        committed.ShouldBe(1);
         session.LastStatementMetrics.ShouldNotBeNull().HashMemoryBytes.ShouldBe(0);
         (await RowsAsync(session, "SELECT * FROM copy", timeout.Token)).Count.ShouldBe(count);
     }

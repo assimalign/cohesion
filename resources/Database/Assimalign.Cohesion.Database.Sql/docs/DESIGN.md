@@ -6781,11 +6781,11 @@ while this statement remains active.
 
 Reservation commits a new identity and existing kind-14 reclamation intent together. All copied
 rows carry one dedicated builder transaction's writer sequence. Batches contain at most 64 rows
-and release the apply gate between brackets; only the final bracket awaits durability, including
-when the input width is an exact multiple of 64. Ordered WAL makes earlier brackets durable with
-it. The builder commits durably outside the apply gate after the last flush and source disposal,
-before catalog publication. Whole-owner abandonment supplies failure cleanup, so the builder
-needs no growing per-row undo ledger.
+and release the apply gate between brackets; every bracket appends without awaiting durability,
+including the final batch and exact multiples of 64. The builder commits durably outside the apply
+gate after the last flush and source disposal, before catalog publication. Its later commit record
+makes every earlier bracket durable through the ordered WAL. Whole-owner abandonment supplies
+failure cleanup, so the builder needs no growing per-row undo ledger.
 
 Ordinary MVCC over the builder's single commit controls visibility. A snapshot taken before that
 commit sees no destination rows. A snapshot taken after it sees every row once the live catalog

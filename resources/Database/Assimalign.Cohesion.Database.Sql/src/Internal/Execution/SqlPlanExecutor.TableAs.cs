@@ -66,9 +66,8 @@ internal sealed partial class SqlPlanExecutor
                     await foreach (var row in source.GetRowsAsync(cancellationToken).ConfigureAwait(false))
                     {
                         cancellationToken.ThrowIfCancellationRequested();
-                        // Defer a full batch until another row arrives, so even exact multiples
-                        // of 64 have one final durable flush. Earlier brackets only append WAL.
-                        if (batch.Count == 64) { await FlushAsync(false).ConfigureAwait(false); }
+                        // Bound each physical bracket and release the apply gate between batches.
+                        if (batch.Count == 64) { await FlushAsync().ConfigureAwait(false); }
                         var values = new object?[table.Columns.Count];
                         for (int ordinal = 0; ordinal < values.Length; ordinal++)
                         {
@@ -83,10 +82,12 @@ internal sealed partial class SqlPlanExecutor
                         batch.Add(record);
                         written++;
                     }
-                    if (batch.Count != 0) { await FlushAsync(true).ConfigureAwait(false); }
+                    if (batch.Count != 0) { await FlushAsync().ConfigureAwait(false); }
 
-                    async Task FlushAsync(bool durable)
+                    async Task FlushAsync()
                     {
+                        // The ordered journal makes every bracket durable with the builder's
+                        // later commit, whose fsync runs outside the apply gate.
                         await statement.Coordinator.ApplyStatementAsync(builder, bracket =>
                         {
                             foreach (var record in batch)
@@ -97,7 +98,7 @@ internal sealed partial class SqlPlanExecutor
                                 _storage.InsertRow(bracket, table.ObjectId, record);
                             }
                             return ValueTask.FromResult(true);
-                        }, durable, cancellationToken).ConfigureAwait(false);
+                        }, false, cancellationToken).ConfigureAwait(false);
                         batch.Clear();
                         statement.Metrics.ReleaseHashMemory(batchBytes);
                         batchBytes = 0;
