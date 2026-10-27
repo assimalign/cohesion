@@ -1076,14 +1076,20 @@ internal sealed partial class SqlPlanExecutor
     /// deleted slot, so a short record is a live slot's, and it is damaged, not a reclaimed version
     /// to retry against (#1362).
     /// </exception>
-    private void EnsureLatestVersion(SqlCatalogTable table, PageId pageId, int slotIndex, TransactionSequence self)
+    private void EnsureLatestVersion(SqlCatalogTable table, PageId pageId, int slotIndex, TransactionSequence self, bool codeSerialization = false)
     {
         var (_, deleter) = ReadVersionStamps(table, pageId, slotIndex);
 
         if (deleter != TransactionSequence.None && deleter != self)
         {
-            throw new TransactionAbortedException(
+            var conflict = new TransactionAbortedException(
                 string.Format(System.Globalization.CultureInfo.CurrentCulture, _errorExecutorEnsureLatestVersionFailure, table.Schema, table.Name, deleter));
+            if (codeSerialization)
+            {
+                throw new DatabaseTransactionAbortedException(conflict.Message,
+                    [new Diagnostic { Code = SqlExecutionException.SerializationFailureCode, Severity = DiagnosticSeverity.Error, Message = conflict.Message }], conflict);
+            }
+            throw conflict;
         }
     }
 

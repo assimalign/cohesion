@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.ExceptionServices;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -53,11 +54,6 @@ internal sealed partial class SqlPlanExecutor
                 await locks.AcquireAsync(statement.Transaction.Sequence, refused.Resource, refused.Mode, cancellationToken).ConfigureAwait(false);
                 retryMark = locks.MarkStatement(statement.Transaction.Sequence);
                 statement.References.ClearAfterCascadeRetry();
-            }
-            catch (TransactionAbortedException exception) when (exception is not TransactionDeadlockException)
-            {
-                throw new DatabaseTransactionAbortedException(exception.Message,
-                    [new Diagnostic { Code = SqlExecutionException.SerializationFailureCode, Severity = DiagnosticSeverity.Error, Message = exception.Message }], exception);
             }
         }
     }
@@ -211,7 +207,7 @@ internal sealed partial class SqlPlanExecutor
                 var (_, deleter) = ReadVersionStamps(plan.Table, target.PageId, target.SlotIndex);
                 if (deleter == TransactionSequence.None || deleter == statement.Transaction.Sequence) { break; }
                 if (statement.Transaction.IsolationLevel != IsolationLevel.ReadCommitted)
-                { EnsureLatestVersion(plan.Table, target.PageId, target.SlotIndex, statement.Transaction.Sequence); }
+                { EnsureLatestVersion(plan.Table, target.PageId, target.SlotIndex, statement.Transaction.Sequence, codeSerialization: true); }
                 changed = true;
                 if (!_storage.RowVersionLinks.TryGet(SqlRecordLocation.Pack(target.PageId, target.SlotIndex), deleter, out var successor))
                 { target = null; break; }
@@ -222,8 +218,12 @@ internal sealed partial class SqlPlanExecutor
                 var values = DecodeRow(record, location.PageId, location.SlotIndex, plan.Table,
                     _definitions.Get(plan.Table, cancellationToken).MissingValues, out var writer, out _);
                 if (writer != deleter)
-                { throw new TransactionAbortedException(string.Format(System.Globalization.CultureInfo.CurrentCulture,
-                    ErrorMessages.DmlTargetVersionChanged, plan.Table.Schema, plan.Table.Name)); }
+                {
+                    var conflict = new TransactionAbortedException(string.Format(System.Globalization.CultureInfo.CurrentCulture,
+                        ErrorMessages.DmlTargetVersionChanged, plan.Table.Schema, plan.Table.Name));
+                    throw new DatabaseTransactionAbortedException(conflict.Message,
+                        [new Diagnostic { Code = SqlExecutionException.SerializationFailureCode, Severity = DiagnosticSeverity.Error, Message = conflict.Message }], conflict);
+                }
                 target = new(location.PageId, location.SlotIndex, writer, values, values);
                 var memory = statement.Metrics.DmlMemory(_definitions.StatementMemoryBudget)!;
                 memory.Retain(values);
@@ -326,30 +326,55 @@ internal sealed partial class SqlPlanExecutor
                 deletions, scanned, released, statement, cancellationToken, pending).ConfigureAwait(false);
         }
         await AcquireParentRowLocksAsync(released, statement, cancellationToken, validate: false, cascade: true).ConfigureAwait(false);
-        foreach (var key in deletions.Keys) { updates.Remove(key); }
+        var cascadedUpdates = new List<SqlConstraintUpdate>();
+        foreach (var key in deletions.Keys)
+        {
+            if (updates.Remove(key, out var update) && update.OldValues.Length != 0)
+            {
+                cascadedUpdates.Add(update);
+                statement.Metrics.DmlMemory(_definitions.StatementMemoryBudget)!.Reserve(32);
+            }
+        }
         pending = await CollectReferentialUpdatesAsync(deletions, scanned, statement, cancellationToken, updates).ConfigureAwait(false);
-        ValidateRestrictedDeletes(deletions, pending, statement, cancellationToken);
         var references = new List<SqlParentReference>();
         released.Clear();
-        foreach (var group in updates.Values.GroupBy(update => update.Table))
+        ExceptionDispatchInfo? foreignKeyFailure = null;
+        try
         {
-            var table = group.Key;
-            foreach (var update in group)
+            ValidateRestrictedDeletes(deletions, pending, statement, cancellationToken);
+            // UPDATE's old-key NO ACTION check survives an AFTER-style cascade of its
+            // proposed row (PostgreSQL ri_triggers.c:887,923-955).
+            foreach (var update in cascadedUpdates)
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                CheckDomains(_definitions.Get(table, cancellationToken), update.NewValues, ExecutionEvaluator(null, cancellationToken),
-                    update.Location.PageId.Value < 0 ? null : update.Assigned.ToArray());
-                if (update.Location.PageId.Value >= 0)
-                {
-                    ValidateParentUpdate(table, update.OldValues, update.NewValues, statement, cancellationToken, deletions, pending);
-                    CollectReleasedReferences(table, [update.OldValues], released, statement, cancellationToken);
-                }
-                update.NewVersion = SqlRowCodec.Encode(table, update.NewValues, statement.Transaction.Sequence);
-                statement.Metrics.DmlMemory(_definitions.StatementMemoryBudget)!.Retain(update.NewVersion);
+                ValidateParentUpdate(update.Table, update.OldValues, update.NewValues,
+                    statement, cancellationToken, deletions, pending);
             }
-            ValidateRows(table, group.Select(update => update.NewValues).ToList(), statement, cancellationToken,
-                references: references, deletions: deletions, updates: pending,
-                foreignKeySnapshot: statement.Transaction.IsolationLevel == IsolationLevel.ReadCommitted ? statement.Transaction.Snapshot : null);
+            foreach (var group in updates.Values.GroupBy(update => update.Table))
+            {
+                var table = group.Key;
+                foreach (var update in group)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    CheckDomains(_definitions.Get(table, cancellationToken), update.NewValues, ExecutionEvaluator(null, cancellationToken),
+                        update.Location.PageId.Value < 0 ? null : update.Assigned.ToArray());
+                    if (update.Location.PageId.Value >= 0)
+                    {
+                        ValidateParentUpdate(table, update.OldValues, update.NewValues, statement, cancellationToken, deletions, pending);
+                        CollectReleasedReferences(table, [update.OldValues], released, statement, cancellationToken);
+                    }
+                    update.NewVersion = SqlRowCodec.Encode(table, update.NewValues, statement.Transaction.Sequence);
+                    statement.Metrics.DmlMemory(_definitions.StatementMemoryBudget)!.Retain(update.NewVersion);
+                }
+                ValidateRows(table, group.Select(update => update.NewValues).ToList(), statement, cancellationToken,
+                    references: references, deletions: deletions, updates: pending,
+                    foreignKeySnapshot: statement.Transaction.IsolationLevel == IsolationLevel.ReadCommitted ? statement.Transaction.Snapshot : null);
+            }
+            }
+        catch (SqlConstraintViolationException failure) when (failure.ConstraintKind == "FOREIGN KEY")
+        {
+            // Index uniqueness is immediate; FK triggers run after index insertion
+            // (nodeModifyTable.c:2371-2383). Keep all lock waits outside the apply gate.
+            foreignKeyFailure = ExceptionDispatchInfo.Capture(failure);
         }
         await AcquireParentRowLocksAsync(references, statement, cancellationToken, cascade: true).ConfigureAwait(false);
         await AcquireParentRowLocksAsync(released, statement, cancellationToken, validate: false, cascade: true).ConfigureAwait(false);
@@ -398,11 +423,12 @@ internal sealed partial class SqlPlanExecutor
                         { throw TranslateUniqueViolation(plan.Table, new IndexUniqueViolationException(live.Metadata.Name, key)); }
                     }
                 }
-                foreach (var target in targets) { EnsureLatestVersion(plan.Table, target.PageId, target.SlotIndex, statement.Transaction.Sequence); }
+                foreignKeyFailure?.Throw();
+                foreach (var target in targets) { EnsureLatestVersion(plan.Table, target.PageId, target.SlotIndex, statement.Transaction.Sequence, codeSerialization: true); }
                 foreach (var deletion in deletions.Values.Where(deletion => deletion.Location.PageId.Value >= 0))
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    EnsureLatestVersion(deletion.Table, deletion.Location.PageId, deletion.Location.SlotIndex, statement.Transaction.Sequence);
+                    EnsureLatestVersion(deletion.Table, deletion.Location.PageId, deletion.Location.SlotIndex, statement.Transaction.Sequence, codeSerialization: true);
                     TombstoneVersion(statement, bracket, deletion.Location.PageId, deletion.Location.SlotIndex);
                     await TombstoneIndexEntriesAsync(statement, GetLiveIndexes(deletion.Table, statement), deletion.Table, deletion.Values,
                         SqlRecordLocation.Pack(deletion.Location.PageId, deletion.Location.SlotIndex), cancellationToken).ConfigureAwait(false);
@@ -411,7 +437,7 @@ internal sealed partial class SqlPlanExecutor
                 foreach (var update in updates.Values.Where(update => update.Location.PageId.Value >= 0))
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    EnsureLatestVersion(update.Table, update.Location.PageId, update.Location.SlotIndex, statement.Transaction.Sequence);
+                    EnsureLatestVersion(update.Table, update.Location.PageId, update.Location.SlotIndex, statement.Transaction.Sequence, codeSerialization: true);
                     TombstoneVersion(statement, bracket, update.Location.PageId, update.Location.SlotIndex);
                     await TombstoneIndexEntriesAsync(statement, GetLiveIndexes(update.Table, statement), update.Table, update.OldValues,
                         SqlRecordLocation.Pack(update.Location.PageId, update.Location.SlotIndex), cancellationToken).ConfigureAwait(false);

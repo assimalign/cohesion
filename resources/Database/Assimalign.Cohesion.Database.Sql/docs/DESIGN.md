@@ -3125,6 +3125,14 @@ NO ACTION accepts a replacement parent key, whereas RESTRICT refuses substitutio
 PostgreSQL utils/adt/ri_triggers.c:944-959. Existing UPDATE statement key-swap discipline remains.
 Only direct actions contribute counts and RETURNING; their returned values precede referential
 side effects. All composed row sets and projected constraint indexes reserve statement memory.
+Direct UPDATEs removed by a cascade still run their old-to-new parent-key check against the
+final state. This preserves the old-key NO ACTION check (PostgreSQL
+utils/adt/ri_triggers.c:887,923-955), including cross-table RESTRICT and SET NULL children;
+these compositions need no repeated-modification fallback. A final-state FK failure is retained
+until the immediate direct-proposal unique check completes, matching index-before-AFTER-trigger
+ordering (executor/nodeModifyTable.c:2371-2383), with every lock wait outside the apply gate.
+Only a failed target recheck or EnsureLatestVersion check receives CS04064. Host-ended
+transactions and abandoned lock owners retain the ordinary uncoded transaction-abort contract.
 A MERGE-only constraint-state subtype and call-site filtering preserve ordinary DML object
 sizes and the existing Release allocation budgets.
 Disk and wire formats and assembly boundaries are unchanged.

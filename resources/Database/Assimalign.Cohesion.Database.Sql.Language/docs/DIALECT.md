@@ -1512,6 +1512,14 @@ SET NULL and SET DEFAULT effects. A child moved away from a deleted parent survi
 allows a replacement parent key within the statement; RESTRICT refuses substitution. Direct
 CHECK/domain and unique proposal failures remain errors even when a cascade would remove the
 proposed row. RETURNING and affected counts describe direct actions before referential effects.
+An UPDATE removed by a cascade still validates children of its old stored parent key against
+the final state; surviving old-key children refuse the whole statement with CS03039. Immediate
+direct-proposal uniqueness takes precedence over final-state foreign-key failures, following
+PostgreSQL executor/nodeModifyTable.c:2371-2383 and utils/adt/ri_triggers.c:887,923-955.
+CS04064 identifies actual target-version conflicts; host-ended transactions and abandoned lock
+owners retain the ordinary uncoded transaction-abort contract. The
+[review regression corpus](../../Assimalign.Cohesion.Database.Sql/tests/SqlMergeReviewRegressionTests.cs)
+pins these conditions and unchanged tables on refusal.
 The [engine recheck corpus](../../Assimalign.Cohesion.Database.Sql/tests/SqlMergeConcurrencyTests.cs),
 [final-state corpus](../../Assimalign.Cohesion.Database.Sql/tests/SqlMergeConstraintTests.cs),
 [InMemory/TCP corpus](../../Assimalign.Cohesion.Database.Sql.Client/tests/SqlMergeWireTests.cs) and

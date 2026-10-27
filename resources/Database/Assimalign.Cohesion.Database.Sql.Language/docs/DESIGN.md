@@ -15,6 +15,9 @@ renderer and grammar are unchanged. Live clause conformance executes MERGE rathe
 measuring only EXPLAIN; SQL's design records transaction admission, ReadCommitted target
 rechecks and mixed-action final-state foreign keys. The engine and InMemory/TCP corpora cover
 these semantics without changing the syntax or advertised clause count.
+The final-state corpus also checks old parent keys of directly updated rows removed by a
+cascade and immediate unique-before-FK precedence. Actual target-version conflicts carry
+CS04064; host-ended transactions and abandoned lock owners keep their ordinary uncoded abort.
 
 ## ALTER TYPE domain rendering (#1447)
 
