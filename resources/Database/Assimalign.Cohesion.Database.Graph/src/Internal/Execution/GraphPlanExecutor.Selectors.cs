@@ -24,6 +24,9 @@ internal static partial class GraphPlanExecutor
         public bool ExactLength { get; init; }
         public bool Truncated { get; set; }
         public ulong[]? FirstTruncatedPrefix { get; set; }
+        public IReadOnlyDictionary<ulong, int>? Distances { get; init; }
+        public IReadOnlyList<HashSet<ulong>>? Layers { get; init; }
+        public IReadOnlyList<ulong>? Identity { get; init; }
     }
 
     private static IAsyncEnumerable<PathMatch> MatchCoreStreamAsync(
@@ -47,6 +50,8 @@ internal static partial class GraphPlanExecutor
         using var searchMemory = new GraphMemoryOwner(budget.Memory);
         searchMemory.Add(512);
         var connectivity = Connectivity(shape, operation, budget, searchMemory, token);
+        var localStep = selection.OrderByLength && !selection.CountLengthGroups
+            ? LocalStep(shape, input, searchMemory, token) : null;
         var startAnchor = plan.Anchor.NodeIndex == 0 && plan.Anchor.RelationshipTypes is null
             ? plan.Anchor : searchPlan.Anchor;
         IAsyncEnumerable<StoredGraphNode> starts = operation.Updates.StreamAnchorAsync(startAnchor, budget, token);
@@ -89,6 +94,13 @@ internal static partial class GraphPlanExecutor
                 if (operation.Updates.FindNode(target) is not { } storedTarget ||
                     shape.Nodes[^1].Any(node => !GraphLabelEvaluator.Accepts(node, storedTarget.Labels))) { continue; }
                 budget.SelectorPairs++;
+                if (localStep is not null)
+                {
+                    await foreach (var match in SelectLocalShortestAsync(database, operation, searchPlan, input, localStep,
+                        start, storedTarget, connectivity.Direction, connectivity.Types, budget, parameters, token).ConfigureAwait(false))
+                    { yield return match; }
+                    continue;
+                }
                 long remaining = selection.Count ?? long.MaxValue;
                 // Shortest searches deepen one hop at a time. Each round retains a DFS
                 // history frontier, not all histories of the breadth-first search.

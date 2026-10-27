@@ -154,7 +154,11 @@ EXPLAIN exposes SelectPaths, PathSearch, ElementPrefilter, PathPrefilter and Pos
 including the count unit, partition, mode, order and configured work/state/output ceilings.
 Selectors and inline predicates execute in process and over InMemory/TCP with the existing
 CG05004 work/64-hop and CG05020 retained-memory refusals. No partial selection is returned on
-exhaustion. Shortest searches stop after the complete selected length/tie group; ANY stops only
+exhaustion. ANY SHORTEST and SHORTEST k stop at their path quota, including within a tie;
+element-local searches use filtered breadth-first distances and lazy identity-ordered witnesses.
+Longer lengths retain mode histories and respect quantifier minimums. Path-level predicates
+retain the accounted history search. ALL SHORTEST and counted length groups must finish the
+complete selected tie group and can refuse combinatorial output. ANY stops only
 when no lower identity prefix can improve its witness. An unbounded WALK with infinitely many
 lexicographically improving cyclic paths can exhaust the backstop even for ANY; ALL similarly
 refuses unbounded output. Disconnected pairs return no path. Multiple quantifier decompositions

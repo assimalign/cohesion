@@ -398,8 +398,31 @@ SP3 executes selectors and inline WHERE in scalar and path requests, including s
 ASTs, empty input and LIMIT 0. Selected searches anchor at the source boundary and run per
 ordered endpoint pair and incoming row. A budgeted finite topology pass, using a safe union of the pattern's directions/types, excludes
 disconnected pairs; it never substitutes vertex-visited state for accepting path histories.
-Shortest selection uses iterative hop deepening with an accounted DFS frontier, sorting each
-accepting length by identity before applying path/group quotas. ALL enumerates the pattern's
+ANY SHORTEST and counted SHORTEST use reverse breadth-first distances for element-local
+searches (types, directions, node/edge properties and predicates, plus incoming/end bindings).
+The filtered transition graph retains vertices and edges, rather than predecessor histories.
+A homogeneous repeated hop has exact distances; unions of position-specific steps provide a
+safe lower bound, with the matcher enforcing the original pattern. On the shortest-path DAG,
+ordered DFS lazily chooses the smallest relationship identity, then node identity, that can
+still reach the target in the remaining hops. A shortest path between distinct vertices has
+no repeated node, so every mode admits it. No accepting tie buffer is built for a path quota.
+Fixed chains and a single fixed-body repetition have unique decompositions. Adjacent quantifiers
+instead enumerate physical identities in that same order and validate only the first accepting
+source-ordered decomposition, preserving group bindings without counting duplicates.
+
+If k exceeds the number of shortest paths, exact-length reachability layers prune subsequent
+lengths and output stops at k. Lengths beyond the graph distance, including unsatisfied pattern
+or quantifier minimums, retain the accounted matcher history for TRAIL, SIMPLE and ACYCLIC;
+vertex reachability alone cannot prove their admissibility. Graph state costs O(V+E), and layers
+for longer lengths cost O(L*V) retained state and O(L*E) work, with L at most 64, in addition to
+the mode history and selected output. Path predicates and correlations outside the current
+hop/endpoints retain iterative deepening and identity sorting. ALL SHORTEST and counted length
+groups also retain exhaustive tie handling: combinatorial output can still refuse cleanly.
+Directed n-by-n grid regressions bound one witness by 5E+128 work units and three witnesses
+at n=20 by 6E+128 (E=2*n*(n-1)); ALL SHORTEST on that grid still refuses with CG05004.
+The independent bounded oracle covers 3,240 selector/mode/pattern/graph cases, checking both
+bags and order, including longer paths, cycles, filters, bound endpoints and decompositions.
+ALL enumerates the pattern's
 complete bounded domain. ANY deepens until its smallest complete identity sequence cannot be
 preceded by any truncated prefix. The 64-hop backstop refuses an unresolved search with CG05004;
 in particular, an unbounded WALK can have no lexicographic minimum (ever-longer lower-identity
@@ -432,6 +455,9 @@ keeps prefilters in the selective path pattern;
 `community/cypher/front-end/parser/v25/parser/src/main/antlr4/org/neo4j/cypher/internal/parser/v25/Cypher25Parser.g4:401-425,431-442,482-485`
 provides prefix order and inline predicates. Cohesion requires explicit literal k, retains
 TRAIL by default and strengthens arbitrary ties to the identity order above.
+`community/cypher/runtime-util/src/main/java/org/neo4j/internal/kernel/api/helpers/traversal/BiDirectionalBFS.java:39-63,78-95`
+separates filtered BFS exploration from lazy/eager path retracing; Cohesion uses reverse distances
+and the stricter identity-minimal witness contract, without copying reference code.
 
 ### Quantified paths (#1144)
 

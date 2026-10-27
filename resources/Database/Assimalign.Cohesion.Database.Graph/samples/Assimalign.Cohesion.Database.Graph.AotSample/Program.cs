@@ -57,6 +57,7 @@ foreach (string selector in new[] { "ANY", "ALL", "ANY SHORTEST", "ALL SHORTEST"
     { throw new InvalidOperationException("Selector path smoke mismatch."); }
     checks++;
 }
+await Check("MATCH p = SHORTEST 1 (a:N {k:1})-[:T]->{0,2}(m)-[:T]->{0,2}(b:N {k:3}) RETURN path_length(p)", [[2L]]);
 await Refuse(new() { WorkUnits = 3 }, "CG05004");
 await Refuse(new() { MemoryBytes = 1024 }, "CG05020");
 await Refuse(new() { WorkUnits = 0 }, "CG08021");

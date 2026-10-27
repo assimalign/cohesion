@@ -338,6 +338,14 @@ internal static partial class GraphPlanExecutor
                             if (plan.Mode == GqlPathMode.Trail && state.Used.Contains(edge.Id) || !GraphLabelEvaluator.Accepts(hop.Pattern, edge.Type) ||
                                 outgoing && edge.SourceId != from || incoming && edge.TargetId != from) { break; }
                             ulong next = edge.SourceId == from ? edge.TargetId : edge.SourceId;
+                            if (search?.Identity is { } identity && state.Relationships.Count < identity.Count &&
+                                edge.Id != identity[state.Relationships.Count]) { break; }
+                            if (search is not null && state.Relationships.Count < search.HopLimit)
+                            {
+                                int remaining = search.HopLimit - state.Relationships.Count - 1;
+                                if (search.Distances is { } distances && (!distances.TryGetValue(next, out int distance) || distance != remaining) ||
+                                    search.Layers is { } layers && !layers[remaining].Contains(next)) { break; }
+                            }
                             // Nodes is the accounted, source-ordered identity state (at most 65
                             // entries). SIMPLE can repeat only the opposite endpoint, then stops.
                             if (plan.Mode is GqlPathMode.Acyclic or GqlPathMode.Simple && ContainsNodeIdentity(state.Nodes, next) &&
