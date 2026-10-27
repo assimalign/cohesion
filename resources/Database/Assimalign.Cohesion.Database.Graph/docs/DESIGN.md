@@ -483,6 +483,9 @@ directed/undirected relationship overlap, all matched entities, bound endpoints,
 unrelated commits and every return/failure/disposal path. Threaded stress runs for at least
 250 ms, then until at least two recorded queued creator races of each isolation have completed,
 under a 30-second cancellation ceiling; counters and lock-release checks decide success.
+Each iteration disposes its database before the next begins. Actors publish their queued
+progress before assertions, so a failed assertion reaches the caller instead of hiding behind
+the progress wait's hang guard.
 An optional internal, instance-free test gate after writer acquisition deterministically ends
 the session or cancels before the pattern grant, proving late-grant cleanup. Tests also force a
 pattern-only wait and check failure release before the caller rolls back its faulted transaction.

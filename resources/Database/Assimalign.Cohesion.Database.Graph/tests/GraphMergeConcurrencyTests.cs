@@ -54,8 +54,8 @@ public sealed class GraphMergeConcurrencyTests
         var pending = threaded ? Task.Run(async () =>
         {
             var task = MergeAsync(second, competing, "Person").AsTask();
-            task.IsCompleted.ShouldBeFalse();
             queued.SetResult();
+            task.IsCompleted.ShouldBeFalse();
             return await task;
         }, token) : MergeAsync(second, competing, "Person").AsTask();
         if (threaded) { await queued.Task.WaitAsync(token); }
@@ -540,7 +540,7 @@ public sealed class GraphMergeConcurrencyTests
         // Act: independent thread-pool actors drive each isolated database's winner and waiter.
         do
         {
-            var database = await engine.CreateDatabaseAsync("race" + (snapshotRaces + committedRaces), token);
+            await using var database = await engine.CreateDatabaseAsync("race" + (snapshotRaces + committedRaces), token);
             var isolation = snapshotRaces <= committedRaces ? IsolationLevel.Snapshot : IsolationLevel.ReadCommitted;
             await RaceCreatorsAsync(database, isolation, overlap: true, token, threaded: true);
             if (isolation == IsolationLevel.Snapshot) { Interlocked.Increment(ref snapshotRaces); }
