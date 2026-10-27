@@ -18,6 +18,9 @@ public static class SqlClauses
     /// <summary>An INSERT's unique-key conflict action.</summary>
     public const string OnConflict = "ON CONFLICT";
 
+    /// <summary>A MERGE statement whose syntax and binding are supported.</summary>
+    public const string Merge = "MERGE";
+
     /// <summary>An <c>UPDATE</c> statement.</summary>
     public const string Update = "UPDATE";
 

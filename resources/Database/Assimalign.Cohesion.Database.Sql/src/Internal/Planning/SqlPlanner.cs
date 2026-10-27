@@ -78,7 +78,7 @@ internal sealed partial class SqlPlanner
                 // planner's allocation budget. Retry uses this same fixed statement snapshot.
                 // DML targets retain the read image too, so definition validation refuses
                 // stale writers before they can mutate a replacement owner.
-                if (expression is SqlQueryBodyExpression or SqlInsertExpression or SqlUpdateExpression or SqlDeleteExpression)
+                if (expression is SqlQueryBodyExpression or SqlInsertExpression or SqlUpdateExpression or SqlDeleteExpression or SqlMergeExpression)
                 {
                     planner.UseTruncateSnapshot(snapshot);
                 }
@@ -136,6 +136,7 @@ internal sealed partial class SqlPlanner
                 => new SqlDefinitionPlan(expression),
             SqlQueryBodyExpression query => PlanQuery(query),
             SqlInsertExpression insert => PlanInsert(insert),
+            SqlMergeExpression merge => PlanMerge(merge),
             SqlUpdateExpression update => PlanUpdate(update),
             SqlDeleteExpression delete => PlanDelete(delete),
             SqlCreateViewExpression create => PlanCreateView(create),
@@ -1507,6 +1508,11 @@ internal sealed partial class SqlPlanner
         if (boundValues is not null && boundValues.ContainsKey(expression))
         {
             return;
+        }
+        if (expression is SqlFunctionCallExpression mergeCall && IsMergeAction(mergeCall))
+        {
+            if (evaluator.IsBoundValue(expression)) { return; }
+            throw new SqlPlanningException("CS01053", ErrorMessages.MergeActionContext, expression.Location);
         }
         bool isBound = boundSubqueries is not null && boundSubqueries.ContainsKey(expression);
         switch (expression)

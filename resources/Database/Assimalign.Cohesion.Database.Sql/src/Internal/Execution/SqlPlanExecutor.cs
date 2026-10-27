@@ -83,6 +83,11 @@ internal sealed partial class SqlPlanExecutor
 
     internal Task<DatabaseResult> ExecuteAsync(SqlPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
+        // SQ-M1 refuses before source materialization, costing or action evaluation.
+        if (StatementInput(plan) is SqlMergePlan)
+        {
+            throw new SqlPlanningException("CK00001", ErrorMessages.MergeExecutionPending);
+        }
         // Set before WITH and subquery materialization, and retain it in every child read.
         _isDml |= StatementInput(plan) is SqlInsertPlan or SqlInsertSelectPlan or SqlUpdatePlan or SqlDeletePlan;
         return JoinedDml(plan) && statement.Metrics.JoinedDmlStatement is null

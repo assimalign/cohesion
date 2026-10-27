@@ -22,6 +22,7 @@ public class SqlLanguageProfileTests
     [InlineData(SqlClauses.Except, "SELECT a FROM t EXCEPT SELECT a FROM u;")]
     [InlineData(SqlClauses.Explain, "EXPLAIN SELECT * FROM t;")]
     [InlineData(SqlClauses.Insert, "INSERT INTO t (id) VALUES (1);")]
+    [InlineData(SqlClauses.Merge, "MERGE INTO t USING s ON t.id=s.id WHEN MATCHED THEN DELETE;")]
     [InlineData(SqlClauses.OnConflict, "INSERT INTO t (id) VALUES (1) ON CONFLICT DO NOTHING;")]
     [InlineData(SqlClauses.Returning, "INSERT INTO t (id) VALUES (1) RETURNING id;")]
     [InlineData(SqlClauses.Update, "UPDATE t SET id = 1;")]

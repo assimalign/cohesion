@@ -21,8 +21,19 @@ public sealed partial class SqlQueryParser
         }
 
         bool MasksPseudoRelation(string name) => name.Equals(table.Alias ?? table.TableName, StringComparison.OrdinalIgnoreCase) ||
-            sources is not null && sources.SelectMany(item => new[] { item.Table }.Concat(item.Joins.Select(join => join.Table)))
-                .Any(reference => name.Equals(reference.Alias ?? (reference as SqlTableReference)?.TableName, StringComparison.OrdinalIgnoreCase));
+            sources is not null && sources.Any(item => MasksItem(item, name));
+
+        static bool MasksItem(SqlFromItem item, string name)
+            => MasksReference(item.Table, name) || item.Joins.Any(join => MasksReference(join.Table, name));
+
+        static bool MasksReference(SqlRelationReference reference, string name)
+        {
+            System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
+            // A group alias hides its children; an aliasless group exposes their namespaces.
+            if (reference.Alias is { } alias) { return name.Equals(alias, StringComparison.OrdinalIgnoreCase); }
+            return reference is SqlJoinedTableReference group ? MasksItem(group.Item, name)
+                : reference is SqlTableReference named && name.Equals(named.TableName, StringComparison.OrdinalIgnoreCase);
+        }
 
         // OLD/NEW are contextual pseudo-relations only when a visible relation does not mask them
         // (PostgreSQL src/backend/parser/analyze.c:2773-2786). Keep quoted identifiers ordinary.

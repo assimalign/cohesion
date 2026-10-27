@@ -86,6 +86,17 @@ internal sealed partial class SqlPlanner
                     ValidateFunctionCalls(insert.SelectSource);
                 }
                 break;
+            case SqlMergeExpression merge:
+                ValidateSourceFunctionCalls([merge.Source]);
+                ValidateFunctionCalls(merge.Condition);
+                foreach (var action in merge.Actions)
+                {
+                    ValidateFunctionCalls(action.Condition);
+                    foreach (var assignment in action.Assignments) { ValidateFunctionCalls(assignment.Value); }
+                    foreach (var value in action.Values ?? []) { ValidateFunctionCalls(value); }
+                }
+                foreach (var column in merge.Returning ?? []) { ValidateFunctionCalls(column.Expression); }
+                break;
             case SqlUpdateExpression update:
                 ValidateSourceFunctionCalls(update.From);
                 if (update.Returning is not null)
@@ -261,6 +272,12 @@ internal sealed partial class SqlPlanner
 
     private static void CheckCallCore(SqlFunctionCallExpression call, SqlFunctionCatalog catalog)
     {
+        if (IsMergeAction(call))
+        {
+            if (call.Arguments.Count != 0 || call.Quantifier != SqlSetQuantifier.Default || call.OrderBy.Count != 0)
+            { throw new SqlPlanningException("CS01006", ErrorMessages.MergeActionArity, call.Location); }
+            return;
+        }
         if (SqlStandardLibrary.IsEvaluatorForm(call.FunctionName))
         {
             SqlExpressionEvaluator.CheckEvaluatorForm(call);

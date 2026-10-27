@@ -111,6 +111,7 @@ structured-carrier messages remain unprefixed.
 | COHSQLE028 | CS01028 | Binding/names |
 | COHSQLE051 | CS01051 | Binding/names |
 | COHSQLE052 | CS01052 | Binding/names |
+| New (#1715, SQ-M1) | CS01053 | Binding/names — merge_action() outside MERGE RETURNING |
 | COHSQLE001 | CS02001 | Values/types |
 | COHSQLE002 | CS02002 | Values/types |
 | COHSQLE003 | CS02003 | Values/types |
@@ -188,6 +189,7 @@ structured-carrier messages remain unprefixed.
 | New (#1714) | CS05068 | Execution/budgets — UPDATE target matched by multiple source associations (before writes) |
 | New (#1525, SQ-J1) | CS05069 | Execution/budgets — direct RIGHT, FULL or parenthesized joined DML source would require a different target-outer execution tree |
 | New (#1525, SQ-J2) | CS05070 | Execution/capabilities — FULL JOIN lacks a safe mandatory hash equality or has an unproven ON evaluation |
+| New (#1715, SQ-M1) | CS05071 | Action planning — MERGE WHEN follows an unconditional clause of the same match kind |
 | COHSQLE041 | CS06041 | Storage/durability |
 | COHSQLE058 | CS06058 | Storage/durability |
 

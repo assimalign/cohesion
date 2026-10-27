@@ -3016,6 +3016,60 @@ so unique entries also validate the final state during a swap. Snapshot and Read
 use the same pending view. Wire regressions select isolation via the existing server-session
 API because SQL BEGIN deliberately has no isolation clause; UPDATE/results use both transports.
 
+## MERGE binding and association plan (#1715, SQ-M1)
+
+SqlPlanner.Merge reuses BindDmlSources and BindJoinSources metadata/subquery association
+binding, with an explicit tree for MERGE; ordinary joined UPDATE/DELETE keep CS05069.
+SqlMergePlan retains the stored target, physical target binding, target-then-source slots,
+ordered SqlMergeActionPlan records and RETURNING. INNER/LEFT/RIGHT/FULL preservation is
+chosen from non-DO-NOTHING unmatched actions, following PostgreSQL
+optimizer/prep/prepjointree.c:222-246. RIGHT normalizes to source LEFT target without changing
+slot ordinals. FULL carries safe hash keys when proven; arbitrary Boolean ON retains a full
+nested-loop plan that SQ-M2 must execute. No WHEN filter is pushed into the match join.
+
+MATCHED sees both sides; BY TARGET sees source only; BY SOURCE sees target only, following
+parser/parse_merge.c:52-99. Each match kind becomes terminal after an unconditional clause
+(parser/parse_merge.c:138-178). Destinations resolve only against target columns. Duplicates,
+identity policy, parameters, Boolean predicates, aggregates and assignment families are
+checked before execution, including empty sources. Assignment types use existing INSERT
+SELECT conversion families; runtime values and final constraints remain for SQ-M2/3.
+ON/WHEN subqueries bind against their action namespace. SET/INSERT values and RETURNING
+retain the existing subquery capability boundary. Sources retain normal read-source binding.
+WITH-prefixed MERGE is outside the requested statement grammar.
+Each action retains its own bound condition subqueries, so SQ-M2 can evaluate them only when
+that ordered action is considered; they are not eagerly materialized by a statement wrapper.
+Source/ON subqueries use the shared association wrappers. EXPLAIN nests action children
+under their owning MergeAction.
+
+RETURNING sees both sides and null-extended metadata, using the shared projection binder.
+Target outputs retain their schema nullability because every changed row supplies its old
+or new target, including INSERT; source outputs retain absent-side nullability.
+merge_action() uses the existing scalar-call AST but resolves to ReturningActionOrdinal,
+a text slot immediately after association columns; SQ-M2 supplies INSERT/UPDATE/DELETE
+per changed row before projecting. It is never registered as an application/native function.
+The slot's typing and metadata bypass application overloads with the same spelling.
+Bare * follows existing DML target-then-visible-source expansion. Action expressions and
+projections disable constant callback folding so binding cannot execute an action.
+
+EXPLAIN emits Merge, the complete association tree, ordered MergeAction children and
+RETURNING names. ExecuteAsync refuses a bound Merge with CK00001 before child materialization
+or action evaluation; EXPLAIN ANALYZE stays SELECT-only. SQ-M2 adds action execution/shared
+admission; SQ-M3 adds physical repeated-target checks (CS05036), ReadCommitted rechecks and
+final-state FK validation. Disk and wire formats and assembly boundaries are unchanged.
+Deviates from interface-first (database-area.md); new public syntax leaves are sealed.
+
+| Code | MERGE binding condition |
+|---|---|
+| CS01053 | merge_action() outside MERGE RETURNING |
+| CS05071 | WHEN follows an unconditional clause of the same match kind |
+
+Existing names/duplicates/arity/parameters use CS01014/015/019/006/020; non-Boolean predicates
+and incompatible assignment types use CS02003; aggregates use CS05017; identity uses CS03025.
+INSERT width mismatches retain CS05013 and the existing INSERT row-width message.
+All new messages use generated SQL resources. SQ-M1 allocates no CS03/04/06 identity.
+The SQL NativeAOT guard also explains all three match kinds and checks CK00001 in process
+and over the in-memory wire, including preservation of target rows after refusal.
+
 ## INSERT ... ON CONFLICT execution (#1118)
 
 Binding rejects duplicate whole-column SET targets before execution (PostgreSQL
