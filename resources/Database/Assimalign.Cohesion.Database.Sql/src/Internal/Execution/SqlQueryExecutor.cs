@@ -76,7 +76,6 @@ internal sealed class SqlQueryExecutor
                 [.. exception.Diagnostics]));
         }
 
-        SqlPlanExecutor.EnsureExecutionSupported(plan);
         statement.Metrics.IsPlanned = true;
         var executor = new SqlPlanExecutor(_storage, _catalog, _indexManager, _definitions);
         plan = executor.Cost(plan, statement, cancellationToken);

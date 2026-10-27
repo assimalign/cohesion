@@ -15,7 +15,7 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 internal sealed partial class SqlPlanExecutor
 {
     private static bool JoinedDml(SqlPlan plan)
-        => StatementInput(plan) is SqlUpdatePlan { Source: not null } or SqlDeletePlan { Source: not null };
+        => StatementInput(plan) is SqlUpdatePlan { Source: not null } or SqlDeletePlan { Source: not null } or SqlMergePlan;
 
     private static SqlPlan StatementInput(SqlPlan plan)
     {
@@ -101,6 +101,13 @@ internal sealed partial class SqlPlanExecutor
                     break;
                 case SqlUpdatePlan { Source: { } source }: Visit(source.Associations); break;
                 case SqlDeletePlan { Source: { } source }: Visit(source.Associations); break;
+                case SqlMergePlan merge:
+                    Visit(merge.Source.Associations);
+                    foreach (var action in merge.Actions)
+                    {
+                        foreach (var query in action.Queries) { Visit(query.Query); }
+                    }
+                    break;
                 case SqlWithPlan with:
                     foreach (var relation in with.Relations) { Visit(relation.Query); }
                     Visit(with.Input);

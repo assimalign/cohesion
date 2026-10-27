@@ -661,9 +661,13 @@ public sealed class SqlLanguageConformanceTests
                 seek[6].ShouldBe(1L);
                 seek[7].ShouldBeNull();
             }),
-        [SqlClauses.Merge] = new("EXPLAIN MERGE INTO t USING t AS s ON t.id=s.id WHEN MATCHED THEN DELETE RETURNING merge_action();",
-            _seed, expression => expression is SqlExplainExpression { Statement: SqlMergeExpression },
-            async (_, result) => (await ReadRowsAsync(result)).ShouldContain(row => Equals(row[2], "Merge"))),
+        [SqlClauses.Merge] = new("MERGE INTO t USING t AS s ON t.id=s.id WHEN MATCHED THEN DELETE RETURNING merge_action();",
+            _seed, expression => expression is SqlMergeExpression,
+            async (session, result) =>
+            {
+                (await ReadRowsAsync(result)).Select(row => row[0]).ShouldBe(["DELETE", "DELETE", "DELETE"]);
+                await ExpectRowsAsync(session, "SELECT id FROM t", []);
+            }),
         [SqlClauses.Select] = new("SELECT id, age + 1 AS next_age FROM t ORDER BY id;", _seed,
             expression => expression is SqlSelectExpression,
             async (session, result) =>

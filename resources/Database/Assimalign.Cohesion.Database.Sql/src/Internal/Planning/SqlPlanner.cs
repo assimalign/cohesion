@@ -186,7 +186,7 @@ internal sealed partial class SqlPlanner
             bindings = BindJoin(select, source, out columns, out steps, out outputOrdinals, out tree);
         }
         var evaluator = new SqlExpressionEvaluator(columns, _parameters, bindings, defaultCollation: _catalog.DefaultCollation,
-            subquerySlots: _subquerySlots, functions: _functions, cancellationToken: _cancellationToken,
+            subquerySlots: _subquerySlots, functions: _functions, cancellationToken: _cancellationToken, foldConstants: FoldQueryConstants,
             outerScope: OuterScope, outerDependencies: OuterDependencies, relation: select.From[0].Table);
 
         if (ViewDefinitionBinding is not null) { CaptureViewSelect(select, columns, bindings, outputOrdinals, evaluator); }
@@ -365,7 +365,7 @@ internal sealed partial class SqlPlanner
     // Keep predicate collection independent of SELECT/DML binding (and of future join pushdown).
     private SqlAccessPath SelectAccessPath(SqlCatalogTable table, IReadOnlyList<SqlExpression> conjuncts, SqlExpressionEvaluator? scope)
     {
-        if (ViewDefinitionBinding is not null || _inferringTableOutput && !_tableAsWithData || conjuncts.Count == 0 || _commonTableState?.BindingUnused == true)
+        if (_queryScopes?.DeferQueryEvaluation == true || ViewDefinitionBinding is not null || _inferringTableOutput && !_tableAsWithData || conjuncts.Count == 0 || _commonTableState?.BindingUnused == true)
         {
             return SqlScanPath.Instance;
         }
@@ -393,7 +393,7 @@ internal sealed partial class SqlPlanner
     private SqlAccessPath SelectAccessPath(SqlCatalogTable table,
         Dictionary<int, List<(SqlBinaryOperator Op, object? Value)>> predicates, IReadOnlyList<SqlCatalogIndex>? indexes = null)
     {
-        if (ViewDefinitionBinding is not null || _inferringTableOutput && !_tableAsWithData || predicates.Count == 0 || _commonTableState?.BindingUnused == true)
+        if (_queryScopes?.DeferQueryEvaluation == true || ViewDefinitionBinding is not null || _inferringTableOutput && !_tableAsWithData || predicates.Count == 0 || _commonTableState?.BindingUnused == true)
         {
             return SqlScanPath.Instance;
         }
@@ -874,7 +874,7 @@ internal sealed partial class SqlPlanner
     /// created on first use and shared by the statement.
     /// </summary>
     private SqlExpressionEvaluator ScopelessEvaluator => _scopelessEvaluator ??=
-        new SqlExpressionEvaluator(Array.Empty<SqlCatalogColumn>(), _parameters, defaultCollation: _catalog.DefaultCollation, functions: _functions, cancellationToken: _cancellationToken);
+        new SqlExpressionEvaluator(Array.Empty<SqlCatalogColumn>(), _parameters, defaultCollation: _catalog.DefaultCollation, functions: _functions, cancellationToken: _cancellationToken, foldConstants: FoldQueryConstants);
 
     /// <summary>Whether <c>*</c> appears anywhere in an expression, outside a subquery.</summary>
     /// <param name="expression">The expression to search.</param>

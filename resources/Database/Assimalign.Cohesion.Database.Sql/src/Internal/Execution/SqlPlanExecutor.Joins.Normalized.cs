@@ -18,7 +18,7 @@ internal sealed partial class SqlPlanExecutor
     /// <summary>Executes normalized joins, including FULL's independently tracked build rows.</summary>
     private async IAsyncEnumerable<object?[]> EnumerateNormalizedJoinRowsAsync(SqlJoinPlan plan,
         SqlStatementContext statement, Func<int, IEnumerable<object?[]>> readInput,
-        [EnumeratorCancellation] CancellationToken cancellationToken)
+        [EnumeratorCancellation] CancellationToken cancellationToken, int? dmlTarget = null)
     {
         var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken);
         var indexes = new Dictionary<SqlJoinStep, BTreeIndex>(ReferenceEqualityComparer.Instance);
@@ -26,7 +26,7 @@ internal sealed partial class SqlPlanExecutor
         for (int i = 0; i < plan.Steps.Count; i++)
         {
             var step = plan.Steps[i];
-            if (step.Access is { } access && TryResolveSeekTree(plan.Bindings[access.InnerBinding].Source.Table!, access.Index, out var tree))
+            if (step.Access is { } access && access.InnerBinding != dmlTarget && TryResolveSeekTree(plan.Bindings[access.InnerBinding].Source.Table!, access.Index, out var tree))
             {
                 indexes.Add(step, tree);
             }
@@ -53,8 +53,9 @@ internal sealed partial class SqlPlanExecutor
                     foreach (var input in readInput(node.Binding))
                     {
                         if (ReferenceEquals(node, plan.Tree) && statement.Metrics.Analysis(plan) is { } work) { work.Candidates++; }
-                        var frame = new object?[plan.Columns.Count];
+                        var frame = new object?[plan.Columns.Count + (dmlTarget is null ? 0 : 2)];
                         input.CopyTo(frame, binding.Offset);
+                        if (node.Binding == dmlTarget) { frame[^2] = input; }
                         Retain(node, frame, rows);
                     }
                     results.Add(node, (rows, binding.Offset, binding.Offset + binding.Source.Columns.Count));
@@ -114,6 +115,12 @@ internal sealed partial class SqlPlanExecutor
                             var joined = (object?[])left.Clone();
                             var right = candidate.Row;
                             right.AsSpan(seek ? 0 : inner.Start, inner.End - inner.Start).CopyTo(joined.AsSpan(inner.Start));
+                            if (dmlTarget is not null && !seek)
+                            {
+                                joined[^2] ??= right[^2];
+                                joined[^1] ??= right[^1];
+                            }
+                            if (dmlTarget is not null && seek && ReferenceEquals(node, plan.Tree)) { joined[^1] = true; }
                             await PrepareSubqueriesAsync(step.Condition, joined, statement, cancellationToken).ConfigureAwait(false);
                             if (!evaluator.Matches(step.Condition, joined)) { continue; }
                             matched = true;
@@ -173,6 +180,10 @@ internal sealed partial class SqlPlanExecutor
 
         void Retain(SqlJoinTree node, object?[] row, List<object?[]> buffer)
         {
+            // Presence is independent of user NULLs, including an all-NULL derived source.
+            // The target's original array survives both FULL build output and join clones.
+            if (dmlTarget is not null && ReferenceEquals(node,
+                plan.Tree!.Left!.Binding == dmlTarget ? plan.Tree.Right : plan.Tree.Left)) { row[^1] = true; }
             if (sinks.TryGetValue(node, out var sink))
             {
                 sink.Add(row, cancellationToken);

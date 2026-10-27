@@ -3016,7 +3016,7 @@ so unique entries also validate the final state during a swap. Snapshot and Read
 use the same pending view. Wire regressions select isolation via the existing server-session
 API because SQL BEGIN deliberately has no isolation clause; UPDATE/results use both transports.
 
-## MERGE binding and association plan (#1715, SQ-M1)
+## MERGE binding, association and execution (#1715, SQ-M1/SQ-M2)
 
 SqlPlanner.Merge reuses BindDmlSources and BindJoinSources metadata/subquery association
 binding, with an explicit tree for MERGE; ordinary joined UPDATE/DELETE keep CS05069.
@@ -3037,15 +3037,20 @@ its retained AST source span. Destinations resolve only against target columns. 
 identity policy, parameters, Boolean predicates, aggregates and assignment families are
 checked before execution, including empty sources. Assignment types use existing INSERT
 SELECT conversion families; runtime values and final constraints remain for SQ-M2/3.
-ON/WHEN subqueries bind against their action namespace. SET/INSERT values and RETURNING
-retain the existing subquery capability boundary. Sources retain normal read-source binding.
+ON/WHEN and SET/INSERT subqueries bind against their action namespace. RETURNING
+retains the existing subquery capability boundary. Sources retain normal read-source binding.
 Regression cases pair MERGE USING with UPDATE FROM for stored tables, system relations,
 views, aliased derived queries and supported INNER/LEFT/CROSS joins, before and after
 canonical rendering. Unsupported source forms retain the existing read-source codes;
 no VALUES relation is added. The parser reserves a trailing source CROSS JOIN's ON for MERGE.
 WITH-prefixed MERGE is outside the requested statement grammar.
-Each action retains its own bound condition subqueries, so SQ-M2 can evaluate them only when
-that ordered action is considered; they are not eagerly materialized by a statement wrapper.
+Each action retains its own bound condition/value subqueries. A lazy action frame prepares
+only reached scalar branches; independent query values cache per statement, correlated values
+expire per candidate. A failed condition never evaluates the action's values. The first matching
+clause ends selection even for DO NOTHING; later clauses are never materialized.
+Clause-subquery binding suppresses constant callback folding and seek-bound evaluation,
+including nested query scopes, so even immutable application callbacks remain lazy. These
+queries conservatively scan instead of evaluating a seek bound before the clause is reached.
 Source/ON subqueries use the shared association wrappers. EXPLAIN nests action children
 under their owning MergeAction.
 
@@ -3053,24 +3058,44 @@ RETURNING sees both sides and null-extended metadata, using the shared projectio
 Target outputs retain their schema nullability because every changed row supplies its old
 or new target, including INSERT; source outputs retain absent-side nullability.
 merge_action() uses the existing scalar-call AST but resolves to ReturningActionOrdinal,
-a text slot immediately after association columns; SQ-M2 supplies INSERT/UPDATE/DELETE
+a text slot immediately after association columns; execution supplies INSERT/UPDATE/DELETE
 per changed row before projecting. It is never registered as an application/native function.
 The slot's typing and metadata bypass application overloads with the same spelling.
 Bare * follows existing DML target-then-visible-source expansion. Action expressions and
 projections disable constant callback folding so binding cannot execute an action.
 
 EXPLAIN emits Merge, the complete association tree, ordered MergeAction children and
-RETURNING names. The query dispatcher refuses a bound Merge, including subquery/WITH wrappers,
-with CK00001 before costing can read source indexes; direct executor calls share the guard.
-Refusal precedes child materialization and action evaluation; EXPLAIN ANALYZE stays SELECT-only.
-SQ-M2 adds action execution/shared
-admission; SQ-M3 adds physical repeated-target checks (CS05036), ReadCommitted rechecks and
-final-state FK validation. Disk and wire formats and assembly boundaries are unchanged.
+RETURNING names. EXPLAIN ANALYZE stays SELECT-only. SqlPlanExecutor.Merge drains the
+association cursor before selecting actions and writing. Normalized join frames optionally
+retain target-array identity and source-subtree presence independently of user NULLs, including
+FULL unmatched build rows. Target index probes are disabled for this identity-preserving path;
+ordinary SELECT and joined DML retain their existing allocations and physical paths.
+
+MERGE shares joined-DML's outer lock mark (including source and clause subqueries), metadata
+admission, cascade retry discipline and pre-apply row/reference/unique locks. All mutations,
+index updates and RETURNING preparation execute in one ApplyStatementAsync bracket, so a
+late uniqueness, projection, wire encoding or cancellation failure undoes the whole statement.
+Only directly selected actions contribute affected counts and RETURNING, excluding cascade
+side effects. INSERT uses the existing default/identity/coercion routines; UPDATE assignments
+read the original association. DELETE projects the old target, and BY SOURCE nullifies source
+columns. A set of packed target identities rejects a second selected UPDATE/DELETE with
+CS05036 before writes; DO NOTHING does not enter the set (PostgreSQL
+executor/nodeModifyTable.c:3521-3551). Retained selection and generated defaults survive
+referential lock retries without invoking action callbacks again.
+
+Hash builds use the shared statement memory grant and unwind on budget/cancellation failure.
+Provisioning admission enumerates target, source, ON and all action/subquery references before
+planning. Result preparation includes MERGE in the session DML boundary. Existing cascade,
+CHECK/domain and FK routines validate actions; SQ-M3 completes mixed INSERT/UPDATE/DELETE
+final-state constraint composition and PostgreSQL ReadCommitted target rechecks. Until then,
+existing EnsureLatestVersion refuses stale targets, and overlapping direct UPDATE/referential
+writes conservatively fail CS05036. Disk and wire formats and assembly boundaries are unchanged.
 Deviates from interface-first (database-area.md); new public syntax leaves are sealed.
 
 | Code | MERGE binding condition |
 |---|---|
 | CS01053 | merge_action() outside MERGE RETURNING |
+| CS05036 | A second modifying action selects the same physical target |
 | CS05070 | FULL association lacks a safe mandatory hash equality or complete ON safety proof |
 | CS05071 | WHEN follows an unconditional clause of the same match kind |
 
@@ -3078,8 +3103,9 @@ Existing names/duplicates/arity/parameters use CS01014/015/019/006/020; non-Bool
 and incompatible assignment types use CS02003; aggregates use CS05017; identity uses CS03025.
 INSERT width mismatches retain CS05013 and the existing INSERT row-width message.
 All new messages use generated SQL resources. SQ-M1 allocates no CS03/04/06 identity.
-The SQL NativeAOT guard also explains all three match kinds and checks CK00001 in process
-and over the in-memory wire, including preservation of target rows after refusal.
+The SQL NativeAOT guard explains all three match kinds and executes MERGE RETURNING in process
+and over the in-memory wire. Engine and client regressions cover all action kinds, lazy subqueries,
+repeated targets, statement rollback and the basic InMemory/TCP round trip.
 
 ## INSERT ... ON CONFLICT execution (#1118)
 

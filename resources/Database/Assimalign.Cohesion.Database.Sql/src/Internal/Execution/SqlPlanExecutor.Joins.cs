@@ -89,7 +89,7 @@ internal sealed partial class SqlPlanExecutor
         if (plan.Tree is not null)
         {
             // All tree inputs may be reused by a parent; delivery detaches selected cells.
-            await foreach (var row in EnumerateNormalizedJoinRowsAsync(plan, statement, ReadInput, cancellationToken).ConfigureAwait(false))
+            await foreach (var row in EnumerateNormalizedJoinRowsAsync(plan, statement, ReadInput, cancellationToken, dmlTarget?.Binding).ConfigureAwait(false))
             {
                 yield return row;
             }

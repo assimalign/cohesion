@@ -190,6 +190,16 @@ internal sealed partial class SqlSchemaProvisioner
                     yield return table;
                 }
                 break;
+            case SqlMergeExpression merge:
+                yield return merge.Table;
+                foreach (var table in SourceReferences([merge.Source])) { yield return table; }
+                foreach (var expression in merge.Actions.SelectMany(action =>
+                    action.Assignments.Select(assignment => assignment.Value).Concat(action.Values ?? []).Append(action.Condition))
+                    .Concat(merge.Returning?.Select(column => column.Expression) ?? []).Append(merge.Condition))
+                {
+                    foreach (var table in References(expression)) { yield return table; }
+                }
+                break;
             case SqlAlterTableExpression alter:
                 yield return alter.Table;
                 IEnumerable<SqlConstraintDefinition> constraints = alter.Action switch

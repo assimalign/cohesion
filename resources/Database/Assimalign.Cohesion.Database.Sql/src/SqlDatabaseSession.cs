@@ -707,7 +707,7 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
             var execution = _executor.ExecuteAsync(request, scope, cancellationToken);
             // Reads encode during delivery. Embedded execution keeps its direct task path.
             return ResultPreparation is not null && request.Statement.SqlExpression.CommandType is
-                SqlQueryCommandType.Insert or SqlQueryCommandType.Update or SqlQueryCommandType.Delete
+                SqlQueryCommandType.Insert or SqlQueryCommandType.Update or SqlQueryCommandType.Delete or SqlQueryCommandType.Merge
                     ? PrepareExecutionResultAsync(execution, scope, cancellationToken) : execution;
         }
 

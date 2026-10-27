@@ -13,7 +13,7 @@ internal sealed partial class SqlPlanner
     private SqlPlan PlanConstantSelect(SqlSelectExpression select)
     {
         var evaluator = new SqlExpressionEvaluator([], _parameters, defaultCollation: _catalog.DefaultCollation,
-            subquerySlots: _subquerySlots, functions: _functions, cancellationToken: _cancellationToken,
+            subquerySlots: _subquerySlots, functions: _functions, cancellationToken: _cancellationToken, foldConstants: FoldQueryConstants,
             outerScope: OuterScope, outerDependencies: OuterDependencies);
         if (select.Columns.Any(column => column.Expression is SqlStarExpression))
         {

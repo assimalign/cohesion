@@ -69,7 +69,7 @@ internal sealed partial class SqlPlanner
                 var rightPart = AddReference(join.Table, join.JoinType == SqlJoinType.LeftOuter);
                 var scope = new SqlExpressionEvaluator(allColumns, _parameters, bindings.Skip(start).ToArray(),
                     defaultCollation: _catalog.DefaultCollation, subquerySlots: _subquerySlots,
-                    functions: _functions, cancellationToken: _cancellationToken,
+                    functions: _functions, cancellationToken: _cancellationToken, foldConstants: FoldQueryConstants,
                     outerScope: OuterScope, outerDependencies: OuterDependencies);
                 if (metadataOnly && join.Condition is { } scopedCondition && (queryOwner is not null || dmlScopes is not null))
                 {
@@ -82,7 +82,7 @@ internal sealed partial class SqlPlanner
                     }).ToArray();
                     var joinedScope = new SqlExpressionEvaluator(
                         allColumns.ToArray(), _parameters, local, defaultCollation: _catalog.DefaultCollation,
-                        subquerySlots: _subquerySlots, functions: _functions, cancellationToken: _cancellationToken);
+                        subquerySlots: _subquerySlots, functions: _functions, cancellationToken: _cancellationToken, foldConstants: FoldQueryConstants);
                     if (queryOwner is not null) { (_queryScopes ??= new()).JoinScopes[(queryOwner, scopedCondition)] = joinedScope; }
                     dmlScopes?.Add(scopedCondition, joinedScope);
                 }
