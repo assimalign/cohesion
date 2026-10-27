@@ -337,13 +337,13 @@ internal sealed partial class SqlPlanExecutor
                 statement.Metrics.DmlMemory(_definitions.StatementMemoryBudget)!.Reserve(32);
             }
         }
-        using var finalPending = (SqlMergeConstraintUpdates)await CollectReferentialUpdatesAsync(deletions, scanned, statement, cancellationToken, updates).ConfigureAwait(false);
-        pending = finalPending;
         var references = new List<SqlParentReference>();
         released.Clear();
-        ExceptionDispatchInfo? foreignKeyFailure = null;
+        ExceptionDispatchInfo? referentialFailure = null;
         try
         {
+            using var finalPending = (SqlMergeConstraintUpdates)await CollectReferentialUpdatesAsync(deletions, scanned, statement, cancellationToken, updates).ConfigureAwait(false);
+            pending = finalPending;
             ValidateRestrictedDeletes(deletions, pending, statement, cancellationToken);
             // UPDATE's old-key NO ACTION check survives an AFTER-style cascade of its
             // proposed row (PostgreSQL ri_triggers.c:887,923-955).
@@ -373,25 +373,37 @@ internal sealed partial class SqlPlanExecutor
                     foreignKeySnapshot: statement.Transaction.IsolationLevel == IsolationLevel.ReadCommitted ? statement.Transaction.Snapshot : null);
             }
         }
-        catch (SqlConstraintViolationException failure) when (failure.ConstraintKind == "FOREIGN KEY")
+        catch (SqlConstraintViolationException failure)
         {
-            // Index uniqueness is immediate; FK triggers run after index insertion
-            // (nodeModifyTable.c:2371-2383). Keep all lock waits outside the apply gate.
-            foreignKeyFailure = ExceptionDispatchInfo.Capture(failure);
+            // Direct uniqueness precedes AFTER-style FK actions, including constraints
+            // on their SET rows (nodeModifyTable.c:2371-2383). No statement writes
+            // after a captured failure, so it needs no further parent-row locks.
+            referentialFailure = ExceptionDispatchInfo.Capture(failure);
         }
-        await AcquireParentRowLocksAsync(references, statement, cancellationToken, cascade: true).ConfigureAwait(false);
-        await AcquireParentRowLocksAsync(released, statement, cancellationToken, validate: false, cascade: true).ConfigureAwait(false);
-        await LockConstraintDeletesAsync(deletions.Values.Where(deletion => deletion.Location.PageId.Value >= 0), statement, cancellationToken).ConfigureAwait(false);
-        foreach (var group in updates.Values.GroupBy(update => update.Table).OrderBy(group => group.Key.ObjectId))
+        catch (SqlPlanningException failure) when (failure.Diagnostics is [{ Code: "CS03025" }])
         {
-            var hashes = new List<ulong>();
-            var live = GetLiveIndexes(group.Key, statement);
-            foreach (var update in group)
+            referentialFailure = ExceptionDispatchInfo.Capture(failure);
+        }
+        catch (SqlEvaluationException failure) when (failure.Diagnostics is [{ Code: SqlEvaluationException.NotNullViolationCode }])
+        {
+            referentialFailure = ExceptionDispatchInfo.Capture(failure);
+        }
+        if (referentialFailure is null)
+        {
+            await AcquireParentRowLocksAsync(references, statement, cancellationToken, cascade: true).ConfigureAwait(false);
+            await AcquireParentRowLocksAsync(released, statement, cancellationToken, validate: false, cascade: true).ConfigureAwait(false);
+            await LockConstraintDeletesAsync(deletions.Values.Where(deletion => deletion.Location.PageId.Value >= 0), statement, cancellationToken).ConfigureAwait(false);
+            foreach (var group in updates.Values.GroupBy(update => update.Table).OrderBy(group => group.Key.ObjectId))
             {
-                if (update.Location.PageId.Value >= 0) { CollectUniqueKeyHashes(live, group.Key, update.OldValues, hashes); }
-                ValidateIndexKeysAndCollectUniqueHashes(live, group.Key, update.NewValues, hashes);
+                var hashes = new List<ulong>();
+                var live = GetLiveIndexes(group.Key, statement);
+                foreach (var update in group)
+                {
+                    if (update.Location.PageId.Value >= 0) { CollectUniqueKeyHashes(live, group.Key, update.OldValues, hashes); }
+                    ValidateIndexKeysAndCollectUniqueHashes(live, group.Key, update.NewValues, hashes);
+                }
+                await AcquireUniqueKeyLocksAsync(statement, group.Key.ObjectId, hashes, cancellationToken, cascade: true).ConfigureAwait(false);
             }
-            await AcquireUniqueKeyLocksAsync(statement, group.Key.ObjectId, hashes, cancellationToken, cascade: true).ConfigureAwait(false);
         }
         var directIndexes = GetLiveIndexes(plan.Table, statement);
         var directHashes = new List<ulong>();
@@ -426,7 +438,7 @@ internal sealed partial class SqlPlanExecutor
                         { throw TranslateUniqueViolation(plan.Table, new IndexUniqueViolationException(live.Metadata.Name, key)); }
                     }
                 }
-                foreignKeyFailure?.Throw();
+                referentialFailure?.Throw();
                 foreach (var target in targets) { EnsureLatestVersion(plan.Table, target.PageId, target.SlotIndex, statement.Transaction.Sequence, codeSerialization: true); }
                 foreach (var deletion in deletions.Values.Where(deletion => deletion.Location.PageId.Value >= 0))
                 {

@@ -1516,8 +1516,10 @@ Direct CHECK/domain and unique proposal failures remain errors even when a casca
 proposed row. RETURNING and affected counts describe direct actions before referential effects.
 An UPDATE removed by a cascade still validates children of its old stored parent key against
 the final state; surviving old-key children refuse the whole statement with CS03039. Immediate
-direct-proposal uniqueness takes precedence over final-state foreign-key failures, following
-PostgreSQL executor/nodeModifyTable.c:2371-2383 and utils/adt/ri_triggers.c:887,923-955.
+direct-proposal uniqueness takes precedence over final-state foreign-key failures and
+NOT NULL, CHECK, domain or identity failures on SET NULL/DEFAULT rows, following PostgreSQL
+executor/nodeModifyTable.c:2371-2383 and utils/adt/ri_triggers.c:887,923-955. A retained failure
+performs no further parent-row locking, so a stale matched parent cannot mask the statement error.
 CS04064 identifies actual target-version conflicts; host-ended transactions and abandoned lock
 owners retain the ordinary uncoded transaction-abort contract. The
 [review regression corpus](../../Assimalign.Cohesion.Database.Sql/tests/SqlMergeReviewRegressionTests.cs)

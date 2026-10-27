@@ -3138,9 +3138,13 @@ side effects. All composed row sets and projected constraint indexes reserve sta
 Direct UPDATEs removed by a cascade still run their old-to-new parent-key check against the
 final state. This preserves the old-key NO ACTION check (PostgreSQL
 utils/adt/ri_triggers.c:887,923-955), including cross-table RESTRICT and SET NULL children;
-these compositions need no repeated-modification fallback. A final-state FK failure is retained
-until the immediate direct-proposal unique check completes, matching index-before-AFTER-trigger
-ordering (executor/nodeModifyTable.c:2371-2383), with every lock wait outside the apply gate.
+these compositions need no repeated-modification fallback. Final-state FK failures and
+NOT NULL, CHECK, domain or identity failures while collecting or validating SET NULL/DEFAULT
+rows are retained until the immediate direct-proposal unique check completes, matching
+index-before-AFTER-trigger ordering (executor/nodeModifyTable.c:2371-2383). A pending failure
+skips further parent-row and final-write locks: no row can be written, and a stale parent
+version or a needless wait must not replace the statement's error. Direct unique-key locks
+still precede the precheck; every lock wait remains outside the apply gate.
 Only a failed target recheck or EnsureLatestVersion check receives CS04064. Host-ended
 transactions and abandoned lock owners retain the ordinary uncoded transaction-abort contract.
 A MERGE-only constraint-state subtype and call-site filtering preserve ordinary DML object

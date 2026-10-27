@@ -147,6 +147,94 @@ public sealed class SqlMergeReviewRegressionTests
         }
     }
 
+    [Theory(DisplayName = "Cohesion Test [Sql] - MERGE: immediate uniqueness precedes SET action constraint failures (#1715)")]
+    [InlineData("SET NULL", "not-null", true)]
+    [InlineData("SET NULL", "not-null", false)]
+    [InlineData("SET DEFAULT", "not-null", true)]
+    [InlineData("SET DEFAULT", "not-null", false)]
+    [InlineData("SET DEFAULT", "check", true)]
+    [InlineData("SET DEFAULT", "check", false)]
+    [InlineData("SET DEFAULT", "domain", true)]
+    [InlineData("SET DEFAULT", "domain", false)]
+    [InlineData("SET DEFAULT", "identity", true)]
+    [InlineData("SET DEFAULT", "identity", false)]
+    public async Task ExecuteAsync_UniqueAndSetActionViolation_ShouldReportUniqueFirst(string policy, string constraint, bool duplicate)
+    {
+        // Arrange: the duplicate is direct; the other failure is an AFTER-style write.
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        await using var engine = SqlDatabaseEngine.Create("merge-set-precedence", new());
+        var database = await engine.CreateDatabaseAsync("db", timeout.Token);
+        await using var session = await database.CreateSessionAsync(timeout.Token);
+        await session.ExecuteAsync("CREATE TABLE t(id INT PRIMARY KEY)", cancellationToken: timeout.Token);
+        await session.ExecuteAsync("INSERT INTO t VALUES(1),(2),(3)", cancellationToken: timeout.Token);
+        if (constraint == "domain")
+        { await session.ExecuteAsync("CREATE DOMAIN positive_id AS INT CHECK(VALUE>0)", cancellationToken: timeout.Token); }
+        string column = constraint switch
+        {
+            "not-null" => "INT NOT NULL",
+            "check" => "INT DEFAULT 0 CHECK(pid>0)",
+            "domain" => "positive_id DEFAULT 0",
+            _ => "INT GENERATED ALWAYS AS IDENTITY",
+        };
+        await session.ExecuteAsync("CREATE TABLE child(pid " + column + " REFERENCES t(id) ON DELETE " + policy + ")", cancellationToken: timeout.Token);
+        await session.ExecuteAsync(constraint == "identity" ? "INSERT INTO child DEFAULT VALUES" : "INSERT INTO child VALUES(1)", cancellationToken: timeout.Token);
+
+        // Act
+        var failure = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(
+            "MERGE INTO t USING (SELECT 1 AS id UNION ALL SELECT 2) s ON t.id=s.id " +
+            "WHEN MATCHED AND t.id=1 THEN DELETE WHEN MATCHED THEN UPDATE SET id=" + (duplicate ? "3" : "4"), cancellationToken: timeout.Token));
+
+        // Assert: without a duplicate, the saved constraint retains its code and atomicity.
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(duplicate ? "CS03037" : constraint switch
+        {
+            "not-null" => policy == "SET NULL" ? "CS03039" : "CS03024",
+            "identity" => "CS03025",
+            _ => "CS03038",
+        });
+        (await RowsAsync(session, "SELECT id FROM t ORDER BY id", timeout.Token)).ShouldBe(["1", "2", "3"]);
+        (await RowsAsync(session, "SELECT pid FROM child", timeout.Token)).ShouldBe(["1"]);
+        session.LastStatementMetrics!.HashMemoryBytes.ShouldBe(0);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql] - MERGE: a saved FK failure does not lock stale validated parents (#1715)")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ExecuteAsync_ForeignKeyFailureWithStaleParent_ShouldPreserveStatementError(bool duplicate)
+    {
+        // Arrange: one outgoing FK resolves a snapshot parent; a later row fails its FK.
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        await using var engine = SqlDatabaseEngine.Create("merge-saved-fk", new());
+        var database = await engine.CreateDatabaseAsync("db", timeout.Token);
+        await using var session = await database.CreateSessionAsync(timeout.Token);
+        await using var writer = await database.CreateSessionAsync(timeout.Token);
+        await session.ExecuteAsync("CREATE TABLE p(id INT PRIMARY KEY)", cancellationToken: timeout.Token);
+        await session.ExecuteAsync("CREATE TABLE t(id INT PRIMARY KEY,pid INT REFERENCES p(id))", cancellationToken: timeout.Token);
+        await session.ExecuteAsync("INSERT INTO p VALUES(10)", cancellationToken: timeout.Token);
+        await session.ExecuteAsync("INSERT INTO t VALUES(1,NULL),(2,NULL)", cancellationToken: timeout.Token);
+        await using var transaction = await session.BeginTransactionAsync(IsolationLevel.Snapshot, timeout.Token);
+        int removals = 0;
+        SqlPlanExecutor.MergeActionsSelected = _ =>
+        {
+            writer.ExecuteAsync("DELETE FROM p", cancellationToken: timeout.Token).AsTask().GetAwaiter().GetResult();
+            removals++;
+        };
+        try
+        {
+            // Act
+            var failure = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(
+                "MERGE INTO t USING (SELECT 1 AS id,10 AS pid UNION ALL SELECT 2,99) s ON t.id=s.id " +
+                "WHEN MATCHED THEN UPDATE SET pid=s.pid,id=" + (duplicate ? "1" : "t.id"), cancellationToken: timeout.Token));
+
+            // Assert: a parent-version abort must not mask the retained FK or immediate duplicate.
+            removals.ShouldBe(1);
+            failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(duplicate ? "CS03037" : "CS03039");
+            await transaction.RollbackAsync(timeout.Token);
+            (await RowsAsync(writer, "SELECT id,pid FROM t ORDER BY id", timeout.Token)).ShouldBe(["1,", "2,"]);
+            session.LastStatementMetrics!.HashMemoryBytes.ShouldBe(0);
+        }
+        finally { SqlPlanExecutor.MergeActionsSelected = null; }
+    }
+
     [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "AbandonPending")]
     private static extern void AbandonPending(LockManager manager, TransactionSequence owner);
 

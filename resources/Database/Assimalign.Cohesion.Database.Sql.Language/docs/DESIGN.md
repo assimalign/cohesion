@@ -16,7 +16,9 @@ measuring only EXPLAIN; SQL's design records transaction admission, ReadCommitte
 rechecks and mixed-action final-state foreign keys. The engine and InMemory/TCP corpora cover
 these semantics without changing the syntax or advertised clause count.
 The final-state corpus also checks old parent keys of directly updated rows removed by a
-cascade and immediate unique-before-FK precedence. Actual target-version conflicts carry
+cascade and immediate uniqueness before FK or SET action constraint failures, including
+NOT NULL, CHECK, domain and identity. Retained failures skip parent-row locking, preserving
+the statement's diagnostic when an earlier matched parent is stale. Actual target-version conflicts carry
 CS04064; host-ended transactions and abandoned lock owners keep their ordinary uncoded abort.
 The recorded two-session cascade corpus checks transaction-duration old-parent locks when a
 direct child update moves into a cascade, for both commit and rollback.
