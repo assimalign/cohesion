@@ -73,7 +73,7 @@ this per-statement budget; exhaustion gives CD05018 at the clause span
 and rolls back the writes. Serialized rows are preflighted in the same transaction: the existing
 CD05016 covers the 16 MiB frame cap, and CD05019 covers values deeper than 256 levels including
 the named projection wrapper. This is a retained-result estimate, not a managed-heap measurement;
-SELECT source and group staging share this counter; mutation pending-write buffers remain outside the estimate.
+SELECT source and group staging share this counter; UPDATE, DELETE, INSERT and UPSERT pending buffers share it too (#1755). Pending-buffer exhaustion refuses with CD05018 before any write, including INSERT/UPSERT SELECT; all reservations release on every exit.
 An over-deep array/object constructor gives CD05015 naming RETURNING at its expression span;
 other serialization failures retain their own diagnostic identity.
 
