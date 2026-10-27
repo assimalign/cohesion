@@ -71,6 +71,9 @@ and array variable names; MISSING LEFT bindings are omitted, actual null element
 Array expansion, grouped Int64 counts, ANY/SOME/EVERY and array IN use the ordinary query
 exchange, without new messages or format versions. The advertised-clause test exercises
 grouped UNNEST and ANY on both transports; the AOT consumer covers these shapes too.
+Array-index DDL and matching ANY/UNNEST plans (#1530) use these same messages. Wire probes and
+the AOT consumer verify IndexSeek EXPLAIN, same-element residuals, repeated UNNEST rows and
+located restricted-WHEN failures with connection reuse; no codec or protocol version changes.
 VALUE/RAW MISSING becomes NULL during engine projection, before DISTINCT and projected ordering,
 so embedded and wire rows agree on IsMissing=false and completion counts. Embedded MISSING
 object members remain omitted and MISSING array elements become NULL.
