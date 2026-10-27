@@ -206,6 +206,9 @@ internal sealed partial class SqlSchemaProvisioner
                     }
                 }
                 break;
+            case SqlCreateTableAsExpression createAs:
+                foreach (var table in References(createAs.Query)) { yield return table; }
+                break;
             case SqlCreateViewExpression createView:
                 foreach (var table in References(createView.Query)) { yield return table; }
                 break;

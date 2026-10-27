@@ -21,6 +21,7 @@ public sealed partial class SqlCatalog
     private readonly Dictionary<ulong, (ulong ReplacementObjectId, TransactionSequence Marker, SqlCatalogSnapshot Before)> _truncatedTables = new();
     private (ulong ObjectId, ulong ReplacementObjectId, TransactionSequence Marker)[] _orderedTruncations = [];
     private readonly Dictionary<SqlCatalogIndex, BTreeIndex> _truncatedIndexes = new(ReferenceEqualityComparer.Instance);
+    // Unreachable build owners for TRUNCATE/rewrite replacements and CTAS alike.
     private readonly HashSet<ulong> _preparedTruncateOwners = new();
     private readonly HashSet<ulong> _truncateRetirementsPublishing = new();
     private ulong _storageBindingGeneration;

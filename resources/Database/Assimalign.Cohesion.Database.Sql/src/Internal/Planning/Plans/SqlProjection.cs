@@ -15,6 +15,9 @@ internal sealed record SqlProjection(string Name, int? ColumnOrdinal, SqlExpress
     /// <summary>Gets the bound computed expression the executor evaluates; null for pass-through projections.</summary>
     internal SqlBoundExpression? Value { get; init; }
 
+    /// <summary>Distinguishes real output names from display-only synthesized names for CTAS.</summary>
+    internal bool HasOutputName { get; init; } = true;
+
     internal int? MaxLength { get; init; }
 
     /// <summary>Gets the collation <c>DISTINCT</c> compares and hashes the output's values under.</summary>

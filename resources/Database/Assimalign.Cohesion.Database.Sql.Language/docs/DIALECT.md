@@ -352,8 +352,54 @@ contract. General sequences remain outside this run.
 
 TRUNCATE inside BEGIN is refused with structured CS04066 (25001); prior transaction work
 and its active state remain usable. This deliberately differs from PostgreSQL's transaction-safe
-TRUNCATE (local reference: src/backend/commands/tablecmds.c:2225-2258). CTAS remains refused
-with the existing CS00003 parser diagnostic until SQ-T2.
+TRUNCATE (local reference: src/backend/commands/tablecmds.c:2225-2258).
+
+`CREATE TABLE [IF NOT EXISTS] t [(names)] AS query [WITH [NO] DATA]` infers its columns
+from SELECT, WITH, joins, grouping or set-operation output. The default is WITH DATA.
+An explicit name list must rename every output; otherwise every output needs a column name
+or alias (aggregate names such as count are retained). Missing, blank, duplicate (ignoring
+case) or wrong-width names fail with structured CS03068 (42601) before reservation. The complete
+list rule matches Cohesion's CREATE VIEW rule; PostgreSQL also accepts a shorter list that renames
+only the leading columns (createas.c:167-185).
+Types, length/precision/scale, domain identities and collations follow view output inference;
+untyped NULL output becomes nullable TEXT. All destination columns are nullable, as persisted
+view columns are: source NOT NULL, keys, table checks, column defaults, identity and indexes are not
+copied. Domain constraints and domain defaults still belong to the inferred domain type, including
+the default's resolved function-call identities. WITH DATA uses normal indexed query planning;
+overwide catalog metadata fails with CS05042 at reservation, before source evaluation. Values use ordinary
+column assignment and domain validation. Parameters are allowed; their values are copied,
+with no persisted query or source dependency.
+
+WITH NO DATA binds and validates output without running the source, its predicates, projections,
+aggregates, row limits or functions. IF NOT EXISTS against an existing table skips source binding
+and execution; a view or system relation with the target name is still refused. A table name
+claimed concurrently by CREATE TABLE, another CTAS or ALTER TABLE RENAME is checked atomically
+at publication: the loser reports CS03049 (42P07), or completes as a zero-row no-op with IF NOT EXISTS.
+CTAS reports the number of rows written as its affected count in process and over the wire,
+matching PostgreSQL's SELECT n completion; WITH NO DATA, empty input and IF NOT EXISTS skips
+report zero. It follows existing self-committing DDL:
+inside BEGIN it fails with CS04003 (25001), leaving earlier work and the transaction active.
+This differs from PostgreSQL's statement-transaction publication. A completed catalog publication
+is irrevocable; cancellation after it returns the committed result. A disconnect may lose that
+response. The source uses one statement MVCC snapshot. Retained query output and encoded batch
+buffers share StatementMemoryBudget; exhaustion reports CS05067 and leaves no table.
+The destination remains absent until its entire data build and dedicated writer transaction
+are durable. Ordinary snapshot isolation follows the builder's single commit: a snapshot taken
+before that commit sees no destination rows; one taken after it sees every row once the live
+catalog can bind the table at publication, as with a concurrently created table. A snapshot taken
+between builder commit and publication therefore sees the complete table after publication.
+Statement and BEGIN admission proceed normally through that interval. No snapshot sees a partial
+row set. Conversion, domain, budget, cancellation and storage failures before
+publication leave no table. Crash recovery sees no table or the complete table, and reclaims
+abandoned owners. SQL remains format 26; existing kind-14 reclamation records suffice.
+
+CTAS holds the shared metadata lease for its entire source query and build, following CREATE
+INDEX's precedent. Other sessions' CREATE/DROP of views, functions, domains and schemas fail
+immediately during that lease. Its statement epoch also delays reclamation of owners retired
+meanwhile. Source reads retain their single statement snapshot while table DML/DDL runs concurrently.
+References: local PostgreSQL src/backend/commands/createas.c:90-109,167-185,242-283,342-349
+(SELECT n completion), src/backend/rewrite/rewriteHandler.c:1301-1312 (domain default fallback)
+and src/backend/nodes/makefuncs.c:565-582 (CTAS creates columns without source constraints).
 
 A snapshot captured before publication can read the same old rows after TRUNCATE commits,
 in process and over InMemory/TCP. Tables receive fresh physical owner identities; pinned
@@ -375,7 +421,7 @@ src/backend/commands/tablecmds.c:2033-2090 and src/backend/catalog/heap.c:3701-3
 
 ## Statement matrix
 
-With INSERT ... ON CONFLICT (#1118), DML RETURNING (#1117), persisted CREATE/DROP VIEW (#1124), CREATE/DROP SCHEMA (#1030), set operations (#1114), quantified comparisons (#1718), UPDATE ... FROM / DELETE ... USING (#1714), TRUNCATE (#1716) and binding-only MERGE (#1715), the profile has **56 of 62 declared clauses** measured against the live SQL engine, including nonexecuting MERGE EXPLAIN.
+With INSERT ... ON CONFLICT (#1118), DML RETURNING (#1117), persisted CREATE/DROP VIEW (#1124), CREATE/DROP SCHEMA (#1030), set operations (#1114), quantified comparisons (#1718), UPDATE ... FROM / DELETE ... USING (#1714), TRUNCATE and CREATE TABLE AS (#1716) and binding-only MERGE (#1715), the profile has **57 of 63 declared clauses** measured against the live SQL engine, including nonexecuting MERGE EXPLAIN.
 Phase 22 measured 33 of 49.
 The earlier 32/48 figure included `JOIN`, `GROUP BY`, `HAVING`, and `SUBQUERY`,
 removed in Phase 12e (#1019–#1021), plus a no-op `CAST` removed in Phase 13.
@@ -411,6 +457,7 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | `UPDATE ... FROM` / `DELETE ... USING` | Supported | Collected source associations feed SET, WHERE and RETURNING; UPDATE rejects multiple matches with CS05068 before writes, DELETE deduplicates physical targets. EXPLAIN shows sources. |
 | `DELETE` | Supported | optional `WHERE`, including correlated and uncorrelated subqueries; aggregates outside a child query are rejected; qualified references use the target name or its alias, which hides the base name (PostgreSQL `parse_relation.c:3759`); hidden/unknown qualifiers fail with located `CS01015` before any write and leave an explicit transaction active |
 | `CREATE TABLE` | Supported | Identity columns use GENERATED ALWAYS/BY DEFAULT AS IDENTITY or the SQL Server IDENTITY alias (see identity contract above). `IF NOT EXISTS`, column definitions with parameterized types, `COLLATE <name>`, `NOT NULL`/`NULL`, `DEFAULT <expression>`, column and table `PRIMARY KEY`, `REFERENCES`/`FOREIGN KEY`, `CHECK`, and `UNIQUE`; optional `CONSTRAINT <name>` |
+| `CREATE TABLE AS` | Supported | Optional complete output names and WITH [NO] DATA; unpublished durable build and atomic publication. See the CTAS contract above. |
 | `ALTER TABLE` | Supported subset, measured | ADD/DROP COLUMN and ADD/DROP CONSTRAINT execute. Full-definition `ALTER COLUMN c <type> [NULL | NOT NULL] [DEFAULT expression]` accepts nullability, length and precision changes that preserve storage type, scale, collation, domain and DEFAULT; tightening and every CHAR length change check existing live values and refuse changes requiring a rewrite. RENAME TO, RENAME [COLUMN], ALTER [COLUMN] SET/DROP DEFAULT and SET/DROP NOT NULL also execute (#1122). PostgreSQL TYPE/SET DATA TYPE and TYPE ... USING remain unsupported. ADD COLUMN nonvolatile defaults backfill old-row reads and apply to subsequent inserts that omit the column; explicit NULL follows nullability. Nullable additions without a default read NULL. NOT NULL additions to populated tables require a non-null default. Invalid defaults reject before mutation; expression defaults follow the fast-default contract below. Column COLLATE persists and governs default comparisons. See the default, atomicity and MVCC contract below (#1023). DROP COLUMN changes only the catalog: it rewrites no row, survives a crash at any point on one definition, and SELECTs running beside it read every value in its own column; see the DROP COLUMN contract below (#1241). |
 | `TRUNCATE` | Supported | Table lists, per-table ONLY, CONTINUE/RESTART IDENTITY and CASCADE/RESTRICT; auto-commit only; old snapshots retain their rows and defer storage reclamation. See the contract below. |
 | `DROP TABLE` | Supported | `IF EXISTS`; returns after catalog unpublication, with page reclamation asynchronous after older readers finish; the name may be recreated immediately |
@@ -3847,7 +3894,8 @@ An ON condition referencing any derived String/Json/Character column retains nes
 preserve deferred collation errors. No hash spill exists.
 
 `SqlDatabaseEngineOptions.StatementMemoryBudget` defaults to 67108864 bytes and must be positive.
-It limits accounted concurrently live hash-build storage per statement. Budget exhaustion reports
+It limits accounted concurrently live hash-build storage per statement. CTAS also charges its
+retained source result and copy buffers, as described in the CTAS contract. Budget exhaustion reports
 `CS05067` (53200, out_of_memory). It does not cap result materialization or transient planning.
 SELECT-only `EXPLAIN ANALYZE` runs normal query expressions, including application functions, and
 returns the existing eight-column plan description. `actual_rows` counts candidates before

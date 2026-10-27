@@ -78,7 +78,7 @@ internal sealed partial class SqlPlanner
                 // planner's allocation budget. Retry uses this same fixed statement snapshot.
                 // DML targets retain the read image too, so definition validation refuses
                 // stale writers before they can mutate a replacement owner.
-                if (expression is SqlQueryBodyExpression or SqlInsertExpression or SqlUpdateExpression or SqlDeleteExpression or SqlMergeExpression)
+                if (expression is SqlQueryBodyExpression or SqlInsertExpression or SqlUpdateExpression or SqlDeleteExpression or SqlMergeExpression or SqlCreateTableAsExpression)
                 {
                     planner.UseTruncateSnapshot(snapshot);
                 }
@@ -142,6 +142,7 @@ internal sealed partial class SqlPlanner
             SqlCreateViewExpression create => PlanCreateView(create),
             SqlDropViewExpression drop => new SqlDropViewPlan(drop.View.SchemaName ?? DefaultSchema, drop.View.TableName, drop.IfExists, drop.Cascade),
             SqlCreateTableExpression create => PlanCreateTable(create),
+            SqlCreateTableAsExpression create => PlanCreateTableAs(create),
             SqlCreateSchemaExpression create => new SqlCreateSchemaPlan(create.Name, create.IfNotExists),
             SqlDropTableExpression drop => PlanDropTable(drop),
             SqlTruncateExpression truncate => new SqlTruncatePlan(truncate),
@@ -364,7 +365,7 @@ internal sealed partial class SqlPlanner
     // Keep predicate collection independent of SELECT/DML binding (and of future join pushdown).
     private SqlAccessPath SelectAccessPath(SqlCatalogTable table, IReadOnlyList<SqlExpression> conjuncts, SqlExpressionEvaluator? scope)
     {
-        if (ViewDefinitionBinding is not null || conjuncts.Count == 0 || _commonTableState?.BindingUnused == true)
+        if (ViewDefinitionBinding is not null || _inferringTableOutput && !_tableAsWithData || conjuncts.Count == 0 || _commonTableState?.BindingUnused == true)
         {
             return SqlScanPath.Instance;
         }
@@ -392,7 +393,7 @@ internal sealed partial class SqlPlanner
     private SqlAccessPath SelectAccessPath(SqlCatalogTable table,
         Dictionary<int, List<(SqlBinaryOperator Op, object? Value)>> predicates, IReadOnlyList<SqlCatalogIndex>? indexes = null)
     {
-        if (ViewDefinitionBinding is not null || predicates.Count == 0 || _commonTableState?.BindingUnused == true)
+        if (ViewDefinitionBinding is not null || _inferringTableOutput && !_tableAsWithData || predicates.Count == 0 || _commonTableState?.BindingUnused == true)
         {
             return SqlScanPath.Instance;
         }

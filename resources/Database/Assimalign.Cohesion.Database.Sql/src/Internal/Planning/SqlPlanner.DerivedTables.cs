@@ -18,7 +18,7 @@ internal sealed partial class SqlPlanner
     private SqlProjectionMetadata? CaptureProjectionMetadata(SqlCollationCandidate candidate, SqlCatalogColumn? source = null,
         SqlExpression? expression = null, SqlExpressionEvaluator? evaluator = null)
     {
-        if (ViewDefinitionBinding is null && !InDerivedBody && _commonTableState?.BindingOperands is null && !(_queryScopes?.SetOperandDepth > 0)) { return null; }
+        if (ViewDefinitionBinding is null && !_inferringTableOutput && !InDerivedBody && _commonTableState?.BindingOperands is null && !(_queryScopes?.SetOperandDepth > 0)) { return null; }
         SqlType? declared = expression is null ? null : UnwrapCollation(expression) switch
         {
             SqlCastExpression cast => SqlDefinitionBinder.ResolveType(cast.TargetType, _functions, cast.Location),

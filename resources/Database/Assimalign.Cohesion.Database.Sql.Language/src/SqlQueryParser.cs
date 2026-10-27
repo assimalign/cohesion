@@ -633,6 +633,7 @@ public sealed partial class SqlQueryParser : QueryParser
     private static string StatementName(SqlQueryExpression expression) => expression switch
     {
         SqlCreateTableExpression => "CREATE TABLE",
+        SqlCreateTableAsExpression => "CREATE TABLE AS",
         SqlCreateSchemaExpression => "CREATE SCHEMA",
         SqlCreateViewExpression => "CREATE VIEW",
         SqlCreateIndexExpression => "CREATE INDEX",
@@ -957,6 +958,7 @@ public sealed partial class SqlQueryParser : QueryParser
         out Location location)
     {
         bool withStatement = false;
+        bool createTable = false;
         bool explainPrefix = false;
         bool inWithDefinitions = false;
         HashSet<string>? cteNames = null;
@@ -1024,10 +1026,12 @@ public sealed partial class SqlQueryParser : QueryParser
                 location = null!;
                 return false;
             }
-            if (firstToken.Equals("CREATE", StringComparison.OrdinalIgnoreCase) && IsKeyword(ref lexer, "VIEW"))
+            createTable |= firstToken.Equals("CREATE", StringComparison.OrdinalIgnoreCase) && IsKeyword(ref lexer, "TABLE");
+            if (firstToken.Equals("CREATE", StringComparison.OrdinalIgnoreCase) &&
+                (IsKeyword(ref lexer, "VIEW") || (createTable && IsKeyword(ref lexer, "AS") && fromScopes.Count == 0)))
             {
-                // Header syntax is checked by ParseCreateView; AS starts the query's scan.
-                while (lexer.MoveNext())
+                // Dedicated DDL parsing checks the header; AS starts the query's scan.
+                while (!IsKeyword(ref lexer, "AS") && lexer.MoveNext())
                 {
                     if (IsKeyword(ref lexer, "AS")) { break; }
                 }

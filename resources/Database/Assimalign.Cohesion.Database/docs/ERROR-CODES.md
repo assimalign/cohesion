@@ -148,6 +148,7 @@ structured-carrier messages remain unprefixed.
 | COHSQLE065 | CS03065 | Schema/constraints |
 | COHSQLE066 | CS03066 | Schema/constraints |
 | New (#1716) | CS03067 | Schema/constraints — TRUNCATE omits a required referencing table (0A000) |
+| New (#1716) | CS03068 | Schema/catalog — CTAS output names are missing, blank, duplicate or have the wrong width (42601) |
 | COHSQLP001 | CS03101 | Schema/constraints |
 | COHSQLP002 | CS03102 | Schema/constraints |
 | COHSQLP003 | CS03103 | Schema/constraints |

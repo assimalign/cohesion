@@ -180,6 +180,8 @@ internal sealed partial class SqlPlanExecutor
                 return await ExecuteDeleteAsync(delete, statement, cancellationToken).ConfigureAwait(false);
             case SqlCreateTablePlan create:
                 return await ExecuteCreateTableAsync(create, statement, cancellationToken).ConfigureAwait(false);
+            case SqlCreateTableAsPlan create:
+                return await ExecuteCreateTableAsAsync(create, statement, cancellationToken).ConfigureAwait(false);
             case SqlCreateViewPlan createView:
                 return await ExecuteCreateViewAsync(createView, statement, cancellationToken).ConfigureAwait(false);
             case SqlDropViewPlan dropView:

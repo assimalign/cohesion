@@ -131,7 +131,7 @@ internal sealed class SqlHashJoinTable : IDisposable
 
     private long ArrayBytes(int capacity) => 48L + 20L * capacity + (_trackUnmatched ? 24L + ((capacity + 7L) & ~7L) : 0);
 
-    private static long RowBytes(object?[] row)
+    internal static long RowBytes(object?[] row)
     {
         long bytes = 24L + 8L * row.Length;
         foreach (object? value in row)

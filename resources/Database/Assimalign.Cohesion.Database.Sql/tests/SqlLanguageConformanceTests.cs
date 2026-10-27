@@ -188,8 +188,9 @@ public sealed class SqlLanguageConformanceTests
         // The profile drives enumeration. A newly advertised clause cannot silently escape this test.
         var cases = CreateCases();
         // #1714 adds UPDATE FROM and DELETE USING and #1718 adds quantified comparisons:
-        // exactly three over #1118's 51. TRUNCATE (#1716) and binding-only MERGE (#1715) add one each.
-        SqlLanguageProfile.Instance.Clauses.Count().ShouldBe(56);
+        // exactly three over #1118's 51. TRUNCATE and CREATE TABLE AS (#1716) and binding-only
+        // MERGE (#1715) add one each.
+        SqlLanguageProfile.Instance.Clauses.Count().ShouldBe(57);
         RequireExecutionCases(SqlLanguageProfile.Instance.Clauses, cases);
         cases.Keys.Except(SqlLanguageProfile.Instance.Clauses).ShouldBeEmpty("Cases must describe the current profile.");
 
@@ -854,6 +855,13 @@ public sealed class SqlLanguageConformanceTests
                 await ExpectRowsAsync(session, "SELECT n, f FROM created;", [["ab ", 1.5d]]);
                 await ExpectRowsAsync(session, "SELECT DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'created' ORDER BY ORDINAL_POSITION;",
                     [["INTEGER"], ["CHARACTER VARYING"], ["DOUBLE PRECISION"], ["CHARACTER"], ["TIMESTAMP WITH TIME ZONE"]]);
+            }),
+        [SqlClauses.CreateTableAs] = new("CREATE TABLE copied (key,label) AS SELECT id,name FROM t WITH DATA;", _seed,
+            expression => expression is SqlCreateTableAsExpression,
+            async (session, result) =>
+            {
+                result.AffectedCount.ShouldBe(3);
+                await ExpectRowsAsync(session, "SELECT key, label FROM copied ORDER BY key;", [[1, "Ada"], [2, "Grace"], [3, "Alan"]]);
             }),
         [SqlClauses.AlterTable] = new("ALTER TABLE t ADD COLUMN extra INT NOT NULL DEFAULT 7;", _seed,
             expression => expression is SqlAlterTableExpression { Action: SqlAlterAddColumnAction }, VerifyAlterAsync),

@@ -176,7 +176,8 @@ public sealed partial class SqlCatalog
     // migrations and script receipts; the worker captures immutable intent incarnations.
     /// <summary>Captures permanently retired table-owner identities whose storage reclamation is pending.</summary>
     /// <returns>A read-only snapshot unaffected by later publications or completed reclamations.</returns>
-    /// <remarks>Prepared TRUNCATE owners remain internal because they can become live.
+    /// <remarks>Prepared TRUNCATE and CTAS owners remain internal while they can become live.
+    /// Abandoned CTAS owners become pending as soon as the build exits, including a lost name race.
     /// Reclamation must wait for transaction and statement pins before freeing owner pages. Retired owners become
     /// discoverable after the TRUNCATE visibility marker ends, so the fence covers every old reader.</remarks>
     /// <exception cref="StorageOfflineException">The catalog is offline.</exception>
@@ -2220,7 +2221,8 @@ public sealed partial class SqlCatalog
         DatabaseObjectOwner owner,
         string? owningSchema,
         CancellationToken cancellationToken,
-        SqlCatalogScriptPublication? publication)
+        SqlCatalogScriptPublication? publication,
+        bool prepareOwner = false)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(schema);
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
@@ -2239,8 +2241,17 @@ public sealed partial class SqlCatalog
             ValidateConstraints(table);
             // Persist the identity before physical trees are created. A crash can
             // leave unused trees, but can never reuse their identity for a table.
+            // Refuse an unstorable definition before reserving an owner or evaluating CTAS.
+            _ = EncodeTable(table);
             using var transaction = _storage.BeginTransaction();
+            var intent = prepareOwner ? _storage.InsertRow(transaction, table.ObjectId,
+                SqlReclamationRecord.Encode(table.ObjectId, schema, name)) : ((PageId PageId, int SlotIndex)?)null;
             CommitCatalogChange(transaction, checked(_nextObjectId + 1), publication, reservationOnly: true, actualObject: SqlObjectIdentity.Table(schema, name));
+            if (intent is { } location)
+            {
+                _pendingReclamations.Add(table.ObjectId, new SqlReclamationIntent(location.PageId, location.SlotIndex));
+                _preparedTruncateOwners.Add(table.ObjectId);
+            }
             return new ValueTask<SqlCatalogTable>(table);
         }
     }
@@ -2346,6 +2357,11 @@ public sealed partial class SqlCatalog
                 throw new SqlCatalogException("CS05060", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.PublishTableCoreAsyncSqlCatalog, table.Schema, table.Name));
             }
             _tables.TryGetValue((table.Schema, table.Name), out TableSlot? existing);
+            if (!replaceExisting && existing is not null)
+            {
+                throw new SqlCatalogException("CS03049", string.Format(System.Globalization.CultureInfo.CurrentCulture,
+                    ErrorMessages.RenameTableCollision, table.Schema, table.Name));
+            }
             if (replaceExisting ? existing is null || existing.Table.ObjectId != table.ObjectId :
                 existing is not null || FindTableByObjectId(table.ObjectId) is not null)
             {
@@ -2387,7 +2403,20 @@ public sealed partial class SqlCatalog
             var tableLocation = UpsertRecord(transaction, existing?.Location, EncodeTable(table));
             var slots = indexes.Select(index => new IndexSlot(index, _storage.InsertRow(transaction, EncodeIndex(index)))).ToArray();
             var registrationsLocation = UpsertRecord(transaction, _registrationsLocation, EncodeRegistrations(mergedRegistrations));
+            // CTAS's unreachable owner stays reclaimable until this same catalog commit
+            // publishes its complete definition. Format 26 already understands kind 14.
+            bool prepared = !replaceExisting && _preparedTruncateOwners.Contains(table.ObjectId);
+            if (prepared)
+            {
+                var intent = _pendingReclamations[table.ObjectId];
+                _storage.DeleteRow(transaction, intent.PageId, intent.SlotIndex);
+            }
             CommitCatalogChange(transaction, publication: publication, actualObject: SqlObjectIdentity.Table(table.Schema, table.Name), createsObject: !replaceExisting);
+            if (prepared)
+            {
+                _pendingReclamations.Remove(table.ObjectId);
+                _preparedTruncateOwners.Remove(table.ObjectId);
+            }
             _tables[(table.Schema, table.Name)] = new TableSlot(table, tableLocation);
             foreach (IndexSlot slot in slots)
             {

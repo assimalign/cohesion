@@ -87,6 +87,7 @@ internal sealed partial class SqlPlanner
             projections.Add(new SqlProjection(first.Projections[i].Name, null, null, type.Type)
             {
                 Value = new SqlBoundSlot(i), Collation = collation, IsNullable = nullable,
+                HasOutputName = first.Projections[i].HasOutputName,
                 MaxLength = type.MaxLength, Metadata = new SqlProjectionMetadata(candidate, null, type, domain),
             });
             columns.Add(new SqlCatalogColumn(projections[i].Name, type, nullable,

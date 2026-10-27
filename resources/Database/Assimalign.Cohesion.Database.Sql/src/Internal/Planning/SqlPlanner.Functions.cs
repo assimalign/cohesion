@@ -127,6 +127,11 @@ internal sealed partial class SqlPlanner
                     ValidateFunctionCalls(constraint.CheckExpression);
                 }
                 break;
+            case SqlCreateTableAsExpression create:
+                // Existing-table IF NOT EXISTS is resolved before binding its query.
+                if (!create.IfNotExists || !_catalog.TryGetTable(create.Table.SchemaName ?? DefaultSchema, create.Table.TableName, out _))
+                { ValidateFunctionCalls(create.Query); }
+                break;
             case SqlAlterTableExpression { Action: SqlAlterSetDefaultAction change }:
                 ValidateFunctionCalls(change.DefaultValue);
                 break;

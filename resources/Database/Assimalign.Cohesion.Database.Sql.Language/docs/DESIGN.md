@@ -6,10 +6,29 @@ SqlTruncateExpression stores an immutable ordered list of SqlTruncateTable targe
 its ONLY modifier, plus effective restart/cascade flags. TABLE is optional; CONTINUE IDENTITY
 and RESTRICT are the defaults. Canonical rendering supplies TABLE and both effective policies.
 TRUNCATE adds one keyword and one advertised clause; RESTART/CONTINUE/IDENTITY remain contextual.
-Completeness and live conformance cases cover the new command; CTAS retains CS00003.
+Completeness and live conformance cases cover both commands.
 The engine's snapshot, closure, identity and reclamation contract is recorded in DIALECT.md.
 No public construction bridge or interface is added. Truncate is appended to SqlQueryCommandType;
 the existing Begin, Commit and Rollback values remain 9, 10 and 11.
+
+## CREATE TABLE AS (#1716, SQ-T2)
+
+SqlCreateTableAsExpression is a sealed CREATE leaf with an immutable optional complete output-name
+list, a query body and effective WithData/IfNotExists flags. The definition-list parser dispatches
+to CTAS at AS, including after a parenthesized name list. It shares SELECT/WITH/set grammar,
+capability checks and nesting measurement. Canonical rendering supplies the effective data policy.
+CREATE TABLE AS adds one advertised clause beside CREATE TABLE, with no new keyword or command
+enum value. DIALECT.md specifies metadata, transaction refusal, publication and error semantics;
+parser/profile and live engine conformance cases advance together.
+Output metadata retains domain defaults and their resolved call vectors. WITH DATA keeps normal
+indexed access planning; WITH NO DATA alone suppresses seek-bound evaluation. The complete name
+list follows CREATE VIEW's Cohesion rule, as DIALECT.md records.
+The engine reports copied-row completion counts, shares the statement grant between retained
+source output and batches, and handles losing name races as duplicate/no-op. Ordinary snapshot
+isolation follows the builder's single commit: snapshots before it see no rows; snapshots after it,
+including those captured before catalog publication, see every row once the live catalog can bind
+the table. Admission proceeds normally. DIALECT.md also records the whole-build metadata lease
+and statement epoch; syntax and format 26 remain unchanged.
 
 ## Repeated subquery grouping keys (#1718)
 

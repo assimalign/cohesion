@@ -28,8 +28,8 @@ The pushed target filter runs before retaining target identities. Collection kee
 stamp from the original decode, avoiding a second whole-row read. Internal statement counters
 record association reads separately from total row reads, which also include stamp checks and
 tombstone pre-images, and record peak retained target identities. Target/association collections
-follow plain UPDATE/DELETE's existing unbudgeted retention; StatementMemoryBudget currently
-accounts for join hash builds, not these DML collections.
+follow plain UPDATE/DELETE's existing unbudgeted retention; StatementMemoryBudget accounts for
+join hash builds and CTAS's retained source/batches, not these DML collections.
 Costing rewrites source-derived relations through the same identity map as WITH definitions, so
 volatile CTE sources materialize once. A private join-frame identity slot retains the original decoded
 target array by reference; a local map associates it with physical location and writer stamp.
@@ -6818,6 +6818,91 @@ Reference behavior was re-derived from local PostgreSQL gram.y:7239-7256,
 tablecmds.c:1915-1917,2033-2090,2225-2258 and heap.c:3701-3782. The snapshot preservation
 and explicit-transaction refusal are the owner's deliberate departures from PostgreSQL.
 
+#### Catalog: Atomic CREATE TABLE AS (#1716, SQ-T2)
+
+CTAS shares view/derived output inference, including type facets, domain identity and collation.
+Its name list renames the complete output; unnamed, blank, duplicate or wrong-width outputs
+fail with CS03068 (42601). All destination columns are nullable, following persisted-view metadata
+and PostgreSQL CTAS rather than copying source NOT NULL. Untyped NULL becomes TEXT. No source
+key, table constraint, column default, index or identity is copied; inferred domain constraints and
+domain defaults (including their resolved function-call vectors) still apply. WITH DATA uses normal
+indexed planning while retaining projection metadata; only WITH NO DATA suppresses access-path
+evaluation. Reservation encodes and size-checks the table record before allocating its identity or
+evaluating the source, so overwide metadata fails with CS05042 before building any rows.
+Parameters are allowed. WITH DATA is the default; WITH NO DATA binds without query execution or
+cost probes, including skipped predicates, functions and row-limit evaluation. IF NOT EXISTS skips
+source binding/execution for an existing table. Completion reports the rows written, with zero
+for WITH NO DATA, empty input and an IF NOT EXISTS skip, in process and over the wire. The executor
+prepares that actual completion before publication; other DDL retains its fixed zero completion.
+
+The session's DDL/metadata lease precedes reserved owner X, the coordinator apply gate and data
+page latches; catalog monitor/storage brackets are innermost and never overlap data apply or
+page latches. Source reads use the fixed statement snapshot and ordinary retained read owners.
+The shared metadata lease spans the entire query and build, as it does for CREATE INDEX. Other
+sessions' CREATE/DROP of views, functions, domains and schemas therefore fail immediately while
+CTAS runs. Unrelated table DDL remains concurrent. The statement epoch spans reservation, source
+disposal, exceptions and cancellation cleanup; it also delays reclamation of other owners retired
+while this statement remains active.
+
+Reservation commits a new identity and existing kind-14 reclamation intent together. All copied
+rows carry one dedicated builder transaction's writer sequence. Batches contain at most 64 rows
+and release the apply gate between brackets; every bracket appends without awaiting durability,
+including the final batch and exact multiples of 64. The builder commits durably outside the apply
+gate after the last flush and source disposal, before catalog publication. Its later commit record
+makes every earlier bracket durable through the ordered WAL. Whole-owner abandonment supplies
+failure cleanup, so the builder needs no growing per-row undo ledger.
+
+Ordinary MVCC over the builder's single commit controls visibility. A snapshot taken before that
+commit sees no destination rows. A snapshot taken after it sees every row once the live catalog
+can bind the table at publication, just as for a concurrently created table. This includes snapshots
+taken between builder commit and publication: the rows committed before those snapshots, so they
+see the complete table after publication. No snapshot sees a partial build. CTAS adds no snapshot
+admission gate or per-statement synchronization/allocation; BEGIN, explicit-transaction and
+auto-commit admission retain their pre-CTAS shape. TRUNCATE's BEGIN/publication semaphore is
+unchanged; a BEGIN queued there does not block admission of ordinary statements. No snapshot
+survives reopen, so no persisted creation marker or format change is needed.
+
+Query operators keep their existing materialization policy, as INSERT SELECT does. Before copying,
+the retained child result (row arrays, scalar/text/binary payloads and result-list capacity) is
+charged to the statement memory grant. The encoded batch and its reference buffer share that
+grant. CS05067 refuses an over-budget build before publication. Source disposal, flush completion
+and every exception/cancellation path release the corresponding reservations.
+
+One catalog transaction publishes the complete table and removes its abandonment intent, advancing
+the logical DDL generation and any declared-script receipt together. Under the same catalog monitor,
+a newly occupied table name reports CS03049 (42P07); IF NOT EXISTS instead completes with zero rows
+and retains the losing owner's abandonment intent for reclamation. Source disposal finishes before
+this irrevocable boundary. Every exit after reservation clears the owner's volatile prepared mark,
+including reservation-hook, lock, binding and builder failures and a lost name race. Its durable
+intent is then listed as pending until reclamation finishes, matching reopen. Earlier failures leave
+no table; the existing worker reclaims the abandoned owner after the statement/snapshot fences
+clear. Recovery restores either no table plus reclamation
+work, or the entire table with no intent. SQL stays format 26: ordinary table records and kind 14
+already express this protocol. There is no public catalog seam, friend grant or new interface.
+CTAS follows existing self-committing DDL and is refused inside BEGIN with CS04003 (25001);
+commit-time transactional DDL needs broader catalog machinery and remains outside this run.
+
+Tests cover metadata, renaming, no-data evaluation suppression, value/domain failures, pre-publication
+fault/cancellation cleanup, and both wire transports. Every captured storage crash boundary is reopened
+under Synchronous, Grouped and None (None models process loss), including copy checkpoints and
+abandonment reclamation. Nonparallel stress runs for a minimum interval and then until hidden-owner,
+complete-read, build and concurrent reclamation counters all move, with a 90-second hang guard.
+NativeAOT smoke copies rows and verifies no-data evaluation suppression over the wire.
+Tests pin snapshots before builder commit, between commit and publication, and after publication;
+actual data-journal flush counts stay zero through every copy bracket and advance at builder commit.
+Abandonment tests capture the owner through TableAsStage, assert it is listed pending while a
+statement pin prevents reclamation, and assert HasOwnerPages is false after the pin ends and the
+worker drains. Destination assignment is tested independently of source evaluation: a conversion
+failure after a checkpointed copied batch leaves no table and reclaims the whole owner, both in
+process and after crash.
+PostgreSQL references: createas.c:90-109,167-185,242-283,342-349 (SELECT n completion),
+rewrite/rewriteHandler.c:1301-1312 (domain default fallback) and makefuncs.c:565-582. Source constraint omission and complete
+output-list validation are explicit dialect choices recorded in DIALECT.md.
+
+| Code | Condition | SQLSTATE |
+|---|---|---|
+| CS03068 | CTAS output names are missing, blank, duplicate or have the wrong width | 42601 |
+
 #### Catalog: Recoverable table rewrite and ordinal compaction (#1265)
 
 SqlDatabase.RewriteTableAsync accepts validated SqlObjectName schema/table components,
@@ -7959,8 +8044,9 @@ SqlDatabaseEngineOptions.StatementMemoryBudget is a positive byte count, default
 statement, including nested queries: each table reserves 104 bytes, arrays reserve both old and
 new storage during doubling, and retained rows charge their arrays and conservatively sized
 boxed/text/binary cells, including both padded CHAR payloads and trimmed comparison strings.
-The limit governs accounted live hash-build memory, not result
-materialization, planning or transient scalar hashing. Reservation precedes retained allocation.
+The limit governs accounted live hash-build memory and CTAS retention described above. General
+result materialization, planning and transient scalar hashing remain outside this grant. Hash-build
+reservation precedes retained allocation; CTAS admits the completed query output before copying.
 Every exit releases reservations, including cancellation, failed decoding and budget refusal.
 CS05067 / PostgreSQL SQLSTATE 53200 reports budget exhaustion through an unprefixed resx
 message and one diagnostic code. There is no partitioning or spill. Persisted statistics,

@@ -74,6 +74,7 @@ internal static class SqlSystemViews
             SqlCreateSchemaExpression create => create.Name,
             SqlDropSchemaExpression drop => drop.Name,
             SqlCreateTableExpression create => create.Table.SchemaName,
+            SqlCreateTableAsExpression create => create.Table.SchemaName,
             SqlCreateViewExpression create => create.View.SchemaName,
             _ => null,
         };
@@ -86,6 +87,7 @@ internal static class SqlSystemViews
             SqlUpdateExpression update => update.Table,
             SqlDeleteExpression delete => delete.Table,
             SqlCreateTableExpression create => create.Table,
+            SqlCreateTableAsExpression create => create.Table,
             SqlDropTableExpression drop => drop.Table,
             SqlAlterTableExpression alter => alter.Table,
             SqlCreateIndexExpression create => create.Table,
