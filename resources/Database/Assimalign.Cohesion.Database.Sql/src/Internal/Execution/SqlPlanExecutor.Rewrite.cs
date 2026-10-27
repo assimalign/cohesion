@@ -62,7 +62,7 @@ internal sealed partial class SqlPlanExecutor
         Exception? operationFailure = null;
         try
         {
-            if (copyRows) { RewriteStage?.Invoke("Reserved", 0); }
+            if (copyRows) { RewriteStage?.Invoke("Reserved", checked((long)replacements[0].ObjectId)); }
             else { TruncateReserved?.Invoke(); }
             foreach (var table in replacements)
             {

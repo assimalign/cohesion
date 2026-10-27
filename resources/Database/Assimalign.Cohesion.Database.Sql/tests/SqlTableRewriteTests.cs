@@ -123,8 +123,10 @@ public sealed partial class SqlTableRewriteTests
         await PrepareAsync(session, timeout.Token);
         var previous = Table(database);
         int observed = 0;
-        SqlPlanExecutor.RewriteStage = (point, _) =>
+        ulong preparedOwner = 0;
+        SqlPlanExecutor.RewriteStage = (point, owner) =>
         {
+            if (point == "Reserved") { preparedOwner = checked((ulong)owner); }
             if (point != stage) { return; }
             observed++;
             if (cancel) { cancellation.Cancel(); }
@@ -144,6 +146,8 @@ public sealed partial class SqlTableRewriteTests
         database.IndexManager.ExportRegistrations().ShouldAllBe(index => index.ObjectId == previous.ObjectId);
         (await RowsAsync(session, "SELECT id FROM t WHERE id=1", timeout.Token)).ShouldHaveSingleItem()[0].ShouldBe(1);
         await ReclaimAsync(database, timeout.Token);
+        preparedOwner.ShouldBeGreaterThan(previous.ObjectId);
+        database.DataStorage.HasOwnerPages(preparedOwner).ShouldBeFalse();
         await database.RewriteTableAsync(previous, timeout.Token);
         await ReclaimAsync(database, timeout.Token);
     }
@@ -229,16 +233,22 @@ public sealed partial class SqlTableRewriteTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - Rewrite: every durable file boundary recovers one complete row layout and index set")]
-    [InlineData(StorageCommitDurability.Synchronous)]
-    [InlineData(StorageCommitDurability.Grouped)]
-    [InlineData(StorageCommitDurability.None)]
-    public async Task Reopen_InterruptedRewrite_ShouldConvergeAtEveryCrashPoint(StorageCommitDurability durability)
+    [InlineData(StorageCommitDurability.Synchronous, false)]
+    [InlineData(StorageCommitDurability.Grouped, false)]
+    [InlineData(StorageCommitDurability.None, false)]
+    [InlineData(StorageCommitDurability.Synchronous, true)]
+    [InlineData(StorageCommitDurability.Grouped, true)]
+    [InlineData(StorageCommitDurability.None, true)]
+    public async Task Reopen_InterruptedRewrite_ShouldConvergeAtEveryCrashPoint(StorageCommitDurability durability, bool cancel)
     {
         // Arrange
         using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(4));
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(timeout.Token);
         var strategy = new CrashCaptureSqlStorageStrategy(durability);
         CrashCaptureSqlStorageStrategy.CrashPointRecorder recorder;
         ulong old;
+        ulong preparedOwner = 0;
+        int checkpoints = 0, reclaimedBatches = 0, freedBeforeIntentRemoval = 0;
         await using (var engine = SqlDatabaseEngine.Create("rewrite-crash", new() { StorageStrategy = strategy, Durability = durability }))
         {
             var database = await engine.CreateDatabaseAsync("db", timeout.Token);
@@ -249,12 +259,54 @@ public sealed partial class SqlTableRewriteTests
             old = Table(database).ObjectId;
             await using var pin = await session.BeginTransactionAsync(timeout.Token);
 
-            // Act
-            using (recorder = strategy.RecordCrashPoints()) { await database.RewriteTableAsync(Table(database), timeout.Token); }
+            SqlPlanExecutor.RewriteStage = (stage, value) =>
+            {
+                if (stage == "Reserved") { preparedOwner = checked((ulong)value); }
+                if (stage != "Copied") { return; }
+                database.Coordinator.Checkpoint(timeout.Token);
+                database.CatalogStorage.Checkpoint();
+                checkpoints++;
+                if (cancel) { cancellation.Cancel(); }
+            };
+            database.TableReclamation.AfterBatch = (owner, _) =>
+            {
+                Interlocked.Increment(ref reclaimedBatches);
+                if (!database.DataStorage.HasOwnerPages(owner))
+                {
+                    // This boundary is inside reclamation, after durable frees and before
+                    // the catalog removes the intent. Checkpoint both stores here too.
+                    database.CatalogStorage.GetOwnerPages(owner).ShouldNotBeEmpty();
+                    database.Coordinator.Checkpoint(timeout.Token);
+                    database.CatalogStorage.Checkpoint();
+                    Interlocked.Increment(ref freedBeforeIntentRemoval);
+                }
+            };
+            try
+            {
+                // Act: record through checkpoints, pin release, reclamation and intent removal.
+                using (recorder = strategy.RecordCrashPoints())
+                {
+                    if (cancel) { await Should.ThrowAsync<OperationCanceledException>(() => database.RewriteTableAsync(Table(database), cancellation.Token).AsTask()); }
+                    else { await database.RewriteTableAsync(Table(database), timeout.Token); }
+                    await pin.RollbackAsync(timeout.Token);
+                    await ReclaimAsync(database, timeout.Token);
+                    database.Coordinator.Checkpoint(timeout.Token);
+                    database.CatalogStorage.Checkpoint();
+                }
+            }
+            finally
+            {
+                SqlPlanExecutor.RewriteStage = null;
+                database.TableReclamation.AfterBatch = null;
+            }
         }
 
         // Assert
         recorder.Count.ShouldBeGreaterThan(1);
+        preparedOwner.ShouldBeGreaterThan(old);
+        checkpoints.ShouldBe(cancel ? 1 : 2);
+        reclaimedBatches.ShouldBeGreaterThan(0);
+        freedBeforeIntentRemoval.ShouldBeGreaterThan(0);
         int replaced = 0;
         int retained = 0;
         for (int point = 0; point < recorder.Count; point++)
@@ -273,44 +325,90 @@ public sealed partial class SqlTableRewriteTests
             await ExecAsync(session, "INSERT INTO t VALUES (66)", timeout.Token);
             await ReclaimAsync(database, timeout.Token);
             database.Catalog.GetPendingTableReclamations().ShouldBeEmpty();
+            database.DataStorage.HasOwnerPages(table.ObjectId).ShouldBeTrue();
+            database.DataStorage.HasOwnerPages(table.ObjectId == old ? preparedOwner : old).ShouldBeFalse();
         }
         retained.ShouldBeGreaterThan(0);
-        replaced.ShouldBeGreaterThan(0);
-        _output.WriteLine($"{durability}: recovered {recorder.Count} rewrite crash images; old={retained}, compact={replaced}");
+        if (cancel) { replaced.ShouldBe(0); }
+        else { replaced.ShouldBeGreaterThan(0); }
+        _output.WriteLine($"{durability}, canceled={cancel}: recovered {recorder.Count} rewrite crash images; old={retained}, compact={replaced}; copy checkpoints={checkpoints}; reclamation batches={reclaimedBatches}; freed-before-intent={freedBeforeIntentRemoval}");
     }
 
-    [Fact(DisplayName = "Cohesion Test [Sql] - Rewrite: writer, pinned reader and reclamation races preserve every committed row")]
-    public async Task RewriteTableAsync_ConcurrentWritersReadersAndReclamation_ShouldPreserveHistory()
+    [Theory(DisplayName = "Cohesion Test [Sql] - Rewrite: exact commit and snapshot history catches lost and resurrected writes")]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    public async Task RewriteTableAsync_ConcurrentWritersReadersAndReclamation_ShouldPreserveHistory(int corruption)
     {
-        // Arrange
+        // Arrange: the history is independent of every observed row, including the first read.
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(90));
         using var stop = CancellationTokenSource.CreateLinkedTokenSource(timeout.Token);
+        using var historyGate = new SemaphoreSlim(1, 1);
         await using var engine = SqlDatabaseEngine.Create("rewrite-stress", new() { MaintenanceInterval = TimeSpan.FromMilliseconds(2) });
         var database = await engine.CreateDatabaseAsync("db", timeout.Token);
         await using var session = await database.CreateSessionAsync(timeout.Token);
-        await PrepareAsync(session, timeout.Token);
-        int written = 1, snapshots = 0, prepared = 0, rewrites = 0;
+        await ExecAsync(session, "CREATE TABLE t (gone INT,id INT PRIMARY KEY,value INT)", timeout.Token);
+        await ExecAsync(session, "ALTER TABLE t DROP COLUMN gone", timeout.Token);
+        await ExecAsync(session, "CREATE TABLE child (id INT PRIMARY KEY,pid INT REFERENCES t(id) ON DELETE CASCADE,value INT)", timeout.Token);
+        await ExecAsync(session, "INSERT INTO t(id,value) VALUES (1,11),(2,21)", timeout.Token);
+        await ExecAsync(session, "INSERT INTO child VALUES (1,1,12),(2,2,22)", timeout.Token);
+        int attempts = 2, written = 0, snapshots = 0, prepared = 0, rewrites = 0, ddl = 0, truncations = 0;
+        int maintenancePasses = 0, maintenanceBusy = 0;
+        long sequence = 0;
+        var history = new List<(long Commit, int? Id)>(); // null is an atomic TRUNCATE CASCADE.
+        var reads = new List<(long Snapshot, (int Id, int Value)[] Parents, (int Id, int Parent, int Value)[] Children)>();
+        bool truncateOwnsHistory = false;
+        SqlPlanExecutor.TruncateReserved = () => { historyGate.Wait(timeout.Token); truncateOwnsHistory = true; };
+        SqlPlanExecutor.TruncatePublished = () =>
+        {
+            history.Add((++sequence, null));
+            Interlocked.Increment(ref truncations);
+            truncateOwnsHistory = false;
+            historyGate.Release();
+        };
         SqlPlanExecutor.RewriteStage = (stage, _) =>
         {
             if (stage != "Prepared") { return; }
             database.TableReclamation.Request();
-            database.TableReclamation.RunBatch(timeout.Token);
+            try
+            {
+                database.TableReclamation.RunBatch(timeout.Token);
+                Interlocked.Increment(ref maintenancePasses);
+            }
+            catch (StorageTransactionException error) when (error.Code != StorageTransactionErrorCode.ForeignStorage)
+            {
+                // Match the real purge worker's busy/retry policy for a stale page
+                // directory entry reused by another bracket. Final reclamation is mandatory.
+                Interlocked.Increment(ref maintenanceBusy);
+            }
             Interlocked.Increment(ref prepared);
         };
         var writer = DedicatedTestTask.Run(async () =>
         {
             await using var concurrent = await database.CreateSessionAsync(timeout.Token);
-            int id = 2;
             while (!stop.IsCancellationRequested)
             {
                 try
                 {
-                    await ExecAsync(concurrent, $"INSERT INTO t VALUES ({id})", stop.Token);
-                    Interlocked.Increment(ref written);
-                    id++;
+                    await using var transaction = await concurrent.BeginTransactionAsync(IsolationLevel.ReadCommitted, stop.Token);
+                    int id = Interlocked.Increment(ref attempts);
+                    await ExecAsync(concurrent, $"INSERT INTO t(id,value) VALUES ({id},{id * 10})", stop.Token);
+                    await ExecAsync(concurrent, $"INSERT INTO child VALUES ({id},{id},{id * 10})", stop.Token);
+                    await ExecAsync(concurrent, $"UPDATE t SET value={id * 10 + 1} WHERE id={id}", stop.Token);
+                    await ExecAsync(concurrent, $"UPDATE child SET value={id * 10 + 2} WHERE id={id}", stop.Token);
+                    await ExecAsync(concurrent, $"DELETE FROM t WHERE id={id - 2}", stop.Token);
+                    // Locks precede the history gate: no gate -> table-lock cycle.
+                    await historyGate.WaitAsync(stop.Token);
+                    try
+                    {
+                        await transaction.CommitAsync(stop.Token);
+                        history.Add((++sequence, id));
+                        Interlocked.Increment(ref written);
+                    }
+                    finally { historyGate.Release(); }
                 }
                 catch (OperationCanceledException) when (stop.IsCancellationRequested) { break; }
-                catch (DatabaseException error) when (error.Diagnostics.Any(diagnostic => diagnostic.Code is "CS04064" or "CS04006")) { }
+                catch (DatabaseException error) when (Retryable(error)) { }
             }
         }, timeout.Token);
         var reader = DedicatedTestTask.Run(async () =>
@@ -320,41 +418,120 @@ public sealed partial class SqlTableRewriteTests
             {
                 try
                 {
-                    await using var pin = await concurrent.BeginTransactionAsync(stop.Token);
-                    var before = (await RowsAsync(concurrent, "SELECT id FROM t ORDER BY id", stop.Token)).Select(row => (int)row[0]!).ToArray();
-                    before.ShouldBe(Enumerable.Range(1, before.Length));
+                    SqlDatabaseTransaction snapshot;
+                    long captured;
+                    await historyGate.WaitAsync(stop.Token);
+                    try { snapshot = await concurrent.BeginTransactionAsync(stop.Token); captured = sequence; }
+                    finally { historyGate.Release(); }
+                    await using var pinned = snapshot;
+                    reads.Add(await ReadAsync(concurrent, captured, stop.Token));
                     await Task.Yield();
-                    var after = (await RowsAsync(concurrent, "SELECT id FROM t ORDER BY id", stop.Token)).Select(row => (int)row[0]!).ToArray();
-                    after.ShouldBe(before);
+                    reads.Add(await ReadAsync(concurrent, captured, stop.Token));
                     Interlocked.Increment(ref snapshots);
                 }
                 catch (OperationCanceledException) when (stop.IsCancellationRequested) { break; }
             }
         }, timeout.Token);
+        var definitions = DedicatedTestTask.Run(async () =>
+        {
+            await using var concurrent = await database.CreateSessionAsync(timeout.Token);
+            bool added = false;
+            while (!stop.IsCancellationRequested)
+            {
+                try
+                {
+                    await ExecAsync(concurrent, added ? "ALTER TABLE t DROP COLUMN scratch" : "ALTER TABLE t ADD COLUMN scratch INT", stop.Token);
+                    added = !added;
+                    Interlocked.Increment(ref ddl);
+                    await ExecAsync(concurrent, "TRUNCATE t CASCADE", stop.Token);
+                }
+                catch (OperationCanceledException) when (stop.IsCancellationRequested) { break; }
+                catch (DatabaseObjectLockedException) { await Task.Yield(); }
+                catch (DatabaseException error) when (Retryable(error)) { }
+            }
+        }, timeout.Token);
         var elapsed = Stopwatch.StartNew();
         try
         {
-            // Act: time is a minimum only; counters decide whether the race was exercised.
+            // Act: durations set only a minimum; successful counters decide completion.
             do
             {
-                await database.RewriteTableAsync(Table(database), timeout.Token);
-                rewrites++;
-            } while (elapsed.Elapsed < TimeSpan.FromSeconds(1) || rewrites < 20 || Volatile.Read(ref written) < 20 || Volatile.Read(ref snapshots) < 20);
+                try { await database.RewriteTableAsync(Table(database), timeout.Token); rewrites++; }
+                catch (DatabaseObjectLockedException) { await Task.Yield(); }
+                catch (DatabaseException error) when (Retryable(error)) { }
+            } while (elapsed.Elapsed < TimeSpan.FromSeconds(1) || rewrites < 20 || Volatile.Read(ref written) < 20 ||
+                Volatile.Read(ref snapshots) < 20 || Volatile.Read(ref ddl) < 20 || Volatile.Read(ref truncations) < 10 ||
+                Volatile.Read(ref maintenancePasses) < 20);
         }
         finally
         {
-            SqlPlanExecutor.RewriteStage = null;
             stop.Cancel();
-            await Task.WhenAll(writer, reader);
+            await Task.WhenAll(writer, reader, definitions);
+            SqlPlanExecutor.RewriteStage = null;
+            SqlPlanExecutor.TruncateReserved = null;
+            SqlPlanExecutor.TruncatePublished = null;
+            if (truncateOwnsHistory) { historyGate.Release(); }
         }
 
-        // Assert
+        // Assert: exact rows and values for BOTH reads of every pinned snapshot.
+        rewrites.ShouldBeGreaterThanOrEqualTo(20);
         prepared.ShouldBe(rewrites);
+        maintenancePasses.ShouldBeGreaterThanOrEqualTo(20);
         written.ShouldBeGreaterThanOrEqualTo(20);
         snapshots.ShouldBeGreaterThanOrEqualTo(20);
-        (await RowsAsync(session, "SELECT id FROM t ORDER BY id", timeout.Token)).Select(row => (int)row[0]!).ShouldBe(Enumerable.Range(1, written));
+        ddl.ShouldBeGreaterThanOrEqualTo(20);
+        truncations.ShouldBeGreaterThanOrEqualTo(10);
+        reads.Count.ShouldBeGreaterThanOrEqualTo(2 * snapshots);
+        foreach (var read in reads) { Verify(read); }
+        // The original false pass ([1,2] committed, both reads [1]) must fail too.
+        Should.Throw<ShouldAssertException>(() => Verify((0L, new[] { (1, 11) }, new[] { (1, 1, 12) })));
+        int finalId = Interlocked.Increment(ref attempts);
+        await ExecAsync(session, $"INSERT INTO t(id,value) VALUES ({finalId},{finalId * 10 + 1})", timeout.Token);
+        await ExecAsync(session, $"INSERT INTO child VALUES ({finalId},{finalId},{finalId * 10 + 2})", timeout.Token);
+        await ExecAsync(session, $"DELETE FROM t WHERE id={finalId - 2}", timeout.Token);
+        history.Add((++sequence, finalId));
+        if (corruption != 0)
+        {
+            await ExecAsync(session, $"DELETE FROM t WHERE id={finalId}", timeout.Token);
+            if (corruption == 2)
+            {
+                await ExecAsync(session, "INSERT INTO t(id,value) VALUES (1,11)", timeout.Token);
+                await ExecAsync(session, "INSERT INTO child VALUES (1,1,12)", timeout.Token);
+            }
+        }
+        var final = await ReadAsync(session, sequence, timeout.Token);
+        if (corruption == 0) { Verify(final); }
+        else { Should.Throw<ShouldAssertException>(() => Verify(final)); }
+        if (corruption == 2) { final.Parents.Length.ShouldBe(Expected(sequence).Length); }
         await ReclaimAsync(database, timeout.Token);
-        _output.WriteLine($"rewrites={rewrites}; prepared maintenance passes={prepared}; writes={written}; stable snapshots={snapshots}");
+        _output.WriteLine($"fault={corruption}; rewrites={rewrites}; prepared maintenance passes={prepared}; successful maintenance passes={maintenancePasses}; busy passes={maintenanceBusy}; writer attempts={attempts - 2}; committed mixed transactions={written}; inserts={written * 2}; updates={written * 2}; deletes/cascades={written}; FK writes={written * 2}; stable snapshots={snapshots}; exact snapshot reads={reads.Count}; DDL={ddl}; truncations={truncations}");
+
+        (int Id, int Value)[] Expected(long snapshot)
+        {
+            var values = new Dictionary<int, int> { [1] = 11, [2] = 21 };
+            foreach (var change in history.Where(change => change.Commit <= snapshot))
+            {
+                if (change.Id is not { } id) { values.Clear(); continue; }
+                values.Remove(id - 2);
+                values[id] = id * 10 + 1;
+            }
+            return values.OrderBy(pair => pair.Key).Select(pair => (pair.Key, pair.Value)).ToArray();
+        }
+        void Verify((long Snapshot, (int Id, int Value)[] Parents, (int Id, int Parent, int Value)[] Children) read)
+        {
+            var expected = Expected(read.Snapshot);
+            read.Parents.ShouldBe(expected, $"exact parent history at commit {read.Snapshot}");
+            read.Children.ShouldBe(expected.Select(row => (row.Id, row.Id, row.Value + 1)).ToArray(), $"exact child/FK history at commit {read.Snapshot}");
+        }
+        static bool Retryable(DatabaseException error) => error is DatabaseTransactionAbortedException ||
+            error.Diagnostics.Any(diagnostic => diagnostic.Code is "CS04064" or "CS04006");
+        static async Task<(long Snapshot, (int Id, int Value)[] Parents, (int Id, int Parent, int Value)[] Children)> ReadAsync(
+            SqlDatabaseSession reader, long snapshot, CancellationToken token)
+        {
+            var parents = (await RowsAsync(reader, "SELECT id,value FROM t ORDER BY id", token)).Select(row => ((int)row[0]!, (int)row[1]!)).ToArray();
+            var children = (await RowsAsync(reader, "SELECT id,pid,value FROM child ORDER BY id", token)).Select(row => ((int)row[0]!, (int)row[1]!, (int)row[2]!)).ToArray();
+            return (snapshot, parents, children);
+        }
     }
 
     private static SqlCatalogTable Table(SqlDatabase database) => database.Catalog.Tables.Single(table => table.Name == "t");

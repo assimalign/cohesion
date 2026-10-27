@@ -318,8 +318,10 @@ public sealed partial class SqlTableRewriteTests
         await PrepareAsync(session, timeout.Token);
         await ExecAsync(session, "INSERT INTO t VALUES " + string.Join(',', Enumerable.Range(2, 191).Select(id => $"({id})")), timeout.Token);
         int batches = 0;
+        ulong preparedOwner = 0;
         SqlPlanExecutor.RewriteStage = (stage, processed) =>
         {
+            if (stage == "Reserved") { preparedOwner = checked((ulong)processed); }
             if (stage != "Copied") { return; }
             batches++;
             if (cancel && processed == 128) { cancellation.Cancel(); }
@@ -339,6 +341,9 @@ public sealed partial class SqlTableRewriteTests
         else { Table(database).DroppedColumnOrdinals.ShouldBeEmpty(); }
         (await RowsAsync(session, "SELECT id FROM t ORDER BY id", timeout.Token)).Select(row => (int)row[0]!).ShouldBe(Enumerable.Range(1, 192));
         await ReclaimAsync(database, timeout.Token);
+        preparedOwner.ShouldBeGreaterThan(previous.ObjectId);
+        database.DataStorage.HasOwnerPages(cancel ? preparedOwner : previous.ObjectId).ShouldBeFalse();
+        database.DataStorage.HasOwnerPages(Table(database).ObjectId).ShouldBeTrue();
         database.IndexManager.ExportRegistrations().ShouldAllBe(index => index.ObjectId == Table(database).ObjectId);
     }
 

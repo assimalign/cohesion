@@ -6764,10 +6764,18 @@ Existing codes retain their conditions. SQL record-space format advances once, 2
 publication semantics. Compiled-schema v8 and catalog record shapes stay unchanged. The
 existing coded open gate refuses all earlier files; no upgrade or legacy reader is added.
 
-Crash tests reopen every write/flush/length image under Synchronous, Grouped and None;
+Crash tests retain every write/flush/length image through copy-batch checkpoints, snapshot
+release, reclamation and the free-before-intent-removal window, then reopen every image for
+successful publication and canceled preparation under Synchronous, Grouped and None;
 None models process loss. Snapshot/index, missing-tail, duplicate-row, cancellation, exception,
 lock wait, stale-description, disposal and counter-driven nonparallel stress tests exercise
-admission and every acquired owner. NativeAOT smoke executes compaction and a rebuilt seek.
+admission and every acquired owner. Prepared-owner IDs are captured at reservation; assertions
+check their physical pages after reclamation as well as the live owner. A mutation that removes
+intents without freeing pages fails these guards. The independent commit/BEGIN history checks
+exact parent and child rows and values for both snapshot reads and final state while inserts,
+updates, deletes/cascades, FK writes, DDL and TRUNCATE race rewrites. Lost-write and equal-count
+resurrection fault modes exercise the same oracle, including the two-row false-prefix case.
+NativeAOT smoke executes compaction and a rebuilt seek.
 The exclusive rewrite follows local PostgreSQL tablecmds.c:4681-4691,6049,6186; preserving old
 snapshot layouts through owner replacement follows the owner's deliberate TRUNCATE policy.
 
