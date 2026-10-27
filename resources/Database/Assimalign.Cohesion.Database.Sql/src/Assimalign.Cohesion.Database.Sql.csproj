@@ -23,4 +23,9 @@
 		<CohesionSharedSource Include="Assimalign.Cohesion.Database.Sql.Language" Module="Types" />
         <CohesionSharedSource Include="Assimalign.Cohesion.Database" Module="Engine" />
 	</ItemGroup>
+	<ItemGroup>
+		<CohesionValueType Include="ValueObjects\SqlObjectName.cs" ObjectRuntimeType="String"
+			ObjectNamespace="Assimalign.Cohesion.Database.Sql" ObjectAccessModifier="public"
+			ObjectHasImplicitOperators="true" ObjectHasIsValidMethod="true" ObjectComparison="OrdinalIgnoreCase" />
+	</ItemGroup>
 </Project>

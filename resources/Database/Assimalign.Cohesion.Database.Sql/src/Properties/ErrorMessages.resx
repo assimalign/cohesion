@@ -850,7 +850,8 @@
   <data name="FileNamesOrphanDirectory" xml:space="preserve"><value>Database '{0}' cannot be created: its directory '{1}' is already there without a database in it, left by an interrupted create or drop. Delete the directory, or drop the database, which deletes it, and create the database again.</value></data>
   <data name="FileStorageAlreadyExists" xml:space="preserve"><value>Storage for database '{0}' already exists.</value></data>
   <data name="CatalogTableSubject" xml:space="preserve"><value>table '{0}.{1}'</value></data>
-  <data name="RetainedDroppedColumnHint" xml:space="preserve"><value>It keeps the physical positions of {0} dropped columns, which are never reused (#1241); recreating the table and copying its rows (CREATE TABLE, INSERT ... SELECT) reclaims them.</value></data>
+  <data name="SqlObjectNameInvalid" xml:space="preserve"><value>A SQL object name must contain a non-whitespace character.</value></data>
+  <data name="RetainedDroppedColumnHint" xml:space="preserve"><value>It keeps the physical positions of {0} dropped columns, which are never reused (#1241); RewriteTableAsync compacts them, or recreate the table and copy its rows (CREATE TABLE, INSERT ... SELECT).</value></data>
   <data name="CatalogIndexSubject" xml:space="preserve"><value>index '{0}'</value></data>
   <data name="CatalogRegistrationsSubject" xml:space="preserve"><value>the database's {0} index registrations</value></data>
   <data name="StartupFrameExpected" xml:space="preserve"><value>Expected a startup frame but received {0}.</value></data>

@@ -205,6 +205,20 @@ See [DESIGN.md](DESIGN.md) for the execution model and its decisions.
 
 `SqlDatabaseServerOptions.Listener` takes an `IDuplexConnectionListener`, including TCP and InMemory listeners. The server owns accepted duplex connections and their protocol I/O.
 
+## Table maintenance (#1265)
+
+SqlDatabase.RewriteTableAsync(schemaName, tableName, cancellationToken) compacts dropped
+physical ordinals,
+copies live rows and rebuilds indexes on the provisioning worker. Names are decoded SQL
+identifiers, without delimiters. Writers bound to a retired owner wait for the exclusive table
+lock and then abort retryably with CS04006. Transactions begun before publication also abort
+when writing or reading retired tables inside DML; retry the entire transaction. Read-only
+snapshots retain the original layout until they end. Publication is recoverable as one complete owner
+replacement. Cancellation before publication keeps the original table; retry interrupted work
+explicitly. The maintenance operation preserves schema ownership and logical definitions.
+The source lock is acquired before queueing, leaving the worker available to other databases.
+A nonzero engine LockTimeout reports CS04044 on contention; otherwise supply cancellation.
+
 ## Session execution (#1576, 2026-10-16)
 
 `SqlDatabaseSession` derives from `DatabaseLanguageSession<SqlQueryRequest>`. It offers typed
