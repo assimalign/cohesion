@@ -246,6 +246,7 @@ payload accepts rows plus a matching affected count without capability negotiati
 | COHDOC020 | CD03020 | Schema/constraints |
 | COHDOC022 | CD03022 | Schema/constraints |
 | COHDOC024 | CD03024 | Schema/constraints |
+| — | CD03025 | Schema/constraints — multiple array keys or UNIQUE array index |
 | COHDOC004 | CD04004 | Transactions/locking |
 | COHDBD001 | CD04101 | Transactions/locking |
 | COHDOC001 | CD05001 | Execution/budgets |

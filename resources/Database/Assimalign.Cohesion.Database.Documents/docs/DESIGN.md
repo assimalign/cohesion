@@ -492,6 +492,7 @@ CD00007 for the same count rule at parse and plan time:
 | `CD03022` | An index has fewer than one or more than 32 paths |
 | `CD01023` | A direct SELECT AST repeats a FROM/UNNEST binding name or supplies an empty binding name |
 | `CD03024` | Index already exists |
+| `CD03025` | Multiple array keys or a UNIQUE array index |
 | `CD01025` | Index does not exist |
 | `CD01026` | A directly constructed RETURNING projection has an empty output name |
 | `CD01027` | A directly constructed comprehension has an empty variable name |
@@ -620,7 +621,7 @@ repeatedly. Expansion checks cancellation and transaction activity for every row
 and structural-equality loops also observe cancellation. The expansion method is internal for
 the owning test assembly to cancel from borrowed JSON reads and verify per-element checks.
 No reflection or runtime code generation is involved. No catalog, storage or wire layout
-changes, format bump or upgrade path are needed; #1135's index v2 remains unchanged.
+changes, format bump or upgrade path are needed for these expressions; the current index record format is v3 (#1530).
 
 #### ARRAY and FIRST comprehensions (#1728)
 
@@ -843,8 +844,8 @@ an absent value has `IsMissing(ordinal) == true`, `IsNull(ordinal) == false`, an
 `GetValue(ordinal) == null`. Explicit NULL has the reverse predicates. SELECT * keeps the
 whole source value. SQL, Graph and KeyValuePair leaves keep the default unsupported capability.
 The evaluator's sentinel remains internal to Documents; no catalog value or public sentinel
-type is introduced. Index definitions and physical registrations use v2 (#1135); collections,
-documents and content retain their current versions. Leading MISSING omits an index entry;
+type is introduced. Index definitions and physical registrations use v3 (#1530); collections,
+documents and content retain their current versions. Leading MISSING omits a sparse index entry; the typed catalog IncludeMissing mode retains it;
 trailing MISSING and NULL have distinct component tags. See the catalog's key-layout contract.
 Unary NULL/MISSING/VALUED tests never select an index seek.
 
@@ -1080,11 +1081,11 @@ is recorded for owner review; P8 (#1264) later absorbs the description into its 
 
 ## Index planning and writes
 
-Index definition and physical registration records use catalog v2 (#1135); other record kinds
+Index definition and physical registration records use catalog v3 (#1530); other record kinds
 retain their current versions. Startup validates metadata and tree formats before the recovery
-scrub. V1 index catalogs are refused with a recreate remedy; no legacy reader or upgrade exists.
+scrub. V1/v2 index catalogs are refused with a recreate remedy; no legacy reader or upgrade exists.
 The engine-level refusal names the database, disposes its coordinator and leaves a cleanly closed
-file set byte-identical, for both v1 definition and registration records.
+file set byte-identical, for both v1/v2 definition and registration records.
 
 
 `CREATE [UNIQUE] INDEX [IF NOT EXISTS] <index-name> ON <collection> (<path>, ...)` and
@@ -2233,16 +2234,32 @@ The fields below appear consecutively beginning at offset 18. No trailing fields
 | --- | --- | --- |
 | 1 collection | 0 | GUID collection identity; string name; byte owner; nullable string owning schema |
 | 2 document | 0 | GUID collection identity; string document identity; UInt64 version; UInt64 head; Int64 byte length; UInt32 IEEE CRC-32 |
-| 4 index definition (v2) | 0 | GUID collection identity; string index name; Int32 path count (1..32); ordered path strings; byte unique flag (0 or 1); UInt64 physical generation identity |
-| 5 physical registration (v2) | 1 | UInt64 physical generation identity; Int64 root page; string index name; byte unique flag (0 or 1) |
+| 4 index definition (v3) | 0 | GUID collection identity; string index name; Int32 key count (1..32); ordered key descriptors; byte flags (bit 0 UNIQUE, bit 1 INCLUDE MISSING); UInt64 physical generation identity |
+| 5 physical registration (v3) | 1 | UInt64 physical generation identity; Int64 root page; string index name; byte unique flag (0 or 1) |
 
-Kinds 1 and 2 remain v1. Every index uses v2, including single-path nonunique indexes.
-V1 index records are refused before the recovery scrub writes anything, with found/supported
-versions and a recreate remedy. There is no upgrade path or legacy reader. The preceding v1 index reader
-refuses v2 physical registrations at its pre-scrub fence. Engines predating that fence must
-never open these files, as the compatibility section below records.
-Key-path lists are immutable and compare by value, including catalog conflict checks.
-A default `DocumentIndexMetadata` reports an empty leading `Path` and can be formatted safely.
+Kinds 1 and 2 remain v1. Every index uses v3, including scalar-only definitions and physical
+registrations. V1 and v2 index records are refused at the pre-recovery fence with CD06105,
+found/supported versions and a recreate remedy. There is no upgrade path or legacy reader.
+The v2 reader likewise refuses v3 at its fence. The shared storage and B-tree page formats
+are unchanged. Engines predating the fence must never open these files.
+
+Each key descriptor is a byte kind (0 scalar path, 1 DISTINCT array), then a string path.
+For an array key the path is element-relative (empty means the element itself), followed by
+a string document source path and a predicate. Predicate tags are 0 absent (root only),
+1 comparison, 2 IS NULL, 3 IS MISSING, 4 AND, 5 OR and 6 NOT. Tags 1..3 carry a relative path;
+tag 1 additionally carries a comparison byte (Equal=0 through GreaterThanOrEqual=5), then a
+constant tag (1 NULL, 2 FALSE, 3 TRUE, 4 Decimal, 5 String) and its payload. Decimal is the
+four little-endian Int32 words written by BinaryWriter.Write(Decimal); strings use the length
+encoding above. AND/OR carry two predicate nodes in left/right order; NOT carries one.
+Decode enforces at most 32 levels and 128 nodes before descending or allocating an unbounded
+tree. Unknown tags, unknown flag bits, invalid paths/constants, multiple array keys and UNIQUE
+array definitions are malformed current-format data, with located CD06105 / CK06003.
+
+`DocumentIndexMetadata.Keys` is an immutable snapshot with descriptor value equality, including
+WHEN and IncludeMissing in conflict checks. `Paths` retains scalar-only definitions; it is
+empty for an array index, preventing the existing scalar planner from inferring completeness
+from an array index's scalar prefix. Array-aware consumers use Keys. The default metadata's
+leading Path is empty and its formatting is safe.
 
 Kind 3 content chunks use the format in
 [Documents.Storage](DESIGN.md#storage-component).
@@ -2263,16 +2280,50 @@ plans, and the plan executor invokes this component under the statement's `Trans
 after lock acquisition and ownership enforcement. `DocumentDatabase` therefore needs no index
 members, and the catalog and B+Tree updates retain the same transaction as the DDL statement.
 
-Each index has 1..32 ordered case-sensitive paths and an immutable UNIQUE flag. The cap
+Each index has 1..32 ordered keys and immutable UNIQUE and IncludeMissing flags. Scalar keys are case-sensitive paths. The cap
 matches PostgreSQL `src/include/pg_config_manual.h:79` (INDEX_MAX_KEYS). Paths retain the
 lossless dotted/bracket-string encoding: `customer.address.zip`, `items[0].price`, and
-`['root.name']`. Wildcards, expansion, expression keys and sort directions are outside T1.
-The single-path catalog overload remains a convenience for a nonunique definition; it writes v2.
+`['root.name']`. Wildcards and sort directions remain unsupported. The typed catalog API additionally admits one DISTINCT array key (#1530).
+The single-path catalog overload remains a convenience for a nonunique, sparse definition; it writes v3.
 
-A document gets one entry when the leading path is not MISSING. Absent members, incompatible
+A scalar-only document index emits one entry when the leading path is not MISSING, or when IncludeMissing is true. Absent members, incompatible
 shapes, navigation through NULL and out-of-range subscripts yield MISSING; reading a NULL
 member itself yields NULL, matching the evaluator. Trailing MISSING and explicit NULL are
 distinct encoded components. No document-identity suffix is needed.
+
+`DocumentIndexKey.DistinctArray(sourcePath, elementPath, when)` normalizes away the bound variable:
+sourcePath is document-relative and elementPath/WHEN paths are relative to one element. An empty
+element path means the element itself. WHEN supports path-to-constant scalar comparisons,
+IS NULL, IS MISSING, AND, OR and NOT; constants normalize to null, Boolean, Decimal or String.
+There are no functions, callbacks, parameters, subqueries, nested comprehensions, document-relative
+WHEN operands or arbitrary engine ASTs. Catalog therefore never depends on the engine evaluator.
+Only TRUE admits an element, with OQL scalar type comparisons, ordinal strings and unknown-value
+propagation. The fixed limits are 32 predicate levels and 128 nodes.
+
+Array keys are DISTINCT only, with at most one array key per index and no UNIQUE array index
+(CD03025). A document emits the set of distinct encoded scalar projections, combined with its
+other scalar document keys. Numeric scales and repeated elements deduplicate by encoded key;
+NULL is a scalar posting. MISSING projections are omitted as in ARRAY comprehension, and complex
+array/object projections have no postings. Empty or fully filtered arrays emit nothing. A missing
+source produces a MISSING component (omitted if leading and sparse); a present non-array source
+produces NULL, following ARRAY/FIRST's source semantics. INCLUDE MISSING includes a missing leading
+source or scalar path; it does not invent an element for an empty or filtered array.
+
+Postings carry document-version references, not element identities. A single WHEN tree evaluates
+all its conjuncts on the same element, so a price projection with stock > 0 excludes a price from
+a different element. For arbitrary later ANY planning, the complete ANY must remain a residual:
+intersecting document candidates for price and stock alone cannot prove same-element correlation.
+Reevaluating ANY over the visible stored array proves correctness. It does not alone prove #1530's
+2x fetch bound; OQ-I2 must select sufficiently restrictive spans/WHEN matches and measure that bound.
+Search deduplicates document identities before returning candidates; UNNEST must still read the
+original array to preserve its element multiplicity. No OQL array-index syntax or access planning
+is delivered by this catalog run.
+
+The single-array-key and DISTINCT precedent is [Couchbase array indexing](https://docs.couchbase.com/server/current/n1ql/n1ql-language-reference/indexing-arrays.html),
+and [INCLUDE MISSING](https://docs.couchbase.com/server/current/n1ql/n1ql-language-reference/createindex.html)
+informs the leading-missing metadata. The narrower scalar projection/WHEN grammar is Cohesion's
+boundary. RavenDB's per-element conversion (`src/Raven.Server/Documents/Indexes/Persistence/Corax/CoraxDocumentConverterBase.cs:361-376`)
+informs enumeration, but its list context/element identity is not copied.
 
 Every component starts with one Documents-owned byte: 0 MISSING, 1 NULL, 2 FALSE, 3 TRUE,
 4 number, 5 string, 6 array, 7 object. The first four and the last two have no payload.
@@ -2317,8 +2368,8 @@ creation; those snapshots use scans.
 
 #### Catalog: Mutation, rollback, and recovery
 
-Saving a document prepares old and new composite keys and checks unique constraints, then one shared physical statement bracket
-tombstones prior metadata, inserts new metadata, tombstones old index entries, inserts new index
+Saving a document prepares deduplicated old and new composite-key sets and checks unique constraints, then one shared physical statement bracket
+tombstones prior metadata, inserts new metadata, tombstones every old index entry, inserts every new index
 entries, and persists any changed root registration (a backstop: a tree's root page stays fixed
 through splits since #1159, so registrations change only when a tree is created). Deletion
 tombstones metadata and keys in one
@@ -2326,6 +2377,19 @@ bracket. The surrounding logical transaction also owns all chunk writes/tombston
 publishes its in-memory reference only after the physical bracket succeeds. The shared version
 ledger records record and index mutations, so logical rollback erases the writer's keys and
 restores old tombstones. The caller aborts the logical operation after failure.
+
+Equal old/new values still receive distinct document-version references. Logical undo records each
+posting; physical failure rolls the whole bracket back and reattaches roots before logical undo.
+Cancellation is checked during element extraction, each cursor move and posting application,
+including after the last posting before publication. Extraction errors publish no catalog change.
+The caller continues to abort the logical operation so earlier content brackets are undone.
+Lock/latch order is the database writer lock, coordinator apply gate, B-tree latch, then storage
+page latch. Preparation can take the catalog monitor before storage latches, but never across an
+await or while entering apply/undo. Index cursors release the tree latch before catalog/content
+reads. Non-parallel tests require counted progress through replacement, rollback, pinned reads,
+canceled searches and purge, then more progress after unpinning; the duration is only a minimum
+exercise period and a hang ceiling. Injected failures/cancellation after a counted posting prove
+bracket rollback and subsequent reuse.
 
 Physical tree generations use reserved storage sequences and are never reused. Root registrations
 carry writer/deleter zero because they describe current physical topology, including nodes holding

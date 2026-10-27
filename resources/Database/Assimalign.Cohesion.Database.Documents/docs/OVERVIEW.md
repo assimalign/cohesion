@@ -158,13 +158,13 @@ commit the caller's transaction. The engine takes the logical database's exclusi
 rejects write conflicts and stale index definitions, and enforces schema ownership before calling
 the catalog.
 
-`CreateIndexAsync` builds a scalar-path index immediately. `SaveDocumentAsync` and
+`CreateIndexAsync` builds scalar-path indexes or typed DISTINCT array descriptors immediately. The typed overload also persists `IncludeMissing`; OQL array-index syntax and planning follow in OQ-I2. Index definitions and registrations use v3, and the pre-recovery fence refuses v1/v2 with CD06105 and a recreate remedy. `SaveDocumentAsync` and
 `DeleteDocumentAsync` maintain every visible index alongside metadata writes; queries do not
 rebuild indexes. The Documents engine reaches index creation and deletion through planned OQL
 `CREATE INDEX` and `DROP INDEX` statements; these catalog methods remain lower-level transactional
 composition seams. `SearchIndexAsync` performs a B+Tree equality or range seek and resolves only
 snapshot-visible document versions, ordered by ordinal identity. See [DESIGN.md](DESIGN.md) for
-the format and the precise path/scalar semantics.
+the format and the precise scalar/array posting semantics.
 
 
 ## Storage component

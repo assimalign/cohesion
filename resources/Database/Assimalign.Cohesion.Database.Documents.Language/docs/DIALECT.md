@@ -324,7 +324,7 @@ per row, so key swaps may fail. A failed explicit transaction requires RollbackA
 The wire uses ExecutionFailure (6) without a protocol change and keeps the connection usable.
 The path-count cap reports CD00009 at the 33rd key (CD03022 for a directly constructed AST). Duplicate/empty keys, expressions, wildcards, ASC/DESC, partial
 WHERE and INCLUDE MISSING receive CD00002. ALL and DISTINCT ARRAY index keys get one CK00001
-at ALL/DISTINCT. The catalog uses v2 index records and refuses v1 indexes before recovery writes;
+at ALL/DISTINCT. The catalog uses v3 index records (#1530) and refuses v1/v2 indexes before recovery writes;
 there is no upgrade path or legacy reader. Composite seeks support a leading equality prefix
 and one range on the next path. Bounded snapshot-visible probes rank candidate cost first;
 ties use prefix length, range, UNIQUE, then ordinal name. Comparable complete inputs may

@@ -305,7 +305,7 @@ public sealed partial class DocumentCatalog
     {
         EnsureActive(context);
         byte[] bytes = DocumentCatalogCodec.Encode(record, context.Sequence);
-        var changes = PrepareIndexChanges(record.Document, previous, context.Snapshot);
+        var changes = PrepareIndexChanges(record.Document, previous, context.Snapshot, cancellationToken);
         if (record.Document is not null) { await CheckUniqueAsync(changes, context, cancellationToken).ConfigureAwait(false); }
         var location = await ApplyAsync(context, async bracket =>
         {
@@ -336,7 +336,7 @@ public sealed partial class DocumentCatalog
         {
             return;
         }
-        var changes = PrepareIndexChanges(null, previous, context.Snapshot);
+        var changes = PrepareIndexChanges(null, previous, context.Snapshot, cancellationToken);
         await ApplyAsync(context, async bracket =>
         {
             Tombstone(bracket, old.Reference, context.Sequence);

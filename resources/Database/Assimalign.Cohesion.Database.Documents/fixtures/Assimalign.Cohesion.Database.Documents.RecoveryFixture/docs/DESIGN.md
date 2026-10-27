@@ -12,7 +12,7 @@ nonzero exit. COUNT verification requires an Int64 long (#1137), including index
 A composite UNIQUE (rank, marker) index also survives restart. Verify seeks the committed key
 and attempts a duplicate Put, which must fail without leaving state so verify can run twice.
 The owning test reads both raw trees and counts all live entries as well as each committed,
-deleted and abandoned key, proving no missing or orphan entries. Both registrations are v2 and
+deleted and abandoned key, proving no missing or orphan entries. Both registrations are v3 (#1530) and
 the composite registration retains its UNIQUE flag. The fixture uses no reflection and can be published with NativeAOT.
 
 The process boundary forces recovery from persisted files, independently of
