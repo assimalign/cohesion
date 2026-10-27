@@ -6809,9 +6809,16 @@ message, public interface, visibility grant or project reference. The maintenanc
 generated SqlObjectName value object for decoded schema and table components, preserving case-insensitive
 catalog identity and delimited-name punctuation; default names are refused at admission.
 FK intent preparation rechecks the physical binding generation after grants and refreshes
-outgoing parents after a swap. Constraint probes against a replacement invisible to the
-statement snapshot abort with CS04006 instead of reporting a false FK violation. Hook-driven
-regressions pause between parent discovery and IS grant and cover retained parent versions.
+outgoing parents after a swap. Retained publications identify their replacement by ObjectId,
+so a later rename cannot hide an invisible compact owner. Only the first non-null, non-self
+key that actually probes a parent checks visibility, using the probe's snapshot (refreshed
+committed visibility for read-committed ON CONFLICT). An invisible replacement aborts with
+CS04006 instead of reporting a false FK violation; empty input and MATCH SIMPLE null keys
+need no parent probe and can commit. Seeing the newest ordered publication marker skips all
+retained owners in constant work; older snapshots use an allocation-free indexed scan.
+Hook-driven regressions pause between parent discovery and IS grant and cover retained parent versions.
+The null-key shortcut follows local PostgreSQL src/backend/utils/adt/ri_triggers.c:458-496;
+no reference-engine code is copied.
 Existing codes retain their conditions. SQL remains format 26: ordinary dense table records,
 kind-14 intents and the existing TRUNCATE publication contract are readable by the format-26
 engine, so this operation changes no persisted contract. Compiled-schema v8 and catalog record

@@ -16,8 +16,10 @@ namespace Assimalign.Cohesion.Database.Sql.Catalog;
 
 public sealed partial class SqlCatalog
 {
-    private readonly Dictionary<ulong, (TransactionSequence Marker, SqlCatalogSnapshot Before)> _truncatedTables = new();
-    private (ulong ObjectId, TransactionSequence Marker, SqlCatalogSnapshot Before)[] _orderedTruncations = [];
+    internal static Action? ReplacementMarkerExamined { get; set; }
+
+    private readonly Dictionary<ulong, (ulong ReplacementObjectId, TransactionSequence Marker, SqlCatalogSnapshot Before)> _truncatedTables = new();
+    private (ulong ObjectId, ulong ReplacementObjectId, TransactionSequence Marker, SqlCatalogSnapshot Before)[] _orderedTruncations = [];
     private readonly Dictionary<SqlCatalogIndex, BTreeIndex> _truncatedIndexes = new(ReferenceEqualityComparer.Instance);
     private readonly HashSet<ulong> _preparedTruncateOwners = new();
     private readonly HashSet<ulong> _truncateRetirementsPublishing = new();
@@ -80,15 +82,20 @@ public sealed partial class SqlCatalog
     // publication markers until its snapshot and all its constraint reads have ended.
     internal bool SnapshotPredatesReplacement(SqlCatalogTable current, TransactionSnapshot snapshot)
     {
-        foreach (var retirement in Volatile.Read(ref _orderedTruncations))
+        var retirements = Volatile.Read(ref _orderedTruncations);
+        if (retirements.Length == 0) { return false; }
+        // Publication serializes markers. Seeing the newest implies seeing all of
+        // them, even when an older reader keeps arbitrarily many owners retained.
+        ReplacementMarkerExamined?.Invoke();
+        if (snapshot.IsVisible(retirements[^1].Marker)) { return false; }
+        for (int index = 0; index < retirements.Length; index++)
         {
+            var retirement = retirements[index];
+            ReplacementMarkerExamined?.Invoke();
             if (snapshot.IsVisible(retirement.Marker)) { continue; }
-            foreach (var previous in retirement.Before.Tables)
-            {
-                if (previous.ObjectId == retirement.ObjectId &&
-                    string.Equals(previous.Schema, current.Schema, StringComparison.OrdinalIgnoreCase) &&
-                    string.Equals(previous.Name, current.Name, StringComparison.OrdinalIgnoreCase)) { return true; }
-            }
+            // Rename preserves this identity and updates incoming FK names. Names
+            // cannot identify the publication whose compact owner a probe will read.
+            if (retirement.ReplacementObjectId == current.ObjectId) { return true; }
         }
         return false;
     }
@@ -219,9 +226,9 @@ public sealed partial class SqlCatalog
                 _pendingReclamations.Add(item.ObjectId, new SqlReclamationIntent(item.Location.PageId, item.Location.SlotIndex));
                 _truncateRetirementsPublishing.Add(item.ObjectId);
             }
-            foreach (var table in expected) { _truncatedTables.Add(table.ObjectId, (marker, before)); }
+            foreach (var table in expected) { _truncatedTables.Add(table.ObjectId, (mapping[table.ObjectId].ObjectId, marker, before)); }
             foreach (var pair in retiredIndexes) { _truncatedIndexes.Add(pair.Key, pair.Value); }
-            AppendOrderedTruncations(expected, marker, before);
+            AppendOrderedTruncations(expected, replacements, marker, before);
             _registrations = merged;
             _registrationsLocation = registrationsLocation;
             _storageBindingGeneration = bindingGeneration;
@@ -263,16 +270,17 @@ public sealed partial class SqlCatalog
         }
     }
 
-    private void AppendOrderedTruncations(IReadOnlyList<SqlCatalogTable> retired, TransactionSequence marker, SqlCatalogSnapshot before)
+    private void AppendOrderedTruncations(IReadOnlyList<SqlCatalogTable> retired, IReadOnlyList<SqlCatalogTable> replacements,
+        TransactionSequence marker, SqlCatalogSnapshot before)
     {
         // Snapshot admission serializes monotonically increasing markers. The caller
         // supplies this publication's owners in ascending identity order.
         var previous = _orderedTruncations;
-        var next = new (ulong ObjectId, TransactionSequence Marker, SqlCatalogSnapshot Before)[previous.Length + retired.Count];
+        var next = new (ulong ObjectId, ulong ReplacementObjectId, TransactionSequence Marker, SqlCatalogSnapshot Before)[previous.Length + retired.Count];
         Array.Copy(previous, next, previous.Length);
         for (int index = 0; index < retired.Count; index++)
         {
-            next[previous.Length + index] = (retired[index].ObjectId, marker, before);
+            next[previous.Length + index] = (retired[index].ObjectId, replacements[index].ObjectId, marker, before);
         }
         Volatile.Write(ref _orderedTruncations, next);
     }
@@ -282,7 +290,7 @@ public sealed partial class SqlCatalog
         var previous = _orderedTruncations;
         int index = 0;
         while (previous[index].ObjectId != objectId) { index++; }
-        var next = new (ulong ObjectId, TransactionSequence Marker, SqlCatalogSnapshot Before)[previous.Length - 1];
+        var next = new (ulong ObjectId, ulong ReplacementObjectId, TransactionSequence Marker, SqlCatalogSnapshot Before)[previous.Length - 1];
         Array.Copy(previous, next, index);
         Array.Copy(previous, index + 1, next, index, previous.Length - index - 1);
         Volatile.Write(ref _orderedTruncations, next);

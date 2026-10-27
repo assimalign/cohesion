@@ -44,6 +44,14 @@ then normal queued waits retaining closure grants and deadlock detection. Hard d
 carry CS04065 mapped to 40P01; explicit victim rollback remains caller-managed under
 statement atomicity. Grammar, diagnostic transport and disk formats are unchanged.
 
+## Parent replacement visibility (#1265)
+
+DIALECT.md records retryable FK probes by replacement ObjectId across renames. Empty input,
+MATCH SIMPLE null keys and input-satisfied self-keys require no parent probe; read-committed
+ON CONFLICT uses refreshed probe visibility. Engine conformance cases exercise empty UPDATE,
+empty INSERT SELECT and all-null FK inserts across a retained parent rewrite. Grammar, AST,
+diagnostic identities and format 26 are unchanged.
+
 ## Bounded SELECT evaluation (#1523)
 
 DIALECT.md records early termination across stored/system, grouped, correlated,
