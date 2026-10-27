@@ -41,9 +41,9 @@ relationship-identity sequence. Search runs in one statement snapshot with
 O(visited vertices + frontier) state, cancellation, and configurable memory/work limits through the search's
 `Limits`. Exhaustion fails the statement. The defaults are the engine's 256 MiB and 1,000,000
 work units; path materialization also consumes these budgets. See [typed shortest search](DESIGN.md#typed-shortest-distance-and-path-1536-gq-sp1).
-GQL selectors ANY/ALL, ANY/ALL SHORTEST and counted shortest paths/groups now parse, bind and
-EXPLAIN with endpoint-pair partitions and separate search prefilters. Execution retains CK00001
-until SP3; see [selector planning](DESIGN.md#gql-path-selectors-planning-boundary-1734-gq-sp2).
+GQL selectors ANY/ALL, ANY/ALL SHORTEST and counted shortest paths/groups now parse, bind, execute and
+EXPLAIN with endpoint-pair partitions and separate search prefilters
+under the statement work/memory budgets; see [selector execution](DESIGN.md#gql-path-selectors-execution-1734-gq-sp2sp3).
 
 `GraphSchema.Open` supplies session-bound label/type discovery, property metadata, ownership
 enforcement and node-property index creation. `AddGraph(name, graph => ...)` captures

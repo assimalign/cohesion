@@ -43,7 +43,12 @@ internal sealed partial class SqlPlanExecutor
         int? slot = expression switch { SqlBoundSubquery query => query.Slot, SqlBoundInSubquery member => member.Slot, SqlBoundQuantifiedComparison quantified => quantified.Slot, _ => null };
         if (slot is int id && frame.Queries.TryGetValue(id, out var binding) && !frame.TryGet(id, out _))
         {
-            frame.Set(id, await MaterializeSubqueryAsync(binding, statement, cancellationToken).ConfigureAwait(false));
+            if (binding.IsCorrelated || !frame.StatementValues.TryGetValue(id, out var values))
+            {
+                values = await MaterializeSubqueryAsync(binding, statement, cancellationToken).ConfigureAwait(false);
+                if (!binding.IsCorrelated) { frame.StatementValues[id] = values; }
+            }
+            frame.Set(id, values);
         }
         // An empty quantified set decides the predicate without visiting its scalar operand.
         if (expression is SqlBoundQuantifiedComparison comparison &&

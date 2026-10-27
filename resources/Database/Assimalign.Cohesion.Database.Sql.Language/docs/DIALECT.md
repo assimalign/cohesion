@@ -13,8 +13,7 @@ parser did not consume reports `CS00003`, so nothing executes a truncated statem
 the profile requires updating the parser, this matrix, and the engine's
 `SqlLanguageConformanceTests` execution-case table in the same change. That test
 enumerates the profile and fails if any advertised clause lacks a passing case.
-MERGE is the staged exception: its advertised clause is measured through binding and
-nonexecuting EXPLAIN while action execution deliberately refuses with CK00001 until SQ-M2.
+MERGE's advertised clause is measured through action execution and RETURNING.
 
 ## Storage integrity errors (#1160)
 
@@ -78,7 +77,7 @@ Explicit INSERT aliases `AS overriding` and `AS "overriding"` remain valid;
 only a bare OVERRIDING token in clause position is refused. CREATE SEQUENCE, OVERRIDING ... VALUE, identity
 MINVALUE/MAXVALUE/CYCLE/CACHE, ALTER COLUMN RESTART/SET GENERATED, and generated stored
 expressions also report named `CK00001`. Sequences, restart, overriding and populated-table
-identity backfill remain T2. INSERT ... RETURNING exposes the allocated identity value (#1117). Full-definition ALTER COLUMN already refuses identity type changes,
+identity backfill remain T2. INSERT ... RETURNING exposes the allocated identity value (#1117). Validation-only full-definition ALTER COLUMN refuses identity type changes,
 nullable definitions and DEFAULT; retaining the type and NOT NULL preserves generation. SET/DROP DEFAULT and DROP NOT NULL refuse identity columns with CS03025 (#1122).
 
 ## RETURNING contract (#1117)
@@ -321,8 +320,8 @@ EXCLUDED is absent from RETURNING scope; EXCLUDED.column there reports CK00001, 
 a real target table or alias is named excluded, which stays referenceable (PostgreSQL).
 MySQL ON DUPLICATE KEY UPDATE and SQLite INSERT OR IGNORE/REPLACE report one CK00001
 suggesting ON CONFLICT and execute nothing. These spellings and CONFLICT, DO, NOTHING,
-EXCLUDED remain contextual, so stored identifier quoting is unchanged. MERGE parses, binds and
-explains; execution retains CK00001 until SQ-M2 (#1715).
+EXCLUDED remain contextual, so stored identifier quoting is unchanged. MERGE executes ordered
+actions, BY SOURCE and RETURNING (#1715, SQ-M2).
 
 ## TRUNCATE (#1716, SQ-T1)
 
@@ -391,7 +390,7 @@ between builder commit and publication therefore sees the complete table after p
 Statement and BEGIN admission proceed normally through that interval. No snapshot sees a partial
 row set. Conversion, domain, budget, cancellation and storage failures before
 publication leave no table. Crash recovery sees no table or the complete table, and reclaims
-abandoned owners. SQL remains format 26; existing kind-14 reclamation records suffice.
+abandoned owners. SQL remains format 27; existing kind-14 reclamation records suffice.
 
 CTAS holds the shared metadata lease for its entire source query and build, following CREATE
 INDEX's precedent. Other sessions' CREATE/DROP of views, functions, domains and schemas fail
@@ -421,7 +420,7 @@ src/backend/commands/tablecmds.c:2033-2090 and src/backend/catalog/heap.c:3701-3
 
 ## Statement matrix
 
-With INSERT ... ON CONFLICT (#1118), DML RETURNING (#1117), persisted CREATE/DROP VIEW (#1124), CREATE/DROP SCHEMA (#1030), set operations (#1114), quantified comparisons (#1718), UPDATE ... FROM / DELETE ... USING (#1714), TRUNCATE and CREATE TABLE AS (#1716) and binding-only MERGE (#1715), the profile has **57 of 63 declared clauses** measured against the live SQL engine, including nonexecuting MERGE EXPLAIN.
+With INSERT ... ON CONFLICT (#1118), DML RETURNING (#1117), persisted CREATE/DROP VIEW (#1124), CREATE/DROP SCHEMA (#1030), set operations (#1114), quantified comparisons (#1718), UPDATE ... FROM / DELETE ... USING (#1714), TRUNCATE and CREATE TABLE AS (#1716) and MERGE (#1715), the profile has **57 of 63 declared clauses** measured against the live SQL engine, including MERGE actions and RETURNING.
 Phase 22 measured 33 of 49.
 The earlier 32/48 figure included `JOIN`, `GROUP BY`, `HAVING`, and `SUBQUERY`,
 removed in Phase 12e (#1019–#1021), plus a no-op `CAST` removed in Phase 13.
@@ -450,7 +449,7 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | Statement | Status | Notes |
 |---|---|---|
 | `SELECT` | Supported subset, measured | Stored tables, persisted read-only views, virtual system relations and aliased derived queries, with written-order N-way INNER/LEFT/RIGHT/FULL/CROSS joins and comma items over these source kinds; `DISTINCT`, projections and aliases, scalar expressions, `WHERE`, grouping, multi-expression `ORDER BY ASC/DESC` with per-key `NULLS FIRST`/`NULLS LAST`, nonnegative integer `LIMIT`/`OFFSET`, ISO `FETCH FIRST`/`NEXT`, and the SQL Server `TOP` lexical alias. `COUNT(*)`, `COUNT(expr)`, `SUM`, `AVG`, `MIN`, `MAX`, `STRING_AGG`, and `LISTAGG` execute in grouped and ungrouped queries, with DISTINCT/ALL and ordered inputs. See the aggregate contract below. `SELECT` without `FROM` uses one implicit row, including in CTE bodies. |
-| `EXPLAIN` | Supported extension, measured | SELECT, INSERT (including query sources), UPDATE, DELETE or MERGE returns the chosen plan as ordinary rows without executing it (MERGE itself does not execute yet; see its row). Plain EXPLAIN remains nonexecuting. SELECT-only `EXPLAIN ANALYZE` executes the query and reports actual candidate work (#1522); data changes, including WITH data changes, normally fail `CS05057` (0A000), retaining the earlier `CS04021` read-only catalog refusal where applicable. DDL, transaction control and nested EXPLAIN report `CK00001`. Standalone ANALYZE remains unsupported. |
+| `EXPLAIN` | Supported extension, measured | SELECT, INSERT (including query sources), UPDATE, DELETE or MERGE returns the chosen plan as ordinary rows without executing it. Plain EXPLAIN remains nonexecuting. SELECT-only `EXPLAIN ANALYZE` executes the query and reports actual candidate work (#1522); data changes, including WITH data changes, normally fail `CS05057` (0A000), retaining the earlier `CS04021` read-only catalog refusal where applicable. DDL, transaction control and nested EXPLAIN report `CK00001`. Standalone ANALYZE remains unsupported. |
 | `INSERT` / `VALUES` | Supported subset, measured | Optional column list, multi-row literal/scalar `VALUES` including whole-item `DEFAULT`, `INSERT ... DEFAULT VALUES` (one row of defaults, with an optional column list), and transactional `INSERT ... SELECT` with the same destination coercion, defaults, and constraints. `VALUES` expressions have no columns in scope: a column reference reports `CS01005` before anything executes (see [VALUES and counts have no column scope](#values-and-counts-have-no-column-scope-1165)). Subqueries inside `VALUES` are excluded; use `INSERT ... SELECT`. |
 | `INSERT ... ON CONFLICT` | Supported subset, measured | Column-set inference, ON CONSTRAINT unique-index names, untargeted DO NOTHING, and targeted DO UPDATE SET/WHERE with target and EXCLUDED scope; inserted/updated RETURNING rows and counts. See the upsert contract above. |
 | `UPDATE` | Supported | multi-column `SET`, including `c = DEFAULT`, and `WHERE` (including correlated and uncorrelated subqueries); qualified references in both use the target name or its alias, which hides the base name (PostgreSQL `parse_relation.c:3759`); hidden/unknown qualifiers fail with located `CS01015` before any write and leave an explicit transaction active; aggregates in SET and outside child queries in WHERE are rejected; aggregates inside WHERE subqueries execute (see [Grouping and aggregate functions](#grouping-and-aggregate-functions-1020)) |
@@ -458,7 +457,7 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | `DELETE` | Supported | optional `WHERE`, including correlated and uncorrelated subqueries; aggregates outside a child query are rejected; qualified references use the target name or its alias, which hides the base name (PostgreSQL `parse_relation.c:3759`); hidden/unknown qualifiers fail with located `CS01015` before any write and leave an explicit transaction active |
 | `CREATE TABLE` | Supported | Identity columns use GENERATED ALWAYS/BY DEFAULT AS IDENTITY or the SQL Server IDENTITY alias (see identity contract above). `IF NOT EXISTS`, column definitions with parameterized types, `COLLATE <name>`, `NOT NULL`/`NULL`, `DEFAULT <expression>`, column and table `PRIMARY KEY`, `REFERENCES`/`FOREIGN KEY`, `CHECK`, and `UNIQUE`; optional `CONSTRAINT <name>` |
 | `CREATE TABLE AS` | Supported | Optional complete output names and WITH [NO] DATA; unpublished durable build and atomic publication. See the CTAS contract above. |
-| `ALTER TABLE` | Supported subset, measured | ADD/DROP COLUMN and ADD/DROP CONSTRAINT execute. Full-definition `ALTER COLUMN c <type> [NULL | NOT NULL] [DEFAULT expression]` accepts nullability, length and precision changes that preserve storage type, scale, collation, domain and DEFAULT; tightening and every CHAR length change check existing live values and refuse changes requiring a rewrite. RENAME TO, RENAME [COLUMN], ALTER [COLUMN] SET/DROP DEFAULT and SET/DROP NOT NULL also execute (#1122). PostgreSQL TYPE/SET DATA TYPE and TYPE ... USING remain unsupported. ADD COLUMN nonvolatile defaults backfill old-row reads and apply to subsequent inserts that omit the column; explicit NULL follows nullability. Nullable additions without a default read NULL. NOT NULL additions to populated tables require a non-null default. Invalid defaults reject before mutation; expression defaults follow the fast-default contract below. Column COLLATE persists and governs default comparisons. See the default, atomicity and MVCC contract below (#1023). DROP COLUMN changes only the catalog: it rewrites no row, survives a crash at any point on one definition, and SELECTs running beside it read every value in its own column; see the DROP COLUMN contract below (#1241). |
+| `ALTER TABLE` | Supported subset, measured | ADD/DROP COLUMN and ADD/DROP CONSTRAINT execute. Full-definition `ALTER COLUMN c <type> [NULL | NOT NULL] [DEFAULT expression]` retains the validation-only path for nullability, length and precision when storage type, scale, collation and domain stay unchanged; DEFAULT changes on that path use SET/DROP DEFAULT. Tightening and every CHAR length change validate existing values and refuse repadding through that path. Storage-type, scale, domain and collation changes use the shared rewrite; full-definition identity-type changes retain their refusal. RENAME TO, RENAME [COLUMN], ALTER [COLUMN] SET/DROP DEFAULT and SET/DROP NOT NULL also execute (#1122). PostgreSQL TYPE/SET DATA TYPE with optional COLLATE/USING execute through the exclusive rewrite (#1447); see the ALTER TYPE contract below. ADD COLUMN nonvolatile defaults backfill old-row reads and apply to subsequent inserts that omit the column; explicit NULL follows nullability. Nullable additions without a default read NULL. NOT NULL additions to populated tables require a non-null default. Invalid defaults reject before mutation; expression defaults follow the fast-default contract below. Column COLLATE persists and governs default comparisons. See the default, atomicity and MVCC contract below (#1023). DROP COLUMN changes only the catalog: it rewrites no row, survives a crash at any point on one definition, and SELECTs running beside it read every value in its own column; see the DROP COLUMN contract below (#1241). |
 | `TRUNCATE` | Supported | Table lists, per-table ONLY, CONTINUE/RESTART IDENTITY and CASCADE/RESTRICT; auto-commit only; old snapshots retain their rows and defer storage reclamation. See the contract below. |
 | `DROP TABLE` | Supported | `IF EXISTS`; returns after catalog unpublication, with page reclamation asynchronous after older readers finish; the name may be recreated immediately |
 | `CREATE SCHEMA` | Supported subset, measured | `CREATE SCHEMA [IF NOT EXISTS] name` persists an empty SQL namespace; AUTHORIZATION and nested schema elements report named `CK00001` errors. Namespace names compare without case and keep their stored spelling. |
@@ -485,7 +484,7 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | `ON DELETE CASCADE` / `RESTRICT` / `NO ACTION` / `SET NULL` / `SET DEFAULT` | Supported | omitted deletion action defaults to `NO ACTION`; a cascade deletes its whole transitive closure with no depth limit, so a self-referencing chain deletes however long it is (#1164), and a cycle deletes each row once; `DROP TABLE ... CASCADE` is not supported |
 | `ON UPDATE` | Recognized, not supported | absent from the profile; rejected with `CK00001` |
 | `START TRANSACTION` / `BEGIN [WORK\|TRANSACTION]` / `COMMIT [WORK\|TRANSACTION]` / `END` / `ROLLBACK [WORK\|TRANSACTION]` | Supported | Spellings map to the existing BEGIN/COMMIT/ROLLBACK session commands (+0 clauses). Like every SQL statement, a valid spelling without `;` receives informational CS00009, with no error or warning; with `;` it has no parser diagnostics. START and WORK are contextual, so columns named start/work remain valid. END takes no suffix; without a transaction its CS04002 message names COMMIT. Commit and rollback observe caller cancellation only before their end starts (#1246); a pre-canceled explicit end leaves the transaction usable. Once execution completes, automatic commit ignores caller cancellation and delivers the committed result; real append and durability failures retain their normal errors. Catalog DDL that self-committed finishes mandatory cleanup with CancellationToken.None and delivers its committed result even if the caller canceled; a successful CREATE TABLE requires no retry and exists once after reopen. `SqlCommitCancellationConformanceTests` covers the end boundary and committed rows after reopen. END WORK/TRANSACTION, AND [NO] CHAIN, modes, ROLLBACK [WORK] TO [SAVEPOINT], BEGIN TRAN/named transactions and COMMIT PREPARED stay CS00003. ABORT [WORK\|TRANSACTION], SAVEPOINT, RELEASE, SET TRANSACTION and PREPARE TRANSACTION stay CS00002 (#1012); TRANSACTION alone is not a statement. |
-| `MERGE` | Syntax, binding and EXPLAIN; action execution deferred to SQ-M2 | `CK00001` at execution |
+| `MERGE` | Ordered actions, BY SOURCE and RETURNING execute; concurrent-target rechecks and complete mixed-action final-state constraints remain for SQ-M3 | Existing constraint and action codes |
 | `GRANT` | Not in the dialect | `CS00002` |
 
 ## Unique-build failure order (#1444)
@@ -791,7 +790,7 @@ code when the row is evaluated. `+a` and `+(1 + 2)` reported
 
 **ALTER TABLE actions.** `ADD [COLUMN]`, `ADD CONSTRAINT`, `DROP [COLUMN]`,
 `DROP CONSTRAINT`, full-definition `ALTER COLUMN`, RENAME and ALTER column default/nullability actions parse.
-TYPE/SET DATA TYPE, SET SCHEMA, RENAME CONSTRAINT and comma-separated action lists report named `CK00001`.
+TYPE/SET DATA TYPE with optional COLLATE/USING also parse. SET SCHEMA, RENAME CONSTRAINT and comma-separated action lists report named `CK00001`.
 Other unknown or incomplete actions such as MODIFY, ALTER c INT, ALTER c SET/DROP,
 ALTER CONSTRAINT, bare SET, SET TABLESPACE and SET LOGGED report `CS00003` at parse time.
 SET SCHEMA is named only when SCHEMA follows SET; syntax diagnostics list all supported actions.
@@ -1046,10 +1045,68 @@ whose required ordering differs from both insertion order and the actual scan.
 
 ## Renames and column defaults/nullability (#1122)
 
-ALTER TABLE accepts one action: RENAME TO new_table, RENAME [COLUMN] old TO new,
+**ALTER COLUMN TYPE (#1447, SQ-A2).**
+`ALTER TABLE t ALTER [COLUMN] c [SET DATA] TYPE type [COLLATE collation] [USING expression]`
+executes inline under the table's exclusive lock. USING sees every column of the original row,
+including qualified references to t; it cannot read another table or contain subqueries,
+aggregates or window functions. Without USING the old column supplies the value. Both forms
+require an assignment/implicit registry cast to the target; an explicit-only conversion such as
+TEXT to INT requires `USING CAST(c AS INT)`. A bare string literal retains unknown-input
+coercion. Target character length overflow refuses unless a written CAST permits truncation.
+The declaration selects the target collation; omitted COLLATE uses the database default.
+Nullability, keys and constraints remain. Integer identity targets retain the cursor, start and
+increment. Domain/non-integer identity targets refuse. Start and allocated counter values must
+fit the target integer range; unissued reservation tails are trimmed to it before publication
+so the counter remains valid after reopen. Restart retains the existing reserved-value gap policy.
+
+USING does not transform a default. Defaults must independently assignment-cast to the new type;
+an incompatible default refuses even on an empty table (drop it before TYPE, then SET DEFAULT).
+Numeric and Boolean defaults keep their original expression identity; unknown string literals
+keep their resolved old identity. Immutable defaults validate eagerly and persist as canonical
+literals, so repeated changes do not accumulate casts. A column without a default inherits the
+target domain's default. Domain base modifiers use assignment overflow checks. Volatile defaults
+retain per-insert evaluation and their original text and pinned calls; stable defaults also run
+at INSERT time. TYPE recasts bind standard and application assignment casts, including DATE to
+TIMESTAMP and TIMESTAMP to TIMESTAMPTZ. Immutable defaults freeze to literals and lose their pins.
+Ordinary defaults keep their established evaluation behavior. CHAR defaults, including application
+casts, keep assignment overflow/padding without a persisted explicit CAST. Immutable target-domain
+defaults are checked even on an empty table. Existing CHECKs retain persisted-definition rules,
+validate changed operand types against runtime comparison rules, and recheck converted rows.
+LIKE keeps runtime text conversion for non-character operands. Domain and
+NOT NULL failures also abort the whole operation. Every index is rebuilt; new uniqueness
+collisions, including after a collation change, refuse. Incoming, outgoing and self foreign keys
+must retain the engine's identical storage-type/collation compatibility and valid final keys.
+Only FKs whose child or referenced columns include c are locked and revalidated; unrelated
+FK neighbors remain writable and are not scanned. Affected adjacent tables are locked exclusively
+during validation. Views depending on c refuse,
+including a same-type USING expression; views reading only other columns retain their binding.
+
+The shared #1265 rewrite copies live rows to a dense new owner and atomically publishes the
+definition, indexes and catalog generation. A conversion/constraint failure or cancellation
+before publication leaves the old table current. LockTimeout reports CS04044; stale writers
+retry with CS04006. Read-only old snapshots keep the original definition/owner. Cancellation
+after publication cannot undo the committed result. Full-definition storage/scale/domain/
+collation changes use the same rewrite; decision 49a's validation-only facet path remains.
+Full definitions refuse CS05013 if the resulting default differs or collation changes without
+an explicit COLLATE, including when the type requires a rewrite. TYPE without USING retains
+the heap and index trees for same-storage, same-scale, same-domain and same-collation changes
+whose length/precision widen or become unbounded, except CHAR width changes that can repad values.
+Narrowing rewrites with assignment semantics: excess trailing spaces trim to the target VARCHAR
+length, while non-space overflow refuses. Each rewrite chunk
+evaluates USING, domains and CHECKs before entering the database-wide physical apply gate.
+Failed builds expose their abandoned owner through pending reclamations until its pages are freed.
+Full-definition identity-type changes retain their refusal; use explicit TYPE for integer identity conversion.
+Populated-table provisioning handoff and expanded crash/wire coverage follow in SQ-A3.
+SQL format 27 gates the per-column TYPE default-assignment flag in table extension 7; older files
+refuse without an upgrade reader. Compiled-schema v8 is unchanged.
+CS02064 names a missing assignment pathway for the value, USING result or default (42804).
+Reference anchors: PostgreSQL tablecmds.c:14949-14998,15142-15199,15269-15304,15612-15624 and
+utils/adt/varchar.c:620-648 in the local clone.
+
+Each ALTER TABLE statement accepts one action. Rename/default/nullability forms are RENAME TO new_table, RENAME [COLUMN] old TO new,
 and ALTER [COLUMN] c SET DEFAULT value, DROP DEFAULT, SET NOT NULL or DROP NOT NULL.
 RENAME and TO remain contextual identifiers. Rename targets are unqualified and stay in the
-same schema; SET SCHEMA, RENAME CONSTRAINT, TYPE/SET DATA TYPE and action lists are excluded.
+same schema; SET SCHEMA, RENAME CONSTRAINT and action lists are excluded.
 Existing names and read-only system relation names cannot be overwritten.
 After the ownership check, a table name retained by a declared script object claim is refused with CS03302 naming
 the script; historical targets are forward-only and cannot be silently rewritten.
@@ -1301,7 +1358,8 @@ WHERE filters after null extension. EXPLAIN JoinStep names FullHashJoin and unma
 ANALYZE counts tested candidate pairs, excluding emitted unmatched rows. All retained hash
 rows and match flags share StatementMemoryBudget (default 64 MiB), including nested builds;
 CS05067 refuses exhaustion without spill. Reservations unwind on success, failure and
-cancellation. Other outer/intermediate/result materialization is outside that hash budget.
+cancellation. Joined DML also charges retained outer/intermediate inputs and associations as
+described in the statement-memory contract below. General SELECT result materialization is outside that grant.
 PostgreSQL anchors: optimizer/path/joinrels.c:1157-1180, executor/nodeHashjoin.c:578-592,634-679,729-756.
 
 Ordinary flat joins execute left-deep in written order. Only the first INNER pair
@@ -1374,7 +1432,7 @@ Capability preflight skips advertised clauses and reports the first unadvertised
 one. Thus USING cannot mask a later NATURAL, WINDOW or OVER. MERGE INTO ... USING
 binds and explains; DELETE ... USING executes; CREATE INDEX ... USING remains a syntax error.
 
-## MERGE syntax and binding (#1715, SQ-M1)
+## MERGE syntax, binding and execution (#1715, SQ-M1/SQ-M2)
 
 ```sql
 MERGE INTO target [AS a] USING source [AS b] ON condition
@@ -1407,8 +1465,10 @@ target columns. Missing/ambiguous names, duplicate destinations, missing paramet
 non-Boolean predicates, aggregates and incompatible assignment types fail during binding,
 including empty inputs. Assignment compatibility follows INSERT SELECT's implicit conversion
 families; row-dependent conversion, bounds, nullability and domain checks belong to execution.
-ON and WHEN admit existing read subqueries; action values and RETURNING subqueries retain
-CK00001. Source queries keep existing correlation/capability rules.
+ON, WHEN and action values admit existing read subqueries; RETURNING subqueries retain
+CK00001. Clause conditions and values run lazily, including subquery branches, only for
+rows that reach that clause; values run only after its condition holds.
+Source queries keep existing correlation/capability rules.
 
 RETURNING supports merge_action(), a contextual zero-argument text expression available only
 in this projection (CS01053 elsewhere; CS01006 for arguments/modifiers), including nested
@@ -1416,7 +1476,9 @@ scalar expressions. It is separate from the standalone executable-function profi
 expands target columns then visible source columns, preserving source USING merges;
 qualified wildcards retain CK00001. Source metadata includes absent-side nullability,
 including merged USING outputs.
-DO NOTHING produces no changed-row result in SQ-M2.
+RETURNING emits one row per applied action and none for DO NOTHING. merge_action() yields
+INSERT, UPDATE or DELETE. Target columns contain the new row for INSERT/UPDATE and the old
+row for DELETE; source columns are NULL for BY SOURCE candidates.
 
 EXPLAIN shows Merge, the association tree, ordered MergeAction children (match kind,
 operation, condition presence and column counts), and RETURNING columns. Physical columns
@@ -1428,11 +1490,19 @@ with CS05070, as for source-internal FULL joins. LEFT and RIGHT still accept has
 predicates. WHEN filters are not pushed into ON because they select actions rather
 than classify matches.
 
-SQ-M1 refuses successfully bound MERGE, including wrapped plans, with CK00001 before costing
-can read source indexes, materializing source/subquery rows or evaluating actions.
-Plain EXPLAIN succeeds for supported plans without writes; EXPLAIN ANALYZE retains
-its SELECT-only boundary. Execution, repeated-target CS05036, final-state constraints and
-PostgreSQL concurrency rechecks belong to SQ-M2/SQ-M3. No disk/protocol/result-frame changes.
+SQ-M2 executes all supported actions within one statement rollback bracket, including result
+preparation before publication. Source association cursors drain before writes and row-lock
+waits. Physical identity and explicit side-presence markers classify NULL-valued candidates.
+A second modifying action on one physical target fails with CS05036, including DELETE;
+extra matches that select DO NOTHING do not count. Competing INSERT keys use ordinary
+uniqueness enforcement. Identity allocation, defaults, coercion, domain/CHECK validation,
+referential actions and lock ordering reuse existing DML rules. Hash builds share the
+statement memory grant and cancellation unwinds reservations and statement locks.
+Plain EXPLAIN succeeds without writes; EXPLAIN ANALYZE stays SELECT-only.
+SQ-M3 supplies PostgreSQL concurrent-target rechecks and complete mixed-action final-state
+constraint validation; SQ-M2 still refuses a stale target through existing version checks.
+No disk/protocol/result-frame changes. Repeated modification follows PostgreSQL
+executor/nodeModifyTable.c:3521-3551.
 Namespace/order rules follow PostgreSQL parser/parse_merge.c:52-99,138-178,247-285;
 join preservation follows optimizer/prep/prepjointree.c:222-246 and FULL eligibility follows
 optimizer/path/joinrels.c:1165-1179 in the local reference clone.
@@ -1440,6 +1510,7 @@ optimizer/path/joinrels.c:1165-1179 in the local reference clone.
 | Code | MERGE condition |
 |---|---|
 | CS01053 | merge_action() outside MERGE RETURNING |
+| CS05036 | A second modifying action selects the same physical target |
 | CS05070 | FULL association lacks a safe mandatory hash equality or complete ON safety proof |
 | CS05071 | WHEN follows an unconditional clause of the same match kind |
 
@@ -1561,7 +1632,7 @@ its data with the engine that wrote it (which can still open it), drop the
 database (`DropDatabaseAsync`), create it again and reload the data. A database
 whose creation was interrupted before its format was recorded reads as format 1
 and needs only the drop and create. Upgrading databases across format versions
-is tracked by #1152. New databases remain on format 26; recoverable table rewrite and dropped-ordinal compaction (#1265) reuse its existing records and TRUNCATE publication contract. SqlDatabase.RewriteTableAsync is a C# maintenance operation on the provisioning worker; it adds no SQL statement. Read-only snapshots retain the original layout until they end. Writers bound to a retired table, including old snapshot transactions reading it inside DML, abort retryably with CS04006; retry the entire transaction. FK probes against a replacement their probe snapshot cannot see also abort with CS04006, including after a parent rename. Empty DML input, MATCH SIMPLE null keys and self-keys satisfied by the same input do not probe a parent and do not trigger this refusal. Read-committed ON CONFLICT checks its refreshed probe snapshot after arbitration. Format 26 fenced changed temporal DEFAULT and frozen missing-value text (#1422). Format 25 admits distinct predicates, Boolean tests and LIKE ESCAPE in persisted expressions and views; format 24 admits explicit NULL placement in
+is tracked by #1152. New databases use format 27, which records TYPE default assignment coercion; earlier files are refused. Recoverable table rewrite and dropped-ordinal compaction (#1265) reuse its existing records and TRUNCATE publication contract. SqlDatabase.RewriteTableAsync is a C# maintenance operation on the provisioning worker; it adds no SQL statement. Read-only snapshots retain the original layout until they end. Writers bound to a retired table, including old snapshot transactions reading it inside DML, abort retryably with CS04006; retry the entire transaction. FK probes against a replacement their probe snapshot cannot see also abort with CS04006, including after a parent rename. Empty DML input, MATCH SIMPLE null keys and self-keys satisfied by the same input do not probe a parent and do not trigger this refusal. Read-committed ON CONFLICT checks its refreshed probe snapshot after arbitration. Format 26 fenced changed temporal DEFAULT and frozen missing-value text (#1422). Format 25 admits distinct predicates, Boolean tests and LIKE ESCAPE in persisted expressions and views; format 24 admits explicit NULL placement in
 stored view bodies; earlier formats are refused at open, with no upgrade reader.
 
 From format 4 on, the catalog stores the format marker in a record that engines
@@ -2650,7 +2721,7 @@ and `parse_expr.c:2541-2560,3085-3105`.
 
 These forms are storable in CHECK, parenthesized DEFAULT, domain definitions,
 SQL function bodies and views. Canonical CHECK text is exposed by
-INFORMATION_SCHEMA.CHECK_CONSTRAINTS. Storage format 26 refuses older files;
+INFORMATION_SCHEMA.CHECK_CONSTRAINTS. Storage format 27 refuses older files;
 there is no upgrade reader. No named clause is added; the profile count does not change.
 ESCAPE and UNKNOWN stay contextual. ISNULL and NOTNULL are recognized in
 postfix position and refused with one CK00001; explicit AS aliases and ordinary
@@ -2915,7 +2986,7 @@ and reopen with the same metadata as an explicit zero scale; bare decimals remai
 
 The supported alteration is the full definition, for example
 ALTER TABLE t ALTER COLUMN c NUMERIC(28,2). PostgreSQL's ALTER COLUMN c TYPE ...
-form remains unsupported. Function overload identity and invocation semantics are
+form executes with optional COLLATE and USING (#1447). Function overload identity and invocation semantics are
 unchanged apart from FLOAT(p)'s resolved storage selection.
 
 ## Declared bounds on writes (#1418)
@@ -3484,7 +3555,7 @@ pin in the same change.
 | `CS05045` | Error | Result encoding/preparation failed. Writing statements prepare header/rows before commit and any result frame; DML failures roll back only the statement. Read-only SELECT, EXPLAIN, system views and SHOW encode during delivery and may fail after partial frames, which the client discards. Includes encoding failures or a header/row above ProtocolFrameHeader.MaxPayloadLength (currently 16 MiB); there is no aggregate result cap. Size refusals map to SQLSTATE 54000 and report encoded size and frame limit. The connection and explicit transaction remain usable on result failures; transport failures are terminal (#1651). |
 | `CS02034` | Error | Invalid LIKE ESCAPE: escape is neither empty nor one Unicode scalar, or a pattern ends with the escape character (SQLSTATE 22025); ExecutionFailure leaves the connection usable |
 | `CS03035` | Error | ON CONFLICT has no matching unique arbiter, a named target is not a unique index, or DO UPDATE omitted its target (PostgreSQL 42P10) |
-| `CS05036` | Error | ON CONFLICT DO UPDATE cannot affect a row a second time (PostgreSQL 21000) |
+| `CS05036` | Error | ON CONFLICT DO UPDATE or MERGE cannot affect a row a second time (PostgreSQL 21000) |
 | `CS03037` | Error | UNIQUE, PRIMARY KEY or unique-index violation, including a second unique index during ON CONFLICT DO UPDATE (SQLSTATE 23505, unique_violation) |
 | `CS03038` | Error | Table CHECK or domain-check violation, including writes, CAST to a domain and function domain arguments/results (SQLSTATE 23514, check_violation) |
 | `CS03039` | Error | FOREIGN KEY violation: missing parent on INSERT/UPDATE, or referenced key protected by RESTRICT/NO ACTION on DELETE/UPDATE, including final-row checks (SQLSTATE 23503, foreign_key_violation) |
@@ -3779,6 +3850,7 @@ the diagnostic fixes introduce no persisted-format change beyond #1422's format-
 | `CS03061` | Column already exists | 42701 (`duplicate_column`) |
 | `CS02062` | INTERVAL duration overflow in assignment, DEFAULT or CAST | 22015 (`interval_field_overflow`) |
 | `CS02063` | FOREIGN KEY columns have incompatible collations | 42P21 (`collation_mismatch`) |
+| `CS02064` | ALTER COLUMN TYPE old value, USING result or dependent DEFAULT has no assignment cast | 42804 (`datatype_mismatch`) |
 | `CS04064` | A bound table was replaced while DDL waited; retry the statement | 40001 (`serialization_failure`) |
 | `CS04066` | TRUNCATE inside an explicit transaction | 25001 (`active_sql_transaction`) |
 | `CS04065` | Hard lock deadlock; roll back the victim transaction before retrying | 40P01 (`deadlock_detected`) |
@@ -3818,7 +3890,7 @@ SQL does not infer it from a CLR exception type. This follows PostgreSQL datetim
 REAL and DOUBLE text retain CS02022 / 22P02 for malformed input and CS02002 / 22003
 for overflow/underflow. Floating assignment rejects 1,000 and overflowing 1e400, as CAST does.
 
-Catalog format 26 and compiled-schema v8 refuse earlier definitions rather than reinterpret
+Catalog format 27 and compiled-schema v8 refuse earlier definitions rather than reinterpret
 retained default text. Format-25 INTERVAL defaults such as '12' (formerly days) and
 '2.03:04:05.1234567' are never rebound by this engine. A catalog refusal carries CS06041;
 a schema refusal uses InvalidDocument at schema.format. Export with the writing engine,
@@ -3894,8 +3966,12 @@ An ON condition referencing any derived String/Json/Character column retains nes
 preserve deferred collation errors. No hash spill exists.
 
 `SqlDatabaseEngineOptions.StatementMemoryBudget` defaults to 67108864 bytes and must be positive.
-It limits accounted concurrently live hash-build storage per statement. CTAS also charges its
-retained source result and copy buffers, as described in the CTAS contract. Budget exhaustion reports
+It limits accounted concurrently live hash-build storage per statement. MERGE, UPDATE FROM and
+DELETE USING also charge retained decoded targets, inputs, associations and selected write storage,
+including normalized buffers and referential writes. These conservative reservations last until
+statement exit; shared payload already charged by a hash build is not charged again for an alias.
+An exhausted joined statement refuses before any write and releases memory on success, failure or
+cancellation. CTAS also charges its retained source result and copy buffers, as described in the CTAS contract. Budget exhaustion reports
 `CS05067` (53200, out_of_memory). It does not cap result materialization or transient planning.
 SELECT-only `EXPLAIN ANALYZE` runs normal query expressions, including application functions, and
 returns the existing eight-column plan description. `actual_rows` counts candidates before

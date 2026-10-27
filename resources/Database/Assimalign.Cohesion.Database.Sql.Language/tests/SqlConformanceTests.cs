@@ -35,6 +35,9 @@ public class SqlConformanceTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - Conformance: supported statements parse without errors")]
+    [InlineData("ALTER TABLE t ALTER v TYPE \"a space\" USING v;", SqlQueryCommandType.Alter)]
+    [InlineData("ALTER TABLE t ALTER v TYPE \"a\"\"quote\";", SqlQueryCommandType.Alter)]
+    [InlineData("ALTER TABLE t ALTER v TYPE \"\"\"odd\"\"\";", SqlQueryCommandType.Alter)]
     [InlineData("SELECT * FROM users;", SqlQueryCommandType.Select)]
     [InlineData("SELECT * FROM a FULL JOIN b USING(id);", SqlQueryCommandType.Select)]
     [InlineData("SELECT * FROM a LEFT OUTER JOIN b ON a.id = b.id FULL OUTER JOIN c ON b.id = c.id;", SqlQueryCommandType.Select)]
@@ -56,6 +59,9 @@ public class SqlConformanceTests
     [InlineData("UPDATE dbo.users AS u SET age = age + 1 WHERE u.id BETWEEN 1 AND 10 RETURNING id, age;", SqlQueryCommandType.Update)]
     [InlineData("MERGE INTO t USING s ON t.id=s.id WHEN MATCHED AND s.v>0 THEN UPDATE SET v=s.v WHEN MATCHED THEN DELETE WHEN NOT MATCHED THEN INSERT(id,v) VALUES(s.id,s.v) WHEN NOT MATCHED BY SOURCE THEN DO NOTHING RETURNING merge_action();", SqlQueryCommandType.Merge)]
     [InlineData("MERGE INTO t USING s CROSS JOIN u ON t.id=s.id WHEN MATCHED THEN DO NOTHING;", SqlQueryCommandType.Merge)]
+    [InlineData("MERGE INTO t USING s ON t.id>s.id WHEN NOT MATCHED AND FALSE THEN INSERT VALUES(s.id,s.v);", SqlQueryCommandType.Merge)]
+    [InlineData("UPDATE t SET v=s.v FROM s WHERE t.id>s.id;", SqlQueryCommandType.Update)]
+    [InlineData("DELETE FROM t USING s WHERE t.id>s.id;", SqlQueryCommandType.Delete)]
     [InlineData("UPDATE dbo.users SET name = DEFAULT WHERE id = 1;", SqlQueryCommandType.Update)]
     [InlineData("UPDATE t SET v=s.v FROM s WHERE t.id=s.id RETURNING t.v,s.v;", SqlQueryCommandType.Update)]
     [InlineData("DELETE FROM t USING s WHERE t.id=s.id RETURNING t.id,s.v;", SqlQueryCommandType.Delete)]
@@ -71,6 +77,8 @@ public class SqlConformanceTests
     [InlineData("SELECT INTERVAL '12', CAST('-12.5' AS INTERVAL), CAST('13:45' AS TIME);", SqlQueryCommandType.Select)]
     [InlineData("ALTER TABLE users ADD COLUMN email VARCHAR(255);", SqlQueryCommandType.Alter)]
     [InlineData("ALTER TABLE users DROP COLUMN email;", SqlQueryCommandType.Alter)]
+    [InlineData("ALTER TABLE users ALTER COLUMN age TYPE BIGINT;", SqlQueryCommandType.Alter)]
+    [InlineData("ALTER TABLE users ALTER age SET DATA TYPE INT USING CAST(age AS INT);", SqlQueryCommandType.Alter)]
     [InlineData("DROP TABLE IF EXISTS users;", SqlQueryCommandType.Drop)]
     [InlineData("TRUNCATE TABLE users;", SqlQueryCommandType.Truncate)]
     [InlineData("CREATE INDEX ix_users_name ON users (name);", SqlQueryCommandType.Create)]

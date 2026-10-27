@@ -542,7 +542,7 @@ rejected before it reaches the session and changes nothing. Each refusal is an `
 
 The planner validates each source-ordered stage against its incoming scope. LET adds bindings; FOR/UNWIND retains a proven node or relationship element kind from COLLECT, homogeneous entity lists and compatible result branches, while unproven or mixed elements stay Value bindings; a RETURN/NEXT or WITH boundary retains only referenceable projected columns, including entity kinds, optionality, composite possibilities and Int64 COUNT metadata. Carried columns use binding names independently of displayed source text; duplicate carried names are CG01015 during planning, including EXPLAIN. MATCH anchors prefer carried entities. An INSERT introduces its label and relationship-type names for later stages without retaining negative token-cache entries. Unknown names empty only their MATCH stage.
 
-WITH WHERE validates independently of ORDER BY expression reuse. DISTINCT or aggregation restricts it to projected bindings; other WITH predicates also see incoming bindings. An out-of-scope reference or aggregate in WHERE is CG05001 during planning; aggregate aliases remain usable. MATCH declares every comma-separated pattern part before validating its maps. Inline maps are predicates on the complete bound clause: available inputs can filter early, while references to later pattern parts wait until the clause is fully bound, including anonymous elements and either expansion direction. Only literal/parameter equalities supply property-index seeks, so a deferred predicate cannot narrow the scan candidates. INSERT/CREATE maps may reference only the incoming scope (CG05001 otherwise). Member access on value bindings admits maps and entities and propagates the accessed value's composite/entity shape; known scalar owners are CG03003 during planning, and invalid runtime containers are CG02013.
+WITH WHERE validates independently of ORDER BY expression reuse. DISTINCT or aggregation restricts it to projected bindings; other WITH predicates also see incoming bindings. An out-of-scope reference or aggregate in WHERE is CG05001 during planning; aggregate aliases remain usable. MATCH declares every comma-separated pattern part before validating its maps. For paths without selectors or inline WHERE, inline maps are predicates on the complete bound clause: available inputs can filter early, while references to later pattern parts wait until the clause is fully bound, including anonymous elements and either expansion direction. Only literal/parameter equalities supply property-index seeks, so a deferred predicate cannot narrow the scan candidates. INSERT/CREATE maps may reference only the incoming scope (CG05001 otherwise). Member access on value bindings admits maps and entities and propagates the accessed value's composite/entity shape; known scalar owners are CG03003 during planning, and invalid runtime containers are CG02013.
 
 Behavior consulted, no code copied, relative to C:/Source/repos/neo4j/neo4j: community/cypher/front-end/ast/src/main/scala/org/neo4j/cypher/internal/ast/Clause.scala:1723-1724,1965,1998-2030; front-end/rewriting/src/main/scala/org/neo4j/cypher/internal/rewriting/rewriters/PropertyPredicateNormalizer.scala:35-41; front-end/ast/src/main/scala/org/neo4j/cypher/internal/ast/semantics/SemanticPatternCheck.scala:101-103; front-end/ast/src/main/scala/org/neo4j/cypher/internal/ast/semantics/SemanticError.scala:725; front-end/ast/src/main/scala/org/neo4j/cypher/internal/ast/semantics/SemanticExpressionCheck.scala:495 and interpreted-runtime/src/main/scala/org/neo4j/cypher/internal/runtime/interpreted/commands/expressions/Property.scala:43-79 (the latter paths are also under community/cypher).
 
@@ -835,7 +835,7 @@ across all parenthesized and quantified segments, including zero-repetition junc
 
 Shape validation rejects undefined modes and insertion modes with CG05001. Explicit nested
 modes and unselected unbounded WALK are CK00001, independently of text parsing, empty data or LIMIT.
-WALK is never silently restricted to TRAIL. Selector execution remains deferred; its plans
+WALK is never silently restricted to TRAIL. Selector execution uses the search below; its plans
 admit unbounded WALK without changing these identity rules. All modes preserve cancellation,
 retained-memory accounting (CG05020), physical-work exhaustion and qualifying 65th-hop refusal
 (CG05004); the text-bound sum above 64 remains CG00005. EXPLAIN reports `mode=<Mode>` on
@@ -848,7 +848,7 @@ and effective-mode references. SIMPLE is the owner's GQL requirement beyond Neo4
 GqlPathModeTests and GraphPathModeWireTests cover cycles, self-loops, repeated relationships,
 whole-path identity, interior anchors, backtracking, rows and path frames over InMemory and TCP.
 
-### GQL path selectors: planning boundary (#1734, GQ-SP2)
+### GQL path selectors: execution (#1734, GQ-SP2/SP3)
 
 MATCH accepts `ANY`, `ALL`, `ANY SHORTEST`, `ALL SHORTEST`, `SHORTEST k [PATHS]`
 and `SHORTEST k GROUPS`. The prefix follows an optional `p =` assignment. Its complete
@@ -885,31 +885,86 @@ its owning search shape; unquantified groups do not merge accumulated lists. Min
 allocation regressions prove linear growth for nested filters and for a filtered singleton
 preceding each growing nested group. Empty filter storage and quantified predicate locals
 are allocated lazily; Release planning checks retain the base budgets for node, edge and
-quantified paths without selectors or prefilters. Ordinary MATCH WHERE remains a post-selection
+quantified paths without selectors or prefilters. Unselected execution dispatches directly to
+the ordinary matcher; it allocates neither
+a forwarding iterator nor search-only continuation grants or repeated-body predicate locals.
+Ordinary match results keep the base two-reference carrier and unfiltered iteration tasks keep
+their two-reference continuation layout; predicate/property checkpoints live only in filtered tasks.
+A private execution variant of the internal path plan holds selector state, keeping search
+arguments out of the ordinary iterator's retained parameter layout.
+Budget profile counters are also lazy: ordinary queries retain no selector observations, and
+test progress callbacks keep their values when the first selector counter creates that state.
+Release minimum-of-five-round checks pin node, one-hop and quantified execution below the
+reviewed base allocation ceilings (9,160, 28,696 and 204,546 bytes per match).
+Ordinary MATCH WHERE remains a post-selection
 filter, including in OPTIONAL MATCH before null extension. It cannot be pushed into an index
 anchor or a matches-nothing shortcut for a clause containing a selector. FILTER and later
 WITH predicates retain their ordinary downstream placement.
-Selected search prefilters may reference their own path bindings, including quantified
+Search prefilters, with or without an explicit selector, may reference their own path bindings, including quantified
 singletons and the named path, plus the scope entering MATCH. Peer-path-only dependencies
 are refused with CG01016 at the reference, regardless of comma order (Neo4j
 `community/cypher/front-end/ast/src/main/scala/org/neo4j/cypher/internal/ast/Clause.scala:1053-1098`).
 
-SP2 delivers parsing, binding and nonexecuting EXPLAIN, including zero-hop paths, cycles,
+SP2/SP3 deliver parsing, binding, execution and nonexecuting EXPLAIN, including zero-hop paths, cycles,
 bound endpoints and quantified bodies in all modes. A selector admits unbounded WALK into
-planning; an unselected unbounded WALK keeps its existing CK00001. EXPLAIN exposes SelectPaths,
+execution; an unselected unbounded WALK keeps its existing CK00001. EXPLAIN exposes SelectPaths,
 PathSearch, ElementPrefilter, PathPrefilter and PostFilter, the count unit, endpoint partition,
 resolved mode and stable order. Search work uses CG05004 and retained history/state plus output
 use CG05020 under the existing configurable statement ceilings (defaults: 1,000,000 work units,
 256 MiB); these are separate from SP1's vertex-visited BFS state contract. GQL's 64-hop backstop
 is retained. No claim of memory independent of path histories or output is made.
 
-Until SP3, every planned selector or inline WHERE prefilter refuses execution with CK00001
-after complete binding, before a writer lock or data expansion, even for empty input, LIMIT 0,
-or a preceding write stage. This also applies to source-free ASTs and inline WHERE without an
-explicit selector. EXPLAIN succeeds, missing parameters/names still fail binding, and wire
-execution reports ExecutionFailure with the existing diagnostic. No disk or wire change,
-new public interface, boundary grant or new runtime budget code is introduced. Selector forms
-are not added to the executable-clause profile until execution exists.
+SP3 executes selectors and inline WHERE in scalar and path requests, including source-free
+ASTs, empty input and LIMIT 0. Selected searches anchor at the source boundary and run per
+ordered endpoint pair and incoming row. A budgeted finite topology pass, using a safe union of the pattern's directions/types, excludes
+disconnected pairs; it never substitutes vertex-visited state for accepting path histories.
+ANY SHORTEST and counted SHORTEST use reverse breadth-first distances for element-local
+searches (types, directions, node/edge properties and predicates, plus incoming/end bindings).
+The filtered transition graph retains vertices and edges, rather than predecessor histories.
+A homogeneous repeated hop has exact distances; unions of position-specific steps provide a
+safe lower bound, with the matcher enforcing the original pattern. On the shortest-path DAG,
+ordered DFS lazily chooses the smallest relationship identity, then node identity, that can
+still reach the target in the remaining hops. A shortest path between distinct vertices has
+no repeated node, so every mode admits it. No accepting tie buffer is built for a path quota.
+Fixed chains and a single fixed-body repetition have unique decompositions. Adjacent quantifiers
+instead enumerate physical identities in that same order and validate only the first accepting
+source-ordered decomposition, preserving group bindings without counting duplicates.
+
+If k exceeds the number of shortest paths, exact-length reachability layers prune subsequent
+lengths and output stops at k. Lengths beyond the graph distance, including unsatisfied pattern
+or quantifier minimums, retain the accounted matcher history for TRAIL, SIMPLE and ACYCLIC;
+vertex reachability alone cannot prove their admissibility. Graph state costs O(V+E), and layers
+for longer lengths cost O(L*V) retained state and O(L*E) work, with L at most 64, in addition to
+the mode history and selected output. Path predicates and correlations outside the current
+hop/endpoints retain iterative deepening and identity sorting. ALL SHORTEST and counted length
+groups also retain exhaustive tie handling: combinatorial output can still refuse cleanly.
+Directed n-by-n grid regressions bound one witness by 5E+128 work units and three witnesses
+at n=20 by 6E+128 (E=2*n*(n-1)); ALL SHORTEST on that grid still refuses with CG05004.
+The independent bounded oracle covers 3,240 selector/mode/pattern/graph cases, checking both
+bags and order, including longer paths, cycles, filters, bound endpoints and decompositions.
+ALL enumerates the pattern's
+complete bounded domain. ANY deepens until its smallest complete identity sequence cannot be
+preceded by any truncated prefix. The 64-hop backstop refuses an unresolved search with CG05004;
+in particular, an unbounded WALK can have no lexicographic minimum (ever-longer lower-identity
+cycles), and is refused rather than returning an unstable ANY witness. ALL WALK likewise refuses
+if more qualifying paths exceed the backstop. A completed shortest quota does not explore longer
+paths. Repeated prefixes, connectivity visits, retained history states, comparison work and output
+all charge the statement's existing work/memory grants; no partial selection survives exhaustion.
+Nullable-segment continuation chains reserve their retained memory before construction, even
+when the complete match has zero hops.
+Repeated-body predicates run with singleton bindings before group-list publication. A predicate
+waiting for the enclosing named path retains that iteration's local bindings until completion.
+Unquantified group filters retain their own variables and test the complete candidate before
+selection. Multiple quantifier decompositions of one relationship/node identity sequence count
+as one physical path; the first source-ordered decomposition supplies its group bindings.
+
+EXPLAIN remains nonexecuting and reports source anchoring, count units and configured ceilings.
+The PathSearch description with a live execution budget also reports statement-wide pairs, states, candidates
+and selected paths. Existing statement metrics include all physical and viable work and peak
+retained bytes. No EventSource, public interface, storage or wire format changes are introduced.
+PATH SELECTOR joins the executable language profile, backed by GqlProfileExecutionTests and
+GqlPathSelectorExecutionTests; InMemory/TCP GraphPathSelectorWireTests and the Graph NativeAOT
+sample exercise the same operators.
 
 Conformance lives in GqlPathSelectorParserTests and the keyword-disposition corpus,
 GqlPathSelectorPlanningTests, and GraphPathSelectorWireTests (InMemory and TCP). Former parser
@@ -922,6 +977,9 @@ keeps prefilters in the selective path pattern;
 `community/cypher/front-end/parser/v25/parser/src/main/antlr4/org/neo4j/cypher/internal/parser/v25/Cypher25Parser.g4:401-425,431-442,482-485`
 provides prefix order and inline predicates. Cohesion requires explicit literal k, retains
 TRAIL by default and strengthens arbitrary ties to the identity order above.
+`community/cypher/runtime-util/src/main/java/org/neo4j/internal/kernel/api/helpers/traversal/BiDirectionalBFS.java:39-63,78-95`
+separates filtered BFS exploration from lazy/eager path retracing; Cohesion uses reverse distances
+and the stricter identity-minimal witness contract, without copying reference code.
 
 ### Retained execution memory and explicit query limits (#1533, D4)
 
@@ -1547,7 +1605,7 @@ to exercise that enforcement path; compiled provisioning is not included.
 
 | Code | Meaning |
 | --- | --- |
-| `CK00001` | Unsupported language capability, including deferred selector/inline-predicate execution after binding; EXPLAIN succeeds for those planned forms |
+| `CK00001` | Unsupported language capability, including counted ANY, nested selectors/modes and unselected unbounded WALK; planned selectors and inline predicates execute |
 | `CG00001`–`CG00006` | Parser syntax/literal/bound errors; see language design. `CG00005` is the sum-of-repetition-bounds limit of 64 relationships |
 | `CG00007` | Attempt to mutate catalog introspection results |
 | `CG00008` | A Cypher arrow (`-->`, `--`) directly after a pattern element, which GQL reads as a comment |
@@ -1569,7 +1627,7 @@ to exercise that enforcement path; compiled provisioning is not included.
 | `CG02013` | Value error (#1140): non-Boolean conditions, invalid arithmetic, concatenation, container, index or field types, invalid paging counts, function/CAST kind or value failures, unsupported computed property values, zero divisor, overflow or non-finite result. Reused by #1142, #1146, #1147 and #1148; structured Diagnostic, code-free Message, composed as CODE: message on protocol 2.0 |
 | `CG01014` | Multiple map keys normalize to the same bare parameter name |
 | `CG01015` | Duplicate final result column name, implicit or explicit, under ordinal case-sensitive comparison; rejected during planning before execution |
-| `CG01016` | A selected path prefilter references a variable introduced by a peer path in the same MATCH; located at the offending reference. Its own path bindings (including quantified singletons) and the scope entering MATCH are allowed |
+| `CG01016` | A path search prefilter, with or without an explicit selector, references a variable introduced by a peer path in the same MATCH; located at the offending reference. Its own path bindings (including quantified singletons) and the scope entering MATCH are allowed |
 | `CG07016` | A composite result requires graph.composite-values; ExecutionFailure before ResultHeader, preserving the authenticated session |
 | `CG06017` | Unsupported graph record or tree-registration format, including formats 1–4: opening is refused before logical recovery scrub with the remedy to recreate the database. Graph.Storage retains the code in its StorageCorruptionException cause's Diagnostics; the engine retains it as an additional Error diagnostic beside CG06018 under DatabaseCorruptionException / CK06003. No upgrade path exists |
 | `CG06018` | Missing or unrecoverable files; preserve the complete file set for recovery and restore missing sidecars from backup |

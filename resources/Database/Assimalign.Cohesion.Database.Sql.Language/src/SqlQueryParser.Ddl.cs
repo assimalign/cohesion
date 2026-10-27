@@ -614,13 +614,16 @@ public sealed partial class SqlQueryParser
                 return set ? new SqlAlterSetNotNullAction(column) : new SqlAlterDropNotNullAction(column);
             }
         }
+        if (set && IsWord(ref lexer, "DATA"))
+        {
+            Advance(ref lexer);
+            ExpectIdentityWord(ref lexer, "TYPE");
+            return ParseAlterColumnType(ref lexer, column);
+        }
         if (!set && !drop && IsWord(ref lexer, "TYPE"))
         {
-            RejectAlterForm(ref lexer, "ALTER COLUMN TYPE");
-        }
-        else if (set && IsWord(ref lexer, "DATA") && TryPeekToken(lexer, out string next, out _) && next.Equals("TYPE", StringComparison.OrdinalIgnoreCase))
-        {
-            RejectAlterForm(ref lexer, "ALTER COLUMN SET DATA TYPE");
+            Advance(ref lexer);
+            return ParseAlterColumnType(ref lexer, column);
         }
         else
         {
@@ -628,6 +631,26 @@ public sealed partial class SqlQueryParser
             ConsumeRemaining(ref lexer);
         }
         return null;
+    }
+
+    private SqlAlterAction ParseAlterColumnType(ref TokenLexer lexer, string column)
+    {
+        string typeName = CurrentIdentifierText(ref lexer);
+        string type = ParseDefinitionType(ref lexer, column, out var resolved);
+        string? collation = null;
+        if (IsWord(ref lexer, "COLLATE"))
+        {
+            Advance(ref lexer);
+            collation = ParseCollationName(ref lexer);
+        }
+        SqlExpression? conversion = null;
+        if (IsWord(ref lexer, "USING"))
+        {
+            Advance(ref lexer);
+            conversion = ParseOperand(ref lexer, OperandRule.Expression);
+        }
+        return new SqlAlterColumnTypeAction(new SqlColumnDefinition(column, type, true, false, null,
+            collationName: collation, resolvedType: resolved, typeName: typeName), conversion);
     }
 
     private string ReadAlterName(ref TokenLexer lexer, string subject)
@@ -651,7 +674,7 @@ public sealed partial class SqlQueryParser
 
     private static bool IsAlterColumnDefinition(TokenLexer lexer)
     {
-        // TYPE/SET DATA TYPE use the capability diagnostic; facets have separate action nodes.
+        // TYPE/SET DATA TYPE and facets have separate action nodes.
         // This action uses the same full column definition as CREATE and ADD.
         Next(ref lexer);
         if (!IsKeyword(ref lexer, "COLUMN"))

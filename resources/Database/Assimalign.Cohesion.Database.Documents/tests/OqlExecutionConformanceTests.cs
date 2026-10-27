@@ -254,6 +254,9 @@ public sealed class OqlExecutionConformanceTests
                     "SELECT INDEX_NAME, PATH, PATHS[0], PATHS[1], IS_UNIQUE FROM COHESION_SCHEMA.INDEXES ORDER BY INDEX_NAME", Missing: [(0, 3)]),
                 new("CREATE INDEX by_tag ON items (tags[0])", [["by_tag", "tags[0]", false]],
                     VerificationStatement: "SELECT INDEX_NAME, PATH, IS_UNIQUE FROM COHESION_SCHEMA.INDEXES"),
+                new("CREATE INDEX by_elements ON items (DISTINCT ARRAY t FOR t IN tags END)",
+                    [["by_elements", "DISTINCT ARRAY v FOR v IN \"tags\" END", false]],
+                    VerificationStatement: "SELECT INDEX_NAME, PATH, IS_UNIQUE FROM COHESION_SCHEMA.INDEXES"),
             ],
             [OqlClauses.DropIndex] =
             [

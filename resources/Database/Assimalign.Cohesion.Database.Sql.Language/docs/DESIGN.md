@@ -1,5 +1,28 @@
 # Assimalign.Cohesion.Database.Sql.Language — Design
 
+## Joined-DML statement memory (#1715, #1751)
+
+DIALECT.md records CS05067 before writes when retained MERGE, UPDATE FROM or DELETE USING
+inputs, associations or selected writes exceed StatementMemoryBudget. Hash builds share that
+grant without a second charge for aliased payload. Syntax, AST and persisted formats are unchanged;
+the engine's joined-DML memory conformance cases cover refusal and under-budget execution.
+
+## MERGE execution (#1715, SQ-M2)
+
+DIALECT.md records ordered executable actions, BY SOURCE, old/new target RETURNING,
+merge_action(), repeated-target CS05036 and lazy action-owned subqueries. The existing AST,
+renderer and grammar are unchanged. Live clause conformance executes MERGE rather than
+measuring only EXPLAIN; SQL's design records transaction admission and SQ-M3's remaining
+concurrent-target rechecks and mixed-action final-state constraints.
+
+## ALTER TYPE domain rendering (#1447)
+
+SqlColumnDefinition retains the parser's decoded type name separately from its type spelling.
+ALTER TYPE renders this structured name with identifier escaping, so a decoded domain name
+beginning and ending in quote characters cannot be confused with SQL delimiters. Parser and
+direct-AST round trips cover both forms. DIALECT.md records TYPE's assignment-default casts,
+narrowing rewrites and persisted CHECK rules; the engine's live conformance corpus exercises them.
+
 ## TRUNCATE (#1716, SQ-T1)
 
 SqlTruncateExpression stores an immutable ordered list of SqlTruncateTable targets, each with
@@ -130,7 +153,7 @@ contextual. The latter uses the existing function-call AST and binds only in MER
 RETURNING, where Sql maps it to a text slot. It is not a standalone executable built-in.
 Grammar requires the action set appropriate to the match kind. Unreachable clauses,
 scopes, column/type validation and planning belong to Sql. DIALECT records the complete
-binding contract and temporary CK00001 execution refusal. No persisted format changes.
+binding and executable action contract, including SQ-M3's remaining work. No persisted format changes.
 USING shares UPDATE FROM's stored/system/view, aliased derived-query and supported join
 sources. At the top level a source CROSS JOIN leaves ON for MERGE; ordinary FROM parsing
 keeps its existing CROSS JOIN ON refusal. VALUES relations, table functions, LATERAL,
@@ -336,7 +359,12 @@ including nested groups and the derived SELECT introduced by canonical group-ali
 Decision 49a adds `SqlAlterColumnAction`, a full column-definition action:
 `ALTER TABLE t ALTER COLUMN c INT NOT NULL`. It reuses column parsing, including bounds,
 DEFAULT and collation, and the executor checks which changes preserve storage representation.
-The PostgreSQL TYPE/SET DATA TYPE variants remain explicitly refused. Separate typed actions
+The public sealed SqlAlterColumnTypeAction retains the PostgreSQL TYPE/SET DATA TYPE target
+and original-row USING expression (#1447). The public SqlExpressionRenderer.Render(SqlAlterTableExpression)
+overload emits ALTER COLUMN ... TYPE with optional COLLATE/USING and quotes decoded domain
+names when required, preserving spaces, embedded quotes and keyword names on reparse.
+These are public API additions; no public interface is added. This adds no keyword or clause count: TYPE and DATA are contextual and USING
+already exists. Separate typed actions
 for SET/DROP DEFAULT and SET/DROP NOT NULL lower onto the existing column replacement path
 (#1122); RENAME TO and RENAME [COLUMN] have their own immutable action leaves. RENAME and TO
 remain contextual, and each form uses the ordinary complete-statement terminator check. Lookahead
@@ -558,7 +586,7 @@ its ordinary bare output alias before SET.
 
 CORRESPONDING, recursive/nested or data-modifying CTEs, window functions, LATERAL,
 UPDATE SET subqueries, `ON UPDATE`,
-MERGE execution (until SQ-M2), RETURNING subqueries/OLD/NEW/INTO, savepoints, isolation-level syntax, and cost-hint syntax.
+RETURNING subqueries/OLD/NEW/INTO, savepoints, isolation-level syntax, and cost-hint syntax.
 Each is an additive dialect extension when its engine feature
 lands.
 

@@ -1,6 +1,6 @@
 namespace Assimalign.Cohesion.Database.Sql.Language;
 
-/// <summary>Replaces a column's definition while preserving its physical identity.</summary>
+/// <summary>Replaces a column's full definition through validation or a table rewrite.</summary>
 public sealed class SqlAlterColumnAction : SqlAlterAction
 {
     internal SqlAlterColumnAction(SqlColumnDefinition column)

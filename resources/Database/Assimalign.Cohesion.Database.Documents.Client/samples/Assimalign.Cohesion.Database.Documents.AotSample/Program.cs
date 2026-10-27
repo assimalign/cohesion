@@ -204,6 +204,13 @@ internal static class Program
                 document.GetProperty("actual_rows").ValueKind == System.Text.Json.JsonValueKind.Null), "EXPLAIN documents");
             Check((await connection.QueryAsync("SELECT * FROM COHESION_SCHEMA.INDEXES", cancellationToken: token)).Count == 1, "catalog");
             Check(await connection.ExecuteAsync("DROP INDEX by_score ON items", cancellationToken: token) == 0, "index drop");
+            Check(await connection.ExecuteAsync("CREATE INDEX by_nested ON items (DISTINCT ARRAY t FOR t IN nested WHEN t IS NOT NULL END)", cancellationToken: token) == 0, "array index DDL");
+            var arrayPlan = await connection.QueryAsync("EXPLAIN SELECT score FROM items WHERE ANY x IN nested SATISFIES x = 1 AND x IS NOT NULL END", cancellationToken: token);
+            Check(arrayPlan.Documents.Any(document => document.GetProperty("operator").GetString() == "IndexSeek" &&
+                document.GetProperty("detail").GetString()!.Contains("array_residual=True", StringComparison.Ordinal)), "array seek EXPLAIN");
+            Check((await connection.QueryAsync("SELECT score FROM items WHERE ANY x IN nested SATISFIES x = 1 AND x IS NOT NULL END", cancellationToken: token)).Count == 1, "array ANY residual");
+            Check((await connection.QueryAsync("SELECT t FROM items d UNNEST d.nested t WHERE t = 1 AND t IS NOT NULL", cancellationToken: token)).Count == 1, "array UNNEST seek");
+            Check(await connection.ExecuteAsync("DROP INDEX by_nested ON items", cancellationToken: token) == 0, "array index drop");
             Check(await connection.ExecuteAsync("CREATE UNIQUE INDEX by_name_score ON items (name,score)", cancellationToken: token) == 0, "composite unique create");
             Check(await connection.ExecuteAsync("CREATE INDEX IF NOT EXISTS by_name_score ON items (score)", cancellationToken: token) == 0, "index if not exists");
             Check((await connection.QueryAsync("SELECT score FROM items WHERE name = '東京' AND score >= 3", cancellationToken: token)).Count == 1, "composite seek");

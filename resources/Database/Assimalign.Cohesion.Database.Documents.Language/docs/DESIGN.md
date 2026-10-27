@@ -91,7 +91,7 @@ Lexical recognition preserves the established vocabulary so rejected constructs 
 | `FETCH` | No | The SQL FETCH FIRST spelling is not adopted; one CK00001 at FETCH |
 | `CREATE COLLECTION` | Yes | One database-local collection, optionally `IF NOT EXISTS` |
 | `DROP COLLECTION` | Yes | One database-local collection, optionally `IF EXISTS` |
-| `CREATE INDEX` | Yes | One named index over 1..32 ordered paths, optional UNIQUE and IF NOT EXISTS |
+| `CREATE INDEX` | Yes | 1..32 ordered scalar paths or one DISTINCT ARRAY key; scalar-only UNIQUE; IF NOT EXISTS |
 | `DROP INDEX` | Yes | One named index in one collection, optional IF EXISTS; ON is required |
 | `SUBQUERY` | No | A nested `SELECT` reports this capability name at the inner keyword, including UPDATE SET/WHERE, DELETE and INSERT/UPSERT VALUES, with or without EXPLAIN |
 | `MERGE` | No (pin) | SQL++ merge; stays a pin with no T1 item lifting it, and #1101 owns it |
@@ -148,6 +148,22 @@ an omitted or negative count replaces all, following the
 [Couchbase string-function contract](https://docs.couchbase.com/server/current/n1ql/n1ql-language-reference/stringfun.html#replace).
 A fractional count gives the engine type diagnostic CD02008. Plain arity errors name only
 the invalid count; the CD00006 COUNT-star explanation appears only for an actual star operand.
+
+### Array index keys (#1530)
+
+CREATE INDEX accepts `DISTINCT ARRAY v.p FOR v IN arr [WHEN cond] END` among scalar keys.
+The parser reuses `OqlComprehensionExpression` inside the immutable
+`OqlCreateIndexExpression.Keys`; an index comprehension denotes DISTINCT and is never FIRST.
+The scalar Paths view is empty for array indexes. The engine binds the document source path,
+element-relative projection and bounded WHEN to catalog-owned descriptors without adding a
+catalog reference here. ALL remains one CK00001. Malformed bindings and missing END retain
+CD00002; unsupported WITHIN/multiple bindings retain their existing capability refusals.
+Restricted source/projection/WHEN forms and multiple/UNIQUE arrays receive located engine
+diagnostics CD01028, CD02027, CD03025, CD03027 or CD03028 before catalog mutation. Numeric
+text binds to Decimal; direct AST Single/Double values are refused. WHEN permits only path-to-
+literal comparisons, NULL/MISSING tests, AND/OR/NOT, within 32 levels and 128 predicate nodes.
+The [dialect](DIALECT.md#index-ddl-1135) records matching ANY and UNNEST access, residuals,
+canonical catalog rendering and the measured fetch bound/limit. The existing v3 format is unchanged.
 
 ### Projection semantics (#1128)
 
@@ -403,8 +419,8 @@ only the stored FROM binding; META on an inner variable is an error even if it s
 ### ARRAY and FIRST comprehensions (#1728)
 
 OqlComprehensionExpression is a sealed expression leaf retaining Variable, Collection,
-Projection, optional Predicate and IsFirst. The same expression shape is available to future
-index-key consumers; array index DDL itself remains deferred. Comprehensions are primary
+Projection, optional Predicate and IsFirst. CREATE INDEX reuses this shape for its restricted
+DISTINCT ARRAY key (#1530). Comprehensions are primary
 expressions, including parenthesized mappings, nested mappings, registered function arguments,
 UNNEST, grouping, predicates and RETURNING. The collection evaluates in the enclosing scope;
 the mapped expression and WHEN introduce one binding which may shadow any enclosing variable.
@@ -786,9 +802,9 @@ are explicit AST flags; DROP INDEX retains IfExists. Single-path constructors re
 convenience forms. Quoted "if" stays an index name. Duplicate paths compare segment values, so
 `a`, `"a"` and `['a']` name the same key. Empty/duplicate paths, wildcards, expressions, ASC/DESC,
 partial WHERE and INCLUDE MISSING receive CD00002 at the invalid token. The engine enforces the
-32-path cap on directly constructed ASTs with CD03022; text reports CD00009 at the 33rd key. ALL and DISTINCT ARRAY keys receive one CK00001 from the key parser,
-at ALL or DISTINCT and naming that array-key form. They remain deferred independently of SELECT
-quantifiers. Capability validation computes the balanced key-list token range once, so repeated
+32-key cap on directly constructed ASTs with CD03022; text reports CD00009 at the 33rd key.
+ALL array keys receive one CK00001 from the key parser; DISTINCT ARRAY uses the restricted
+grammar above. Capability validation computes the balanced key-list token range once, so repeated
 array-key words do not cause quadratic prefix rescans. UNIQUE elsewhere, including SELECT UNIQUE(a),
 retains CK00001 and is never a function.
 
@@ -804,6 +820,11 @@ COHESION_SCHEMA.INDEXES exposes PATH, ordered PATHS and the real IS_UNIQUE. Cond
 preserves an existing name even if the requested definition differs. Conditional absent DROP is
 a no-op; an existing schema-owned index still refuses removal. All snapshot conflicts precede no-ops.
 The dialect page and execution conformance corpus carry the same executable contract.
+
+Array-index catalog DDL rendering quotes individual source, projection and WHEN path segments
+when needed, including keyword, punctuated and Unicode names admitted by the typed catalog API.
+The engine's catalog round-trip corpus binds the rendered syntax back to the same canonical paths
+and filter descriptor, including integer subscripts and doubled identifier/string quotes (#1530).
 
 ## Verification and extension
 

@@ -34,6 +34,7 @@ internal sealed partial class SqlPlanExecutor
             SqlSelectPlan p => CostSelect(p),
             SqlUpdatePlan p => p with { Access = Choose(p.Table, p.Access), Source = RewriteDmlSource(p.Source) },
             SqlDeletePlan p => p with { Access = Choose(p.Table, p.Access), Source = RewriteDmlSource(p.Source) },
+            SqlMergePlan p => p with { Source = RewriteDmlSource(p.Source)! },
             SqlJoinPlan p => CostJoin(p),
             SqlGroupPlan p => p with { Input = Rewrite(p.Input) },
             SqlSubqueryPlan p => p with { Input = Rewrite(p.Input), Queries = p.Queries.Select(q => q with { Query = Rewrite(q.Query) }).ToArray() },

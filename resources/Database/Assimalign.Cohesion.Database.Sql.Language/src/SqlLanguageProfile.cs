@@ -131,8 +131,8 @@ public static class SqlLanguageProfile
     ];
 
     /// <summary>
-    /// Gets the SQL language profile. MERGE advertises syntax, binding and EXPLAIN while
-    /// action execution retains CK00001 until SQ-M2; other clauses awaiting execution are excluded.
+    /// Gets the SQL language profile, including MERGE actions, BY SOURCE, RETURNING,
+    /// repeated-target detection and EXPLAIN. Clauses awaiting execution are excluded.
     /// </summary>
     public static QueryLanguageProfile Instance { get; } = new(
         "SQL",

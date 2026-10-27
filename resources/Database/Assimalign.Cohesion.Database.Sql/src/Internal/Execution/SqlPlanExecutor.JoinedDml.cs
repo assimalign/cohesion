@@ -52,8 +52,12 @@ internal sealed partial class SqlPlanExecutor
                 CheckDomains(bound, updated, evaluator, assigned);
             }
 
-            replacements.Add((pageId, slotIndex, values, updated,
-                SqlRowCodec.Encode(plan.Table, updated, statement.Transaction.Sequence)));
+            var memory = statement.Metrics.DmlMemory(_definitions.StatementMemoryBudget)!;
+            memory.Retain(updated);
+            memory.Reserve(384L + 32L * plan.Assignments.Count); // replacements and final-state constraint maps
+            var version = SqlRowCodec.Encode(plan.Table, updated, statement.Transaction.Sequence);
+            memory.Retain(version);
+            replacements.Add((pageId, slotIndex, values, updated, version));
         }
 
         // Row locks come before the constraint reads, not after them: the

@@ -127,6 +127,7 @@ structured-carrier messages remain unprefixed.
 | COHSQLE055 | CS02055 | Values/types |
 | COHSQLE062 | CS02062 | Values/types |
 | COHSQLE063 | CS02063 | Values/types |
+| New (#1447) | CS02064 | Values/types — ALTER COLUMN TYPE old value, USING result or dependent DEFAULT has no assignment cast (42804) |
 | COHSQLE024 | CS03024 | Schema/constraints |
 | COHSQLE025 | CS03025 | Schema/constraints |
 | COHSQLE027 | CS03027 | Schema/constraints |
@@ -179,7 +180,7 @@ structured-carrier messages remain unprefixed.
 | COHSQLE013 | CS05013 | Execution/budgets |
 | COHSQLE017 | CS05017 | Execution/budgets |
 | COHSQLE032 | CS05032 | Execution/budgets |
-| COHSQLE036 | CS05036 | Execution/budgets |
+| COHSQLE036 | CS05036 | Repeated target modification by ON CONFLICT or MERGE |
 | COHSQLE040 | CS05040 | Execution/budgets |
 | COHSQLE042 | CS05042 | Execution/budgets |
 | COHSQLE043 | CS05043 | Execution/budgets |
@@ -234,6 +235,7 @@ payload accepts rows plus a matching affected count without capability negotiati
 | COHDOC025 | CD01025 | Binding/names |
 | New (#1727) | CD01026 | Binding/names — empty RETURNING output name in a directly constructed AST |
 | New (#1728) | CD01027 | Binding/names — empty comprehension variable in a directly constructed AST |
+| New (#1530, OQ-I2) | CD01028 | Binding/names — array index projection or WHEN path is not rooted in its element variable |
 | COHDOC006 | CD02006 | Values/types |
 | COHDOC007 | CD02007 | Values/types |
 | COHDOC008 | CD02008 | Values/types |
@@ -243,6 +245,7 @@ payload accepts rows plus a matching affected count without capability negotiati
 | COHDOC019 | CD02019 | Values/types |
 | COHDOC021 | CD02021 | Values/types |
 | COHDOC026 | CD02026 | Values/types |
+| New (#1530, OQ-I2) | CD02027 | Values/types — array index WHEN constant is not a supported scalar literal |
 | COHDOC010 | CD03010 | Schema/constraints |
 | COHDOC011 | CD03011 | Schema/constraints |
 | COHDOC012 | CD03012 | Schema/constraints |
@@ -251,6 +254,8 @@ payload accepts rows plus a matching affected count without capability negotiati
 | COHDOC024 | CD03024 | Schema/constraints |
 | New (#1530) | CD03025 | Schema/constraints — multiple array keys, UNIQUE array index, or INCLUDE MISSING with a leading array key |
 | New (#1530) | CD03026 | Schema/constraints — encoded index definition exceeds the 8,092-byte catalog record limit; refused before posting extraction or tree creation |
+| New (#1530, OQ-I2) | CD03027 | Schema/constraints — array key source, projection or WHEN is outside the restricted expression grammar |
+| New (#1530, OQ-I2) | CD03028 | Schema/constraints — array index WHEN exceeds 32 levels or 128 predicate nodes |
 | COHDOC004 | CD04004 | Transactions/locking |
 | COHDBD001 | CD04101 | Transactions/locking |
 | COHDOC001 | CD05001 | Execution/budgets |
@@ -265,7 +270,10 @@ payload accepts rows plus a matching affected count without capability negotiati
 GQL path modes (#1733) retain the existing identities: malformed mode values or INSERT modes in
 hand-built ASTs use CG05001; text repetition bounds above 64 use CG00005; a visited qualifying
 65th hop or physical-work exhaustion uses CG05004; retained-memory exhaustion uses CG05020.
-Nested explicit modes/selectors and unselected unbounded WALK use CK00001. Selected unbounded WALK parses, binds and EXPLAINs; selector/inline-predicate execution retains CK00001 until SP3 (#1734). BEGIN [TRANSACTION] (#1725) shares START TRANSACTION's
+Selector execution (#1734) reuses these conditions for endpoint search, retained history states,
+identity comparisons and selected output. Shortest quotas stop before longer paths; unresolved
+ANY identity prefixes or exhaustive ALL WALK beyond 64 hops refuse with CG05004.
+Nested explicit modes/selectors and unselected unbounded WALK use CK00001. Selected unbounded WALK and inline predicates execute within these search budgets (#1734). BEGIN [TRANSACTION] (#1725) shares START TRANSACTION's
 transaction-state diagnostics; it allocates no new identity. These changes add no disk or wire format.
 
 | Previous code | Code | Category |
@@ -286,7 +294,7 @@ transaction-state diagnostics; it allocates no new identity. These changes add n
 | COHDBG011 | CG01011 | Binding/names |
 | COHDBG014 | CG01014 | Binding/names |
 | COHDBG015 | CG01015 | Binding/names |
-| New (#1734) | CG01016 | Binding/names — selected path prefilter references a binding introduced by a peer path in the same MATCH |
+| New (#1734) | CG01016 | Binding/names — path search prefilter references a binding introduced by a peer path in the same MATCH, with or without an explicit selector |
 | COHDBG009 | CG02009 | Values/types |
 | COHDBG013 | CG02013 | Values/types |
 | COHDBG003 | CG03003 | Schema/constraints |
@@ -294,9 +302,9 @@ transaction-state diagnostics; it allocates no new identity. These changes add n
 | COHDBG022 | CG04022 | Transactions/locking |
 | COHDBG023 | CG04023 | Transactions/locking |
 | COHDBG001 | CG05001 | Execution/budgets |
-| COHDBG004 | CG05004 | Execution/budgets |
+| COHDBG004 | CG05004 | Execution/budgets — physical work or qualifying 65th hop, including selector search |
 | COHDBG008 | CG05008 | Execution/budgets |
-| COHDBG020 | CG05020 | Execution/budgets |
+| COHDBG020 | CG05020 | Execution/budgets — retained statement memory, including selector history and output |
 | New (#1536) | CG05022 | Execution — selected shortest-path record is absent while reconstruction's operation remains active |
 | COHDBG006 | CG06006 | Storage/durability |
 | COHDBG012 | CG06012 | Storage/durability |

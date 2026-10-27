@@ -90,6 +90,11 @@ public sealed class SqlCatalogColumn
     /// </summary>
     public string? DefaultLiteral { get; }
 
+    // TYPE keeps non-immutable expression text and pins, but rebinds its assignment
+    // cast on load. Ordinary declarations retain their original evaluation contract.
+    [System.Diagnostics.DebuggerBrowsable(System.Diagnostics.DebuggerBrowsableState.Never)]
+    internal bool RecastDefault { get; init; }
+
     /// <summary>Gets the frozen ADD COLUMN value for physically absent fields, independent of the current insert default.</summary>
     public string? MissingValueLiteral { get; }
 

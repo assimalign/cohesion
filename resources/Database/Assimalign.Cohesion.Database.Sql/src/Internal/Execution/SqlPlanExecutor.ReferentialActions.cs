@@ -111,8 +111,8 @@ internal sealed partial class SqlPlanExecutor
                 if (constraint.OnDelete is not (SqlCatalogReferentialAction.SetNull or SqlCatalogReferentialAction.SetDefault)) { continue; }
                 var keys = reference.ParentKey.Read(deletion.Values);
                 if (keys.Any(value => value is null)) { continue; }
-                var matches = FindConstraintRows(reference.ChildKey, keys, statement, cancellationToken,
-                    ConstraintCurrentSnapshot(statement)).ToList();
+                var matches = CollectConstraintMatches(FindConstraintRows(reference.ChildKey, keys, statement, cancellationToken,
+                    ConstraintCurrentSnapshot(statement)), statement);
                 var bound = _definitions.Get(child, cancellationToken);
                 foreach (var match in matches)
                 {
@@ -130,6 +130,12 @@ internal sealed partial class SqlPlanExecutor
                             await AcquireReferenceIntentLocksAsync(child, statement, cancellationToken, cascade: true).ConfigureAwait(false);
                         }
                         update = new SqlConstraintUpdate(child, match.Location, match.Values, (object?[])match.Values.Clone(), []);
+                        if (statement.Metrics.DmlMemory(_definitions.StatementMemoryBudget) is { } memory)
+                        {
+                            memory.Retain(match.Values);
+                            memory.Retain(update.NewValues);
+                            memory.Reserve(384L + 32L * child.Columns.Count);
+                        }
                         updates.Add(key, update);
                     }
                     foreach (int ordinal in reference.ChildKey.Ordinals)
@@ -145,6 +151,7 @@ internal sealed partial class SqlPlanExecutor
                         update.NewValues[ordinal] = CoerceForColumn(value, child.Columns[ordinal]);
                         update.Assigned.Add(ordinal);
                     }
+                    statement.Metrics.DmlMemory(_definitions.StatementMemoryBudget)?.Retain(update.NewValues);
                 }
             }
         }
@@ -162,6 +169,7 @@ internal sealed partial class SqlPlanExecutor
                 CheckDomains(bound, update.NewValues, ExecutionEvaluator(null, cancellationToken, transactionTimestamp: statement.TransactionStart), update.Assigned.ToArray());
                 ValidateParentUpdate(table, update.OldValues, update.NewValues, statement, cancellationToken, deletions, indexed);
                 update.NewVersion = SqlRowCodec.Encode(table, update.NewValues, statement.Transaction.Sequence);
+                statement.Metrics.DmlMemory(_definitions.StatementMemoryBudget)?.Retain(update.NewVersion);
             }
             // PostgreSQL ri_triggers.c:2800-2813 uses current parent visibility for ReadCommitted
             // RI writes while transaction snapshots retain their crosscheck.

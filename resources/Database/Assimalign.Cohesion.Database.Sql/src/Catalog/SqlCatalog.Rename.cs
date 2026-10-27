@@ -166,7 +166,7 @@ public sealed partial class SqlCatalog
                     constraint.OnDelete, constraint.CheckFunctionCalls)).ToArray();
                 var columns = own && columnName is not null ? table.Columns.Select(column => new SqlCatalogColumn(
                     RenameColumn(column.Name), column.Type, column.IsNullable, column.DefaultLiteral, column.Collation,
-                    column.DomainName, column.DefaultFunctionCalls, column.Identity, column.MissingValueLiteral)).ToArray() : table.Columns;
+                    column.DomainName, column.DefaultFunctionCalls, column.Identity, column.MissingValueLiteral) { RecastDefault = column.RecastDefault }).ToArray() : table.Columns;
                 var replacement = new SqlCatalogTable(table.ObjectId, table.Schema, own && columnName is null ? newName : table.Name,
                     columns, own ? table.PrimaryKeyColumns.Select(RenameColumn).ToArray() : table.PrimaryKeyColumns,
                     table.Owner, table.OwningSchema, constraints, table.DroppedColumnOrdinals);

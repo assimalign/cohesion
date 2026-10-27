@@ -12,8 +12,7 @@ var statement = (GqlQueryStatement)parser.Parse(
 ```
 
 Selectors ANY/ALL, ANY/ALL SHORTEST and counted SHORTEST paths/groups also parse, bind and
-EXPLAIN with search prefilters and endpoint-pair partitions; execution remains CK00001 until
-SP3. See [DIALECT.md](DIALECT.md#path-selectors-parsing-and-planning-1734).
+execute with search prefilters and endpoint-pair partitions. See [DIALECT.md](DIALECT.md#path-selectors-1734).
 Complete paths render back to GQL through `GqlPathPattern.ToString()`, retaining predicates,
 quantifiers and selector/mode semantics across reparsing.
 

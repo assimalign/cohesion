@@ -53,9 +53,12 @@ internal static partial class DocumentPlanExecutor
         var candidates = await ReadCandidatesAsync(database, operation, plan.Collection, plan.Access, cancellationToken).ConfigureAwait(false);
 
         var matches = new List<DocumentEvaluationContext>();
-        // Index and scan order are deliberately erased. Identity order is the
-        // baseline for row output and the tie break of every subsequent sort.
-        foreach (var entry in candidates.OrderBy(entry => entry.Id, StringComparer.Ordinal))
+        // Identity is the baseline and sort tie break. A bounded identity DESC
+        // page must visit candidates in reverse identity order before filtering.
+        var ordered = plan.Logical.CanStopEarly && query.OrderBy.Count == 1 && query.OrderBy[0].Descending
+            ? candidates.OrderByDescending(entry => entry.Id, StringComparer.Ordinal)
+            : candidates.OrderBy(entry => entry.Id, StringComparer.Ordinal);
+        foreach (var entry in ordered)
         {
             if (PageComplete(plan.Logical, matches.Count)) { break; }
             cancellationToken.ThrowIfCancellationRequested();
@@ -323,8 +326,8 @@ internal static partial class DocumentPlanExecutor
         await PrepareIndexChangeAsync(database, operation, plan.Collection, "CREATE INDEX", cancellationToken).ConfigureAwait(false);
         if (plan.IfNotExists && database.Catalog.GetIndexes(plan.Collection.Id, operation.Context.Snapshot).Any(index => index.Name == plan.IndexName))
         { return DocumentCommandResult.Success; }
-        await database.Catalog.CreateIndexAsync(plan.Collection.Id, plan.IndexName, plan.Paths, plan.IsUnique,
-            operation.Context, cancellationToken).ConfigureAwait(false);
+        await database.Catalog.CreateIndexAsync(plan.Collection.Id, plan.IndexName, plan.Keys, plan.IsUnique,
+            false, operation.Context, cancellationToken).ConfigureAwait(false);
         return DocumentCommandResult.Success;
     }
 

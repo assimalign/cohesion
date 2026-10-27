@@ -14,6 +14,7 @@
   <data name="IntervalYearMonthUnsupported" xml:space="preserve"><value>Year-month INTERVAL literals are not supported.</value></data>
   <data name="TimeTextInvalid" xml:space="preserve"><value>TIME requires a valid clock within 00:00:00 through 23:59:59.9999999, optionally with AM/PM and a supported zone.</value></data>
   <data name="IntervalTextInvalid" xml:space="preserve"><value>Invalid day-time INTERVAL literal.</value></data>
+  <data name="AlterTypeRenderingRequired" xml:space="preserve"><value>This renderer requires an ALTER COLUMN TYPE action.</value></data>
   <data name="RendererThrowIfTooDeepNotSupported" xml:space="preserve"><value>The expression nests {0} levels deep; the SQL dialect allows at most {1}, so its text would not parse.</value></data>
   <data name="SqlExpressionRendererNodeNotSupported" xml:space="preserve"><value>Expression node '{0}' has no SQL spelling.</value></data>
   <data name="ExpressionRendererLevelNotSupported" xml:space="preserve"><value>Binary operator '{0}' has no SQL spelling.</value></data>

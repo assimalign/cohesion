@@ -11,10 +11,9 @@ namespace Assimalign.Cohesion.Database.Sql;
 /// cast of any context.
 /// </para>
 /// <para>
-/// In this iteration (phase E3) the registry is consulted by <c>CAST</c> only. Assignment coercion
-/// (a value written to a column) and overload resolution keep their own rules, so a cast registered
-/// as <see cref="Assignment"/> or <see cref="Implicit"/> is recorded with that context, which a later
-/// phase applies, and behaves as <see cref="Explicit"/> until then. The built-in casts carry
+/// <c>CAST</c> admits every context. <c>ALTER COLUMN TYPE</c> admits assignment and implicit
+/// casts for both old values and the result of USING. Ordinary INSERT/UPDATE coercion and
+/// function overload resolution retain their existing rules. The built-in casts carry
 /// PostgreSQL's contexts for the same pairs.
 /// </para>
 /// </remarks>

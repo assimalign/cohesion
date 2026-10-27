@@ -38,13 +38,14 @@ internal sealed partial class SqlPlanner
                 _ => evaluator,
             };
             SqlBoundExpression? condition = null;
-            IReadOnlyList<SqlSubqueryBinding> actionQueries = [];
+            var actionExpressions = clause.Assignments.Select(assignment => assignment.Value)
+                .Concat(clause.Values ?? []).ToList();
+            if (clause.Condition is { } predicate) { actionExpressions.Insert(0, predicate); }
+            var actionQueries = BindMergeActionQueries(actionExpressions, merge.Table, scope);
             if (clause.Condition is { } filter)
             {
                 // Keep these with the clause: SQ-M2 must not materialize a later action's
                 // subqueries before an earlier action has decided whether to handle the row.
-                actionQueries = BindSubqueries(WalkSubqueries(filter), dml: merge.Table,
-                    scope: new SqlCorrelationScope(NextCorrelationScope(), scope, OuterScope));
                 ValidateMergeValue(filter, scope, "MERGE WHEN");
                 condition = scope.BindPredicate(filter);
             }
@@ -124,7 +125,7 @@ internal sealed partial class SqlPlanner
             Steps = associations.Steps.Select(existing => ReferenceEquals(existing, root.Step) ? step : existing).ToArray(),
             Tree = kind == SqlJoinType.RightOuter ? new(-1, root.Right, root.Left, step) : root with { Step = step },
         };
-        var input = source with { Associations = associations };
+        var input = source with { Associations = PushJoinPredicates(associations) };
         return WrapSubqueries(new SqlMergePlan(table, input, actions, BindMergeReturning(merge, input), columns.Length), queries);
 
         static SqlCatalogColumn NullableColumn(SqlCatalogColumn column) => column.IsNullable ? column
@@ -151,11 +152,33 @@ internal sealed partial class SqlPlanner
         SqlPlanningException Invalid() => new("CS05013", ErrorMessages.MergeActionInvalid, merge.Location);
     }
 
+    private bool FoldQueryConstants => _queryScopes?.DeferQueryEvaluation != true;
+
+    private IReadOnlyList<SqlSubqueryBinding> BindMergeActionQueries(IEnumerable<SqlExpression> expressions,
+        SqlTableReference target, SqlExpressionEvaluator evaluator)
+    {
+        var state = _queryScopes!;
+        bool deferred = state.DeferQueryEvaluation;
+        var scopeless = _scopelessEvaluator;
+        state.DeferQueryEvaluation = true;
+        _scopelessEvaluator = null;
+        try
+        {
+            return BindSubqueries(expressions.SelectMany(WalkSubqueries), dml: target,
+                scope: new SqlCorrelationScope(NextCorrelationScope(), evaluator, OuterScope));
+        }
+        finally
+        {
+            state.DeferQueryEvaluation = deferred;
+            _scopelessEvaluator = scopeless;
+        }
+    }
+
     private void ValidateMergeValue(SqlExpression expression, SqlExpressionEvaluator scope, string? predicate = null)
     {
         if (ContainsAggregate(expression)) { throw new SqlPlanningException("CS05017", ErrorMessages.MergeAggregate, expression.Location); }
         if (ContainsStar(expression)) { throw new SqlPlanningException("CS05013", ErrorMessages.MergeStar, expression.Location); }
-        if (predicate is null) { ValidateExpression(expression, scope); }
+        if (predicate is null) { ValidateExpression(expression, scope, _subqueryTypes); }
         else { ValidatePredicate(expression, scope, predicate, _subqueryTypes); }
     }
 

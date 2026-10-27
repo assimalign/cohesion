@@ -40,7 +40,7 @@ internal sealed partial class SqlPlanner
             columns = ResolveTable(dml!).Columns;
         }
         var local = new SqlExpressionEvaluator(columns, _parameters, bindings, defaultCollation: _catalog.DefaultCollation,
-            subquerySlots: _subquerySlots, functions: _functions, cancellationToken: _cancellationToken, relation: reference);
+            subquerySlots: _subquerySlots, functions: _functions, cancellationToken: _cancellationToken, foldConstants: FoldQueryConstants, relation: reference);
         return new SqlCorrelationScope(NextCorrelationScope(), local, OuterScope) { Bindings = bindings };
     }
 

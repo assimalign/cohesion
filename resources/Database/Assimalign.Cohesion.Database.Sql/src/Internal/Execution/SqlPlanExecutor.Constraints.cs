@@ -453,14 +453,15 @@ internal sealed partial class SqlPlanExecutor
                 string.Equals(c.ReferencedTable, parent.Name, StringComparison.OrdinalIgnoreCase))
             .Select(c => (child, c)));
 
-    private SqlConstraintLookup ConstraintLookup(SqlBoundConstraintKey key, SqlStatementContext statement)
+    private SqlConstraintLookup ConstraintLookup(SqlBoundConstraintKey key, SqlStatementContext statement,
+        IReadOnlyList<SqlCatalogIndex>? preparedIndexes = null)
     {
         var lookups = statement.References.Lookups;
         if (lookups.TryGetValue(key, out var lookup)) { return lookup; }
         SqlCatalogIndex? selected = null;
         int[] prefix = [], indexOrdinals = [];
         var bound = _definitions.Get(key.Table);
-        foreach (var metadata in _catalog.GetIndexes(key.Table.ObjectId))
+        foreach (var metadata in preparedIndexes ?? _catalog.GetIndexes(key.Table.ObjectId))
         {
             int[] ordinals = bound.GetKey(metadata.ColumnNames).Ordinals;
             var mapping = new List<int>();
@@ -823,6 +824,12 @@ internal sealed partial class SqlPlanExecutor
             return null;
         }
 
+        if (statement.Metrics.DmlMemory(_definitions.StatementMemoryBudget) is { } memory)
+        {
+            memory.Retain(values);
+            memory.Reserve(256); // deletion record, dictionary growth and cascade work
+        }
+
         await AcquireRowWriteLocksAsync(statement, table.ObjectId, [location], cancellationToken, cascade: true).ConfigureAwait(false);
 
         // A child row was found in latest state, which can be newer than a snapshot fixed at the
@@ -1012,7 +1019,8 @@ internal sealed partial class SqlPlanExecutor
                 continue;
             }
 
-            frame.Matches = FindConstraintRows(reference.ChildKey, keys, statement, cancellationToken, ConstraintCurrentSnapshot(statement)).ToList();
+            frame.Matches = CollectConstraintMatches(FindConstraintRows(reference.ChildKey, keys, statement, cancellationToken,
+                ConstraintCurrentSnapshot(statement)), statement);
             frame.Match = 0;
         }
     }
@@ -1111,6 +1119,8 @@ internal sealed partial class SqlPlanExecutor
     /// <param name="defaultCollation">The database default collation.</param>
     /// <param name="functions">The engine's function catalog and the database.</param>
     /// <param name="functionCalls">The persisted calls' exact normalized identities in preorder.</param>
+    /// <param name="retyping">Whether ALTER TYPE must validate changed operand types.</param>
+    /// <param name="previous">The original definition, used to identify changed operand types.</param>
     /// <returns>
     /// The predicate compiled to the bound tree every write to the table version evaluates: its
     /// columns as ordinals of the version's rows, its calls bound to their functions and each
@@ -1118,12 +1128,16 @@ internal sealed partial class SqlPlanExecutor
     /// </returns>
     /// <exception cref="DatabaseException">The predicate cannot be evaluated against the table's rows.</exception>
     internal static SqlBoundExpression BindPersistedCheck(SqlExpression expression, SqlCatalogTable table, Collation defaultCollation,
-        SqlFunctionEnvironment functions, IReadOnlyList<string> functionCalls, CancellationToken cancellationToken)
+        SqlFunctionEnvironment functions, IReadOnlyList<string> functionCalls, CancellationToken cancellationToken, bool retyping = false,
+        SqlCatalogTable? previous = null)
     {
         var scope = new SqlExpressionEvaluator(table.Columns, null, defaultCollation: defaultCollation, functions: functions, cancellationToken: cancellationToken);
         SqlDefinitionBinder.PinCalls(expression, scope, functionCalls);
         SqlPersistedExpression.Bind(expression, scope);
-        new SqlCheckSyntax(table, scope, declaring: false).Validate(expression, requireBoolean: true);
+        var previousScope = previous is null ? null : new SqlExpressionEvaluator(previous.Columns, null,
+            defaultCollation: defaultCollation, functions: functions, cancellationToken: cancellationToken);
+        if (previousScope is not null) { SqlDefinitionBinder.PinCalls(expression, previousScope, functionCalls); }
+        new SqlCheckSyntax(table, scope, declaring: false, retyping: retyping, previousScope: previousScope).Validate(expression, requireBoolean: true);
         return scope.BindPredicate(expression);
     }
 
@@ -1261,6 +1275,8 @@ internal sealed partial class SqlPlanExecutor
         private readonly SqlExpressionEvaluator _scope;
         private readonly bool _declaring;
         private readonly bool _validateQualifiers;
+        private readonly bool _retyping;
+        private readonly SqlExpressionEvaluator? _previousScope;
 
         /// <summary>Initializes the check of one predicate.</summary>
         /// <param name="table">The table version the predicate constrains.</param>
@@ -1271,12 +1287,17 @@ internal sealed partial class SqlPlanExecutor
         /// the catalog's persisted predicate binds.
         /// </param>
         /// <param name="validateQualifiers">Whether to enforce qualifier identity for a new or changed schema.</param>
-        internal SqlCheckSyntax(SqlCatalogTable table, SqlExpressionEvaluator scope, bool declaring, bool validateQualifiers = true)
+        /// <param name="retyping">Whether to revalidate operand types for ALTER COLUMN TYPE.</param>
+        /// <param name="previousScope">The original operand types, when retyping an existing definition.</param>
+        internal SqlCheckSyntax(SqlCatalogTable table, SqlExpressionEvaluator scope, bool declaring, bool validateQualifiers = true, bool retyping = false,
+            SqlExpressionEvaluator? previousScope = null)
         {
             _table = table;
             _scope = scope;
             _declaring = declaring;
             _validateQualifiers = validateQualifiers;
+            _retyping = retyping;
+            _previousScope = previousScope;
         }
 
         /// <summary>Checks one node.</summary>
@@ -1403,6 +1424,7 @@ internal sealed partial class SqlPlanExecutor
                     break;
                 case SqlBinaryExpression binary when binary.Operator is SqlBinaryOperator.Add or SqlBinaryOperator.Subtract
                     or SqlBinaryOperator.Multiply or SqlBinaryOperator.Divide or SqlBinaryOperator.Modulo:
+                    if (_retyping && !TypeChanged(binary.Left) && !TypeChanged(binary.Right)) { break; }
                     SqlPlanner.ValidateTemporalArithmetic(binary, _scope);
                     var leftType = _scope.StaticTypeOf(binary.Left);
                     var rightType = _scope.StaticTypeOf(binary.Right);
@@ -1425,17 +1447,36 @@ internal sealed partial class SqlPlanExecutor
                         CheckComparable(list.Operand, value);
                     }
                     break;
+                case SqlCaseExpression { Input: { } input } conditional when _retyping:
+                    foreach (var branch in conditional.WhenClauses) { CheckComparable(input, branch.Condition); }
+                    break;
+                case SqlUnaryExpression { Operator: SqlUnaryOperator.Negate or SqlUnaryOperator.Plus } unary when _retyping:
+                    if (unary.Operator != SqlUnaryOperator.Negate || _scope.StaticTypeOf(unary.Operand) != DatabaseType.TimeSpan)
+                    { CheckNumber(unary.Operand); }
+                    break;
             }
         }
 
+        // LIKE accepts every SQL storage type through the evaluator's LikeText conversion.
+        // Its normal binder already checks constant patterns and escape lengths.
+        private bool TypeChanged(SqlExpression expression)
+            => _retyping && (_previousScope is null || _scope.StaticTypeOf(expression) != _previousScope.StaticTypeOf(expression));
+
         private void CheckComparable(SqlExpression left, SqlExpression right)
         {
+            if (_retyping && !TypeChanged(left) && !TypeChanged(right)) { return; }
             var (leftCall, leftType) = Operand(left);
             var (rightCall, rightType) = Operand(right);
-            if (leftCall is null && rightCall is null || leftType == DatabaseType.Null || rightType == DatabaseType.Null ||
+            if (!_retyping && leftCall is null && rightCall is null || leftType == DatabaseType.Null || rightType == DatabaseType.Null ||
                 Comparable(leftType, rightType))
             {
                 return;
+            }
+
+            if (_retyping)
+            {
+                throw new SqlExecutionException(SqlExecutionException.DatatypeMismatchCode,
+                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ValuesNotComparable, leftType, rightType, ""));
             }
 
             var (call, type, other) = leftCall is not null ? (leftCall, leftType, rightType) : (rightCall!, rightType, leftType);
@@ -1453,7 +1494,12 @@ internal sealed partial class SqlPlanExecutor
 
         private void CheckNumber(SqlExpression operand)
         {
+            if (_retyping && !TypeChanged(operand)) { return; }
             var (call, type) = Operand(operand);
+            if (_retyping && type != DatabaseType.Null && !IsNumber(type))
+            {
+                throw SqlEvaluationException.InvalidOperandType("CHECK arithmetic", SqlType.NameOf(type));
+            }
             if (call is not null && type != DatabaseType.Null && !IsNumber(type))
             {
                 throw new SqlFunctionResultMismatchException(call, SqlType.NameOf(type), "a number");
@@ -1466,6 +1512,7 @@ internal sealed partial class SqlPlanExecutor
         /// </summary>
         private (SqlFunctionCallExpression? Call, DatabaseType Type) Operand(SqlExpression expression)
         {
+            if (_retyping) { return (null, _scope.StaticTypeOf(expression)); }
             while (expression is SqlCollateExpression collate)
             {
                 expression = collate.Operand;

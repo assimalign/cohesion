@@ -1,14 +1,19 @@
 # Assimalign.Cohesion.Database.Sql — Overview
 
+ALTER COLUMN TYPE with optional COLLATE and USING converts original-row values through the
+shared exclusive rewrite, rechecks defaults/constraints/FKs and atomically replaces rows/indexes
+(#1447). This run executes inline; populated-table provisioning handoff follows in SQ-A3.
+
 TRUNCATE table lists execute through atomic storage replacement, with recursive FK closure,
 identity restart/continuation and deferred reclamation that preserves older snapshots (#1716).
 CREATE TABLE AS infers output types and builds an unpublished owner before atomic publication;
 WITH NO DATA creates only the inferred definition. Failed builds leave no table and use deferred reclamation.
 
-MERGE parses, binds target/source/action scopes and explains ordered actions, BY SOURCE and
-RETURNING/merge_action(). USING retains the existing read-source forms. FULL associations
-require a safe mandatory hash equality and complete ON safety proof (CS05070); execution
-refuses with CK00001 before costing until SQ-M2 (#1715).
+MERGE executes ordered actions, BY SOURCE and RETURNING/merge_action() within one statement
+rollback bracket. Repeated target modifications fail with CS05036. USING retains the existing
+read-source forms. FULL associations require a safe mandatory hash equality and complete ON
+safety proof (CS05070). SQ-M3 supplies concurrent-target rechecks and complete mixed-action
+final-state constraints (#1715).
 
 ## Wire contract ownership
 
@@ -124,7 +129,7 @@ shared storage, with DDL flowing through this assembly's relational Catalog comp
 - **SQL definitions and declared scripts (E4)** — database-local SQL functions use the same
   bound expression evaluator and scalar ABI as registered functions. SQL domains share type
   resolution and write enforcement with registered domains. Canonical definitions, dependencies,
-  ownership, script receipts and table reclamation intents persist in catalog format 26. A builder's named scripts run
+  ownership, script receipts and table reclamation intents persist in the catalog (format 27). A builder's named scripts run
   inline after its typed schema, in declaration order, and resume at committed statement
   boundaries after a crash. Checksums prohibit edits to an applied name; Verify checks receipts;
   an unchanged script-set hash and catalog generation skip reconciliation in constant time.
@@ -236,7 +241,7 @@ on `DatabaseSession`.
 An interrupted create is adopted only with its durable sql.create claim and initial empty
 data storage. Pre-header files can be restarted through CreateDatabaseAsync or declared
 application Build when no other persisted state conflicts. All catalog sizes are probed read-only
-before a format refusal. SQL remains at format 26; the claim does not change record layouts.
+before a format refusal. The claim changes no record layout and needed no format bump.
 Missing sidecars and ambiguous lost catalogs are preserved and refused.
 
 

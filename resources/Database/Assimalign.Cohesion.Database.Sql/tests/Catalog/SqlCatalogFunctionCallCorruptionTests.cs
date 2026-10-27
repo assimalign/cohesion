@@ -83,7 +83,7 @@ public sealed class SqlCatalogFunctionCallCorruptionTests
         if (check) { writer.AppendNull(); }
         else { writer.AppendString("ABS(1)", Collation.Binary); }
         writer.AppendInt32(0).AppendInt8((sbyte)DatabaseObjectOwner.Adhoc).AppendNull()
-            .AppendInt32(6).AppendInt32(check ? 1 : 0);
+            .AppendInt32(7).AppendInt32(check ? 1 : 0);
         if (check)
         {
             writer.AppendString("ck", Collation.Binary).AppendInt8((sbyte)SqlCatalogConstraintKind.Check)

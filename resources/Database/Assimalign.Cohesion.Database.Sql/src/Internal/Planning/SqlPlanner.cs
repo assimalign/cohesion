@@ -186,7 +186,7 @@ internal sealed partial class SqlPlanner
             bindings = BindJoin(select, source, out columns, out steps, out outputOrdinals, out tree);
         }
         var evaluator = new SqlExpressionEvaluator(columns, _parameters, bindings, defaultCollation: _catalog.DefaultCollation,
-            subquerySlots: _subquerySlots, functions: _functions, cancellationToken: _cancellationToken,
+            subquerySlots: _subquerySlots, functions: _functions, cancellationToken: _cancellationToken, foldConstants: FoldQueryConstants,
             outerScope: OuterScope, outerDependencies: OuterDependencies, relation: select.From[0].Table);
 
         if (ViewDefinitionBinding is not null) { CaptureViewSelect(select, columns, bindings, outputOrdinals, evaluator); }
@@ -365,7 +365,7 @@ internal sealed partial class SqlPlanner
     // Keep predicate collection independent of SELECT/DML binding (and of future join pushdown).
     private SqlAccessPath SelectAccessPath(SqlCatalogTable table, IReadOnlyList<SqlExpression> conjuncts, SqlExpressionEvaluator? scope)
     {
-        if (ViewDefinitionBinding is not null || _inferringTableOutput && !_tableAsWithData || conjuncts.Count == 0 || _commonTableState?.BindingUnused == true)
+        if (_queryScopes?.DeferQueryEvaluation == true || ViewDefinitionBinding is not null || _inferringTableOutput && !_tableAsWithData || conjuncts.Count == 0 || _commonTableState?.BindingUnused == true)
         {
             return SqlScanPath.Instance;
         }
@@ -393,7 +393,7 @@ internal sealed partial class SqlPlanner
     private SqlAccessPath SelectAccessPath(SqlCatalogTable table,
         Dictionary<int, List<(SqlBinaryOperator Op, object? Value)>> predicates, IReadOnlyList<SqlCatalogIndex>? indexes = null)
     {
-        if (ViewDefinitionBinding is not null || _inferringTableOutput && !_tableAsWithData || predicates.Count == 0 || _commonTableState?.BindingUnused == true)
+        if (_queryScopes?.DeferQueryEvaluation == true || ViewDefinitionBinding is not null || _inferringTableOutput && !_tableAsWithData || predicates.Count == 0 || _commonTableState?.BindingUnused == true)
         {
             return SqlScanPath.Instance;
         }
@@ -874,7 +874,7 @@ internal sealed partial class SqlPlanner
     /// created on first use and shared by the statement.
     /// </summary>
     private SqlExpressionEvaluator ScopelessEvaluator => _scopelessEvaluator ??=
-        new SqlExpressionEvaluator(Array.Empty<SqlCatalogColumn>(), _parameters, defaultCollation: _catalog.DefaultCollation, functions: _functions, cancellationToken: _cancellationToken);
+        new SqlExpressionEvaluator(Array.Empty<SqlCatalogColumn>(), _parameters, defaultCollation: _catalog.DefaultCollation, functions: _functions, cancellationToken: _cancellationToken, foldConstants: FoldQueryConstants);
 
     /// <summary>Whether <c>*</c> appears anywhere in an expression, outside a subquery.</summary>
     /// <param name="expression">The expression to search.</param>
@@ -1048,7 +1048,7 @@ internal sealed partial class SqlPlanner
             var column = columns[i];
             if (primaryKey.Contains(column.Name, StringComparer.OrdinalIgnoreCase))
             {
-                columns[i] = new SqlCatalogColumn(column.Name, column.Type, false, column.DefaultLiteral, column.Collation, column.DomainName, column.DefaultFunctionCalls, column.Identity, column.MissingValueLiteral);
+                columns[i] = new SqlCatalogColumn(column.Name, column.Type, false, column.DefaultLiteral, column.Collation, column.DomainName, column.DefaultFunctionCalls, column.Identity, column.MissingValueLiteral) { RecastDefault = column.RecastDefault };
             }
         }
         return new SqlCreateTablePlan(schema, create.Table.TableName, columns, primaryKey, create.IfNotExists, create.Constraints);
@@ -1119,10 +1119,11 @@ internal sealed partial class SqlPlanner
     }
 
     // PostgreSQL heap.c:3409 admits defaults with the same assignment coercion as INSERT.
-    internal static void ValidateDefaultType(SqlExpression expression, SqlExpressionEvaluator scope, DatabaseType target, string column)
+    internal static void ValidateDefaultType(SqlExpression expression, SqlExpressionEvaluator scope, DatabaseType target, string column,
+        bool assignmentCast = false)
     {
         var source = scope.StaticTypeOf(expression);
-        if (!CanAssignInsertType(source, target) && !(source == DatabaseType.DateTimeOffset && target == DatabaseType.DateTime))
+        if (!assignmentCast && !CanAssignInsertType(source, target) && !(source == DatabaseType.DateTimeOffset && target == DatabaseType.DateTime))
         {
             throw new SqlPlanningException("CS05013", string.Format(CultureInfo.CurrentCulture,
                 ErrorMessages.DefaultTypeIncompatible, column, source, target), expression.Location);
@@ -1232,6 +1233,7 @@ internal sealed partial class SqlPlanner
             SqlAlterAddConstraintAction add => new SqlAddConstraintPlan(ResolveTable(alter.Table), add.Constraint),
             SqlAlterDropConstraintAction drop => new SqlDropConstraintPlan(ResolveTable(alter.Table), drop.ConstraintName),
             SqlAlterColumnAction change => PlanAlterColumn(alter.Table, change),
+            SqlAlterColumnTypeAction change => PlanAlterColumnType(alter.Table, change),
             SqlAlterRenameTableAction rename => new SqlRenamePlan(ResolveTable(alter.Table), null, rename.NewName),
             SqlAlterRenameColumnAction rename => new SqlRenamePlan(ResolveTable(alter.Table), rename.ColumnName, rename.NewName),
             SqlAlterSetDefaultAction change => PlanColumnFacet(alter.Table, change.ColumnName, change.DefaultValue, false, null),
@@ -1270,7 +1272,8 @@ internal sealed partial class SqlPlanner
             : dropDefault ? type.DefaultLiteral : previous.DefaultLiteral;
         return new SqlAlterColumnPlan(table, new SqlCatalogColumn(previous.Name, previous.Type, nullable ?? previous.IsNullable,
             text, previous.Collation, previous.DomainName, value is not null ? DefaultCalls(text) : dropDefault ? [] : previous.DefaultFunctionCalls,
-            previous.Identity, previous.MissingValueLiteral), AllowDefaultChange: value is not null || dropDefault);
+            previous.Identity, previous.MissingValueLiteral)
+            { RecastDefault = value is null && !dropDefault && previous.RecastDefault }, AllowDefaultChange: value is not null || dropDefault);
     }
 
     private SqlAlterColumnPlan PlanAlterColumn(SqlTableReference reference, SqlAlterColumnAction change)
@@ -1292,11 +1295,34 @@ internal sealed partial class SqlPlanner
                 ErrorMessages.ColumnNullabilityConflict, change.Column.ColumnName));
         }
         var type = ResolveColumnType(change.Column);
+        if (previous.Identity is not null && previous.Type.Type != type.Storage.Type)
+        {
+            // The existing full-definition identity contract remains validation-only;
+            // explicit TYPE selects identity conversion through the rewrite path.
+            throw SqlPlanningException.IdentityViolation(change.Column.ColumnName, ErrorMessages.IdentityTypeChangeForbidden);
+        }
         string? defaultText = ResolveDefaultLiteral(change.Column, $"{table.Schema}.{table.Name}");
-        return new SqlAlterColumnPlan(table, new SqlCatalogColumn(change.Column.ColumnName, type.Storage,
+        var collation = ResolveColumnCollation(change.Column, type.Storage);
+        // Full definitions retain decision 49a's explicit facet contract even when
+        // the type requires a rewrite. SET/DROP DEFAULT owns default changes.
+        if (!string.Equals(previous.DefaultLiteral, defaultText, StringComparison.Ordinal))
+        {
+            throw new SqlPlanningException("CS05013", string.Format(CultureInfo.CurrentCulture,
+                ErrorMessages.ExecuteAlterColumnAsyncSqlPlanning, previous.Name));
+        }
+        if (change.Column.CollationName is null &&
+            (previous.Collation ?? _catalog.DefaultCollation).Id != (collation ?? _catalog.DefaultCollation).Id)
+        {
+            throw new SqlPlanningException("CS05013", string.Format(CultureInfo.CurrentCulture,
+                ErrorMessages.AlterColumnImplicitCollation, previous.Name));
+        }
+        var column = new SqlCatalogColumn(change.Column.ColumnName, type.Storage,
             change.Column.IsNullable, defaultText,
-            ResolveColumnCollation(change.Column, type.Storage), type.IsDomain ? type.Name : null,
-            DefaultCalls(defaultText), previous.Identity, previous.MissingValueLiteral));
+            collation, type.IsDomain ? type.Name : null,
+            DefaultCalls(defaultText), previous.Identity, previous.MissingValueLiteral) { RecastDefault = previous.RecastDefault };
+        return RequiresColumnRewrite(previous, column)
+            ? PlanColumnRewrite(table, column, type, null, reference, recastDefault: false)
+            : new SqlAlterColumnPlan(table, column);
     }
 
     private SqlAddColumnPlan PlanAddColumn(string schema, string table, SqlAlterAddColumnAction add)

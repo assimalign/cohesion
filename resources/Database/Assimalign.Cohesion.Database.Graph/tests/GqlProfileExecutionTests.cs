@@ -52,6 +52,15 @@ public sealed class GqlProfileExecutionTests
                      [2, 1, "RelationshipTypeScan", "KNOWS|SERVES", null, "edge=0; direction=Outgoing; postings=(type_id,relationship); combine=union; physical=visited_postings; viable=accepted_hops; physical_limit=1000000", 2L, null],
                      [3, 0, "Project", "a", null, "kind=Node; expression=a", null, null]]),
             ],
+            [GqlClauses.PathSelector] =
+            [
+                new("MATCH ANY (a:Person {name:'Alice'})->*(b:Person {name:'Bob'}) RETURN a.name,b.name", [["Alice","Bob"]]),
+                new("MATCH ALL (a:Person {name:'Alice'})->*(b:Person {name:'Bob'}) RETURN a.name,b.name", [["Alice","Bob"]]),
+                new("MATCH p = ANY SHORTEST (a:Person {name:'Alice'})->*(b:Person {name:'Bob'}) RETURN path_length(p)", [[1L]]),
+                new("MATCH p = ALL SHORTEST (a:Person {name:'Alice'})->*(b:Person {name:'Bob'}) RETURN path_length(p)", [[1L]]),
+                new("MATCH p = SHORTEST 2 (a:Person {name:'Alice'})->*(b:Person {name:'Bob'}) RETURN path_length(p)", [[1L]]),
+                new("MATCH p = SHORTEST 2 GROUPS (a:Person {name:'Alice'})->*(b:Person {name:'Bob'}) RETURN path_length(p)", [[1L]]),
+            ],
             [GqlClauses.PathMode] =
             [
                 new("MATCH WALK (a:Person {name:'Alice'})->{1,2}(b) RETURN b.name", [["Bob"]]),
@@ -471,6 +480,7 @@ public sealed class GqlProfileExecutionTests
         GqlClauses.Set => query.Stages.Any(stage => stage is GqlSetStage),
         GqlClauses.Remove => query.Stages.Any(stage => stage is GqlRemoveStage),
         GqlClauses.QuantifiedPath => query.MatchClauses.SelectMany(clause => clause.Paths).SelectMany(PatternPaths).Any(path => path.Relationships.Any(edge => edge.Quantifier is not null) || path.Elements?.Any(element => element is GqlParenthesizedPathPattern { Quantifier: not null }) == true),
+        GqlClauses.PathSelector => query.MatchClauses.SelectMany(clause => clause.Paths).Any(path => path.Selector is not null),
         GqlClauses.PathMode => query.MatchClauses.SelectMany(clause => clause.Paths).Any(path => path.Mode is not null),
         GqlClauses.Explain => query.IsExplain,
         GqlClauses.Match => query.MatchClauses.Any(clause => !clause.Optional),

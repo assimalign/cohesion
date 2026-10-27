@@ -4,7 +4,7 @@ namespace Assimalign.Cohesion.Database.Graph.Internal;
 
 [global::System.Diagnostics.DebuggerDisplay("GraphPathPlan")]
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Internal.GraphPathPlan.DebugView))]
-internal sealed record GraphPathPlan(GqlPathPattern Pattern, GraphAnchor Anchor)
+internal record GraphPathPlan(GqlPathPattern Pattern, GraphAnchor Anchor)
 {
     internal GraphPathShape? Shape { get; init; }
     internal GraphPathSelectionPlan? Selection { get; init; }
