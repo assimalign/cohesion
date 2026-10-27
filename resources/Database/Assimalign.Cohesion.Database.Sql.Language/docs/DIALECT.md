@@ -78,7 +78,7 @@ Explicit INSERT aliases `AS overriding` and `AS "overriding"` remain valid;
 only a bare OVERRIDING token in clause position is refused. CREATE SEQUENCE, OVERRIDING ... VALUE, identity
 MINVALUE/MAXVALUE/CYCLE/CACHE, ALTER COLUMN RESTART/SET GENERATED, and generated stored
 expressions also report named `CK00001`. Sequences, restart, overriding and populated-table
-identity backfill remain T2. INSERT ... RETURNING exposes the allocated identity value (#1117). Full-definition ALTER COLUMN already refuses identity type changes,
+identity backfill remain T2. INSERT ... RETURNING exposes the allocated identity value (#1117). Validation-only full-definition ALTER COLUMN refuses identity type changes,
 nullable definitions and DEFAULT; retaining the type and NOT NULL preserves generation. SET/DROP DEFAULT and DROP NOT NULL refuse identity columns with CS03025 (#1122).
 
 ## RETURNING contract (#1117)
@@ -458,7 +458,7 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | `DELETE` | Supported | optional `WHERE`, including correlated and uncorrelated subqueries; aggregates outside a child query are rejected; qualified references use the target name or its alias, which hides the base name (PostgreSQL `parse_relation.c:3759`); hidden/unknown qualifiers fail with located `CS01015` before any write and leave an explicit transaction active |
 | `CREATE TABLE` | Supported | Identity columns use GENERATED ALWAYS/BY DEFAULT AS IDENTITY or the SQL Server IDENTITY alias (see identity contract above). `IF NOT EXISTS`, column definitions with parameterized types, `COLLATE <name>`, `NOT NULL`/`NULL`, `DEFAULT <expression>`, column and table `PRIMARY KEY`, `REFERENCES`/`FOREIGN KEY`, `CHECK`, and `UNIQUE`; optional `CONSTRAINT <name>` |
 | `CREATE TABLE AS` | Supported | Optional complete output names and WITH [NO] DATA; unpublished durable build and atomic publication. See the CTAS contract above. |
-| `ALTER TABLE` | Supported subset, measured | ADD/DROP COLUMN and ADD/DROP CONSTRAINT execute. Full-definition `ALTER COLUMN c <type> [NULL | NOT NULL] [DEFAULT expression]` accepts nullability, length and precision changes that preserve storage type, scale, collation, domain and DEFAULT; tightening and every CHAR length change check existing live values and refuse changes requiring a rewrite. RENAME TO, RENAME [COLUMN], ALTER [COLUMN] SET/DROP DEFAULT and SET/DROP NOT NULL also execute (#1122). PostgreSQL TYPE/SET DATA TYPE and TYPE ... USING remain unsupported. ADD COLUMN nonvolatile defaults backfill old-row reads and apply to subsequent inserts that omit the column; explicit NULL follows nullability. Nullable additions without a default read NULL. NOT NULL additions to populated tables require a non-null default. Invalid defaults reject before mutation; expression defaults follow the fast-default contract below. Column COLLATE persists and governs default comparisons. See the default, atomicity and MVCC contract below (#1023). DROP COLUMN changes only the catalog: it rewrites no row, survives a crash at any point on one definition, and SELECTs running beside it read every value in its own column; see the DROP COLUMN contract below (#1241). |
+| `ALTER TABLE` | Supported subset, measured | ADD/DROP COLUMN and ADD/DROP CONSTRAINT execute. Full-definition `ALTER COLUMN c <type> [NULL | NOT NULL] [DEFAULT expression]` retains the validation-only path for nullability, length and precision when storage type, scale, collation and domain stay unchanged; DEFAULT changes on that path use SET/DROP DEFAULT. Tightening and every CHAR length change validate existing values and refuse repadding through that path. Storage-type, scale, domain and collation changes use the shared rewrite; full-definition identity-type changes retain their refusal. RENAME TO, RENAME [COLUMN], ALTER [COLUMN] SET/DROP DEFAULT and SET/DROP NOT NULL also execute (#1122). PostgreSQL TYPE/SET DATA TYPE with optional COLLATE/USING execute through the exclusive rewrite (#1447); see the ALTER TYPE contract below. ADD COLUMN nonvolatile defaults backfill old-row reads and apply to subsequent inserts that omit the column; explicit NULL follows nullability. Nullable additions without a default read NULL. NOT NULL additions to populated tables require a non-null default. Invalid defaults reject before mutation; expression defaults follow the fast-default contract below. Column COLLATE persists and governs default comparisons. See the default, atomicity and MVCC contract below (#1023). DROP COLUMN changes only the catalog: it rewrites no row, survives a crash at any point on one definition, and SELECTs running beside it read every value in its own column; see the DROP COLUMN contract below (#1241). |
 | `TRUNCATE` | Supported | Table lists, per-table ONLY, CONTINUE/RESTART IDENTITY and CASCADE/RESTRICT; auto-commit only; old snapshots retain their rows and defer storage reclamation. See the contract below. |
 | `DROP TABLE` | Supported | `IF EXISTS`; returns after catalog unpublication, with page reclamation asynchronous after older readers finish; the name may be recreated immediately |
 | `CREATE SCHEMA` | Supported subset, measured | `CREATE SCHEMA [IF NOT EXISTS] name` persists an empty SQL namespace; AUTHORIZATION and nested schema elements report named `CK00001` errors. Namespace names compare without case and keep their stored spelling. |
@@ -791,7 +791,7 @@ code when the row is evaluated. `+a` and `+(1 + 2)` reported
 
 **ALTER TABLE actions.** `ADD [COLUMN]`, `ADD CONSTRAINT`, `DROP [COLUMN]`,
 `DROP CONSTRAINT`, full-definition `ALTER COLUMN`, RENAME and ALTER column default/nullability actions parse.
-TYPE/SET DATA TYPE, SET SCHEMA, RENAME CONSTRAINT and comma-separated action lists report named `CK00001`.
+TYPE/SET DATA TYPE with optional COLLATE/USING also parse. SET SCHEMA, RENAME CONSTRAINT and comma-separated action lists report named `CK00001`.
 Other unknown or incomplete actions such as MODIFY, ALTER c INT, ALTER c SET/DROP,
 ALTER CONSTRAINT, bare SET, SET TABLESPACE and SET LOGGED report `CS00003` at parse time.
 SET SCHEMA is named only when SCHEMA follows SET; syntax diagnostics list all supported actions.
@@ -1046,10 +1046,51 @@ whose required ordering differs from both insertion order and the actual scan.
 
 ## Renames and column defaults/nullability (#1122)
 
-ALTER TABLE accepts one action: RENAME TO new_table, RENAME [COLUMN] old TO new,
+**ALTER COLUMN TYPE (#1447, SQ-A2).**
+`ALTER TABLE t ALTER [COLUMN] c [SET DATA] TYPE type [COLLATE collation] [USING expression]`
+executes inline under the table's exclusive lock. USING sees every column of the original row,
+including qualified references to t; it cannot read another table or contain subqueries,
+aggregates or window functions. Without USING the old column supplies the value. Both forms
+require an assignment/implicit registry cast to the target; an explicit-only conversion such as
+TEXT to INT requires `USING CAST(c AS INT)`. A bare string literal retains unknown-input
+coercion. Target character length overflow refuses unless a written CAST permits truncation.
+The declaration selects the target collation; omitted COLLATE uses the database default.
+Nullability, keys and constraints remain. Integer identity targets retain the cursor, start and
+increment. Domain/non-integer identity targets refuse. Start and allocated counter values must
+fit the target integer range; unissued reservation tails are trimmed to it before publication
+so the counter remains valid after reopen. Restart retains the existing reserved-value gap policy.
+
+USING does not transform a default. Defaults must independently assignment-cast to the new type;
+an incompatible default refuses even on an empty table (drop it before TYPE, then SET DEFAULT).
+Defaults use original literal identities. Immutable defaults validate eagerly; volatile defaults
+retain per-insert evaluation. Standard CHAR defaults keep assignment overflow/padding;
+a dependent DEFAULT requiring an application CHAR conversion refuses with CK00001 because
+the ordinary persisted CAST spelling would introduce explicit truncation. Drop that default
+before TYPE and set the desired expression afterward. Immutable target-domain defaults are
+checked even on an empty table. CHECKs
+rebind their operators/functions against the target and recheck converted rows. Domain and
+NOT NULL failures also abort the whole operation. Every index is rebuilt; new uniqueness
+collisions, including after a collation change, refuse. Incoming, outgoing and self foreign keys
+must retain the engine's identical storage-type/collation compatibility and valid final keys.
+Adjacent FK tables are locked exclusively during validation. Views depending on c refuse,
+including a same-type USING expression; views reading only other columns retain their binding.
+
+The shared #1265 rewrite copies live rows to a dense new owner and atomically publishes the
+definition, indexes and catalog generation. A conversion/constraint failure or cancellation
+before publication leaves the old table current. LockTimeout reports CS04044; stale writers
+retry with CS04006. Read-only old snapshots keep the original definition/owner. Cancellation
+after publication cannot undo the committed result. Full-definition storage/scale/domain/
+collation changes use the same rewrite; decision 49a's validation-only facet path remains.
+Full-definition identity-type changes retain their refusal; use explicit TYPE for integer identity conversion.
+Populated-table provisioning handoff and expanded crash/wire coverage follow in SQ-A3.
+SQL format 26 and compiled-schema v8 remain unchanged because persisted shapes are unchanged.
+CS02064 names a missing assignment pathway for the value, USING result or default (42804).
+Reference anchors: PostgreSQL tablecmds.c:14949-14998,15269-15304,15612-15624 in the local clone.
+
+Each ALTER TABLE statement accepts one action. Rename/default/nullability forms are RENAME TO new_table, RENAME [COLUMN] old TO new,
 and ALTER [COLUMN] c SET DEFAULT value, DROP DEFAULT, SET NOT NULL or DROP NOT NULL.
 RENAME and TO remain contextual identifiers. Rename targets are unqualified and stay in the
-same schema; SET SCHEMA, RENAME CONSTRAINT, TYPE/SET DATA TYPE and action lists are excluded.
+same schema; SET SCHEMA, RENAME CONSTRAINT and action lists are excluded.
 Existing names and read-only system relation names cannot be overwritten.
 After the ownership check, a table name retained by a declared script object claim is refused with CS03302 naming
 the script; historical targets are forward-only and cannot be silently rewritten.
@@ -2915,7 +2956,7 @@ and reopen with the same metadata as an explicit zero scale; bare decimals remai
 
 The supported alteration is the full definition, for example
 ALTER TABLE t ALTER COLUMN c NUMERIC(28,2). PostgreSQL's ALTER COLUMN c TYPE ...
-form remains unsupported. Function overload identity and invocation semantics are
+form executes with optional COLLATE and USING (#1447). Function overload identity and invocation semantics are
 unchanged apart from FLOAT(p)'s resolved storage selection.
 
 ## Declared bounds on writes (#1418)
@@ -3779,6 +3820,7 @@ the diagnostic fixes introduce no persisted-format change beyond #1422's format-
 | `CS03061` | Column already exists | 42701 (`duplicate_column`) |
 | `CS02062` | INTERVAL duration overflow in assignment, DEFAULT or CAST | 22015 (`interval_field_overflow`) |
 | `CS02063` | FOREIGN KEY columns have incompatible collations | 42P21 (`collation_mismatch`) |
+| `CS02064` | ALTER COLUMN TYPE old value, USING result or dependent DEFAULT has no assignment cast | 42804 (`datatype_mismatch`) |
 | `CS04064` | A bound table was replaced while DDL waited; retry the statement | 40001 (`serialization_failure`) |
 | `CS04066` | TRUNCATE inside an explicit transaction | 25001 (`active_sql_transaction`) |
 | `CS04065` | Hard lock deadlock; roll back the victim transaction before retrying | 40P01 (`deadlock_detected`) |

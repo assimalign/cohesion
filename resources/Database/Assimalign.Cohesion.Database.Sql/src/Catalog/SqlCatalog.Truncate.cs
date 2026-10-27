@@ -138,7 +138,8 @@ public sealed partial class SqlCatalog
     internal ValueTask PublishStorageReplacementAsync(IReadOnlyList<SqlCatalogTable> expected, IReadOnlyList<SqlCatalogTable>? named,
         IReadOnlyList<SqlCatalogTable> replacements, IReadOnlyList<SqlCatalogIndex> indexes,
         IReadOnlyList<BTreeIndexRegistration> registrations, IReadOnlyDictionary<SqlCatalogIndex, BTreeIndex> retiredIndexes,
-        bool restartIdentity, TransactionSequence marker, string actualObject, SqlCatalogScriptPublication? publication, CancellationToken cancellationToken)
+        bool restartIdentity, TransactionSequence marker, string actualObject, SqlCatalogScriptPublication? publication, CancellationToken cancellationToken,
+        bool definitionChange = false)
     {
         lock (_sync)
         {
@@ -189,11 +190,31 @@ public sealed partial class SqlCatalog
                 DeleteIdentityCounter(transaction, table.ObjectId);
                 if (!restartIdentity && _identityCounters.TryGetValue(table.ObjectId, out var previous) && previous.Location is not null)
                 {
-                    var identity = table.Columns.Single(column => column.Identity is not null).Identity!;
-                    long reserved = checked((long)(previous.Next + (Int128)(previous.Remaining - 1) * identity.Increment));
+                    var column = mapping[table.ObjectId].Columns.Single(column => column.Identity is not null);
+                    var identity = column.Identity!;
+                    var (minimum, maximum) = IdentityBounds(column.Type.Type, identity.Increment);
+                    Int128 last = previous.Next - identity.Increment;
+                    // PostgreSQL sequence.c:1547-1571 validates the current sequence
+                    // value when its bounds change. Unissued reservations are local:
+                    // trim their tail to the new range, retaining the allocation cursor.
+                    // Persisting an old out-of-range reservation would fail reopen's
+                    // counter validation even when every converted row fits the type.
+                    if (last < minimum || last > maximum)
+                    {
+                        throw new SqlCatalogException("CS02002", string.Format(System.Globalization.CultureInfo.CurrentCulture,
+                            ErrorMessages.IdentityReplacementRange, column.Name, column.Type.Type));
+                    }
+                    int remaining = previous.Remaining;
+                    while (remaining > 0)
+                    {
+                        Int128 endpoint = previous.Next + (Int128)(remaining - 1) * identity.Increment;
+                        if (endpoint >= minimum && endpoint <= maximum) { break; }
+                        remaining--;
+                    }
+                    long reserved = checked((long)(remaining == 0 ? last : previous.Next + (Int128)(remaining - 1) * identity.Increment));
                     ulong id = mapping[table.ObjectId].ObjectId;
                     var record = new DatabaseKeyWriter().AppendInt32(identityCounterRecordKind).AppendInt64((long)id).AppendInt64(reserved).ToArray();
-                    counters.Add((id, new IdentityCounter { Next = previous.Next, Remaining = previous.Remaining,
+                    counters.Add((id, new IdentityCounter { Next = previous.Next, Remaining = remaining,
                         Location = _storage.InsertRow(transaction, record) }));
                 }
             }
@@ -204,12 +225,13 @@ public sealed partial class SqlCatalog
             }
             var registrationsLocation = UpsertRecord(transaction, _registrationsLocation, EncodeRegistrations(merged));
             DefinitionSlot<SqlCatalogScript>? receipt = null;
-            if (publication is not null)
+            if (!definitionChange && publication is not null)
             {
                 ValidateScriptPublication(publication, actualObject);
                 receipt = StageScript(transaction, CreateScriptReceipt(publication, _ddlGeneration, actualObject, false, false));
             }
-            transaction.Commit();
+            if (definitionChange) { CommitCatalogChange(transaction, publication: publication, actualObject: actualObject); }
+            else { transaction.Commit(); }
             if (receipt is not null) { _scripts[receipt.Value.Name] = receipt; }
             foreach (var slot in tableSlots) { _tables[(slot.Table.Schema, slot.Table.Name)] = slot; }
             foreach (var slot in oldIndexes) { _indexes.Remove((slot.Index.TableObjectId, slot.Index.Name)); }

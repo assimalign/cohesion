@@ -1,5 +1,9 @@
 # Assimalign.Cohesion.Database.Sql — Overview
 
+ALTER COLUMN TYPE with optional COLLATE and USING converts original-row values through the
+shared exclusive rewrite, rechecks defaults/constraints/FKs and atomically replaces rows/indexes
+(#1447). This run executes inline; populated-table provisioning handoff follows in SQ-A3.
+
 TRUNCATE table lists execute through atomic storage replacement, with recursive FK closure,
 identity restart/continuation and deferred reclamation that preserves older snapshots (#1716).
 CREATE TABLE AS infers output types and builds an unpublished owner before atomic publication;

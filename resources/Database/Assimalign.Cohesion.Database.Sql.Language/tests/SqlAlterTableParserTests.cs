@@ -46,8 +46,6 @@ public sealed class SqlAlterTableParserTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - ALTER: excluded actions carry a named capability diagnostic")]
-    [InlineData("ALTER COLUMN c TYPE BIGINT", "ALTER COLUMN TYPE")]
-    [InlineData("ALTER c SET DATA TYPE BIGINT", "ALTER COLUMN SET DATA")]
     [InlineData("SET SCHEMA other", "SET SCHEMA")]
     [InlineData("RENAME CONSTRAINT old TO newer", "RENAME CONSTRAINT")]
     [InlineData("ALTER c SET DEFAULT 7, ALTER c SET NOT NULL", "comma-separated ALTER TABLE actions")]
@@ -60,6 +58,42 @@ public sealed class SqlAlterTableParserTests
         var diagnostic = statement.Diagnostics.Single(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
         diagnostic.Code.ShouldBe("CK00001");
         diagnostic.Message!.ShouldContain(construct, Case.Sensitive);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql.Language] - ALTER TYPE: optional words, modifiers and USING round trip")]
+    [InlineData("ALTER COLUMN c TYPE BIGINT")]
+    [InlineData("ALTER c SET DATA TYPE NUMERIC(8,2) USING c + 1")]
+    [InlineData("ALTER c TYPE VARCHAR(20) COLLATE binary USING CAST(c AS TEXT)")]
+    [InlineData("ALTER c TYPE \"domain name\" USING CASE WHEN c IS NULL THEN 0 ELSE c END")]
+    public void Parse_AlterType_ShouldRetainAndRenderAction(string action)
+    {
+        // Arrange / Act
+        var statement = new SqlQueryParser().Parse("ALTER TABLE \"my schema\".t " + action);
+
+        // Assert
+        statement.Diagnostics.ShouldNotContain(d => d.Severity == DiagnosticSeverity.Error);
+        var alter = statement.ShouldBeOfType<SqlQueryStatement>().SqlExpression.ShouldBeOfType<SqlAlterTableExpression>();
+        var change = alter.Action.ShouldBeOfType<SqlAlterColumnTypeAction>();
+        change.Column.ColumnName.ShouldBe("c");
+        string rendered = SqlExpressionRenderer.Render(alter);
+        var roundtrip = new SqlQueryParser().Parse(rendered);
+        roundtrip.Diagnostics.ShouldNotContain(d => d.Severity == DiagnosticSeverity.Error);
+        SqlExpressionRenderer.Render(roundtrip.ShouldBeOfType<SqlQueryStatement>().SqlExpression.ShouldBeOfType<SqlAlterTableExpression>()).ShouldBe(rendered);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql.Language] - ALTER TYPE: incomplete clauses are syntax errors")]
+    [InlineData("ALTER c TYPE")]
+    [InlineData("ALTER c SET DATA")]
+    [InlineData("ALTER c TYPE INT USING")]
+    [InlineData("ALTER c TYPE INT COLLATE")]
+    [InlineData("ALTER c TYPE INT USING c +")]
+    public void Parse_IncompleteAlterType_ShouldReportSyntax(string action)
+    {
+        // Arrange / Act
+        var statement = new SqlQueryParser().Parse("ALTER TABLE t " + action);
+
+        // Assert
+        statement.Diagnostics.ShouldContain(d => d.Code == "CS00003");
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - ALTER: incomplete actions never execute a consumed prefix")]

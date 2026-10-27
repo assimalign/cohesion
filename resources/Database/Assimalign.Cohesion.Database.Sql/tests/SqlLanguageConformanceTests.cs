@@ -21,6 +21,26 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 /// </summary>
 public sealed class SqlLanguageConformanceTests
 {
+    [Theory(DisplayName = "Cohesion Test [Sql] - Conformance: ALTER TYPE grammar converts old-row values (#1447)")]
+    [InlineData("ALTER COLUMN v TYPE BIGINT", 7L)]
+    [InlineData("ALTER v SET DATA TYPE BIGINT USING v+1", 8L)]
+    [InlineData("ALTER v TYPE VARCHAR(10) COLLATE binary USING CAST(v AS TEXT)", "7")]
+    public async Task ExecuteAsync_AlterTypeCorpus_ShouldConvertOriginalRow(string action, object expected)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("alter-type-conformance", new());
+        var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await ExecuteAsync(session, "CREATE TABLE t(v INT)");
+        await ExecuteAsync(session, "INSERT INTO t VALUES(7)");
+
+        // Act
+        await ExecuteAsync(session, "ALTER TABLE t " + action);
+
+        // Assert
+        (await RowsAsync(session, "SELECT v FROM t")).ShouldHaveSingleItem()[0].ShouldBe(expected);
+    }
+
     [Theory(DisplayName = "Cohesion Test [Sql] - Rewrite: empty input and NULL foreign keys commit across a parent replacement (#1265)")]
     [InlineData("UPDATE child SET note=1 WHERE false", 0)]
     [InlineData("INSERT INTO child VALUES (NULL,1),(NULL,2)", 2)]

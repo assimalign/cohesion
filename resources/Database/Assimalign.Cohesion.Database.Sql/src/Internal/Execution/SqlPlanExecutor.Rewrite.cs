@@ -14,12 +14,10 @@ internal sealed partial class SqlPlanExecutor
 {
     internal static Action<string, long>? RewriteStage { get; set; }
 
-    // Future ALTER TYPE supplies the replacement definition and a bound value transform
-    // here. It must acquire the same admission and dependencies before calling this one
-    // copier/publication path; no type-specific physical rewrite is needed.
+    // Physical compaction and ALTER TYPE share this copier and publication path.
     internal async Task RewriteTableAsync(SqlCatalogTable table, SqlStatementContext statement,
         CancellationToken cancellationToken, Func<SqlCatalogTable, ulong, SqlCatalogTable>? describe = null,
-        Func<object?[], object?[]>? transform = null)
+        Func<object?[], object?[]>? transform = null, Action<SqlCatalogTable, SqlCatalogIndex[]>? validate = null, bool definitionChange = false)
     {
         // Lock/latch order: fail-fast schema admission -> old table X (before queueing)
         // -> fail-fast metadata admission (on the worker) -> reserved table X
@@ -42,12 +40,13 @@ internal sealed partial class SqlPlanExecutor
         describe ??= static (previous, id) => new SqlCatalogTable(id, previous.Schema, previous.Name,
             previous.Columns, previous.PrimaryKeyColumns, previous.Owner, previous.OwningSchema, previous.Constraints);
         await ReplaceTableStorageAsync([table], null, describe, transform, copyRows: true, restartIdentity: false,
-            SqlObjectIdentity.Table(table.Schema, table.Name), statement, cancellationToken).ConfigureAwait(false);
+            SqlObjectIdentity.Table(table.Schema, table.Name), statement, cancellationToken, validate, definitionChange).ConfigureAwait(false);
     }
 
     private async Task ReplaceTableStorageAsync(SqlCatalogTable[] previous, IReadOnlyList<SqlCatalogTable>? named,
         Func<SqlCatalogTable, ulong, SqlCatalogTable>? describe, Func<object?[], object?[]>? transform,
-        bool copyRows, bool restartIdentity, string actualObject, SqlStatementContext statement, CancellationToken cancellationToken)
+        bool copyRows, bool restartIdentity, string actualObject, SqlStatementContext statement, CancellationToken cancellationToken,
+        Action<SqlCatalogTable, SqlCatalogIndex[]>? validate = null, bool definitionChange = false)
     {
         var oldIndexes = previous.SelectMany(table => _catalog.GetIndexes(table.ObjectId)).ToArray();
         var retiredIndexes = new Dictionary<SqlCatalogIndex, BTreeIndex>(ReferenceEqualityComparer.Instance);
@@ -89,6 +88,7 @@ internal sealed partial class SqlPlanExecutor
             if (copyRows)
             {
                 await CopyReplacementRowsAsync(previous[0], replacements[0], indexes, statement, transform, cancellationToken).ConfigureAwait(false);
+                validate?.Invoke(replacements[0], indexes);
                 RewriteStage?.Invoke("Prepared", 0);
             }
             else { TruncatePrepared?.Invoke(); }
@@ -100,7 +100,7 @@ internal sealed partial class SqlPlanExecutor
                 await _catalog.PublishStorageReplacementAsync(previous, named, replacements, indexes, PublishedRegistrations(indexes),
                     retiredIndexes, restartIdentity, marker.Sequence,
                     actualObject,
-                    statement.ScriptReceipt, cancellationToken).ConfigureAwait(false);
+                    statement.ScriptReceipt, cancellationToken, definitionChange).ConfigureAwait(false);
                 // Set before any observer can throw: publication is irrevocable, and cleanup
                 // must remove old handles even when cancellation or a test observer intervenes.
                 published = true;

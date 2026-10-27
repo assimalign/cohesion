@@ -371,7 +371,7 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
         {
             try
             {
-                if (request.Statement.SqlExpression is SqlDropTableExpression or SqlDropSchemaExpression or SqlTruncateExpression or SqlCreateTableAsExpression)
+                if (request.Statement.SqlExpression is SqlDropTableExpression or SqlDropSchemaExpression or SqlTruncateExpression or SqlCreateTableAsExpression or SqlAlterTableExpression)
                 {
                     _database.TableReclamation.Request();
                 }

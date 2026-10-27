@@ -67,7 +67,7 @@ internal static class SqlCastConverter
 
                 if (converted is not null)
                 {
-                    converted = ApplyModifiers(converted, cast.Target.Storage, isExplicit: true);
+                    converted = ApplyModifiers(converted, cast.Target.Storage, isExplicit: !cast.Assignment);
                 }
             }
             catch (SqlEvaluationException exception)

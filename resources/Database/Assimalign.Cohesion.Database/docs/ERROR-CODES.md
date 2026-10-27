@@ -127,6 +127,7 @@ structured-carrier messages remain unprefixed.
 | COHSQLE055 | CS02055 | Values/types |
 | COHSQLE062 | CS02062 | Values/types |
 | COHSQLE063 | CS02063 | Values/types |
+| New (#1447) | CS02064 | Values/types — ALTER COLUMN TYPE old value, USING result or dependent DEFAULT has no assignment cast (42804) |
 | COHSQLE024 | CS03024 | Schema/constraints |
 | COHSQLE025 | CS03025 | Schema/constraints |
 | COHSQLE027 | CS03027 | Schema/constraints |

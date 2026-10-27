@@ -24,11 +24,13 @@ internal sealed class SqlBoundCast : SqlBoundExpression
     /// <param name="collation">The collation a domain check's input compares under.</param>
     /// <param name="location">The source expression span, if available.</param>
     /// <param name="sourceType">The source SQL identity when known, retaining JSON and JSONB.</param>
+    /// <param name="assignment">Whether target modifiers enforce assignment overflow rules.</param>
     internal SqlBoundCast(SqlBoundExpression operand, string targetText, SqlType target, SqlCast?[] casts, DatabaseName database,
-        Collation collation, Location? location = null, DatabaseType sourceType = DatabaseType.Null)
+        Collation collation, Location? location = null, DatabaseType sourceType = DatabaseType.Null, bool assignment = false)
         : base(SqlBoundExpressionKind.Cast)
     {
         SourceType = sourceType;
+        Assignment = assignment;
         Location = location;
         Operand = operand;
         TargetText = targetText;
@@ -43,6 +45,9 @@ internal sealed class SqlBoundCast : SqlBoundExpression
 
     /// <summary>Gets the source identity, retaining JSON and JSONB despite their shared CLR representation.</summary>
     internal DatabaseType SourceType { get; }
+
+    // Assignment coercion retains overflow checks for character modifiers.
+    internal bool Assignment { get; }
 
     /// <summary>Gets the bound operand.</summary>
     internal SqlBoundExpression Operand { get; }
