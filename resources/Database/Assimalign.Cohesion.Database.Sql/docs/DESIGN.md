@@ -584,10 +584,10 @@ Validation-only ALTER COLUMN compares the exact padded CLR values, not wrapper r
 trailing-space-insensitive equality. Every CHAR length change requires validation, including widening;
 non-null values that would be repadded cause refusal before metadata publication. Empty or all-null
 columns may change length. Code-first changes on populated tables defer that validation to the existing
-provisioning worker. Rewriting remains #1447's responsibility, sharing #1265's machinery; this change
-does not invent a metadata-only repadding behavior or a separate rewrite implementation. Both the
-definition-rewrite and changed-padding refusals name the column and direct callers to an explicit
-table-copy migration, identifying #1447 as the in-place rewrite work.
+provisioning worker. TYPE now performs repadding through #1447's shared #1265 rewrite machinery;
+the validation-only full-definition path names the column and directs callers to TYPE. Changing
+DEFAULT separately on that path uses SET/DROP DEFAULT. There is no metadata-only repadding
+behavior or separate type-only copier.
 
 BETWEEN binds independent comparands for its lower and upper comparisons, matching PostgreSQL
 `src/backend/parser/parse_expr.c:1325-1341`; round 2 leaves that implementation unchanged. IN separates
@@ -2034,8 +2034,9 @@ target. Text execution throws DatabaseParseException; the server sends ParseFail
 connection usable. Declared scripts parse in Build before database I/O, so the same failure precedes
 any script effects. Typed schema declarations use their existing UnsupportedType validation enum;
 COHSQLS codes remain reserved for script receipts/ownership. There is no persisted-catalog upgrade
-or compatibility reader: nothing has shipped. The full-definition ALTER COLUMN form is covered;
-PostgreSQL's TYPE/USING syntax remains unsupported.
+or compatibility reader: nothing has shipped. Both the full-definition ALTER COLUMN form and
+PostgreSQL's TYPE/USING form use this modifier admission; TYPE/USING rewrites through #1447's
+shared exclusive copier.
 
 Raw compiled decimal metadata follows the same shared scale normalization: precision with no
 scale resolves to scale zero. Compiled snapshots canonicalize it before hashing, and provisioning
@@ -6930,6 +6931,83 @@ output-list validation are explicit dialect choices recorded in DIALECT.md.
 |---|---|---|
 | CS03068 | CTAS output names are missing, blank, duplicate or have the wrong width | 42601 |
 
+#### ALTER COLUMN TYPE and USING (#1447, SQ-A2)
+
+ALTER [COLUMN] c [SET DATA] TYPE type [COLLATE collation] [USING expression] binds USING
+against the original table row and requires an assignment/implicit registry cast for its result;
+without USING the old column is the operand. Explicit-only pairs require a written CAST.
+Character modifiers retain assignment overflow checks; explicit CAST inside USING may truncate.
+PostgreSQL anchors in the local clone are tablecmds.c:14949-14998 (old-row scope and assignment
+coercion), :15269-15304 (independent default conversion) and :15612-15624 (view dependency refusal).
+The target declaration selects its collation; nullability, identity and existing constraints remain.
+Integer identity types may change within the existing integer family, retaining cursor/start/increment.
+Domain identity targets refuse, following PostgreSQL parse_utilcmd.c:3700-3727 and
+sequence.c:1382-1389. Publication validates the allocated counter against the target range
+(sequence.c:1547-1571), trims unissued reservation tails to that range and persists a valid
+kind-16 endpoint. This preserves the live cursor without making a narrower table unreadable
+after reopen; ordinary restart may still skip unused reserved values, as before.
+Full-definition storage-type, scale, domain and collation changes share this rewrite; decision
+49a's validation-only nullability/length/precision path remains intact. Full definitions refuse
+CS05013 if the resulting default differs, or if collation changes without an explicit COLLATE;
+SET/DROP DEFAULT remains the default-changing operation even when a rewrite is needed. TYPE
+without USING also uses the validation-only path when storage identity, scale, domain and
+collation remain unchanged, except CHAR width changes that can require repadding. Such changes
+retain the heap owner and index trees. PostgreSQL's corresponding rewrite test is
+tablecmds.c:15156-15194 (ATColumnChangeRequiresRewrite). The existing
+full-definition identity-type refusal remains; explicit TYPE permits integer identity conversion.
+
+Defaults are tested independently of USING from the original expression without implicit column
+coercion (tablecmds.c:15269-15304). Numeric and Boolean literals retain their expression identity;
+unknown string literals retain their resolved old identity. Immutable results persist as canonical
+literals, preventing CAST accumulation across repeated changes and reopen. Expression defaults
+retain their original text and pinned calls; the DEFAULT binder supplies assignment coercion on
+each evaluation, including target-domain base modifiers, so character overflow refuses rather
+than truncating. A missing native domain still opens with readable stored values; its bound domain
+checker retains CS02010 for writes, including columns with expression defaults. A column with no default inherits the target domain's default, as CREATE TABLE
+and CTAS do. Volatile defaults are bound without execution; immutable defaults are evaluated
+before reservation. Referencing CHECKs use the declaration binder against the target definition,
+including CASE input/WHEN, LIKE operand/pattern/escape and empty-table operand compatibility, pin existing function identities, and
+evaluate over every converted row. Domain checks and NOT NULL use the shared write validators.
+All indexes are rebuilt and uniqueness is checked under the target collation before publication.
+FK compatibility retains the engine's declaration rule: identical storage identity and character
+collation. Incoming and outgoing keys are revalidated against the complete replacement, including
+self references and MATCH SIMPLE NULL keys. Only FKs whose child or referenced key includes the
+altered column are locked and revalidated; unrelated neighbors remain writable and are not scanned.
+The affected adjacent tables take exclusive locks, so their rows and definitions remain stable
+through validation/publication. Dependent views refuse even
+a same-type USING expression; views reading only other columns retain the shared owner remapping.
+CHAR defaults retain their old declared width when resolving unknown literals and use assignment
+modifiers on future calls. A dependent default requiring an application CHAR/TEXT conversion
+that cannot retain this assignment behavior refuses with CK00001; drop it before TYPE and set
+the desired default afterward. Immutable target-domain defaults validate even on empty tables.
+
+The inline path holds session schema/metadata admission, source table X, adjacent FK X in id
+order, reserved owner X, then the apply gate and tree/page latches. The lock manager detects
+cycles with other DDL; no apply gate/page latch spans catalog publication. LockTimeout and
+caller cancellation retain the session cleanup contract. Failures abandon the reserved owner
+and keep the old table/indexes current. The shared copier converts and validates each bounded
+64-row chunk before entering the database-wide apply gate; only physical row/index writes run
+under that gate. Application callbacks can therefore write unrelated tables through another
+session. Abandonment clears the volatile prepared-owner mark even if directory cleanup fails,
+leaving the durable intent publicly pending until reclamation frees its pages. This applies to
+TYPE and the maintenance RewriteTableAsync path. The shared copier publishes the logical description,
+indexes, generation and optional script receipt in one transaction. Older snapshots retain the
+old owner; stale writers retry with CS04006. Cancellation after publication cannot undo it.
+The populated-table worker handoff and expanded crash/wire convergence coverage remain SQ-A3.
+
+CS02064 identifies a missing assignment cast for an old value, USING result or default (42804).
+Existing constraint, conversion, view, locking and storage codes retain their conditions.
+SQL format 26 and compiled-schema v8 are unchanged: this uses existing column/type/default
+records, dense row encoding, replacement markers and reclamation intents. The language assembly
+adds the public sealed SqlAlterColumnTypeAction leaf and SqlExpressionRenderer.Render(SqlAlterTableExpression)
+overload; canonical rendering quotes decoded domain names when required. No persisted shape,
+wire message, public interface, visibility grant or project reference changes. NativeAOT smoke
+executes TYPE USING; nonparallel tests force stale-writer waits/retries until counters prove the
+race, and inject failure/cancellation at each preparation stage to verify ownership release.
+TYPE crash-image tests reopen success and cancellation images under all three durability policies,
+checking complete old/new definitions, rows, unique-index seeks and abandoned-owner reclamation
+through copy checkpoints and cleanup.
+
 #### Catalog: Recoverable table rewrite and ordinal compaction (#1265)
 
 SqlDatabase.RewriteTableAsync accepts validated SqlObjectName schema/table components,
@@ -6984,9 +7062,9 @@ statement pin ends. A crash therefore exposes either the complete original layou
 or the complete compact layout/index set, and abandoned/retired owners converge through the
 existing reclamation worker. Interrupted preparation is abandoned; the caller retries explicitly.
 
-The shared copier accepts an internal replacement-definition function and row transform for
-#1447. TYPE syntax, conversion binding, dependency rebinding and its deferred schema intent
-are later runs; there is no second type-only copier. This operation adds no SQL syntax, wire
+The shared copier accepts an internal replacement-definition function, row transform and final
+validation callback for #1447. TYPE uses these hooks; its deferred schema intent is a later run.
+There is no second type-only copier. Physical maintenance adds no SQL syntax, wire
 message, public interface, visibility grant or project reference. The maintenance API uses a
 generated SqlObjectName value object for decoded schema and table components, preserving case-insensitive
 catalog identity and delimited-name punctuation; default names are refused at admission.

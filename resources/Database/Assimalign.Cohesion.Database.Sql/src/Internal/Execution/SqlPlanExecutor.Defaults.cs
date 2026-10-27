@@ -134,7 +134,24 @@ internal sealed partial class SqlPlanExecutor
                 SqlPlanner.ValidateDefaultType(expression, scope, column.Type.Type, column.Name);
             }
             var volatility = DefaultVolatility(expression, scope);
-            var bound = new SqlBoundDefault(scope.Bind(expression), column, volatility != SqlFunctionVolatility.Immutable);
+            // A missing native domain remains readable under the stored base type;
+            // the bound domain checker owns its existing CS02010 write refusal.
+            var target = (column.DomainName is { } name ? functions.Types.Find(name) : null) ?? SqlType.ForStorage(column.Type);
+            // DEFAULT text stores the original expression, without implicit column
+            // coercion. Rebind that assignment, including a domain's base modifiers,
+            // rather than persisting an explicit CAST that can truncate characters.
+            var casts = functions.Types.ResolveCasts(scope.SourceDomain(expression), target);
+            var source = scope.StaticTypeOf(expression);
+            SqlBoundExpression value = scope.Bind(expression);
+            // Standard assignments already belong to CoerceForColumn, including
+            // its established DEFAULT diagnostics. Only application conversion
+            // pathways need a registry node before that assignment.
+            if (casts[(int)source] is { } cast && !SqlStandardCasts.Contains(cast))
+            {
+                value = new SqlBoundCast(value, target.Name, SqlType.ForStorage(column.Type), casts,
+                    functions.Database, collation, sourceType: source, assignment: true);
+            }
+            var bound = new SqlBoundDefault(value, column, volatility != SqlFunctionVolatility.Immutable);
             // Immutable defaults are proved at definition time, even on an empty table.
             // Loading retains the tree; stable and volatile calls run when a value is assigned.
             return declaring && volatility == SqlFunctionVolatility.Immutable
@@ -186,7 +203,7 @@ internal sealed partial class SqlPlanExecutor
         }
     }
 
-    private static void EnsureFiniteDefault(object? value)
+    internal static void EnsureFiniteDefault(object? value)
     {
         if (value is float single && !float.IsFinite(single) || value is double number && !double.IsFinite(number))
         {
@@ -226,7 +243,7 @@ internal sealed partial class SqlPlanExecutor
         catch (DatabaseException failure) { throw SqlExecutionException.FromPersisted(failure); }
     }
 
-    private static SqlFunctionVolatility DefaultVolatility(SqlExpression expression, SqlExpressionEvaluator scope)
+    internal static SqlFunctionVolatility DefaultVolatility(SqlExpression expression, SqlExpressionEvaluator scope)
     {
         RuntimeHelpers.EnsureSufficientExecutionStack();
         var volatility = expression is SqlFunctionCallExpression call && !SqlStandardLibrary.IsEvaluatorForm(call.FunctionName)
@@ -241,7 +258,7 @@ internal sealed partial class SqlPlanExecutor
 
     // Serialize the already coerced fast-default value, never the original expression.
     // The persisted literal is read by the same ceiling parser as every definition.
-    private static string FrozenDefaultLiteral(object? value, DatabaseType target) => SqlCharacter.Output(value) switch
+    internal static string FrozenDefaultLiteral(object? value, DatabaseType target) => SqlCharacter.Output(value) switch
     {
         null => "NULL",
         bool boolean => boolean ? "TRUE" : "FALSE",

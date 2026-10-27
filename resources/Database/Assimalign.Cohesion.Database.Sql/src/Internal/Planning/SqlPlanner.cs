@@ -1232,6 +1232,7 @@ internal sealed partial class SqlPlanner
             SqlAlterAddConstraintAction add => new SqlAddConstraintPlan(ResolveTable(alter.Table), add.Constraint),
             SqlAlterDropConstraintAction drop => new SqlDropConstraintPlan(ResolveTable(alter.Table), drop.ConstraintName),
             SqlAlterColumnAction change => PlanAlterColumn(alter.Table, change),
+            SqlAlterColumnTypeAction change => PlanAlterColumnType(alter.Table, change),
             SqlAlterRenameTableAction rename => new SqlRenamePlan(ResolveTable(alter.Table), null, rename.NewName),
             SqlAlterRenameColumnAction rename => new SqlRenamePlan(ResolveTable(alter.Table), rename.ColumnName, rename.NewName),
             SqlAlterSetDefaultAction change => PlanColumnFacet(alter.Table, change.ColumnName, change.DefaultValue, false, null),
@@ -1292,11 +1293,34 @@ internal sealed partial class SqlPlanner
                 ErrorMessages.ColumnNullabilityConflict, change.Column.ColumnName));
         }
         var type = ResolveColumnType(change.Column);
+        if (previous.Identity is not null && previous.Type.Type != type.Storage.Type)
+        {
+            // The existing full-definition identity contract remains validation-only;
+            // explicit TYPE selects identity conversion through the rewrite path.
+            throw SqlPlanningException.IdentityViolation(change.Column.ColumnName, ErrorMessages.IdentityTypeChangeForbidden);
+        }
         string? defaultText = ResolveDefaultLiteral(change.Column, $"{table.Schema}.{table.Name}");
-        return new SqlAlterColumnPlan(table, new SqlCatalogColumn(change.Column.ColumnName, type.Storage,
+        var collation = ResolveColumnCollation(change.Column, type.Storage);
+        // Full definitions retain decision 49a's explicit facet contract even when
+        // the type requires a rewrite. SET/DROP DEFAULT owns default changes.
+        if (!string.Equals(previous.DefaultLiteral, defaultText, StringComparison.Ordinal))
+        {
+            throw new SqlPlanningException("CS05013", string.Format(CultureInfo.CurrentCulture,
+                ErrorMessages.ExecuteAlterColumnAsyncSqlPlanning, previous.Name));
+        }
+        if (change.Column.CollationName is null &&
+            (previous.Collation ?? _catalog.DefaultCollation).Id != (collation ?? _catalog.DefaultCollation).Id)
+        {
+            throw new SqlPlanningException("CS05013", string.Format(CultureInfo.CurrentCulture,
+                ErrorMessages.AlterColumnImplicitCollation, previous.Name));
+        }
+        var column = new SqlCatalogColumn(change.Column.ColumnName, type.Storage,
             change.Column.IsNullable, defaultText,
-            ResolveColumnCollation(change.Column, type.Storage), type.IsDomain ? type.Name : null,
-            DefaultCalls(defaultText), previous.Identity, previous.MissingValueLiteral));
+            collation, type.IsDomain ? type.Name : null,
+            DefaultCalls(defaultText), previous.Identity, previous.MissingValueLiteral);
+        return RequiresColumnRewrite(previous, column)
+            ? PlanColumnRewrite(table, column, type, null, reference, recastDefault: false)
+            : new SqlAlterColumnPlan(table, column);
     }
 
     private SqlAddColumnPlan PlanAddColumn(string schema, string table, SqlAlterAddColumnAction add)

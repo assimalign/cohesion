@@ -33,6 +33,34 @@ namespace Assimalign.Cohesion.Database.Sql.Language;
 /// </remarks>
 public static class SqlExpressionRenderer
 {
+    /// <summary>Renders an ALTER COLUMN TYPE statement as canonical SQL without a terminator.</summary>
+    /// <param name="query">The parsed statement.</param>
+    /// <returns>The target type, optional collation and original-row conversion.</returns>
+    /// <exception cref="ArgumentNullException">The query is null.</exception>
+    /// <exception cref="NotSupportedException">The action is not ALTER COLUMN TYPE.</exception>
+    /// <exception cref="InsufficientExecutionStackException">The thread has insufficient stack.</exception>
+    public static string Render(SqlAlterTableExpression query)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        if (query.Action is not SqlAlterColumnTypeAction change)
+        {
+            throw new NotSupportedException(ErrorMessages.AlterTypeRenderingRequired);
+        }
+        return "ALTER TABLE " + (query.Table.SchemaName is { } schema ? Identifier(schema) + "." : "") +
+            Identifier(query.Table.TableName) + " ALTER COLUMN " + Identifier(change.Column.ColumnName) +
+            " TYPE " + AlterTypeTarget(change.Column) + (change.Column.CollationName is { } collation ? " COLLATE " + Identifier(collation) : "") +
+            (change.UsingExpression is { } conversion ? " USING " + Render(conversion) : "");
+    }
+
+    private static string AlterTypeTarget(SqlColumnDefinition column)
+    {
+        if (column.ResolvedType is not null) { return CastTarget(column.DataType); }
+        string type = column.DataType;
+        // Parsed domain declarations retain their SQL delimiters. Internal ASTs
+        // may also carry a bare name; quote that name without quoting twice.
+        return type.Length >= 2 && type[0] == '"' && type[^1] == '"' ? type : Identifier(type);
+    }
+
     // Precedence ladder of SqlQueryParser.Expressions.cs, loosest first. An operand whose own
     // level is below what its position parses is parenthesized.
     private const int orLevel = 1;

@@ -35,6 +35,8 @@ binding SQL DDL/CAST type names to the shared type system (`Database.Types`).
 - **Types and builtins** — `SqlTypeNames` resolves declared type names (with
   length/precision/scale) to `DatabaseType` identities; builtin function names are
   declared in the lexer tables and the dialect doc.
+- **ALTER COLUMN TYPE** — optional COLUMN/SET DATA, target type/collation and USING retain
+  a typed action and render canonically; the engine binds conversions against the original row.
 - **Canonical rendering** — `SqlExpressionRenderer` turns a parsed expression or
   SELECT, set-operation, UPDATE, DELETE or MERGE query back into canonical SQL text that parses to the same tree. It is the
   form in which the engine persists stored expressions (CHECK, DEFAULT and SQL function bodies); see

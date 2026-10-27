@@ -35,6 +35,8 @@ public class SqlConformanceTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - Conformance: supported statements parse without errors")]
+    [InlineData("ALTER TABLE t ALTER v TYPE \"a space\" USING v;", SqlQueryCommandType.Alter)]
+    [InlineData("ALTER TABLE t ALTER v TYPE \"a\"\"quote\";", SqlQueryCommandType.Alter)]
     [InlineData("SELECT * FROM users;", SqlQueryCommandType.Select)]
     [InlineData("SELECT * FROM a FULL JOIN b USING(id);", SqlQueryCommandType.Select)]
     [InlineData("SELECT * FROM a LEFT OUTER JOIN b ON a.id = b.id FULL OUTER JOIN c ON b.id = c.id;", SqlQueryCommandType.Select)]
@@ -74,6 +76,8 @@ public class SqlConformanceTests
     [InlineData("SELECT INTERVAL '12', CAST('-12.5' AS INTERVAL), CAST('13:45' AS TIME);", SqlQueryCommandType.Select)]
     [InlineData("ALTER TABLE users ADD COLUMN email VARCHAR(255);", SqlQueryCommandType.Alter)]
     [InlineData("ALTER TABLE users DROP COLUMN email;", SqlQueryCommandType.Alter)]
+    [InlineData("ALTER TABLE users ALTER COLUMN age TYPE BIGINT;", SqlQueryCommandType.Alter)]
+    [InlineData("ALTER TABLE users ALTER age SET DATA TYPE INT USING CAST(age AS INT);", SqlQueryCommandType.Alter)]
     [InlineData("DROP TABLE IF EXISTS users;", SqlQueryCommandType.Drop)]
     [InlineData("TRUNCATE TABLE users;", SqlQueryCommandType.Truncate)]
     [InlineData("CREATE INDEX ix_users_name ON users (name);", SqlQueryCommandType.Create)]

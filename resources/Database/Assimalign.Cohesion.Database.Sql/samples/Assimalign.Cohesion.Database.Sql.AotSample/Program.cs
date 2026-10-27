@@ -325,6 +325,8 @@ internal static class Program
         Check("in process: rewritten rows and index seek", await RowsAsync(session, "SELECT value FROM altered_guard WHERE id=1"), [[7]]);
         Check("in process: rewritten index plan", (await RowsAsync(session, "EXPLAIN SELECT value FROM altered_guard WHERE id=1"))
             .Any(row => Equals(row[2], "IndexSeek")), true);
+        await session.ExecuteAsync("ALTER TABLE altered_guard ALTER value TYPE BIGINT USING value+id", cancellationToken: CancellationToken.None);
+        Check("in process: ALTER TYPE USING", await RowsAsync(session, "SELECT value FROM altered_guard ORDER BY id"), [[8L], [-7L]]);
         await session.ExecuteAsync("CREATE TABLE aggregate_guard (id INT, g INT)", cancellationToken: CancellationToken.None);
         await session.ExecuteAsync("INSERT INTO aggregate_guard VALUES (2, 1), (1, 1), (2, 1)", cancellationToken: CancellationToken.None);
         foreach (string grouping in new[] { "", " GROUP BY g" })
@@ -575,7 +577,7 @@ internal static class Program
         Check("over the wire: correlated scalar EXISTS and IN after failure", await RowsAsync(connection, correlatedRows, timeout.Token), [[1L, 100L], [2L, 200L]]);
         Check("over the wire: correlated UPDATE", await connection.ExecuteAsync("UPDATE subquery_guard SET id = id WHERE EXISTS (SELECT u.id FROM subquery_guard u WHERE u.id = subquery_guard.id)", cancellationToken: timeout.Token), 1L);
         Check("over the wire: correlated DELETE", await connection.ExecuteAsync("DELETE FROM subquery_guard WHERE id IN (SELECT u.id FROM subquery_guard u WHERE u.id = subquery_guard.id)", cancellationToken: timeout.Token), 1L);
-        Check("over the wire: ALTER rename and frozen missing values", await RowsAsync(connection, "SELECT value FROM altered_guard ORDER BY id", timeout.Token), [[7], [-9]]);
+        Check("over the wire: ALTER TYPE, rename and frozen missing values", await RowsAsync(connection, "SELECT value FROM altered_guard ORDER BY id", timeout.Token), [[8L], [-7L]]);
         Check("over the wire: T1 scalars and transaction clock", await RowsAsync(connection, t1Scalars, timeout.Token), _t1Scalars);
         Check("over the wire: strict typed literals", await RowsAsync(connection, typedLiterals, timeout.Token), _typedLiterals);
         Check("over the wire: ISO type names and SQL Server lexical aliases", await RowsAsync(connection, typeAliases, timeout.Token), _typeAliases);
