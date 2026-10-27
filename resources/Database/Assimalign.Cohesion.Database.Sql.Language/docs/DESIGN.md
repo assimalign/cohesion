@@ -20,6 +20,9 @@ capability checks and nesting measurement. Canonical rendering supplies the effe
 CREATE TABLE AS adds one advertised clause beside CREATE TABLE, with no new keyword or command
 enum value. DIALECT.md specifies metadata, transaction refusal, publication and error semantics;
 parser/profile and live engine conformance cases advance together.
+Output metadata retains domain defaults and their resolved call vectors. WITH DATA keeps normal
+indexed access planning; WITH NO DATA alone suppresses seek-bound evaluation. The complete name
+list follows CREATE VIEW's Cohesion rule, as DIALECT.md records.
 
 ## Repeated subquery grouping keys (#1718)
 

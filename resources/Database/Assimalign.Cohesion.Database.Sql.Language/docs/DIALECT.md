@@ -355,11 +355,15 @@ TRUNCATE (local reference: src/backend/commands/tablecmds.c:2225-2258).
 from SELECT, WITH, joins, grouping or set-operation output. The default is WITH DATA.
 An explicit name list must rename every output; otherwise every output needs a column name
 or alias (aggregate names such as count are retained). Missing, blank, duplicate (ignoring
-case) or wrong-width names fail with structured CS03068 (42601) before reservation.
+case) or wrong-width names fail with structured CS03068 (42601) before reservation. The complete
+list rule matches Cohesion's CREATE VIEW rule; PostgreSQL also accepts a shorter list that renames
+only the leading columns (createas.c:167-185).
 Types, length/precision/scale, domain identities and collations follow view output inference;
 untyped NULL output becomes nullable TEXT. All destination columns are nullable, as persisted
-view columns are: source NOT NULL, keys, table checks, defaults, identity and indexes are not
-copied. Domain constraints still belong to the inferred domain type. Values use ordinary
+view columns are: source NOT NULL, keys, table checks, column defaults, identity and indexes are not
+copied. Domain constraints and domain defaults still belong to the inferred domain type, including
+the default's resolved function-call identities. WITH DATA uses normal indexed query planning;
+overwide catalog metadata fails with CS05042 at reservation, before source evaluation. Values use ordinary
 column assignment and domain validation. Parameters are allowed; their values are copied,
 with no persisted query or source dependency.
 

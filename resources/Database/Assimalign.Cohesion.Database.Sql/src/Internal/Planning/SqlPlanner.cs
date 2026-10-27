@@ -364,7 +364,7 @@ internal sealed partial class SqlPlanner
     // Keep predicate collection independent of SELECT/DML binding (and of future join pushdown).
     private SqlAccessPath SelectAccessPath(SqlCatalogTable table, IReadOnlyList<SqlExpression> conjuncts, SqlExpressionEvaluator? scope)
     {
-        if (ViewDefinitionBinding is not null || _inferringTableOutput || conjuncts.Count == 0 || _commonTableState?.BindingUnused == true)
+        if (ViewDefinitionBinding is not null || _inferringTableOutput && !_tableAsWithData || conjuncts.Count == 0 || _commonTableState?.BindingUnused == true)
         {
             return SqlScanPath.Instance;
         }
@@ -392,7 +392,7 @@ internal sealed partial class SqlPlanner
     private SqlAccessPath SelectAccessPath(SqlCatalogTable table,
         Dictionary<int, List<(SqlBinaryOperator Op, object? Value)>> predicates, IReadOnlyList<SqlCatalogIndex>? indexes = null)
     {
-        if (ViewDefinitionBinding is not null || _inferringTableOutput || predicates.Count == 0 || _commonTableState?.BindingUnused == true)
+        if (ViewDefinitionBinding is not null || _inferringTableOutput && !_tableAsWithData || predicates.Count == 0 || _commonTableState?.BindingUnused == true)
         {
             return SqlScanPath.Instance;
         }

@@ -11,6 +11,7 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 internal sealed partial class SqlPlanner
 {
     private bool _inferringTableOutput;
+    private bool _tableAsWithData;
 
     private SqlCreateTableAsPlan PlanCreateTableAs(SqlCreateTableAsExpression create)
     {
@@ -22,6 +23,7 @@ internal sealed partial class SqlPlanner
                 ErrorMessages.RenameTableCollision, schema, create.Table.TableName), create.Location);
         }
         _inferringTableOutput = true;
+        _tableAsWithData = create.WithData;
         try
         {
             var child = PlanQuery(create.Query);
@@ -39,11 +41,18 @@ internal sealed partial class SqlPlanner
             // Domain identity/constraints remain part of the output's type. Unknown
             // all-NULL output becomes text, as it does for an unknown set-operation output.
             var columns = BindDerivedOutput(child, create.Table.TableName, create.Columns, create.Query).Columns
-                .Select(column => new SqlCatalogColumn(column.Name,
-                    column.Type.Type == DatabaseType.Null ? new DatabaseTypeInfo(DatabaseType.String) : column.Type,
-                    collation: column.Collation, domainName: column.DomainName)).ToArray();
+                .Select(column =>
+                {
+                    string? defaultLiteral = column.DomainName is { } domain ? _functions.Types.Find(domain)?.DefaultLiteral : null;
+                    var domainDefinition = column.DomainName is null ? null : _catalog.Domains.FirstOrDefault(domain =>
+                        domain.Name.Equals(column.DomainName, StringComparison.OrdinalIgnoreCase));
+                    return new SqlCatalogColumn(column.Name,
+                        column.Type.Type == DatabaseType.Null ? new DatabaseTypeInfo(DatabaseType.String) : column.Type,
+                        defaultLiteral: defaultLiteral, collation: column.Collation, domainName: column.DomainName,
+                        defaultFunctionCalls: domainDefinition?.DefaultFunctionCalls ?? DefaultCalls(defaultLiteral));
+                }).ToArray();
             return new(schema, create.Table.TableName, columns, child, create.WithData, create.IfNotExists);
         }
-        finally { _inferringTableOutput = false; }
+        finally { _inferringTableOutput = false; _tableAsWithData = false; }
     }
 }

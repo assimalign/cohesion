@@ -6759,7 +6759,11 @@ CTAS shares view/derived output inference, including type facets, domain identit
 Its name list renames the complete output; unnamed, blank, duplicate or wrong-width outputs
 fail with CS03068 (42601). All destination columns are nullable, following persisted-view metadata
 and PostgreSQL CTAS rather than copying source NOT NULL. Untyped NULL becomes TEXT. No source
-key, table constraint, default, index or identity is copied; inferred domain constraints still apply.
+key, table constraint, column default, index or identity is copied; inferred domain constraints and
+domain defaults (including their resolved function-call vectors) still apply. WITH DATA uses normal
+indexed planning while retaining projection metadata; only WITH NO DATA suppresses access-path
+evaluation. Reservation encodes and size-checks the table record before allocating its identity or
+evaluating the source, so overwide metadata fails with CS05042 before building any rows.
 Parameters are allowed. WITH DATA is the default; WITH NO DATA binds without query execution or
 cost probes, including skipped predicates, functions and row-limit evaluation. IF NOT EXISTS skips
 source binding/execution for an existing table. Completion uses DDL's zero affected count.

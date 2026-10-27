@@ -2240,6 +2240,8 @@ public sealed partial class SqlCatalog
             ValidateConstraints(table);
             // Persist the identity before physical trees are created. A crash can
             // leave unused trees, but can never reuse their identity for a table.
+            // Refuse an unstorable definition before reserving an owner or evaluating CTAS.
+            _ = EncodeTable(table);
             using var transaction = _storage.BeginTransaction();
             var intent = prepareOwner ? _storage.InsertRow(transaction, table.ObjectId,
                 SqlReclamationRecord.Encode(table.ObjectId, schema, name)) : ((PageId PageId, int SlotIndex)?)null;
