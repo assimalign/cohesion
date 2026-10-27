@@ -207,7 +207,7 @@ internal static class DocumentIndexKeys
         return null;
     }
 
-    private static List<object> ParsePath(string path)
+    internal static List<object> ParsePath(string path)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         var parts = new List<object>();

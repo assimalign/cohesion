@@ -66,7 +66,7 @@ internal sealed partial class DocumentPlanner
         var logical = CreateLogicalPlan(query, _cancellationToken, _parameters, _functions);
         var collection = ResolveCollection(query.Collection, query.Location);
         return new DocumentPlan(logical, collection, ChooseAccess(query.Predicate, query.Alias, _catalog.GetIndexes(collection.Id, _snapshot),
-            logical.UnnestVariables));
+            logical.UnnestVariables, query.Unnest));
     }
 
     private static DocumentCreateCollectionPlan PlanCreateCollection(OqlCreateCollectionExpression create)
@@ -112,13 +112,14 @@ internal sealed partial class DocumentPlanner
             throw new DocumentPlanningException("CD05001", ErrorMessages.DocumentPlannerPlanCreateIndexFailure, create.Location);
         }
 
-        if (create.Paths.Count is < 1 or > 32)
+        if (create.Keys.Count is < 1 or > 32)
         { throw new DocumentPlanningException("CD03022", ErrorMessages.IndexPathCount, create.Location); }
-        var paths = create.Paths.Select(path => IndexPath(path, alias: null)
-            ?? throw new DocumentPlanningException("CD05001", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DocumentPlannerPlanCreateIndexFailure2, create.IndexName), path.Location)).ToArray();
-        if (paths.Distinct(StringComparer.Ordinal).Count() != paths.Length)
+        var keys = create.Keys.Select(DocumentArrayIndexExpressions.BindKey).ToArray();
+        if (keys.Count(key => key.ArraySource is not null) > 1 || create.IsUnique && keys.Any(key => key.ArraySource is not null))
+        { throw new DocumentPlanningException("CD03025", ErrorMessages.ArrayIndexDefinitionInvalid, create.Location); }
+        if (keys.Distinct().Count() != keys.Length)
         { throw new DocumentPlanningException("CD05001", ErrorMessages.IndexPathsDuplicate, create.Location); }
-        return new DocumentCreateIndexPlan(ResolveCollection(create.Collection, create.Location), create.IndexName, paths, create.IsUnique, create.IfNotExists);
+        return new DocumentCreateIndexPlan(ResolveCollection(create.Collection, create.Location), create.IndexName, keys, create.IsUnique, create.IfNotExists);
     }
 
     private DocumentDropIndexPlan PlanDropIndex(OqlDropIndexExpression drop)
@@ -227,7 +228,8 @@ internal sealed partial class DocumentPlanner
             Validate(order.Expression, allowAggregate: true, functions: functions);
             if (grouped) { ValidateGrouped(order.Expression, query, unnestVariables, scopes!, functions); }
         }
-        bool canStopEarly = !grouped && !query.IsDistinct && query.OrderBy.Count == 0 &&
+        bool canStopEarly = !grouped && !query.IsDistinct && (query.OrderBy.Count == 0 ||
+            query.OrderBy.Count == 1 && query.OrderBy[0].Expression is OqlMetaExpression { Member: "id" }) &&
             projections.All(projection => (projection.Expression is not OqlStarExpression || query.Unnest.Count > 0) &&
                 (projection.Type != DatabaseType.Null || projection.Expression is
                     OqlLiteralExpression { Value: null or JsonElement { ValueKind: JsonValueKind.Null } } or OqlMissingExpression));
@@ -237,7 +239,7 @@ internal sealed partial class DocumentPlanner
     }
 
     private DocumentAccessPath ChooseAccess(OqlExpression? predicate, string? alias, IReadOnlyList<DocumentIndexMetadata> indexes,
-        IReadOnlySet<string>? variables = null)
+        IReadOnlySet<string>? variables = null, IReadOnlyList<OqlUnnestExpression>? unnest = null)
     {
         var predicates = new List<(string Path, string? LegacyPath, string Operator, object Value)>();
         if (predicate is not null) { Collect(predicate); }
@@ -246,15 +248,46 @@ internal sealed partial class DocumentPlanner
         bool bestRange = false;
         long bestCost = long.MaxValue;
         var candidates = new List<(DocumentIndexPath Path, int Prefix, bool Range)>();
+        var scopes = unnest is { Count: > 0 } || HasArrayPredicate(predicate)
+            ? ArrayScopes(predicate, alias, variables, unnest).ToArray() : null;
         foreach (var index in indexes.OrderBy(index => index.Name, StringComparer.Ordinal))
         {
             _cancellationToken.ThrowIfCancellationRequested();
+            // Paths is empty for array indexes. Scalar-only queries never allocate
+            // array scope state or enumerate keys merely to detect an array key.
+            if (index.Paths.Count > 0) { AddCandidate(index, null); continue; }
+            if (scopes is null) { continue; }
+            AddArrayCandidates(index);
+        }
+
+        // Keep captured array-key detection state off the scalar iteration path.
+        void AddArrayCandidates(DocumentIndexMetadata index)
+        {
+            var array = index.Keys.FirstOrDefault(key => key.ArraySource is not null);
+            if (array is null) { return; }
+            foreach (var scope in scopes)
+            {
+                if (IndexPath(scope.Source, alias) != array.ArraySource && LegacyIndexPath(scope.Source, alias) != array.ArraySource ||
+                    !WhenImplied(array.When, scope.Predicate, scope.Variable)) { continue; }
+                // Each ANY is a separate witness. Combining terms from separate scopes
+                // would lose documents whose two predicates match different elements.
+                var elementTerms = new List<(string Path, string? LegacyPath, string Operator, object Value)>();
+                Collect(scope.Predicate, scope.Variable, elementTerms);
+                if (!elementTerms.Any(term => term.Path == array.Path || term.LegacyPath == array.Path)) { continue; }
+                AddCandidate(index, elementTerms);
+            }
+        }
+
+        void AddCandidate(DocumentIndexMetadata index,
+            List<(string Path, string? LegacyPath, string Operator, object Value)>? elementTerms)
+        {
             var prefix = new List<object>();
             DocumentSeekBound? lower = null;
             DocumentSeekBound? upper = null;
-            foreach (string path in index.Paths)
+            foreach (var key in index.Keys)
             {
-                var usable = predicates.Where(term => term.Path == path || term.LegacyPath == path).ToArray();
+                var terms = key.ArraySource is null ? predicates : elementTerms!;
+                var usable = terms.Where(term => term.Path == key.Path || term.LegacyPath == key.Path).ToArray();
                 var equality = usable.FirstOrDefault(term => term.Operator == "=");
                 if (equality.Value is not null) { prefix.Add(equality.Value); continue; }
                 foreach (var term in usable)
@@ -267,10 +300,10 @@ internal sealed partial class DocumentPlanner
                 break;
             }
             bool range = lower is not null || upper is not null;
-            if (prefix.Count == 0 && !range) { continue; }
-            // Keep the single-path plan's scalar bound shape for callers inspecting it.
+            if (prefix.Count == 0 && !range) { return; }
+            // Keep the single-key plan's bound shape for callers inspecting it.
             DocumentIndexPath candidate;
-            if (index.Paths.Count == 1 && prefix.Count == 1)
+            if (index.Keys.Count == 1 && prefix.Count == 1)
             { candidate = new DocumentIndexPath(index, new DocumentSeekBound(prefix[0], true), new DocumentSeekBound(prefix[0], true)); }
             else { candidate = new DocumentIndexPath(index, lower, upper, prefix.AsReadOnly()); }
             candidates.Add((candidate, prefix.Count, range));
@@ -316,24 +349,33 @@ internal sealed partial class DocumentPlanner
         }
         return inputs.Count == 1 ? selected : new DocumentIntersectionPath(inputs.AsReadOnly());
 
-        void Collect(OqlExpression expression)
+        void Collect(OqlExpression expression, string? elementVariable = null,
+            List<(string Path, string? LegacyPath, string Operator, object Value)>? destination = null)
         {
+            destination ??= predicates;
+            static string? Name(OqlPathExpression path, string? alias, IReadOnlySet<string>? variables,
+                string? elementVariable, bool legacy = false)
+            {
+                if (elementVariable is null)
+                { return IsVariablePath(path, variables) ? null : legacy ? LegacyIndexPath(path, alias) : IndexPath(path, alias); }
+                return path.Segments.Count == 0 || path.Segments[0].Name != elementVariable ? null :
+                    (legacy ? LegacyIndexPath(path, elementVariable) : IndexPath(path, elementVariable)) ?? string.Empty;
+            }
             if (expression is OqlBetweenExpression { Negated: false, Operand: OqlPathExpression rangePath } between &&
                 IsConstant(between.Lower) && IsConstant(between.Upper))
             {
-                if (IsVariablePath(rangePath, variables)) { return; }
                 if (!TryEvaluateBound(between.Lower, out var lower) || !TryEvaluateBound(between.Upper, out var upper)) { return; }
-                string? name = IndexPath(rangePath, alias);
+                string? name = Name(rangePath, alias, variables, elementVariable);
                 if (name is not null && lower is bool or decimal or string && upper is bool or decimal or string)
                 {
-                    var legacy = LegacyIndexPath(rangePath, alias);
-                    predicates.Add((name, legacy, ">=", lower));
-                    predicates.Add((name, legacy, "<=", upper));
+                    var legacy = Name(rangePath, alias, variables, elementVariable, true);
+                    destination.Add((name, legacy, ">=", lower));
+                    destination.Add((name, legacy, "<=", upper));
                 }
                 return;
             }
             if (expression is not OqlBinaryExpression binary) { return; }
-            if (binary.Operator == "AND") { Collect(binary.Left); Collect(binary.Right); return; }
+            if (binary.Operator == "AND") { Collect(binary.Left, elementVariable, destination); Collect(binary.Right, elementVariable, destination); return; }
             if (binary.Operator is not ("=" or ">" or ">=" or "<" or "<=")) { return; }
             OqlPathExpression? path = binary.Left as OqlPathExpression;
             OqlExpression constant = binary.Right;
@@ -344,12 +386,12 @@ internal sealed partial class DocumentPlanner
                 constant = binary.Left;
                 operation = operation switch { ">" => "<", ">=" => "<=", "<" => ">", "<=" => ">=", _ => operation };
             }
-            if (path is null || IsVariablePath(path, variables) || !IsConstant(constant)) { return; }
+            if (path is null || !IsConstant(constant)) { return; }
             if (!TryEvaluateBound(constant, out var value)) { return; }
-            string? pathName = IndexPath(path, alias);
+            string? pathName = Name(path, alias, variables, elementVariable);
             if (pathName is not null && value is bool or decimal or string)
             {
-                predicates.Add((pathName, LegacyIndexPath(path, alias), operation, value));
+                destination.Add((pathName, Name(path, alias, variables, elementVariable, true), operation, value));
             }
         }
 
@@ -375,7 +417,11 @@ internal sealed partial class DocumentPlanner
     {
         int count = path.EqualityPrefix?.Count ?? 0;
         if (path.Lower is not null || path.Upper is not null) { count++; }
-        for (int i = 0; i < count; i++) { yield return path.Index.Paths[i]; }
+        for (int i = 0; i < count; i++)
+        {
+            var key = path.Index.Keys[i];
+            yield return key.ArraySource is null ? key.Path : $"DISTINCT ARRAY {key.Path} IN {key.ArraySource}";
+        }
     }
 
     private static DocumentSeekBound Tighter(DocumentSeekBound? current, DocumentSeekBound candidate, bool isLower)

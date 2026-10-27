@@ -494,6 +494,10 @@ CD00007 for the same count rule at parse and plan time:
 | `CD03024` | Index already exists |
 | `CD03025` | Multiple array keys, a UNIQUE array index, or IncludeMissing with a leading array key |
 | `CD03026` | Encoded index definition exceeds the 8,092-byte catalog record limit; refused before building postings |
+| `CD03027` | Array index expression is outside the restricted source, projection or WHEN grammar |
+| `CD03028` | Array index WHEN exceeds 32 levels or 128 predicate nodes |
+| `CD01028` | Array projection or WHEN path does not start with its element variable |
+| `CD02027` | Array index WHEN constant is not a supported scalar literal |
 | `CD01025` | Index does not exist |
 | `CD01026` | A directly constructed RETURNING projection has an empty output name |
 | `CD01027` | A directly constructed comprehension has an empty variable name |
@@ -600,9 +604,9 @@ Array IN reuses #1127 structural equality, preserving the distinction from list 
 existing NULL-left rule even for an empty array. The Couchbase NULL IN [] difference remains
 a follow-up. UPDATE and DELETE may use quantified predicates but cannot introduce UNNEST.
 
-Index collection uses only top-level document conjuncts; variable-headed paths cannot select
-a document index, and quantifier predicates are never traversed for seeks. A document-only
-conjunct can still select an index with UNNEST. Array-index pushdown remains deferred.
+Scalar index collection uses top-level document conjuncts. Array index collection considers each
+top-level ANY independently and eligible direct document-path UNNEST bindings; the full predicate
+remains a residual after candidate deduplication and array expansion. See array access planning below.
 EXPLAIN inserts Unnest/LeftUnnest nodes, naming each variable in Detail, between projection
 and access while retaining the existing Select detail string.
 
@@ -2328,10 +2332,64 @@ all its conjuncts on the same element, so a price projection with stock > 0 excl
 a different element. For arbitrary later ANY planning, the complete ANY must remain a residual:
 intersecting document candidates for price and stock alone cannot prove same-element correlation.
 Reevaluating ANY over the visible stored array proves correctness. It does not alone prove #1530's
-2x fetch bound; OQ-I2 must select sufficiently restrictive spans/WHEN matches and measure that bound.
+2x fetch bound; array access planning selects restrictive spans/WHEN matches as described below.
 Search deduplicates document identities before returning candidates; UNNEST must still read the
-original array to preserve its element multiplicity. No OQL array-index syntax or access planning
-is delivered by this catalog run.
+original array to preserve its element multiplicity.
+
+#### Array index DDL and access planning (#1530, OQ-I2)
+
+OQL accepts one `DISTINCT ARRAY v.p FOR v IN arr [WHEN cond] END` key among 1..32 ordered keys.
+The source is a document path and the projection is the variable itself or a path rooted in it.
+WHEN binds only element paths, scalar literal comparisons, IS NULL/MISSING, AND, OR and NOT;
+negated tests normalize to NOT(test). Numeric text converts directly to Decimal, including scale
+and exponent spellings within its domain. CLR Single/Double literals in a directly constructed
+AST are refused (CD02027), like the typed catalog API. Parameters, computed mappings and sources,
+and other WHEN expressions are refused before catalog mutation with located CD01028/CD02027/
+CD03027/CD03028 diagnostics. Catalog CD03025 still refuses multiple array keys and UNIQUE arrays.
+ALL remains CK00001; INCLUDE MISSING syntax stays deferred. No format changes beyond existing v3.
+`OqlCreateIndexExpression.Keys` snapshots paths/comprehensions; each comprehension denotes DISTINCT.
+Its scalar Paths view remains empty for array indexes, matching the catalog's coverage boundary.
+
+The chooser retains #1527's bounded probes, ranking and identity intersection. Array scope
+collection and captured array-key detection state are created only for eligible ANY/SOME or
+UNNEST shapes. Scalar-only predicates use the scalar Paths view without enumerating array keys;
+the Release regression retains the base chooser's measured allocation budget.
+For an array index, each top-level conjunctive ANY/SOME supplies its own source, variable and element bounds. Separate
+ANY witnesses never share bounds. INNER and LEFT UNNEST over direct document paths are eligible
+when a mandatory scalar comparison on the projected element rejects LEFT's synthetic MISSING row.
+Dependent expansion sources, EVERY, NOT ANY, OR-only predicates, complex projections and presence
+tests alone do not establish a usable array span. A scalar prefix alone never proves coverage of
+empty, missing or fully filtered arrays. Matching uses normalized paths and ignores variable names.
+Every WHEN leaf (or complete OR/NOT subtree) must match a predicate conjunct after normalization;
+conjunction order/association, reversed comparisons and negated tests normalize. There is no general
+inequality implication solver. If implication cannot be established, that array index is excluded.
+
+Candidates are deduplicated by document identity before content reads. The complete ANY remains
+residual on each candidate, preserving same-element semantics even with price and stock on different
+elements. UNNEST expands the stored array after deduplication, keeping `[1,1,2]` as three rows.
+EXPLAIN prints canonical DISTINCT ARRAY keys and `distinct_documents=True; array_residual=True`;
+estimates still count physical postings, which may exceed document counts. System PATH/PATHS render
+the same normalized keys with a canonical `v` variable and quoted source root. Rendering parses
+every catalog path segment, retaining integer subscripts and quoting punctuation, keywords,
+Unicode and embedded quotes in source, projection and WHEN paths so typed definitions reparse.
+
+Ungrouped, non-DISTINCT pages with fixed projection types (including META().id) can stop after
+OFFSET + LIMIT residual survivors when there is no ORDER BY or the sole ordering is document
+identity, ASC or DESC. Projection aliases resolving to META().id have the same behavior. Candidates
+are visited in that identity direction, and every visited document receives the full residual.
+Other orderings, grouping, DISTINCT and projections requiring type inference retain materialization.
+Candidate metadata and index probes are not limited by this content-read optimization.
+
+For the benchmark-shaped `(category, DISTINCT ARRAY v.price FOR v IN variants END)` query with
+category = X and any price <= Y, all candidates satisfy the residual: an identity-ordered page
+fetches at most OFFSET + LIMIT documents. The 256-candidate probe reads 50 documents for LIMIT 50
+and 70 for OFFSET 20 LIMIT 50, in either direction. With interleaved residual rejections it reads
+99/139 ascending and 100/140 descending, within 2 * (OFFSET + LIMIT) because every other candidate
+qualifies. This ratio is not guaranteed for arbitrary residuals. The correlated `price > 10 AND
+stock > 0` probe reads one qualifying document with a matching WHEN stock > 0; without WHEN it
+rejects 1,000 cross-element false positives after 1,001 reads. A matching WHEN narrows candidates
+but does not itself guarantee a bounded fetch ratio for additional residuals or other orderings.
+These probes do not claim execution of the external SF10 benchmark or its result digest harness.
 
 The single-array-key and DISTINCT precedent is [Couchbase array indexing](https://docs.couchbase.com/server/current/n1ql/n1ql-language-reference/indexing-arrays.html),
 and [INCLUDE MISSING](https://docs.couchbase.com/server/current/n1ql/n1ql-language-reference/createindex.html)
