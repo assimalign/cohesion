@@ -34,12 +34,10 @@ internal sealed partial class SqlSchemaProvisioner
                 admission = _database.DdlInterlock.EnterApply(_database.Name);
                 rewrite = new SqlTableRewrite(this, table, admission, cancellationToken);
                 _rewrite = rewrite;
-                _database.Engine.ScheduleProvisioning(rewrite);
             }
             catch
             {
-                // Enqueue either publishes completely or removes its node under the
-                // queue monitor. No observer has been armed for this unpublished item.
+                // Preparation has not started; discard any constructor-owned resources.
                 rewrite?.DiscardUnqueued();
                 admission?.Dispose();
                 _rewrite = null;
@@ -47,11 +45,12 @@ internal sealed partial class SqlSchemaProvisioner
                 throw;
             }
         }
-        // Never register a synchronous cancellation callback under the admission monitor.
-        // It may claim queued work and release admission immediately.
-        rewrite.ObserveCancellation();
+        // Never begin async lock preparation or register cancellation under admission.
+        rewrite.StartPreparation();
         return new ValueTask(rewrite.Completion);
     }
+
+    internal void QueueRewrite(SqlTableRewrite rewrite) => _database.Engine.ScheduleProvisioning(rewrite);
 
     internal void UnqueueRewrite(SqlTableRewrite rewrite) => _database.Engine.UnscheduleProvisioning(rewrite);
 
@@ -71,9 +70,39 @@ internal sealed partial class SqlSchemaProvisioner
         return rewrite?.StopAsync() ?? ValueTask.CompletedTask;
     }
 
-    internal async Task RunRewriteAsync(SqlCatalogTable table, CancellationToken cancellationToken)
+    internal async Task<TransactionContext> AcquireRewriteLockAsync(SqlCatalogTable table, CancellationToken cancellationToken)
     {
-        TransactionContext? transaction = null;
+        TransactionContext transaction = await _database.Coordinator.BeginAsync(IsolationLevel.ReadCommitted, cancellationToken).ConfigureAwait(false);
+        try
+        {
+            // Never put an external lock wait on the engine's single provisioning pump.
+            // A configured engine lock timeout also bounds a caller holding the blocker.
+            var timeout = _database.Engine.EngineOptions.LockTimeout;
+            using var scope = timeout == TimeSpan.Zero ? null : _database.Coordinator.LockManager.EnterLockTimeout(timeout);
+            await _database.Coordinator.LockManager.AcquireAsync(transaction.Sequence,
+                LockResource.Object(table.ObjectId), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
+            return transaction;
+        }
+        catch (Exception failure)
+        {
+            try { await RollbackRewriteAsync(transaction).ConfigureAwait(false); }
+            catch (Exception cleanup) { throw new AggregateException(failure, cleanup); }
+            if (failure is TransactionLockTimeoutException) { throw SqlTimeoutException.Lock(failure, null); }
+            throw;
+        }
+    }
+
+    internal async Task RollbackRewriteAsync(TransactionContext? transaction)
+    {
+        if (transaction is { State: TransactionState.Active } && !_database.IsOffline)
+        {
+            await _database.Coordinator.RollbackAsync(transaction, CancellationToken.None).ConfigureAwait(false);
+            RewriteRolledBack?.Invoke();
+        }
+    }
+
+    internal async Task RunRewriteAsync(SqlCatalogTable table, TransactionContext transaction, CancellationToken cancellationToken)
+    {
         long epoch = _database.TableReclamation.EnterStatement();
         var metrics = new SqlStatementMetrics();
         try
@@ -82,7 +111,6 @@ internal sealed partial class SqlSchemaProvisioner
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                transaction = await _database.Coordinator.BeginAsync(IsolationLevel.ReadCommitted, cancellationToken).ConfigureAwait(false);
                 using var metadata = _database.DdlInterlock.EnterMetadata(_database.Name, definition: false);
                 var statement = new SqlStatementContext(transaction, _database.Coordinator, databaseName: _database.Name,
                     provisioningProgress: (processed, total) => _database.ReportProvisioning(
@@ -100,11 +128,7 @@ internal sealed partial class SqlSchemaProvisioner
             {
                 try
                 {
-                    if (transaction is { State: TransactionState.Active } && !_database.IsOffline)
-                    {
-                        await _database.Coordinator.RollbackAsync(transaction, CancellationToken.None).ConfigureAwait(false);
-                        RewriteRolledBack?.Invoke();
-                    }
+                    await RollbackRewriteAsync(transaction).ConfigureAwait(false);
                 }
                 catch (Exception cleanupFailure) when (operationFailure is not null)
                 {
