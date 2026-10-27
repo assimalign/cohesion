@@ -327,7 +327,7 @@ public sealed class SqlPredicateExecutionTests
         var error = await Should.ThrowAsync<SqlDataStorageFormatException>(async () => await reopened.OpenDatabaseAsync("db", CancellationToken.None));
         // Assert
         error.Message.ShouldContain("uses data-storage format 24", Case.Sensitive);
-        error.Message.ShouldContain("supports only format 27", Case.Sensitive);
+        error.Message.ShouldContain("supports only format 26", Case.Sensitive);
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - Persisted predicates: equality distinguishes truth, negation and ESCAPE")]
