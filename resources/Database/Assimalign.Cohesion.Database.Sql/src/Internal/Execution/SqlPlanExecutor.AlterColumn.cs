@@ -24,6 +24,7 @@ internal sealed partial class SqlPlanExecutor
         {
             return await ExecuteAlterColumnTypeAsync(plan, statement, cancellationToken).ConfigureAwait(false);
         }
+        if (plan.TypeChange) { EnsureNoViewReads(plan.Table, column.Name, rename: true); }
         // PostgreSQL tablecmds.c:15612-15624 refuses changing a type read by a view.
         if (previous.Type.Type != column.Type.Type || previous.Type.MaxLength != column.Type.MaxLength ||
             previous.Type.Precision != column.Type.Precision || previous.Type.Scale != column.Type.Scale) { EnsureNoViewReads(plan.Table, column.Name, rename: true); }

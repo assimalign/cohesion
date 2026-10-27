@@ -21,6 +21,25 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 /// </summary>
 public sealed class SqlLanguageConformanceTests
 {
+    [Theory(DisplayName = "Cohesion Test [Sql] - Conformance: ALTER TYPE converts original literal defaults (#1447)")]
+    [InlineData("7", "INT", 7)]
+    [InlineData("TRUE", "BOOLEAN", true)]
+    public async Task ExecuteAsync_AlterTypeDefaultCorpus_ShouldConvertOriginalDefault(string expression, string target, object expected)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("alter-default-conformance", new());
+        var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await ExecuteAsync(session, $"CREATE TABLE t(v TEXT DEFAULT {expression})");
+
+        // Act
+        await ExecuteAsync(session, $"ALTER TABLE t ALTER v TYPE {target} USING CAST(v AS {target})");
+        await ExecuteAsync(session, "INSERT INTO t DEFAULT VALUES");
+
+        // Assert
+        (await RowsAsync(session, "SELECT v FROM t")).ShouldHaveSingleItem()[0].ShouldBe(expected);
+    }
+
     [Theory(DisplayName = "Cohesion Test [Sql] - Conformance: ALTER TYPE grammar converts old-row values (#1447)")]
     [InlineData("ALTER COLUMN v TYPE BIGINT", 7L)]
     [InlineData("ALTER v SET DATA TYPE BIGINT USING v+1", 8L)]

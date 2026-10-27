@@ -5,7 +5,7 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 [global::System.Diagnostics.DebuggerDisplay("SqlAlterColumnPlan")]
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlAlterColumnPlan.DebugView))]
 internal sealed record SqlAlterColumnPlan(SqlCatalogTable Table, SqlCatalogColumn Column, bool AllowDefaultChange = false,
-    SqlBoundExpression? Conversion = null) : SqlPlan{
+    SqlBoundExpression? Conversion = null, bool TypeChange = false) : SqlPlan{
     private sealed class DebugView
     {
         private readonly global::Assimalign.Cohesion.Database.Sql.Internal.SqlAlterColumnPlan _target;

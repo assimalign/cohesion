@@ -6920,24 +6920,36 @@ sequence.c:1382-1389. Publication validates the allocated counter against the ta
 kind-16 endpoint. This preserves the live cursor without making a narrower table unreadable
 after reopen; ordinary restart may still skip unused reserved values, as before.
 Full-definition storage-type, scale, domain and collation changes share this rewrite; decision
-49a's validation-only nullability/length/precision path remains intact. The existing
+49a's validation-only nullability/length/precision path remains intact. Full definitions refuse
+CS05013 if the resulting default differs, or if collation changes without an explicit COLLATE;
+SET/DROP DEFAULT remains the default-changing operation even when a rewrite is needed. TYPE
+without USING also uses the validation-only path when storage identity, scale, domain and
+collation remain unchanged, except CHAR width changes that can require repadding. Such changes
+retain the heap owner and index trees. PostgreSQL's corresponding rewrite test is
+tablecmds.c:15156-15194 (ATColumnChangeRequiresRewrite). The existing
 full-definition identity-type refusal remains; explicit TYPE permits integer identity conversion.
 
-Defaults are tested independently of USING, with old literal identities retained, then persisted
-as ordinary CAST expressions. Storage-only outer casts leave assignment modifiers to the DEFAULT
-binder; domain names preserve registered domain conversion pathways. Volatile defaults are bound
-without execution, immutable defaults are evaluated before reservation. CHECKs rebind against the
-target type (including empty-table operand compatibility), pin existing function identities, and
+Defaults are tested independently of USING from the original expression without implicit column
+coercion (tablecmds.c:15269-15304). Numeric and Boolean literals retain their expression identity;
+unknown string literals retain their resolved old identity. Immutable results persist as canonical
+literals, preventing CAST accumulation across repeated changes and reopen. Expression defaults
+retain their original text and pinned calls; the DEFAULT binder supplies assignment coercion on
+each evaluation, including target-domain base modifiers, so character overflow refuses rather
+than truncating. A column with no default inherits the target domain's default, as CREATE TABLE
+and CTAS do. Volatile defaults are bound without execution; immutable defaults are evaluated
+before reservation. Referencing CHECKs use the declaration binder against the target definition,
+including CASE input/WHEN, LIKE operand/pattern/escape and empty-table operand compatibility, pin existing function identities, and
 evaluate over every converted row. Domain checks and NOT NULL use the shared write validators.
 All indexes are rebuilt and uniqueness is checked under the target collation before publication.
 FK compatibility retains the engine's declaration rule: identical storage identity and character
 collation. Incoming and outgoing keys are revalidated against the complete replacement, including
-self references and MATCH SIMPLE NULL keys. Adjacent FK tables take exclusive locks, so their
-rows and definitions remain stable through validation/publication. Dependent views refuse even
+self references and MATCH SIMPLE NULL keys. Only FKs whose child or referenced key includes the
+altered column are locked and revalidated; unrelated neighbors remain writable and are not scanned.
+The affected adjacent tables take exclusive locks, so their rows and definitions remain stable
+through validation/publication. Dependent views refuse even
 a same-type USING expression; views reading only other columns retain the shared owner remapping.
-CHAR defaults retain their old declared width when capturing literals and use unbounded TEXT
-input for standard target-CHAR assignment, avoiding bare CHAR's length-one meaning and explicit
-truncation on future calls. A dependent default requiring an application CHAR/TEXT conversion
+CHAR defaults retain their old declared width when resolving unknown literals and use assignment
+modifiers on future calls. A dependent default requiring an application CHAR/TEXT conversion
 that cannot retain this assignment behavior refuses with CK00001; drop it before TYPE and set
 the desired default afterward. Immutable target-domain defaults validate even on empty tables.
 
@@ -6945,7 +6957,12 @@ The inline path holds session schema/metadata admission, source table X, adjacen
 order, reserved owner X, then the apply gate and tree/page latches. The lock manager detects
 cycles with other DDL; no apply gate/page latch spans catalog publication. LockTimeout and
 caller cancellation retain the session cleanup contract. Failures abandon the reserved owner
-and keep the old table/indexes current. The shared copier publishes the logical description,
+and keep the old table/indexes current. The shared copier converts and validates each bounded
+64-row chunk before entering the database-wide apply gate; only physical row/index writes run
+under that gate. Application callbacks can therefore write unrelated tables through another
+session. Abandonment clears the volatile prepared-owner mark even if directory cleanup fails,
+leaving the durable intent publicly pending until reclamation frees its pages. This applies to
+TYPE and the maintenance RewriteTableAsync path. The shared copier publishes the logical description,
 indexes, generation and optional script receipt in one transaction. Older snapshots retain the
 old owner; stale writers retry with CS04006. Cancellation after publication cannot undo it.
 The populated-table worker handoff and expanded crash/wire convergence coverage remain SQ-A3.
@@ -6953,7 +6970,9 @@ The populated-table worker handoff and expanded crash/wire convergence coverage 
 CS02064 identifies a missing assignment cast for an old value, USING result or default (42804).
 Existing constraint, conversion, view, locking and storage codes retain their conditions.
 SQL format 26 and compiled-schema v8 are unchanged: this uses existing column/type/default
-records, dense row encoding, replacement markers and reclamation intents. No persisted shape,
+records, dense row encoding, replacement markers and reclamation intents. The language assembly
+adds the public sealed SqlAlterColumnTypeAction leaf and SqlExpressionRenderer.Render(SqlAlterTableExpression)
+overload; canonical rendering quotes decoded domain names when required. No persisted shape,
 wire message, public interface, visibility grant or project reference changes. NativeAOT smoke
 executes TYPE USING; nonparallel tests force stale-writer waits/retries until counters prove the
 race, and inject failure/cancellation at each preparation stage to verify ownership release.

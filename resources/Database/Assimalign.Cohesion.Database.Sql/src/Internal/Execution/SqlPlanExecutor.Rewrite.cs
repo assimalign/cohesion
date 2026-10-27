@@ -140,6 +140,10 @@ internal sealed partial class SqlPlanExecutor
             {
                 throw new AggregateException(operationFailure, cleanupFailure);
             }
+            finally
+            {
+                if (!published) { _catalog.AbandonStorageReplacement(replacements); }
+            }
         }
     }
 
@@ -164,12 +168,22 @@ internal sealed partial class SqlPlanExecutor
             .Where(version => snapshot.IsVisible(version.Writer) &&
                 (version.Deleter == TransactionSequence.None || !snapshot.IsVisible(version.Deleter))).Chunk(64))
         {
+            // User callbacks and constraint evaluation must not hold the database-wide
+            // apply gate. Prepare this bounded chunk as ordinary DML does, then apply
+            // storage/index mutations only. The source table X keeps its rows stable.
+            var converted = new object?[batch.Length][];
+            for (int i = 0; i < batch.Length; i++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                converted[i] = transform is null ? batch[i].Values : transform(batch[i].Values);
+            }
             await statement.Coordinator.ApplyStatementAsync(statement.Transaction, async bracket =>
             {
-                foreach (var version in batch)
+                for (int i = 0; i < batch.Length; i++)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    var values = transform is null ? version.Values : transform(version.Values);
+                    var version = batch[i];
+                    var values = converted[i];
                     byte[] record = SqlRowCodec.Encode(replacement, values, version.Writer);
                     var location = _storage.InsertRow(bracket, replacement.ObjectId, record);
                     foreach (var index in indexes)

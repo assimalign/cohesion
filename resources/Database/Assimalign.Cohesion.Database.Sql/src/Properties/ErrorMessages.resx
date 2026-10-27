@@ -149,6 +149,7 @@
   <data name="AlterTypeAssignmentRequired" xml:space="preserve"><value>Column '{0}' cannot be cast automatically from {1} to {2}. Supply an explicit CAST in USING, or drop an incompatible DEFAULT before changing the type.</value></data>
   <data name="AlterTypeUsingScalarOnly" xml:space="preserve"><value>ALTER COLUMN TYPE USING requires a scalar row expression without aggregates or window functions.</value></data>
   <data name="AlterTypeCharacterDefaultCast" xml:space="preserve"><value>ALTER COLUMN TYPE cannot persist a dependent DEFAULT using an application CHAR conversion. Drop the DEFAULT before changing the type, then set the desired DEFAULT explicitly.</value></data>
+  <data name="AlterColumnImplicitCollation" xml:space="preserve"><value>ALTER COLUMN '{0}' implicitly changes collation through a full definition; specify COLLATE explicitly.</value></data>
   <data name="AlterColumnRewrite" xml:space="preserve"><value>ALTER COLUMN '{0}' would rewrite existing values; use ALTER COLUMN TYPE to convert them.</value></data>
   <data name="ConstraintCollationUnsupported" xml:space="preserve"><value>Collation 'invariant' is not index-backed; column '{0}' cannot have an index or indexed constraint.</value></data>
   <data name="ExecutionColumnExists" xml:space="preserve"><value>Column '{0}' already exists.</value></data>

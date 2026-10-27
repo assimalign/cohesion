@@ -135,6 +135,16 @@ public sealed partial class SqlCatalog
         }
     }
 
+    // Once preparation exits it cannot publish. Its durable intents remain visible
+    // until reclamation, including when mandatory cleanup encounters offline storage.
+    internal void AbandonStorageReplacement(IReadOnlyList<SqlCatalogTable> replacements)
+    {
+        lock (_sync)
+        {
+            foreach (var table in replacements) { _preparedTruncateOwners.Remove(table.ObjectId); }
+        }
+    }
+
     internal ValueTask PublishStorageReplacementAsync(IReadOnlyList<SqlCatalogTable> expected, IReadOnlyList<SqlCatalogTable>? named,
         IReadOnlyList<SqlCatalogTable> replacements, IReadOnlyList<SqlCatalogIndex> indexes,
         IReadOnlyList<BTreeIndexRegistration> registrations, IReadOnlyDictionary<SqlCatalogIndex, BTreeIndex> retiredIndexes,

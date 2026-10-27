@@ -1300,9 +1300,23 @@ internal sealed partial class SqlPlanner
             throw SqlPlanningException.IdentityViolation(change.Column.ColumnName, ErrorMessages.IdentityTypeChangeForbidden);
         }
         string? defaultText = ResolveDefaultLiteral(change.Column, $"{table.Schema}.{table.Name}");
+        var collation = ResolveColumnCollation(change.Column, type.Storage);
+        // Full definitions retain decision 49a's explicit facet contract even when
+        // the type requires a rewrite. SET/DROP DEFAULT owns default changes.
+        if (!string.Equals(previous.DefaultLiteral, defaultText, StringComparison.Ordinal))
+        {
+            throw new SqlPlanningException("CS05013", string.Format(CultureInfo.CurrentCulture,
+                ErrorMessages.ExecuteAlterColumnAsyncSqlPlanning, previous.Name));
+        }
+        if (change.Column.CollationName is null &&
+            (previous.Collation ?? _catalog.DefaultCollation).Id != (collation ?? _catalog.DefaultCollation).Id)
+        {
+            throw new SqlPlanningException("CS05013", string.Format(CultureInfo.CurrentCulture,
+                ErrorMessages.AlterColumnImplicitCollation, previous.Name));
+        }
         var column = new SqlCatalogColumn(change.Column.ColumnName, type.Storage,
             change.Column.IsNullable, defaultText,
-            ResolveColumnCollation(change.Column, type.Storage), type.IsDomain ? type.Name : null,
+            collation, type.IsDomain ? type.Name : null,
             DefaultCalls(defaultText), previous.Identity, previous.MissingValueLiteral);
         return RequiresColumnRewrite(previous, column)
             ? PlanColumnRewrite(table, column, type, null, reference, recastDefault: false)

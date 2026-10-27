@@ -1125,7 +1125,8 @@ internal sealed partial class SqlPlanExecutor
         var scope = new SqlExpressionEvaluator(table.Columns, null, defaultCollation: defaultCollation, functions: functions, cancellationToken: cancellationToken);
         SqlDefinitionBinder.PinCalls(expression, scope, functionCalls);
         SqlPersistedExpression.Bind(expression, scope);
-        new SqlCheckSyntax(table, scope, declaring: false, retyping: retyping).Validate(expression, requireBoolean: true);
+        if (retyping) { SqlPlanner.ValidateExpression(expression, scope); }
+        new SqlCheckSyntax(table, scope, declaring: retyping, retyping: retyping).Validate(expression, requireBoolean: true);
         return scope.BindPredicate(expression);
     }
 
@@ -1430,7 +1431,26 @@ internal sealed partial class SqlPlanExecutor
                         CheckComparable(list.Operand, value);
                     }
                     break;
+                case SqlCaseExpression { Input: { } input } conditional when _retyping:
+                    foreach (var branch in conditional.WhenClauses) { CheckComparable(input, branch.Condition); }
+                    break;
+                case SqlLikeExpression like when _retyping:
+                    CheckCharacter(like.Operand);
+                    CheckCharacter(like.Pattern);
+                    if (like.Escape is { } escape) { CheckCharacter(escape); }
+                    break;
+                case SqlUnaryExpression { Operator: SqlUnaryOperator.Negate or SqlUnaryOperator.Plus } unary when _retyping:
+                    if (unary.Operator != SqlUnaryOperator.Negate || _scope.StaticTypeOf(unary.Operand) != DatabaseType.TimeSpan)
+                    { CheckNumber(unary.Operand); }
+                    break;
             }
+        }
+
+        private void CheckCharacter(SqlExpression expression)
+        {
+            var type = _scope.StaticTypeOf(expression);
+            if (type is not (DatabaseType.Null or DatabaseType.String or DatabaseType.Character or DatabaseType.Json))
+            { throw SqlEvaluationException.InvalidOperandType("LIKE", SqlType.NameOf(type)); }
         }
 
         private void CheckComparable(SqlExpression left, SqlExpression right)

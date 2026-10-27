@@ -1062,7 +1062,10 @@ so the counter remains valid after reopen. Restart retains the existing reserved
 
 USING does not transform a default. Defaults must independently assignment-cast to the new type;
 an incompatible default refuses even on an empty table (drop it before TYPE, then SET DEFAULT).
-Defaults use original literal identities. Immutable defaults validate eagerly; volatile defaults
+Numeric and Boolean defaults keep their original expression identity; unknown string literals
+keep their resolved old identity. Immutable defaults validate eagerly and persist as canonical
+literals, so repeated changes do not accumulate casts. A column without a default inherits the
+target domain's default. Domain base modifiers use assignment overflow checks. Volatile defaults
 retain per-insert evaluation. Standard CHAR defaults keep assignment overflow/padding;
 a dependent DEFAULT requiring an application CHAR conversion refuses with CK00001 because
 the ordinary persisted CAST spelling would introduce explicit truncation. Drop that default
@@ -1072,7 +1075,9 @@ rebind their operators/functions against the target and recheck converted rows. 
 NOT NULL failures also abort the whole operation. Every index is rebuilt; new uniqueness
 collisions, including after a collation change, refuse. Incoming, outgoing and self foreign keys
 must retain the engine's identical storage-type/collation compatibility and valid final keys.
-Adjacent FK tables are locked exclusively during validation. Views depending on c refuse,
+Only FKs whose child or referenced columns include c are locked and revalidated; unrelated
+FK neighbors remain writable and are not scanned. Affected adjacent tables are locked exclusively
+during validation. Views depending on c refuse,
 including a same-type USING expression; views reading only other columns retain their binding.
 
 The shared #1265 rewrite copies live rows to a dense new owner and atomically publishes the
@@ -1081,6 +1086,12 @@ before publication leaves the old table current. LockTimeout reports CS04044; st
 retry with CS04006. Read-only old snapshots keep the original definition/owner. Cancellation
 after publication cannot undo the committed result. Full-definition storage/scale/domain/
 collation changes use the same rewrite; decision 49a's validation-only facet path remains.
+Full definitions refuse CS05013 if the resulting default differs or collation changes without
+an explicit COLLATE, including when the type requires a rewrite. TYPE without USING retains
+the heap and index trees for same-storage, same-scale, same-domain and same-collation changes
+accepted by the facet path, except CHAR width changes that can repad values. Each rewrite chunk
+evaluates USING, domains and CHECKs before entering the database-wide physical apply gate.
+Failed builds expose their abandoned owner through pending reclamations until its pages are freed.
 Full-definition identity-type changes retain their refusal; use explicit TYPE for integer identity conversion.
 Populated-table provisioning handoff and expanded crash/wire coverage follow in SQ-A3.
 SQL format 26 and compiled-schema v8 remain unchanged because persisted shapes are unchanged.

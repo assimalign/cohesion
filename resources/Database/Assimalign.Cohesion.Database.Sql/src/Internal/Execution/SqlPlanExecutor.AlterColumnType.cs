@@ -54,12 +54,17 @@ internal sealed partial class SqlPlanExecutor
         // FK DDL; no page latch or apply gate spans catalog publication. Session cleanup
         // releases every table grant on success, failure, cancellation and disposal.
         var adjacent = new SortedDictionary<ulong, SqlCatalogTable>();
-        foreach (var constraint in plan.Table.Constraints.Where(c => c.Kind == SqlCatalogConstraintKind.Reference))
+        foreach (var constraint in plan.Table.Constraints.Where(c => c.Kind == SqlCatalogConstraintKind.Reference &&
+            c.Columns.Contains(column.Name, StringComparer.OrdinalIgnoreCase)))
         {
             if (_catalog.TryGetTable(constraint.ReferencedSchema!, constraint.ReferencedTable!, out var parent))
             { adjacent.TryAdd(parent.ObjectId, parent); }
         }
-        foreach (var (child, _) in IncomingReferences(plan.Table)) { adjacent.TryAdd(child.ObjectId, child); }
+        foreach (var (child, constraint) in IncomingReferences(plan.Table))
+        {
+            if (constraint.ReferencedColumns!.Contains(column.Name, StringComparer.OrdinalIgnoreCase))
+            { adjacent.TryAdd(child.ObjectId, child); }
+        }
         adjacent.Remove(plan.Table.ObjectId);
         foreach (var table in adjacent.Values)
         {
@@ -81,8 +86,9 @@ internal sealed partial class SqlPlanExecutor
             plan.Table.PrimaryKeyColumns, plan.Table.Owner, plan.Table.OwningSchema, plan.Table.Constraints);
         // Rebind CHECKs before entering the cache's persisted-definition error wrapper:
         // a newly incompatible type is a DDL failure, not catalog corruption.
-        foreach (var constraint in definition.Constraints.Where(c => c.Kind == SqlCatalogConstraintKind.Check))
+        foreach (var check in _definitions.Get(plan.Table, cancellationToken).Checks.Where(c => c.ColumnOrdinals.Contains(ordinal)))
         {
+            var constraint = check.Constraint;
             BindPersistedCheck(SqlPersistedExpression.Load(constraint.CheckExpression!, constraint.Name), definition,
                 _catalog.DefaultCollation, _definitions.Functions, constraint.CheckFunctionCalls, cancellationToken, retyping: true);
         }
@@ -97,7 +103,7 @@ internal sealed partial class SqlPlanExecutor
             defaultRow[ordinal] = constant.Value;
             CheckDomain(definition, defaultDomain, defaultRow, evaluator);
         }
-        ValidateRewriteReferenceTypes(definition, adjacent.Values);
+        ValidateRewriteReferenceTypes(definition, adjacent.Values, column.Name);
 
         await RewriteTableAsync(plan.Table, statement, cancellationToken,
             (_, id) => new SqlCatalogTable(id, definition.Schema, definition.Name, columns,
@@ -109,12 +115,12 @@ internal sealed partial class SqlPlanExecutor
                 CheckDomains(bound, converted, evaluator);
                 ValidateRows(definition, [converted], statement, cancellationToken, checksOnly: true);
                 return converted;
-            }, (replacement, indexes) => ValidateRewriteReferences(replacement, indexes, adjacent.Values, statement, cancellationToken),
+            }, (replacement, indexes) => ValidateRewriteReferences(replacement, indexes, adjacent.Values, column.Name, statement, cancellationToken),
             definitionChange: true).ConfigureAwait(false);
         return new SqlQueryResult(DatabaseResultStatus.Success, affectedCount: 0);
     }
 
-    private void ValidateRewriteReferenceTypes(SqlCatalogTable replacement, IEnumerable<SqlCatalogTable> adjacent)
+    private void ValidateRewriteReferenceTypes(SqlCatalogTable replacement, IEnumerable<SqlCatalogTable> adjacent, string column)
     {
         var tables = adjacent.Append(replacement).ToArray();
         foreach (var child in tables)
@@ -123,7 +129,7 @@ internal sealed partial class SqlPlanExecutor
             {
                 var parent = tables.FirstOrDefault(table => string.Equals(table.Schema, constraint.ReferencedSchema, StringComparison.OrdinalIgnoreCase) &&
                     string.Equals(table.Name, constraint.ReferencedTable, StringComparison.OrdinalIgnoreCase));
-                if (parent is null || child.ObjectId != replacement.ObjectId && parent.ObjectId != replacement.ObjectId) { continue; }
+                if (parent is null || !ReferenceUsesAlteredColumn(child, constraint, parent, replacement, column)) { continue; }
                 for (int i = 0; i < constraint.Columns.Count; i++)
                 {
                     var source = child.Columns[FindColumnOrdinal(child, constraint.Columns[i])];
@@ -145,7 +151,7 @@ internal sealed partial class SqlPlanExecutor
         }
     }
 
-    private void ValidateRewriteReferences(SqlCatalogTable replacement, SqlCatalogIndex[] indexes, IEnumerable<SqlCatalogTable> adjacent,
+    private void ValidateRewriteReferences(SqlCatalogTable replacement, SqlCatalogIndex[] indexes, IEnumerable<SqlCatalogTable> adjacent, string column,
         SqlStatementContext statement, CancellationToken cancellationToken)
     {
         var tables = adjacent.Append(replacement).ToArray();
@@ -156,7 +162,7 @@ internal sealed partial class SqlPlanExecutor
             {
                 var parent = tables.FirstOrDefault(table => string.Equals(table.Schema, constraint.ReferencedSchema, StringComparison.OrdinalIgnoreCase) &&
                     string.Equals(table.Name, constraint.ReferencedTable, StringComparison.OrdinalIgnoreCase));
-                if (parent is null || child.ObjectId != replacement.ObjectId && parent.ObjectId != replacement.ObjectId) { continue; }
+                if (parent is null || !ReferenceUsesAlteredColumn(child, constraint, parent, replacement, column)) { continue; }
                 var reference = BindReference(child, constraint, parent, statement, cancellationToken);
                 // The new descriptions are unpublished, but their enforcing trees are
                 // complete. Seed the ordinary lookup cache so self/incoming validation
@@ -173,4 +179,9 @@ internal sealed partial class SqlPlanExecutor
             }
         }
     }
+
+    private static bool ReferenceUsesAlteredColumn(SqlCatalogTable child, SqlCatalogConstraint constraint,
+        SqlCatalogTable parent, SqlCatalogTable replacement, string column)
+        => child.ObjectId == replacement.ObjectId && constraint.Columns.Contains(column, StringComparer.OrdinalIgnoreCase) ||
+            parent.ObjectId == replacement.ObjectId && constraint.ReferencedColumns!.Contains(column, StringComparer.OrdinalIgnoreCase);
 }
