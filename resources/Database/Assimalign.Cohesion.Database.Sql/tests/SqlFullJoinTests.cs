@@ -133,6 +133,31 @@ public sealed class SqlFullJoinTests
         Check(await RowsAsync(session, "SELECT id FROM " + from + " ORDER BY id"), [[2m], [3m]]);
     }
 
+    [Theory(DisplayName = "Cohesion Test [Sql] - FULL mixed column and computed keys retain every key in either order (#1525)")]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task Join_FullMixedKeys_ShouldPreserveKeyAlignment(bool computedFirst, bool computedLeft)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("full-mixed-keys", new());
+        var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await ExecAsync(session, "CREATE TABLE a(id INT,k INT); CREATE TABLE b(id INT,k INT); INSERT INTO a VALUES(1,10),(1,20),(2,20),(3,30); INSERT INTO b VALUES(1,10),(1,20),(2,10),(4,40);");
+        string computed = computedLeft ? "CAST(a.id AS BIGINT) = b.id" : "a.id = CAST(b.id AS BIGINT)";
+        string condition = computedFirst ? computed + " AND a.k = b.k" : "a.k = b.k AND " + computed;
+
+        // Act
+        var rows = await RowsAsync(session, "SELECT a.id,a.k,b.id,b.k FROM a FULL JOIN b ON " + condition);
+
+        // Assert
+        Bag(rows).ShouldBe(Bag([[1, 10, 1, 10], [1, 20, 1, 20], [2, 20, null, null],
+            [3, 30, null, null], [null, null, 2, 10], [null, null, 4, 40]]));
+        session.LastStatementMetrics!.JoinAccessPaths.ShouldBe(["join-hash"]);
+        session.LastStatementMetrics.HashMemoryBytes.ShouldBe(0);
+    }
+
     [Theory(DisplayName = "Cohesion Test [Sql] - FULL unsupported physical conditions fail before reads, even on empty inputs (#1525)")]
     [InlineData("a.id < b.id", "CS05070")]
     [InlineData("TRUE", "CS05070")]
