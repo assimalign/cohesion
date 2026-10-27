@@ -157,11 +157,13 @@ internal sealed partial class DocumentPlanner
                 case DocumentIndexPath seek:
                     var bounds = new List<string>();
                     var prefix = seek.EqualityPrefix ?? [];
-                    for (int i = 0; i < prefix.Count; i++) { bounds.Add($"{seek.Index.Paths[i]} = {Value(prefix[i])}"); }
-                    string rangePath = seek.Index.Paths[Math.Min(prefix.Count, seek.Index.Paths.Count - 1)];
+                    for (int i = 0; i < prefix.Count; i++) { bounds.Add($"{DocumentIndexRendering.Key(seek.Index.Keys[i])} = {Value(prefix[i])}"); }
+                    string rangePath = DocumentIndexRendering.Key(seek.Index.Keys[Math.Min(prefix.Count, seek.Index.Keys.Count - 1)]);
                     if (seek.Lower is { } lower) { bounds.Add($"{rangePath} {(lower.Inclusive ? ">=" : ">")} {Value(lower.Value)}"); }
                     if (seek.Upper is { } upper) { bounds.Add($"{rangePath} {(upper.Inclusive ? "<=" : "<")} {Value(upper.Value)}"); }
                     string description = string.Join(" AND ", bounds);
+                    if (System.Linq.Enumerable.Any(seek.Index.Keys, key => key.ArraySource is not null))
+                    { description += "; distinct_documents=True; array_residual=True"; }
                     if (seek.Estimate is { } estimate)
                     {
                         description += $"; estimate_kind={(estimate.IsComplete ? "exact_index_entries" : "lower_bound")}; probe_entries={estimate.EntriesExamined}; probe_pages={estimate.PagesVisited}";

@@ -108,7 +108,6 @@ public sealed class OqlProjectionParserTests
     [InlineData("SELECT {a:DISTINCT} FROM items", "DISTINCT")]
     [InlineData("SELECT {'a':ALL} FROM items", "ALL")]
     [InlineData("CREATE INDEX ix ON items (ALL tags)", "ALL")]
-    [InlineData("CREATE INDEX ix ON items (DISTINCT ARRAY t FOR t IN tags END)", "DISTINCT")]
     public void Parse_MisplacedQuantifier_ShouldRejectOnce(string text, string construct)
     {
         // Arrange / Act

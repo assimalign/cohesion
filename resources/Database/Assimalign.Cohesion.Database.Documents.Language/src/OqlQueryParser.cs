@@ -295,7 +295,7 @@ public sealed partial class OqlQueryParser : QueryParser
             // Only a recognized clause head owns the next word; a path or alias does not.
             if (value == "FIRST" && index == fetchHead + 1 || value == "ALL" && index == pagingHead + 1) { continue; }
 
-            // Array-index keys belong to the DDL parser, which emits one diagnostic at ALL/DISTINCT.
+            // The DDL parser owns array-key quantifiers and the comprehension binding words.
             if (value is ("ALL" or "DISTINCT" or "ARRAY" or "FOR" or "IN" or "END") && indexKeyStart >= 0 && index > indexKeyStart && index < indexKeyEnd) { continue; }
             if (value == "UNIQUE" && index == 1 && IsIndexStatement("CREATE")) { continue; }
 

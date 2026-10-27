@@ -323,8 +323,8 @@ internal static partial class DocumentPlanExecutor
         await PrepareIndexChangeAsync(database, operation, plan.Collection, "CREATE INDEX", cancellationToken).ConfigureAwait(false);
         if (plan.IfNotExists && database.Catalog.GetIndexes(plan.Collection.Id, operation.Context.Snapshot).Any(index => index.Name == plan.IndexName))
         { return DocumentCommandResult.Success; }
-        await database.Catalog.CreateIndexAsync(plan.Collection.Id, plan.IndexName, plan.Paths, plan.IsUnique,
-            operation.Context, cancellationToken).ConfigureAwait(false);
+        await database.Catalog.CreateIndexAsync(plan.Collection.Id, plan.IndexName, plan.Keys, plan.IsUnique,
+            false, operation.Context, cancellationToken).ConfigureAwait(false);
         return DocumentCommandResult.Success;
     }
 

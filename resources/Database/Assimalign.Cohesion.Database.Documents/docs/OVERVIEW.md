@@ -20,6 +20,10 @@ CD00007. Column types remain independent of the page, including empty results.
 INNER/LEFT UNNEST expands array elements into scoped rows before WHERE, grouping and paging.
 ANY/SOME/EVERY and array-value IN query arrays without expansion. A star with UNNEST returns
 synthetic objects keyed by variable names; an ordinary star preserves the stored document.
+CREATE INDEX admits one DISTINCT ARRAY path projection with an optional restricted WHEN among
+scalar keys. Matching ANY and direct UNNEST sources use deduplicated document candidates while
+retaining full predicate residuals and UNNEST multiplicity. DESIGN and DIALECT state the measured
+selective fetch bound and its limit for unfiltered multi-field predicates.
 
 `DocumentDatabaseServer.Create(engine, options)` or `engineBuilder.AddServer(options => ...)`
 serves OQL and document/collection commands on a consumer-supplied listener. Each authenticated

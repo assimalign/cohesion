@@ -231,6 +231,7 @@ payload accepts rows plus a matching affected count without capability negotiati
 | COHDOC025 | CD01025 | Binding/names |
 | New (#1727) | CD01026 | Binding/names — empty RETURNING output name in a directly constructed AST |
 | New (#1728) | CD01027 | Binding/names — empty comprehension variable in a directly constructed AST |
+| New (#1530, OQ-I2) | CD01028 | Binding/names — array index projection or WHEN path is not rooted in its element variable |
 | COHDOC006 | CD02006 | Values/types |
 | COHDOC007 | CD02007 | Values/types |
 | COHDOC008 | CD02008 | Values/types |
@@ -240,6 +241,7 @@ payload accepts rows plus a matching affected count without capability negotiati
 | COHDOC019 | CD02019 | Values/types |
 | COHDOC021 | CD02021 | Values/types |
 | COHDOC026 | CD02026 | Values/types |
+| New (#1530, OQ-I2) | CD02027 | Values/types — array index WHEN constant is not a supported scalar literal |
 | COHDOC010 | CD03010 | Schema/constraints |
 | COHDOC011 | CD03011 | Schema/constraints |
 | COHDOC012 | CD03012 | Schema/constraints |
@@ -248,6 +250,8 @@ payload accepts rows plus a matching affected count without capability negotiati
 | COHDOC024 | CD03024 | Schema/constraints |
 | New (#1530) | CD03025 | Schema/constraints — multiple array keys, UNIQUE array index, or INCLUDE MISSING with a leading array key |
 | New (#1530) | CD03026 | Schema/constraints — encoded index definition exceeds the 8,092-byte catalog record limit; refused before posting extraction or tree creation |
+| New (#1530, OQ-I2) | CD03027 | Schema/constraints — array key source, projection or WHEN is outside the restricted expression grammar |
+| New (#1530, OQ-I2) | CD03028 | Schema/constraints — array index WHEN exceeds 32 levels or 128 predicate nodes |
 | COHDOC004 | CD04004 | Transactions/locking |
 | COHDBD001 | CD04101 | Transactions/locking |
 | COHDOC001 | CD05001 | Execution/budgets |

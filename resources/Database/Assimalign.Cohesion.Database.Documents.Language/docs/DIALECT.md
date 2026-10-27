@@ -303,6 +303,8 @@ may be normalized. A successful UPDATE returns the matched count, including unch
 and allocates fresh versions. Failure or cancellation writes nothing under the transaction rules
 above. EXPLAIN UPDATE describes the access without writing. USE KEYS, LIMIT and FOR remain CK00001. DocumentUpdateTests covers paths, atomicity, serialization and matched counts.
 
+## Index DDL (#1135)
+
 CREATE [UNIQUE] INDEX [IF NOT EXISTS] name ON collection (path [, path ...]) and
 DROP INDEX [IF EXISTS] name ON collection execute. Indexes have 1..32 distinct ordered paths;
 root bracket-string names such as ['x.y'], nested members and integer array subscripts work.
@@ -325,8 +327,8 @@ array/object UNIQUE components fail CD02021 naming index and path. Constraints a
 per row, so key swaps may fail. A failed explicit transaction requires RollbackAsync before reuse.
 The wire uses ExecutionFailure (6) without a protocol change and keeps the connection usable.
 The path-count cap reports CD00009 at the 33rd key (CD03022 for a directly constructed AST). Duplicate/empty keys, expressions, wildcards, ASC/DESC, partial
-WHERE and INCLUDE MISSING receive CD00002. ALL and DISTINCT ARRAY index keys get one CK00001
-at ALL/DISTINCT. The catalog uses v3 index records (#1530) and refuses v1/v2 indexes before recovery writes;
+WHERE and INCLUDE MISSING receive CD00002. ALL array keys get one CK00001 at ALL.
+The catalog uses v3 index records (#1530) and refuses v1/v2 indexes before recovery writes;
 there is no upgrade path or legacy reader. Composite seeks support a leading equality prefix
 and one range on the next path. Bounded snapshot-visible probes rank candidate cost first;
 ties use prefix length, range, UNIQUE, then ordinal name. Comparable complete inputs may
@@ -334,6 +336,41 @@ intersect document identities before JSON reads. The full predicate always filte
 EXPLAIN exposes the chosen IndexSeek or IndexIntersection and index-entry estimates, including
 incomplete lower bounds and the intersection's minimum-input upper bound. It does not execute
 the data statement; actual_rows remains NULL. No persisted statistics or ANALYZE command is added.
+
+One key may instead be `DISTINCT ARRAY v.p FOR v IN arr [WHEN cond] END` (#1530).
+Scalar keys may precede or follow it. The source must be a document path and the mapping a path
+rooted in the variable (or that variable itself). WHEN supports element-path comparisons to
+NULL, Boolean, Decimal or String literals, IS NULL/MISSING, AND, OR and NOT. Parameters,
+computed mappings/sources, functions and other WHEN expressions are excluded. Text numeric
+literals bind directly to Decimal, including `1.0`; CLR Single/Double constants in a direct AST
+are refused. WHEN has at most 32 levels and 128 predicate nodes (a negated presence test counts
+as NOT plus the test). Binding failures use CD01028, unsupported constants CD02027, restricted
+expression failures CD03027 and predicate size failures CD03028, all located before catalog writes.
+Multiple array keys and UNIQUE array indexes use CD03025. INCLUDE MISSING syntax remains deferred.
+PATH/PATHS render normalized array keys with a canonical `v` binding and a quoted source root.
+
+Top-level conjunctive ANY/SOME predicates match source/projection paths independently of variable
+names. Separate ANY scopes keep separate witnesses. Direct document-path UNNEST (including LEFT
+when a mandatory element comparison rejects its synthetic MISSING row) can also use an array
+index. Dependent sources, EVERY, NOT ANY, OR-only element predicates and presence tests alone
+remain scans unless another usable scalar index applies. Every index WHEN condition must be
+implied by matching normalized element conjuncts; reversed comparisons and negated presence
+tests normalize, but broader inequality inference is not performed. A scalar prefix alone never
+makes an array index complete for empty/filtered arrays.
+
+Candidates deduplicate by document identity before fetching. The complete predicate always
+executes as a residual, rejecting cross-element false positives. UNNEST then expands the stored
+array with its original element multiplicity: `[1,1,2]` still produces three rows. EXPLAIN prints
+DISTINCT ARRAY keys, `distinct_documents=True; array_residual=True`, and posting-count estimates.
+The benchmark-shaped category = X AND any variant price <= Y query with first 50 IDs uses a
+`(category, DISTINCT ARRAY v.price FOR v IN variants END)` index; the deterministic probe fetches
+64 qualifying documents for 50 result documents, within 2x. A selective price/stock predicate
+with a matching stock WHEN fetches one document. Its unfiltered counterpart returns the same one
+document after 1,001 fetches, rejecting 1,000 cross-element false positives. The 2x bound applies
+to the single-field benchmark shape and the WHEN-matched case; arbitrary unfiltered multi-field
+same-element predicates have no bounded candidate ratio. These are local probes, not an SF10 run.
+The syntax/matching basis is [Couchbase array indexing](https://docs.couchbase.com/server/current/n1ql/n1ql-language-reference/indexing-arrays.html);
+the DISTINCT-only, scalar projection and no-UNIQUE restrictions are Cohesion's approved boundary.
 
 Conformance lives in OqlSqlppBasisTests, OqlKeywordDispositionTests, DocumentMissingTests,
 OqlExecutionConformanceTests, DocumentQueryTests and DocumentMissingWireTests. The wire tests
