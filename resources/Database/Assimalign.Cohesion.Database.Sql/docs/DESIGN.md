@@ -380,6 +380,11 @@ introduced. Computed USING COALESCE and proven identity/widening casts can suppl
 in later joins or grouped inner subtrees. PostgreSQL optimizer/path/joinrels.c:1157-1180
 likewise refuses FULL when it cannot produce a merge/hash path.
 
+Column-only equalities retain direct ordinal extraction; operand-analysis sets and expression
+vectors are allocated only for computed keys, with earlier column keys backfilled when a vector
+first becomes necessary. The Release allocation guard retains the pre-FULL ordinary-equijoin
+extraction budget of 1,040 bytes per call.
+
 Both physical sides become nullable. USING keeps one output in written USING order, with
 COALESCE of both common-typed inputs, the resolved equality collation for text, and retained
 identical domain identity. The merged column is nonnullable only when both inputs were

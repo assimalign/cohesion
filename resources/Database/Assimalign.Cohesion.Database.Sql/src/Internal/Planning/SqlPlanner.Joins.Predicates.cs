@@ -355,31 +355,45 @@ internal sealed partial class SqlPlanner
         var outer = new List<int>();
         var local = new List<int>();
         var collations = new List<Collation>();
-        var outerExpressions = new List<SqlBoundExpression>();
-        var innerExpressions = new List<SqlBoundExpression>();
+        List<SqlBoundExpression>? outerExpressions = null;
+        List<SqlBoundExpression>? innerExpressions = null;
         foreach (var term in Terms(condition))
         {
             if (term is not SqlBoundBinary { Operator: SqlBinaryOperator.Equal } equality) { continue; }
-            bool Inside(int ordinal) => ordinal >= binding.Offset && ordinal < endOrdinal;
-            var left = new HashSet<int>();
-            var right = new HashSet<int>();
-            if (!JoinRestrictionColumns(equality.Left, left, columns) ||
-                !JoinRestrictionColumns(equality.Right, right, columns) || left.Count == 0 || right.Count == 0) { continue; }
-            bool leftInner = left.All(Inside), rightInner = right.All(Inside);
-            if (leftInner == rightInner || !(leftInner ? right : left).All(ordinal => !Inside(ordinal))) { continue; }
-            if (!fullFrame && (equality.Left is not SqlBoundColumn || equality.Right is not SqlBoundColumn)) { continue; }
-            // CHAR/text comparison trims a comparand and is not a hash equivalence over text.
-            if (left.Concat(right).Any(ordinal => columns[ordinal].Type.Type == DatabaseType.Character)) { continue; }
-            var source = leftInner ? equality.Left : equality.Right;
-            var probe = leftInner ? equality.Right : equality.Left;
-            outer.Add(probe is SqlBoundColumn a ? a.Ordinal : -1);
-            local.Add(source is SqlBoundColumn b ? fullFrame ? b.Ordinal : b.Ordinal - binding.Offset : -1);
-            outerExpressions.Add(probe);
-            innerExpressions.Add(source);
+            SqlBoundExpression source, probe;
+            if (equality.Left is SqlBoundColumn a && equality.Right is SqlBoundColumn b)
+            {
+                // Keep column-only extraction on its original ordinal path, without expression analysis.
+                bool leftInner = a.Ordinal >= binding.Offset && a.Ordinal < endOrdinal;
+                bool rightInner = b.Ordinal >= binding.Offset && b.Ordinal < endOrdinal;
+                if (leftInner == rightInner || columns[a.Ordinal].Type.Type == DatabaseType.Character ||
+                    columns[b.Ordinal].Type.Type == DatabaseType.Character) { continue; }
+                source = leftInner ? a : b;
+                probe = leftInner ? b : a;
+            }
+            else
+            {
+                if (!fullFrame || !TryHashExpressionKey(equality, columns, binding.Offset, endOrdinal, out bool leftInner)) { continue; }
+                source = leftInner ? equality.Left : equality.Right;
+                probe = leftInner ? equality.Right : equality.Left;
+                // Backfill earlier column keys only when this side first needs an expression vector.
+                if (probe is not SqlBoundColumn)
+                {
+                    outerExpressions ??= outer.Select(static ordinal => (SqlBoundExpression)new SqlBoundColumn(ordinal)).ToList();
+                }
+                if (source is not SqlBoundColumn)
+                {
+                    innerExpressions ??= local.Select(static ordinal => (SqlBoundExpression)new SqlBoundColumn(ordinal)).ToList();
+                }
+            }
+            outer.Add(probe is SqlBoundColumn outerColumn ? outerColumn.Ordinal : -1);
+            local.Add(source is SqlBoundColumn innerColumn ? fullFrame ? innerColumn.Ordinal : innerColumn.Ordinal - binding.Offset : -1);
+            outerExpressions?.Add(probe);
+            innerExpressions?.Add(source);
             collations.Add(equality.Collation.Resolve(null));
         }
         return outer.Count == 0 ? null : new(outer.ToArray(), local.ToArray(), collations.ToArray(),
-            outer.Contains(-1) ? outerExpressions.ToArray() : null, local.Contains(-1) ? innerExpressions.ToArray() : null);
+            outerExpressions?.ToArray(), innerExpressions?.ToArray());
 
         static IEnumerable<SqlBoundExpression> Terms(SqlBoundExpression expression)
         {
@@ -388,5 +402,21 @@ internal sealed partial class SqlPlanner
             { foreach (var operand in logical.Operands) { foreach (var item in Terms(operand)) { yield return item; } } }
             else { yield return expression; }
         }
+    }
+
+    private static bool TryHashExpressionKey(SqlBoundBinary equality, IReadOnlyList<SqlCatalogColumn> columns,
+        int startOrdinal, int endOrdinal, out bool leftInner)
+    {
+        var left = new HashSet<int>();
+        var right = new HashSet<int>();
+        leftInner = false;
+        if (!JoinRestrictionColumns(equality.Left, left, columns) ||
+            !JoinRestrictionColumns(equality.Right, right, columns) || left.Count == 0 || right.Count == 0) { return false; }
+        bool Inside(int ordinal) => ordinal >= startOrdinal && ordinal < endOrdinal;
+        leftInner = left.All(Inside);
+        bool rightInner = right.All(Inside);
+        if (leftInner == rightInner || !(leftInner ? right : left).All(ordinal => !Inside(ordinal))) { return false; }
+        // CHAR/text comparison trims a comparand and is not a hash equivalence over text.
+        return !left.Concat(right).Any(ordinal => columns[ordinal].Type.Type == DatabaseType.Character);
     }
 }
