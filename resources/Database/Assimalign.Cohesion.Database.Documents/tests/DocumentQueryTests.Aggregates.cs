@@ -126,7 +126,7 @@ public sealed partial class DocumentQueryTests
     public async Task Execute_AggregateBudget_ShouldRefuseAndReuseSessionAsync(string aggregate)
     {
         // Arrange
-        await using var engine = DocumentDatabaseEngine.Create("aggregate-budget", new() { StatementMemoryBudget = 1000 });
+        await using var engine = DocumentDatabaseEngine.Create("aggregate-budget", new() { StatementMemoryBudget = 6144 });
         var database = await engine.CreateDatabaseAsync("test", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         var collection = await session.CreateCollectionAsync("items", CancellationToken.None);
@@ -207,8 +207,8 @@ public sealed partial class DocumentQueryTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Documents] - Aggregates: exact retained-memory limit accepts equality and refuses one byte less")]
-    [InlineData(319L, true)]
-    [InlineData(320L, false)]
+    [InlineData(575L, true)]
+    [InlineData(576L, false)]
     public async Task Execute_DistinctBudgetBoundary_ShouldChargeExactlyAsync(long budget, bool fails)
     {
         // Arrange
@@ -217,20 +217,28 @@ public sealed partial class DocumentQueryTests
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         await session.CreateCollectionAsync("items", CancellationToken.None);
         await session.ExecuteAsync("INSERT INTO items (KEY, VALUE) VALUES ('a',{v:1}),('b',{v:2})", cancellationToken: CancellationToken.None);
-        // Act / Assert: 128 set + two (64 entry + 32 scalar) reservations.
-        if (fails)
+        using var json = JsonDocument.Parse("[{\"v\":1},{\"v\":2}]");
+        var group = json.RootElement.EnumerateArray().Select(value => new DocumentEvaluationContext(value)).ToArray();
+        var call = new OqlCallExpression("COUNT", [new OqlPathExpression([new OqlPathSegment("v", null)])], quantifier: OqlAggregateQuantifier.Distinct);
+        // Act / Assert: 256 accumulator + 128 set + two 96-byte scalar entries.
+        await database.RunAsync(session, operation =>
         {
-            var failure = await Should.ThrowAsync<DatabaseException>(async () => await RowsAsync(session, "SELECT COUNT(DISTINCT v) FROM items"));
-            failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD05018");
-        }
-        else { (await RowsAsync(session, "SELECT COUNT(DISTINCT v) FROM items")).Single().GetValue(0).ShouldBe(2L); }
-        // Each one-value set is released before the next group.
-        (await RowsAsync(session, "SELECT v, COUNT(DISTINCT v) AS n FROM items GROUP BY v")).Count.ShouldBe(2);
+            var evaluator = new DocumentExpressionEvaluator(null, null, operation: operation);
+            if (fails)
+            {
+                Should.Throw<DatabaseException>(() => evaluator.Evaluate(call, default, group)).Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD05018");
+            }
+            else { evaluator.Evaluate(call, default, group).ShouldBe(2L); }
+            evaluator.Memory.Bytes.ShouldBe(0);
+            // Each one-value set is released before the next group.
+            foreach (var document in group) { evaluator.Evaluate(call, default, [document]).ShouldBe(1L); evaluator.Memory.Bytes.ShouldBe(0); }
+            return ValueTask.FromResult(true);
+        }, CancellationToken.None);
     }
 
     [Theory(DisplayName = "Cohesion Test [Documents] - Aggregates: array reservations accumulate across fresh groups")]
-    [InlineData(703L, true)]
-    [InlineData(704L, false)]
+    [InlineData(3971L, true)]
+    [InlineData(3972L, false)]
     public async Task Execute_GroupedArrayBudget_ShouldShareStatementCounterAsync(long budget, bool fails)
     {
         // Arrange
@@ -239,7 +247,7 @@ public sealed partial class DocumentQueryTests
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         await session.CreateCollectionAsync("items", CancellationToken.None);
         await session.ExecuteAsync("INSERT INTO items (KEY, VALUE) VALUES ('a',{v:1}),('b',{v:2})", cancellationToken: CancellationToken.None);
-        // Act / Assert: two arrays each reserve 256 + 64 entry + 32 scalar/result.
+        // Act / Assert: source and groups reserve 2518; two output rows 1166; sort keys 288.
         const string query = "SELECT v, ARRAY_AGG(v) AS a FROM items GROUP BY v ORDER BY v";
         if (fails)
         {
@@ -347,7 +355,7 @@ public sealed partial class DocumentQueryTests
     public async Task Execute_AggregateSourceReturningBudget_ShouldRollbackCombinedRetentionAsync()
     {
         // Arrange
-        await using var engine = DocumentDatabaseEngine.Create("combined-budget", new() { StatementMemoryBudget = 1000 });
+        await using var engine = DocumentDatabaseEngine.Create("combined-budget", new() { StatementMemoryBudget = 1100 });
         var database = await engine.CreateDatabaseAsync("test", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         await session.CreateCollectionAsync("items", CancellationToken.None);

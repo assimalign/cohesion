@@ -73,7 +73,7 @@ this per-statement budget; exhaustion gives CD05018 at the clause span
 and rolls back the writes. Serialized rows are preflighted in the same transaction: the existing
 CD05016 covers the 16 MiB frame cap, and CD05019 covers values deeper than 256 levels including
 the named projection wrapper. This is a retained-result estimate, not a managed-heap measurement;
-pre-existing source and mutation staging allocations are outside this new charge.
+SELECT source and group staging share this counter; mutation pending-write buffers remain outside the estimate.
 An over-deep array/object constructor gives CD05015 naming RETURNING at its expression span;
 other serialization failures retain their own diagnostic identity.
 
@@ -133,15 +133,16 @@ The [Couchbase aggregate reference](https://docs.couchbase.com/server/current/n1
 defines ALL/DISTINCT, ARRAY_AGG's unknown handling and the named sample statistics. The owner
 selected these defaults on 2026-10-25. Existing SUM/AVG nonnumber refusal is preserved.
 
-DISTINCT sets and ARRAY_AGG storage charge the existing StatementMemoryBudget and fail with
-CD05018 at the aggregate call span. INSERT/UPSERT SELECT sources and RETURNING share one
-operation-owned counter, with RETURNING failures retaining their clause span. Each distinct value is charged once per call/group; a set's
-charge is released when that evaluation finishes. Array charges accumulate across groups and
-independent call appearances, including HAVING and ORDER BY, conservatively retaining the charge
-for temporary arrays until statement end. Charges include list/set storage, scalar ownership,
-JSON UTF-8/token metadata and the array result's second representation. This is an estimate;
-ordinary SELECT source/group staging still has its existing memory policy. Exhaustion aborts
-explicit work and preserves reusable sessions after rollback. EXPLAIN lists aggregate names and
+Retained SELECT source rows, catalog identities/sort staging, group keys/membership, native
+accumulators, DISTINCT sets, ARRAY_AGG inputs and results, and projection/order storage charge
+StatementMemoryBudget (#1753). Exhaustion gives CD05018 before any result is published.
+Aggregate-call failures keep the call span; RETURNING keeps its clause span. Sources and groups
+release reservations on every exit. DISTINCT sets and array input lists release after evaluation;
+HAVING scratch releases per predicate, projected results are charged separately, and ORDER BY
+storage releases after sorting. JSON charges UTF-8/token metadata and ownership; input and result
+representations are charged separately while both live. INSERT/UPSERT SELECT sources and RETURNING
+share the operation counter. This estimate excludes mutation pending-write buffers and application
+callback-owned state. Exhaustion aborts explicit work and preserves reusable sessions after rollback. EXPLAIN lists aggregate names and
 quantifiers in Group detail without evaluating arguments or reading documents. Arrays, booleans,
 NULL and decimals use existing wire values and headers; no frame or format version changes.
 GROUP AS and group aliases remain for OQ-G2.

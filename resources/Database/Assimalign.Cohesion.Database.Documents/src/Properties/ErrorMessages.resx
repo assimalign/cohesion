@@ -57,7 +57,7 @@
   <data name="ReturningDepthExceeded" xml:space="preserve"><value>RETURNING values must be nested no deeper than 256 levels, including the named projection object.</value></data>
   <data name="ReturningMemoryExceeded" xml:space="preserve"><value>RETURNING exceeds the statement memory budget of {0} bytes.</value></data>
   <data name="AggregateMemoryExceeded" xml:space="preserve">
-    <value>Aggregate retained values exceed the statement memory budget of {0} bytes.</value>
+    <value>Retained statement values exceed the statement memory budget of {0} bytes.</value>
   </data>
   <data name="AggregateQuantifierInvalid" xml:space="preserve">
     <value>ALL or DISTINCT requires one non-star aggregate expression.</value>

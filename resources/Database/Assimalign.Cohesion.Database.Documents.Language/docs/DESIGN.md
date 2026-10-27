@@ -161,7 +161,7 @@ including inside an aggregate argument. Function tokens remain usable as names. 
 syntax uses CD00011, direct-AST binding uses CD01029, and existing arity/context/value/budget
 identities remain in use. The [dialect](DIALECT.md#aggregate-quantifiers-and-native-aggregates-1729-oq-g1)
 records every input rule, equality, statistic, memory estimate and no-order promise. Parser and
-engine conformance corpora cover all eleven names and both transports; GROUP AS remains OQ-G2.
+engine conformance corpora cover all eleven names and both transports. Native aggregate retention shares the statement counter with SELECT source/group staging (#1753); scratch reservations release at expression and sort boundaries. GROUP AS remains OQ-G2 and can reuse the executor reservation owner for wrappers.
 
 ### Array index keys (#1530)
 

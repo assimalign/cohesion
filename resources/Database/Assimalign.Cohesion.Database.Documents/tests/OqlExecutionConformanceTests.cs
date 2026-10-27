@@ -100,6 +100,7 @@ public sealed class OqlExecutionConformanceTests
             ],
             [OqlClauses.Select] =
             [
+                new("SELECT ARRAY_AGG(category) FROM items GROUP BY category HAVING ARRAY_LENGTH(ARRAY_AGG(category)) > 0 ORDER BY ARRAY_AGG(category)", [[Json("[\"a\",\"a\",\"a\"]")], [Json("[\"b\"]")]]),
                 new("SELECT EVERY x IN [TRUE] SATISFIES EVERY(amount > 0) END FROM items", [[true]]),
                 new("SELECT STDDEV(v) FROM items UNNEST [-79228162514264337593543950335,0,79228162514264337593543950335] v WHERE name = 'alpha'", [[decimal.MaxValue]]),
                 new("SELECT d.name AS label, d.details.score + @increment AS adjusted, d.tags[0] AS tag FROM items AS d WHERE d.name = 'alpha'",

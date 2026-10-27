@@ -66,7 +66,7 @@ internal sealed class DocumentBuiltinAggregateFunction : DocumentAggregateFuncti
                 {
                     if (arguments[0].IsMissing) { return; }
                     if (_array is null) { _memory?.Charge(256); _array = []; }
-                    _memory?.Retain(value, array: true);
+                    _memory?.Retain(value);
                     _array.Add(value);
                     return;
                 }
@@ -100,7 +100,10 @@ internal sealed class DocumentBuiltinAggregateFunction : DocumentAggregateFuncti
             try
             {
                 if (_name == "ARRAY_AGG")
-                { return new(_array is null ? null : DocumentJsonValue.Array(Elements(), _writeVerb, _maxDepth, _resultClause)); }
+                {
+                    try { return new(_array is null ? null : DocumentJsonValue.Array(Elements(), _writeVerb, _maxDepth, _resultClause)); }
+                    finally { _array = null; }
+                }
                 if (_name == "COUNT") { return new(_count); }
                 if (_count == 0) { return DocumentValue.Null; }
                 if (_name is "STDDEV" or "VARIANCE")

@@ -481,7 +481,7 @@ CD00007 for the same count rule at parse and plan time:
 | `CD02013` | Invalid evaluated LIKE escape or a pattern ending in its escape character |
 | `CD01014` | DISTINCT ORDER BY expression is absent from the projection |
 | `CD05015` | A query/RETURNING array or object constructor exceeds the 256-level result limit |
-| `CD05018` | Retained RETURNING results or aggregate values exceed the statement memory budget |
+| `CD05018` | Retained statement source rows, groups, RETURNING results or aggregate values exceed the statement memory budget |
 | `CD00011` | ALL/DISTINCT applied to a scalar or star call |
 | `CD01029` | Direct call AST has an invalid aggregate quantifier or quantifier target |
 | `CD05019` | Serialized RETURNING value exceeds 256 levels, including a named projection wrapper |
@@ -719,17 +719,26 @@ transition function; src/backend/utils/adt/float.c:2937-2955 explains why stable
 avoid naive floating squared-sum subtraction. Cohesion uses its own grouping comparator and exact
 integer squared-sum subtraction, where cancellation loses no digits; no reference-engine code was copied.
 
-At this base ordinary SELECT grouping has no budget counter. Aggregate retention therefore uses
-an operation-owned lazy counter against the existing StatementMemoryBudget, reusing CD05018's retained
-result exhaustion condition. Aggregate SELECT sources and RETURNING share that counter, including
-INSERT/UPSERT SELECT writes, so their combined retention cannot bypass the statement limit.
-A set reserves 128 bytes plus 64 bytes per entry and scalar ownership;
-arrays reserve 256 bytes plus list/value ownership and serialized-result capacity. JSON measurement
-uses raw UTF-8 length plus 12 bytes per token and 128 bytes per owner, as RETURNING does. Array
-charges remain conservatively accumulated until statement end, including temporary HAVING/order
-arrays; distinct-set charges are released per evaluation. Source/group staging is unchanged and
-this is not a process-heap cap. Budget failures use the existing statement rollback path. Parser,
-execution-conformance and InMemory/TCP corpora and the NativeAOT sample cover this contract.
+The operation-owned counter applies StatementMemoryBudget to catalog identities and sort staging,
+retained SELECT source rows (including JSON, IDs, raw star bytes and expanded bindings), group
+keys and membership, native accumulator state, DISTINCT sets, array inputs, scratch expressions,
+and projected output. It reuses CD05018 for retained statement memory exhaustion (#1753, #1097).
+Source and group reservations release on every executor exit; a reservation can also own the
+GROUP AS wrappers planned for OQ-G2. Fixed transition-state estimates include the bounded exact
+statistic moments. Planning never creates this execution-only state.
+
+A set reserves 128 bytes plus 64 bytes per entry and scalar ownership. An array input list
+reserves 256 bytes plus entries/values; its independently owned JSON result is charged separately
+while both representations coexist. JSON costs raw UTF-8 length plus 12 bytes per token and
+128 bytes per owner, as RETURNING does. HAVING scratch releases after each predicate; projection
+scratch transfers to independently charged result rows; ORDER BY values release after sorting.
+Duplicate and paged-away results release their row charges. Statement completion releases remaining
+charges. Budget refusal or cancellation publishes no partial result and uses ordinary rollback.
+These lifetimes follow the separation of input, transition and output contexts described in the
+local PostgreSQL src/backend/executor/nodeAgg.c:66-80; no reference-engine code was copied.
+The limit remains a retained-storage estimate; mutation pending-write buffers and application
+callback-owned state are outside these native estimates. Parser, execution-conformance and
+InMemory/TCP corpora and the NativeAOT sample cover the contract.
 
 #### SQL++ functions and transaction clock (#1137)
 
@@ -1225,8 +1234,7 @@ arrays by token count while large strings pay for their bytes. A lone star retai
 and one original raw image; each representation is charged once. A 1,024-byte ASCII object
 with one string property costs 2,448 bytes per row (224 row storage + 1,200 clone + 1,024 raw),
 plus 208 bytes of statement metadata. Charges accumulate before rows enter the result list; CD05018 at the clause span rolls
-back the statement on exhaustion. Aggregate retention now shares this limit as described above. This does not retrofit accounting onto SELECT source/group or
-mutation/source staging and is not a process-heap cap. The public option is a model configuration
+back the statement on exhaustion. SELECT source/group staging, native accumulators and aggregate results share this limit and release reservations according to their lifetimes, as described above. Mutation pending-write buffers remain outside this estimate. The public option is a model configuration
 capability, not an assembly-visibility bridge. No new public interface or dependency is added.
 
 The server already serializes both counts into Complete; updated Documents.Client accepts an

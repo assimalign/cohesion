@@ -19,6 +19,9 @@ internal sealed class DocumentQueryResult : DatabaseResultSet
     private readonly IReadOnlyList<DatabaseColumn> _columns;
     private readonly IReadOnlyList<object?[]> _rows;
     private readonly IReadOnlyList<ReadOnlyMemory<byte>>? _rawDocuments;
+    private readonly DocumentAggregateMemory? _memory;
+    private readonly int _memoryGeneration;
+    private long _retainedBytes;
 
     internal bool BareValue { get; }
 
@@ -30,13 +33,19 @@ internal sealed class DocumentQueryResult : DatabaseResultSet
     /// <param name="bareValue">Whether frames contain a bare value instead of a projection object.</param>
     /// <param name="rawDocuments">The original stored bytes for lone-star results.</param>
     /// <param name="affectedCount">The mutation count, or -1 for a read-only result.</param>
-    public DocumentQueryResult(IReadOnlyList<DatabaseColumn> columns, IReadOnlyList<object?[]> rows, bool bareValue = false, IReadOnlyList<ReadOnlyMemory<byte>>? rawDocuments = null, long affectedCount = -1)
+    /// <param name="memory">The statement counter while this result is an executing SELECT source.</param>
+    /// <param name="retainedBytes">The result reservations transferred by the executor.</param>
+    public DocumentQueryResult(IReadOnlyList<DatabaseColumn> columns, IReadOnlyList<object?[]> rows, bool bareValue = false, IReadOnlyList<ReadOnlyMemory<byte>>? rawDocuments = null, long affectedCount = -1,
+        DocumentAggregateMemory? memory = null, long retainedBytes = 0)
     {
         _affectedCount = affectedCount;
         _columns = columns;
         _rows = rows;
         BareValue = bareValue;
         _rawDocuments = rawDocuments;
+        _memory = memory;
+        _memoryGeneration = memory?.Generation ?? 0;
+        _retainedBytes = retainedBytes;
     }
 
     public override DatabaseResultStatus Status => DatabaseResultStatus.Success;
@@ -52,7 +61,11 @@ internal sealed class DocumentQueryResult : DatabaseResultSet
         }
         await Task.CompletedTask.ConfigureAwait(false);
     }
-    public override ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    public override ValueTask DisposeAsync()
+    {
+        _memory?.ReleaseResult(Interlocked.Exchange(ref _retainedBytes, 0), _memoryGeneration);
+        return ValueTask.CompletedTask;
+    }
 
     [global::System.Diagnostics.DebuggerDisplay("DocumentQueryRow FieldCount={FieldCount}")]
     [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Documents.Internal.DocumentQueryResult.DocumentQueryRow.DebugView))]

@@ -13,6 +13,14 @@ internal sealed class DocumentAggregateMemory
     private readonly long _limit;
     private readonly CancellationToken _cancellationToken;
     private long _bytes;
+    private int _generation;
+
+    internal long Bytes => _bytes;
+    internal int Generation => _generation;
+    internal long PeakBytes { get; private set; }
+
+    // Internal retained-heap probe; absent in ordinary execution.
+    internal Action? RetentionObserved { get; set; }
 
     internal DocumentAggregateMemory(long limit, CancellationToken cancellationToken)
     {
@@ -20,20 +28,20 @@ internal sealed class DocumentAggregateMemory
         _cancellationToken = cancellationToken;
     }
 
-    internal long Retain(object? value, bool array = false)
+    internal long Retain(object? value)
     {
-        // Sorted-set nodes/list capacity, scalar ownership and JSON text/token metadata.
-        // ARRAY_AGG also reserves its serialized result while the input list is alive.
-        long bytes = 64L + (value switch
-        {
-            string text => 32L + text.Length * (array ? 8L : 2L),
-            JsonElement json => (array ? 2L : 1L) *
-                (128L + JsonMarshal.GetRawUtf8Value(json).Length + 12L * Tokens(json)),
-            _ => 32L,
-        });
+        long bytes = 64L + ValueBytes(value);
         Charge(bytes);
         return bytes;
     }
+
+    // One owned representation, independent of whether it is input, scratch or output.
+    internal long ValueBytes(object? value) => value switch
+    {
+        string text => 32L + text.Length * 2L,
+        JsonElement json => 128L + JsonMarshal.GetRawUtf8Value(json).Length + 12L * Tokens(json),
+        _ => 32L,
+    };
 
     internal void Charge(long bytes)
     {
@@ -46,10 +54,54 @@ internal sealed class DocumentAggregateMemory
         _cancellationToken.ThrowIfCancellationRequested();
         if (bytes > _limit - _bytes) { return false; }
         _bytes += bytes;
+        PeakBytes = Math.Max(PeakBytes, _bytes);
+        RetentionObserved?.Invoke();
         return true;
     }
 
     internal void Release(long bytes) => _bytes -= bytes;
+
+    internal void Clear() { _bytes = 0; _generation++; }
+
+    internal void ReleaseResult(long bytes, int generation)
+    { if (generation == _generation) { Release(bytes); } }
+
+    // Lifetime owner for source rows, group keys/state and future GROUP AS wrappers.
+    // Each owner releases only its own reservations, including on refused/canceled work.
+    internal Reservation Reserve() => new(this);
+
+    [global::System.Diagnostics.DebuggerDisplay("Reservation")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(Reservation.DebugView))]
+    internal sealed class Reservation : IDisposable
+    {
+        private readonly DocumentAggregateMemory _memory;
+        private long _bytes;
+
+        internal long Bytes => _bytes;
+
+        internal Reservation(DocumentAggregateMemory memory) { _memory = memory; }
+
+        internal void Charge(long bytes) { _memory.Charge(bytes); _bytes += bytes; }
+
+        internal void Retain(object? value) => Charge(64L + _memory.ValueBytes(value));
+
+        internal void Rewind(long bytes)
+        {
+            _memory.Release(_bytes - bytes);
+            _bytes = bytes;
+        }
+
+        public void Dispose()
+        {
+            _memory.Release(_bytes);
+            _bytes = 0;
+        }
+
+        private sealed class DebugView
+        {
+            public DebugView(Reservation value) { _ = value; }
+        }
+    }
 
     private long Tokens(JsonElement json)
     {

@@ -106,6 +106,8 @@ internal sealed partial class DocumentExpressionEvaluator
     internal bool Matches(OqlExpression? expression, DocumentEvaluationContext document, IReadOnlyList<DocumentEvaluationContext>? group = null)
         => expression is null || Truth(Evaluate(expression, document, group)) is true;
 
+    internal DocumentAggregateMemory Memory => (_state ??= new EvaluationState(null)).GetMemory(_cancellationToken);
+
     // Check every reference and original JSON number before planning, including skipped
     // Boolean branches and expressions over empty inputs.
     internal void ValidateInputs(OqlExpression? expression)
@@ -440,18 +442,21 @@ internal sealed partial class DocumentExpressionEvaluator
     {
         var context = new DocumentFunctionContext(_databaseName, _cancellationToken, _transactionStart);
         string name = function.Name.ToString().ToUpperInvariant();
-        var memory = call.Quantifier == OqlAggregateQuantifier.Distinct || name == "ARRAY_AGG"
-            ? (_state ??= new EvaluationState(null)).GetMemory(_cancellationToken) : null;
-        var accumulator = function is DocumentBuiltinAggregateFunction native && memory is not null
-            ? native.CreateAccumulator(in context, memory, _writeVerb, _constructorMaxDepth, _resultClause)
-            : function.CreateAccumulator(in context);
+        var memory = Memory;
         bool star = call.Arguments.Count == 1 && call.Arguments[0] is OqlStarExpression;
         SortedSet<object?>? seen = call.Quantifier == OqlAggregateQuantifier.Distinct
             ? new(Comparer<object?>.Create((left, right) => Compare(left, right, _cancellationToken))) : null;
-        long distinctBytes = 0;
+        long before = memory.Bytes;
+        object? result;
         try
         {
-            if (seen is not null) { memory!.Charge(128); distinctBytes = 128; }
+            // All calls own bounded native transition state. Statistics keep exact
+            // moments of at most 604 bits, independent of the number of inputs.
+            memory.Charge(name is "STDDEV" or "VARIANCE" ? 768 : 256);
+            var accumulator = function is DocumentBuiltinAggregateFunction native
+                ? native.CreateAccumulator(in context, memory, _writeVerb, _constructorMaxDepth, _resultClause)
+                : function.CreateAccumulator(in context);
+            if (seen is not null) { memory!.Charge(128); }
             foreach (var document in group)
             {
                 _cancellationToken.ThrowIfCancellationRequested();
@@ -468,15 +473,20 @@ internal sealed partial class DocumentExpressionEvaluator
                     { continue; }
                     if (value is not (null or DocumentMissing) && !function.AcceptsArgument(0, FunctionKind(value))) { continue; }
                     if (seen.Contains(value)) { continue; }
-                    distinctBytes += memory!.Retain(value);
+                    memory!.Retain(value);
                     seen.Add(value);
                 }
                 var arguments = new DocumentArguments(values, in context);
                 accumulator.Add(in arguments);
             }
-            return accumulator.Finish().Value;
+            result = accumulator.Finish().Value;
+            if (name == "ARRAY_AGG" && result is not null) { memory!.Retain(result); }
         }
-        finally { memory?.Release(distinctBytes); }
+        finally { memory.Release(memory.Bytes - before); }
+        // The independent JSON result outlives the input list, until the enclosing
+        // expression transfers its output or discards its scratch values.
+        if (name == "ARRAY_AGG" && result is not null) { memory!.Retain(result); }
+        return result;
     }
 
     internal static decimal Number(object value) => value switch { decimal number => number, long number => number,

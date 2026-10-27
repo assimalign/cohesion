@@ -153,6 +153,7 @@ internal sealed class DocumentOperation
         }
 
         // The statement ends its admission into the explicit transaction and its hold on the session.
+        _statementMemory?.Clear();
         _session.ReleaseOperation(_transaction);
     }
 
