@@ -1,43 +1,62 @@
 using System.Collections.Generic;
 
+using Assimalign.Cohesion.Hosting.Resources;
+
 namespace Assimalign.Cohesion.ApplicationModel;
 
 /// <summary>
-/// Wraps a resource together with the dependency edges that determine the order in
-/// which a gateway realizes the graph.
+/// Declares one application resource in an application set: a logical service, such as
+/// <c>orders-api</c>, and the resources it depends on.
 /// </summary>
 public interface IApplicationResourceDescriptor
 {
     /// <summary>
-    /// The resource this descriptor wraps.
+    /// Gets the id the resource's instances share.
     /// </summary>
-    IApplicationResource Resource { get; }
+    /// <remarks>
+    /// The id is unique within <see cref="Set"/>. Across the hierarchy, a resource is identified by
+    /// its set's <see cref="IApplicationSet.Id"/> and this id together.
+    /// </remarks>
+    ResourceId Id => ResourceId.FromName(Provider, Name);
 
     /// <summary>
-    /// The immutable realization plan computed during <see cref="IApplicationBuilder.Build"/>,
-    /// or <see langword="null"/> while this is an authoring descriptor.
+    /// Gets the set whose gateway runs the resource.
     /// </summary>
-    ResourcePlan? Plan { get; }
-
-    /// <summary>Gets the optional logical group containing this resource.</summary>
-    ResourceGroupName? ResourceGroup => Plan?.ResourceGroup;
+    IApplicationSet Set { get; }
 
     /// <summary>
-    /// The resources this resource must be realized after, in declaration order.
+    /// Gets the resource's provider.
     /// </summary>
-    IReadOnlyList<IApplicationResourceDescriptor> Dependencies { get; }
+    ProviderName Provider { get; }
 
     /// <summary>
-    /// Declares that this resource depends on (must be realized after) another resource.
+    /// Gets the resource's name.
     /// </summary>
-    /// <param name="resource">The resource that must be realized first.</param>
-    /// <returns>This descriptor, for chaining.</returns>
-    IApplicationResourceDescriptor DependsOn(IApplicationResourceDescriptor resource);
+    ResourceName Name { get; }
 
     /// <summary>
-    /// Declares that this resource depends on (must be realized after) all of the given resources.
+    /// Gets the resources this one depends on, in declaration order, each with the permissions it
+    /// needs there.
     /// </summary>
-    /// <param name="resources">The resources that must be realized first.</param>
-    /// <returns>This descriptor, for chaining.</returns>
-    IApplicationResourceDescriptor DependsOn(params IApplicationResourceDescriptor[] resources);
+    IReadOnlyList<ApplicationResourceDependency> Dependencies { get; }
+
+    /// <summary>
+    /// Declares that this resource depends on another and needs the specified permissions on it.
+    /// </summary>
+    /// <remarks>
+    /// The gateway registers the permissions with the tenant's identity provider, which issues this
+    /// resource credentials for them when it runs. Declaring the same dependency again adds the new
+    /// permissions to it. The other resource may belong to any set of the same hierarchy.
+    /// </remarks>
+    /// <param name="resource">The resource depended on.</param>
+    /// <param name="permissions">The permissions this resource needs on it; none to depend without access.</param>
+    /// <returns>This descriptor.</returns>
+    /// <exception cref="System.ArgumentNullException">
+    /// <paramref name="resource"/> or <paramref name="permissions"/> is <see langword="null"/>.
+    /// </exception>
+    /// <exception cref="System.ArgumentException">
+    /// <paramref name="resource"/> is this resource or belongs to another hierarchy, or a permission
+    /// is <see langword="default"/>.
+    /// </exception>
+    IApplicationResourceDescriptor DependsOn(IApplicationResourceDescriptor resource, params ResourcePermission[] permissions);
 }

@@ -1,153 +1,60 @@
-using System;
-using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Hosting.Resources;
 
 /// <summary>
-/// Defines a resource's local control plane: its runtime surface and configuration status, health,
-/// observed endpoints, graceful stop, and declarative commands.
+/// The control plane of one resource instance. It joins the instance's host lifecycle, publishes
+/// the instance's manifest when the host starts, and executes actions and restores state on request.
 /// </summary>
 /// <remarks>
-/// The control plane holds no desired state. Configuration comes from the deployment record the platform
-/// delivers; the control plane applies it to the registered sections and reports what is in force.
+/// The control plane is transport-neutral. A transport, such as the Web endpoint an area embeds,
+/// maps its requests onto <see cref="ExecuteAsync"/> and <see cref="RestoreAsync"/>. Both are
+/// accepted only between <see cref="IHostService.StartAsync"/> and <see cref="IHostService.StopAsync"/>.
 /// </remarks>
-public interface IResourceControlPlane
+public interface IResourceControlPlane : IHostService
 {
-    /// <summary>Gets the configuration sections, actions and tools this resource exposes.</summary>
-    /// <remarks>The surface is frozen when the resource's host is built.</remarks>
-    ResourceRuntimeSurface Surface => ResourceRuntimeSurface.Empty;
-
-    /// <summary>Gets which deployment record this instance applied and the outcome for each section.</summary>
-    ResourceConfigurationStatus ConfigurationStatus => ResourceConfigurationStatus.Empty;
-
-    /// <summary>Registers a configuration section the deployment record may set.</summary>
-    /// <param name="section">The section.</param>
-    /// <exception cref="NotSupportedException">This control plane has no runtime surface.</exception>
-    void AddConfiguration(ResourceConfigurationSection section) =>
-        throw new NotSupportedException(ErrorMessages.ResourceSurfaceUnsupported);
-
-    /// <summary>Registers an action the gateway may invoke.</summary>
-    /// <param name="action">The action.</param>
-    /// <exception cref="NotSupportedException">This control plane has no runtime surface.</exception>
-    void AddAction(ResourceAction action) =>
-        throw new NotSupportedException(ErrorMessages.ResourceSurfaceUnsupported);
-
-    /// <summary>Registers an operator tool a management portal may open.</summary>
-    /// <param name="tool">The tool.</param>
-    /// <exception cref="NotSupportedException">This control plane has no runtime surface.</exception>
-    void AddTool(ResourceTool tool) =>
-        throw new NotSupportedException(ErrorMessages.ResourceSurfaceUnsupported);
-
-    /// <summary>Applies a delivered deployment record to the registered configuration sections.</summary>
-    /// <param name="record">The deployment record.</param>
-    /// <param name="phase">Whether the host has started; while it runs, only live sections apply.</param>
-    /// <param name="cancellationToken">Cancels the request before the record is applied.</param>
-    /// <returns>The resulting configuration status.</returns>
-    /// <exception cref="NotSupportedException">This control plane has no runtime surface.</exception>
-    ValueTask<ResourceConfigurationStatus> ApplyConfigurationAsync(
-        ResourceConfigurationRecord record,
-        ResourceConfigurationPhase phase,
-        CancellationToken cancellationToken = default) =>
-        throw new NotSupportedException(ErrorMessages.ResourceSurfaceUnsupported);
-
-    /// <summary>Invokes a registered action with a UTF-8 JSON input.</summary>
-    /// <param name="name">The action name.</param>
-    /// <param name="input">The UTF-8 JSON input.</param>
-    /// <param name="cancellationToken">Cancels the action.</param>
-    /// <returns>The action's UTF-8 JSON result.</returns>
-    /// <exception cref="ArgumentException">The input does not bind to the action's input type.</exception>
-    /// <exception cref="NotSupportedException">The resource exposes no action with this name.</exception>
-    ValueTask<ReadOnlyMemory<byte>> InvokeActionAsync(
-        ResourceActionName name,
-        ReadOnlyMemory<byte> input,
-        CancellationToken cancellationToken = default) =>
-        throw new NotSupportedException(ErrorMessages.ResourceActionUnknown);
+    /// <summary>
+    /// Gets the resource instance this control plane serves.
+    /// </summary>
+    IResource Resource { get; }
 
     /// <summary>
-    /// Gets the area-defined command kinds accepted by this control plane.
+    /// Gets the manifest the control plane publishes when its host starts.
     /// </summary>
-    IReadOnlyList<string> AcceptedCommandKinds { get; }
+    ResourceManifest Manifest { get; }
 
     /// <summary>
-    /// Gets accepted declarations, including their owners, without transport state.
+    /// Executes one invocation of an action.
     /// </summary>
-    IReadOnlyList<ResourceCommand> Commands => Array.Empty<ResourceCommand>();
+    /// <remarks>
+    /// After a successful write to a stateful action, <see cref="ResourceActionResult.State"/>
+    /// carries the snapshot of the state that write left.
+    /// </remarks>
+    /// <param name="action">The action's name.</param>
+    /// <param name="context">The invocation.</param>
+    /// <param name="cancellationToken">Cancels the invocation.</param>
+    /// <returns>
+    /// The action's result, <see cref="ResourceActionStatus.NotFound"/> when the resource has no such
+    /// action, or <see cref="ResourceActionStatus.NotSupported"/> when the action does not accept the
+    /// requested operation.
+    /// </returns>
+    /// <exception cref="System.ArgumentNullException"><paramref name="context"/> is <see langword="null"/>.</exception>
+    /// <exception cref="System.InvalidOperationException">The control plane is not started.</exception>
+    ValueTask<ResourceActionResult> ExecuteAsync(ResourceActionName action, ResourceActionContext context, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Gets the latest observed endpoint snapshot keyed by endpoint name.
+    /// Restores a stateful action's state from a snapshot.
     /// </summary>
-    IReadOnlyDictionary<string, Uri> ObservedEndpoints { get; }
-
-    /// <summary>Registers the runtime implementation of an advertised command kind.</summary>
-    /// <param name="handler">The area-owned mutation handler.</param>
-    /// <exception cref="ArgumentNullException">The handler is null.</exception>
-    /// <exception cref="ArgumentException">The handler kind is not advertised.</exception>
-    /// <exception cref="InvalidOperationException">A handler already exists for the kind.</exception>
-    /// <exception cref="NotSupportedException">This control plane does not support registration.</exception>
-    void RegisterCommandHandler(IResourceCommandHandler handler) =>
-        throw new NotSupportedException("This resource control plane does not support command handlers.");
-
-    /// <summary>Adds a contributor to health, readiness, and liveness aggregation.</summary>
-    /// <param name="contributor">The contributor to add.</param>
-    void AddHealthContributor(IHealthContributor contributor);
-
-    /// <summary>Records the realized address of a resource endpoint.</summary>
-    /// <param name="name">The endpoint name.</param>
-    /// <param name="address">The realized endpoint address.</param>
-    /// <exception cref="ArgumentNullException">
-    /// <paramref name="name"/> or <paramref name="address"/> is <see langword="null"/>.
-    /// </exception>
-    /// <exception cref="ArgumentException">
-    /// <paramref name="name"/> is empty, or <paramref name="address"/> is not an endpoint URI.
-    /// </exception>
-    void ObserveEndpoint(string name, Uri address);
-
-    /// <summary>Checks the aggregate resource health.</summary>
-    /// <param name="cancellationToken">Cancels the check.</param>
-    /// <returns>The aggregate health report.</returns>
-    ValueTask<ResourceHealthReport> CheckHealthAsync(CancellationToken cancellationToken = default);
-
-    /// <summary>Checks whether the resource is ready to receive work.</summary>
-    /// <param name="cancellationToken">Cancels the check.</param>
-    /// <returns>The aggregate readiness report.</returns>
-    ValueTask<ResourceHealthReport> CheckReadinessAsync(CancellationToken cancellationToken = default);
-
-    /// <summary>Checks whether the resource process remains live.</summary>
-    /// <param name="cancellationToken">Cancels the check.</param>
-    /// <returns>The aggregate liveness report.</returns>
-    ValueTask<ResourceHealthReport> CheckLivenessAsync(CancellationToken cancellationToken = default);
-
-    /// <summary>Attaches the built resource host used for graceful stop requests, and freezes the runtime surface.</summary>
-    /// <param name="host">The resource host.</param>
-    void AttachHost(IHost host);
-
-    /// <summary>Requests a graceful stop from the attached resource host.</summary>
-    /// <param name="cancellationToken">Cancels the request before it is accepted.</param>
-    /// <returns>A value task that completes when the request has been accepted.</returns>
-    ValueTask RequestStopAsync(CancellationToken cancellationToken = default);
-
-    /// <summary>Executes an area-defined declarative command.</summary>
-    /// <param name="command">The command envelope.</param>
-    /// <param name="cancellationToken">Cancels command execution.</param>
-    /// <returns>The area-defined response payload.</returns>
-    /// <exception cref="ArgumentNullException">The command is null.</exception>
-    /// <exception cref="ArgumentException">An envelope identity field is blank.</exception>
-    /// <exception cref="NotSupportedException">The command kind has no registered runtime handler.</exception>
-    /// <exception cref="ResourceCommandRejectedException">Ownership or the runtime refuses the command.</exception>
-    ValueTask<ReadOnlyMemory<byte>> ExecuteCommandAsync(
-        ResourceCommand command,
-        CancellationToken cancellationToken = default);
-
-    /// <summary>Deletes a previously applied declaration belonging to the supplied owner.</summary>
-    /// <param name="command">The declaration identity to delete.</param>
-    /// <param name="cancellationToken">Cancels deletion.</param>
-    /// <returns>The area-defined response bytes.</returns>
-    /// <exception cref="ArgumentNullException">The command is null.</exception>
-    /// <exception cref="ArgumentException">An envelope identity field is blank.</exception>
-    /// <exception cref="NotSupportedException">The command kind or deletion is unsupported.</exception>
-    /// <exception cref="ResourceCommandRejectedException">Ownership or the runtime refuses deletion.</exception>
-    ValueTask<ReadOnlyMemory<byte>> DeleteCommandAsync(ResourceCommand command, CancellationToken cancellationToken = default) =>
-        throw new NotSupportedException($"Resource command kind '{command.Kind}' does not support deletion.");
+    /// <param name="snapshot">The snapshot.</param>
+    /// <param name="cancellationToken">Cancels the restore.</param>
+    /// <returns>
+    /// <see cref="ResourceActionStatus.Succeeded"/>, <see cref="ResourceActionStatus.NotFound"/> when
+    /// the resource has no such action, <see cref="ResourceActionStatus.NotSupported"/> when the action
+    /// has no state, or <see cref="ResourceActionStatus.Rejected"/> when the snapshot is not a value
+    /// of the state's type.
+    /// </returns>
+    /// <exception cref="System.ArgumentNullException"><paramref name="snapshot"/> is <see langword="null"/>.</exception>
+    /// <exception cref="System.InvalidOperationException">The control plane is not started.</exception>
+    ValueTask<ResourceActionResult> RestoreAsync(ResourceStateSnapshot snapshot, CancellationToken cancellationToken = default);
 }

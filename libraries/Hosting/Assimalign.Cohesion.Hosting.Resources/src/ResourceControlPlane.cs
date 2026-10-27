@@ -1,423 +1,330 @@
 using System;
+using System.Collections.Frozen;
 using System.Collections.Generic;
-using System.Collections.ObjectModel;
+using System.Diagnostics;
 using System.Globalization;
-using System.Linq;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 
-using Assimalign.Cohesion.Hosting.Resources;
-using Assimalign.Cohesion.Hosting.Resources.Internal;
-
 namespace Assimalign.Cohesion.Hosting.Resources;
 
-/// <summary>Provides the transport-neutral control plane configured by a resource executable.</summary>
-/// <remarks>Create isolated instances with <see cref="Create"/> and use them through <see cref="IResourceControlPlane"/>.</remarks>
-[global::System.Diagnostics.DebuggerDisplay("ResourceControlPlane")]
-[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
-public sealed partial class ResourceControlPlane : IResourceControlPlane
+/// <summary>
+/// The control plane of one resource instance.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <see cref="StartAsync"/> publishes the instance's <see cref="Manifest"/> and restores every
+/// snapshot the publisher returns before it completes. Register the control plane ahead of the
+/// services that serve traffic: a host starts its services in registration order, so the instance
+/// serves only once the state written since the resource's last deployment is in effect. A failed
+/// publication fails the host's start; the gateway tears down an instance whose manifest never
+/// arrives, and the platform's restart policy decides what runs next.
+/// </para>
+/// <para>
+/// Reads run concurrently. Writes and restores run one at a time for the whole resource, so the
+/// snapshot a write returns is the state that write left. The control plane reads the resource's
+/// actions once, when it is created.
+/// </para>
+/// </remarks>
+[DebuggerDisplay("{Resource.Provider}/{Resource.Name} {Resource.Key}")]
+[DebuggerTypeProxy(typeof(DebugView))]
+public sealed class ResourceControlPlane : IResourceControlPlane
 {
-    /// <summary>
-    /// The description of the unhealthy contribution recorded for a contributor that threw.
-    /// </summary>
-    /// <remarks>
-    /// The text is fixed and never derived from the exception: area hosts publish these reports
-    /// on the unauthenticated <c>/healthz</c>, <c>/readyz</c> and <c>/livez</c> probes, and a
-    /// dependency's exception message can carry host, database or user names (CWE-209).
-    /// </remarks>
-    internal const string ContributorThrewDescription = "The contributor threw an exception.";
+    private const int created = 0;
+    private const int starting = 1;
+    private const int started = 2;
+    private const int stopped = 3;
 
-    /// <summary>
-    /// The value recorded in place of an <see cref="Exception"/> a contributor placed in
-    /// <see cref="HealthContribution.Data"/>.
-    /// </summary>
-    /// <remarks>
-    /// Area writers serialize data values they do not recognize through
-    /// <see cref="object.ToString"/>, and an exception's is its type, message, inner exceptions and
-    /// stack trace, which the unauthenticated probes would publish like a thrown exception's message.
-    /// </remarks>
-    internal const string ContributorExceptionDataValue = "The contributor reported an exception.";
+    private readonly IResourceManifestPublisher _publisher;
+    private readonly FrozenDictionary<ResourceActionName, IResourceAction> _actions;
+    private readonly SemaphoreSlim _mutations = new(1, 1);
+    private int _lifecycle;
 
-    private readonly object _sync = new();
-    private readonly IReadOnlyList<string> _acceptedCommandKinds;
-    private readonly Dictionary<string, IHealthContributor> _contributors = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, Uri> _observedEndpoints = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<string, IResourceCommandHandler> _handlers = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, (ResourceCommand Command, ReadOnlyMemory<byte> Response)> _commands = new(StringComparer.Ordinal);
-    private readonly SemaphoreSlim _commandGate = new(1, 1);
-    private IHost? _host;
-
-    private ResourceControlPlane(IEnumerable<string> acceptedCommandKinds)
+    private ResourceControlPlane(
+        IResource resource,
+        IResourceManifestPublisher publisher,
+        FrozenDictionary<ResourceActionName, IResourceAction> actions,
+        ResourceManifest manifest)
     {
-        ArgumentNullException.ThrowIfNull(acceptedCommandKinds);
-
-        _acceptedCommandKinds = acceptedCommandKinds
-            .Select(static kind =>
-            {
-                ArgumentException.ThrowIfNullOrWhiteSpace(kind);
-                return kind;
-            })
-            .Distinct(StringComparer.Ordinal)
-            .ToArray();
+        Resource = resource;
+        Manifest = manifest;
+        _publisher = publisher;
+        _actions = actions;
     }
+
+    /// <inheritdoc/>
+    public ServiceId Id { get; } = ServiceId.New();
+
+    /// <inheritdoc/>
+    public IResource Resource { get; }
+
+    /// <inheritdoc/>
+    public ResourceManifest Manifest { get; }
 
     /// <summary>
-    /// Creates a control plane with the supplied area-defined command kinds.
+    /// Creates the control plane of a resource instance.
     /// </summary>
-    /// <param name="acceptedCommandKinds">The command kinds accepted by the area.</param>
-    /// <returns>A new isolated resource control plane.</returns>
-    /// <exception cref="ArgumentNullException">An accepted command kind is null.</exception>
-    /// <exception cref="ArgumentException">An accepted command kind is empty or whitespace.</exception>
-    public static ResourceControlPlane Create(IEnumerable<string>? acceptedCommandKinds = null)
+    /// <param name="resource">The resource instance.</param>
+    /// <param name="publisher">Publishes the instance's manifest when its host starts.</param>
+    /// <returns>The control plane.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="resource"/> or <paramref name="publisher"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">
+    /// The resource's provider, name, or key is <see langword="default"/>; it returns a
+    /// <see langword="null"/> collection; or one of its actions is <see langword="null"/>, has no
+    /// name, shares a name with another, declares an operation other than Read or Write, or has
+    /// state without accepting writes.
+    /// </exception>
+    public static ResourceControlPlane Create(IResource resource, IResourceManifestPublisher publisher)
     {
-        return new ResourceControlPlane(acceptedCommandKinds ?? Array.Empty<string>());
-    }
+        ArgumentNullException.ThrowIfNull(resource);
+        ArgumentNullException.ThrowIfNull(publisher);
 
-    /// <inheritdoc />
-    public IReadOnlyList<string> AcceptedCommandKinds => _acceptedCommandKinds;
-
-    /// <inheritdoc />
-    public IReadOnlyList<ResourceCommand> Commands
-    {
-        get
+        if (resource.Provider.Value is null)
         {
-            lock (_sync)
+            throw new ArgumentException(ErrorMessages.ProviderNameMissing, nameof(resource));
+        }
+
+        if (resource.Name.Value is null)
+        {
+            throw new ArgumentException(ErrorMessages.ResourceNameMissing, nameof(resource));
+        }
+
+        if (resource.Key == default)
+        {
+            throw new ArgumentException(ErrorMessages.ResourceInstanceKeyMissing, nameof(resource));
+        }
+
+        if (resource.HealthContributors is null)
+        {
+            throw new ArgumentException(ErrorMessages.ResourceHealthContributorsMissing, nameof(resource));
+        }
+
+        IReadOnlyCollection<IResourceAction> declared = resource.Actions
+            ?? throw new ArgumentException(ErrorMessages.ResourceActionsMissing, nameof(resource));
+
+        var actions = new Dictionary<ResourceActionName, IResourceAction>(declared.Count);
+        var descriptors = new List<ResourceActionDescriptor>(declared.Count);
+        foreach (IResourceAction action in declared)
+        {
+            if (action is null)
             {
-                return _commands.Values.Select(static entry => entry.Command with { Payload = entry.Command.Payload.ToArray() }).ToArray();
-            }
-        }
-    }
-
-    /// <inheritdoc />
-    /// <exception cref="ArgumentNullException"><paramref name="handler"/> or its kind is null.</exception>
-    public void RegisterCommandHandler(IResourceCommandHandler handler)
-    {
-        ArgumentNullException.ThrowIfNull(handler);
-        ArgumentException.ThrowIfNullOrWhiteSpace(handler.Kind);
-        if (!_acceptedCommandKinds.Contains(handler.Kind, StringComparer.Ordinal))
-        {
-            throw new ArgumentException($"Resource command kind '{handler.Kind}' is not advertised by this control plane.", nameof(handler));
-        }
-
-        lock (_sync)
-        {
-            if (!_handlers.TryAdd(handler.Kind, handler))
-            {
-                throw new InvalidOperationException($"Resource command handler '{handler.Kind}' is already registered.");
-            }
-        }
-    }
-
-    /// <inheritdoc />
-    public IReadOnlyDictionary<string, Uri> ObservedEndpoints
-    {
-        get
-        {
-            lock (_sync)
-            {
-                return new ReadOnlyDictionary<string, Uri>(
-                    new Dictionary<string, Uri>(_observedEndpoints, StringComparer.OrdinalIgnoreCase));
-            }
-        }
-    }
-
-    /// <inheritdoc />
-    /// <exception cref="ArgumentNullException"><paramref name="contributor"/> or its name is null.</exception>
-    /// <exception cref="ArgumentException">The contributor name is blank.</exception>
-    /// <exception cref="InvalidOperationException">A contributor with the same name is already registered.</exception>
-    public void AddHealthContributor(IHealthContributor contributor)
-    {
-        ArgumentNullException.ThrowIfNull(contributor);
-        ArgumentException.ThrowIfNullOrWhiteSpace(contributor.Name);
-
-        lock (_sync)
-        {
-            if (!_contributors.TryAdd(contributor.Name, contributor))
-            {
-                throw new InvalidOperationException(
-                    $"A resource health contributor named '{contributor.Name}' is already registered.");
-            }
-        }
-    }
-
-    /// <inheritdoc />
-    /// <exception cref="ArgumentNullException"><paramref name="name"/> or <paramref name="address"/> is null.</exception>
-    public void ObserveEndpoint(string name, Uri address)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(name);
-        Uri.ThrowIfNotEndpoint(address);
-
-        lock (_sync)
-        {
-            _observedEndpoints[name] = address;
-        }
-    }
-
-    /// <inheritdoc />
-    /// <exception cref="OperationCanceledException">Cancellation was requested.</exception>
-    public ValueTask<ResourceHealthReport> CheckHealthAsync(CancellationToken cancellationToken = default)
-        => CheckContributorsAsync(cancellationToken);
-
-    /// <inheritdoc />
-    /// <exception cref="OperationCanceledException">Cancellation was requested.</exception>
-    public async ValueTask<ResourceHealthReport> CheckReadinessAsync(CancellationToken cancellationToken = default)
-    {
-        ResourceHealthReport report = await CheckContributorsAsync(cancellationToken).ConfigureAwait(false);
-
-        // A section that refused the deployment record at startup runs on a value nobody asked for, so the
-        // instance takes no traffic. Liveness is unaffected: restarting would only refuse the same record again.
-        return HasStartupRejections ? report with { Status = HealthStatus.Unhealthy } : report;
-    }
-
-    /// <inheritdoc />
-    /// <exception cref="OperationCanceledException">Cancellation was requested.</exception>
-    public ValueTask<ResourceHealthReport> CheckLivenessAsync(CancellationToken cancellationToken = default)
-        => CheckContributorsAsync(cancellationToken);
-
-    /// <inheritdoc />
-    /// <exception cref="ArgumentNullException"><paramref name="host"/> is null.</exception>
-    /// <exception cref="InvalidOperationException">A different host is already attached.</exception>
-    public void AttachHost(IHost host)
-    {
-        ArgumentNullException.ThrowIfNull(host);
-
-        lock (_sync)
-        {
-            FreezeSurface();
-            if (_host is not null && !ReferenceEquals(_host, host))
-            {
-                throw new InvalidOperationException("The resource control plane is already attached to a host.");
+                throw new ArgumentException(ErrorMessages.ResourceActionNull, nameof(resource));
             }
 
-            _host = host;
+            ResourceActionName name = action.Name;
+            if (name.Value is null)
+            {
+                throw new ArgumentException(ErrorMessages.ResourceActionNameMissing, nameof(resource));
+            }
+
+            if (action.Kind is not (ResourceActionKind.Read or ResourceActionKind.Write or ResourceActionKind.ReadWrite))
+            {
+                throw new ArgumentException(Format(ErrorMessages.ResourceActionKindInvalid, name), nameof(resource));
+            }
+
+            bool stateful = action.State is not null;
+            if (stateful && !action.Kind.HasFlag(ResourceActionKind.Write))
+            {
+                throw new ArgumentException(Format(ErrorMessages.ResourceActionStateReadOnly, name), nameof(resource));
+            }
+
+            if (!actions.TryAdd(name, action))
+            {
+                throw new ArgumentException(Format(ErrorMessages.ResourceActionNameDuplicate, name), nameof(resource));
+            }
+
+            descriptors.Add(new ResourceActionDescriptor(name, action.Kind, stateful));
         }
+
+        descriptors.Sort(static (left, right) => left.Name.CompareTo(right.Name));
+
+        var manifest = new ResourceManifest(resource.Provider, resource.Name, resource.Key, descriptors.AsReadOnly());
+        return new ResourceControlPlane(resource, publisher, actions.ToFrozenDictionary(), manifest);
     }
 
-    /// <inheritdoc />
-    /// <exception cref="InvalidOperationException">No host is attached.</exception>
-    /// <exception cref="OperationCanceledException">Cancellation was requested.</exception>
-    public ValueTask RequestStopAsync(CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Publishes the instance's manifest, then restores every snapshot the publisher returns.
+    /// </summary>
+    /// <param name="cancellationToken">Cancels publication and restores.</param>
+    /// <returns>A task that completes when the returned state is in effect.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// The control plane was already started; the publisher returned <see langword="null"/>, a
+    /// <see langword="null"/> snapshot, or two snapshots for one action; or a snapshot was not
+    /// restored. A failed start leaves the control plane unstarted.
+    /// </exception>
+    public async Task StartAsync(CancellationToken cancellationToken = default)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-
-        IHost host;
-        lock (_sync)
+        if (Interlocked.CompareExchange(ref _lifecycle, starting, created) != created)
         {
-            host = _host
-                ?? throw new InvalidOperationException("The resource control plane is not attached to a host.");
+            throw new InvalidOperationException(ErrorMessages.ResourceControlPlaneAlreadyStarted);
         }
 
-        host.Context.Shutdown();
-        return ValueTask.CompletedTask;
-    }
-
-    /// <inheritdoc />
-    /// <exception cref="ArgumentNullException"><paramref name="command"/> or an envelope identity field is null.</exception>
-    public ValueTask<ReadOnlyMemory<byte>> ExecuteCommandAsync(
-        ResourceCommand command,
-        CancellationToken cancellationToken = default)
-        => DispatchCommandAsync(command, delete: false, cancellationToken);
-
-    /// <inheritdoc />
-    /// <exception cref="ArgumentNullException"><paramref name="command"/> or an envelope identity field is null.</exception>
-    public ValueTask<ReadOnlyMemory<byte>> DeleteCommandAsync(
-        ResourceCommand command,
-        CancellationToken cancellationToken = default)
-        => DispatchCommandAsync(command, delete: true, cancellationToken);
-
-    private async ValueTask<ReadOnlyMemory<byte>> DispatchCommandAsync(
-        ResourceCommand command,
-        bool delete,
-        CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(command);
-        ArgumentException.ThrowIfNullOrWhiteSpace(command.Id);
-        ArgumentException.ThrowIfNullOrWhiteSpace(command.Kind);
-        ArgumentException.ThrowIfNullOrWhiteSpace(command.Owner);
-        ArgumentException.ThrowIfNullOrWhiteSpace(command.Key);
-        ResourceCommand invocation = command;
-        command = command with { Payload = command.Payload.ToArray() };
-
-        await _commandGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        string? registeredKind = null;
+        bool published = false;
         try
         {
-            IResourceCommandHandler handler;
-            (ResourceCommand Command, ReadOnlyMemory<byte> Response) existing;
-            bool found;
-            lock (_sync)
+            IReadOnlyList<ResourceStateSnapshot> snapshots = await _publisher.PublishAsync(Manifest, cancellationToken).ConfigureAwait(false)
+                ?? throw new InvalidOperationException(ErrorMessages.ResourcePublicationNull);
+
+            var restored = new HashSet<ResourceActionName>();
+            foreach (ResourceStateSnapshot snapshot in snapshots)
             {
-                if (!_handlers.TryGetValue(command.Kind, out handler!))
+                if (snapshot is null)
                 {
-                    throw new NotSupportedException($"Resource command kind '{command.Kind}' is not implemented by this control plane.");
+                    throw new InvalidOperationException(ErrorMessages.ResourcePublicationSnapshotNull);
                 }
-                registeredKind = command.Kind;
-                found = _commands.TryGetValue(command.Key, out existing);
-                if (found && !string.Equals(existing.Command.Owner, command.Owner, StringComparison.Ordinal))
+
+                if (!restored.Add(snapshot.Action))
                 {
-                    throw new ResourceCommandRejectedException(
-                        $"Command '{command.Kind}' key '{command.Key}' belongs to owner '{existing.Command.Owner}'; owner '{command.Owner}' cannot overwrite or delete it.");
+                    throw new InvalidOperationException(Format(ErrorMessages.ResourcePublicationSnapshotDuplicate, snapshot.Action));
                 }
-                if (found && delete && (existing.Command.Id != command.Id || existing.Command.Kind != command.Kind))
+
+                ResourceActionResult result = await RestoreCoreAsync(snapshot, cancellationToken).ConfigureAwait(false);
+                if (result.Status != ResourceActionStatus.Succeeded)
                 {
-                    throw new ResourceCommandRejectedException($"Command '{command.Id}' cannot delete the newer declaration '{existing.Command.Id}' for key '{command.Key}'.");
-                }
-                foreach (var entry in _commands.Values)
-                {
-                    if (entry.Command.Id == command.Id && entry.Command.Owner != command.Owner)
-                    {
-                        throw new ResourceCommandRejectedException($"Command id '{command.Id}' belongs to owner '{entry.Command.Owner}'; owner '{command.Owner}' must use a different identity.");
-                    }
-                    if (entry.Command.Owner == command.Owner && entry.Command.Id == command.Id &&
-                        (entry.Command.Kind != command.Kind || entry.Command.Key != command.Key ||
-                         (!delete && !entry.Command.Payload.Span.SequenceEqual(command.Payload.Span))))
-                    {
-                        throw new ResourceCommandRejectedException($"Command id '{command.Id}' for owner '{command.Owner}' was already used for a different declaration.");
-                    }
+                    throw new InvalidOperationException(Format(ErrorMessages.ResourceStateRestoreFailed, snapshot.Action, result.Status, result.Reason));
                 }
             }
 
-            if (!delete && found && existing.Command.Id == command.Id)
-            {
-                ReadOnlyMemory<byte> replay = existing.Response.ToArray();
-                HostingResourceEventSource.Log.CommandApplied(registeredKind, delete);
-                return replay;
-            }
-            if (delete && !found)
-            {
-                HostingResourceEventSource.Log.CommandApplied(registeredKind, delete);
-                return ReadOnlyMemory<byte>.Empty;
-            }
-            ReadOnlyMemory<byte> response;
-            try
-            {
-                response = delete
-                    ? await handler.DeleteAsync(existing.Command, cancellationToken).ConfigureAwait(false)
-                    : await handler.ExecuteAsync(command, cancellationToken).ConfigureAwait(false);
-            }
-            catch (ResourceCommandRejectedException)
-            {
-                throw;
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                throw;
-            }
-            catch (Exception exception)
-            {
-                HostingResourceEventSource.Log.CommandHandlerFailed(registeredKind, delete, exception);
-                CommandFailureDiagnostics.MarkReported(exception, invocation);
-                throw;
-            }
-            lock (_sync)
-            {
-                if (delete)
-                {
-                    _commands.Remove(command.Key);
-                }
-                else
-                {
-                    _commands[command.Key] = (command, response.ToArray());
-                }
-            }
-            HostingResourceEventSource.Log.CommandApplied(registeredKind, delete);
-            return response;
-        }
-        catch (NotSupportedException) when (registeredKind is null)
-        {
-            HostingResourceEventSource.Log.CommandUnknownKind(delete);
-            throw;
-        }
-        catch (ResourceCommandRejectedException)
-        {
-            HostingResourceEventSource.Log.CommandConflict(registeredKind!, delete);
-            throw;
+            published = true;
         }
         finally
         {
-            _commandGate.Release();
+            // A failed start returns to created so the host may start the control plane again; a
+            // stop that raced the start keeps its stopped state.
+            Interlocked.CompareExchange(ref _lifecycle, published ? started : created, starting);
         }
-    }
-
-    private async ValueTask<ResourceHealthReport> CheckContributorsAsync(CancellationToken cancellationToken)
-    {
-        IHealthContributor[] contributors;
-        lock (_sync)
-        {
-            contributors = _contributors.Values.ToArray();
-        }
-
-        var results = new Dictionary<string, HealthContribution>(contributors.Length, StringComparer.Ordinal);
-        HealthStatus status = HealthStatus.Healthy;
-
-        foreach (IHealthContributor contributor in contributors)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            HealthContribution contribution;
-            try
-            {
-                contribution = WithholdExceptionData(
-                    await contributor.CheckAsync(cancellationToken).ConfigureAwait(false));
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                throw;
-            }
-            catch (Exception exception)
-            {
-                HostingResourceEventSource.Log.ContributorFailed(contributor.Name, exception);
-                // Fixed text, never exception.Message: the report reaches unauthenticated probes.
-                contribution = HealthContribution.Unhealthy(ContributorThrewDescription);
-            }
-
-            results.Add(contributor.Name, contribution);
-            if ((int)contribution.Status < (int)status)
-            {
-                status = contribution.Status;
-            }
-        }
-
-        return new ResourceHealthReport(
-            status,
-            new ReadOnlyDictionary<string, HealthContribution>(results));
     }
 
     /// <summary>
-    /// Returns the contribution with every <see cref="Exception"/> in its data replaced by
-    /// <see cref="ContributorExceptionDataValue"/>, or the contribution itself when its data holds
-    /// none. Keys, other values and enumeration order are kept.
+    /// Stops accepting action invocations and restores.
     /// </summary>
-    private static HealthContribution WithholdExceptionData(HealthContribution contribution)
+    /// <param name="cancellationToken">Unused; stopping completes synchronously.</param>
+    /// <returns>A completed task.</returns>
+    public Task StopAsync(CancellationToken cancellationToken = default)
     {
-        if (contribution.Data is not { Count: > 0 } data ||
-            !data.Values.Any(static value => value is Exception))
+        Volatile.Write(ref _lifecycle, stopped);
+        return Task.CompletedTask;
+    }
+
+    /// <inheritdoc/>
+    public async ValueTask<ResourceActionResult> ExecuteAsync(ResourceActionName action, ResourceActionContext context, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        ThrowIfNotStarted();
+
+        if (!_actions.TryGetValue(action, out IResourceAction? target))
         {
-            return contribution;
+            return ResourceActionResult.NotFound();
         }
 
-        var withheld = new Dictionary<string, object>(data.Count, StringComparer.Ordinal);
-        foreach (KeyValuePair<string, object> item in data)
+        if ((target.Kind & context.Operation) == ResourceActionKind.None)
         {
-            withheld[item.Key] = item.Value is Exception ? ContributorExceptionDataValue : item.Value;
+            return ResourceActionResult.NotSupported();
         }
 
-        return contribution with { Data = new ReadOnlyDictionary<string, object>(withheld) };
+        if (context.Operation == ResourceActionKind.Read)
+        {
+            return await InvokeAsync(target, context, cancellationToken).ConfigureAwait(false);
+        }
+
+        await _mutations.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            ResourceActionResult result = await InvokeAsync(target, context, cancellationToken).ConfigureAwait(false);
+            if (result.Status == ResourceActionStatus.Succeeded && target.State is { } state)
+            {
+                return result.WithState(ResourceStateSnapshot.Create(target.Name, state.GetSnapshot()));
+            }
+
+            return result;
+        }
+        finally
+        {
+            _mutations.Release();
+        }
+    }
+
+    /// <inheritdoc/>
+    public ValueTask<ResourceActionResult> RestoreAsync(ResourceStateSnapshot snapshot, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        ThrowIfNotStarted();
+
+        return RestoreCoreAsync(snapshot, cancellationToken);
+    }
+
+    private async ValueTask<ResourceActionResult> RestoreCoreAsync(ResourceStateSnapshot snapshot, CancellationToken cancellationToken)
+    {
+        if (!_actions.TryGetValue(snapshot.Action, out IResourceAction? target))
+        {
+            return ResourceActionResult.NotFound();
+        }
+
+        if (target.State is not { } state)
+        {
+            return ResourceActionResult.NotSupported();
+        }
+
+        await _mutations.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await state.RestoreAsync(snapshot.Value, cancellationToken).ConfigureAwait(false);
+            return ResourceActionResult.Success();
+        }
+        catch (JsonException exception)
+        {
+            // The snapshot does not describe a value of the state's type: the sender's error.
+            return ResourceActionResult.Rejected(exception.Message);
+        }
+        finally
+        {
+            _mutations.Release();
+        }
+    }
+
+    private static async ValueTask<ResourceActionResult> InvokeAsync(IResourceAction action, ResourceActionContext context, CancellationToken cancellationToken)
+    {
+        ResourceActionResult? result;
+        try
+        {
+            result = await action.ExecuteAsync(context, cancellationToken).ConfigureAwait(false);
+        }
+        catch (JsonException exception)
+        {
+            // The input did not bind to the action's input type: the caller's error, not the action's.
+            return ResourceActionResult.Rejected(exception.Message);
+        }
+
+        return result ?? throw new InvalidOperationException(Format(ErrorMessages.ResourceActionResultNull, action.Name));
+    }
+
+    private void ThrowIfNotStarted()
+    {
+        if (Volatile.Read(ref _lifecycle) != started)
+        {
+            throw new InvalidOperationException(ErrorMessages.ResourceControlPlaneNotStarted);
+        }
+    }
+
+    private static string Format(string format, params object?[] arguments)
+    {
+        return string.Format(CultureInfo.CurrentCulture, format, arguments);
     }
 
     private sealed class DebugView
     {
-        private readonly ResourceControlPlane _target;
+        private readonly ResourceControlPlane _controlPlane;
 
-        public DebugView(ResourceControlPlane value)
+        public DebugView(ResourceControlPlane controlPlane)
         {
-            _target = value;
+            _controlPlane = controlPlane;
         }
 
-        public IReadOnlyList<string> AcceptedCommandKinds => _target.AcceptedCommandKinds;
+        public ServiceId Id => _controlPlane.Id;
 
-        public ResourceRuntimeSurface Surface => _target.Surface;
+        public IResource Resource => _controlPlane.Resource;
 
-        public ResourceConfigurationStatus ConfigurationStatus => _target.ConfigurationStatus;
+        public ResourceManifest Manifest => _controlPlane.Manifest;
     }
 }

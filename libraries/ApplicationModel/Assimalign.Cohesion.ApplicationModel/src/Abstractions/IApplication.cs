@@ -4,36 +4,27 @@ using System.Threading.Tasks;
 namespace Assimalign.Cohesion.ApplicationModel;
 
 /// <summary>
-/// A built application operation: a desired-state graph of resources together with
-/// the gateway selected for operations that require platform contact. An application
-/// does not host resource workloads itself.
+/// A built application: the model of what its gateway deploys, and the gateway that runs it.
 /// </summary>
 /// <remarks>
-/// <see cref="IApplication"/> deliberately does NOT extend a host abstraction. A host
-/// runs inside a single process; an application is <em>described</em> and then
-/// <em>realized</em> by an <see cref="IApplicationGateway"/> across potentially many
-/// processes, containers, or pods that the application does not own.
+/// An application does not host resource workloads, so it deliberately does not extend a host
+/// abstraction. Its gateway deploys the model's resources and child gateways across processes,
+/// containers, or pods that the application does not own.
 /// </remarks>
 public interface IApplication
 {
     /// <summary>
-    /// The immutable desired-state resource graph this application realizes.
+    /// Gets the immutable model of what the application's gateway deploys.
     /// </summary>
     IApplicationModel Model { get; }
 
     /// <summary>
-    /// Executes the operation selected by <see cref="IApplicationModel.RunMode"/>.
-    /// <see cref="GatewayRunMode.Run"/> realizes and supervises through the selected
-    /// gateway until cancellation, then releases supervision gracefully without
-    /// interpreting cancellation as teardown. <see cref="GatewayRunMode.Describe"/>
-    /// writes the model document without contacting the platform. <see cref="GatewayRunMode.Render"/>
-    /// and <see cref="GatewayRunMode.Bootstrap"/> dispatch through optional capabilities on the
-    /// selected gateway and write their platform representation to standard output.
+    /// Runs the application's gateway with its model.
     /// </summary>
-    /// <param name="cancellationToken">Signals that the selected operation should stop.</param>
-    /// <returns>A task that completes once the selected operation has completed.</returns>
-    /// <exception cref="System.NotSupportedException">
-    /// The selected gateway does not implement the requested optional operation.
+    /// <param name="cancellationToken">Signals that the gateway should stop.</param>
+    /// <returns>A task that completes when the gateway stops.</returns>
+    /// <exception cref="System.InvalidOperationException">
+    /// The application has no gateway, or has already been run.
     /// </exception>
     Task RunAsync(CancellationToken cancellationToken = default);
 }

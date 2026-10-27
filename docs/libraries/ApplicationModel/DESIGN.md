@@ -1,5 +1,9 @@
 # ApplicationModel — Design v3
 
+> **Superseded (2026-10-27).** The owner restarted Hosting.Resources, ApplicationModel, and
+> ApplicationModel.Gateway from scratch. The current designs are in each project's `docs/DESIGN.md`
+> (Hosting.Resources and ApplicationModel so far). This record describes the retired design.
+
 > **Status: implemented library-family design, 2026-09-14; amended 2026-09-25 for the owner's
 > bring-your-own identity, clients, and stores decisions (R8 in the signed design; §2, §4.4,
 > §4.7, §4.8, §6, §8.3, §9.5, §10, B44).** This file is the

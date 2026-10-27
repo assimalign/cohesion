@@ -1,24 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
 		<RootNamespace>Assimalign.Cohesion.ApplicationModel.Gateway</RootNamespace>
-		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+		<Description>Cohesion application gateway: deploys an application model through an infrastructure provider, receives the manifests its resources' instances publish, and exposes each resource's infrastructure actions.</Description>
 	</PropertyGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Resources" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.Security.DataProtection" />
-	</ItemGroup>
-	<ItemGroup>
-		<CohesionPackageReference Include="System.Security.Cryptography.ProtectedData" />
-	</ItemGroup>
-	<ItemGroup>
-		<CohesionSharedSource Include="Assimalign.Cohesion.ApplicationModel" Module="MergePatch" />
-	</ItemGroup>
-	<ItemGroup>
-		<None
-			Include="..\buildTransitive\Assimalign.Cohesion.ApplicationModel.Gateway.props"
-			Pack="true"
-			PackagePath="buildTransitive\Assimalign.Cohesion.ApplicationModel.Gateway.props" />
 	</ItemGroup>
 </Project>

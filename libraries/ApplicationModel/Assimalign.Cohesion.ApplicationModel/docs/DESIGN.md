@@ -1,861 +1,193 @@
-# Assimalign.Cohesion.ApplicationModel — DESIGN
+# Assimalign.Cohesion.ApplicationModel — Design
 
-> This is the per-library design record for the **Layer 1** ApplicationModel
-> contract package. The current cross-package direction of record is
-> [`DEVELOPER_EXPERIENCE_DESIGN.md`](../../../../docs/DEVELOPER_EXPERIENCE_DESIGN.md);
-> the [ApplicationModel area design v3](../../../../docs/libraries/ApplicationModel/DESIGN.md) summarises the family. Read this file
-> for the contracts that are implemented in this package and why they have this shape.
+> **Status (2026-10-27):** chunk 2 of the Application Model rebuild, built on
+> [Hosting.Resources](../../../Hosting/Assimalign.Cohesion.Hosting.Resources/docs/DESIGN.md) (chunk 1).
+> The previous implementation (plans and planners, providers and stores, commands, externals) is
+> retired; its source is at commit `6576e7c64`. ApplicationModel.Gateway is chunk 3.
 
-## What this library is
+## Purpose
 
-### Logical resource groups
+The library has three parts:
 
-`IApplicationBuilder.AddResourceGroup(name, configure)` scopes resource declarations to one
-flat, application-local group. Its callback receives the same `IApplicationBuilder`, so existing
-`AddWeb`, `AddResource`, `RemoteReference`, and other extension members remain usable. Resource
-names remain globally unique within the application, and dependencies may cross groups. Empty
-groups are retained; duplicate group declarations and nested groups are rejected. The scope is
-restored even when the callback throws; declarations made before a failure remain on the builder,
-as with other composition calls.
+1. **The application.** `Application.CreateBuilder(name, args)` returns an `IApplicationBuilder`,
+   which is the root gateway's set. `UseGateway` selects the `IApplicationGateway` that runs it, and
+   `Build()` closes composition and returns an `IApplication`: its immutable `IApplicationModel` and
+   `RunAsync`, which hands the model to the gateway.
+2. **Declarative.** What each gateway deploys. An `IApplicationSet` is one gateway's scope: the
+   application resources it runs and the child gateways it runs, each with a set of its own. An
+   `IApplicationResourceDescriptor` declares one resource and, through `DependsOn`, the resources it
+   needs and the permissions it needs on each. `GetManifest()` projects a set and everything below
+   it as `ApplicationManifest` data; the root's manifest is the global manifest.
+3. **Runtime.** `IApplicationResource` is a gateway's view of one declared resource: the instances
+   running it and the state written to them since the gateway was deployed. It answers an
+   instance's publication with the state to restore, and a recorded write with the instances that
+   must restore it.
 
-The model exposes immutable `ApplicationResourceGroup` snapshots, and descriptors and plans carry
-optional `ResourceGroupName` membership. Group identity is ordinal and case-sensitive, using one
-to 128 ASCII letters, digits, periods, underscores, or hyphens (excluding `.` and `..`). Names are
-logical labels, not infrastructure namespace names. The group's name and members are serialized
-in `ApplicationModelDocument.ResourceGroups`; each resource document and plan repeats its
-membership. Imports reject unknown members, multiple membership, duplicate names, and any
-disagreement between these representations. Export summaries retain membership too. Documents
-without group metadata remain ungrouped.
-
-Grouping is owned by application composition. Producer `resource.json`, manifest hashes,
-resource identity, dependencies, workload specifications, services, storage, and environment
-variables are unchanged. Groups introduce no deployment namespace, authorization boundary,
-ownership rule, lifecycle dependency, or delete cascade. Application-set provider wrappers
-preserve the resolved model's groups.
-
-See [logical group composition](../../../../docs/libraries/ApplicationModel/RESOURCE_GROUPS.md)
-for the code-first usage and wire shape.
-
-`Assimalign.Cohesion.ApplicationModel` is the **declarative + control-plane
-contract package**: a `Core`-only set of interfaces and value objects that let an
-author *declare a graph of resources* (the desired state) and hand it to a
-*gateway* that *realizes* it. It contains **no hosting, DI, configuration, logging,
-or platform code**, and depends only on `Assimalign.Cohesion.Core`.
-
-Two planes share one vocabulary here:
-
-- **Declarative plane** — `IApplication`, `IApplicationModel`, `IApplicationBuilder`,
-  `IApplicationResource`, `ResourceManifest`, `IManifestResource`,
-  `IPlannedResource`, the platform-neutral `ResourcePlan` records,
-  `IApplicationResourceDescriptor`, and
-  `IApplicationEnvironment`; plus the application-boundary contracts
-  `ExternalResourceDeclaration`, `IExternalResource`, `IExternalResourceResolver`,
-  and `RemoteReferenceOptions`. The older `IExecutableResource` /
-  `IEndpointResource` / `IMountResource` capability interfaces remain as a
-  compatibility surface for gateways and hand-written resources while resource
-  areas move to generated manifests and plans.
-- **Control plane** (contracts only; implementations live in the `…Gateway.*`
-  packages) — `IApplicationGateway`, `IApplicationResourceController`,
-  `IResourceControlContext`, `IApplicationResourceStateManager`,
-  `IApplicationResourcePackager`, `IControlPlaneClient`,
-  `IMultiModelApplicationGateway`, and the `IResourceArtifact` family.
-- **Provider seams** (contracts only; the gateway calls them, opt-in resource-area packages
-  implement them) — `ApplicationProviders` plus the store, certificate, trust, command-input,
-  telemetry, credential, and caller seams described in
-  [Provider seams](#provider-seams-explicit-registration).
-
-The guided implementation surface is `PlannedResource`; resource-area types derive
-from it and override `CreatePlan(PlanContext)` only when the generic trait mapping
-is insufficient. The package also ships manifest records, immutable plan records,
-typed deployer options, their source-generated JSON contexts, and the generated
-identity wrappers `ResourceName`/`ResourceId` and `ApplicationName`/`EnvironmentName`.
-The mutable authoring builder, descriptors, and collection remain internal; `Build()`
-copies descriptor edges and manifest collections into the immutable model snapshot.
-
-The internal application-environment implementation delegates explicit process values to Core's
-`AppEnvironment`. With neither process variable nor `--environment` set, the apphost defaults to
-`Local` before gateway selection (O36). Core's resource-runtime unset default stays `Production`.
-
-`Local` identifies developer-machine execution; `Development` is a named deployed environment
-with the same strict behavior as Staging and Production. `IsLocal` alone selects relaxed
-realization, naming, and executable model-resolution paths; `IsDevelopment` identifies the
-deployed name. `Application.CreateSet` and `ApplicationBuilder.UseGateway` retain the apphost's
-Local default for every gateway, including Docker and Kubernetes. Gateway reselection resolves
-explicit values again. Host resolution preserves Core's raw explicit value, including whitespace;
-Local and InProcess additionally retain their existing blank-process-value fallback to Local.
-
-`CohesionApplicationAttribute` records the SDK-selected application name in gateway assembly
-metadata for build and tooling inspection. It is not a runtime discovery mechanism: generated
-gateway code supplies the same identity directly to `Application.CreateBuilder(ApplicationName,
-args)`, preserving the package's no-reflection boundary.
-
-## Generated string value-type compatibility (#1472)
-
-Regeneration removes `ToString(string?, IFormatProvider?)` from `ResourceName`, `ApplicationName`,
-and `EnvironmentName`. These overloads shipped in `10.0.0-preview.1`, so their removal is a
-source and binary breaking change under the preview compatibility policy (HTTP/Web program
-decision 15). Replace calls such as `resourceName.ToString(format, provider)` with
-`resourceName.ToString()` and recompile consumers. The removed overload did not apply formatting
-or culture to initialized string values; `ToString()` preserves their text and now returns an
-empty string for `default`.
-
-The generated nested converters for `ResourceName`, `ResourceId`, `ApplicationName`, and
-`EnvironmentName` are now public sealed types with public parameterless constructors. A
-source-generated `JsonSerializerContext` in a consuming assembly can use these value objects
-without a custom converter. This adds public surface compared with preview.1's non-public nested
-converters; the conversion rules for null, invalid values and dictionary keys are unchanged.
-The redundant internal nested converter partials in `ResourceName` and `ApplicationName` are
-removed because their modifiers conflict with the generated public declaration (CS0262).
-The separate `Internal.ResourceNameJsonConverter` and `Internal.ApplicationNameJsonConverter`
-types retain their existing roles and accessibility.
-
-## Validated resource and credential values (#1481)
-
-`ResourceHttpPath` owns the resource probe and control-plane path grammar: a nonblank
-absolute path beginning with `/`, without a query or fragment. Paths compare ordinally,
-as RFC 3986 section 6.2.2.1 does not make path components case-insensitive. Manifest probe
-`Http` and control-plane `Path` carry checked values. Construction rejects malformed strings
-with `ArgumentException`; JSON import rejects them with `JsonException`. Manifest validation
-still checks present default values through `ResourceHttpPath.IsValid` and refuses them with
-`InvalidDataException`. Plan validation uses the same rule through
-`TryCreate` for manifest and planned HTTP probe values and control-plane paths before a gateway
-can reconcile. `ProbeMapping.Value` remains a string because it also carries gRPC service names.
-`ControlPlaneSpec.Path` remains a string because the empty string represents an omitted
-control-plane fact in legacy v1 plans; nonempty paths still pass the canonical grammar.
-
-`ResourceMountSource` owns the case-sensitive source expression grammar used by manifests,
-provider validation, and gateway resolution. `literal:` accepts an empty payload and embedded
-colons; `parameter:` requires a nonblank name; other expressions contain exactly one colon
-between nonblank source and key. Whitespace and case are preserved. Typed construction and JSON import reject malformed source text. Manifest validation uses
-`ResourceMountSource.TryCreate` and throws `InvalidDataException` for a present default source.
-`GenericPlanner` uses `TryCreate` before constructing mount bindings and reports invalid direct
-planner input with `InvalidOperationException`.
-`MountBinding.Source` retains the generated nullable value type; plan validation refuses a
-present default. Both manifest and plan sources retain null for omission. Mount kind rules
-remain separate: Volume mounts cannot declare sources, and literal sources require
-Configuration mounts.
-
-**Typed manifest DTOs (#1470).** The freeze deviation is retired. Public properties are
-`ResourceHttpPath? ResourceManifestProbe.Http`, `ResourceHttpPath ResourceManifestControlPlane.Path`
-and `ResourceMountSource? ResourceManifestMount.Source`, each with init access. Valid string
-initializers still use the existing implicit conversions. Optional values preserve null; a
-required/default path or a present default source is refused before reconcile. Consumers read
-`.Value` for raw text (or `?.Value` for optional members). The source-generated manifest JSON
-context retains plain strings and nulls, with schema `cohesion/resource/v1` unchanged.
-
-`ApplicationName.IsValid` owns the existing application identity grammar: 1-63 lowercase
-ASCII letters, digits, or hyphens, beginning and ending with a letter or digit. Conversion,
-`Parse`, `TryCreate`, and JSON import now enforce it; `Build()` retains the required-value
-check for default names.
-
-`ApplicationCredentialScheme` follows RFC 9110 sections 5.6.2 and 11.1: a nonempty HTTP token,
-compared ordinally ignoring case. `ApplicationCredentialValue` is opaque, ordinal, nonblank,
-and contains neither CR nor LF. The generated custom-display opt-out lets its partial redact
-`ToString()` and debugger display as `<redacted>`; transport code explicitly reads
-`credential.Value.Value`. The credential value has no reverse implicit string conversion,
-so interpolation and concatenation also redact it.
-The credential record carries both types and checks default values through its init setters,
-so construction and `with` expressions cannot bypass validation. Dynamic issuer output is
-checked when issued, before it can enter the gateway's credential cache.
-
-**Compatibility with 10.0.0-preview.1.** The three manifest DTO property types above change
-from strings to their checked value types. Consumers must recompile. Other existing API changes are `MountBinding`'s source constructor parameter,
-property, and deconstruction output, and `ApplicationCredential`'s scheme/value constructor
-parameters, properties, and deconstruction outputs: these now use generated value types.
-Consumers must recompile; code using string members reads the underlying `Value`. Valid string
-assignments continue through implicit conversions.
-
-Validation rejects malformed manifest HTTP/control-plane paths and source expressions during
-value construction with `ArgumentException`, or JSON import with `JsonException`. Present default
-values remain refused by manifest validation with `InvalidDataException` and direct plan validation
-with `InvalidOperationException`. Invalid `ApplicationName.Parse` calls throw `ArgumentException`. `ApplicationModelDocument.Parse` and
-both `Load` overloads instead propagate `ArgumentException` when an application name fails
-validation through `ToModel` and `ApplicationName.Parse`; `ToModel` and both `Save` overloads
-share that behavior. Relative paths and paths containing query/fragment delimiters,
-whitespace-only parameter/source/key names, and invalid application identities are refused
-earlier, before reconciliation.
-
-Credential schemes additionally reject every non-token character; values reject embedded CR/LF.
-Invalid credential `with` assignments and present defaults are now refused. Credential value
-interpolation and concatenation now redact the former raw string. Credential record equality
-now ignores scheme casing, following HTTP authentication scheme semantics. Valid manifest/plan
-JSON remains string-shaped, and optional source omission and legacy plan omission remain supported.
-
-## Design intent and why-this-not-that
-
-- **`IApplication` does not extend a host abstraction.** A host runs inside one
-  process; an application is *described* then *realized* by a gateway across many
-  processes/containers/pods it does not own. Conflating them forces single-process
-  assumptions. `RunAsync` dispatches the requested mode: Run delegates realization
-  and supervision to the gateway, while Describe writes the model with no platform
-  contact. It hosts nothing itself.
-- **The graph type is `IApplicationModel`, not `IApplicationContext`.** The name
-  already existed in the code and `IApplication.Model` returns it; reintroducing a
-  second "context" type was rejected as drift.
-- **`Descriptors` is authoritative; `Resources` is a projection.** Dependency edges
-  live on the descriptors (the gateway topologically sorts them); the model exposes
-  `Resources` as a read-only one-to-one projection for convenience, and the mutable
-  working collection lives only on the builder. At `Build()`, required same-application
-  manifest references infer edges by exact application/resource identity; explicit C#
-  `DependsOn` edges remain ordering-only and additive. Optional references never infer a
-  gating edge, and cross-application references remain external. Surfacing a mutable `IList`
-  on an "immutable desired state" was a contradiction that an early review caught. A built
-  descriptor also carries its immutable `Plan`; an authoring descriptor has no plan until
-  `Build()` completes planning.
-- **Facts in manifests; realization in plans.** `ResourceManifest` mirrors the
-  `cohesion/resource/v2` build artifact and contains resource facts only. At
-  `Build()`, every resource produces a `cohesion/plan/v1` `ResourcePlan` from its
-  manifest, deployer options, environment, and references. `GenericPlanner` is the
-  inherited default: workload kind is explicit, volume mounts produce per-replica
-  claims and a governing headless service, endpoints produce services, public
-  endpoints produce exposures, and probes map one-for-one. Platform gateways compile
-  this IR; they do not branch on resource kind or CLR type.
-- **The planning path is visible at `Build()`.** `IPlannedResource.PlannerName`
-  defaults to `GenericPlanner`; an area-owned planner overrides it with the full
-  stable label (for example, `Database planner`). After each plan validates,
-  `Build()` writes exactly one informational line to standard error in declaration
-  order, preserving standard output for describe/render documents. A named area
-  planner is paired with the selected gateway's stable platform identity
-  (`appa-database: Database planner → kubernetes compiler`); the inherited or
-  legacy fallback is always explicit (`worker: GenericPlanner`). No CLR-type
-  inspection or platform-package reference is needed.
-- **Typed escape hatches stop at deployer-owned facts.** `ResourceOptions` permits
-  replica and storage-size overrides. `Build()` validates replicas against the
-  manifest's `maxReplicas`, then runs `ResourcePlanValidator`; platform-specific
-  knobs belong to the selected gateway's compiler and never enter a resource-area
-  package.
-- **`UseGateway` is mandatory — no reflection.** An earlier design reflected a
-  default gateway when none was set; that would have propagated a
-  `RequiresUnreferencedCode` marker onto `Build()` (the one API every consumer
-  calls) and fought the repo's AOT mandate. `Build()` now throws a plain
-  `InvalidOperationException` when no gateway is selected. Any future zero-config
-  default must be a compile-time, source-generated registration, never a runtime
-  probe.
-- **Readiness is a level-triggered, plan-gate wait.**
-  `IApplicationResourceStateManager.WaitForStateAsync` completes on **any** state in
-  `descriptor.Plan.Workload.Gate.Terminals` with a per-resource budget and succeeds
-  exactly when `Gate.Satisfying` contains the reached state. Long-running workloads
-  satisfy on `Running`; a Job satisfies on `Stopped`, while `Stopped` remains a fast
-  failure for every non-Job kind. `Degraded` is observed but is
-  non-gating: it does not admit dependents initially and never re-gates them
-  after initial readiness admitted them. A timeout returns the last observed state;
-  caller cancellation throws `OperationCanceledException` and removes the waiter.
-  The lifecycle enum is treated as a membership set, never an ordered lattice.
-- **Controllers are plan-selected, level-triggered reconcilers.** `Build()` calls gateway
-  `Validate(model)`, which asks registered overrides and then the platform controller
-  `CanRealize(plan, out reason)` before any artifact gather. `ReconcileAsync` computes
-  desired objects and applies them, idempotently, and returns; it does not own
-  steady-state observation (that is a gateway's single informer) and does not block
-  on readiness (the gateway gates on the state manager).
-- **Typed artifacts, no discriminator downcasts.** `IResourceArtifact` is refined by
-  `IExecutableArtifact` / `IContainerImageArtifact`; consumers request the concrete
-  shape by type rather than switching on a kind enum and casting.
-
-## External references and exported models
-
-An application-boundary reference is represented by an ordinary resource node, not by a side
-table. `ExternalResourceDeclaration` snapshots the target application, consumed endpoint names,
-optionality, embedded manifest, and available same-application closure. Its `ManifestHash` and
-`ClosureHash` are computed from the portable canonical manifest contract, excluding local paths
-and other machine-specific artifact facts.
-
-Generated gateway code may register a declaration through the infrastructure-only
-`IApplicationBuilder.AddExternal` seam. Application code binds it with
-`RemoteReference(ExternalResourceDeclaration, ...)`; the string overload creates a manifest-less
-declaration. Both return the same `IApplicationResourceDescriptor` used by `DependsOn`, so the
-external participates in topological ordering, readiness, and observed-endpoint injection like
-any locally realized resource.
-
-A manifest-less declaration has no build-time application identity to authenticate. Its selected
-file or gateway binding is therefore the authority; resolution still requires the named resource
-to be present in the export and in that export's embedded model. Manifest-backed declarations
-add the stronger owner and canonical-hash checks.
-
-The base bindings are static endpoints, an `export.json` file, a peer gateway address, or an
-arbitrary `IExternalResourceResolver`. The effective resolver is selected in this order:
-
-1. matching `--external` command-line binding;
-2. matching `Cohesion__External__...` process-environment binding (colon aliases are accepted);
-3. the resolver supplied by `RemoteReference`;
-4. the unresolved resolver.
-
-This makes deployment/environment input authoritative over source while leaving the C# binding
-as a useful local default. A peer-gateway binding uses the transport-neutral
-`IControlPlaneClient`; this package deliberately does not take an HTTP dependency. A
-platform-specific importer can be supplied through `RemoteReferenceOptions.Bind` without adding
-platform types to the contract package.
-
-`IExternalResourceResolver.ResolveAsync` returns endpoints plus the provider manifest hash and
-export schema version when known. The gateway controller owns policy: compatible resolutions are
-`Running`; optional unresolved declarations are `Skipped`; required unresolved declarations stay
-nonterminal until the per-resource readiness budget fails the startup gate; and a missing
-referenced endpoint is `Failed`. A changed manifest hash with all referenced endpoints still
-present is reported as `ManifestDrift` while remaining `Running`. Stop and delete detach only the
-consumer's observed external state; they do not operate on the provider application.
-
-There are two portable documents with different jobs:
-
-- `ApplicationModelDocument` (`cohesion/model/v1`) is the immutable graph: invocation intent,
-  dependencies, manifests, platform-neutral plans, and external declaration/closure/realization/
-  binding metadata. Describe mode writes this document without contacting a platform, and an
-  import retains static, file, and gateway `RemoteReference` bindings. An arbitrary resolver
-  supplied through `Bind(...)` is deliberately emitted as unbound because executable code is not
-  portable; the importing platform must contribute its binding again.
-- `ApplicationExportDocument` (`schemaVersion: 1`) is public discovery: application/environment
-  version, optional public JWK, resource manifest hashes, observed internal/public endpoints, and
-  the complete model document. It has source-generated `Create`/`Parse`/`Load`/`Save`/`ToModel`
-  paths and validates cross-document identity, hashes, kinds, and endpoint names.
-
-`export.json` remains a storage convention rather than a side effect of this Layer-1 package.
-`Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane` implements item 23a's authenticated
-HTTP publication and fetch endpoints over this exact document. Kubernetes export/import remains
-a platform integration and is not implemented here.
-
-## Application-set composition
-
-`Application.CreateSet(gateway, args)` requires an `IMultiModelApplicationGateway` and creates an
-`IApplicationSet`. Each generated or hand-written `ApplicationDeclaration` pairs an application
-identity with an `IApplicationModelResolver`. The supplied resolvers cover:
-
-- `Executable(path)` — invoke the member gateway with `--mode describe`;
-- `File(path)` — reconstruct the model embedded in an application export;
-- `Gateway(address, client)` — obtain that export through `IControlPlaneClient`;
-- `ControlPlane(executablePath, exportPath)` — use executable describe in Local and the
-  exported model otherwise.
-
-Member models are resolved at `RunAsync` start in declaration order. The set rejects duplicate
-declarations and a resolver returning the wrong application identity, applies invocation-level
-external overrides to each imported model, and binds an external targeting a sibling member through
-`IApplicationSetExternalResourceResolver`. That direct observed-state lookup runs before the
-external's configured control-plane/file/static resolver and falls back only when the sibling is
-not observable. The set dispatches `Run`, `Apply`, or `Teardown` through the shared gateway;
-`Describe` writes a JSON array of every member model without gateway contact; `Render` validates
-the ordered collection and dispatches it through `IApplicationGatewayRenderer`; and `Bootstrap`
-does the same through `IApplicationGatewayBootstrapper`. A single application dispatches those
-optional capabilities with a one-model collection. An unsupported capability names the selected
-gateway before any application-set gateway validation. The base
-multi-model contract preserves model
-order and requires state to be scoped by `(application, resource)`; equal resource identifiers in
-different applications must not collide. SDK generation of `Applications.<Name>` is a consumer
-convenience over this seam and is not required by the contract itself.
-
-In Local, executable resolution applies `--realize` only after the first description shows
-that the member declares the requested external. An imported export must already record a matching
-external as realized, and the set rejects any requested name that no member realized.
-
-A member's describe output carries no provider registrations. `AddApplication(declaration,
-configure)` registers them for that member alone; the set invokes the callback after the member
-resolves, attaches the frozen registrations to its model, and validates every member — registered or
-not — before any gateway call. See *Provider seams*, "Two registration surfaces, one registration
-container".
-
-## Provider seams (explicit registration)
-
-Libraries never depend on resources. Everything a gateway needs from a resource area at run time
-— reading a `<source>:<key>` mount source, issuing a TLS leaf, persisting a trusted issuer,
-rewriting a command payload, exporting telemetry, minting a credential, authenticating a
-control-plane caller — is a seam defined here and implemented elsewhere. This package defines the
-seams; `…ApplicationModel.Gateway` calls them; the shipped implementations live in opt-in
-`Assimalign.Cohesion.<Area>.ApplicationModel.Orchestration` packages under `resources/<Area>/`,
-which reference this package and their area's `<Area>.Client` and nothing in the Hosting or
-Gateway families.
-
-The diagram shows reference direction between the seams (defined in `libraries/**`) and their
-implementers (in `resources/**`): the gateway references the seams to call them, every
-orchestration package references the seams to implement them (and its area's client to reach
-the resource), the SDK consumer's gateway `Program.cs` references the packages it registers, and
-the seams reference only Core. The dotted edge is the one `COHLIB001` rejects — no project under
-`libraries/**` may reference `resources/**`, so a seam never knows its implementers.
+The library references Core and Hosting.Resources. The arrow below means "references".
 
 ```mermaid
 flowchart LR
-    subgraph Libs["libraries/** — define and call the seams"]
-        Seams["Assimalign.Cohesion.ApplicationModel — seams"]
-        Core["Assimalign.Cohesion.Core"]
-        Gateway["ApplicationModel.Gateway"]
+    Gateway["ApplicationModel.Gateway, chunk 3"] --> Model["Assimalign.Cohesion.ApplicationModel"]
+    Model --> Resources["Assimalign.Cohesion.Hosting.Resources"]
+    Model --> Core["Assimalign.Cohesion.Core"]
+    Resources --> Hosting["Assimalign.Cohesion.Hosting"]
+    Resources --> Core
+```
+
+## The hierarchy
+
+The root set belongs to the root gateway, which runs its own resources (here the tenant's identity
+provider) and its child gateways. Each child gateway runs its own set. A resource's provider and
+name are unique within its set, so `east` and `west` may both run `Web/orders-api`. Gateway names
+are unique across the whole hierarchy. A dependency may point into any set of the same hierarchy;
+in the diagram an arrow is a `DependsOn`, labeled with its permissions.
+
+```mermaid
+flowchart TB
+    subgraph root["Set root, deployed by the root gateway"]
+        identity["IdentityHub/identity"]
+        subgraph east["Set east, a child gateway"]
+            db["Database.Sql/orders-db"]
+            api["Web/orders-api"]
+        end
+        subgraph west["Set west, a child gateway"]
+            api2["Web/orders-api"]
+        end
     end
-    subgraph Res["resources/** — implement the seams"]
-        SecretOrch["SecretStore.ApplicationModel.Orchestration"]
-        SecretClient["SecretStore.Client"]
-        ConfigOrch["ConfigurationStore.ApplicationModel.Orchestration"]
-        ConfigClient["ConfigurationStore.Client"]
-    end
-    Program["gateway Program.cs — SDK consumer"]
-    Seams --> Core
-    Gateway -->|"calls"| Seams
-    SecretOrch -->|"implements"| Seams
-    SecretOrch --> SecretClient
-    ConfigOrch -->|"implements"| Seams
-    ConfigOrch --> ConfigClient
-    Program --> Gateway
-    Program -->|"registers"| SecretOrch
-    Program -->|"registers"| ConfigOrch
-    Seams -.->|"COHLIB001 ✗"| SecretOrch
+    api -->|"data.read, data.write"| db
+    api -->|"no permissions"| identity
+    api2 -->|"tokens.issue"| identity
 ```
 
-| Seam | Registered through | Called by the gateway to |
-| --- | --- | --- |
-| `IResourceSourceProvider` | `Providers.Sources["<source>"]` | read a Secret, certificate, or Configuration mount whose source is `<source>:<key>` |
-| `IResourceCertificateAuthority` | `Providers.CertificateAuthority` | issue the TLS leaf of an endpoint whose certificate mount has no source |
-| `ITrustedIssuerStore` | `Providers.TrustStore` | read and add the application's trusted peer issuers |
-| `IResourceCommandInputResolver` | `Providers.CommandInputs` | rewrite a declared command payload (by command kind) before delivery |
-| `ResourceTelemetrySink` | `Providers.Telemetry` | point every resource's OTLP export at a sink resource or an external address |
-| `IApplicationCredentialIssuer` | `Providers.CredentialIssuer` | mint credentials before falling back to the default ES256 application key |
-| `IApplicationCallerAuthenticator` | `Providers.Callers` | authenticate control-plane callers after the built-in trusted-issuer check |
+## The model
 
-`IResourceSourceResolver` runs the other way: the gateway implements it over the same `Sources`
-registrations and hands it to each command-input resolver, so a resolver can turn a declared
-`parameter:`/`<source>:<key>` expression into bytes without knowing how sources are resolved.
+| Type | Role |
+| --- | --- |
+| `IApplicationBuilder`, `ApplicationBuilder` | The root set, plus `Args`, `UseGateway`, and `Build`. `Application.CreateBuilder(name, args)` creates it. |
+| `IApplication`, `Application` | A built application: `Model` and `RunAsync`, which runs the selected gateway with the model, once. |
+| `IApplicationModel`, `ApplicationModel` | The immutable model for one gateway: `Manifest` (the whole hierarchy, validated and read-only), `Name` and `Deployment` (that gateway and its part), and `Role`. `ApplicationModel.Create(manifest, gateway)` builds one from data. |
+| `GatewayRole` | `Root` for the hierarchy's top gateway, `Composite` for any other. |
+| `IApplicationResourceAction` | An infrastructure action on a resource, such as `scale`, executed against the platform. Same invocation and result types as a control. |
+| `IApplicationGateway` | The seam ApplicationModel.Gateway implements: `RunAsync(model)`. Deliberately minimal until chunk 3. |
+| `IApplicationSet` | One gateway's scope. The builder is the root; `AddGateway` makes a child; `AddResource` declares a resource. |
+| `IApplicationResourceDescriptor` | One declared resource. `DependsOn(resource, permissions)` records a dependency; declaring it again adds the new permissions. |
+| `ApplicationManifest`, `ApplicationResourceManifest`, `ApplicationResourceDependency` | The hierarchy as data. A dependency names its target by gateway, provider, and name. |
+| `IApplicationResource`, `ApplicationResource` | A gateway's aggregate of one resource: `Register` an instance's published manifest, `Record` a stateful write's snapshot, `Unregister` a stopped instance, and `ExecuteAsync` one of its infrastructure `Actions`. |
+| `GatewayName`, `GatewayId`, `ResourcePermission` | Value objects. `GatewayId` is a version 5 UUID of the name, like chunk 1's ids. |
 
-**Explicit registration only.** Nothing is injected by convention. A gateway `Program.cs`
-references an orchestration package and calls its verb, which fills `builder.Providers`:
+## Decisions
 
-```csharp
-IApplicationResourceDescriptor secrets = builder.AddResource(Manifests.Secrets);
-IApplicationResourceDescriptor logs = builder.AddResource(Manifests.Logs);
-builder.UseSecretStore(secrets).AsCertificateAuthority().AsTrustStore();
-builder.Providers.Telemetry = ResourceTelemetrySink.FromResource(logs);
-```
+**D1 — Resource names are scoped per gateway.** The management routes put resources under
+`/gateways/{gatewayId}`, and one service commonly runs in several child gateways (east and west),
+so a resource's provider and name are unique within its set only. Across the hierarchy a resource is
+identified by its set's `GatewayId` and its `ResourceId` together. Gateway names are unique across the
+hierarchy because they key the routes under a tenant. This settles chunk 1's first open question
+without changing `ResourceId`.
 
-Anything the shipped packages do not cover is a hand-written provider assigned to the same
-members. `parameter:` and `literal:` stay built into the gateway and can never be registered.
+**D2 — Descriptors are build-time objects; the gateway works from data.** A gateway may receive its
+deployment manifest as JSON through its arguments, with no descriptor objects in memory. So
+`ApplicationResource` is created from an `ApplicationResourceManifest`, and a dependency is recorded
+as data (gateway, provider, name) rather than as a reference to another descriptor.
 
-**Why an open provider bag and not a gateway option or a convention.** The previous design gave
-the gateway a single store client and discovered stores by manifest kind, which put area wire
-knowledge (paths, command kinds, file names) in a library and made every area a hidden dependency
-of the gateway. Registrations on the model keep the library area-neutral, keep the dependency on
-the consumer's side of the line, and let a developer bring an implementation without forking the
-gateway. The cost is that an unregistered provider is now an error the developer must fix rather
-than something that silently works; `Build()`-time validation makes that error immediate and
-names the package to reference.
+**D3 — One set type at every level.** The root gateway's set and each child gateway's set are both
+`IApplicationSet`, and nothing limits the depth. Nothing differs between a root and a composite set
+in this chunk, so separate types would only duplicate the composition API. The gateway chunk decides
+what a root does that a composite does not.
 
-**Why `ApplicationProviders` is a class and not an interface.** It is a registration container,
-not a behaviour: consumers never substitute it, and a frozen snapshot has to be copied by this
-package. The behaviours are the seams, and those are interfaces.
+**D4 — `DependsOn` records access, not order.** A dependency carries the permissions the dependent
+resource needs, which the gateway registers with the tenant's identity provider so that provider can
+issue credentials just in time. Two resources may depend on each other, so there is no cycle check.
+Whether dependencies also order startup is the gateway's decision.
 
-**Resource-backed or outside the model.** A provider that declares a non-null `ResourceKind`
-must be bound to a resource of the declaring application with that manifest kind; the gateway
-waits for that resource to be Running and hands the provider a `ResourceProviderConnection` —
-the observed control-plane address, the resource's audience-bound `ResourceAccess` bearer
-credential for the reconcile pass (minted through the credential issuer; see *Identity*), and the
-application's transport validator. A provider with a null
-`ResourceKind` does not require a model resource: registered under a name that is no model
-resource (for example `vault`), it lives outside the model, authenticates itself, and receives a
-`null` connection. `ResourceProviderBinding<T>` carries the same choice for the certificate
-authority and trust store (`Resource = null` means outside the model).
+**D5 — `Register` and `Record` are atomic with respect to each other.** Each runs under one lock and
+returns its answer from the state that lock protects. An instance that registers before a write is
+recorded is in the write's restore list; one that registers after it gets the snapshot in its
+registration answer. Every instance therefore receives every recorded snapshot exactly once. The
+alternative, a gateway that lists the instances and then records, lets an instance that registers
+in between miss the write.
 
-**Defaults when nothing is registered.** Unbound certificate authority: the gateway's
-development CA in Local only, a loud failure elsewhere — never a silent downgrade. The authority
-resource's own leaf always comes from the gateway CA, because it cannot issue its first leaf.
-Unbound trust store: the Local-only `trusted-issuers.json` file under the application's state
-directory; trust grants fail elsewhere. No telemetry sink: no telemetry variables are injected. No
-credential issuer (or an issuer returning `null`): the default ES256 application-key issuer. No
-command-input resolver for a kind: the payload is delivered as declared and validated by its
-receiving control plane. Producer manifests impose no resolver prerequisites.
+**D6 — Version skew is filtered, not refused.** An instance receives only snapshots for actions its
+own manifest declares stateful, and `Record` accepts a snapshot only from an instance that declares
+the action stateful. During a rollout, an instance of another version neither receives nor reports
+state it does not understand.
 
-**Freeze semantics.** `IApplicationBuilder.Providers` is mutable while authoring. `Build()` copies
-it into the model as a frozen snapshot (`IApplicationModel.Providers`): `Sources`,
-`CommandInputs`, and `Callers` become read-only collections (`NotSupportedException` on
-mutation) and every setter throws `InvalidOperationException`. Later builder registrations never
-reach an already-built model. `ApplicationProviders.Empty` is frozen and is the default-interface
-value of `IApplicationModel.Providers`. Providers are code, so `ApplicationModelDocument` never
-carries them: an imported model — every application-set member resolved from a describe output
-and every export — has `Empty`.
+**D7 — Durability belongs to the gateway.** The aggregate keeps its state in memory for the life of
+one deployment. A gateway that restarts within the same deployment seeds a new aggregate through
+`ApplicationResource.Create(manifest, state)`. A gateway should persist a recorded snapshot before it
+acknowledges the write, or a restart can lose a write that running instances already apply.
 
-**Two registration surfaces, one registration container.** An application built in code registers
-on `IApplicationBuilder.Providers`. `IApplicationProviderBuilder` is the provider-registration
-surface of one application-set member: `Application` (its name), `Providers` (the mutable
-registrations), and `TryGetResourceManifest(name, out manifest)` (a lookup of the application's
-resources so a verb can check a store's kind before binding it). They are separate interfaces
-(owner decision O45, 2026-09-27): `IApplicationBuilder` does not extend `IApplicationProviderBuilder`
-and has no `Application` or `TryGetResourceManifest`, because a builder's verbs bind the resource
-descriptors it created, while a member has no descriptors and binds stores by `ResourceName`. The
-internal default builder implements both (its `Application` is `null` until it is named), so code
-holding it can still cast it to `IApplicationProviderBuilder`. An application set hands a member its
-surface through `IApplicationSet.AddApplication(declaration, configure)`:
+**D8 — Reads take no lock.** `Instances` and `State` return read-only copies that each change
+replaces, so a management read never waits on a registration, and a debugger never deadlocks on a
+held lock.
 
-```csharp
-IApplicationSet set = Application.CreateSet(new LocalGateway(options), args)
-    .AddApplication(Applications.Platform, platform => platform
-        .UseSecretStore("platform-secrets")
-        .AsCertificateAuthority()
-        .AsTrustStore())
-    .AddApplication(Applications.AppA, appa =>
-    {
-        appa.UseConfigurationStore("appa-configuration");
-        appa.Providers.Telemetry = ResourceTelemetrySink.FromResource("appa-logs");
-    })
-    .AddApplication(Applications.AppB);
-```
+**D9 — The base model references Hosting.Resources.** An application resource aggregates the
+instances Hosting.Resources defines, so the model shares that library's identity, manifest, and
+snapshot types. The previous model duplicated `ResourceName` and `ResourceId` instead. This deviates
+from the "base ApplicationModel remains Core-only" rule in `.claude/rules/resource-areas.md`; the
+csproj carries the marker, and the rule text changes with the area consolidation rule.
 
-`RunAsync` resolves each member in declaration order and, right after the member's model resolves,
-invokes that member's callback with a fresh surface over the resolved model, so `TryGetResourceManifest`
-sees the member's resources. When the callback returns, the set freezes the registrations (a
-registration made later through a kept reference throws), attaches them to that member's model
-alone (an internal wrapper that forwards every other member of `IApplicationModel`, so descriptors,
-resources, manifests, and plans keep their identity), and runs the same
-`ApplicationProviderValidation` `Build()` runs. Orchestration verbs take a resource name for this
-surface (`UseSecretStore("secrets")`, `UseConfigurationStore("settings")`), and
-`ResourceTelemetrySink.FromResource(ResourceName, endpoint)` names a sink the same way, because a
-member has no descriptors. An application built in code uses the descriptor forms instead
-(`builder.UseSecretStore(secrets)`, `builder.UseConfigurationStore(settings)`,
-`ResourceTelemetrySink.FromResource(descriptor, endpoint)`). Both forms write the same
-`ApplicationProviders`, and the handle `UseSecretStore` returns, `SecretStoreProviderBuilder`,
-exposes that instance as `Providers`, so `.AsCertificateAuthority()` and `.AsTrustStore()` chain the
-same way on either surface.
+**D10 — The builder is the root set.** `IApplicationBuilder` extends `IApplicationSet`, so a
+program composes with `builder.AddResource(...)` and `builder.AddGateway(...)`, and a root resource's
+`Set` and a child set's `Parent` are the builder itself. The alternative, a builder that exposes a
+separate root set object, made `builder.Set.AddResource(...)` the spelling and gave the root two
+identities. The builder and each child set share one internal composition type, so the rules exist
+once. Child sets are internal; `IApplicationSet` is their public surface.
 
-**Never inherited by name.** A member gets exactly what its own callback registered — never the
-registrations of another member, of the set, or of the member's own gateway (lost with its describe
-output) — even when two members declare a store of the same name. The set validates every member
-at start, in every run mode, whether or not it registers anything, as `Build()` validates a builder
-whatever mode it runs in: a store-backed member without a registration fails before the gateway is
-contacted, with a message that starts `Application-set member '<name>' has invalid provider
-registrations.` and names the package and the `set.AddApplication(Applications.<Member>, application
-=> application.Use<Area>("<store>"))` registration. A callback failure is wrapped the same way
-(`Application-set member '<name>' could not register its providers: ...`). A member whose resolver
-returns a model that already carries registrations (a custom in-memory resolver over a built model)
-keeps them when added without a callback; adding it with a callback as well is rejected, so
-registrations for one application live in one place. The cross-application rule is unchanged: a
-member may not bind another application's resource — including a Local `--realize` closure's — and
-the gateway still refuses a closure resource's `<source>:<key>` mounts at resolution (see the
-gateway design, *Imported models and provider registrations*).
+**D11 — One validation path.** `Build()` freezes the hierarchy, projects its manifest, and creates
+the model with `ApplicationModel.Create(manifest)`, the same call a gateway makes for a manifest it
+receives as JSON through its arguments. Composition checks its rules early, at each `Add` and
+`DependsOn`, for a precise error at the line that broke them; `Create` is the authority. `Create`
+also copies the lists read-only, so a caller that keeps a deserialized list cannot change a model.
 
-**Build-time validation.** `ApplicationProviderValidation.Validate(model)` (internal) enforces:
+**D12 — Building needs no gateway; running does.** A build step can create the model and its
+manifest, such as the static assets the SDK will generate for a resource reference, without
+selecting or contacting a gateway. `RunAsync` without a gateway throws, and an application runs
+once.
 
-1. every `<source>:<key>` mount source of the application's own manifests (manifest
-   `Application` equals the model name) has a `Sources` registration; `parameter:` and `literal:`
-   are exempt, and a mount with no source needs no provider (an endpoint certificate mount
-   without a source is issued by the certificate authority or the Local dev CA). A missing
-   registration names the source and, when the source is a model resource of kind `K`, says to
-   reference `Assimalign.Cohesion.K.ApplicationModel.Orchestration` and call `builder.UseK(...)`;
-2. a provider with a non-null `ResourceKind` names an existing resource of the application whose
-   manifest kind matches (ordinal, case-insensitive — the gateway's existing kind comparison);
-3. no mount source or binding names a resource of another application — a manifest reference
-   into another application, a remote reference, or an external. Cross-application store sources
-   are rejected for now (owner decision 4) and return as a follow-up once the store resources
-   support cross-application callers;
-4. a resource telemetry sink belongs to the application and declares the named endpoint.
+**D13 — `IApplicationGateway` is a seed.** The builder needs a type to select, so the interface
+exists with one member, `RunAsync(model)`. ApplicationModel.Gateway implements it; the publication
+endpoint and the infrastructure provider live there.
 
-Command input resolvers are optional explicit registrations. Producer manifests do not declare
-command kinds or resolver requirements; a registered resolver rewrites its matching programmatic
-commands before delivery, and commands without a resolver are delivered as declared.
+**D14 — A model is for one gateway and keeps the whole hierarchy.** `Manifest` is always the whole
+hierarchy, so a dependency outside the gateway's own part resolves; `Name` and `Deployment` say
+which gateway the model is for and what that gateway deploys, and `Role` follows from them. A model
+built in code is for the root; `ApplicationModel.Create(manifest, gateway)` creates a child gateway's.
+This settled what a child gateway receives: the whole manifest plus its own name, not its subtree.
 
-Every failure is an `InvalidOperationException`. `Build()` runs the validation after the graph,
-manifests, commands, and plans validate and before it asks the selected gateway to validate the
-model, so a gateway never receives a model whose registrations are inconsistent, and the error names
-the package and verb to reference. An application set runs the same validation for each member at
-`RunAsync` start, after it attaches that member's registrations, with the same rules; the message is
-prefixed with the member name and its hint names the member's `AddApplication(..., configure)`
-callback instead of `builder.Use<Area>(...)`. The resources of a Local `--realize` closure belong to
-another application, whose manifests rule 1 does not check; the gateway fails their
-`<source>:<key>` mounts at resolution, naming the realized application and the cross-application
-limit, and fails the mounts of any model that reaches it without the needed registration (one handed
-to it directly rather than through `Build()` or a set), naming the missing registration. A flagged
-command in such a model is delivered as declared and the target refuses the unresolved payload;
-SecretStore keeps that rejection of an unresolved `secretstore.add-secret` as defense in depth. A
-model's registrations apply only to resources of its own application.
+**D15 — Infrastructure actions sit on the aggregate.** A gateway's provider supplies each resource's
+infrastructure actions to `ApplicationResource.Create`, and `ExecuteAsync` dispatches them with the
+statuses a control plane uses (`NotFound`, `NotSupported`, `Rejected` for input that does not bind).
+The contract lives here rather than in the gateway library so a transport can expose the actions
+without referencing a gateway package.
 
-**Identity.** `IApplicationCredentialIssuer` covers every credential the gateway mints, tagged by
-`ApplicationCredentialPurpose` (`ResourceBootstrap`, `ResourceAccess`, `Telemetry`,
-`RemoteCommand`, `PeerControlPlane`, `Developer`). An issuer that returns `null` defers that
-request to the default ES256 application-key issuer, so an IdP can take over one purpose at a
-time. Resources verify what it issues, so an application that registers an issuer must register a
-matching credential verifier on its resources (`Hosting.Resources`, resource side). Callers of the
-gateway control plane go through the built-in trusted-issuer authenticator first and then each
-`IApplicationCallerAuthenticator` in order; `ApplicationCallerStatus.NoResult` falls through,
-the other statuses are final, and area/command checks apply to the mapped `ApplicationCaller`.
-The shipped gateway consults both: every credential it mints goes through
-`Providers.CredentialIssuer` (gateway design, *Identity seams*), and its served control plane runs
-`Providers.Callers` after the built-in authenticator (ControlPlane design, *Caller
-authentication*). With neither registered, every credential and every control-plane response is
-what it was before the seams existed.
+## Threading
 
-Using them from a gateway `Program.cs` — an identity provider that takes over the credentials the
-application's resources receive (bootstrap and access), and whose tokens peers and developers may
-present to this gateway's control plane:
+An application builder and its sets are composed on one thread and are not safe for concurrent
+changes. An `ApplicationResource` is safe for concurrent use.
 
-```csharp
-builder.Providers.CredentialIssuer = new IdpCredentialIssuer(idp);   // null for purposes it leaves to the default
-builder.Providers.Callers.Add(new IdpCallerAuthenticator(idp));     // NoResult for tokens it does not recognize
-```
+## AOT
 
-```csharp
-sealed class IdpCredentialIssuer : IApplicationCredentialIssuer
-{
-    private readonly IdentityProviderClient _idp;
+No reflection or runtime code generation. The manifest records are plain data; their value objects
+carry their own JSON converters.
 
-    public IdpCredentialIssuer(IdentityProviderClient idp)
-    {
-        _idp = idp;
-    }
+## Diagnostics
 
-    public async ValueTask<ApplicationCredential?> IssueAsync(
-        ApplicationCredentialRequest request,
-        CancellationToken cancellationToken = default) =>
-        request.Purpose is ApplicationCredentialPurpose.ResourceBootstrap or ApplicationCredentialPurpose.ResourceAccess
-            ? await _idp.IssueBearerAsync(request.Audience, request.Subject, request.Lifetime, cancellationToken)
-            : null;
-}
-```
+None. The library raises no events and has no event source.
 
-The request carries the audience, subject, and lifetime the default issuer would use for that
-purpose (the table on `IApplicationCredentialIssuer`). Every carrier except the telemetry headers
-document presents the credential as `Authorization: Bearer`, so the gateway refuses another scheme
-for those purposes. An authenticator maps a credential it recognizes to an `ApplicationCaller`
-(`Peer` with an `Application` to use command routes, `Developer` for read-only discovery) and
-returns `NoResult` for anything else. **Resources verify what the issuer mints:** a resource that
-receives an IdP-issued bootstrap, access, or telemetry credential registers a matching
-`IResourceCredentialVerifier` with `ResourceRuntime.RegisterCredentialVerifier(Assembly, factory)`
-before building its area application
-([Hosting.Resources DESIGN.md](../../../Hosting/Assimalign.Cohesion.Hosting.Resources/docs/DESIGN.md#resource-credential-verification);
-[RUNTIME_CONTRACT.md, Resource credentials](../../../../docs/RUNTIME_CONTRACT.md#resource-credentials)).
-The area hosting modules consult it first and fall back to application-key verification on
-`NoResult`, so both kinds of credential can coexist while an identity provider takes over.
-An `Authenticated` `ApplicationCallerResult` cannot be constructed without its caller (it throws
-`ArgumentException`); a `with` expression can still produce one, and the gateway control plane
-treats that as a defect (`500`), so no authenticator can pass the gateway an authenticated result
-with no identity to check. `ApplicationCaller.AllowedCommandKinds` follows `TrustedIssuer`: an empty list
-permits every command kind, so an authenticator that means "no commands" must forbid the caller
-rather than return an empty list.
+## Open questions
 
-Management grants are a separate list: `ApplicationCaller.AllowedManagementOperations` and
-`TrustedIssuer.AllowedManagementOperations`. Unlike the command rule, an empty list grants no
-management access. The gateway management API checks them per operation and target (a section, an
-action or a platform surface); see [Resource management](../../../../docs/libraries/ApplicationModel/RESOURCE_MANAGEMENT.md).
-No feature-specific state or HTTP handler is added to this declarative model.
-
-`TrustedIssuer` lives here (moved from `…ApplicationModel.Gateway`) because `ITrustedIssuerStore`
-and `IApplicationCallerAuthenticator` name it; it is BCL-only (ES256 JWK validation over
-`System.Text.Json` and `System.Security.Cryptography`), so the Core-only boundary is unchanged.
-
-**Secrets in values.** `ResourceProviderConnection`, `ApplicationCredential`,
-`ApplicationCallerRequest`, and `ResourceCertificate` (whose bundle carries a private key) redact
-those members from their record `ToString()`, so logging a request never logs the credential.
-
-## Lifecycle and error model
-
-- `Application.CreateBuilder(ApplicationName, args)` → fluent
-  `AddResource(...).DependsOn(...)` + `UseGateway(...)` → `Build()`. `UseName`
-  remains available for callers that start from the parameterless overload. Invocation intent
-  carried by the immutable model includes `--adopt` ownership consent and
-  `--restart-orphans` local-process recovery policy; platform gateways decide how to realize it.
-- `--realize <external>` is validated during `Build()`. It is accepted only in Local for
-  gateway identities `local`, `inprocess`, and `docker`, requires an embedded target manifest,
-  and replaces the requested external plus its reachable same-application closure with ordinary
-  planned resources. Cross-application references discovered within that closure remain external,
-  and realized members retain their original application identity for runtime naming.
-- After run cancellation, `CohesionApplication` lets the selected gateway apply its own
-  per-resource stop budgets. It does not impose one 30-second outer timeout across a
-  reverse-ordered resource set, which would truncate later resources' declared grace periods.
-  Cancellation that arrives while gateway startup is still blocked is handled identically: the
-  partially started session is stopped without uninstalling persistent resources, and Run
-  completes after that stop rather than surfacing lifetime cancellation as startup failure.
-- `Build()` validates: unique resource names (enforced eagerly on `AddResource`),
-  at least one realized resource, all explicit dependencies and required manifest references
-  present, no dependency cycles
-  (DFS), a selected gateway, an RFC 1123 application name, each typed override,
-  every computed plan, and the provider registrations (above), then asks the selected gateway to
-  validate realizability. Planning
-  deliberately happens here rather than in MSBuild or
-  when the resource is added.
-  Every failure is an `InvalidOperationException` with an actionable message; there
-  are no custom exception types in this library (an area-scoped root can be added
-  later if the surface grows).
-- In Run mode, `IApplication.RunAsync` mirrors `Host<TContext>.RunAsync`: a linked
-  `CancellationTokenSource` plus a `TaskCompletionSource` completed on cancellation.
-  It `StartAsync`es the gateway, awaits cancellation, then `StopAsync`es supervision
-  using the gateway's own resource-aware stop bounds. Stop retains persistent platform objects;
-  Apply performs a reconcile pass and Teardown dispatches `UninstallAsync(model)`. Describe emits the model document
-  (or the declaration-ordered document array for an application set) and never contacts the selected
-  gateway. Render and Bootstrap use optional gateway capabilities, receive the original cancellation
-  token, write to standard output, and remain platform-contact-free.
-
-## AOT posture
-
-This package is `Core`-only and AOT-clean: capability matching is `is`-based and
-there is **no reflection-based serialization**. Manifest, plan, and describe-mode
-model documents use explicit `JsonSerializerContext` contracts. Entry-assembly name
-fallback is used only in Local and is slugged before validation; assembly
-attributes are never read at run time. The generated value types use
-`System.Text.Json` converters that are source-emitted, not reflection-based.
-
-**Note on the family:** the sibling `…Gateway` base is also AOT-gated. Platform packages own
-their own AOT posture; this package neither references nor asserts an implementation status for
-Docker or Kubernetes integrations.
-
-## Family relationships
-
-- `…ApplicationModel.Gateway` (Layer 2a) — the guided `ApplicationGateway` base +
-  `LocalGateway`; implements the control-plane contracts defined here.
-- `…ApplicationModel.Gateway.ControlPlane` — the hosting-free authenticated HTTP server/client
-  behind `Gateway(...)`, plus the resource command dispatch seam.
-- `…ApplicationModel.Gateway.{Platform}` (Layer 2b) — platform compilers and controllers supplied
-  outside this contract package.
-- `{Resource}.ApplicationModel` — guarded, NuGet-only declarative packages referencing
-  `ApplicationModel` and `Hosting.Resources` directly; they
-  provide a typed `PlannedResource`, `Add{Resource}(manifest, options)`, the area's
-  planner when it differs from `GenericPlanner`, and the resource-side default
-  control-plane contract served by `{Resource}.Hosting`.
-- `{Resource}.ApplicationModel.Orchestration` — opt-in, NuGet-only packages that implement the
-  [provider seams](#provider-seams-explicit-registration) over their area's `{Resource}.Client`
-  and register them through an explicit `Use{Resource}(...)` verb. They reference this package
-  and the client only — never Hosting, the gateway family, or `{Resource}.ApplicationModel`.
-
-## Non-goals
-
-- Hosting a process (DI/Config/Logging composition stays in `{Resource}.Hosting`).
-- Building container images (delegated to the SDK container tooling, upstream, per
-  resource).
-- Referencing or rebuilding any `{Resource}.Hosting` runtime — an out-of-process orchestrator
-  only needs contracts, manifests/plans, and deployable artifacts.
-- Platform object formats, Kubernetes types, and process supervision — those live
-  in gateway/compiler packages. The platform-neutral resource manifest, realization
-  plan, and describe-mode model document are contracts of this package.
-- Area wire knowledge — store paths, command kinds, trust file formats, or any resource kind
-  name. Those belong to the orchestration package that implements a provider seam.
-- Cross-application store sources and providers, for now. A mount source or provider binding
-  that names another application's resource is rejected; supporting it waits on the store
-  resources accepting cross-application callers.
-
-## Declarative resource commands (T7a)
-
-`IResourceCommand` records desired state owned by the declaring application. Its target is
-an exact resource instance in that application's graph, including external nodes.
-`ResourceCommands.Create` requires source-generated `JsonTypeInfo<T>` metadata, snapshots
-UTF-8 JSON, sorts object properties ordinally at every nesting level, and derives a lowercase
-SHA-256 id from length-prefixed command kind, target application/resource identity, and canonical
-payload bytes. Changing a payload changes the id; `Owner`, the nonblank provider conflict `Key`,
-and `Optional` remain separate ownership and gating facts. The typed area verbs include their
-logical key fields in the payload. Payloads are copied when created and again when the model is built.
-
-`IResourceCommandDescriptor` is an additive authoring seam. Area-owned descriptor interfaces
-extend it and internal wrappers delegate command accumulation to the original descriptor.
-`IApplicationBuilder.AddCommand` also accepts an explicit declaration. `Build()` checks the
-owner against the declaring model, exact target graph membership, canonical payload and identity,
-nonblank keys, duplicate ids, and conflicting declarations for the same target/key,
-regardless of command kind. One desired graph declares one operation per provider ownership
-key; a subsequent model can replace or withdraw that operation. The model and each built command descriptor expose
-read-only command snapshots; built descriptors reject subsequent mutation.
-
-**Commands resolved before delivery.** An `IResourceCommandInputResolver` registered explicitly in
-the declaring application's `ApplicationProviders.CommandInputs` rewrites its matching kind before
-delivery, including when the target belongs to another application. Producer manifests contain no
-command catalog or resolver metadata. A command without a registered resolver is delivered as
-declared; the receiving control plane validates the supported kind and payload. A resource's
-runtime surface is static: the resource exports it at build time and serves it on its control
-plane, and nothing in this model discovers it from a running process.
-
-Dependency normalization accepts an older wrapper that exposes the exact registered `Resource`
-instance. This preserves unchanged SecretStore-style wrappers without requiring them to implement
-a new interface. Matching names or value equality never establish graph membership. New typed
-wrappers preserve the same invariant, including when a remote reference is rebound.
-
-`ApplicationModelDocument.Commands` retains declarations through describe/export/application-set
-roundtrips, validates canonical bytes and deterministic ids on import, and maps each imported
-target back to that imported model's resource instance. Old documents without commands import an
-empty list. These portable payloads are desired state and must never contain secret material;
-this slice supplies database names/principal names and nonsecret configuration values only.
-Observed command status is a separate resource state-manager contract.
-
-Command execution belongs to the gateway after Running and before dependent reconciliation.
-Area default-control-plane handlers retain ownership and reject unsupported mutation capabilities.
-The contract package adds no client, hosting, DI, platform, or runtime serialization dependency.
-`IControlPlaneExternalResourceResolver` exposes a peer gateway address without exposing the
-internal resolver implementation. In application sets the direct sibling resolver preserves its
-fallback's peer address, so generic command delivery can select a peer only when no sibling target
-is available. Static and file bindings expose no control-plane address. Exports validate observed
-command target membership, required identity fields, defined statuses and duplicate target/owner/id
-tuples. A rejected unsupported command kind is valid audit data even without a desired declaration.
-
-## Trust grant command options
-
-GatewayCommand carries an immutable AllowedCommandKinds list. Repeatable, comma-separated
---allow options are valid only in trust-add mode. Absent or empty grants mean unrestricted kinds;
-trust-issue rejects the option. ApplicationModel parses and carries policy; the serving gateway
-enforces it on apply and delete. The CLI's --against option remains deferred.
-
-## HTTPS certificate plan fact (31t)
-
-PortBinding carries optional `Certificate` after `Scheme`, retaining the original three-argument constructor and deconstruction. GenericPlanner copies the manifest value or an empty string. Validation is per endpoint: values must match, and nonempty values other than reserved `public` must identify a Secret MountBinding. ResourceManifest's existing Secret-only rule is unchanged. An HTTPS Secret mount adds no VolumeSpec and does not turn a Deployment into a StatefulSet. ResourceInputs additionally carries certificates-only transport trust bytes beside the bootstrap credential, outside the hashed plan.
-
-## Runtime surface and code-first deployment configuration (P2, 2026-10-25)
-
-Phase P2 of the [deployment-record program](../../../../docs/programs/RESOURCE_CONTROL_PLANE_REDESIGN.md)
-lets a gateway's `Program.cs` declare a resource's deployment configuration and checks it against
-what the resource's build said it accepts. This package owns the model half; the gateway owns the
-record (`…Gateway/docs/DESIGN.md`).
-
-- **The surface.** `ResourceSurface` parses `cohesion/runtime/v1`, the `resource.runtime.json` the
-  SDK's describe step writes after each build: `Configuration` sections (`ResourceSurfaceSection`:
-  path, mutability, scope, `Claimable`, JSON schema), `Actions` and `Tools`. Unknown members are
-  ignored and required ones are strict. `Digest` hashes the compact rewrite, so an indented and a
-  compact copy of one surface share it. `ResourceManifest.Surface` carries it in memory only
-  (`[JsonIgnore]`): `resource.json` stays `cohesion/resource/v2` and its digest does not move when
-  only the surface changes. Sdk.Gateway attaches it to each generated manifest, and a model
-  document carries it as the resource's sibling `surface` member.
-- **Declaring configuration.** `ResourceConfigurationExtensions` adds `Configure(section, patch)`
-  (a JSON string or a `JsonElement`), `SetExtension(key, value)` and `TryGetExtension(key, out
-  value)` to every descriptor through a generic `extension<TDescriptor>` block, so an area verb's
-  typed descriptor keeps chaining. Section paths and extension keys are the `ResourceSectionPath`
-  and `ResourceExtensionKey` value objects; the grammars match what Hosting.Resources lets a
-  resource declare (colon-separated segments; `<platform>/<name>`). Repeated `Configure` calls on
-  one section compose as RFC 7396 merge patches, through the `MergePatch` shared-source module
-  this package and the gateway compile.
-- **Where it lives.** The patches and extension data are stored on `PlannedResource`, which every
-  area's resource type derives from, so no area package changed (and the frozen Database model did
-  not have to). A built descriptor, an external resource, or a resource that is not a
-  `PlannedResource` refuses them.
-- **The plan.** `Build()` copies them into `ResourcePlan.Configuration` and `ResourcePlan.Extensions`
-  before validation. Both are omitted from the serialized plan when empty, so a resource that
-  declares nothing hashes exactly as before. `ResourcePlanValidator` requires a surface for any
-  configuration, a section the surface declares, and a patch its schema accepts, and names the
-  resource, section and JSON path on failure; extension keys must parse. A gateway validates which
-  of its own platform's keys it supports.
-- **Delivery input.** `ResourceInputs.WithDeploymentRecord(directory, generation, platformOverrides,
-  restartDigest)` hands a controller the record directory a resource reads as
-  `COHESION_CONFIG_DIRECTORY`, the generation the record belongs to, the generation's platform
-  surface overrides (phase P3, below) and the record's restart digest, which a platform that
-  restarts instances for restart-class sections stamps on what its instances start from. Like the
-  bootstrap credential they sit outside the hashed plan: they name a place or carry operator state,
-  not deployment content.
-
-The schema validator is a deliberate subset of JSON Schema, enough for the schemas Hosting.Resources
-generates: local `$ref` pointers, boolean schemas, `type`, `enum`, `const`, `pattern` (with a
-250 ms match timeout), `anyOf`/`oneOf`, `properties`/`additionalProperties`, `required` and
-`items`. An object schema that lists `properties` is closed unless it says otherwise, so a
-misspelt member fails at `Build()` rather than being ignored by the resource. A merge patch skips
-`required`, because it changes only the members it names, but may not remove a required member.
-
-Two limits are accepted for now. Composition keeps a `null` tombstone, so a later object patch on
-the same member merges into nothing rather than replacing the earlier value. And configuration is
-validated against the surface the build described; a resource built without the describe step has
-no surface, and any `Configure` call on it fails `Build()`.
-
-### Scale bounds and platform surfaces (phase P3)
-
-Phase P3 adds the two model pieces platform gateways build their typed verbs and manageable
-settings on (decision D5):
-
-- **Scale bounds.** `ScaleBetween(minimum, maximum)` and `TryGetScale` join the generic
-  `ResourceConfigurationExtensions` block; the bounds are stored on `PlannedResource` and `Build()`
-  copies them into `WorkloadSpec.Scale` (`ScaleBounds`), which is omitted from the serialized plan
-  when absent, so a plan without bounds hashes as before. `ResourcePlanValidator` refuses bounds on a
-  workload that does not run continuously and replicate (a Job or a DaemonSet), a minimum below one
-  or a maximum below the minimum, and a maximum above the manifest's `maxReplicas`. The bounds are
-  neutral: a platform that autoscales keeps the replica count between them, and one that does not
-  ignores them. Platform verbs such as Kubernetes' `ConfigureHpa` write their bounds here and keep
-  only what is platform-specific in extension data, so the bounds survive a change of platform.
-- **Platform surfaces.** `ResourcePlatformSurface` is one manageable setting of a platform object: a
-  `ResourceExtensionKey`, a JSON schema in the subset above, the value code declares, and an
-  optional rule. `Create` checks the schema and the declared value, `TryValidatePatch` checks an
-  operator's merge patch, then the value it produces, then the rule, and `Apply` merges an override
-  over the declared value (`JsonMergePatchComposition.Apply`, the shared `MergePatch` module's RFC
-  7396 application). It is a public sealed type with a static `Create` because platform packages
-  construct it, and it lives here because both the gateway base and the platform packages need it,
-  and this package is the one both reference.
-- **Why data with a schema, not a typed contract per platform.** The management API, and a later
-  portal, serve and validate a surface without loading platform code: a platform adds a surface by
-  publishing a key, a schema and a value. The rule covers what the schema subset cannot state, such
-  as a minimum that may not exceed a maximum. The cost is that a platform's object model is restated
-  as a schema, and the schema and the platform's compiler can drift apart unless the platform's
-  tests cover both.
+1. **Tenant and identity provider.** Neither is modeled yet. Is the tenant's identity provider a
+   resource of the root set, an external service, or both? Permissions are only recorded until then.
+2. **Permission vocabulary.** A permission is checked against its grammar only. The target's
+   provider should declare the permissions it accepts; that arrives with the area packages.
+3. **Composite depth.** May a child gateway run child gateways of its own? This chunk allows it.
+4. **Deployment manifest — settled in chunk 3.** ApplicationModel.Gateway's
+   `GatewayDeploymentManifest` carries the "what" (this manifest plus a gateway name) and the "where"
+   (provider settings), with its JSON wire contract. The `/infra` routes' transport is still open.
+5. **Area verbs.** `set.AddWeb("orders-api")` and resource options belong to the area packages, once
+   area implementations consolidate into `<Area>.ApplicationModel`.
+6. **Static assets.** The SDK will generate assets for each `CohesionResourceReference` that the
+   gateway needs. A descriptor and its manifest record have no slot for them yet; the slot's shape
+   comes with the generation that fills it.
+7. **A child gateway's model — settled in chunk 3** (D14): the whole manifest plus the child's name,
+   carried by a `GatewayDeploymentManifest`.

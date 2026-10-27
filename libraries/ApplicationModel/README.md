@@ -1,5 +1,13 @@
 # ApplicationModel Library Area
 
+> **Being rebuilt (2026-10-27).** `Assimalign.Cohesion.ApplicationModel` and
+> `Assimalign.Cohesion.ApplicationModel.Gateway` have been rebuilt on
+> `Assimalign.Cohesion.Hosting.Resources`; see their
+> [model](Assimalign.Cohesion.ApplicationModel/docs/DESIGN.md) and
+> [gateway](Assimalign.Cohesion.ApplicationModel.Gateway/docs/DESIGN.md) designs.
+> `Gateway.InProcess` and `Gateway.ControlPlane` are not rebuilt yet, and the rest of this page and
+> the linked area records describe the retired design.
+
 The L2 application-composition and orchestration plane: the declarative application model every
 resource area's `<Area>.ApplicationModel` package builds on, plus the gateway family that
 describes and realizes resource manifests without loading their runtimes.
@@ -25,7 +33,8 @@ references a gateway.
 
 ```mermaid
 flowchart LR
-    Model["Assimalign.Cohesion.ApplicationModel"] --> Core["Assimalign.Cohesion.Core"]
+    Model["Assimalign.Cohesion.ApplicationModel"] --> Resources["Assimalign.Cohesion.Hosting.Resources"]
+    Model --> Core["Assimalign.Cohesion.Core"]
     Gateway["ApplicationModel.Gateway"] --> Model
     InProcess["ApplicationModel.Gateway.InProcess"] --> Gateway
     ControlPlane["ApplicationModel.Gateway.ControlPlane"] --> Model
@@ -40,8 +49,8 @@ outside resource-area packages. That prohibition has no opt-out and no exemption
 
 | Project | Role |
 | --- | --- |
-| `Assimalign.Cohesion.ApplicationModel` | The declarative application model: resources, descriptors, manifests, the plan IR, and the planner contracts every area's `<Area>.ApplicationModel` composes against |
-| `Assimalign.Cohesion.ApplicationModel.Gateway` | The out-of-process gateway base: describe and realize resource manifests without loading their runtimes |
+| `Assimalign.Cohesion.ApplicationModel` | Application sets (what each gateway deploys), resource descriptors and their permission-carrying dependencies, the global manifest, and the gateway-side aggregate of a resource's instances and state |
+| `Assimalign.Cohesion.ApplicationModel.Gateway` | The gateway: deploys its part of the hierarchy through an infrastructure provider, receives instance publications, and exposes infrastructure actions |
 | `Assimalign.Cohesion.ApplicationModel.Gateway.InProcess` | The in-process Composite plan controller — compiles the supported in-process subset of a Composite plan |
 | `Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane` | The gateway-side control-plane contract that a resource's default control plane is reached through |
 

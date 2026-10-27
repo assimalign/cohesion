@@ -1,96 +1,21 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
 		<RootNamespace>Assimalign.Cohesion.ApplicationModel</RootNamespace>
+		<Description>Cohesion application model: the hierarchical set of gateways and the application resources they deploy, resource dependencies and their permissions, the global manifest, and the gateway-side aggregate of a resource's instances and state.</Description>
 	</PropertyGroup>
+	<!--
+		Deviates from the repo "base ApplicationModel remains Core-only" rule (resource-areas.md) per
+		the 2026-10-27 redesign: an application resource aggregates the instances Hosting.Resources
+		defines, so the model shares that library's identity, manifest, and state types instead of
+		duplicating them.
+	-->
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Core" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Resources" />
 	</ItemGroup>
 	<ItemGroup>
-		<CohesionSharedSource Include="Assimalign.Cohesion.ApplicationModel" Module="MergePatch" />
-	</ItemGroup>
-	<ItemGroup>
-		<CohesionValueType
-			Include="ValueObjects\ResourceGroupName.cs"
-			ObjectRuntimeType="String"
-			ObjectNamespace="Assimalign.Cohesion.ApplicationModel"
-			ObjectAccessModifier="public"
-			ObjectHasImplicitOperators="true"
-			ObjectHasIsValidMethod="true"
-			ObjectComparison="Ordinal" />
-		<CohesionValueType 
-			Include="ValueObjects\ResourceName.cs" 
-			ObjectRuntimeType="String" 
-			ObjectNamespace="Assimalign.Cohesion.ApplicationModel" 
-			ObjectAccessModifier="public" 
-			ObjectHasImplicitOperators="true" />
-		<CohesionValueType
-			Include="ValueObjects\ResourceId.cs"
-			ObjectRuntimeType="Guid"
-			ObjectNamespace="Assimalign.Cohesion.ApplicationModel"
-			ObjectAccessModifier="public"
-			ObjectHasImplicitOperators="true" />
-		<CohesionValueType
-			Include="ValueObjects\ApplicationName.cs"
-			ObjectRuntimeType="String"
-			ObjectNamespace="Assimalign.Cohesion.ApplicationModel"
-			ObjectAccessModifier="public"
-			ObjectHasImplicitOperators="true"
-			ObjectHasIsValidMethod="true"
-			ObjectComparison="Ordinal" />
-		<CohesionValueType
-			Include="ValueObjects\EnvironmentName.cs"
-			ObjectRuntimeType="String"
-			ObjectNamespace="Assimalign.Cohesion.ApplicationModel"
-			ObjectAccessModifier="public"
-			ObjectHasImplicitOperators="true" />
-		<CohesionValueType
-			Include="ValueObjects\ResourceSectionPath.cs"
-			ObjectRuntimeType="String"
-			ObjectNamespace="Assimalign.Cohesion.ApplicationModel"
-			ObjectAccessModifier="public"
-			ObjectHasImplicitOperators="true"
-			ObjectHasIsValidMethod="true"
-			ObjectComparison="Ordinal" />
-		<CohesionValueType
-			Include="ValueObjects\ResourceExtensionKey.cs"
-			ObjectRuntimeType="String"
-			ObjectNamespace="Assimalign.Cohesion.ApplicationModel"
-			ObjectAccessModifier="public"
-			ObjectHasImplicitOperators="true"
-			ObjectHasIsValidMethod="true"
-			ObjectComparison="Ordinal" />
-		<CohesionValueType
-			Include="ValueObjects\ResourceHttpPath.cs"
-			ObjectRuntimeType="String"
-			ObjectNamespace="Assimalign.Cohesion.ApplicationModel"
-			ObjectAccessModifier="public"
-			ObjectHasImplicitOperators="true"
-			ObjectHasIsValidMethod="true"
-			ObjectComparison="Ordinal" />
-		<CohesionValueType
-			Include="ValueObjects\ResourceMountSource.cs"
-			ObjectRuntimeType="String"
-			ObjectNamespace="Assimalign.Cohesion.ApplicationModel"
-			ObjectAccessModifier="public"
-			ObjectHasImplicitOperators="true"
-			ObjectHasIsValidMethod="true"
-			ObjectComparison="Ordinal" />
-		<CohesionValueType
-			Include="ValueObjects\ApplicationCredentialScheme.cs"
-			ObjectRuntimeType="String"
-			ObjectNamespace="Assimalign.Cohesion.ApplicationModel"
-			ObjectAccessModifier="public"
-			ObjectHasImplicitOperators="true"
-			ObjectHasIsValidMethod="true"
-			ObjectComparison="OrdinalIgnoreCase" />
-		<CohesionValueType
-			Include="ValueObjects\ApplicationCredentialValue.cs"
-			ObjectRuntimeType="String"
-			ObjectNamespace="Assimalign.Cohesion.ApplicationModel"
-			ObjectAccessModifier="public"
-			ObjectHasImplicitOperators="false"
-			ObjectHasIsValidMethod="true"
-			ObjectComparison="Ordinal"
-			ObjectHasCustomToString="true" />
+		<CohesionValueType Include="ValueObjects\GatewayName.cs" ObjectRuntimeType="String" ObjectNamespace="Assimalign.Cohesion.ApplicationModel" ObjectAccessModifier="public" ObjectHasImplicitOperators="true" ObjectHasIsValidMethod="true" ObjectComparison="Ordinal" />
+		<CohesionValueType Include="ValueObjects\GatewayId.cs" ObjectRuntimeType="Guid" ObjectNamespace="Assimalign.Cohesion.ApplicationModel" ObjectAccessModifier="public" ObjectHasImplicitOperators="true" />
+		<CohesionValueType Include="ValueObjects\ResourcePermission.cs" ObjectRuntimeType="String" ObjectNamespace="Assimalign.Cohesion.ApplicationModel" ObjectAccessModifier="public" ObjectHasImplicitOperators="true" ObjectHasIsValidMethod="true" ObjectComparison="Ordinal" />
 	</ItemGroup>
 </Project>

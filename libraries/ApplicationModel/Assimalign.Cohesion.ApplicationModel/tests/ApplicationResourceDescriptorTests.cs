@@ -1,60 +1,81 @@
 using System;
+using System.Linq;
 
 using Shouldly;
 using Xunit;
-
-using Assimalign.Cohesion.ApplicationModel;
 
 namespace Assimalign.Cohesion.ApplicationModel.Tests;
 
 public class ApplicationResourceDescriptorTests
 {
-    [Fact]
-    public void DependsOn_LinksDependency()
+    private const string DisplayPrefix = "Cohesion Test [ApplicationModel] - ApplicationResourceDescriptor: ";
+
+    [Fact(DisplayName = DisplayPrefix + "Declaring a dependency again adds its new permissions once")]
+    public void DependsOn_WithSameResourceTwice_ShouldMergePermissions()
     {
-        IApplicationBuilder builder = Application.CreateBuilder().UseGateway(new FakeGateway());
-        IApplicationResourceDescriptor a = builder.AddResource(new FakeResource("a"));
-        IApplicationResourceDescriptor b = builder.AddResource(new FakeResource("b"));
+        // Arrange
+        ApplicationBuilder root = Application.CreateBuilder("root", []);
+        IApplicationResourceDescriptor database = root.AddResource("Database.Sql", "orders-db");
+        IApplicationResourceDescriptor api = root.AddResource("Web", "orders-api");
 
-        a.DependsOn(b);
+        // Act
+        api.DependsOn(database, "data.read").DependsOn(database, "data.write", "data.read");
 
-        a.Dependencies.Count.ShouldBe(1);
-        a.Dependencies.ShouldContain(b);
+        // Assert
+        ApplicationResourceDependency dependency = api.Dependencies.ShouldHaveSingleItem();
+        dependency.Permissions.Select(permission => permission.Value).ShouldBe(["data.read", "data.write"]);
     }
 
-    [Fact]
-    public void DependsOn_Params_LinksAll()
+    [Fact(DisplayName = DisplayPrefix + "A dependency names the gateway whose set declares the resource")]
+    public void DependsOn_WithResourceInAnotherGateway_ShouldRecordThatGateway()
     {
-        IApplicationBuilder builder = Application.CreateBuilder().UseGateway(new FakeGateway());
-        IApplicationResourceDescriptor a = builder.AddResource(new FakeResource("a"));
-        IApplicationResourceDescriptor b = builder.AddResource(new FakeResource("b"));
-        IApplicationResourceDescriptor c = builder.AddResource(new FakeResource("c"));
+        // Arrange
+        ApplicationBuilder root = Application.CreateBuilder("root", []);
+        IApplicationResourceDescriptor identity = root.AddResource("IdentityHub", "identity");
+        IApplicationResourceDescriptor api = root.AddGateway("east").AddResource("Web", "orders-api");
 
-        a.DependsOn(b, c);
+        // Act
+        api.DependsOn(identity, "tokens.issue");
 
-        a.Dependencies.Count.ShouldBe(2);
-        a.Dependencies.ShouldContain(b);
-        a.Dependencies.ShouldContain(c);
+        // Assert
+        ApplicationResourceDependency dependency = api.Dependencies.ShouldHaveSingleItem();
+        dependency.Gateway.ShouldBe(root.Name);
+        dependency.Provider.ShouldBe(identity.Provider);
+        dependency.Name.ShouldBe(identity.Name);
     }
 
-    [Fact]
-    public void DependsOn_SameDependencyTwice_IsDeduplicated()
+    [Fact(DisplayName = DisplayPrefix + "A resource cannot depend on itself")]
+    public void DependsOn_WithItself_ShouldThrow()
     {
-        IApplicationBuilder builder = Application.CreateBuilder().UseGateway(new FakeGateway());
-        IApplicationResourceDescriptor a = builder.AddResource(new FakeResource("a"));
-        IApplicationResourceDescriptor b = builder.AddResource(new FakeResource("b"));
+        // Arrange
+        IApplicationResourceDescriptor api = Application.CreateBuilder("root", []).AddResource("Web", "orders-api");
 
-        a.DependsOn(b).DependsOn(b);
-
-        a.Dependencies.Count.ShouldBe(1);
+        // Act & Assert
+        Should.Throw<ArgumentException>(() => api.DependsOn(api));
     }
 
-    [Fact]
-    public void DependsOn_Self_Throws()
+    [Fact(DisplayName = DisplayPrefix + "A resource of another hierarchy is refused")]
+    public void DependsOn_WithResourceOfAnotherHierarchy_ShouldThrow()
     {
-        IApplicationBuilder builder = Application.CreateBuilder().UseGateway(new FakeGateway());
-        IApplicationResourceDescriptor a = builder.AddResource(new FakeResource("a"));
+        // Arrange
+        IApplicationResourceDescriptor api = Application.CreateBuilder("contoso", []).AddResource("Web", "orders-api");
+        IApplicationResourceDescriptor database = Application.CreateBuilder("fabrikam", []).AddResource("Database.Sql", "orders-db");
 
-        Should.Throw<InvalidOperationException>(() => a.DependsOn(a));
+        // Act & Assert
+        Should.Throw<ArgumentException>(() => api.DependsOn(database, "data.read"));
+        api.Dependencies.ShouldBeEmpty();
+    }
+
+    [Fact(DisplayName = DisplayPrefix + "A default permission is refused")]
+    public void DependsOn_WithDefaultPermission_ShouldThrow()
+    {
+        // Arrange
+        ApplicationBuilder root = Application.CreateBuilder("root", []);
+        IApplicationResourceDescriptor database = root.AddResource("Database.Sql", "orders-db");
+        IApplicationResourceDescriptor api = root.AddResource("Web", "orders-api");
+
+        // Act & Assert
+        Should.Throw<ArgumentException>(() => api.DependsOn(database, "data.read", default));
+        api.Dependencies.ShouldBeEmpty();
     }
 }

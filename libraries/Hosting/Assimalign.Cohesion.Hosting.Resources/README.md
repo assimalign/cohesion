@@ -1,37 +1,16 @@
-# Hosting.Resources
+# Assimalign.Cohesion.Hosting.Resources
 
-`Assimalign.Cohesion.Hosting.Resources` is the opt-in resource runtime for Cohesion executables.
-It owns the health contracts, ambient `ResourceContext`, protected mounts, control-plane aggregation, compiler-rooted
-entry invocation, and the runner that translates a plain host lifetime into the supervisor-facing
-resource process contract.
+What a Cohesion resource instance is, and the control plane that runs inside it.
 
-The package directly depends on `Assimalign.Cohesion.Core` and `Assimalign.Cohesion.Hosting`.
-It also uses the Windows
-`System.Security.Cryptography.ProtectedData` BCL facade for DPAPI-backed mounts.
+A resource instance has an identity (its provider, its resource name, and a key of its own), the
+actions its control plane exposes, the state those actions leave, and health contributors. When its
+host starts, the control plane publishes the instance's manifest to the gateway that manages it and
+restores the state the gateway returns: every stateful write made since the resource was last
+deployed. Afterwards it executes actions and restores state on request.
 
-The base `Assimalign.Cohesion.App` framework delivers Resources beside plain Hosting because every
-opt-in resource SDK generates `ResourceRuntime` calls. Presence in
-the framework is not activation: a disabled `CohesionApplicationModel` produces no resource
-registration, while direct package consumers can choose their references independently.
+The library is transport-neutral and gateway-neutral. The Web area binds the control plane to HTTP;
+`Assimalign.Cohesion.ApplicationModel` and `Assimalign.Cohesion.ApplicationModel.Gateway` manage
+instances.
 
-Health values and `IHealthContributor` are defined in this package's
-`Assimalign.Cohesion.Hosting.Resources` namespace. The former Health sibling project and package
-have been removed. Database remains unchanged for its separate branch integration; no compatibility
-assembly or namespace is supplied for its old references.
-
-Enabled resource generators register an executable entry and an area control-plane factory.
-`ResourceRuntime.HostBuilt` attaches that invocation's control plane and installs a resource runner
-on that host only. Ordinary hosts remain ordinary Hosting runs.
-
-On the normal fully-started resource-process path the runner emits:
-
-`cohesion-resource: ready` → `cohesion-resource: stopping` → `cohesion-resource: stopped`
-
-If a stop is accepted while `OnStartedAsync` is still running, `ready` is omitted and the protocol
-begins with `stopping`; a late `ready` is never emitted after the stop transition.
-
-It converts the executable boundary to the frozen `cohesion/sysexits/v1` mapping: `0` success,
-`64` configuration, `69` dependency, `70` other pre-ready failure, `75` other post-ready failure,
-`130` interrupted drain, and `143` other requested-stop drain cancellation. A process writes the
-result to `Environment.ExitCode`; an in-process invocation faults with
-`ResourceEntryExitException` for a nonzero result so its supervisor keeps the same policy.
+- [Overview](docs/OVERVIEW.md)
+- [Design](docs/DESIGN.md)

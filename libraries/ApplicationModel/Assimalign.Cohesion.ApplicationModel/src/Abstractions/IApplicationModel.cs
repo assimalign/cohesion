@@ -1,105 +1,46 @@
-using System.Collections.Generic;
-
 namespace Assimalign.Cohesion.ApplicationModel;
 
 /// <summary>
-/// The immutable desired state of an application — the architecture graph: a named set
-/// of resources, the environment they are realized into, and the dependency edges
-/// between them.
+/// The immutable model of an application: what its gateway deploys, as validated manifest data.
 /// </summary>
 /// <remarks>
-/// <see cref="Descriptors"/> is the single source of truth: the dependency edges live
-/// there and a gateway topologically sorts them. <see cref="Resources"/> is a read-only
-/// one-to-one projection of <see cref="Descriptors"/> for convenience. The mutable
-/// working collection used while authoring lives on <see cref="IApplicationBuilder"/>,
-/// not here.
+/// <para>
+/// A model is built from code, by <see cref="IApplicationBuilder.Build"/>, or from manifest data a
+/// gateway received, by <see cref="ApplicationModel.Create(ApplicationManifest, GatewayName)"/>. Both
+/// paths enforce the same rules, so a gateway treats the two alike.
+/// </para>
+/// <para>
+/// <see cref="Manifest"/> is always the whole hierarchy, so a dependency that points outside this
+/// gateway's part still resolves. <see cref="Name"/> says which gateway the model is for, and
+/// <see cref="Deployment"/> is that gateway's part.
+/// </para>
 /// </remarks>
 public interface IApplicationModel
 {
     /// <summary>
-    /// A stable, human-meaningful name for the application. Gateways use it as the
-    /// Kubernetes namespace, the local log-prefix root, and the registry repository prefix.
+    /// Gets the id of the gateway the model is for.
     /// </summary>
-    ApplicationName Name { get; }
+    GatewayId Id => GatewayId.FromName(Name);
 
     /// <summary>
-    /// The environment this application is being realized into.
+    /// Gets the name of the gateway the model is for: the root gateway for a model built in code, or
+    /// the child gateway a deployment manifest names.
     /// </summary>
-    IApplicationEnvironment Environment { get; }
+    GatewayName Name { get; }
 
     /// <summary>
-    /// The operation requested for this invocation.
+    /// Gets the gateway's position in the hierarchy.
     /// </summary>
-    GatewayRunMode RunMode { get; }
+    GatewayRole Role => Name == Manifest.Name ? GatewayRole.Root : GatewayRole.Composite;
 
     /// <summary>
-    /// The stable identity of the gateway selected to realize this model.
+    /// Gets the manifest of the whole hierarchy, from the root gateway down.
     /// </summary>
-    ResourceName GatewayIdentity { get; }
+    ApplicationManifest Manifest { get; }
 
     /// <summary>
-    /// The ownership identity written by platform gateways, in the form
-    /// <c>&lt;application&gt;@&lt;gateway-identity&gt;</c>.
+    /// Gets the part of <see cref="Manifest"/> this gateway deploys: its own resources and its child
+    /// gateways.
     /// </summary>
-    string Owner { get; }
-
-    /// <summary>
-    /// Gets whether an existing target owned by another gateway may be adopted explicitly.
-    /// </summary>
-    bool Adopt { get; }
-
-    /// <summary>
-    /// Gets whether a local gateway should gracefully replace verified child processes left
-    /// by an earlier gateway instance instead of re-attaching to them.
-    /// </summary>
-    bool RestartOrphans { get; }
-
-    /// <summary>
-    /// The dependency descriptors — authoritative. Each descriptor wraps a resource and
-    /// the resources it must be realized after.
-    /// </summary>
-    IReadOnlyList<IApplicationResourceDescriptor> Descriptors { get; }
-
-    /// <summary>
-    /// A read-only projection of the resources composing the application, in declaration
-    /// order. Equivalent to <c>Descriptors.Select(d =&gt; d.Resource)</c>; the invariant
-    /// <c>Resources.Count == Descriptors.Count</c> holds with a one-to-one correspondence.
-    /// </summary>
-    IReadOnlyList<IApplicationResource> Resources { get; }
-
-    /// <summary>
-    /// The generic, platform-neutral manifests for <see cref="Resources"/>, in declaration order.
-    /// </summary>
-    IReadOnlyList<ResourceManifest> Manifests { get; }
-
-    /// <summary>
-    /// The validated realization plans computed for <see cref="Resources"/> during
-    /// <see cref="IApplicationBuilder.Build"/>, in declaration order.
-    /// </summary>
-    IReadOnlyList<ResourcePlan> Plans { get; }
-
-    /// <summary>Gets logical groups and their resource membership in declaration order.</summary>
-    IReadOnlyList<ApplicationResourceGroup> ResourceGroups => System.Array.Empty<ApplicationResourceGroup>();
-
-    /// <summary>Gets the immutable commands claimed by this application in declaration order.</summary>
-    IReadOnlyList<IResourceCommand> Commands => System.Array.Empty<IResourceCommand>();
-
-    /// <summary>
-    /// Gets the frozen provider registrations the gateway resolves stores, certificates, trust,
-    /// command inputs, telemetry, credentials, and control-plane callers through.
-    /// </summary>
-    /// <remarks>
-    /// A model built by <see cref="IApplicationBuilder.Build"/> carries a frozen snapshot of the
-    /// builder's <see cref="IApplicationBuilder.Providers"/>. Providers are code and are never
-    /// serialized, so a model imported from a document (an application-set member or an export), and
-    /// any implementation that does not override this member, carries
-    /// <see cref="ApplicationProviders.Empty"/>. An application set attaches a member's registrations
-    /// explicitly: the member added through
-    /// <see cref="IApplicationSet.AddApplication(ApplicationDeclaration, System.Action{IApplicationProviderBuilder})"/>
-    /// carries exactly what that callback registered, validated against the member's own resources.
-    /// Registrations are never inherited from another model, the set, or another member by name.
-    /// A gateway handed a model without the registration a <c>&lt;source&gt;:&lt;key&gt;</c> mount
-    /// needs reports that mount as unresolved, naming the missing registration.
-    /// </remarks>
-    ApplicationProviders Providers => ApplicationProviders.Empty;
+    ApplicationManifest Deployment { get; }
 }

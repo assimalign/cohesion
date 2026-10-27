@@ -4,18 +4,27 @@
   <resheader name="version"><value>2.0</value></resheader>
   <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms</value></resheader>
   <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
-  <data name="ResourceConfigurationPathInvalid" xml:space="preserve"><value>A configuration path is one or more segments of ASCII letters, digits, dots, hyphens or underscores separated by single colons, at most 256 characters.</value></data>
+  <data name="ResourceNameInvalid" xml:space="preserve"><value>A resource name is 1 to 63 lowercase ASCII letters, digits, or hyphens, starting with a letter and ending with a letter or digit.</value></data>
+  <data name="ProviderNameInvalid" xml:space="preserve"><value>A provider name is one or more dot-separated segments of ASCII letters and digits, each starting with a letter, at most 128 characters.</value></data>
   <data name="ResourceActionNameInvalid" xml:space="preserve"><value>An action name is lowercase ASCII letters and digits in hyphen-separated words, at most 64 characters.</value></data>
-  <data name="ResourceToolNameInvalid" xml:space="preserve"><value>A tool name is lowercase ASCII letters and digits in hyphen-separated words, at most 64 characters.</value></data>
-  <data name="ResourceToolSubprotocolInvalid" xml:space="preserve"><value>A tool subprotocol is an HTTP token and applies only to the WebSocket protocol.</value></data>
-  <data name="ResourceSurfaceUnsupported" xml:space="preserve"><value>This resource control plane has no runtime surface.</value></data>
-  <data name="ResourceSurfaceFrozen" xml:space="preserve"><value>The runtime surface cannot change after the resource host is built.</value></data>
-  <data name="ResourceConfigurationSectionDuplicate" xml:space="preserve"><value>A configuration section with this path is already registered.</value></data>
-  <data name="ResourceConfigurationClaimableNotObject" xml:space="preserve"><value>A claimable configuration section must bind to a JSON object whose members are the claimed entries.</value></data>
-  <data name="ResourceActionDuplicate" xml:space="preserve"><value>An action with this name is already registered.</value></data>
-  <data name="ResourceToolDuplicate" xml:space="preserve"><value>A tool with this name is already registered.</value></data>
-  <data name="ResourceActionUnknown" xml:space="preserve"><value>The resource exposes no action with this name.</value></data>
-  <data name="ResourceActionInputInvalid" xml:space="preserve"><value>The action input does not bind to the action's input type.</value></data>
-  <data name="ResourceConfigurationDirectoryMissing" xml:space="preserve"><value>The deployment record directory does not exist.</value></data>
-  <data name="ResourceConfigurationRecordInvalid" xml:space="preserve"><value>A deployment record layer is larger than 1 MiB or is not a JSON object, or a claim layer's owner is not a DNS label or appears twice.</value></data>
+  <data name="ProviderNameMissing" xml:space="preserve"><value>A provider name is required.</value></data>
+  <data name="ResourceNameMissing" xml:space="preserve"><value>A resource name is required.</value></data>
+  <data name="ResourceActionNameMissing" xml:space="preserve"><value>An action name is required.</value></data>
+  <data name="ResourceInstanceKeyMissing" xml:space="preserve"><value>A resource instance key is required.</value></data>
+  <data name="ResourceActionsMissing" xml:space="preserve"><value>The resource returned no action collection.</value></data>
+  <data name="ResourceHealthContributorsMissing" xml:space="preserve"><value>The resource returned no health contributor collection.</value></data>
+  <data name="ResourceActionNull" xml:space="preserve"><value>The resource's action collection contains null.</value></data>
+  <data name="ResourceActionKindInvalid" xml:space="preserve"><value>Action '{0}' must accept Read, Write, or both, and nothing else.</value></data>
+  <data name="ResourceActionStateReadOnly" xml:space="preserve"><value>Action '{0}' has state but does not accept writes. Only a write changes state, so only a writable action may have it.</value></data>
+  <data name="ResourceActionNameDuplicate" xml:space="preserve"><value>The resource declares action '{0}' more than once.</value></data>
+  <data name="ResourceActionOperationInvalid" xml:space="preserve"><value>An invocation requests exactly one operation: Read or Write.</value></data>
+  <data name="ResourceActionResultNull" xml:space="preserve"><value>Action '{0}' returned null instead of a result.</value></data>
+  <data name="ResourceStateSnapshotEmpty" xml:space="preserve"><value>A state snapshot is a UTF-8 JSON value and cannot be empty.</value></data>
+  <data name="ResourceStateSnapshotNull" xml:space="preserve"><value>A state snapshot cannot be the JSON literal null.</value></data>
+  <data name="ResourceControlPlaneAlreadyStarted" xml:space="preserve"><value>The resource control plane has already been started.</value></data>
+  <data name="ResourceControlPlaneNotStarted" xml:space="preserve"><value>The resource control plane is not started; it accepts invocations and restores only between StartAsync and StopAsync.</value></data>
+  <data name="ResourcePublicationNull" xml:space="preserve"><value>The manifest publisher returned null instead of a snapshot list.</value></data>
+  <data name="ResourcePublicationSnapshotNull" xml:space="preserve"><value>The manifest publisher returned a null snapshot.</value></data>
+  <data name="ResourcePublicationSnapshotDuplicate" xml:space="preserve"><value>The manifest publisher returned more than one snapshot for action '{0}'.</value></data>
+  <data name="ResourceStateRestoreFailed" xml:space="preserve"><value>The snapshot the manifest publisher returned for action '{0}' was not restored ({1}). {2}</value></data>
 </root>
