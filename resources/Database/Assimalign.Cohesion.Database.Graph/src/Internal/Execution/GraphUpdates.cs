@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Graph.Language;
 using Assimalign.Cohesion.Database.Graph.Storage;
+using Assimalign.Cohesion.Database.Transactions;
 
 using Assimalign.Cohesion.Database.Graph.Protocol;
 
@@ -32,6 +33,18 @@ internal sealed class GraphUpdates : IDisposable
     private readonly HashSet<(bool Node, ulong Id)> _changed = [];
     private readonly Dictionary<(bool Node, ulong Id), object> _entityValues = [];
     private GraphMemoryOwner? _memory;
+    private TransactionSnapshot? _readSnapshot;
+
+    // The MERGE seam owns this scope; every overlay-aware read uses the selected store view.
+    internal TransactionSnapshot ReadSnapshot => _readSnapshot ?? _operation.Context.Snapshot;
+    internal TransactionSnapshot? OverrideReadSnapshot(TransactionSnapshot? snapshot)
+    {
+        var previous = _readSnapshot;
+        _readSnapshot = snapshot;
+        // Type selections are view-dependent, including cached absence.
+        _typeSelections.Clear();
+        return previous;
+    }
 
     internal GraphUpdates(GraphDatabase database, GraphOperation operation) { _database = database; _operation = operation; }
 
@@ -84,7 +97,7 @@ internal sealed class GraphUpdates : IDisposable
 
     internal StoredGraphRelationship? FindRelationship(ulong id) => _relationships.TryGetValue(id, out var edge)
         ? new StoredGraphRelationship(id, edge.From.Value, edge.To.Value, edge.Type, edge.Properties)
-        : _database.Store.FindRelationship(id, _operation.Context.Snapshot);
+        : _database.Store.FindRelationship(id, ReadSnapshot);
     internal void DeletedNode(ulong id)
     {
         if (_nodes.Remove(id, out var node)) { ForgetLabels(node); }
@@ -92,7 +105,7 @@ internal sealed class GraphUpdates : IDisposable
     internal void DeletedRelationship(ulong id) => _relationships.Remove(id);
 
     internal StoredGraphNode? FindNode(ulong id) => _nodes.TryGetValue(id, out var node)
-        ? new StoredGraphNode(id, node.Labels, node.Properties) : _database.Store.FindNode(id, _operation.Context.Snapshot);
+        ? new StoredGraphNode(id, node.Labels, node.Properties) : _database.Store.FindNode(id, ReadSnapshot);
 
     private void RememberNode(GraphNode node, CancellationToken token = default)
     {
@@ -144,13 +157,13 @@ internal sealed class GraphUpdates : IDisposable
     internal IReadOnlyList<StoredGraphNode> GetNodes(string? label, CancellationToken token = default)
     {
         token.ThrowIfCancellationRequested();
-        var stored = label is null ? _database.Store.GetNodes(null, _operation.Context.Snapshot)
-            : _database.Store.ScanLabels([label], _operation.Context.Snapshot, token);
+        var stored = label is null ? _database.Store.GetNodes(null, ReadSnapshot)
+            : _database.Store.ScanLabels([label], ReadSnapshot, token);
         return MergeNodes(stored, label is null ? _nodes.Values : PendingNodes([label]));
     }
 
     internal IReadOnlyList<StoredGraphNode> GetUnionNodes(IReadOnlyList<string> labels, CancellationToken token)
-        => MergeNodes(_database.Store.ScanLabels(labels, _operation.Context.Snapshot, token), PendingNodes(labels));
+        => MergeNodes(_database.Store.ScanLabels(labels, ReadSnapshot, token), PendingNodes(labels));
 
     internal async IAsyncEnumerable<StoredGraphNode> StreamAnchorAsync(GraphAnchor anchor,
         GraphPlanExecutor.ExpansionBudget budget, [EnumeratorCancellation] CancellationToken token)
@@ -162,7 +175,7 @@ internal sealed class GraphUpdates : IDisposable
                 : anchor.Label is null || node.Labels.Contains(anchor.Label, StringComparer.Ordinal)) &&
             (anchor.Property is null || node.Properties.TryGetValue(anchor.Property, out var value) &&
                 GraphValueComparer.Instance.Equals(value, anchor.Value))).OrderBy(node => node.Id.Value).ToArray();
-        var snapshot = _operation.Context.Snapshot;
+        var snapshot = ReadSnapshot;
         IAsyncEnumerable<StoredGraphNode> persisted = anchor.Property is { } property
             ? _database.Store.StreamIndexAsync(anchor.Label!, property, anchor.Value, snapshot, token, budget.Consume, memory.Add)
             : StreamStored();
@@ -211,7 +224,7 @@ internal sealed class GraphUpdates : IDisposable
         }
         pending.Sort();
         int position = 0;
-        foreach (var stored in _database.Store.StreamRelationshipTypes(types, _operation.Context.Snapshot,
+        foreach (var stored in _database.Store.StreamRelationshipTypes(types, ReadSnapshot,
             token, Visit, memory.Add))
         {
             while (position < pending.Count && pending[position] <= stored.Id)
@@ -265,7 +278,7 @@ internal sealed class GraphUpdates : IDisposable
 
     internal async ValueTask<IReadOnlyList<StoredGraphNode>> SearchIndexAsync(string label, string key, object? value, CancellationToken token)
     {
-        var found = await _database.Store.SearchIndexAsync(label, key, value, _operation.Context.Snapshot, token).ConfigureAwait(false);
+        var found = await _database.Store.SearchIndexAsync(label, key, value, ReadSnapshot, token).ConfigureAwait(false);
         return found.Where(node => !_nodes.ContainsKey(node.Id))
             .Concat(_nodes.Values.Where(node => node.Labels.Contains(label, StringComparer.Ordinal) &&
                 node.Properties.TryGetValue(key, out var actual) && GraphValueComparer.Instance.Equals(actual, value))
@@ -278,8 +291,8 @@ internal sealed class GraphUpdates : IDisposable
         {
             string? name = pattern.LabelExpression is GqlLabelName label ? label.Name : pattern.Type;
             types = pattern.LabelExpression is GqlLabelWildcard || pattern.LabelExpression is null && name is null ? null
-                : name is not null ? _database.Catalog.FindRelationshipType(name, _operation.Context.Snapshot) is { } type ? [type.Id] : []
-                : _database.Catalog.GetRelationshipTypes(_operation.Context.Snapshot)
+                : name is not null ? _database.Catalog.FindRelationshipType(name, ReadSnapshot) is { } type ? [type.Id] : []
+                : _database.Catalog.GetRelationshipTypes(ReadSnapshot)
                     .Where(type => GraphLabelEvaluator.Accepts(pattern, type.Name)).Select(type => type.Id).ToArray();
             _typeSelections.Add(pattern, types);
         }
@@ -293,7 +306,7 @@ internal sealed class GraphUpdates : IDisposable
         IReadOnlyCollection<Guid>? typeIds, CancellationToken token)
     {
         var result = new List<StoredGraphRelationship>();
-        await foreach (var edge in _database.Store.GetIncidentAsync(id, direction, typeIds, _operation.Context.Snapshot, token).ConfigureAwait(false))
+        await foreach (var edge in _database.Store.GetIncidentAsync(id, direction, typeIds, ReadSnapshot, token).ConfigureAwait(false))
         {
             token.ThrowIfCancellationRequested();
             result.Add(_relationships.TryGetValue(edge.Id, out var updated)
@@ -328,7 +341,7 @@ internal sealed class GraphUpdates : IDisposable
         token.ThrowIfCancellationRequested();
         using var memory = budget is null ? null : new GraphMemoryOwner(budget.Memory);
         memory?.Add(512);
-        var snapshot = _operation.Context.Snapshot;
+        var snapshot = ReadSnapshot;
         var selectedTypes = typeIds?.Distinct().ToArray();
         var directions = direction == GraphIncidentDirection.Both
             ? new[] { GraphIncidentDirection.Outgoing, GraphIncidentDirection.Incoming } : new[] { direction };

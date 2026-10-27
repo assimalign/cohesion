@@ -18,7 +18,7 @@ public sealed partial class GraphStore
 {
     private static readonly string _errorGraphStoreDropIndexAsyncFailure2 = ErrorMessages.GraphStoreDropIndexAsyncFailure2;
 
-    private const ulong adjacencyId = ulong.MaxValue;
+    private const ulong adjacencyId = GraphLockNamespaces.Adjacency;
     private const string treeName = "graph";
     private static readonly Guid _maximumTypeId = new("ffffffff-ffff-ffff-ffff-ffffffffffff");
     private readonly Dictionary<ulong, (PageId Page, int Slot, long Root)> _registrations = new();

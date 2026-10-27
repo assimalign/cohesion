@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Transactions;
+using Assimalign.Cohesion.Database.Graph.Internal;
 
 namespace Assimalign.Cohesion.Database.Graph;
 
@@ -44,6 +45,8 @@ public sealed class GraphDatabaseTransaction : DatabaseTransaction
 
     private readonly TransactionCoordinator _coordinator;
     private readonly TransactionContext _context;
+    private GraphMergeLocks? _mergeLocks;
+    internal GraphMergeLocks MergeLocks => _mergeLocks ??= new();
 
     // The database whose offline state (#1243) refuses the transaction's commit and rollback and
     // makes its disposal touch nothing.
@@ -129,6 +132,7 @@ public sealed class GraphDatabaseTransaction : DatabaseTransaction
 
             throw translated;
         }
+        finally { _mergeLocks?.Dispose(); }
     }
 
     /// <inheritdoc />
@@ -157,6 +161,7 @@ public sealed class GraphDatabaseTransaction : DatabaseTransaction
 
             throw translated;
         }
+        finally { _mergeLocks?.Dispose(); }
     }
 
     /// <inheritdoc />
