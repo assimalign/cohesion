@@ -49,9 +49,14 @@ internal static partial class DocumentPlanExecutor
     {
         var query = plan.Logical.Query;
         var evaluator = new DocumentExpressionEvaluator(query.Alias, parameters, cancellationToken, writeVerb, operation.TransactionStart,
-            query.Unnest.Count > 0 ? query.Alias ?? query.Collection : null, database.Engine.Functions, database.Name);
+            query.Unnest.Count > 0 ? query.Alias ?? query.Collection : null, database.Engine.Functions, database.Name, operation: operation);
         var candidates = await ReadCandidatesAsync(database, operation, plan.Collection, plan.Access, cancellationToken).ConfigureAwait(false);
 
+        using var sourceMemory = evaluator.Memory.Reserve();
+        // Catalog identities and the ordinal sort's staging arrays remain live with
+        // the decoded source. Charge before cloning the first retained document.
+        sourceMemory.Charge(128L + candidates.Count * 128L);
+        foreach (var entry in candidates) { sourceMemory.Retain(entry.Id); }
         var matches = new List<DocumentEvaluationContext>();
         // Identity is the baseline and sort tie break. A bounded identity DESC
         // page must visit candidates in reverse identity order before filtering.
@@ -70,11 +75,20 @@ internal static partial class DocumentPlanExecutor
                 query.Unnest.Count == 0 && query.Projections.Count == 1 && query.Projections[0].Expression is OqlStarExpression ? document.Content : default);
             if (query.Unnest.Count == 0)
             {
-                if (evaluator.Matches(query.Predicate, context)) { matches.Add(context with { Content = json.RootElement.Clone() }); }
+                if (evaluator.Matches(query.Predicate, context))
+                {
+                    RetainSource(context, sourceMemory, evaluator.Memory);
+                    sourceMemory.Charge(128);
+                    matches.Add(context with { Content = json.RootElement.Clone() });
+                }
             }
             else
             {
-                CollectMatches(plan.Logical, context with { Content = json.RootElement.Clone() }, matches, evaluator, operation, cancellationToken);
+                long before = sourceMemory.Bytes;
+                int previousCount = matches.Count;
+                RetainSource(context, sourceMemory, evaluator.Memory);
+                CollectMatches(plan.Logical, context with { Content = json.RootElement.Clone() }, matches, evaluator, operation, cancellationToken, sourceMemory);
+                if (matches.Count == previousCount) { sourceMemory.Rewind(before); }
             }
         }
 
@@ -124,31 +138,48 @@ internal static partial class DocumentPlanExecutor
     {
         var query = plan.Logical.Query;
         var evaluator = new DocumentExpressionEvaluator(query.Alias, parameters, cancellationToken, writeVerb, operation.TransactionStart,
-            query.Unnest.Count > 0 ? query.Alias ?? query.Collection : null, database.Engine.Functions, database.Name);
+            query.Unnest.Count > 0 ? query.Alias ?? query.Collection : null, database.Engine.Functions, database.Name, operation: operation);
         var matches = new List<DocumentEvaluationContext>();
+        using var sourceMemory = evaluator.Memory.Reserve();
         foreach (var document in DocumentSystemCollections.Enumerate(database, operation.Context.Snapshot, plan.Name, cancellationToken))
         {
             if (PageComplete(plan.Logical, matches.Count)) { break; }
             operation.EnsureActive();
-            CollectMatches(plan.Logical, new DocumentEvaluationContext(document), matches, evaluator, operation, cancellationToken);
+            long before = sourceMemory.Bytes;
+            int previousCount = matches.Count;
+            RetainSource(new DocumentEvaluationContext(document), sourceMemory, evaluator.Memory);
+            CollectMatches(plan.Logical, new DocumentEvaluationContext(document), matches, evaluator, operation, cancellationToken, sourceMemory);
+            if (matches.Count == previousCount) { sourceMemory.Rewind(before); }
         }
         return ExecuteRows(plan.Logical, matches, evaluator, cancellationToken);
     }
 
     private static void CollectMatches(DocumentLogicalPlan logical, DocumentEvaluationContext source,
-        List<DocumentEvaluationContext> matches, DocumentExpressionEvaluator evaluator, DocumentOperation operation, CancellationToken cancellationToken)
+        List<DocumentEvaluationContext> matches, DocumentExpressionEvaluator evaluator, DocumentOperation operation, CancellationToken cancellationToken,
+        DocumentAggregateMemory.Reservation sourceMemory)
     {
         if (logical.Query.Unnest.Count == 0)
         {
-            if (evaluator.Matches(logical.Query.Predicate, source)) { matches.Add(source); }
+            if (evaluator.Matches(logical.Query.Predicate, source)) { sourceMemory.Charge(128); matches.Add(source); }
             return;
         }
         using var rows = Expand(logical.Query, source, evaluator, operation, cancellationToken).GetEnumerator();
         // Test the completed window before advancing, including within one source document.
         while (!PageComplete(logical, matches.Count) && rows.MoveNext())
         {
-            if (evaluator.Matches(logical.Query.Predicate, rows.Current)) { matches.Add(rows.Current); }
+            if (evaluator.Matches(logical.Query.Predicate, rows.Current))
+            {
+                sourceMemory.Charge(128L + logical.Query.Unnest.Count * 64L);
+                matches.Add(rows.Current);
+            }
         }
+    }
+
+    private static void RetainSource(DocumentEvaluationContext source, DocumentAggregateMemory.Reservation reservation,
+        DocumentAggregateMemory memory)
+    {
+        reservation.Charge(memory.ValueBytes(source.Content) + source.RawContent.Length);
+        if (source.Id is not null) { reservation.Retain(source.Id); }
     }
 
     // Internal so tests can cancel from reads of borrowed JSON during expansion without a timer.
@@ -207,19 +238,41 @@ internal static partial class DocumentPlanExecutor
     private static DatabaseResult ExecuteRows(DocumentLogicalPlan logical, List<DocumentEvaluationContext> matches,
         DocumentExpressionEvaluator evaluator, CancellationToken cancellationToken)
     {
+        var memory = evaluator.Memory;
+        long before = memory.Bytes;
+        try { return ExecuteRowsCore(logical, matches, evaluator, cancellationToken); }
+        catch
+        {
+            memory.Release(memory.Bytes - before);
+            throw;
+        }
+    }
+
+    private static DatabaseResult ExecuteRowsCore(DocumentLogicalPlan logical, List<DocumentEvaluationContext> matches,
+        DocumentExpressionEvaluator evaluator, CancellationToken cancellationToken)
+    {
         var query = logical.Query;
+        var memory = evaluator.Memory;
+        using var groupMemory = memory.Reserve();
         var output = new List<EvaluatedRow>();
         if (logical.IsGrouped)
         {
             var groups = new SortedDictionary<object?[], List<DocumentEvaluationContext>>(TupleComparer.Instance);
-            if (query.GroupBy.Count == 0) { groups.Add([], matches); }
+            groupMemory.Charge(256);
+            if (query.GroupBy.Count == 0) { groupMemory.Charge(128); groups.Add([], matches); }
             else
             {
                 foreach (var document in matches)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     var key = query.GroupBy.Select(expression => evaluator.Evaluate(expression, document)).ToArray();
-                    if (!groups.TryGetValue(key, out var group)) { groups.Add(key, group = []); }
+                    if (!groups.TryGetValue(key, out var group))
+                    {
+                        groupMemory.Charge(192L + key.Length * 16L);
+                        foreach (var value in key) { groupMemory.Retain(value); }
+                        groups.Add(key, group = []);
+                    }
+                    groupMemory.Charge(128);
                     group.Add(document);
                 }
             }
@@ -227,7 +280,11 @@ internal static partial class DocumentPlanExecutor
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var document = group.Count > 0 ? group[0] : default;
-                if (evaluator.Matches(query.Having, document, group)) { Project(document, group); }
+                long before = memory.Bytes;
+                bool matchesHaving;
+                try { matchesHaving = evaluator.Matches(query.Having, document, group); }
+                finally { memory.Release(memory.Bytes - before); }
+                if (matchesHaving) { Project(document, group); }
             }
         }
         else
@@ -242,39 +299,67 @@ internal static partial class DocumentPlanExecutor
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 if (seen.Add(row.Values)) { distinct.Add(row); }
+                else { memory.Release(row.RetainedBytes); }
             }
             output = distinct;
         }
         if (query.OrderBy.Count > 0)
         {
-            foreach (var row in output)
+            long orderBytes = 0;
+            try
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                row.OrderKeys = query.OrderBy.Select((order, index) => query.IsValue && logical.ProjectedOrdering[index]
-                        ? row.Values[0] : evaluator.Evaluate(order.Expression, row.Document, row.Group)).ToArray();
-            }
-            output.Sort((left, right) =>
-            {
-                for (int i = 0; i < query.OrderBy.Count; i++)
+                foreach (var row in output)
                 {
-                    int comparison = DocumentExpressionEvaluator.Compare(left.OrderKeys[i], right.OrderKeys[i]);
-                    if (comparison != 0) { return query.OrderBy[i].Descending ? -comparison : comparison; }
+                    cancellationToken.ThrowIfCancellationRequested();
+                    long before = memory.Bytes;
+                    try
+                    {
+                        row.OrderKeys = query.OrderBy.Select((order, index) => query.IsValue && logical.ProjectedOrdering[index]
+                                ? row.Values[0] : evaluator.Evaluate(order.Expression, row.Document, row.Group)).ToArray();
+                    }
+                    finally { memory.Release(memory.Bytes - before); }
+                    memory.Charge(32L + row.OrderKeys.Length * 16L);
+                    orderBytes += 32L + row.OrderKeys.Length * 16L;
+                    foreach (var key in row.OrderKeys) { orderBytes += memory.Retain(key); }
                 }
-                return left.Ordinal.CompareTo(right.Ordinal);
-            });
+                output.Sort((left, right) =>
+                {
+                    for (int i = 0; i < query.OrderBy.Count; i++)
+                    {
+                        int comparison = DocumentExpressionEvaluator.Compare(left.OrderKeys[i], right.OrderKeys[i]);
+                        if (comparison != 0) { return query.OrderBy[i].Descending ? -comparison : comparison; }
+                    }
+                    return left.Ordinal.CompareTo(right.Ordinal);
+                });
+            }
+            finally
+            {
+                foreach (var row in output) { row.OrderKeys = []; }
+                memory.Release(orderBytes);
+            }
         }
-        return CreateResult(logical, output, cancellationToken);
+        return CreateResult(logical, output, cancellationToken, memory: memory);
 
         void Project(DocumentEvaluationContext document, IReadOnlyList<DocumentEvaluationContext>? group)
         {
-            var values = logical.Projections.Select(projection => evaluator.EvaluateProjection(projection.Expression, document, group, query.IsValue)).ToArray();
+            long before = memory.Bytes;
+            object?[] values;
+            try { values = logical.Projections.Select(projection => evaluator.EvaluateProjection(projection.Expression, document, group, query.IsValue)).ToArray(); }
+            finally { memory.Release(memory.Bytes - before); }
             if (query.IsValue && values[0] is DocumentMissing) { values[0] = null; }
-            output.Add(new EvaluatedRow(values, document, group, output.Count));
+            for (int i = 0; i < values.Length; i++)
+            { if (values[i] is JsonElement json) { values[i] = json.Clone(); } }
+            long bytes = 192L + values.Length * 32L;
+            memory.Charge(bytes);
+            if (query.Projections.Count == 1 && query.Projections[0].Expression is OqlStarExpression)
+            { memory.Charge(document.RawContent.Length); bytes += document.RawContent.Length; }
+            foreach (var value in values) { bytes += memory.Retain(value); }
+            output.Add(new EvaluatedRow(values, document, group, output.Count) { RetainedBytes = bytes });
         }
     }
 
     private static DocumentQueryResult CreateResult(DocumentLogicalPlan logical, List<EvaluatedRow> output,
-        CancellationToken cancellationToken, long affectedCount = -1)
+        CancellationToken cancellationToken, long affectedCount = -1, DocumentAggregateMemory? memory = null)
     {
         var query = logical.Query;
         var columns = new DatabaseColumn[logical.Projections.Count];
@@ -298,10 +383,19 @@ internal static partial class DocumentPlanExecutor
         // Infer and normalize column types over the complete result before slicing.
         int start = (int)Math.Min(logical.Offset, output.Count);
         int take = (int)Math.Min(logical.Limit ?? long.MaxValue, output.Count - start);
-        if (start != 0 || take != output.Count) { output = output.GetRange(start, take); }
+        if (start != 0 || take != output.Count)
+        {
+            if (memory is not null)
+            {
+                for (int i = 0; i < output.Count; i++)
+                { if (i < start || i >= start + take) { memory.Release(output[i].RetainedBytes); } }
+            }
+            output = output.GetRange(start, take);
+        }
         bool wholeDocument = query.Projections.Count == 1 && query.Projections[0].Expression is OqlStarExpression;
         return new DocumentQueryResult(columns, output.Select(row => row.Values).ToList(),
-            query.IsValue || wholeDocument, wholeDocument ? output.Select(row => row.Document.RawContent).ToArray() : null, affectedCount);
+            query.IsValue || wholeDocument, wholeDocument ? output.Select(row => row.Document.RawContent).ToArray() : null, affectedCount,
+            memory, memory is null ? 0 : output.Sum(row => row.RetainedBytes));
     }
 
     private static async ValueTask<DatabaseResult> ExecuteCreateCollectionAsync(DocumentDatabase database, DocumentOperation operation,
@@ -377,6 +471,7 @@ internal static partial class DocumentPlanExecutor
     private sealed record EvaluatedRow(object?[] Values, DocumentEvaluationContext Document, IReadOnlyList<DocumentEvaluationContext>? Group, int Ordinal)
     {
         internal object?[] OrderKeys { get; set; } = [];
+        internal long RetainedBytes { get; set; }
 
         private sealed class DebugView
         {

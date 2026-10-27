@@ -533,8 +533,8 @@ internal sealed partial class DocumentPlanner
                 foreach (var child in PredicateChildren(comprehension)) { Validate(child, false, functions: functions); }
                 return;
             case OqlQuantifiedExpression quantified:
-                Validate(quantified.Collection, false, functions: functions);
-                Validate(quantified.Predicate, false, functions: functions);
+                Validate(quantified.Collection, allowAggregate, functions: functions);
+                Validate(quantified.Predicate, allowAggregate, functions: functions);
                 return;
             case OqlInExpression or OqlBetweenExpression or OqlLikeExpression or OqlCaseExpression:
                 foreach (var child in PredicateChildren(expression)) { Validate(child, allowAggregate, functions: functions); }
@@ -557,6 +557,11 @@ internal sealed partial class DocumentPlanner
                 Validate(unary.Operand, allowAggregate, functions: functions);
                 return;
             case OqlCallExpression call:
+                if (call.Quantifier != OqlAggregateQuantifier.None &&
+                    (call.Quantifier is not (OqlAggregateQuantifier.All or OqlAggregateQuantifier.Distinct) ||
+                     call.Arguments.Count != 1 || call.Arguments[0] is OqlStarExpression ||
+                     DocumentFunctionCatalog.IsSpecial(call.Name) || functions.HasName(call.Name) && !functions.IsAggregate(call.Name)))
+                { throw new DocumentPlanningException("CD01029", ErrorMessages.AggregateQuantifierInvalid, call.Location); }
                 if (DocumentFunctionCatalog.IsSpecial(call.Name))
                 {
                     var form = OqlFunctions.Find(call.Name);
@@ -670,7 +675,7 @@ internal sealed partial class DocumentPlanner
             (a.Otherwise is null) == (b.Otherwise is null) && a.Branches.Count == b.Branches.Count && EquivalentChildren(a, b, alias, variables, scopes, leftScope, rightScope, localDepth),
         (OqlPathExpression a, OqlPathExpression b) => EquivalentPath(a, b, alias, variables, leftScope, rightScope, localDepth),
         (OqlLiteralExpression a, OqlLiteralExpression b) => DocumentExpressionEvaluator.Compare(a.Value, b.Value) == 0,
-        (OqlCallExpression a, OqlCallExpression b) => a.Name == b.Name && a.Arguments.Count == b.Arguments.Count &&
+        (OqlCallExpression a, OqlCallExpression b) => a.Name == b.Name && (a.Quantifier == OqlAggregateQuantifier.Distinct) == (b.Quantifier == OqlAggregateQuantifier.Distinct) && a.Arguments.Count == b.Arguments.Count &&
             a.Arguments.Zip(b.Arguments).All(pair => EquivalentExpression(pair.First, pair.Second, alias, variables, scopes, leftScope, rightScope, localDepth)),
         (OqlStarExpression, OqlStarExpression) => true,
         (OqlArrayExpression a, OqlArrayExpression b) => a.Elements.Count == b.Elements.Count &&

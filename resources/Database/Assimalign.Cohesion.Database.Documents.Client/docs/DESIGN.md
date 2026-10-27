@@ -9,6 +9,16 @@ deletion that survived transaction end. Leading array definitions keep IncludeMi
 These are catalog checks;
 the client API and wire contract do not change. OQL array-index DDL and planning follow in OQ-I2.
 
+## Aggregate wire conformance (#1729, OQ-G1)
+
+ALL/DISTINCT arguments and ARRAY_AGG, BOOL_AND, BOOL_OR, aggregate EVERY, STDDEV and VARIANCE
+use ordinary OQL text and existing JSON result cells. Empty aggregates retain Json, Boolean or
+Decimal headers; COUNT remains Int64. DocumentAggregateWireTests verifies grouped/ungrouped
+values, HAVING, ordering, EXPLAIN detail, NULL/MISSING, sample singleton zero and located
+syntax/context/overflow/budget diagnostics over InMemory and TCP. Budget failure aborts explicit
+work; rollback permits reuse of the connection. The NativeAOT sample exercises all six names
+and quantifiers on both transports. Source/group staging now shares the statement counter (#1753); aggregate-span fixtures admit source retention before testing the aggregate limit. The 32 MiB response fixtures explicitly allow 256 MiB of statement retention while retaining their existing 8 MiB formatter allocation assertion. No client API, capability, codec, frame or version changes.
+
 ## Comprehension wire conformance (#1728)
 
 ARRAY/FIRST use the existing OQL request text, JSON result cells and MISSING bitmap on InMemory

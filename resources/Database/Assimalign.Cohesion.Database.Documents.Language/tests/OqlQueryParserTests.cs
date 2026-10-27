@@ -121,7 +121,6 @@ public sealed class OqlQueryParserTests
     [InlineData("SELECT ELEMENT(address) FROM people", "ELEMENT", 7)]
     [InlineData("SELECT FLATTEN(address) FROM people", "FLATTEN", 7)]
     [InlineData("SELECT (SELECT city FROM addresses) FROM people", "SUBQUERY", 8)]
-    [InlineData("SELECT ARRAY_AGG(age) FROM people", "ARRAY_AGG", 7)]
     [InlineData("CREATE DATABASE other", "CREATE", 0)]
     [InlineData("DROP DATABASE other", "DROP", 0)]
     [InlineData("USE other", "USE", 0)]

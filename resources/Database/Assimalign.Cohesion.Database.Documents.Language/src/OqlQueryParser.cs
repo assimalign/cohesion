@@ -252,6 +252,7 @@ public sealed partial class OqlQueryParser : QueryParser
         int parentheses = 0;
         bool inSelectList = false;
         int selectHead = -2;
+        int callQuantifier = -2;
         int fetchHead = -2;
         int pagingHead = -2;
         int openQuantifiers = 0;
@@ -299,10 +300,15 @@ public sealed partial class OqlQueryParser : QueryParser
             if (value is ("ALL" or "DISTINCT" or "ARRAY" or "FOR" or "IN" or "END") && indexKeyStart >= 0 && index > indexKeyStart && index < indexKeyEnd) { continue; }
             if (value == "UNIQUE" && index == 1 && IsIndexStatement("CREATE")) { continue; }
 
-            // DISTINCT/ALL are legal only directly after SELECT, including INSERT/UPSERT SELECT.
+            // SELECT and call-head quantifiers are parsed by their respective grammar rules.
             if (openQuantifiers == 0 && value is "DISTINCT" or "ALL")
             {
                 if (index == selectHead + 1) { continue; }
+                if (index == callQuantifier + 1 || index > 1 && _tokens[index - 1].Type == TokenType.LeftParen &&
+                    _tokens[index - 2].Type is TokenType.Function or TokenType.Identifier or TokenType.QuotedIdentifier &&
+                    (!OqlUnsupportedVocabulary.TryFind(_tokens[index - 2].Text.ToUpperInvariant(), out var deferred) ||
+                        deferred.Position != OqlWordPosition.Function))
+                { callQuantifier = index; continue; }
                 bool function = index > 1 && _tokens[index - 1].Type == TokenType.LeftParen &&
                     (_tokens[index - 2].Type == TokenType.Function ||
                         OqlUnsupportedVocabulary.TryFind(_tokens[index - 2].Text.ToUpperInvariant(), out var unsupportedFunction) &&

@@ -6,8 +6,8 @@ expression trees. It provides `OqlLanguageProfile`, stable `OqlClauses` names, `
 `OqlSelectExpression`, `OqlInsertExpression`, `OqlUpsertExpression`, `OqlUpdateExpression`, `OqlUpdateAssignment`, `OqlDeleteExpression`, `OqlMetaExpression`, `OqlObjectExpression`, `OqlCreateCollectionExpression`, `OqlDropCollectionExpression`,
 `OqlCreateIndexExpression`, `OqlDropIndexExpression`, and expression nodes
 for projection, filtering, grouping, aggregates, ordering, nested properties, and array access.
-One immutable standard-function table declares META, five aggregates and 34 SQL++ scalars, with
-native parse-time arity checks and static result types used by native registrations. The standalone
+One immutable standard-function table declares META, eleven aggregates and 34 SQL++ scalars, with
+ALL/DISTINCT aggregate metadata, native parse-time arity checks and static result types used by native registrations. The standalone
 parser default reports CD00008 for unknown calls; engine requests defer additional named calls to
 the executing engine's function catalog.
 BEGIN/START, COMMIT and ROLLBACK execute on in-process and wire sessions. Snapshot is the default;

@@ -31,7 +31,7 @@ internal static partial class DocumentPlanExecutor
         private readonly List<EvaluatedRow> _rows = [];
         private readonly DatabaseColumn[] _columns;
         private readonly DocumentRowWriter _writer;
-        private long _bytes;
+        private readonly DocumentAggregateMemory _memory;
 
         internal ReturningRows(DocumentDatabase database, DocumentOperation operation, DocumentLogicalPlan plan,
             IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken)
@@ -40,6 +40,7 @@ internal static partial class DocumentPlanExecutor
             _operation = operation;
             _cancellationToken = cancellationToken;
             _limit = database.Engine.EngineOptions.StatementMemoryBudget;
+            _memory = operation.GetStatementMemory(cancellationToken);
             _wholeDocument = plan.Projections.Count == 1 && plan.Projections[0].Expression is OqlStarExpression;
             _evaluator = new DocumentExpressionEvaluator(plan.Query.Alias, parameters, cancellationToken,
                 transactionStart: operation.TransactionStart, functions: database.Engine.Functions, databaseName: database.Name,
@@ -127,12 +128,11 @@ internal static partial class DocumentPlanExecutor
 
         private void Charge(long bytes)
         {
-            if (bytes > _limit - _bytes)
+            if (!_memory.TryCharge(bytes))
             {
                 throw new DocumentPlanningException("CD05018", string.Format(CultureInfo.CurrentCulture,
                     ErrorMessages.ReturningMemoryExceeded, _limit), _plan.Query.Location);
             }
-            _bytes += bytes;
         }
 
         private sealed class DebugView

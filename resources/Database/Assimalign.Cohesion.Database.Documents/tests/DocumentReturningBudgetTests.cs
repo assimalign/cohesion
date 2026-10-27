@@ -64,10 +64,14 @@ public sealed class DocumentReturningBudgetTests
         var target = (await session.GetCollectionAsync("items", CancellationToken.None)).ShouldNotBeNull();
         var original = await target.GetAsync(session, "00000", CancellationToken.None);
 
+        // VALUES isolates RETURNING ownership; SELECT source staging has its own shared-budget regressions.
+        using var json = System.Text.Json.JsonDocument.Parse(Content(size));
+        var parameters = new System.Collections.Generic.Dictionary<string, object?> { ["v"] = json.RootElement };
+        string statement = verb == "INSERT" ? "INSERT INTO items (KEY, VALUE) VALUES ('00000',@v),('00001',@v) RETURNING *" : Statement(verb);
         // Act / Assert
         if (fits)
         {
-            await using var result = (await session.ExecuteAsync(Statement(verb), cancellationToken: CancellationToken.None))
+            await using var result = (await session.ExecuteAsync(statement, parameters, CancellationToken.None))
                 .ShouldBeAssignableTo<DatabaseResultSet>();
             result.AffectedCount.ShouldBe(2);
             int count = 0;
@@ -77,7 +81,7 @@ public sealed class DocumentReturningBudgetTests
         else
         {
             var failure = await Should.ThrowAsync<DatabaseException>(async () =>
-                await session.ExecuteAsync(Statement(verb), cancellationToken: CancellationToken.None));
+                await session.ExecuteAsync(statement, parameters, CancellationToken.None));
             failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD05018");
             foreach (string id in new[] { "00000", "00001" })
             {

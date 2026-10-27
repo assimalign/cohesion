@@ -100,10 +100,15 @@ public sealed class OqlExecutionConformanceTests
             ],
             [OqlClauses.Select] =
             [
+                new("SELECT ARRAY_AGG(category) FROM items GROUP BY category HAVING ARRAY_LENGTH(ARRAY_AGG(category)) > 0 ORDER BY ARRAY_AGG(category)", [[Json("[\"a\",\"a\",\"a\"]")], [Json("[\"b\"]")]]),
+                new("SELECT EVERY x IN [TRUE] SATISFIES EVERY(amount > 0) END FROM items", [[true]]),
+                new("SELECT STDDEV(v) FROM items UNNEST [-79228162514264337593543950335,0,79228162514264337593543950335] v WHERE name = 'alpha'", [[decimal.MaxValue]]),
                 new("SELECT d.name AS label, d.details.score + @increment AS adjusted, d.tags[0] AS tag FROM items AS d WHERE d.name = 'alpha'",
                     [["alpha", 3m, "blue"]], Parameters: new Dictionary<string, object?> { ["increment"] = 2 }),
                 new("SELECT COUNT(*) AS total, COUNT(amount) AS present, SUM(amount) AS sum, AVG(amount) AS average, MIN(amount) AS minimum, MAX(amount) AS maximum FROM items",
                     [[4L, 3L, 12m, 4m, 2m, 6m]]),
+                new("SELECT COUNT(DISTINCT category) AS c, COUNT(ALL category) AS all_c, SUM(DISTINCT amount) AS s, AVG(DISTINCT amount) AS a, MIN(ALL amount) AS lo, MAX(DISTINCT amount) AS hi FROM items",
+                    [[2L, 4L, 12m, 4m, 2m, 6m]]),
                 new("SELECT COUNT(*) AS total, SUM(amount) AS sum, AVG(amount) AS average, MIN(amount) AS minimum, MAX(amount) AS maximum FROM items WHERE amount > 100",
                     [[0L, null, null, null, null]]),
             ],
@@ -419,6 +424,12 @@ public sealed class OqlExecutionConformanceTests
             ["COUNT"] = new("COUNT(*)", [[4L]]),
             ["SUM"] = new("SUM(amount)", [[12m]]),
             ["AVG"] = new("AVG(amount)", [[4m]]),
+            ["ARRAY_AGG"] = new("ARRAY_AGG(DISTINCT 1)", [[Json("[1]")]]),
+            ["BOOL_AND"] = new("BOOL_AND(amount > 3)", [[false]]),
+            ["BOOL_OR"] = new("BOOL_OR(amount > 3)", [[true]]),
+            ["EVERY"] = new("EVERY(amount > 0)", [[true]]),
+            ["STDDEV"] = new("STDDEV(amount)", [[2m]]),
+            ["VARIANCE"] = new("VARIANCE(amount)", [[4m]]),
             ["MIN"] = new("MIN(amount)", [[2m]]),
             ["MAX"] = new("MAX(amount)", [[6m]]),
         };
