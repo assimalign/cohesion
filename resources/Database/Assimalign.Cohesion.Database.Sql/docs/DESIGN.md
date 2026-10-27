@@ -7821,7 +7821,7 @@ The internal stateless SqlCatalogCreation predicate owns the creation-only recor
 initial counter constraints. SQL uses it directly from Internal/Catalog,
 so recovery decisions use catalog vocabulary without a public API or friend-assembly grant.
 Creation commits collation, dbo and the format marker in that order. Completion changes no
-catalog record layout or record-space format 26. SQL requires its sql.create claim only when
+catalog record layout or the record-space format. SQL requires its sql.create claim only when
 adopting a marker-free interrupted file set; an empty data scan alone is no proof. The predicate
 receives the default namespace from SQL's shared SqlNamespaceNames constant, avoiding a new
 catalog dependency on the language assembly.
