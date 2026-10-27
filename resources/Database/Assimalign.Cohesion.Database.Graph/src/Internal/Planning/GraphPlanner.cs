@@ -191,11 +191,13 @@ internal sealed partial class GraphPlanner
                 optional = clause.Optional;
                 int firstDeclaration = declarations.Count;
                 bool clauseMatchesNothing = false;
+                var incomingPrefilterScope = clause.Paths.Any(path => path?.Selector is not null)
+                    ? new HashSet<string>(variables.Keys, StringComparer.Ordinal) : null;
                 // A MATCH declares every pattern part before checking any properties
                 // (Neo4j SemanticPatternCheck.scala:101-103).
                 foreach (var path in clause.Paths) { Declare(path, creating: false); }
                 foreach (var path in clause.Paths)
-                { if (!Validate(path, creating: false, declared: true)) { clauseMatchesNothing = true; } }
+                { if (!Validate(path, creating: false, declared: true, incomingPrefilterScope: incomingPrefilterScope)) { clauseMatchesNothing = true; } }
                 ValidateExpression(clause.Predicate);
                 bool selective = clause.Paths.Any(path => path.Selector is not null);
                 // A post-selection WHERE cannot constrain the search, including through
@@ -567,11 +569,21 @@ internal sealed partial class GraphPlanner
             }
         }
         // Returns false when a MATCH pattern requires a name the database does not have.
-        bool Validate(GqlPathPattern path, bool creating, IReadOnlySet<string>? propertyScope = null, bool declared = false)
+        bool Validate(GqlPathPattern path, bool creating, IReadOnlySet<string>? propertyScope = null, bool declared = false,
+            IReadOnlySet<string>? incomingPrefilterScope = null)
         {
             if (!declared) { Declare(path, creating); }
             bool satisfiable = true;
-            var propertyGroups = shapes.Where(binding => binding.Value.Groups.Any(group => group)).Select(binding => binding.Key).ToHashSet(StringComparer.Ordinal);
+            HashSet<string>? prefilterScope = null;
+            if (path.Selector is not null)
+            {
+                // Neo4j Clause.scala:1053-1098: selective dependencies belong to this
+                // pattern (including quantified singletons) or the scope entering MATCH.
+                prefilterScope = new HashSet<string>(incomingPrefilterScope!, StringComparer.Ordinal);
+                foreach (var binding in pathShapes[path].Bindings()) { prefilterScope.Add(binding.Name); }
+                if (path.Variable is { } variable) { prefilterScope.Add(variable); }
+            }
+            HashSet<string>? propertyGroups = null;
             var pending = new Stack<(GraphPathShape Shape, bool Required, bool Group, IReadOnlyList<(string Name, bool Node)> Locals)>();
             pending.Push((pathShapes[path], true, false, []));
             while (pending.TryPop(out var item))
@@ -593,7 +605,7 @@ internal sealed partial class GraphPlanner
                 foreach (var filter in item.Shape.Prefilters) { ValidatePrefilter(filter.Predicate, item.Locals); }
                 foreach (var segment in item.Shape.Segments.AsEnumerable().Reverse())
                 {
-                    var locals = segment.Quantifier is null ? item.Locals : segment.Body.Bindings().Distinct().ToArray();
+                    var locals = segment.Quantifier is null ? item.Locals : segment.Body.HasPrefilters ? segment.Body.Bindings().Distinct().ToArray() : [];
                     pending.Push((segment.Body, item.Required && segment.Quantifier?.Min != 0, item.Group || segment.Quantifier is not null, locals));
                 }
             }
@@ -601,15 +613,16 @@ internal sealed partial class GraphPlanner
 
             void ValidatePatternProperties(IReadOnlyDictionary<string, GqlExpression> properties, bool group)
             {
-                if (group && properties is not null && properties.Values.Any(expression => expression is not null && GraphValueExpressions.ReferencesAny(expression, propertyGroups, token)))
+                if (group && properties is { Count: > 0 } && properties.Values.Any(expression => expression is not null && GraphValueExpressions.ReferencesAny(expression,
+                    propertyGroups ??= shapes.Where(binding => binding.Value.Groups.Any(value => value)).Select(binding => binding.Key).ToHashSet(StringComparer.Ordinal), token)))
                 { throw new GraphPlanningException("CG03003", ErrorMessages.GroupPropertyReference, query.Location); }
-                ValidateStageProperties(properties!, creating, propertyScope);
+                ValidateStageProperties(properties!, creating, propertyScope, prefilterScope);
             }
 
             void ValidatePrefilter(GqlExpression? predicate, IReadOnlyList<(string Name, bool Node)> locals)
             {
                 if (predicate is null) { return; }
-                if (locals.Count == 0) { ValidateExpression(predicate); return; }
+                if (locals.Count == 0) { ValidateExpression(predicate, variableScope: prefilterScope); return; }
                 // Inside a repeated body its variables denote the current occurrence's
                 // singletons. Outside that body they retain their group-list types.
                 var saved = locals.Select(local => (local.Name, Kind: variables[local.Name],
@@ -618,7 +631,7 @@ internal sealed partial class GraphPlanner
                 {
                     foreach (var local in locals)
                     { variables[local.Name] = local.Node ? BindingKind.Node : BindingKind.Relationship; shapes.Remove(local.Name); }
-                    ValidateExpression(predicate);
+                    ValidateExpression(predicate, variableScope: prefilterScope);
                 }
                 finally
                 {
@@ -627,7 +640,8 @@ internal sealed partial class GraphPlanner
                 }
             }
         }
-        void ValidateStageProperties(IReadOnlyDictionary<string, GqlExpression> properties, bool creating, IReadOnlySet<string>? propertyScope)
+        void ValidateStageProperties(IReadOnlyDictionary<string, GqlExpression> properties, bool creating, IReadOnlySet<string>? propertyScope,
+            IReadOnlySet<string>? variableScope = null)
         {
             if (properties is null) { throw new GraphPlanningException("CG05001", ErrorMessages.PropertyScalarRequired, query.Location); }
             var introduced = creating ? new HashSet<string>(variables.Keys.Where(name => !propertyScope!.Contains(name)), StringComparer.Ordinal) : null;
@@ -636,7 +650,7 @@ internal sealed partial class GraphPlanner
                 if (expression is null) { throw new GraphPlanningException("CG05001", ErrorMessages.PropertyScalarRequired, query.Location); }
                 if (creating && GraphValueExpressions.ReferencesAny(expression, introduced!, token))
                 { throw new GraphPlanningException("CG05001", ErrorMessages.InsertPropertyScope, expression.Location); }
-                ValidateExpression(expression);
+                ValidateExpression(expression, variableScope: variableScope);
                 if (expression is not (GqlLiteralExpression or GqlParameterExpression))
                 {
                     if (MayReturn(expression, true) || MayReturn(expression, false) ||
@@ -668,7 +682,8 @@ internal sealed partial class GraphPlanner
         // Walks the predicate with an explicit stack, in source order: an AND chain of any length
         // and parentheses of any depth validate without recursion, as Neo4j's n-ary Ands carry
         // any number of predicates. Only evaluation recurses, and it checks the stack (CG05008).
-        void ValidateExpression(GqlExpression? root, bool allowAggregates = false, bool ordering = false)
+        void ValidateExpression(GqlExpression? root, bool allowAggregates = false, bool ordering = false,
+            IReadOnlySet<string>? variableScope = null)
         {
             if (root is null) { return; }
             var pending = new Stack<(GqlExpression? Expression, GqlExpression? Function)>();
@@ -719,6 +734,9 @@ internal sealed partial class GraphPlanner
                     GqlLabeledPredicate labeled => labeled.Variable,
                     _ => null,
                 };
+                if (reference is not null && variableScope is not null && !variableScope.Contains(reference) && variables.ContainsKey(reference))
+                { throw new GraphPlanningException("CG01016", string.Format(System.Globalization.CultureInfo.CurrentCulture,
+                    ErrorMessages.SelectivePrefilterPeerBinding, reference), expression!.Location); }
                 if (function is not null && reference is not null && !variables.ContainsKey(reference))
                 {
                     string name = function is GqlFunctionCallExpression enclosing ? GraphScalarFunctions.Name(enclosing.Function) : function is GqlNamedFunctionCallExpression named ? named.Name.ToString() : "CAST";

@@ -281,6 +281,7 @@ transaction-state diagnostics; it allocates no new identity. These changes add n
 | COHDBG011 | CG01011 | Binding/names |
 | COHDBG014 | CG01014 | Binding/names |
 | COHDBG015 | CG01015 | Binding/names |
+| New (#1734) | CG01016 | Binding/names — selected path prefilter references a binding introduced by a peer path in the same MATCH |
 | COHDBG009 | CG02009 | Values/types |
 | COHDBG013 | CG02013 | Values/types |
 | COHDBG003 | CG03003 | Schema/constraints |

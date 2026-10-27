@@ -142,6 +142,9 @@ runs after selection, before OPTIONAL null extension; FILTER/later WITH predicat
 downstream. For example, `MATCH p = ANY SHORTEST ((a)-[r:T WHERE r.w>0]->*(b) WHERE a.k<>b.k) WHERE path_length(p)>2 RETURN p`
 searches only qualifying paths, selects by endpoint pair, then tests the selected length.
 Predicates in a quantified body see its singleton variables; outside it they are group lists.
+Selected search prefilters may use their own path's variables and bindings entering MATCH.
+A reference to a variable introduced only by a peer path in that MATCH is CG01016, located
+at the reference; declaring that peer before the selected path does not make it visible.
 
 EXPLAIN exposes SelectPaths, PathSearch, ElementPrefilter, PathPrefilter and PostFilter,
 including the count unit, partition, mode, order and configured work/state/output ceilings.

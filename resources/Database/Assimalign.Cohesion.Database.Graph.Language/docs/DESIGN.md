@@ -367,10 +367,19 @@ Labels, relationship directions/types, property maps and inline node/relationshi
 element prefilters. A WHERE inside a parenthesized path is a path prefilter. These remain
 inside search, including under quantifiers; each repeated body's variables denote its local
 singleton occurrence inside its predicates and group lists outside it. Unquantified group
-flattening retains predicate boundary offsets. Unique path-instance ownership lets lowering transfer filter lists rather than copy them through every enclosing group, avoiding quadratic planner allocation for deep predicates. Ordinary MATCH WHERE remains a post-selection
+flattening retains predicate boundary offsets. One iterative pass appends each filter once to
+its owning search shape; unquantified groups do not merge accumulated lists. Minimum-round
+allocation regressions prove linear growth for nested filters and for a filtered singleton
+preceding each growing nested group. Empty filter storage and quantified predicate locals
+are allocated lazily; Release planning checks retain the base budgets for node, edge and
+quantified paths without selectors or prefilters. Ordinary MATCH WHERE remains a post-selection
 filter, including in OPTIONAL MATCH before null extension. It cannot be pushed into an index
 anchor or a matches-nothing shortcut for a clause containing a selector. FILTER and later
 WITH predicates retain their ordinary downstream placement.
+Selected search prefilters may reference their own path bindings, including quantified
+singletons and the named path, plus the scope entering MATCH. Peer-path-only dependencies
+are refused with CG01016 at the reference, regardless of comma order (Neo4j
+`community/cypher/front-end/ast/src/main/scala/org/neo4j/cypher/internal/ast/Clause.scala:1053-1098`).
 
 SP2 delivers parsing, binding and nonexecuting EXPLAIN, including zero-hop paths, cycles,
 bound endpoints and quantified bodies in all modes. A selector admits unbounded WALK into

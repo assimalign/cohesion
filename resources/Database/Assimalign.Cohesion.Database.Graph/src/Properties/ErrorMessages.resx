@@ -274,4 +274,5 @@
   <data name="FunctionArgumentConversion" xml:space="preserve"><value>A function argument cannot be read as its declared CLR type.</value></data>
   <data name="ShortestPathNodeMissing" xml:space="preserve"><value>The selected shortest path contains a node absent from this statement snapshot.</value></data>
   <data name="ShortestPathRelationshipMissing" xml:space="preserve"><value>The selected shortest path contains a relationship absent from this statement snapshot.</value></data>
+  <data name="SelectivePrefilterPeerBinding" xml:space="preserve"><value>Selected path prefilters cannot reference '{0}', which is introduced by another path in the same MATCH. Bind it in an earlier clause or in this path.</value></data>
 </root>

@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 
 using Shouldly;
 using Xunit;
+using Xunit.Abstractions;
 
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Graph.Internal;
@@ -15,6 +16,86 @@ namespace Assimalign.Cohesion.Database.Graph.Tests;
 
 public sealed class GqlPathSelectorPlanningTests
 {
+    private readonly ITestOutputHelper _output;
+
+    public GqlPathSelectorPlanningTests(ITestOutputHelper output) => _output = output;
+
+    [Theory(DisplayName = "Cohesion Test [Graph] - Selected prefilters refuse dependencies on peer MATCH paths (#1734)")]
+    [InlineData("ANY ((a) WHERE b.k > 0), (b)", "b.k")]
+    [InlineData("(b), ALL SHORTEST (a WHERE b.k > 0)", "b.k")]
+    [InlineData("ANY (a)-[r WHERE element_id(b) <> 'x']->(c), (b)", "b)")]
+    [InlineData("ANY (a) ((x WHERE b.k > 0)->(y)){0,3} (c), (b)", "b.k")]
+    [InlineData("p = ANY ((a) WHERE path_length(q) > 0), q = (b)", "q)")]
+    [InlineData("ANY (a {k:b.k}), (b)", "b.k")]
+    [InlineData("ANY (a)-[r {k:b.k}]->(c), (b)", "b.k")]
+    public async Task Plan_PeerPrefilter_ShouldRefuseAtReferenceAsync(string pattern, string reference)
+    {
+        // Arrange
+        await using var engine = GraphDatabaseEngine.Create("selectors", new());
+        var database = await engine.CreateDatabaseAsync("graph", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        string source = $"EXPLAIN MATCH {pattern} RETURN a";
+        // Act
+        var error = await Should.ThrowAsync<DatabaseException>(async () =>
+            await session.ExecuteAsync(source, cancellationToken: CancellationToken.None));
+        // Assert
+        var diagnostic = error.Diagnostics.ShouldHaveSingleItem();
+        diagnostic.Code.ShouldBe("CG01016");
+        diagnostic.Start.ShouldBe(source.IndexOf(reference, StringComparison.Ordinal));
+        diagnostic.End.ShouldNotBeNull().ShouldBeGreaterThan(diagnostic.Start!.Value);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Graph] - Selected prefilters retain their own and incoming bindings (#1734)")]
+    [InlineData("MATCH (b) MATCH ANY ((a) WHERE b.k > 0), (b) RETURN a")]
+    [InlineData("MATCH ANY ((a)->(b) WHERE b.k > 0), (c) RETURN a")]
+    [InlineData("MATCH p = ANY ((a) WHERE path_length(p) > 0) RETURN a")]
+    [InlineData("MATCH ANY (a) ((x WHERE x.k > 0)->(y)){0,3} (b) RETURN a")]
+    public async Task Plan_LocalPrefilter_ShouldRetainAllowedBindingsAsync(string source)
+    {
+        // Arrange
+        await using var engine = GraphDatabaseEngine.Create("selectors", new());
+        var database = await engine.CreateDatabaseAsync("graph", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        // Act
+        var plan = await PlanAsync(database, session, source);
+        // Assert
+        plan.MatchClauses.SelectMany(clause => clause.Paths).ShouldContain(path => path.Selection != null);
+    }
+
+#if !DEBUG
+    [Theory(DisplayName = "Cohesion Test [Graph] - Ordinary planning stays within base allocation budgets (#1734)")]
+    [InlineData("MATCH (a) RETURN a.k", 11256L, 10672L)]
+    [InlineData("MATCH (a)->(b) RETURN a.k", 12208L, 11544L)]
+    [InlineData("MATCH (a) ((x)->(y)){0,3} (b) RETURN a.k", 15168L, 14424L)]
+    public async Task Plan_UnselectedPaths_ShouldKeepBaseAllocationBudgetAsync(string source, long budget, long isolatedBase)
+    {
+        // Arrange: parse and acquire the snapshot outside the synchronous measured loop.
+        await using var engine = GraphDatabaseEngine.Create("selectors", new());
+        var database = await engine.CreateDatabaseAsync("graph", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        var parsed = GraphQueryRequest.FromGql(source).Statement.GqlExpression;
+        var statement = new GqlQueryExpression(parsed.MatchClauses, [], [], false, parsed.Projections);
+        long bytes = await database.RunAsync(session, operation =>
+        {
+            GraphPlan Plan() => new GraphPlanner(database, operation.Context.Snapshot).Plan(statement, token: CancellationToken.None);
+            for (int i = 0; i < 100; i++) { GC.KeepAlive(Plan()); }
+            long minimum = long.MaxValue;
+            // Act: minimum of five 100-plan rounds; no await can move the allocation counter.
+            for (int round = 0; round < 5; round++)
+            {
+                long before = GC.GetAllocatedBytesForCurrentThread();
+                for (int i = 0; i < 100; i++) { GC.KeepAlive(Plan()); }
+                minimum = Math.Min(minimum, GC.GetAllocatedBytesForCurrentThread() - before);
+            }
+            return ValueTask.FromResult(minimum / 100);
+        }, CancellationToken.None);
+        // Assert
+        _output.WriteLine($"{source}: {bytes} bytes/plan; review base budget={budget}; isolated base={isolatedBase}");
+        bytes.ShouldBeLessThanOrEqualTo(budget);
+        bytes.ShouldBeLessThanOrEqualTo(isolatedBase);
+    }
+#endif
+
     [Theory(DisplayName = "Cohesion Test [Graph] - Selector plans distinguish path counts and distinct length groups (#1734)")]
     [InlineData("ANY", 1L, false, false)]
     [InlineData("ALL", null, false, false)]
@@ -110,25 +191,50 @@ public sealed class GqlPathSelectorPlanningTests
         outside.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG03003");
     }
 
-    [Fact(DisplayName = "Cohesion Test [Graph] - Deep path prefilters lower with linear retained planner allocations (#1734)")]
-    public void Create_DeepPrefilters_ShouldAllocateLinearly()
+    [Fact(DisplayName = "Cohesion Test [Graph] - Sibling and nested prefilters retain their individual boundary offsets (#1734)")]
+    public void Create_AdjacentFilteredGroups_ShouldRetainBoundaries()
+    {
+        // Arrange
+        var path = GraphQueryRequest.FromGql("MATCH ANY ((a) WHERE a.k>0) ((b)->(c) WHERE b.k>1) (((d)->(e) WHERE d.k>2) WHERE e.k>3) RETURN a")
+            .Statement.GqlExpression.Matches[0];
+        // Act
+        var shape = GraphPathShape.Create(path);
+        // Assert
+        shape.Prefilters.Select(filter => (filter.StartBoundary, filter.EndBoundary))
+            .ShouldBe([(0, 0), (0, 1), (1, 2), (1, 2)]);
+        shape.Nodes.Select(nodes => nodes.Select(node => node.Variable).ToArray()).ShouldBe(new string?[][] { ["a", "b"], ["c", "d"], ["e"] });
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Graph] - Deep path prefilters lower with linear retained planner allocations (#1734)")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Create_DeepPrefilters_ShouldAllocateLinearly(bool precedingSibling)
     {
         // Arrange: isolate shape lowering from parser-stack size and AST construction.
-        var small = Nested(512);
-        var large = Nested(1024);
-        _ = GraphPathShape.Create(Nested(32), parsed: true);
+        var small = Nested(512, precedingSibling);
+        var large = Nested(1024, precedingSibling);
+        var medium = Nested(256, precedingSibling);
+        _ = GraphPathShape.Create(Nested(32, precedingSibling), parsed: true);
         // Act: use the minimum of three rounds after warming the lowering path.
         long smallBytes = Enumerable.Range(0, 3).Min(_ => Measure(small, 512));
         long largeBytes = Enumerable.Range(0, 3).Min(_ => Measure(large, 1024));
+        long mediumBytes = Enumerable.Range(0, 3).Min(_ => Measure(medium, 256));
+        _output.WriteLine($"prefilters precedingSibling={precedingSibling}: 256={mediumBytes}; 512={smallBytes}; 1024={largeBytes}");
         // Assert: doubling nesting must not quadruple filter storage.
-        ((double)largeBytes / smallBytes).ShouldBeLessThan(3.2, $"small={smallBytes}; large={largeBytes}");
+        ((double)largeBytes / smallBytes).ShouldBeLessThan(2.6, $"small={smallBytes}; large={largeBytes}");
+        ((double)smallBytes / mediumBytes).ShouldBeLessThan(2.6, $"medium={mediumBytes}; small={smallBytes}");
 
-        static GqlPathPattern Nested(int count)
+        static GqlPathPattern Nested(int count, bool sibling)
         {
             var node = new GqlNodePattern(null, [], new Dictionary<string, GqlExpression>());
             var path = new GqlPathPattern([node], []);
             for (int i = 0; i < count; i++)
-            { path = new GqlPathPattern([], []) { Elements = [new GqlParenthesizedPathPattern(path)], Predicate = new GqlLiteralExpression(true) }; }
+            {
+                var filter = new GqlLiteralExpression(true);
+                path = sibling
+                    ? new GqlPathPattern([], []) { Elements = [new GqlParenthesizedPathPattern(new GqlPathPattern([node], []) { Predicate = filter }), new GqlParenthesizedPathPattern(path)] }
+                    : new GqlPathPattern([], []) { Elements = [new GqlParenthesizedPathPattern(path)], Predicate = filter };
+            }
             return path;
         }
         static long Measure(GqlPathPattern path, int count)
