@@ -23,7 +23,7 @@ internal sealed partial class SqlPlanExecutor
 
     private static readonly string _errorEnsureSnapshotSeesCascadeRowFailure = ErrorMessages.EnsureSnapshotSeesCascadeRowFailure;
 
-    private sealed record SqlConstraintDelete(SqlCatalogTable Table, (PageId PageId, int SlotIndex) Location, object?[] Values);
+    private sealed record SqlConstraintDelete(SqlCatalogTable Table, (PageId PageId, int SlotIndex) Location, object?[] Values, object?[]? EffectiveValues = null);
     [global::System.Diagnostics.DebuggerDisplay("SqlConstraintUpdate")]
     [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlPlanExecutor.SqlConstraintUpdate.DebugView))]
     private sealed record SqlConstraintUpdate(SqlCatalogTable Table, (PageId PageId, int SlotIndex) Location,
@@ -698,6 +698,9 @@ internal sealed partial class SqlPlanExecutor
 
                 foreach (var match in matches)
                 {
+                    // Pending parents are already exclusively owned by this statement.
+                    // Synthetic MERGE insert locations never name a storage row.
+                    if (updates?.ContainsKey((parent.ObjectId, SqlRecordLocation.Pack(match.Location.PageId, match.Location.SlotIndex))) == true) { continue; }
                     if (references is null)
                     {
                         // A visible parent deleted after this snapshot cannot authorize a new child.
@@ -768,10 +771,11 @@ internal sealed partial class SqlPlanExecutor
     /// </remarks>
     private async Task CollectCascadeDeletesAsync(SqlCatalogTable table, (PageId PageId, int SlotIndex) location, object?[] values,
         Dictionary<(ulong ObjectId, ulong Location), SqlConstraintDelete> deletions, HashSet<ulong> scannedTables,
-        List<SqlParentReference> released, SqlStatementContext statement, CancellationToken cancellationToken)
+        List<SqlParentReference> released, SqlStatementContext statement, CancellationToken cancellationToken,
+        SqlConstraintUpdates? finalRows = null)
     {
         var root = await EnterCascadeRowAsync(table, location, values, arrivedBy: null, deletions, scannedTables, released,
-            statement, cancellationToken).ConfigureAwait(false);
+            statement, cancellationToken, finalRows).ConfigureAwait(false);
         if (root is null)
         {
             return; // an earlier target's cascade already reached this row
@@ -786,7 +790,7 @@ internal sealed partial class SqlPlanExecutor
             // rows (a wide fan-out into a table with no cascading references does no
             // further lookup). Checking each step makes every step cancellable.
             cancellationToken.ThrowIfCancellationRequested();
-            if (!TryNextCascadeRow(frame, deletions, statement, cancellationToken, out var edge, out var match))
+            if (!TryNextCascadeRow(frame, deletions, statement, cancellationToken, out var edge, out var match, finalRows))
             {
                 path.Pop(); // every row below this one is collected
                 continue;
@@ -798,7 +802,7 @@ internal sealed partial class SqlPlanExecutor
             }
 
             var next = await EnterCascadeRowAsync(edge.Child, match.Location, match.Values, edge.Constraint, deletions, scannedTables,
-                released, statement, cancellationToken).ConfigureAwait(false);
+                released, statement, cancellationToken, finalRows).ConfigureAwait(false);
             if (next is not null)
             {
                 path.Push(next);
@@ -817,9 +821,13 @@ internal sealed partial class SqlPlanExecutor
     /// </summary>
     private async ValueTask<SqlCascadeFrame?> EnterCascadeRowAsync(SqlCatalogTable table, (PageId PageId, int SlotIndex) location,
         object?[] values, SqlCatalogConstraint? arrivedBy, Dictionary<(ulong ObjectId, ulong Location), SqlConstraintDelete> deletions,
-        HashSet<ulong> scannedTables, List<SqlParentReference> released, SqlStatementContext statement, CancellationToken cancellationToken)
+        HashSet<ulong> scannedTables, List<SqlParentReference> released, SqlStatementContext statement, CancellationToken cancellationToken,
+        SqlConstraintUpdates? finalRows = null)
     {
-        if (!deletions.TryAdd((table.ObjectId, SqlRecordLocation.Pack(location.PageId, location.SlotIndex)), new(table, location, values)))
+        var key = (table.ObjectId, SqlRecordLocation.Pack(location.PageId, location.SlotIndex));
+        object?[] stored = values;
+        if (finalRows is not null && finalRows.TryGet(key, out var pending) && pending.OldValues.Length != 0) { stored = pending.OldValues; }
+        if (!deletions.TryAdd(key, new(table, location, stored, values)))
         {
             return null;
         }
@@ -830,11 +838,12 @@ internal sealed partial class SqlPlanExecutor
             memory.Reserve(256); // deletion record, dictionary growth and cascade work
         }
 
-        await AcquireRowWriteLocksAsync(statement, table.ObjectId, [location], cancellationToken, cascade: true).ConfigureAwait(false);
+        if (location.PageId.Value >= 0)
+        { await AcquireRowWriteLocksAsync(statement, table.ObjectId, [location], cancellationToken, cascade: true).ConfigureAwait(false); }
 
         // A child row was found in latest state, which can be newer than a snapshot fixed at the
         // transaction's begin; a target of the statement itself was found through that snapshot.
-        if (arrivedBy is not null)
+        if (arrivedBy is not null && location.PageId.Value >= 0)
         {
             EnsureSnapshotSeesCascadeRow(table, location, statement);
         }
@@ -845,10 +854,12 @@ internal sealed partial class SqlPlanExecutor
             await AcquireReferenceIntentLocksAsync(table, statement, cancellationToken, cascade: true).ConfigureAwait(false);
         }
 
-        // Deleting the row releases every reference it holds. The edge it was
-        // reached by is excluded: that parent row is in the deletion set and is
-        // already exclusively locked by this statement.
-        CollectReleasedReferences(table, [values], released, statement, cancellationToken, skip: arrivedBy);
+        // Deleting the row releases every stored reference. Skip the arrival edge
+        // only when its values are also the stored values: a pending MERGE update
+        // may have moved the child to this parent from a different, unlocked one.
+        if (location.PageId.Value >= 0)
+        { CollectReleasedReferences(table, [stored], released, statement, cancellationToken,
+            skip: ReferenceEquals(stored, values) ? arrivedBy : null); }
 
         // The incoming references are read after the row and its table are locked,
         // exactly where the recursive walk read them.
@@ -982,7 +993,7 @@ internal sealed partial class SqlPlanExecutor
     private bool TryNextCascadeRow(SqlCascadeFrame frame, Dictionary<(ulong ObjectId, ulong Location), SqlConstraintDelete> deletions,
         SqlStatementContext statement, CancellationToken cancellationToken,
         out SqlBoundReference edge,
-        out ((PageId PageId, int SlotIndex) Location, object?[] Values) match)
+        out ((PageId PageId, int SlotIndex) Location, object?[] Values) match, SqlConstraintUpdates? finalRows = null)
     {
         while (true)
         {
@@ -1019,8 +1030,9 @@ internal sealed partial class SqlPlanExecutor
                 continue;
             }
 
-            frame.Matches = CollectConstraintMatches(FindConstraintRows(reference.ChildKey, keys, statement, cancellationToken,
-                ConstraintCurrentSnapshot(statement)), statement);
+            frame.Matches = CollectConstraintMatches(finalRows is null
+                ? FindConstraintRows(reference.ChildKey, keys, statement, cancellationToken, ConstraintCurrentSnapshot(statement))
+                : FinalConstraintRows(reference.ChildKey, keys, statement, cancellationToken, deletions, finalRows, ConstraintCurrentSnapshot(statement)), statement);
             frame.Match = 0;
         }
     }
@@ -1041,11 +1053,16 @@ internal sealed partial class SqlPlanExecutor
                 {
                     continue;
                 }
-                var keys = reference.ParentKey.Read(deletion.Values);
+                var keys = reference.ParentKey.Read(deletion.EffectiveValues ?? deletion.Values);
                 if (keys.Any(value => value is null))
                 {
                     continue;
                 }
+                // NO ACTION permits a replacement parent key in this statement. RESTRICT
+                // retains its immediate referenced-row refusal (ri_triggers.c:944-959).
+                if (constraint.OnDelete == SqlCatalogReferentialAction.NoAction &&
+                    FinalConstraintRows(reference.ParentKey, keys, statement, cancellationToken,
+                        deletions, updates, ConstraintCurrentSnapshot(statement)).Any()) { continue; }
                 foreach (var match in FinalConstraintRows(reference.ChildKey, keys, statement, cancellationToken,
                     deletions, updates, ConstraintCurrentSnapshot(statement)))
                 {

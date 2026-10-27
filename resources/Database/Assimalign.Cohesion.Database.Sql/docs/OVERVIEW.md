@@ -12,8 +12,8 @@ WITH NO DATA creates only the inferred definition. Failed builds leave no table 
 MERGE executes ordered actions, BY SOURCE and RETURNING/merge_action() within one statement
 rollback bracket. Repeated target modifications fail with CS05036. USING retains the existing
 read-source forms. FULL associations require a safe mandatory hash equality and complete ON
-safety proof (CS05070). SQ-M3 supplies concurrent-target rechecks and complete mixed-action
-final-state constraints (#1715).
+safety proof (CS05070). ReadCommitted rechecks concurrently changed targets and reselects ordered actions; Snapshot
+refuses them with CS04064. Foreign keys validate the composed final action state (#1715).
 
 ## Wire contract ownership
 

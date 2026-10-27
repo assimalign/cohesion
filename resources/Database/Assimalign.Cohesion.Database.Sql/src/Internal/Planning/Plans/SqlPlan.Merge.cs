@@ -14,7 +14,7 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 [global::System.Diagnostics.DebuggerDisplay("SqlMergePlan")]
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed record SqlMergePlan(SqlCatalogTable Table, SqlDmlSource Source,
-    IReadOnlyList<SqlMergeActionPlan> Actions, IReadOnlyList<SqlProjection>? Returning,
+    IReadOnlyList<SqlMergeActionPlan> Actions, SqlBoundExpression Condition, IReadOnlyList<SqlProjection>? Returning,
     int ReturningActionOrdinal) : SqlPlan
 {
     private sealed class DebugView

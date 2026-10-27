@@ -19,6 +19,48 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 [Collection(nameof(VersionPurgeRefusalTests))]
 public sealed class VersionPurgeRefusalTests
 {
+    [Fact(DisplayName = "Cohesion Test [Sql] - Purge: damaged versions cannot stop independent lineage pruning (#1715)")]
+    public async Task RunIteration_DamagedVersion_ShouldStillPruneLinks()
+    {
+        // Arrange: park the engine pump and drive a separately owned worker explicitly.
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        var clock = new ManualTimeProvider();
+        await using var engine = CreateEngine(clock);
+        await using var pump = await PausedPump.CreateAsync(engine.Workers.OfType<SqlVersionPurgeWorker>().Single(), engine.UndoDeferredSignal);
+        var database = await engine.CreateDatabaseAsync("test", timeout.Token);
+        await using var session = await database.CreateSessionAsync(timeout.Token);
+        await SetupAsync(session, timeout.Token);
+        await PutAsync(session, 1, timeout.Token);
+        var storage = database.DataStorage;
+        var location = default((PageId PageId, int SlotIndex));
+        using (var iterator = storage.GetUnitIterator())
+        {
+            iterator.MoveNext().ShouldBeTrue();
+            location = (iterator.Current.PageId, iterator.Current.SlotIndex);
+        }
+        await session.ExecuteAsync("UPDATE items SET id=2", cancellationToken: timeout.Token);
+        var original = storage.ReadRow(location.PageId, location.SlotIndex).ToArray();
+        storage.UpdateRow(location.PageId, location.SlotIndex, new byte[1]);
+        var worker = new SqlVersionPurgeWorker(engine);
+        await using var lifetime = CheckpointPace.Own(worker);
+        database.DataStorage.RowVersionLinks.Count.ShouldBe(1);
+        try
+        {
+            // Act: both full passes actually reach the damaged tracked record.
+            for (int pass = 0; pass < 2; pass++)
+            {
+                clock.Advance(TimeSpan.FromHours(1));
+                CheckpointPace.RunSettled(worker, timeout.Token);
+                worker.FailureCount.ShouldBe(pass + 1);
+                worker.Fault.ShouldBeOfType<StorageCorruptionException>();
+            }
+
+            // Assert
+            database.DataStorage.RowVersionLinks.Count.ShouldBe(0);
+        }
+        finally { storage.UpdateRow(location.PageId, location.SlotIndex, original); }
+    }
+
     [Fact(DisplayName = "Cohesion Test [Sql] - Purge: refused undo reports once per episode without taking the database offline")]
     public async Task RunIteration_UndoRemainsRefused_ShouldReportOnceAndRecoverForEachEpisode()
     {

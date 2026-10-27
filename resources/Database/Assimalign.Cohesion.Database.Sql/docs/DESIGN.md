@@ -3017,7 +3017,7 @@ so unique entries also validate the final state during a swap. Snapshot and Read
 use the same pending view. Wire regressions select isolation via the existing server-session
 API because SQL BEGIN deliberately has no isolation clause; UPDATE/results use both transports.
 
-## MERGE binding, association and execution (#1715, SQ-M1/SQ-M2)
+## MERGE binding, association and execution (#1715, SQ-M1/SQ-M2/SQ-M3)
 
 SqlPlanner.Merge reuses BindDmlSources and BindJoinSources metadata/subquery association
 binding, with an explicit tree for MERGE; ordinary joined UPDATE/DELETE keep CS05069.
@@ -3037,7 +3037,7 @@ parser/parse_merge.c:52-99. Each match kind becomes terminal after an unconditio
 its retained AST source span. Destinations resolve only against target columns. Duplicates,
 identity policy, parameters, Boolean predicates, aggregates and assignment families are
 checked before execution, including empty sources. Assignment types use existing INSERT
-SELECT conversion families; runtime values and final constraints remain for SQ-M2/3.
+SELECT conversion families; execution validates runtime values and the composed final constraints.
 ON/WHEN and SET/INSERT subqueries bind against their action namespace. RETURNING
 retains the existing subquery capability boundary. Sources retain normal read-source binding.
 Regression cases pair MERGE USING with UPDATE FROM for stored tables, system relations,
@@ -3087,11 +3087,78 @@ referential lock retries without invoking action callbacks again.
 Hash builds and retained inputs, candidates and writes use the shared statement memory grant
 and unwind on budget/cancellation failure; the statement-budget section records alias ownership.
 Provisioning admission enumerates target, source, ON and all action/subquery references before
-planning. Result preparation includes MERGE in the session DML boundary. Existing cascade,
-CHECK/domain and FK routines validate actions; SQ-M3 completes mixed INSERT/UPDATE/DELETE
-final-state constraint composition and PostgreSQL ReadCommitted target rechecks. Until then,
-existing EnsureLatestVersion refuses stale targets, and overlapping direct UPDATE/referential
-writes conservatively fail CS05036. Disk and wire formats and assembly boundaries are unchanged.
+planning. Result preparation includes MERGE in the session DML boundary.
+
+Under ReadCommitted a selected modifying target is locked and followed through every committed
+replacement before applying. The original source association remains fixed. The full original ON
+predicate and ordered WHEN clauses are reevaluated against the latest target. A broken match
+produces both a BY SOURCE candidate (source columns NULL) and a BY TARGET candidate (target
+columns NULL); a deleted MATCHED target produces only BY TARGET. An original BY SOURCE row
+never becomes MATCHED, and its concurrent deletion removes the candidate. Competing INSERTs
+retain ordinary unique enforcement without rescanning or ON CONFLICT arbitration. Snapshot
+retains the retryable DatabaseTransactionAbortedException, now with existing CS04064. These
+choices follow PostgreSQL executor/nodeModifyTable.c:3557-3598,3621-3744. Only modifying
+reselected direct actions enter repeated-target detection. Scalar assignments reevaluate on EPQ;
+independent action subqueries retain their statement cache (executor/nodeSubplan.c:1094-1113).
+Completed reselections and defaults persist across a later referential lock backoff.
+
+SqlStorage owns internal, transient predecessor/successor links for ordinary, joined, upsert,
+referential and MERGE UPDATE publishers. A link is consulted only under the predecessor row
+lock and only when its writer equals that row's deleter stamp. Every tombstone first forgets a
+prior link, preventing a failed UPDATE then DELETE in one transaction from following a rolled-back
+replacement. The pinned statement snapshot protects intermediate rows and links even when writer
+sequence and publication order differ. The version-purge worker removes links strictly below the
+same safe MVCC horizon in cancellable batches of at most 1024. No statement survives reopen, so
+these links require no persisted identity or format bump. Source/reference intents precede sorted
+original row locks, then successor/referential rows, parent rows, unique keys, the coordinator apply
+gate and page/index latches. The lineage monitor never surrounds a wait or storage operation.
+Link pruning runs in a finally even when record/index reclamation reports a deferred failure.
+At the end of a prune, backing dictionaries and retirement queues above 1024 slots trim when
+their counts fall below one quarter of capacity. Links remain recorded by every UPDATE path:
+reader admission and replacement publication have no shared atomic reader-registration seam,
+so sampling a ReadCommitted-reader count could miss a statement admitted between that sample
+and publication. The existing pinned-snapshot horizon remains the safety proof for retention.
+
+Constraint preparation composes direct INSERT/UPDATE rows and deletions before applying incoming
+referential actions. Statement-local negative page identities represent pending inserts and never
+become physical locks or storage reads. Cascades find final child references, so a directly updated
+child that moved away survives, while overlapping SET NULL/DEFAULT assignments compose onto
+its final row. A cascaded rekey retains separate stored values for index removal and effective
+values for downstream reference discovery. A moved-then-cascaded child also locks the parent
+referenced by its stored values until transaction end: its new cascade edge proves ownership
+only of the new parent, so skipping that edge is safe only for unchanged stored values. This
+closes the undecided-tombstone window even when the MERGE transaction later rolls back.
+CHECK/domain, row encoding and unique proposal
+checks cannot be hidden by a later cascade (executor/nodeModifyTable.c:2327 and
+executor/execIndexing.c:433-455); FK validation sees only the composed final rows.
+NO ACTION accepts a replacement parent key, whereas RESTRICT refuses substitution, following
+PostgreSQL utils/adt/ri_triggers.c:944-959. Existing UPDATE statement key-swap discipline remains.
+Only direct actions contribute counts and RETURNING; their returned values precede referential
+side effects. All composed row sets and projected constraint indexes reserve statement memory.
+Direct UPDATEs removed by a cascade still run their old-to-new parent-key check against the
+final state. This preserves the old-key NO ACTION check (PostgreSQL
+utils/adt/ri_triggers.c:887,923-955), including cross-table RESTRICT and SET NULL children;
+these compositions need no repeated-modification fallback. Final-state FK failures and
+NOT NULL, CHECK, domain or identity failures while collecting or validating SET NULL/DEFAULT
+rows are retained until the immediate direct-proposal unique check completes, matching
+index-before-AFTER-trigger ordering (executor/nodeModifyTable.c:2371-2383). A pending failure
+skips further parent-row and final-write locks: no row can be written, and a stale parent
+version or a needless wait must not replace the statement's error. Direct unique-key locks
+still precede the precheck; every lock wait remains outside the apply gate.
+In MERGE's row-concurrency path, CS04064 identifies a failed target recheck or an apply-phase
+EnsureLatestVersion check on a row being modified. Cascade snapshot crosschecks
+(EnsureSnapshotSeesCascadeRow) and matched-parent EnsureLatestVersion checks retain plain
+DML's uncoded transaction-abort contract, as do host-ended transactions and abandoned lock owners.
+A MERGE-only constraint-state subtype and call-site filtering preserve ordinary DML object
+sizes and the existing Release allocation budgets.
+SET NULL/DEFAULT refreshes only added or changed final rows. Mutable constraint projections
+keep a reverse location directory, replace only changed keys, and release empty buckets and
+their exclusive projected arrays; ledger capacity is reused and shared row cells stay retained.
+Unchanged iterations reserve nothing. Discarded cascade-discovery projections are disposed before
+the final-state view is built, and final projections are disposed on every statement exit.
+The self-table and cross-table memory corpus compares both SET policies with CASCADE under the
+default grant; the joined-DML refusal corpus still checks genuinely oversized statements.
+Disk and wire formats and assembly boundaries are unchanged.
 Deviates from interface-first (database-area.md); new public syntax leaves are sealed.
 
 | Code | MERGE binding condition |
@@ -3108,6 +3175,11 @@ All new messages use generated SQL resources. SQ-M1 allocates no CS03/04/06 iden
 The SQL NativeAOT guard explains all three match kinds and executes MERGE RETURNING in process
 and over the in-memory wire. Engine and client regressions cover all action kinds, lazy subqueries,
 repeated targets, statement rollback and the basic InMemory/TCP round trip.
+SqlMergeConcurrencyTests gates update/commit/rollback/delete/insert and multi-hop schedules under
+both isolations, exercises cancellation/disposal/no-op/error exits, and runs until recheck counters
+confirm sustained races. SqlMergeConstraintTests covers final-state composition and immediate
+constraints. SqlMergeWireTests and SqlMergeConcurrencyWireTests carry the final-state and coded
+Snapshot-refusal corpus over both transports without changing the wire's default Snapshot BEGIN.
 
 ## INSERT ... ON CONFLICT execution (#1118)
 

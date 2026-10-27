@@ -227,6 +227,8 @@ internal sealed partial class SqlPlanExecutor
                         await TombstoneIndexEntriesAsync(statement, indexes, table, write.OldValues!, oldReference, cancellationToken).ConfigureAwait(false);
                     }
                     var location = _storage.InsertRow(bracket, table.ObjectId, write.Record);
+                    if (write.OldLocation is { } predecessor)
+                    { _storage.RowVersionLinks.Add(predecessor, SqlRecordLocation.Pack(location.PageId, location.SlotIndex), statement.Transaction.Sequence); }
                     statement.Coordinator.VersionStore.RecordCreated(statement.Transaction.Sequence, location.PageId, location.SlotIndex);
                     await InsertIndexEntriesAsync(statement, indexes, table, write.Values,
                         SqlRecordLocation.Pack(location.PageId, location.SlotIndex), cancellationToken).ConfigureAwait(false);
