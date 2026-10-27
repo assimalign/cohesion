@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -9,6 +10,7 @@ using Xunit;
 using Xunit.Abstractions;
 
 using Assimalign.Cohesion.Database.Graph.Internal;
+using Assimalign.Cohesion.Database.Graph.Language;
 using Assimalign.Cohesion.Database.Graph.Storage;
 using Assimalign.Cohesion.Database.Graph.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Transactions;
@@ -109,14 +111,45 @@ public sealed class GraphMergeFixTests
         await using var session = await db.CreateSessionAsync();
         var parameters = new Dictionary<string, object?> { ["rows"] = new object?[] { new Dictionary<string, object?> { ["k"] = 1 } } };
 
-        // Act / Assert: the first two have provable kinds under EXPLAIN; the third exercises evaluation.
-        foreach (string prefix in source.Contains('$') ? new[] { "" } : new[] { "", "EXPLAIN " })
+        // Act / Assert: all three have provable kinds, including the captured parameter shape.
+        foreach (string prefix in new[] { "", "EXPLAIN " })
         {
             var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(prefix + source, parameters));
             error.Diagnostics[0].Code.ShouldBe("CG03004");
         }
         var ordinary = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(source.Replace("MERGE", "CREATE", StringComparison.Ordinal), parameters));
         ordinary.Diagnostics[0].Code.ShouldBe("CG03003");
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Graph] - evaluated MERGE equalities use their dedicated runtime code (#1735)")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Execute_UnknownCompositeMergeEquality_ShouldUseRuntimeMergeCode(bool map)
+    {
+        // Arrange: enter the executor with an evaluated row to exercise validation independently
+        // of the planner's conservative shape proofs.
+        await using var engine = GraphDatabaseEngine.Create("fix", new());
+        var db = await engine.CreateDatabaseAsync("patterns");
+        await using var session = await db.CreateSessionAsync();
+        var stage = (GqlMergeStage)GraphQueryRequest.FromGql("MERGE (:N {v:x})").Statement.GqlExpression.Stages.Single();
+        var plan = new GraphPathPlan(stage.Path, new(0, "N", null, null)) { Shape = GraphPathShape.Create(stage.Path) };
+        object value = map ? new Dictionary<string, object?> { ["k"] = 1L } : new object?[] { 1L };
+        var budget = new GraphPlanExecutor.ExpansionBudget();
+
+        // Act
+        var error = await Should.ThrowAsync<DatabaseException>(db.RunAsync(session, async operation =>
+        {
+            operation.QueryBudget = budget;
+            await foreach (var row in GraphPlanExecutor.StreamMergeAsync(db, operation, stage, plan,
+                [new Dictionary<string, object?> { ["x"] = value }], budget, null, new StrongBox<long>(), CancellationToken.None))
+            { _ = row; }
+            return true;
+        }, CancellationToken.None).AsTask());
+
+        // Assert
+        error.Diagnostics[0].Code.ShouldBe("CG03004");
+        budget.Memory.ActiveLeases.ShouldBe(0);
+        (await GraphMergeExecutionTests.Rows(session, "MATCH (n) RETURN count(*)")).Single()[0].ShouldBe(0L);
     }
 
     [Fact(DisplayName = "Cohesion Test [Graph] - row-dependent indexed MERGE upserts 10000 rows among 100000 within budget (#1735)")]
