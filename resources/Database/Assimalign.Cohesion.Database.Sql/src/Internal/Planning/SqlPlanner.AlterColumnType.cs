@@ -57,12 +57,16 @@ internal sealed partial class SqlPlanner
 
         string? text = recastDefault && previous.DefaultLiteral is not null
             ? RecastColumnDefault(previous, target, previousDomain) : column.DefaultLiteral;
+        bool literalDefault = text is not null &&
+            SqlPersistedExpression.IsDefaultLiteral(SqlPersistedExpression.Load(text, "ALTER COLUMN DEFAULT"));
         var replacement = new SqlCatalogColumn(column.Name, column.Type, column.IsNullable, text, column.Collation,
-            column.DomainName, text is not null && SqlPersistedExpression.IsDefaultLiteral(SqlPersistedExpression.Load(text, "ALTER COLUMN DEFAULT"))
-                ? [] : column.DefaultFunctionCalls, column.Identity, column.MissingValueLiteral);
-        // The decision 49a path validates facets without copying rows or rebuilding
-        // indexes. CHAR width changes can repad values and still need the copier.
+            column.DomainName, literalDefault ? [] : column.DefaultFunctionCalls, column.Identity, column.MissingValueLiteral)
+            { RecastDefault = text is not null && !literalDefault && (recastDefault && previous.DefaultLiteral is not null || column.RecastDefault) };
+        // Only widening facets preserve physical values. Narrowing VARCHAR may
+        // trim trailing spaces; CHAR width changes may repad (tablecmds.c:15142-15199).
         bool compatible = expression is null && !RequiresColumnRewrite(previous, replacement) &&
+            (column.Type.MaxLength is null || previous.Type.MaxLength is { } length && column.Type.MaxLength >= length) &&
+            (column.Type.Precision is null || previous.Type.Precision is { } precision && column.Type.Precision >= precision) &&
             !(column.Type.Type == DatabaseType.Character && column.Type.MaxLength != previous.Type.MaxLength);
         return new SqlAlterColumnPlan(table, replacement, AllowDefaultChange: true,
             compatible ? null : conversion, TypeChange: true);
@@ -87,14 +91,6 @@ internal sealed partial class SqlPlanner
             : scope.Bind(expression);
         var conversion = BindAlterAssignment(operand, source, domain, target, previous.Name,
             expression is SqlLiteralExpression { LiteralType: SqlLiteralType.Null });
-        if (target.Storage.Type == DatabaseType.Character)
-        {
-            var characterCast = conversion.Casts[(int)source];
-            var textCast = _functions.Types.ResolveCast(domain, source, SqlType.Text);
-            if (characterCast is not null && !SqlStandardCasts.Contains(characterCast) ||
-                textCast is not null && !SqlStandardCasts.Contains(textCast))
-            { throw new SqlPlanningException("CK00001", ErrorMessages.AlterTypeCharacterDefaultCast); }
-        }
         if (SqlPlanExecutor.DefaultVolatility(expression, scope) != SqlFunctionVolatility.Immutable)
         {
             // The DEFAULT binder supplies assignment coercion on every evaluation.

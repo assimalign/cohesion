@@ -73,7 +73,7 @@ internal sealed partial class SqlPlanExecutor
         }
         string RenameColumn(string name) => plan.ColumnName is not null && string.Equals(name, plan.ColumnName, StringComparison.OrdinalIgnoreCase) ? plan.NewName : name;
         var columns = plan.Table.Columns.Select(column => new SqlCatalogColumn(RenameColumn(column.Name), column.Type,
-            column.IsNullable, column.DefaultLiteral, column.Collation, column.DomainName, column.DefaultFunctionCalls, column.Identity, column.MissingValueLiteral)).ToArray();
+            column.IsNullable, column.DefaultLiteral, column.Collation, column.DomainName, column.DefaultFunctionCalls, column.Identity, column.MissingValueLiteral) { RecastDefault = column.RecastDefault }).ToArray();
         // Bind rewritten definitions before any mutation. Renaming never re-resolves a recorded call.
         foreach (var constraint in plan.Table.Constraints.Where(constraint => constraint.Kind == SqlCatalogConstraintKind.Check))
         {

@@ -391,7 +391,7 @@ between builder commit and publication therefore sees the complete table after p
 Statement and BEGIN admission proceed normally through that interval. No snapshot sees a partial
 row set. Conversion, domain, budget, cancellation and storage failures before
 publication leave no table. Crash recovery sees no table or the complete table, and reclaims
-abandoned owners. SQL remains format 26; existing kind-14 reclamation records suffice.
+abandoned owners. SQL remains format 27; existing kind-14 reclamation records suffice.
 
 CTAS holds the shared metadata lease for its entire source query and build, following CREATE
 INDEX's precedent. Other sessions' CREATE/DROP of views, functions, domains and schemas fail
@@ -1066,12 +1066,14 @@ Numeric and Boolean defaults keep their original expression identity; unknown st
 keep their resolved old identity. Immutable defaults validate eagerly and persist as canonical
 literals, so repeated changes do not accumulate casts. A column without a default inherits the
 target domain's default. Domain base modifiers use assignment overflow checks. Volatile defaults
-retain per-insert evaluation. Standard CHAR defaults keep assignment overflow/padding;
-a dependent DEFAULT requiring an application CHAR conversion refuses with CK00001 because
-the ordinary persisted CAST spelling would introduce explicit truncation. Drop that default
-before TYPE and set the desired expression afterward. Immutable target-domain defaults are
-checked even on an empty table. CHECKs
-rebind their operators/functions against the target and recheck converted rows. Domain and
+retain per-insert evaluation and their original text and pinned calls; stable defaults also run
+at INSERT time. TYPE recasts bind standard and application assignment casts, including DATE to
+TIMESTAMP and TIMESTAMP to TIMESTAMPTZ. Immutable defaults freeze to literals and lose their pins.
+Ordinary defaults keep their established evaluation behavior. CHAR defaults, including application
+casts, keep assignment overflow/padding without a persisted explicit CAST. Immutable target-domain
+defaults are checked even on an empty table. Existing CHECKs retain persisted-definition rules,
+validate changed operand types against runtime comparison rules, and recheck converted rows.
+LIKE keeps runtime text conversion for non-character operands. Domain and
 NOT NULL failures also abort the whole operation. Every index is rebuilt; new uniqueness
 collisions, including after a collation change, refuse. Incoming, outgoing and self foreign keys
 must retain the engine's identical storage-type/collation compatibility and valid final keys.
@@ -1089,14 +1091,18 @@ collation changes use the same rewrite; decision 49a's validation-only facet pat
 Full definitions refuse CS05013 if the resulting default differs or collation changes without
 an explicit COLLATE, including when the type requires a rewrite. TYPE without USING retains
 the heap and index trees for same-storage, same-scale, same-domain and same-collation changes
-accepted by the facet path, except CHAR width changes that can repad values. Each rewrite chunk
+whose length/precision widen or become unbounded, except CHAR width changes that can repad values.
+Narrowing rewrites with assignment semantics: excess trailing spaces trim to the target VARCHAR
+length, while non-space overflow refuses. Each rewrite chunk
 evaluates USING, domains and CHECKs before entering the database-wide physical apply gate.
 Failed builds expose their abandoned owner through pending reclamations until its pages are freed.
 Full-definition identity-type changes retain their refusal; use explicit TYPE for integer identity conversion.
 Populated-table provisioning handoff and expanded crash/wire coverage follow in SQ-A3.
-SQL format 26 and compiled-schema v8 remain unchanged because persisted shapes are unchanged.
+SQL format 27 gates the per-column TYPE default-assignment flag in table extension 7; older files
+refuse without an upgrade reader. Compiled-schema v8 is unchanged.
 CS02064 names a missing assignment pathway for the value, USING result or default (42804).
-Reference anchors: PostgreSQL tablecmds.c:14949-14998,15269-15304,15612-15624 in the local clone.
+Reference anchors: PostgreSQL tablecmds.c:14949-14998,15142-15199,15269-15304,15612-15624 and
+utils/adt/varchar.c:620-648 in the local clone.
 
 Each ALTER TABLE statement accepts one action. Rename/default/nullability forms are RENAME TO new_table, RENAME [COLUMN] old TO new,
 and ALTER [COLUMN] c SET DEFAULT value, DROP DEFAULT, SET NOT NULL or DROP NOT NULL.
@@ -1613,7 +1619,7 @@ its data with the engine that wrote it (which can still open it), drop the
 database (`DropDatabaseAsync`), create it again and reload the data. A database
 whose creation was interrupted before its format was recorded reads as format 1
 and needs only the drop and create. Upgrading databases across format versions
-is tracked by #1152. New databases remain on format 26; recoverable table rewrite and dropped-ordinal compaction (#1265) reuse its existing records and TRUNCATE publication contract. SqlDatabase.RewriteTableAsync is a C# maintenance operation on the provisioning worker; it adds no SQL statement. Read-only snapshots retain the original layout until they end. Writers bound to a retired table, including old snapshot transactions reading it inside DML, abort retryably with CS04006; retry the entire transaction. FK probes against a replacement their probe snapshot cannot see also abort with CS04006, including after a parent rename. Empty DML input, MATCH SIMPLE null keys and self-keys satisfied by the same input do not probe a parent and do not trigger this refusal. Read-committed ON CONFLICT checks its refreshed probe snapshot after arbitration. Format 26 fenced changed temporal DEFAULT and frozen missing-value text (#1422). Format 25 admits distinct predicates, Boolean tests and LIKE ESCAPE in persisted expressions and views; format 24 admits explicit NULL placement in
+is tracked by #1152. New databases use format 27, which records TYPE default assignment coercion; earlier files are refused. Recoverable table rewrite and dropped-ordinal compaction (#1265) reuse its existing records and TRUNCATE publication contract. SqlDatabase.RewriteTableAsync is a C# maintenance operation on the provisioning worker; it adds no SQL statement. Read-only snapshots retain the original layout until they end. Writers bound to a retired table, including old snapshot transactions reading it inside DML, abort retryably with CS04006; retry the entire transaction. FK probes against a replacement their probe snapshot cannot see also abort with CS04006, including after a parent rename. Empty DML input, MATCH SIMPLE null keys and self-keys satisfied by the same input do not probe a parent and do not trigger this refusal. Read-committed ON CONFLICT checks its refreshed probe snapshot after arbitration. Format 26 fenced changed temporal DEFAULT and frozen missing-value text (#1422). Format 25 admits distinct predicates, Boolean tests and LIKE ESCAPE in persisted expressions and views; format 24 admits explicit NULL placement in
 stored view bodies; earlier formats are refused at open, with no upgrade reader.
 
 From format 4 on, the catalog stores the format marker in a record that engines
@@ -2702,7 +2708,7 @@ and `parse_expr.c:2541-2560,3085-3105`.
 
 These forms are storable in CHECK, parenthesized DEFAULT, domain definitions,
 SQL function bodies and views. Canonical CHECK text is exposed by
-INFORMATION_SCHEMA.CHECK_CONSTRAINTS. Storage format 26 refuses older files;
+INFORMATION_SCHEMA.CHECK_CONSTRAINTS. Storage format 27 refuses older files;
 there is no upgrade reader. No named clause is added; the profile count does not change.
 ESCAPE and UNKNOWN stay contextual. ISNULL and NOTNULL are recognized in
 postfix position and refused with one CK00001; explicit AS aliases and ordinary
@@ -3871,7 +3877,7 @@ SQL does not infer it from a CLR exception type. This follows PostgreSQL datetim
 REAL and DOUBLE text retain CS02022 / 22P02 for malformed input and CS02002 / 22003
 for overflow/underflow. Floating assignment rejects 1,000 and overflowing 1e400, as CAST does.
 
-Catalog format 26 and compiled-schema v8 refuse earlier definitions rather than reinterpret
+Catalog format 27 and compiled-schema v8 refuse earlier definitions rather than reinterpret
 retained default text. Format-25 INTERVAL defaults such as '12' (formerly days) and
 '2.03:04:05.1234567' are never rebound by this engine. A catalog refusal carries CS06041;
 a schema refusal uses InvalidDocument at schema.format. Export with the writing engine,

@@ -1048,7 +1048,7 @@ internal sealed partial class SqlPlanner
             var column = columns[i];
             if (primaryKey.Contains(column.Name, StringComparer.OrdinalIgnoreCase))
             {
-                columns[i] = new SqlCatalogColumn(column.Name, column.Type, false, column.DefaultLiteral, column.Collation, column.DomainName, column.DefaultFunctionCalls, column.Identity, column.MissingValueLiteral);
+                columns[i] = new SqlCatalogColumn(column.Name, column.Type, false, column.DefaultLiteral, column.Collation, column.DomainName, column.DefaultFunctionCalls, column.Identity, column.MissingValueLiteral) { RecastDefault = column.RecastDefault };
             }
         }
         return new SqlCreateTablePlan(schema, create.Table.TableName, columns, primaryKey, create.IfNotExists, create.Constraints);
@@ -1119,10 +1119,11 @@ internal sealed partial class SqlPlanner
     }
 
     // PostgreSQL heap.c:3409 admits defaults with the same assignment coercion as INSERT.
-    internal static void ValidateDefaultType(SqlExpression expression, SqlExpressionEvaluator scope, DatabaseType target, string column)
+    internal static void ValidateDefaultType(SqlExpression expression, SqlExpressionEvaluator scope, DatabaseType target, string column,
+        bool assignmentCast = false)
     {
         var source = scope.StaticTypeOf(expression);
-        if (!CanAssignInsertType(source, target) && !(source == DatabaseType.DateTimeOffset && target == DatabaseType.DateTime))
+        if (!assignmentCast && !CanAssignInsertType(source, target) && !(source == DatabaseType.DateTimeOffset && target == DatabaseType.DateTime))
         {
             throw new SqlPlanningException("CS05013", string.Format(CultureInfo.CurrentCulture,
                 ErrorMessages.DefaultTypeIncompatible, column, source, target), expression.Location);
@@ -1271,7 +1272,8 @@ internal sealed partial class SqlPlanner
             : dropDefault ? type.DefaultLiteral : previous.DefaultLiteral;
         return new SqlAlterColumnPlan(table, new SqlCatalogColumn(previous.Name, previous.Type, nullable ?? previous.IsNullable,
             text, previous.Collation, previous.DomainName, value is not null ? DefaultCalls(text) : dropDefault ? [] : previous.DefaultFunctionCalls,
-            previous.Identity, previous.MissingValueLiteral), AllowDefaultChange: value is not null || dropDefault);
+            previous.Identity, previous.MissingValueLiteral)
+            { RecastDefault = value is null && !dropDefault && previous.RecastDefault }, AllowDefaultChange: value is not null || dropDefault);
     }
 
     private SqlAlterColumnPlan PlanAlterColumn(SqlTableReference reference, SqlAlterColumnAction change)
@@ -1317,7 +1319,7 @@ internal sealed partial class SqlPlanner
         var column = new SqlCatalogColumn(change.Column.ColumnName, type.Storage,
             change.Column.IsNullable, defaultText,
             collation, type.IsDomain ? type.Name : null,
-            DefaultCalls(defaultText), previous.Identity, previous.MissingValueLiteral);
+            DefaultCalls(defaultText), previous.Identity, previous.MissingValueLiteral) { RecastDefault = previous.RecastDefault };
         return RequiresColumnRewrite(previous, column)
             ? PlanColumnRewrite(table, column, type, null, reference, recastDefault: false)
             : new SqlAlterColumnPlan(table, column);

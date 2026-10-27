@@ -21,6 +21,25 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 /// </summary>
 public sealed class SqlLanguageConformanceTests
 {
+    [Theory(DisplayName = "Cohesion Test [Sql] - Conformance: TYPE narrowing preserves only excess trailing spaces (#1447)")]
+    [InlineData("TEXT")]
+    [InlineData("VARCHAR(8)")]
+    public async Task ExecuteAsync_AlterTypeNarrowingCorpus_ShouldUseAssignment(string source)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("alter-trim-conformance", new());
+        var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await ExecuteAsync(session, $"CREATE TABLE t(v {source})");
+        await ExecuteAsync(session, "INSERT INTO t VALUES('ab    ')");
+
+        // Act
+        await ExecuteAsync(session, "ALTER TABLE t ALTER v TYPE VARCHAR(3)");
+
+        // Assert
+        (await RowsAsync(session, "SELECT v FROM t")).ShouldHaveSingleItem()[0].ShouldBe("ab ");
+    }
+
     [Theory(DisplayName = "Cohesion Test [Sql] - Conformance: ALTER TYPE converts original literal defaults (#1447)")]
     [InlineData("7", "INT", 7)]
     [InlineData("TRUE", "BOOLEAN", true)]

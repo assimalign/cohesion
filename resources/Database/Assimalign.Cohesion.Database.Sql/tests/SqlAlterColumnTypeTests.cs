@@ -488,8 +488,8 @@ public sealed class SqlAlterColumnTypeTests
         (await RowsAsync(session, "SELECT v FROM t")).ShouldBeEmpty();
     }
 
-    [Fact(DisplayName = "Cohesion Test [Sql] - ALTER TYPE: application CHAR defaults refuse before rewriting and can be dropped")]
-    public async Task ExecuteAsync_ApplicationCharacterDefault_ShouldRequireSeparateDefaultDeclaration()
+    [Fact(DisplayName = "Cohesion Test [Sql] - ALTER TYPE: application CHAR defaults use the registered assignment")]
+    public async Task ExecuteAsync_ApplicationCharacterDefault_ShouldApplyAssignment()
     {
         // Arrange
         var builder = SqlDatabaseEngine.CreateBuilder("alter-custom-char");
@@ -501,15 +501,14 @@ public sealed class SqlAlterColumnTypeTests
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         await ExecAsync(session, "CREATE TABLE t(v TEXT DEFAULT 'abcd')");
         await ExecAsync(session, "INSERT INTO t DEFAULT VALUES");
-        var previous = Table(database);
 
-        // Act / Assert
-        var failure = await Should.ThrowAsync<DatabaseException>(() => ExecAsync(session, "ALTER TABLE t ALTER v TYPE target_char"));
-        failure.Diagnostics.ShouldContain(d => d.Code == "CK00001");
-        Table(database).ShouldBeSameAs(previous);
-        await ExecAsync(session, "ALTER TABLE t ALTER v DROP DEFAULT");
+        // Act
         await ExecAsync(session, "ALTER TABLE t ALTER v TYPE target_char");
+
+        // Assert
         (await RowsAsync(session, "SELECT v FROM t")).ShouldHaveSingleItem()[0].ShouldBe("ABCD");
+        await ExecAsync(session, "INSERT INTO t DEFAULT VALUES");
+        (await RowsAsync(session, "SELECT v FROM t")).ShouldAllBe(row => Equals(row[0], "ABCD"));
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - ALTER TYPE: lock cancellation and timeout release metadata and allow retry")]
