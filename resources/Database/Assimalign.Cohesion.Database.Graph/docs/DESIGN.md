@@ -488,6 +488,10 @@ progress before assertions, so a failed assertion reaches the caller instead of 
 the progress wait's hang guard. The pending state is captured before publication: the signal
 may let the main actor commit before the assertion executes. Deterministic inline-completion
 and already-completed-task tests cover both orderings.
+
+The strict unselected-MATCH allocation fixture runs in the same non-parallel collection.
+Concurrent suite activity perturbs its small retained fixture ceiling; isolated baseline and
+current implementations allocate identically. All existing allocation ceilings remain enforced.
 An optional internal, instance-free test gate after writer acquisition deterministically ends
 the session or cancels before the pattern grant, proving late-grant cleanup. Tests also force a
 pattern-only wait and check failure release before the caller rolls back its faulted transaction.
