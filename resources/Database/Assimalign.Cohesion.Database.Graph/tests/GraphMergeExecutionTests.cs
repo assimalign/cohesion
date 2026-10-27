@@ -79,8 +79,8 @@ public sealed class GraphMergeExecutionTests
         (await Rows(session, "MATCH (n:P) RETURN n.bad")).ShouldAllBe(row => row[0] == null);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Graph] - MERGE reuses bound relationships and repeated node variables (#1735)")]
-    public async Task Execute_BoundRelationshipsAndLoops_ShouldReuseIdentities()
+    [Fact(DisplayName = "Cohesion Test [Graph] - MERGE reuses bound nodes and bare repeated node variables (#1735)")]
+    public async Task Execute_BoundNodesAndLoops_ShouldReuseIdentities()
     {
         // Arrange
         await using var engine = GraphDatabaseEngine.Create("merge", new());
@@ -89,11 +89,11 @@ public sealed class GraphMergeExecutionTests
         await session.ExecuteAsync("INSERT (a:P {id:1})-[r:R]->(b:P {id:2})");
 
         // Act
-        var reused = await session.ExecuteAsync("MATCH ()-[r:R]->() MERGE (a)-[r]->(b)-[:S]->(c:P {id:3}) RETURN a.id, b.id, c.id");
-        var loop = await session.ExecuteAsync("MERGE (n:Loop {id:1})-[:SELF]->(n:Other {extra:2}) RETURN n.id");
+        var reused = await session.ExecuteAsync("MATCH (a)-[:R]->(b) MERGE (a)-[:R]->(b)-[:S]->(c:P {id:3}) RETURN a.id, b.id, c.id");
+        var loop = await session.ExecuteAsync("MERGE (n:Loop {id:1})-[:SELF]->(n) RETURN n.id");
 
         // Assert
-        reused.AffectedCount.ShouldBe(2);
+        reused.AffectedCount.ShouldBe(3);
         (await Read(reused)).ShouldHaveSingleItem().ShouldBe(new object?[] { 1L, 2L, 3L });
         loop.AffectedCount.ShouldBe(2);
         (await Rows(session, "MATCH (:Loop)-[:SELF]->(:Loop) RETURN count(*)")).ShouldHaveSingleItem()[0].ShouldBe(1L);
@@ -126,7 +126,7 @@ public sealed class GraphMergeExecutionTests
 
     [Theory(DisplayName = "Cohesion Test [Graph] - MERGE null bound targets and failing branches abort all statement writes (#1735)")]
     [InlineData("INSERT (:Before) OPTIONAL MATCH (n:Missing) MERGE (n)-[:R]->(:P)", "CG03005")]
-    [InlineData("OPTIONAL MATCH ()-[r:Absent]->() MERGE ()-[r]->()", "CG03005")]
+    [InlineData("LET key=NULL MERGE ()-[:Absent {id:key}]->()", "CG03004")]
     [InlineData("INSERT (:Before) MERGE (n:P) ON CREATE SET n.x=1/0", "CG02013")]
     [InlineData("INSERT (:Before) LET m={k:NULL} MERGE (n:P {id:m.k})", "CG03004")]
     public async Task Execute_RuntimeFailure_ShouldRollBackEveryCreation(string source, string code)
@@ -206,8 +206,8 @@ public sealed class GraphMergeExecutionTests
         (await Rows(session, "MATCH (n) RETURN count(*)")).ShouldHaveSingleItem()[0].ShouldBe(0L);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Graph] - bound undirected MERGE edges solve shared endpoints across the whole path (#1735)")]
-    public async Task Execute_BoundUndirectedChain_ShouldReverseEarlierOrientationWhenRequired()
+    [Fact(DisplayName = "Cohesion Test [Graph] - bound undirected MERGE relationships are refused before writes (#1735)")]
+    public async Task Execute_BoundUndirectedChain_ShouldRefuseRedeclarations()
     {
         // Arrange
         await using var engine = GraphDatabaseEngine.Create("merge", new());
@@ -216,11 +216,11 @@ public sealed class GraphMergeExecutionTests
         await session.ExecuteAsync("INSERT (a:P {id:1})<-[:R]-(b:P {id:2})-[:S]->(c:P {id:3})");
 
         // Act
-        var result = await session.ExecuteAsync("MATCH ()-[r:R]->(), ()-[s:S]->() MERGE (x)-[r]-(y)-[s]-(z)-[:T]->(:P {id:4}) RETURN x.id,y.id,z.id");
+        var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("MATCH ()-[r:R]->(), ()-[s:S]->() MERGE (x)-[r]-(y)-[s]-(z)-[:T]->(:P {id:4}) RETURN x.id,y.id,z.id"));
 
         // Assert
-        result.AffectedCount.ShouldBe(2);
-        (await Read(result)).ShouldHaveSingleItem().ShouldBe(new object?[] { 1L, 2L, 3L });
+        error.Diagnostics[0].Code.ShouldBe("CG03007");
+        (await Rows(session, "MATCH (n:P) RETURN count(*)")).ShouldHaveSingleItem()[0].ShouldBe(3L);
     }
 
     [Fact(DisplayName = "Cohesion Test [Graph] - Snapshot MERGE evaluates equality operands once per input before both probes (#1735)")]
@@ -234,6 +234,8 @@ public sealed class GraphMergeExecutionTests
         await using var engine = await builder.BuildAsync();
         var db = await engine.CreateDatabaseAsync("patterns");
         await using var session = await db.CreateSessionAsync();
+        await session.ExecuteAsync("CREATE (:P {id:0})");
+        await GraphSchema.Open(db, session).CreateIndexAsync("P", "by_id", "id");
         await using var transaction = await session.BeginTransactionAsync(IsolationLevel.Snapshot);
 
         // Act

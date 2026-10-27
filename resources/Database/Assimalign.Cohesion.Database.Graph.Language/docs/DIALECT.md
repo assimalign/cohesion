@@ -190,25 +190,29 @@ runtime totals. The engine's GqlProfileExecutionTests EXPLAIN corpus pins this d
 `MERGE path (ON (CREATE | MATCH) SET ...)*` matches the complete fixed path for
 each incoming row. Every complete match receives ON MATCH; when none exists, it creates every
 unbound node and relationship and runs ON CREATE once. An existing partial path does not supply
-unbound parts. Bind variables with an earlier MATCH to reuse existing identities. Bound
-relationships also reuse their endpoints, and may omit their type. Repeated unbound node variables
-create one node with the union of their labels and compatible property equalities. For numerically
-equal repeated properties, the last occurrence supplies the stored CLR scalar type. A relationship
-variable cannot occur twice within the same MERGE path (CG05001).
+unbound parts. Bind node variables with an earlier MATCH to reuse existing identities. A repeated
+or already-bound node must be a bare variable without labels or properties (CG03006, including
+EXPLAIN). Repeated unbound node variables create one node and may form a self-loop. Relationship
+variables must be newly declared by MERGE (CG03007 for an incoming declaration, including EXPLAIN);
+a relationship variable cannot occur twice within the same MERGE path (CG05001).
 
 Each clause takes one path; use successive MERGE clauses for separate decisions. Either branch
 order is accepted, with repeated branches; each kind's SET items append in source order and
 rendering preserves that order within each kind. Multiple paths are CG00002.
 Property maps evaluate once per input row against the incoming scope. Equalities must be finite,
-non-null storage scalars (CG03004; supplied parameters retain their ordinary binding validation); a runtime NULL bound entity, an absent bound entity, conflicting
-repeated-node equalities or incompatible bound constraints/endpoints use CG03005. MERGE does not
+non-null storage scalars (CG03004 for proven or evaluated invalid equalities; supplied parameters
+retain their ordinary binding validation). Row-dependent equalities seek an available property
+index with each row's evaluated value; a dropped index falls back to a scan. A runtime NULL bound
+node or absent bound node uses CG03005. MERGE does not
 modify a bound entity to make the pattern fit. Nodes require creation-compatible label conjunctions;
-unbound relationships need exactly one type. Fixed either-direction relationships match either
+relationships need exactly one type. Fixed either-direction relationships match either
 stored orientation; creation uses the source's left-to-right order. Incoming arrows reverse that order.
 
 Earlier MERGE creations and SET changes are visible to later input rows and stages through writer
 overlays. Both branches use ordinary SET's item ordering, schema validation, NULL removal, no-op
-and affected-count rules. Created entities count once; changed pre-existing entities count once
+and affected-count rules. ON CREATE may supply Required properties: existence validation runs
+after that branch, and an entity still missing a Required property refuses with CG03003 and
+rolls back the statement. Created entities count once; changed pre-existing entities count once
 per statement. An empty input produces no decision or creation. RETURN/WITH/NEXT compose normally;
 EXPLAIN shows Merge, OnCreate and OnMatch without executing the probes or mutations. ExecutePaths
 refuses MERGE before mutation. Variable-length and quantified update patterns remain refused.

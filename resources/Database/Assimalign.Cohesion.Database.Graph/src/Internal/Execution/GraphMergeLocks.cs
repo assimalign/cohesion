@@ -33,7 +33,7 @@ internal sealed class GraphMergeLocks : IDisposable
     }
 
     internal async ValueTask AcquireAsync(GraphDatabase database, GraphOperation operation,
-        LockResource resource, CancellationToken token = default)
+        LockResource resource, CancellationToken token = default, Func<ValueTask>? beforePatternGrant = null)
     {
         var manager = database.Coordinator.LockManager;
         var owner = operation.Context.Sequence;
@@ -75,6 +75,9 @@ internal sealed class GraphMergeLocks : IDisposable
             lock (_sync) { _escalated = true; }
             return;
         }
+        // Instance-free test seam: end after bookkeeping but before the manager sees the
+        // request, exercising an actual late grant to an owner already released by teardown.
+        if (beforePatternGrant is not null) { await beforePatternGrant().ConfigureAwait(false); }
         await manager.AcquireAsync(owner, resource, LockMode.Exclusive, token).ConfigureAwait(false);
 
         void Charge() => operation.Merge.ChargeLock();

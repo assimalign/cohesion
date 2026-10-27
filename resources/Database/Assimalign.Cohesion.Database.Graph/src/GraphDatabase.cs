@@ -505,7 +505,7 @@ public sealed partial class GraphDatabase : DatabaseInstance
             label => Catalog.FindLabel(label, operation.Context.Snapshot)!.Value.Id, StringComparer.Ordinal);
 
     internal async ValueTask ValidateNodeAsync(GraphOperation operation, IReadOnlyList<string> labels,
-        IReadOnlyDictionary<string, object?>? properties, CancellationToken token)
+        IReadOnlyDictionary<string, object?>? properties, CancellationToken token, bool deferRequired = false)
     {
         foreach (string label in labels)
         {
@@ -516,7 +516,7 @@ public sealed partial class GraphDatabase : DatabaseInstance
                 metadata = new GraphLabelMetadata(Guid.NewGuid(), label);
                 await Catalog.SaveLabelAsync(metadata.Value, operation.Context, token).ConfigureAwait(false);
             }
-            await ValidatePropertiesAsync(metadata.Value.Id, properties, operation, token).ConfigureAwait(false);
+            await ValidatePropertiesAsync(metadata.Value.Id, properties, operation, token, deferRequired).ConfigureAwait(false);
         }
     }
 
@@ -529,7 +529,7 @@ public sealed partial class GraphDatabase : DatabaseInstance
     }
 
     internal async ValueTask<Guid> ValidateRelationshipAsync(GraphOperation operation, string type,
-        IReadOnlyDictionary<string, object?>? properties, CancellationToken token)
+        IReadOnlyDictionary<string, object?>? properties, CancellationToken token, bool deferRequired = false)
     {
         var metadata = Catalog.FindRelationshipType(type, operation.Context.Snapshot);
         if (metadata != Catalog.FindRelationshipType(type, LatestSnapshot(operation.Context))) { DatabaseTransactionAbortedException.ThrowGraphConflict(); }
@@ -538,7 +538,7 @@ public sealed partial class GraphDatabase : DatabaseInstance
             metadata = new GraphRelationshipTypeMetadata(Guid.NewGuid(), type);
             await Catalog.SaveRelationshipTypeAsync(metadata.Value, operation.Context, token).ConfigureAwait(false);
         }
-        await ValidatePropertiesAsync(metadata.Value.Id, properties, operation, token).ConfigureAwait(false);
+        await ValidatePropertiesAsync(metadata.Value.Id, properties, operation, token, deferRequired).ConfigureAwait(false);
         return metadata.Value.Id;
     }
 
@@ -546,7 +546,7 @@ public sealed partial class GraphDatabase : DatabaseInstance
     internal static GraphRelationship Materialize(StoredGraphRelationship relationship)
         => new(new GraphRelationshipId(relationship.Id), relationship.Type, new GraphNodeId(relationship.SourceId), new GraphNodeId(relationship.TargetId), relationship.Properties);
 
-    private async ValueTask ValidatePropertiesAsync(Guid definition, IReadOnlyDictionary<string, object?>? properties, GraphOperation operation, CancellationToken token)
+    private async ValueTask ValidatePropertiesAsync(Guid definition, IReadOnlyDictionary<string, object?>? properties, GraphOperation operation, CancellationToken token, bool deferRequired = false)
     {
         var keys = Catalog.GetPropertyKeys(definition, operation.Context.Snapshot);
         if (!keys.SequenceEqual(Catalog.GetPropertyKeys(definition, LatestSnapshot(operation.Context)))) { DatabaseTransactionAbortedException.ThrowGraphConflict(); }
@@ -554,7 +554,7 @@ public sealed partial class GraphDatabase : DatabaseInstance
         {
             object? value = null;
             bool present = properties?.TryGetValue(key.Name, out value) == true && value is not null;
-            if (key.Required && !present || present && key.Type is { } type && type != TypeOf(value))
+            if (!deferRequired && key.Required && !present || present && key.Type is { } type && type != TypeOf(value))
             {
                 throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ValidatePropertiesAsyncDatabase, key.Name));
             }

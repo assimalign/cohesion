@@ -118,6 +118,20 @@ internal sealed partial class GraphPlanner
                     if (merge.Path.Relationships is not null && merge.Path.Relationships.Where(edge => edge?.Variable is not null)
                         .GroupBy(edge => edge.Variable, StringComparer.Ordinal).Any(group => group.Count() > 1))
                     { throw new GraphPlanningException("CG05001", ErrorMessages.StageUnsupported, stage.Location); }
+                    // Neo4j SemanticPatternCheck.scala:670 and ClauseConverters.scala:519,885:
+                    // update relationships are declarations; reused nodes must be bare variables.
+                    foreach (var edge in merge.Path.Relationships ?? [])
+                    {
+                        if (edge?.Variable is { } name && variables.ContainsKey(name))
+                        { throw new GraphPlanningException("CG03007", ErrorMessages.MergeRelationshipDeclared, stage.Location); }
+                    }
+                    var mergeNodes = new HashSet<string>(variables.Keys, StringComparer.Ordinal);
+                    foreach (var node in merge.Path.Nodes ?? [])
+                    {
+                        if (node?.Variable is not { } name || mergeNodes.Add(name)) { continue; }
+                        if (node.Labels is { Count: > 0 } || node.LabelExpression is not null || node.Properties is { Count: > 0 })
+                        { throw new GraphPlanningException("CG03006", ErrorMessages.MergeNodeDeclared, stage.Location); }
+                    }
                     Validate(merge.Path, creating: true, new HashSet<string>(variables.Keys, StringComparer.Ordinal), merging: true);
                     ValidateSet(merge.OnCreate, merge);
                     ValidateSet(merge.OnMatch, merge);
@@ -211,7 +225,7 @@ internal sealed partial class GraphPlanner
                         selection = new GraphPathSelectionPlan(selector, shape, path.Mode ?? GqlPathMode.Trail, startVariables, endVariables,
                             startVariables.Concat(endVariables).Where(boundVariables.Contains).Distinct(StringComparer.Ordinal).ToArray());
                     }
-                    paths.Add(new GraphPathPlan(path, ChooseAnchor(shape, anchors, boundVariables, token, sourceOnly: selection is not null)) { Shape = shape, Selection = selection });
+                    paths.Add(new GraphPathPlan(path, ChooseAnchor(shape, anchors, boundVariables, token, sourceOnly: selection is not null, merging: stage is GqlMergeStage)) { Shape = shape, Selection = selection });
                     foreach (var binding in shape.Bindings())
                     { if (!groupVariables.Contains(binding.Name)) { boundVariables.Add(binding.Name); } }
                 }
@@ -624,7 +638,7 @@ internal sealed partial class GraphPlanner
                 if (item.Shape.Edge is { } edge)
                 {
                     bool valid = ValidateRelationship(edge, creating && !merging, tokens);
-                    if (merging && !(edge.Type is null && edge.LabelExpression is null && edge.Variable is { } boundEdge && propertyScope!.Contains(boundEdge)) &&
+                    if (merging &&
                         string.IsNullOrWhiteSpace(edge.LabelExpression is null ? edge.Type : (edge.LabelExpression as GqlLabelName)?.Name))
                     { throw new GraphPlanningException("CG05001", ErrorMessages.ValidateRelationshipGraphPlanning3, query.Location); }
                     if (item.Required) { satisfiable &= valid; }
@@ -654,7 +668,7 @@ internal sealed partial class GraphPlanner
                         { GraphPlanExecutor.ValidateMergeProperty(GraphExpressionEvaluator.Parameter(parameter, _parameters), expression.Location); }
                     }
                 }
-                ValidateStageProperties(properties!, creating, propertyScope, prefilterScope);
+                ValidateStageProperties(properties!, creating, propertyScope, prefilterScope, merging);
             }
 
             void ValidatePrefilter(GqlExpression? predicate, IReadOnlyList<(string Name, bool Node)> locals)
@@ -679,7 +693,7 @@ internal sealed partial class GraphPlanner
             }
         }
         void ValidateStageProperties(IReadOnlyDictionary<string, GqlExpression> properties, bool creating, IReadOnlySet<string>? propertyScope,
-            IReadOnlySet<string>? variableScope = null)
+            IReadOnlySet<string>? variableScope = null, bool merging = false)
         {
             if (properties is null) { throw new GraphPlanningException("CG05001", ErrorMessages.PropertyScalarRequired, query.Location); }
             var introduced = creating ? new HashSet<string>(variables.Keys.Where(name => !propertyScope!.Contains(name)), StringComparer.Ordinal) : null;
@@ -693,7 +707,7 @@ internal sealed partial class GraphPlanner
                 {
                     if (MayReturn(expression, true) || MayReturn(expression, false) ||
                         (KnownFunctionKind(expression, false) & (GraphFunctionKind.Date | GraphFunctionKind.Timestamp)) != 0)
-                    { throw new GraphPlanningException("CG03003", ErrorMessages.PropertyScalarRequired, expression.Location); }
+                    { throw new GraphPlanningException(merging ? "CG03004" : "CG03003", merging ? ErrorMessages.MergePropertyInvalid : ErrorMessages.PropertyScalarRequired, expression.Location); }
                 }
             }
             ValidateProperties(properties, creating);
@@ -1203,7 +1217,7 @@ internal sealed partial class GraphPlanner
     // at every eligible position. Equality seeks win ties, then source-ordered node/type candidates.
     // Neo4j's labelScanLeafPlanner reads HasLabels selections for pattern nodes
     // (labelScanLeafPlanner.scala:45-46, :73-78).
-    private GraphAnchor ChooseAnchor(GraphPathShape shape, AnchorSources sources, IReadOnlySet<string> boundVariables, CancellationToken token, bool sourceOnly = false)
+    private GraphAnchor ChooseAnchor(GraphPathShape shape, AnchorSources sources, IReadOnlySet<string> boundVariables, CancellationToken token, bool sourceOnly = false, bool merging = false)
     {
         for (int i = 0; i < (sourceOnly ? 1 : shape.Nodes.Count); i++)
         {
@@ -1241,7 +1255,7 @@ internal sealed partial class GraphPlanner
                     }
                     continue;
                 }
-                var inline = FirstValues(node.Properties);
+                var inline = FirstValues(node.Properties, merging);
                 var equalities = sources.GetEqualities(node.Variable);
                 if (inline.Count == 0 && equalities.Count == 0) { continue; }
                 var indexes = sources.GetIndexedKeys();
@@ -1266,7 +1280,9 @@ internal sealed partial class GraphPlanner
                     }
                     if (bestKey is not null)
                     {
-                        long cost = _database.Store.EstimateIndexCount(bestIndex, label, best.Value, _snapshot, token);
+                        // A row-dependent MERGE equality is evaluated once by its executor.
+                        // Choose the seek here; bind its value from that row before either probe.
+                        long cost = best.Value is GqlExpression ? 1 : _database.Store.EstimateIndexCount(bestIndex, label, best.Value, _snapshot, token);
                         // Prefer an equality seek on a tie, preserving the established preference
                         // for a seek over its own label scan. Other ties retain source order.
                         if (scan is null || cost < scanCost || cost == scanCost && scan.Property is null)
@@ -1317,12 +1333,16 @@ internal sealed partial class GraphPlanner
     }
 
     /// <summary>Each key's first non-null inline value and its position among the node's non-null values.</summary>
-    private Dictionary<string, FirstValue> FirstValues(IReadOnlyDictionary<string, GqlExpression> properties)
+    private Dictionary<string, FirstValue> FirstValues(IReadOnlyDictionary<string, GqlExpression> properties, bool rowValues = false)
     {
         var values = new Dictionary<string, FirstValue>(StringComparer.Ordinal);
         foreach (var property in properties)
         {
-            if (property.Value is not (GqlLiteralExpression or GqlParameterExpression)) { continue; }
+            if (property.Value is not (GqlLiteralExpression or GqlParameterExpression))
+            {
+                if (rowValues) { values.TryAdd(property.Key, new FirstValue(values.Count, property.Value)); }
+                continue;
+            }
             var value = GraphExpressionEvaluator.Scalar(property.Value, _parameters);
             if (value is not null) { values.TryAdd(property.Key, new FirstValue(values.Count, value)); }
         }

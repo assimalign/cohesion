@@ -51,9 +51,9 @@ internal sealed class GraphUpdates : IDisposable
     internal GraphUpdates(GraphDatabase database, GraphOperation operation) { _database = database; _operation = operation; }
 
     internal async ValueTask<GraphNode> CreateNodeAsync(IReadOnlyList<string> labels,
-        IReadOnlyDictionary<string, object?> properties, CancellationToken token)
+        IReadOnlyDictionary<string, object?> properties, CancellationToken token, bool deferRequired = false)
     {
-        await _database.ValidateNodeAsync(_operation, labels, properties, token).ConfigureAwait(false);
+        await _database.ValidateNodeAsync(_operation, labels, properties, token, deferRequired).ConfigureAwait(false);
         var node = new GraphNode(new GraphNodeId((ulong)_database.DataStorage.ReserveTransactionSequence()),
             Array.AsReadOnly(labels.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray()),
             new ReadOnlyDictionary<string, object?>(new Dictionary<string, object?>(properties, StringComparer.Ordinal)));
@@ -63,9 +63,9 @@ internal sealed class GraphUpdates : IDisposable
     }
 
     internal async ValueTask<GraphRelationship> CreateRelationshipAsync(GraphNodeId from, GraphNodeId to, string type,
-        IReadOnlyDictionary<string, object?> properties, CancellationToken token)
+        IReadOnlyDictionary<string, object?> properties, CancellationToken token, bool deferRequired = false)
     {
-        var typeId = await _database.ValidateRelationshipAsync(_operation, type, properties, token).ConfigureAwait(false);
+        var typeId = await _database.ValidateRelationshipAsync(_operation, type, properties, token, deferRequired).ConfigureAwait(false);
         _typeSelections.Clear();
         var edge = new GraphRelationship(new GraphRelationshipId((ulong)_database.DataStorage.ReserveTransactionSequence()), type, from, to,
             new ReadOnlyDictionary<string, object?>(new Dictionary<string, object?>(properties, StringComparer.Ordinal)));

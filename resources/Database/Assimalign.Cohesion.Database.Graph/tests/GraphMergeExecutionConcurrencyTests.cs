@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -35,11 +36,25 @@ public sealed class GraphMergeExecutionConcurrencyTests
         (await first.ExecuteAsync("MERGE (:P {id:1})", cancellationToken: token)).AffectedCount.ShouldBe(1);
 
         // Act
-        var pending = second.ExecuteAsync("MERGE (n:P {id:1}) ON MATCH SET n.hit=1 RETURN n.id", cancellationToken: token).AsTask();
+        var pinned = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var resume = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        int pins = 0;
+        var pending = db.RunAsync(second, async operation =>
+        {
+            operation.Context.Snapshot.IsVisible(winner.Context.Sequence).ShouldBeFalse();
+            pins++;
+            pinned.TrySetResult();
+            await resume.Task.WaitAsync(token);
+            return await GraphPlanExecutor.ExecuteAsync(db, operation,
+                GraphQueryRequest.FromGql("MERGE (n:P {id:1}) ON MATCH SET n.hit=1 RETURN n.id").Statement, null, token);
+        }, token).AsTask();
+        await pinned.Task.WaitAsync(token);
         pending.IsCompleted.ShouldBeFalse();
         await winner.CommitAsync(token);
+        resume.TrySetResult();
 
         // Assert
+        pins.ShouldBe(1);
         if (isolation == IsolationLevel.Snapshot)
         {
             (await Should.ThrowAsync<DatabaseTransactionAbortedException>(pending)).Diagnostics[0].Code.ShouldBe("CG04024");
@@ -53,10 +68,100 @@ public sealed class GraphMergeExecutionConcurrencyTests
         (await GraphMergeExecutionTests.Rows(first, "MATCH (n:P) RETURN count(*)", token)).ShouldHaveSingleItem()[0].ShouldBe(1L);
     }
 
+    [Theory(DisplayName = "Cohesion Test [Graph] - MERGE re-reads incoming entity values after a pattern wait (#1735)")]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task Execute_PatternWaitWithBoundValues_ShouldIncrementRefreshedVersion(bool relationship, bool create)
+    {
+        // Arrange: retain an incoming row and cached view from before the writer commits.
+        // A raw pattern holder forces waited=true without weakening the production writer lock.
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        var token = timeout.Token;
+        await using var engine = GraphDatabaseEngine.Create("merge", new());
+        var db = await engine.CreateDatabaseAsync("patterns", token);
+        await using var session = await db.CreateSessionAsync(cancellationToken: token);
+        await session.ExecuteAsync("CREATE (:P {c:0})-[:R {c:0}]->()", cancellationToken: token);
+        await using var transaction = await session.BeginTransactionAsync(IsolationLevel.ReadCommitted, token);
+        var blocker = await db.Coordinator.BeginAsync(IsolationLevel.Snapshot, token);
+        var captured = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var startMerge = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        ulong id = 0;
+        int waits = 0;
+        string target = relationship ? "r" : "a";
+        var pending = db.RunAsync(session, async operation =>
+        {
+            var a = GraphDatabase.Materialize(operation.Updates.GetNodes("P", token).Single());
+            var edge = (await db.Store.GetIncidentAsync(a.Id.Value, operation.Context.Snapshot, token)).Single();
+            var r = GraphDatabase.Materialize(edge);
+            id = relationship ? r.Id.Value : a.Id.Value;
+            string merge = create ? "MERGE (:Fresh) ON CREATE" : "MERGE (a) ON MATCH";
+            var stage = (GqlMergeStage)GraphQueryRequest.FromGql($"{merge} SET {target}.c={target}.c+1").Statement.GqlExpression.Stages.Single();
+            var plan = new GraphPathPlan(stage.Path, new(0, null, null, null)) { Shape = GraphPathShape.Create(stage.Path) };
+            var budget = operation.QueryBudget ??= new();
+            await operation.Merge.RefreshAsync(false, token);
+            var identity = new GraphMergePatternIdentity([new(create ? null : a.Id.Value,
+                create ? ["Fresh"] : [], new Dictionary<string, object?>())], []);
+            await db.Coordinator.LockManager.AcquireAsync(blocker.Sequence, identity.Resource, LockMode.Exclusive, token);
+            captured.TrySetResult();
+            await startMerge.Task.WaitAsync(token);
+            await foreach (var row in GraphPlanExecutor.StreamMergeAsync(db, operation, stage, plan,
+                [new Dictionary<string, object?> { ["a"] = a, ["r"] = r }], budget, null, new StrongBox<long>(), token,
+                waited =>
+                {
+                    if (waited) { waits++; }
+                    entered.TrySetResult();
+                }))
+            { (relationship ? ((Protocol.GraphRelationship)row[target]!).Properties : ((Protocol.GraphNode)row[target]!).Properties)["c"].ShouldBe(2L); }
+            await operation.Updates.PublishAsync(token);
+            return true;
+        }, token).AsTask();
+        await captured.Task.WaitAsync(token);
+        pending.IsCompleted.ShouldBeFalse();
+
+        // Act: publish c=1 while the merge's incoming row still contains c=0.
+        var writer = await db.Coordinator.BeginAsync(IsolationLevel.Snapshot, token);
+        try
+        {
+            var properties = new Dictionary<string, object?> { ["c"] = 1L };
+            if (relationship) { await db.Store.UpdateRelationshipAsync(id, properties, writer, token); }
+            else
+            {
+                var labels = new[] { "P" };
+                var ids = labels.ToDictionary(label => label, label => db.Catalog.FindLabel(label, writer.Snapshot)!.Value.Id, StringComparer.Ordinal);
+                await db.Store.UpdateNodeAsync(id, labels, properties, ids, writer, token);
+            }
+            await db.Coordinator.CommitAsync(writer, token);
+        }
+        finally
+        {
+            if (writer.State == TransactionState.Active) { await db.Coordinator.RollbackAsync(writer, token); }
+        }
+        startMerge.TrySetResult();
+        await entered.Task.WaitAsync(token);
+        pending.IsCompleted.ShouldBeFalse();
+        waits.ShouldBe(1);
+        // The MERGE owns the writer and is queued on the raw holder's pattern resource.
+        db.Coordinator.LockManager.TryAcquire(blocker.Sequence, LockResource.Database(), LockMode.Exclusive).ShouldBeFalse();
+        await db.Coordinator.CommitAsync(blocker, token);
+        await pending;
+        await transaction.CommitAsync(token);
+
+        // Assert: both expression evaluation and replacement construction used the fresh value.
+        waits.ShouldBe(1);
+        var rows = await GraphMergeExecutionTests.Rows(session,
+            relationship ? "MATCH ()-[n:R]->() RETURN n.c" : "MATCH (n:P) RETURN n.c", token);
+        rows.Single()[0].ShouldBe(2L);
+    }
+
     [Theory(DisplayName = "Cohesion Test [Graph] - latest MERGE probes survive a dropped indexed anchor (#1735)")]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task Execute_DroppedIndex_ShouldScanLatestAndPreserveFreshness(bool phantom)
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task Execute_DroppedIndex_ShouldScanLatestAndPreserveFreshness(bool phantom, bool rowEquality)
     {
         // Arrange
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
@@ -68,7 +173,8 @@ public sealed class GraphMergeExecutionConcurrencyTests
         await GraphSchema.Open(db, writer).CreateIndexAsync("P", "by_id", "id", token);
         await using var reader = await db.CreateSessionAsync(cancellationToken: token);
         await using var transaction = await reader.BeginTransactionAsync(IsolationLevel.Snapshot, token);
-        (await GraphMergeExecutionTests.Rows(reader, "EXPLAIN MERGE (n:P {id:7}) RETURN n.id", token)).Select(row => row[2]).ShouldContain("IndexSeek");
+        string query = rowEquality ? "LET key=7 MERGE (n:P {id:key}) RETURN n.id" : "MERGE (n:P {id:7}) RETURN n.id";
+        (await GraphMergeExecutionTests.Rows(reader, "EXPLAIN " + query, token)).Select(row => row[2]).ShouldContain("IndexSeek");
         await db.RunAsync(writer, async operation =>
         {
             await db.LockWriterAsync(operation, token);
@@ -83,11 +189,11 @@ public sealed class GraphMergeExecutionConcurrencyTests
         if (phantom)
         {
             var failure = await Should.ThrowAsync<DatabaseTransactionAbortedException>(async () =>
-                await reader.ExecuteAsync("MERGE (n:P {id:7}) RETURN n.id", cancellationToken: token));
+                await reader.ExecuteAsync(query, cancellationToken: token));
             failure.Diagnostics[0].Code.ShouldBe("CG04024");
         }
         else
-        { (await GraphMergeExecutionTests.Rows(reader, "MERGE (n:P {id:7}) RETURN n.id", token)).ShouldHaveSingleItem()[0].ShouldBe(7L); }
+        { (await GraphMergeExecutionTests.Rows(reader, query, token)).ShouldHaveSingleItem()[0].ShouldBe(7L); }
         await transaction.RollbackAsync(token);
     }
 

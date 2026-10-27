@@ -140,7 +140,11 @@ comma-separated independent MERGEs use successive clauses. Variable-length/quant
 named path assignments, path modes/selectors, parenthesized update groups and inline predicates
 remain refused by update-pattern validation. The engine validates creation-compatible labels,
 relationship types, incoming-only equality expressions and both branch scopes before execution,
-including EXPLAIN. Bound relationship variables may omit the type and reuse their stored type.
+including EXPLAIN. Already-declared relationship variables are refused (CG03007); a repeated or
+already-bound node must be a bare variable (CG03006). New relationships require one type.
+MERGE property equalities use CG03004 for both proven and evaluated non-scalar values; other
+property writes retain CG03003. Required properties can be supplied by ON CREATE before the
+finished created entity is validated. Row-dependent equalities can use a per-row index seek.
 GqlMergeParserTests and the profile execution corpus pin grammar, rendering and live behavior.
 
 ## SET and REMOVE (#1149)
@@ -192,7 +196,7 @@ The function table advertises the aggregates and core scalar functions listed be
 | `CASE` | Simple and searched CASE, COALESCE and NULLIF case abbreviations | First matching alternative, lazy selected branch; absent ELSE yields NULL |
 | `INSERT` | Scalar value-expression node/path insertion, optionally following a match; a node takes a label conjunction (`:A&B`, `:A:B`), a relationship one type and a directed edge (`-[:T]->`, `<-[:T]-`) | Inserts nodes and relationships transactionally |
 | `CREATE` | Same insertion grammar as `INSERT`; compatibility extension | Same transactional insertion path |
-| `MERGE` | One complete fixed path, followed by zero or more ON CREATE SET or ON MATCH SET actions | Matches every complete path or creates every unbound part; includes fixed undirected relationships, bound entity reuse, overlays and Snapshot freshness checks |
+| `MERGE` | One complete fixed path, followed by zero or more ON CREATE SET or ON MATCH SET actions | Matches every complete path or creates every unbound part; includes fixed undirected relationships, bound node reuse, overlays and Snapshot freshness checks |
 | `SET` | ISO property assignment, literal-map replacement and node labels with IS or colon; D3 `+=` and repeated-colon labels | Applies items left to right per row, with one published replacement per updated entity per statement |
 | `REMOVE` | Property keys or node labels with IS or colon | Removes keys/labels, ignoring OPTIONAL NULL targets |
 | `DELETE` | Bound node/relationship variables following a match | Refuses deleting a node that still has incident relationships |

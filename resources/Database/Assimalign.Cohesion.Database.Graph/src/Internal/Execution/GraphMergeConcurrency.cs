@@ -23,10 +23,11 @@ internal static class GraphMergeConcurrency
     internal static ValueTask<GraphMergeRead<T>> MatchAsync<T>(GraphDatabase database,
         GraphOperation operation, GraphMergePatternIdentity identity,
         Func<TransactionSnapshot, CancellationToken, ValueTask<GraphMergeRead<T>>> probe,
-        CancellationToken cancellationToken = default, Func<ValueTask>? beforePatternLock = null)
+        CancellationToken cancellationToken = default, Func<ValueTask>? beforePatternLock = null,
+        Func<ValueTask>? beforePatternGrant = null, Action<bool>? onPatternWait = null)
     {
         ArgumentNullException.ThrowIfNull(identity);
-        return MatchCoreAsync(database, operation, identity, null, null, probe, cancellationToken, beforePatternLock);
+        return MatchCoreAsync(database, operation, identity, null, null, probe, cancellationToken, beforePatternLock, beforePatternGrant, onPatternWait);
     }
 
     // The key identifies one immutable, fully evaluated pattern. A fresh row evaluation must
@@ -38,14 +39,14 @@ internal static class GraphMergeConcurrency
     {
         ArgumentNullException.ThrowIfNull(evaluatedPattern);
         ArgumentNullException.ThrowIfNull(createIdentity);
-        return MatchCoreAsync(database, operation, null, evaluatedPattern, createIdentity, probe, cancellationToken, null);
+        return MatchCoreAsync(database, operation, null, evaluatedPattern, createIdentity, probe, cancellationToken, null, null, null);
     }
 
     private static async ValueTask<GraphMergeRead<T>> MatchCoreAsync<T>(GraphDatabase database,
         GraphOperation operation, GraphMergePatternIdentity? identity, object? evaluatedPattern,
         Func<GraphMergePatternIdentity>? createIdentity,
         Func<TransactionSnapshot, CancellationToken, ValueTask<GraphMergeRead<T>>> probe,
-        CancellationToken cancellationToken, Func<ValueTask>? beforePatternLock)
+        CancellationToken cancellationToken, Func<ValueTask>? beforePatternLock, Func<ValueTask>? beforePatternGrant, Action<bool>? onPatternWait)
     {
         ArgumentNullException.ThrowIfNull(probe);
         operation.EnsureActive();
@@ -63,9 +64,14 @@ internal static class GraphMergeConcurrency
             // Instance-free test gate for the end-between-grants interleaving. Production
             // callers omit it; no field or allocation is added to ordinary operations.
             if (beforePatternLock is not null) { await beforePatternLock().ConfigureAwait(false); }
-            var grant = statement.Locks.AcquireAsync(database, operation, identity.Resource, cancellationToken);
+            // Teardown may have fenced and disposed the cached tracker during the callback.
+            // Re-read the ended sentinel before touching it and after any late grant.
+            statement = operation.Merge;
+            var grant = statement.Locks.AcquireAsync(database, operation, identity.Resource, cancellationToken, beforePatternGrant);
             bool waited = !grant.IsCompletedSuccessfully;
+            onPatternWait?.Invoke(waited);
             await grant.ConfigureAwait(false);
+            statement = operation.Merge;
             operation.EnsureActive();
             cancellationToken.ThrowIfCancellationRequested();
             await statement.RefreshAsync(waited, cancellationToken).ConfigureAwait(false);
