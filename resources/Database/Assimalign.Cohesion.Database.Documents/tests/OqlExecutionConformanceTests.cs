@@ -346,6 +346,7 @@ public sealed class OqlExecutionConformanceTests
     [InlineData("duplicate", "CD03024")]
     [InlineData("missing", "CD01025")]
     [InlineData("key-size", "CD02026")]
+    [InlineData("definition-size", "CD03026")]
     public async Task Execute_IndexUserError_ShouldReturnDistinctCodeAndKeepSession(string scenario, string code)
     {
         // Arrange
@@ -359,6 +360,8 @@ public sealed class OqlExecutionConformanceTests
         {
             "duplicate" => "CREATE INDEX ix ON items (b)",
             "missing" => "DROP INDEX absent ON items",
+            "definition-size" => "CREATE INDEX ix ON items (" + string.Join(',',
+                Enumerable.Range(0, 32).Select(i => new string('p', 260) + i)) + ")",
             _ => "CREATE INDEX ix ON items (a)",
         };
 

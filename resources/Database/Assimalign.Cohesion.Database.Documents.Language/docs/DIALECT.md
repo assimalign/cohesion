@@ -310,7 +310,9 @@ UNIQUE is a Cohesion extension in SQL spelling and remains reserved elsewhere (S
 is CK00001). Conditional creation skips an existing name regardless of its definition.
 An absent conditional DROP is a no-op; existing schema ownership and snapshot conflicts still refuse.
 Unconditional duplicate creation fails with CD03024; an absent unconditional DROP fails with
-CD01025. An encoded composite key beyond 1024 bytes fails with CD02026. These errors
+CD01025. An encoded composite key beyond 1024 bytes fails with CD02026. An encoded index
+definition beyond the 8,092-byte catalog record limit fails with CD03026 before any posting
+extraction or physical tree creation, including definitions with large path lists. These errors
 carry structured diagnostics. OQL index DDL is autocommit-only; an explicit transaction refuses
 it with CD04105 before catalog access. After a failed autocommit statement the next can run immediately.
 PATHS in COHESION_SCHEMA.INDEXES is the ordered array, PATH is its first entry, and IS_UNIQUE is real.
