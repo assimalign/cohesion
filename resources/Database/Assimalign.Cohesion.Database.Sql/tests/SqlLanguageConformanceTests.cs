@@ -21,6 +21,32 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 /// </summary>
 public sealed class SqlLanguageConformanceTests
 {
+    [Theory(DisplayName = "Cohesion Test [Sql] - Rewrite: empty input and NULL foreign keys commit across a parent replacement (#1265)")]
+    [InlineData("UPDATE child SET note=1 WHERE false", 0)]
+    [InlineData("INSERT INTO child VALUES (NULL,1),(NULL,2)", 2)]
+    [InlineData("INSERT INTO child SELECT 1,1 WHERE false", 0)]
+    public async Task RewriteTableAsync_NoParentProbe_ShouldCommitOldSnapshot(string sql, int count)
+    {
+        // Arrange
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        await using var engine = SqlDatabaseEngine.Create("rewrite-no-parent-probe", new());
+        var database = await engine.CreateDatabaseAsync("db", timeout.Token);
+        await using var session = await database.CreateSessionAsync(timeout.Token);
+        await using var stale = await database.CreateSessionAsync(timeout.Token);
+        await ExecuteAsync(session, "CREATE TABLE t (id INT PRIMARY KEY)");
+        await ExecuteAsync(session, "INSERT INTO t VALUES (1)");
+        await ExecuteAsync(session, "CREATE TABLE child (pid INT REFERENCES t(id), note INT)");
+        await using var snapshot = await stale.BeginTransactionAsync(timeout.Token);
+        await database.RewriteTableAsync("dbo", "t", timeout.Token);
+
+        // Act
+        (await stale.ExecuteAsync(sql, cancellationToken: timeout.Token)).AffectedCount.ShouldBe(count);
+        await snapshot.CommitAsync(timeout.Token);
+
+        // Assert
+        (await RowsAsync(session, "SELECT * FROM child")).Count.ShouldBe(count);
+    }
+
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Conformance: TRUNCATE retains joining views and indexed snapshot access (#1716)")]
     public async Task ExecuteAsync_TruncateSnapshot_ShouldRetainJoiningViewAndSeek()
     {
