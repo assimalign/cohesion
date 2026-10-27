@@ -105,7 +105,7 @@ internal sealed partial class SqlPlanner
                     QueryDetail(false, p.OrderBy, p.IsDistinct, p.Limit, p.Offset),
                 SqlInsertPlan p => DmlDetail($"values rows={p.Rows.Count}", p.Returning),
                 SqlInsertSelectPlan p => DmlDetail(null, p.Returning),
-                SqlMergePlan p => DmlDetail($"join={p.Source.Associations.Tree!.Step!.Kind}; actions=written_order; execution=unsupported", p.Returning),
+                SqlMergePlan p => DmlDetail($"join={p.Source.Associations.Tree!.Step!.Kind}; actions=written_order", p.Returning),
                 SqlUpdatePlan p => DmlDetail($"assignments={p.Assignments.Count}; filter={p.Where is not null}", p.Returning),
                 SqlDeletePlan p => DmlDetail($"filter={p.Where is not null}", p.Returning),
                 SqlDefinitionPlan p => p.Expression.CommandType.ToString(),
