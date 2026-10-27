@@ -4,6 +4,8 @@ The shared client core of the Data Platform: the protocol client every per-model
 client (`Sql.Client`, `KeyValuePair.Client`, `Blob.Client`, …) builds on. It dials a
 `libraries/Connections` transport, runs the startup/authenticate/ready
 handshake, runs model-owned framed exchanges, and pools authenticated connections.
+SQL, Graph and Documents negotiate transaction status so pool return can roll back open or failed
+work and require Idle before reuse. Legacy transaction-capable peers without status are discarded.
 
 ## Scope
 

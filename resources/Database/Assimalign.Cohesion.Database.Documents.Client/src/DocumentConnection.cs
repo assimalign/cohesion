@@ -12,7 +12,8 @@ namespace Assimalign.Cohesion.Database.Documents.Client;
 
 /// <summary>An authenticated Documents connection supporting one active operation at a time.</summary>
 /// <remarks>Results own their data and are materialized before returning. Dispose returns a healthy
-/// session to the shared pool. Explicit transactions over the wire are not supported.</remarks>
+/// session to the shared pool after rolling back any open or failed text transaction. Use OQL
+/// BEGIN/START, COMMIT and ROLLBACK on this connection to control its transaction.</remarks>
 [global::System.Diagnostics.DebuggerDisplay("DocumentConnection {Database,nq}")]
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Documents.Client.DocumentConnection.DebugView))]
 public sealed class DocumentConnection : IAsyncDisposable
@@ -20,6 +21,9 @@ public sealed class DocumentConnection : IAsyncDisposable
     private readonly DatabaseConnection _connection;
     // Operation diagnostics may finish after disposal has returned the shared lease.
     private readonly string _database;
+    // Lock order: wrapper operation lock -> shared lease admission lock. The shared lease
+    // releases its lock before frame I/O, cancellation, joining or pool return; no pool lock
+    // or storage latch is acquired here. Reset runs only after the admitted exchange joins.
     private readonly object _operationLock = new();
     private Task? _disposeTask;
     private int _disposed;
@@ -54,12 +58,19 @@ public sealed class DocumentConnection : IAsyncDisposable
     /// <param name="statement">The OQL statement.</param>
     /// <param name="parameters">Named JSON scalars or JsonElement values.</param>
     /// <param name="cancellationToken">Cancellation token for the exchange.</param>
-    /// <returns>The write count; -1 for queries and zero for index DDL.</returns>
+    /// <returns>The write count; -1 for queries and zero for DDL and transaction controls.</returns>
     /// <exception cref="ArgumentException">The statement or a parameter value is invalid.</exception>
     /// <exception cref="ObjectDisposedException">The rental is disposed.</exception>
     /// <exception cref="InvalidOperationException">Another exchange is active.</exception>
-    /// <exception cref="OperationCanceledException">The operation is canceled.</exception>
+    /// <exception cref="OperationCanceledException">The exchange or bounded status cleanup is canceled.</exception>
     /// <exception cref="DocumentClientException">The statement or connection failed.</exception>
+    /// <remarks>
+    /// Any exception from COMMIT leaves its outcome unknown to the caller and discards the connection.
+    /// This includes losing the Ready status postamble after Complete acknowledged the commit.
+    /// Status cleanup uses a five-second internal bound independent of the caller's token; its timeout
+    /// raises OperationCanceledException, and closure before Ready raises DocumentClientException.
+    /// Cleanup never retries COMMIT or promises to undo committed work.
+    /// </remarks>
     public async ValueTask<long> ExecuteAsync(string statement, IReadOnlyDictionary<string, object?>? parameters = null,
         CancellationToken cancellationToken = default)
         => (await RunAsync("Execute", new DocumentExchange(statement, parameters), cancellationToken).ConfigureAwait(false)).Result.AffectedCount;
@@ -168,7 +179,7 @@ public sealed class DocumentConnection : IAsyncDisposable
         }
     }
 
-    /// <summary>Returns a healthy session to the pool, once only.</summary>
+    /// <summary>Rolls back open or failed transactions and returns a certified idle session to the pool, once only.</summary>
     /// <returns>The completion of the return.</returns>
     public ValueTask DisposeAsync()
     {

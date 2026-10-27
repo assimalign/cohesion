@@ -62,6 +62,37 @@ internal sealed partial class SqlPlanner
         return (targetTable, evaluator, new SqlDmlSource(associations, 0, visibleOrdinals), queries);
     }
 
+    // The target must remain outer: its original decoded array identifies the packed row
+    // location through join clones. Safe WHERE equalities can prune a Cross step while the
+    // complete residual retains volatile calls, errors and nullable-source semantics.
+    private SqlJoinPlan PlanDmlAssociations(SqlJoinPlan plan, SqlBoundExpression? where)
+    {
+        var steps = plan.Steps.ToArray();
+        for (int i = 0; i < steps.Length; i++)
+        {
+            var step = steps[i];
+            if (step.Kind != SqlJoinType.Cross) { continue; }
+            var binding = plan.Bindings[step.Binding];
+            int end = binding.Offset + binding.Source.Columns.Count;
+            var terms = JoinConjuncts(where).OfType<SqlBoundBinary>()
+                .Where(term => term.Operator == SqlBinaryOperator.Equal &&
+                    term.Left is SqlBoundColumn left && term.Right is SqlBoundColumn right &&
+                    left.Ordinal < end && right.Ordinal < end &&
+                    (left.Ordinal >= binding.Offset) != (right.Ordinal >= binding.Offset) &&
+                    JoinRestrictionColumns(term, new HashSet<int>(), plan.Columns)).ToArray();
+            if (terms.Length == 0) { continue; }
+            var equalities = terms.Select(term => (((SqlBoundColumn)term.Left).Ordinal,
+                ((SqlBoundColumn)term.Right).Ordinal, term.Collation.Resolve(null))).ToList();
+            steps[i] = step with
+            {
+                Kind = SqlJoinType.Inner,
+                Condition = terms.Length == 1 ? terms[0] : new SqlBoundLogical(false, terms),
+                Access = SelectJoinAccessPath(plan.Bindings, plan.Columns, equalities, step.Binding, false),
+            };
+        }
+        return PushJoinPredicates(plan with { Steps = steps, Where = where }, pinFirst: true);
+    }
+
     private SqlExpressionEvaluator DmlEvaluator(IReadOnlyList<SqlCatalogColumn> columns,
         IReadOnlyList<SqlRelationBinding>? bindings, SqlTableReference target, bool foldConstants = true)
         => new(columns, _parameters, bindings, defaultCollation: _catalog.DefaultCollation,

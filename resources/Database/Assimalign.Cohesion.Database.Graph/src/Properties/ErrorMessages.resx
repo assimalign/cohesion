@@ -85,8 +85,9 @@
   <data name="DatabaseFilesUnrecoverable" xml:space="preserve"><value>Database '{0}' has missing or unrecoverable storage files. Preserve all files and restore the complete file set from backup. OpenDatabaseAsync requires the original journal and backup; replacing a missing sidecar could discard acknowledged commits or reopen a partially dropped database.</value></data>
   <data name="DatabaseOpenFailed" xml:space="preserve"><value>Database '{0}' could not be opened because a storage operation failed. Retry OpenDatabaseAsync after the condition is resolved. {1}</value></data>
 
-  <data name="RecordFormatUnsupported" xml:space="preserve"><value>Unsupported graph record format. This engine requires format 4; recreate the database with this engine. No upgrade path is available.</value></data>
+  <data name="RecordFormatUnsupported" xml:space="preserve"><value>Unsupported graph record format. This engine requires format 5; recreate the database with this engine. No upgrade path is available.</value></data>
 
+  <data name="RelationshipTypePostingInvalid" xml:space="preserve"><value>Malformed graph relationship-type posting key.</value></data>
   <data name="LabelPostingInvalid" xml:space="preserve">
     <value>Invalid graph label posting key.</value>
   </data>

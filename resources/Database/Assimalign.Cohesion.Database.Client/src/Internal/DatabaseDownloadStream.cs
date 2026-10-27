@@ -305,7 +305,7 @@ internal sealed class DatabaseDownloadStream : Stream
             using CancellationTokenRegistration registration = cancellationToken.UnsafeRegister(
                 static state => ((DatabaseDownloadStream)state!).Cancel(), _owner);
             var streamingReader = new ClientFrameReader(reader);
-            var streamingWriter = new ClientFrameWriter(writer);
+            var streamingWriter = new ClientFrameWriter(writer, _exchange.Family);
             await _exchange.OpenAsync(streamingReader, streamingWriter, cancellationToken).ConfigureAwait(false);
             _owner._started.TrySetResult();
             // Model code may use synchronous destination writes. Let stream creation return before

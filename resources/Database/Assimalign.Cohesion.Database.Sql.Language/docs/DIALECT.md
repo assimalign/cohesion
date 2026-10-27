@@ -119,17 +119,20 @@ ON CONFLICT ... RETURNING returns inserted and updated rows, excluding skipped p
 EXPLAIN reports the expanded RETURNING projection count and names for INSERT,
 INSERT SELECT, UPDATE and DELETE without applying the write or evaluating the projection.
 
-### UPDATE FROM and DELETE USING binding (#1714, SQ-UF1)
+### UPDATE FROM and DELETE USING (#1714)
 
 The parser and canonical renderer accept `UPDATE t [AS alias] SET ... FROM s1, s2 ... WHERE ... RETURNING ...`
 and `DELETE FROM t [AS alias] USING s1, s2 ... WHERE ... RETURNING ...`. Sources use the SELECT
 relation grammar: stored tables, views, system relations, CTEs and aliased derived queries, with
 INNER, LEFT and CROSS joins. RIGHT/FULL joins retain their CK00001 refusal.
-These forms are **parsed and bound only** and are absent from the executable language profile.
-A bound statement refuses at execution with structured `CK00001`, naming the clause and explaining
-that target/source collection, cardinality checking and mutation are not implemented yet.
-The refusal precedes CTE/source/WHERE-child execution and writes, including for empty inputs.
+These forms execute and are advertised as UPDATE FROM and DELETE USING in the SQL profile.
 Plain EXPLAIN describes the target/source association plan without applying the mutation.
+
+Equality-driven hash or seek steps follow written source order. For example,
+`UPDATE t SET v = b.v FROM a, b WHERE t.id = b.tid AND b.aid = a.id` visits |t| * |a|
+pairs before b's hash; write `FROM b, a` to make these equality joins linear in the input sizes.
+Results are correct in either order. General join-order search is deferred to #1629; place a
+source connected by equality to the target before sources that depend on it.
 
 SET values, WHERE and RETURNING resolve against the target plus source namespace. SET destinations
 remain target columns. An alias hides the original relation name; self-joins require distinct
@@ -143,17 +146,31 @@ columns in FROM/USING order. JOIN USING preserves its visible output order (merg
 then remaining left and right columns), omitting hidden duplicate keys rather than exposing every
 physical association slot. Duplicate result names are allowed; client name lookup selects the
 first match and ordinal access distinguishes them. Plain UPDATE/DELETE without sources are unchanged.
-Explicit source columns are supported by binding. A real visible source named/aliased OLD or NEW
+Explicit source columns execute. A real visible source named/aliased OLD or NEW
 masks that pseudo-relation refusal. SET and RETURNING subqueries retain CK00001.
 Delimited OLD/NEW qualifiers remain ordinary identifiers through canonical rendering.
 Keyword-spelled CTE names are accepted after DELETE USING; actual WITH RECURSIVE remains unsupported.
 
 Namespace behavior follows the local PostgreSQL `src/backend/parser/analyze.c:602-621,2560-2578`.
-SQ-UF2 will collect physical target identities per association, reject multiple source matches
-for one UPDATE target before any write, and deduplicate DELETE targets. This deliberately differs
-from PostgreSQL's first-update behavior at `src/backend/executor/nodeModifyTable.c:2599-2608`.
+Target/source associations are collected before SET evaluation or writes. Multiple matching
+source associations for one UPDATE target fail with structured CS05068 before any row is written,
+even for equal source values. DELETE deduplicates physical targets and retains one source association
+for RETURNING; which source is retained and result order are unspecified. Unkeyed equal target rows
+remain distinct. UPDATE RETURNING sees new target values and collected source values; DELETE sees
+old target values and collected source values. Concurrent committed target changes fail through the
+existing first-updater-wins conflict, preserving the original physical identity rather than following
+a replacement row. Constraint and statement-rollback behavior is the same as plain UPDATE/DELETE.
+This deliberately differs from PostgreSQL's first-update behavior at
+`src/backend/executor/nodeModifyTable.c:2599-2608`.
 
-UPDATE and DELETE choose the same indexed equality-prefix and range access paths as SELECT,
+Joined associations keep the target outer. Safe target-only WHERE restrictions can seek the target;
+mandatory target/source equalities use source index probes or budgeted hash joins. EXPLAIN shows
+the chosen paths and algorithms. WITH definitions and source references share one materialization,
+including volatile expressions. Failure/cancellation unwinds new statement locks after undo,
+including locks taken by WITH/subqueries, while earlier transaction grants remain held. DELETE
+retries retain collected source values and re-acquire source intents before resuming preparation.
+
+UPDATE and DELETE without source clauses choose the same indexed equality-prefix and range access paths as SELECT,
 including target aliases and qualified columns. EXPLAIN shows the chosen IndexSeek and bounds
 or TableScan below the mutation. The complete WHERE remains a residual predicate, including
 subqueries. Targets are collected through one statement snapshot before any write, so changing
@@ -306,7 +323,7 @@ EXCLUDED remain contextual, so stored identifier quoting is unchanged. MERGE rem
 
 ## Statement matrix
 
-With INSERT ... ON CONFLICT (#1118), DML RETURNING (#1117), persisted CREATE/DROP VIEW (#1124), CREATE/DROP SCHEMA (#1030) and set operations (#1114), the profile measures **51 of 57 declared clauses** against the live SQL engine.
+With INSERT ... ON CONFLICT (#1118), DML RETURNING (#1117), persisted CREATE/DROP VIEW (#1124), CREATE/DROP SCHEMA (#1030), set operations (#1114), quantified comparisons (#1718) and UPDATE ... FROM / DELETE ... USING (#1714), the profile measures **54 of 60 declared clauses** against the live SQL engine.
 Phase 22 measured 33 of 49.
 The earlier 32/48 figure included `JOIN`, `GROUP BY`, `HAVING`, and `SUBQUERY`,
 removed in Phase 12e (#1019–#1021), plus a no-op `CAST` removed in Phase 13.
@@ -339,7 +356,7 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | `INSERT` / `VALUES` | Supported subset, measured | Optional column list, multi-row literal/scalar `VALUES` including whole-item `DEFAULT`, `INSERT ... DEFAULT VALUES` (one row of defaults, with an optional column list), and transactional `INSERT ... SELECT` with the same destination coercion, defaults, and constraints. `VALUES` expressions have no columns in scope: a column reference reports `CS01005` before anything executes (see [VALUES and counts have no column scope](#values-and-counts-have-no-column-scope-1165)). Subqueries inside `VALUES` are excluded; use `INSERT ... SELECT`. |
 | `INSERT ... ON CONFLICT` | Supported subset, measured | Column-set inference, ON CONSTRAINT unique-index names, untargeted DO NOTHING, and targeted DO UPDATE SET/WHERE with target and EXCLUDED scope; inserted/updated RETURNING rows and counts. See the upsert contract above. |
 | `UPDATE` | Supported | multi-column `SET`, including `c = DEFAULT`, and `WHERE` (including correlated and uncorrelated subqueries); qualified references in both use the target name or its alias, which hides the base name (PostgreSQL `parse_relation.c:3759`); hidden/unknown qualifiers fail with located `CS01015` before any write and leave an explicit transaction active; aggregates in SET and outside child queries in WHERE are rejected; aggregates inside WHERE subqueries execute (see [Grouping and aggregate functions](#grouping-and-aggregate-functions-1020)) |
-| `UPDATE ... FROM` / `DELETE ... USING` | Parsed and bound, execution unavailable | Source namespaces and association plans are inspected by EXPLAIN; execution reports CK00001 until SQ-UF2. These clauses are absent from the executable profile. |
+| `UPDATE ... FROM` / `DELETE ... USING` | Supported | Collected source associations feed SET, WHERE and RETURNING; UPDATE rejects multiple matches with CS05068 before writes, DELETE deduplicates physical targets. EXPLAIN shows sources. |
 | `DELETE` | Supported | optional `WHERE`, including correlated and uncorrelated subqueries; aggregates outside a child query are rejected; qualified references use the target name or its alias, which hides the base name (PostgreSQL `parse_relation.c:3759`); hidden/unknown qualifiers fail with located `CS01015` before any write and leave an explicit transaction active |
 | `CREATE TABLE` | Supported | Identity columns use GENERATED ALWAYS/BY DEFAULT AS IDENTITY or the SQL Server IDENTITY alias (see identity contract above). `IF NOT EXISTS`, column definitions with parameterized types, `COLLATE <name>`, `NOT NULL`/`NULL`, `DEFAULT <expression>`, column and table `PRIMARY KEY`, `REFERENCES`/`FOREIGN KEY`, `CHECK`, and `UNIQUE`; optional `CONSTRAINT <name>` |
 | `ALTER TABLE` | Supported subset, measured | ADD/DROP COLUMN and ADD/DROP CONSTRAINT execute. Full-definition `ALTER COLUMN c <type> [NULL | NOT NULL] [DEFAULT expression]` accepts nullability, length and precision changes that preserve storage type, scale, collation, domain and DEFAULT; tightening and every CHAR length change check existing live values and refuse changes requiring a rewrite. RENAME TO, RENAME [COLUMN], ALTER [COLUMN] SET/DROP DEFAULT and SET/DROP NOT NULL also execute (#1122). PostgreSQL TYPE/SET DATA TYPE and TYPE ... USING remain unsupported. ADD COLUMN nonvolatile defaults backfill old-row reads and apply to subsequent inserts that omit the column; explicit NULL follows nullability. Nullable additions without a default read NULL. NOT NULL additions to populated tables require a non-null default. Invalid defaults reject before mutation; expression defaults follow the fast-default contract below. Column COLLATE persists and governs default comparisons. See the default, atomicity and MVCC contract below (#1023). DROP COLUMN changes only the catalog: it rewrites no row, survives a crash at any point on one definition, and SELECTs running beside it read every value in its own column; see the DROP COLUMN contract below (#1241). |
@@ -354,7 +371,7 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | `COLLATE` | Supported subset, measured | Column and expression overrides: `binary`, `case_insensitive`, `case_accent_insensitive`, plus compatibility `invariant` with scan execution only. Effective collation governs comparisons, `LIKE`, ordering, grouping, `DISTINCT`, and unique keys. See the collation contract below. |
 | `JOIN` / `USING` | Supported subset, measured | N-way INNER (or bare JOIN), LEFT [OUTER], CROSS and comma joins over stored/system/derived sources. INNER/LEFT require ON or USING; CROSS accepts neither. RIGHT/FULL, NATURAL, LATERAL and qualified wildcards remain excluded. See the precise contract below. |
 | `GROUP BY` / `HAVING` | Supported subset, measured | One or more grouping expressions; `WHERE` filters input rows and `HAVING` filters groups after aggregation. Composes with supported N-way joins, `ORDER BY`, `LIMIT`, and `OFFSET`, including server/client execution. Ungrouped, unaggregated projected columns are errors. `DISTINCT`/`ALL` and aggregate input `ORDER BY` execute; STRING_AGG and LISTAGG concatenate text. Grouping extensions, windows, and other ordered-set aggregates report `CK00001`. |
-| Subqueries / `INSERT ... SELECT` | Supported subset, measured | Correlated and uncorrelated scalar, `IN`/`NOT IN`, and `EXISTS`/`NOT EXISTS` queries in supported SELECT expressions and UPDATE/DELETE WHERE predicates, plus aliased derived tables and transactional insert-source queries. Each body may be a set operation (#1114). All use the outer statement snapshot; nesting is limited to 32 subquery levels, within the statement's expression nesting limit (256 levels by default, `CS00006`). Quantified comparisons and subqueries in UPDATE SET, VALUES, CHECK/DEFAULT, and LIMIT/OFFSET/FETCH/TOP expressions report `CK00001`. See the subquery contract below. |
+| Subqueries / `INSERT ... SELECT` | Supported subset, measured | Correlated and uncorrelated scalar, `IN`/`NOT IN`, `EXISTS`/`NOT EXISTS`, and scalar `op ANY`, `op SOME` or `op ALL` queries in supported SELECT expressions and UPDATE/DELETE WHERE predicates, plus aliased derived tables and transactional insert-source queries. Each body may be a set operation (#1114). All use the outer statement snapshot; nesting is limited to 32 subquery levels, within the statement's expression nesting limit (256 levels by default, `CS00006`). Subqueries in UPDATE SET, VALUES, CHECK/DEFAULT, and LIMIT/OFFSET/FETCH/TOP expressions report `CK00001`. See the subquery contract below. |
 | `TOP` / `FETCH` | Supported subset, measured | Row counts normalize to LIMIT/Offset plan fields; see [Pagination](#pagination-1107). PERCENT, WITH TIES and DML TOP retain CK00001. |
 | `SELECT ALL` | Recognized, not supported | rejected with `CK00001` |
 | DML `RETURNING` | Supported subset, measured | Written-row SELECT list and affected count; see the RETURNING contract below |
@@ -1226,7 +1243,7 @@ copied on delivery, as are unmatched LEFT outer values used in multiple results.
 
 Capability preflight skips advertised clauses and reports the first unadvertised
 one. Thus USING cannot mask a later NATURAL, WINDOW or OVER. MERGE INTO ... USING
-remains CS00002; DELETE ... USING and CREATE INDEX ... USING are syntax errors.
+remains CS00002; DELETE ... USING executes; CREATE INDEX ... USING remains a syntax error.
 
 ## Value comparison (#1029)
 
@@ -1629,6 +1646,13 @@ from grouped columns. An ungrouped source column in a projection, `HAVING`, or
 chooses an arbitrary row's value. Aggregate arguments cannot contain another
 aggregate, and aggregates cannot occur in `WHERE`, `JOIN ... ON`, or `GROUP BY`.
 
+Repeated scalar-subquery, EXISTS and ANY/SOME/ALL grouping expressions may appear in SELECT,
+HAVING and ORDER BY. They reuse the group value when the complete query bodies are structurally
+identical in the same scope, including identical correlations, and their operators, quantifiers,
+negation and bound scalar operands agree. IN keys likewise compare their query bodies.
+Different or unproven keys do not share a slot; an ungrouped reference still reports `CS05017`.
+Matching follows PostgreSQL's whole-expression comparison (`parse_agg.c:1451`).
+
 `UPDATE` and `DELETE` act on one row at a time, so an aggregate in `UPDATE ... SET`
 or in their `WHERE` fails while planning, as PostgreSQL rejects one in those clauses
 (SQLSTATE 42803), with `Aggregate functions are not allowed in UPDATE SET.` or
@@ -1815,6 +1839,39 @@ Boolean-position validation. An invalid legacy operand or an application functio
 result is no longer Boolean fails when the stored body is invoked with CS02003;
 it does not prevent the database from opening.
 
+## Quantified comparisons (#1718)
+
+Scalar `expr op ANY|SOME|ALL (query)` executes for `=`, `<>` (or `!=`), `<`, `<=`, `>` and `>=`.
+SOME is synonymous with ANY; canonical text retains its spelling. The query must
+return exactly one column, including when empty (CS05013). Correlated references
+use the same lexical scopes as IN and EXISTS. Query bodies may contain set
+operations, derived sources and references to an enclosing WITH.
+
+ANY/SOME combines comparisons with OR; ALL combines them with AND. Empty ANY/SOME
+is FALSE and empty ALL is TRUE, even with a NULL left operand. A nonempty result
+with a NULL left operand is UNKNOWN. A NULL comparison contributes UNKNOWN unless
+a TRUE decides ANY/SOME or a FALSE decides ALL. Projection retains UNKNOWN as NULL;
+WHERE admits only TRUE. These rules follow PostgreSQL
+src/backend/executor/nodeSubplan.c:244-269,399-427.
+
+Comparisons use the ordinary scalar numeric, temporal, binary, CHAR and collation
+rules, including CS02055 / 42804 for incompatible non-NULL values when compared.
+Explicit left COLLATE overrides the child output collation; otherwise the child
+column contributes declared collation strength, as for IN. The Boolean result
+contributes no text collation. Scalar folding evaluates the left operand once for
+a nonempty set and skips it for an empty set, including correlated scalar children.
+Independent subqueries retain eager statement preparation. Folding stops on a deciding truth
+value. Set children use the existing materialization strategy: independent children
+run once per statement, correlated children per outer frame. Child projection
+evaluation is not guaranteed to stop at a deciding comparison. Lazy CASE, COALESCE
+and Boolean branches skip unvisited correlated children.
+
+The existing 32-level subquery and whole-expression depth limits apply. Row values,
+array operands and subqueries in UPDATE SET, INSERT VALUES, RETURNING, CHECK/DEFAULT
+and LIMIT/OFFSET remain excluded. Row-value syntax retains CS00003; array operands
+retain named CK00001. ANY/SOME remain contextual identifier spellings and keep their
+existing canonical quoting. No disk or wire format changes.
+
 ## Subqueries and query-source inserts (#1021)
 
 Subqueries are separate planned queries. An uncorrelated child materializes once
@@ -1890,12 +1947,12 @@ clauses nest below it, so the [expression nesting limit](#expression-nesting-lim
 (256 levels by default) bounds the statement as a whole, subqueries included. The
 32-level subquery limit is fixed; it does not follow the configured expression limit.
 
-`ANY`/`ALL`/`SOME` quantified comparisons, nested or recursive CTEs, lateral joins,
+Nested or recursive CTEs, lateral joins,
 and subqueries in UPDATE SET, INSERT VALUES, CHECK/DEFAULT,
 or LIMIT/OFFSET/FETCH/TOP expressions remain excluded with `CK00001`. Ordinary numeric
 LIMIT/OFFSET/FETCH/TOP clauses on queries containing subqueries do execute. CHECK remains
 a deterministic row-local expression and still rejects every subquery form.
-These subset boundaries do not add named clauses to the 54-clause denominator.
+Quantified comparisons add one measured named clause beside SUBQUERY.
 
 ## Common table expressions (#1116)
 
@@ -3289,7 +3346,7 @@ rejects with `CK00001`: `RECURSIVE`, `[NOT] MATERIALIZED`, `SEARCH`/`CYCLE`,
 `SELECT ALL`,
 `CREATE COLLATION`, `CREATE FULLTEXT`, `GROUPING SETS` and
 the `GROUPING`, `ROLLUP`, `CUBE` and `GROUPING_ID` calls, `FILTER (...)` and
-`WITHIN GROUP` after a non-LISTAGG call, LISTAGG ON OVERFLOW (contextual), the `ANY`/`SOME` (and `ALL`) quantified comparisons,
+`WITHIN GROUP` after a non-LISTAGG call, LISTAGG ON OVERFLOW (contextual), the `ANY`/`SOME` (and `ALL`) array comparisons,
 `LATERAL`, `~`, `SEQUENCE`, `SERIAL`, `BIGSERIAL`, `SMALLSERIAL`, `OVERRIDING`,
 `MINVALUE`, `MAXVALUE`, `CYCLE`, `CACHE`, `RESTART`, plus `PERCENT` and `WITH TIES` after
 FETCH or TOP. Identifiers spelled like these recognized-unsupported words,
@@ -3299,7 +3356,7 @@ refusal is a dedicated parser rule. The table also holds the recognized
 non-executing functions listed above, including the window and niladic datetime names (#1103). Profile keywords
 that start an unsupported form by another rule, such as `LEFT` or `CROSS`, need no entry.
 A recognized construct is skipped once it is reported, so the text after it adds
-no second diagnostic: `= ANY (SELECT ...)` no longer parses as a call to a
+no second diagnostic: `= ANY (array_operand)` no longer parses as a call to a
 function named `ANY`, `LATERAL` is no longer bound as a table name, and `WITHIN`
 is no longer read as a column alias. `SqlKeywordDispositionTests` (Sql.Language)
 holds one case per word. It fails when a keyword or table entry is added without
@@ -3520,6 +3577,7 @@ the diagnostic fixes introduce no persisted-format change beyond #1422's format-
 | `CS06060` | Unsupported SQL catalog metadata format or version; earlier/future metadata is refused without an upgrade reader | 0A000 (`feature_not_supported`) |
 | `CS03059` | Expression cannot be stored as a valid deterministic row definition | 42P17 (`invalid_object_definition`) |
 | `CS05060` | Executor/catalog invariant failure, including unavailable constraint indexes or freshly rendered CREATE VIEW text that cannot reload | XX000 (`internal_error`) |
+| `CS05068` | UPDATE target matched by multiple source associations; refused before writes | 21000 (`cardinality_violation`) |
 | `CS03061` | Column already exists | 42701 (`duplicate_column`) |
 | `CS02062` | INTERVAL duration overflow in assignment, DEFAULT or CAST | 22015 (`interval_field_overflow`) |
 | `CS02063` | FOREIGN KEY columns have incompatible collations | 42P21 (`collation_mismatch`) |

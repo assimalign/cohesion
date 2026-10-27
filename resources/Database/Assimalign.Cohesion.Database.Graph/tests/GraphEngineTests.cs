@@ -151,11 +151,13 @@ public sealed class GraphEngineTests
         finally { if (Directory.Exists(root)) { Directory.Delete(root, true); } }
     }
 
-    [Theory(DisplayName = "Cohesion Test [Graph] - Format: old records and registrations are refused with CG06017 before scrub, leaving every file unchanged (#1534)")]
+    [Theory(DisplayName = "Cohesion Test [Graph] - Format: old records and registrations are refused with CG06017 before scrub, leaving every file unchanged (#1534, #1633)")]
     [InlineData(1, 2)]
     [InlineData(2, 2)]
     [InlineData(1, 3)]
     [InlineData(2, 3)]
+    [InlineData(1, 4)]
+    [InlineData(2, 4)]
     public async Task OpenDatabaseAsync_EarlierGraphFormat_ShouldPreserveCodedRefusalAsync(ulong owner, byte version)
     {
         // Arrange

@@ -235,6 +235,14 @@ internal static class Program
             Check("in process: RETURNING affected count", written.AffectedCount, 1L);
         }
         Check("in process: UPDATE RETURNING", await RowsAsync(session, "UPDATE returning_native SET value = value + 1 RETURNING value"), [[4]]);
+        await session.ExecuteAsync("CREATE TABLE joined_native (id INT PRIMARY KEY,value INT)");
+        await session.ExecuteAsync("INSERT INTO joined_native VALUES(1,4)");
+        await session.ExecuteAsync("CREATE TABLE source_native (id INT,v INT)");
+        await session.ExecuteAsync("INSERT INTO source_native VALUES(1,8)");
+        Check("in process: UPDATE FROM", await RowsAsync(session, "UPDATE joined_native SET value=s.v FROM source_native AS s WHERE joined_native.id=s.id RETURNING joined_native.value,s.v"), [[8,8]]);
+        await session.ExecuteAsync("INSERT INTO source_native VALUES(1,8)");
+        CheckFailure("in process: UPDATE FROM cardinality", await FailureAsync(() => RowsAsync(session, "UPDATE joined_native SET value=s.v FROM source_native AS s WHERE joined_native.id=s.id")), "CS05068");
+        Check("in process: DELETE USING deduplication", await RowsAsync(session, "DELETE FROM joined_native USING source_native AS s WHERE joined_native.id=s.id RETURNING joined_native.value,s.v"), [[8,8]]);
         await session.ExecuteAsync("CREATE TABLE upsert_native (id INT PRIMARY KEY, value INT DEFAULT (1 + 2))");
         await session.ExecuteAsync("INSERT INTO upsert_native VALUES (1, 10)");
         Check("in process: ON CONFLICT EXCLUDED RETURNING", await RowsAsync(session,
@@ -278,6 +286,7 @@ internal static class Program
         Check("in process: comma and CROSS", await RowsAsync(session, crossJoin), [[8L]]);
         Check("in process: set operations", await RowsAsync(session, setOperations), [[2L]]);
         Check("in process: set subquery", await RowsAsync(session, "SELECT Id FROM customers WHERE Id IN (SELECT Id FROM customers EXCEPT SELECT Id FROM customers WHERE Id = 1)"), [[2L]]);
+        Check("in process: quantified comparisons", await RowsAsync(session, "SELECT 1 = ANY (SELECT 1 UNION ALL SELECT NULL), NULL <> SOME (SELECT 1 WHERE FALSE), NULL < ALL (SELECT 1 WHERE FALSE), 1 > ALL (SELECT NULL)"), [[true, false, true, null]]);
         Check("in process: renamed derived join", await RowsAsync(session, derivedJoin), [[1L]]);
         Check("in process: correlated scalar EXISTS and IN", await RowsAsync(session, correlatedRows), [[1L, 100L], [2L, 200L]]);
         CheckFailure("in process: correlated cardinality", await FailureAsync(() => RowsAsync(session, correlatedCardinality)), "one row");
@@ -465,6 +474,13 @@ internal static class Program
         Check("over the wire: ON CONFLICT affected count", upserted.AffectedCount, 2L);
         Check("over the wire: ON CONFLICT EXCLUDED RETURNING", upserted.Select(row => new object?[] { row.GetInt32(0), row.GetInt32(1) }).ToArray(), [[1, 20], [3, 30]]);
         Check("over the wire: DELETE RETURNING", await RowsAsync(connection, "DELETE FROM returning_native WHERE id = 1 RETURNING value", timeout.Token), [[4]]);
+        await connection.ExecuteAsync("INSERT INTO joined_native VALUES(1,4)", cancellationToken: timeout.Token);
+        await connection.ExecuteAsync("DELETE FROM source_native", cancellationToken: timeout.Token);
+        await connection.ExecuteAsync("INSERT INTO source_native VALUES(1,9)", cancellationToken: timeout.Token);
+        Check("over the wire: UPDATE FROM", await RowsAsync(connection, "UPDATE joined_native SET value=s.v FROM source_native AS s WHERE joined_native.id=s.id RETURNING joined_native.value,s.v", timeout.Token), [[9,9]]);
+        await connection.ExecuteAsync("INSERT INTO source_native VALUES(1,9)", cancellationToken: timeout.Token);
+        CheckFailure("over the wire: UPDATE FROM cardinality", await FailureAsync(() => RowsAsync(connection, "UPDATE joined_native SET value=s.v FROM source_native AS s WHERE joined_native.id=s.id", timeout.Token)), "CS05068");
+        Check("over the wire: DELETE USING deduplication", await RowsAsync(connection, "DELETE FROM joined_native USING source_native AS s WHERE joined_native.id=s.id RETURNING joined_native.value,s.v", timeout.Token), [[9,9]]);
         Check("over the wire: IDENTITY leaves connection usable", await RowsAsync(connection, "SELECT id FROM identity_wire", timeout.Token), [[10]]);
         await connection.ExecuteAsync("CREATE TABLE default_wire (id INT DEFAULT 7 NOT NULL, label TEXT DEFAULT 'seed', note INT)", cancellationToken: timeout.Token);
         await connection.ExecuteAsync("INSERT INTO default_wire (label, id) VALUES (DEFAULT, 1), (NULL, 2)", cancellationToken: timeout.Token);
@@ -500,6 +516,7 @@ internal static class Program
         Check("over the wire: comma and CROSS", await RowsAsync(connection, crossJoin, timeout.Token), [[8L]]);
         Check("over the wire: set operations", await RowsAsync(connection, setOperations, timeout.Token), [[2L]]);
         Check("over the wire: set subquery", await RowsAsync(connection, "SELECT Id FROM customers WHERE Id IN (SELECT Id FROM customers EXCEPT SELECT Id FROM customers WHERE Id = 1)", timeout.Token), [[2L]]);
+        Check("over the wire: quantified correlation", await RowsAsync(connection, "SELECT c.Id, c.Id >= ALL (SELECT d.Id FROM customers d WHERE d.Id <= c.Id), c.Id = SOME (SELECT d.Id FROM customers d WHERE d.Id > c.Id), (SELECT 1 / (c.Id - c.Id)) = ANY (SELECT d.Id FROM customers d WHERE d.Id = c.Id AND FALSE) FROM customers c ORDER BY c.Id", timeout.Token), [[1L, true, false, false], [2L, true, false, false]]);
         Check("over the wire: renamed derived join", await RowsAsync(connection, derivedJoin, timeout.Token), [[1L]]);
         Check("over the wire: chained CTEs", await RowsAsync(connection,
             "WITH a AS (SELECT Id FROM customers), b AS (SELECT Id FROM a) SELECT Id FROM b ORDER BY Id", timeout.Token), [[1L], [2L]]);

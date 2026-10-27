@@ -70,7 +70,8 @@ internal sealed partial class SqlPlanExecutor
     /// </summary>
     private async IAsyncEnumerable<object?[]> EnumerateJoinRowsAsync(SqlJoinPlan plan, SqlStatementContext statement,
         bool[] sharedColumns, [EnumeratorCancellation] CancellationToken cancellationToken,
-        IReadOnlyDictionary<SqlDerivedRelation, List<object?[]>>? derivedRows)
+        IReadOnlyDictionary<SqlDerivedRelation, List<object?[]>>? derivedRows,
+        (int Binding, IReadOnlyList<object?[]> Rows)? dmlTarget = null)
     {
         // Every earlier step is retained by a later loop. Only the final index inner
         // is a fresh read for each delivered pair. Delivery detaches selected binary cells only.
@@ -125,8 +126,9 @@ internal sealed partial class SqlPlanExecutor
         {
             foreach (var first in ReadInput(reversed ? 1 : 0))
             {
-                rows[0] = new object?[plan.Columns.Count];
+                rows[0] = new object?[plan.Columns.Count + (dmlTarget is null ? 0 : 1)];
                 first.CopyTo(rows[0], initial.Offset);
+                if (dmlTarget?.Binding == (reversed ? 1 : 0)) { rows[0][^1] = first; }
                 // An explicit cursor stack keeps N inputs from becoming N recursive
                 // MoveNext calls. Query text controls N independently of expression depth.
                 int level = 0;
@@ -185,6 +187,7 @@ internal sealed partial class SqlPlanExecutor
                         if (statement.Metrics.Analysis(step) is { } work) { work.Candidates++; }
                         var joined = (object?[])outer.Clone();
                         cursors[level]!.Current.CopyTo(joined, inner.Offset);
+                        if (dmlTarget?.Binding == innerBinding) { joined[^1] = cursors[level]!.Current; }
                         await PrepareSubqueriesAsync(step.Condition, joined, statement, cancellationToken).ConfigureAwait(false);
                         if (evaluator.Matches(step.Condition, joined))
                         {
@@ -214,6 +217,8 @@ internal sealed partial class SqlPlanExecutor
 
         IEnumerable<object?[]> ReadInput(int binding)
         {
+            // Joined DML already applied this binding's pushed filter before retaining identities.
+            if (dmlTarget?.Binding == binding) { return dmlTarget.Value.Rows; }
             var source = plan.Bindings[binding].Source;
             var rows = inputIndexes[binding] is { } tree && plan.Inputs[binding].Access is SqlIndexSeekPath seek
                 ? SeekRows(source.Table!, seek, tree, statement, cancellationToken).Select(row => row.Values)

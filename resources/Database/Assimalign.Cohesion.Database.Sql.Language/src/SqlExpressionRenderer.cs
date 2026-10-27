@@ -194,6 +194,9 @@ public static class SqlExpressionRenderer
         SqlBetweenExpression between => Operand(between.Operand, concatLevel) + (between.IsNegated ? " NOT BETWEEN " : " BETWEEN ") +
             Operand(between.Low, concatLevel) + " AND " + Operand(between.High, concatLevel),
         SqlInExpression inExpression => In(inExpression),
+        SqlQuantifiedComparisonExpression quantified => Operand(quantified.Operand, predicateLevel) + " " +
+            OperatorText(quantified.Operator) + " " + quantified.Quantifier.ToString().ToUpperInvariant() +
+            " (" + Select(quantified.Subquery) + ")",
         SqlLikeExpression like => Operand(like.Operand, concatLevel) + (like.IsNegated ? " NOT LIKE " : " LIKE ") +
             Operand(like.Pattern, collateLevel) + (like.Escape is null ? "" : " ESCAPE " + Operand(like.Escape, collateLevel)),
         SqlCollateExpression collate => Operand(collate.Operand, collateLevel) + " COLLATE " + collate.CollationName,
@@ -246,6 +249,7 @@ public static class SqlExpressionRenderer
                 SqlBinaryOperator.GreaterThan or SqlBinaryOperator.LessOrEqual or SqlBinaryOperator.GreaterOrEqual,
         } => comparisonLevel,
         SqlIsNullExpression or SqlDistinctExpression or SqlBooleanTestExpression => isLevel,
+        SqlQuantifiedComparisonExpression => comparisonLevel,
         SqlBetweenExpression or SqlInExpression or SqlLikeExpression => predicateLevel,
         SqlBinaryExpression { Operator: SqlBinaryOperator.Add or SqlBinaryOperator.Subtract } => additiveLevel,
         SqlBinaryExpression { Operator: SqlBinaryOperator.Concat } => concatLevel,

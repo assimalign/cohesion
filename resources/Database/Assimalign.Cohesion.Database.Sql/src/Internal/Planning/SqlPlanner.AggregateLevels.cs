@@ -75,6 +75,7 @@ internal sealed partial class SqlPlanner
                 SqlSubqueryExpression scalar => scalar.Select,
                 SqlExistsExpression exists => exists.Subquery,
                 SqlInExpression member => member.Subquery,
+                SqlQuantifiedComparisonExpression quantified => quantified.Subquery,
                 _ => null,
             };
             if (query is not null) { VisitQuery(query, depth + 1); }

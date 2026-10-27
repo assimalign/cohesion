@@ -71,7 +71,29 @@ internal sealed partial class SqlPlanner
         if (select.Columns.Any(column => UnderAggregate(column.Expression, source, false)) ||
             select.Having is not null && UnderAggregate(select.Having, source, false) ||
             select.OrderBy.Any(order => UnderAggregate(order.Expression, source, false))) { return scope; }
+        // A repeated complete group key reads its retained value, so its children bind over
+        // source rows just as the original key does. A matching subquery alone is insufficient.
+        if (SubqueryRoots(select).Any(expression => WithinRepeatedGroupKey(expression))) { return scope; }
         return new SqlCorrelationScope(scope.Id, scope.Local, scope.Parent, select.GroupBy);
+
+        bool WithinRepeatedGroupKey(SqlExpression expression)
+        {
+            RuntimeHelpers.EnsureSufficientExecutionStack();
+            if (!ContainsNode(expression, source)) { return false; }
+            foreach (var key in select.GroupBy)
+            {
+                try
+                {
+                    if (SameGroupExpression(expression, key, scope.Local)) { return true; }
+                }
+                catch (SqlEvaluationException)
+                {
+                    // ORDER BY output aliases have no source binding. Its ordinary binder
+                    // resolves them later; an unproven match must keep the grouped scope.
+                }
+            }
+            return Children(expression).Any(WithinRepeatedGroupKey);
+        }
     }
 
     private bool UnderAggregate(SqlExpression expression, SqlExpression source, bool aggregate)

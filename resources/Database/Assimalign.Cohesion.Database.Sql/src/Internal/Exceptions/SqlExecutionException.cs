@@ -34,6 +34,7 @@ internal sealed class SqlExecutionException : DatabaseException
     internal const string DuplicateFunctionCode = "CS03065";
     internal const string InsufficientPrivilegeCode = "CS03066";
     internal const string StatementMemoryBudgetCode = "CS05067";
+    internal const string DmlMultipleSourceMatchesCode = "CS05068";
 
     internal SqlExecutionException(string code, string message, Exception? innerException = null, Location? location = null)
         : base(message, [new Diagnostic

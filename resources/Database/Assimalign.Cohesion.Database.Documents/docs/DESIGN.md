@@ -278,17 +278,45 @@ catalog mutation. C# collection operations keep their existing transactional API
 DDL refusal follows [SQL++ transaction restrictions](https://github.com/couchbaselabs/docs-devex/blob/c3bb1549af4887019b9983e371d9e8b4f569052c/modules/n1ql/partials/n1ql-language-reference/transaction-restrictions.adoc#L1).
 SAVEPOINT and SET TRANSACTION remain deferred. The language's DIALECT records exact spellings.
 
-The server rejects parsed transaction commands with CD07002 before executing them. This temporary
-T1 gate prevents pooled borrowers from leaving an open transaction before OQ-T2 implements
-negotiated Ready status and family-aware reset (Documents Execute 64, Complete 66, sixteen-byte
-completion). No shared-client or protocol layout changes accompany T1. InMemory and TCP tests
-verify refusal leaves the same server session usable with no open transaction.
+The wire server dispatches the same controls on its connection-owned session (#1725 OQ-T2).
+Documents negotiates transaction-status and sends Ready with Idle (I), Active (T), or Failed (E)
+after each Execute or Command terminal response, including Failure. Legacy 2.0 and unnegotiated
+2.1 peers retain the terminal framing, but every text transaction control is refused with CD07002
+before transaction admission or cleanup touches the session's transaction. The session remains
+usable for ordinary autocommit work. This prevents capability-free drivers from leaking active or
+failed transactions across pooled rentals. The shared status-capable client discards an
+unnegotiated peer on return. Pooled rollback
+uses Execute 64 with an empty JSON parameter object and Complete 66 with two zero Int64 counts,
+then requires Idle before reuse. CD07002 remains live for the negotiated-capability requirement.
+No new request identifier, protocol version or disk format is needed.
+Controls ignore the supplied parameter object, including duplicate names. For ordinary statements,
+duplicate-name validation runs inside statement admission: CD01009 faults an explicit transaction,
+and later work retains CD04101 until an end control recovers it. Malformed wire JSON still terminates
+the connection before statement admission.
+
+Semantic Command validation and wire response encoding also belong to the failed-statement
+contract. A blank command collection, an oversized Put response preflight, or a query serialization
+failure aborts active explicit work before Failure and Ready E are sent. Command admission checks
+an already failed transaction before preflight, preserving CD04101. The server reuses the session's
+internal failure cleanup; no public API or assembly boundary changes.
+
+The single server pump owns session access. On the client, lock order is the typed wrapper's
+operation lock then shared lease admission lock; pool locks and storage latches are never taken
+there. The lease releases its lock before I/O, cancellation, joining and pool return. Return joins
+the last exchange before reset, and reset performs no I/O under the pool lock. Disconnect cancels
+the pump and session disposal undoes pending work before releasing storage locks. Counter-driven
+non-parallel stress covers cancellation, disposal, abort, rejected overlap and repeated teardown.
+
+Ready status follows PostgreSQL's end-of-cycle reporting (src/backend/tcop/dest.c:256–282 and
+src/backend/access/transam/xact.c:5055–5095). Complete is the statement acknowledgement; bounded
+status cleanup ignores subsequent caller cancellation. A disconnect before acknowledgement leaves
+COMMIT outcome unknown; cleanup never retries COMMIT or promises to undo committed work.
 
 | Code | Condition |
 | --- | --- |
 | CD04104 | COMMIT or ROLLBACK without an explicit transaction |
 | CD04105 | OQL DDL inside an explicit transaction |
-| CD07002 | Wire text transaction control awaits negotiated status and safe reset |
+| CD07002 | Text transaction control requires the negotiated transaction-status capability |
 
 Transaction cleanup continues to follow PostgreSQL's interruption protection in
 `src/backend/access/transam/xact.c:2854-2861`. RavenDB's
@@ -417,8 +445,8 @@ throws (`AbstractTransactionOperationsMerger.cs:906-916`). A failed request ther
 nothing of its own, and the merge never makes one request's failure another's. Citations are to
 PostgreSQL `85f55534e80`, Neo4j `54a7dcf7c25` and RavenDB `83399cb8bc8`.
 
-Documents wire commands use automatic statement transactions; explicit transactions remain in process only
-(`DocumentTransactionFailureTests`).
+Documents wire commands use the connection-owned explicit transaction when present, otherwise
+an automatic statement transaction (`DocumentTransactionTextWireTests`).
 
 Collections created by these APIs or OQL `CREATE COLLECTION` have `DatabaseObjectOwner.Adhoc`. A collection
 directly marked `Schema` refuses `DROP COLLECTION`, `CREATE INDEX`, and `DROP INDEX`,
@@ -1582,15 +1610,16 @@ ORDER BY, parameters, nested paths, aggregates, collection DDL and index DDL use
 as embedded execution. `SELECT *` returns whole JSON values; projections return JSON objects
 whose property names are the unique column names. MISSING members are omitted; explicit NULL
 members emit JSON null (for example, `"x":null`). Both use Document (65) frames.
-Document and collection commands use the existing session-bound operations and automatic
-transactions. Parsed text transaction controls are refused with CD07002 until negotiated status
-and family-aware pooled reset arrive in OQ-T2; no transaction-control frame is added.
+Document and collection commands use the existing session-bound operations and the connection's
+explicit transaction, or automatic transactions when none is open. Text controls use Execute;
+negotiated Ready status follows both Execute and Command, including complete failures. Pool
+return rolls back active or failed work and requires Idle; no transaction-control frame is added.
 
 ### Envelope and payload layout
 
 The shared envelope is unchanged: `u32be payloadLength`, `u8 messageType`, payload bytes. The length
 excludes the five-byte header and is at most 16,777,216.
-#1126 advanced the shared startup version from 1.0 to 2.0 because Documents projections changed from ResultRow (68) arrays to Document (65) objects carrying MISSING by omission. The shared handshake now negotiates 2.1 (#1105), with an empty capability list for Documents and its existing structured Failure payload. Different majors are refused before authentication; additive future capabilities use negotiation rather than another minor bump.
+#1126 advanced the shared startup version from 1.0 to 2.0 because Documents projections changed from ResultRow (68) arrays to Document (65) objects carrying MISSING by omission. The shared handshake now negotiates 2.1 (#1105), with transaction-status for Documents and its existing structured Failure payload. Different majors are refused before authentication; additive future capabilities use negotiation rather than another minor bump.
 
 All integers below are big-endian. `str(x)` means `i32 byteLength` followed by that many UTF-8
 bytes. `json(x)` means `i32 byteLength` followed by one complete UTF-8 JSON value. Negative lengths,
@@ -1983,7 +2012,11 @@ conversion overflow outside expression evaluation. No message embeds its code.
 
 ## Shared startup negotiation (#1105)
 
-The endpoint participates in protocol 2.1: Startup may carry capability names and Ready returns the agreed version with an empty capability list. Negotiated 2.0 still sends empty Ready. Different majors are refused. This model does not register the core Diagnostics capability and its channel rejects that frame in both directions. Documents keeps the existing structured Failure frame (#190/#1103); no second diagnostics frame is needed.
+The endpoint participates in protocol 2.1: Startup may carry capability names and Ready returns
+the agreed version with the transaction-status intersection (#1725). Negotiated 2.0 still sends
+empty Ready. Different majors are refused. This model does not register the core Diagnostics
+capability and its channel rejects that frame in both directions. Documents keeps the existing
+structured Failure frame (#190/#1103); no second diagnostics frame is needed.
 
 
 ## Catalog component

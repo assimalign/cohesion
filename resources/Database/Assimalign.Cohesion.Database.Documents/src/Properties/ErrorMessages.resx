@@ -88,7 +88,6 @@
   <data name="CatalogHeaderMalformed" xml:space="preserve"><value>Malformed document catalog metadata header.</value></data>
   <data name="TransactionNotOpen" xml:space="preserve"><value>No explicit document transaction is open.</value></data>
   <data name="TransactionDdlInvalid" xml:space="preserve"><value>OQL collection and index DDL cannot run inside an explicit transaction.</value></data>
-  <data name="TextTransactionWireUnavailable" xml:space="preserve"><value>OQL text transaction control is unavailable over the wire until Documents transaction status and pooled reset are supported.</value></data>
   <data name="TransactionCommitAborted" xml:space="preserve"><value>The session's transaction is aborted and cannot commit; nothing was committed.</value></data>
   <data name="TransactionOperationsAborted" xml:space="preserve"><value>The session's transaction is aborted; statements are refused until it is rolled back.</value></data>
   <data name="TransactionFailureCause" xml:space="preserve"><value> Cause: {0}</value></data>
@@ -210,4 +209,5 @@
   <data name="FunctionRegistrationDuplicate" xml:space="preserve"><value>Document function '{0}' overlaps an existing registration or changes its function kind.</value></data>
   <data name="FunctionUnknown" xml:space="preserve"><value>Unknown OQL function '{0}'.</value></data>
   <data name="FunctionArityInvalid" xml:space="preserve"><value>Invalid argument count for OQL function '{0}'.</value></data>
+  <data name="TextTransactionStatusRequired" xml:space="preserve"><value>Text transaction control requires the negotiated transaction-status capability.</value></data>
 </root>

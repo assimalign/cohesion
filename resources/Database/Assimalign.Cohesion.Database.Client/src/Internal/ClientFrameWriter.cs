@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -12,6 +13,7 @@ namespace Assimalign.Cohesion.Database.Client.Internal;
 internal sealed class ClientFrameWriter : ProtocolFrameWriter
 {
     private readonly ProtocolFrameWriter _writer;
+    private readonly bool _documentCommands;
 
     internal bool RequiresTransactionStatus { get; private set; }
 
@@ -21,9 +23,12 @@ internal sealed class ClientFrameWriter : ProtocolFrameWriter
     /// Initializes a new instance of the <see cref="ClientFrameWriter"/> class.
     /// </summary>
     /// <param name="writer">The underlying protocol frame writer whose completed-pipe failures are translated.</param>
-    public ClientFrameWriter(ProtocolFrameWriter writer)
+    /// <param name="family">The immutable family whose request identifiers are observed.</param>
+    public ClientFrameWriter(ProtocolFrameWriter writer, ProtocolMessageFamily family)
     {
         _writer = writer;
+        _documentCommands = family.Capabilities.Contains(ProtocolCapability.TransactionStatus) &&
+            !family.Supports((ProtocolMessageType)5) && family.Supports((ProtocolMessageType)69);
     }
 
     protected override async ValueTask WriteFrameCoreAsync(ProtocolFrame frame, CancellationToken cancellationToken)
@@ -31,9 +36,9 @@ internal sealed class ClientFrameWriter : ProtocolFrameWriter
         try
         {
             await _writer.WriteFrameAsync(frame, cancellationToken).ConfigureAwait(false);
-            // The transaction-status contract covers Execute (5) and Graph ExecutePaths (64).
+            // Execute (5), Graph ExecutePaths / Documents Execute (64), and Documents Command (69).
             // Observe the request, including application exchanges using the default constructor.
-            if ((byte)frame.Type is 5 or 64) { RequiresTransactionStatus = true; }
+            if ((byte)frame.Type is 5 or 64 || (_documentCommands && (byte)frame.Type == 69)) { RequiresTransactionStatus = true; }
         }
         catch (InvalidOperationException exception)
         {

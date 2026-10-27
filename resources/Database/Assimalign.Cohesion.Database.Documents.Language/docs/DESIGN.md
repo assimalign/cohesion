@@ -625,9 +625,13 @@ and EXPLAIN transaction control remain unsupported. Each parse accepts only one 
 
 OqlTransactionParserTests covers commands, isolation, spans, malformed text, contextual names and
 savepoint refusals. The keyword-disposition corpus and Documents' advertised-clause execution
-corpus include the enabled transaction capabilities. In-process sessions accept these controls;
-the Documents server temporarily refuses them with CD07002 until OQ-T2 supplies negotiated status
-and family-aware pooled reset. No wire request identifier or persisted format changes in T1.
+corpus include the enabled transaction capabilities. In-process and wire sessions accept these
+controls. Documents negotiates Ready transaction-status after Execute and Command; pooled reset
+uses Execute 64 / Complete 66 and requires both completion counts zero and Idle status. Legacy
+peers without status cannot certify reuse and are discarded. A server refuses text transaction
+control with CD07002 when the peer did not negotiate transaction-status, before any transaction
+is touched, so a legacy pool cannot inherit an open transaction.
+No wire request identifier, protocol version or persisted format changes (#1725 OQ-T2).
 
 ### UPDATE (#1133)
 

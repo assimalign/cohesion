@@ -12,6 +12,19 @@ namespace Assimalign.Cohesion.Database.Documents.Protocol.Tests;
 
 public sealed class DocumentWireCodecTests
 {
+    [Fact(DisplayName = "Cohesion Test [Documents.Protocol] - Transaction status is the Documents capability and is absent from legacy Ready (#1725)")]
+    public void Family_TransactionStatus_ShouldNegotiateWithoutDiagnostics()
+    {
+        // Arrange / Act
+        DocumentProtocol.Family.Capabilities.ShouldHaveSingleItem().ShouldBeSameAs(ProtocolCapability.TransactionStatus);
+        var ready = new ProtocolReadyMessage(ProtocolVersion.Current, [ProtocolCapability.TransactionStatus.Name]);
+
+        // Assert
+        ProtocolReadyMessage.Decode(ready.Encode()).Capabilities.ShouldBe([ProtocolCapability.TransactionStatus.Name]);
+        ProtocolReadyMessage.Decode([]).Capabilities.ShouldBeEmpty();
+        new DocumentProtocolCompleteMessage(0, 0).Encode().Length.ShouldBe(16);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Documents] - Completion has two big-endian signed counts")]
     public void Complete_QueryAndWrite_ShouldEncodeAffectedCount()
     {

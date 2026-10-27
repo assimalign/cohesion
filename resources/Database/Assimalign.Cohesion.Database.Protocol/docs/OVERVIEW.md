@@ -16,7 +16,10 @@ Model packages own their message identifiers and payload codecs.
 This child root has no dependencies on models, the area root, or transports. The
 area root references it. See [design and wire contract](DESIGN.md).
 
-SQL and Graph negotiate transaction-status: each Execute ends with a Ready I/T/E status, enabling rollback before pool reuse. Existing identifiers and protocol 2.1 are retained (#1540).
+SQL, Graph and Documents negotiate transaction-status: Execute, Graph ExecutePaths and Documents
+Command end with Ready I/T/E status, enabling rollback before pool reuse. Reset retains each
+family's existing envelope: SQL/Graph use 5/8 and Documents uses 64/66 with two completion counts.
+Existing identifiers and protocol 2.1 are retained (#1540, #1725).
 
 ## Error and construction conventions (#1470)
 

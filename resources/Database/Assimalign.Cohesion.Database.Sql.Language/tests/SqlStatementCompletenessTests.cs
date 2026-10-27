@@ -56,6 +56,7 @@ public sealed class SqlStatementCompletenessTests
         [SqlClauses.Intersect] = ["SELECT a FROM t INTERSECT ALL SELECT a FROM u"],
         [SqlClauses.Except] = ["SELECT a FROM t EXCEPT DISTINCT SELECT a FROM u"],
         [SqlClauses.Cte] = ["WITH c AS (SELECT a FROM t) SELECT * FROM c", "WITH c AS (SELECT a FROM t) DELETE FROM t WHERE a IN (SELECT a FROM c)", "INSERT INTO t WITH c AS (SELECT a FROM t) SELECT * FROM c"],
+        [SqlClauses.QuantifiedComparison] = ["SELECT a = ANY (SELECT b FROM u) FROM t", "SELECT a <> SOME (SELECT b FROM u) FROM t", "SELECT a < ALL (SELECT b FROM u) FROM t"],
         [SqlClauses.Subquery] =
         [
             "SELECT a FROM t WHERE a IN (SELECT b FROM u)",
@@ -80,6 +81,8 @@ public sealed class SqlStatementCompletenessTests
             "INSERT INTO t SELECT u.id FROM u JOIN w ON u.id = w.id ON CONFLICT DO NOTHING",
         ],
         [SqlClauses.Update] = ["UPDATE t SET a = 1", "UPDATE t SET a = DEFAULT", "UPDATE dbo.t SET a = 1, b = 'x' WHERE id = 1"],
+        [SqlClauses.UpdateFrom] = ["UPDATE t SET a = s.a FROM s WHERE t.id=s.id RETURNING s.a"],
+        [SqlClauses.DeleteUsing] = ["DELETE FROM t USING s WHERE t.id=s.id RETURNING s.id"],
         [SqlClauses.Delete] = ["DELETE FROM t", "DELETE FROM t WHERE id = 1"],
         [SqlClauses.Returning] = ["INSERT INTO t VALUES (1) RETURNING *", "INSERT INTO t SELECT a FROM u RETURNING a", "UPDATE t SET a = 1 RETURNING a AS updated", "DELETE FROM t RETURNING *"],
         [SqlClauses.CreateTable] = ["CREATE TABLE t (id INT PRIMARY KEY, name TEXT NOT NULL DEFAULT 'x')", "CREATE TABLE IF NOT EXISTS dbo.t (id INT)"],

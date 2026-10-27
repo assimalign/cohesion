@@ -51,6 +51,8 @@ public class SqlConformanceTests
     [InlineData("UPDATE dbo.users SET name = 'Ada', age = age + 1 WHERE id = @id;", SqlQueryCommandType.Update)]
     [InlineData("UPDATE dbo.users AS u SET age = age + 1 WHERE u.id BETWEEN 1 AND 10 RETURNING id, age;", SqlQueryCommandType.Update)]
     [InlineData("UPDATE dbo.users SET name = DEFAULT WHERE id = 1;", SqlQueryCommandType.Update)]
+    [InlineData("UPDATE t SET v=s.v FROM s WHERE t.id=s.id RETURNING t.v,s.v;", SqlQueryCommandType.Update)]
+    [InlineData("DELETE FROM t USING s WHERE t.id=s.id RETURNING t.id,s.v;", SqlQueryCommandType.Delete)]
     [InlineData("DELETE FROM users WHERE id = $1;", SqlQueryCommandType.Delete)]
     [InlineData("DELETE FROM dbo.users AS u WHERE u.id = @id AND EXISTS (SELECT a.id FROM admins a WHERE a.id = u.id) RETURNING id;", SqlQueryCommandType.Delete)]
     [InlineData("DELETE FROM users;", SqlQueryCommandType.Delete)]
@@ -82,7 +84,13 @@ public class SqlConformanceTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - Conformance: executable subqueries parse without errors")]
+    [InlineData("SELECT id = (SELECT 2), COUNT(*) FROM candidates GROUP BY id = (SELECT 2) HAVING id = (SELECT 2) ORDER BY id = (SELECT 2);", SqlQueryCommandType.Select)]
+    [InlineData("SELECT EXISTS (SELECT 2 WHERE id = 2), COUNT(*) FROM candidates GROUP BY EXISTS (SELECT 2 WHERE id = 2) HAVING EXISTS (SELECT 2 WHERE id = 2) ORDER BY EXISTS (SELECT 2 WHERE id = 2);", SqlQueryCommandType.Select)]
+    [InlineData("SELECT id = ANY (SELECT 2), COUNT(*) FROM candidates GROUP BY id = ANY (SELECT 2) HAVING id = ANY (SELECT 2) ORDER BY id = ANY (SELECT 2);", SqlQueryCommandType.Select)]
     [InlineData("SELECT id FROM users WHERE id IN (SELECT user_id FROM admins);", SqlQueryCommandType.Select)]
+    [InlineData("SELECT id FROM users WHERE id = ANY (SELECT user_id FROM admins);", SqlQueryCommandType.Select)]
+    [InlineData("SELECT id FROM users WHERE id <> SOME (SELECT user_id FROM admins);", SqlQueryCommandType.Select)]
+    [InlineData("SELECT id FROM users u WHERE id >= ALL (SELECT a.user_id FROM admins a WHERE a.user_id = u.id);", SqlQueryCommandType.Select)]
     [InlineData("INSERT INTO archive SELECT * FROM users WHERE inactive = TRUE;", SqlQueryCommandType.Insert)]
     [InlineData("WITH a AS (SELECT id FROM users), b AS (SELECT id FROM a) SELECT * FROM b;", SqlQueryCommandType.Select)]
     [InlineData("WITH a AS (SELECT id FROM users) INSERT INTO archive SELECT id FROM a;", SqlQueryCommandType.Insert)]

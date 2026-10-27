@@ -74,9 +74,12 @@ SQL syntax uses `CS00001`–`CS00099`. `CS00009` is the informational note for a
 statement semicolon; it does not refuse parsing or execution. `CS00100` is retired and reserved:
 the migration described it as a profile refusal, but the parser used it for this note.
 Recognized unsupported clauses use `CK00001`.
-SQL UPDATE ... FROM and DELETE ... USING retain this identity at execution after syntax and
-source binding succeed (#1714, SQ-UF1). Their association plans may be described by EXPLAIN;
-execution remains unavailable until SQ-UF2. No new identity is allocated for this staged refusal.
+SQL UPDATE ... FROM and DELETE ... USING execute (#1714). Multiple source associations for
+one UPDATE target report CS05068 before any mutation; DELETE deduplicates physical targets.
+Quantified comparisons (#1718) reuse CS01015 for name binding, CS02055 for incompatible
+compared non-NULL values, and CS05013 for the existing single-column scalar/IN/ANY/SOME/ALL
+subquery shape condition. No new diagnostic identity is allocated.
+
 Within category 03, condition bands 000–099 cover catalog/DDL, 100–199 provisioning,
 200–299 declared scripts, 300–399 registered definitions, and 400–499 generic constraint failures.
 These bands make allocation predictable while callers continue to match the complete identity.
@@ -180,6 +183,7 @@ structured-carrier messages remain unprefixed.
 | COHSQLE057 | CS05057 | Execution/budgets |
 | COHSQLE060 | CS05060 | Execution/budgets |
 | COHSQLE067 | CS05067 | Execution/budgets |
+| New (#1714) | CS05068 | Execution/budgets — UPDATE target matched by multiple source associations (before writes) |
 | COHSQLE041 | CS06041 | Storage/durability |
 | COHSQLE058 | CS06058 | Storage/durability |
 
@@ -348,7 +352,7 @@ and invariant exceptions and lower child-root typed failures retain their docume
 | CD04105 | OQL collection/index DDL inside an explicit transaction (#1725) | — |
 | CD05016 | Result byte/frame limit exceeded | — |
 | CD07001 | Session belongs to another database | — |
-| CD07002 | Documents server refuses text transaction control pending safe pooled reset (#1725 T1) | — |
+| CD07002 | Text transaction control requires the negotiated transaction-status capability (#1725) | — |
 | CD09001 | Collection handle is stale | — |
 | CB01001 | Container is absent | — |
 | CB01002 | Blob is absent | — |

@@ -94,6 +94,13 @@ internal static class SqlTreeDump
                 Append(builder, between.High);
                 builder.Append(')');
                 break;
+            case SqlQuantifiedComparisonExpression quantified:
+                builder.Append("Quantified(").Append(quantified.Operator).Append(", ").Append(quantified.Quantifier).Append(", ");
+                Append(builder, quantified.Operand);
+                builder.Append(", ");
+                Append(builder, quantified.Subquery);
+                builder.Append(')');
+                break;
             case SqlInExpression inExpression:
                 builder.Append("In(").Append(inExpression.IsNegated).Append(", ");
                 Append(builder, inExpression.Operand);

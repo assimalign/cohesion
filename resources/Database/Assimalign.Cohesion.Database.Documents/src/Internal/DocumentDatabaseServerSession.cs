@@ -376,6 +376,15 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
                     // Executions run on the session lifetime token, not the soft-stop
                     // token: a drain lets in-flight statements finish.
                     await ExecuteAsync(frame.Value, _lifetimeSource.Token).ConfigureAwait(false);
+                    if (_channel!.Capabilities.Contains(ProtocolCapability.TransactionStatus.Name))
+                    {
+                        var transaction = _databaseSession!.CurrentTransaction;
+                        var status = transaction is null ? ProtocolTransactionStatus.Idle
+                            : transaction.State == Assimalign.Cohesion.Database.Transactions.TransactionState.Faulted
+                                ? ProtocolTransactionStatus.Failed : ProtocolTransactionStatus.Active;
+                        await WriteFrameAsync(ProtocolMessageType.Ready,
+                            new ProtocolTransactionStatusMessage(status).Encode(), _lifetimeSource.Token).ConfigureAwait(false);
+                    }
                     break;
 
                 case ProtocolMessageType.Ping:
@@ -403,18 +412,22 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
         {
             if (execute is not null)
             {
-                using var parametersJson = JsonDocument.Parse(execute.Parameters, new JsonDocumentOptions { MaxDepth = 256 });
-                var parameters = new Dictionary<string, object?>(StringComparer.Ordinal);
-                foreach (var property in parametersJson.RootElement.EnumerateObject())
+                var statement = (OqlQueryStatement)new OqlQueryParser(allowUnregisteredFunctions: true).Parse(execute.Statement);
+                if (statement.OqlExpression is OqlTransactionExpression &&
+                    !_channel!.Capabilities.Contains(ProtocolCapability.TransactionStatus.Name))
                 {
-                    if (!parameters.TryAdd(property.Name, property.Value.Clone()))
-                    {
-                        throw DatabaseException.CreateDocumentsFailure("CD01009", ErrorMessages.ParameterNameDuplicate);
-                    }
+                    // Refuse before statement admission or failure cleanup can touch a transaction.
+                    // Capability-free drivers cannot certify a clean session on pool return.
+                    var diagnostic = new Diagnostic { Code = "CD07002", Message = ErrorMessages.TextTransactionStatusRequired, Severity = DiagnosticSeverity.Error };
+                    string message = string.Format(System.Globalization.CultureInfo.CurrentCulture,
+                        ErrorMessages.ServerSessionExecuteAsyncFailure, diagnostic.Code, diagnostic.Message);
+                    await WriteFrameAsync((ProtocolMessageType)DocumentProtocolMessageType.Failure,
+                        CreateFailure(ProtocolErrorCode.ExecutionFailure, message, [diagnostic]).Encode(), cancellationToken).ConfigureAwait(false);
+                    return;
                 }
+                using var parametersJson = JsonDocument.Parse(execute.Parameters, new JsonDocumentOptions { MaxDepth = 256 });
                 var result = await _databaseSession!.ExecuteStatementAsync(() =>
                 {
-                    var statement = (OqlQueryStatement)new OqlQueryParser(allowUnregisteredFunctions: true).Parse(execute.Statement);
                     var diagnostics = statement.Diagnostics.ToArray();
                     if (string.IsNullOrWhiteSpace(execute.Statement) || diagnostics.Any(d => d.Severity == DiagnosticSeverity.Error))
                     {
@@ -423,11 +436,18 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
                         DocumentDatabaseEventSource.Log.StatementParseFailed(this, _databaseSession!.Database.Name, error);
                         throw error;
                     }
-                    // Until Documents negotiates transaction status and pooled reset is family-aware,
-                    // no wire borrower may leave an explicit transaction on a pooled session (#1725 T2).
-                    if (statement.OqlExpression is OqlTransactionExpression transaction)
+                    // Controls ignore supplied parameters. Ordinary parameter validation belongs
+                    // inside statement admission so a failure also faults an explicit transaction.
+                    var parameters = new Dictionary<string, object?>(StringComparer.Ordinal);
+                    if (statement.OqlExpression is not OqlTransactionExpression)
                     {
-                        throw new DocumentPlanningException("CD07002", ErrorMessages.TextTransactionWireUnavailable, transaction.Location);
+                        foreach (var property in parametersJson.RootElement.EnumerateObject())
+                        {
+                            if (!parameters.TryAdd(property.Name, property.Value.Clone()))
+                            {
+                                throw DatabaseException.CreateDocumentsFailure("CD01009", ErrorMessages.ParameterNameDuplicate);
+                            }
+                        }
                     }
                     return new DocumentQueryRequest(statement, parameters);
                 }, cancellationToken).ConfigureAwait(false);
@@ -440,6 +460,10 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
         }
         catch (Exception exception) when (exception is DatabaseException or DatabaseTypeException or JsonException)
         {
+            // Preflight and response encoding can fail outside an engine operation. Abort active
+            // explicit work before reporting Failure; an already faulted or ended transaction
+            // keeps its original cause/outcome. The single pump owns this session access.
+            await _databaseSession!.AbortTransactionAsync(exception).ConfigureAwait(false);
             ProtocolErrorCode code = exception is DatabaseParseException ? ProtocolErrorCode.ParseFailure :
                 exception is DatabaseOfflineException ? ProtocolErrorCode.Unavailable : ProtocolErrorCode.ExecutionFailure;
             IReadOnlyList<Diagnostic> diagnostics = exception is DatabaseException databaseException ? databaseException.Diagnostics : [];
@@ -522,11 +546,12 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
 
     private async Task RunCommandAsync(DocumentProtocolCommandMessage command, CancellationToken cancellationToken)
     {
+        var session = _databaseSession!;
+        session.ThrowIfCommandRefuses();
         if (command.Operation != DocumentProtocolOperation.ListCollections && string.IsNullOrWhiteSpace(command.Collection))
         {
             throw new DocumentPlanningException("CD05001", ErrorMessages.CollectionNameMissing);
         }
-        var session = _databaseSession!;
         long count = 0;
         long affected = -1;
         switch (command.Operation)

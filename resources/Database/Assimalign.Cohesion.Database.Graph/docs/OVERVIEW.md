@@ -125,12 +125,14 @@ The Storage component is part of `Assimalign.Cohesion.Database.Graph`, with publ
 ### Storage: Graph storage component
 
 The `src/Storage/` component stores property-graph nodes, relationships,
-endpoint adjacency, MVCC label postings and secondary node-property indexes. Filtered incident reads seek by
+endpoint adjacency, MVCC label and relationship-type postings and secondary node-property indexes. Filtered incident reads seek by
 node, direction and catalog type GUID before decoding relationships; self-loops appear once. It targets .NET 10, is AOT
 compatible, and uses explicit binary codecs without reflection.
 
-Graph record and tree-registration format 4 adds catalog label GUIDs and label postings to
-format 3, which shipped with #1532's typed adjacency and entity revisions. Opening an earlier
+Graph record and tree-registration format 5 requires relationship-type postings (#1633),
+building on format 4's catalog label GUIDs and label postings and format 3's typed adjacency
+and entity revisions. Internal type scans are available to storage tests; planner anchors and
+estimates follow in GQ-R2. Opening an earlier
 format fails with CG06017 before logical recovery scrub writes; recreate the database with
 this engine. There is no upgrade path.
 

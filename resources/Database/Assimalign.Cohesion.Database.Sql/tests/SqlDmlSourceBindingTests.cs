@@ -6,9 +6,7 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
-using Assimalign.Cohesion.Database.Client;
 using Assimalign.Cohesion.Database.Execution;
-using Assimalign.Cohesion.Database.Sql.Client;
 using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Types;
 
@@ -58,65 +56,6 @@ public sealed class SqlDmlSourceBindingTests
         var amount = returning[usingJoin ? 4 : 5];
         amount.IsNullable.ShouldBe(usingJoin);
         details.ShouldContain(detail => detail != null && detail.Contains($"returning={names.Length}; columns={string.Join(", ", names)}"));
-    }
-
-    [Theory(DisplayName = "Cohesion Test [Sql] - DML sources: refusal precedes source and RETURNING callbacks and preserves the transaction (#1714)")]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task ExecuteAsync_SourceCallbacks_ShouldRefuseBeforeEvaluation(bool delete)
-    {
-        // Arrange
-        int calls = 0;
-        var builder = SqlDatabaseEngine.CreateBuilder("dml-callbacks");
-        builder.Functions.Add(SqlScalarFunction.Create("source_probe", (long value) => { calls++; return value; }, SqlFunctionVolatility.Volatile));
-        await using var engine = await builder.BuildAsync(CancellationToken.None);
-        var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
-        await using var session = await database.CreateSessionAsync(CancellationToken.None);
-        await session.ExecuteAsync("CREATE TABLE t (id INT)", cancellationToken: CancellationToken.None);
-        await session.ExecuteAsync("BEGIN", cancellationToken: CancellationToken.None);
-        await session.ExecuteAsync("INSERT INTO t VALUES (1)", cancellationToken: CancellationToken.None);
-        string sql = "WITH q AS (SELECT source_probe(id) AS id FROM t) " + (delete
-            ? "DELETE FROM t USING q WHERE EXISTS (SELECT source_probe(q.id)) RETURNING source_probe(t.id)"
-            : "UPDATE t SET id=q.id FROM q WHERE EXISTS (SELECT source_probe(q.id)) RETURNING source_probe(t.id)");
-
-        // Act
-        var failure = await Should.ThrowAsync<DatabaseException>(async () =>
-            await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None));
-
-        // Assert
-        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CK00001");
-        calls.ShouldBe(0);
-        await session.ExecuteAsync("COMMIT", cancellationToken: CancellationToken.None);
-        await using var rows = (await session.ExecuteAsync("SELECT id FROM t", cancellationToken: CancellationToken.None))
-            .ShouldBeAssignableTo<DatabaseResultSet>();
-        var ids = new List<int>();
-        await foreach (var row in rows.GetRowsAsync(CancellationToken.None)) { ids.Add(row.GetInt32(0)); }
-        ids.ShouldBe([1]);
-    }
-
-    [Theory(DisplayName = "Cohesion Test [Sql] - DML sources: refusal keeps its code and the wire connection usable (#1714)")]
-    [InlineData("UPDATE users SET name=s.name FROM users AS s WHERE users.id=s.id RETURNING s.name")]
-    [InlineData("DELETE FROM users USING users AS s WHERE users.id=s.id RETURNING s.name")]
-    public async Task ExecuteAsync_OverWire_ShouldRefuseWithoutMutation(string sql)
-    {
-        // Arrange
-        await using var harness = await ServerTestHarness.StartAsync();
-        await using var client = SqlClient.Create(new SqlClientOptions
-        {
-            Settings = new DatabaseConnectionSettings { Database = ServerTestHarness.DatabaseName, Principal = "dml-sources", EndPoint = harness.Listener.EndPoint },
-            ConnectionFactory = harness.Listener.CreateFactory(),
-        });
-        await using var connection = await client.ConnectAsync(TestTimeout.Token(30));
-
-        // Act
-        var failure = await Should.ThrowAsync<SqlClientException>(async () =>
-            await connection.ExecuteAsync(sql, cancellationToken: TestTimeout.Token(30)));
-
-        // Assert
-        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CK00001");
-        failure.ConnectionUsable.ShouldBeTrue();
-        (await connection.QueryAsync("SELECT id FROM users ORDER BY id", cancellationToken: TestTimeout.Token(30)))
-            .Select(row => row["id"]).ShouldBe([1, 2]);
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - DML sources: SET and RETURNING bind to physical source slots and retain target identity (#1714)")]
@@ -207,7 +146,7 @@ public sealed class SqlDmlSourceBindingTests
         diagnostic.Start.ShouldNotBeNull();
     }
 
-    [Theory(DisplayName = "Cohesion Test [Sql] - DML sources: bound forms explain sources and refuse execution without writes (#1714)")]
+    [Theory(DisplayName = "Cohesion Test [Sql] - DML sources: bound forms explain sources and execute (#1714)")]
     [InlineData("UPDATE t SET v=s.v FROM s WHERE t.id=s.id RETURNING s.v")]
     [InlineData("DELETE FROM t USING s WHERE t.id=s.id RETURNING s.v")]
     [InlineData("UPDATE t SET v=q.v FROM (SELECT id,v FROM s) q WHERE t.id=q.id")]
@@ -216,7 +155,7 @@ public sealed class SqlDmlSourceBindingTests
     [InlineData("UPDATE t SET v=s.v FROM s WHERE EXISTS (SELECT 1 WHERE s.id=t.id)")]
     [InlineData("DELETE FROM t USING s JOIN t AS q ON EXISTS (SELECT 1 WHERE s.id=q.id) WHERE t.id=s.id")]
     [InlineData("UPDATE t SET v=1 FROM INFORMATION_SCHEMA.TABLES AS s WHERE s.TABLE_NAME='t'")]
-    public async Task ExecuteAsync_BoundSourceForms_ShouldRefuseAndExplain(string sql)
+    public async Task ExecuteAsync_BoundSourceForms_ShouldExecuteAndExplain(string sql)
     {
         // Arrange
         await using var engine = SqlDatabaseEngine.Create("dml-refusal", new());
@@ -225,25 +164,22 @@ public sealed class SqlDmlSourceBindingTests
         await session.ExecuteAsync("CREATE TABLE t (id INT, v INT)", cancellationToken: CancellationToken.None);
         await session.ExecuteAsync("CREATE TABLE s (id INT, v INT)", cancellationToken: CancellationToken.None);
         await session.ExecuteAsync("INSERT INTO t VALUES (1,10)", cancellationToken: CancellationToken.None);
-        await session.ExecuteAsync("INSERT INTO s VALUES (1,20),(1,30)", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("INSERT INTO s VALUES (1,20)", cancellationToken: CancellationToken.None);
 
         // Act
-        var failure = await Should.ThrowAsync<DatabaseException>(async () =>
-            await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None));
+        (await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None)).AffectedCount.ShouldBe(1);
         await using var description = (await session.ExecuteAsync("EXPLAIN " + sql, cancellationToken: CancellationToken.None))
             .ShouldBeAssignableTo<DatabaseResultSet>();
         var targets = new List<string?>();
         await foreach (var row in description.GetRowsAsync(CancellationToken.None)) { targets.Add(row.GetString(3)); }
 
         // Assert
-        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CK00001");
-        failure.Message.ShouldContain("execution is not implemented yet", Case.Sensitive);
         targets.ShouldContain("dbo.t");
         targets.ShouldContain(sql.Contains("INFORMATION_SCHEMA") ? "INFORMATION_SCHEMA.TABLES" : "dbo.s");
         await using var result = (await session.ExecuteAsync("SELECT v FROM t", cancellationToken: CancellationToken.None))
             .ShouldBeAssignableTo<DatabaseResultSet>();
         var values = new List<int>();
         await foreach (var row in result.GetRowsAsync(CancellationToken.None)) { values.Add(row.GetInt32(0)); }
-        values.ShouldBe([10]);
+        values.ShouldBe(sql.Contains("DELETE") ? [] : sql.Contains("INFORMATION_SCHEMA") ? [1] : [20]);
     }
 }

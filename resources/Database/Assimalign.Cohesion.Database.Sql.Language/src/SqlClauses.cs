@@ -21,8 +21,14 @@ public static class SqlClauses
     /// <summary>An <c>UPDATE</c> statement.</summary>
     public const string Update = "UPDATE";
 
+    /// <summary>An UPDATE with joined read sources.</summary>
+    public const string UpdateFrom = "UPDATE FROM";
+
     /// <summary>A <c>DELETE</c> statement.</summary>
     public const string Delete = "DELETE";
+
+    /// <summary>A DELETE with joined read sources.</summary>
+    public const string DeleteUsing = "DELETE USING";
 
     /// <summary>A <c>CREATE TABLE</c> statement.</summary>
     public const string CreateTable = "CREATE TABLE";
@@ -77,6 +83,9 @@ public static class SqlClauses
 
     /// <summary>A scalar, predicate, or insert-source subquery.</summary>
     public const string Subquery = "SUBQUERY";
+
+    /// <summary>A scalar ANY, SOME or ALL comparison over a subquery.</summary>
+    public const string QuantifiedComparison = "QUANTIFIED COMPARISON";
 
     /// <summary>A <c>WITH</c> common-table-expression clause.</summary>
     public const string Cte = "WITH";

@@ -59,8 +59,8 @@ shared storage, with DDL flowing through this assembly's relational Catalog comp
   materialized once per statement and optional complete output column lists;
   `INSERT` (multi-row, whole-item `DEFAULT`, `DEFAULT VALUES`, nullability);
   `UPDATE` (including `SET c = DEFAULT`)/`DELETE` with correlated and uncorrelated WHERE subqueries and accurate
-  affected counts; FROM/USING variants parse and bind source namespaces and expose association plans
-  through EXPLAIN, with execution refused by CK00001 until SQ-UF2; `CREATE/ALTER/DROP TABLE`. DROP unpublishes immediately and the
+  affected counts; UPDATE FROM and DELETE USING execute collected source associations, with
+  target seeks and budgeted source hash/index joins exposed through EXPLAIN; `CREATE/ALTER/DROP TABLE`. DROP unpublishes immediately and the
   version-purge worker reclaims its data/index pages after older readers finish.
   Unsupported dialect features fail
   at plan time with precise messages. Statements nest at most the engine's

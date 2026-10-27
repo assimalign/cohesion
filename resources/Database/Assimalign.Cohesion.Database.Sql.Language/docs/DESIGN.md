@@ -1,19 +1,30 @@
 # Assimalign.Cohesion.Database.Sql.Language — Design
 
-## Joined DML syntax and binding (#1714, SQ-UF1)
+## Repeated subquery grouping keys (#1718)
+
+DIALECT.md records structural matching of complete scalar-subquery, EXISTS and quantified
+group keys across SELECT, HAVING and ORDER BY, including identical correlations. Operators,
+quantifiers, negation, scalar operands and query bodies remain significant; IN keys also compare
+bodies. This is an engine binding rule; syntax and persisted representations are unchanged.
+
+## Joined DML planning and execution (#1714, SQ-UF2)
 
 SqlUpdateExpression.From and SqlDeleteExpression.Using retain comma items and existing relation/join
 variants without adding a public construction bridge. Shared parsing and canonical source rendering
 preserve SELECT behavior and DML round trips, including WITH, derived bodies and RETURNING. The
 capability scan admits read-source queries while keeping SET/RETURNING subquery exclusions.
-Visible source OLD/NEW names mask pseudo-relations. DIALECT.md distinguishes parsed/bound support
-from execution: no clause/profile declaration is added until SQ-UF2 executes the forms.
+Visible source OLD/NEW names mask pseudo-relations. The profile now advertises UPDATE FROM and
+DELETE USING; DIALECT.md records pre-write CS05068 and physical-target DELETE deduplication.
+Joined execution uses target-outer predicate pushdown/costing, one materialization per CTE, and
+statement unwind before WITH/subquery wrappers. Both project overviews reflect executable support.
 DELETE's top-level USING source position recognizes keyword-spelled CTE references, while actual
 WITH RECURSIVE remains refused. Canonical rendering delimits ordinary OLD/NEW column qualifiers
 so a quoted identifier cannot become a RETURNING pseudo-relation on reparse.
 Bare RETURNING * follows PostgreSQL's visible namespace expansion: target columns, then sources
 in FROM/USING order with USING merges preserved and duplicate output names allowed. The engine
 retains visible output ordinals separately from physical association slots; plain DML is unchanged.
+Equality-driven steps follow written source order; DIALECT.md documents the dependence and the
+source-order workaround pending general join-order search in #1629. No reordering is introduced.
 
 ## Cascade progress and deadlock diagnostics (w11 review)
 
@@ -200,6 +211,21 @@ statement's nesting measure remains subject to the engine's existing limit. SqlC
 the statement corpus and the live conformance case change together; DIALECT.md is the contract.
 The engine's deferred-provisioning admission walks the wrapped statement before binding, just
 as it does for an ordinary data statement; an EXPLAIN cannot bypass a pending table reservation.
+
+## Quantified comparison AST (#1718)
+
+SqlQuantifiedComparisonExpression and SqlComparisonQuantifier retain the written
+scalar operator, ANY/SOME/ALL spelling and query body. The parser admits subquery
+operands after all six comparisons (including !=), preserves completed-sublink
+precedence, and uses the existing subquery and expression depth accounting.
+The query-operand grammar and SOME alias follow PostgreSQL
+src/backend/parser/gram.y:15677-15688,17022-17024.
+Rendering and tree dumps retain the whole body, including set operations.
+SqlClauses.QuantifiedComparison adds one measured profile clause beside Subquery.
+ANY/SOME remain contextual words in the recognized vocabulary for array refusals;
+their existing canonical identifier quoting stays stable. Row values retain the
+existing syntax refusal and excluded subquery positions keep CK00001. DIALECT.md
+specifies truth tables, comparison rules and materialization. No format changes.
 
 ## Derived relation AST (#1113, part b)
 

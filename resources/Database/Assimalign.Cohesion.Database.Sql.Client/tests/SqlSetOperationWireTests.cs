@@ -41,6 +41,11 @@ public sealed class SqlSetOperationWireTests
             cancellationToken: SqlClientTestHarness.Timeout());
         member.Columns.Single().Type.ShouldBe(DatabaseType.Int32);
         member.Select(row => row[0]).ShouldBe(new object?[] { 2 });
+        var quantified = await connection.QueryAsync(
+            "SELECT id FROM users WHERE id = ALL (SELECT id FROM users UNION SELECT id FROM users)",
+            cancellationToken: SqlClientTestHarness.Timeout());
+        quantified.Columns.Single().Type.ShouldBe(DatabaseType.Int32);
+        quantified.ShouldBeEmpty();
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql.Client] - Set operations: rejections keep coded diagnostics and the connection")]
@@ -50,7 +55,7 @@ public sealed class SqlSetOperationWireTests
     [InlineData("SELECT id FROM users OFFSET 1 UNION SELECT id FROM users", "CS00003")]
     [InlineData("SELECT id FROM users UNION ALL CORRESPONDING SELECT id FROM users", "CK00001")]
     [InlineData("SELECT id FROM users UNION SELECT id FROM users WINDOW w AS ()", "CK00001")]
-    [InlineData("SELECT id FROM users WHERE id = ALL (SELECT id FROM users UNION SELECT id FROM users)", "CK00001")]
+    [InlineData("SELECT id FROM users WHERE id = ALL (SELECT id, name FROM users UNION SELECT id, name FROM users)", "CS05013")]
     [InlineData("SELECT id FROM users UNION SELECT id, name FROM users", "CS05013")]
     [InlineData("SELECT id FROM users UNION SELECT name FROM users", "CS02003")]
     [InlineData("INSERT INTO users (id) SELECT id FROM users UNION SELECT id, name FROM users", "CS05013")]

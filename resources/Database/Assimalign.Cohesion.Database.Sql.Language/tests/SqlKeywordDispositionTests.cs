@@ -128,8 +128,8 @@ public sealed class SqlKeywordDispositionTests
         ["SIMILAR"] = Rejects("SELECT a FROM t WHERE a SIMILAR TO 'x%'", "SIMILAR TO"),
         ["LIKE"] = Parses("SELECT a FROM t WHERE a LIKE 'x%'"),
         ["IS"] = Parses("SELECT a FROM t WHERE a IS NULL"),
-        ["ANY"] = Rejects("SELECT a FROM t WHERE a = ANY (SELECT b FROM u)", "ANY quantified comparison"),
-        ["SOME"] = Rejects("SELECT a FROM t WHERE a = SOME (SELECT b FROM u)", "SOME quantified comparison"),
+        ["ANY"] = Parses("SELECT a FROM t WHERE a = ANY (SELECT b FROM u)"),
+        ["SOME"] = Parses("SELECT a FROM t WHERE a = SOME (SELECT b FROM u)"),
         ["~"] = Rejects("SELECT ~a FROM t", "prefix ~ operator"),
         // Literals
         ["NULL"] = Parses("SELECT a FROM t WHERE a IS NULL"),

@@ -213,20 +213,30 @@ unacknowledged command; transaction outcome and reconciliation remain model conc
 
 ### Transaction reset (#1540)
 
-SQL and Graph negotiate transaction-status. The connector consumes the terminal Ready status
+SQL, Graph and Documents negotiate transaction-status. The connector consumes the terminal Ready status
 before completing an Execute exchange, including complete statement errors. Pool return sends
 ROLLBACK for active or failed transactions, then requires a successful zero-count completion and
 Idle status before reuse. It performs this I/O outside the pool lock, after joining the last
 lease operation. The rollback reply and its Ready drain each have a five-second internal bound
 (up to ten seconds in total). Failure, missing/invalid status, cancellation
 or an unnegotiated transaction-capable peer discards the connector. Idle sessions need no reset
-exchange. No state is inferred from statement text. The connector observes Execute (5) and
-ExecutePaths (64) frames and drains negotiated status even for application exchanges using the
-one-argument constructor. The explicit transactionStatus flag can still require a postamble.
+exchange. No state is inferred from statement text. Reset keeps SQL/Graph Execute 5 / completion 8
+(one zero Int64); Documents uses Execute 64
+with empty JSON parameters / Complete 66 (two zero Int64 counts). The family's TransactionStatus
+capability, absence of Execute 5 and presence of Command 69 select the Documents envelope without
+a model reference or new public seam. Blob also defines byte 69 for ChunkAcknowledgement, so
+identifiers alone cannot identify Documents. The connector observes Execute (5),
+ExecutePaths / Documents Execute (64), and Documents Command (69) frames and drains negotiated
+status even for application exchanges using the one-argument constructor. The explicit
+transactionStatus flag can still require a postamble.
 After a complete result or statement error, status is read with a bounded five-second internal
 token; caller cancellation in that window does not turn an acknowledged COMMIT into cancellation.
-Ping and other non-Execute exchanges retain their existing completion contract. The original
+Ping and other exchanges retain their existing completion contract. Documents Command drains
+status because CRUD failures can fault an explicit transaction. The original
 statement exception survives a failure reading its status, and the connector is discarded.
+After a successful completion, a postamble failure still raises its existing protocol, transport
+or cleanup exception and discards the connector. It never retries the acknowledged statement or
+claims that committed work was rolled back.
 
 ## Streaming exchange and ownership
 

@@ -328,6 +328,8 @@ internal sealed partial class SqlExpressionEvaluator
                 return EvaluateBetween((SqlBoundBetween)expression, row);
             case SqlBoundExpressionKind.In:
                 return EvaluateIn((SqlBoundIn)expression, row);
+            case SqlBoundExpressionKind.QuantifiedComparison:
+                return EvaluateQuantifiedComparison((SqlBoundQuantifiedComparison)expression, row);
             case SqlBoundExpressionKind.InSubquery:
                 return EvaluateInSubquery((SqlBoundInSubquery)expression, row);
             case SqlBoundExpressionKind.Like:
@@ -523,7 +525,7 @@ internal sealed partial class SqlExpressionEvaluator
     private SqlCollationCandidate FindCollation(SqlExpression? expression, bool bound)
     {
         RuntimeHelpers.EnsureSufficientExecutionStack();
-        if (expression is null)
+        if (expression is null || expression is SqlQuantifiedComparisonExpression)
         {
             return default;
         }
@@ -1003,6 +1005,35 @@ internal sealed partial class SqlExpressionEvaluator
         // No match with a NULL candidate is UNKNOWN for both IN and NOT IN.
         // CHECK permits UNKNOWN; WHERE filters it out.
         return hasUnknown ? null : Box(expression.IsNegated);
+    }
+
+    private object? EvaluateQuantifiedComparison(SqlBoundQuantifiedComparison expression, object?[] row)
+    {
+        var candidates = SqlSubqueryValues.Get(_subqueryValues, expression.Slot);
+        // Empty ANY/SOME is FALSE; empty ALL is TRUE, including for NULL operands.
+        if (candidates.Length == 0) { return Box(expression.All); }
+        object? value = EvaluateCore(expression.Operand, row);
+        if (value is null) { return null; }
+        bool unknown = false;
+        foreach (var candidate in candidates)
+        {
+            _cancellationToken.ThrowIfCancellationRequested();
+            if (candidate is null) { unknown = true; continue; }
+            int comparison = Compare(value, candidate, expression.Collation.Resolve(_subqueryValues));
+            bool matches = expression.Operator switch
+            {
+                SqlBinaryOperator.Equal => comparison == 0,
+                SqlBinaryOperator.NotEqual => comparison != 0,
+                SqlBinaryOperator.LessThan => comparison < 0,
+                SqlBinaryOperator.LessOrEqual => comparison <= 0,
+                SqlBinaryOperator.GreaterThan => comparison > 0,
+                SqlBinaryOperator.GreaterOrEqual => comparison >= 0,
+                _ => throw new SqlPlanningException("CS05013", string.Format(CultureInfo.CurrentCulture,
+                    ErrorMessages.EvaluatorEvaluateBinarySqlPlanning, expression.Operator), expression.Location),
+            };
+            if (matches != expression.All) { return Box(matches); }
+        }
+        return unknown ? null : Box(expression.All);
     }
 
     private object? EvaluateInSubquery(SqlBoundInSubquery expression, object?[] row)

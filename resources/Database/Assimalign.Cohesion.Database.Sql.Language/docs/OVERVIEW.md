@@ -40,8 +40,9 @@ binding SQL DDL/CAST type names to the shared type system (`Database.Types`).
   form in which the engine persists stored expressions (CHECK, DEFAULT and SQL function bodies); see
   [DIALECT.md](DIALECT.md#persisted-definitions-are-canonical).
 
-FROM/USING mutations currently refuse execution with CK00001; EXPLAIN exposes their association plans.
-They are absent from the executable clause profile until SQ-UF2.
+UPDATE FROM and DELETE USING execute and belong to the executable clause profile. EXPLAIN
+exposes target access paths and source join algorithms. UPDATE refuses multiple matches before
+writes with CS05068; DELETE deduplicates physical targets.
 
 ## Dependencies
 

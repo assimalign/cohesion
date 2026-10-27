@@ -103,6 +103,7 @@ public sealed partial class GraphStore
             var location = Insert(bracket, bytes, context);
             await RemoveRelationshipAsync(prior, bracket, context, cancellationToken).ConfigureAwait(false);
             await InsertAdjacencyAsync(record, location, context, cancellationToken).ConfigureAwait(false);
+            await InsertRelationshipTypeAsync(record, location, context, cancellationToken).ConfigureAwait(false);
             SaveRegistrations(bracket);
             return location;
         }, cancellationToken).ConfigureAwait(false);

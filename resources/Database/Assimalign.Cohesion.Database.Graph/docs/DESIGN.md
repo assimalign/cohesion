@@ -195,8 +195,8 @@ Each logical database owns `graph.dat`, `graph.log` and `graph.bak`, in the dire
 `<RootPath>/<storage name>` when it is file-backed (see "Database names and directories" below).
 All records start with the
 shared 16-byte little-endian writer/deleter transaction stamp. The graph payload's byte 16 is the
-kind, byte 17 is format version 4, bytes 18–25 are a nonzero unsigned 64-bit identity and bytes
-26–33 hold the entity's increasing revision. Formats 1, 2 and 3 are refused before logical recovery scrub,
+kind, byte 17 is format version 5, bytes 18–25 are a nonzero unsigned 64-bit identity and bytes
+26–33 hold the entity's increasing revision. Formats 1, 2, 3 and 4 are refused before logical recovery scrub,
 with CG06017 and the remedy to recreate the database; no upgrade path exists. Graph
 identities are reserved from the shared storage sequence allocator, so rollback does not recycle
 an identity. Database-local IDs must always be paired with the correct session.
@@ -267,7 +267,7 @@ final working copies once, nodes before relationships. A cascade discards pendin
 updates just as explicit relationship deletion does; the affected count includes explicit targets.
 
 Each persisted replacement tombstones the old record and moves every label posting and property-index entry or
-both direction-specific adjacency entries (also for a self-loop) to the new location in one physical bracket.
+both direction-specific adjacency entries (also for a self-loop) and its relationship-type posting to the new location in one physical bracket.
 The identity directory retains all versions newest first, ordered by the format-3 revision on
 reopen. Older snapshots retain the old records and index entries; rollback removes replacements
 and restores old stamps. Purge reclaims only versions no snapshot can see; reclaimed or reused
@@ -1374,7 +1374,7 @@ to exercise that enforcement path; compiled provisioning is not included.
 | `CG01014` | Multiple map keys normalize to the same bare parameter name |
 | `CG01015` | Duplicate final result column name, implicit or explicit, under ordinal case-sensitive comparison; rejected during planning before execution |
 | `CG07016` | A composite result requires graph.composite-values; ExecutionFailure before ResultHeader, preserving the authenticated session |
-| `CG06017` | Unsupported graph record or tree-registration format, including formats 1–3: opening is refused before logical recovery scrub with the remedy to recreate the database. Graph.Storage retains the code in its StorageCorruptionException cause's Diagnostics; the engine retains it as an additional Error diagnostic beside CG06018 under DatabaseCorruptionException / CK06003. No upgrade path exists |
+| `CG06017` | Unsupported graph record or tree-registration format, including formats 1–4: opening is refused before logical recovery scrub with the remedy to recreate the database. Graph.Storage retains the code in its StorageCorruptionException cause's Diagnostics; the engine retains it as an additional Error diagnostic beside CG06018 under DatabaseCorruptionException / CK06003. No upgrade path exists |
 | `CG06018` | Missing or unrecoverable files; preserve the complete file set for recovery and restore missing sidecars from backup |
 | `CG09019` | The database or a resource used by a statement was disposed. ExecutionFailure on the wire; the session remains ready. Pre-statement direct-API lifetime guards retain ObjectDisposedException |
 | `CG05020` | Accounted retained execution memory exceeds the statement limit; no partial result escapes and every owned cursor/lease is released |
@@ -2465,12 +2465,12 @@ protection against a duplicate-key lower-bound seek starting in a later leaf aft
 shared B+Tree split. A regression creates 240 incident edges, forces splits, reopens the
 file set, and checks all edges. There is no kernel change.
 
-#### Storage: Version 4 record format
+#### Storage: Version 5 record format
 
 All multibyte fixed-width values below are little-endian unless a key explicitly says
 otherwise. Every slotted record starts with the shared 16-byte stamp prefix: writer
 sequence at offsets 0-7, deleter sequence at offsets 8-15. Zero deleter means live.
-Graph records have kind at offset 16, format version `4` at offset 17 and a nonzero
+Graph records have kind at offset 16, format version `5` at offset 17 and a nonzero
 64-bit logical identity at offsets 18-25 and a UInt64 revision at offsets 26-33. Revision starts at zero and increases with each replacement. The remaining payload is:
 
 | Kind | Meaning | Payload after identity |
@@ -2511,20 +2511,21 @@ replacement even when the supplied values equal the visible version. The engine 
 whose assignments were all no-ops; a changed-then-restored entity retains its write conflict. Creation accepts complete StoredGraphNode/StoredGraphRelationship
 records whose nonzero identities the caller reserves from the backing storage's durable sequence;
 duplicate identities are refused. Reserving identities before insertion lets the engine stage all
-changes before first publication. Formats 1, 2 and 3 are refused before logical recovery scrub with CG06017
+changes before first publication. Formats 1, 2, 3 and 4 are refused before logical recovery scrub with CG06017
 and the remedy to recreate the database; no legacy reader or upgrade path exists. The existing
 StorageCorruptionException retains the code in its internal format-refusal cause's Diagnostics; the engine retains it in DatabaseCorruptionException.Diagnostics beside CK06003 and CG06018.
-The graph record and tree-registration version is 4; catalog and B-tree page formats are unchanged.
+The graph record and tree-registration version is 5; catalog and B-tree page formats are unchanged.
 GraphRecordCodec.FormatVersion is the single fence used by pre-recovery validation and open.
 Format 3 shipped with #1532's typed adjacency and entity revisions. Format 4 (#1534) adds a
-catalog GUID after each node label and a label-postings tree; format-3 databases must be recreated.
+catalog GUID after each node label and a label-postings tree. Format 5 (#1633) requires
+a persisted relationship-type postings tree; format-4 databases must also be recreated.
 The version fence refuses the old labeled-node layout with CG06017 before scrub can write,
 leaving a cleanly closed file set byte-identical. There is no backfill, upgrade path or legacy reader.
-Open reconstructs label-name/token mappings
-and advisory posting counts from retained records and attaches persisted trees.
+Open reconstructs label-name/token and relationship-type-name/token mappings
+and advisory label posting counts from retained records and attaches persisted trees.
 
 Owner-one physical registration records are exactly 34 bytes: a zero stamp prefix,
-kind `4`, version `4`, UInt64 object ID, and Int64 root page ID. Every tree is named
+kind `4`, version `5`, UInt64 object ID, and Int64 root page ID. Every tree is named
 `graph`; its object ID distinguishes it. A tree's root page stays fixed through splits
 (#1159), so a registration changes only when a tree is created; every mutation bracket
 still saves changed registrations as a backstop, and registrations are reloaded after
@@ -2572,6 +2573,41 @@ the whole sample, and the other eleven were unchanged. This is a descriptive mea
 never a timing assertion. Normal fixed-header checks allocate nothing.
 
 #### Storage: Secondary indexes
+
+The relationship-type postings B+Tree (#1633, GQ-R1) mirrors label postings. It is registered
+under UInt64.MaxValue - 2, name `graph`, and maps a 24-byte key (big-endian catalog type
+GUID, big-endian UInt64 relationship identity) to the packed record location. Each relationship,
+including a self-loop, has one posting. Type names never enter keys. The existing type GUID in
+the relationship payload supplies the stable token; no catalog or wire format changes.
+
+CreateRelationshipAsync inserts the posting in the same physical bracket as the record and
+both adjacency entries. Property replacement tombstones the old posting and inserts the new
+location; explicit deletion and detach deletion tombstone it. All changes use the shared index
+undo ledger, writer scrub and safe-bound pruning. Physical statement failure reloads registrations;
+logical rollback leaves unused tree infrastructure while removing created entries and restoring
+deleters. Retained relationship records without the mandatory registration refuse open as corruption.
+An empty graph may have no type tree; its first relationship creates it transactionally.
+
+Internal StreamRelationshipTypes merges selected name/token ranges in identity order and
+rechecks record visibility, identity, type GUID and ordinal type name. It retains historical
+GUIDs for reused names, deduplicates selected tokens and returns each visible relationship once.
+The name directory is reconstructed from retained records on open; it is candidate discovery,
+not visibility state. Cursors have the same bounded batches, lock order, cancellation and finally
+cleanup as label postings. Instance-local posting counters and mutation/read hooks support
+deterministic storage tests without new EventSource events or public surface. Tests cover split
+ranges, long names, multiple replacements, old snapshots, rollback, detach, recovery images,
+missing registration and interrupted mutation/cursor cleanup.
+The nonparallel scripted reader/writer test pauses each selected type posting before its
+record recheck across multiple cursor batches, then replaces or deletes that relationship,
+commits or rolls back, and purges while the reader's snapshot stays pinned. Pruning tests
+also count removed entries: each dead relationship version contributes two adjacency entries
+and one type posting, so two replacements and one deletion remove nine entries.
+
+GQ-R2 supplies planner anchors, estimates and large-graph scan-avoidance evidence. This run
+adds no planner use or language behavior. Neo4j token-scan behavior was consulted at
+`community/cypher/cypher-planner/src/main/scala/org/neo4j/cypher/internal/compiler/planner/logical/steps/leafplanner/relationshipTypeScanLeafPlanner.scala:47-80`
+in `C:/Source/repos/neo4j/neo4j`; no code copied. Cohesion persistence and MVCC follow its
+existing label-postings design rather than Neo4j physical storage.
 
 The label-postings B+Tree is registered under UInt64.MaxValue - 1, name `graph`. Its fixed
 24-byte key is a big-endian catalog label GUID followed by the UInt64 node identity in
@@ -2654,9 +2690,9 @@ caller's snapshot with the latest committed view while holding the lock; a chang
 record produces `TransactionAbortedException`. A stale detach cannot silently cascade
 a relationship that appeared after its snapshot.
 
-Creating a relationship applies the record and endpoint indexes in one coordinator
+Creating a relationship applies the record, type posting and endpoint indexes in one coordinator
 statement. Deleting a connected node without detach is refused before mutation.
-Detach tombstones the node, every incident relationship, both adjacency entries and
+Detach tombstones the node, every incident relationship, its type posting, both adjacency entries and
 all node-property entries in one physical bracket. Version-ledger entries allow logical
 rollback to restore those records and index stamps together. Committed tombstones remain
 available to older snapshots until the shared version-purge worker's safe bound passes.
@@ -2687,7 +2723,7 @@ retain key identity order; unfiltered scans still enumerate node identities. Tra
 enumeration and cycle limits are owned and documented by the Graph root.
 
 Updates encode the replacement and every new index key before mutation. They move every
-label posting and property-index entry, or both direction-specific adjacency entries (also for a self-loop), to the new physical
+label posting and property-index entry, or the type posting and both direction-specific adjacency entries (also for a self-loop), to the new physical
 location and tombstone the old record in one physical bracket. Rollback restores old stamps
 and removes new versions. Relationship insertion checks endpoint existence in the latest
 committed view, so property updates do not conflict with insertion. Snapshot pins protect
