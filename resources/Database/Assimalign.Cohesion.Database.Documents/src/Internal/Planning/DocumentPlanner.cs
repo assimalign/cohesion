@@ -248,12 +248,24 @@ internal sealed partial class DocumentPlanner
         bool bestRange = false;
         long bestCost = long.MaxValue;
         var candidates = new List<(DocumentIndexPath Path, int Prefix, bool Range)>();
+        var scopes = unnest is { Count: > 0 } || HasArrayPredicate(predicate)
+            ? ArrayScopes(predicate, alias, variables, unnest).ToArray() : null;
         foreach (var index in indexes.OrderBy(index => index.Name, StringComparer.Ordinal))
         {
             _cancellationToken.ThrowIfCancellationRequested();
+            // Paths is empty for array indexes. Scalar-only queries never allocate
+            // array scope state or enumerate keys merely to detect an array key.
+            if (index.Paths.Count > 0) { AddCandidate(index, null); continue; }
+            if (scopes is null) { continue; }
+            AddArrayCandidates(index);
+        }
+
+        // Keep captured array-key detection state off the scalar iteration path.
+        void AddArrayCandidates(DocumentIndexMetadata index)
+        {
             var array = index.Keys.FirstOrDefault(key => key.ArraySource is not null);
-            if (array is null) { AddCandidate(index, null); continue; }
-            foreach (var scope in ArrayScopes(predicate, alias, variables, unnest))
+            if (array is null) { return; }
+            foreach (var scope in scopes)
             {
                 if (IndexPath(scope.Source, alias) != array.ArraySource && LegacyIndexPath(scope.Source, alias) != array.ArraySource ||
                     !WhenImplied(array.When, scope.Predicate, scope.Variable)) { continue; }
@@ -341,7 +353,8 @@ internal sealed partial class DocumentPlanner
             List<(string Path, string? LegacyPath, string Operator, object Value)>? destination = null)
         {
             destination ??= predicates;
-            string? Name(OqlPathExpression path, bool legacy = false)
+            static string? Name(OqlPathExpression path, string? alias, IReadOnlySet<string>? variables,
+                string? elementVariable, bool legacy = false)
             {
                 if (elementVariable is null)
                 { return IsVariablePath(path, variables) ? null : legacy ? LegacyIndexPath(path, alias) : IndexPath(path, alias); }
@@ -352,10 +365,10 @@ internal sealed partial class DocumentPlanner
                 IsConstant(between.Lower) && IsConstant(between.Upper))
             {
                 if (!TryEvaluateBound(between.Lower, out var lower) || !TryEvaluateBound(between.Upper, out var upper)) { return; }
-                string? name = Name(rangePath);
+                string? name = Name(rangePath, alias, variables, elementVariable);
                 if (name is not null && lower is bool or decimal or string && upper is bool or decimal or string)
                 {
-                    var legacy = Name(rangePath, true);
+                    var legacy = Name(rangePath, alias, variables, elementVariable, true);
                     destination.Add((name, legacy, ">=", lower));
                     destination.Add((name, legacy, "<=", upper));
                 }
@@ -375,10 +388,10 @@ internal sealed partial class DocumentPlanner
             }
             if (path is null || !IsConstant(constant)) { return; }
             if (!TryEvaluateBound(constant, out var value)) { return; }
-            string? pathName = Name(path);
+            string? pathName = Name(path, alias, variables, elementVariable);
             if (pathName is not null && value is bool or decimal or string)
             {
-                destination.Add((pathName, Name(path, true), operation, value));
+                destination.Add((pathName, Name(path, alias, variables, elementVariable, true), operation, value));
             }
         }
 

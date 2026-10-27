@@ -2350,8 +2350,11 @@ ALL remains CK00001; INCLUDE MISSING syntax stays deferred. No format changes be
 `OqlCreateIndexExpression.Keys` snapshots paths/comprehensions; each comprehension denotes DISTINCT.
 Its scalar Paths view remains empty for array indexes, matching the catalog's coverage boundary.
 
-The chooser retains #1527's bounded probes, ranking and identity intersection. For an array index,
-each top-level conjunctive ANY/SOME supplies its own source, variable and element bounds. Separate
+The chooser retains #1527's bounded probes, ranking and identity intersection. Array scope
+collection and captured array-key detection state are created only for eligible ANY/SOME or
+UNNEST shapes. Scalar-only predicates use the scalar Paths view without enumerating array keys;
+the Release regression retains the base chooser's measured allocation budget.
+For an array index, each top-level conjunctive ANY/SOME supplies its own source, variable and element bounds. Separate
 ANY witnesses never share bounds. INNER and LEFT UNNEST over direct document paths are eligible
 when a mandatory scalar comparison on the projected element rejects LEFT's synthetic MISSING row.
 Dependent expansion sources, EVERY, NOT ANY, OR-only predicates, complex projections and presence

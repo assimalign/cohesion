@@ -7,6 +7,13 @@ namespace Assimalign.Cohesion.Database.Documents.Internal;
 
 internal sealed partial class DocumentPlanner
 {
+    private static bool HasArrayPredicate(OqlExpression? predicate) => predicate switch
+    {
+        OqlQuantifiedExpression { IsEvery: false, Collection: OqlPathExpression } => true,
+        OqlBinaryExpression { Operator: "AND" } and => HasArrayPredicate(and.Left) || HasArrayPredicate(and.Right),
+        _ => false,
+    };
+
     private static IEnumerable<(OqlPathExpression Source, string Variable, OqlExpression Predicate)> ArrayScopes(
         OqlExpression? predicate, string? alias, IReadOnlySet<string>? variables, IReadOnlyList<OqlUnnestExpression>? unnest)
     {
