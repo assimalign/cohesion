@@ -196,6 +196,16 @@ internal sealed partial class GraphPlanner
                 // A MATCH declares every pattern part before checking any properties
                 // (Neo4j SemanticPatternCheck.scala:101-103).
                 foreach (var path in clause.Paths) { Declare(path, creating: false); }
+                if (incomingPrefilterScope is null)
+                {
+                    for (int pathIndex = 0; pathIndex < clause.Paths.Count; pathIndex++)
+                    {
+                        if (!pathShapes[clause.Paths[pathIndex]].HasPrefilters) { continue; }
+                        incomingPrefilterScope = new HashSet<string>(variables.Keys, StringComparer.Ordinal);
+                        incomingPrefilterScope.ExceptWith(declarations.Skip(firstDeclaration));
+                        break;
+                    }
+                }
                 foreach (var path in clause.Paths)
                 { if (!Validate(path, creating: false, declared: true, incomingPrefilterScope: incomingPrefilterScope)) { clauseMatchesNothing = true; } }
                 ValidateExpression(clause.Predicate);
@@ -216,7 +226,7 @@ internal sealed partial class GraphPlanner
                         selection = new GraphPathSelectionPlan(selector, shape, path.Mode ?? GqlPathMode.Trail, startVariables, endVariables,
                             startVariables.Concat(endVariables).Where(boundVariables.Contains).Distinct(StringComparer.Ordinal).ToArray());
                     }
-                    paths.Add(new GraphPathPlan(path, ChooseAnchor(shape, anchors, boundVariables, token)) { Shape = shape, Selection = selection });
+                    paths.Add(new GraphPathPlan(path, ChooseAnchor(shape, anchors, boundVariables, token, sourceOnly: selection is not null)) { Shape = shape, Selection = selection });
                     foreach (var binding in shape.Bindings())
                     { if (!groupVariables.Contains(binding.Name)) { boundVariables.Add(binding.Name); } }
                 }
@@ -575,7 +585,7 @@ internal sealed partial class GraphPlanner
             if (!declared) { Declare(path, creating); }
             bool satisfiable = true;
             HashSet<string>? prefilterScope = null;
-            if (path.Selector is not null)
+            if (path.Selector is not null || pathShapes[path].HasPrefilters)
             {
                 // Neo4j Clause.scala:1053-1098: selective dependencies belong to this
                 // pattern (including quantified singletons) or the scope entering MATCH.
@@ -1164,9 +1174,9 @@ internal sealed partial class GraphPlanner
     // at every eligible position. Equality seeks win ties, then source-ordered node/type candidates.
     // Neo4j's labelScanLeafPlanner reads HasLabels selections for pattern nodes
     // (labelScanLeafPlanner.scala:45-46, :73-78).
-    private GraphAnchor ChooseAnchor(GraphPathShape shape, AnchorSources sources, IReadOnlySet<string> boundVariables, CancellationToken token)
+    private GraphAnchor ChooseAnchor(GraphPathShape shape, AnchorSources sources, IReadOnlySet<string> boundVariables, CancellationToken token, bool sourceOnly = false)
     {
-        for (int i = 0; i < shape.Nodes.Count; i++)
+        for (int i = 0; i < (sourceOnly ? 1 : shape.Nodes.Count); i++)
         {
             foreach (var node in shape.Nodes[i])
             {
@@ -1174,14 +1184,14 @@ internal sealed partial class GraphPlanner
                 { return new GraphAnchor(i, node.Labels.FirstOrDefault(), null, null); }
             }
         }
-        for (int i = 0; i < shape.Segments.Count; i++)
+        for (int i = 0; !sourceOnly && i < shape.Segments.Count; i++)
         {
             if (shape.Segments[i] is { Quantifier: null, Body.Edge.Variable: { } variable } && boundVariables.Contains(variable))
             { return new GraphAnchor(i, shape.Nodes[i].SelectMany(node => node.Labels).FirstOrDefault(), null, null); }
         }
         GraphAnchor? scan = null;
         long scanCost = long.MaxValue;
-        for (int i = 0; i < shape.Nodes.Count; i++)
+        for (int i = 0; i < (sourceOnly ? 1 : shape.Nodes.Count); i++)
         {
             foreach (var node in shape.Nodes[i])
             {
@@ -1238,7 +1248,7 @@ internal sealed partial class GraphPlanner
         }
         // Only outer singleton edges can seed a path. Repeated bodies may match zero times;
         // anchoring on one of their postings would lose those matches.
-        for (int i = 0; i < shape.Segments.Count; i++)
+        for (int i = 0; !sourceOnly && i < shape.Segments.Count; i++)
         {
             token.ThrowIfCancellationRequested();
             if (shape.Segments[i] is not { Quantifier: null, Body.Edge: { } edge }) { continue; }

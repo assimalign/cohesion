@@ -27,6 +27,8 @@ public sealed class GqlPathSelectorPlanningTests
     [InlineData("ANY (a) ((x WHERE b.k > 0)->(y)){0,3} (c), (b)", "b.k")]
     [InlineData("p = ANY ((a) WHERE path_length(q) > 0), q = (b)", "q)")]
     [InlineData("ANY (a {k:b.k}), (b)", "b.k")]
+    [InlineData("(a WHERE b.k>0), (b)", "b.k")]
+    [InlineData("((a) WHERE b.k>0), (b)", "b.k")]
     [InlineData("ANY (a)-[r {k:b.k}]->(c), (b)", "b.k")]
     public async Task Plan_PeerPrefilter_ShouldRefuseAtReferenceAsync(string pattern, string reference)
     {
@@ -293,7 +295,7 @@ public sealed class GqlPathSelectorPlanningTests
         session.LastStatementMetrics!.Physical.ShouldBe(0);
     }
 
-    [Theory(DisplayName = "Cohesion Test [Graph] - Planned selectors refuse eagerly before data reads or writes (#1734)")]
+    [Theory(DisplayName = "Cohesion Test [Graph] - Planned selectors and prefilters execute on empty input (#1734)")]
     [InlineData("MATCH ANY (a) RETURN a.k")]
     [InlineData("MATCH ALL (a) RETURN a.k LIMIT 0")]
     [InlineData("MATCH ANY SHORTEST WALK (a)->*(b) RETURN a.k")]
@@ -302,21 +304,21 @@ public sealed class GqlPathSelectorPlanningTests
     [InlineData("INSERT (:Pending) MATCH SHORTEST 2 (a)->(b) RETURN a.k")]
     [InlineData("MATCH SHORTEST 2 GROUPS (a)-[*0]->(b) RETURN a.k")]
     [InlineData("MATCH ((a)->(b) WHERE a.k>0) RETURN a.k")]
-    public async Task ExecuteAsync_DeferredSelector_ShouldRefuseBeforeSideEffectsAsync(string source)
+    public async Task ExecuteAsync_PlannedSelector_ShouldExecuteAsync(string source)
     {
         // Arrange
         await using var engine = GraphDatabaseEngine.Create("selectors", new());
         var database = await engine.CreateDatabaseAsync("graph", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         // Act
-        var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(source, cancellationToken: CancellationToken.None));
+        var result = await session.ExecuteAsync(source, cancellationToken: CancellationToken.None);
+        if (result is DatabaseResultSet rows) { await rows.DisposeAsync(); }
         // Assert
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CK00001");
-        error.Message.ShouldContain("planned and explained", Case.Sensitive);
-        session.LastStatementMetrics!.Physical.ShouldBe(0);
-        session.LastStatementMetrics.Memory.RetainedBytes.ShouldBe(0);
-        await using var result = (DatabaseResultSet)await session.ExecuteAsync("MATCH (n) RETURN count(*)", cancellationToken: CancellationToken.None);
-        await foreach (var row in result.GetRowsAsync(CancellationToken.None)) { row.GetValue(0).ShouldBe(0L); }
+        session.LastStatementMetrics!.Memory.RetainedBytes.ShouldBe(0);
+        session.LastStatementMetrics.Memory.ActiveLeases.ShouldBe(0);
+        await using var count = (DatabaseResultSet)await session.ExecuteAsync("MATCH (n) RETURN count(*)", cancellationToken: CancellationToken.None);
+        await foreach (var row in count.GetRowsAsync(CancellationToken.None))
+        { row.GetValue(0).ShouldBe(source.StartsWith("INSERT", StringComparison.Ordinal) ? 1L : 0L); }
     }
 
     [Fact(DisplayName = "Cohesion Test [Graph] - Source-free selector trees have an independent semantic gate (#1734)")]

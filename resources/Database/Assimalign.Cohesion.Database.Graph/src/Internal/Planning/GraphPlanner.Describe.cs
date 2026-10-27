@@ -86,7 +86,7 @@ internal sealed partial class GraphPlanner
                     var selection = path.Selection;
                     int pathId = Add(DescribeOperator(path), pathParent, path.Pattern.Variable,
                         detail: selection is null ? $"mode={path.Mode}"
-                            : $"selector={selection.Selector}; partition=endpoint_pair; per_input=True; mode={selection.Mode}; count={selection.Count?.ToString(CultureInfo.InvariantCulture) ?? "ALL"}; count_unit={(selection.CountLengthGroups ? "distinct_lengths" : "paths")}; order={(selection.OrderByLength ? "length," : "")}identity; start={string.Join(",", selection.StartVariables)}; end={string.Join(",", selection.EndVariables)}; bound_endpoints={string.Join(",", selection.BoundEndpoints)}; execution=deferred");
+                            : $"selector={selection.Selector}; partition=endpoint_pair; per_input=True; mode={selection.Mode}; count={selection.Count?.ToString(CultureInfo.InvariantCulture) ?? "ALL"}; count_unit={(selection.CountLengthGroups ? "distinct_lengths" : "paths")}; order={(selection.OrderByLength ? "length," : "")}identity; start={string.Join(",", selection.StartVariables)}; end={string.Join(",", selection.EndVariables)}; bound_endpoints={string.Join(",", selection.BoundEndpoints)}; execution=iterative_deepening");
                     var anchor = path.Anchor;
                     string? index = anchor.Property is null ? null : $"{anchor.Label}({anchor.Property})";
                     if (anchor.Property is not null && _database.Catalog.FindLabel(anchor.Label!, _snapshot) is { } label)
@@ -98,7 +98,7 @@ internal sealed partial class GraphPlanner
                     var shape = path.Shape ?? GraphPathShape.Create(path.Pattern);
                     if (selection is not null || shape.HasPrefilters)
                     {
-                        pathId = Add("PathSearch", pathId, detail: $"element_predicates={shape.ElementPrefilterCount}; path_predicates={shape.PathPrefilterCount}; work_limit={budget?.WorkLimit ?? GraphPlanExecutor.ExpansionBudget.PhysicalLimit}; state_and_output_memory_limit={budget?.Memory.Limit ?? 268435456}; work_refusal=CG05004; memory_refusal=CG05020");
+                        pathId = Add("PathSearch", pathId, detail: $"element_predicates={shape.ElementPrefilterCount}; path_predicates={shape.PathPrefilterCount}; work_limit={budget?.WorkLimit ?? GraphPlanExecutor.ExpansionBudget.PhysicalLimit}; state_and_output_memory_limit={budget?.Memory.Limit ?? 268435456}; work_refusal=CG05004; memory_refusal=CG05020; statement_pairs={budget?.SelectorPairs ?? 0}; statement_states={budget?.SelectorStates ?? 0}; statement_candidates={budget?.SelectorCandidates ?? 0}; statement_selected={budget?.SelectorSelected ?? 0}");
                         DescribePrefilters(shape, pathId, "root");
                     }
                     int parent = anchor.RelationshipTypes is { } types

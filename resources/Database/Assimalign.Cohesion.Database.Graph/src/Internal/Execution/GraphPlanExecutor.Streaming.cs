@@ -160,7 +160,7 @@ internal static partial class GraphPlanExecutor
             bool found = false;
             var outputRow = new GraphBindingRow(layout);
             var parts = new Stack<(int Index, DeferredProperty? Deferred,
-                IAsyncEnumerator<(Dictionary<string, object?> Bindings, MatchedProperties? Properties)> Cursor)>();
+                IAsyncEnumerator<PathMatch> Cursor)>();
             try
             {
                 if (!clause.MatchesNothing && clause.Paths.Count > 0)

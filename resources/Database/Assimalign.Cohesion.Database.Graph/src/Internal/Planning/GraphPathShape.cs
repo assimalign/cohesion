@@ -23,7 +23,7 @@ internal sealed class GraphPathShape
     internal int ElementPrefilterCount => Nodes.Sum(nodes => nodes.Count(node => node.Predicate is not null)) +
         (Edge?.Predicate is null ? 0 : 1) + Segments.Sum(segment => segment.Body.ElementPrefilterCount);
     internal int PathPrefilterCount => Prefilters.Count + Segments.Sum(segment => segment.Body.PathPrefilterCount);
-    internal bool HasPrefilters => ElementPrefilterCount != 0 || PathPrefilterCount != 0;
+    internal bool HasPrefilters { get; private set; }
 
     internal static GraphPathShape Create(GqlPathPattern path, bool creating = false, bool parsed = false)
     {
@@ -45,11 +45,13 @@ internal sealed class GraphPathShape
                     case GqlPathNode { Pattern: { } node }:
                         if (creating && node.Predicate is not null) { throw Invalid(); }
                         shape.Nodes[^1].Add(node);
+                        shape.HasPrefilters |= node.Predicate is not null;
                         break;
                     case GqlPathRelationship { Pattern: { } edge }:
                         if (creating && edge.Predicate is not null) { throw Invalid(); }
                         CheckQuantifier(edge.Quantifier, zeroAllowed: true, creating);
-                        shape.Segments.Add(new GraphPathSegment(new GraphPathShape { Edge = edge, Bound = 1 }, edge.Quantifier));
+                        shape.Segments.Add(new GraphPathSegment(new GraphPathShape { Edge = edge, Bound = 1, HasPrefilters = edge.Predicate is not null }, edge.Quantifier));
+                        shape.HasPrefilters |= edge.Predicate is not null;
                         shape.Nodes.Add([]);
                         shape.Bound += edge.Quantifier?.Max ?? edge.Quantifier?.Min ?? 1;
                         shape.HasQuantifier |= edge.Quantifier is not null;
@@ -71,7 +73,7 @@ internal sealed class GraphPathShape
             if (item.Exit)
             {
                 if (current.Predicate is { } predicate)
-                { (shape._prefilters ??= []).Add(new GraphPathPrefilter(predicate, item.StartBoundary, shape.Segments.Count)); }
+                { (shape._prefilters ??= []).Add(new GraphPathPrefilter(predicate, item.StartBoundary, shape.Segments.Count)); shape.HasPrefilters = true; }
                 if (current.Selector is null && current.Mode == GqlPathMode.Walk && shape.HasUnboundedQuantifier)
                 { throw new GraphPlanningException("CK00001", ErrorMessages.UnboundedWalkUnsupported); }
                 if (item.Parent is { } parent)
@@ -82,6 +84,7 @@ internal sealed class GraphPathShape
                     parent.Nodes.Add([]);
                     parent.Bound += shape.Bound * (quantifier.Max ?? quantifier.Min);
                     parent.HasQuantifier = true;
+                    parent.HasPrefilters |= shape.HasPrefilters;
                     parent.HasUnboundedQuantifier |= quantifier.Max is null;
                     if (parent.Bound > 64) { throw Invalid(); }
                 }
