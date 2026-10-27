@@ -21,6 +21,10 @@ internal sealed partial class SqlExpressionEvaluator
     /// </exception>
     internal SqlFunction? ResolveFunction(SqlFunctionCallExpression call)
     {
+        // A MERGE action slot has its own type; an application function with the same
+        // spelling must not supply its arity, length or domain metadata.
+        if (_projectionSources?.ContainsKey(call) == true &&
+            call.FunctionName.Equals("MERGE_ACTION", StringComparison.OrdinalIgnoreCase)) { return null; }
         if (!TryGetCallOverloads(call, out var overloads))
         {
             return null;

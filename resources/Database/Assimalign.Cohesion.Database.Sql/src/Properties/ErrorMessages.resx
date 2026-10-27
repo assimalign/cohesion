@@ -1,6 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <root>
   <data name="UpsertArbiterInvalid" xml:space="preserve"><value>ON CONFLICT target '{0}' on '{1}.{2}': {3}</value></data>
+  <data name="MergeActionInvalid" xml:space="preserve"><value>MERGE requires at least one WHEN clause with an action valid for its match kind.</value></data>
+  <data name="MergeWhenUnreachable" xml:space="preserve"><value>A MERGE WHEN clause follows an unconditional clause of the same match kind.</value></data>
+  <data name="MergeActionContext" xml:space="preserve"><value>merge_action() is allowed only in the RETURNING projection of MERGE.</value></data>
+  <data name="MergeActionArity" xml:space="preserve"><value>merge_action() accepts no arguments, quantifier or ordering.</value></data>
+  <data name="MergeAggregate" xml:space="preserve"><value>Aggregates are not allowed in MERGE conditions or action values; use a source query.</value></data>
+  <data name="MergeStar" xml:space="preserve"><value>A wildcard is not allowed in MERGE conditions or action values.</value></data>
+  <data name="MergeAssignmentType" xml:space="preserve"><value>MERGE value of type {0} cannot be assigned to column '{1}' of type {2}.</value></data>
+  <data name="MergeExecutionPending" xml:space="preserve"><value>MERGE execution is not supported; syntax, binding and EXPLAIN are available.</value></data>
   <data name="UpsertTargetRequired" xml:space="preserve"><value>DO UPDATE requires a column or ON CONSTRAINT target.</value></data>
   <data name="UpsertConstraintNotUnique" xml:space="preserve"><value>The constraint has no associated unique index (CHECK and FOREIGN KEY cannot arbitrate).</value></data>
   <data name="UpsertLegacyPrimaryKey" xml:space="preserve"><value>The legacy primary key has no associated unique index.</value></data>

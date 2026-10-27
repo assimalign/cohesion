@@ -139,6 +139,49 @@ public static class SqlExpressionRenderer
         return builder.ToString();
     }
 
+    /// <summary>Renders MERGE and its ordered actions as canonical SQL without a terminator.</summary>
+    /// <param name="query">The parsed statement.</param>
+    /// <returns>The canonical statement text.</returns>
+    /// <exception cref="ArgumentNullException">The query is null.</exception>
+    /// <exception cref="NotSupportedException">The tree exceeds the supported nesting limit.</exception>
+    /// <exception cref="InsufficientExecutionStackException">The thread has insufficient stack.</exception>
+    public static string Render(SqlMergeExpression query)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        ThrowIfTooDeep(query.NestingDepth);
+        var builder = new StringBuilder("MERGE INTO ");
+        builder.Append(Table(query.Table));
+        AppendSources(builder, [query.Source], " USING ");
+        builder.Append(" ON ").Append(Expression(query.Condition));
+        foreach (var action in query.Actions)
+        {
+            builder.Append(action.MatchKind switch
+            {
+                SqlMergeMatchKind.Matched => " WHEN MATCHED",
+                SqlMergeMatchKind.NotMatchedBySource => " WHEN NOT MATCHED BY SOURCE",
+                _ => action.IsByTargetExplicit ? " WHEN NOT MATCHED BY TARGET" : " WHEN NOT MATCHED",
+            });
+            if (action.Condition is { } condition) { builder.Append(" AND ").Append(Expression(condition)); }
+            builder.Append(" THEN ");
+            switch (action.Action)
+            {
+                case SqlMergeAction.Update:
+                    builder.Append("UPDATE SET ").Append(string.Join(", ", action.Assignments.Select(assignment => Identifier(assignment.ColumnName) + " = " + Expression(assignment.Value))));
+                    break;
+                case SqlMergeAction.Delete: builder.Append("DELETE"); break;
+                case SqlMergeAction.DoNothing: builder.Append("DO NOTHING"); break;
+                case SqlMergeAction.Insert:
+                    builder.Append("INSERT");
+                    if (action.Columns is { } columns) { builder.Append(" (").Append(string.Join(", ", columns.Select(Identifier))).Append(')'); }
+                    if (action.IsDefaultValues) { builder.Append(" DEFAULT VALUES"); }
+                    else { builder.Append(" VALUES (").Append(string.Join(", ", action.Values!.Select(Expression))).Append(')'); }
+                    break;
+            }
+        }
+        AppendDmlTail(builder, null, query.Returning);
+        return builder.ToString();
+    }
+
     /// <summary>Renders a DELETE, including USING sources, as canonical SQL without a terminator.</summary>
     /// <param name="query">The parsed statement.</param>
     /// <returns>The canonical statement text.</returns>

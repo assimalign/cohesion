@@ -40,6 +40,11 @@ public sealed class SqlInvalidStatementConformanceTests
         yield return ["UPDATE t SET a = SUM(a)", "CS05017", "Aggregate functions are not allowed in UPDATE SET."];
         yield return ["UPDATE t SET a = 1 WHERE COUNT(*) > 0", "CS05017", "Aggregate functions are not allowed in WHERE."];
         yield return ["DELETE FROM t WHERE COUNT(*) > 0", "CS05017", "Aggregate functions are not allowed in WHERE."];
+        yield return ["MERGE INTO t USING p ON t.a>p.a WHEN NOT MATCHED THEN INSERT VALUES(p.a,p.b) WHEN NOT MATCHED BY SOURCE THEN DELETE", "CS05070", "FULL JOIN requires"];
+        yield return ["EXPLAIN MERGE INTO t USING p ON t.a>p.a WHEN NOT MATCHED THEN INSERT VALUES(p.a,p.b) WHEN NOT MATCHED BY SOURCE THEN DELETE", "CS05070", "FULL JOIN requires"];
+        yield return ["MERGE INTO t USING p ON t.a=p.a WHEN MATCHED THEN DELETE WHEN MATCHED THEN DO NOTHING", "CS05071", "unconditional"];
+        yield return ["MERGE INTO t USING p ON t.a=p.a WHEN NOT MATCHED THEN DO NOTHING WHEN NOT MATCHED THEN INSERT DEFAULT VALUES", "CS05071", "unconditional"];
+        yield return ["MERGE INTO t USING p ON t.a=p.a WHEN NOT MATCHED BY SOURCE THEN DELETE WHEN NOT MATCHED BY SOURCE THEN DO NOTHING", "CS05071", "unconditional"];
     }
 
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - Invalid statements: reject before mutation with coded diagnostics (#1192)")]

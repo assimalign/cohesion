@@ -4,6 +4,11 @@ TRUNCATE table lists execute through atomic storage replacement, with recursive 
 identity restart/continuation and deferred reclamation that preserves older snapshots (#1716).
 CTAS remains deferred to SQ-T2.
 
+MERGE parses, binds target/source/action scopes and explains ordered actions, BY SOURCE and
+RETURNING/merge_action(). USING retains the existing read-source forms. FULL associations
+require a safe mandatory hash equality and complete ON safety proof (CS05070); execution
+refuses with CK00001 before costing until SQ-M2 (#1715).
+
 ## Wire contract ownership
 
 `Assimalign.Cohesion.Database.Sql.Protocol` owns this model's wire messages, codecs, family singleton and transferred value shapes (5 public types). Both engine and remote client reference that one assembly. Its public namespace and RootNamespace equal its project name. Engine requests, planning, catalog, storage and server lifecycle stay in `Assimalign.Cohesion.Database.Sql`. This extraction preserves wire bytes and validation; moved public types intentionally change namespace and assembly identity with no forwarders.

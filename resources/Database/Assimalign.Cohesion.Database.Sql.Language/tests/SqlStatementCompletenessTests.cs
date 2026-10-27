@@ -72,6 +72,7 @@ public sealed class SqlStatementCompletenessTests
         [SqlClauses.Case] = ["SELECT CASE WHEN a = 1 THEN 'x' ELSE 'y' END FROM t", "SELECT a FROM t WHERE CASE a WHEN 1 THEN TRUE END"],
         [SqlClauses.Cast] = ["SELECT CAST(a AS INT) FROM t", "SELECT a FROM t WHERE CAST(a AS TEXT) = '1'"],
         [SqlClauses.Collate] = ["SELECT a FROM t WHERE a = 'x' COLLATE binary", "SELECT a COLLATE case_insensitive FROM t"],
+        [SqlClauses.Merge] = ["MERGE INTO t USING s ON t.id=s.id WHEN MATCHED THEN DELETE", "MERGE INTO t USING s ON TRUE WHEN NOT MATCHED THEN INSERT DEFAULT VALUES WHEN NOT MATCHED BY SOURCE THEN DO NOTHING RETURNING merge_action()"],
         [SqlClauses.Insert] = ["INSERT INTO t VALUES (1)", "INSERT INTO t (a, b) VALUES (1, 'x')", "INSERT INTO t (b, a) DEFAULT VALUES"],
         [SqlClauses.OnConflict] =
         [

@@ -224,7 +224,7 @@ public sealed partial class SqlQueryParser
         return new SqlSelectColumn(expr, alias);
     }
 
-    private List<SqlJoinClause> ParseJoinClauses(ref TokenLexer lexer)
+    private List<SqlJoinClause> ParseJoinClauses(ref TokenLexer lexer, bool mergeSource = false)
     {
         var joins = new List<SqlJoinClause>();
 
@@ -263,7 +263,9 @@ public sealed partial class SqlQueryParser
 
             // ON condition
             SqlExpression? condition = null;
-            bool hasOn = !IsAtEnd(ref lexer) && IsKeyword(ref lexer, "ON");
+            // A top-level source CROSS JOIN has no condition; the next ON belongs to MERGE.
+            bool hasOn = !(mergeSource && joinType == SqlJoinType.Cross) &&
+                !IsAtEnd(ref lexer) && IsKeyword(ref lexer, "ON");
             if (hasOn)
             {
                 Advance(ref lexer);

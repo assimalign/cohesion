@@ -13,6 +13,8 @@ parser did not consume reports `CS00003`, so nothing executes a truncated statem
 the profile requires updating the parser, this matrix, and the engine's
 `SqlLanguageConformanceTests` execution-case table in the same change. That test
 enumerates the profile and fails if any advertised clause lacks a passing case.
+MERGE is the staged exception: its advertised clause is measured through binding and
+nonexecuting EXPLAIN while action execution deliberately refuses with CK00001 until SQ-M2.
 
 ## Storage integrity errors (#1160)
 
@@ -319,7 +321,8 @@ EXCLUDED is absent from RETURNING scope; EXCLUDED.column there reports CK00001, 
 a real target table or alias is named excluded, which stays referenceable (PostgreSQL).
 MySQL ON DUPLICATE KEY UPDATE and SQLite INSERT OR IGNORE/REPLACE report one CK00001
 suggesting ON CONFLICT and execute nothing. These spellings and CONFLICT, DO, NOTHING,
-EXCLUDED remain contextual, so stored identifier quoting is unchanged. MERGE remains CS00002.
+EXCLUDED remain contextual, so stored identifier quoting is unchanged. MERGE parses, binds and
+explains; execution retains CK00001 until SQ-M2 (#1715).
 
 ## TRUNCATE (#1716, SQ-T1)
 
@@ -372,7 +375,7 @@ src/backend/commands/tablecmds.c:2033-2090 and src/backend/catalog/heap.c:3701-3
 
 ## Statement matrix
 
-With INSERT ... ON CONFLICT (#1118), DML RETURNING (#1117), persisted CREATE/DROP VIEW (#1124), CREATE/DROP SCHEMA (#1030), set operations (#1114), quantified comparisons (#1718) and UPDATE ... FROM / DELETE ... USING (#1714), TRUNCATE (#1716) brings the profile to **55 of 61 declared clauses** against the live SQL engine.
+With INSERT ... ON CONFLICT (#1118), DML RETURNING (#1117), persisted CREATE/DROP VIEW (#1124), CREATE/DROP SCHEMA (#1030), set operations (#1114), quantified comparisons (#1718), UPDATE ... FROM / DELETE ... USING (#1714), TRUNCATE (#1716) and binding-only MERGE (#1715), the profile has **56 of 62 declared clauses** measured against the live SQL engine, including nonexecuting MERGE EXPLAIN.
 Phase 22 measured 33 of 49.
 The earlier 32/48 figure included `JOIN`, `GROUP BY`, `HAVING`, and `SUBQUERY`,
 removed in Phase 12e (#1019–#1021), plus a no-op `CAST` removed in Phase 13.
@@ -435,7 +438,8 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | `ON DELETE CASCADE` / `RESTRICT` / `NO ACTION` / `SET NULL` / `SET DEFAULT` | Supported | omitted deletion action defaults to `NO ACTION`; a cascade deletes its whole transitive closure with no depth limit, so a self-referencing chain deletes however long it is (#1164), and a cycle deletes each row once; `DROP TABLE ... CASCADE` is not supported |
 | `ON UPDATE` | Recognized, not supported | absent from the profile; rejected with `CK00001` |
 | `START TRANSACTION` / `BEGIN [WORK\|TRANSACTION]` / `COMMIT [WORK\|TRANSACTION]` / `END` / `ROLLBACK [WORK\|TRANSACTION]` | Supported | Spellings map to the existing BEGIN/COMMIT/ROLLBACK session commands (+0 clauses). Like every SQL statement, a valid spelling without `;` receives informational CS00009, with no error or warning; with `;` it has no parser diagnostics. START and WORK are contextual, so columns named start/work remain valid. END takes no suffix; without a transaction its CS04002 message names COMMIT. Commit and rollback observe caller cancellation only before their end starts (#1246); a pre-canceled explicit end leaves the transaction usable. Once execution completes, automatic commit ignores caller cancellation and delivers the committed result; real append and durability failures retain their normal errors. Catalog DDL that self-committed finishes mandatory cleanup with CancellationToken.None and delivers its committed result even if the caller canceled; a successful CREATE TABLE requires no retry and exists once after reopen. `SqlCommitCancellationConformanceTests` covers the end boundary and committed rows after reopen. END WORK/TRANSACTION, AND [NO] CHAIN, modes, ROLLBACK [WORK] TO [SAVEPOINT], BEGIN TRAN/named transactions and COMMIT PREPARED stay CS00003. ABORT [WORK\|TRANSACTION], SAVEPOINT, RELEASE, SET TRANSACTION and PREPARE TRANSACTION stay CS00002 (#1012); TRANSACTION alone is not a statement. |
-| `MERGE`, `GRANT` | Not in the dialect | `CS00002` |
+| `MERGE` | Syntax, binding and EXPLAIN; action execution deferred to SQ-M2 | `CK00001` at execution |
+| `GRANT` | Not in the dialect | `CS00002` |
 
 ## Unique-build failure order (#1444)
 
@@ -1321,7 +1325,76 @@ copied on delivery, as are unmatched LEFT outer values used in multiple results.
 
 Capability preflight skips advertised clauses and reports the first unadvertised
 one. Thus USING cannot mask a later NATURAL, WINDOW or OVER. MERGE INTO ... USING
-remains CS00002; DELETE ... USING executes; CREATE INDEX ... USING remains a syntax error.
+binds and explains; DELETE ... USING executes; CREATE INDEX ... USING remains a syntax error.
+
+## MERGE syntax and binding (#1715, SQ-M1)
+
+```sql
+MERGE INTO target [AS a] USING source [AS b] ON condition
+WHEN MATCHED [AND condition] THEN UPDATE SET column = expression [, ...]
+-- MATCHED also accepts DELETE or DO NOTHING
+WHEN NOT MATCHED [BY TARGET] [AND condition] THEN INSERT [(column [, ...])]
+    VALUES (expression [, ...])
+-- NOT MATCHED also accepts INSERT DEFAULT VALUES or DO NOTHING
+WHEN NOT MATCHED BY SOURCE [AND condition] THEN DELETE
+-- BY SOURCE also accepts UPDATE SET ... or DO NOTHING
+[RETURNING expression [AS name] [, ...]];
+```
+
+At least one WHEN is required. Clauses retain written order; the first qualifying clause
+of a candidate's match kind selects its action. An unconditional clause, including DO
+NOTHING, makes later clauses of the same kind unreachable (CS05071, at the complete later
+WHEN clause). BY TARGET is the default
+unmatched direction. INSERT takes one VALUES row or DEFAULT VALUES; whole-item DEFAULT and
+existing identity policies apply. Target names must be unique and match the VALUES width.
+Bare target/source aliases are also accepted. Sources use existing stored/system/view,
+derived-query and joined-relation binding. WITH-prefixed MERGE is outside this run's grammar.
+The UPDATE FROM source forms also bind in MERGE USING and survive canonical rendering,
+including views, aliased derived queries and CROSS JOIN sources. A trailing source CROSS
+JOIN leaves the following ON for MERGE. VALUES relations, table functions, LATERAL,
+NATURAL JOIN and aliasless derived queries retain UPDATE FROM's refusal codes.
+
+ON and RETURNING see both sides. MATCHED predicates/values see both, BY TARGET sees only
+source, and BY SOURCE sees only target. Aliases hide base names; destinations always name
+target columns. Missing/ambiguous names, duplicate destinations, missing parameters,
+non-Boolean predicates, aggregates and incompatible assignment types fail during binding,
+including empty inputs. Assignment compatibility follows INSERT SELECT's implicit conversion
+families; row-dependent conversion, bounds, nullability and domain checks belong to execution.
+ON and WHEN admit existing read subqueries; action values and RETURNING subqueries retain
+CK00001. Source queries keep existing correlation/capability rules.
+
+RETURNING supports merge_action(), a contextual zero-argument text expression available only
+in this projection (CS01053 elsewhere; CS01006 for arguments/modifiers), including nested
+scalar expressions. It is separate from the standalone executable-function profile. Bare *
+expands target columns then visible source columns, preserving source USING merges;
+qualified wildcards retain CK00001. Source metadata includes absent-side nullability,
+including merged USING outputs.
+DO NOTHING produces no changed-row result in SQ-M2.
+
+EXPLAIN shows Merge, the association tree, ordered MergeAction children (match kind,
+operation, condition presence and column counts), and RETURNING columns. Physical columns
+remain target then source. Ignoring DO NOTHING clauses, MATCHED-only uses INNER; BY SOURCE
+uses target LEFT source; BY TARGET uses target RIGHT source normalized physically to source
+LEFT target; both unmatched directions use FULL. FULL requires #1525's safe mandatory hash
+equality and complete non-throwing ON proof; otherwise planning, including EXPLAIN, refuses
+with CS05070, as for source-internal FULL joins. LEFT and RIGHT still accept hashless ON
+predicates. WHEN filters are not pushed into ON because they select actions rather
+than classify matches.
+
+SQ-M1 refuses successfully bound MERGE, including wrapped plans, with CK00001 before costing
+can read source indexes, materializing source/subquery rows or evaluating actions.
+Plain EXPLAIN succeeds for supported plans without writes; EXPLAIN ANALYZE retains
+its SELECT-only boundary. Execution, repeated-target CS05036, final-state constraints and
+PostgreSQL concurrency rechecks belong to SQ-M2/SQ-M3. No disk/protocol/result-frame changes.
+Namespace/order rules follow PostgreSQL parser/parse_merge.c:52-99,138-178,247-285;
+join preservation follows optimizer/prep/prepjointree.c:222-246 and FULL eligibility follows
+optimizer/path/joinrels.c:1165-1179 in the local reference clone.
+
+| Code | MERGE condition |
+|---|---|
+| CS01053 | merge_action() outside MERGE RETURNING |
+| CS05070 | FULL association lacks a safe mandatory hash equality or complete ON safety proof |
+| CS05071 | WHEN follows an unconditional clause of the same match kind |
 
 ## Value comparison (#1029)
 

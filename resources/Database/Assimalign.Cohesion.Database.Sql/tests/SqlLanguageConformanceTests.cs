@@ -188,8 +188,8 @@ public sealed class SqlLanguageConformanceTests
         // The profile drives enumeration. A newly advertised clause cannot silently escape this test.
         var cases = CreateCases();
         // #1714 adds UPDATE FROM and DELETE USING and #1718 adds quantified comparisons:
-        // exactly three over #1118's 51. TRUNCATE (#1716) adds one more.
-        SqlLanguageProfile.Instance.Clauses.Count().ShouldBe(55);
+        // exactly three over #1118's 51. TRUNCATE (#1716) and binding-only MERGE (#1715) add one each.
+        SqlLanguageProfile.Instance.Clauses.Count().ShouldBe(56);
         RequireExecutionCases(SqlLanguageProfile.Instance.Clauses, cases);
         cases.Keys.Except(SqlLanguageProfile.Instance.Clauses).ShouldBeEmpty("Cases must describe the current profile.");
 
@@ -660,6 +660,9 @@ public sealed class SqlLanguageConformanceTests
                 seek[6].ShouldBe(1L);
                 seek[7].ShouldBeNull();
             }),
+        [SqlClauses.Merge] = new("EXPLAIN MERGE INTO t USING t AS s ON t.id=s.id WHEN MATCHED THEN DELETE RETURNING merge_action();",
+            _seed, expression => expression is SqlExplainExpression { Statement: SqlMergeExpression },
+            async (_, result) => (await ReadRowsAsync(result)).ShouldContain(row => Equals(row[2], "Merge"))),
         [SqlClauses.Select] = new("SELECT id, age + 1 AS next_age FROM t ORDER BY id;", _seed,
             expression => expression is SqlSelectExpression,
             async (session, result) =>

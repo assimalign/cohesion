@@ -199,7 +199,7 @@ internal sealed partial class SqlExpressionEvaluator
         return new SqlExpressionEvaluator(_columns, _parameters, _relations as IReadOnlyList<SqlRelationBinding>, ordinals,
             _defaultCollation, sources, _subquerySlots, _subqueryValues, _functions, _cancellationToken, _typing?.SlotScope, _bindingContext,
             relation: _relations as SqlRelationReference, outerScope: _typing?.OuterScope,
-            outerDependencies: _typing?.OuterDependencies);
+            outerDependencies: _typing?.OuterDependencies, foldConstants: _foldConstants);
     }
 
     /// <summary>
@@ -503,7 +503,8 @@ internal sealed partial class SqlExpressionEvaluator
 
     internal SqlExpressionEvaluator ForRelations(IReadOnlyList<SqlRelationBinding> bindings)
         => new(_columns, _parameters, bindings, defaultCollation: _defaultCollation,
-            subquerySlots: _subquerySlots, functions: _functions, cancellationToken: _cancellationToken);
+            subquerySlots: _subquerySlots, functions: _functions, cancellationToken: _cancellationToken,
+            foldConstants: _foldConstants);
 
     /// <summary>The collation a column contributes: 2 when declared on the column, 1 when inherited.</summary>
     private SqlCollationCandidate ColumnCollation(int ordinal)

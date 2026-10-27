@@ -39,7 +39,7 @@ public class SqlQueryParserTests
     {
         var parser = new SqlQueryParser();
 
-        var statement = (SqlQueryStatement)parser.Parse("MERGE INTO dbo.Users u USING dbo.Users2 u2 ON u.Id = u2.Id;");
+        var statement = (SqlQueryStatement)parser.Parse("GRANT SELECT ON dbo.Users TO guest;");
 
         statement.SqlExpression.CommandType.ShouldBe(SqlQueryCommandType.Unknown);
         statement.Diagnostics.ShouldContain(x => x.Code == "CS00002");

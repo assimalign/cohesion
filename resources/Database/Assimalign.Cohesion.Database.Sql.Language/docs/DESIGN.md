@@ -100,6 +100,23 @@ identifier `a"x`. A base-created view with that stored spelling can therefore re
 or fail after reopen. The unambiguous old form `"a" "x"` keeps its meaning. There is no stored-text
 migration or alternate lexer; recreate an affected view with explicit whitespace or `AS`.
 
+## MERGE syntax and binding (#1715, SQ-M1)
+
+SqlMergeExpression retains a target, one USING relation/join item, ON, ordered
+SqlMergeWhenClause values and optional RETURNING. Each clause retains its complete source span
+from WHEN through its action, so CS05071 locates the unreachable clause. Match/action enums are separate;
+BY TARGET's explicit spelling survives canonical round trips. MERGE adds one keyword
+and one advertised clause; MATCHED, SOURCE, TARGET, DO, NOTHING and merge_action remain
+contextual. The latter uses the existing function-call AST and binds only in MERGE
+RETURNING, where Sql maps it to a text slot. It is not a standalone executable built-in.
+Grammar requires the action set appropriate to the match kind. Unreachable clauses,
+scopes, column/type validation and planning belong to Sql. DIALECT records the complete
+binding contract and temporary CK00001 execution refusal. No persisted format changes.
+USING shares UPDATE FROM's stored/system/view, aliased derived-query and supported join
+sources. At the top level a source CROSS JOIN leaves ON for MERGE; ordinary FROM parsing
+keeps its existing CROSS JOIN ON refusal. VALUES relations, table functions, LATERAL,
+NATURAL JOIN and aliasless derived queries retain the existing source diagnostic codes.
+
 ## INSERT conflict clauses (#1118)
 
 SqlOnConflictClause retains inference kind, column set or constraint name, action,
@@ -522,7 +539,7 @@ its ordinary bare output alias before SET.
 
 CORRESPONDING, recursive/nested or data-modifying CTEs, window functions, LATERAL,
 UPDATE SET subqueries, `ON UPDATE`,
-`MERGE`, RETURNING subqueries/OLD/NEW/INTO, savepoints, isolation-level syntax, and cost-hint syntax.
+MERGE execution (until SQ-M2), RETURNING subqueries/OLD/NEW/INTO, savepoints, isolation-level syntax, and cost-hint syntax.
 Each is an additive dialect extension when its engine feature
 lands.
 

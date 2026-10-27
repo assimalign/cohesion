@@ -316,7 +316,7 @@ internal sealed partial class SqlPlanner
         SqlExpressionEvaluator evaluator)
     {
         RuntimeHelpers.EnsureSufficientExecutionStack();
-        return GroupExpressionTypeCore(expression, columns, evaluator);
+        return evaluator.IsBoundValue(expression) ? evaluator.StaticTypeOf(expression) : GroupExpressionTypeCore(expression, columns, evaluator);
     }
 
     private DatabaseType GroupExpressionTypeCore(SqlExpression expression, IReadOnlyList<SqlCatalogColumn> columns,

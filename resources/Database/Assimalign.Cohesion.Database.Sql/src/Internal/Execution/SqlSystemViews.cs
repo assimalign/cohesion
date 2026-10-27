@@ -82,6 +82,7 @@ internal static class SqlSystemViews
             SqlCreateViewExpression create => create.View,
             SqlDropViewExpression drop => drop.View,
             SqlInsertExpression insert => insert.Table,
+            SqlMergeExpression merge => merge.Table,
             SqlUpdateExpression update => update.Table,
             SqlDeleteExpression delete => delete.Table,
             SqlCreateTableExpression create => create.Table,

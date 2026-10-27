@@ -15,7 +15,7 @@ public static class SqlLanguageProfile
     private static readonly string[] _keywords =
     [
         // DML
-        "SELECT", "EXPLAIN", "FROM", "WHERE", "INSERT", "UPDATE", "DELETE",
+        "SELECT", "EXPLAIN", "FROM", "WHERE", "INSERT", "UPDATE", "DELETE", "MERGE",
         "SET", "VALUES", "INTO", "RETURNING",
         "FUNCTION", "DOMAIN", "RETURNS", "RETURN", "IMMUTABLE", "STABLE", "VOLATILE", "STRICT", "CALLED", "INPUT",
         // DDL
@@ -75,6 +75,7 @@ public static class SqlLanguageProfile
         SqlClauses.Explain,
         SqlClauses.Insert,
         SqlClauses.OnConflict,
+        SqlClauses.Merge,
         SqlClauses.Update,
         SqlClauses.UpdateFrom,
         SqlClauses.Delete,
@@ -129,8 +130,8 @@ public static class SqlLanguageProfile
     ];
 
     /// <summary>
-    /// Gets the SQL language profile. Clauses awaiting execution support are excluded even
-    /// when <see cref="SqlQueryParser"/> can construct their syntax trees.
+    /// Gets the SQL language profile. MERGE advertises syntax, binding and EXPLAIN while
+    /// action execution retains CK00001 until SQ-M2; other clauses awaiting execution are excluded.
     /// </summary>
     public static QueryLanguageProfile Instance { get; } = new(
         "SQL",
