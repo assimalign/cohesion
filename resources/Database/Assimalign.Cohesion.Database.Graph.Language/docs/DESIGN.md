@@ -132,7 +132,8 @@ only the parser hands a list it built to a node without copying it.
 ## MERGE (#1735)
 
 GqlMergeStage carries one Path and ordered OnCreate/OnMatch item lists. The parser accepts either
-branch order, each at most once; ON remains contextual so existing variable names are preserved.
+branch order with repeated branches; each kind's SET items append in source order. ON remains
+contextual so existing variable names are preserved.
 GqlMergeStage.ToString renders CREATE before MATCH using the
 existing path/scalar renderer. Both branches share ordinary SET grammar. A MERGE accepts one path;
 comma-separated independent MERGEs use successive clauses. Variable-length/quantified paths,
@@ -191,7 +192,7 @@ The function table advertises the aggregates and core scalar functions listed be
 | `CASE` | Simple and searched CASE, COALESCE and NULLIF case abbreviations | First matching alternative, lazy selected branch; absent ELSE yields NULL |
 | `INSERT` | Scalar value-expression node/path insertion, optionally following a match; a node takes a label conjunction (`:A&B`, `:A:B`), a relationship one type and a directed edge (`-[:T]->`, `<-[:T]-`) | Inserts nodes and relationships transactionally |
 | `CREATE` | Same insertion grammar as `INSERT`; compatibility extension | Same transactional insertion path |
-| `MERGE` | One complete fixed path, optionally ON CREATE SET and ON MATCH SET | Matches every complete path or creates every unbound part; includes fixed undirected relationships, bound entity reuse, overlays and Snapshot freshness checks |
+| `MERGE` | One complete fixed path, followed by zero or more ON CREATE SET or ON MATCH SET actions | Matches every complete path or creates every unbound part; includes fixed undirected relationships, bound entity reuse, overlays and Snapshot freshness checks |
 | `SET` | ISO property assignment, literal-map replacement and node labels with IS or colon; D3 `+=` and repeated-colon labels | Applies items left to right per row, with one published replacement per updated entity per statement |
 | `REMOVE` | Property keys or node labels with IS or colon | Removes keys/labels, ignoring OPTIONAL NULL targets |
 | `DELETE` | Bound node/relationship variables following a match | Refuses deleting a node that still has incident relationships |
@@ -229,7 +230,7 @@ stage        := [OPTIONAL] MATCH match-paths [WHERE predicate]
               | FOR variable IN predicate
               | UNWIND predicate AS variable
               | (INSERT | CREATE) paths
-              | MERGE path [ON CREATE SET set-items] [ON MATCH SET set-items]
+              | MERGE path (ON (CREATE | MATCH) SET set-items)*
               | SET set-item (',' set-item)*
               | REMOVE remove-item (',' remove-item)*
               | [DETACH] DELETE variables

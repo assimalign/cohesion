@@ -38,22 +38,20 @@ public sealed partial class GqlQueryParser
             {
                 var paths = ParsePatterns();
                 if (!Failed && paths.Count != 1) { Error("CG00002", ErrorMessages.MergeSinglePath, clauseStart); }
-                IReadOnlyList<GqlSetItem> onCreate = [], onMatch = [];
-                bool sawCreate = false, sawMatch = false;
+                var onCreate = new List<GqlSetItem>();
+                var onMatch = new List<GqlSetItem>();
                 while (!Failed && Take("ON"))
                 {
                     var branch = Current;
                     bool create = Take("CREATE");
                     if (!create) { Expect("MATCH"); }
-                    if (create ? sawCreate : sawMatch) { Error("CG00002", ErrorMessages.MergeBranchDuplicate, branch); break; }
-                    if (create) { sawCreate = true; } else { sawMatch = true; }
                     Expect("SET");
                     if (Failed) { break; }
                     var set = ParseSet(branch);
-                    if (create) { onCreate = set.Items; } else { onMatch = set.Items; }
+                    (create ? onCreate : onMatch).AddRange(set.Items);
                 }
                 hasNamedBinding |= HasNamedBinding(paths);
-                if (!Failed) { stages.Add(new GqlMergeStage(paths[0], onCreate, onMatch, Span(clauseStart, Previous))); }
+                if (!Failed) { stages.Add(new GqlMergeStage(paths[0], onCreate.AsReadOnly(), onMatch.AsReadOnly(), Span(clauseStart, Previous))); }
                 segmentWrites = true;
             }
             else if (Is("CREATE") || Is("INSERT"))

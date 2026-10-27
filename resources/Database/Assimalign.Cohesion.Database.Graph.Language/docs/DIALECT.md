@@ -187,7 +187,7 @@ runtime totals. The engine's GqlProfileExecutionTests EXPLAIN corpus pins this d
 
 ## MERGE (#1735)
 
-`MERGE path [ON CREATE SET ...] [ON MATCH SET ...]` matches the complete fixed path for
+`MERGE path (ON (CREATE | MATCH) SET ...)*` matches the complete fixed path for
 each incoming row. Every complete match receives ON MATCH; when none exists, it creates every
 unbound node and relationship and runs ON CREATE once. An existing partial path does not supply
 unbound parts. Bind variables with an earlier MATCH to reuse existing identities. Bound
@@ -197,7 +197,8 @@ equal repeated properties, the last occurrence supplies the stored CLR scalar ty
 variable cannot occur twice within the same MERGE path (CG05001).
 
 Each clause takes one path; use successive MERGE clauses for separate decisions. Either branch
-order is accepted, each at most once (duplicate branches and multiple paths are CG00002).
+order is accepted, with repeated branches; each kind's SET items append in source order and
+rendering preserves that order within each kind. Multiple paths are CG00002.
 Property maps evaluate once per input row against the incoming scope. Equalities must be finite,
 non-null storage scalars (CG03004; supplied parameters retain their ordinary binding validation); a runtime NULL bound entity, an absent bound entity, conflicting
 repeated-node equalities or incompatible bound constraints/endpoints use CG03005. MERGE does not

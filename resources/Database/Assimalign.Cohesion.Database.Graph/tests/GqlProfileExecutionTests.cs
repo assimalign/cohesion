@@ -237,6 +237,9 @@ public sealed class GqlProfileExecutionTests
             [GqlClauses.Merge] =
             [
                 new("MERGE (n:Person {name:'Alice'}) ON MATCH SET n.age = n.age + 1 RETURN n.age", [[43L]], 1),
+                new("MERGE (n:Person {name:'Alice'}) ON MATCH SET n.age=n.age+1 ON MATCH SET n.age=n.age+2 RETURN n.age", [[45L]], 1),
+                new("MERGE (n:MergeRepeat) ON CREATE SET n.x=1 ON CREATE SET n.x=n.x+2 RETURN n.x", [[3L]], 1),
+                new("MERGE (n:MergeLoop {id:1})-[:SELF]->(n) RETURN n.id", [[1L]], 2),
                 Mutation("MERGE (n:Person {name:'New'}) ON CREATE SET n.age = 9", 1,
                     new ExecutionCase("MATCH (n:Person {name:'New'}) RETURN n.age", [[9L]])),
                 new("FOR x IN [1,1,1] MERGE (n:MergeRow {id:x}) ON CREATE SET n.hits=1 ON MATCH SET n.hits=n.hits+1 RETURN n.hits", [[3L],[3L],[3L]], 1),
