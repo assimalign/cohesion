@@ -127,7 +127,7 @@ exact integer moments at decimal scale 28; retained state is bounded by the deci
 Int64 input count. VARIANCE rounds the final rational value to decimal using nearest-even rounding.
 STDDEV converts the BCL square root through its shortest round-trip representation, like SQRT,
 using the unrounded rational whenever variance is not exactly representable as decimal. A final
-out-of-range result retains CD02007; an intermediate moment cannot overflow or underflow.
+out-of-range result retains CD02007, decided from the exact rational. A floating conversion beyond the decimal boundary falls back to nearest-even decimal rounding, including decimal.MaxValue; an intermediate moment cannot overflow or underflow.
 
 The [Couchbase aggregate reference](https://docs.couchbase.com/server/current/n1ql/n1ql-language-reference/aggregatefun.html)
 defines ALL/DISTINCT, ARRAY_AGG's unknown handling and the named sample statistics. The owner

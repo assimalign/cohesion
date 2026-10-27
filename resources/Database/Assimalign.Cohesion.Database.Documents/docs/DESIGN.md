@@ -704,7 +704,7 @@ is bounded by 604 bits even at Int64.MaxValue inputs, so state is independent of
 Sample statistics return singleton zero. VARIANCE rounds the final rational to decimal using
 nearest-even rounding; STDDEV uses SQRT's decimal conversion and square-root convention, falling
 back to the rational's double value when intermediate variance is not exactly representable.
-Only a final out-of-range result uses CD02007. No new public function seam,
+The exact rational decides root overflow; if floating conversion crosses the decimal boundary, an exact midpoint comparison rounds the integral root to nearest-even. Only a final out-of-range result uses CD02007. No new public function seam,
 interface, visibility grant or dependency is needed; local native configuration carries the
 statement memory counter and constructor depth without exposing implementation state publicly.
 

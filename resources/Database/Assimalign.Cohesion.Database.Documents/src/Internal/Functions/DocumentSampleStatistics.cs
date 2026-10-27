@@ -47,9 +47,25 @@ internal sealed class DocumentSampleStatistics
         }
         // Keep SQRT's decimal-to-double convention for exact decimal variance. A
         // rounded or out-of-domain intermediate must not distort a representable root.
+        if (numerator > _maximum * _maximum * denominator) { throw new OverflowException(); }
         double squared = fits && exact ? (double)variance : (double)numerator / (double)denominator;
-        return decimal.Parse(Math.Sqrt(squared).ToString("R", CultureInfo.InvariantCulture),
-            NumberStyles.Float, CultureInfo.InvariantCulture);
+        if (decimal.TryParse(Math.Sqrt(squared).ToString("R", CultureInfo.InvariantCulture),
+            NumberStyles.Float, CultureInfo.InvariantCulture, out decimal root)) { return root; }
+
+        // A floating root can round beyond MaxValue even though the exact root fits.
+        // Here the root is at decimal's upper boundary, where its spacing is one.
+        // Locate the integral root and round the exact rational at its midpoint.
+        BigInteger lower = BigInteger.Zero, upper = _maximum + 1;
+        while (upper - lower > 1)
+        {
+            BigInteger middle = (lower + upper) >> 1;
+            if (middle * middle * denominator <= numerator) { lower = middle; }
+            else { upper = middle; }
+        }
+        BigInteger twiceMidpoint = (lower << 1) + 1;
+        int rounding = (numerator << 2).CompareTo(twiceMidpoint * twiceMidpoint * denominator);
+        if (rounding > 0 || rounding == 0 && !lower.IsEven) { lower++; }
+        return (decimal)lower;
     }
 
     private static bool TryDecimalRatio(BigInteger numerator, BigInteger denominator, out decimal value, out bool exact)

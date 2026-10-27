@@ -174,6 +174,7 @@ public sealed class OqlExecutionConformanceTests
             ],
             [OqlClauses.Every] =
             [
+                new("SELECT STDDEV(v) FROM items UNNEST [-79228162514264337593543950335,0,79228162514264337593543950335] v WHERE name = 'alpha'", [[decimal.MaxValue]]),
                 new("SELECT name FROM items d WHERE EVERY t IN d.tags SATISFIES t = 'blue' END", [["alpha"], ["gamma"], ["delta"]]),
             ],
             [OqlClauses.In] =
