@@ -323,10 +323,14 @@ public sealed partial class SqlTableRewriteTests
             database.Catalog.GetIndexes(table.ObjectId).ShouldHaveSingleItem();
             await Should.ThrowAsync<DatabaseException>(() => ExecAsync(session, "INSERT INTO t VALUES (1)", timeout.Token));
             await ExecAsync(session, "INSERT INTO t VALUES (66)", timeout.Token);
+            var livePages = database.DataStorage.GetOwnerPages(table.ObjectId).ToArray();
             await ReclaimAsync(database, timeout.Token);
             database.Catalog.GetPendingTableReclamations().ShouldBeEmpty();
+            database.DataStorage.GetOwnerPages(table.ObjectId).ShouldBe(livePages);
             database.DataStorage.HasOwnerPages(table.ObjectId).ShouldBeTrue();
             database.DataStorage.HasOwnerPages(table.ObjectId == old ? preparedOwner : old).ShouldBeFalse();
+            (await RowsAsync(session, "SELECT id FROM t ORDER BY id", timeout.Token)).Select(row => (int)row[0]!).ShouldBe(Enumerable.Range(1, 66));
+            (await RowsAsync(session, "SELECT id FROM t WHERE id=66", timeout.Token)).ShouldHaveSingleItem()[0].ShouldBe(66);
         }
         retained.ShouldBeGreaterThan(0);
         if (cancel) { replaced.ShouldBe(0); }
