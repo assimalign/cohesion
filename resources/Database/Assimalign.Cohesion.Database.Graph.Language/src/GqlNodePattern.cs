@@ -24,4 +24,7 @@ public sealed record GqlNodePattern(string? Variable, IReadOnlyList<string> Labe
     /// its meaning: the node carries every listed label.
     /// </remarks>
     public GqlLabelExpression? LabelExpression { get; init; }
+
+    /// <summary>Gets the inline WHERE prefilter, evaluated for this node inside path search.</summary>
+    public GqlExpression? Predicate { get; init; }
 }

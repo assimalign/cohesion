@@ -73,7 +73,7 @@ expressions and container access. Project scalar values
 after FOR/UNWIND, or project a full named path through ExecutePaths. No wire format is added.
 
 Node and INSERT/CREATE quantifiers are CG00002. Questioned paths after an edge or subpath,
-subpath assignments, inner WHERE and nested quantifiers remain named CK00001. Outer path modes execute (#1733 below). A touching `--` after `}`, `+`, `*` or a subpath's `)` is CG00008.
+subpath assignments and nested quantifiers remain named CK00001. Inline WHERE follows the selector planning boundary below. Outer path modes execute (#1733 below). A touching `--` after `}`, `+`, `*` or a subpath's `)` is CG00008.
 Subpath parsing uses CG00009 on stack exhaustion, with no separate text nesting cap; direct AST
 nesting beyond 128, cycles and repeated path instances in one walk are CG05001.
 
@@ -108,10 +108,57 @@ All modes allow zero hops. The same mode covers all fixed edges, quantified segm
 parenthesized groups, independently of the chosen index anchor. Each comma-separated path may
 choose its own mode and reuse identities from another path. Mode words stay legal identifiers.
 An explicit mode or selector inside a parenthesized/quantified subpath is CK00001. Unbounded
-WALK (including `+`, `*`, `{m,}`, `{,}` and Cypher open upper bounds) is CK00001 even with LIMIT.
-Shortest selectors remain CK00001. INSERT/CREATE modes are CG00002; malformed direct AST mode
+WALK without a selector (including `+`, `*`, `{m,}`, `{,}` and Cypher open upper bounds) is CK00001 even with LIMIT.
+Selectors parse, bind and EXPLAIN under the planning boundary below; execution remains CK00001. INSERT/CREATE modes are CG00002; malformed direct AST mode
 values and insertion modes are CG05001. The existing 64-hop, memory, work and cancellation
 contracts still apply; WALK never silently becomes TRAIL. EXPLAIN shows the resolved mode.
+
+## Path selectors: parsing and planning (#1734)
+
+`MATCH [p =] <selector> [mode] [PATH | PATHS] [GROUP | GROUPS] <path>` parses and
+binds the selector surface. GROUP/GROUPS applies only to counted SHORTEST; k is an explicit
+positive Int64 literal. The mode defaults to TRAIL. Counts that are missing, signed, zero,
+non-integer, parameters or overflow are CG00011. Counted ANY, including parameter counts,
+remains CK00001 at the complete prefix.
+
+`GqlPathPattern.ToString()` renders the complete semantic path, including its assignment,
+selector, mode, canonical PATH/GROUPS prefix, labels, property constraints, inline WHERE
+and quantifiers. Reparsing preserves the path AST after source locations are normalized.
+
+| Selector | Selection for each ordered endpoint pair and incoming binding |
+| --- | --- |
+| ANY | One admissible path in stable identity order |
+| ALL | Every admissible path |
+| ANY SHORTEST | One path of minimum hop count |
+| ALL SHORTEST | Every path of minimum hop count; SHORTEST 1 GROUPS |
+| SHORTEST k [PATHS] | Up to k paths ordered by length, then identity |
+| SHORTEST k GROUPS | Every path at up to k distinct shortest lengths |
+
+Stable identity order compares the complete relationship-identity sequence lexicographically
+from start to end, then the node-identity sequence. This extends SP1's deterministic tie rule
+and is stronger than Neo4j's arbitrary ties. Anonymous or bound endpoints, equal endpoints,
+zero hops, cycles and quantified bodies keep that same partition. All four path modes can be
+planned, including selected unbounded WALK; path histories and output share the accounted
+statement memory ceiling separately from the simple vertex-visited shortest API.
+
+Node/edge label and property constraints and inline WHERE predicates stay inside search.
+A WHERE inside parenthesized path syntax also stays inside search. The ordinary MATCH WHERE
+runs after selection, before OPTIONAL null extension; FILTER/later WITH predicates remain
+downstream. For example, `MATCH p = ANY SHORTEST ((a)-[r:T WHERE r.w>0]->*(b) WHERE a.k<>b.k) WHERE path_length(p)>2 RETURN p`
+searches only qualifying paths, selects by endpoint pair, then tests the selected length.
+Predicates in a quantified body see its singleton variables; outside it they are group lists.
+Selected search prefilters may use their own path's variables and bindings entering MATCH.
+A reference to a variable introduced only by a peer path in that MATCH is CG01016, located
+at the reference; declaring that peer before the selected path does not make it visible.
+
+EXPLAIN exposes SelectPaths, PathSearch, ElementPrefilter, PathPrefilter and PostFilter,
+including the count unit, partition, mode, order and configured work/state/output ceilings.
+**Until SP3, execution refuses every selector or inline WHERE prefilter with CK00001 after
+binding and before reads or writes**, including LIMIT 0 and empty input. EXPLAIN succeeds;
+missing names/parameters still report binding errors first. The wire carries ExecutionFailure
+with CK00001 and preserves the session. The existing CG05004 work/64-hop and CG05020 retained
+memory contracts are reserved for the later search implementation; no partial selection may
+be returned on exhaustion. No executable-profile clause, disk format or wire format is added.
 
 ## Adjacency work and EXPLAIN (#1532)
 
