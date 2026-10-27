@@ -44,6 +44,13 @@ This registry covers the Database edit boundary. CK does not reserve codes for u
 Cohesion libraries or resource areas. Cache has its prefix reserved even when an operation
 reports through the existing cache result vocabulary rather than an exception diagnostic.
 
+Process-crash test reopening (#1713) changes no error identity or engine behavior. An underlying
+sharing/lock violation (Windows HRESULT 0x80070020/0x80070021, or EWOULDBLOCK/EAGAIN errno
+11 on Linux and 35 on macOS) still fails open with Blob CB06005,
+Documents CD06104 or Graph CG06006, retaining the I/O cause. Only the test harness retries those
+causes; unrelated errors propagate immediately. Its 30-second timeout names the file and last
+error and has no production diagnostic code.
+
 ## Kernel migration
 
 | Previous code | Code | Condition family |
@@ -67,6 +74,9 @@ SQL syntax uses `CS00001`–`CS00099`. `CS00009` is the informational note for a
 statement semicolon; it does not refuse parsing or execution. `CS00100` is retired and reserved:
 the migration described it as a profile refusal, but the parser used it for this note.
 Recognized unsupported clauses use `CK00001`.
+SQL UPDATE ... FROM and DELETE ... USING retain this identity at execution after syntax and
+source binding succeed (#1714, SQ-UF1). Their association plans may be described by EXPLAIN;
+execution remains unavailable until SQ-UF2. No new identity is allocated for this staged refusal.
 Within category 03, condition bands 000–099 cover catalog/DDL, 100–199 provisioning,
 200–299 declared scripts, 300–399 registered definitions, and 400–499 generic constraint failures.
 These bands make allocation predictable while callers continue to match the complete identity.
@@ -223,6 +233,12 @@ SQLSTATE meanings remain those in [the SQL dialect](../../Assimalign.Cohesion.Da
 
 ## Graph migration
 
+GQL path modes (#1733) retain the existing identities: malformed mode values or INSERT modes in
+hand-built ASTs use CG05001; text repetition bounds above 64 use CG00005; a visited qualifying
+65th hop or physical-work exhaustion uses CG05004; retained-memory exhaustion uses CG05020.
+Nested explicit modes and unbounded WALK use CK00001. BEGIN [TRANSACTION] (#1725) shares START TRANSACTION's
+transaction-state diagnostics; it allocates no new identity. These changes add no disk or wire format.
+
 | Previous code | Code | Category |
 |---|---|---|
 | GQL0001 | CG00001 | Language/syntax |
@@ -328,8 +344,11 @@ and invariant exceptions and lower child-root typed failures retain their docume
 | CS06060 | SQL catalog metadata format/version is unsupported | 0A000 |
 | CD04102 | Catalog snapshot conflict | — |
 | CD04103 | Expected document version differs | — |
+| CD04104 | No explicit document transaction is open for COMMIT or ROLLBACK (#1725) | — |
+| CD04105 | OQL collection/index DDL inside an explicit transaction (#1725) | — |
 | CD05016 | Result byte/frame limit exceeded | — |
 | CD07001 | Session belongs to another database | — |
+| CD07002 | Documents server refuses text transaction control pending safe pooled reset (#1725 T1) | — |
 | CD09001 | Collection handle is stale | — |
 | CB01001 | Container is absent | — |
 | CB01002 | Blob is absent | — |

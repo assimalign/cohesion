@@ -7,6 +7,9 @@
     <PublishAot Condition="'$(DocumentFixtureNativeAot)' == 'true'">true</PublishAot>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="$(CohesionRepositoryDirectory)resources\Database\Assimalign.Cohesion.Database.Blob\tests\TestObjects\CrashReopen.cs" Link="TestObjects\CrashReopen.cs" />
+  </ItemGroup>
+  <ItemGroup>
     <CohesionProjectReference Include="Assimalign.Cohesion.Database.Documents" />
   </ItemGroup>
 </Project>

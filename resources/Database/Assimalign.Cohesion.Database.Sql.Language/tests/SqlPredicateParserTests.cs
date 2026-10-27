@@ -124,16 +124,15 @@ public sealed class SqlPredicateParserTests
         error.End.ShouldBe(error.Start + (text.Contains("::", System.StringComparison.Ordinal) ? 2 : form.Length));
     }
 
-    [Fact(DisplayName = "Cohesion Test [Sql.Language] - Predicates: adjacent left-arrow keeps its syntax rejection")]
-    public void Parse_AdjacentLeftArrow_ShouldRetainSyntaxError()
+    [Fact(DisplayName = "Cohesion Test [Sql.Language] - Predicates: adjacent less-than and minus form a comparison (#1647)")]
+    public void Parse_AdjacentLeftArrow_ShouldCompareWithNegativeLiteral()
     {
         // Arrange / Act
-        var statement = new SqlQueryParser().Parse("SELECT a<-1;");
+        var statement = (SqlQueryStatement)new SqlQueryParser().Parse("SELECT a<-1;");
         // Assert
-        var error = statement.Diagnostics.ShouldHaveSingleItem();
-        error.Code.ShouldBe("CS00003");
-        error.Start.ShouldBe(8);
-        error.End.ShouldBe(10);
+        statement.Diagnostics.ShouldBeEmpty();
+        var expression = statement.SqlExpression.ShouldBeOfType<SqlSelectExpression>().Columns.ShouldHaveSingleItem().Expression;
+        SqlExpressionRenderer.Render(expression).ShouldBe("a < -1");
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql.Language] - Predicates: contextual operator words remain ordinary identifiers")]

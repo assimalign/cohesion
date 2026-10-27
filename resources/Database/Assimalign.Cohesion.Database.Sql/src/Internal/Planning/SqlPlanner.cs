@@ -902,11 +902,7 @@ internal sealed partial class SqlPlanner
     /// <exception cref="DatabaseException">An assignment or the filter contains an aggregate.</exception>
     private SqlPlan PlanUpdate(SqlUpdateExpression update)
     {
-        var queries = BindDmlSubqueries(update.Where, update.Table);
-        var table = ResolveTable(update.Table);
-        var evaluator = new SqlExpressionEvaluator(table.Columns, _parameters,
-            defaultCollation: _catalog.DefaultCollation, subquerySlots: _subquerySlots, functions: _functions, cancellationToken: _cancellationToken,
-            outerScope: OuterScope, outerDependencies: OuterDependencies, relation: update.Table);
+        var (table, evaluator, source, queries) = BindDmlSources(update.Table, update.From, update.Where, update);
 
         var assignments = new List<(int Ordinal, SqlBoundExpression Value)>(update.Assignments.Count);
         var assigned = new HashSet<int>();
@@ -944,8 +940,13 @@ internal sealed partial class SqlPlanner
             where = evaluator.BindPredicate(update.Where);
         }
 
-        var input = new SqlUpdatePlan(table, assignments, where, SelectAccessPath(table, update.Where, evaluator))
-        { Returning = BindReturning(update.Returning, table, update.Table) };
+        var input = new SqlUpdatePlan(table, assignments, where,
+            source is null ? SelectAccessPath(table, update.Where, evaluator) : SqlScanPath.Instance)
+        {
+            Source = source is null ? null : source with { Associations = source.Associations with { Where = where } },
+            Returning = source is null ? BindReturning(update.Returning, table, update.Table)
+                : BindSourceReturning(update.Returning, source, update.Table),
+        };
         return WrapSubqueries(input, queries);
     }
 
@@ -954,11 +955,7 @@ internal sealed partial class SqlPlanner
     /// <exception cref="DatabaseException">The filter contains an aggregate.</exception>
     private SqlPlan PlanDelete(SqlDeleteExpression delete)
     {
-        var queries = BindDmlSubqueries(delete.Where, delete.Table);
-        var table = ResolveTable(delete.Table);
-        var evaluator = new SqlExpressionEvaluator(table.Columns, _parameters,
-            defaultCollation: _catalog.DefaultCollation, subquerySlots: _subquerySlots, functions: _functions, cancellationToken: _cancellationToken,
-            outerScope: OuterScope, outerDependencies: OuterDependencies, relation: delete.Table);
+        var (table, evaluator, source, queries) = BindDmlSources(delete.Table, delete.Using, delete.Where, delete);
 
         SqlBoundExpression? where = null;
         if (delete.Where is not null)
@@ -968,8 +965,13 @@ internal sealed partial class SqlPlanner
             where = evaluator.BindPredicate(delete.Where);
         }
 
-        var input = new SqlDeletePlan(table, where, SelectAccessPath(table, delete.Where, evaluator))
-        { Returning = BindReturning(delete.Returning, table, delete.Table) };
+        var input = new SqlDeletePlan(table, where,
+            source is null ? SelectAccessPath(table, delete.Where, evaluator) : SqlScanPath.Instance)
+        {
+            Source = source is null ? null : source with { Associations = source.Associations with { Where = where } },
+            Returning = source is null ? BindReturning(delete.Returning, table, delete.Table)
+                : BindSourceReturning(delete.Returning, source, delete.Table),
+        };
         return WrapSubqueries(input, queries);
     }
 

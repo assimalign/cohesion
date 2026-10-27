@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 
 namespace Assimalign.Cohesion.Database.Sql.Language;
 
@@ -20,6 +21,13 @@ public sealed partial class SqlQueryParser
 
         var table = ParseRequiredTableReference(ref lexer, dmlTarget: true);
 
+        IReadOnlyList<SqlFromItem> sources = [];
+        if (IsKeyword(ref lexer, "USING"))
+        {
+            Advance(ref lexer);
+            sources = ParseFromItems(ref lexer);
+        }
+
         // WHERE
         SqlExpression? where = null;
         if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "WHERE"))
@@ -28,9 +36,9 @@ public sealed partial class SqlQueryParser
             where = ParseExpression(ref lexer);
         }
 
-        var returning = ParseReturning(ref lexer, table);
+        var returning = ParseReturning(ref lexer, table, sources: sources);
 
         return new SqlDeleteExpression(table, where, null,
-            Location.Create(1, 1, pos, _lastTokenEnd), returning);
+            Location.Create(1, 1, pos, _lastTokenEnd), returning, sources);
     }
 }

@@ -81,8 +81,30 @@ internal sealed partial class SqlPlanExecutor
             _containsLike || containsLike || _definitions.Functions.RunsApplicationCode ? cancellationToken : default, sharedColumns, transactionTimestamp ?? ViewTransactionStart);
 
     internal Task<DatabaseResult> ExecuteAsync(SqlPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
-        => statement.Metrics.IsAnalyzing ? ExecuteAnalyzedAsync(plan, statement, cancellationToken)
+    {
+        // Refuse before materializing CTEs or WHERE children, including volatile source calls.
+        var input = plan;
+        while (true)
+        {
+            if (input is SqlWithPlan with) { input = with.Input; }
+            else if (input is SqlSubqueryPlan subquery) { input = subquery.Input; }
+            else if (input is SqlCorrelatedSubqueryPlan correlated) { input = correlated.Input; }
+            else { break; }
+        }
+        string? clause = input switch
+        {
+            SqlUpdatePlan { Source: not null } => "UPDATE ... FROM",
+            SqlDeletePlan { Source: not null } => "DELETE ... USING",
+            _ => null,
+        };
+        if (clause is not null)
+        {
+            throw new SqlUnsupportedQueryException(string.Format(CultureInfo.CurrentCulture,
+                ErrorMessages.DmlSourcesExecutionUnavailable, clause));
+        }
+        return statement.Metrics.IsAnalyzing ? ExecuteAnalyzedAsync(plan, statement, cancellationToken)
             : ExecuteCoreAsync(plan, statement, cancellationToken);
+    }
 
     private async Task<DatabaseResult> ExecuteAnalyzedAsync(SqlPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {

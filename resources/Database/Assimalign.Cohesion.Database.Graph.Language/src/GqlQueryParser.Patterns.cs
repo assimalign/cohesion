@@ -19,13 +19,24 @@ public sealed partial class GqlQueryParser
         do
         {
             string? variable = null;
-            if (allowPathVariable && IsVariableToken)
+            if (allowPathVariable && IsVariableToken && _tokens[_position + 1].Type == TokenType.Equals)
             {
                 variable = Identifier();
                 Expect(TokenType.Equals, "'='");
             }
+            GqlPathMode? mode = null;
+            var prefix = Current;
+            var prefixEnd = prefix;
+            if (allowPathVariable && TryPathModeAt(_position, out var explicitMode))
+            {
+                mode = explicitMode;
+                Advance();
+                if (Is("PATH") || Is("PATHS")) { prefixEnd = Current; Advance(); }
+            }
             var path = ParsePath(allowQuantifiers: allowPathVariable, out _);
-            paths.Add(path with { Variable = variable });
+            if (!Failed && mode == GqlPathMode.Walk && ContainsUnboundedQuantifier(path))
+            { UnsupportedConstruct("UNBOUNDED WALK", prefix, prefixEnd); }
+            paths.Add(path with { Variable = variable, Mode = mode });
         } while (!Failed && Take(TokenType.Comma));
         return paths.AsReadOnly();
     }
@@ -105,10 +116,20 @@ public sealed partial class GqlQueryParser
     {
         if (index >= _tokens.Count) { return false; }
         var end = _tokens[index];
-        if (GqlUnsupportedVocabulary.TryFind(end.Text.ToUpperInvariant(), out var word) && word.Position == GqlWordPosition.PathMode)
+        if (TryPathModeAt(index, out _))
         { return StartsPathPattern(index + 1, ref end); }
         return end.Text.ToUpperInvariant() is "ALL" or "ANY" or "SHORTEST" &&
             TryPathSearchPrefix(index, out _, out int last) && last + 1 < _tokens.Count && _tokens[last + 1].Type == TokenType.LeftParen;
+    }
+
+    private bool TryPathModeAt(int index, out GqlPathMode mode)
+    {
+        if (IsWordAt(index, "WALK")) { mode = GqlPathMode.Walk; return true; }
+        if (IsWordAt(index, "TRAIL")) { mode = GqlPathMode.Trail; return true; }
+        if (IsWordAt(index, "SIMPLE")) { mode = GqlPathMode.Simple; return true; }
+        if (IsWordAt(index, "ACYCLIC")) { mode = GqlPathMode.Acyclic; return true; }
+        mode = default;
+        return false;
     }
 
     private void RejectPathMode()
@@ -185,6 +206,23 @@ public sealed partial class GqlQueryParser
             foreach (var element in current.Elements ?? [])
             {
                 if (element is GqlPathRelationship { Pattern.Quantifier: not null } || element is GqlParenthesizedPathPattern { Quantifier: not null }) { return true; }
+                if (element is GqlParenthesizedPathPattern group) { pending.Push(group.Pattern); }
+            }
+        }
+        return false;
+    }
+
+    private static bool ContainsUnboundedQuantifier(GqlPathPattern path)
+    {
+        var pending = new Stack<GqlPathPattern>();
+        pending.Push(path);
+        while (pending.TryPop(out var current))
+        {
+            if (current.Relationships.Any(edge => edge.Quantifier is { Max: null })) { return true; }
+            foreach (var element in current.Elements ?? [])
+            {
+                if (element is GqlPathRelationship { Pattern.Quantifier: { Max: null } } ||
+                    element is GqlParenthesizedPathPattern { Quantifier: { Max: null } }) { return true; }
                 if (element is GqlParenthesizedPathPattern group) { pending.Push(group.Pattern); }
             }
         }

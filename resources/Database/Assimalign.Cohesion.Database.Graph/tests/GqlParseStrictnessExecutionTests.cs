@@ -30,8 +30,8 @@ public sealed class GqlParseStrictnessExecutionTests
     // rejects: an undirected tilde edge and a Cypher arrow that used to truncate the statement.
     [InlineData("MATCH (n:Person)~(m) DETACH DELETE n", "CK00001")]
     [InlineData("MATCH (n:Person)-->(m)\nDETACH DELETE n", "CG00008")]
-    [InlineData("MATCH TRAIL (a)-[r]->(b) DETACH DELETE a", "CK00001")]
-    [InlineData("MATCH p = ACYCLIC (a)-[r]->(b) RETURN p", "CK00001")]
+    [InlineData("MATCH (TRAIL (a)-[r]->(b)) DETACH DELETE a", "CK00001")]
+    [InlineData("MATCH p = (ACYCLIC (a)-[r]->(b)) RETURN p", "CK00001")]
     [InlineData("MATCH ALL SHORTEST (a)-[r]->(b) DETACH DELETE b", "CK00001")]
     [InlineData("MERGE (n:Person {name: 'Cara'})", "CK00001")]
     public async Task Execute_StrictnessViolation_FailsAtParseTimeWithoutEffectAsync(string gql, string code)

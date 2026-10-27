@@ -49,6 +49,27 @@ internal sealed class SmokeRunner
         StudioEngines? engines = null;
         try
         {
+            foreach (StudioModel model in new[] { StudioModel.Sql, StudioModel.Documents, StudioModel.Graph })
+            {
+                await runner.StepAsync("splitter", model.FolderName + "-left-arrow", () =>
+                {
+                    // Arrange / Act: SQL and OQL see -- as a comment; GQL sees arrows.
+                    const string script = "  MATCH (a)<-->(b) RETURN a; RETURN 1;";
+                    List<ScriptStatement> statements = ScriptSplitter.Split(script, model);
+
+                    // Assert: retain semicolons, trimming and editor offsets in each language.
+                    int expected = model == StudioModel.Graph ? 2 : 1;
+                    Require(statements.Count == expected && statements[0].Offset == 2
+                        && statements[0].Text == (expected == 2 ? "MATCH (a)<-->(b) RETURN a;" : script.Trim())
+                        && (expected == 1 || statements[1] == new ScriptStatement("RETURN 1;", script.IndexOf("RETURN 1", StringComparison.Ordinal))),
+                        ErrorMessages.ScriptSplitLanguageMismatch);
+                    Require(ScriptSplitter.IsBlank("/* outer /* inner ; */ ; */ -- ;\r ;", model)
+                        && ScriptSplitter.FirstKeyword("/* ; */ ((MATCH (a)<-->(b) RETURN a;", model) == "MATCH",
+                        ErrorMessages.ScriptSplitLanguageMismatch);
+                    return Task.FromResult(true);
+                }).ConfigureAwait(false);
+            }
+
             engines = await runner.StepAsync("engines", "create", () => Task.FromResult(StudioEngines.Create(dataRoot))).ConfigureAwait(false);
             if (engines is not null)
             {
@@ -281,6 +302,21 @@ internal sealed class SmokeRunner
             }
 
             await GraphRoundTripAsync(scope, embedded, "Emb").ConfigureAwait(false);
+
+            // Arrange: a refused GQL arrow must not swallow the following statement (#1647).
+            const string arrowScript = "  MATCH (a)<-->(b) RETURN a; RETURN 1;";
+            await ScriptStepAsync(scope, "split-left-arrow-continue-on-error", embedded, arrowScript,
+                outcomes =>
+                {
+                    // Assert: StopOnError=false still executes the independent RETURN.
+                    if (outcomes.Count != 2 || !outcomes[0].Failed || outcomes[1].Failed || outcomes[1].Skipped
+                        || outcomes[0].StatementOffset != 2 || outcomes[1].StatementOffset != arrowScript.IndexOf("RETURN 1", StringComparison.Ordinal))
+                    {
+                        return ErrorMessages.GqlScriptContinuationFailed;
+                    }
+
+                    return ExpectRows(outcomes[1], 1, row => row.Length == 1 && row[0] == "1");
+                }, allowFailures: true).ConfigureAwait(false);
 
             await StepAsync(scope, "transaction-api-rollback", async () =>
             {

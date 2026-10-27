@@ -11,6 +11,7 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.Database.Indexing;
+using Assimalign.Cohesion.Database.Blob.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Transactions;
 using Assimalign.Cohesion.Database.Types;
 
@@ -43,7 +44,8 @@ public sealed class DocumentProcessTests
     {
         // SearchIndexAsync filters catalog tombstones; only a raw cursor can expose leftover old keys.
         await using var engine = DocumentDatabaseEngine.Create("document-recovery-index", new() { RootPath = root });
-        var database = await engine.OpenDatabaseAsync("crash", CancellationToken.None);
+        var database = await CrashReopen.OpenAsync(Path.Combine(root, "crash", "document.dat"),
+            token => engine.OpenDatabaseAsync("crash", token), CancellationToken.None);
         var latest = new TransactionSnapshot(TransactionSequence.None, TransactionSequence.None, new TransactionSequence(ulong.MaxValue), []);
         var definitions = database.Catalog.GetIndexes(database.Catalog.FindCollection("items", latest).ShouldNotBeNull().Id, latest);
         definitions.Count.ShouldBe(2);
@@ -107,7 +109,13 @@ public sealed class DocumentProcessTests
         var error = process.StandardError.ReadToEndAsync();
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(45));
         try { await process.WaitForExitAsync(timeout.Token); }
-        catch { process.Kill(entireProcessTree: true); throw; }
+        catch
+        {
+            if (!process.HasExited) { process.Kill(entireProcessTree: true); }
+            using var cleanup = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            await process.WaitForExitAsync(cleanup.Token);
+            throw;
+        }
         process.ExitCode.ShouldBe(0, await output + await error);
     }
 }

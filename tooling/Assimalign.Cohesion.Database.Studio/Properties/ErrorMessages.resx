@@ -78,4 +78,6 @@
   <data name="ResultLastRowMismatch" xml:space="preserve"><value>unexpected last row: {0}</value></data>
   <data name="ResultSetMissing" xml:space="preserve"><value>no result set</value></data>
   <data name="DiagnosticsMissing" xml:space="preserve"><value>no diagnostics</value></data>
+  <data name="GqlScriptContinuationFailed" xml:space="preserve"><value>A refused GQL arrow must leave two statements with editor offsets and execute the independent RETURN when StopOnError=false.</value></data>
+  <data name="ScriptSplitLanguageMismatch" xml:space="preserve"><value>Script splitting must follow the workspace language's arrow/comment boundaries and retain statement text and editor offsets.</value></data>
 </root>

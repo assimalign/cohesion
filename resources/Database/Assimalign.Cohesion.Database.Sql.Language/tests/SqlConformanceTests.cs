@@ -21,6 +21,19 @@ public class SqlConformanceTests
 
     // ── The supported-statement corpus ─────────────────────────────────
 
+    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Conformance: binding-only DML sources preserve contextual identifiers (#1714)")]
+    [InlineData("WITH \"recursive\" AS (SELECT id FROM s) DELETE FROM t USING recursive WHERE t.id=recursive.id;")]
+    [InlineData("UPDATE t SET id=s.id FROM s RETURNING \"old\".id;")]
+    [InlineData("DELETE FROM t USING s RETURNING \"new\".id;")]
+    public void Parse_BindingOnlyDmlCorpus_ShouldParseWithoutErrors(string sql)
+    {
+        // Arrange / Act
+        var statement = Parse(sql);
+
+        // Assert
+        statement.Diagnostics.ShouldNotContain(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
+    }
+
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - Conformance: supported statements parse without errors")]
     [InlineData("SELECT * FROM users;", SqlQueryCommandType.Select)]
     [InlineData("SELECT a FROM t UNION SELECT a FROM u;", SqlQueryCommandType.Select)]

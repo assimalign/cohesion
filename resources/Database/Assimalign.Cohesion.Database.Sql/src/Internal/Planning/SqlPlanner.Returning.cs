@@ -27,6 +27,24 @@ internal sealed partial class SqlPlanner
         return BindProjections(returning, table.Columns, evaluator);
     }
 
+    private IReadOnlyList<SqlProjection>? BindSourceReturning(IReadOnlyList<SqlSelectColumn>? returning,
+        SqlDmlSource source, SqlTableReference target)
+    {
+        if (returning is null) { return null; }
+        foreach (var column in returning)
+        {
+            if (ContainsAggregate(column.Expression))
+            {
+                throw new SqlPlanningException("CS05017", ErrorMessages.ReturningAggregate, column.Expression.Location);
+            }
+        }
+        var associations = source.Associations;
+        var evaluator = DmlEvaluator(associations.Columns, associations.Bindings, target, foldConstants: false);
+        // PostgreSQL parse_target.c:1301-1321 expands the visible namespace, preserving
+        // merged USING output order rather than exposing every physical association slot.
+        return BindProjections(returning, associations.Columns, evaluator, source.VisibleOrdinals);
+    }
+
     private List<SqlProjection> BindProjections(IReadOnlyList<SqlSelectColumn> selectColumns,
         IReadOnlyList<SqlCatalogColumn> columns, SqlExpressionEvaluator evaluator, IReadOnlyList<int>? outputOrdinals = null)
     {

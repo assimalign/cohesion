@@ -24,6 +24,9 @@ public class OqlLanguageProfileTests
     }
 
     [Theory]
+    [InlineData(OqlClauses.Begin)]
+    [InlineData(OqlClauses.Commit)]
+    [InlineData(OqlClauses.Rollback)]
     [InlineData(OqlClauses.Insert)]
     [InlineData(OqlClauses.Upsert)]
     [InlineData(OqlClauses.Update)]

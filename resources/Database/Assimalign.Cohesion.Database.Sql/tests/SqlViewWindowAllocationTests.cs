@@ -1,5 +1,6 @@
 #if !DEBUG
 using System;
+using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -9,21 +10,29 @@ using Assimalign.Cohesion.Database.Sql.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Transactions;
 using Shouldly;
 using Xunit;
+using Xunit.Abstractions;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 [Collection(nameof(SqlDatabaseEventSourceCollection))]
 public sealed class SqlViewWindowAllocationTests
 {
+    private readonly ITestOutputHelper _output;
+
+    public SqlViewWindowAllocationTests(ITestOutputHelper output)
+    {
+        _output = output;
+    }
+
     [Theory(DisplayName = "Cohesion Test [Sql] - View windows: cancellable INSERT seek and aggregate allocate zero extra startup bytes")]
     [InlineData("INSERT INTO sink SELECT id FROM items WHERE id = -1")]
     [InlineData("SELECT id FROM items WHERE id = 1")]
     [InlineData("SELECT COUNT(*) FROM items")]
     public async Task ExecuteAsync_NoWindowWithApplicationFunction_ShouldAddZeroBytes(string sql)
     {
-        // Arrange: the empty INSERT SELECT exercises cancellable INSERT dispatch without page,
-        // journal or ledger growth obscuring its startup allocations. The reference dispatcher
-        // omits only window startup, retaining all current statement work.
+        // Arrange: the empty INSERT SELECT exercises cancellable INSERT dispatch without page
+        // or ledger growth. Physical transaction brackets still append journal records; both
+        // dispatchers retain that work, and the reference omits only window startup.
         var builder = SqlDatabaseEngine.CreateBuilder("view-window-allocations");
         builder.Functions.Add(SqlScalarFunction.Create("application_value", static (int value) => value));
         await using var engine = await builder.BuildAsync(CancellationToken.None);
@@ -44,18 +53,33 @@ public sealed class SqlViewWindowAllocationTests
             if (actualPlan is SqlSelectPlan select) { select.Access.ShouldBeOfType<SqlIndexSeekPath>(); }
             var executor = new SqlPlanExecutor(actual.DataStorage, actual.Catalog, actual.IndexManager, actual.Definitions);
             var baseline = new SqlPlanExecutor(reference.DataStorage, reference.Catalog, reference.IndexManager, reference.Definitions);
+            var actualRounds = new (long Bytes, int Collections)[3];
+            var referenceRounds = new (long Bytes, int Collections)[3];
             Measure(100, false);
             Measure(100, true);
 
             // Act
             long actualBytes = long.MaxValue, referenceBytes = long.MaxValue;
-            for (int round = 0; round < 3; round++)
+            for (int round = 0; round < actualRounds.Length; round++)
             {
-                referenceBytes = Math.Min(referenceBytes, Measure(1_000, true));
-                actualBytes = Math.Min(actualBytes, Measure(1_000, false));
+                int collections = GC.CollectionCount(0);
+                long measured = Measure(1_000, true);
+                referenceRounds[round] = (measured, GC.CollectionCount(0) - collections);
+                referenceBytes = Math.Min(referenceBytes, measured);
+                collections = GC.CollectionCount(0);
+                measured = Measure(1_000, false);
+                actualRounds[round] = (measured, GC.CollectionCount(0) - collections);
+                actualBytes = Math.Min(actualBytes, measured);
             }
 
             // Assert
+            // Write only after all measurements, keeping output allocations out of every round.
+            _output.WriteLine($"Architecture: {RuntimeInformation.ProcessArchitecture}; runtime: {RuntimeInformation.FrameworkDescription}.");
+            for (int round = 0; round < actualRounds.Length; round++)
+            {
+                _output.WriteLine($"Round {round + 1}: actual {actualRounds[round].Bytes} bytes ({actualRounds[round].Collections} Gen0 collections); reference {referenceRounds[round].Bytes} bytes ({referenceRounds[round].Collections} Gen0 collections).");
+            }
+            _output.WriteLine($"Minima: actual {actualBytes} bytes; reference {referenceBytes} bytes; delta {actualBytes - referenceBytes} bytes.");
             (actualBytes - referenceBytes).ShouldBe(0);
 
             long Measure(int count, bool useReference)

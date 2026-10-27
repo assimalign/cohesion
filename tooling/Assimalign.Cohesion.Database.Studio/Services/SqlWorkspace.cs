@@ -121,7 +121,7 @@ internal sealed class SqlWorkspace : LanguageWorkspace
         }
 
         SqlConnection connection = await EnsureConnectionAsync(cancellationToken).ConfigureAwait(false);
-        string keyword = ScriptSplitter.FirstKeyword(outcome.Statement);
+        string keyword = ScriptSplitter.FirstKeyword(outcome.Statement, StudioModel.Sql);
 
         try
         {

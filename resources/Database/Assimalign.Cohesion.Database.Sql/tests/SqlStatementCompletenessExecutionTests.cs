@@ -76,7 +76,7 @@ public sealed class SqlStatementCompletenessExecutionTests
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - Completeness: a statement with leftover text reports CS00003 and changes nothing")]
     [InlineData("DELETE FROM t WHRE id = 1;")]
     [InlineData("UPDATE t SET name = 'z' WHRE id = 1;")]
-    [InlineData("UPDATE t SET name = u.name FROM u WHERE t.id = u.id;")]
+    [InlineData("UPDATE t SET name = u.name FROM u FROM v WHERE t.id = u.id;")]
     [InlineData("DELETE FROM t WHERE id = :id;")]
     [InlineData("UPDATE t SET name = :name WHERE id = 1;")]
     [InlineData("DELETE FROM t WHERE id = 1; DELETE FROM t;")]

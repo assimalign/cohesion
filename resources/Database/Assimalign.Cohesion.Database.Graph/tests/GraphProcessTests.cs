@@ -39,7 +39,13 @@ public sealed class GraphProcessTests
         var error = process.StandardError.ReadToEndAsync();
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(45));
         try { await process.WaitForExitAsync(timeout.Token); }
-        catch { process.Kill(entireProcessTree: true); throw; }
+        catch
+        {
+            if (!process.HasExited) { process.Kill(entireProcessTree: true); }
+            using var cleanup = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            await process.WaitForExitAsync(cleanup.Token);
+            throw;
+        }
         process.ExitCode.ShouldBe(0, await output + await error);
     }
 }

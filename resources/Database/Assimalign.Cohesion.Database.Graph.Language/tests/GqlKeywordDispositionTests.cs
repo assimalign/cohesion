@@ -100,7 +100,9 @@ public sealed class GqlKeywordDispositionTests
         ["ALTER"] = Rejects("ALTER GRAPH g", "ALTER"),
         ["GRANT"] = Rejects("GRANT READ ON GRAPH g TO u", "GRANT"),
         ["REVOKE"] = Rejects("REVOKE READ ON GRAPH g FROM u", "REVOKE"),
-        ["BEGIN"] = Rejects("BEGIN TRANSACTION", "BEGIN"),
+        ["BEGIN"] = Parses("BEGIN TRANSACTION"),
+        ["START"] = Parses("START TRANSACTION"),
+        ["TRANSACTION"] = Parses("BEGIN TRANSACTION"),
         ["COMMIT"] = Parses("COMMIT"),
         ["ROLLBACK"] = Parses("ROLLBACK"),
         ["FINISH"] = Rejects("MATCH (a) FINISH", "FINISH"),
@@ -118,10 +120,10 @@ public sealed class GqlKeywordDispositionTests
         ["CATALOG"] = Rejects("CREATE CATALOG c", "CATALOG"),
         // ISO/IEC 39075 delete, path and edge constructs
         ["NODETACH"] = Rejects("MATCH (n) NODETACH DELETE n", "NODETACH DELETE"),
-        ["WALK"] = Rejects("MATCH WALK (a)-[]->(b) RETURN a", "WALK PATH MODE"),
-        ["TRAIL"] = Rejects("MATCH TRAIL (a)-[]->(b) RETURN a", "TRAIL PATH MODE"),
-        ["SIMPLE"] = Rejects("MATCH SIMPLE (a)-[]->(b) RETURN a", "SIMPLE PATH MODE"),
-        ["ACYCLIC"] = Rejects("MATCH ACYCLIC (a)-[]->(b) RETURN a", "ACYCLIC PATH MODE"),
+        ["WALK"] = Parses("MATCH WALK (a)-[]->(b) RETURN a"),
+        ["TRAIL"] = Parses("MATCH TRAIL (a)-[]->(b) RETURN a"),
+        ["SIMPLE"] = Parses("MATCH SIMPLE (a)-[]->(b) RETURN a"),
+        ["ACYCLIC"] = Parses("MATCH ACYCLIC (a)-[]->(b) RETURN a"),
         ["~"] = Rejects("MATCH (a)~[r]~(b) RETURN a", GqlUnsupportedVocabulary.UndirectedEdge),
         ["CARDINALITY"] = Rejects("RETURN cardinality(1)", "FUNCTION cardinality"),
         ["LTRIM"] = Rejects("RETURN ltrim(1)", "FUNCTION ltrim"),
@@ -233,7 +235,7 @@ public sealed class GqlKeywordDispositionTests
 
         // Act / Assert
         GqlUnsupportedVocabulary.Words
-            .Where(word => word.Position is GqlWordPosition.PathMode or GqlWordPosition.BeforeDelete && keywords.Contains(word.Spelling))
+            .Where(word => word.Position == GqlWordPosition.BeforeDelete && keywords.Contains(word.Spelling))
             .Select(word => word.Spelling)
             .ShouldBeEmpty();
     }
@@ -298,6 +300,8 @@ public sealed class GqlKeywordDispositionTests
         => GqlLanguageProfile.Instance.Keywords.ToArray()
             .Concat(GqlUnsupportedVocabulary.Words.Select(word => word.Spelling))
             .Concat(GqlLabelVocabulary.Spellings)
+            .Concat(GqlTransactionVocabulary.Spellings)
+            .Concat(Enum.GetNames<GqlPathMode>())
             .Append("EXPLAIN") // Contextual statement prefix; identifier cases live in this corpus too.
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();

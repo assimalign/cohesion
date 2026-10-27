@@ -323,7 +323,7 @@ internal sealed class QueryPage : ContentPage
         }
 
         (string text, int start, int length) = GetRunRange();
-        if (length == 0 || ScriptSplitter.IsBlank(text.Substring(start, length)))
+        if (length == 0 || ScriptSplitter.IsBlank(text.Substring(start, length), _model))
         {
             _messages.Add("Nothing to run.", MessageKind.Warning);
             return;
@@ -367,8 +367,8 @@ internal sealed class QueryPage : ContentPage
         }
     }
 
-    private static bool IsDdl(string statement)
-        => ScriptSplitter.FirstKeyword(statement) is "CREATE" or "DROP" or "ALTER" or "INSERT";
+    private bool IsDdl(string statement)
+        => ScriptSplitter.FirstKeyword(statement, _model) is "CREATE" or "DROP" or "ALTER" or "INSERT";
 
     private void Render(List<StatementOutcome> outcomes, double totalMs)
     {

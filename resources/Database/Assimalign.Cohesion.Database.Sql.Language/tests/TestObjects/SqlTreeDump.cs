@@ -55,6 +55,9 @@ internal static class SqlTreeDump
             case SqlLiteralExpression literal:
                 builder.Append("Literal(").Append(literal.LiteralType).Append(", ").Append(Text(literal.Value)).Append(')');
                 break;
+            case SqlDefaultExpression:
+                builder.Append("Default");
+                break;
             case SqlColumnReferenceExpression column:
                 builder.Append("Column(").Append(Text(column.SchemaName)).Append(", ").Append(Text(column.TableAlias))
                        .Append(", ").Append(Text(column.ColumnName)).Append(')');

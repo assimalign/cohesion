@@ -12,7 +12,7 @@ var statement = (GqlQueryStatement)parser.Parse(
 ```
 
 The supported surface is ordered MATCH and OPTIONAL MATCH clauses with clause-local WHERE and
-null extension, quantified relationships/subpaths under trail semantics (ISO {m,n}, +, *, Cypher *m..n), and named paths such as
+null extension, WALK/TRAIL/SIMPLE/ACYCLIC modes (implicit TRAIL), quantified relationships/subpaths (ISO {m,n}, +, *, Cypher *m..n), and named paths such as
 `MATCH p = (a)-[r:KNOWS]->(b) RETURN p`, ISO label expressions such as `(n:(A|B)&!C)`, `(n:%)` and
 `-[r:T|U]->`, every directed ISO edge in full and abbreviated form (`->`, `<-`, `-`, `<->`), scalar
 Boolean, arithmetic, null/truth, list-membership and string filters and labeled predicates (`n IS NOT LABELED A`, `n:A|B`),
@@ -48,7 +48,7 @@ The engine defaults are 256 MiB retained memory and 1,000,000 physical work unit
 bindings stream and an unordered LIMIT can stop upstream work; final results remain materialized.
 This changes no grammar or wire bytes; remote execution uses the server engine ceilings.
 
-Standalone START TRANSACTION, COMMIT and ROLLBACK parse into GqlTransactionCommand and run through the existing session transaction API, including over Execute (#1540).
+Standalone BEGIN [TRANSACTION] / START TRANSACTION, COMMIT and ROLLBACK parse into GqlTransactionCommand and run through the existing session transaction API, including over Execute (#1540, #1725).
 
 ## Graph diagnostic conventions (#1470)
 

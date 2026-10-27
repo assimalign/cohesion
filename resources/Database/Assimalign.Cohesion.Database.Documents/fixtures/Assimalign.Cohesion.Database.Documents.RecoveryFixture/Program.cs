@@ -1,10 +1,12 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database;
+using Assimalign.Cohesion.Database.Blob.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Documents;
 using Assimalign.Cohesion.Database.Documents.Catalog;
 using Assimalign.Cohesion.Database.Documents.RecoveryFixture;
@@ -64,7 +66,8 @@ if (args[0] == "seed")
 }
 else if (args[0] == "verify")
 {
-    var database = await engine.OpenDatabaseAsync("crash");
+    var database = await CrashReopen.OpenAsync(Path.Combine(args[1], "crash", "document.dat"),
+        token => engine.OpenDatabaseAsync("crash", token), CancellationToken.None);
     await using var session = await database.CreateSessionAsync();
     var collection = await session.GetCollectionAsync("items");
     var document = await collection.GetAsync(session, "committed");

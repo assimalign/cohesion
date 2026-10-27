@@ -160,6 +160,22 @@ failure over InMemory and TCP (#1135).
 
 ## Failures and pooling
 
+### Text transaction gate (#1725 T1)
+
+The OQL parser now recognizes BEGIN/START, COMMIT and ROLLBACK for in-process sessions.
+Until OQ-T2 supplies negotiated Ready transaction status and family-aware pooled reset, the
+Documents server refuses these commands with ExecutionFailure and CD07002 before opening a
+transaction. A decoded refusal leaves the same pooled session reusable. MERGE and other
+unsupported syntax retain ParseFailure with CK00001. Client failure tests verify both
+classifications, source locations and the same session after the next rental over InMemory and TCP.
+The telemetry parse-refusal test uses MERGE so it still exercises StatementParseFailed.
+
+The NativeAOT sample checks in-process default Snapshot and explicit READ COMMITTED control,
+then checks the wire refusal on both transports. No client runtime member, shared-client reset
+logic, protocol layout or capability advertisement changes in T1.
+
+### Terminal response ownership
+
 The typed connection captures its immutable database name when it receives the shared lease
 (#1313). Operation diagnostics can finish after disposal returns that lease, whose members then
 refuse access. The cached name keeps diagnostics independent of the returned rental.

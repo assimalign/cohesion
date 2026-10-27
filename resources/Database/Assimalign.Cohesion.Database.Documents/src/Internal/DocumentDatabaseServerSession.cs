@@ -423,6 +423,12 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
                         DocumentDatabaseEventSource.Log.StatementParseFailed(this, _databaseSession!.Database.Name, error);
                         throw error;
                     }
+                    // Until Documents negotiates transaction status and pooled reset is family-aware,
+                    // no wire borrower may leave an explicit transaction on a pooled session (#1725 T2).
+                    if (statement.OqlExpression is OqlTransactionExpression transaction)
+                    {
+                        throw new DocumentPlanningException("CD07002", ErrorMessages.TextTransactionWireUnavailable, transaction.Location);
+                    }
                     return new DocumentQueryRequest(statement, parameters);
                 }, cancellationToken).ConfigureAwait(false);
                 await WriteResultAsync(result, cancellationToken).ConfigureAwait(false);

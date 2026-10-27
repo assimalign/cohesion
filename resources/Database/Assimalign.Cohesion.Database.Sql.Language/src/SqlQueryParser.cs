@@ -1099,6 +1099,11 @@ public sealed partial class SqlQueryParser : QueryParser
                 firstToken.Equals("INSERT", StringComparison.OrdinalIgnoreCase) &&
                 token.Equals("VALUES", StringComparison.OrdinalIgnoreCase);
 
+            // FROM/USING and WHERE admit read subqueries; SET still refuses them.
+            dmlWhere |= fromScopes.Count == 0 &&
+                (IsKeyword(ref lexer, "FROM") && firstToken.Equals("UPDATE", StringComparison.OrdinalIgnoreCase) ||
+                 IsKeyword(ref lexer, "USING") && firstToken.Equals("DELETE", StringComparison.OrdinalIgnoreCase));
+
             dmlWhere |= fromScopes.Count == 0 && IsKeyword(ref lexer, "WHERE") &&
                 (firstToken.Equals("UPDATE", StringComparison.OrdinalIgnoreCase) || firstToken.Equals("DELETE", StringComparison.OrdinalIgnoreCase));
 
@@ -1201,6 +1206,8 @@ public sealed partial class SqlQueryParser : QueryParser
                     (inWithDefinitions && fromScopes.Count == 0 &&
                         (string.Equals(previousToken, "WITH", StringComparison.OrdinalIgnoreCase) || previousToken == ",") ||
                      string.Equals(previousToken, "FROM", StringComparison.OrdinalIgnoreCase) ||
+                     string.Equals(previousToken, "USING", StringComparison.OrdinalIgnoreCase) &&
+                        fromScopes.Count == 0 && firstToken.Equals("DELETE", StringComparison.OrdinalIgnoreCase) ||
                      string.Equals(previousToken, "JOIN", StringComparison.OrdinalIgnoreCase) ||
                      string.Equals(previousToken, "AS", StringComparison.OrdinalIgnoreCase) ||
                      inFrom && previousToken == "," || previousToken == "." ||
@@ -1227,7 +1234,8 @@ public sealed partial class SqlQueryParser : QueryParser
             }
             else if (lexer.Current.Type == TokenType.Keyword)
             {
-                if (token.Equals("FROM", StringComparison.OrdinalIgnoreCase)) { inFrom = true; }
+                if (token.Equals("FROM", StringComparison.OrdinalIgnoreCase) ||
+                    token.Equals("USING", StringComparison.OrdinalIgnoreCase) && fromScopes.Count == 0 && firstToken.Equals("DELETE", StringComparison.OrdinalIgnoreCase)) { inFrom = true; }
                 else if (token.Equals("WHERE", StringComparison.OrdinalIgnoreCase) ||
                     token.Equals("GROUP", StringComparison.OrdinalIgnoreCase) ||
                     token.Equals("HAVING", StringComparison.OrdinalIgnoreCase) ||

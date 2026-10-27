@@ -20,15 +20,18 @@ public sealed class SqlDeleteExpression : SqlQueryExpression
     /// <param name="text">The raw statement text.</param>
     /// <param name="location">The source location.</param>
     /// <param name="returning">The written-row projection, if specified.</param>
+    /// <param name="sources">The USING sources, if specified.</param>
     internal SqlDeleteExpression(
         SqlTableReference table,
         SqlExpression? where,
         string? text,
         Location? location,
-        IReadOnlyList<SqlSelectColumn>? returning = null)
+        IReadOnlyList<SqlSelectColumn>? returning = null,
+        IReadOnlyList<SqlFromItem>? sources = null)
         : base(SqlQueryCommandType.Delete, text, location)
     {
         Table = table;
+        Using = sources ?? [];
         Returning = returning;
         Where = where;
     }
@@ -37,6 +40,9 @@ public sealed class SqlDeleteExpression : SqlQueryExpression
     /// Gets the target table reference.
     /// </summary>
     public SqlTableReference Table { get; }
+
+    /// <summary>Gets the comma-separated USING sources and their join trees; empty when absent.</summary>
+    public IReadOnlyList<SqlFromItem> Using { get; }
 
     /// <summary>Gets the written-row projection, or null when RETURNING is absent.</summary>
     public IReadOnlyList<SqlSelectColumn>? Returning { get; }

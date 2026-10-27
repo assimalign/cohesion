@@ -88,6 +88,24 @@ A StorageIOException or IOException while opening storage crosses the engine bou
 DatabaseException with structured CB06005 diagnostics (#1364). Open releases any acquired
 file set and publishes no database, so callers may resolve the I/O condition and retry.
 
+The process-crash harness retries that actual open only for an underlying sharing or lock
+violation (HRESULT 0x80070020/0x80070021, or the current platform's EWOULDBLOCK/EAGAIN errno:
+11 on Linux, 35 on macOS), including coded wrappers (#1713). .NET 10's Unix FileShare advisory
+lock path stores the raw errno in IOException.HResult (see .NET 10's
+[advisory lock handling](https://github.com/dotnet/runtime/blob/v10.0.0/src/libraries/System.Private.CoreLib/src/Microsoft/Win32/SafeHandles/SafeFileHandle.Unix.cs#L312-L325)
+and [errno translation](https://github.com/dotnet/runtime/blob/v10.0.0/src/libraries/Common/src/Interop/Unix/Interop.IOErrors.cs#L133-L136)).
+Classification tests cover each platform's codes and reject foreign Unix errnos. The test-only
+`CrashReopen` source is linked into the Blob.Client tests and Documents/Graph verifier fixtures
+through the existing Compile/Link mechanism. A successful open decides readiness; retries are
+paced at 25 ms with a 30-second hang guard naming the file and last error. Each attempt runs on
+the thread pool and is raced against both guard and caller cancellation, including an open
+that blocks synchronously or ignores its token. A detached observer consumes a late failure or
+disposes a late successful database/engine (asynchronously when supported). Mid-open regressions
+hold both synchronous and asynchronous opens past cancellation and verify late disposal. Other
+I/O, corruption, permission and mixed aggregate failures propagate immediately. Engine open
+behavior and CB06005 are unchanged; a held-file regression proves refusal before release and
+successful retry after release, while a persistent-failure test pins timeout diagnostics.
+
 
 Storage corruption is `CK06003` (#1160). The engine translates a
 `StorageCorruptionException` into `DatabaseCorruptionException`, retaining the storage
