@@ -11,6 +11,7 @@ using Assimalign.Cohesion.Database.Documents.Catalog;
 using Assimalign.Cohesion.Database.Documents.Internal;
 using Assimalign.Cohesion.Database.Documents.Language;
 using Assimalign.Cohesion.Database.Execution;
+using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Documents.Tests;
 
@@ -288,6 +289,48 @@ public sealed partial class DocumentQueryTests
         }
         else { fetches.ShouldBe(256); }
         (await PlanAsync(database, query, parameters)).Access.ShouldBeOfType<DocumentIndexPath>();
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Documents] - Typed array paths render reparsable catalog DDL (#1530)")]
+    [InlineData("arr", "odd-name", "is-live", "arr", "['odd-name']", "['is-live']")]
+    [InlineData("root.odd-name", "price", "stock", "root['odd-name']", "price", "stock")]
+    [InlineData("root.select", "from", "when", "root.select", "from", "when")]
+    [InlineData("根.配列", "価格", "有効", "根.配列", "価格", "有効")]
+    [InlineData("['a.b'][0]['a''b']", "['x.y'][1]['a\"b']", "['is.live']", "['a.b'][0]['a''b']", "['x.y'][1]['a\"b']", "['is.live']")]
+    public async Task Execute_TypedArrayMetadata_ShouldRoundTripPaths(string source, string projection, string filter,
+        string canonicalSource, string canonicalProjection, string canonicalFilter)
+    {
+        // Arrange.
+        await using var engine = DocumentDatabaseEngine.Create("typed-array-rendering", new());
+        var database = await engine.CreateDatabaseAsync("test");
+        await using var session = await database.CreateSessionAsync();
+        await session.CreateCollectionAsync("items");
+        var key = DocumentIndexKey.DistinctArray(source, projection,
+            DocumentIndexPredicate.Compare(filter, DocumentIndexComparison.GreaterThan, 0m));
+        var writer = await database.Coordinator.BeginAsync(IsolationLevel.Snapshot, CancellationToken.None);
+        try
+        {
+            await database.LockWriterAsync(writer, CancellationToken.None);
+            var parent = database.Catalog.FindCollection("items", writer.Snapshot)!.Value.Id;
+            await database.Catalog.CreateIndexAsync(parent, "ix", [key], false, false, writer, CancellationToken.None);
+            await database.Coordinator.CommitAsync(writer, CancellationToken.None);
+        }
+        finally
+        {
+            if (writer.State == TransactionState.Active)
+            { await database.Coordinator.RollbackAsync(writer, CancellationToken.None); }
+        }
+
+        // Act.
+        string rendered = (await RowsAsync(session, "SELECT PATH FROM COHESION_SCHEMA.INDEXES")).Single().GetString(0)!;
+        var parsed = (OqlQueryStatement)new OqlQueryParser().Parse($"CREATE INDEX copy ON items ({rendered})");
+
+        // Assert: canonical catalog paths identify the same source, projection and WHEN leaf.
+        parsed.Diagnostics.ShouldBeEmpty();
+        var copy = parsed.OqlExpression.ShouldBeOfType<OqlCreateIndexExpression>();
+        DocumentArrayIndexExpressions.BindKey(copy.Keys[0]).ShouldBe(DocumentIndexKey.DistinctArray(canonicalSource,
+            canonicalProjection, DocumentIndexPredicate.Compare(canonicalFilter, DocumentIndexComparison.GreaterThan, 0m)));
+        await session.ExecuteAsync($"CREATE INDEX copy ON items ({rendered})", cancellationToken: CancellationToken.None);
     }
 
     [Theory(DisplayName = "Cohesion Test [Documents] - Same-element residual and WHEN match have measured fetch limits (#1530)")]

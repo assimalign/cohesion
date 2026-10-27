@@ -2366,7 +2366,9 @@ residual on each candidate, preserving same-element semantics even with price an
 elements. UNNEST expands the stored array after deduplication, keeping `[1,1,2]` as three rows.
 EXPLAIN prints canonical DISTINCT ARRAY keys and `distinct_documents=True; array_residual=True`;
 estimates still count physical postings, which may exceed document counts. System PATH/PATHS render
-the same normalized keys with a canonical `v` variable and quoted source root.
+the same normalized keys with a canonical `v` variable and quoted source root. Rendering parses
+every catalog path segment, retaining integer subscripts and quoting punctuation, keywords,
+Unicode and embedded quotes in source, projection and WHEN paths so typed definitions reparse.
 
 Ungrouped, non-DISTINCT pages with fixed projection types (including META().id) can stop after
 OFFSET + LIMIT residual survivors when there is no ORDER BY or the sole ordering is document

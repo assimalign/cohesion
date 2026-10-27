@@ -348,6 +348,8 @@ as NOT plus the test). Binding failures use CD01028, unsupported constants CD020
 expression failures CD03027 and predicate size failures CD03028, all located before catalog writes.
 Multiple array keys and UNIQUE array indexes use CD03025. INCLUDE MISSING syntax remains deferred.
 PATH/PATHS render normalized array keys with a canonical `v` binding and a quoted source root.
+Source, projection and WHEN path segments containing punctuation, keywords, Unicode or quotes
+are quoted individually, preserving typed catalog definitions as executable DDL.
 
 Top-level conjunctive ANY/SOME predicates match source/projection paths independently of variable
 names. Separate ANY scopes keep separate witnesses. Direct document-path UNNEST (including LEFT

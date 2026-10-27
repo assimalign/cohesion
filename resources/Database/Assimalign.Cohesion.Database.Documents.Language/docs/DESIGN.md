@@ -821,6 +821,11 @@ preserves an existing name even if the requested definition differs. Conditional
 a no-op; an existing schema-owned index still refuses removal. All snapshot conflicts precede no-ops.
 The dialect page and execution conformance corpus carry the same executable contract.
 
+Array-index catalog DDL rendering quotes individual source, projection and WHEN path segments
+when needed, including keyword, punctuated and Unicode names admitted by the typed catalog API.
+The engine's catalog round-trip corpus binds the rendered syntax back to the same canonical paths
+and filter descriptor, including integer subscripts and doubled identifier/string quotes (#1530).
+
 ## Verification and extension
 
 `OqlQueryParserTests` and `OqlIndexDdlParserTests` contain valid and malformed query/index-DDL

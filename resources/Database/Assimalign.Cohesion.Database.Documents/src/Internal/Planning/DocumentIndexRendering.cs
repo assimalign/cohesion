@@ -1,7 +1,9 @@
 using System;
 using System.Globalization;
+using System.Text;
 
 using Assimalign.Cohesion.Database.Documents.Catalog;
+using Assimalign.Cohesion.Database.Documents.Language;
 
 namespace Assimalign.Cohesion.Database.Documents.Internal;
 
@@ -12,25 +14,38 @@ internal static class DocumentIndexRendering
         $"DISTINCT ARRAY {Element(key.Path)} FOR v IN {Source(key.ArraySource)}" +
         (key.When is null ? string.Empty : $" WHEN {Predicate(key.When)}") + " END";
 
-    private static string Element(string path) => "v" + (path.Length == 0 || path[0] == '[' ? string.Empty : ".") + path;
+    private static string Element(string path) => path.Length == 0 ? "v" : Path(path, "v");
 
-    private static string Source(string path)
+    private static string Source(string path) => Path(path, string.Empty);
+
+    private static string Path(string path, string prefix)
     {
-        // Quote the root name so a contextual/keyword-shaped property round-trips.
-        if (path.StartsWith("['", StringComparison.Ordinal))
+        var builder = new StringBuilder(prefix);
+        foreach (var segment in DocumentIndexKeys.ParsePath(path))
         {
-            int end = 2;
-            var name = new System.Text.StringBuilder();
-            while (end < path.Length)
+            if (segment is string name)
             {
-                char next = path[end++];
-                if (next != '\'') { name.Append(next); continue; }
-                if (end < path.Length && path[end] == '\'') { name.Append('\''); end++; continue; }
-                return Quote(name.ToString()) + path[(end + 1)..];
+                bool root = builder.Length == 0;
+                if (!root) { builder.Append('.'); }
+                builder.Append(root || !PlainIdentifier(name) ? Quote(name) : name);
             }
+            else { builder.Append('[').Append(segment).Append(']'); }
         }
-        int split = path.IndexOfAny(['.', '[']);
-        return split < 0 ? Quote(path) : Quote(path[..split]) + path[split..];
+        return builder.ToString();
+    }
+
+    private static bool PlainIdentifier(string name)
+    {
+        if (name.Length == 0 || !(char.IsAsciiLetter(name[0]) || name[0] == '_')) { return false; }
+        foreach (char character in name)
+        {
+            if (!(char.IsAsciiLetterOrDigit(character) || character == '_')) { return false; }
+        }
+        foreach (string keyword in OqlLanguageProfile.Instance.Keywords)
+        {
+            if (name.Equals(keyword, StringComparison.OrdinalIgnoreCase)) { return false; }
+        }
+        return true;
     }
 
     private static string Quote(string name) => "\"" + name.Replace("\"", "\"\"", StringComparison.Ordinal) + "\"";
