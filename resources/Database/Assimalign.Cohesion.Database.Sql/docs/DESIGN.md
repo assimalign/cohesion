@@ -6766,7 +6766,12 @@ Schema application and maintenance share fail-fast admission; session DDL is exc
 the operation. Ordinary readers retain their snapshot layouts. Writers that bound a retired owner,
 including transactions begun before publication, abort retryably with CS04006 after waiting
 for table X; retry the entire transaction against a fresh snapshot. The lock
-and latch order is established in SqlPlanExecutor.RewriteTableAsync. Database disposal cancels
+and latch order in SqlPlanExecutor.RewriteTableAsync is fail-fast schema admission, source-table
+X before queueing, fail-fast EnterMetadata on the worker, then reserved-table X and data apply.
+EnterMetadata must not wait while source-table X is held: definition DDL can own metadata
+while waiting for that table. Catalog reservation/publication hold only their inner catalog
+monitor and storage bracket, and no data apply gate or tree/page latch spans publication.
+Database disposal cancels
 queued work, claims it if the pump stopped, and joins in-flight cleanup before storage closes.
 The provisioning FIFO uses a short queue monitor and removable rewrite nodes: cancellation
 unlinks queued work immediately, so a stalled peer cannot retain canceled database graphs or
@@ -6816,7 +6821,9 @@ committed visibility for read-committed ON CONFLICT). An invisible replacement a
 CS04006 instead of reporting a false FK violation; empty input and MATCH SIMPLE null keys
 need no parent probe and can commit. Seeing the newest ordered publication marker skips all
 retained owners in constant work; older snapshots use an allocation-free indexed scan.
-Hook-driven regressions pause between parent discovery and IS grant and cover retained parent versions.
+Hook-driven regressions pause child INSERT, child DELETE and a parent DELETE binding a rewriting
+child between discovery and IS grant, assert rediscovery, and verify rollback cannot restore an
+orphan. Parent DELETE must wait for the child's shared lock on the replacement parent's row.
 The null-key shortcut follows local PostgreSQL src/backend/utils/adt/ri_triggers.c:458-496;
 no reference-engine code is copied.
 Existing codes retain their conditions. SQL remains format 26: ordinary dense table records,
@@ -6833,7 +6840,10 @@ admission and every acquired owner. Prepared-owner IDs are captured at reservati
 check their physical pages after reclamation as well as the live owner. A mutation that removes
 intents without freeing pages fails these guards. The independent commit/BEGIN history checks
 exact parent and child rows and values for both snapshot reads and final state while inserts,
-updates, deletes/cascades, FK writes, DDL and TRUNCATE race rewrites. Lost-write and equal-count
+updates, deletes/cascades, FK writes, DDL and TRUNCATE race rewrites. An independent writer updates
+child FK rows without an earlier parent access or lock; its chosen ids and increments join the
+commit history, and successful child-only writes are required before the run can finish.
+Lost-write and equal-count
 resurrection fault modes exercise the same oracle, including the two-row false-prefix case.
 NativeAOT smoke executes compaction and a rebuilt seek.
 The exclusive rewrite follows local PostgreSQL tablecmds.c:4681-4691,6049,6186; preserving old

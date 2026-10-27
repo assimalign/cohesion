@@ -358,14 +358,17 @@ public sealed partial class SqlTableRewriteTests
         await ExecAsync(session, "INSERT INTO child VALUES (1,1,12),(2,2,22)", timeout.Token);
         int attempts = 2, written = 0, snapshots = 0, prepared = 0, rewrites = 0, ddl = 0, truncations = 0;
         int maintenancePasses = 0, maintenanceBusy = 0;
+        int childWrites = 0, childCommits = 0;
         long sequence = 0;
-        var history = new List<(long Commit, int? Id)>(); // null is an atomic TRUNCATE CASCADE.
+        // No Id/ChildId means atomic TRUNCATE CASCADE; ChildId records an independent
+        // child's increment, chosen from committed history rather than observed rows.
+        var history = new List<(long Commit, int? Id, int? ChildId)>();
         var reads = new List<(long Snapshot, (int Id, int Value)[] Parents, (int Id, int Parent, int Value)[] Children)>();
         bool truncateOwnsHistory = false;
         SqlPlanExecutor.TruncateReserved = () => { historyGate.Wait(timeout.Token); truncateOwnsHistory = true; };
         SqlPlanExecutor.TruncatePublished = () =>
         {
-            history.Add((++sequence, null));
+            history.Add((++sequence, null, null));
             Interlocked.Increment(ref truncations);
             truncateOwnsHistory = false;
             historyGate.Release();
@@ -406,8 +409,39 @@ public sealed partial class SqlTableRewriteTests
                     try
                     {
                         await transaction.CommitAsync(stop.Token);
-                        history.Add((++sequence, id));
+                        history.Add((++sequence, id, null));
                         Interlocked.Increment(ref written);
+                    }
+                    finally { historyGate.Release(); }
+                }
+                catch (OperationCanceledException) when (stop.IsCancellationRequested) { break; }
+                catch (DatabaseException error) when (Retryable(error)) { }
+            }
+        }, timeout.Token);
+        var childWriter = DedicatedTestTask.Run(async () =>
+        {
+            await using var concurrent = await database.CreateSessionAsync(timeout.Token);
+            while (!stop.IsCancellationRequested)
+            {
+                try
+                {
+                    int id;
+                    await historyGate.WaitAsync(stop.Token);
+                    try { id = Expected(sequence).LastOrDefault().Id; }
+                    finally { historyGate.Release(); }
+                    if (id == 0) { await Task.Yield(); continue; }
+                    await using var transaction = await concurrent.BeginTransactionAsync(IsolationLevel.ReadCommitted, stop.Token);
+                    // No earlier parent access or table intent: publication can race this
+                    // writer's outgoing-parent discovery, unlike the mixed writer above.
+                    var result = await concurrent.ExecuteAsync(
+                        $"UPDATE child SET pid=pid,value=value+1000 WHERE id={id}", cancellationToken: stop.Token);
+                    await historyGate.WaitAsync(stop.Token);
+                    try
+                    {
+                        await transaction.CommitAsync(stop.Token);
+                        history.Add((++sequence, null, id));
+                        Interlocked.Increment(ref childCommits);
+                        Interlocked.Add(ref childWrites, checked((int)result.AffectedCount));
                     }
                     finally { historyGate.Release(); }
                 }
@@ -465,12 +499,12 @@ public sealed partial class SqlTableRewriteTests
                 catch (DatabaseException error) when (Retryable(error)) { }
             } while (elapsed.Elapsed < TimeSpan.FromSeconds(1) || rewrites < 20 || Volatile.Read(ref written) < 20 ||
                 Volatile.Read(ref snapshots) < 20 || Volatile.Read(ref ddl) < 20 || Volatile.Read(ref truncations) < 10 ||
-                Volatile.Read(ref maintenancePasses) < 20);
+                Volatile.Read(ref maintenancePasses) < 20 || Volatile.Read(ref childWrites) < 20);
         }
         finally
         {
             stop.Cancel();
-            await Task.WhenAll(writer, reader, definitions);
+            await Task.WhenAll(writer, childWriter, reader, definitions);
             SqlPlanExecutor.RewriteStage = null;
             SqlPlanExecutor.TruncateReserved = null;
             SqlPlanExecutor.TruncatePublished = null;
@@ -482,6 +516,8 @@ public sealed partial class SqlTableRewriteTests
         prepared.ShouldBe(rewrites);
         maintenancePasses.ShouldBeGreaterThanOrEqualTo(20);
         written.ShouldBeGreaterThanOrEqualTo(20);
+        childWrites.ShouldBeGreaterThanOrEqualTo(20);
+        childCommits.ShouldBeGreaterThanOrEqualTo(20);
         snapshots.ShouldBeGreaterThanOrEqualTo(20);
         ddl.ShouldBeGreaterThanOrEqualTo(20);
         truncations.ShouldBeGreaterThanOrEqualTo(10);
@@ -493,7 +529,7 @@ public sealed partial class SqlTableRewriteTests
         await ExecAsync(session, $"INSERT INTO t(id,value) VALUES ({finalId},{finalId * 10 + 1})", timeout.Token);
         await ExecAsync(session, $"INSERT INTO child VALUES ({finalId},{finalId},{finalId * 10 + 2})", timeout.Token);
         await ExecAsync(session, $"DELETE FROM t WHERE id={finalId - 2}", timeout.Token);
-        history.Add((++sequence, finalId));
+        history.Add((++sequence, finalId, null));
         if (corruption != 0)
         {
             await ExecAsync(session, $"DELETE FROM t WHERE id={finalId}", timeout.Token);
@@ -508,24 +544,41 @@ public sealed partial class SqlTableRewriteTests
         else { Should.Throw<ShouldAssertException>(() => Verify(final)); }
         if (corruption == 2) { final.Parents.Length.ShouldBe(Expected(sequence).Length); }
         await ReclaimAsync(database, timeout.Token);
-        _output.WriteLine($"fault={corruption}; rewrites={rewrites}; prepared maintenance passes={prepared}; successful maintenance passes={maintenancePasses}; busy passes={maintenanceBusy}; writer attempts={attempts - 2}; committed mixed transactions={written}; inserts={written * 2}; updates={written * 2}; deletes/cascades={written}; FK writes={written * 2}; stable snapshots={snapshots}; exact snapshot reads={reads.Count}; DDL={ddl}; truncations={truncations}");
+        _output.WriteLine($"fault={corruption}; rewrites={rewrites}; prepared maintenance passes={prepared}; successful maintenance passes={maintenancePasses}; busy passes={maintenanceBusy}; writer attempts={attempts - 2}; committed mixed transactions={written}; child-only commits={childCommits}; child-only FK writes={childWrites}; inserts={written * 2}; updates={written * 2}; deletes/cascades={written}; FK writes={written * 2 + childWrites}; stable snapshots={snapshots}; exact snapshot reads={reads.Count}; DDL={ddl}; truncations={truncations}");
 
         (int Id, int Value)[] Expected(long snapshot)
         {
             var values = new Dictionary<int, int> { [1] = 11, [2] = 21 };
             foreach (var change in history.Where(change => change.Commit <= snapshot))
             {
+                if (change.ChildId is not null) { continue; }
                 if (change.Id is not { } id) { values.Clear(); continue; }
                 values.Remove(id - 2);
                 values[id] = id * 10 + 1;
             }
             return values.OrderBy(pair => pair.Key).Select(pair => (pair.Key, pair.Value)).ToArray();
         }
+        (int Id, int Parent, int Value)[] ExpectedChildren(long snapshot)
+        {
+            var values = new Dictionary<int, int> { [1] = 12, [2] = 22 };
+            foreach (var change in history.Where(change => change.Commit <= snapshot))
+            {
+                if (change.ChildId is { } childId)
+                {
+                    if (values.TryGetValue(childId, out int value)) { values[childId] = value + 1000; }
+                    continue;
+                }
+                if (change.Id is not { } id) { values.Clear(); continue; }
+                values.Remove(id - 2);
+                values[id] = id * 10 + 2;
+            }
+            return values.OrderBy(pair => pair.Key).Select(pair => (pair.Key, pair.Key, pair.Value)).ToArray();
+        }
         void Verify((long Snapshot, (int Id, int Value)[] Parents, (int Id, int Parent, int Value)[] Children) read)
         {
             var expected = Expected(read.Snapshot);
             read.Parents.ShouldBe(expected, $"exact parent history at commit {read.Snapshot}");
-            read.Children.ShouldBe(expected.Select(row => (row.Id, row.Id, row.Value + 1)).ToArray(), $"exact child/FK history at commit {read.Snapshot}");
+            read.Children.ShouldBe(ExpectedChildren(read.Snapshot), $"exact child/FK history at commit {read.Snapshot}");
         }
         static bool Retryable(DatabaseException error) => error is DatabaseTransactionAbortedException ||
             error.Diagnostics.Any(diagnostic => diagnostic.Code is "CS04064" or "CS04006");

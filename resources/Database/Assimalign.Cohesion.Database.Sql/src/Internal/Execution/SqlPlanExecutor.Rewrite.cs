@@ -21,8 +21,11 @@ internal sealed partial class SqlPlanExecutor
         CancellationToken cancellationToken, Func<SqlCatalogTable, ulong, SqlCatalogTable>? describe = null,
         Func<object?[], object?[]>? transform = null)
     {
-        // Lock/latch order: schema/metadata admission -> old table X -> reserved table X
-        // -> coordinator apply gate -> index directory/tree latch/page pins. No apply gate
+        // Lock/latch order: fail-fast schema admission -> old table X (before queueing)
+        // -> fail-fast metadata admission (on the worker) -> reserved table X
+        // -> coordinator apply gate -> index directory/tree latch/page pins. EnterMetadata
+        // must not wait under old table X: definition DDL may own metadata while waiting
+        // for that table. No apply gate
         // or page/tree latch spans catalog publication. The snapshot gate precedes the
         // catalog monitor; catalog storage brackets are innermost. The statement epoch
         // and logical transaction pin outlive all copying, directory cleanup and undo.
