@@ -241,6 +241,13 @@ cleanup are cached before reuse. Error identities remain separate from message t
 structured diagnostic carrier exists. Standard .NET guards retain their argument names and exception types.
 Shared Engine source uses the consuming assembly's generated accessor through the internal `EngineErrorMessages` binding; no public resource accessor or cross-assembly internal access is introduced.
 
+## Whole-pattern MERGE (#1735)
+
+MERGE matches one complete fixed path or creates all its unbound parts, then runs ON MATCH or
+ON CREATE SET. It supports bound nodes/relationships, undirected matching, writer overlays and
+retryable stale-Snapshot detection through pattern locks. See the language DIALECT and this
+project's DESIGN for validation, counts, concurrency and EXPLAIN behavior.
+
 ## Graph diagnostic conventions (#1470)
 
 Exception and diagnostic templates use the project's build-generated `ErrorMessages` resources.

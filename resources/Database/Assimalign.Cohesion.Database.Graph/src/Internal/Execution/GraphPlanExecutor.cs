@@ -93,6 +93,15 @@ internal static partial class GraphPlanExecutor
                     await ReplaceBindingsAsync(StreamStageAsync(plan.Stages[stageIndex], StreamBindingsAsync(bindings, token),
                         layout, budget, operation, parameters, token)).ConfigureAwait(false);
                     break;
+                case GqlMergeStage merge:
+                    // Capturing affected in a callback allocates a closure for ordinary queries too.
+                    var mergeCount = new System.Runtime.CompilerServices.StrongBox<long>();
+                    await ReplaceBindingsAsync(StreamMergeAsync(database, operation, merge,
+                        stagePlan.MatchClauses[0].Paths[0], bindings, budget, parameters,
+                        mergeCount, token)).ConfigureAwait(false);
+                    affected += mergeCount.Value;
+                    operation.Updates.RefreshMergeBindings(bindings, token, bindingMemory);
+                    break;
                 case GqlInsertStage insertion:
                     foreach (var binding in bindings)
                     {

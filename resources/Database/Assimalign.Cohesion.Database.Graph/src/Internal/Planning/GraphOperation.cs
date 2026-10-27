@@ -1,9 +1,10 @@
 using System;
-using System.Collections.Generic;
 using System.Collections.Frozen;
-using Assimalign.Cohesion.Database.Graph.Language;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+
+using Assimalign.Cohesion.Database.Graph.Language;
 using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Graph.Internal;
@@ -20,15 +21,36 @@ internal sealed class GraphOperation
     internal IReadOnlyDictionary<GqlNamedFunctionCallExpression, GraphFunction> FunctionBindings { get; set; } = FrozenDictionary<GqlNamedFunctionCallExpression, GraphFunction>.Empty;
     internal CancellationToken FunctionCancellation { get; set; }
     internal GraphPlanExecutor.ExpansionBudget? QueryBudget { get; set; }
-    private readonly GraphDatabase _database;
+    // Reuse the session reference so flow-owned MERGE cleanup adds no ordinary operation size.
+    private GraphDatabase Database => _session.Database;
     private readonly GraphDatabaseSession _session;
     private readonly GraphDatabaseTransaction? _transaction;
     private readonly TransactionContext _context;
     private readonly SemaphoreSlim _completionGate = new(1, 1);
     private TransactionContext? _snapshotPin;
     private int _finished;
-    private GraphMergeStatement? _merge;
-    internal GraphMergeStatement Merge => _merge ??= new(_database, this, _transaction?.MergeLocks);
+    private static readonly object _mergeEnded = new();
+    private object? _merge;
+    private GraphMergeStatement? _mergeLease;
+    internal GraphMergeStatement Merge
+    {
+        get
+        {
+            var current = Volatile.Read(ref _merge);
+            if (ReferenceEquals(current, _mergeEnded)) { throw Ended(); }
+            if (current is GraphMergeStatement existing) { return existing; }
+            var created = new GraphMergeStatement(Database, this, _transaction?.MergeLocks);
+            current = Interlocked.CompareExchange(ref _merge, created, null);
+            if (current is null) { _mergeLease = created; return created; }
+            created.Dispose();
+            return current as GraphMergeStatement ?? throw Ended();
+        }
+    }
+
+    // Query memory is flow-owned. Teardown fences locks; the running probe releases its
+    // memory lease on its own flow, after it has stopped accounting work and memory.
+    internal void ReleaseMerge() => _mergeLease?.Dispose();
+    private static DatabaseException Ended() => DatabaseException.CreateGraphFailure("CK04002", ErrorMessages.GraphOperationEnsureActiveDatabase);
 
     /// <summary>Initializes a new instance of the <see cref="GraphOperation"/> class.</summary>
     /// <param name="database">The database the statement runs on.</param>
@@ -38,7 +60,6 @@ internal sealed class GraphOperation
     /// <param name="transactionStart">The UTC instant captured before the transaction began.</param>
     internal GraphOperation(GraphDatabase database, GraphDatabaseSession session, TransactionContext context, GraphDatabaseTransaction? transaction, DateTimeOffset transactionStart)
     {
-        _database = database;
         _session = session;
         Context = context;
         _context = context;
@@ -49,7 +70,7 @@ internal sealed class GraphOperation
 
     internal TransactionContext Context { get; private set; }
     internal DateTimeOffset TransactionStart { get; }
-    internal GraphEvaluationContext EvaluationContext => new(TransactionStart, _database, this);
+    internal GraphEvaluationContext EvaluationContext => new(TransactionStart, Database, this);
     internal GraphUpdates Updates { get; }
 
     internal async ValueTask InitializeAsync(CancellationToken cancellationToken)
@@ -59,27 +80,28 @@ internal sealed class GraphOperation
             // Capture the pin before the statement snapshot. An earlier writer
             // may commit while the operation is open, so the refreshing transaction
             // context alone cannot preserve the statement's original horizon.
-            _snapshotPin = await _database.Coordinator.BeginSnapshotPinAsync(cancellationToken).ConfigureAwait(false);
+            _snapshotPin = await Database.Coordinator.BeginSnapshotPinAsync(cancellationToken).ConfigureAwait(false);
             Context = _context.PinStatementSnapshot();
         }
     }
 
     internal ValueTask RefreshWriterSnapshotAsync(CancellationToken cancellationToken)
     {
-        if (_context.IsolationLevel == IsolationLevel.ReadCommitted && _merge?.SnapshotCaptured != true)
+        if (_context.IsolationLevel == IsolationLevel.ReadCommitted && (Volatile.Read(ref _merge) as GraphMergeStatement)?.SnapshotCaptured != true)
         {
             cancellationToken.ThrowIfCancellationRequested();
             // The existing pin's horizon is at or below the refreshed view's,
             // so it still protects every version this statement can read.
             Context = _context.PinStatementSnapshot();
+            Updates.RefreshReadSnapshot();
         }
         return ValueTask.CompletedTask;
     }
 
     internal void EnsureActive()
     {
-        _database.EnsureNotDisposed();
-        _database.ThrowIfOffline();
+        Database.EnsureNotDisposed();
+        Database.ThrowIfOffline();
         _session.ThrowIfNotOpen();
         if (Context.State != TransactionState.Active || Volatile.Read(ref _finished) != 0)
         {
@@ -98,7 +120,7 @@ internal sealed class GraphOperation
             {
                 if (_transaction is null)
                 {
-                    await _database.Coordinator.CommitAsync(_context).ConfigureAwait(false);
+                    await Database.Coordinator.CommitAsync(_context).ConfigureAwait(false);
                     committed = true;
                 }
             }
@@ -109,7 +131,7 @@ internal sealed class GraphOperation
                 {
                     // The commit is durable. Cleanup cannot turn it into a failed statement
                     // that a caller might retry and apply twice.
-                    GraphDatabaseEventSource.Log.StatementCleanupFailed(_database.Name, error);
+                    GraphDatabaseEventSource.Log.StatementCleanupFailed(Database.Name, error);
                 }
             }
         }
@@ -135,11 +157,11 @@ internal sealed class GraphOperation
                     // and refuses later statements until the caller rolls back (#1188).
                     await _transaction.AbortForFailedStatementAsync(cause).ConfigureAwait(false);
                 }
-                else if (Context.State == TransactionState.Active && !_database.IsOffline)
+                else if (Context.State == TransactionState.Active && !Database.IsOffline)
                 {
                     // An offline database undoes nothing (#1243): the reopen's recovery aborts
                     // the operation's transaction.
-                    await _database.Coordinator.RollbackAsync(_context).ConfigureAwait(false);
+                    await Database.Coordinator.RollbackAsync(_context).ConfigureAwait(false);
                 }
             }
             finally
@@ -155,8 +177,8 @@ internal sealed class GraphOperation
         try { await ReleaseSnapshotPinAsync().ConfigureAwait(false); }
         finally
         {
-            _merge?.Dispose();
-            Finish();
+            try { (Interlocked.Exchange(ref _merge, _mergeEnded) as GraphMergeStatement)?.EndLocks(); }
+            finally { Finish(); }
         }
     }
 
@@ -174,10 +196,10 @@ internal sealed class GraphOperation
     private async ValueTask ReleaseSnapshotPinAsync()
     {
         var pin = Interlocked.Exchange(ref _snapshotPin, null);
-        if (pin?.State == TransactionState.Active && !_database.IsOffline)
+        if (pin?.State == TransactionState.Active && !Database.IsOffline)
         {
-            _database.BeforeSnapshotPinRelease?.Invoke(pin);
-            await _database.Coordinator.RollbackAsync(pin).ConfigureAwait(false);
+            Database.BeforeSnapshotPinRelease?.Invoke(pin);
+            await Database.Coordinator.RollbackAsync(pin).ConfigureAwait(false);
         }
     }
 

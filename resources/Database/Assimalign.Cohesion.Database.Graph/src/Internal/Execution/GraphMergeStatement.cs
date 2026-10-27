@@ -71,11 +71,13 @@ internal sealed class GraphMergeStatement : IDisposable
         _latest = null;
         // Also covers a tracker first published concurrently with the transaction's end.
         // Fence new lock charges before releasing the statement's lease on the same budget.
-        try
-        {
-            if (_ownsLocks || _operation.Context.State != TransactionState.Active) { Locks.Dispose(); }
-        }
+        try { EndLocks(); }
         finally { _memory.Dispose(); }
+    }
+
+    internal void EndLocks()
+    {
+        if (_ownsLocks || _operation.Context.State != TransactionState.Active) { Locks.Dispose(); }
     }
 
     private sealed class DebugView

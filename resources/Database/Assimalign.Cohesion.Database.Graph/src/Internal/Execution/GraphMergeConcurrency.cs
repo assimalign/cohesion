@@ -8,7 +8,7 @@ using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Graph.Internal;
 
-/// <summary>Transaction-owned serialization and freshness contract for the future MERGE stage.</summary>
+/// <summary>Transaction-owned serialization and freshness contract for the MERGE stage.</summary>
 internal static class GraphMergeConcurrency
 {
     /// <summary>

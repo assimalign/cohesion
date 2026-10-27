@@ -106,7 +106,6 @@ public class GqlQueryParserTests
     [InlineData("MANDATORY MATCH (a) RETURN a")]
 
 
-    [InlineData("MERGE (a:Person)")]
     [InlineData("MATCH (a) RETURN a UNION MATCH (b) RETURN b")]
     [InlineData("MATCH (a) RETURN a {.name}")]
     [InlineData("INSERT (:Person {tags: [1, 2]})")]

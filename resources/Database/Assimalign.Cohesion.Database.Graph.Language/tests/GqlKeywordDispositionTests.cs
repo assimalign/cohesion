@@ -49,7 +49,8 @@ public sealed class GqlKeywordDispositionTests
         ["WITH"] = Parses("MATCH (a) WITH a RETURN a"),
         ["SET"] = Parses("MATCH (a) SET a.x = 1"),
         ["REMOVE"] = Parses("MATCH (a) REMOVE a.x"),
-        ["MERGE"] = Rejects("MERGE (n)", "MERGE"),
+        ["MERGE"] = Parses("MERGE (n)"),
+        ["ON"] = Parses("MERGE (n) ON CREATE SET n.x = 1 ON MATCH SET n.x = 2"),
         ["ORDER"] = Parses("MATCH (a) RETURN a ORDER BY a.x"),
         ["BY"] = Parses("MATCH (a) RETURN a ORDER BY a.x"),
         ["GROUP"] = Parses("MATCH (a) RETURN a.x, count(*) AS n GROUP BY a.x"),
@@ -303,6 +304,7 @@ public sealed class GqlKeywordDispositionTests
             .Concat(GqlTransactionVocabulary.Spellings)
             .Concat(Enum.GetNames<GqlPathMode>())
             .Append("EXPLAIN") // Contextual statement prefix; identifier cases live in this corpus too.
+            .Append("ON") // Contextual MERGE branch prefix; ordinary variable spelling stays valid.
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
 

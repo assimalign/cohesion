@@ -46,6 +46,8 @@ internal sealed class GraphUpdates : IDisposable
         return previous;
     }
 
+    internal void RefreshReadSnapshot() => _typeSelections.Clear();
+
     internal GraphUpdates(GraphDatabase database, GraphOperation operation) { _database = database; _operation = operation; }
 
     internal async ValueTask<GraphNode> CreateNodeAsync(IReadOnlyList<string> labels,
@@ -176,7 +178,10 @@ internal sealed class GraphUpdates : IDisposable
             (anchor.Property is null || node.Properties.TryGetValue(anchor.Property, out var value) &&
                 GraphValueComparer.Instance.Equals(value, anchor.Value))).OrderBy(node => node.Id.Value).ToArray();
         var snapshot = ReadSnapshot;
-        IAsyncEnumerable<StoredGraphNode> persisted = anchor.Property is { } property
+        // A Snapshot plan can retain an index dropped before the latest-view MERGE probe.
+        // Fall back under the same writer/pattern locks; the matcher retains all equalities.
+        bool useIndex = anchor.Property is not null && HasReadIndex(anchor.Label!, anchor.Property);
+        IAsyncEnumerable<StoredGraphNode> persisted = useIndex && anchor.Property is { } property
             ? _database.Store.StreamIndexAsync(anchor.Label!, property, anchor.Value, snapshot, token, budget.Consume, memory.Add)
             : StreamStored();
         int position = 0;
@@ -278,12 +283,18 @@ internal sealed class GraphUpdates : IDisposable
 
     internal async ValueTask<IReadOnlyList<StoredGraphNode>> SearchIndexAsync(string label, string key, object? value, CancellationToken token)
     {
-        var found = await _database.Store.SearchIndexAsync(label, key, value, ReadSnapshot, token).ConfigureAwait(false);
+        var found = HasReadIndex(label, key)
+            ? await _database.Store.SearchIndexAsync(label, key, value, ReadSnapshot, token).ConfigureAwait(false)
+            : _database.Store.ScanLabels([label], ReadSnapshot, token)
+                .Where(node => node.Properties.TryGetValue(key, out var actual) && GraphValueComparer.Instance.Equals(actual, value)).ToArray();
         return found.Where(node => !_nodes.ContainsKey(node.Id))
             .Concat(_nodes.Values.Where(node => node.Labels.Contains(label, StringComparer.Ordinal) &&
                 node.Properties.TryGetValue(key, out var actual) && GraphValueComparer.Instance.Equals(actual, value))
                 .Select(node => new StoredGraphNode(node.Id.Value, node.Labels, node.Properties))).OrderBy(node => node.Id).ToArray();
     }
+
+    private bool HasReadIndex(string label, string key) => _readSnapshot is null ||
+        _database.Store.HasIndex(label, key, ReadSnapshot);
 
     internal Guid[]? SelectTypes(GqlRelationshipPattern pattern)
     {
@@ -533,6 +544,26 @@ internal sealed class GraphUpdates : IDisposable
             foreach (string name in binding.Keys.ToArray())
             { binding[name] = Refresh(binding[name], touchedNodes, touchedRelationships, refreshed); }
             bindingMemory?.RetainValue(binding, token);
+        }
+    }
+
+    // MERGE applies a branch per input row. Refresh the complete output table afterward,
+    // so a later row's change also reaches earlier rows' nested aliases, as ordinary SET does.
+    internal void RefreshMergeBindings(List<Dictionary<string, object?>> bindings, CancellationToken token,
+        GraphMemoryOwner bindingMemory)
+    {
+        if (bindings.Count == 0 || _nodes.Count == 0 && _relationships.Count == 0) { return; }
+        using var memory = _operation.QueryBudget!.Memory.Reserve(128 + 64L * (_nodes.Count + _relationships.Count));
+        var nodes = _nodes.Keys.ToHashSet();
+        var relationships = _relationships.Keys.ToHashSet();
+        var refreshed = new Dictionary<object, object?>(ReferenceEqualityComparer.Instance);
+        foreach (var binding in bindings)
+        {
+            token.ThrowIfCancellationRequested();
+            bindingMemory.ReleaseValue(binding);
+            foreach (string name in binding.Keys.ToArray())
+            { binding[name] = Refresh(binding[name], nodes, relationships, refreshed); }
+            bindingMemory.RetainValue(binding, token);
         }
     }
 

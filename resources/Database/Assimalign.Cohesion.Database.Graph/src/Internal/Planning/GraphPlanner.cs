@@ -68,7 +68,7 @@ internal sealed partial class GraphPlanner
         var planned = new List<GraphStagePlan>();
         var deletedVariables = new HashSet<string>(StringComparer.Ordinal);
         var shapes = new Dictionary<string, GraphBindingShape>(StringComparer.Ordinal);
-        bool writes = stages.Any(stage => stage is GqlInsertStage or GqlDeleteStage or GqlSetStage or GqlRemoveStage);
+        bool writes = stages.Any(stage => stage is GqlInsertStage or GqlMergeStage or GqlDeleteStage or GqlSetStage or GqlRemoveStage);
         if (pathsRequest && writes)
         { throw new GraphPlanningException("CG05001", ErrorMessages.PathProjectionRequired, statement.Location); }
         var snapshotted = new HashSet<string>(StringComparer.Ordinal);
@@ -112,33 +112,18 @@ internal sealed partial class GraphPlanner
             optional = false;
             switch (stage)
             {
+                case GqlMergeStage merge:
+                    if (merge.Path is null || merge.OnCreate is null || merge.OnMatch is null)
+                    { throw new GraphPlanningException("CG05001", ErrorMessages.StageUnsupported, stage.Location); }
+                    if (merge.Path.Relationships is not null && merge.Path.Relationships.Where(edge => edge?.Variable is not null)
+                        .GroupBy(edge => edge.Variable, StringComparer.Ordinal).Any(group => group.Count() > 1))
+                    { throw new GraphPlanningException("CG05001", ErrorMessages.StageUnsupported, stage.Location); }
+                    Validate(merge.Path, creating: true, new HashSet<string>(variables.Keys, StringComparer.Ordinal), merging: true);
+                    ValidateSet(merge.OnCreate, merge);
+                    ValidateSet(merge.OnMatch, merge);
+                    break;
                 case GqlSetStage set:
-                    foreach (var item in set.Items)
-                    {
-                        if (item is null || string.IsNullOrWhiteSpace(item.Variable))
-                        { throw new GraphPlanningException("CG05001", ErrorMessages.StageUnsupported, stage.Location); }
-                        RequireVariable(item.Variable, entity: true);
-                        switch (item)
-                        {
-                            case GqlSetPropertyItem property when !string.IsNullOrWhiteSpace(property.Property) && property.Value is not null:
-                                ValidateExpression(property.Value);
-                                break;
-                            case GqlSetPropertiesItem map when map.Properties is not null:
-                                foreach (var pair in map.Properties)
-                                {
-                                    if (string.IsNullOrWhiteSpace(pair.Key) || pair.Value is null)
-                                    { throw new GraphPlanningException("CG05001", ErrorMessages.StageUnsupported, item.Location); }
-                                    ValidateExpression(pair.Value);
-                                }
-                                break;
-                            case GqlSetLabelsItem labels when labels.Labels is { Count: > 0 } && labels.Labels.All(name => !string.IsNullOrWhiteSpace(name)):
-                                if (variables[item.Variable] != BindingKind.Node)
-                                { throw new GraphPlanningException("CG03003", ErrorMessages.EntityBindingRequired, item.Location); }
-                                foreach (string name in labels.Labels) { tokens.IntroduceLabel(name); }
-                                break;
-                            default: throw new GraphPlanningException("CG05001", ErrorMessages.StageUnsupported, item.Location);
-                        }
-                    }
+                    ValidateSet(set.Items, stage);
                     break;
                 case GqlRemoveStage remove:
                     foreach (var item in remove.Items)
@@ -178,7 +163,7 @@ internal sealed partial class GraphPlanner
                 case GqlNextStage:
                     if (stageIndex == 0 || stageIndex == stages.Count - 1 ||
                         stages[stageIndex - 1] is GqlReturnStage { IsWith: true } ||
-                        stages[stageIndex - 1] is not GqlReturnStage && !stages.Take(stageIndex).Reverse().TakeWhile(item => item is not GqlNextStage).Any(item => item is GqlInsertStage or GqlDeleteStage or GqlSetStage or GqlRemoveStage))
+                        stages[stageIndex - 1] is not GqlReturnStage && !stages.Take(stageIndex).Reverse().TakeWhile(item => item is not GqlNextStage).Any(item => item is GqlInsertStage or GqlMergeStage or GqlDeleteStage or GqlSetStage or GqlRemoveStage))
                     { throw new GraphPlanningException("CG05001", ErrorMessages.NextSegmentInvalid, stage.Location); }
                     if (stages[stageIndex - 1] is not GqlReturnStage) { ClearScope(); }
                     break;
@@ -231,17 +216,17 @@ internal sealed partial class GraphPlanner
                     { if (!groupVariables.Contains(binding.Name)) { boundVariables.Add(binding.Name); } }
                 }
                 clauses.Add(new GraphMatchClausePlan(paths, clause.Predicate, optional,
-                    declarations.Skip(firstDeclaration).ToArray(), clauseMatchesNothing));
-                matchesNothing |= !optional && clauseMatchesNothing;
+                    declarations.Skip(firstDeclaration).ToArray(), stage is GqlMergeStage ? false : clauseMatchesNothing));
+                matchesNothing |= stage is not GqlMergeStage && !optional && clauseMatchesNothing;
             }
             optional = false;
             // INSERT maps see only the incoming scope, independently of creation order.
             var insertScope = stage is GqlInsertStage ? new HashSet<string>(variables.Keys, StringComparer.Ordinal) : null;
             foreach (var path in query.Creates) { Validate(path, creating: true, insertScope); }
             foreach (var variable in query.DeleteVariables) { RequireVariable(variable, entity: true); }
-            if (stage is GqlInsertStage)
+            if (stage is GqlInsertStage or GqlMergeStage)
             {
-                foreach (var path in query.Creates)
+                foreach (var path in stage is GqlMergeStage merging ? new[] { merging.Path } : query.Creates)
                 {
                     foreach (var node in path.Nodes)
                     {
@@ -250,7 +235,8 @@ internal sealed partial class GraphPlanner
                     }
                     foreach (var edge in path.Relationships)
                     {
-                        tokens.IntroduceRelationshipType(GraphLabelEvaluator.InsertType(edge));
+                        if (stage is not GqlMergeStage || edge.Type is not null || edge.LabelExpression is not null)
+                        { tokens.IntroduceRelationshipType(GraphLabelEvaluator.InsertType(edge)); }
                         if (edge.Variable is { } edgeVariable) { boundVariables.Add(edgeVariable); }
                     }
                 }
@@ -539,6 +525,36 @@ internal sealed partial class GraphPlanner
             _ => throw new GraphPlanningException("CG05001", ErrorMessages.ProjectionUnsupported, expression.Location),
         };
 
+        void ValidateSet(IReadOnlyList<GqlSetItem> items, GqlStage stage)
+        {
+            foreach (var item in items)
+            {
+                if (item is null || string.IsNullOrWhiteSpace(item.Variable))
+                { throw new GraphPlanningException("CG05001", ErrorMessages.StageUnsupported, stage.Location); }
+                RequireVariable(item.Variable, entity: true);
+                switch (item)
+                {
+                    case GqlSetPropertyItem property when !string.IsNullOrWhiteSpace(property.Property) && property.Value is not null:
+                        ValidateExpression(property.Value);
+                        break;
+                    case GqlSetPropertiesItem map when map.Properties is not null:
+                        foreach (var pair in map.Properties)
+                        {
+                            if (string.IsNullOrWhiteSpace(pair.Key) || pair.Value is null)
+                            { throw new GraphPlanningException("CG05001", ErrorMessages.StageUnsupported, item.Location); }
+                            ValidateExpression(pair.Value);
+                        }
+                        break;
+                    case GqlSetLabelsItem labels when labels.Labels is { Count: > 0 } && labels.Labels.All(name => !string.IsNullOrWhiteSpace(name)):
+                        if (variables[item.Variable] != BindingKind.Node)
+                        { throw new GraphPlanningException("CG03003", ErrorMessages.EntityBindingRequired, item.Location); }
+                        foreach (string name in labels.Labels) { tokens.IntroduceLabel(name); }
+                        break;
+                    default: throw new GraphPlanningException("CG05001", ErrorMessages.StageUnsupported, item.Location);
+                }
+            }
+        }
+
         void Declare(GqlPathPattern path, bool creating)
         {
             token.ThrowIfCancellationRequested();
@@ -580,7 +596,7 @@ internal sealed partial class GraphPlanner
         }
         // Returns false when a MATCH pattern requires a name the database does not have.
         bool Validate(GqlPathPattern path, bool creating, IReadOnlySet<string>? propertyScope = null, bool declared = false,
-            IReadOnlySet<string>? incomingPrefilterScope = null)
+            IReadOnlySet<string>? incomingPrefilterScope = null, bool merging = false)
         {
             if (!declared) { Declare(path, creating); }
             bool satisfiable = true;
@@ -607,7 +623,10 @@ internal sealed partial class GraphPlanner
                 }
                 if (item.Shape.Edge is { } edge)
                 {
-                    bool valid = ValidateRelationship(edge, creating, tokens);
+                    bool valid = ValidateRelationship(edge, creating && !merging, tokens);
+                    if (merging && !(edge.Type is null && edge.LabelExpression is null && edge.Variable is { } boundEdge && propertyScope!.Contains(boundEdge)) &&
+                        string.IsNullOrWhiteSpace(edge.LabelExpression is null ? edge.Type : (edge.LabelExpression as GqlLabelName)?.Name))
+                    { throw new GraphPlanningException("CG05001", ErrorMessages.ValidateRelationshipGraphPlanning3, query.Location); }
                     if (item.Required) { satisfiable &= valid; }
                     ValidatePatternProperties(edge.Properties, item.Group);
                     ValidatePrefilter(edge.Predicate, item.Locals);
@@ -626,6 +645,15 @@ internal sealed partial class GraphPlanner
                 if (group && properties is { Count: > 0 } && properties.Values.Any(expression => expression is not null && GraphValueExpressions.ReferencesAny(expression,
                     propertyGroups ??= shapes.Where(binding => binding.Value.Groups.Any(value => value)).Select(binding => binding.Key).ToHashSet(StringComparer.Ordinal), token)))
                 { throw new GraphPlanningException("CG03003", ErrorMessages.GroupPropertyReference, query.Location); }
+                if (merging && properties is not null)
+                {
+                    foreach (var expression in properties.Values)
+                    {
+                        if (expression is GqlLiteralExpression literal) { GraphPlanExecutor.ValidateMergeProperty(literal.Value, expression.Location); }
+                        else if (expression is GqlParameterExpression parameter)
+                        { GraphPlanExecutor.ValidateMergeProperty(GraphExpressionEvaluator.Parameter(parameter, _parameters), expression.Location); }
+                    }
+                }
                 ValidateStageProperties(properties!, creating, propertyScope, prefilterScope);
             }
 
@@ -1149,6 +1177,7 @@ internal sealed partial class GraphPlanner
     private static GqlQueryExpression StageQuery(GqlStage stage, Assimalign.Cohesion.Database.Language.Location? location) => stage switch
     {
         GqlMatchStage match => new([match.Clause], [], [], false, [], location ?? stage.Location),
+        GqlMergeStage merge => new([new GqlMatchClause([merge.Path], null, false)], [], [], false, [], location ?? stage.Location),
         GqlInsertStage insert => new([], null, insert.Paths, [], false, [], location ?? stage.Location),
         GqlDeleteStage delete => new([], null, [], delete.Variables, delete.Detach, [], location ?? stage.Location),
         GqlReturnStage project => new([], null, [], [], false, project.Projections, location ?? stage.Location)

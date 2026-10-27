@@ -309,10 +309,10 @@ public sealed partial class GqlQueryParser : QueryParser
                 continue;
             }
             if (patternDepth == 0 && value is "WHERE" or "RETURN" or "WITH" or "LET" or "FILTER" or "FOR" or "UNWIND" or "SET" or "REMOVE") { inValueExpression = true; inPattern = false; }
-            if (patternDepth == 0 && value is "MATCH" or "RETURN" or "WITH" or "LET" or "FILTER" or "FOR" or "UNWIND" or "INSERT" or "CREATE" or "NEXT") { inUpdate = false; }
+            if (patternDepth == 0 && value is "MATCH" or "RETURN" or "WITH" or "LET" or "FILTER" or "FOR" or "UNWIND" or "INSERT" or "CREATE" or "MERGE" or "NEXT") { inUpdate = false; }
             if (patternDepth == 0 && value is "SET" or "REMOVE") { inUpdate = true; }
-            if (patternDepth == 0 && (value is "MATCH" or "CREATE" or "INSERT" or "DELETE" || value == "NEXT" && IsQueryStartAt(i + 1))) { inValueExpression = false; }
-            if (patternDepth == 0 && value is "MATCH" or "CREATE" or "INSERT") { inPattern = true; }
+            if (patternDepth == 0 && (value is "MATCH" or "CREATE" or "INSERT" or "MERGE" or "DELETE" || value == "NEXT" && IsQueryStartAt(i + 1))) { inValueExpression = false; }
+            if (patternDepth == 0 && value is "MATCH" or "CREATE" or "INSERT" or "MERGE") { inPattern = true; }
             if (patternDepth == 0 && value == "DELETE") { inPattern = false; }
 
             // n IS [NOT] LABELED A in WHERE is ISO's <labeled predicate>; IS NULL and truth
@@ -562,7 +562,7 @@ public sealed partial class GqlQueryParser : QueryParser
         AfterPrimary,
     }
 
-    private bool IsQueryStart() => Is("MATCH") || Is("OPTIONAL") || Is("CREATE") || Is("INSERT") || Is("RETURN") ||
+    private bool IsQueryStart() => Is("MATCH") || Is("OPTIONAL") || Is("CREATE") || Is("INSERT") || Is("MERGE") || Is("RETURN") ||
         Is("LET") || Is("FILTER") || Is("FOR") || Is("UNWIND") || Is("WITH");
 
     private bool IsVariableToken => IsVariableLexeme(Current);
@@ -572,7 +572,7 @@ public sealed partial class GqlQueryParser : QueryParser
     private static bool IsReservedTemporal(Lexeme token) => token.Type is not (TokenType.String or TokenType.QuotedIdentifier) &&
         token.Text.ToUpperInvariant() is "CURRENT_DATE" or "CURRENT_TIMESTAMP" or "CURRENT_TIME" or "LOCAL_TIME" or "LOCAL_TIMESTAMP";
     private bool IsQueryStartAt(int index) => IsWordAt(index, "MATCH") || IsWordAt(index, "OPTIONAL") || IsWordAt(index, "CREATE") ||
-        IsWordAt(index, "INSERT") || IsWordAt(index, "RETURN") || IsWordAt(index, "LET") || IsWordAt(index, "FILTER") ||
+        IsWordAt(index, "INSERT") || IsWordAt(index, "MERGE") || IsWordAt(index, "RETURN") || IsWordAt(index, "LET") || IsWordAt(index, "FILTER") ||
         IsWordAt(index, "FOR") || IsWordAt(index, "UNWIND") || IsWordAt(index, "WITH");
 
     private bool IsWordAt(int index, string word) => index < _tokens.Count &&

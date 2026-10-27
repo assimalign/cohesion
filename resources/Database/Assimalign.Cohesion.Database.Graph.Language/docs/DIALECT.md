@@ -185,6 +185,39 @@ seek_direction, type_filter, physical=visited_candidates, viable=accepted_hops a
 physical_limit=1000000. These describe counting rules; EXPLAIN executes no hops and has no
 runtime totals. The engine's GqlProfileExecutionTests EXPLAIN corpus pins this description.
 
+## MERGE (#1735)
+
+`MERGE path [ON CREATE SET ...] [ON MATCH SET ...]` matches the complete fixed path for
+each incoming row. Every complete match receives ON MATCH; when none exists, it creates every
+unbound node and relationship and runs ON CREATE once. An existing partial path does not supply
+unbound parts. Bind variables with an earlier MATCH to reuse existing identities. Bound
+relationships also reuse their endpoints, and may omit their type. Repeated unbound node variables
+create one node with the union of their labels and compatible property equalities. For numerically
+equal repeated properties, the last occurrence supplies the stored CLR scalar type. A relationship
+variable cannot occur twice within the same MERGE path (CG05001).
+
+Each clause takes one path; use successive MERGE clauses for separate decisions. Either branch
+order is accepted, each at most once (duplicate branches and multiple paths are CG00002).
+Property maps evaluate once per input row against the incoming scope. Equalities must be finite,
+non-null storage scalars (CG03004; supplied parameters retain their ordinary binding validation); a runtime NULL bound entity, an absent bound entity, conflicting
+repeated-node equalities or incompatible bound constraints/endpoints use CG03005. MERGE does not
+modify a bound entity to make the pattern fit. Nodes require creation-compatible label conjunctions;
+unbound relationships need exactly one type. Fixed either-direction relationships match either
+stored orientation; creation uses the source's left-to-right order. Incoming arrows reverse that order.
+
+Earlier MERGE creations and SET changes are visible to later input rows and stages through writer
+overlays. Both branches use ordinary SET's item ordering, schema validation, NULL removal, no-op
+and affected-count rules. Created entities count once; changed pre-existing entities count once
+per statement. An empty input produces no decision or creation. RETURN/WITH/NEXT compose normally;
+EXPLAIN shows Merge, OnCreate and OnMatch without executing the probes or mutations. ExecutePaths
+refuses MERGE before mutation. Variable-length and quantified update patterns remain refused.
+
+Every decision uses the database writer lock followed by a logical pattern lock. Snapshot checks
+the complete pattern against the latest committed view and reports retryable CG04024 if a decided
+match changes/disappears or a decided creation gains a committed match. ReadCommitted refreshes
+and re-matches after serialization. Pattern locks remain transaction-owned until commit/rollback;
+any failed statement aborts its explicit transaction. No disk or wire version changes.
+
 ## SET and REMOVE
 
 SET and REMOVE are source-ordered stages after an incoming clause. Leading SET/REMOVE is
@@ -205,8 +238,7 @@ use INSERT's catalog discovery and schema validation; later MATCH stages see the
 
 Only literal whole maps are supported: `$p` and `properties(other)` as whole-map operands
 are CK00001. Literal composite properties, including parenthesized literals, are CK00001; computed composite property values
-are CG03003. MERGE, including both ON CREATE SET and ON MATCH SET, remains one CK00001
-naming MERGE. `+=` must touch; GQL combines it into one operator token without changing the
+are CG03003. MERGE uses the same SET items in its two branches. `+=` must touch; GQL combines it into one operator token without changing the
 shared lexer. SHOW remains read-only (CG00007).
 
 Affected counts include created entities plus distinct changed pre-existing entities. An entity
