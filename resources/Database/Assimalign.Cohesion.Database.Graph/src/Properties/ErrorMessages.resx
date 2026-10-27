@@ -5,6 +5,8 @@
   <data name="CatalogIdentityReused" xml:space="preserve"><value>A definition identity cannot be reused or renamed. After a drop, wait for version purge before reusing the identity.</value></data>
   <data name="CatalogOwnerMissing" xml:space="preserve"><value>The owning graph definition does not exist.</value></data>
   <data name="CatalogSnapshotChanged" xml:space="preserve"><value>The graph catalog changed since this transaction's snapshot. Retry the transaction.</value></data>
+  <data name="MergeSnapshotConflict" xml:space="preserve"><value>The MERGE pattern decision changed after this transaction's snapshot. Retry the transaction.</value></data>
+  <data name="MergeIdentityInvalid" xml:space="preserve"><value>A bound MERGE pattern requires valid entity identities, endpoint slots, labels, relationship types and non-null finite scalar property equalities.</value></data>
   <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
   <resheader name="version"><value>2.0</value></resheader>
   <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms</value></resheader>

@@ -159,6 +159,14 @@ public sealed partial class GraphStore
     /// <exception cref="ArgumentNullException"><paramref name="snapshot"/> is null.</exception>
     public StoredGraphRelationship? FindRelationship(ulong id, TransactionSnapshot snapshot) => Find(2, id, snapshot)?.Record.Relationship;
 
+    // MERGE freshness uses the physical version, so a replacement that restores the same
+    // values still invalidates an older Snapshot decision. No extra work on ordinary reads.
+    internal (TransactionSequence Writer, ulong Revision)? MergeVersion(bool node, ulong id, TransactionSnapshot snapshot)
+    {
+        var found = Find(node ? (byte)1 : (byte)2, id, snapshot);
+        return found is null ? null : (found.Value.Reference.Writer, found.Value.Reference.Revision);
+    }
+
     /// <summary>Enumerates visible nodes in identity order, seeking MVCC label postings when a label is specified.</summary>
     /// <param name="label">Optional label.</param><param name="snapshot">Visibility snapshot.</param><returns>The visible nodes.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="snapshot"/> is null.</exception>

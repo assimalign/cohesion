@@ -406,6 +406,61 @@ The Database solution includes `Graph.RecoveryFixture` so solution builds keep t
 the selected configuration. The Graph test build copies that configuration's outputs beside the
 test assembly, allowing `dotnet test --no-build` after a Debug or Release solution build.
 
+### Internal MERGE serialization contract (#1735, GQ-M1)
+
+`GraphMergeConcurrency.MatchAsync` is an internal seam for GQ-M2; MERGE text remains refused.
+Call it inside the existing operation failure bracket, before choosing match or create. Supply
+`GraphMergePatternIdentity` after binding: node binding slots with bound IDs, ordinal labels and
+evaluated property equalities, and fixed relationships with endpoint slots, type, orientation,
+optional bound ID and equalities. Repeated variables reuse a node slot; variable names are absent.
+Incoming edges swap endpoint slots. Label/property order, duplicate labels, relationship-part
+order and undirected endpoint order do not change the resource; equal numeric values share the
+existing exact-fraction hash. Null, non-finite and composite equalities, zero bound IDs, empty
+patterns and invalid endpoint slots are refused with structured CG05023. This validates the
+internal identity only; language admission and matching remain GQ-M2 responsibilities.
+
+The seam takes the existing exclusive database writer lock, then an exclusive logical pattern
+entry in Graph's reserved `ObjectId = ulong.MaxValue` lock namespace. The entry is a process-local
+32-bit equality hash; collisions only over-serialize. An absent pattern is still a resource.
+No registry, public API, Transactions change or storage format is needed. These locks belong to
+the transaction and remain held through commit/rollback, including an empty or matched return.
+The writer lock is mandatory: differently expressed overlapping patterns, and ordinary writes,
+must also serialize with this decision. Ordinary CREATE/SET/DELETE acquire no additional lock and
+pay no new check. The source comment establishes lock/latch order; probes take only read latches
+and must neither mutate nor acquire locks. Normal operation abort and coordinator undo release
+ownership on exception/cancellation/disposal; an ended owner's late grant is explicitly released.
+
+The caller supplies a read-only whole-pattern probe over the supplied `TransactionSnapshot`,
+including its statement overlays and every match's persisted node/relationship read set. The
+probe must use the supplied view for every storage read, return complete matches, and charge its
+ordinary query work and retained memory to the operation budget. GQ-M2 must plumb this view into
+matching rather than accidentally using the operation's old snapshot for the latest-state probe.
+At Snapshot, the seam probes the original view, compares every matched and bound entity's writer
+and revision against the latest committed view, and probes that latest pattern view before
+returning the original decision. A changed/deleted entity or a create decision with a new matching
+pattern raises retryable `DatabaseTransactionAbortedException` with structured CG04024. This
+detects replacements even if values are restored, and checks bound endpoints even with no whole
+match. Each entity revision comparison checks cancellation and consumes one physical-work unit
+when the operation has a query budget. Caller-owned uncommitted versions appear in both views; overlay-only identities are absent
+from both store views. Unrelated commits and additional matches beside unchanged existing matches
+do not invalidate the original match decision. At ReadCommitted the writer acquisition refreshes
+the statement view and the seam probes it once, so a competing creator matches and a concurrent
+deletion re-matches to absence. Its existing snapshot pin continues protecting that newer view.
+
+Non-parallel tests exercise real transactions for creators, ordinary deleters/replacements,
+directed/undirected relationship overlap, all matched entities, bound endpoints, overlays,
+unrelated commits and every return/failure/disposal path. Threaded stress runs for at least
+250 ms, then until at least two recorded queued creator races of each isolation have completed,
+under a 30-second cancellation ceiling; counters and lock-release checks decide success.
+An optional internal, instance-free test gate after writer acquisition deterministically ends
+the session or cancels before the pattern grant, proving late-grant cleanup. Tests also force a
+pattern-only wait and check failure release before the caller rolls back its faulted transaction.
+
+Behavior consulted, no code copied: Neo4j
+`community/cypher/interpreted-runtime/src/main/scala/org/neo4j/cypher/internal/runtime/interpreted/pipes/MergePipe.scala:32-45,79-102`
+branches on a whole input match and its locking variant locks then re-reads. The fixed-Snapshot
+retry requirement above is the stronger owner-approved contract (2026-10-25).
+
 ### Failed statements in explicit transactions (#1188)
 
 A statement that fails inside an explicit transaction aborts the whole transaction. Graph storage
@@ -1619,6 +1674,7 @@ to exercise that enforcement path; compiled provisioning is not included.
 | `CG07005` | Session/database binding mismatch |
 | `CG06006` | Storage, index, or malformed catalog-record failure translated at the engine boundary |
 | `CG04007` | A retryable catalog conflict, or the session's explicit transaction is aborted by a failed statement: a statement, BEGIN or COMMIT is refused until a rollback completes; the message and `InnerException` name the original failure |
+| `CG04024` | Internal MERGE seam: retryable Snapshot match-or-create decision invalidated by a committed entity replacement/deletion or a new matching pattern |
 | `CG05008` | Statement too complex: parsing, planning or evaluating it needs more stack than the executing thread has left (ISO SQLSTATE 54001). The statement fails and the session stays open; Graph.Client retains the connection after a terminal rejection before path output |
 | `CG02009` | Element too large: catalog metadata, a node's labels and properties, or a relationship's type and properties, exceed the 8,092-byte graph record, or an indexed property value exceeds the 1,016-byte index key. Nothing is written for the element; the statement fails and the session stays open |
 | `CG01010` | **Warning**, not a failure: a read-only statement or `GetIndexesAsync` names a label the database does not have at the statement's snapshot. No node carries it, so the read returns the rows the expression still matches (none for a required label), reports this `DiagnosticSeverity.Warning` diagnostic in `DatabaseResult.Diagnostics` or `GraphSchemaResult<T>.Diagnostics`, and leaves an explicit transaction active. Neo4j's `UnknownLabelWarning`, GQLSTATUS 01N50. Not sent over protocol 2.0 |
@@ -1634,6 +1690,7 @@ to exercise that enforcement path; compiled provisioning is not included.
 | `CG09019` | The database or a resource used by a statement was disposed. ExecutionFailure on the wire; the session remains ready. Pre-statement direct-API lifetime guards retain ObjectDisposedException |
 | `CG05020` | Accounted retained execution memory exceeds the statement limit; no partial result escapes and every owned cursor/lease is released |
 | `CG05022` | A selected shortest-path node or relationship is absent from the statement snapshot while the operation remains active; reconstruction fails without a partial path |
+| `CG05023` | Internal MERGE seam: invalid bound pattern identity, topology or property equality |
 | `CG08021` | Query limits are nonpositive or exceed the configured engine ceilings; invalid engine ceilings use the same code in the configuration exception message |
 | `CK06101` | `Database.Indexing`'s code, carried unchanged: opening a database whose property-index pages are in a B-tree page format this engine does not read (format 1, written before #1194) fails with "Database 'x' cannot be opened. CK06101: …", checked before recovery's scrub, so a cleanly closed database's files stay as they were (a crashed one has had only the storage layer's journal redo and undo, and keeps its journal) |
 | `CK06001` | `Database.Storage`'s code, carried unchanged: opening a database whose file set is in another storage format (#1251) fails with "Database 'x' cannot be opened. CK06001: …", the storage's `StorageFormatException` as its inner exception, refused before its journal is read, so the files stay as they were |
