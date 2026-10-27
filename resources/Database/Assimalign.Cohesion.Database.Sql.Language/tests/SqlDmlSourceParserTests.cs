@@ -75,8 +75,6 @@ public sealed class SqlDmlSourceParserTests
     [InlineData("UPDATE t SET v = (SELECT v FROM s) FROM s")]
     [InlineData("UPDATE t SET v = s.v FROM s RETURNING (SELECT s.v)")]
     [InlineData("DELETE FROM t USING s RETURNING (SELECT s.id)")]
-    [InlineData("WITH RECURSIVE q AS (SELECT id FROM s) DELETE FROM t USING q WHERE t.id=q.id")]
-    [InlineData("WITH RECURSIVE q AS (SELECT id FROM s) UPDATE t SET id=q.id FROM q")]
     public void Parse_ExcludedSources_ShouldReportUnsupported(string sql)
     {
         // Arrange / Act

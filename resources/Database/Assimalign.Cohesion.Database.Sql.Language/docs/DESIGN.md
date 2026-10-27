@@ -1,5 +1,61 @@
 # Assimalign.Cohesion.Database.Sql.Language — Design
 
+## WITH RECURSIVE binding (#1719, SQ-R1)
+
+WITH RECURSIVE declares visibility of every name throughout its WITH list. Acyclic
+entries bind in dependency order and keep ordinary reachable-only materialization.
+Unqualified self-references identify recursive entries; schema-qualified names still
+resolve in the catalog. Mutual recursion reports CK00001. A recursive entry requires
+an anchor UNION [ALL] recursive term and exactly one self-reference in the latter.
+The anchor fixes output names, width, types, modifiers, domains and collations before
+the recursive FROM binds. A complete column list renames the output. Unknown anchor
+NULL/string output becomes text. Overall UNION type/modifier and collation changes
+report CS02066 and CS02067 with cast/COLLATE hints; widths report CS02065.
+
+The recursive reference cannot appear in the anchor, in scalar/IN/EXISTS/quantified
+subqueries, on a nullable outer-join side, under INTERSECT ALL, or on either side of
+EXCEPT ALL or the right of EXCEPT DISTINCT. INTERSECT DISTINCT, the left of EXCEPT
+DISTINCT, preserved outer-join sides and derived FROM queries follow PostgreSQL's
+allowed forms. Aggregates at the level containing the reference are invalid;
+independent subquery aggregates remain allowed. Outer-only subquery aggregates
+owned by the recursive level also report CS01061. Top-level recursive UNION ORDER BY,
+LIMIT/FETCH, OFFSET and FOR UPDATE/SHARE use CK00001. SEARCH/CYCLE, CREATE RECURSIVE
+VIEW, nested WITH and modifying CTE bodies remain CK00001.
+
+Valid recursive definitions bind all entries and the consuming statement, then
+planning, EXPLAIN and execution return CK00001 until SQ-R2, even for an unused
+recursive definition. No working-table operator or depth limit is introduced here.
+Binding defers count/seek and constant-fold evaluation once recursion is identified.
+CREATE VIEW with a recursive query body freezes ordinary anchor metadata without
+executing it; cached and reopened view use propagates the same planning refusal.
+No catalog, storage or wire format changes are needed.
+
+IsRecursiveScope records the list modifier on each AST definition, independently
+of whether it self-references. Binding retains the existing case-insensitive name
+rules, requires complete output-name lists and conservatively makes recursive
+columns nullable. Independent ready definitions retain declaration-order priority.
+Row-locking FOR UPDATE/SHARE forms are contextual CK00001 refusals in all queries.
+
+References re-derived from the local PostgreSQL clone: src/backend/parser/parse_cte.c:
+345-400 (output checks and hints), 580-632 (unknown anchor output), 648-725 and 863-906
+(dependencies), 915-1019 (form/tails), 1027-1199 (references and joins), 1209-1277
+(set operands); parse_collate.c:807-860 (implicit default and conflicts);
+parse_agg.c:1327-1334 (aggregates). No reference code is copied.
+
+| Code | Condition | PostgreSQL SQLSTATE |
+| --- | --- | --- |
+| CS01054 | Recursive definition lacks a top-level anchor UNION [ALL] recursive term | 42P19 |
+| CS01055 | Recursive reference in the anchor | 42P19 |
+| CS01056 | Recursive reference inside a scalar, IN, quantified or EXISTS subquery | 42P19 |
+| CS01057 | Recursive reference on the nullable side of an outer join | 42P19 |
+| CS01058 | Recursive reference under INTERSECT ALL | 42P19 |
+| CS01059 | Recursive reference in a prohibited EXCEPT operand | 42P19 |
+| CS01060 | Recursive term has more than one self-reference | 42P19 |
+| CS01061 | Aggregate at the query level containing a recursive reference | 42P19 |
+| CS02065 | Recursive anchor, recursive output or declared column-list width mismatch | 42601 |
+| CS02066 | Recursive UNION changes the anchor type, domain or type modifiers; cast hint | 42804 |
+| CS02067 | Recursive UNION changes or conflicts with the anchor collation; COLLATE hint | 42P21 |
+
 ## Joined-DML statement memory (#1715, #1751)
 
 DIALECT.md records CS05067 before writes when retained MERGE, UPDATE FROM or DELETE USING
@@ -80,8 +136,7 @@ Visible source OLD/NEW names mask pseudo-relations. The profile now advertises U
 DELETE USING; DIALECT.md records pre-write CS05068 and physical-target DELETE deduplication.
 Joined execution uses target-outer predicate pushdown/costing, one materialization per CTE, and
 statement unwind before WITH/subquery wrappers. Both project overviews reflect executable support.
-DELETE's top-level USING source position recognizes keyword-spelled CTE references, while actual
-WITH RECURSIVE remains refused. Canonical rendering delimits ordinary OLD/NEW column qualifiers
+DELETE's top-level USING source position recognizes keyword-spelled CTE references, while WITH RECURSIVE now binds under #1719. Canonical rendering delimits ordinary OLD/NEW column qualifiers
 so a quoted identifier cannot become a RETURNING pseudo-relation on reparse.
 Bare RETURNING * follows PostgreSQL's visible namespace expansion: target columns, then sources
 in FROM/USING order with USING merges preserved and duplicate output names allowed. The engine
@@ -434,13 +489,13 @@ DELETE TOP are recognized DML TOP exclusions with CK00001.
 PERCENT and TIES are contextual unsupported entries; their identifier quoting requires
 the engine format-19 gate. PostgreSQL gram.y:13537-13658 supplies the offset/fetch grammar.
 
-Non-recursive WITH (#1116) uses an ordered CommonTables list on each SELECT/INSERT/
-UPDATE/DELETE root and a sealed SqlCommonTableExpression leaf. This preserves the
+WITH (#1116, #1719) uses an ordered CommonTables list on each SELECT/INSERT/
+UPDATE/DELETE/MERGE root and a sealed SqlCommonTableExpression leaf. This preserves the
 existing command dispatch and exposes bodies without a wrapper statement variant.
 INSERT INTO ... WITH attaches the list to its SELECT source. Prefix parsing is
 separate from ordinary subquery parsing, so bodies never become SUBQUERY in WITH.
-The capability scan continues through the complete prefix and rejects recursive,
-nested, modifying, materialization-hint and SEARCH/CYCLE forms precisely. PostgreSQL
+The capability scan continues through the complete prefix and rejects nested,
+modifying, materialization-hint and SEARCH/CYCLE forms precisely. PostgreSQL
 src/backend/parser/parse_cte.c:214-229 supplies declaration-order visibility.
 
 FROM exposes one SqlFromItem join tree per comma item (#1109), preserving JOIN precedence
@@ -541,12 +596,12 @@ CK00001. ORDER BY aliases and ordinals count visible wildcard output after USING
   the engine resolves remaining domain names and reports a name it does not know. Which conversions a
   CAST may make is the engine's cast registry's question too, so every built-in type
   is a valid CAST target here.
-- **Recognized-but-unsupported tokens stay in the lexer tables.** `RECURSIVE`
-  and window functions are lexed so diagnostics can
+- **Recognized clause tokens stay in the lexer tables.** `RECURSIVE` is now
+  advertised for binding; window functions are lexed so diagnostics can
   say "unsupported" precisely rather than mis-parsing them as identifiers. Gateable
   names live in `SqlClauses`; supported names are present in `SqlLanguageProfile`,
-  while reserved future clauses such as recursive/nested CTEs, windows,
-  unsupported join forms remain absent. `ParseCore` scans a copy of its configured
+  while window and NATURAL clauses remain absent. Nested WITH and recursive
+  execution retain positional capability checks. `ParseCore` scans a copy of its configured
   lexer before recursive descent and attaches the first rejected clause to the
   statement, so analyzers observe `CK00001` with the token location and the `SQL`
   surface name. An actually unknown leading command still receives `CS00002`, even
@@ -594,7 +649,7 @@ its ordinary bare output alias before SET.
 
 ## Non-goals (current dialect)
 
-CORRESPONDING, recursive/nested or data-modifying CTEs, window functions, LATERAL,
+CORRESPONDING, nested or data-modifying CTEs and recursive execution, window functions, LATERAL,
 UPDATE SET subqueries, `ON UPDATE`,
 RETURNING subqueries/OLD/NEW/INTO, savepoints, isolation-level syntax, and cost-hint syntax.
 Each is an additive dialect extension when its engine feature

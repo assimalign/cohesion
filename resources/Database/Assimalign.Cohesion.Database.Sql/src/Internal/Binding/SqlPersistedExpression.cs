@@ -413,7 +413,7 @@ internal static class SqlPersistedExpression
         if (left is null || right is null) { return left is null && right is null; }
         RuntimeHelpers.EnsureSufficientExecutionStack();
         if (left.GetType() != right.GetType() ||
-            !SameList(left.CommonTables, right.CommonTables, (a, b) => Same(a.Name, b.Name) &&
+            !SameList(left.CommonTables, right.CommonTables, (a, b) => a.IsRecursiveScope == b.IsRecursiveScope && Same(a.Name, b.Name) &&
                 SameList(a.Columns, b.Columns, Same) && SameQuery(a.Body, b.Body)) ||
             left.LimitSyntaxKind != right.LimitSyntaxKind ||
             !SameList(left.OrderBy, right.OrderBy, (a, b) => a.IsDescending == b.IsDescending && a.NullPlacement == b.NullPlacement && AreEquivalent(a.Expression, b.Expression)) ||

@@ -55,6 +55,7 @@ public sealed class SqlStatementCompletenessTests
         [SqlClauses.SetOperation] = ["SELECT a FROM t UNION SELECT a FROM u", "(SELECT a FROM t ORDER BY a LIMIT 1) UNION ALL SELECT a FROM u"],
         [SqlClauses.Intersect] = ["SELECT a FROM t INTERSECT ALL SELECT a FROM u"],
         [SqlClauses.Except] = ["SELECT a FROM t EXCEPT DISTINCT SELECT a FROM u"],
+        [SqlClauses.Recursive] = ["WITH RECURSIVE r(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM r) SELECT n FROM r"],
         [SqlClauses.Cte] = ["WITH c AS (SELECT a FROM t) SELECT * FROM c", "WITH c AS (SELECT a FROM t) DELETE FROM t WHERE a IN (SELECT a FROM c)", "INSERT INTO t WITH c AS (SELECT a FROM t) SELECT * FROM c"],
         [SqlClauses.QuantifiedComparison] = ["SELECT a = ANY (SELECT b FROM u) FROM t", "SELECT a <> SOME (SELECT b FROM u) FROM t", "SELECT a < ALL (SELECT b FROM u) FROM t"],
         [SqlClauses.Subquery] =

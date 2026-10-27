@@ -89,6 +89,7 @@ internal sealed partial class SqlSchemaProvisioner
             SqlInsertExpression insert => insert.CommonTables,
             SqlUpdateExpression update => update.CommonTables,
             SqlDeleteExpression delete => delete.CommonTables,
+            SqlMergeExpression merge => merge.CommonTables,
             _ => [],
         };
         foreach (var definition in commonTables)

@@ -108,7 +108,6 @@ public class SqlLanguageProfileTests
 
     [Theory]
     [InlineData(SqlClauses.Window)]
-    [InlineData(SqlClauses.Recursive)]
     [InlineData(SqlClauses.Over)]
     [InlineData(SqlClauses.Partition)]
     [InlineData(SqlClauses.All)]
@@ -120,7 +119,6 @@ public class SqlLanguageProfileTests
 
     [Theory]
     [InlineData(SqlClauses.Window, "SELECT * FROM t WINDOW w AS ();")]
-    [InlineData(SqlClauses.Recursive, "WITH RECURSIVE cte AS (SELECT * FROM t) SELECT * FROM cte;")]
     [InlineData(SqlClauses.Over, "SELECT ROW_NUMBER() OVER () FROM t;")]
     [InlineData(SqlClauses.Partition, "SELECT ROW_NUMBER() PARTITION BY id FROM t;")]
     [InlineData(SqlClauses.All, "SELECT ALL id FROM t;")]

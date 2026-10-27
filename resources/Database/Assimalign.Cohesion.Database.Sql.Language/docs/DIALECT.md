@@ -150,7 +150,7 @@ first match and ordinal access distinguishes them. Plain UPDATE/DELETE without s
 Explicit source columns execute. A real visible source named/aliased OLD or NEW
 masks that pseudo-relation refusal. SET and RETURNING subqueries retain CK00001.
 Delimited OLD/NEW qualifiers remain ordinary identifiers through canonical rendering.
-Keyword-spelled CTE names are accepted after DELETE USING; actual WITH RECURSIVE remains unsupported.
+Keyword-spelled CTE names are accepted after DELETE USING; WITH RECURSIVE binds as described below.
 
 Namespace behavior follows the local PostgreSQL `src/backend/parser/analyze.c:602-621,2560-2578`.
 Target/source associations are collected before SET evaluation or writes. Multiple matching
@@ -420,7 +420,7 @@ src/backend/commands/tablecmds.c:2033-2090 and src/backend/catalog/heap.c:3701-3
 
 ## Statement matrix
 
-With INSERT ... ON CONFLICT (#1118), DML RETURNING (#1117), persisted CREATE/DROP VIEW (#1124), CREATE/DROP SCHEMA (#1030), set operations (#1114), quantified comparisons (#1718), UPDATE ... FROM / DELETE ... USING (#1714), TRUNCATE and CREATE TABLE AS (#1716) and MERGE (#1715), the profile has **57 of 63 declared clauses** measured against the live SQL engine, including MERGE actions and RETURNING.
+With INSERT ... ON CONFLICT (#1118), DML RETURNING (#1117), persisted CREATE/DROP VIEW (#1124), CREATE/DROP SCHEMA (#1030), set operations (#1114), quantified comparisons (#1718), UPDATE ... FROM / DELETE ... USING (#1714), TRUNCATE and CREATE TABLE AS (#1716) and MERGE (#1715), the profile has **58 of 63 declared clauses** measured against the live SQL engine, including MERGE actions and RETURNING. WITH RECURSIVE (#1719, SQ-R1) adds one declared binding-only clause; recursive execution remains CK00001 until SQ-R2.
 Phase 22 measured 33 of 49.
 The earlier 32/48 figure included `JOIN`, `GROUP BY`, `HAVING`, and `SUBQUERY`,
 removed in Phase 12e (#1019–#1021), plus a no-op `CAST` removed in Phase 13.
@@ -441,7 +441,7 @@ projection aliases, including aliases inside scalar expressions, and select-list
 ordinals through the SQL server/client (#1024). At Phase 22 the count remained 33/49 because
 `ALTER TABLE` and `ORDER BY` were already advertised for smaller executable subsets.
 
-The **6 excluded clauses** are recursive CTEs (`RECURSIVE`), window clauses (`WINDOW`,
+The **5 excluded clauses** are window clauses (`WINDOW`,
 `OVER`, `PARTITION`), `NATURAL`,
 and `ALL`. Counts describe named clauses, not
 complete ISO SQL support; the boundaries below are part of the contract.
@@ -476,8 +476,8 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | DML `RETURNING` | Supported subset, measured | Written-row SELECT list and affected count; see the RETURNING contract below |
 | `NATURAL JOIN` | Recognized, not supported | rejected with `CK00001` |
 | `UNION` / `INTERSECT` / `EXCEPT` | Supported, measured | Each accepts ALL or DISTINCT (default); available in every query position, with parenthesized operands and combined ordering/paging. See [Set operations](#set-operations-1114). |
-| `WITH` (CTEs) | Supported subset, measured | Ordered non-recursive SELECT bodies before SELECT, INSERT, UPDATE or DELETE; optional output column lists; also INSERT INTO t WITH ... SELECT |
-| `WITH RECURSIVE` | Recognized, not supported | `CK00001` at RECURSIVE |
+| `WITH` (CTEs) | Supported subset, measured | Ordered non-recursive SELECT bodies before SELECT, INSERT, UPDATE, DELETE or MERGE; optional output column lists; also INSERT INTO t WITH ... SELECT |
+| `WITH RECURSIVE` | Parsed and bound; execution deferred | Dependency analysis, anchor output contract and PostgreSQL recursive-reference restrictions; valid recursion refuses planning/EXPLAIN/execution with CK00001 until SQ-R2. Acyclic lists execute. |
 | Window functions / `OVER` / `WINDOW` | Recognized, not supported | function names lexed; clauses rejected with `CK00001` |
 | `CREATE [OR REPLACE] VIEW` / `DROP VIEW` | Yes | Persisted read-only views; DROP defaults to RESTRICT and supports CASCADE |
 | `CONSTRAINT` / `FOREIGN KEY` / `REFERENCES` / `CHECK` / `UNIQUE` constraints | Supported subset, measured | Column and table declarations normalize into constraint definitions; UNIQUE lowers to a unique catalog index. NULL is an equal index key: a second NULL violates a single-column UNIQUE constraint. Foreign-key NULL values are allowed; CHECK accepts UNKNOWN and rejects FALSE. CHECK expressions must be deterministic Boolean row expressions with the engine's scalar functions (built-in or registered, `IMMUTABLE` only), each called with arguments its signature accepts (`CS01006` otherwise); parameters and aggregates are excluded. CHECK predicates and DEFAULT expressions are stored as canonical text and parsed once per table version; see [Persisted definitions are canonical](#persisted-definitions-are-canonical). |
@@ -1453,7 +1453,7 @@ WHEN clause). BY TARGET is the default
 unmatched direction. INSERT takes one VALUES row or DEFAULT VALUES; whole-item DEFAULT and
 existing identity policies apply. Target names must be unique and match the VALUES width.
 Bare target/source aliases are also accepted. Sources use existing stored/system/view,
-derived-query and joined-relation binding. WITH-prefixed MERGE is outside this run's grammar.
+derived-query and joined-relation binding. WITH-prefixed MERGE shares SELECT CTE binding and materialization (#1719).
 The UPDATE FROM source forms also bind in MERGE USING and survive canonical rendering,
 including views, aliased derived queries and CROSS JOIN sources. A trailing source CROSS
 JOIN leaves the following ON for MERGE. VALUES relations, table functions, LATERAL,
@@ -2104,7 +2104,7 @@ materialize both operands and a hash membership/count table in O(L+R). Every rem
 execution level checks the stack and reports CS05004. Sorting adds O(N log N); streaming
 and spilling remain excluded.
 CORRESPONDING (including BY forms) remains T2 and reports one contextual CK00001.
-Nested/recursive WITH, LATERAL and outer ORDER BY keys bound to derived outputs retain their
+Nested WITH, recursive execution and LATERAL and outer ORDER BY keys bound to derived outputs retain their
 existing exclusions.
 
 Reference anchors in the local PostgreSQL clone: `src/backend/parser/gram.y:845-846,13103-13115`
@@ -2256,7 +2256,7 @@ Quantified comparisons add one measured named clause beside SUBQUERY.
 ## Common table expressions (#1116)
 
 `WITH a [(column, ...)] AS (SELECT ...), b AS (SELECT ... FROM a) ...`
-executes before SELECT, INSERT, UPDATE or DELETE. The ISO query-source spelling
+executes before SELECT, INSERT, UPDATE, DELETE or MERGE. The ISO query-source spelling
 `INSERT INTO target WITH a AS (SELECT ...) SELECT ... FROM a` also executes.
 The public AST exposes each statement's `CommonTables` and each definition's name,
 output column list, body and source location. This adds exactly one advertised clause.
@@ -2299,12 +2299,67 @@ rolls back the whole statement and preserves an explicit transaction. Identity
 columns allocate one value for each inserted row through the existing insert path.
 EXPLAIN includes WITH, materialization and constant-source operators without running them.
 
-`WITH RECURSIVE`, WITH inside subqueries or derived tables, INSERT/UPDATE/DELETE
-bodies (including DELETE RETURNING), `AS [NOT] MATERIALIZED` and SEARCH/CYCLE
-report `CK00001`. RECURSIVE has one error at its token and no CS00002.
+WITH inside subqueries, derived tables or CTE bodies, modifying CTE bodies,
+`AS [NOT] MATERIALIZED` and SEARCH/CYCLE report `CK00001`.
 A WITH list followed by another command kind reports `CS00003`.
 Capability scanning continues through advertised WITH lists, so an excluded OVER,
 NATURAL JOIN or WINDOW still reports its own clause.
+
+## WITH RECURSIVE binding (#1719, SQ-R1)
+
+WITH RECURSIVE declares visibility of every name throughout its WITH list. Acyclic
+entries bind in dependency order and keep ordinary reachable-only materialization.
+Unqualified self-references identify recursive entries; schema-qualified names still
+resolve in the catalog. Mutual recursion reports CK00001. A recursive entry requires
+an anchor UNION [ALL] recursive term and exactly one self-reference in the latter.
+The anchor fixes output names, width, types, modifiers, domains and collations before
+the recursive FROM binds. A complete column list renames the output. Unknown anchor
+NULL/string output becomes text. Overall UNION type/modifier and collation changes
+report CS02066 and CS02067 with cast/COLLATE hints; widths report CS02065.
+
+The recursive reference cannot appear in the anchor, in scalar/IN/EXISTS/quantified
+subqueries, on a nullable outer-join side, under INTERSECT ALL, or on either side of
+EXCEPT ALL or the right of EXCEPT DISTINCT. INTERSECT DISTINCT, the left of EXCEPT
+DISTINCT, preserved outer-join sides and derived FROM queries follow PostgreSQL's
+allowed forms. Aggregates at the level containing the reference are invalid;
+independent subquery aggregates remain allowed. Outer-only subquery aggregates
+owned by the recursive level also report CS01061. Top-level recursive UNION ORDER BY,
+LIMIT/FETCH, OFFSET and FOR UPDATE/SHARE use CK00001. SEARCH/CYCLE, CREATE RECURSIVE
+VIEW, nested WITH and modifying CTE bodies remain CK00001.
+
+Valid recursive definitions bind all entries and the consuming statement, then
+planning, EXPLAIN and execution return CK00001 until SQ-R2, even for an unused
+recursive definition. No working-table operator or depth limit is introduced here.
+Binding defers count/seek and constant-fold evaluation once recursion is identified.
+CREATE VIEW with a recursive query body freezes ordinary anchor metadata without
+executing it; cached and reopened view use propagates the same planning refusal.
+No catalog, storage or wire format changes are needed.
+
+IsRecursiveScope records the list modifier on each AST definition, independently
+of whether it self-references. Binding retains the existing case-insensitive name
+rules, requires complete output-name lists and conservatively makes recursive
+columns nullable. Independent ready definitions retain declaration-order priority.
+Row-locking FOR UPDATE/SHARE forms are contextual CK00001 refusals in all queries.
+
+References re-derived from the local PostgreSQL clone: src/backend/parser/parse_cte.c:
+345-400 (output checks and hints), 580-632 (unknown anchor output), 648-725 and 863-906
+(dependencies), 915-1019 (form/tails), 1027-1199 (references and joins), 1209-1277
+(set operands); parse_collate.c:807-860 (implicit default and conflicts);
+parse_agg.c:1327-1334 (aggregates). No reference code is copied.
+
+| Code | Condition | PostgreSQL SQLSTATE |
+| --- | --- | --- |
+| CS01054 | Recursive definition lacks a top-level anchor UNION [ALL] recursive term | 42P19 |
+| CS01055 | Recursive reference in the anchor | 42P19 |
+| CS01056 | Recursive reference inside a scalar, IN, quantified or EXISTS subquery | 42P19 |
+| CS01057 | Recursive reference on the nullable side of an outer join | 42P19 |
+| CS01058 | Recursive reference under INTERSECT ALL | 42P19 |
+| CS01059 | Recursive reference in a prohibited EXCEPT operand | 42P19 |
+| CS01060 | Recursive term has more than one self-reference | 42P19 |
+| CS01061 | Aggregate at the query level containing a recursive reference | 42P19 |
+| CS02065 | Recursive anchor, recursive output or declared column-list width mismatch | 42601 |
+| CS02066 | Recursive UNION changes the anchor type, domain or type modifiers; cast hint | 42804 |
+| CS02067 | Recursive UNION changes or conflicts with the anchor collation; COLLATE hint | 42P21 |
 
 ## Derived tables and DML predicates (#1113, part b)
 

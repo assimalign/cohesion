@@ -70,17 +70,30 @@ internal sealed partial class SqlPlanner
                         ErrorMessages.CteDuplicateName, definition.Name), definition.Location);
                 }
             }
+            HashSet<SqlCommonTableExpression>? recursive = null;
+            var bindingOrder = definitions[0].IsRecursiveScope ? OrderRecursiveDefinitions(definitions, out recursive) : definitions;
+            if (recursive?.Count > 0)
+            {
+                state.HasRecursion = true;
+                (_queryScopes ??= new()).DeferQueryEvaluation = true;
+                _scopelessEvaluator = null;
+            }
             // PostgreSQL parse_cte.c:214-229 analyzes non-recursive definitions in
             // declaration order and publishes each only after its body is bound.
-            foreach (var definition in definitions)
+            foreach (var definition in bindingOrder)
             {
-                state.Future.Remove(definition.Name); // Self-reference falls through to the stored relation.
+                state.Future.Remove(definition.Name); // Plain WITH can still resolve a stored self-name.
                 state.Dependencies = new(ReferenceEqualityComparer.Instance);
                 state.BindingOperands = CollectCommonTableOperands(definition.Body);
                 state.BindingUnused = !state.Referenced.Contains(definition);
                 ValidateFunctionCalls(definition.Body);
-                var query = PlanQuery(definition.Body);
-                var relation = BindDerivedOutput(query, definition.Name, definition.Columns, definition.Body).Derived! with { IsCommonTable = true };
+                SqlDerivedRelation relation;
+                if (recursive?.Contains(definition) == true) { relation = BindRecursiveDefinition(definition); }
+                else
+                {
+                    var query = PlanQuery(definition.Body);
+                    relation = BindDerivedOutput(query, definition.Name, definition.Columns, definition.Body).Derived! with { IsCommonTable = true };
+                }
                 dependencies.Add(relation, state.Dependencies);
                 state.Relations[definition.Name] = relation;
                 ordered.Add(relation);
@@ -137,6 +150,7 @@ internal sealed partial class SqlPlanner
         internal HashSet<SqlDerivedRelation>? Dependencies { get; set; }
         internal HashSet<SqlSelectExpression>? BindingOperands { get; set; }
         internal bool BindingUnused { get; set; }
+        internal bool HasRecursion { get; set; }
 
         private sealed class DebugView
         {

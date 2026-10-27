@@ -103,6 +103,8 @@ internal sealed partial class SqlPlanner
             var referenced = FindReferencedCommonTables(expression);
             _commonTableState = referenced is null ? null : new CommonTableState(referenced);
             var plan = PlanCore(expression);
+            if (_commonTableState?.HasRecursion == true && ViewDefinitionBinding is null)
+            { throw new SqlUnsupportedQueryException(ErrorMessages.CteRecursiveExecution, location: expression.Location); }
             plan.ContainsLike = _containsLike;
             return plan;
         }
@@ -122,6 +124,7 @@ internal sealed partial class SqlPlanner
             SqlInsertExpression { CommonTables.Count: > 0 } insert => PlanCommonTables(insert.CommonTables, insert),
             SqlUpdateExpression { CommonTables.Count: > 0 } update => PlanCommonTables(update.CommonTables, update),
             SqlDeleteExpression { CommonTables.Count: > 0 } delete => PlanCommonTables(delete.CommonTables, delete),
+            SqlMergeExpression { CommonTables.Count: > 0 } merge => PlanCommonTables(merge.CommonTables, merge),
             _ => PlanStatementCore(expression),
         };
 

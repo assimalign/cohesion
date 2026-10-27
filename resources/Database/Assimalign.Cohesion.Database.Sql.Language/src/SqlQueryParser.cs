@@ -1070,13 +1070,14 @@ public sealed partial class SqlQueryParser : QueryParser
             if (!returning && IsKeyword(ref lexer, "WITH")) { inWithDefinitions = true; }
             if (withStatement && !onConflictUpdate && fromScopes.Count == 0 &&
                 (IsKeyword(ref lexer, "SELECT") || IsKeyword(ref lexer, "INSERT") ||
-                 IsKeyword(ref lexer, "UPDATE") || IsKeyword(ref lexer, "DELETE")))
+                 IsKeyword(ref lexer, "UPDATE") || IsKeyword(ref lexer, "DELETE") || IsKeyword(ref lexer, "MERGE")))
             {
                 firstToken = token;
                 inWithDefinitions = false;
             }
             if (inWithDefinitions && fromScopes.Count == 0 && IsNameToken(ref lexer) &&
-                (string.Equals(previousToken, "WITH", StringComparison.OrdinalIgnoreCase) || previousToken == ","))
+                (string.Equals(previousToken, "WITH", StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(previousToken, "RECURSIVE", StringComparison.OrdinalIgnoreCase) || previousToken == ","))
             {
                 (cteNames ??= new(StringComparer.OrdinalIgnoreCase)).Add(CurrentIdentifierText(ref lexer));
             }
@@ -1172,7 +1173,7 @@ public sealed partial class SqlQueryParser : QueryParser
                 return true;
             }
             if (withStatement && previousToken == "(" &&
-                (IsKeyword(ref lexer, "INSERT") || IsKeyword(ref lexer, "UPDATE") || IsKeyword(ref lexer, "DELETE")))
+                (IsKeyword(ref lexer, "INSERT") || IsKeyword(ref lexer, "UPDATE") || IsKeyword(ref lexer, "DELETE") || IsKeyword(ref lexer, "MERGE")))
             {
                 clause = $"data-modifying CTE body ({token.ToUpperInvariant()})";
                 location = tokenLocation;
@@ -1189,6 +1190,14 @@ public sealed partial class SqlQueryParser : QueryParser
             if (inWithDefinitions && fromScopes.Count == 0 && previousToken == ")" && (IsWord(ref lexer, "SEARCH") || IsWord(ref lexer, "CYCLE")))
             {
                 clause = "SEARCH/CYCLE";
+                location = tokenLocation;
+                return true;
+            }
+            if (IsWord(ref lexer, "FOR") && TryPeekToken(lexer, out string locking, out _) &&
+                (locking.Equals("UPDATE", StringComparison.OrdinalIgnoreCase) || locking.Equals("SHARE", StringComparison.OrdinalIgnoreCase) ||
+                 locking.Equals("NO", StringComparison.OrdinalIgnoreCase) || locking.Equals("KEY", StringComparison.OrdinalIgnoreCase)))
+            {
+                clause = "FOR UPDATE/SHARE";
                 location = tokenLocation;
                 return true;
             }
@@ -1220,7 +1229,8 @@ public sealed partial class SqlQueryParser : QueryParser
                 bool cteIdentifier = cteNames?.Contains(CurrentIdentifierText(ref lexer)) == true && IsNameToken(ref lexer) &&
                     !(IsKeyword(ref lexer, "RECURSIVE") && string.Equals(previousToken, "WITH", StringComparison.OrdinalIgnoreCase)) &&
                     (inWithDefinitions && fromScopes.Count == 0 &&
-                        (string.Equals(previousToken, "WITH", StringComparison.OrdinalIgnoreCase) || previousToken == ",") ||
+                        (string.Equals(previousToken, "WITH", StringComparison.OrdinalIgnoreCase) ||
+                         string.Equals(previousToken, "RECURSIVE", StringComparison.OrdinalIgnoreCase) || previousToken == ",") ||
                      string.Equals(previousToken, "FROM", StringComparison.OrdinalIgnoreCase) ||
                      string.Equals(previousToken, "USING", StringComparison.OrdinalIgnoreCase) &&
                         fromScopes.Count == 0 && firstToken.Equals("DELETE", StringComparison.OrdinalIgnoreCase) ||

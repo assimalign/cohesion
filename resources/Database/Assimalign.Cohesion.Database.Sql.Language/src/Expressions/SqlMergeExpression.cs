@@ -18,6 +18,9 @@ public sealed class SqlMergeExpression : SqlQueryExpression
         Returning = returning;
     }
 
+    /// <summary>Gets the WITH definitions in declaration order.</summary>
+    public IReadOnlyList<SqlCommonTableExpression> CommonTables { get; internal set; } = [];
+
     /// <summary>Gets the stored target table and its optional alias.</summary>
     public SqlTableReference Table { get; }
 
