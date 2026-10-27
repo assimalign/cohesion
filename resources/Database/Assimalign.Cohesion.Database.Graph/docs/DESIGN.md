@@ -892,6 +892,8 @@ Ordinary match results keep the base two-reference carrier and unfiltered iterat
 their two-reference continuation layout; predicate/property checkpoints live only in filtered tasks.
 A private execution variant of the internal path plan holds selector state, keeping search
 arguments out of the ordinary iterator's retained parameter layout.
+Budget profile counters are also lazy: ordinary queries retain no selector observations, and
+test progress callbacks keep their values when the first selector counter creates that state.
 Release minimum-of-five-round checks pin node, one-hop and quantified execution below the
 reviewed base allocation ceilings (9,160, 28,696 and 204,546 bytes per match).
 Ordinary MATCH WHERE remains a post-selection

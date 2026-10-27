@@ -306,6 +306,7 @@ internal static partial class GraphPlanExecutor
         private long _physical;
         private long _viable;
         private int _candidates;
+        private BudgetObservations? _observations;
         internal ExpansionBudget(long workLimit = PhysicalLimit, long memoryLimit = 256L * 1024 * 1024, GraphQueryMemoryPool? pool = null)
         {
             WorkLimit = workLimit;
@@ -313,20 +314,39 @@ internal static partial class GraphPlanExecutor
         }
         internal long WorkLimit { get; }
         internal GraphQueryMemory Memory { get; }
-        internal long SelectorPairs { get; set; }
-        internal long SelectorStates { get; set; }
-        internal long SelectorCandidates { get; set; }
-        internal long SelectorSelected { get; set; }
+        internal long SelectorPairs
+        { get => (_observations as SelectorObservations)?.Pairs ?? 0; set => ObserveSelector().Pairs = value; }
+        internal long SelectorStates
+        { get => (_observations as SelectorObservations)?.States ?? 0; set => ObserveSelector().States = value; }
+        internal long SelectorCandidates
+        { get => (_observations as SelectorObservations)?.Candidates ?? 0; set => ObserveSelector().Candidates = value; }
+        internal long SelectorSelected
+        { get => (_observations as SelectorObservations)?.Selected ?? 0; set => ObserveSelector().Selected = value; }
         internal long Consumed => _physical;
         // Observe every pending DFS state before it is popped, including parents and children.
-        internal Action<int>? OnFrontier { get; init; }
+        internal Action<int>? OnFrontier
+        { get => _observations?.OnFrontier; init => (_observations ??= new()).OnFrontier = value; }
         // Sampling at each consumed candidate includes the bounded incident read buffers.
-        internal Action<int>? OnCandidate { get; init; }
+        internal Action<int>? OnCandidate
+        { get => _observations?.OnCandidate; init => (_observations ??= new()).OnCandidate = value; }
         internal void VisitCandidate() => OnCandidate?.Invoke(++_candidates);
         internal long Physical => _physical;
         internal long Viable => _viable;
         internal void ConsumeViable() => _viable++;
-        internal Action<int>? OnConsume { get; init; }
+        internal Action<int>? OnConsume
+        { get => _observations?.OnConsume; init => (_observations ??= new()).OnConsume = value; }
+
+        private SelectorObservations ObserveSelector()
+        {
+            if (_observations is SelectorObservations selector) { return selector; }
+            selector = new SelectorObservations
+            {
+                OnFrontier = _observations?.OnFrontier, OnCandidate = _observations?.OnCandidate,
+                OnConsume = _observations?.OnConsume,
+            };
+            _observations = selector;
+            return selector;
+        }
         internal void EnsureAvailable()
         {
             if (_physical >= WorkLimit)
@@ -340,6 +360,21 @@ internal static partial class GraphPlanExecutor
             _physical = next;
             if (overflow || _physical > WorkLimit)
             { throw new GraphPlanningException("CG05004", string.Format(CultureInfo.CurrentCulture, ErrorMessages.ExpansionLimitExceeded, Physical, Viable, WorkLimit)); }
+        }
+
+        private class BudgetObservations
+        {
+            public Action<int>? OnFrontier { get; set; }
+            public Action<int>? OnCandidate { get; set; }
+            public Action<int>? OnConsume { get; set; }
+        }
+
+        private sealed class SelectorObservations : BudgetObservations
+        {
+            public long Pairs { get; set; }
+            public long States { get; set; }
+            public long Candidates { get; set; }
+            public long Selected { get; set; }
         }
 
         private sealed class DebugView
