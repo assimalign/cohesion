@@ -381,9 +381,9 @@ internal static class Program
         var mergePlan = await RowsAsync(session, "EXPLAIN " + mergeBinding);
         Check("in process: MERGE binding and ordered actions", mergePlan.Any(row => Equals(row[2], "Merge")) &&
             mergePlan.Count(row => Equals(row[2], "MergeAction")) == 3, true);
-        CheckFailure("in process: MERGE execution remains staged", await FailureAsync(async () =>
-            await session.ExecuteAsync(mergeBinding, cancellationToken: CancellationToken.None)), "CK00001");
-        Check("in process: refused MERGE has no effects", await RowsAsync(session, "SELECT COUNT(*) FROM default_guard"), [[3L]]);
+        var merged = await RowsAsync(session, mergeBinding);
+        Check("in process: MERGE actions execute", merged.Length == 3 && merged.All(row => Equals(row[0], "UPDATE")), true);
+        Check("in process: MERGE retains target count", await RowsAsync(session, "SELECT COUNT(*) FROM default_guard"), [[3L]]);
         foreach (string side in new[] { "left", "right" })
         {
             await session.ExecuteAsync($"CREATE TABLE hash_{side}(id INT PRIMARY KEY,k INT)");
@@ -532,8 +532,8 @@ internal static class Program
         var mergePlan = await RowsAsync(connection, "EXPLAIN " + mergeBinding, timeout.Token);
         Check("over the wire: MERGE binding and ordered actions", mergePlan.Any(row => Equals(row[2], "Merge")) &&
             mergePlan.Count(row => Equals(row[2], "MergeAction")) == 3, true);
-        CheckFailure("over the wire: MERGE execution remains staged", await FailureAsync(() =>
-            RowsAsync(connection, mergeBinding, timeout.Token)), "CK00001");
+        var merged = await RowsAsync(connection, mergeBinding, timeout.Token);
+        Check("over the wire: MERGE actions execute", merged.Length == 3 && merged.All(row => Equals(row[0], "UPDATE")), true);
         var hashAnalysis = await RowsAsync(connection,
             "EXPLAIN ANALYZE SELECT l.id FROM hash_left l JOIN hash_right r ON l.k=r.k", timeout.Token);
         Check("over the wire: hash analysis keeps typed counts", hashAnalysis.Any(row => Equals(row[2], "JoinStep") && Equals(row[7], 80L) && row.Length == 8), true);

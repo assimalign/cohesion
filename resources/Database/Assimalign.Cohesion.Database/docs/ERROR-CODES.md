@@ -179,7 +179,7 @@ structured-carrier messages remain unprefixed.
 | COHSQLE013 | CS05013 | Execution/budgets |
 | COHSQLE017 | CS05017 | Execution/budgets |
 | COHSQLE032 | CS05032 | Execution/budgets |
-| COHSQLE036 | CS05036 | Execution/budgets |
+| COHSQLE036 | CS05036 | Repeated target modification by ON CONFLICT or MERGE |
 | COHSQLE040 | CS05040 | Execution/budgets |
 | COHSQLE042 | CS05042 | Execution/budgets |
 | COHSQLE043 | CS05043 | Execution/budgets |

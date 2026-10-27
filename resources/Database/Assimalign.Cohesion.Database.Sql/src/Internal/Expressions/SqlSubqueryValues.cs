@@ -28,13 +28,13 @@ internal sealed class SqlSubqueryValues
     private readonly int _scope;
 
     internal SqlSubqueryValues(SqlSubqueryValues? parent = null, int scope = -1,
-        IReadOnlyList<SqlSubqueryBinding>? queries = null)
+        IReadOnlyList<SqlSubqueryBinding>? queries = null, bool lazy = false)
     {
         _parent = parent;
         _scope = scope;
         Queries = queries?.ToDictionary(query => query.Slot) ?? [];
         StatementValues = parent?.StatementValues ?? [];
-        HasCorrelatedQueries = Queries.Values.Any(query => query.IsCorrelated);
+        HasCorrelatedQueries = lazy || Queries.Values.Any(query => query.IsCorrelated);
         Evaluated = HasCorrelatedQueries ? new() : null;
     }
 

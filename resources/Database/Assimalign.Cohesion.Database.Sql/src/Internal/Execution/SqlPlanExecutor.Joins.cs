@@ -52,6 +52,11 @@ internal sealed partial class SqlPlanExecutor
             await PrepareSubqueriesAsync(plan.Where, row, statement, cancellationToken).ConfigureAwait(false);
             if (evaluator.Matches(plan.Where, row))
             {
+                if (statement.Metrics.DmlMemory(_definitions.StatementMemoryBudget) is { } memory)
+                {
+                    memory.Retain(row);
+                    memory.Reserve(32);
+                }
                 matches.Add(row);
             }
         }
@@ -89,7 +94,7 @@ internal sealed partial class SqlPlanExecutor
         if (plan.Tree is not null)
         {
             // All tree inputs may be reused by a parent; delivery detaches selected cells.
-            await foreach (var row in EnumerateNormalizedJoinRowsAsync(plan, statement, ReadInput, cancellationToken).ConfigureAwait(false))
+            await foreach (var row in EnumerateNormalizedJoinRowsAsync(plan, statement, ReadInput, cancellationToken, dmlTarget?.Binding).ConfigureAwait(false))
             {
                 yield return row;
             }
@@ -179,7 +184,20 @@ internal sealed partial class SqlPlanExecutor
                         }
                         else if (accesses[level] is not { } access)
                         {
-                            buffered[level] ??= ReadInput(innerBinding).ToList();
+                            if (buffered[level] is null)
+                            {
+                                var buffer = new List<object?[]>();
+                                foreach (var item in ReadInput(innerBinding))
+                                {
+                                    if (statement.Metrics.DmlMemory(_definitions.StatementMemoryBudget) is { } memory)
+                                    {
+                                        memory.Retain(item);
+                                        memory.Reserve(32); // list storage, including growth
+                                    }
+                                    buffer.Add(item);
+                                }
+                                buffered[level] = buffer;
+                            }
                             candidates = buffered[level]!;
                         }
                         else

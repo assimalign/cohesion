@@ -12,10 +12,10 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 [Collection(nameof(SqlDatabaseEventSourceCollection))]
 public sealed class SqlMergeCostingTests
 {
-    [Theory(DisplayName = "Cohesion Test [Sql] - MERGE: wrapped statements refuse before costing reads source indexes (#1715)")]
+    [Theory(DisplayName = "Cohesion Test [Sql] - MERGE: wrapped statements cost source indexes and execute (#1715)")]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task Execute_WrappedMerge_ShouldRefuseBeforeCostProbesAsync(bool correlated)
+    public async Task Execute_WrappedMerge_ShouldCostAndExecuteAsync(bool correlated)
     {
         // Arrange
         await using var engine = SqlDatabaseEngine.Create("merge-cost-refusal", new());
@@ -45,15 +45,13 @@ public sealed class SqlMergeCostingTests
             matches = 0;
 
             // Act
-            var failure = await Should.ThrowAsync<DatabaseException>(async () =>
-                await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None));
+            var result = await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None);
 
             // Assert
-            failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CK00001");
-            probes.ShouldBe(0);
-            entries.ShouldBe(0);
-            matches.ShouldBe(0);
-            session.LastStatementMetrics!.RecordsExamined.ShouldBe(0);
+            result.AffectedCount.ShouldBe(0);
+            probes.ShouldBe(1);
+            entries.ShouldBeGreaterThanOrEqualTo(2);
+            matches.ShouldBe(2);
         }
         finally { SqlPlanExecutor.CostProbeCompleted = null; }
     }

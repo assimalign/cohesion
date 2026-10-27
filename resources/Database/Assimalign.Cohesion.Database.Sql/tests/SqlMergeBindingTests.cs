@@ -152,10 +152,10 @@ public sealed class SqlMergeBindingTests
         diagnostic.Start.ShouldNotBeNull();
     }
 
-    [Theory(DisplayName = "Cohesion Test [Sql] - MERGE: safe FULL associations bind and execution refuses without writes (#1715)")]
+    [Theory(DisplayName = "Cohesion Test [Sql] - MERGE: safe FULL associations execute BY SOURCE without evaluating unmatched actions (#1715)")]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task Execute_BoundMerge_ShouldRefuseBeforeActionsAsync(bool transaction)
+    public async Task Execute_BoundMerge_ShouldApplyOnlySelectedActionsAsync(bool transaction)
     {
         // Arrange
         await using var engine = SqlDatabaseEngine.Create("merge-refusal", new());
@@ -168,13 +168,13 @@ public sealed class SqlMergeBindingTests
 
         // Act
         await using var explanation = (await session.ExecuteAsync("EXPLAIN " + sql, cancellationToken: CancellationToken.None)).ShouldBeAssignableTo<DatabaseResultSet>();
-        var failure = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None));
+        var applied = await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None);
         if (transaction) { await session.ExecuteAsync("COMMIT", cancellationToken: CancellationToken.None); }
         await using var result = (await session.ExecuteAsync("SELECT v FROM t", cancellationToken: CancellationToken.None)).ShouldBeAssignableTo<DatabaseResultSet>();
 
         // Assert
-        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CK00001");
-        await foreach (var row in result.GetRowsAsync(CancellationToken.None)) { row.GetInt32(0).ShouldBe(7); }
+        applied.AffectedCount.ShouldBe(1);
+        (await RowsCountAsync(result)).ShouldBe(0);
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - MERGE: merge_action is forbidden outside MERGE RETURNING (#1715)")]
@@ -210,11 +210,11 @@ public sealed class SqlMergeBindingTests
 
         // Act
         await session.ExecuteAsync("EXPLAIN " + sql, cancellationToken: CancellationToken.None);
-        var failure = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None));
+        var applied = await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None);
 
         // Assert
         calls.ShouldBe(0);
-        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CK00001");
+        applied.AffectedCount.ShouldBe(0);
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - MERGE: source trees, predicates, aliases and metadata bind (#1715)")]
@@ -276,11 +276,11 @@ public sealed class SqlMergeBindingTests
 
         // Act
         await using var description = (await session.ExecuteAsync("EXPLAIN " + sql, cancellationToken: CancellationToken.None)).ShouldBeAssignableTo<DatabaseResultSet>();
-        var failure = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None));
+        var applied = await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None);
 
         // Assert
         description.ShouldBeAssignableTo<DatabaseResultSet>();
-        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CK00001");
+        applied.AffectedCount.ShouldBe(0);
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - MERGE: absent sources nullify merged USING metadata (#1715)")]
@@ -330,8 +330,15 @@ public sealed class SqlMergeBindingTests
         tree.Step.Hash.ShouldBeNull();
         tree.Left!.Binding.ShouldBe(kind == SqlJoinType.RightOuter ? 1 : 0);
         details.ShouldContain(detail => detail != null && detail.Contains(kind + "; NestedLoop"));
-        var failure = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None));
-        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CK00001");
+        var applied = await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None);
+        applied.AffectedCount.ShouldBe(0);
+    }
+
+    private static async Task<int> RowsCountAsync(DatabaseResult result)
+    {
+        int count = 0;
+        await foreach (var row in ((DatabaseResultSet)result).GetRowsAsync(CancellationToken.None)) { count++; }
+        return count;
     }
 
     private static async Task SetupAsync(SqlDatabaseSession session)

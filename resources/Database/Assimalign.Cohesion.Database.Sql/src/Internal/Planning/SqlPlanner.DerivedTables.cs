@@ -83,7 +83,7 @@ internal sealed partial class SqlPlanner
             {
                 scope ??= new SqlExpressionEvaluator(output.Columns, _parameters, output.Bindings,
                     defaultCollation: _catalog.DefaultCollation, subquerySlots: _subquerySlots,
-                    functions: _functions, cancellationToken: _cancellationToken,
+                    functions: _functions, cancellationToken: _cancellationToken, foldConstants: FoldQueryConstants,
                     outerScope: OuterScope, outerDependencies: OuterDependencies);
                 inherited = scope.ColumnMetadata(reference);
             }
@@ -96,7 +96,7 @@ internal sealed partial class SqlPlanner
                 {
                     scope ??= new SqlExpressionEvaluator(output.Columns, _parameters, output.Bindings,
                         defaultCollation: _catalog.DefaultCollation, subquerySlots: _subquerySlots, functions: _functions,
-                        cancellationToken: _cancellationToken, outerScope: OuterScope, outerDependencies: OuterDependencies);
+                        cancellationToken: _cancellationToken, outerScope: OuterScope, outerDependencies: OuterDependencies, foldConstants: FoldQueryConstants);
                     if (scope.ResolveFunction(call)?.ReturnType is { IsPseudo: false } result) { declaredType = result; }
                 }
             }
@@ -105,7 +105,7 @@ internal sealed partial class SqlPlanner
             {
                 scope ??= new SqlExpressionEvaluator(output.Columns, _parameters, output.Bindings,
                     defaultCollation: _catalog.DefaultCollation, subquerySlots: _subquerySlots, functions: _functions,
-                    cancellationToken: _cancellationToken, outerScope: OuterScope, outerDependencies: OuterDependencies);
+                    cancellationToken: _cancellationToken, outerScope: OuterScope, outerDependencies: OuterDependencies, foldConstants: FoldQueryConstants);
                 inferredType = scope.OutputTypeInfo(resultExpression);
             }
             var type = projection.Metadata?.TypeInfo ?? inherited?.Type ?? declaredType?.Storage

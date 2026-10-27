@@ -31,6 +31,11 @@ internal sealed partial class SqlPlanExecutor
                 var values = new object?[row.FieldCount];
                 for (int i = 0; i < values.Length; i++)
                 { values[i] = SqlBinaryValue.CopyShared(SqlCharacter.Input(row.GetValue(i), result.Columns[i].Type)); }
+                if (statement.Metrics.DmlMemory(_definitions.StatementMemoryBudget) is { } memory)
+                {
+                    memory.Retain(values);
+                    memory.Reserve(32);
+                }
                 rows.Add(values);
             }
         }

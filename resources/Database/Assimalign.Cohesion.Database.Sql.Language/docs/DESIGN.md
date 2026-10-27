@@ -1,5 +1,20 @@
 # Assimalign.Cohesion.Database.Sql.Language — Design
 
+## Joined-DML statement memory (#1715, #1751)
+
+DIALECT.md records CS05067 before writes when retained MERGE, UPDATE FROM or DELETE USING
+inputs, associations or selected writes exceed StatementMemoryBudget. Hash builds share that
+grant without a second charge for aliased payload. Syntax, AST and persisted formats are unchanged;
+the engine's joined-DML memory conformance cases cover refusal and under-budget execution.
+
+## MERGE execution (#1715, SQ-M2)
+
+DIALECT.md records ordered executable actions, BY SOURCE, old/new target RETURNING,
+merge_action(), repeated-target CS05036 and lazy action-owned subqueries. The existing AST,
+renderer and grammar are unchanged. Live clause conformance executes MERGE rather than
+measuring only EXPLAIN; SQL's design records transaction admission and SQ-M3's remaining
+concurrent-target rechecks and mixed-action final-state constraints.
+
 ## TRUNCATE (#1716, SQ-T1)
 
 SqlTruncateExpression stores an immutable ordered list of SqlTruncateTable targets, each with
@@ -130,7 +145,7 @@ contextual. The latter uses the existing function-call AST and binds only in MER
 RETURNING, where Sql maps it to a text slot. It is not a standalone executable built-in.
 Grammar requires the action set appropriate to the match kind. Unreachable clauses,
 scopes, column/type validation and planning belong to Sql. DIALECT records the complete
-binding contract and temporary CK00001 execution refusal. No persisted format changes.
+binding and executable action contract, including SQ-M3's remaining work. No persisted format changes.
 USING shares UPDATE FROM's stored/system/view, aliased derived-query and supported join
 sources. At the top level a source CROSS JOIN leaves ON for MERGE; ordinary FROM parsing
 keeps its existing CROSS JOIN ON refusal. VALUES relations, table functions, LATERAL,
@@ -558,7 +573,7 @@ its ordinary bare output alias before SET.
 
 CORRESPONDING, recursive/nested or data-modifying CTEs, window functions, LATERAL,
 UPDATE SET subqueries, `ON UPDATE`,
-MERGE execution (until SQ-M2), RETURNING subqueries/OLD/NEW/INTO, savepoints, isolation-level syntax, and cost-hint syntax.
+RETURNING subqueries/OLD/NEW/INTO, savepoints, isolation-level syntax, and cost-hint syntax.
 Each is an additive dialect extension when its engine feature
 lands.
 

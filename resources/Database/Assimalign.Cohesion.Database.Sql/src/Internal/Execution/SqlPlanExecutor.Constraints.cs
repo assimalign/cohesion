@@ -823,6 +823,12 @@ internal sealed partial class SqlPlanExecutor
             return null;
         }
 
+        if (statement.Metrics.DmlMemory(_definitions.StatementMemoryBudget) is { } memory)
+        {
+            memory.Retain(values);
+            memory.Reserve(256); // deletion record, dictionary growth and cascade work
+        }
+
         await AcquireRowWriteLocksAsync(statement, table.ObjectId, [location], cancellationToken, cascade: true).ConfigureAwait(false);
 
         // A child row was found in latest state, which can be newer than a snapshot fixed at the
@@ -1012,7 +1018,8 @@ internal sealed partial class SqlPlanExecutor
                 continue;
             }
 
-            frame.Matches = FindConstraintRows(reference.ChildKey, keys, statement, cancellationToken, ConstraintCurrentSnapshot(statement)).ToList();
+            frame.Matches = CollectConstraintMatches(FindConstraintRows(reference.ChildKey, keys, statement, cancellationToken,
+                ConstraintCurrentSnapshot(statement)), statement);
             frame.Match = 0;
         }
     }
