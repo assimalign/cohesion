@@ -485,7 +485,9 @@ unrelated commits and every return/failure/disposal path. Threaded stress runs f
 under a 30-second cancellation ceiling; counters and lock-release checks decide success.
 Each iteration disposes its database before the next begins. Actors publish their queued
 progress before assertions, so a failed assertion reaches the caller instead of hiding behind
-the progress wait's hang guard.
+the progress wait's hang guard. The pending state is captured before publication: the signal
+may let the main actor commit before the assertion executes. Deterministic inline-completion
+and already-completed-task tests cover both orderings.
 An optional internal, instance-free test gate after writer acquisition deterministically ends
 the session or cancels before the pattern grant, proving late-grant cleanup. Tests also force a
 pattern-only wait and check failure release before the caller rolls back its faulted transaction.

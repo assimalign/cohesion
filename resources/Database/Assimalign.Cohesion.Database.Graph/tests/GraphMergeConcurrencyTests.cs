@@ -54,8 +54,7 @@ public sealed class GraphMergeConcurrencyTests
         var pending = threaded ? Task.Run(async () =>
         {
             var task = MergeAsync(second, competing, "Person").AsTask();
-            queued.SetResult();
-            task.IsCompleted.ShouldBeFalse();
+            ReportQueued(task, queued);
             return await task;
         }, token) : MergeAsync(second, competing, "Person").AsTask();
         if (threaded) { await queued.Task.WaitAsync(token); }
@@ -550,6 +549,43 @@ public sealed class GraphMergeConcurrencyTests
         // Assert: each credited race asserted a queued writer, exactly one creation and release.
         snapshotRaces.ShouldBeGreaterThanOrEqualTo(2);
         committedRaces.ShouldBeGreaterThanOrEqualTo(2);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Graph] - queued progress may complete the actor before its assertion (#1735)")]
+    public void ReportQueued_CompletionDuringPublication_ShouldAssertObservedState()
+    {
+        // Arrange: force completion synchronously inside publication, with no scheduler race.
+        var pending = new TaskCompletionSource();
+        var queued = new TaskCompletionSource();
+        var completion = queued.Task.ContinueWith(_ => pending.SetResult(), CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+
+        // Act
+        ReportQueued(pending.Task, queued);
+
+        // Assert
+        pending.Task.IsCompletedSuccessfully.ShouldBeTrue();
+        completion.IsCompletedSuccessfully.ShouldBeTrue();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Graph] - queued assertion failure publishes progress before throwing (#1735)")]
+    public void ReportQueued_AlreadyCompleted_ShouldPublishBeforeFailure()
+    {
+        // Arrange
+        var queued = new TaskCompletionSource();
+
+        // Act
+        Should.Throw<ShouldAssertException>(() => ReportQueued(Task.CompletedTask, queued));
+
+        // Assert
+        queued.Task.IsCompletedSuccessfully.ShouldBeTrue();
+    }
+
+    private static void ReportQueued(Task task, TaskCompletionSource queued)
+    {
+        bool completed = task.IsCompleted;
+        queued.SetResult();
+        completed.ShouldBeFalse();
     }
 
     private static GraphMergePatternIdentity Identity(string[] labels)
