@@ -336,6 +336,33 @@ public sealed partial class SqlAlterColumnTypeReviewTests
         database.Catalog.GetPendingTableReclamations().ShouldNotContain(owner);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Sql] - ALTER TYPE review: missing domains retain readable expression defaults after reopen")]
+    public async Task Reopen_UnregisteredDomainDefault_ShouldPermitReadsAndRefuseWrites()
+    {
+        // Arrange
+        var storage = new CrashCaptureSqlStorageStrategy();
+        var builder = SqlDatabaseEngine.CreateBuilder("alter-review-missing-domain");
+        builder.Options.StorageStrategy = storage;
+        builder.Types.Add(SqlType.CreateDomain("native_int", SqlType.Integer));
+        await using (var engine = builder.Build())
+        {
+            var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+            await using var session = await database.CreateSessionAsync(CancellationToken.None);
+            await ExecAsync(session, "CREATE TABLE t(v native_int DEFAULT (1+2))");
+            await ExecAsync(session, "INSERT INTO t DEFAULT VALUES");
+        }
+
+        // Act
+        await using var reopened = SqlDatabaseEngine.Create("alter-review-missing-domain", new() { StorageStrategy = storage.CaptureDurableImages() });
+        var restored = await reopened.OpenDatabaseAsync("db", CancellationToken.None);
+        await using var reader = await restored.CreateSessionAsync(CancellationToken.None);
+
+        // Assert
+        (await RowsAsync(reader, "SELECT v FROM t")).ShouldHaveSingleItem()[0].ShouldBe(3);
+        var failure = await Should.ThrowAsync<DatabaseException>(() => ExecAsync(reader, "INSERT INTO t DEFAULT VALUES"));
+        failure.Diagnostics.ShouldContain(d => d.Code == "CS02010");
+    }
+
     private static SqlCatalogTable Table(SqlDatabase database) => database.Catalog.Tables.Single(t => t.Name == "t");
 
     private static async Task ExecAsync(SqlDatabaseSession session, string sql)

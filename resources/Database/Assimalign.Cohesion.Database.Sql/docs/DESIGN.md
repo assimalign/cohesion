@@ -6935,7 +6935,8 @@ unknown string literals retain their resolved old identity. Immutable results pe
 literals, preventing CAST accumulation across repeated changes and reopen. Expression defaults
 retain their original text and pinned calls; the DEFAULT binder supplies assignment coercion on
 each evaluation, including target-domain base modifiers, so character overflow refuses rather
-than truncating. A column with no default inherits the target domain's default, as CREATE TABLE
+than truncating. A missing native domain still opens with readable stored values; its bound domain
+checker retains CS02010 for writes, including columns with expression defaults. A column with no default inherits the target domain's default, as CREATE TABLE
 and CTAS do. Volatile defaults are bound without execution; immutable defaults are evaluated
 before reservation. Referencing CHECKs use the declaration binder against the target definition,
 including CASE input/WHEN, LIKE operand/pattern/escape and empty-table operand compatibility, pin existing function identities, and

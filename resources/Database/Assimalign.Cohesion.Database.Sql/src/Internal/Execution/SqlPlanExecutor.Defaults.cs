@@ -134,7 +134,9 @@ internal sealed partial class SqlPlanExecutor
                 SqlPlanner.ValidateDefaultType(expression, scope, column.Type.Type, column.Name);
             }
             var volatility = DefaultVolatility(expression, scope);
-            var target = column.DomainName is { } name ? functions.Types.Find(name)! : SqlType.ForStorage(column.Type);
+            // A missing native domain remains readable under the stored base type;
+            // the bound domain checker owns its existing CS02010 write refusal.
+            var target = (column.DomainName is { } name ? functions.Types.Find(name) : null) ?? SqlType.ForStorage(column.Type);
             // DEFAULT text stores the original expression, without implicit column
             // coercion. Rebind that assignment, including a domain's base modifiers,
             // rather than persisting an explicit CAST that can truncate characters.
