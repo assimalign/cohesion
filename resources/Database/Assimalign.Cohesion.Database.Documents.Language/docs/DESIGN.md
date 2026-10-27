@@ -795,6 +795,10 @@ retains CK00001 and is never a function.
 Composite keys follow SQL++'s leading-key MISSING rule. UNIQUE is a Cohesion SQL-spelled extension;
 any NULL/MISSING component exempts the key from conflicts (PostgreSQL NULLS DISTINCT). Arrays and
 objects in a UNIQUE key fail CD02021; duplicate valued scalar keys fail CD03020 (23505).
+The catalog refuses an encoded index definition larger than 8,092 bytes with CD03026 before
+posting extraction or physical tree creation (#1530). This execution limit also applies to
+syntactically valid long path lists; it adds no parser or AST limit. The execution conformance
+corpus verifies the code, catalog cause and session reuse after refusal.
 Immediate per-row checks and the existing failed-transaction contract apply to every mutation.
 COHESION_SCHEMA.INDEXES exposes PATH, ordered PATHS and the real IS_UNIQUE. Conditional creation
 preserves an existing name even if the requested definition differs. Conditional absent DROP is

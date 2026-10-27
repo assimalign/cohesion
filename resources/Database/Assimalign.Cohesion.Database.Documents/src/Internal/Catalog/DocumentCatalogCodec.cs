@@ -12,6 +12,7 @@ namespace Assimalign.Cohesion.Database.Documents.Internal;
 
 internal static class DocumentCatalogCodec
 {
+    internal const byte IndexRecordVersion = 3;
     private static readonly UTF8Encoding _utf8 = new(false, true);
 
     internal static byte[] Encode(CatalogRecord record, TransactionSequence writer)
@@ -21,7 +22,7 @@ internal static class DocumentCatalogCodec
         binary.Write(writer.Value);
         binary.Write(0UL);
         binary.Write((byte)(record.Collection is not null ? 1 : record.Document is not null ? 2 : 4));
-        binary.Write((byte)(record.Index is not null ? 2 : 1));
+        binary.Write(record.Index is not null ? IndexRecordVersion : (byte)1);
         if (record.Collection is { } collection)
         {
             binary.Write(collection.Id.ToByteArray());
@@ -43,9 +44,18 @@ internal static class DocumentCatalogCodec
             var index = record.Index!.Value;
             binary.Write(index.CollectionId.ToByteArray());
             WriteString(binary, index.Name);
-            binary.Write(index.Paths.Count);
-            foreach (string path in index.Paths) { WriteString(binary, path); }
-            binary.Write(index.IsUnique);
+            binary.Write(index.Keys.Count);
+            foreach (var key in index.Keys)
+            {
+                binary.Write((byte)(key.ArraySource is null ? 0 : 1));
+                WriteString(binary, key.Path);
+                if (key.ArraySource is not null)
+                {
+                    WriteString(binary, key.ArraySource);
+                    DocumentIndexPredicateCodec.Write(binary, key.When);
+                }
+            }
+            binary.Write((byte)((index.IsUnique ? 1 : 0) | (index.IncludeMissing ? 2 : 0)));
             binary.Write(index.ObjectId);
         }
         return stream.ToArray();
@@ -126,20 +136,32 @@ internal static class DocumentCatalogCodec
                 case 4:
                     int count = reader.ReadInt32();
                     if (count is < 1 or > 32) { throw new DocumentCatalogException("CD06105", ErrorMessages.IndexPathCountInvalid); }
-                    var paths = new string[count];
+                    var keys = new DocumentIndexKey[count];
                     for (int i = 0; i < count; i++)
                     {
-                        paths[i] = ReadString(reader) ?? throw new DocumentCatalogException("CD06105", ErrorMessages.CatalogCodecDecodeDocumentCatalog4);
-                        DocumentIndexKeys.ValidatePath(paths[i]);
+                        byte keyKind = reader.ReadByte();
+                        string path = ReadString(reader) ?? throw new DocumentCatalogException("CD06105", ErrorMessages.CatalogCodecDecodeDocumentCatalog4);
+                        keys[i] = keyKind switch
+                        {
+                            0 => DocumentIndexKey.Scalar(path),
+                            1 => DocumentIndexKey.DistinctArray(ReadString(reader)
+                                ?? throw new DocumentCatalogException("CD06105", ErrorMessages.CatalogCodecDecodeDocumentCatalog4),
+                                path, DocumentIndexPredicateCodec.Read(reader)),
+                            _ => throw new DocumentCatalogException("CD06105", ErrorMessages.IndexDescriptorInvalid)
+                        };
                     }
                     byte flags = reader.ReadByte();
-                    if (flags > 1) { throw new DocumentCatalogException("CD06105", ErrorMessages.IndexFlagsInvalid); }
+                    if (flags > 3) { throw new DocumentCatalogException("CD06105", ErrorMessages.IndexFlagsInvalid); }
                     ulong objectId = reader.ReadUInt64();
                     if (objectId == 0)
                     {
                         throw new DocumentCatalogException("CD06105", ErrorMessages.CatalogCodecDecodeDocumentCatalog5);
                     }
-                    result = new CatalogRecord(null, null, new DocumentIndexMetadata(id, name, paths, flags == 1, objectId));
+                    if (System.Linq.Enumerable.Count(keys, key => key.ArraySource is not null) > 1 ||
+                        (flags & 1) != 0 && System.Linq.Enumerable.Any(keys, key => key.ArraySource is not null) ||
+                        (flags & 2) != 0 && keys[0].ArraySource is not null)
+                    { throw new DocumentCatalogException("CD06105", ErrorMessages.IndexDescriptorInvalid); }
+                    result = new CatalogRecord(null, null, new DocumentIndexMetadata(id, name, keys, (flags & 1) != 0, (flags & 2) != 0, objectId));
                     break;
                 default:
                     throw new DocumentCatalogException("CD06105", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CatalogCodecDecodeDocumentCatalog6, kind));
@@ -158,7 +180,7 @@ internal static class DocumentCatalogCodec
 
     internal static void EnsureVersion(byte kind, byte version)
     {
-        byte supported = (byte)(kind is 4 or 5 ? 2 : 1);
+        byte supported = kind is 4 or 5 ? IndexRecordVersion : (byte)1;
         if (version != supported)
         {
             throw new DocumentCatalogException("CD06105", string.Format(CultureInfo.CurrentCulture, ErrorMessages.CatalogFormatMismatch, kind, version, supported))

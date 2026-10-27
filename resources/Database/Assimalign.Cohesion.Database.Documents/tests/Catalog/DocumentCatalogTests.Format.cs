@@ -1,6 +1,7 @@
 using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
+using System.IO;
 using Assimalign.Cohesion.Database.Indexing;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Types;
@@ -16,10 +17,12 @@ namespace Assimalign.Cohesion.Database.Documents.Catalog.Tests;
 
 public sealed partial class DocumentCatalogTests
 {
-    [Theory(DisplayName = "Cohesion Test [Documents.Catalog] - Legacy index records are refused before recovery writes (#1135)")]
-    [InlineData((byte)4)]
-    [InlineData((byte)5)]
-    public async Task EnsureIndexFormat_V1IndexRecord_ShouldRefuseWithoutWritesAsync(byte kind)
+    [Theory(DisplayName = "Cohesion Test [Documents.Catalog] - V1 and v2 index records are refused before recovery writes (#1530)")]
+    [InlineData((byte)4, (byte)1)]
+    [InlineData((byte)5, (byte)1)]
+    [InlineData((byte)4, (byte)2)]
+    [InlineData((byte)5, (byte)2)]
+    public async Task EnsureIndexFormat_EarlierIndexRecord_ShouldRefuseWithoutWritesAsync(byte kind, byte version)
     {
         // Arrange: hand-build a v1 header on an otherwise current physical record.
         await using var fixture = await Fixture.Create();
@@ -30,17 +33,29 @@ public sealed partial class DocumentCatalogTests
             {
                 var unit = records.Current;
                 if (unit.Data.Span[16] != kind) { continue; }
-                var bytes = unit.Data.ToArray();
+                using var stream = new MemoryStream();
+                using var writer = new BinaryWriter(stream);
+                writer.Write(kind == 4 ? 42UL : 0UL);
+                writer.Write(0UL);
+                writer.Write(kind);
+                writer.Write(version);
                 if (kind == 4)
                 {
-                    // V1 held one path and no count or UNIQUE flag.
-                    int pathsOffset = 38 + BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(34));
-                    bytes = bytes[..pathsOffset].Concat(bytes[(pathsOffset + 4)..^9]).Concat(bytes[^8..]).ToArray();
+                    writer.Write(fixture.Collection.Id.ToByteArray());
+                    writer.Write(4); writer.Write("by_a"u8);
+                    if (version == 2) { writer.Write(1); }
+                    writer.Write(1); writer.Write("a"u8);
+                    if (version == 2) { writer.Write(false); }
+                    writer.Write(1UL);
                 }
-                else { bytes = bytes[..^1]; } // V1 registrations had no flag.
-                bytes[17] = 1;
+                else
+                {
+                    writer.Write(1UL); writer.Write(1L);
+                    writer.Write(4); writer.Write("by_a"u8);
+                    if (version == 2) { writer.Write(false); }
+                }
                 using var bracket = fixture.Storage.BeginTransaction();
-                fixture.Storage.UpdateEntry(bracket, unit.PageId, unit.SlotIndex, bytes);
+                fixture.Storage.UpdateEntry(bracket, unit.PageId, unit.SlotIndex, stream.ToArray());
                 bracket.Commit();
                 break;
             }
@@ -52,7 +67,7 @@ public sealed partial class DocumentCatalogTests
         var error = Should.Throw<DocumentCatalogException>(() => DocumentCatalog.EnsureIndexFormat(fixture.Storage));
 
         // Assert.
-        error.Message.ShouldContain("found 1, supported 2");
+        error.Message.ShouldContain($"found {version}, supported 3");
         error.Message.ShouldContain("Recreate");
         fixture.Data.ToArray().ShouldBe(before);
         fixture.Journal.ToArray().ShouldBe(journal);
@@ -95,7 +110,7 @@ public sealed partial class DocumentCatalogTests
     }
 
     [Fact(DisplayName = "Cohesion Test [Documents.Catalog] - Composite UNIQUE records round trip on reopen (#1135)")]
-    public async Task Open_CompositeUniqueIndex_ShouldRoundTripV2RecordsAsync()
+    public async Task Open_CompositeUniqueIndex_ShouldRoundTripV3RecordsAsync()
     {
         // Arrange.
         await using var fixture = await Fixture.Create();
@@ -114,7 +129,7 @@ public sealed partial class DocumentCatalogTests
         actual.Paths.ShouldBe(["a", "b[0]", "['x.y']"]);
         using var registrations = fixture.Storage.GetUnitIterator(1);
         registrations.MoveNext().ShouldBeTrue();
-        registrations.Current.Data.Span[17].ShouldBe((byte)2);
+        registrations.Current.Data.Span[17].ShouldBe((byte)3);
         registrations.Current.Data.Span[^1].ShouldBe((byte)1);
         await fixture.Coordinator.CommitAsync(reader);
     }

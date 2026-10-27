@@ -56,7 +56,7 @@ public sealed class DocumentProcessTests
             while (registrations.MoveNext())
             {
                 var bytes = registrations.Current.Data;
-                bytes.Span[16].ShouldBe((byte)5); bytes.Span[17].ShouldBe((byte)2);
+                bytes.Span[16].ShouldBe((byte)5); bytes.Span[17].ShouldBe((byte)3);
                 ulong objectId = BinaryPrimitives.ReadUInt64LittleEndian(bytes.Span[18..]);
                 var metadata = definitions.Single(index => index.ObjectId == objectId);
                 long rootPage = BinaryPrimitives.ReadInt64LittleEndian(bytes.Span[26..]);
@@ -76,7 +76,7 @@ public sealed class DocumentProcessTests
             manager.TryGetIndex(metadata.ObjectId, metadata.Name, out var tree).ShouldBeTrue();
             foreach (var (rank, count) in new[] { (1m, 0), (11m, 1), (99m, 0), (2m, 0), (3m, 1), (4m, 0), (14m, 1), (98m, 0) })
             {
-                // Documents' v2 component prefix 4 precedes a DatabaseKeyWriter decimal.
+                // Documents' v3 component prefix 4 precedes a DatabaseKeyWriter decimal.
                 var bytes = new byte[] { 4 }.Concat(IndexKey.From(new DatabaseKeyWriter().AppendDecimal(rank)).Encoded.ToArray()).ToList();
                 if (metadata.IsUnique)
                 {
