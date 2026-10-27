@@ -12,11 +12,11 @@ namespace Assimalign.Cohesion.Database.Graph.Tests;
 
 public sealed class GqlDiagnosticTests
 {
-    [Fact(DisplayName = "Cohesion Test [Graph] - Diagnostics: ANY SHORTEST and UNION reach every request seam")]
+    [Fact(DisplayName = "Cohesion Test [Graph] - Diagnostics: MERGE and UNION reach every request seam")]
     public async Task Execute_ErrorStatement_ShouldCarryCompleteDiagnosticsAsync()
     {
         // Arrange
-        const string gql = "MATCH ANY SHORTEST (a)->(b) RETURN a UNION MATCH (c) RETURN c";
+        const string gql = "MATCH (a)->(b) MERGE (d) RETURN a UNION MATCH (c) RETURN c";
         var parsed = (GqlQueryStatement)new GqlQueryParser().Parse(gql);
         parsed.Diagnostics.Count().ShouldBe(2);
         await using var engine = GraphDatabaseEngine.Create("diagnostics", new());

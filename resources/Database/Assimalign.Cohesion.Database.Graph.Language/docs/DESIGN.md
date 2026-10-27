@@ -158,7 +158,7 @@ The function table advertises the aggregates and core scalar functions listed be
 | --- | --- | --- |
 | `MATCH` | Comma-separated paths with fixed/quantified edges and parenthesized segments; optional `variable =` path assignment, label expressions, scalar expression property maps; every ISO full and abbreviated edge except the tilde forms | Planner chooses an indexed anchor when available; executor applies the outer path mode (implicit TRAIL) and binds named paths in traversal order |
 | `OPTIONAL MATCH` | The same graph patterns and clause-local WHERE, including a leading optional or several consecutive matching clauses | Left join against each running binding; an unmatched clause preserves that row and binds its new variables to NULL |
-| `PATH MODE` | WALK, TRAIL, SIMPLE or ACYCLIC after an optional path assignment, with optional PATH/PATHS | Applies to the complete path; nested explicit modes and unbounded WALK remain CK00001 |
+| `PATH MODE` | WALK, TRAIL, SIMPLE or ACYCLIC after an optional path assignment, with optional PATH/PATHS | Applies to the complete path; nested explicit modes and unselected unbounded WALK remain CK00001 |
 | `QUANTIFIED PATH` | ISO edge/subpath `{m,n}`, `{m}`, `{m,}`, `{,n}`, `{,}`, `+`, `*`; Cypher bracketed `*m..n` | Enumerates paths under the outer mode, including zero-length matches; group variables bind source-ordered lists |
 | `WHERE` | Boolean and scalar expressions: comparisons, labels, AND/OR/XOR/NOT, IS null/truth tests, arithmetic, concatenation, IN lists and string predicates | Keeps TRUE only; see [DIALECT.md](DIALECT.md) and scalar expressions below |
 | `EXPLAIN` | One linear statement of the supported stages | Shared description rows without executing any read expansion or write; Cohesion extension |
@@ -219,16 +219,18 @@ stage        := [OPTIONAL] MATCH match-paths [WHERE predicate]
               | [DETACH] DELETE variables
               | WITH projections return-tail [WHERE predicate]
 match-paths  := match-path (',' match-path)*
-match-path   := [ variable '=' ] [ (WALK | TRAIL | SIMPLE | ACYCLIC) [PATH | PATHS] ] path
+match-path   := [ variable '=' ] [selector] [mode] [PATH | PATHS] [GROUP | GROUPS] path
+selector     := ANY | ALL | ANY SHORTEST | ALL SHORTEST | SHORTEST positive-int64
+mode         := WALK | TRAIL | SIMPLE | ACYCLIC
 paths        := path (',' path)*
 path         := path-primary ((edge [quantifier] path-primary) | parenthesized | node)*
 path-primary := node | parenthesized
-parenthesized:= '(' path ')' [quantifier]
+parenthesized:= '(' path [WHERE predicate] ')' [quantifier]
 quantifier   := '{' integer [',' [integer]] '}' | '{,' [integer] '}' | '+' | '*'
-node         := '(' [ variable ] [ label-spec ] [ properties ] ')'
+node         := '(' [ variable ] [ label-spec ] [ properties ] [WHERE predicate] ')'
 edge         := '-[' filler ']->' | '<-[' filler ']-' | '-[' filler ']-' | '<-[' filler ']->'
               | '->' | '<-' | '-' | '<->'
-filler       := [ variable ] [ label-spec ] [cypher-length] [ properties ]
+filler       := [ variable ] [ label-spec ] [cypher-length] [ properties ] [WHERE predicate]
 cypher-length:= '*' [integer] ['..' [integer]]
 label-spec   := (':' | IS) label-expr | ':' label ( ':' label )+
 label-expr   := label-term ('|' label-term)*
@@ -317,10 +319,10 @@ SIMPLE permits a self-loop and a two-hop out-and-back over the same relationship
 node uniqueness, not an additional TRAIL rule. No hop may extend a closed SIMPLE path.
 All modes admit zero-length paths. Identity rules span fixed edges, parenthesized groups,
 quantified repetitions and both sides of an interior anchor. They reset for another path.
-The parser refuses an explicit nested mode or selector and any unbounded WALK with CK00001,
-including nested unbounded segments and statements with LIMIT. Shortest selectors remain refused.
+The parser refuses an explicit nested mode or selector and unselected unbounded WALK with CK00001,
+including nested unbounded segments and statements with LIMIT. Selectors have the planning-only boundary below; selected unbounded WALK can be planned.
 Malformed text retains CG00002/CG00004/CG00005; undefined enum values and insertion modes in
-direct ASTs use CG05001. Shape validation independently refuses nested modes and unbounded WALK.
+direct ASTs use CG05001. Shape validation independently refuses nested modes and unselected unbounded WALK.
 The 64-hop, physical-work, memory and cancellation contracts remain in force.
 
 Owner decisions 2026-10-25 require all four modes, including SIMPLE beyond Neo4j's grammar.
@@ -333,8 +335,71 @@ rejects an explicit mode or selector inside a parenthesized or quantified path.
 rejects unbounded REPEATABLE ELEMENTS with or without selective search.
 `community/cypher/front-end/expressions/src/main/scala/org/neo4j/cypher/internal/expressions/PathMode.scala:44-50`
 can make WALK effectively TRAIL under a different match mode. Cohesion has no such implicit
-override: WALK always allows repeats. Future shortest selectors must preserve this mode contract
-and define their admission separately.
+override: WALK always allows repeats. Selector plans preserve this mode contract
+and admit unbounded WALK as described below.
+
+### Path selectors: planning boundary (#1734, GQ-SP2)
+
+MATCH accepts `ANY`, `ALL`, `ANY SHORTEST`, `ALL SHORTEST`, `SHORTEST k [PATHS]`
+and `SHORTEST k GROUPS`. The prefix follows an optional `p =` assignment. Its complete
+order is selector/count, optional WALK/TRAIL/SIMPLE/ACYCLIC, optional PATH/PATHS, then
+GROUP/GROUPS for a counted group selector. For example:
+`MATCH p = SHORTEST 2 TRAIL GROUPS ((a)-[r:T WHERE r.w > 0]->*(b) WHERE a.k <> b.k) WHERE path_length(p) > 2 RETURN p`.
+GROUP is an accepted singular spelling; canonical rendering uses GROUPS. Counted SHORTEST
+requires a positive Int64 literal (CG00011 otherwise); parameter counts, omitted counts and
+counted ANY remain outside this delivery (counted ANY retains CK00001).
+
+`GqlPathPattern.Selector` records the kind, count and complete prefix span. Its sealed
+`GqlPathSelector` renders a canonical selector independently of optional mode/path tokens.
+Omission preserves exhaustive matching; an explicit ALL retains its own selection plan.
+Selection partitions by the actual ordered start/end identities for each incoming binding,
+even for anonymous endpoints, equal endpoints and an interior scan anchor. ANY selects one
+admissible path; ALL selects every admissible path. ANY SHORTEST selects one minimum-length
+path; counted SHORTEST selects up to k paths in ascending hop count. ALL SHORTEST is equivalent
+to SHORTEST 1 GROUPS: groups count distinct hop lengths and retain every path at each selected
+length. A path count can split ties; a length-group count cannot. Shortest ties use the
+lexicographically ascending complete relationship-identity sequence from start to end, as in
+SP1; a node-identity sequence breaks any remaining identity tie. ANY uses that stable identity
+order without length ranking. The omitted mode is explicitly TRAIL, Cohesion's existing
+choice; SIMPLE, ACYCLIC and WALK retain their documented identity rules.
+
+Labels, relationship directions/types, property maps and inline node/relationship WHERE are
+element prefilters. A WHERE inside a parenthesized path is a path prefilter. These remain
+inside search, including under quantifiers; each repeated body's variables denote its local
+singleton occurrence inside its predicates and group lists outside it. Unquantified group
+flattening retains predicate boundary offsets. Unique path-instance ownership lets lowering transfer filter lists rather than copy them through every enclosing group, avoiding quadratic planner allocation for deep predicates. Ordinary MATCH WHERE remains a post-selection
+filter, including in OPTIONAL MATCH before null extension. It cannot be pushed into an index
+anchor or a matches-nothing shortcut for a clause containing a selector. FILTER and later
+WITH predicates retain their ordinary downstream placement.
+
+SP2 delivers parsing, binding and nonexecuting EXPLAIN, including zero-hop paths, cycles,
+bound endpoints and quantified bodies in all modes. A selector admits unbounded WALK into
+planning; an unselected unbounded WALK keeps its existing CK00001. EXPLAIN exposes SelectPaths,
+PathSearch, ElementPrefilter, PathPrefilter and PostFilter, the count unit, endpoint partition,
+resolved mode and stable order. Search work uses CG05004 and retained history/state plus output
+use CG05020 under the existing configurable statement ceilings (defaults: 1,000,000 work units,
+256 MiB); these are separate from SP1's vertex-visited BFS state contract. GQL's 64-hop backstop
+is retained. No claim of memory independent of path histories or output is made.
+
+Until SP3, every planned selector or inline WHERE prefilter refuses execution with CK00001
+after complete binding, before a writer lock or data expansion, even for empty input, LIMIT 0,
+or a preceding write stage. This also applies to source-free ASTs and inline WHERE without an
+explicit selector. EXPLAIN succeeds, missing parameters/names still fail binding, and wire
+execution reports ExecutionFailure with the existing diagnostic. No disk or wire change,
+new public interface, boundary grant or new runtime budget code is introduced. Selector forms
+are not added to the executable-clause profile until execution exists.
+
+Conformance lives in GqlPathSelectorParserTests and the keyword-disposition corpus,
+GqlPathSelectorPlanningTests, and GraphPathSelectorWireTests (InMemory and TCP). Former parser
+refusal cases now have AST/planning evidence; counted ANY and nested selectors stay pinned.
+Local Neo4j behavior consulted, no code copied (paths relative to `C:/Source/repos/neo4j/neo4j`):
+`community/cypher/cypher-logical-plans/src/main/scala/org/neo4j/cypher/internal/logical/plans/LogicalPlan.scala:3533-3560`
+defines endpoint-pair selectors and distinguishes path counts from length groups;
+`community/cypher/ir/src/main/scala/org/neo4j/cypher/internal/ir/NodeConnectionAndPathPattern.scala:389-407`
+keeps prefilters in the selective path pattern;
+`community/cypher/front-end/parser/v25/parser/src/main/antlr4/org/neo4j/cypher/internal/parser/v25/Cypher25Parser.g4:401-425,431-442,482-485`
+provides prefix order and inline predicates. Cohesion requires explicit literal k, retains
+TRAIL by default and strengthens arbitrary ties to the identity order above.
 
 ### Quantified paths (#1144)
 
@@ -388,9 +453,9 @@ as for collect(entity), with CG05001 naming lists of nodes or relationships. A M
 provably empty and projects as `[]`; scalar projections after FOR/UNWIND use the existing wire codec. Named full paths use ExecutePaths.
 
 INSERT/CREATE quantifiers and node quantifiers are CG00002 before writes. Questioned paths
-after an edge or parenthesized path, subpath assignments, WHERE inside a parenthesized path,
-and nested quantifiers each produce one named CK00001. Elsewhere `?` retains the stray-character
-or unsupported-parameter diagnostic. Path search prefixes remain CK00001; explicit outer modes execute (#1733). A `--` touching a subpath's `)` or quantifier's `}`, `+` or `*` is CG00008, just as
+after an edge or parenthesized path, subpath assignments and nested quantifiers each produce
+one named CK00001. Inline WHERE has the selector planning boundary above. Elsewhere `?` retains the stray-character
+or unsupported-parameter diagnostic. Path selectors parse, bind and EXPLAIN but refuse execution until SP3; explicit outer modes execute (#1733). A `--` touching a subpath's `)` or quantifier's `}`, `+` or `*` is CG00008, just as
 after a node or edge filler, including the bracketed Cypher star and its bounds. A nested `?`
 retains CK00001; path modes inside subpaths receive the same named capability diagnostic. Recursive
 subpath parsing uses the CG00009 stack guard. Hand-built subpath nesting beyond 128 levels, cycles and repeated path instances in one walk are refused
@@ -921,7 +986,7 @@ GqlOrderPagingTests and GraphOrderPagingWireTests pin the executable surface.
 
 | Code | Meaning |
 | --- | --- |
-| `CK00001` | Recognized construct outside the executable profile, reported once at its own span: OPTIONAL block operands, MANDATORY MATCH, procedures, excluded functions and datetime forms, unsupported CAST targets, HAVING and statistical aggregates (STDDEV_SAMP/POP, PERCENTILE_CONT/DISC), substituted/whole-map parameters, composite properties, comprehensions, slicing, map projections, questioned paths, subpath variables, parenthesized-path WHERE, nested quantifiers, standalone ORDER BY/page statements, set operations, FOR ordinality/offset suffixes, NEXT YIELD, server/session scope, undirected (tilde) edges, path mode and path search prefixes, `NODETACH DELETE`, and `MERGE` |
+| `CK00001` | Recognized construct outside the executable profile, reported once at its own span: OPTIONAL block operands, MANDATORY MATCH, procedures, excluded functions and datetime forms, unsupported CAST targets, HAVING and statistical aggregates (STDDEV_SAMP/POP, PERCENTILE_CONT/DISC), substituted/whole-map parameters, composite properties, comprehensions, slicing, map projections, questioned paths, subpath variables, nested quantifiers, standalone ORDER BY/page statements, set operations, FOR ordinality/offset suffixes, NEXT YIELD, server/session scope, undirected (tilde) edges, nested path modes/selectors, unselected unbounded WALK, counted ANY, deferred selector/prefilter execution, `NODETACH DELETE`, and `MERGE` |
 | `CG00001` | Empty statement |
 | `CG00002` | Malformed supported syntax, invalid statement composition, leftover tokens, or a character GQL does not use (`?`, `#`, `^`, ```, ...) |
 | `CG00003` | Unterminated string, quoted name, or block comment |
@@ -932,6 +997,7 @@ GqlOrderPagingTests and GraphOrderPagingWireTests pin the executable surface.
 | `CG00008` | A `--` comment begins exactly where a node/subpath pattern's `)`, an edge pattern's `]`, or a postfix quantifier's `}`, `+` or `*` ends, in `MATCH`, `INSERT` or `CREATE`: a Cypher arrow (`-->`, `--`) that would hide the rest of the line. Reported at the `--`; the message names `->`, `<-` and `-` |
 | `CG00009` | The statement nests groups, unary expressions, CASE, subscripts or collection constructors deeper than the parsing thread's stack can follow. Reported at the group, unary, constructor or subscript token that could not be entered; the parse stops there and reports nothing else. The same text parses on a thread with more stack, so the engine's `GraphQueryRequest.FromGql` reports it as `CG05008`, statement too complex, not as a parse error |
 | `CG00010` | Unknown function call; the message names the unregistered spelling |
+| `CG00011` | A counted SHORTEST selector omits a positive Int64 literal count or supplies zero, a sign, a non-integer, a parameter or overflow |
 
 Locations use zero-based absolute UTF-16 offsets with exclusive ends and one-based line numbers.
 A line breaks at LF, CR, NEL (U+0085), LS (U+2028) or PS (U+2029), and CR LF is one break
@@ -952,9 +1018,10 @@ WALK capability checks; executable mode words no longer occur in the unsupported
 | --- | --- | --- | --- |
 | `(a)~[r]~(b)`, `<~[r]~`, `~[r]~>`, `(a)~(b)`, `<~`, `~>` | `UNDIRECTED EDGE` | the whole edge, from `~` or `<~` through its closing `~` or `~>` | pin until the engine stores undirected edges |
 | `MATCH (TRAIL (a)-[]->(b))`, nested WALK/SIMPLE/ACYCLIC | `<MODE>` | the inner mode word | CK00001; outer modes execute (#1733) |
-| `MATCH ALL SHORTEST (...)`, `MATCH ANY SHORTEST (...)` | `ALL SHORTEST`, `ANY SHORTEST` | the prefix, plus its path mode and `PATH`/`PATHS` | pin |
-| `MATCH SHORTEST 2 (...)`, `SHORTEST 2 GROUPS` | `SHORTEST PATH` | the prefix, plus its count, path mode and `PATH`/`PATHS` or `GROUP`/`GROUPS` | pin |
-| `MATCH ALL (...)`, `MATCH ALL TRAIL (...)`, `MATCH ANY 2 (...)` | `ALL PATH SEARCH`, `ANY PATH SEARCH` | the prefix, plus its count, path mode and `PATH`/`PATHS` | pin |
+| `MATCH ALL SHORTEST (...)`, `MATCH ANY SHORTEST (...)` | selector AST | complete prefix span | parses/binds/EXPLAIN; execution CK00001 until SP3 |
+| `MATCH SHORTEST 2 (...)`, `SHORTEST 2 GROUPS` | counted selector AST | complete prefix span | parses/binds/EXPLAIN; execution CK00001 until SP3 |
+| `MATCH ALL (...)`, `MATCH ALL TRAIL (...)`, `MATCH ANY (...)` | selector AST | complete prefix span | parses/binds/EXPLAIN; execution CK00001 until SP3 |
+| `MATCH ANY 2 (...)` | `ANY PATH SEARCH` | complete prefix span | outside #1734 |
 | `MATCH (n) NODETACH DELETE n` | `NODETACH DELETE` | both words | pin |
 | `MERGE (n)` | `MERGE` | `MERGE` | pin |
 

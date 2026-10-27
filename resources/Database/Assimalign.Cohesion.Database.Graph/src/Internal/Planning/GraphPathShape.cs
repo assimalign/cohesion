@@ -12,10 +12,15 @@ internal sealed class GraphPathShape
 {
     internal List<List<GqlNodePattern>> Nodes { get; } = [[]];
     internal List<GraphPathSegment> Segments { get; } = [];
+    internal List<GraphPathPrefilter> Prefilters { get; private set; } = [];
     internal GqlRelationshipPattern? Edge { get; private init; }
     internal long Bound { get; private set; }
     internal bool HasQuantifier { get; private set; }
     internal bool HasUnboundedQuantifier { get; private set; }
+    internal int ElementPrefilterCount => Nodes.Sum(nodes => nodes.Count(node => node.Predicate is not null)) +
+        (Edge?.Predicate is null ? 0 : 1) + Segments.Sum(segment => segment.Body.ElementPrefilterCount);
+    internal int PathPrefilterCount => Prefilters.Count + Segments.Sum(segment => segment.Body.PathPrefilterCount);
+    internal bool HasPrefilters => ElementPrefilterCount != 0 || PathPrefilterCount != 0;
 
     internal static GraphPathShape Create(GqlPathPattern path, bool creating = false, bool parsed = false)
     {
@@ -33,6 +38,14 @@ internal sealed class GraphPathShape
             if (!item.Exit)
             {
                 if (!visited.Add(current)) { throw Invalid(); }
+                if (current.Selector is { } selector)
+                {
+                    if (creating || !Enum.IsDefined(selector.Kind) || selector.Count <= 0 ||
+                        selector.Kind is not (GqlPathSelectorKind.Shortest or GqlPathSelectorKind.ShortestGroups) && selector.Count != 1)
+                    { throw Invalid(); }
+                    if (item.Depth != 0) { throw new GraphPlanningException("CK00001", ErrorMessages.NestedPathSelectorUnsupported, selector.Location); }
+                }
+                if (creating && current.Predicate is not null) { throw Invalid(); }
                 if (current.Mode is { } mode)
                 {
                     if (mode is not (GqlPathMode.Walk or GqlPathMode.Trail or GqlPathMode.Simple or GqlPathMode.Acyclic) || creating)
@@ -85,11 +98,13 @@ internal sealed class GraphPathShape
                 switch (element)
                 {
                     case GqlPathNode { Pattern: { } node }:
+                        if (creating && node.Predicate is not null) { throw Invalid(); }
                         shape.Nodes[^1].Add(node);
                         hasStart = true;
                         needsNode = false;
                         break;
                     case GqlPathRelationship { Pattern: { } edge } when hasStart && !needsNode:
+                        if (creating && edge.Predicate is not null) { throw Invalid(); }
                         CheckQuantifier(edge.Quantifier, zeroAllowed: true, creating);
                         shape.Segments.Add(new GraphPathSegment(new GraphPathShape { Edge = edge, Bound = 1 }, edge.Quantifier));
                         shape.Nodes.Add([]);
@@ -113,6 +128,22 @@ internal sealed class GraphPathShape
                         }
                         else
                         {
+                            int offset = shape.Segments.Count;
+                            // This unquantified body shape is discarded after flattening. The
+                            // identity gate guarantees one parent, so transfer its owned list
+                            // rather than copying every filter through every enclosing group.
+                            var filters = body.Prefilters;
+                            if (filters.Count != 0)
+                            {
+                                if (offset != 0)
+                                {
+                                    for (int i = 0; i < filters.Count; i++)
+                                    { filters[i] = filters[i] with { StartBoundary = filters[i].StartBoundary + offset, EndBoundary = filters[i].EndBoundary + offset }; }
+                                }
+                                if (shape.Prefilters.Count == 0) { shape.Prefilters = filters; }
+                                else { shape.Prefilters.AddRange(filters); }
+                                body.Prefilters = [];
+                            }
                             shape.Nodes[^1].AddRange(body.Nodes[0]);
                             for (int i = 0; i < body.Segments.Count; i++)
                             { shape.Segments.Add(body.Segments[i]); shape.Nodes.Add(new List<GqlNodePattern>(body.Nodes[i + 1])); }
@@ -128,7 +159,8 @@ internal sealed class GraphPathShape
                 if (shape.Bound > 64) { throw Invalid(); }
             }
             if (!hasStart || needsNode) { throw Invalid(); }
-            if (current.Mode == GqlPathMode.Walk && shape.HasUnboundedQuantifier)
+            if (current.Predicate is { } predicate) { shape.Prefilters.Add(new GraphPathPrefilter(predicate, 0, shape.Segments.Count)); }
+            if (current.Selector is null && current.Mode == GqlPathMode.Walk && shape.HasUnboundedQuantifier)
             { throw new GraphPlanningException("CK00001", ErrorMessages.UnboundedWalkUnsupported); }
             shapes[current] = shape;
         }

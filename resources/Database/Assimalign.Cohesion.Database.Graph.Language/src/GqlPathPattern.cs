@@ -18,6 +18,12 @@ public sealed record GqlPathPattern(IReadOnlyList<GqlNodePattern> Nodes,
     /// <summary>Gets the optional variable bound to the complete MATCH path.</summary>
     public string? Variable { get; init; }
 
+    /// <summary>Gets the optional outer MATCH selector. Omission preserves exhaustive matching.</summary>
+    public GqlPathSelector? Selector { get; init; }
+
+    /// <summary>Gets the parenthesized path's WHERE prefilter, evaluated inside path search.</summary>
+    public GqlExpression? Predicate { get; init; }
+
     /// <summary>
     /// Gets the explicit mode, or null for implicit TRAIL. Only the outer MATCH path may
     /// specify a mode; it governs every relationship and parenthesized or quantified segment.

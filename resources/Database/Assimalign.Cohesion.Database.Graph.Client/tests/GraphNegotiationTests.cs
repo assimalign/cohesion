@@ -38,7 +38,7 @@ public sealed class GraphNegotiationTests
         agreement.Version.ShouldBe(new(2, minor));
         agreement.Capabilities.Contains("diagnostics").ShouldBe(diagnostics);
         if (minor == 0) { ready.Payload.IsEmpty.ShouldBeTrue(); }
-        await ExecuteAsync("MATCH ANY SHORTEST (a)->(b) RETURN a UNION MATCH (c) RETURN c");
+        await ExecuteAsync("MATCH (a)->(b) MERGE (d) RETURN a UNION MATCH (c) RETURN c");
         if (diagnostics)
         {
             var diagnostic = await ReadAsync();

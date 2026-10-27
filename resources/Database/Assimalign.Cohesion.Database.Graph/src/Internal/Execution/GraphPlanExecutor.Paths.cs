@@ -119,6 +119,8 @@ internal static partial class GraphPlanExecutor
         token.ThrowIfCancellationRequested();
         operation.EnsureActive();
         var shape = plan.Shape ?? GraphPathShape.Create(plan.Pattern);
+        if (plan.Pattern.Selector is not null || shape.HasPrefilters)
+        { throw new GraphPlanningException("CK00001", ErrorMessages.PathSelectionExecutionUnsupported, plan.Pattern.Selector?.Location); }
         var anchor = plan.Anchor;
         // Only singleton bindings may anchor or constrain another occurrence of an entity.
         foreach (var node in shape.Nodes.SelectMany(nodes => nodes))

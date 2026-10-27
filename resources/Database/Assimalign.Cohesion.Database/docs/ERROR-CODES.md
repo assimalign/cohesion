@@ -260,7 +260,7 @@ payload accepts rows plus a matching affected count without capability negotiati
 GQL path modes (#1733) retain the existing identities: malformed mode values or INSERT modes in
 hand-built ASTs use CG05001; text repetition bounds above 64 use CG00005; a visited qualifying
 65th hop or physical-work exhaustion uses CG05004; retained-memory exhaustion uses CG05020.
-Nested explicit modes and unbounded WALK use CK00001. BEGIN [TRANSACTION] (#1725) shares START TRANSACTION's
+Nested explicit modes/selectors and unselected unbounded WALK use CK00001. Selected unbounded WALK parses, binds and EXPLAINs; selector/inline-predicate execution retains CK00001 until SP3 (#1734). BEGIN [TRANSACTION] (#1725) shares START TRANSACTION's
 transaction-state diagnostics; it allocates no new identity. These changes add no disk or wire format.
 
 | Previous code | Code | Category |
@@ -275,6 +275,7 @@ transaction-state diagnostics; it allocates no new identity. These changes add n
 | GQL0008 | CG00008 | Language/syntax |
 | GQL0009 | CG00009 | Language/syntax |
 | GQL0010 | CG00010 | Language/syntax |
+| New (#1734) | CG00011 | Language/syntax — SHORTEST selector requires a positive Int64 literal count |
 | COHDBG002 | CG01002 | Binding/names |
 | COHDBG010 | CG01010 | Binding/names |
 | COHDBG011 | CG01011 | Binding/names |

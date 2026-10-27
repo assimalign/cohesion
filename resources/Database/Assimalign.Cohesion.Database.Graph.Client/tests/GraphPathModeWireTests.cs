@@ -72,7 +72,7 @@ public sealed class GraphPathModeWireTests
             "MATCH WALK ((a)->(b))* RETURN a.k",
             "MATCH (TRAIL (a)->(b)){1,2} RETURN a.k",
             "MATCH SIMPLE (ACYCLIC (a)->(b)) RETURN a.k",
-            "MATCH ANY SHORTEST WALK (a)->{1,3}(b) RETURN a.k",
+            "MATCH ANY 2 WALK (a)->{1,3}(b) RETURN a.k",
         })
         {
             var error = await Should.ThrowAsync<GraphClientException>(async () => await connection.QueryAsync(source, cancellationToken: harness.Token));

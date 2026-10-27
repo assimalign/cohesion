@@ -19,6 +19,8 @@ internal sealed partial class GraphPlanner
         GqlRemoveStage => "Remove",
         GraphMatchClausePlan { Optional: true } => "OptionalMatch",
         GraphMatchClausePlan => "Match",
+        GraphPathSelectionPlan => "SelectPaths",
+        GraphPathPlan { Selection: not null } => "SelectPaths",
         GraphPathPlan => "ExpandPath",
         GraphProjectionPlan => "Project",
         GraphDistinctPlan => "Distinct",
@@ -77,9 +79,14 @@ internal sealed partial class GraphPlanner
                 // optionals expose their ordered join boundary and local filter/null extension.
                 int clauseId = plan.MatchClauses.Count == 1 && !clause.Optional ? rootId
                     : Add(DescribeOperator(clause), rootId, detail: $"filter={clause.Predicate is not null}; matches_nothing={clause.MatchesNothing}; nulls={string.Join(",", clause.Optional ? clause.NewVariables : [])}");
+                int pathParent = clause.Paths.Any(path => path.Selection is not null) && clause.Predicate is { } postfilter
+                    ? Add("PostFilter", clauseId, detail: GraphProjectionText.Describe(postfilter)) : clauseId;
                 foreach (var path in clause.Paths)
                 {
-                    int pathId = Add(DescribeOperator(path), clauseId, path.Pattern.Variable, detail: $"mode={path.Mode}");
+                    var selection = path.Selection;
+                    int pathId = Add(DescribeOperator(path), pathParent, path.Pattern.Variable,
+                        detail: selection is null ? $"mode={path.Mode}"
+                            : $"selector={selection.Selector}; partition=endpoint_pair; per_input=True; mode={selection.Mode}; count={selection.Count?.ToString(CultureInfo.InvariantCulture) ?? "ALL"}; count_unit={(selection.CountLengthGroups ? "distinct_lengths" : "paths")}; order={(selection.OrderByLength ? "length," : "")}identity; start={string.Join(",", selection.StartVariables)}; end={string.Join(",", selection.EndVariables)}; bound_endpoints={string.Join(",", selection.BoundEndpoints)}; execution=deferred");
                     var anchor = path.Anchor;
                     string? index = anchor.Property is null ? null : $"{anchor.Label}({anchor.Property})";
                     if (anchor.Property is not null && _database.Catalog.FindLabel(anchor.Label!, _snapshot) is { } label)
@@ -89,6 +96,11 @@ internal sealed partial class GraphPlanner
                             .OrderBy(candidate => candidate.Name, StringComparer.Ordinal).FirstOrDefault().Name ?? index;
                     }
                     var shape = path.Shape ?? GraphPathShape.Create(path.Pattern);
+                    if (selection is not null || shape.HasPrefilters)
+                    {
+                        pathId = Add("PathSearch", pathId, detail: $"element_predicates={shape.ElementPrefilterCount}; path_predicates={shape.PathPrefilterCount}; work_limit={budget?.WorkLimit ?? GraphPlanExecutor.ExpansionBudget.PhysicalLimit}; state_and_output_memory_limit={budget?.Memory.Limit ?? 268435456}; work_refusal=CG05004; memory_refusal=CG05020");
+                        DescribePrefilters(shape, pathId, "root");
+                    }
                     int parent = anchor.RelationshipTypes is { } types
                         ? Add(DescribeOperator(anchor), pathId, string.Join("|", types),
                             detail: $"edge={anchor.NodeIndex}; direction={shape.Segments[anchor.NodeIndex].Body.Edge!.Direction}; postings=(type_id,relationship); combine=union; physical=visited_postings; viable=accepted_hops; physical_limit={budget?.WorkLimit ?? GraphPlanExecutor.ExpansionBudget.PhysicalLimit}",
@@ -147,6 +159,21 @@ internal sealed partial class GraphPlanner
             int id = nodes.Count;
             nodes.Add(new DatabasePlanNode { NodeId = id, ParentId = parent, Operator = name, Target = target, Index = index, Detail = detail, EstimatedRows = estimate });
             return id;
+        }
+
+        void DescribePrefilters(GraphPathShape shape, int parent, string scope)
+        {
+            foreach (var filter in shape.Prefilters)
+            { Add("PathPrefilter", parent, detail: $"scope={scope}; boundaries={filter.StartBoundary}..{filter.EndBoundary}; expression={GraphProjectionText.Describe(filter.Predicate)}"); }
+            foreach (var node in shape.Nodes.SelectMany(nodes => nodes))
+            {
+                if (node.LabelExpression is not null || node.Labels.Count != 0 || node.Properties.Count != 0 || node.Predicate is not null)
+                { Add("ElementPrefilter", parent, node.Variable, detail: $"scope={scope}; labels={node.LabelExpression?.ToString() ?? string.Join("&", node.Labels)}; properties={string.Join(",", node.Properties.Keys)}; predicate={(node.Predicate is null ? "" : GraphProjectionText.Describe(node.Predicate))}"); }
+            }
+            if (shape.Edge is { } edge && (edge.LabelExpression is not null || edge.Type is not null || edge.Properties.Count != 0 || edge.Predicate is not null))
+            { Add("ElementPrefilter", parent, edge.Variable, detail: $"scope={scope}; type={edge.LabelExpression?.ToString() ?? edge.Type}; properties={string.Join(",", edge.Properties.Keys)}; predicate={(edge.Predicate is null ? "" : GraphProjectionText.Describe(edge.Predicate))}"); }
+            for (int i = 0; i < shape.Segments.Count; i++)
+            { DescribePrefilters(shape.Segments[i].Body, parent, $"{scope}/{i}{(shape.Segments[i].Quantifier is null ? "" : "/iteration")}"); }
         }
     }
 

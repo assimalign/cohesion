@@ -197,13 +197,24 @@ internal sealed partial class GraphPlanner
                 foreach (var path in clause.Paths)
                 { if (!Validate(path, creating: false, declared: true)) { clauseMatchesNothing = true; } }
                 ValidateExpression(clause.Predicate);
-                clauseMatchesNothing |= RequiresUnknownName(clause.Predicate);
-                var anchors = new AnchorSources(_database, _snapshot, clause.Predicate, _parameters);
+                bool selective = clause.Paths.Any(path => path.Selector is not null);
+                // A post-selection WHERE cannot constrain the search, including through
+                // an index anchor or a catalog-based matches-nothing shortcut.
+                if (!selective) { clauseMatchesNothing |= RequiresUnknownName(clause.Predicate); }
+                var anchors = new AnchorSources(_database, _snapshot, selective ? null : clause.Predicate, _parameters);
                 var paths = new List<GraphPathPlan>();
                 foreach (var path in clause.Paths)
                 {
                     var shape = pathShapes[path];
-                    paths.Add(new GraphPathPlan(path, ChooseAnchor(shape, anchors, boundVariables, token)) { Shape = shape });
+                    GraphPathSelectionPlan? selection = null;
+                    if (path.Selector is { } selector)
+                    {
+                        var startVariables = shape.Nodes[0].Where(node => node.Variable is not null).Select(node => node.Variable!).ToArray();
+                        var endVariables = shape.Nodes[^1].Where(node => node.Variable is not null).Select(node => node.Variable!).ToArray();
+                        selection = new GraphPathSelectionPlan(selector, shape, path.Mode ?? GqlPathMode.Trail, startVariables, endVariables,
+                            startVariables.Concat(endVariables).Where(boundVariables.Contains).Distinct(StringComparer.Ordinal).ToArray());
+                    }
+                    paths.Add(new GraphPathPlan(path, ChooseAnchor(shape, anchors, boundVariables, token)) { Shape = shape, Selection = selection });
                     foreach (var binding in shape.Bindings())
                     { if (!groupVariables.Contains(binding.Name)) { boundVariables.Add(binding.Name); } }
                 }
@@ -561,8 +572,8 @@ internal sealed partial class GraphPlanner
             if (!declared) { Declare(path, creating); }
             bool satisfiable = true;
             var propertyGroups = shapes.Where(binding => binding.Value.Groups.Any(group => group)).Select(binding => binding.Key).ToHashSet(StringComparer.Ordinal);
-            var pending = new Stack<(GraphPathShape Shape, bool Required, bool Group)>();
-            pending.Push((pathShapes[path], true, false));
+            var pending = new Stack<(GraphPathShape Shape, bool Required, bool Group, IReadOnlyList<(string Name, bool Node)> Locals)>();
+            pending.Push((pathShapes[path], true, false, []));
             while (pending.TryPop(out var item))
             {
                 foreach (var node in item.Shape.Nodes.SelectMany(nodes => nodes))
@@ -570,15 +581,21 @@ internal sealed partial class GraphPlanner
                     bool valid = ValidateNodeLabels(node, creating, tokens);
                     if (item.Required) { satisfiable &= valid; }
                     ValidatePatternProperties(node.Properties, item.Group);
+                    ValidatePrefilter(node.Predicate, item.Locals);
                 }
                 if (item.Shape.Edge is { } edge)
                 {
                     bool valid = ValidateRelationship(edge, creating, tokens);
                     if (item.Required) { satisfiable &= valid; }
                     ValidatePatternProperties(edge.Properties, item.Group);
+                    ValidatePrefilter(edge.Predicate, item.Locals);
                 }
+                foreach (var filter in item.Shape.Prefilters) { ValidatePrefilter(filter.Predicate, item.Locals); }
                 foreach (var segment in item.Shape.Segments.AsEnumerable().Reverse())
-                { pending.Push((segment.Body, item.Required && segment.Quantifier?.Min != 0, item.Group || segment.Quantifier is not null)); }
+                {
+                    var locals = segment.Quantifier is null ? item.Locals : segment.Body.Bindings().Distinct().ToArray();
+                    pending.Push((segment.Body, item.Required && segment.Quantifier?.Min != 0, item.Group || segment.Quantifier is not null, locals));
+                }
             }
             return satisfiable;
 
@@ -587,6 +604,27 @@ internal sealed partial class GraphPlanner
                 if (group && properties is not null && properties.Values.Any(expression => expression is not null && GraphValueExpressions.ReferencesAny(expression, propertyGroups, token)))
                 { throw new GraphPlanningException("CG03003", ErrorMessages.GroupPropertyReference, query.Location); }
                 ValidateStageProperties(properties!, creating, propertyScope);
+            }
+
+            void ValidatePrefilter(GqlExpression? predicate, IReadOnlyList<(string Name, bool Node)> locals)
+            {
+                if (predicate is null) { return; }
+                if (locals.Count == 0) { ValidateExpression(predicate); return; }
+                // Inside a repeated body its variables denote the current occurrence's
+                // singletons. Outside that body they retain their group-list types.
+                var saved = locals.Select(local => (local.Name, Kind: variables[local.Name],
+                    Shape: shapes.GetValueOrDefault(local.Name))).ToArray();
+                try
+                {
+                    foreach (var local in locals)
+                    { variables[local.Name] = local.Node ? BindingKind.Node : BindingKind.Relationship; shapes.Remove(local.Name); }
+                    ValidateExpression(predicate);
+                }
+                finally
+                {
+                    foreach (var local in saved)
+                    { variables[local.Name] = local.Kind; if (local.Shape is not null) { shapes[local.Name] = local.Shape; } }
+                }
             }
         }
         void ValidateStageProperties(IReadOnlyDictionary<string, GqlExpression> properties, bool creating, IReadOnlySet<string>? propertyScope)

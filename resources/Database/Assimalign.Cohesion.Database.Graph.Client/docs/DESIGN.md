@@ -172,6 +172,14 @@ rejections and terminal path rejections before any path output complete the exch
 reuse of that authenticated session. Later path failures
 retain the streaming lifetime rules below. No frame or codec change is needed on wire 2.0.
 
+## Selector planning boundary (#1734, GQ-SP2)
+
+EXPLAIN transports selector plans through the existing scalar rows. Selectors and inline
+WHERE prefilters parse and bind, then refuse execution with ExecutionFailure carrying CK00001
+until SP3, before any rows or paths. Missing prefilter parameters retain CG05001. Both
+InMemory and TCP tests verify terminal refusal and reuse of the exact authenticated session.
+No client production API, protocol capability, frame or encoding changes.
+
 ## Path lifetime
 
 The typed connection captures its immutable database name and negotiated composite-value flag when it receives the shared lease

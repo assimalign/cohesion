@@ -68,17 +68,8 @@ public sealed class GqlParseStrictnessTests
     [InlineData("MATCH «WALK» (a)-[]->+(b)", "UNBOUNDED WALK")]
     [InlineData("MATCH p = («SIMPLE» (a)-[]->(b)) RETURN p", "SIMPLE")]
     [InlineData("MATCH «WALK PATH» (a)-[]->+(b) RETURN a", "UNBOUNDED WALK")]
-    // Path search prefixes (pins): one prefix, not ALL or ANY plus SHORTEST PATH
-    [InlineData("MATCH «ALL SHORTEST» (a)-[]->(b)", "ALL SHORTEST")]
-    [InlineData("MATCH «ANY SHORTEST» (a)-[]->(b)", "ANY SHORTEST")]
-    [InlineData("MATCH p = «ANY SHORTEST PATHS» (a)-[]->(b) RETURN p", "ANY SHORTEST")]
-    // A path search prefix owns its path mode and PATH/PATHS (ISO/IEC 39075 <path search prefix>)
-    [InlineData("MATCH «ANY SHORTEST TRAIL» (a)-[]->(b) RETURN a", "ANY SHORTEST")]
-    [InlineData("MATCH «ALL TRAIL» (a)-[]->(b) RETURN a", "ALL PATH SEARCH")]
-    [InlineData("MATCH «ALL» (a)-[]->(b) RETURN a", "ALL PATH SEARCH")]
-    [InlineData("MATCH «ANY» (a)-[]->(b) RETURN a", "ANY PATH SEARCH")]
+    // Counted ANY remains outside the approved selector surface (#1734).
     [InlineData("MATCH «ANY 2 WALK PATHS» (a)-[]->(b) RETURN a", "ANY PATH SEARCH")]
-    [InlineData("MATCH «SHORTEST 2 GROUPS» (a)-[]->(b) RETURN a", "SHORTEST PATH")]
     // A procedure's YIELD belongs to its CALL
     [InlineData("MATCH (a) «CALL» db.labels() YIELD label RETURN label", "CALL")]
     // Delete without detaching (pin)

@@ -834,9 +834,9 @@ edge tasks stop on either side. This gives the same complete-path rule for any a
 across all parenthesized and quantified segments, including zero-repetition junctions.
 
 Shape validation rejects undefined modes and insertion modes with CG05001. Explicit nested
-modes and unbounded WALK are CK00001, independently of text parsing, empty data or LIMIT.
-WALK is never silently restricted to TRAIL. Shortest selectors remain deferred and must later
-define admission without changing these identity rules. All modes preserve cancellation,
+modes and unselected unbounded WALK are CK00001, independently of text parsing, empty data or LIMIT.
+WALK is never silently restricted to TRAIL. Selector execution remains deferred; its plans
+admit unbounded WALK without changing these identity rules. All modes preserve cancellation,
 retained-memory accounting (CG05020), physical-work exhaustion and qualifying 65th-hop refusal
 (CG05004); the text-bound sum above 64 remains CG00005. EXPLAIN reports `mode=<Mode>` on
 ExpandPath and quantified Expand rows, including the default. No disk or wire format changes.
@@ -847,6 +847,69 @@ records the rechecked Neo4j grammar, nested-prefix rejection, unbounded repeatab
 and effective-mode references. SIMPLE is the owner's GQL requirement beyond Neo4j's mode set.
 GqlPathModeTests and GraphPathModeWireTests cover cycles, self-loops, repeated relationships,
 whole-path identity, interior anchors, backtracking, rows and path frames over InMemory and TCP.
+
+### GQL path selectors: planning boundary (#1734, GQ-SP2)
+
+MATCH accepts `ANY`, `ALL`, `ANY SHORTEST`, `ALL SHORTEST`, `SHORTEST k [PATHS]`
+and `SHORTEST k GROUPS`. The prefix follows an optional `p =` assignment. Its complete
+order is selector/count, optional WALK/TRAIL/SIMPLE/ACYCLIC, optional PATH/PATHS, then
+GROUP/GROUPS for a counted group selector. For example:
+`MATCH p = SHORTEST 2 TRAIL GROUPS ((a)-[r:T WHERE r.w > 0]->*(b) WHERE a.k <> b.k) WHERE path_length(p) > 2 RETURN p`.
+GROUP is an accepted singular spelling; canonical rendering uses GROUPS. Counted SHORTEST
+requires a positive Int64 literal (CG00011 otherwise); parameter counts, omitted counts and
+counted ANY remain outside this delivery (counted ANY retains CK00001).
+
+`GqlPathPattern.Selector` records the kind, count and complete prefix span. Its sealed
+`GqlPathSelector` renders a canonical selector independently of optional mode/path tokens.
+Omission preserves exhaustive matching; an explicit ALL retains its own selection plan.
+Selection partitions by the actual ordered start/end identities for each incoming binding,
+even for anonymous endpoints, equal endpoints and an interior scan anchor. ANY selects one
+admissible path; ALL selects every admissible path. ANY SHORTEST selects one minimum-length
+path; counted SHORTEST selects up to k paths in ascending hop count. ALL SHORTEST is equivalent
+to SHORTEST 1 GROUPS: groups count distinct hop lengths and retain every path at each selected
+length. A path count can split ties; a length-group count cannot. Shortest ties use the
+lexicographically ascending complete relationship-identity sequence from start to end, as in
+SP1; a node-identity sequence breaks any remaining identity tie. ANY uses that stable identity
+order without length ranking. The omitted mode is explicitly TRAIL, Cohesion's existing
+choice; SIMPLE, ACYCLIC and WALK retain their documented identity rules.
+
+Labels, relationship directions/types, property maps and inline node/relationship WHERE are
+element prefilters. A WHERE inside a parenthesized path is a path prefilter. These remain
+inside search, including under quantifiers; each repeated body's variables denote its local
+singleton occurrence inside its predicates and group lists outside it. Unquantified group
+flattening retains predicate boundary offsets. Unique path-instance ownership lets lowering transfer filter lists rather than copy them through every enclosing group, avoiding quadratic planner allocation for deep predicates. Ordinary MATCH WHERE remains a post-selection
+filter, including in OPTIONAL MATCH before null extension. It cannot be pushed into an index
+anchor or a matches-nothing shortcut for a clause containing a selector. FILTER and later
+WITH predicates retain their ordinary downstream placement.
+
+SP2 delivers parsing, binding and nonexecuting EXPLAIN, including zero-hop paths, cycles,
+bound endpoints and quantified bodies in all modes. A selector admits unbounded WALK into
+planning; an unselected unbounded WALK keeps its existing CK00001. EXPLAIN exposes SelectPaths,
+PathSearch, ElementPrefilter, PathPrefilter and PostFilter, the count unit, endpoint partition,
+resolved mode and stable order. Search work uses CG05004 and retained history/state plus output
+use CG05020 under the existing configurable statement ceilings (defaults: 1,000,000 work units,
+256 MiB); these are separate from SP1's vertex-visited BFS state contract. GQL's 64-hop backstop
+is retained. No claim of memory independent of path histories or output is made.
+
+Until SP3, every planned selector or inline WHERE prefilter refuses execution with CK00001
+after complete binding, before a writer lock or data expansion, even for empty input, LIMIT 0,
+or a preceding write stage. This also applies to source-free ASTs and inline WHERE without an
+explicit selector. EXPLAIN succeeds, missing parameters/names still fail binding, and wire
+execution reports ExecutionFailure with the existing diagnostic. No disk or wire change,
+new public interface, boundary grant or new runtime budget code is introduced. Selector forms
+are not added to the executable-clause profile until execution exists.
+
+Conformance lives in GqlPathSelectorParserTests and the keyword-disposition corpus,
+GqlPathSelectorPlanningTests, and GraphPathSelectorWireTests (InMemory and TCP). Former parser
+refusal cases now have AST/planning evidence; counted ANY and nested selectors stay pinned.
+Local Neo4j behavior consulted, no code copied (paths relative to `C:/Source/repos/neo4j/neo4j`):
+`community/cypher/cypher-logical-plans/src/main/scala/org/neo4j/cypher/internal/logical/plans/LogicalPlan.scala:3533-3560`
+defines endpoint-pair selectors and distinguishes path counts from length groups;
+`community/cypher/ir/src/main/scala/org/neo4j/cypher/internal/ir/NodeConnectionAndPathPattern.scala:389-407`
+keeps prefilters in the selective path pattern;
+`community/cypher/front-end/parser/v25/parser/src/main/antlr4/org/neo4j/cypher/internal/parser/v25/Cypher25Parser.g4:401-425,431-442,482-485`
+provides prefix order and inline predicates. Cohesion requires explicit literal k, retains
+TRAIL by default and strengthens arbitrary ties to the identity order above.
 
 ### Retained execution memory and explicit query limits (#1533, D4)
 
@@ -1472,12 +1535,13 @@ to exercise that enforcement path; compiled provisioning is not included.
 
 | Code | Meaning |
 | --- | --- |
-| `CK00001` | Unsupported language capability, reported on the parsed statement |
+| `CK00001` | Unsupported language capability, including deferred selector/inline-predicate execution after binding; EXPLAIN succeeds for those planned forms |
 | `CG00001`–`CG00006` | Parser syntax/literal/bound errors; see language design. `CG00005` is the sum-of-repetition-bounds limit of 64 relationships |
 | `CG00007` | Attempt to mutate catalog introspection results |
 | `CG00008` | A Cypher arrow (`-->`, `--`) directly after a pattern element, which GQL reads as a comment |
 | `CG00009` | Groups, unary expressions, CASE or collection constructors nested deeper than the parsing thread's stack; `GraphQueryRequest.FromGql` and the engine report it as `CG05008` |
 | `CG00010` | Unknown function spelling; standalone parsing or deferred engine binding |
+| `CG00011` | SHORTEST selector count is missing or is not a positive Int64 literal |
 | `CG05001` | Invalid hand-built function arity or unbound argument; invalid pattern, variable binding, label expression, predicate or traversal specification, including an insertion that names `\|`, `!`, `%` or an either-direction edge, a binary `AND`, and a chain with fewer than two operands |
 | `CG01002` | Unknown label or relationship type in a schema write (`CreateIndexAsync`, `DropLabelAsync`, `DropRelationshipTypeAsync`), a failed statement. A read never reports it; see `CG01010` and `CG01011` |
 | `CG03003` | Proven incompatible function argument kind; schema/data mismatch, restricted deletion or invalid graph mutation; deterministic catalog identity reuse/rename, identity mismatch, index retargeting or missing owner |

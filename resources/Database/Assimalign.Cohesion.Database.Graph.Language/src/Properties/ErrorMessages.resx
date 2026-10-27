@@ -52,6 +52,7 @@
   <data name="GqlQueryParserParsePathVoid6" xml:space="preserve"><value>The sum of path repetition bounds cannot exceed 64 relationships.</value></data>
   <data name="GqlQueryParserParsePathVoid7" xml:space="preserve"><value>Expected a node pattern.</value></data>
   <data name="GqlQueryParserParseQuantifierVoid" xml:space="preserve"><value>A quantifier requires ordered bounds and a positive upper bound.</value></data>
+  <data name="SelectorCountInvalid" xml:space="preserve"><value>A SHORTEST selector requires a positive Int64 literal count.</value></data>
   <data name="QueryParserParseQuantifierBoundVoid" xml:space="preserve"><value>Invalid or out-of-range numeric literal.</value></data>
   <data name="GqlQueryParserAbbreviatedEdgeVoid" xml:space="preserve"><value>An abbreviated edge pattern cannot carry a variable, label expression or property map; write the bracketed form, such as -[r:TYPE]-&gt;.</value></data>
   <data name="RejectLineCommentAfterElementVoid" xml:space="preserve"><value>'--' directly after a node or edge pattern starts a GQL comment that hides the rest of the line; write the edge as '-&gt;', '&lt;-' or '-' (Cypher '--&gt;', '&lt;--', '--' and '&lt;--&gt;' are not GQL), or put a space before the comment.</value></data>
