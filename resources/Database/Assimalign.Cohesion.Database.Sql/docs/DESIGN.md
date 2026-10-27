@@ -6737,6 +6737,8 @@ complete another database's deferred index migration before releasing the holder
 the caller-held conflict's coded timeout without an elapsed-time assertion.
 Cleanup assertions finish reclamation first: discovery briefly owns a coordinator snapshot
 fence, which must not be mistaken for a leaked maintenance transaction.
+Pre-queue failures use the same SQL failure translation as worker failures; an injected enqueue
+failure plus rollback I/O failure retains both causes under CS06041 before admission is released.
 
 TRUNCATE and rewrite use one ReplaceTableStorageAsync preparation/publication path and one
 catalog reservation/publication transaction. Rewrite decodes the old physical layout, including

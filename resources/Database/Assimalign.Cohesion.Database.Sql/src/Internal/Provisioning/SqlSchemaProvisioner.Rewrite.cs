@@ -54,6 +54,8 @@ internal sealed partial class SqlSchemaProvisioner
 
     internal void UnqueueRewrite(SqlTableRewrite rewrite) => _database.Engine.UnscheduleProvisioning(rewrite);
 
+    internal Exception TranslateRewriteFailure(Exception failure) => _database.TranslateFailure(failure);
+
     internal void ReleaseRewrite()
     {
         lock (_rewriteSync)
