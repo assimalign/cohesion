@@ -362,13 +362,18 @@ Candidates deduplicate by document identity before fetching. The complete predic
 executes as a residual, rejecting cross-element false positives. UNNEST then expands the stored
 array with its original element multiplicity: `[1,1,2]` still produces three rows. EXPLAIN prints
 DISTINCT ARRAY keys, `distinct_documents=True; array_residual=True`, and posting-count estimates.
-The benchmark-shaped category = X AND any variant price <= Y query with first 50 IDs uses a
-`(category, DISTINCT ARRAY v.price FOR v IN variants END)` index; the deterministic probe fetches
-64 qualifying documents for 50 result documents, within 2x. A selective price/stock predicate
-with a matching stock WHEN fetches one document. Its unfiltered counterpart returns the same one
-document after 1,001 fetches, rejecting 1,000 cross-element false positives. The 2x bound applies
-to the single-field benchmark shape and the WHEN-matched case; arbitrary unfiltered multi-field
-same-element predicates have no bounded candidate ratio. These are local probes, not an SF10 run.
+Ungrouped, non-DISTINCT queries with fixed projection types can stop after OFFSET + LIMIT residual
+survivors when unordered or ordered solely by META().id (including a projection alias), ASC or DESC.
+Other orderings and projections requiring type inference retain materialization. This limits content
+fetches, not candidate metadata or index probes. The benchmark category = X AND any variant price
+<= Y shape with a `(category, DISTINCT ARRAY v.price FOR v IN variants END)` index has no residual
+rejections and fetches at most OFFSET + LIMIT documents in identity order. Among 256 candidates,
+LIMIT 50 reads 50 documents; OFFSET 20 LIMIT 50 reads 70, in either direction. Interleaved rejections
+read 99/139 ascending and 100/140 descending: at most 2 * (OFFSET + LIMIT) for this half-qualifying
+shape. Arbitrary residuals have no such ratio. A matching stock WHEN fetches one document for the
+selective price/stock probe; its unfiltered counterpart rejects 1,000 cross-element false positives
+after 1,001 fetches. WHEN alone guarantees no ratio for additional residuals or other orderings.
+These are local probes, not an SF10 run.
 The syntax/matching basis is [Couchbase array indexing](https://docs.couchbase.com/server/current/n1ql/n1ql-language-reference/indexing-arrays.html);
 the DISTINCT-only, scalar projection and no-UNIQUE restrictions are Cohesion's approved boundary.
 

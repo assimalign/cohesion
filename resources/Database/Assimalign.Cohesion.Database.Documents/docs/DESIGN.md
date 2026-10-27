@@ -2368,13 +2368,22 @@ EXPLAIN prints canonical DISTINCT ARRAY keys and `distinct_documents=True; array
 estimates still count physical postings, which may exceed document counts. System PATH/PATHS render
 the same normalized keys with a canonical `v` variable and quoted source root.
 
-The benchmark-shaped `(category, DISTINCT ARRAY v.price FOR v IN variants END)` query selects
-category = X and any price <= Y, then the first 50 IDs. A deterministic probe reads 64 qualifying
-documents for those 50 rows (within 2x); it counts content reads, not wall time. The correlated
-`price > 10 AND stock > 0` probe reads one qualifying document with a matching `WHEN stock > 0`.
-Without WHEN, that probe correctly rejects 1,000 cross-element false positives after 1,001 reads
-for one qualifying document. Thus the 2x guarantee applies to the single-field benchmark query
-and the WHEN-matched selective case; arbitrary unfiltered multi-field predicates have no such bound.
+Ungrouped, non-DISTINCT pages with fixed projection types (including META().id) can stop after
+OFFSET + LIMIT residual survivors when there is no ORDER BY or the sole ordering is document
+identity, ASC or DESC. Projection aliases resolving to META().id have the same behavior. Candidates
+are visited in that identity direction, and every visited document receives the full residual.
+Other orderings, grouping, DISTINCT and projections requiring type inference retain materialization.
+Candidate metadata and index probes are not limited by this content-read optimization.
+
+For the benchmark-shaped `(category, DISTINCT ARRAY v.price FOR v IN variants END)` query with
+category = X and any price <= Y, all candidates satisfy the residual: an identity-ordered page
+fetches at most OFFSET + LIMIT documents. The 256-candidate probe reads 50 documents for LIMIT 50
+and 70 for OFFSET 20 LIMIT 50, in either direction. With interleaved residual rejections it reads
+99/139 ascending and 100/140 descending, within 2 * (OFFSET + LIMIT) because every other candidate
+qualifies. This ratio is not guaranteed for arbitrary residuals. The correlated `price > 10 AND
+stock > 0` probe reads one qualifying document with a matching WHEN stock > 0; without WHEN it
+rejects 1,000 cross-element false positives after 1,001 reads. A matching WHEN narrows candidates
+but does not itself guarantee a bounded fetch ratio for additional residuals or other orderings.
 These probes do not claim execution of the external SF10 benchmark or its result digest harness.
 
 The single-array-key and DISTINCT precedent is [Couchbase array indexing](https://docs.couchbase.com/server/current/n1ql/n1ql-language-reference/indexing-arrays.html),

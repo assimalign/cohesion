@@ -234,10 +234,21 @@ public sealed partial class DocumentQueryTests
         }
     }
 
-    [Fact(DisplayName = "Cohesion Test [Documents] - Category/price first-50 query fetches at most twice qualifying documents (#1530)")]
-    public async Task Execute_SelectiveArrayPrice_ShouldMeetFetchBound()
+    [Theory(DisplayName = "Cohesion Test [Documents] - Identity ordered array pages stop after OFFSET + LIMIT survivors (#1530)")]
+    [InlineData(false, false, 0, null)]
+    [InlineData(false, false, 20, null)]
+    [InlineData(false, true, 0, null)]
+    [InlineData(false, true, 20, null)]
+    [InlineData(true, false, 0, null)]
+    [InlineData(true, false, 20, null)]
+    [InlineData(true, true, 0, null)]
+    [InlineData(true, true, 20, null)]
+    [InlineData(false, false, 0, "category DESC")]
+    [InlineData(false, false, 0, "META().version DESC")]
+    [InlineData(false, false, 0, "META().id, META().version")]
+    public async Task Execute_SelectiveArrayPrice_ShouldMeetFetchBound(bool descending, bool residual, int offset, string? otherOrder)
     {
-        // Arrange: repeated and multiple qualifying postings must not cause extra content reads.
+        // Arrange: 256 candidates, duplicate numeric postings and interleaved residual rejections.
         await using var engine = DocumentDatabaseEngine.Create("array-fetch", new());
         var database = await engine.CreateDatabaseAsync("test");
         await using var session = await database.CreateSessionAsync();
@@ -246,25 +257,36 @@ public sealed partial class DocumentQueryTests
         {
             for (int i = 0; i < 256; i++)
             {
-                string category = i % 2 == 0 ? "X" : "Y";
-                string variants = i < 128 ? "[{\"price\":5},{\"price\":5.0},{\"price\":9}]" : "[{\"price\":99}]";
-                await PutAsync(collection, session, $"{i:D4}", $"{{\"category\":\"{category}\",\"variants\":{variants}}}");
+                string keep = i % 2 == 0 ? "true" : "false";
+                await PutAsync(collection, session, $"{i:D4}",
+                    $"{{\"category\":\"X\",\"keep\":{keep},\"variants\":[{{\"price\":5}},{{\"price\":5.0}},{{\"price\":9}}]}}");
             }
             await transaction.CommitAsync(CancellationToken.None);
         }
-        const string query = "SELECT META().id AS id FROM items WHERE category = 'X' AND ANY v IN variants SATISFIES v.price <= @price END ORDER BY META().id LIMIT 50";
+        string order = residual ? "id" : offset == 0 ? "META().id" : "META(d).id";
+        string query = "SELECT META(d).id AS id FROM items d WHERE category = 'X' AND ANY v IN variants SATISFIES v.price <= @price END" +
+            (residual ? " AND keep = TRUE" : "") + " ORDER BY " + (otherOrder ?? order + (descending ? " DESC" : "")) + $" LIMIT 50 OFFSET {offset}";
         var parameters = new Dictionary<string, object?> { ["price"] = 10m };
         var expected = (await RowsAsync(session, query, parameters)).Select(r => r.GetString(0)).ToArray();
         await session.ExecuteAsync("CREATE INDEX ix ON items (category, DISTINCT ARRAY v.price FOR v IN variants END)", cancellationToken: CancellationToken.None);
 
         // Act.
         var rows = await RowsAsync(session, query, parameters);
+        long fetches = session.LastQueryDocumentsRead;
 
-        // Assert: ORDER BY materializes the 64 qualifying documents before taking 50.
+        // Assert.
         rows.Select(r => r.GetString(0)).ShouldBe(expected);
         rows.Count.ShouldBe(50);
-        session.LastQueryDocumentsRead.ShouldBe(64);
-        session.LastQueryDocumentsRead.ShouldBeLessThanOrEqualTo(2 * rows.Count);
+        Console.WriteLine($"Array page descending={descending}, residual={residual}, offset={offset}, otherOrder={otherOrder}: {fetches} content reads.");
+        if (otherOrder is null)
+        {
+            var ids = Enumerable.Range(0, 256).Where(i => !residual || i % 2 == 0);
+            if (descending) { ids = ids.Reverse(); }
+            rows.Select(r => r.GetString(0)).ShouldBe(ids.Skip(offset).Take(50).Select(i => $"{i:D4}"));
+            fetches.ShouldBeLessThanOrEqualTo(2 * (offset + 50));
+            fetches.ShouldBe(residual ? 2 * (offset + 50) - (descending ? 0 : 1) : offset + 50);
+        }
+        else { fetches.ShouldBe(256); }
         (await PlanAsync(database, query, parameters)).Access.ShouldBeOfType<DocumentIndexPath>();
     }
 

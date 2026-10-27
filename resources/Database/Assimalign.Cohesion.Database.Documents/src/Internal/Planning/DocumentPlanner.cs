@@ -228,7 +228,8 @@ internal sealed partial class DocumentPlanner
             Validate(order.Expression, allowAggregate: true, functions: functions);
             if (grouped) { ValidateGrouped(order.Expression, query, unnestVariables, scopes!, functions); }
         }
-        bool canStopEarly = !grouped && !query.IsDistinct && query.OrderBy.Count == 0 &&
+        bool canStopEarly = !grouped && !query.IsDistinct && (query.OrderBy.Count == 0 ||
+            query.OrderBy.Count == 1 && query.OrderBy[0].Expression is OqlMetaExpression { Member: "id" }) &&
             projections.All(projection => (projection.Expression is not OqlStarExpression || query.Unnest.Count > 0) &&
                 (projection.Type != DatabaseType.Null || projection.Expression is
                     OqlLiteralExpression { Value: null or JsonElement { ValueKind: JsonValueKind.Null } } or OqlMissingExpression));
