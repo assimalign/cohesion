@@ -17,6 +17,8 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 internal sealed partial class SqlPlanExecutor
 {
+    internal static Action<SqlCatalogTable>? ReferenceIntentsDiscovered { get; set; }
+
     private static readonly string _errorEnsureSnapshotSeesCascadeRowFailure3 = ErrorMessages.EnsureSnapshotSeesCascadeRowFailure3;
 
     private static readonly string _errorEnsureSnapshotSeesCascadeRowFailure = ErrorMessages.EnsureSnapshotSeesCascadeRowFailure;
@@ -176,7 +178,7 @@ internal sealed partial class SqlPlanExecutor
         while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            ulong generation = _catalog.DdlGeneration;
+            var generation = _catalog.BindingGeneration;
             var adjacent = new SortedSet<ulong>();
             if (outgoing)
             {
@@ -197,6 +199,7 @@ internal sealed partial class SqlPlanExecutor
                     adjacent.Add(reference.Child.ObjectId);
                 }
             }
+            ReferenceIntentsDiscovered?.Invoke(table);
             adjacent.Remove(table.ObjectId);
             ulong blocked = table.ObjectId;
             LockMode mode = LockMode.IntentExclusive;
@@ -224,8 +227,10 @@ internal sealed partial class SqlPlanExecutor
                 continue;
             }
             EnsureCurrentDefinition(table);
-            if (generation != _catalog.DdlGeneration)
+            if (generation != _catalog.BindingGeneration)
             {
+                // Physical publication can replace an outgoing parent between discovery
+                // and its IS grant. Refresh parents before probing or locking their rows.
                 // Under own IX no new incoming FK can publish (it needs parent X).
                 // Rebuild once under that lock and try any newly discovered children.
                 if (incoming) { references.Incoming.Remove(table.ObjectId); }
@@ -639,6 +644,15 @@ internal sealed partial class SqlPlanExecutor
             if (checksOnly) { continue; }
             var parent = ReferenceParent(table, constraint, statement);
             if (parent is null) { continue; }
+            if (!current && _catalog.SnapshotPredatesReplacement(parent, statement.Snapshot))
+            {
+                // Compact owners omit historical versions. A retained SELECT can still
+                // see the parent, but DML must retry against the replacement snapshot.
+                string message = string.Format(System.Globalization.CultureInfo.CurrentCulture,
+                    ErrorMessages.StatementTableChanged, parent.Schema, parent.Name);
+                throw new DatabaseTransactionAbortedException(message,
+                    [new Diagnostic { Code = "CS04006", Severity = DiagnosticSeverity.Error, Message = message }]);
+            }
             var reference = BindReference(table, constraint, parent, statement, cancellationToken);
 
             HashSet<object?[]>? selfKeys = null;

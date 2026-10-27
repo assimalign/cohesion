@@ -210,8 +210,10 @@ See [DESIGN.md](DESIGN.md) for the execution model and its decisions.
 SqlDatabase.RewriteTableAsync(schemaName, tableName, cancellationToken) compacts dropped
 physical ordinals,
 copies live rows and rebuilds indexes on the provisioning worker. Names are decoded SQL
-identifiers, without delimiters. Writers wait for an exclusive table lock; older snapshots
-retain the original layout until they end. Publication is recoverable as one complete owner
+identifiers, without delimiters. Writers bound to a retired owner wait for the exclusive table
+lock and then abort retryably with CS04006. Transactions begun before publication also abort
+when writing or reading retired tables inside DML; retry the entire transaction. Read-only
+snapshots retain the original layout until they end. Publication is recoverable as one complete owner
 replacement. Cancellation before publication keeps the original table; retry interrupted work
 explicitly. The maintenance operation preserves schema ownership and logical definitions.
 

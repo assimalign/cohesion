@@ -23,8 +23,10 @@ public sealed partial class SqlDatabase
     /// <exception cref="SqlCatalogException">The table is missing or its description changed while acquiring its exclusive lock.</exception>
     /// <remarks>
     /// This physical maintenance also accepts schema-owned tables. It preserves their logical
-    /// definitions and identity allocation. Writers wait for the table's exclusive lock;
-    /// older snapshots continue to read the retired layout until their pins end. Cancellation
+    /// definitions and identity allocation. Writers that bound a retired owner wait for the
+    /// table lock and then abort retryably with CS04006; retry the entire transaction.
+    /// Transactions begun before publication also abort if they write or read retired
+    /// tables inside DML. Older read-only snapshots retain the retired layout until their pins end. Cancellation
     /// after durable publication cannot undo it. Interrupted preparation leaves the old table
     /// current and durable reclamation work for the abandoned owner; retry explicitly.
     /// </remarks>
