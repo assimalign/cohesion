@@ -26,20 +26,20 @@ internal static partial class GraphPlanExecutor
         public ulong[]? FirstTruncatedPrefix { get; set; }
     }
 
-    private static async IAsyncEnumerable<(Dictionary<string, object?> Bindings, MatchedProperties? Properties)> MatchCoreStreamAsync(
+    private static IAsyncEnumerable<PathMatch> MatchCoreStreamAsync(
         GraphDatabase database, GraphOperation operation, GraphPathPlan plan, Dictionary<string, object?> input,
         ExpansionBudget budget, IReadOnlyDictionary<string, object?>? parameters,
-        [EnumeratorCancellation] CancellationToken token, bool deferUnbound = false)
-    {
-        if (plan.Selection is null)
-        {
-            await foreach (var match in SearchPathStreamAsync(database, operation, plan, input, budget, parameters,
-                token, deferUnbound).ConfigureAwait(false))
-            { yield return (match.Bindings, match.Properties); }
-            yield break;
-        }
+        CancellationToken token, bool deferUnbound = false)
+        => plan.Selection is null
+            ? SearchPathStreamAsync(database, operation, plan, input, budget, parameters, token, deferUnbound)
+            : SelectPathStreamAsync(database, operation, plan, input, budget, parameters, token);
 
-        var selection = plan.Selection;
+    private static async IAsyncEnumerable<PathMatch> SelectPathStreamAsync(
+        GraphDatabase database, GraphOperation operation, GraphPathPlan plan, Dictionary<string, object?> input,
+        ExpansionBudget budget, IReadOnlyDictionary<string, object?>? parameters,
+        [EnumeratorCancellation] CancellationToken token)
+    {
+        var selection = plan.Selection!;
         var shape = selection.Search;
         // Selected paths always search from their source boundary. An interior index
         // anchor must not change endpoint partitioning, identity order or local scopes.
@@ -156,7 +156,7 @@ internal static partial class GraphPlanExecutor
                         hasGroup = true;
                         budget.Consume();
                         budget.SelectorSelected++;
-                        yield return (match.Bindings, null); // All search properties have already been checked.
+                        yield return match; // All search properties have already been checked.
                         if (!selection.CountLengthGroups && selection.Count is not null) { remaining--; }
                     }
                     if (selection.CountLengthGroups && hasGroup) { remaining--; }
@@ -305,7 +305,7 @@ internal static partial class GraphPlanExecutor
     {
         for (; check != stop; check = check!.Previous)
         {
-            if (!PropertiesMatch(check!.Expected, check.Actual, WithLocals(bindings, check.Locals),
+            if (!PropertiesMatch(check!.Expected, check.Actual, WithLocals(bindings, (check as ScopedProperties)?.Locals),
                 operation.EvaluationContext, parameters, deferUnbound)) { return false; }
         }
         return true;
@@ -314,12 +314,13 @@ internal static partial class GraphPlanExecutor
     private static bool CheckIteration(ref PathState state, EndIterationTask end, GraphOperation operation,
         IReadOnlyDictionary<string, object?>? parameters)
     {
-        var predicates = end.Predicates;
+        var stop = (end as FilteredIterationTask)?.Predicates;
+        var predicates = stop;
         var properties = end.Properties;
         Dictionary<string, object?>? locals = null;
         foreach (string name in end.Repeat.Names)
         { (locals ??= new(StringComparer.Ordinal))[name] = state.Bindings[name]; }
-        for (var check = state.Predicates; check != end.Predicates; check = check!.Previous)
+        for (var check = Predicates(state); check != stop; check = check!.Previous)
         {
             var bindings = WithLocals(state.Bindings, check!.Locals);
             if (GraphValueExpressions.ReferencesUnbound(check.Expression, bindings))
@@ -328,12 +329,12 @@ internal static partial class GraphPlanExecutor
         }
         for (var check = state.Properties; check != end.Properties; check = check!.Previous)
         {
-            var bindings = WithLocals(state.Bindings, check!.Locals);
-            if (check.Expected.Values.Any(value => GraphValueExpressions.ReferencesUnbound(value, bindings)))
-            { properties = check with { Previous = properties, Locals = locals }; }
+            var bindings = WithLocals(state.Bindings, (check as ScopedProperties)?.Locals);
+            if (check!.Expected.Values.Any(value => GraphValueExpressions.ReferencesUnbound(value, bindings)))
+            { properties = new ScopedProperties(check, properties, locals); }
             else if (!PropertiesMatch(check.Expected, check.Actual, bindings, operation.EvaluationContext, parameters)) { return false; }
         }
-        state = state with { Predicates = predicates, Properties = properties };
+        state = WithPredicates(state with { Properties = properties }, predicates);
         return true;
     }
 }

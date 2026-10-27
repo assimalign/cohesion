@@ -885,7 +885,12 @@ its owning search shape; unquantified groups do not merge accumulated lists. Min
 allocation regressions prove linear growth for nested filters and for a filtered singleton
 preceding each growing nested group. Empty filter storage and quantified predicate locals
 are allocated lazily; Release planning checks retain the base budgets for node, edge and
-quantified paths without selectors or prefilters. Ordinary MATCH WHERE remains a post-selection
+quantified paths without selectors or prefilters. Unselected execution dispatches directly to
+the ordinary matcher; it allocates neither
+a forwarding iterator nor search-only continuation grants or repeated-body predicate locals.
+Release minimum-of-five-round checks pin node, one-hop and quantified execution below the
+reviewed base allocation ceilings (9,160, 28,696 and 204,546 bytes per match).
+Ordinary MATCH WHERE remains a post-selection
 filter, including in OPTIONAL MATCH before null extension. It cannot be pushed into an index
 anchor or a matches-nothing shortcut for a clause containing a selector. FILTER and later
 WITH predicates retain their ordinary downstream placement.

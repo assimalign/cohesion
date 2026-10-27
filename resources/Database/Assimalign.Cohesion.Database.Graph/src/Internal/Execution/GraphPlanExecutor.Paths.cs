@@ -14,9 +14,14 @@ namespace Assimalign.Cohesion.Database.Graph.Internal;
 
 internal static partial class GraphPlanExecutor
 {
-    private sealed record MatchedProperties(IReadOnlyDictionary<string, GqlExpression> Expected,
-        IReadOnlyDictionary<string, object?> Actual, MatchedProperties? Previous,
-        IReadOnlyDictionary<string, object?>? Locals = null);
+    private record MatchedProperties(IReadOnlyDictionary<string, GqlExpression> Expected,
+        IReadOnlyDictionary<string, object?> Actual, MatchedProperties? Previous);
+    private sealed record ScopedProperties : MatchedProperties
+    {
+        public ScopedProperties(MatchedProperties properties, MatchedProperties? previous, IReadOnlyDictionary<string, object?>? locals)
+            : base(properties.Expected, properties.Actual, previous) { Locals = locals; }
+        public IReadOnlyDictionary<string, object?>? Locals { get; }
+    }
     private sealed record MatchedPredicate(GqlExpression Expression, MatchedPredicate? Previous,
         IReadOnlyDictionary<string, object?>? Locals = null);
 
@@ -47,14 +52,15 @@ internal static partial class GraphPlanExecutor
         }
     }
     private sealed record RepeatTask(GraphPathSegment Segment, bool Forward, int Count, string[] Names, PathTask? Next) : PathTask;
-    private sealed record EndIterationTask(RepeatTask Repeat, PathTask? Next,
-        MatchedProperties? Properties, MatchedPredicate? Predicates) : PathTask;
+    private record EndIterationTask(RepeatTask Repeat, PathTask? Next, MatchedProperties? Properties) : PathTask;
+    private sealed record FilteredIterationTask(RepeatTask Repeat, PathTask? Next,
+        MatchedProperties? Properties, MatchedPredicate? Predicates) : EndIterationTask(Repeat, Next, Properties);
     private sealed record PredicateTask(IReadOnlyList<GraphPathPrefilter> Filters, PathTask? Next) : PathTask;
     private sealed record StartLeftTask(GraphNode Anchor, PathTask? Next) : PathTask;
 
-    private sealed record PathState(GraphNode Current, Dictionary<string, object?> Bindings,
+    private record PathState(GraphNode Current, Dictionary<string, object?> Bindings,
         List<GraphNode> Nodes, List<GraphRelationship> Relationships, HashSet<ulong> Used,
-        Dictionary<string, object?[]> Groups, MatchedProperties? Properties, MatchedPredicate? Predicates, PathTask? Task)
+        Dictionary<string, object?[]> Groups, MatchedProperties? Properties, PathTask? Task)
     {
         internal PathState Fork(Dictionary<string, object?>? bindings = null) => this with
         {
@@ -62,6 +68,17 @@ internal static partial class GraphPlanExecutor
             Used = new(Used), Groups = new(Groups, StringComparer.Ordinal),
         };
     }
+
+    private sealed record FilteredPathState : PathState
+    {
+        public FilteredPathState(PathState state) : base(state) { }
+        public MatchedPredicate? Predicates { get; init; }
+    }
+
+    private static MatchedPredicate? Predicates(PathState state) => (state as FilteredPathState)?.Predicates;
+
+    private static PathState WithPredicates(PathState state, MatchedPredicate? predicates)
+        => state is FilteredPathState filtered ? filtered with { Predicates = predicates } : state;
 
     [global::System.Diagnostics.DebuggerDisplay("PathFrontier")]
     [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Internal.GraphPlanExecutor.PathFrontier.DebugView))]
@@ -75,6 +92,7 @@ internal static partial class GraphPlanExecutor
             _memory = new GraphMemoryOwner(memory);
         }
         internal int Count => _states.Count;
+        internal void ReserveTasks(long bytes) => _memory.Add(bytes);
         internal void Push(PathState state)
         {
             long bytes = Size(state);
@@ -93,10 +111,10 @@ internal static partial class GraphPlanExecutor
             long bytes = 384 + 80L * state.Bindings.Count + 48L * state.Used.Count + 128L * state.Groups.Count
                 + 64L * state.Nodes.Count + 80L * state.Relationships.Count;
             foreach (var values in state.Groups.Values) { bytes += 32 + 16L * values.Length; }
-            for (var check = state.Predicates; check is not null; check = check.Previous)
+            for (var check = Predicates(state); check is not null; check = check.Previous)
             { bytes += 64 + (check.Locals is null ? 0 : 128 + 80L * check.Locals.Count); }
             for (var check = state.Properties; check is not null; check = check.Previous)
-            { bytes += 64 + (check.Locals is null ? 0 : 128 + 80L * check.Locals.Count); }
+            { bytes += 64 + (check is ScopedProperties { Locals: { } locals } ? 128 + 80L * locals.Count : 0); }
             return bytes;
         }
         internal PathState Pop(out long bytes)
@@ -169,8 +187,9 @@ internal static partial class GraphPlanExecutor
             using var anchorMemory = budget.Memory.Reserve(GraphValueMemory.Node(node, token));
             // Continuations for nullable segments can outnumber the 64 actual hops.
             // Reserve their retained chain before constructing it for a search.
-            using var taskMemory = budget.Memory.Reserve(search is not null || shape.HasPrefilters
-                ? 128L * (shape.Nodes.Count + shape.Segments.Count) : 0);
+            using var frontier = new PathFrontier(budget.Memory);
+            if (search is not null || shape.HasPrefilters)
+            { frontier.ReserveTasks(128L * (shape.Nodes.Count + shape.Segments.Count)); }
             PathTask? left = null;
             // Prepend continuations in reverse execution order: right, then left from the anchor.
             for (int i = 0; i < anchor.NodeIndex; i++)
@@ -183,9 +202,9 @@ internal static partial class GraphPlanExecutor
                     ? new EdgeTask(shape.Segments[i].Body.Edge!, true, next, seed)
                     : SegmentTasks(shape.Segments[i], true, next);
             }
-            using var frontier = new PathFrontier(budget.Memory);
-            frontier.Push(new PathState(node, new(input, StringComparer.Ordinal), [node], [], [], new(StringComparer.Ordinal), null, null,
-                new NodeTask(shape.Nodes[anchor.NodeIndex], tasks)));
+            var initial = new PathState(node, new(input, StringComparer.Ordinal), [node], [], [], new(StringComparer.Ordinal), null,
+                new NodeTask(shape.Nodes[anchor.NodeIndex], tasks));
+            frontier.Push(search is not null || shape.HasPrefilters ? new FilteredPathState(initial) : initial);
             var incidents = new Dictionary<IAsyncEnumerator<StoredGraphRelationship>, IncidentTask>();
             try
             {
@@ -216,7 +235,7 @@ internal static partial class GraphPlanExecutor
                                 frontier.ResizeActive(state, ref stateBytes);
                             }
                             bool matches = CheckProperties(finalProperties, null, state.Bindings, operation, parameters, deferUnbound);
-                            matches &= CheckPredicates(state.Predicates, null, state.Bindings, operation, parameters);
+                            matches &= CheckPredicates(Predicates(state), null, state.Bindings, operation, parameters);
                             foreach (var filter in shape.Prefilters)
                             { if (!PredicateMatches(filter.Predicate, state.Bindings, operation, parameters)) { matches = false; break; } }
                             if (matches)
@@ -232,7 +251,7 @@ internal static partial class GraphPlanExecutor
                         case NodeTask nodes:
                             bool accepted = true;
                             var properties = state.Properties;
-                            var nodePredicates = state.Predicates;
+                            var nodePredicates = Predicates(state);
                             foreach (var pattern in nodes.Patterns)
                             {
                                 if (!AcceptNode(pattern, state.Current, state.Bindings, operation.EvaluationContext, parameters, deferUnbound: true)) { accepted = false; break; }
@@ -246,7 +265,7 @@ internal static partial class GraphPlanExecutor
                             }
                             if (accepted)
                             {
-                                state = state with { Properties = properties, Predicates = nodePredicates, Task = nodes.Next };
+                                state = WithPredicates(state with { Properties = properties, Task = nodes.Next }, nodePredicates);
                                 frontier.ResizeActive(state, ref stateBytes);
                                 goto Dispatch;
                             }
@@ -261,19 +280,21 @@ internal static partial class GraphPlanExecutor
                             {
                                 var iteration = state.Fork();
                                 foreach (string name in repeat.Names) { iteration.Bindings.Remove(name); }
-                                var end = new EndIterationTask(repeat, repeat.Next, state.Properties, state.Predicates);
+                                EndIterationTask end = state is FilteredPathState filtered
+                                    ? new FilteredIterationTask(repeat, repeat.Next, state.Properties, filtered.Predicates)
+                                    : new EndIterationTask(repeat, repeat.Next, state.Properties);
                                 frontier.Push(iteration with { Task = BodyTasks(repeat.Segment.Body, repeat.Forward, end) });
                             }
                             if (repeat.Count >= (repeat.Segment.Quantifier?.Min ?? 1))
                             { frontier.Push(state with { Task = repeat.Next }); }
                             break;
                         case PredicateTask filter:
-                            state = state with { Predicates = AddPredicates(filter.Filters, state.Predicates), Task = filter.Next };
+                            state = WithPredicates(state with { Task = filter.Next }, AddPredicates(filter.Filters, Predicates(state)));
                             frontier.ResizeActive(state, ref stateBytes);
                             goto Dispatch;
                         case EndIterationTask end:
                             // Repeated-body predicates see this iteration's singleton bindings.
-                            if (!CheckIteration(ref state, end, operation, parameters)) { break; }
+                            if ((search is not null || shape.HasPrefilters) && !CheckIteration(ref state, end, operation, parameters)) { break; }
                             foreach (string name in end.Repeat.Names)
                             {
                                 var previous = state.Groups[name];
@@ -326,7 +347,7 @@ internal static partial class GraphPlanExecutor
                             var relationship = GraphDatabase.Materialize(edge);
                             if (!Accept(hop.Pattern.Variable, relationship, bindings) ||
                                 !PropertiesMatch(hop.Pattern.Properties, relationship.Properties, bindings, operation.EvaluationContext, parameters, deferUnbound: true)) { break; }
-                            var edgePredicates = state.Predicates;
+                            var edgePredicates = Predicates(state);
                             if (hop.Pattern.Predicate is { } edgePredicate)
                             {
                                 if (!GraphValueExpressions.ReferencesUnbound(edgePredicate, bindings))
@@ -353,9 +374,9 @@ internal static partial class GraphPlanExecutor
                             if (plan.Mode == GqlPathMode.Trail) { copy.Used.Add(edge.Id); }
                             if (hop.Forward) { copy.Nodes.Add(nextNode); copy.Relationships.Add(relationship); }
                             else { copy.Nodes.Insert(0, nextNode); copy.Relationships.Insert(0, relationship); }
-                            frontier.Push(copy with { Current = nextNode, Task = hop.Next,
-                                Predicates = edgePredicates, Properties = shape.HasQuantifier
-                                    ? new MatchedProperties(hop.Pattern.Properties, relationship.Properties, copy.Properties) : copy.Properties });
+                            frontier.Push(WithPredicates(copy with { Current = nextNode, Task = hop.Next,
+                                Properties = shape.HasQuantifier
+                                    ? new MatchedProperties(hop.Pattern.Properties, relationship.Properties, copy.Properties) : copy.Properties }, edgePredicates));
                             break;
                     }
                     }
