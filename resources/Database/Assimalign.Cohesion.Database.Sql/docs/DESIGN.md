@@ -2644,7 +2644,7 @@ utility.c:1480-1483 and namespace.c:526-531.
 
 AUTHORIZATION and nested schema elements are rejected with CK00001. Atomic nested statements
 would require a separate DDL execution contract because each existing statement self-commits.
-Record-space format 27 has no upgrade reader: export older databases, recreate and explicitly
+Record-space format 26 has no upgrade reader: export older databases, recreate and explicitly
 CREATE SCHEMA for non-dbo table namespaces before importing. Namespace records are not synthesized.
 
 The area root carries only the model-independent ownership contracts (`DatabaseObjectOwner`,
@@ -3295,7 +3295,7 @@ project reference or InternalsVisibleTo change is required.
   format, no upgrade path.** The catalog stores the format version of the whole
   data file set, rows and the index trees that ride it (a kind-4 record for
   versions 1–3, a kind-8 record from version 4). The engine reads and writes
-  format 27 only: format 6's stamped rows in per-object page chains whose index keys use the
+  format 26 only: format 6's stamped rows in per-object page chains whose index keys use the
   temporal identity encoding (#1099, below), in index trees of B-tree page format
   2, which order entries by key, entry reference and writer (#1194,
   `Database.Indexing` DESIGN), decoded through each table's physical column
@@ -6686,7 +6686,7 @@ All columns, constraints, ownership, physical ordinals
 and frozen missing values are copied. CONTINUE moves the exact volatile cursor/block and the
 durable last reservation; RESTART removes the counter so allocation resumes at START. No new
 record layout, durable record kind, public catalog member, interface or format version is needed:
-SQL is now format 27 (#1265). Failed preparation and crash recovery use kind 14 unchanged.
+SQL remains format 26. Failed preparation and crash recovery use kind 14 unchanged.
 
 A short-lived coordinator snapshot pin brackets catalog publication: it is active before the
 swap and rolled back just afterwards. Its sequence is a visibility marker, with no persisted
@@ -6808,9 +6808,10 @@ FK intent preparation rechecks the physical binding generation after grants and 
 outgoing parents after a swap. Constraint probes against a replacement invisible to the
 statement snapshot abort with CS04006 instead of reporting a false FK violation. Hook-driven
 regressions pause between parent discovery and IS grant and cover retained parent versions.
-Existing codes retain their conditions. SQL record-space format advances once, 26 to 27, fencing the new physical-layout
-publication semantics. Compiled-schema v8 and catalog record shapes stay unchanged. The
-existing coded open gate refuses all earlier files; no upgrade or legacy reader is added.
+Existing codes retain their conditions. SQL remains format 26: ordinary dense table records,
+kind-14 intents and the existing TRUNCATE publication contract are readable by the format-26
+engine, so this operation changes no persisted contract. Compiled-schema v8 and catalog record
+shapes stay unchanged. The existing coded open gate refuses all earlier files; no upgrade or legacy reader is added.
 
 Crash tests retain every write/flush/length image through copy-batch checkpoints, snapshot
 release, reclamation and the free-before-intent-removal window, then reopen every image for
@@ -6899,7 +6900,7 @@ would tell every caller the value is changeable and then guard that promise at
 runtime.
 
 Table metadata extension version 2 introduced one collation identifier per column
-after the existing constraints. Current format 27 requires the complete table extension 6 record,
+after the existing constraints. Current format 26 requires the complete table extension 6 record,
 including resolved-call vectors, identity facets and frozen missing-value literals described below. Column additions,
 drops, and restart preserve explicit overrides. An index inherits its key
 columns' effective collations; the SQL engine verifies index eligibility and
@@ -6977,7 +6978,7 @@ codec, the key encoding and every comparison read, so they do not consult the do
   column (the primary key's implicit NOT NULL).
 - **Persistence: table extension version 4** (data-storage format 7). After the dropped
   ordinals, one optional string per live column, NULL for a column of a built-in type,
-  which this catalog always writes. Current format 27 also requires the call vectors, identity facets and extension 6 missing-value literals;
+  which this catalog always writes. Current format 26 also requires the call vectors, identity facets and extension 6 missing-value literals;
   the format gate refuses earlier databases rather than loading their definitions. A persisted blank
   name fails the load with `SqlCatalogException`, as does a blank `domainName` at the
   column's constructor (`ArgumentException`).
@@ -7531,7 +7532,7 @@ The internal stateless SqlCatalogCreation predicate owns the creation-only recor
 initial counter constraints. SQL uses it directly from Internal/Catalog,
 so recovery decisions use catalog vocabulary without a public API or friend-assembly grant.
 Creation commits collation, dbo and the format marker in that order. Completion changes no
-catalog record layout or record-space format 27. SQL requires its sql.create claim only when
+catalog record layout or record-space format 26. SQL requires its sql.create claim only when
 adopting a marker-free interrupted file set; an empty data scan alone is no proof. The predicate
 receives the default namespace from SQL's shared SqlNamespaceNames constant, avoiding a new
 catalog dependency on the language assembly.
