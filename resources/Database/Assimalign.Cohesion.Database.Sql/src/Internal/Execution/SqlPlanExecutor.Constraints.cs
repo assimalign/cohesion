@@ -644,15 +644,6 @@ internal sealed partial class SqlPlanExecutor
             if (checksOnly) { continue; }
             var parent = ReferenceParent(table, constraint, statement);
             if (parent is null) { continue; }
-            if (!current && _catalog.SnapshotPredatesReplacement(parent, statement.Snapshot))
-            {
-                // Compact owners omit historical versions. A retained SELECT can still
-                // see the parent, but DML must retry against the replacement snapshot.
-                string message = string.Format(System.Globalization.CultureInfo.CurrentCulture,
-                    ErrorMessages.StatementTableChanged, parent.Schema, parent.Name);
-                throw new DatabaseTransactionAbortedException(message,
-                    [new Diagnostic { Code = "CS04006", Severity = DiagnosticSeverity.Error, Message = message }]);
-            }
             var reference = BindReference(table, constraint, parent, statement, cancellationToken);
 
             HashSet<object?[]>? selfKeys = null;
@@ -667,6 +658,7 @@ internal sealed partial class SqlPlanExecutor
                     selfKeys.Add(ordinals.Select(ordinal => candidate[ordinal]).ToArray());
                 }
             }
+            bool snapshotChecked = false;
             foreach (var row in rows)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -680,6 +672,20 @@ internal sealed partial class SqlPlanExecutor
                 if (selfKeys?.Contains(keys) == true)
                 {
                     continue;
+                }
+
+                if (!current && !snapshotChecked)
+                {
+                    // Only a real parent probe needs historical versions. ON CONFLICT
+                    // under RC probes with refreshed visibility after arbitration waits.
+                    if (_catalog.SnapshotPredatesReplacement(parent, foreignKeySnapshot ?? statement.Snapshot))
+                    {
+                        string message = string.Format(System.Globalization.CultureInfo.CurrentCulture,
+                            ErrorMessages.StatementTableChanged, parent.Schema, parent.Name);
+                        throw new DatabaseTransactionAbortedException(message,
+                            [new Diagnostic { Code = "CS04006", Severity = DiagnosticSeverity.Error, Message = message }]);
+                    }
+                    snapshotChecked = true;
                 }
 
                 var matches = FinalConstraintRows(reference.ParentKey, keys, statement, cancellationToken,
