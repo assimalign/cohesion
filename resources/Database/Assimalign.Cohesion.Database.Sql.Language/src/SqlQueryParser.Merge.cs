@@ -20,6 +20,8 @@ public sealed partial class SqlQueryParser
         var actions = new List<SqlMergeWhenClause>();
         while (IsKeyword(ref lexer, "WHEN"))
         {
+            int clauseStart = lexer.Current.Position;
+            var clauseLexer = lexer;
             Advance(ref lexer);
             bool unmatched = IsKeyword(ref lexer, "NOT");
             if (unmatched) { Advance(ref lexer); }
@@ -81,7 +83,16 @@ public sealed partial class SqlQueryParser
                     ? "INSERT or DO NOTHING" : "UPDATE, DELETE or DO NOTHING");
                 break;
             }
-            actions.Add(new(kind, filter, action, assignments, columns, values, defaults, explicitTarget));
+            // _lastTokenEnd includes lookahead. Revisit only this clause's tokens to retain
+            // the last consumed token, excluding the next WHEN/RETURNING and trailing comments.
+            int clauseEnd = clauseStart;
+            while (clauseLexer.Current.Position < lexer.Current.Position && !IsAtEnd(ref clauseLexer))
+            {
+                if (clauseLexer.Current.Type != TokenType.Comment) { clauseEnd = CurrentTokenEnd(ref clauseLexer); }
+                if (!clauseLexer.MoveNext()) { break; }
+            }
+            actions.Add(new(kind, filter, action, assignments, columns, values, defaults, explicitTarget,
+                Location.Create(1, 1, clauseStart, clauseEnd)));
         }
         if (actions.Count == 0) { AddExpectedDiagnostic(ref lexer, "at least one WHEN clause"); }
         var returning = ParseReturning(ref lexer, table, sources: [source]);

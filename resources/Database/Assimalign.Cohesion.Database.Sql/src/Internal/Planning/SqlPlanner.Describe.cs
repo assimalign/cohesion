@@ -145,7 +145,7 @@ internal sealed partial class SqlPlanner
                                 continue;
                             }
                             int treeId = nodes.Count;
-                            string algorithm = treeStep.Kind == SqlJoinType.FullOuter ? (treeStep.Hash is null ? "FullNestedLoopJoin; unmatched=both" : "FullHashJoin; unmatched=both")
+                            string algorithm = treeStep.Kind == SqlJoinType.FullOuter ? "FullHashJoin; unmatched=both"
                                 : treeStep.Hash is not null ? "HashJoin" : treeStep.Access is not null ? "IndexNestedLoop" : "NestedLoop";
                             string normalization = treeStep.Kind == SqlJoinType.RightOuter ? "; normalized RIGHT to LEFT; physical=LeftOuter" : string.Empty;
                             Add("JoinStep", next.Parent, Target(join.Bindings[treeStep.Binding].Source),

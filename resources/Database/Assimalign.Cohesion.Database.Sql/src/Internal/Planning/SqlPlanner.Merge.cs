@@ -28,7 +28,7 @@ internal sealed partial class SqlPlanner
                 clause.MatchKind == SqlMergeMatchKind.NotMatchedByTarget && clause.Action is SqlMergeAction.Update or SqlMergeAction.Delete ||
                 clause.MatchKind != SqlMergeMatchKind.NotMatchedByTarget && clause.Action == SqlMergeAction.Insert) { throw Invalid(); }
             if (terminal.Contains(clause.MatchKind))
-            { throw new SqlPlanningException("CS05071", ErrorMessages.MergeWhenUnreachable, clause.Condition?.Location ?? merge.Location); }
+            { throw new SqlPlanningException("CS05071", ErrorMessages.MergeWhenUnreachable, clause.Location); }
             if (clause.Condition is null) { terminal.Add(clause.MatchKind); }
             // PostgreSQL parse_merge.c:52-99: unmatched actions cannot name the absent side.
             var scope = clause.MatchKind switch
@@ -95,9 +95,15 @@ internal sealed partial class SqlPlanner
         var step = root.Step! with { Kind = kind, Condition = on };
         if (kind == SqlJoinType.FullOuter)
         {
-            // A safe hash equality is optional for MERGE; SQ-M2 must retain a full nested-loop
-            // fallback for arbitrary ON predicates, including volatile and failing expressions.
-            step = step with { Hash = HashKeys(on, associations.Bindings, associations.Columns, 1, associations.Bindings.Count - 1, fullFrame: true) };
+            // Match #1525's FULL JOIN eligibility, including the complete ON safety proof.
+            // PostgreSQL prepjointree.c:238-240 chooses FULL; joinrels.c:1165-1179
+            // refuses it when neither a merge nor a hash path is available.
+            var keys = HashKeys(on, associations.Bindings, associations.Columns, 1, associations.Bindings.Count - 1, fullFrame: true);
+            if (keys is null)
+            {
+                throw new SqlPlanningException("CS05070", ErrorMessages.FullJoinCondition, merge.Condition.Location);
+            }
+            step = step with { Hash = keys };
         }
         var columns = associations.Columns.Select((column, ordinal) =>
             (ordinal < table.Columns.Count ? byTarget : bySource) ? NullableColumn(column) : column).ToArray();

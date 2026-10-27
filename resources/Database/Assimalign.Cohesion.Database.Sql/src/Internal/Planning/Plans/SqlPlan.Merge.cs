@@ -8,6 +8,7 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// <summary>
 /// MERGE's target/source association tree and ordered actions. Physical columns remain
 /// target then source even when RIGHT normalizes to a source-driven LEFT join.
+/// A FULL association always has a proven safe mandatory hash key, as for SELECT FULL JOIN.
 /// The executor supplies the action name in ReturningActionOrdinal after selecting an action.
 /// </summary>
 [global::System.Diagnostics.DebuggerDisplay("SqlMergePlan")]

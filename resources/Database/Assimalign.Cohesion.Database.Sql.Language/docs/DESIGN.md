@@ -103,7 +103,8 @@ migration or alternate lexer; recreate an affected view with explicit whitespace
 ## MERGE syntax and binding (#1715, SQ-M1)
 
 SqlMergeExpression retains a target, one USING relation/join item, ON, ordered
-SqlMergeWhenClause values and optional RETURNING. Match/action enums are separate;
+SqlMergeWhenClause values and optional RETURNING. Each clause retains its complete source span
+from WHEN through its action, so CS05071 locates the unreachable clause. Match/action enums are separate;
 BY TARGET's explicit spelling survives canonical round trips. MERGE adds one keyword
 and one advertised clause; MATCHED, SOURCE, TARGET, DO, NOTHING and merge_action remain
 contextual. The latter uses the existing function-call AST and binds only in MERGE

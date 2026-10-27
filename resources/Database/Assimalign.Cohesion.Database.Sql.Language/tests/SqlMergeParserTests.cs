@@ -9,6 +9,24 @@ namespace Assimalign.Cohesion.Database.Sql.Language.Tests;
 
 public sealed class SqlMergeParserTests
 {
+    [Fact(DisplayName = "Cohesion Test [Sql.Language] - MERGE: each WHEN retains its full original source span (#1715)")]
+    public void Parse_WhenClauses_ShouldRetainSourceSpans()
+    {
+        // Arrange
+        string[] clauses = ["WHEN MATCHED AND s.v>0 THEN UPDATE SET v=s.v",
+            "WHEN MATCHED THEN DO NOTHING", "WHEN NOT MATCHED BY TARGET THEN INSERT(id,v) VALUES(s.id,s.v)",
+            "WHEN NOT MATCHED BY SOURCE AND t.v>0 THEN UPDATE SET v=0", "WHEN NOT MATCHED BY SOURCE THEN DELETE"];
+        string sql = "MERGE INTO t USING s ON t.id=s.id\n  " + string.Join(" /* next */\n  ", clauses) + " RETURNING t.id;";
+
+        // Act
+        var statement = (SqlQueryStatement)new SqlQueryParser().Parse(sql);
+        var merge = statement.SqlExpression.ShouldBeOfType<SqlMergeExpression>();
+
+        // Assert
+        statement.Diagnostics.ShouldNotContain(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
+        merge.Actions.Select(clause => sql[clause.Location.Start..clause.Location.End]).ShouldBe(clauses);
+    }
+
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - MERGE: complete action grammar round trips (#1715)")]
     [InlineData("MERGE INTO dbo.t AS a USING s AS b ON a.id=b.id WHEN MATCHED AND b.v>0 THEN UPDATE SET v=b.v, id=DEFAULT WHEN MATCHED THEN DELETE WHEN NOT MATCHED BY TARGET AND b.id>0 THEN INSERT (id,v) VALUES(b.id,DEFAULT) WHEN NOT MATCHED THEN DO NOTHING WHEN NOT MATCHED BY SOURCE AND a.id>1 THEN UPDATE SET v=0 WHEN NOT MATCHED BY SOURCE THEN DELETE RETURNING merge_action() AS action,a.id,b.v")]
     [InlineData("merge into t a using (select id, v from s) b on a.id=b.id when matched then do nothing when not matched by source then do nothing when not matched then insert default values returning *")]

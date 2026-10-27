@@ -15,6 +15,66 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed class SqlMergeBindingTests
 {
+    [Theory(DisplayName = "Cohesion Test [Sql] - MERGE: unsafe FULL associations refuse during planning, including EXPLAIN (#1715)")]
+    [InlineData("t.id > s.id")]
+    [InlineData("TRUE")]
+    [InlineData("t.id = s.id OR t.id = 1")]
+    [InlineData("t.id = s.id AND t.id / 0 = 1")]
+    [InlineData("t.id = s.id AND EXISTS(SELECT 1)")]
+    [InlineData("t.id = s.id AND ABS(s.v) = 1")]
+    public async Task Plan_UnsafeFullAssociation_ShouldRefuseBeforeReadsAsync(string condition)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("merge-full-refusal", new());
+        var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await SetupAsync(session);
+        string sql = "MERGE INTO t USING s ON " + condition +
+            " WHEN NOT MATCHED THEN INSERT VALUES(s.id,s.v) WHEN NOT MATCHED BY SOURCE THEN DELETE";
+
+        foreach (string prefix in new[] { "", "EXPLAIN " })
+        {
+            // Act
+            var failure = await Should.ThrowAsync<DatabaseException>(async () =>
+                await session.ExecuteAsync(prefix + sql, cancellationToken: CancellationToken.None));
+
+            // Assert
+            var diagnostic = failure.Diagnostics.ShouldHaveSingleItem();
+            diagnostic.Code.ShouldBe("CS05070");
+            session.LastStatementMetrics!.RecordsExamined.ShouldBe(0);
+        }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql] - MERGE: unreachable diagnostics identify the complete later WHEN clause (#1715)")]
+    [InlineData("MATCHED", "DELETE", false)]
+    [InlineData("MATCHED", "DELETE", true)]
+    [InlineData("NOT MATCHED", "DO NOTHING", false)]
+    [InlineData("NOT MATCHED", "DO NOTHING", true)]
+    [InlineData("NOT MATCHED BY SOURCE", "DELETE", false)]
+    [InlineData("NOT MATCHED BY SOURCE", "DELETE", true)]
+    public async Task Plan_UnreachableWhen_ShouldLocateClauseAsync(string kind, string action, bool conditional)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("merge-when-location", new());
+        var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await SetupAsync(session);
+        string prefix = "MERGE INTO t USING s ON t.id = s.id WHEN " + kind + " THEN " + action + " ";
+        string clause = "WHEN " + kind + (conditional ? " AND TRUE" : "") + " THEN DO NOTHING";
+        string sql = prefix + clause + " RETURNING t.id;";
+
+        // Act
+        var failure = await Should.ThrowAsync<DatabaseException>(async () =>
+            await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None));
+
+        // Assert
+        var diagnostic = failure.Diagnostics.ShouldHaveSingleItem();
+        diagnostic.Code.ShouldBe("CS05071");
+        diagnostic.Start.ShouldBe(prefix.Length);
+        diagnostic.End.ShouldBe(prefix.Length + clause.Length);
+        sql[diagnostic.Start!.Value..diagnostic.End!.Value].ShouldBe(clause);
+    }
+
     [Theory(DisplayName = "Cohesion Test [Sql] - MERGE: preserved sides determine the association tree (#1715)")]
     [InlineData("WHEN MATCHED THEN DELETE", SqlJoinType.Inner)]
     [InlineData("WHEN NOT MATCHED THEN INSERT (id,v) VALUES(s.id,s.v)", SqlJoinType.RightOuter)]
@@ -92,7 +152,7 @@ public sealed class SqlMergeBindingTests
         diagnostic.Start.ShouldNotBeNull();
     }
 
-    [Theory(DisplayName = "Cohesion Test [Sql] - MERGE: general full ON predicates bind and execution refuses without writes (#1715)")]
+    [Theory(DisplayName = "Cohesion Test [Sql] - MERGE: safe FULL associations bind and execution refuses without writes (#1715)")]
     [InlineData(false)]
     [InlineData(true)]
     public async Task Execute_BoundMerge_ShouldRefuseBeforeActionsAsync(bool transaction)
@@ -104,7 +164,7 @@ public sealed class SqlMergeBindingTests
         await SetupAsync(session);
         await session.ExecuteAsync("INSERT INTO t VALUES(1,7)", cancellationToken: CancellationToken.None);
         if (transaction) { await session.ExecuteAsync("BEGIN", cancellationToken: CancellationToken.None); }
-        const string sql = "MERGE INTO t USING (SELECT id,v FROM s) AS b ON t.id>b.id WHEN MATCHED THEN UPDATE SET v=1/0 WHEN NOT MATCHED THEN INSERT DEFAULT VALUES WHEN NOT MATCHED BY SOURCE THEN DELETE RETURNING merge_action()";
+        const string sql = "MERGE INTO t USING (SELECT id,v FROM s) AS b ON t.id=b.id WHEN MATCHED THEN UPDATE SET v=1/0 WHEN NOT MATCHED THEN INSERT DEFAULT VALUES WHEN NOT MATCHED BY SOURCE THEN DELETE RETURNING merge_action()";
 
         // Act
         await using var explanation = (await session.ExecuteAsync("EXPLAIN " + sql, cancellationToken: CancellationToken.None)).ShouldBeAssignableTo<DatabaseResultSet>();
@@ -158,7 +218,7 @@ public sealed class SqlMergeBindingTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - MERGE: source trees, predicates, aliases and metadata bind (#1715)")]
-    [InlineData("s AS b", "EXISTS(SELECT b.id WHERE b.id=t.id)")]
+    [InlineData("s AS b", "t.id=b.id")]
     [InlineData("(SELECT id,v FROM s) AS b", "t.id=b.id")]
     [InlineData("(s RIGHT JOIN s AS u ON s.id=u.id) AS b(id,v,otherid,otherv)", "t.id=b.id")]
     [InlineData("(s FULL JOIN s AS u USING(id)) AS b(id,v,otherv)", "t.id=b.id")]
@@ -244,6 +304,34 @@ public sealed class SqlMergeBindingTests
         returning[0].IsNullable.ShouldBeFalse();
         returning[1].IsNullable.ShouldBeTrue();
         plan.Source.Associations.Columns.Skip(1).ShouldAllBe(column => column.IsNullable);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql] - MERGE: hashless LEFT and normalized RIGHT associations remain available (#1715)")]
+    [InlineData("WHEN NOT MATCHED BY SOURCE THEN DELETE", SqlJoinType.LeftOuter)]
+    [InlineData("WHEN NOT MATCHED THEN INSERT VALUES(s.id,s.v)", SqlJoinType.RightOuter)]
+    public async Task Plan_HashlessOneSidedAssociation_ShouldBindAndExplainAsync(string action, SqlJoinType kind)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("merge-one-sided", new());
+        var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await SetupAsync(session);
+        string sql = "MERGE INTO t USING s ON t.id>s.id " + action;
+
+        // Act
+        var plan = new SqlPlanner(database.Catalog, null).Plan(SqlQueryRequest.FromSql(sql).Statement.SqlExpression).ShouldBeOfType<SqlMergePlan>();
+        await using var explanation = (await session.ExecuteAsync("EXPLAIN " + sql, cancellationToken: CancellationToken.None)).ShouldBeAssignableTo<DatabaseResultSet>();
+        var details = new List<string?>();
+        await foreach (var row in explanation.GetRowsAsync(CancellationToken.None)) { details.Add(row.GetString(5)); }
+
+        // Assert
+        var tree = plan.Source.Associations.Tree!;
+        tree.Step!.Kind.ShouldBe(kind);
+        tree.Step.Hash.ShouldBeNull();
+        tree.Left!.Binding.ShouldBe(kind == SqlJoinType.RightOuter ? 1 : 0);
+        details.ShouldContain(detail => detail != null && detail.Contains(kind + "; NestedLoop"));
+        var failure = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None));
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CK00001");
     }
 
     private static async Task SetupAsync(SqlDatabaseSession session)

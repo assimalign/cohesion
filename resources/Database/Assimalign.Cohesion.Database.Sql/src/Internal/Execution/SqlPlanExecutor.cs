@@ -81,13 +81,18 @@ internal sealed partial class SqlPlanExecutor
         => SqlExpressionEvaluator.ForExecution(subqueryValues,
             _containsLike || containsLike || _definitions.Functions.RunsApplicationCode ? cancellationToken : default, sharedColumns, transactionTimestamp ?? ViewTransactionStart);
 
-    internal Task<DatabaseResult> ExecuteAsync(SqlPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
+    internal static void EnsureExecutionSupported(SqlPlan plan)
     {
-        // SQ-M1 refuses before source materialization, costing or action evaluation.
+        // The dispatcher calls this before costing; direct executor calls share the refusal.
         if (StatementInput(plan) is SqlMergePlan)
         {
             throw new SqlPlanningException("CK00001", ErrorMessages.MergeExecutionPending);
         }
+    }
+
+    internal Task<DatabaseResult> ExecuteAsync(SqlPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
+    {
+        EnsureExecutionSupported(plan);
         // Set before WITH and subquery materialization, and retain it in every child read.
         _isDml |= StatementInput(plan) is SqlInsertPlan or SqlInsertSelectPlan or SqlUpdatePlan or SqlDeletePlan;
         return JoinedDml(plan) && statement.Metrics.JoinedDmlStatement is null

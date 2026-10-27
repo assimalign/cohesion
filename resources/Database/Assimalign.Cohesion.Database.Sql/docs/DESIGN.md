@@ -3024,12 +3024,16 @@ SqlMergePlan retains the stored target, physical target binding, target-then-sou
 ordered SqlMergeActionPlan records and RETURNING. INNER/LEFT/RIGHT/FULL preservation is
 chosen from non-DO-NOTHING unmatched actions, following PostgreSQL
 optimizer/prep/prepjointree.c:222-246. RIGHT normalizes to source LEFT target without changing
-slot ordinals. FULL carries safe hash keys when proven; arbitrary Boolean ON retains a full
-nested-loop plan that SQ-M2 must execute. No WHEN filter is pushed into the match join.
+slot ordinals. FULL requires the same safe mandatory hash equality and complete non-throwing
+ON proof as #1525; CS05070 refuses other predicates during planning, including EXPLAIN.
+This follows PostgreSQL optimizer/path/joinrels.c:1165-1179 after prepjointree.c:238-240
+chooses JOIN_FULL. Hashless LEFT and normalized RIGHT associations remain supported.
+No WHEN filter is pushed into the match join.
 
 MATCHED sees both sides; BY TARGET sees source only; BY SOURCE sees target only, following
 parser/parse_merge.c:52-99. Each match kind becomes terminal after an unconditional clause
-(parser/parse_merge.c:138-178). Destinations resolve only against target columns. Duplicates,
+(parser/parse_merge.c:138-178). CS05071 identifies the complete unreachable WHEN clause using
+its retained AST source span. Destinations resolve only against target columns. Duplicates,
 identity policy, parameters, Boolean predicates, aggregates and assignment families are
 checked before execution, including empty sources. Assignment types use existing INSERT
 SELECT conversion families; runtime values and final constraints remain for SQ-M2/3.
@@ -3052,8 +3056,10 @@ Bare * follows existing DML target-then-visible-source expansion. Action express
 projections disable constant callback folding so binding cannot execute an action.
 
 EXPLAIN emits Merge, the complete association tree, ordered MergeAction children and
-RETURNING names. ExecuteAsync refuses a bound Merge with CK00001 before child materialization
-or action evaluation; EXPLAIN ANALYZE stays SELECT-only. SQ-M2 adds action execution/shared
+RETURNING names. The query dispatcher refuses a bound Merge, including subquery/WITH wrappers,
+with CK00001 before costing can read source indexes; direct executor calls share the guard.
+Refusal precedes child materialization and action evaluation; EXPLAIN ANALYZE stays SELECT-only.
+SQ-M2 adds action execution/shared
 admission; SQ-M3 adds physical repeated-target checks (CS05036), ReadCommitted rechecks and
 final-state FK validation. Disk and wire formats and assembly boundaries are unchanged.
 Deviates from interface-first (database-area.md); new public syntax leaves are sealed.
@@ -3061,6 +3067,7 @@ Deviates from interface-first (database-area.md); new public syntax leaves are s
 | Code | MERGE binding condition |
 |---|---|
 | CS01053 | merge_action() outside MERGE RETURNING |
+| CS05070 | FULL association lacks a safe mandatory hash equality or complete ON safety proof |
 | CS05071 | WHEN follows an unconditional clause of the same match kind |
 
 Existing names/duplicates/arity/parameters use CS01014/015/019/006/020; non-Boolean predicates

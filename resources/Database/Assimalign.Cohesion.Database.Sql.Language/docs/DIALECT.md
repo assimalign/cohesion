@@ -1343,7 +1343,8 @@ WHEN NOT MATCHED BY SOURCE [AND condition] THEN DELETE
 
 At least one WHEN is required. Clauses retain written order; the first qualifying clause
 of a candidate's match kind selects its action. An unconditional clause, including DO
-NOTHING, makes later clauses of the same kind unreachable (CS05071). BY TARGET is the default
+NOTHING, makes later clauses of the same kind unreachable (CS05071, at the complete later
+WHEN clause). BY TARGET is the default
 unmatched direction. INSERT takes one VALUES row or DEFAULT VALUES; whole-item DEFAULT and
 existing identity policies apply. Target names must be unique and match the VALUES width.
 Bare target/source aliases are also accepted. Sources use existing stored/system/view,
@@ -1370,21 +1371,25 @@ EXPLAIN shows Merge, the association tree, ordered MergeAction children (match k
 operation, condition presence and column counts), and RETURNING columns. Physical columns
 remain target then source. Ignoring DO NOTHING clauses, MATCHED-only uses INNER; BY SOURCE
 uses target LEFT source; BY TARGET uses target RIGHT source normalized physically to source
-LEFT target; both unmatched directions use FULL. Safe full-join equality predicates carry
-hash keys; general predicates retain a full nested-loop plan for SQ-M2. Source-internal FULL
-joins retain CS05070. WHEN filters are not pushed into ON because they select actions rather
+LEFT target; both unmatched directions use FULL. FULL requires #1525's safe mandatory hash
+equality and complete non-throwing ON proof; otherwise planning, including EXPLAIN, refuses
+with CS05070, as for source-internal FULL joins. LEFT and RIGHT still accept hashless ON
+predicates. WHEN filters are not pushed into ON because they select actions rather
 than classify matches.
 
-SQ-M1 refuses successfully bound MERGE with CK00001 before materializing source/subquery
-rows or evaluating actions. Plain EXPLAIN succeeds without writes; EXPLAIN ANALYZE retains
+SQ-M1 refuses successfully bound MERGE, including wrapped plans, with CK00001 before costing
+can read source indexes, materializing source/subquery rows or evaluating actions.
+Plain EXPLAIN succeeds for supported plans without writes; EXPLAIN ANALYZE retains
 its SELECT-only boundary. Execution, repeated-target CS05036, final-state constraints and
 PostgreSQL concurrency rechecks belong to SQ-M2/SQ-M3. No disk/protocol/result-frame changes.
 Namespace/order rules follow PostgreSQL parser/parse_merge.c:52-99,138-178,247-285;
-join preservation follows optimizer/prep/prepjointree.c:222-246 in the local reference clone.
+join preservation follows optimizer/prep/prepjointree.c:222-246 and FULL eligibility follows
+optimizer/path/joinrels.c:1165-1179 in the local reference clone.
 
 | Code | MERGE condition |
 |---|---|
 | CS01053 | merge_action() outside MERGE RETURNING |
+| CS05070 | FULL association lacks a safe mandatory hash equality or complete ON safety proof |
 | CS05071 | WHEN follows an unconditional clause of the same match kind |
 
 ## Value comparison (#1029)

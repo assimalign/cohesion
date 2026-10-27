@@ -1,5 +1,7 @@
 using System.Collections.Generic;
 
+using Assimalign.Cohesion.Database.Language;
+
 namespace Assimalign.Cohesion.Database.Sql.Language;
 
 /// <summary>Represents one ordered MERGE action and its optional search condition.</summary>
@@ -7,7 +9,7 @@ public sealed class SqlMergeWhenClause
 {
     internal SqlMergeWhenClause(SqlMergeMatchKind matchKind, SqlExpression? condition, SqlMergeAction action,
         IReadOnlyList<SqlAssignment> assignments, IReadOnlyList<string>? columns,
-        IReadOnlyList<SqlExpression>? values, bool defaultValues, bool explicitByTarget)
+        IReadOnlyList<SqlExpression>? values, bool defaultValues, bool explicitByTarget, Location location)
     {
         MatchKind = matchKind;
         Condition = condition;
@@ -17,6 +19,7 @@ public sealed class SqlMergeWhenClause
         Values = values;
         IsDefaultValues = defaultValues;
         IsByTargetExplicit = explicitByTarget;
+        Location = location;
     }
 
     /// <summary>Gets which candidate rows this clause considers.</summary>
@@ -35,6 +38,8 @@ public sealed class SqlMergeWhenClause
     public bool IsDefaultValues { get; }
     /// <summary>Gets whether NOT MATCHED explicitly spells BY TARGET.</summary>
     public bool IsByTargetExplicit { get; }
+    /// <summary>Gets the source span from WHEN through the end of this action.</summary>
+    public Location Location { get; }
 }
 
 /// <summary>Identifies the candidate class of a MERGE WHEN clause.</summary>
