@@ -1,5 +1,11 @@
 # Documents client design
 
+## Array-posting NativeAOT guard (#1530)
+
+The engine-linked NativeAOT consumer additionally exercises the catalog's typed DISTINCT array
+descriptor, WHEN filter, v3 metadata round trip and delete rollback. These are catalog checks;
+the client API and wire contract do not change. OQL array-index DDL and planning follow in OQ-I2.
+
 ## Comprehension wire conformance (#1728)
 
 ARRAY/FIRST use the existing OQL request text, JSON result cells and MISSING bitmap on InMemory

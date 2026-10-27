@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Net;
 using System.Threading;
@@ -10,7 +11,10 @@ using Assimalign.Cohesion.Connections.InMemory;
 using Assimalign.Cohesion.Connections.Tcp;
 using Assimalign.Cohesion.Database.Client;
 using Assimalign.Cohesion.Database.Documents.Client;
+using Assimalign.Cohesion.Database.Documents.Catalog;
+using Assimalign.Cohesion.Database.Documents.Storage;
 using Assimalign.Cohesion.Database.Protocol;
+using Assimalign.Cohesion.Database.Transactions;
 
 using Assimalign.Cohesion.Database.Documents.Protocol;
 
@@ -25,6 +29,7 @@ internal static class Program
     {
         try
         {
+            await RunArrayCatalogAsync(CancellationToken.None);
             await RunAsync(false);
             await RunAsync(true);
             Console.WriteLine($"SUMMARY: {_passed} passed, 0 failed, 0 skipped");
@@ -36,6 +41,39 @@ internal static class Program
             Console.WriteLine($"SUMMARY: {_passed} passed, 1 failed, 0 skipped");
             return 1;
         }
+    }
+
+    private static async Task RunArrayCatalogAsync(CancellationToken cancellationToken = default)
+    {
+        using var storage = DocumentStorage.Create(new MemoryStream(), new MemoryStream(), new MemoryStream(), "array-aot");
+        await using var coordinator = new TransactionCoordinator(storage, storage.WriteAheadJournal, storage.Records);
+        var catalog = DocumentCatalog.Open(storage, coordinator);
+        var collection = new DocumentCollectionMetadata(Guid.NewGuid(), "items");
+        var writer = await coordinator.BeginAsync(IsolationLevel.Snapshot, cancellationToken);
+        await catalog.SaveCollectionAsync(collection, writer, cancellationToken);
+        var content = await storage.WriteContentAsync(coordinator, writer,
+            "{\"items\":[{\"price\":20,\"stock\":5},{\"price\":20.0,\"stock\":8},{\"price\":1,\"stock\":0}]}"u8.ToArray(), cancellationToken);
+        await catalog.SaveDocumentAsync(new DocumentCatalogEntry(collection.Id, "a", 1, content.Head, content.Length, content.Checksum), writer, cancellationToken);
+        var when = DocumentIndexPredicate.And(
+            DocumentIndexPredicate.Compare("stock", DocumentIndexComparison.GreaterThan, 0),
+            DocumentIndexPredicate.Not(DocumentIndexPredicate.IsNull("price")));
+        var definition = await catalog.CreateIndexAsync(collection.Id, "prices", [DocumentIndexKey.DistinctArray("items", "price", when)],
+            false, true, writer, cancellationToken);
+        await coordinator.CommitAsync(writer, cancellationToken);
+        var reader = await coordinator.BeginAsync(IsolationLevel.Snapshot, cancellationToken);
+        try
+        {
+            var matches = await catalog.SearchIndexAsync(collection.Id, "prices", 10m, false, null, false, reader.Snapshot, cancellationToken);
+            Check(matches.Count == 1 && matches[0].Id == "a", "catalog DISTINCT array candidate");
+            var reopened = DocumentCatalog.Open(storage, coordinator);
+            Check(reopened.GetIndexes(collection.Id, reader.Snapshot).Single() == definition, "catalog v3 descriptor round trip");
+            writer = await coordinator.BeginAsync(IsolationLevel.Snapshot, cancellationToken);
+            await catalog.DeleteDocumentAsync(collection.Id, "a", writer, cancellationToken);
+            await coordinator.RollbackAsync(writer, cancellationToken);
+            Check((await catalog.SearchIndexAsync(collection.Id, "prices", 20m, true, 20m, true, reader.Snapshot, cancellationToken)).Count == 1,
+                "catalog array delete rollback");
+        }
+        finally { await coordinator.RollbackAsync(reader, CancellationToken.None); }
     }
 
     private static async Task RunAsync(bool tcp)
