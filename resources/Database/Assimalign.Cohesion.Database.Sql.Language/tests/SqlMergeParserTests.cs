@@ -33,6 +33,7 @@ public sealed class SqlMergeParserTests
     [InlineData("MERGE INTO \"when\" USING (s FULL JOIN u USING (id)) ON TRUE WHEN NOT MATCHED BY TARGET THEN INSERT (\"merge_action\") VALUES (1)")]
     [InlineData("MERGE INTO t USING s LEFT JOIN u ON s.id=u.id ON t.id=s.id WHEN MATCHED THEN UPDATE SET v=CASE WHEN u.id IS NULL THEN 1 ELSE 2 END RETURNING UPPER(merge_action())")]
     [InlineData("MERGE INTO t USING (s AS old JOIN u AS new ON old.id=new.id) ON t.id=old.id WHEN MATCHED THEN DELETE RETURNING old.id,new.id")]
+    [InlineData("MERGE INTO t USING s CROSS JOIN u ON t.id=s.id WHEN MATCHED THEN DELETE")]
     public void Parse_CompleteGrammar_ShouldRoundTrip(string sql)
     {
         // Arrange / Act

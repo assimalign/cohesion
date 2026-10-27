@@ -112,6 +112,10 @@ RETURNING, where Sql maps it to a text slot. It is not a standalone executable b
 Grammar requires the action set appropriate to the match kind. Unreachable clauses,
 scopes, column/type validation and planning belong to Sql. DIALECT records the complete
 binding contract and temporary CK00001 execution refusal. No persisted format changes.
+USING shares UPDATE FROM's stored/system/view, aliased derived-query and supported join
+sources. At the top level a source CROSS JOIN leaves ON for MERGE; ordinary FROM parsing
+keeps its existing CROSS JOIN ON refusal. VALUES relations, table functions, LATERAL,
+NATURAL JOIN and aliasless derived queries retain the existing source diagnostic codes.
 
 ## INSERT conflict clauses (#1118)
 

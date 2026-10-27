@@ -5,7 +5,9 @@ identity restart/continuation and deferred reclamation that preserves older snap
 CTAS remains deferred to SQ-T2.
 
 MERGE parses, binds target/source/action scopes and explains ordered actions, BY SOURCE and
-RETURNING/merge_action(); execution refuses with CK00001 until SQ-M2 (#1715).
+RETURNING/merge_action(). USING retains the existing read-source forms. FULL associations
+require a safe mandatory hash equality and complete ON safety proof (CS05070); execution
+refuses with CK00001 before costing until SQ-M2 (#1715).
 
 ## Wire contract ownership
 

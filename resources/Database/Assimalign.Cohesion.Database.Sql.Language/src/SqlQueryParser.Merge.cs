@@ -14,7 +14,14 @@ public sealed partial class SqlQueryParser
         var table = ParseRequiredTableReference(ref lexer, dmlTarget: true);
         ExpectKeyword(ref lexer, "USING", "USING after the MERGE target");
         var relation = ParseRelationReference(ref lexer);
-        var source = new SqlFromItem(relation, ParseJoinClauses(ref lexer));
+        var source = new SqlFromItem(relation, ParseJoinClauses(ref lexer, mergeSource: true));
+        // As in FROM, a recognized unsupported source suffix (for example NATURAL JOIN)
+        // keeps its preflight CK00001 without cascading missing ON/WHEN diagnostics.
+        if (lexer.Current.Position == _preflightClauseStart)
+        {
+            return new(table, source, new SqlLiteralExpression("NULL", SqlLiteralType.Null, null), [], null,
+                Location.Create(1, 1, start, _lastTokenEnd));
+        }
         ExpectKeyword(ref lexer, "ON", "ON after the MERGE source");
         var condition = ParseExpression(ref lexer);
         var actions = new List<SqlMergeWhenClause>();

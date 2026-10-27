@@ -3039,6 +3039,10 @@ checked before execution, including empty sources. Assignment types use existing
 SELECT conversion families; runtime values and final constraints remain for SQ-M2/3.
 ON/WHEN subqueries bind against their action namespace. SET/INSERT values and RETURNING
 retain the existing subquery capability boundary. Sources retain normal read-source binding.
+Regression cases pair MERGE USING with UPDATE FROM for stored tables, system relations,
+views, aliased derived queries and supported INNER/LEFT/CROSS joins, before and after
+canonical rendering. Unsupported source forms retain the existing read-source codes;
+no VALUES relation is added. The parser reserves a trailing source CROSS JOIN's ON for MERGE.
 WITH-prefixed MERGE is outside the requested statement grammar.
 Each action retains its own bound condition subqueries, so SQ-M2 can evaluate them only when
 that ordered action is considered; they are not eagerly materialized by a statement wrapper.

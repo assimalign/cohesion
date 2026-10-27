@@ -41,7 +41,9 @@ binding SQL DDL/CAST type names to the shared type system (`Database.Types`).
   [DIALECT.md](DIALECT.md#persisted-definitions-are-canonical).
 
 MERGE syntax, ordered actions, BY SOURCE, RETURNING/merge_action(), binding and EXPLAIN
-are supported; execution refuses with CK00001 until SQ-M2 (#1715).
+are supported, using the existing read-source forms. FULL associations require a safe
+mandatory hash equality and complete ON safety proof (CS05070); execution refuses with
+CK00001 before costing until SQ-M2 (#1715).
 
 UPDATE FROM and DELETE USING execute and belong to the executable clause profile. EXPLAIN
 exposes target access paths and source join algorithms. UPDATE refuses multiple matches before

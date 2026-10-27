@@ -1349,6 +1349,10 @@ unmatched direction. INSERT takes one VALUES row or DEFAULT VALUES; whole-item D
 existing identity policies apply. Target names must be unique and match the VALUES width.
 Bare target/source aliases are also accepted. Sources use existing stored/system/view,
 derived-query and joined-relation binding. WITH-prefixed MERGE is outside this run's grammar.
+The UPDATE FROM source forms also bind in MERGE USING and survive canonical rendering,
+including views, aliased derived queries and CROSS JOIN sources. A trailing source CROSS
+JOIN leaves the following ON for MERGE. VALUES relations, table functions, LATERAL,
+NATURAL JOIN and aliasless derived queries retain UPDATE FROM's refusal codes.
 
 ON and RETURNING see both sides. MATCHED predicates/values see both, BY TARGET sees only
 source, and BY SOURCE sees only target. Aliases hide base names; destinations always name
