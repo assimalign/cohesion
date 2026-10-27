@@ -70,7 +70,6 @@
   <data name="GroupPropertyReference" xml:space="preserve"><value>A property map inside a quantified segment cannot reference a group variable.</value></data>
   <data name="PathHopLimitExceeded" xml:space="preserve"><value>The query requires a path exceeding 64 relationships.</value></data>
   <data name="NestedPathSelectorUnsupported" xml:space="preserve"><value>A path selector is supported only on the outer MATCH path.</value></data>
-  <data name="PathSelectionExecutionUnsupported" xml:space="preserve"><value>Path selectors and inline path-search predicates can be planned and explained; their execution is not supported yet.</value></data>
   <data name="NestedPathModeUnsupported" xml:space="preserve"><value>A path mode inside a parenthesized or quantified subpath is not supported.</value></data>
   <data name="UnboundedWalkUnsupported" xml:space="preserve"><value>Unbounded WALK is not supported; every quantified segment must have a finite upper bound.</value></data>
   <data name="ExpansionLimitExceeded" xml:space="preserve"><value>The query exceeded {2} candidate expansions (physical={0}, viable={1}).</value></data>

@@ -33,10 +33,10 @@ internal sealed class GraphClientTestHarness : IAsyncDisposable
     internal GraphClient Client { get; }
     internal CancellationToken Token => _timeout.Token;
 
-    internal static async Task<GraphClientTestHarness> StartAsync(bool tcp = false, Action<GraphFunctionCollection>? configureFunctions = null)
+    internal static async Task<GraphClientTestHarness> StartAsync(bool tcp = false, Action<GraphFunctionCollection>? configureFunctions = null, GraphDatabaseEngineOptions? options = null)
     {
         GraphDatabaseEngine engine;
-        if (configureFunctions is null) { engine = GraphDatabaseEngine.Create("graph-engine", new()); }
+        if (configureFunctions is null) { engine = GraphDatabaseEngine.Create("graph-engine", options ?? new()); }
         else
         {
             var builder = GraphDatabaseEngine.CreateBuilder("graph-engine");

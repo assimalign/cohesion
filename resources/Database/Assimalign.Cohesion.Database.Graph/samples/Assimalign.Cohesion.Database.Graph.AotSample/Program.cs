@@ -48,6 +48,15 @@ await Check("MATCH (a:N)-[:T]->(b:N) RETURN a.k,b.k ORDER BY a.k", [[1L, 2L], [2
     if (paths.Paths.Count != 1 || paths.Paths[0].Relationships.Count != 1) { throw new InvalidOperationException("Path smoke mismatch."); }
     checks++;
 }
+foreach (string selector in new[] { "ANY", "ALL", "ANY SHORTEST", "ALL SHORTEST", "SHORTEST 2", "SHORTEST 2 GROUPS" })
+{
+    await Check($"MATCH p = {selector} ((a:N WHERE a.k=1)-[:T]->{{0,3}}(b:N WHERE b.k=3) WHERE path_length(p)>0) RETURN path_length(p)", [[2L]]);
+    var selected = (GraphPathsQueryResult)await session.ExecuteAsync(GraphPathsQueryRequest.FromGql(
+        $"MATCH p = {selector} (a:N {{k:1}}) ((x WHERE x.k<y.k)-[r:T WHERE type(r)='T']->(y)){{0,3}} (b:N {{k:3}}) RETURN p"), CancellationToken.None);
+    if (selected.Paths.Count != 1 || selected.Paths[0].Relationships.Count != 2)
+    { throw new InvalidOperationException("Selector path smoke mismatch."); }
+    checks++;
+}
 await Refuse(new() { WorkUnits = 3 }, "CG05004");
 await Refuse(new() { MemoryBytes = 1024 }, "CG05020");
 await Refuse(new() { WorkUnits = 0 }, "CG08021");

@@ -262,7 +262,10 @@ payload accepts rows plus a matching affected count without capability negotiati
 GQL path modes (#1733) retain the existing identities: malformed mode values or INSERT modes in
 hand-built ASTs use CG05001; text repetition bounds above 64 use CG00005; a visited qualifying
 65th hop or physical-work exhaustion uses CG05004; retained-memory exhaustion uses CG05020.
-Nested explicit modes/selectors and unselected unbounded WALK use CK00001. Selected unbounded WALK parses, binds and EXPLAINs; selector/inline-predicate execution retains CK00001 until SP3 (#1734). BEGIN [TRANSACTION] (#1725) shares START TRANSACTION's
+Selector execution (#1734) reuses these conditions for endpoint search, retained history states,
+identity comparisons and selected output. Shortest quotas stop before longer paths; unresolved
+ANY identity prefixes or exhaustive ALL WALK beyond 64 hops refuse with CG05004.
+Nested explicit modes/selectors and unselected unbounded WALK use CK00001. Selected unbounded WALK and inline predicates execute within these search budgets (#1734). BEGIN [TRANSACTION] (#1725) shares START TRANSACTION's
 transaction-state diagnostics; it allocates no new identity. These changes add no disk or wire format.
 
 | Previous code | Code | Category |
@@ -283,7 +286,7 @@ transaction-state diagnostics; it allocates no new identity. These changes add n
 | COHDBG011 | CG01011 | Binding/names |
 | COHDBG014 | CG01014 | Binding/names |
 | COHDBG015 | CG01015 | Binding/names |
-| New (#1734) | CG01016 | Binding/names — selected path prefilter references a binding introduced by a peer path in the same MATCH |
+| New (#1734) | CG01016 | Binding/names — path search prefilter references a binding introduced by a peer path in the same MATCH, with or without an explicit selector |
 | COHDBG009 | CG02009 | Values/types |
 | COHDBG013 | CG02013 | Values/types |
 | COHDBG003 | CG03003 | Schema/constraints |
@@ -291,9 +294,9 @@ transaction-state diagnostics; it allocates no new identity. These changes add n
 | COHDBG022 | CG04022 | Transactions/locking |
 | COHDBG023 | CG04023 | Transactions/locking |
 | COHDBG001 | CG05001 | Execution/budgets |
-| COHDBG004 | CG05004 | Execution/budgets |
+| COHDBG004 | CG05004 | Execution/budgets — physical work or qualifying 65th hop, including selector search |
 | COHDBG008 | CG05008 | Execution/budgets |
-| COHDBG020 | CG05020 | Execution/budgets |
+| COHDBG020 | CG05020 | Execution/budgets — retained statement memory, including selector history and output |
 | New (#1536) | CG05022 | Execution — selected shortest-path record is absent while reconstruction's operation remains active |
 | COHDBG006 | CG06006 | Storage/durability |
 | COHDBG012 | CG06012 | Storage/durability |

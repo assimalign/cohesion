@@ -17,6 +17,9 @@ public static class GqlClauses
     /// <summary>Applies WALK, TRAIL, SIMPLE or ACYCLIC identity rules to a complete matched path.</summary>
     public const string PathMode = "PATH MODE";
 
+    /// <summary>Selects ANY, ALL, shortest paths or shortest length groups per endpoint pair.</summary>
+    public const string PathSelector = "PATH SELECTOR";
+
     /// <summary>The Cohesion extension that describes a data statement without executing it.</summary>
     public const string Explain = "EXPLAIN";
 
