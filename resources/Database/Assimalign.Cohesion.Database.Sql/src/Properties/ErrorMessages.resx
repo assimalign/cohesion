@@ -164,6 +164,8 @@
   <data name="IndexProvisioningCollision" xml:space="preserve"><value>Index '{0}' already exists on '{1}.{2}'; schema provisioning cannot adopt it.</value></data>
   <data name="ExecutionIndexExists" xml:space="preserve"><value>An index named '{0}' already exists on '{1}.{2}'.</value></data>
   <data name="ExecutionIndexMissing" xml:space="preserve"><value>No index named '{0}' exists on '{1}.{2}'.</value></data>
+  <data name="TableAsOutputNames" xml:space="preserve"><value>CREATE TABLE AS requires a complete list of nonblank, distinct output names; alias every unnamed expression or supply the complete column-name list.</value></data>
+  <data name="TableAsTargetChanged" xml:space="preserve"><value>The CREATE TABLE AS destination changed while the statement was being planned. Retry the statement.</value></data>
   <data name="TableIdentityReplaced" xml:space="preserve"><value>Table '{0}.{1}' was replaced while waiting for a DDL lock. Retry the statement.</value></data>
   <data name="ColumnBinaryRequired" xml:space="preserve"><value>Column '{0}' requires binary data.</value></data>
   <data name="DateConversionUnsupported" xml:space="preserve"><value>Cannot convert {0} to DATE.</value></data>

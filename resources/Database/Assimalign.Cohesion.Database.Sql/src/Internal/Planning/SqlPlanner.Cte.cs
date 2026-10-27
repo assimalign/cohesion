@@ -33,6 +33,7 @@ internal sealed partial class SqlPlanner
                 GroupExpressionType(column.Expression, Array.Empty<SqlCatalogColumn>(), evaluator))
             {
                 Value = value, Collation = collation, Metadata = CaptureProjectionMetadata(candidate, expression: column.Expression, evaluator: evaluator),
+                HasOutputName = column.Alias is not null || column.Expression is SqlColumnReferenceExpression,
                 MaxLength = evaluator.MaximumLengthOf(column.Expression),
             });
         }

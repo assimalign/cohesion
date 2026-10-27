@@ -459,6 +459,10 @@ internal static class Program
         await connection.ExecuteAsync("TRUNCATE truncate_native RESTART IDENTITY CASCADE", cancellationToken: timeout.Token);
         await connection.ExecuteAsync("INSERT INTO truncate_native DEFAULT VALUES", cancellationToken: timeout.Token);
         Check("over the wire: TRUNCATE RESTART IDENTITY", await RowsAsync(connection, "SELECT id FROM truncate_native", timeout.Token), [[1L]]);
+        await connection.ExecuteAsync("CREATE TABLE ctas_native (copied) AS SELECT id FROM truncate_native WITH DATA", cancellationToken: timeout.Token);
+        Check("over the wire: CTAS inferred rows", await RowsAsync(connection, "SELECT copied FROM ctas_native", timeout.Token), [[1L]]);
+        await connection.ExecuteAsync("CREATE TABLE ctas_empty AS SELECT CAST('bad' AS INT) AS value WITH NO DATA", cancellationToken: timeout.Token);
+        Check("over the wire: CTAS no-data skips evaluation", await RowsAsync(connection, "SELECT * FROM ctas_empty", timeout.Token), []);
 
         await connection.ExecuteAsync("CREATE SCHEMA wire_namespace", cancellationToken: timeout.Token);
         await connection.ExecuteAsync("CREATE TABLE wire_namespace.t(id INT PRIMARY KEY)", cancellationToken: timeout.Token);

@@ -349,8 +349,33 @@ contract. General sequences remain outside this run.
 
 TRUNCATE inside BEGIN is refused with structured CS04066 (25001); prior transaction work
 and its active state remain usable. This deliberately differs from PostgreSQL's transaction-safe
-TRUNCATE (local reference: src/backend/commands/tablecmds.c:2225-2258). CTAS remains refused
-with the existing CS00003 parser diagnostic until SQ-T2.
+TRUNCATE (local reference: src/backend/commands/tablecmds.c:2225-2258).
+
+`CREATE TABLE [IF NOT EXISTS] t [(names)] AS query [WITH [NO] DATA]` infers its columns
+from SELECT, WITH, joins, grouping or set-operation output. The default is WITH DATA.
+An explicit name list must rename every output; otherwise every output needs a column name
+or alias (aggregate names such as count are retained). Missing, blank, duplicate (ignoring
+case) or wrong-width names fail with structured CS03068 (42601) before reservation.
+Types, length/precision/scale, domain identities and collations follow view output inference;
+untyped NULL output becomes nullable TEXT. All destination columns are nullable, as persisted
+view columns are: source NOT NULL, keys, table checks, defaults, identity and indexes are not
+copied. Domain constraints still belong to the inferred domain type. Values use ordinary
+column assignment and domain validation. Parameters are allowed; their values are copied,
+with no persisted query or source dependency.
+
+WITH NO DATA binds and validates output without running the source, its predicates, projections,
+aggregates, row limits or functions. IF NOT EXISTS against an existing table skips source binding
+and execution; a view or system relation with the target name is still refused. CTAS returns
+the ordinary DDL zero affected-count completion. It follows existing self-committing DDL:
+inside BEGIN it fails with CS04003 (25001), leaving earlier work and the transaction active.
+This differs from PostgreSQL's statement-transaction publication. A completed catalog publication
+is irrevocable; cancellation after it returns the committed result. A disconnect may lose that
+response. The source uses one statement MVCC snapshot. The destination remains absent until
+its entire data build is durable; conversion, domain, cancellation and storage failures before
+publication leave no table. Crash recovery sees no table or the complete table, and reclaims
+abandoned owners. SQL remains format 26; existing kind-14 reclamation records suffice.
+References: local PostgreSQL src/backend/commands/createas.c:90-109,185-189,242-283,342-346
+and src/backend/nodes/makefuncs.c:565-582 (CTAS creates columns without source constraints).
 
 A snapshot captured before publication can read the same old rows after TRUNCATE commits,
 in process and over InMemory/TCP. Tables receive fresh physical owner identities; pinned
@@ -408,6 +433,7 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | `UPDATE ... FROM` / `DELETE ... USING` | Supported | Collected source associations feed SET, WHERE and RETURNING; UPDATE rejects multiple matches with CS05068 before writes, DELETE deduplicates physical targets. EXPLAIN shows sources. |
 | `DELETE` | Supported | optional `WHERE`, including correlated and uncorrelated subqueries; aggregates outside a child query are rejected; qualified references use the target name or its alias, which hides the base name (PostgreSQL `parse_relation.c:3759`); hidden/unknown qualifiers fail with located `CS01015` before any write and leave an explicit transaction active |
 | `CREATE TABLE` | Supported | Identity columns use GENERATED ALWAYS/BY DEFAULT AS IDENTITY or the SQL Server IDENTITY alias (see identity contract above). `IF NOT EXISTS`, column definitions with parameterized types, `COLLATE <name>`, `NOT NULL`/`NULL`, `DEFAULT <expression>`, column and table `PRIMARY KEY`, `REFERENCES`/`FOREIGN KEY`, `CHECK`, and `UNIQUE`; optional `CONSTRAINT <name>` |
+| `CREATE TABLE AS` | Supported | Optional complete output names and WITH [NO] DATA; unpublished durable build and atomic publication. See the CTAS contract above. |
 | `ALTER TABLE` | Supported subset, measured | ADD/DROP COLUMN and ADD/DROP CONSTRAINT execute. Full-definition `ALTER COLUMN c <type> [NULL | NOT NULL] [DEFAULT expression]` accepts nullability, length and precision changes that preserve storage type, scale, collation, domain and DEFAULT; tightening and every CHAR length change check existing live values and refuse changes requiring a rewrite. RENAME TO, RENAME [COLUMN], ALTER [COLUMN] SET/DROP DEFAULT and SET/DROP NOT NULL also execute (#1122). PostgreSQL TYPE/SET DATA TYPE and TYPE ... USING remain unsupported. ADD COLUMN nonvolatile defaults backfill old-row reads and apply to subsequent inserts that omit the column; explicit NULL follows nullability. Nullable additions without a default read NULL. NOT NULL additions to populated tables require a non-null default. Invalid defaults reject before mutation; expression defaults follow the fast-default contract below. Column COLLATE persists and governs default comparisons. See the default, atomicity and MVCC contract below (#1023). DROP COLUMN changes only the catalog: it rewrites no row, survives a crash at any point on one definition, and SELECTs running beside it read every value in its own column; see the DROP COLUMN contract below (#1241). |
 | `TRUNCATE` | Supported | Table lists, per-table ONLY, CONTINUE/RESTART IDENTITY and CASCADE/RESTRICT; auto-commit only; old snapshots retain their rows and defer storage reclamation. See the contract below. |
 | `DROP TABLE` | Supported | `IF EXISTS`; returns after catalog unpublication, with page reclamation asynchronous after older readers finish; the name may be recreated immediately |

@@ -6753,6 +6753,49 @@ Reference behavior was re-derived from local PostgreSQL gram.y:7239-7256,
 tablecmds.c:1915-1917,2033-2090,2225-2258 and heap.c:3701-3782. The snapshot preservation
 and explicit-transaction refusal are the owner's deliberate departures from PostgreSQL.
 
+#### Catalog: Atomic CREATE TABLE AS (#1716, SQ-T2)
+
+CTAS shares view/derived output inference, including type facets, domain identity and collation.
+Its name list renames the complete output; unnamed, blank, duplicate or wrong-width outputs
+fail with CS03068 (42601). All destination columns are nullable, following persisted-view metadata
+and PostgreSQL CTAS rather than copying source NOT NULL. Untyped NULL becomes TEXT. No source
+key, table constraint, default, index or identity is copied; inferred domain constraints still apply.
+Parameters are allowed. WITH DATA is the default; WITH NO DATA binds without query execution or
+cost probes, including skipped predicates, functions and row-limit evaluation. IF NOT EXISTS skips
+source binding/execution for an existing table. Completion uses DDL's zero affected count.
+
+The session's DDL/metadata lease precedes reserved owner X, the coordinator apply gate and data
+page latches; catalog monitor/storage brackets are innermost and never overlap data apply or
+page latches. Source reads use the fixed statement snapshot and ordinary retained read owners.
+The statement epoch spans reservation, source disposal, exceptions and cancellation cleanup.
+Reservation commits a new identity and existing kind-14 reclamation intent together. Data writes
+commit durably in batches of at most 64 rows to the unreachable owner, releasing the apply gate
+between batches. Rows have frozen writer stamps (TransactionSequence.None), so the catalog commit
+makes every row visible together even before the creating session ends. Query operators retain
+their existing materialization policy, as INSERT SELECT does; this is not a streaming-query change.
+
+One catalog transaction publishes the complete table and removes its abandonment intent, advancing
+the logical DDL generation and any declared-script receipt together. Source disposal finishes before
+this irrevocable boundary. Earlier failures leave no table; the existing worker reclaims the abandoned
+owner after the statement/snapshot fences clear. Recovery restores either no table plus reclamation
+work, or the entire table with no intent. SQL stays format 26: ordinary table records and kind 14
+already express this protocol. There is no public catalog seam, friend grant or new interface.
+CTAS follows existing self-committing DDL and is refused inside BEGIN with CS04003 (25001);
+commit-time transactional DDL needs broader catalog machinery and remains outside this run.
+
+Tests cover metadata, renaming, no-data evaluation suppression, value/domain failures, pre-publication
+fault/cancellation cleanup, and both wire transports. Every captured storage crash boundary is reopened
+under Synchronous, Grouped and None (None models process loss), including copy checkpoints and
+abandonment reclamation. Nonparallel stress runs for a minimum interval and then until hidden-owner,
+complete-read, build and concurrent reclamation counters all move, with a 90-second hang guard.
+NativeAOT smoke copies rows and verifies no-data evaluation suppression over the wire.
+PostgreSQL references: createas.c:90-109,185-189,242-283,342-346 and makefuncs.c:565-582. Source constraint omission and complete
+output-list validation are explicit dialect choices recorded in DIALECT.md.
+
+| Code | Condition | SQLSTATE |
+|---|---|---|
+| CS03068 | CTAS output names are missing, blank, duplicate or have the wrong width | 42601 |
+
 #### Catalog: Recoverable table rewrite and ordinal compaction (#1265)
 
 SqlDatabase.RewriteTableAsync accepts validated SqlObjectName schema/table components,

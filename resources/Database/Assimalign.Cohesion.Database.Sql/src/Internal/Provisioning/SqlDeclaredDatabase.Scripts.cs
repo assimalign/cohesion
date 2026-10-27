@@ -84,7 +84,7 @@ internal sealed partial class SqlDeclaredDatabase
                     }
                 }
                 var created = Enumerable.Range(0, receipt.CompletedStatements)
-                    .Where(position => script.Statements[position].Statement.SqlExpression is SqlCreateTableExpression or SqlCreateIndexExpression or SqlCreateSchemaExpression or SqlCreateViewExpression)
+                    .Where(position => script.Statements[position].Statement.SqlExpression is SqlCreateTableExpression or SqlCreateTableAsExpression or SqlCreateIndexExpression or SqlCreateSchemaExpression or SqlCreateViewExpression)
                     .Select(position => expected[position]).ToHashSet(StringComparer.OrdinalIgnoreCase);
                 if (!created.SetEquals(receipt.Objects))
                 {

@@ -65,6 +65,21 @@ public static class SqlExpressionRenderer
             (query.Cascade ? " CASCADE" : " RESTRICT");
     }
 
+    /// <summary>Renders CREATE TABLE AS as canonical SQL without a terminator.</summary>
+    /// <param name="query">The parsed statement.</param>
+    /// <returns>The destination, optional output names, query and explicit data policy.</returns>
+    /// <exception cref="ArgumentNullException">The query is null.</exception>
+    /// <exception cref="NotSupportedException">The query cannot be represented by the dialect.</exception>
+    /// <exception cref="InsufficientExecutionStackException">The thread has insufficient stack.</exception>
+    public static string Render(SqlCreateTableAsExpression query)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        return "CREATE TABLE " + (query.IfNotExists ? "IF NOT EXISTS " : "") +
+            (query.Table.SchemaName is { } schema ? Identifier(schema) + "." : "") + Identifier(query.Table.TableName) +
+            (query.Columns.Count == 0 ? "" : " (" + string.Join(", ", query.Columns.Select(Identifier)) + ")") +
+            " AS " + Render(query.Query) + (query.WithData ? " WITH DATA" : " WITH NO DATA");
+    }
+
     // Builtin window functions. An accepted quoted uppercase or mixed-case spelling is a
     // distinct name: keep it delimited so rendering cannot turn it into an unquoted built-in.
     private static readonly string[] _windowFunctions =

@@ -189,7 +189,7 @@ public sealed class SqlLanguageConformanceTests
         var cases = CreateCases();
         // #1714 adds UPDATE FROM and DELETE USING and #1718 adds quantified comparisons:
         // exactly three over #1118's 51. TRUNCATE (#1716) adds one more.
-        SqlLanguageProfile.Instance.Clauses.Count().ShouldBe(55);
+        SqlLanguageProfile.Instance.Clauses.Count().ShouldBe(56);
         RequireExecutionCases(SqlLanguageProfile.Instance.Clauses, cases);
         cases.Keys.Except(SqlLanguageProfile.Instance.Clauses).ShouldBeEmpty("Cases must describe the current profile.");
 
@@ -852,6 +852,9 @@ public sealed class SqlLanguageConformanceTests
                 await ExpectRowsAsync(session, "SELECT DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'created' ORDER BY ORDINAL_POSITION;",
                     [["INTEGER"], ["CHARACTER VARYING"], ["DOUBLE PRECISION"], ["CHARACTER"], ["TIMESTAMP WITH TIME ZONE"]]);
             }),
+        [SqlClauses.CreateTableAs] = new("CREATE TABLE copied (key,label) AS SELECT id,name FROM t WITH DATA;", _seed,
+            expression => expression is SqlCreateTableAsExpression,
+            async (session, _) => await ExpectRowsAsync(session, "SELECT key FROM copied ORDER BY key LIMIT 1;", [[1]])),
         [SqlClauses.AlterTable] = new("ALTER TABLE t ADD COLUMN extra INT NOT NULL DEFAULT 7;", _seed,
             expression => expression is SqlAlterTableExpression { Action: SqlAlterAddColumnAction }, VerifyAlterAsync),
         [SqlClauses.DropTable] = new("DROP TABLE t;", _seed,

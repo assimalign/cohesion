@@ -265,6 +265,7 @@ internal sealed partial class SqlPlanner
             SqlUpdateExpression update => update.Table,
             SqlDeleteExpression delete => delete.Table,
             SqlCreateTableExpression create => create.Table,
+            SqlCreateTableAsExpression create => create.Table,
             SqlDropTableExpression drop => drop.Table,
             SqlAlterTableExpression alter => alter.Table,
             SqlCreateIndexExpression create => create.Table,

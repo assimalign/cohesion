@@ -81,6 +81,7 @@ public static class SqlLanguageProfile
         SqlClauses.DeleteUsing,
         SqlClauses.Returning,
         SqlClauses.CreateTable,
+        SqlClauses.CreateTableAs,
         SqlClauses.CreateSchema,
         SqlClauses.Identity,
         SqlClauses.CreateIndex,
