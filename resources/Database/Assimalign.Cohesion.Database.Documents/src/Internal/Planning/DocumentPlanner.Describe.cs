@@ -2,6 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
+using System.Linq;
+
+using Assimalign.Cohesion.Database.Documents.Language;
 
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Types;
@@ -65,6 +68,9 @@ internal sealed partial class DocumentPlanner
             : plan is DocumentUpdatePlan update
             ? $"filter={update.Statement.Predicate is not null}; access={AccessName(update.Access)}"
             : logical is null ? null : SelectDetail(logical);
+        if (plan is DocumentSystemCollectionPlan && logical is { Query.Unnest.Count: 0 } &&
+            AggregateDetail(logical) is { } aggregates)
+        { detail += "; " + aggregates; }
         Add(DescribeOperator(plan), null, indexName, detail);
         var returning = plan switch
         {
@@ -116,7 +122,7 @@ internal sealed partial class DocumentPlanner
                 sourceParent = distinctId;
             }
             int projectionId = nodes.Count;
-            Add(DescribeOperator(select.Logical), sourceParent);
+            Add(DescribeOperator(select.Logical), sourceParent, detail: AggregateDetail(select.Logical));
             projectionId = AddBindings(select.Logical, projectionId);
             AddAccess(select.Access, projectionId);
         }
@@ -129,7 +135,7 @@ internal sealed partial class DocumentPlanner
                 Add("Distinct", sourceParent);
             }
             int projectionId = nodes.Count;
-            Add(DescribeOperator(systemSelect.Logical), parent);
+            Add(DescribeOperator(systemSelect.Logical), parent, detail: AggregateDetail(systemSelect.Logical));
             Add("SystemCollectionScan", AddBindings(systemSelect.Logical, projectionId));
         }
         return DatabasePlanDescription.Create(nodes, diagnostics);
@@ -184,6 +190,33 @@ internal sealed partial class DocumentPlanner
         void Add(string name, int? parent, string? index = null, string? detail = null, long? estimated = null)
             => nodes.Add(new DatabasePlanNode { NodeId = nodes.Count, ParentId = parent, Operator = name, Target = target,
                 Index = index, Detail = detail, EstimatedRows = estimated });
+    }
+
+    private static string? AggregateDetail(DocumentLogicalPlan logical)
+    {
+        var calls = new List<string>();
+        foreach (var projection in logical.Projections) { Visit(projection.Expression); }
+        if (logical.Query.Having is { } having) { Visit(having); }
+        foreach (var order in logical.Query.OrderBy) { Visit(order.Expression); }
+        return calls.Count == 0 ? null : "aggregates=" + string.Join(", ", calls);
+
+        void Visit(OqlExpression expression)
+        {
+            if (expression is OqlCallExpression call)
+            {
+                if (call.Quantifier != OqlAggregateQuantifier.None || OqlFunctions.Find(call.Name)?.IsAggregate == true)
+                {
+                    calls.Add(call.Name + "(" + (call.Quantifier == OqlAggregateQuantifier.Distinct ? "DISTINCT" :
+                        call.Arguments.Count == 1 && call.Arguments[0] is OqlStarExpression ? "*" : "ALL") + ")");
+                }
+                foreach (var argument in call.Arguments) { Visit(argument); }
+            }
+            else if (expression is OqlBinaryExpression binary) { Visit(binary.Left); Visit(binary.Right); }
+            else if (expression is OqlUnaryExpression unary) { Visit(unary.Operand); }
+            else if (expression is OqlArrayExpression array) { foreach (var element in array.Elements) { Visit(element); } }
+            else if (expression is OqlObjectExpression obj) { foreach (var member in obj.Members) { Visit(member.Value); } }
+            else { foreach (var child in PredicateChildren(expression)) { Visit(child); } }
+        }
     }
 
     private static string AccessName(DocumentAccessPath access) => access switch

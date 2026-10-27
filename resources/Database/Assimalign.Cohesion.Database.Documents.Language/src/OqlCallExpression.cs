@@ -12,16 +12,21 @@ public sealed class OqlCallExpression : OqlExpression
     /// <param name="name">The uppercase function name.</param>
     /// <param name="arguments">The function arguments.</param>
     /// <param name="location">The source span.</param>
-    public OqlCallExpression(string name, IReadOnlyList<OqlExpression> arguments, Location? location = null) : base(location)
+    /// <param name="quantifier">The optional aggregate input quantifier.</param>
+    public OqlCallExpression(string name, IReadOnlyList<OqlExpression> arguments, Location? location = null, OqlAggregateQuantifier quantifier = OqlAggregateQuantifier.None) : base(location)
     {
         Name = name;
         Arguments = arguments;
+        Quantifier = quantifier;
     }
 
     /// <summary>Gets the uppercase function name.</summary>
     public string Name { get; }
     /// <summary>Gets the function arguments.</summary>
     public IReadOnlyList<OqlExpression> Arguments { get; }
+
+    /// <summary>Gets the aggregate input quantifier, or None for an unquantified call.</summary>
+    public OqlAggregateQuantifier Quantifier { get; }
 
     private sealed class DebugView
     {
@@ -33,6 +38,7 @@ public sealed class OqlCallExpression : OqlExpression
         }
 
         public string Name => _target.Name;
+        public OqlAggregateQuantifier Quantifier => _target.Quantifier;
         public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.Documents.Language.OqlExpression> Arguments => _target.Arguments;
         public string? Text => _target.Text;
         public global::Assimalign.Cohesion.Database.Language.Location? Location => _target.Location;

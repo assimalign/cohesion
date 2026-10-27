@@ -15,7 +15,7 @@ public sealed class OqlFunctionTests
     public void Profile_FunctionTable_ShouldContainExactVocabulary()
     {
         // Arrange
-        var expected = scalarNames.Split(' ').Concat(["META", "COUNT", "SUM", "AVG", "MIN", "MAX"]).Order().ToArray();
+        var expected = scalarNames.Split(' ').Concat(["META", "COUNT", "SUM", "AVG", "MIN", "MAX", "ARRAY_AGG", "BOOL_AND", "BOOL_OR", "EVERY", "STDDEV", "VARIANCE"]).Order().ToArray();
         // Act / Assert
         OqlFunctions.All.Select(function => function.Name).Order().ToArray().ShouldBe(expected);
         OqlLanguageProfile.Instance.Functions.ToArray().Order().ToArray().ShouldBe(expected);

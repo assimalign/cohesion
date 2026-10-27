@@ -56,6 +56,12 @@
   <data name="ReturningNameInvalid" xml:space="preserve"><value>RETURNING projection names must not be empty.</value></data>
   <data name="ReturningDepthExceeded" xml:space="preserve"><value>RETURNING values must be nested no deeper than 256 levels, including the named projection object.</value></data>
   <data name="ReturningMemoryExceeded" xml:space="preserve"><value>RETURNING exceeds the statement memory budget of {0} bytes.</value></data>
+  <data name="AggregateMemoryExceeded" xml:space="preserve">
+    <value>Aggregate retained values exceed the statement memory budget of {0} bytes.</value>
+  </data>
+  <data name="AggregateQuantifierInvalid" xml:space="preserve">
+    <value>ALL or DISTINCT requires one non-star aggregate expression.</value>
+  </data>
   <data name="FunctionArgumentsInvalid" xml:space="preserve"><value>The OQL function name or argument count is not executable.</value></data>
   <data name="FunctionArgumentKindInvalid" xml:space="preserve"><value>The OQL function argument has an incompatible literal kind.</value></data>
   <data name="AggregateContextMissing" xml:space="preserve"><value>An aggregate requires a grouping context.</value></data>

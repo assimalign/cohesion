@@ -304,6 +304,9 @@ public sealed partial class OqlQueryParser
             if (Take(TokenType.LeftParen))
             {
                 string function = name.ToUpperInvariant();
+                var quantifierToken = Current;
+                var quantifier = Take("DISTINCT") ? OqlAggregateQuantifier.Distinct :
+                    Take("ALL") ? OqlAggregateQuantifier.All : OqlAggregateQuantifier.None;
                 List<OqlExpression> arguments = [];
                 if (Current.Type != TokenType.RightParen)
                 {
@@ -323,12 +326,15 @@ public sealed partial class OqlQueryParser
                         ? string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.OqlQueryParserParsePrimaryVoid5, function)
                         : string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.OqlQueryParserParsePrimaryVoid6, function), start);
                 }
+                if (!Failed && quantifier != OqlAggregateQuantifier.None &&
+                    (definition is { IsAggregate: false } || arguments.Count != 1 || arguments[0] is OqlStarExpression))
+                { Error("CD00011", ErrorMessages.AggregateQuantifierInvalid, quantifierToken); }
                 if (function == "META")
                 {
                     string? member = Take(TokenType.Dot) ? Identifier(allowKeyword: true) : null;
                     return new OqlMetaExpression(arguments.AsReadOnly(), member, Span(start, Previous));
                 }
-                return new OqlCallExpression(function, arguments.AsReadOnly(), Span(start, Previous));
+                return new OqlCallExpression(function, arguments.AsReadOnly(), Span(start, Previous), quantifier);
             }
             return ParsePath(start, name);
         }

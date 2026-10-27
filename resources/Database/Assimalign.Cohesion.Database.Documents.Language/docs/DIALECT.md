@@ -95,6 +95,57 @@ Cohesion additionally requires transactional rollback on projection failure. Rav
 `src/Raven.Server/Documents/Patch/PatchDocumentCommand.cs:354-356` conditionally returns
 ModifiedDocument; the same clone was inspected for this post-image precedent.
 
+## Aggregate quantifiers and native aggregates (#1729, OQ-G1)
+
+COUNT, SUM, AVG, MIN, MAX, ARRAY_AGG, BOOL_AND, BOOL_OR, aggregate EVERY, STDDEV and VARIANCE
+accept one expression with an optional ALL or DISTINCT inside the parentheses. Omitted ALL
+includes every admitted input. DISTINCT uses grouping equality: numeric 1 and 1.0 are equal,
+strings compare ordinally, arrays compare by elements and objects by ordinal member names and
+values, including nested NULL. COUNT(*) remains the unquantified row count; ALL/DISTINCT with
+star and quantifiers on scalars fail CD00011. Invalid arities retain CD00006. A directly built
+call with an invalid quantifier, a scalar quantifier or quantified star fails CD01029 in binding.
+Single-argument registered aggregates also accept the quantifiers and retain their declared
+NULL/MISSING policy. Aggregate calls are valid in grouped or ungrouped SELECT, HAVING and
+ORDER BY; the existing prohibition in WHERE, GROUP BY, RETURNING and nested aggregates remains.
+
+| Aggregate | Admitted inputs | Empty or no admitted inputs | Result |
+| --- | --- | --- | --- |
+| COUNT(expr) | Every non-NULL, non-MISSING value | 0 | Int64 |
+| SUM, AVG | Numeric values; NULL/MISSING skipped; valued nonnumbers fail CD02008 | NULL | Decimal |
+| MIN, MAX | Every non-NULL, non-MISSING value, ordered as grouping | NULL | Selected value type |
+| ARRAY_AGG | Every non-MISSING value, including NULL and complex values | NULL | Owned JSON array |
+| BOOL_AND, EVERY(expr) | Booleans only; NULL, MISSING and other kinds skipped | NULL | Boolean conjunction |
+| BOOL_OR | Booleans only; NULL, MISSING and other kinds skipped | NULL | Boolean disjunction |
+| STDDEV, VARIANCE | Numbers only; NULL, MISSING and other kinds skipped | NULL | Decimal sample statistic |
+
+ARRAY_AGG promises no input ordering. Its DISTINCT variant includes at most one explicit NULL;
+all-MISSING input gives NULL. Boolean aggregates are Cohesion extensions and do not coerce SQL++
+Truth values: BOOL_AND(1) is NULL. EVERY(expr) is an aggregate call; the existing quantified
+predicate EVERY v IN arr SATISFIES cond END retains its own AST and empty-array TRUE rule.
+STDDEV and VARIANCE divide by n - 1 for n > 1 and return zero for one numeric input. They use
+exact integer moments at decimal scale 28; retained state is bounded by the decimal domain and
+Int64 input count. VARIANCE rounds the final rational value to decimal using nearest-even rounding.
+STDDEV converts the BCL square root through its shortest round-trip representation, like SQRT,
+using the unrounded rational whenever variance is not exactly representable as decimal. A final
+out-of-range result retains CD02007; an intermediate moment cannot overflow or underflow.
+
+The [Couchbase aggregate reference](https://docs.couchbase.com/server/current/n1ql/n1ql-language-reference/aggregatefun.html)
+defines ALL/DISTINCT, ARRAY_AGG's unknown handling and the named sample statistics. The owner
+selected these defaults on 2026-10-25. Existing SUM/AVG nonnumber refusal is preserved.
+
+DISTINCT sets and ARRAY_AGG storage charge the existing StatementMemoryBudget and fail with
+CD05018 at the aggregate call span. INSERT/UPSERT SELECT sources and RETURNING share one
+operation-owned counter, with RETURNING failures retaining their clause span. Each distinct value is charged once per call/group; a set's
+charge is released when that evaluation finishes. Array charges accumulate across groups and
+independent call appearances, including HAVING and ORDER BY, conservatively retaining the charge
+for temporary arrays until statement end. Charges include list/set storage, scalar ownership,
+JSON UTF-8/token metadata and the array result's second representation. This is an estimate;
+ordinary SELECT source/group staging still has its existing memory policy. Exhaustion aborts
+explicit work and preserves reusable sessions after rollback. EXPLAIN lists aggregate names and
+quantifiers in Group detail without evaluating arguments or reading documents. Arrays, booleans,
+NULL and decimals use existing wire values and headers; no frame or format version changes.
+GROUP AS and group aliases remain for OQ-G2.
+
 ## ARRAY and FIRST comprehensions (#1728)
 
 `ARRAY expr FOR v IN arr [WHEN cond] END` and
@@ -182,10 +233,10 @@ groups use group-key order, system sources catalog order, and ORDER BY ties reta
 Separate pages need unchanged data or a shared snapshot for repeatability. Completion counts
 only returned frames; query AffectedCount remains -1. EXPLAIN includes resolved paging counts.
 
-The [function table](DESIGN.md#supported-clause-matrix) declares META, five aggregates and 34
+The [function table](DESIGN.md#supported-clause-matrix) declares META, eleven aggregates and 34
 SQL++ scalar functions (#1137). Scalars execute in projections, WHERE, GROUP BY, HAVING, ORDER BY,
 UPDATE expressions and INSERT/UPSERT SELECT; VALUES remains constant-only. Unknown calls report
-CD00008 and invalid arities report CD00006. ARRAY_AGG and the deferred REGEXP functions retain
+CD00008 and invalid arities report CD00006. The deferred REGEXP functions retain
 CK00001. Function tokens stay usable as fields and iteration aliases.
 
 LENGTH counts Unicode scalars. SUBSTR and POSITION use zero-based code-point positions;

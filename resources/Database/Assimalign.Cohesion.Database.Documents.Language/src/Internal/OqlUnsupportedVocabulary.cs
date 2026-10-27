@@ -41,7 +41,6 @@ internal static class OqlUnsupportedVocabulary
         new("KNOWN", "KNOWN", OqlWordPosition.Anywhere),
         new("UNKNOWN", "UNKNOWN", OqlWordPosition.Anywhere),
         // Deferred SQL++ function families; their names remain usable as fields.
-        new("ARRAY_AGG", "ARRAY_AGG", OqlWordPosition.Function),
         new("REGEXP_LIKE", "REGEXP_LIKE", OqlWordPosition.Function),
         new("REGEXP_REPLACE", "REGEXP_REPLACE", OqlWordPosition.Function),
         new("REGEXP_POSITION", "REGEXP_POSITION", OqlWordPosition.Function),

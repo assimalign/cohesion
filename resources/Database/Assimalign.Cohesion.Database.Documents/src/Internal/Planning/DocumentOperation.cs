@@ -25,6 +25,7 @@ internal sealed class DocumentOperation
     private readonly SemaphoreSlim _completionGate = new(1, 1);
     private TransactionContext? _snapshotPin;
     private int _finished;
+    private DocumentAggregateMemory? _statementMemory;
 
     /// <summary>Initializes a new instance of the <see cref="DocumentOperation"/> class.</summary>
     /// <param name="database">The database the statement runs on.</param>
@@ -45,6 +46,9 @@ internal sealed class DocumentOperation
     }
 
     internal DocumentDatabaseSession Session => _session;
+
+    internal DocumentAggregateMemory GetStatementMemory(CancellationToken cancellationToken)
+        => _statementMemory ??= new DocumentAggregateMemory(_database.Engine.EngineOptions.StatementMemoryBudget, cancellationToken);
 
     internal DateTimeOffset TransactionStart { get; }
 

@@ -111,6 +111,9 @@ argument. Aggregate placement and grouped scalar arguments are validated by the 
 | COUNT | 1, including * | Int64 | Skip both; * counts input rows; empty input gives 0 |
 | SUM, AVG | 1 | Decimal | Skip both; empty valued input gives NULL |
 | MIN, MAX | 1 | Argument type | Skip both; empty valued input gives NULL |
+| ARRAY_AGG | 1 | Json | Skip MISSING; include NULL; empty/all-MISSING gives NULL |
+| BOOL_AND, BOOL_OR, EVERY | 1 | Boolean | Skip NULL/MISSING and non-Booleans; empty gives NULL |
+| STDDEV, VARIANCE | 1 | Decimal | Skip NULL/MISSING and nonnumbers; empty gives NULL; singleton zero |
 | LOWER, UPPER | 1 | String | Propagate |
 | LENGTH | 1 | Int64 | Propagate |
 | SUBSTR | 2..3 | String | Propagate |
@@ -137,7 +140,7 @@ argument. Aggregate placement and grouped scalar arguments are validated by the 
 | IFNULL | 2..N | Selected | First non-NULL, including MISSING; otherwise NULL |
 
 The conditional rules follow [Couchbase](https://docs.couchbase.com/server/current/n1ql/n1ql-language-reference/condfununknown.html).
-ARRAY_AGG, REGEXP_LIKE, REGEXP_REPLACE and REGEXP_POSITION are deliberately deferred and report
+REGEXP_LIKE, REGEXP_REPLACE and REGEXP_POSITION are deliberately deferred and report
 one CK00001 in call position. Unknown function names instead report CD00008 after their
 arguments are parsed, avoiding secondary syntax diagnostics. Retired ODMG constructs retain
 their positional refusals. Calls never become planner constants or index seek bounds, and
@@ -148,6 +151,17 @@ an omitted or negative count replaces all, following the
 [Couchbase string-function contract](https://docs.couchbase.com/server/current/n1ql/n1ql-language-reference/stringfun.html#replace).
 A fractional count gives the engine type diagnostic CD02008. Plain arity errors name only
 the invalid count; the CD00006 COUNT-star explanation appears only for an actual star operand.
+
+### Aggregate extensions (#1729, OQ-G1)
+
+OqlCallExpression retains an OqlAggregateQuantifier (None, All or Distinct). The explicit ALL
+spelling survives parsing; binding equivalence treats it like omitted ALL. EVERY(...) uses
+OqlCallExpression, while EVERY v IN ... SATISFIES ... END remains OqlQuantifiedExpression,
+including inside an aggregate argument. Function tokens remain usable as names. Quantifier
+syntax uses CD00011, direct-AST binding uses CD01029, and existing arity/context/value/budget
+identities remain in use. The [dialect](DIALECT.md#aggregate-quantifiers-and-native-aggregates-1729-oq-g1)
+records every input rule, equality, statistic, memory estimate and no-order promise. Parser and
+engine conformance corpora cover all eleven names and both transports; GROUP AS remains OQ-G2.
 
 ### Array index keys (#1530)
 
@@ -173,12 +187,12 @@ expression. OQL accepts these spellings, requiring FROM and rejecting VALUE alia
 multiple expressions. VALUE and RAW are reserved: use `"value"`, `"raw"` or `d.value` for fields.
 After AS, a projection label accepts reserved words, following PostgreSQL ColLabel
 (`src/backend/parser/gram.y:17638,18042-18046` in the reference clone). DISTINCT and ALL retain
-their positional capability refusal everywhere except directly after a clause-head SELECT (and after a dot).
+their positional capability refusal except directly after a clause-head SELECT or at a call's
+argument head (and after a dot). The call parser and engine binder enforce aggregate-only use.
 A property or projection label named select does not open a SELECT clause. The AS-label exemption
 applies only within a SELECT list; reserved unsupported FROM and INSERT aliases retain CK00001.
-COUNT(DISTINCT x) remains one CK00001 naming COUNT(DISTINCT). Function-position names in the
-recognized-unsupported table receive that same single refusal for DISTINCT/ALL:
-ARRAY_AGG(DISTINCT x) and ARRAY_AGG(ALL x) name ARRAY_AGG(DISTINCT) and ARRAY_AGG(ALL).
+Recognized-unsupported function names still receive one CK00001 with their optional
+quantifier included in the named construct.
 Computed member names and path access on constructor results remain deferred.
 Member colons remain delimiters even without whitespace: `{a:DISTINCT}` receives the positional
 capability refusal, while `:distinct` in an operand keeps the parameter-form syntax diagnostic.
@@ -268,7 +282,7 @@ a name:
   unsupported at the statement prefix or after SELECT. Other identifier positions retain
   `returning`, including an implicit FROM alias before the end or another clause. The final
   grammar owns the trailing projection; it does not reserve the spelling globally.
-- **Function** (`ELEMENT`, `FLATTEN`, `LISTTOSET`, `STRUCT`, `LIST`, `BAG`, `TYPEOF`, `ARRAY_AGG`, and the deferred REGEXP functions):
+- **Function** (`ELEMENT`, `FLATTEN`, `LISTTOSET`, `STRUCT`, `LIST`, `BAG`, `TYPEOF`, and the deferred REGEXP functions):
   only immediately before `(`. Elsewhere these spellings are ordinary identifiers.
 - **Quantifiers**: `EVERY`, `ANY` or `SOME` followed by `name IN` opens a supported predicate.
   The scan skips the binding IN and still scans the collection and SATISFIES expression for
@@ -459,6 +473,7 @@ query        := SELECT [ALL | DISTINCT] select-kind from-clause
 count        := ['+' | '-'] integer-literal | parameter
 from-clause  := FROM collection [AS? identifier] unnest*
 unnest       := [INNER | LEFT [OUTER]] UNNEST expression [AS? identifier]
+aggregate-call := COUNT '(' '*' ')' | aggregate-name '(' [ALL | DISTINCT] expression ')'
 quantified-expression := (ANY | SOME | EVERY) identifier IN expression SATISFIES expression END
 comprehension := (ARRAY | FIRST) expression FOR identifier IN expression [WHEN expression] END
 select-kind  := projection (',' projection)* | (VALUE | RAW) expression
@@ -612,6 +627,7 @@ The keyword-disposition corpus covers these identifiers both with and without th
 | `CD00008` | Unknown function name; standalone parsing or deferred engine binding |
 | `CD00009` | More than 32 index key paths, at the 33rd path |
 | `CD00010` | A duplicate variable within one FROM/UNNEST or quantifier binding list, at the repeated name |
+| `CD00011` | ALL/DISTINCT on a scalar or star call, at the quantifier |
 
 Every error has an absolute start/end span and source line. End-of-input errors use the source
 length for both offsets. A line breaks at LF, CR, NEL (U+0085), LS (U+2028) or PS (U+2029), and
@@ -845,7 +861,7 @@ NativeAOT compatible.
 
 Profile.Functions is the executable built-in set, checked by the engine's one function-
 coverage guard: every declared name has a passing live case and every live case has a
-declared name. OQL declares META, the five aggregates and 34 SQL++ scalars (#1137); the retired
+declared name. OQL declares META, eleven aggregates and 34 SQL++ scalars (#1137); the retired
 ODMG declarations and their temporary guard exemptions are gone. ABS is executable and leaves
 the recognized-unsupported table and keyword corpus. The function table is the declaration source.
 

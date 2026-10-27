@@ -23,11 +23,12 @@ namespace Assimalign.Cohesion.Database.Documents;
 public sealed class DocumentDatabaseEngineOptions
 {
     /// <summary>
-    /// Gets or sets the maximum retained memory charged to a statement's RETURNING rows.
+    /// Gets or sets the maximum retained memory charged to RETURNING rows and aggregate values.
     /// Defaults to 64 MiB and must be positive. Charges include row storage, scalar values,
     /// JSON clones (128 bytes plus UTF-8 length plus 12 bytes per JSON token), and
     /// preserved whole-document bytes. A lone star retains one clone and one raw image;
     /// each representation is charged once. JSON measurement allocates no text copy.
+    /// DISTINCT sets and ARRAY_AGG additionally charge retained values and result storage.
     /// Exhaustion fails the statement and rolls back its writes with CD05018.
     /// </summary>
     public long StatementMemoryBudget { get; set; } = 64L * 1024 * 1024;

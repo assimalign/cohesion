@@ -151,6 +151,17 @@ internal static class Program
             Check(functions["l"] is long length && length == 2, "scalar code points Int64");
             var count = await connection.QueryAsync("SELECT COUNT(*) AS n FROM items", cancellationToken: token);
             Check(count.Columns[0].Type == Assimalign.Cohesion.Database.Types.DatabaseType.Int64 && count.Single()[0] is long number && number == 1, "COUNT Int64");
+            var aggregates = (await connection.QueryAsync(
+                "SELECT COUNT(DISTINCT score) AS c, SUM(DISTINCT score) AS s, AVG(ALL score) AS a, MIN(DISTINCT score) AS lo, MAX(ALL score) AS hi, ARRAY_AGG(DISTINCT nested) AS ar, BOOL_AND(score > 0) AS ba, BOOL_OR(score > 0) AS bo, EVERY(EVERY x IN nested SATISFIES x IS VALUED END) AS e, STDDEV(score) AS sd, VARIANCE(score) AS va FROM items HAVING COUNT(DISTINCT score) > 0",
+                cancellationToken: token)).Single();
+            Check(aggregates[0] is 1L && aggregates[1] is 3m && aggregates[2] is 3m && aggregates[3] is 3m && aggregates[4] is 3m, "aggregate quantifiers");
+            Check(aggregates[5] is System.Text.Json.JsonElement aggregateArray && aggregateArray.GetArrayLength() == 1 && aggregateArray[0][1].ValueKind == System.Text.Json.JsonValueKind.Null, "ARRAY_AGG DISTINCT owned JSON");
+            Check(aggregates[6] is true && aggregates[7] is true && aggregates[8] is false, "Boolean aggregates and quantified EVERY");
+            Check(aggregates[9] is 0m && aggregates[10] is 0m, "sample singleton statistics");
+            var tinyStatistic = await connection.QueryAsync("SELECT STDDEV(v) FROM items UNNEST [1e-20,2e-20] v", cancellationToken: token);
+            Check(tinyStatistic[0][0] is 7.0710678e-21m, "sample statistic avoids intermediate underflow");
+            var wideStatistic = await connection.QueryAsync("SELECT VARIANCE(v) AS v, STDDEV(v) AS s FROM items UNNEST [-2e14,2e14,0] v", cancellationToken: token);
+            Check(wideStatistic[0][0] is 4e28m && wideStatistic[0][1] is 2e14m, "sample statistic avoids intermediate overflow");
             var registered = await connection.QueryAsync(
                 "SELECT lower_tag('READY') AS tag, has_value(absent) AS missing_value, has_value(NULL) AS null_value, has_value(score) AS valued FROM items",
                 cancellationToken: token);

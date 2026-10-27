@@ -198,6 +198,12 @@ SQLSTATE meanings remain those in [the SQL dialect](../../Assimalign.Cohesion.Da
 
 ## Documents migration
 
+OQL aggregate quantifiers and native aggregates (#1729, OQ-G1) add CD00011 for a scalar/star
+quantifier and CD01029 for an invalid directly constructed call quantifier. Existing CD02007
+covers a statistical result outside the decimal domain, CD02008 preserves SUM/AVG nonnumber refusal, CD05001 covers
+aggregate placement and CD05018 covers the same statement retained-memory exhaustion condition
+for DISTINCT sets and ARRAY_AGG as for RETURNING. No disk or wire identity changes.
+
 OQL ARRAY/FIRST comprehensions (#1728) reuse CD00002/CD00005 for malformed/deep syntax,
 CD01005 for missing parameters, CD02006/CD02007/CD02008 for scalar failures and CD05001 for
 invalid grouping, aggregate or metadata contexts. CD01027 identifies an empty variable in a
@@ -224,6 +230,7 @@ payload accepts rows plus a matching affected count without capability negotiati
 | OQL0008 | CD00008 | Language/syntax |
 | OQL0009 | CD00009 | Language/syntax |
 | OQL0010 | CD00010 | Language/syntax |
+| New (#1729, OQ-G1) | CD00011 | Language/syntax — ALL/DISTINCT on a scalar or star call |
 | COHDOC002 | CD01002 | Binding/names |
 | COHDOC003 | CD01003 | Binding/names |
 | COHDOC005 | CD01005 | Binding/names |
@@ -235,6 +242,7 @@ payload accepts rows plus a matching affected count without capability negotiati
 | New (#1727) | CD01026 | Binding/names — empty RETURNING output name in a directly constructed AST |
 | New (#1728) | CD01027 | Binding/names — empty comprehension variable in a directly constructed AST |
 | New (#1530, OQ-I2) | CD01028 | Binding/names — array index projection or WHEN path is not rooted in its element variable |
+| New (#1729, OQ-G1) | CD01029 | Binding/names — invalid aggregate quantifier or target in a directly constructed call AST |
 | COHDOC006 | CD02006 | Values/types |
 | COHDOC007 | CD02007 | Values/types |
 | COHDOC008 | CD02008 | Values/types |
@@ -386,7 +394,7 @@ and invariant exceptions and lower child-root typed failures retain their docume
 | CD04104 | No explicit document transaction is open for COMMIT or ROLLBACK (#1725) | — |
 | CD04105 | OQL collection/index DDL inside an explicit transaction (#1725) | — |
 | CD05016 | Result byte/frame limit exceeded | — |
-| CD05018 | RETURNING retained result exceeds the statement memory budget (#1727) | — |
+| CD05018 | Retained RETURNING result or aggregate values exceed the statement memory budget (#1727, #1729) | — |
 | CD05019 | Serialized RETURNING value exceeds 256 levels, including the named projection wrapper (#1727) | — |
 | CD07001 | Session belongs to another database | — |
 | CD07002 | Text transaction control requires the negotiated transaction-status capability (#1725) | — |
