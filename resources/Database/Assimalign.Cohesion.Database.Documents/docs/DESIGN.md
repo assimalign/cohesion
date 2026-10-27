@@ -750,6 +750,12 @@ comprehensions and quantifiers retain their existing frames. Explicit group-term
 per-row computed keys before aggregate evaluation. The GROUP AS array binds only the group
 representative, after input grouping, so aggregate row inputs cannot read it (CD01031).
 
+Queries with group aliases track retained key/alias representations by reference identity (JSON
+views use owner/element identity). A shared payload is charged once across members, terms and
+groups; every key slot and alias frame keeps its overhead. Tracking reserves 128 bytes plus 64
+bytes per representation. Equal independently owned strings/JSON remain separately charged,
+as do serialized wrappers and the final array. Queries without aliases create no tracking set.
+
 Each array element wraps the FROM value, UNNEST bindings and explicit group-term aliases in an
 object. MISSING members are omitted; NULL survives. Empty GROUP BY inputs produce zero groups.
 Temporary wrapper owners reserve 128 bytes of list storage plus 64 bytes and the existing JSON

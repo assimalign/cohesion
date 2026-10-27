@@ -181,8 +181,10 @@ GROUP AS cannot appear in an aggregate's row input (CD01031), where the array do
 exist; a local variable introduced inside that row-input expression may reuse the name.
 
 Wrappers, the final group array, source rows, group keys, aggregates, DML pending buffers and
-projected results share StatementMemoryBudget. Temporary wrappers release after constructing
-the array; arrays remain charged through HAVING, projection and ordering. Rejected groups
+projected results share StatementMemoryBudget. Alias bindings charge a shared key representation
+once while retaining per-row binding overhead; independently owned values and serialized JSON
+copies are charged separately. Temporary wrappers release after constructing the array; arrays
+remain charged through HAVING, projection and ordering. Rejected groups
 release their array charge immediately. Every exit releases staging reservations, including
 cancellation and CD05018. Output JSON owns its data independently. EXPLAIN records group_as
 and group_aliases on Group (or system-source detail) without reading or evaluating inputs.

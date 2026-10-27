@@ -202,6 +202,8 @@ public sealed class OqlExecutionConformanceTests
             ],
             [OqlClauses.GroupBy] =
             [
+                new("SELECT COUNT(*) FROM items UNNEST [" + string.Join(",", Enumerable.Range(0, 100)) + "] x WHERE META().id = 'a' GROUP BY @v AS key",
+                    [[100L]], Parameters: new Dictionary<string, object?> { ["v"] = new string('p', 16000) }, StatementMemoryBudget: 1024 * 1024),
                 new("SELECT key, COUNT(*) AS n FROM items GROUP BY category AS key ORDER BY key", [["a", 3L], ["b", 1L]]),
                 new("SELECT category, COUNT(*) AS total, COUNT(amount) AS present, SUM(amount) AS sum, AVG(amount) AS average, MIN(amount) AS minimum, MAX(amount) AS maximum FROM items GROUP BY category ORDER BY category",
                     [["a", 3L, 2L, 8m, 4m, 2m, 6m], ["b", 1L, 1L, 4m, 4m, 4m, 4m]]),
@@ -296,7 +298,9 @@ public sealed class OqlExecutionConformanceTests
                 parsed.Diagnostics.ShouldBeEmpty(context);
                 ContainsClause(parsed.OqlExpression, clause).ShouldBeTrue(context);
 
-                await using var engine = DocumentDatabaseEngine.Create("document-engine", new());
+                var options = new DocumentDatabaseEngineOptions();
+                if (execution.StatementMemoryBudget is long budget) { options.StatementMemoryBudget = budget; }
+                await using var engine = DocumentDatabaseEngine.Create("document-engine", options);
                 var database = await engine.CreateDatabaseAsync("conformance", cancellationToken);
                 await using var session = await database.CreateSessionAsync(cancellationToken);
                 var collection = await session.CreateCollectionAsync("items", cancellationToken);
@@ -598,7 +602,7 @@ public sealed class OqlExecutionConformanceTests
 
     private sealed record ExecutionCase(string Statement, object?[][] ExpectedRows,
         string[]? Setup = null, string? VerificationStatement = null, (int Row, int Column)[]? Missing = null,
-        long ExpectedAffectedCount = 0, IReadOnlyDictionary<string, object?>? Parameters = null);
+        long ExpectedAffectedCount = 0, IReadOnlyDictionary<string, object?>? Parameters = null, long? StatementMemoryBudget = null);
 
     private static ExecutionCase UpsertCase()
     {

@@ -258,7 +258,12 @@ internal static partial class DocumentPlanExecutor
         if (logical.IsGrouped)
         {
             var groups = new SortedDictionary<object?[], List<DocumentEvaluationContext>>(TupleComparer.Instance);
+            // Alias frames share key representations, including repeated JSON views.
+            // Track ownership only on this path so ordinary grouping keeps its allocation shape.
+            var retainedValues = query.GroupAliases.Any(name => name is not null)
+                ? new HashSet<object>(GroupValueComparer.Instance) : null;
             groupMemory.Charge(256);
+            if (retainedValues is not null) { groupMemory.Charge(128); }
             if (query.GroupBy.Count == 0) { groupMemory.Charge(128); groups.Add([], matches); }
             else
             {
@@ -269,7 +274,7 @@ internal static partial class DocumentPlanExecutor
                     if (!groups.TryGetValue(key, out var group))
                     {
                         groupMemory.Charge(192L + key.Length * 16L);
-                        foreach (var value in key) { groupMemory.Retain(value); }
+                        foreach (var value in key) { groupMemory.Charge(GroupValueBytes(value, retainedValues, memory)); }
                         groups.Add(key, group = []);
                     }
                     groupMemory.Charge(128);
@@ -278,7 +283,7 @@ internal static partial class DocumentPlanExecutor
                     {
                         if (query.GroupAliases[index] is not string name) { continue; }
                         groupMemory.Charge(64);
-                        groupMemory.Retain(key[index]);
+                        groupMemory.Charge(GroupValueBytes(key[index], retainedValues, memory));
                         member = member.Bind(name, key[index]);
                     }
                     group.Add(member);

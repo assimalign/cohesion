@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Threading;
 
@@ -9,6 +10,15 @@ namespace Assimalign.Cohesion.Database.Documents.Internal;
 
 internal static partial class DocumentPlanExecutor
 {
+    private static long GroupValueBytes(object? value, HashSet<object>? retainedValues, DocumentAggregateMemory memory)
+    {
+        // Every key/alias slot retains its overhead. A new representation also owns
+        // its payload and a tracking entry; sharing never follows structural equality.
+        if (retainedValues is null) { return 64L + memory.ValueBytes(value); }
+        if (value is null || !retainedValues.Add(value)) { return 64L; }
+        return 128L + memory.ValueBytes(value);
+    }
+
     private static (JsonElement Value, long RetainedBytes) GroupArray(OqlSelectExpression query, IReadOnlyList<DocumentEvaluationContext> group,
         DocumentAggregateMemory memory, CancellationToken cancellationToken)
     {
@@ -44,5 +54,18 @@ internal static partial class DocumentPlanExecutor
                 yield return new(binding.Name, binding.Value);
             }
         }
+    }
+
+    private sealed class GroupValueComparer : IEqualityComparer<object>
+    {
+        internal static GroupValueComparer Instance { get; } = new();
+
+        public new bool Equals(object? left, object? right)
+            => ReferenceEquals(left, right) || left is JsonElement leftJson && right is JsonElement rightJson && leftJson.Equals(rightJson);
+
+        // JsonElement equality identifies the same owner/element, not equal JSON
+        // content. Independently serialized wrappers and arrays remain fully charged.
+        public int GetHashCode(object value)
+            => value is JsonElement json ? json.GetHashCode() : RuntimeHelpers.GetHashCode(value);
     }
 }

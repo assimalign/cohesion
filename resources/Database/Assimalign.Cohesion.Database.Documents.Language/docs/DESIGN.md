@@ -176,6 +176,8 @@ variables retain their own lexical identity. LETTING remains a named CK00001 ref
 The [dialect](DIALECT.md#group-as-and-group-term-aliases-1729-oq-g2) records wrapper shape,
 empty/MISSING behavior, visibility and budget lifetimes. Parser, engine conformance, InMemory/TCP
 and NativeAOT checks cover these contracts without a new disk or wire format.
+Alias retention charges shared key representations once while preserving binding overhead and
+separate charges for independently owned values, wrappers and the final array.
 
 ### Array index keys (#1530)
 
