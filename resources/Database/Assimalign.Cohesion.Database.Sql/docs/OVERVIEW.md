@@ -216,6 +216,8 @@ when writing or reading retired tables inside DML; retry the entire transaction.
 snapshots retain the original layout until they end. Publication is recoverable as one complete owner
 replacement. Cancellation before publication keeps the original table; retry interrupted work
 explicitly. The maintenance operation preserves schema ownership and logical definitions.
+The source lock is acquired before queueing, leaving the worker available to other databases.
+A nonzero engine LockTimeout reports CS04044 on contention; otherwise supply cancellation.
 
 ## Session execution (#1576, 2026-10-16)
 

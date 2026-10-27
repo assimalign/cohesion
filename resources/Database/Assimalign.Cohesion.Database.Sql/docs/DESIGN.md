@@ -6774,6 +6774,16 @@ accumulate canceled queue entries. The queue monitor never spans job or cancella
 enqueue may follow the rewrite admission monitor, while removal releases the queue monitor
 before returning admission. Failed enqueue discards the unpublished cancellation source.
 
+The maintenance caller begins the logical transaction and acquires source-table X before
+enqueueing, mirroring deferred schema preparation. An idle transaction blocking one database
+therefore occupies no provisioning worker and cannot stall a peer's migration. The engine's
+nonzero LockTimeout bounds this acquisition and reports CS04044; zero retains the normal
+unlimited lock-wait policy, so a caller holding a conflicting transaction must supply cancellation.
+Preparation, queue cancellation, failed enqueue and disposal retain one transaction/admission
+owner and join its rollback before completion. Deterministic regressions observe the lock wait,
+complete another database's deferred index migration before releasing the holder, and assert
+the caller-held conflict's coded timeout without an elapsed-time assertion.
+
 TRUNCATE and rewrite use one ReplaceTableStorageAsync preparation/publication path and one
 catalog reservation/publication transaction. Rewrite decodes the old physical layout, including
 frozen missing values, then writes currently live rows with dense ordinals into the reserved

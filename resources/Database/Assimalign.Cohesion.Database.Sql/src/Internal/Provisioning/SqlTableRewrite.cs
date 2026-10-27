@@ -3,6 +3,7 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Sql.Catalog;
+using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
@@ -16,6 +17,8 @@ internal sealed class SqlTableRewrite
     private readonly CancellationTokenSource _stopping;
     private readonly TaskCompletionSource _completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly TaskCompletionSource _joined = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly TaskCompletionSource _prepared = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private TransactionContext? _transaction;
     private CancellationTokenRegistration _cancellation;
     private int _claimed;
     private bool _finished;
@@ -41,7 +44,32 @@ internal sealed class SqlTableRewrite
         }
     }
 
-    internal void ObserveCancellation()
+    internal void StartPreparation() => _ = PrepareAsync();
+
+    private async Task PrepareAsync()
+    {
+        try
+        {
+            _transaction = await _owner.AcquireRewriteLockAsync(_table, _stopping.Token).ConfigureAwait(false);
+            _stopping.Token.ThrowIfCancellationRequested();
+            _owner.QueueRewrite(this);
+            ObserveCancellation();
+        }
+        catch (Exception failure)
+        {
+            // Preparation owns the item until enqueue succeeds. Enqueue rollback is
+            // atomic; no worker can claim a failed enqueue or a pending lock waiter.
+            if (Interlocked.CompareExchange(ref _claimed, 1, 0) == 0)
+            {
+                try { await _owner.RollbackRewriteAsync(_transaction).ConfigureAwait(false); }
+                catch (Exception cleanup) { failure = new AggregateException(failure, cleanup); }
+                Finish(failure);
+            }
+        }
+        finally { _prepared.TrySetResult(); }
+    }
+
+    private void ObserveCancellation()
     {
         lock (_stopping)
         {
@@ -64,7 +92,7 @@ internal sealed class SqlTableRewrite
             // Unlink before cleanup so completed items retain no queue ownership.
             _owner.UnqueueRewrite(this);
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _stopping.Token);
-            _owner.RunRewriteAsync(_table, linked.Token).GetAwaiter().GetResult();
+            _owner.RunRewriteAsync(_table, _transaction!, linked.Token).GetAwaiter().GetResult();
         }
         catch (Exception failure)
         {
@@ -72,18 +100,20 @@ internal sealed class SqlTableRewrite
             // other databases even when a maintenance operation fails.
             error = failure;
         }
-        finally
+        Finish(error);
+    }
+
+    private void Finish(Exception? error)
+    {
+        _admission.Dispose();
+        _owner.ReleaseRewrite();
+        lock (_stopping)
         {
-            _admission.Dispose();
-            _owner.ReleaseRewrite();
-            lock (_stopping)
-            {
-                _finished = true;
-                _cancellation.Dispose();
-                _stopping.Dispose();
-            }
-            _joined.TrySetResult();
+            _finished = true;
+            _cancellation.Dispose();
+            _stopping.Dispose();
         }
+        _joined.TrySetResult();
         // Completion also promises admission was released: a caller can immediately
         // retry or apply a schema after awaiting it, on every success and failure path.
         if (error is OperationCanceledException canceled) { _completion.TrySetCanceled(canceled.CancellationToken); }
@@ -100,6 +130,7 @@ internal sealed class SqlTableRewrite
             stopped = _stopping.Token;
             _stopping.Cancel();
         }
+        await _prepared.Task.ConfigureAwait(false);
         // A queued item must unwind admission even after the pump has stopped.
         Run(stopped);
         await _joined.Task.ConfigureAwait(false);
