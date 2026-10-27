@@ -76,6 +76,23 @@ public sealed partial class SqlCatalog
         }
     }
 
+    // Ordinary FK probes allocate nothing. The statement's pin retains these immutable
+    // publication markers until its snapshot and all its constraint reads have ended.
+    internal bool SnapshotPredatesReplacement(SqlCatalogTable current, TransactionSnapshot snapshot)
+    {
+        foreach (var retirement in Volatile.Read(ref _orderedTruncations))
+        {
+            if (snapshot.IsVisible(retirement.Marker)) { continue; }
+            foreach (var previous in retirement.Before.Tables)
+            {
+                if (previous.ObjectId == retirement.ObjectId &&
+                    string.Equals(previous.Schema, current.Schema, StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(previous.Name, current.Name, StringComparison.OrdinalIgnoreCase)) { return true; }
+            }
+        }
+        return false;
+    }
+
     // Internal engine operations: no new cross-assembly catalog seam. Callers hold table X
     // locks in ascending identity order, then enter this metadata lock. No data apply gate
     // or tree/page latch is held here. Catalog storage brackets are strictly innermost.
