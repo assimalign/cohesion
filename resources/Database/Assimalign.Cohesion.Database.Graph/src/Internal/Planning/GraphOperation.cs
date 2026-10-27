@@ -27,6 +27,8 @@ internal sealed class GraphOperation
     private readonly SemaphoreSlim _completionGate = new(1, 1);
     private TransactionContext? _snapshotPin;
     private int _finished;
+    private GraphMergeStatement? _merge;
+    internal GraphMergeStatement Merge => _merge ??= new(_database, this, _transaction?.MergeLocks);
 
     /// <summary>Initializes a new instance of the <see cref="GraphOperation"/> class.</summary>
     /// <param name="database">The database the statement runs on.</param>
@@ -64,7 +66,7 @@ internal sealed class GraphOperation
 
     internal ValueTask RefreshWriterSnapshotAsync(CancellationToken cancellationToken)
     {
-        if (_context.IsolationLevel == IsolationLevel.ReadCommitted)
+        if (_context.IsolationLevel == IsolationLevel.ReadCommitted && _merge?.SnapshotCaptured != true)
         {
             cancellationToken.ThrowIfCancellationRequested();
             // The existing pin's horizon is at or below the refreshed view's,
@@ -151,7 +153,11 @@ internal sealed class GraphOperation
     private async ValueTask FinishAsync()
     {
         try { await ReleaseSnapshotPinAsync().ConfigureAwait(false); }
-        finally { Finish(); }
+        finally
+        {
+            _merge?.Dispose();
+            Finish();
+        }
     }
 
     private void Finish()

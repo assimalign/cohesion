@@ -20,12 +20,33 @@ internal static class GraphMergeConcurrency
     /// Call inside GraphDatabase.RunAsync (or its streaming equivalent), so a failure aborts the
     /// statement's transaction and releases its locks through the coordinator's normal end path.
     /// </summary>
-    internal static async ValueTask<GraphMergeRead<T>> MatchAsync<T>(GraphDatabase database,
+    internal static ValueTask<GraphMergeRead<T>> MatchAsync<T>(GraphDatabase database,
         GraphOperation operation, GraphMergePatternIdentity identity,
         Func<TransactionSnapshot, CancellationToken, ValueTask<GraphMergeRead<T>>> probe,
         CancellationToken cancellationToken = default, Func<ValueTask>? beforePatternLock = null)
     {
         ArgumentNullException.ThrowIfNull(identity);
+        return MatchCoreAsync(database, operation, identity, null, null, probe, cancellationToken, beforePatternLock);
+    }
+
+    // The key identifies one immutable, fully evaluated pattern. A fresh row evaluation must
+    // supply a fresh key when any bound id or equality changes. Cache only the latest key.
+    internal static ValueTask<GraphMergeRead<T>> MatchAsync<T>(GraphDatabase database,
+        GraphOperation operation, object evaluatedPattern, Func<GraphMergePatternIdentity> createIdentity,
+        Func<TransactionSnapshot, CancellationToken, ValueTask<GraphMergeRead<T>>> probe,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(evaluatedPattern);
+        ArgumentNullException.ThrowIfNull(createIdentity);
+        return MatchCoreAsync(database, operation, null, evaluatedPattern, createIdentity, probe, cancellationToken, null);
+    }
+
+    private static async ValueTask<GraphMergeRead<T>> MatchCoreAsync<T>(GraphDatabase database,
+        GraphOperation operation, GraphMergePatternIdentity? identity, object? evaluatedPattern,
+        Func<GraphMergePatternIdentity>? createIdentity,
+        Func<TransactionSnapshot, CancellationToken, ValueTask<GraphMergeRead<T>>> probe,
+        CancellationToken cancellationToken, Func<ValueTask>? beforePatternLock)
+    {
         ArgumentNullException.ThrowIfNull(probe);
         operation.EnsureActive();
         cancellationToken.ThrowIfCancellationRequested();
@@ -34,16 +55,20 @@ internal static class GraphMergeConcurrency
         // Later mutations use their existing mutation gate -> (reentrant) writer -> apply ->
         // B+Tree -> page order. Never weaken the writer lock: differently expressed overlapping
         // patterns need it, and ordinary CREATE/SET/DELETE must also serialize with this check.
-        await database.LockWriterAsync(operation, cancellationToken).ConfigureAwait(false);
+        await database.LockWriterAsync(operation.Context, cancellationToken).ConfigureAwait(false);
         try
         {
+            var statement = operation.Merge;
+            identity ??= statement.Identity(evaluatedPattern!, createIdentity!);
             // Instance-free test gate for the end-between-grants interleaving. Production
             // callers omit it; no field or allocation is added to ordinary operations.
             if (beforePatternLock is not null) { await beforePatternLock().ConfigureAwait(false); }
-            await database.Coordinator.LockManager.AcquireAsync(operation.Context.Sequence,
-                identity.Resource, LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
+            var grant = statement.Locks.AcquireAsync(database, operation, identity.Resource, cancellationToken);
+            bool waited = !grant.IsCompletedSuccessfully;
+            await grant.ConfigureAwait(false);
             operation.EnsureActive();
             cancellationToken.ThrowIfCancellationRequested();
+            await statement.RefreshAsync(waited, cancellationToken).ConfigureAwait(false);
 
             var snapshot = operation.Context.Snapshot;
             var decision = await probe(snapshot, cancellationToken).ConfigureAwait(false);
@@ -51,13 +76,17 @@ internal static class GraphMergeConcurrency
             cancellationToken.ThrowIfCancellationRequested();
             if (operation.Context.IsolationLevel == IsolationLevel.ReadCommitted) { return decision; }
 
-            var latest = database.LatestSnapshot(operation.Context);
+            var latest = statement.Latest;
             foreach (var entity in identity.BoundEntities) { CheckVersion(entity); }
             foreach (var entity in decision.Entities) { CheckVersion(entity); }
-            var committed = await probe(latest, cancellationToken).ConfigureAwait(false);
+            GraphMergeRead<T> committed;
+            var previous = operation.Updates.OverrideReadSnapshot(latest);
+            try { committed = await probe(latest, cancellationToken).ConfigureAwait(false); }
+            finally { operation.Updates.OverrideReadSnapshot(previous); }
             operation.EnsureActive();
             cancellationToken.ThrowIfCancellationRequested();
-            if (decision.Matches.Count == 0 && committed.Matches.Count != 0) { throw Conflict(); }
+            if (committed.Matches.Count < decision.Matches.Count ||
+                decision.Matches.Count == 0 && committed.Matches.Count != 0) { throw Conflict(); }
             return decision;
 
             void CheckVersion(GraphMergeEntity entity)

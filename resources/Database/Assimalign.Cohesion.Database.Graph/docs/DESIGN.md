@@ -438,20 +438,45 @@ ownership on exception/cancellation/disposal; an ended owner's late grant is exp
 
 The caller supplies a read-only whole-pattern probe over the supplied `TransactionSnapshot`,
 including its statement overlays and every match's persisted node/relationship read set. The
-probe must use the supplied view for every storage read, return complete matches, and charge its
-ordinary query work and retained memory to the operation budget. GQ-M2 must plumb this view into
-matching rather than accidentally using the operation's old snapshot for the latest-state probe.
+seam owns an internal GraphUpdates read-view override around the latest probe, restored in
+`finally` on success, failure, cancellation or disposal. Every overlay-aware lookup, anchor,
+type selection and incident stream uses that view; type-selection caches are invalidated at
+each view transition, including cached absence. The probe returns complete matches, reports
+every persisted entity read, and charges ordinary query work and retained memory to its budget.
 At Snapshot, the seam probes the original view, compares every matched and bound entity's writer
 and revision against the latest committed view, and probes that latest pattern view before
-returning the original decision. A changed/deleted entity or a create decision with a new matching
-pattern raises retryable `DatabaseTransactionAbortedException` with structured CG04024. This
+returning the original decision. A changed/deleted entity, fewer latest matches than decided
+matches, or a create decision with a new matching pattern raises retryable
+`DatabaseTransactionAbortedException` with structured CG04024. This
 detects replacements even if values are restored, and checks bound endpoints even with no whole
 match. Each entity revision comparison checks cancellation and consumes one physical-work unit
-when the operation has a query budget. Caller-owned uncommitted versions appear in both views; overlay-only identities are absent
+from the operation's query budget. Caller-owned uncommitted versions appear in both views;
+overlay-only identities are absent
 from both store views. Unrelated commits and additional matches beside unchanged existing matches
-do not invalidate the original match decision. At ReadCommitted the writer acquisition refreshes
-the statement view and the seam probes it once, so a competing creator matches and a concurrent
-deletion re-matches to absence. Its existing snapshot pin continues protecting that newer view.
+do not invalidate the original match decision. The match-count cross-check also catches an
+incomplete entity read set when a decided match disappears. At ReadCommitted the seam refreshes
+the statement view after the pattern grant and probes once, so a competing creator matches and
+a concurrent property/label update or deletion re-matches to absence. Its existing snapshot pin
+continues protecting that newer view.
+
+MERGE allocates its statement caches lazily. While the transaction-long database writer is
+held, it captures one latest-state view and one ReadCommitted writer view per statement; a
+pattern wait invalidates them and refreshes after its grant. Reentrant mutation writer requests
+reuse the captured view. The evaluated-pattern overload caches the most recent identity by
+reference to an immutable evaluation key, including every bound id and equality. An evaluation
+whose inputs change must use a fresh key. This one-entry cache retains no factory closure and
+cannot grow with distinct input rows; GQ-M2 owns accounting for the evaluated operands.
+
+GraphMergeLocks is lazy and transaction-owned, including across statements. A new parent/entry
+charges 640 bytes to the acquiring operation's existing query-memory budget (CG05020 on refusal),
+covering manager state and local bookkeeping. Charges stay until transaction end; 256 additional
+bytes cover each statement cache until that statement ends. Each pattern first takes parent
+IntentExclusive. After 128 distinct entry resources, new patterns use a single Exclusive object
+lock in the same namespace. The earlier, at most 128 entry grants remain held through undo and
+normal coordinator release; escalation never grows that set. This caps both retained lock state
+and the manager's end walk without a new kernel release API or an unsafe early release. The
+parent protocol preserves phantom serialization, and the database writer remains mandatory for
+overlapping patterns and ordinary writes. Normal writes allocate no MERGE tracker or cache.
 
 Non-parallel tests exercise real transactions for creators, ordinary deleters/replacements,
 directed/undirected relationship overlap, all matched entities, bound endpoints, overlays,
