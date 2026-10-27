@@ -492,7 +492,8 @@ CD00007 for the same count rule at parse and plan time:
 | `CD03022` | An index has fewer than one or more than 32 paths |
 | `CD01023` | A direct SELECT AST repeats a FROM/UNNEST binding name or supplies an empty binding name |
 | `CD03024` | Index already exists |
-| `CD03025` | Multiple array keys or a UNIQUE array index |
+| `CD03025` | Multiple array keys, a UNIQUE array index, or IncludeMissing with a leading array key |
+| `CD03026` | Encoded index definition exceeds the 8,092-byte catalog record limit; refused before building postings |
 | `CD01025` | Index does not exist |
 | `CD01026` | A directly constructed RETURNING projection has an empty output name |
 | `CD01027` | A directly constructed comprehension has an empty variable name |
@@ -2252,14 +2253,17 @@ constant tag (1 NULL, 2 FALSE, 3 TRUE, 4 Decimal, 5 String) and its payload. Dec
 four little-endian Int32 words written by BinaryWriter.Write(Decimal); strings use the length
 encoding above. AND/OR carry two predicate nodes in left/right order; NOT carries one.
 Decode enforces at most 32 levels and 128 nodes before descending or allocating an unbounded
-tree. Unknown tags, unknown flag bits, invalid paths/constants, multiple array keys and UNIQUE
-array definitions are malformed current-format data, with located CD06105 / CK06003.
+tree. Unknown tags, unknown flag bits, invalid paths/constants, multiple array keys, UNIQUE
+array definitions and IncludeMissing with a leading array key are malformed current-format data,
+with located CD06105 / CK06003.
 
 `DocumentIndexMetadata.Keys` is an immutable snapshot with descriptor value equality, including
 WHEN and IncludeMissing in conflict checks. `Paths` retains scalar-only definitions; it is
 empty for an array index, preventing the existing scalar planner from inferring completeness
-from an array index's scalar prefix. Array-aware consumers use Keys. The default metadata's
-leading Path is empty and its formatting is safe.
+from an array index's scalar prefix. Array-aware consumers use Keys. Path returns an empty string
+for an array index or default metadata. Both older scalar-path constructors validate every path
+and throw ArgumentException for invalid paths; the list constructor also retains its null-list
+and 1..32 count guards. The default metadata's formatting is safe.
 
 Kind 3 content chunks use the format in
 [Documents.Storage](DESIGN.md#storage-component).
@@ -2269,8 +2273,10 @@ underlying `DatabaseObjectOwner` byte (`Adhoc = 0`, `Schema = 1`). Unknown kinds
 references, duplicate physical generations, and malformed payloads fail closed.
 
 Catalog metadata records fit one slotted-page record. Identity/name/path sizes are consequently
-bounded by `SlottedPage.MaxRecordSize`; very long metadata is rejected by the shared storage
-layer. Document content has its separate multi-page chunk mechanism.
+bounded by `SlottedPage.MaxRecordSize`. An index definition larger than 8,092 encoded bytes
+raises catalog CD03026 immediately after encoding, before document extraction or physical tree
+creation; this includes large WHEN constants and path lists. Other metadata retains the shared
+storage limit. Document content has its separate multi-page chunk mechanism.
 
 #### Catalog: Index definition and key semantics
 
@@ -2298,16 +2304,24 @@ IS NULL, IS MISSING, AND, OR and NOT; constants normalize to null, Boolean, Deci
 There are no functions, callbacks, parameters, subqueries, nested comprehensions, document-relative
 WHEN operands or arbitrary engine ASTs. Catalog therefore never depends on the engine evaluator.
 Only TRUE admits an element, with OQL scalar type comparisons, ordinal strings and unknown-value
-propagation. The fixed limits are 32 predicate levels and 128 nodes.
+propagation. The typed Compare API accepts null, Boolean, Byte, SByte, Int16, UInt16, Int32,
+UInt32, Int64, UInt64, Decimal and String constants. Integral values normalize to Decimal.
+Single and Double are refused with ArgumentException, even for finite exactly representable
+values such as 1.0d. AND, OR and NOT throw ArgumentException if the resulting predicate exceeds
+32 levels or 128 nodes, counting repeated subtrees at each occurrence. These remain uncoded
+typed C# argument guards under the registry convention. OQ-I2's DDL translates unsupported
+constants and predicates beyond those limits into coded refusals before catalog mutation.
 
-Array keys are DISTINCT only, with at most one array key per index and no UNIQUE array index
-(CD03025). A document emits the set of distinct encoded scalar projections, combined with its
+Array keys are DISTINCT only, with at most one array key per index and no UNIQUE array index.
+IncludeMissing is refused when the leading array key would control missing coverage (CD03025),
+until #1632 defines empty and fully filtered array semantics. A document emits the set of distinct encoded scalar projections, combined with its
 other scalar document keys. Numeric scales and repeated elements deduplicate by encoded key;
 NULL is a scalar posting. MISSING projections are omitted as in ARRAY comprehension, and complex
 array/object projections have no postings. Empty or fully filtered arrays emit nothing. A missing
 source produces a MISSING component (omitted if leading and sparse); a present non-array source
 produces NULL, following ARRAY/FIRST's source semantics. INCLUDE MISSING includes a missing leading
-source or scalar path; it does not invent an element for an empty or filtered array.
+scalar path, including when a later key is an array projection; it does not invent an element
+for an empty or filtered array.
 
 Postings carry document-version references, not element identities. A single WHEN tree evaluates
 all its conjuncts on the same element, so a price projection with stock > 0 excludes a price from
@@ -2361,9 +2375,13 @@ one range component and retains all other conjuncts as residual filters, matchin
 `doc/src/sgml/indices.sgml:461-466`. Candidate documents remain ordered by ordinal identity.
 
 Index leaf entry references are packed metadata page/slot locations. Leaf entries carry writer
-and deleter stamps through the existing index API. Create builds the tree immediately while the
-caller holds the logical database's exclusive writer lock, preserving each visible source
-document's writer stamp. The new index definition is invisible to snapshots predating its
+and deleter stamps through the existing index API. Create snapshots only visible document/reference
+pairs under the catalog monitor. It computes and inserts one document's postings at a time inside
+the physical write bracket, outside that monitor, while the caller holds the database writer lock.
+Build staging is O(documents plus the largest per-document posting set), independent of the total
+expanded posting count; persisted tree pages and the storage/WAL bracket have their own memory
+costs. Only scalar UNIQUE builds retain a collection-wide key set for preflight uniqueness checks.
+Each inserted posting preserves its source document's writer stamp. The new index definition is invisible to snapshots predating its
 creation; those snapshots use scans.
 
 #### Catalog: Mutation, rollback, and recovery

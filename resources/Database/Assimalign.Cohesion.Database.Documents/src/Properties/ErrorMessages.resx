@@ -69,7 +69,8 @@
   <data name="IndexKeyTooLarge" xml:space="preserve"><value>Indexed scalar encodes beyond the shared B+Tree 1024-byte key limit.</value></data>
   <data name="IndexPathCount" xml:space="preserve"><value>An index requires between 1 and 32 key paths.</value></data>
   <data name="IndexPathsDuplicate" xml:space="preserve"><value>Index key paths must be distinct.</value></data>
-  <data name="ArrayIndexDefinitionInvalid" xml:space="preserve"><value>An index supports at most one DISTINCT ARRAY key and array indexes cannot be UNIQUE.</value></data>
+  <data name="ArrayIndexDefinitionInvalid" xml:space="preserve"><value>An index supports at most one DISTINCT ARRAY key; array indexes cannot be UNIQUE, and a leading array key cannot use INCLUDE MISSING.</value></data>
+  <data name="IndexDefinitionTooLarge" xml:space="preserve"><value>The encoded index definition exceeds the 8,092-byte catalog record limit.</value></data>
   <data name="IndexDescriptorInvalid" xml:space="preserve"><value>Invalid index key or predicate descriptor.</value></data>
   <data name="IndexPredicateConstantInvalid" xml:space="preserve"><value>An array index predicate constant must be null, Boolean, integral, Decimal or String.</value></data>
   <data name="IndexPredicateTooLarge" xml:space="preserve"><value>An array index predicate must have at most 32 levels and 128 nodes.</value></data>

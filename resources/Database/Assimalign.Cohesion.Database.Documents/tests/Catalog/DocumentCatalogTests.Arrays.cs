@@ -50,7 +50,7 @@ public sealed partial class DocumentCatalogTests
             DocumentIndexPredicate.And(DocumentIndexPredicate.Not(DocumentIndexPredicate.IsNull("p")),
                 DocumentIndexPredicate.Compare("p", DocumentIndexComparison.GreaterThan, "w")));
         var keys = new[] { DocumentIndexKey.DistinctArray("items", "q", when) };
-        var metadata = await CreateTypedIndexAsync(f, "ix", keys, includeMissing: true);
+        var metadata = await CreateTypedIndexAsync(f, "ix", keys);
         keys[0] = DocumentIndexKey.Scalar("changed");
 
         // Act.
@@ -166,33 +166,31 @@ public sealed partial class DocumentCatalogTests
         (await ReadRawKeysAsync(f, metadata, Latest())).Count.ShouldBe(3);
     }
 
-    [Theory(DisplayName = "Cohesion Test [Documents.Catalog] - INCLUDE MISSING maintains leading keys for scalar and array definitions (#1530, #1632)")]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task SaveDocumentAsync_IncludeMissing_ShouldRetainMissingLeadingKeys(bool array)
+    [Fact(DisplayName = "Cohesion Test [Documents.Catalog] - INCLUDE MISSING maintains leading scalar keys (#1530, #1632)")]
+    public async Task SaveDocumentAsync_IncludeMissing_ShouldRetainMissingLeadingKeys()
     {
         // Arrange.
         await using var f = await Fixture.Create();
-        var key = array ? DocumentIndexKey.DistinctArray("a", "p") : DocumentIndexKey.Scalar("a.p");
+        var key = DocumentIndexKey.Scalar("a.p");
         var sparse = await CreateTypedIndexAsync(f, "sparse", [key]);
         var inclusive = await CreateTypedIndexAsync(f, "inclusive", [key], includeMissing: true);
         await f.Write("missing", "{}");
         await f.Write("wrong-shape", "{\"a\":null}");
-        await f.Write("empty", array ? "{\"a\":[]}" : "{\"a\":{}}");
-        await f.Write("projection-missing", array ? "{\"a\":[{}]}" : "{\"a\":{}}");
-        await f.Write("value", array ? "{\"a\":[{\"p\":2}]}" : "{\"a\":{\"p\":2}}");
+        await f.Write("empty", "{\"a\":{}}");
+        await f.Write("projection-missing", "{\"a\":{}}");
+        await f.Write("value", "{\"a\":{\"p\":2}}");
         var reader = await f.Coordinator.BeginAsync(IsolationLevel.Snapshot);
 
         // Act: replacement of the missing key must leave its old posting visible.
-        await f.Write("missing", array ? "{\"a\":[{\"p\":3}]}" : "{\"a\":{\"p\":3}}");
+        await f.Write("missing", "{\"a\":{\"p\":3}}");
         var old = await ReadRawKeysAsync(f, inclusive, reader.Snapshot);
         var current = await ReadRawKeysAsync(f, inclusive, Latest());
 
-        // Assert: empty/filtered arrays and omitted element projections have no synthetic posting.
-        old.Count.ShouldBe(array ? 3 : 5);
-        old.Count(item => item.Equals(new IndexKey(new byte[] { 0 }))).ShouldBe(array ? 1 : 4);
-        current.Count(item => item.Equals(new IndexKey(new byte[] { 0 }))).ShouldBe(array ? 0 : 3);
-        (await ReadRawKeysAsync(f, sparse, Latest())).Count.ShouldBe(array ? 3 : 2);
+        // Assert.
+        old.Count.ShouldBe(5);
+        old.Count(item => item.Equals(new IndexKey(new byte[] { 0 }))).ShouldBe(4);
+        current.Count(item => item.Equals(new IndexKey(new byte[] { 0 }))).ShouldBe(3);
+        (await ReadRawKeysAsync(f, sparse, Latest())).Count.ShouldBe(2);
         DocumentCatalog.Open(f.Storage, f.Coordinator).GetIndexes(f.Collection.Id, Latest()).Single(item => item.Name == "inclusive")
             .IncludeMissing.ShouldBeTrue();
         await f.Coordinator.RollbackAsync(reader);

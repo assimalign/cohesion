@@ -23,6 +23,7 @@ public sealed partial class DocumentCatalogTests
     [InlineData("constant-kind")]
     [InlineData("flags")]
     [InlineData("unique-array")]
+    [InlineData("include-missing-array")]
     [InlineData("null-path")]
     [InlineData("trailing")]
     public void Decode_MalformedArrayDescriptor_ShouldFailClosed(string damage)
@@ -50,7 +51,7 @@ public sealed partial class DocumentCatalogTests
             writer.Write(20m);
         }
         else { writer.Write((byte)0); }
-        writer.Write((byte)(damage == "flags" ? 4 : damage == "unique-array" ? 1 : 2));
+        writer.Write((byte)(damage == "flags" ? 4 : damage == "unique-array" ? 1 : damage == "include-missing-array" ? 2 : 0));
         writer.Write(10UL);
         if (damage == "trailing") { writer.Write((byte)0); }
 

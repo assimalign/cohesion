@@ -58,7 +58,7 @@ internal static class Program
             DocumentIndexPredicate.Compare("stock", DocumentIndexComparison.GreaterThan, 0),
             DocumentIndexPredicate.Not(DocumentIndexPredicate.IsNull("price")));
         var definition = await catalog.CreateIndexAsync(collection.Id, "prices", [DocumentIndexKey.DistinctArray("items", "price", when)],
-            false, true, writer, cancellationToken);
+            false, false, writer, cancellationToken);
         await coordinator.CommitAsync(writer, cancellationToken);
         var reader = await coordinator.BeginAsync(IsolationLevel.Snapshot, cancellationToken);
         try

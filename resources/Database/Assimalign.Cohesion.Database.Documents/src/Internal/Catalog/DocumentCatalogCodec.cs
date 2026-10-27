@@ -158,7 +158,8 @@ internal static class DocumentCatalogCodec
                         throw new DocumentCatalogException("CD06105", ErrorMessages.CatalogCodecDecodeDocumentCatalog5);
                     }
                     if (System.Linq.Enumerable.Count(keys, key => key.ArraySource is not null) > 1 ||
-                        (flags & 1) != 0 && System.Linq.Enumerable.Any(keys, key => key.ArraySource is not null))
+                        (flags & 1) != 0 && System.Linq.Enumerable.Any(keys, key => key.ArraySource is not null) ||
+                        (flags & 2) != 0 && keys[0].ArraySource is not null)
                     { throw new DocumentCatalogException("CD06105", ErrorMessages.IndexDescriptorInvalid); }
                     result = new CatalogRecord(null, null, new DocumentIndexMetadata(id, name, keys, (flags & 1) != 0, (flags & 2) != 0, objectId));
                     break;

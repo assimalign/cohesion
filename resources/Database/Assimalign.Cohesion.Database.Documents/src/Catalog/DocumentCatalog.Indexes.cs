@@ -12,6 +12,7 @@ using Assimalign.Cohesion.Database.Documents.Internal;
 using Assimalign.Cohesion.Database.Documents.Storage;
 using Assimalign.Cohesion.Database.Indexing;
 using Assimalign.Cohesion.Database.Storage;
+using Assimalign.Cohesion.Database.Storage.Units;
 using Assimalign.Cohesion.Database.Transactions;
 
 using Assimalign.Cohesion.Database.Documents.Protocol;
@@ -28,6 +29,10 @@ public sealed partial class DocumentCatalog
     // Instance-local fault/cancellation seam; each callback observes a completed
     // posting application inside the still-uncommitted physical bracket.
     internal Action<int>? AfterIndexPostingApplied { get; set; }
+
+    // Instance-local work observations for bounded build staging and lock-order tests.
+    internal Action<int>? IndexBuildPostingsBuffered { get; set; }
+    internal Action<bool>? BeforeIndexKeysRead { get; set; }
 
     /// <summary>Lists visible index definitions in ordinal name order.</summary>
     /// <param name="collectionId">The collection identity.</param>
@@ -65,7 +70,7 @@ public sealed partial class DocumentCatalog
     /// <exception cref="InvalidOperationException"><paramref name="context"/> is not active.</exception>
     /// <exception cref="DocumentCatalogException">
     /// The collection is absent, the index already exists, or an existing document's indexed scalar
-    /// encodes beyond the index key limit.
+    /// encodes beyond the index key limit, or the encoded definition exceeds 8,092 bytes (CD03026).
     /// </exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the build applied.</exception>
     /// <exception cref="TransactionAbortedException">The transaction ended, or its end began, before the build was applied.</exception>
@@ -84,7 +89,8 @@ public sealed partial class DocumentCatalog
     /// <exception cref="ArgumentNullException">The paths or context are null.</exception>
     /// <exception cref="ArgumentException">A name or path is invalid.</exception>
     /// <exception cref="DatabaseException">The path count is zero or exceeds 32 (CD03022).</exception>
-    /// <exception cref="DocumentCatalogException">The collection is absent, the name exists, or a key exceeds 1024 bytes.</exception>
+    /// <exception cref="DocumentCatalogException">The collection is absent, the name exists, a key exceeds 1024 bytes,
+    /// or the encoded definition exceeds 8,092 bytes (CD03026).</exception>
     /// <exception cref="DocumentConstraintViolationException">A UNIQUE key is duplicate or non-scalar.</exception>
     /// <exception cref="InvalidOperationException">The context is not active.</exception>
     /// <exception cref="TransactionAbortedException">The transaction ended before publication.</exception>
@@ -102,7 +108,7 @@ public sealed partial class DocumentCatalog
     /// <param name="name">The ordinal index name.</param>
     /// <param name="keys">One to 32 keys, containing at most one DISTINCT array projection.</param>
     /// <param name="isUnique">Whether scalar keys are unique; must be false for array indexes.</param>
-    /// <param name="includeMissing">Whether to index a MISSING leading key.</param>
+    /// <param name="includeMissing">Whether to index a MISSING leading scalar key; must be false for a leading array key.</param>
     /// <param name="context">The active transaction; the caller holds the database writer lock.</param>
     /// <param name="cancellationToken">Cancels extraction or physical application.</param>
     /// <returns>The new index definition.</returns>
@@ -110,7 +116,7 @@ public sealed partial class DocumentCatalog
     /// <exception cref="ArgumentException">The name is invalid.</exception>
     /// <exception cref="DatabaseException">The key count is outside 1..32 (CD03022).</exception>
     /// <exception cref="DocumentCatalogException">The array definition is unsupported (CD03025), a key exceeds
-    /// 1024 bytes, the collection is absent, or the name exists.</exception>
+    /// 1024 bytes, the encoded definition exceeds 8,092 bytes (CD03026), the collection is absent, or the name exists.</exception>
     /// <exception cref="DocumentConstraintViolationException">A UNIQUE key is duplicate or non-scalar.</exception>
     /// <exception cref="InvalidOperationException">The context is not active.</exception>
     /// <exception cref="TransactionAbortedException">The transaction ended before publication.</exception>
@@ -143,20 +149,29 @@ public sealed partial class DocumentCatalog
             }
         }
         var encoded = DocumentCatalogCodec.Encode(new CatalogRecord(null, null, metadata), context.Sequence);
-        var entries = new List<(IndexKey Key, Reference Reference)>();
-        var uniqueKeys = new HashSet<IndexKey>();
+        if (encoded.Length > SlottedPage.MaxRecordSize)
+        { throw new DocumentCatalogException("CD03026", ErrorMessages.IndexDefinitionTooLarge); }
+        var documents = new List<(DocumentCatalogEntry Document, Reference Reference)>();
         lock (_sync)
         {
             foreach (var document in GetDocuments(collectionId, null, context.Snapshot))
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var found = FindDocumentVersion(collectionId, document.Id, context.Snapshot)!.Value;
-                var documentKeys = KeysFor(document, metadata, out bool distinct, cancellationToken);
-                foreach (var key in documentKeys)
+                documents.Add((document, found.Reference));
+            }
+        }
+        // Only scalar UNIQUE builds need collection-wide keys, to refuse duplicates
+        // before creating a physical tree. Extraction never needs the catalog monitor.
+        if (isUnique)
+        {
+            var uniqueKeys = new HashSet<IndexKey>();
+            foreach (var (document, _) in documents)
+            {
+                foreach (var key in KeysFor(document, metadata, out bool distinct, cancellationToken))
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    if (isUnique && !distinct && !uniqueKeys.Add(key)) { throw Duplicate(metadata, context.Snapshot); }
-                    entries.Add((key, found.Reference));
+                    if (!distinct && !uniqueKeys.Add(key)) { throw Duplicate(metadata, context.Snapshot); }
                 }
             }
         }
@@ -167,14 +182,18 @@ public sealed partial class DocumentCatalog
             var index = await _indexes.CreateIndexAsync(context, metadata.ObjectId, new IndexDefinition(name), cancellationToken).ConfigureAwait(false);
             _uniqueIndexes[metadata.ObjectId] = metadata.IsUnique;
             int applied = 0;
-            foreach (var entry in entries)
+            foreach (var (document, reference) in documents)
             {
-                // The definition is invisible to older snapshots; preserve source stamps
-                // so a newly visible definition returns the same rows as a record scan.
-                await index.InsertVersionAsync(bracket, entry.Key,
-                    DocumentStorage.PackLocation(entry.Reference.PageId, entry.Reference.SlotIndex),
-                    entry.Reference.Writer, TransactionSequence.None, cancellationToken).ConfigureAwait(false);
-                AfterIndexPostingApplied?.Invoke(++applied);
+                var documentKeys = KeysFor(document, metadata, out _, cancellationToken);
+                IndexBuildPostingsBuffered?.Invoke(documentKeys.Count);
+                foreach (var key in documentKeys)
+                {
+                    // Preserve source stamps so a newly visible definition agrees with scans.
+                    await index.InsertVersionAsync(bracket, key,
+                        DocumentStorage.PackLocation(reference.PageId, reference.SlotIndex),
+                        reference.Writer, TransactionSequence.None, cancellationToken).ConfigureAwait(false);
+                    AfterIndexPostingApplied?.Invoke(++applied);
+                }
             }
             cancellationToken.ThrowIfCancellationRequested();
             var inserted = _storage.InsertEntry(bracket, encoded);
@@ -254,7 +273,7 @@ public sealed partial class DocumentCatalog
     /// <param name="cancellationToken">Cancels iteration.</param>
     /// <returns>Visible candidate documents in ordinal identity order; apply the residual predicate.</returns>
     /// <exception cref="ArgumentNullException">The name, prefix or snapshot is null.</exception>
-    /// <exception cref="ArgumentException">The bounds are not scalar or exceed the index's path count.</exception>
+    /// <exception cref="ArgumentException">The bounds are not scalar or exceed the index's key count.</exception>
     /// <exception cref="DocumentCatalogException">The definition or tree is absent or malformed.</exception>
     /// <exception cref="StorageCorruptionException">A matching entry's catalog page failed its checksum or is malformed.</exception>
     /// <exception cref="StorageIOException">A matching entry's catalog page could not be read.</exception>
@@ -380,6 +399,7 @@ public sealed partial class DocumentCatalog
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        BeforeIndexKeysRead?.Invoke(Monitor.IsEntered(_sync));
         return DocumentIndexKeys.Read(_storage.ReadContent(new DocumentContentReference(document.HeadLocation, document.Length, document.Checksum)),
             metadata, out distinct, cancellationToken);
     }

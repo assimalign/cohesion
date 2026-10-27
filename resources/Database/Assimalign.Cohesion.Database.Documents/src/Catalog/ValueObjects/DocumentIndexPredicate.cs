@@ -80,7 +80,9 @@ public sealed record DocumentIndexPredicate
     /// <param name="comparison">The comparison operation.</param>
     /// <param name="value">Null, Boolean, integral, Decimal or String constant.</param>
     /// <returns>The immutable comparison.</returns>
-    /// <exception cref="ArgumentException">The path or constant is unsupported.</exception>
+    /// <exception cref="ArgumentException">The path is invalid, or the constant is not null, Boolean,
+    /// Byte, SByte, Int16, UInt16, Int32, UInt32, Int64, UInt64, Decimal or String. Single and Double
+    /// constants are refused even when finite and exactly representable as Decimal.</exception>
     /// <exception cref="ArgumentOutOfRangeException">The comparison is unknown.</exception>
     public static DocumentIndexPredicate Compare(string path, DocumentIndexComparison comparison, object? value)
     {
@@ -112,7 +114,7 @@ public sealed record DocumentIndexPredicate
     /// <param name="right">The right operand.</param>
     /// <returns>The immutable conjunction.</returns>
     /// <exception cref="ArgumentNullException">An operand is null.</exception>
-    /// <exception cref="ArgumentException">The predicate exceeds its depth or size limit.</exception>
+    /// <exception cref="ArgumentException">The combined predicate exceeds 32 levels or 128 nodes, counting repeated subtrees at each occurrence.</exception>
     public static DocumentIndexPredicate And(DocumentIndexPredicate left, DocumentIndexPredicate right)
     { ArgumentNullException.ThrowIfNull(left); ArgumentNullException.ThrowIfNull(right); return new DocumentIndexPredicate(4, left: left, right: right); }
 
@@ -121,7 +123,7 @@ public sealed record DocumentIndexPredicate
     /// <param name="right">The right operand.</param>
     /// <returns>The immutable disjunction.</returns>
     /// <exception cref="ArgumentNullException">An operand is null.</exception>
-    /// <exception cref="ArgumentException">The predicate exceeds its depth or size limit.</exception>
+    /// <exception cref="ArgumentException">The combined predicate exceeds 32 levels or 128 nodes, counting repeated subtrees at each occurrence.</exception>
     public static DocumentIndexPredicate Or(DocumentIndexPredicate left, DocumentIndexPredicate right)
     { ArgumentNullException.ThrowIfNull(left); ArgumentNullException.ThrowIfNull(right); return new DocumentIndexPredicate(5, left: left, right: right); }
 
@@ -129,7 +131,7 @@ public sealed record DocumentIndexPredicate
     /// <param name="operand">The predicate to negate.</param>
     /// <returns>The immutable negation.</returns>
     /// <exception cref="ArgumentNullException">The operand is null.</exception>
-    /// <exception cref="ArgumentException">The predicate exceeds its depth or size limit.</exception>
+    /// <exception cref="ArgumentException">The negated predicate exceeds 32 levels or 128 nodes, counting repeated subtrees at each occurrence.</exception>
     public static DocumentIndexPredicate Not(DocumentIndexPredicate operand)
     { ArgumentNullException.ThrowIfNull(operand); return new DocumentIndexPredicate(6, left: operand); }
 

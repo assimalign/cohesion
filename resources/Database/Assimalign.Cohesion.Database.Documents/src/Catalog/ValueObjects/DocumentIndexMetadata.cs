@@ -14,6 +14,7 @@ public readonly record struct DocumentIndexMetadata
     /// <param name="name">The ordinal index name.</param>
     /// <param name="path">The leading path.</param>
     /// <param name="objectId">The physical generation identity.</param>
+    /// <exception cref="ArgumentException">The path is null, empty or not a valid document field path.</exception>
     public DocumentIndexMetadata(Guid collectionId, string name, string path, ulong objectId)
         : this(collectionId, name, new string[] { path }, false, objectId) { }
 
@@ -24,6 +25,7 @@ public readonly record struct DocumentIndexMetadata
     /// <param name="isUnique">Whether valued scalar keys must be unique.</param>
     /// <param name="objectId">The physical generation identity.</param>
     /// <exception cref="ArgumentNullException">The paths are null.</exception>
+    /// <exception cref="ArgumentException">A path is null, empty or not a valid document field path.</exception>
     /// <exception cref="ArgumentOutOfRangeException">The path count is outside 1..32.</exception>
     public DocumentIndexMetadata(Guid collectionId, string name, IReadOnlyList<string> paths, bool isUnique, ulong objectId)
         : this(collectionId, name, ScalarKeys(paths), isUnique, false, objectId) { }
@@ -33,11 +35,12 @@ public readonly record struct DocumentIndexMetadata
     /// <param name="name">The ordinal index name.</param>
     /// <param name="keys">One to 32 ordered normalized keys.</param>
     /// <param name="isUnique">Whether valued scalar keys must be unique; array indexes cannot be unique.</param>
-    /// <param name="includeMissing">Whether a MISSING leading key is indexed.</param>
+    /// <param name="includeMissing">Whether a MISSING leading scalar key is indexed; must be false for a leading array key.</param>
     /// <param name="objectId">The physical generation identity.</param>
     /// <exception cref="ArgumentNullException">The key list or a key is null.</exception>
     /// <exception cref="ArgumentOutOfRangeException">The key count is outside 1..32.</exception>
-    /// <exception cref="DocumentCatalogException">Multiple array keys or a UNIQUE array index is requested (CD03025).</exception>
+    /// <exception cref="DocumentCatalogException">Multiple array keys, a UNIQUE array index, or
+    /// includeMissing with a leading array key is requested (CD03025).</exception>
     public DocumentIndexMetadata(Guid collectionId, string name, IReadOnlyList<DocumentIndexKey> keys,
         bool isUnique, bool includeMissing, ulong objectId)
     {
@@ -47,7 +50,7 @@ public readonly record struct DocumentIndexMetadata
         ArgumentOutOfRangeException.ThrowIfGreaterThan(keys.Count, 32);
         foreach (var key in keys) { ArgumentNullException.ThrowIfNull(key); }
         int arrays = keys.Count(key => key.ArraySource is not null);
-        if (arrays > 1 || arrays != 0 && isUnique)
+        if (arrays > 1 || arrays != 0 && isUnique || includeMissing && keys[0].ArraySource is not null)
         { throw new DocumentCatalogException("CD03025", ErrorMessages.ArrayIndexDefinitionInvalid); }
         CollectionId = collectionId;
         Name = name;
@@ -67,7 +70,7 @@ public readonly record struct DocumentIndexMetadata
     public Guid CollectionId { get; }
     /// <summary>Gets the ordinal index name.</summary>
     public string Name { get; }
-    /// <summary>Gets the leading key path, or an empty string for a default definition.</summary>
+    /// <summary>Gets the leading scalar path, or an empty string for an array index or a default definition.</summary>
     public string Path => Paths is not { Count: > 0 } ? string.Empty : Paths[0];
     /// <summary>Gets ordered scalar paths, or an empty list for an array index.
     /// Array-aware consumers use <see cref="Keys"/>.</summary>
@@ -76,7 +79,8 @@ public readonly record struct DocumentIndexMetadata
     public IReadOnlyList<DocumentIndexKey> Keys { get; }
     /// <summary>Gets whether valued scalar keys must be unique.</summary>
     public bool IsUnique { get; }
-    /// <summary>Gets whether documents with a MISSING leading key are indexed.</summary>
+    /// <summary>Gets whether documents with a MISSING leading scalar key are indexed.
+    /// This flag cannot be true when the leading key is an array key.</summary>
     public bool IncludeMissing { get; }
     /// <summary>Gets the physical generation identity.</summary>
     public ulong ObjectId { get; }
