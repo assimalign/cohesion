@@ -45,6 +45,8 @@ internal sealed partial class SqlPlanner
             });
             projections.Add(new SqlProjection(name, null, column.Expression, GroupExpressionType(column.Expression, columns, evaluator))
             {
+                HasOutputName = column.Alias is not null || column.Expression is SqlColumnReferenceExpression ||
+                    column.Expression is SqlFunctionCallExpression namedCall && IsAggregate(namedCall),
                 MaxLength = evaluator.MaximumLengthOf(column.Expression),
                 // A bare COUNT never returns NULL, even over no rows; every other projection may.
                 IsNullable = !(column.Expression is SqlFunctionCallExpression projected && IsAggregate(projected)
@@ -316,7 +318,7 @@ internal sealed partial class SqlPlanner
         SqlExpressionEvaluator evaluator)
     {
         RuntimeHelpers.EnsureSufficientExecutionStack();
-        return GroupExpressionTypeCore(expression, columns, evaluator);
+        return evaluator.IsBoundValue(expression) ? evaluator.StaticTypeOf(expression) : GroupExpressionTypeCore(expression, columns, evaluator);
     }
 
     private DatabaseType GroupExpressionTypeCore(SqlExpression expression, IReadOnlyList<SqlCatalogColumn> columns,

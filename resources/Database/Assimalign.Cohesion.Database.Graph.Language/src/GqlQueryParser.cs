@@ -197,6 +197,7 @@ public sealed partial class GqlQueryParser : QueryParser
     {
         int patternDepth = 0;
         int mapDepth = 0;
+        int inlinePredicateDepth = -1;
         var containers = new Stack<TokenType>();
         int mapSeparatorPosition = -1;
         bool inValueExpression = false;
@@ -217,7 +218,8 @@ public sealed partial class GqlQueryParser : QueryParser
 
             if (token.Type == TokenType.LeftBrace) { mapDepth++; }
             if (token.Type == TokenType.RightBrace) { mapDepth--; }
-            bool valuePosition = inValueExpression || mapDepth > 0;
+            if (patternDepth < inlinePredicateDepth) { inlinePredicateDepth = -1; }
+            bool valuePosition = inValueExpression || mapDepth > 0 || inlinePredicateDepth >= 0;
 
             // A WHERE/RETURN label expression (n:A|B, n IS [NOT] LABELED A|B) holds label names exactly
             // as a pattern does, so n:A|Order names a label, not ORDER BY.
@@ -277,6 +279,14 @@ public sealed partial class GqlQueryParser : QueryParser
                 _tokens[i - 1].Type == TokenType.Colon && i - 1 != mapSeparatorPosition)) { continue; }
             if (i + 1 < _tokens.Count && _tokens[i + 1].Type == TokenType.Colon) { continue; }
             string value = token.Text.ToUpperInvariant();
+            if (value == "WHERE" && inPattern && patternDepth > 0)
+            { inlinePredicateDepth = patternDepth; continue; }
+            // MATCH owns selector validation, including malformed counts and nested prefixes.
+            if (inPattern && !valuePosition && value is "ALL" or "ANY" or "SHORTEST")
+            {
+                if (TryPathSearchPrefix(i, out _, out int selectorEnd)) { i = selectorEnd; }
+                continue;
+            }
             // ISO OPTIONAL block operands are recognized outside T1. Consume their complete
             // operand here so nested MATCH/WHERE words cannot produce extra capability errors.
             // This precedes function detection, including after a WHERE expression.
@@ -397,7 +407,7 @@ public sealed partial class GqlQueryParser : QueryParser
     /// Reads an ISO/IEC 39075 path search prefix at <paramref name="index"/>: <c>ALL SHORTEST</c>,
     /// <c>ANY SHORTEST</c> or <c>SHORTEST [k]</c>, or <c>ALL</c> or <c>ANY [k]</c> directly before
     /// a path pattern. Each takes an optional path mode and <c>PATH</c>/<c>PATHS</c>, and
-    /// <c>SHORTEST</c> takes <c>GROUP</c>/<c>GROUPS</c> instead; all of it is one construct.
+    /// <c>SHORTEST</c> may then take <c>GROUP</c>/<c>GROUPS</c>; all of it is one construct.
     /// </summary>
     /// <param name="index">The index of <c>ALL</c>, <c>ANY</c> or <c>SHORTEST</c>.</param>
     /// <param name="construct">The construct the prefix names.</param>
@@ -409,17 +419,17 @@ public sealed partial class GqlQueryParser : QueryParser
         int next = index + 1;
         bool shortest = head == "SHORTEST" || IsWordAt(next, "SHORTEST");
         if (head != "SHORTEST" && shortest) { next++; }
-        if (head != "ALL" && next < _tokens.Count && _tokens[next].Type == TokenType.Integer) { next++; }
+        if (head != "ALL" && next < _tokens.Count && _tokens[next].Type is TokenType.Integer or TokenType.Parameter) { next++; }
 
         if (TryPathModeAt(next, out _))
         {
             next++;
         }
-        if (IsWordAt(next, "PATH") || IsWordAt(next, "PATHS") ||
-            head == "SHORTEST" && (IsWordAt(next, "GROUP") || IsWordAt(next, "GROUPS")))
+        if (IsWordAt(next, "PATH") || IsWordAt(next, "PATHS"))
         {
             next++;
         }
+        if (head == "SHORTEST" && (IsWordAt(next, "GROUP") || IsWordAt(next, "GROUPS"))) { next++; }
 
         last = next - 1;
         if (shortest)

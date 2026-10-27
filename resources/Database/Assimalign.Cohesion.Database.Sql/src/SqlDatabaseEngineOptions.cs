@@ -55,8 +55,8 @@ public sealed class SqlDatabaseEngineOptions
     /// </summary>
     public TimeSpan LockTimeout { get; set; }
 
-    /// <summary>Gets or sets the maximum accounted bytes retained by concurrent hash builds in one statement.</summary>
-    /// <remarks>Defaults to 64 MiB. Must be positive. Exceeding the budget fails the statement; hash joins never spill.</remarks>
+    /// <summary>Gets or sets the maximum accounted bytes retained by hash builds and CREATE TABLE AS copying in one statement.</summary>
+    /// <remarks>Defaults to 64 MiB. Must be positive. CREATE TABLE AS charges retained query output and batch buffers. Exceeding the budget fails the statement before publication; hash joins never spill.</remarks>
     public long StatementMemoryBudget { get; set; } = 64L * 1024 * 1024;
 
     /// <summary>

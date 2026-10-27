@@ -54,6 +54,8 @@ public class SqlConformanceTests
     [InlineData("INSERT INTO users (name) DEFAULT VALUES;", SqlQueryCommandType.Insert)]
     [InlineData("UPDATE dbo.users SET name = 'Ada', age = age + 1 WHERE id = @id;", SqlQueryCommandType.Update)]
     [InlineData("UPDATE dbo.users AS u SET age = age + 1 WHERE u.id BETWEEN 1 AND 10 RETURNING id, age;", SqlQueryCommandType.Update)]
+    [InlineData("MERGE INTO t USING s ON t.id=s.id WHEN MATCHED AND s.v>0 THEN UPDATE SET v=s.v WHEN MATCHED THEN DELETE WHEN NOT MATCHED THEN INSERT(id,v) VALUES(s.id,s.v) WHEN NOT MATCHED BY SOURCE THEN DO NOTHING RETURNING merge_action();", SqlQueryCommandType.Merge)]
+    [InlineData("MERGE INTO t USING s CROSS JOIN u ON t.id=s.id WHEN MATCHED THEN DO NOTHING;", SqlQueryCommandType.Merge)]
     [InlineData("UPDATE dbo.users SET name = DEFAULT WHERE id = 1;", SqlQueryCommandType.Update)]
     [InlineData("UPDATE t SET v=s.v FROM s WHERE t.id=s.id RETURNING t.v,s.v;", SqlQueryCommandType.Update)]
     [InlineData("DELETE FROM t USING s WHERE t.id=s.id RETURNING t.id,s.v;", SqlQueryCommandType.Delete)]
@@ -165,7 +167,7 @@ public class SqlConformanceTests
     [InlineData("SELECT * FROM t WHERE x = ;")]
     [InlineData("SELECT CASE WHEN THEN END FROM t;")]
     [InlineData("SELECT CAST(x AS) FROM t;")]
-    [InlineData("MERGE INTO t USING s ON 1=1;")]
+    [InlineData("GRANT SELECT ON t TO guest;")]
     [InlineData("GRANT ALL ON t TO role;")]
     [InlineData("🙃 emoji soup ¯\\_(ツ)_/¯;")]
     [InlineData("SELECT \0 FROM t;")]
@@ -181,7 +183,7 @@ public class SqlConformanceTests
     [Fact(DisplayName = "Cohesion Test [Sql.Language] - Conformance: unknown commands carry CS00002, empty input CS00001")]
     public void Parse_UnknownAndEmpty_ShouldCarryDeclaredDiagnostics()
     {
-        Parse("MERGE INTO t;").Diagnostics.ShouldContain(d => d.Code == "CS00002");
+        Parse("GRANT SELECT ON t TO guest;").Diagnostics.ShouldContain(d => d.Code == "CS00002");
         Parse("").Diagnostics.ShouldContain(d => d.Code == "CS00001");
         Parse("SELECT 1").Diagnostics.ShouldContain(d => d.Code == "CS00009");
         Parse("SELECT 1;").Diagnostics.ShouldNotContain(d => d.Code == "CS00009");

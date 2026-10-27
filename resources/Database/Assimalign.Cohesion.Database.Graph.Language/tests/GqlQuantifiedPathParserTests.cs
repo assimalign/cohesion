@@ -88,7 +88,6 @@ public sealed class GqlQuantifiedPathParserTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Graph.Language] - Quantifiers: owned exclusions report one capability diagnostic")]
-    [InlineData("MATCH ((a)-[]->(b) WHERE a.x=1){1,3} RETURN a", "PARENTHESIZED PATH WHERE", "WHERE")]
     [InlineData("MATCH (p = (a)-[]->(b)){1,3} RETURN p", "SUBPATH VARIABLE", "p =")]
     [InlineData("MATCH ((a)-[]->(b))? RETURN a", "QUESTIONED PATH", "?")]
     [InlineData("MATCH (a)-[]->?(b) RETURN a", "QUESTIONED PATH", "?")]
@@ -100,7 +99,6 @@ public sealed class GqlQuantifiedPathParserTests
     [InlineData("MATCH ((a)->(b)) (WALK (c)->(d)){2} RETURN a", "WALK", "WALK")]
     [InlineData("MATCH (a) ((x)~[:T]~(y)){1,3} (b) RETURN a", "UNDIRECTED EDGE", "~")]
     [InlineData("MATCH WALK (a)-[:T]->+(b) RETURN a", "WALK", "WALK")]
-    [InlineData("MATCH ANY SHORTEST (a)-[:T]->+(b) RETURN a", "ANY SHORTEST", "ANY")]
     public void Parse_UnsupportedQuantifierConstruct_ShouldNameFirstToken(string source, string construct, string first)
     {
         // Act

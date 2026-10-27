@@ -37,6 +37,10 @@ internal static partial class GraphPlanExecutor
         }
         var plan = new GraphPlanner(database, operation.Context.Snapshot).Plan(statement.GqlExpression, parameters, paths, token);
         parameters = plan.Parameters;
+        // SP2 plans and explains selectors; SP3 supplies their accounted search. Refuse
+        // eagerly, even for empty input, LIMIT 0 or an earlier writing stage.
+        if (plan.MatchClauses.SelectMany(clause => clause.Paths).Any(path => path.Selection is not null || path.Shape?.HasPrefilters == true))
+        { throw new GraphPlanningException("CK00001", ErrorMessages.PathSelectionExecutionUnsupported, plan.Query.Location); }
         // Validate result shape before locking a writer, expanding a MATCH or applying mutations.
         var compositeColumns = plan.Projections.Select(projection => projection.MayBeComposite).ToArray();
         long headerLength = 4;

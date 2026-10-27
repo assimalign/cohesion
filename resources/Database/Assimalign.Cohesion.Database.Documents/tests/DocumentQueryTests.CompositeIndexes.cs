@@ -18,6 +18,36 @@ namespace Assimalign.Cohesion.Database.Documents.Tests;
 
 public sealed partial class DocumentQueryTests
 {
+    [Fact(DisplayName = "Cohesion Test [Documents] - Scalar planning does not assume a compound array index contains empty arrays (#1530)")]
+    public async Task Execute_TypedArrayIndexWithScalarPrefix_ShouldKeepCompleteScalarScan()
+    {
+        // Arrange.
+        await using var engine = DocumentDatabaseEngine.Create("array-planning-boundary", new());
+        var database = await engine.CreateDatabaseAsync("test");
+        await using var session = await database.CreateSessionAsync();
+        var collection = await session.CreateCollectionAsync("items");
+        await PutAsync(collection, session, "empty", "{\"tenant\":7,\"items\":[]}");
+        await PutAsync(collection, session, "valued", "{\"tenant\":7,\"items\":[2]}");
+        var writer = await database.Coordinator.BeginAsync(IsolationLevel.Snapshot);
+        try
+        {
+            await database.LockWriterAsync(writer, CancellationToken.None);
+            var parent = database.Catalog.FindCollection("items", writer.Snapshot)!.Value.Id;
+            await database.Catalog.CreateIndexAsync(parent, "ix", [DocumentIndexKey.Scalar("tenant"), DocumentIndexKey.DistinctArray("items")],
+                false, false, writer, CancellationToken.None);
+            await database.Coordinator.CommitAsync(writer);
+        }
+        finally { if (writer.State == TransactionState.Active) { await database.Coordinator.RollbackAsync(writer); } }
+
+        // Act.
+        const string query = "SELECT META().id AS id FROM items WHERE tenant = 7";
+        var rows = await RowsAsync(session, query);
+
+        // Assert: array-aware planning follows in OQ-I2; a scalar prefix alone is incomplete.
+        rows.Select(row => row.GetString(0)).ShouldBe(["empty", "valued"]);
+        (await PlanAsync(database, query)).Access.ShouldBeOfType<DocumentScanPath>();
+    }
+
     [Theory(DisplayName = "Cohesion Test [Documents] - Composite seeks equal scans over randomized mixed shapes (#1135)")]
     [InlineData(1135, false)]
     [InlineData(2026, false)]

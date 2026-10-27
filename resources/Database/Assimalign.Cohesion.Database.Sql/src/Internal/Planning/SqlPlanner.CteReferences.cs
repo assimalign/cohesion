@@ -22,6 +22,7 @@ internal sealed partial class SqlPlanner
     // The normal binder still checks every definition, including all unknown names/types.
     private static HashSet<SqlCommonTableExpression>? FindReferencedCommonTables(SqlQueryExpression statement)
     {
+        if (statement is SqlCreateTableAsExpression create) { statement = create.Query; }
         if (CommonTablesOf(statement).Count == 0 && statement is not SqlInsertExpression { SelectSource.CommonTables.Count: > 0 })
         {
             return null;

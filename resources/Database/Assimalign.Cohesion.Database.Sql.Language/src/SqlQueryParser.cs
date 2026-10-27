@@ -137,6 +137,10 @@ public sealed partial class SqlQueryParser : QueryParser
             {
                 expression = ParseInsert(ref lexer);
             }
+            else if (keyword.Equals("MERGE", StringComparison.OrdinalIgnoreCase))
+            {
+                expression = ParseMerge(ref lexer);
+            }
             else if (keyword.Equals("UPDATE", StringComparison.OrdinalIgnoreCase))
             {
                 expression = ParseUpdate(ref lexer);
@@ -629,6 +633,7 @@ public sealed partial class SqlQueryParser : QueryParser
     private static string StatementName(SqlQueryExpression expression) => expression switch
     {
         SqlCreateTableExpression => "CREATE TABLE",
+        SqlCreateTableAsExpression => "CREATE TABLE AS",
         SqlCreateSchemaExpression => "CREATE SCHEMA",
         SqlCreateViewExpression => "CREATE VIEW",
         SqlCreateIndexExpression => "CREATE INDEX",
@@ -828,6 +833,7 @@ public sealed partial class SqlQueryParser : QueryParser
         if (IsWord(ref lexer, "WITH")) { statement = ParseWith(ref lexer); }
         else if (StartsQuery(lexer, queryExpected: true)) { statement = ParseQueryExpression(ref lexer); }
         else if (IsWord(ref lexer, "INSERT")) { statement = ParseInsert(ref lexer); }
+        else if (IsWord(ref lexer, "MERGE")) { statement = ParseMerge(ref lexer); }
         else if (IsWord(ref lexer, "UPDATE")) { statement = ParseUpdate(ref lexer); }
         else if (IsWord(ref lexer, "DELETE")) { statement = ParseDelete(ref lexer); }
         else
@@ -912,7 +918,9 @@ public sealed partial class SqlQueryParser : QueryParser
         {
             if (TryPeekToken(lexer, out string next, out _) && next == "(") { return false; }
         }
-        return value.Equals("WHERE", StringComparison.OrdinalIgnoreCase) ||
+        return value.Equals("WHEN", StringComparison.OrdinalIgnoreCase) ||
+               value.Equals("THEN", StringComparison.OrdinalIgnoreCase) ||
+               value.Equals("WHERE", StringComparison.OrdinalIgnoreCase) ||
                value.Equals("SET", StringComparison.OrdinalIgnoreCase) ||
                value.Equals("VALUES", StringComparison.OrdinalIgnoreCase) ||
                value.Equals("DEFAULT", StringComparison.OrdinalIgnoreCase) ||
@@ -950,6 +958,7 @@ public sealed partial class SqlQueryParser : QueryParser
         out Location location)
     {
         bool withStatement = false;
+        bool createTable = false;
         bool explainPrefix = false;
         bool inWithDefinitions = false;
         HashSet<string>? cteNames = null;
@@ -1017,10 +1026,12 @@ public sealed partial class SqlQueryParser : QueryParser
                 location = null!;
                 return false;
             }
-            if (firstToken.Equals("CREATE", StringComparison.OrdinalIgnoreCase) && IsKeyword(ref lexer, "VIEW"))
+            createTable |= firstToken.Equals("CREATE", StringComparison.OrdinalIgnoreCase) && IsKeyword(ref lexer, "TABLE");
+            if (firstToken.Equals("CREATE", StringComparison.OrdinalIgnoreCase) &&
+                (IsKeyword(ref lexer, "VIEW") || (createTable && IsKeyword(ref lexer, "AS") && fromScopes.Count == 0)))
             {
-                // Header syntax is checked by ParseCreateView; AS starts the query's scan.
-                while (lexer.MoveNext())
+                // Dedicated DDL parsing checks the header; AS starts the query's scan.
+                while (!IsKeyword(ref lexer, "AS") && lexer.MoveNext())
                 {
                     if (IsKeyword(ref lexer, "AS")) { break; }
                 }
@@ -1032,7 +1043,7 @@ public sealed partial class SqlQueryParser : QueryParser
             // A WITH-prefixed INSERT's SELECT source can change firstToken below. Retain
             // the outer write identity so its RETURNING subqueries still get their own gate.
             dmlStatement |= fromScopes.Count == 0 &&
-                (IsKeyword(ref lexer, "INSERT") || IsKeyword(ref lexer, "UPDATE") || IsKeyword(ref lexer, "DELETE"));
+                (IsKeyword(ref lexer, "INSERT") || IsKeyword(ref lexer, "UPDATE") || IsKeyword(ref lexer, "DELETE") || IsKeyword(ref lexer, "MERGE"));
             if (fromScopes.Count == 0 && IsWord(ref lexer, "CONFLICT") &&
                 string.Equals(previousToken, "ON", StringComparison.OrdinalIgnoreCase))
             {
@@ -1107,7 +1118,7 @@ public sealed partial class SqlQueryParser : QueryParser
             // FROM/USING and WHERE admit read subqueries; SET still refuses them.
             dmlWhere |= fromScopes.Count == 0 &&
                 (IsKeyword(ref lexer, "FROM") && firstToken.Equals("UPDATE", StringComparison.OrdinalIgnoreCase) ||
-                 IsKeyword(ref lexer, "USING") && firstToken.Equals("DELETE", StringComparison.OrdinalIgnoreCase));
+                 IsKeyword(ref lexer, "USING") && (firstToken.Equals("DELETE", StringComparison.OrdinalIgnoreCase) || firstToken.Equals("MERGE", StringComparison.OrdinalIgnoreCase)));
 
             dmlWhere |= fromScopes.Count == 0 && IsKeyword(ref lexer, "WHERE") &&
                 (firstToken.Equals("UPDATE", StringComparison.OrdinalIgnoreCase) || firstToken.Equals("DELETE", StringComparison.OrdinalIgnoreCase));
@@ -1240,8 +1251,10 @@ public sealed partial class SqlQueryParser : QueryParser
             else if (lexer.Current.Type == TokenType.Keyword)
             {
                 if (token.Equals("FROM", StringComparison.OrdinalIgnoreCase) ||
-                    token.Equals("USING", StringComparison.OrdinalIgnoreCase) && fromScopes.Count == 0 && firstToken.Equals("DELETE", StringComparison.OrdinalIgnoreCase)) { inFrom = true; }
-                else if (token.Equals("WHERE", StringComparison.OrdinalIgnoreCase) ||
+                    token.Equals("USING", StringComparison.OrdinalIgnoreCase) && fromScopes.Count == 0 && (firstToken.Equals("DELETE", StringComparison.OrdinalIgnoreCase) || firstToken.Equals("MERGE", StringComparison.OrdinalIgnoreCase))) { inFrom = true; }
+                else if (token.Equals("WHEN", StringComparison.OrdinalIgnoreCase) ||
+                    token.Equals("ON", StringComparison.OrdinalIgnoreCase) && firstToken.Equals("MERGE", StringComparison.OrdinalIgnoreCase) ||
+                    token.Equals("WHERE", StringComparison.OrdinalIgnoreCase) ||
                     token.Equals("GROUP", StringComparison.OrdinalIgnoreCase) ||
                     token.Equals("HAVING", StringComparison.OrdinalIgnoreCase) ||
                     token.Equals("ORDER", StringComparison.OrdinalIgnoreCase) ||

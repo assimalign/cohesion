@@ -1,6 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <root>
   <data name="UpsertArbiterInvalid" xml:space="preserve"><value>ON CONFLICT target '{0}' on '{1}.{2}': {3}</value></data>
+  <data name="MergeActionInvalid" xml:space="preserve"><value>MERGE requires at least one WHEN clause with an action valid for its match kind.</value></data>
+  <data name="MergeWhenUnreachable" xml:space="preserve"><value>A MERGE WHEN clause follows an unconditional clause of the same match kind.</value></data>
+  <data name="MergeActionContext" xml:space="preserve"><value>merge_action() is allowed only in the RETURNING projection of MERGE.</value></data>
+  <data name="MergeActionArity" xml:space="preserve"><value>merge_action() accepts no arguments, quantifier or ordering.</value></data>
+  <data name="MergeAggregate" xml:space="preserve"><value>Aggregates are not allowed in MERGE conditions or action values; use a source query.</value></data>
+  <data name="MergeStar" xml:space="preserve"><value>A wildcard is not allowed in MERGE conditions or action values.</value></data>
+  <data name="MergeAssignmentType" xml:space="preserve"><value>MERGE value of type {0} cannot be assigned to column '{1}' of type {2}.</value></data>
+  <data name="MergeExecutionPending" xml:space="preserve"><value>MERGE execution is not supported; syntax, binding and EXPLAIN are available.</value></data>
   <data name="UpsertTargetRequired" xml:space="preserve"><value>DO UPDATE requires a column or ON CONSTRAINT target.</value></data>
   <data name="UpsertConstraintNotUnique" xml:space="preserve"><value>The constraint has no associated unique index (CHECK and FOREIGN KEY cannot arbitrate).</value></data>
   <data name="UpsertLegacyPrimaryKey" xml:space="preserve"><value>The legacy primary key has no associated unique index.</value></data>
@@ -164,6 +172,8 @@
   <data name="IndexProvisioningCollision" xml:space="preserve"><value>Index '{0}' already exists on '{1}.{2}'; schema provisioning cannot adopt it.</value></data>
   <data name="ExecutionIndexExists" xml:space="preserve"><value>An index named '{0}' already exists on '{1}.{2}'.</value></data>
   <data name="ExecutionIndexMissing" xml:space="preserve"><value>No index named '{0}' exists on '{1}.{2}'.</value></data>
+  <data name="TableAsOutputNames" xml:space="preserve"><value>CREATE TABLE AS requires a complete list of nonblank, distinct output names; alias every unnamed expression or supply the complete column-name list.</value></data>
+  <data name="TableAsTargetChanged" xml:space="preserve"><value>The CREATE TABLE AS destination changed while the statement was being planned. Retry the statement.</value></data>
   <data name="TableIdentityReplaced" xml:space="preserve"><value>Table '{0}.{1}' was replaced while waiting for a DDL lock. Retry the statement.</value></data>
   <data name="ColumnBinaryRequired" xml:space="preserve"><value>Column '{0}' requires binary data.</value></data>
   <data name="DateConversionUnsupported" xml:space="preserve"><value>Cannot convert {0} to DATE.</value></data>
@@ -313,7 +323,7 @@
   <data name="ScriptPublicationMismatch" xml:space="preserve"><value>The statement target, script identity or expected preceding receipt state does not match this publication.</value></data>
   <data name="StoredRowDecodeFailed" xml:space="preserve"><value>Row of table '{0}.{1}' (object {2}) does not decode: {3}</value></data>
   <data name="StatementMemoryBudgetExceeded" xml:space="preserve">
-    <value>The statement hash-build memory budget of {0} bytes was exceeded.</value>
+    <value>The statement memory budget of {0} bytes was exceeded.</value>
   </data>
   <data name="ExplainAnalyzeSelectOnly" xml:space="preserve">
     <value>EXPLAIN ANALYZE supports SELECT queries only.</value>

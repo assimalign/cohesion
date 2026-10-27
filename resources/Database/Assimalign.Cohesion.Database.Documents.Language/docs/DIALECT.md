@@ -310,7 +310,9 @@ UNIQUE is a Cohesion extension in SQL spelling and remains reserved elsewhere (S
 is CK00001). Conditional creation skips an existing name regardless of its definition.
 An absent conditional DROP is a no-op; existing schema ownership and snapshot conflicts still refuse.
 Unconditional duplicate creation fails with CD03024; an absent unconditional DROP fails with
-CD01025. An encoded composite key beyond 1024 bytes fails with CD02026. These errors
+CD01025. An encoded composite key beyond 1024 bytes fails with CD02026. An encoded index
+definition beyond the 8,092-byte catalog record limit fails with CD03026 before any posting
+extraction or physical tree creation, including definitions with large path lists. These errors
 carry structured diagnostics. OQL index DDL is autocommit-only; an explicit transaction refuses
 it with CD04105 before catalog access. After a failed autocommit statement the next can run immediately.
 PATHS in COHESION_SCHEMA.INDEXES is the ordered array, PATH is its first entry, and IS_UNIQUE is real.
@@ -324,7 +326,7 @@ per row, so key swaps may fail. A failed explicit transaction requires RollbackA
 The wire uses ExecutionFailure (6) without a protocol change and keeps the connection usable.
 The path-count cap reports CD00009 at the 33rd key (CD03022 for a directly constructed AST). Duplicate/empty keys, expressions, wildcards, ASC/DESC, partial
 WHERE and INCLUDE MISSING receive CD00002. ALL and DISTINCT ARRAY index keys get one CK00001
-at ALL/DISTINCT. The catalog uses v2 index records and refuses v1 indexes before recovery writes;
+at ALL/DISTINCT. The catalog uses v3 index records (#1530) and refuses v1/v2 indexes before recovery writes;
 there is no upgrade path or legacy reader. Composite seeks support a leading equality prefix
 and one range on the next path. Bounded snapshot-visible probes rank candidate cost first;
 ties use prefix length, range, UNIQUE, then ordinal name. Comparable complete inputs may

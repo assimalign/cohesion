@@ -31,9 +31,11 @@ internal sealed partial class SqlPlanner
         SqlCorrelatedSubqueryPlan => "CorrelatedSubqueries",
         SqlInsertSelectPlan => "InsertSelect",
         SqlInsertPlan => "Insert",
+        SqlMergePlan => "Merge",
         SqlUpdatePlan => "Update",
         SqlDeletePlan => "Delete",
         SqlCreateTablePlan => "CreateTable",
+        SqlCreateTableAsPlan => "CreateTableAs",
         SqlCreateSchemaPlan => "CreateSchema",
         SqlCreateViewPlan => "CreateView",
         SqlDropViewPlan => "DropView",
@@ -67,10 +69,12 @@ internal sealed partial class SqlPlanner
                 SqlSelectPlan p => Target(p.Table),
                 SqlSystemViewPlan p => p.View.Schema + "." + p.View.Name,
                 SqlInsertPlan p => Target(p.Table),
+                SqlMergePlan p => Target(p.Table),
                 SqlInsertSelectPlan p => Target(p.Table),
                 SqlUpdatePlan p => Target(p.Table),
                 SqlDeletePlan p => Target(p.Table),
                 SqlCreateTablePlan p => p.Schema + "." + p.Name,
+                SqlCreateTableAsPlan p => p.Schema + "." + p.Name,
                 SqlCreateSchemaPlan p => p.Name,
                 SqlDropTablePlan p => p.Schema + "." + p.Name,
                 SqlDropSchemaPlan p => p.Name,
@@ -101,6 +105,7 @@ internal sealed partial class SqlPlanner
                     QueryDetail(false, p.OrderBy, p.IsDistinct, p.Limit, p.Offset),
                 SqlInsertPlan p => DmlDetail($"values rows={p.Rows.Count}", p.Returning),
                 SqlInsertSelectPlan p => DmlDetail(null, p.Returning),
+                SqlMergePlan p => DmlDetail($"join={p.Source.Associations.Tree!.Step!.Kind}; actions=written_order; execution=unsupported", p.Returning),
                 SqlUpdatePlan p => DmlDetail($"assignments={p.Assignments.Count}; filter={p.Where is not null}", p.Returning),
                 SqlDeletePlan p => DmlDetail($"filter={p.Where is not null}", p.Returning),
                 SqlDefinitionPlan p => p.Expression.CommandType.ToString(),
@@ -216,6 +221,16 @@ internal sealed partial class SqlPlanner
                     break;
                 case SqlInsertSelectPlan insert:
                     Visit(insert.Source, id);
+                    break;
+                case SqlMergePlan merge:
+                    Visit(merge.Source.Associations, id);
+                    for (int actionIndex = 0; actionIndex < merge.Actions.Count; actionIndex++)
+                    {
+                        var action = merge.Actions[actionIndex];
+                        int actionId = nodes.Count;
+                        Add("MergeAction", id, Target(merge.Table), detail: $"order={actionIndex + 1}; {action.MatchKind}; {action.Action}; condition={action.Condition is not null}; assignments={action.Assignments.Count}; insert_columns={action.InsertOrdinals.Count}");
+                        foreach (var query in action.Queries) { Visit(query.Query, actionId); }
+                    }
                     break;
                 case SqlUpdatePlan update:
                     if (update.Source is { } updateSource) { Visit(updateSource.Associations, id); }

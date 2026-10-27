@@ -23,6 +23,7 @@ internal static class GqlUnsupportedVocabulary
         new("UNION", "UNION", GqlWordPosition.Clause),
         new("CALL", "CALL", GqlWordPosition.Clause),
         new("YIELD", "YIELD", GqlWordPosition.Clause),
+        // MATCH selector prefixes are parsed; these retain refusals in other positions.
         new("ALL", "ALL", GqlWordPosition.Clause),
         new("EXISTS", "EXISTS", GqlWordPosition.Clause),
         new("ANY", "ANY", GqlWordPosition.Clause),

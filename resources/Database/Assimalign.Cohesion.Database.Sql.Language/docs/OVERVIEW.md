@@ -12,7 +12,7 @@ binding SQL DDL/CAST type names to the shared type system (`Database.Types`).
   (multi-row, whole-item `DEFAULT`, `DEFAULT VALUES`, `INSERT ... SELECT`), `UPDATE`
   (including parsed/bound FROM sources, `SET c = DEFAULT` and correlated and uncorrelated WHERE subqueries), `DELETE`
   (including parsed/bound USING sources and correlated and uncorrelated WHERE subqueries), `CREATE/ALTER/DROP TABLE`, `TRUNCATE` table lists with identity and FK policies,
-  `CREATE/DROP FUNCTION`, `CREATE/DROP DOMAIN`, and a full expression grammar (precedence, `CASE`, `CAST`, predicates,
+  `CREATE TABLE AS` with complete output names and WITH [NO] DATA, `CREATE/DROP FUNCTION`, `CREATE/DROP DOMAIN`, and a full expression grammar (precedence, `CASE`, `CAST`, predicates,
   parameters). Error-tolerant: malformed input yields diagnostics, never
   exceptions.
 - **AST** — sealed statement/expression node families under
@@ -36,9 +36,14 @@ binding SQL DDL/CAST type names to the shared type system (`Database.Types`).
   length/precision/scale) to `DatabaseType` identities; builtin function names are
   declared in the lexer tables and the dialect doc.
 - **Canonical rendering** — `SqlExpressionRenderer` turns a parsed expression or
-  SELECT, set-operation, UPDATE or DELETE query back into canonical SQL text that parses to the same tree. It is the
+  SELECT, set-operation, UPDATE, DELETE or MERGE query back into canonical SQL text that parses to the same tree. It is the
   form in which the engine persists stored expressions (CHECK, DEFAULT and SQL function bodies); see
   [DIALECT.md](DIALECT.md#persisted-definitions-are-canonical).
+
+MERGE syntax, ordered actions, BY SOURCE, RETURNING/merge_action(), binding and EXPLAIN
+are supported, using the existing read-source forms. FULL associations require a safe
+mandatory hash equality and complete ON safety proof (CS05070); execution refuses with
+CK00001 before costing until SQ-M2 (#1715).
 
 UPDATE FROM and DELETE USING execute and belong to the executable clause profile. EXPLAIN
 exposes target access paths and source join algorithms. UPDATE refuses multiple matches before

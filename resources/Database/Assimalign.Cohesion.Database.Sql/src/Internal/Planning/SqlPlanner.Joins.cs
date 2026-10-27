@@ -21,7 +21,8 @@ internal sealed partial class SqlPlanner
     private IReadOnlyList<SqlRelationBinding> BindJoinSources(IReadOnlyList<SqlFromItem> from, SqlQueryExpression statement,
         SqlRelationSource first, out IReadOnlyList<SqlCatalogColumn> columns, out IReadOnlyList<SqlJoinStep> steps,
         out IReadOnlyList<int> outputOrdinals, out SqlJoinTree? tree, bool metadataOnly = false, SqlSelectExpression? queryOwner = null,
-        SqlTableReference? target = null)
+        SqlTableReference? target = null, bool forceTree = false,
+        Dictionary<SqlExpression, SqlExpressionEvaluator>? dmlScopes = null)
     {
         var bindings = new List<SqlRelationBinding>();
         var allColumns = new List<SqlCatalogColumn>();
@@ -33,7 +34,7 @@ internal sealed partial class SqlPlanner
             allColumns.AddRange(first.Columns);
             output.AddRange(Enumerable.Range(0, first.Columns.Count));
         }
-        bool treeNeeded = from.Any(NeedsJoinTree);
+        bool treeNeeded = forceTree || from.Any(NeedsJoinTree);
         SqlJoinTree? whole = treeNeeded && target is not null ? new(0) : null;
         foreach (var item in from)
         {
@@ -70,7 +71,7 @@ internal sealed partial class SqlPlanner
                     defaultCollation: _catalog.DefaultCollation, subquerySlots: _subquerySlots,
                     functions: _functions, cancellationToken: _cancellationToken,
                     outerScope: OuterScope, outerDependencies: OuterDependencies);
-                if (metadataOnly && join.Condition is { } scopedCondition && queryOwner is not null)
+                if (metadataOnly && join.Condition is { } scopedCondition && (queryOwner is not null || dmlScopes is not null))
                 {
                     var local = bindings.Skip(start).Select(binding =>
                     {
@@ -79,9 +80,11 @@ internal sealed partial class SqlPlanner
                         if (binding.UsingColumns is { } merged) { copy.UsingColumns = new(merged); }
                         return copy;
                     }).ToArray();
-                    (_queryScopes ??= new()).JoinScopes[(queryOwner, scopedCondition)] = new SqlExpressionEvaluator(
+                    var joinedScope = new SqlExpressionEvaluator(
                         allColumns.ToArray(), _parameters, local, defaultCollation: _catalog.DefaultCollation,
                         subquerySlots: _subquerySlots, functions: _functions, cancellationToken: _cancellationToken);
+                    if (queryOwner is not null) { (_queryScopes ??= new()).JoinScopes[(queryOwner, scopedCondition)] = joinedScope; }
+                    dmlScopes?.Add(scopedCondition, joinedScope);
                 }
                 var equalities = new List<(int Left, int Right, Collation Collation)>();
                 SqlBoundExpression? condition = null;

@@ -262,9 +262,11 @@ internal sealed partial class SqlPlanner
         var target = expression switch
         {
             SqlInsertExpression insert => insert.Table,
+            SqlMergeExpression merge => merge.Table,
             SqlUpdateExpression update => update.Table,
             SqlDeleteExpression delete => delete.Table,
             SqlCreateTableExpression create => create.Table,
+            SqlCreateTableAsExpression create => create.Table,
             SqlDropTableExpression drop => drop.Table,
             SqlAlterTableExpression alter => alter.Table,
             SqlCreateIndexExpression create => create.Table,

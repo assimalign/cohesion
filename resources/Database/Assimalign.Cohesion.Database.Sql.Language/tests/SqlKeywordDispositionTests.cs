@@ -32,6 +32,7 @@ public sealed class SqlKeywordDispositionTests
         ["UPDATE"] = Parses("UPDATE t SET a = 1"),
         ["SET"] = Parses("UPDATE t SET a = 1"),
         ["DELETE"] = Parses("DELETE FROM t WHERE a = 1"),
+        ["MERGE"] = Parses("MERGE INTO t USING s ON t.id=s.id WHEN MATCHED THEN DO NOTHING"),
         ["RETURNING"] = Parses("DELETE FROM t RETURNING a"),
         ["FUNCTION"] = Parses("CREATE FUNCTION f(p INT) RETURNS INT VOLATILE CALLED ON NULL INPUT RETURN p"),
         ["DOMAIN"] = Parses("CREATE DOMAIN d AS INT CHECK (VALUE > 0)"),

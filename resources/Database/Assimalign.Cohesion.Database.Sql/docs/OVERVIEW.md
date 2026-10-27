@@ -2,7 +2,13 @@
 
 TRUNCATE table lists execute through atomic storage replacement, with recursive FK closure,
 identity restart/continuation and deferred reclamation that preserves older snapshots (#1716).
-CTAS remains deferred to SQ-T2.
+CREATE TABLE AS infers output types and builds an unpublished owner before atomic publication;
+WITH NO DATA creates only the inferred definition. Failed builds leave no table and use deferred reclamation.
+
+MERGE parses, binds target/source/action scopes and explains ordered actions, BY SOURCE and
+RETURNING/merge_action(). USING retains the existing read-source forms. FULL associations
+require a safe mandatory hash equality and complete ON safety proof (CS05070); execution
+refuses with CK00001 before costing until SQ-M2 (#1715).
 
 ## Wire contract ownership
 

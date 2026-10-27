@@ -6,10 +6,29 @@ SqlTruncateExpression stores an immutable ordered list of SqlTruncateTable targe
 its ONLY modifier, plus effective restart/cascade flags. TABLE is optional; CONTINUE IDENTITY
 and RESTRICT are the defaults. Canonical rendering supplies TABLE and both effective policies.
 TRUNCATE adds one keyword and one advertised clause; RESTART/CONTINUE/IDENTITY remain contextual.
-Completeness and live conformance cases cover the new command; CTAS retains CS00003.
+Completeness and live conformance cases cover both commands.
 The engine's snapshot, closure, identity and reclamation contract is recorded in DIALECT.md.
 No public construction bridge or interface is added. Truncate is appended to SqlQueryCommandType;
 the existing Begin, Commit and Rollback values remain 9, 10 and 11.
+
+## CREATE TABLE AS (#1716, SQ-T2)
+
+SqlCreateTableAsExpression is a sealed CREATE leaf with an immutable optional complete output-name
+list, a query body and effective WithData/IfNotExists flags. The definition-list parser dispatches
+to CTAS at AS, including after a parenthesized name list. It shares SELECT/WITH/set grammar,
+capability checks and nesting measurement. Canonical rendering supplies the effective data policy.
+CREATE TABLE AS adds one advertised clause beside CREATE TABLE, with no new keyword or command
+enum value. DIALECT.md specifies metadata, transaction refusal, publication and error semantics;
+parser/profile and live engine conformance cases advance together.
+Output metadata retains domain defaults and their resolved call vectors. WITH DATA keeps normal
+indexed access planning; WITH NO DATA alone suppresses seek-bound evaluation. The complete name
+list follows CREATE VIEW's Cohesion rule, as DIALECT.md records.
+The engine reports copied-row completion counts, shares the statement grant between retained
+source output and batches, and handles losing name races as duplicate/no-op. Ordinary snapshot
+isolation follows the builder's single commit: snapshots before it see no rows; snapshots after it,
+including those captured before catalog publication, see every row once the live catalog can bind
+the table. Admission proceeds normally. DIALECT.md also records the whole-build metadata lease
+and statement epoch; syntax and format 26 remain unchanged.
 
 ## Repeated subquery grouping keys (#1718)
 
@@ -99,6 +118,23 @@ whitespace: `"a""x"` formerly parsed as column `a` with alias `x`, and now names
 identifier `a"x`. A base-created view with that stored spelling can therefore rebind differently
 or fail after reopen. The unambiguous old form `"a" "x"` keeps its meaning. There is no stored-text
 migration or alternate lexer; recreate an affected view with explicit whitespace or `AS`.
+
+## MERGE syntax and binding (#1715, SQ-M1)
+
+SqlMergeExpression retains a target, one USING relation/join item, ON, ordered
+SqlMergeWhenClause values and optional RETURNING. Each clause retains its complete source span
+from WHEN through its action, so CS05071 locates the unreachable clause. Match/action enums are separate;
+BY TARGET's explicit spelling survives canonical round trips. MERGE adds one keyword
+and one advertised clause; MATCHED, SOURCE, TARGET, DO, NOTHING and merge_action remain
+contextual. The latter uses the existing function-call AST and binds only in MERGE
+RETURNING, where Sql maps it to a text slot. It is not a standalone executable built-in.
+Grammar requires the action set appropriate to the match kind. Unreachable clauses,
+scopes, column/type validation and planning belong to Sql. DIALECT records the complete
+binding contract and temporary CK00001 execution refusal. No persisted format changes.
+USING shares UPDATE FROM's stored/system/view, aliased derived-query and supported join
+sources. At the top level a source CROSS JOIN leaves ON for MERGE; ordinary FROM parsing
+keeps its existing CROSS JOIN ON refusal. VALUES relations, table functions, LATERAL,
+NATURAL JOIN and aliasless derived queries retain the existing source diagnostic codes.
 
 ## INSERT conflict clauses (#1118)
 
@@ -522,7 +558,7 @@ its ordinary bare output alias before SET.
 
 CORRESPONDING, recursive/nested or data-modifying CTEs, window functions, LATERAL,
 UPDATE SET subqueries, `ON UPDATE`,
-`MERGE`, RETURNING subqueries/OLD/NEW/INTO, savepoints, isolation-level syntax, and cost-hint syntax.
+MERGE execution (until SQ-M2), RETURNING subqueries/OLD/NEW/INTO, savepoints, isolation-level syntax, and cost-hint syntax.
 Each is an additive dialect extension when its engine feature
 lands.
 

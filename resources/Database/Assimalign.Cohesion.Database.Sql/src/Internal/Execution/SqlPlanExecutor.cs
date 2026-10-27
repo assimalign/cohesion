@@ -81,8 +81,18 @@ internal sealed partial class SqlPlanExecutor
         => SqlExpressionEvaluator.ForExecution(subqueryValues,
             _containsLike || containsLike || _definitions.Functions.RunsApplicationCode ? cancellationToken : default, sharedColumns, transactionTimestamp ?? ViewTransactionStart);
 
+    internal static void EnsureExecutionSupported(SqlPlan plan)
+    {
+        // The dispatcher calls this before costing; direct executor calls share the refusal.
+        if (StatementInput(plan) is SqlMergePlan)
+        {
+            throw new SqlPlanningException("CK00001", ErrorMessages.MergeExecutionPending);
+        }
+    }
+
     internal Task<DatabaseResult> ExecuteAsync(SqlPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
+        EnsureExecutionSupported(plan);
         // Set before WITH and subquery materialization, and retain it in every child read.
         _isDml |= StatementInput(plan) is SqlInsertPlan or SqlInsertSelectPlan or SqlUpdatePlan or SqlDeletePlan;
         return JoinedDml(plan) && statement.Metrics.JoinedDmlStatement is null
@@ -170,6 +180,8 @@ internal sealed partial class SqlPlanExecutor
                 return await ExecuteDeleteAsync(delete, statement, cancellationToken).ConfigureAwait(false);
             case SqlCreateTablePlan create:
                 return await ExecuteCreateTableAsync(create, statement, cancellationToken).ConfigureAwait(false);
+            case SqlCreateTableAsPlan create:
+                return await ExecuteCreateTableAsAsync(create, statement, cancellationToken).ConfigureAwait(false);
             case SqlCreateViewPlan createView:
                 return await ExecuteCreateViewAsync(createView, statement, cancellationToken).ConfigureAwait(false);
             case SqlDropViewPlan dropView:

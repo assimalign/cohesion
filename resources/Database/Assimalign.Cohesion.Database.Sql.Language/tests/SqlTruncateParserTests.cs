@@ -62,14 +62,15 @@ public sealed class SqlTruncateParserTests
         statement.Diagnostics.ShouldContain(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error && diagnostic.Code == "CS00003");
     }
 
-    [Fact(DisplayName = "Cohesion Test [Sql.Language] - CTAS remains refused in SQ-T1")]
-    public void Parse_CreateTableAsSelect_ShouldRetainExistingRefusal()
+    [Fact(DisplayName = "Cohesion Test [Sql.Language] - CTAS parses beside TRUNCATE (#1716)")]
+    public void Parse_CreateTableAsSelect_ShouldRetainQuery()
     {
         // Arrange / Act
         var statement = Parse("CREATE TABLE t AS SELECT 1");
 
         // Assert
-        statement.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS00003");
+        statement.Diagnostics.ShouldNotContain(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
+        statement.SqlExpression.ShouldBeOfType<SqlCreateTableAsExpression>().WithData.ShouldBeTrue();
     }
 
     private static SqlQueryStatement Parse(string sql) => (SqlQueryStatement)new SqlQueryParser().Parse(sql);

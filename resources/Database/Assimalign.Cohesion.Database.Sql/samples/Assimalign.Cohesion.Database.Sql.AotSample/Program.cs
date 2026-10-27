@@ -36,6 +36,10 @@ internal static class Program
 
     private const string aggregates = "SELECT product(Score) AS p, median(Score) AS m, join_names(Name) AS names, COUNT(*) AS c FROM customers";
 
+    private const string mergeBinding = "MERGE INTO default_guard AS t USING default_guard AS s ON t.id=s.id " +
+        "WHEN MATCHED THEN UPDATE SET note=s.id WHEN NOT MATCHED THEN INSERT DEFAULT VALUES " +
+        "WHEN NOT MATCHED BY SOURCE THEN DELETE RETURNING merge_action(),t.id,s.id";
+
     private const string registered = "SELECT FUNCTION_NAME FROM COHESION_SCHEMA.FUNCTIONS WHERE IS_BUILT_IN = 'NO' ORDER BY FUNCTION_NAME";
 
     private static readonly object?[][] _projection =
@@ -374,6 +378,12 @@ internal static class Program
         Check("in process: EXPLAIN retains index and shared columns", explained.Any(row => Equals(row[2], "IndexSeek") && row[4] is string && row.Length == 8), true);
         await RowsAsync(session, "EXPLAIN DELETE FROM default_guard");
         Check("in process: EXPLAIN DELETE has no effects", await RowsAsync(session, "SELECT COUNT(*) FROM default_guard"), [[3L]]);
+        var mergePlan = await RowsAsync(session, "EXPLAIN " + mergeBinding);
+        Check("in process: MERGE binding and ordered actions", mergePlan.Any(row => Equals(row[2], "Merge")) &&
+            mergePlan.Count(row => Equals(row[2], "MergeAction")) == 3, true);
+        CheckFailure("in process: MERGE execution remains staged", await FailureAsync(async () =>
+            await session.ExecuteAsync(mergeBinding, cancellationToken: CancellationToken.None)), "CK00001");
+        Check("in process: refused MERGE has no effects", await RowsAsync(session, "SELECT COUNT(*) FROM default_guard"), [[3L]]);
         foreach (string side in new[] { "left", "right" })
         {
             await session.ExecuteAsync($"CREATE TABLE hash_{side}(id INT PRIMARY KEY,k INT)");
@@ -459,6 +469,10 @@ internal static class Program
         await connection.ExecuteAsync("TRUNCATE truncate_native RESTART IDENTITY CASCADE", cancellationToken: timeout.Token);
         await connection.ExecuteAsync("INSERT INTO truncate_native DEFAULT VALUES", cancellationToken: timeout.Token);
         Check("over the wire: TRUNCATE RESTART IDENTITY", await RowsAsync(connection, "SELECT id FROM truncate_native", timeout.Token), [[1L]]);
+        Check("over the wire: CTAS copied completion", await connection.ExecuteAsync("CREATE TABLE ctas_native (copied) AS SELECT id FROM truncate_native WITH DATA", cancellationToken: timeout.Token), 1L);
+        Check("over the wire: CTAS inferred rows", await RowsAsync(connection, "SELECT copied FROM ctas_native", timeout.Token), [[1L]]);
+        Check("over the wire: CTAS no-data completion", await connection.ExecuteAsync("CREATE TABLE ctas_empty AS SELECT CAST('bad' AS INT) AS value WITH NO DATA", cancellationToken: timeout.Token), 0L);
+        Check("over the wire: CTAS no-data skips evaluation", await RowsAsync(connection, "SELECT * FROM ctas_empty", timeout.Token), []);
 
         await connection.ExecuteAsync("CREATE SCHEMA wire_namespace", cancellationToken: timeout.Token);
         await connection.ExecuteAsync("CREATE TABLE wire_namespace.t(id INT PRIMARY KEY)", cancellationToken: timeout.Token);
@@ -515,6 +529,11 @@ internal static class Program
         Check("over the wire: CHAR storage, cast, length, concat, LIKE and seek", await RowsAsync(connection, characters, timeout.Token), _characters);
         var explained = await RowsAsync(connection, "EXPLAIN SELECT c FROM fixed_codes WHERE c = 'a'", timeout.Token);
         Check("over the wire: EXPLAIN uses existing result rows", explained.Any(row => Equals(row[2], "IndexSeek") && row[4] is string && row.Length == 8), true);
+        var mergePlan = await RowsAsync(connection, "EXPLAIN " + mergeBinding, timeout.Token);
+        Check("over the wire: MERGE binding and ordered actions", mergePlan.Any(row => Equals(row[2], "Merge")) &&
+            mergePlan.Count(row => Equals(row[2], "MergeAction")) == 3, true);
+        CheckFailure("over the wire: MERGE execution remains staged", await FailureAsync(() =>
+            RowsAsync(connection, mergeBinding, timeout.Token)), "CK00001");
         var hashAnalysis = await RowsAsync(connection,
             "EXPLAIN ANALYZE SELECT l.id FROM hash_left l JOIN hash_right r ON l.k=r.k", timeout.Token);
         Check("over the wire: hash analysis keeps typed counts", hashAnalysis.Any(row => Equals(row[2], "JoinStep") && Equals(row[7], 80L) && row.Length == 8), true);

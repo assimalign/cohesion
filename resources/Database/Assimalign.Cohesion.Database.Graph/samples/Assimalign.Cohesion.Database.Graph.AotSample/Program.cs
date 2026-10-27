@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Assimalign.Cohesion.Database;
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Graph;
+using Assimalign.Cohesion.Database.Graph.Language;
 using Assimalign.Cohesion.Database.Graph.Protocol;
 
 var builder = GraphDatabaseEngine.CreateBuilder("graph-aot");
@@ -17,6 +18,13 @@ var database = await engine.CreateDatabaseAsync("app", CancellationToken.None);
 await using var session = await database.CreateSessionAsync(CancellationToken.None);
 var parameters = new Dictionary<string, object?> { ["xs"] = Enumerable.Range(0, 317).ToArray() };
 int checks = 0;
+
+var renderedPath = GraphQueryRequest.FromGql("MATCH p = SHORTEST 2 WALK GROUPS ((a WHERE a.k>0)->{0,3}(b) WHERE a.k<>b.k) RETURN p")
+    .Statement.GqlExpression.Matches[0].ToString();
+var renderedStatement = (GqlQueryStatement)new GqlQueryParser().Parse($"MATCH {renderedPath} RETURN p");
+if (renderedStatement.Diagnostics.Any() || renderedStatement.GqlExpression.Matches[0].ToString() != renderedPath)
+{ throw new InvalidOperationException("Path rendering smoke mismatch."); }
+checks++;
 
 await Check("RETURN developer_twice(21)", [[42L]]);
 await Check("FOR v IN [1,2,2,NULL] RETURN developer_sum(v), developer_sum(DISTINCT v), count(*)", [[5L,3L,4L]]);

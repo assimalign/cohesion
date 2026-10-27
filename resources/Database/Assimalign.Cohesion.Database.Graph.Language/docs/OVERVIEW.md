@@ -11,6 +11,12 @@ var statement = (GqlQueryStatement)parser.Parse(
 // Inspect statement.Diagnostics before consuming statement.GqlExpression.
 ```
 
+Selectors ANY/ALL, ANY/ALL SHORTEST and counted SHORTEST paths/groups also parse, bind and
+EXPLAIN with search prefilters and endpoint-pair partitions; execution remains CK00001 until
+SP3. See [DIALECT.md](DIALECT.md#path-selectors-parsing-and-planning-1734).
+Complete paths render back to GQL through `GqlPathPattern.ToString()`, retaining predicates,
+quantifiers and selector/mode semantics across reparsing.
+
 The supported surface is ordered MATCH and OPTIONAL MATCH clauses with clause-local WHERE and
 null extension, WALK/TRAIL/SIMPLE/ACYCLIC modes (implicit TRAIL), quantified relationships/subpaths (ISO {m,n}, +, *, Cypher *m..n), and named paths such as
 `MATCH p = (a)-[r:KNOWS]->(b) RETURN p`, ISO label expressions such as `(n:(A|B)&!C)`, `(n:%)` and

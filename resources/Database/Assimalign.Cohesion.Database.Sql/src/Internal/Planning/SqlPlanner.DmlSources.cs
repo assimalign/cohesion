@@ -10,7 +10,7 @@ internal sealed partial class SqlPlanner
 {
     private (SqlCatalogTable Table, SqlExpressionEvaluator Evaluator, SqlDmlSource? Source,
         IReadOnlyList<SqlSubqueryBinding> Queries) BindDmlSources(SqlTableReference target,
-        IReadOnlyList<SqlFromItem> sources, SqlExpression? where, SqlQueryExpression statement)
+        IReadOnlyList<SqlFromItem> sources, SqlExpression? where, SqlQueryExpression statement, bool merge = false)
     {
         if (sources.Count == 0)
         {
@@ -19,7 +19,7 @@ internal sealed partial class SqlPlanner
             return (table, DmlEvaluator(table.Columns, null, target), null, children);
         }
 
-        if (sources.Any(NeedsJoinTree))
+        if (!merge && sources.Any(NeedsJoinTree))
         {
             throw new SqlPlanningException("CS05069", ErrorMessages.RightJoinDmlSource, statement.Location);
         }
@@ -27,42 +27,59 @@ internal sealed partial class SqlPlanner
         var first = new SqlRelationSource(targetTable);
         // Cache derived-source bindings across namespace construction and expression binding.
         _queryScopes ??= new();
+        var joinScopes = merge ? new Dictionary<SqlExpression, SqlExpressionEvaluator>() : null;
         var bindings = BindJoinSources(sources, statement, first, out var columns, out _, out _, out _,
-            metadataOnly: true, target: target);
-        var evaluator = DmlEvaluator(columns, bindings, target);
+            metadataOnly: true, target: target, forceTree: merge, dmlScopes: joinScopes);
+        var evaluator = DmlEvaluator(columns, bindings, target, foldConstants: !merge);
         int scopeId = NextCorrelationScope();
         var queries = new List<SqlSubqueryBinding>();
         int start = 1;
-        foreach (var item in sources)
+        if (joinScopes is not null)
         {
-            int end = start + 1;
-            foreach (var join in item.Joins)
+            // Parenthesized source joins retain each ON namespace, including nested groups.
+            // The target and sibling comma items remain absent from those namespaces.
+            foreach (var join in SourceJoins(sources))
             {
-                end++;
-                if (join.Condition is not null)
+                if (join.Condition is { } on)
                 {
-                    // An ON namespace contains only this comma item; the target is separate.
-                    var local = evaluator.ForRelations(bindings.Skip(start).Take(end - start).ToArray());
-                    queries.AddRange(BindSubqueries(WalkSubqueries(join.Condition), dml: target,
-                        scope: new SqlCorrelationScope(scopeId, local, OuterScope)));
+                    queries.AddRange(BindSubqueries(WalkSubqueries(on), dml: target,
+                        scope: new SqlCorrelationScope(scopeId, joinScopes[on], OuterScope)));
                 }
             }
-            start = end;
+        }
+        else
+        {
+            foreach (var item in sources)
+            {
+                int end = start + 1;
+                foreach (var join in item.Joins)
+                {
+                    end++;
+                    if (join.Condition is not null)
+                    {
+                        // An ON namespace contains only this comma item; the target is separate.
+                        var local = evaluator.ForRelations(bindings.Skip(start).Take(end - start).ToArray());
+                        queries.AddRange(BindSubqueries(WalkSubqueries(join.Condition), dml: target,
+                            scope: new SqlCorrelationScope(scopeId, local, OuterScope)));
+                    }
+                }
+                start = end;
+            }
         }
         if (where is not null)
         {
             queries.AddRange(BindSubqueries(WalkSubqueries(where), dml: target,
                 scope: new SqlCorrelationScope(scopeId, evaluator, OuterScope)));
         }
-        bindings = BindJoinSources(sources, statement, first, out columns, out var steps, out var visibleOrdinals, out _, target: target);
-        evaluator = DmlEvaluator(columns, bindings, target);
+        bindings = BindJoinSources(sources, statement, first, out columns, out var steps, out var visibleOrdinals, out var tree, target: target, forceTree: merge);
+        evaluator = DmlEvaluator(columns, bindings, target, foldConstants: !merge);
         // Association slots retain every physical input column, including hidden USING inputs.
         var projections = new SqlProjection[columns.Count];
         for (int ordinal = 0; ordinal < columns.Count; ordinal++)
         {
             projections[ordinal] = PassThrough(columns[ordinal].Name, ordinal, columns, evaluator);
         }
-        var associations = new SqlJoinPlan(bindings, columns, steps, projections, null, [], null, null, false);
+        var associations = new SqlJoinPlan(bindings, columns, steps, projections, null, [], null, null, false) { Tree = tree };
         return (targetTable, evaluator, new SqlDmlSource(associations, 0, visibleOrdinals), queries);
     }
 

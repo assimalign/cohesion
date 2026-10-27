@@ -69,6 +69,8 @@
   <data name="GroupBindingConflict" xml:space="preserve"><value>A group variable cannot also bind a singleton or another quantified segment.</value></data>
   <data name="GroupPropertyReference" xml:space="preserve"><value>A property map inside a quantified segment cannot reference a group variable.</value></data>
   <data name="PathHopLimitExceeded" xml:space="preserve"><value>The query requires a path exceeding 64 relationships.</value></data>
+  <data name="NestedPathSelectorUnsupported" xml:space="preserve"><value>A path selector is supported only on the outer MATCH path.</value></data>
+  <data name="PathSelectionExecutionUnsupported" xml:space="preserve"><value>Path selectors and inline path-search predicates can be planned and explained; their execution is not supported yet.</value></data>
   <data name="NestedPathModeUnsupported" xml:space="preserve"><value>A path mode inside a parenthesized or quantified subpath is not supported.</value></data>
   <data name="UnboundedWalkUnsupported" xml:space="preserve"><value>Unbounded WALK is not supported; every quantified segment must have a finite upper bound.</value></data>
   <data name="ExpansionLimitExceeded" xml:space="preserve"><value>The query exceeded {2} candidate expansions (physical={0}, viable={1}).</value></data>
@@ -272,4 +274,5 @@
   <data name="FunctionArgumentConversion" xml:space="preserve"><value>A function argument cannot be read as its declared CLR type.</value></data>
   <data name="ShortestPathNodeMissing" xml:space="preserve"><value>The selected shortest path contains a node absent from this statement snapshot.</value></data>
   <data name="ShortestPathRelationshipMissing" xml:space="preserve"><value>The selected shortest path contains a relationship absent from this statement snapshot.</value></data>
+  <data name="SelectivePrefilterPeerBinding" xml:space="preserve"><value>Selected path prefilters cannot reference '{0}', which is introduced by another path in the same MATCH. Bind it in an earlier clause or in this path.</value></data>
 </root>

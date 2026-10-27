@@ -162,7 +162,7 @@ public sealed partial class SqlQueryParser
         return true;
     }
 
-    private SqlCreateTableExpression ParseCreateTable(ref TokenLexer lexer, int pos)
+    private SqlQueryExpression ParseCreateTable(ref TokenLexer lexer, int pos)
     {
         // TABLE
         if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "TABLE"))
@@ -174,6 +174,25 @@ public sealed partial class SqlQueryParser
 
         // Table reference (no alias)
         var table = ParseUnaliasedTableReference(ref lexer);
+
+        // A name-only list belongs to CTAS only when followed by AS. Typed
+        // definition lists retain their ordinary parser and diagnostics.
+        var lookahead = lexer;
+        if (lookahead.Current.Type == TokenType.LeftParen)
+        {
+            int depth = 1;
+            while (lookahead.MoveNext())
+            {
+                if (lookahead.Current.Type == TokenType.Semicolon) { break; }
+                if (lookahead.Current.Type == TokenType.LeftParen) { depth++; }
+                if (lookahead.Current.Type == TokenType.RightParen && --depth == 0)
+                {
+                    while (lookahead.MoveNext() && lookahead.Current.Type == TokenType.Comment) { }
+                    break;
+                }
+            }
+        }
+        if (IsKeyword(ref lookahead, "AS")) { return ParseCreateTableAs(ref lexer, table, ifNotExists, pos); }
 
         // Column definitions: ( col1 TYPE, col2 TYPE, ... )
         var columns = new List<SqlColumnDefinition>();

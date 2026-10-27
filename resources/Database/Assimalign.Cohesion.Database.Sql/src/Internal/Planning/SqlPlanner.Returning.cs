@@ -73,6 +73,7 @@ internal sealed partial class SqlPlanner
                     column.Alias ?? (column.Expression is SqlColumnReferenceExpression outerColumn
                         ? outerColumn.ColumnName : $"column{projections.Count + 1}"), null, column.Expression,
                     GroupExpressionType(column.Expression, columns, evaluator)) { Value = value, Collation = collation,
+                        HasOutputName = column.Alias is not null || column.Expression is SqlColumnReferenceExpression,
                         Metadata = CaptureProjectionMetadata(candidate,
                             UnwrapCollation(column.Expression) is SqlColumnReferenceExpression projectedColumn ? evaluator.ColumnMetadata(projectedColumn) : null,
                             column.Expression, evaluator),

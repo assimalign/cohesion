@@ -27,16 +27,19 @@ public sealed partial class GqlQueryParser
             GqlPathMode? mode = null;
             var prefix = Current;
             var prefixEnd = prefix;
-            if (allowPathVariable && TryPathModeAt(_position, out var explicitMode))
+            GqlPathSelector? selector = null;
+            if (allowPathVariable && (Is("ANY") || Is("ALL") || Is("SHORTEST")))
+            { selector = ParsePathSelector(out mode); prefixEnd = Previous; }
+            else if (allowPathVariable && TryPathModeAt(_position, out var explicitMode))
             {
                 mode = explicitMode;
                 Advance();
                 if (Is("PATH") || Is("PATHS")) { prefixEnd = Current; Advance(); }
             }
             var path = ParsePath(allowQuantifiers: allowPathVariable, out _);
-            if (!Failed && mode == GqlPathMode.Walk && ContainsUnboundedQuantifier(path))
+            if (!Failed && selector is null && mode == GqlPathMode.Walk && ContainsUnboundedQuantifier(path))
             { UnsupportedConstruct("UNBOUNDED WALK", prefix, prefixEnd); }
-            paths.Add(path with { Variable = variable, Mode = mode });
+            paths.Add(path with { Variable = variable, Mode = mode, Selector = selector });
         } while (!Failed && Take(TokenType.Comma));
         return paths.AsReadOnly();
     }
@@ -63,7 +66,7 @@ public sealed partial class GqlQueryParser
                 if (IsVariableToken)
                 { Unsupported("SUBPATH VARIABLE", Current); break; }
                 var inner = ParsePath(allowQuantifiers, out long innerBound);
-                if (!Failed && Is("WHERE")) { Unsupported("PARENTHESIZED PATH WHERE", Current); break; }
+                if (!Failed && Take("WHERE")) { inner = inner with { Predicate = ParsePredicate() }; }
                 Expect(TokenType.RightParen, "')'");
                 RejectLineCommentAfterElement();
                 var quantifierStart = Current;
@@ -238,9 +241,10 @@ public sealed partial class GqlQueryParser
         var labels = ParseLabelSpecification(node: true);
         if (!Failed && (variable is not null || labels is not null) && Current.Type == TokenType.Parameter) { RejectUnsupportedParameter("WHOLE-MAP PARAMETER"); }
         var properties = ParseProperties();
+        var predicate = Take("WHERE") ? ParsePredicate() : null;
         Expect(TokenType.RightParen, "')'");
         RejectLineCommentAfterElement();
-        return new GqlNodePattern(variable, ConjunctionNames(labels), properties) { LabelExpression = labels };
+        return new GqlNodePattern(variable, ConjunctionNames(labels), properties) { LabelExpression = labels, Predicate = predicate };
     }
 
     /// <summary>
@@ -272,6 +276,7 @@ public sealed partial class GqlQueryParser
         var quantifier = Current.Type == TokenType.Asterisk ? ParseQuantifier(cypher: true, allowQuantifiers: true) : null;
         if (!Failed && (variable is not null || labels is not null) && Current.Type == TokenType.Parameter) { RejectUnsupportedParameter("WHOLE-MAP PARAMETER"); }
         var properties = ParseProperties();
+        var predicate = Take("WHERE") ? ParsePredicate() : null;
         Expect(TokenType.RightBracket, "']'");
         RejectLineCommentAfterElement();
         GqlPatternDirection direction;
@@ -281,7 +286,7 @@ public sealed partial class GqlQueryParser
             Expect(TokenType.Minus, "'-' or '->'");
             direction = pointsLeft ? GqlPatternDirection.Incoming : GqlPatternDirection.Undirected;
         }
-        return new GqlRelationshipPattern(variable, (labels as GqlLabelName)?.Name, direction, properties) { LabelExpression = labels, Quantifier = quantifier };
+        return new GqlRelationshipPattern(variable, (labels as GqlLabelName)?.Name, direction, properties) { LabelExpression = labels, Quantifier = quantifier, Predicate = predicate };
     }
 
     /// <summary>

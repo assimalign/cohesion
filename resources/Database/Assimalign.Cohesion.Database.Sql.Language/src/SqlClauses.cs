@@ -18,6 +18,9 @@ public static class SqlClauses
     /// <summary>An INSERT's unique-key conflict action.</summary>
     public const string OnConflict = "ON CONFLICT";
 
+    /// <summary>A MERGE statement whose syntax and binding are supported.</summary>
+    public const string Merge = "MERGE";
+
     /// <summary>An <c>UPDATE</c> statement.</summary>
     public const string Update = "UPDATE";
 
@@ -32,6 +35,9 @@ public static class SqlClauses
 
     /// <summary>A <c>CREATE TABLE</c> statement.</summary>
     public const string CreateTable = "CREATE TABLE";
+
+    /// <summary>CREATE TABLE AS with inferred output columns and optional data.</summary>
+    public const string CreateTableAs = "CREATE TABLE AS";
 
     /// <summary>A <c>CREATE SCHEMA</c> SQL namespace definition.</summary>
     public const string CreateSchema = "CREATE SCHEMA";

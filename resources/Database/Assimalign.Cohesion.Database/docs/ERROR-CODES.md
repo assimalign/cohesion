@@ -111,6 +111,7 @@ structured-carrier messages remain unprefixed.
 | COHSQLE028 | CS01028 | Binding/names |
 | COHSQLE051 | CS01051 | Binding/names |
 | COHSQLE052 | CS01052 | Binding/names |
+| New (#1715, SQ-M1) | CS01053 | Binding/names — merge_action() outside MERGE RETURNING |
 | COHSQLE001 | CS02001 | Values/types |
 | COHSQLE002 | CS02002 | Values/types |
 | COHSQLE003 | CS02003 | Values/types |
@@ -147,6 +148,7 @@ structured-carrier messages remain unprefixed.
 | COHSQLE065 | CS03065 | Schema/constraints |
 | COHSQLE066 | CS03066 | Schema/constraints |
 | New (#1716) | CS03067 | Schema/constraints — TRUNCATE omits a required referencing table (0A000) |
+| New (#1716) | CS03068 | Schema/catalog — CTAS output names are missing, blank, duplicate or have the wrong width (42601) |
 | COHSQLP001 | CS03101 | Schema/constraints |
 | COHSQLP002 | CS03102 | Schema/constraints |
 | COHSQLP003 | CS03103 | Schema/constraints |
@@ -188,6 +190,7 @@ structured-carrier messages remain unprefixed.
 | New (#1714) | CS05068 | Execution/budgets — UPDATE target matched by multiple source associations (before writes) |
 | New (#1525, SQ-J1) | CS05069 | Execution/budgets — direct RIGHT, FULL or parenthesized joined DML source would require a different target-outer execution tree |
 | New (#1525, SQ-J2) | CS05070 | Execution/capabilities — FULL JOIN lacks a safe mandatory hash equality or has an unproven ON evaluation |
+| New (#1715, SQ-M1) | CS05071 | Action planning — MERGE WHEN follows an unconditional clause of the same match kind |
 | COHSQLE041 | CS06041 | Storage/durability |
 | COHSQLE058 | CS06058 | Storage/durability |
 
@@ -246,6 +249,8 @@ payload accepts rows plus a matching affected count without capability negotiati
 | COHDOC020 | CD03020 | Schema/constraints |
 | COHDOC022 | CD03022 | Schema/constraints |
 | COHDOC024 | CD03024 | Schema/constraints |
+| New (#1530) | CD03025 | Schema/constraints — multiple array keys, UNIQUE array index, or INCLUDE MISSING with a leading array key |
+| New (#1530) | CD03026 | Schema/constraints — encoded index definition exceeds the 8,092-byte catalog record limit; refused before posting extraction or tree creation |
 | COHDOC004 | CD04004 | Transactions/locking |
 | COHDBD001 | CD04101 | Transactions/locking |
 | COHDOC001 | CD05001 | Execution/budgets |
@@ -260,7 +265,7 @@ payload accepts rows plus a matching affected count without capability negotiati
 GQL path modes (#1733) retain the existing identities: malformed mode values or INSERT modes in
 hand-built ASTs use CG05001; text repetition bounds above 64 use CG00005; a visited qualifying
 65th hop or physical-work exhaustion uses CG05004; retained-memory exhaustion uses CG05020.
-Nested explicit modes and unbounded WALK use CK00001. BEGIN [TRANSACTION] (#1725) shares START TRANSACTION's
+Nested explicit modes/selectors and unselected unbounded WALK use CK00001. Selected unbounded WALK parses, binds and EXPLAINs; selector/inline-predicate execution retains CK00001 until SP3 (#1734). BEGIN [TRANSACTION] (#1725) shares START TRANSACTION's
 transaction-state diagnostics; it allocates no new identity. These changes add no disk or wire format.
 
 | Previous code | Code | Category |
@@ -275,11 +280,13 @@ transaction-state diagnostics; it allocates no new identity. These changes add n
 | GQL0008 | CG00008 | Language/syntax |
 | GQL0009 | CG00009 | Language/syntax |
 | GQL0010 | CG00010 | Language/syntax |
+| New (#1734) | CG00011 | Language/syntax — SHORTEST selector requires a positive Int64 literal count |
 | COHDBG002 | CG01002 | Binding/names |
 | COHDBG010 | CG01010 | Binding/names |
 | COHDBG011 | CG01011 | Binding/names |
 | COHDBG014 | CG01014 | Binding/names |
 | COHDBG015 | CG01015 | Binding/names |
+| New (#1734) | CG01016 | Binding/names — selected path prefilter references a binding introduced by a peer path in the same MATCH |
 | COHDBG009 | CG02009 | Values/types |
 | COHDBG013 | CG02013 | Values/types |
 | COHDBG003 | CG03003 | Schema/constraints |

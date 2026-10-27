@@ -371,7 +371,7 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
         {
             try
             {
-                if (request.Statement.SqlExpression is SqlDropTableExpression or SqlDropSchemaExpression or SqlTruncateExpression)
+                if (request.Statement.SqlExpression is SqlDropTableExpression or SqlDropSchemaExpression or SqlTruncateExpression or SqlCreateTableAsExpression)
                 {
                     _database.TableReclamation.Request();
                 }
@@ -761,7 +761,12 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
     private async Task<DatabaseResult> ExecuteSelfCommittingResultAsync(SqlQueryRequest request,
         SqlStatementContext scope, CancellationToken cancellationToken)
     {
-        // Every supported DDL success returns only a zero-count completion. Prepare that fixed
+        // CTAS prepares its row count after copying and before catalog publication.
+        if (request.Statement.SqlExpression is SqlCreateTableAsExpression)
+        {
+            return await _executor.ExecuteAsync(request, scope, cancellationToken).ConfigureAwait(false);
+        }
+        // The remaining DDL statements return only a zero-count completion. Prepare that fixed
         // result before invoking the executor: catalog publication may commit inside execution.
         var prepared = await scope.PrepareResultAsync(new SqlQueryResult(DatabaseResultStatus.Success, 0), cancellationToken).ConfigureAwait(false);
         var result = await _executor.ExecuteAsync(request, scope, cancellationToken).ConfigureAwait(false);
