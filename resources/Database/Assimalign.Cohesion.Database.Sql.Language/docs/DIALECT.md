@@ -1300,7 +1300,8 @@ WHERE filters after null extension. EXPLAIN JoinStep names FullHashJoin and unma
 ANALYZE counts tested candidate pairs, excluding emitted unmatched rows. All retained hash
 rows and match flags share StatementMemoryBudget (default 64 MiB), including nested builds;
 CS05067 refuses exhaustion without spill. Reservations unwind on success, failure and
-cancellation. Other outer/intermediate/result materialization is outside that hash budget.
+cancellation. Joined DML also charges retained outer/intermediate inputs and associations as
+described in the statement-memory contract below. General SELECT result materialization is outside that grant.
 PostgreSQL anchors: optimizer/path/joinrels.c:1157-1180, executor/nodeHashjoin.c:578-592,634-679,729-756.
 
 Ordinary flat joins execute left-deep in written order. Only the first INNER pair
@@ -3906,8 +3907,12 @@ An ON condition referencing any derived String/Json/Character column retains nes
 preserve deferred collation errors. No hash spill exists.
 
 `SqlDatabaseEngineOptions.StatementMemoryBudget` defaults to 67108864 bytes and must be positive.
-It limits accounted concurrently live hash-build storage per statement. CTAS also charges its
-retained source result and copy buffers, as described in the CTAS contract. Budget exhaustion reports
+It limits accounted concurrently live hash-build storage per statement. MERGE, UPDATE FROM and
+DELETE USING also charge retained decoded targets, inputs, associations and selected write storage,
+including normalized buffers and referential writes. These conservative reservations last until
+statement exit; shared payload already charged by a hash build is not charged again for an alias.
+An exhausted joined statement refuses before any write and releases memory on success, failure or
+cancellation. CTAS also charges its retained source result and copy buffers, as described in the CTAS contract. Budget exhaustion reports
 `CS05067` (53200, out_of_memory). It does not cap result materialization or transient planning.
 SELECT-only `EXPLAIN ANALYZE` runs normal query expressions, including application functions, and
 returns the existing eight-column plan description. `actual_rows` counts candidates before

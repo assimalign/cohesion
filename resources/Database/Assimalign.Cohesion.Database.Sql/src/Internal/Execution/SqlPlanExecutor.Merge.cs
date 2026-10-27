@@ -61,6 +61,9 @@ internal sealed partial class SqlPlanExecutor
         foreach (var (location, values, writer) in EnumerateDmlTargetRows(merge.Table,
             plan.Inputs[merge.Source.TargetBinding].Access, statement, cancellationToken))
         {
+            var memory = statement.Metrics.DmlMemory(_definitions.StatementMemoryBudget)!;
+            memory.Retain(values);
+            memory.Reserve(128); // identity record, dictionary growth and target-input reference
             identities.Add(values, new(location.PageId, location.SlotIndex, writer, values, values));
             statement.Metrics.RecordDmlTargetRows(identities.Count);
         }
@@ -72,6 +75,9 @@ internal sealed partial class SqlPlanExecutor
             var target = row[^2] is object?[] identity ? identities[identity] : null;
             var kind = target is null ? SqlMergeMatchKind.NotMatchedByTarget
                 : row[^1] is null ? SqlMergeMatchKind.NotMatchedBySource : SqlMergeMatchKind.Matched;
+            var memory = statement.Metrics.DmlMemory(_definitions.StatementMemoryBudget)!;
+            memory.Retain(row);
+            memory.Reserve(96); // candidate record and growing list
             candidates.Add(new(target, row, kind));
         }
         statement.Metrics.DmlAssociationRowReads = statement.Metrics.RowReads - readsBefore;
@@ -160,6 +166,9 @@ internal sealed partial class SqlPlanExecutor
                         }
                         CheckDomains(bound, values, evaluator);
                     }
+                    var memory = statement.Metrics.DmlMemory(_definitions.StatementMemoryBudget)!;
+                    if (values is not null) { memory.Retain(values); }
+                    memory.Reserve(128); // write record, list and modified-target set
                     writes.Add(new(candidate, action, values));
                     break;
                 }
@@ -194,6 +203,7 @@ internal sealed partial class SqlPlanExecutor
             if (deletions.ContainsKey(key) || updates.ContainsKey(key)) { throw new SqlExecutionException("CS05036", ErrorMessages.MergeRepeatedRow); }
             updates.Add(key, new(plan.Table, (target.PageId, target.SlotIndex), target.TargetValues, write.Values!,
                 write.Action.Assignments.Select(assignment => assignment.Ordinal).ToHashSet()));
+            statement.Metrics.DmlMemory(_definitions.StatementMemoryBudget)!.Reserve(256L + 32L * write.Action.Assignments.Count);
         }
         var pending = new SqlConstraintUpdates(updates);
         ValidateRestrictedDeletes(deletions, pending, statement, cancellationToken);
@@ -207,6 +217,7 @@ internal sealed partial class SqlPlanExecutor
             ValidateParentUpdate(update.Table, update.OldValues, update.NewValues, statement, cancellationToken, deletions, pending);
             CollectReleasedReferences(update.Table, [update.OldValues], released, statement, cancellationToken);
             update.NewVersion = SqlRowCodec.Encode(update.Table, update.NewValues, statement.Transaction.Sequence);
+            statement.Metrics.DmlMemory(_definitions.StatementMemoryBudget)!.Retain(update.NewVersion);
         }
         await AcquireParentRowLocksAsync(released, statement, cancellationToken, validate: false, cascade: true).ConfigureAwait(false);
         await LockConstraintDeletesAsync(deletions.Values, statement, cancellationToken).ConfigureAwait(false);

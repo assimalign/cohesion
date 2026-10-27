@@ -119,6 +119,26 @@ internal sealed class SqlStatementMetrics
         if (_accessPath is JoinedDmlWork work) { work.PeakTargetRows = Math.Max(work.PeakTargetRows, count); }
     }
 
+    internal SqlDmlMemory? DmlMemory(long budget)
+    {
+        if (_accessPath is not JoinedDmlWork { DmlStatement: not null } work) { return null; }
+        if (work is not BudgetedDmlWork budgeted)
+        {
+            // Empty joined statements keep the original work object's size and allocation.
+            var memory = new SqlDmlMemory(this, budget);
+            budgeted = new(work) { Memory = memory };
+            _accessPath = budgeted;
+        }
+        return budgeted.Memory;
+    }
+
+    internal void ReleaseDmlMemory()
+    {
+        if (_accessPath is not BudgetedDmlWork work) { return; }
+        work.Memory?.Dispose();
+        work.Memory = null;
+    }
+
     /// <summary>
     /// Gets or sets the access path the executor drove ("scan", or
     /// "seek:&lt;index&gt;", or one "join-scan"/"join-seek:&lt;index&gt;" entry per join step separated by semicolons), empty for
@@ -254,7 +274,7 @@ internal sealed class SqlStatementMetrics
 
     // Inherits the base's effective debugger display/proxy. Ordinary joins retain their
     // original instance layout; only joined DML carries the execution scope.
-    private sealed class JoinedDmlWork : JoinWork
+    private class JoinedDmlWork : JoinWork
     {
         internal JoinedDmlWork() : base([]) { }
 
@@ -262,6 +282,25 @@ internal sealed class SqlStatementMetrics
         internal long RowReads;
         internal long AssociationRowReads;
         internal int PeakTargetRows;
+    }
+
+    private sealed class BudgetedDmlWork : JoinedDmlWork
+    {
+        internal BudgetedDmlWork(JoinedDmlWork previous)
+        {
+            Paths = previous.Paths;
+            ScalarPath = previous.ScalarPath;
+            CandidatePairs = previous.CandidatePairs;
+            MemoryBytes = previous.MemoryBytes;
+            PeakMemoryBytes = previous.PeakMemoryBytes;
+            Operators = previous.Operators;
+            DmlStatement = previous.DmlStatement;
+            RowReads = previous.RowReads;
+            AssociationRowReads = previous.AssociationRowReads;
+            PeakTargetRows = previous.PeakTargetRows;
+        }
+
+        internal SqlDmlMemory? Memory;
     }
 
     [global::System.Diagnostics.DebuggerDisplay("AnalysisState")]

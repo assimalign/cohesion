@@ -189,7 +189,15 @@ internal sealed partial class SqlPlanExecutor
                 sink.Add(row, cancellationToken);
                 FullJoinProgress?.Invoke("build", statement.Metrics, cancellationToken);
             }
-            else { buffer.Add(row); }
+            else
+            {
+                if (statement.Metrics.DmlMemory(_definitions.StatementMemoryBudget) is { } memory)
+                {
+                    memory.Retain(row);
+                    memory.Reserve(32); // list storage, including growth
+                }
+                buffer.Add(row);
+            }
         }
     }
 }

@@ -27,9 +27,9 @@ input sizes. Both orders return correct results; general join-order search belon
 The pushed target filter runs before retaining target identities. Collection keeps the writer
 stamp from the original decode, avoiding a second whole-row read. Internal statement counters
 record association reads separately from total row reads, which also include stamp checks and
-tombstone pre-images, and record peak retained target identities. Target/association collections
-follow plain UPDATE/DELETE's existing unbudgeted retention; StatementMemoryBudget accounts for
-join hash builds and CTAS's retained source/batches, not these DML collections.
+tombstone pre-images, and record peak retained target identities. Joined target/association
+collections share StatementMemoryBudget with inputs, selected writes and hash builds
+(#1751); the statement-budget section below defines ownership and conservative charges.
 Costing rewrites source-derived relations through the same identity map as WITH definitions, so
 volatile CTE sources materialize once. A private join-frame identity slot retains the original decoded
 target array by reference; a local map associates it with physical location and writer stamp.
@@ -3083,7 +3083,8 @@ CS05036 before writes; DO NOTHING does not enter the set (PostgreSQL
 executor/nodeModifyTable.c:3521-3551). Retained selection and generated defaults survive
 referential lock retries without invoking action callbacks again.
 
-Hash builds use the shared statement memory grant and unwind on budget/cancellation failure.
+Hash builds and retained inputs, candidates and writes use the shared statement memory grant
+and unwind on budget/cancellation failure; the statement-budget section records alias ownership.
 Provisioning admission enumerates target, source, ON and all action/subquery references before
 planning. Result preparation includes MERGE in the session DML boundary. Existing cascade,
 CHECK/domain and FK routines validate actions; SQ-M3 completes mixed INSERT/UPDATE/DELETE
@@ -8070,13 +8071,38 @@ SqlDatabaseEngineOptions.StatementMemoryBudget is a positive byte count, default
 statement, including nested queries: each table reserves 104 bytes, arrays reserve both old and
 new storage during doubling, and retained rows charge their arrays and conservatively sized
 boxed/text/binary cells, including both padded CHAR payloads and trimmed comparison strings.
-The limit governs accounted live hash-build memory and CTAS retention described above. General
+The limit governs accounted live hash-build memory, joined-DML retention and CTAS retention described above. General
 result materialization, planning and transient scalar hashing remain outside this grant. Hash-build
 reservation precedes retained allocation; CTAS admits the completed query output before copying.
 Every exit releases reservations, including cancellation, failed decoding and budget refusal.
 CS05067 / PostgreSQL SQLSTATE 53200 reports budget exhaustion through an unprefixed resx
 message and one diagnostic code. There is no partitioning or spill. Persisted statistics,
 standalone ANALYZE and spill remain post-T2 Hardening work under D3.
+
+Joined UPDATE FROM, DELETE USING and MERGE also reserve retained decoded target identities,
+non-hash input buffers, derived-source copies, normalized intermediate frames, associations,
+selected write values and encoded replacement versions before retaining each item (#1715, #1751).
+Cascade deletion/update storage uses the same grant when owned by a joined statement. CS05067
+refuses exhaustion before the apply bracket writes anything. The outer joined-statement scope
+releases every reservation on success, refusal, constraint failure and cancellation, including
+WITH/subquery work and cascade retries. Plain UPDATE, DELETE and ON CONFLICT retain their
+existing allocation paths and do not create this owner.
+
+The join-only metrics state lazily owns a reference-identity ledger. Arrays and shared
+boxed/text/binary/CHAR cells use the hash table's conservative size rules; each retained object
+is charged once. The ledger reserves 320 bytes for its owner/promoted metrics/headers and 160 per tracked slot
+for entries/buckets, including simultaneous arrays during growth; vacated hash-only slots are reused.
+Empty joined statements keep the original metrics size and allocate no ledger. Per-row allowances cover
+growing lists, identity/association records, dictionaries, selected writes and constraint maps.
+These conservative reservations last until statement exit, even when a temporary buffer is
+consumed; the ledger can retain its shared objects for that lifetime. Existing hash builds keep
+their original full charges. Registering a hash row credits overlapping ledger payload first;
+disposing the hash releases its charge and transfers surviving retained payload to the ledger.
+Unselected hash objects leave the ledger when their last hash owner releases them. Thus hash
+storage is never charged a second time merely because an association aliases it. The existing
+HashMemoryBytes/PeakHashMemoryBytes internal metrics report the combined statement grant.
+General query-result materialization and transient expression values remain outside the grant;
+derived-source copies and selected write values are admitted as they are retained.
 
 Plain EXPLAIN never executes the SELECT/DML. Probes can read indexes; actual_rows stays NULL.
 Owner clarification on 2026-10-22 adds EXPLAIN ANALYZE over SELECT query bodies only, including

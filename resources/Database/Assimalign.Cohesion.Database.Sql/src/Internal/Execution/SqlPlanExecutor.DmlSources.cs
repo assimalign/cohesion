@@ -52,7 +52,11 @@ internal sealed partial class SqlPlanExecutor
             locks.ReleaseSince(mark);
             throw;
         }
-        finally { statement.Metrics.JoinedDmlStatement = null; }
+        finally
+        {
+            statement.Metrics.ReleaseDmlMemory();
+            statement.Metrics.JoinedDmlStatement = null;
+        }
     }
 
     private async ValueTask AcquireDmlSourceIntentLocksAsync(SqlPlan plan, SqlStatementContext statement,
@@ -188,6 +192,9 @@ internal sealed partial class SqlPlanExecutor
                 values.CopyTo(frame, plan.Bindings[source.TargetBinding].Offset);
                 if (!targetFilter.Matches(input.Filter, frame)) { continue; }
             }
+            var memory = statement.Metrics.DmlMemory(_definitions.StatementMemoryBudget)!;
+            memory.Retain(values);
+            memory.Reserve(128); // identity record, dictionary growth and target-input reference
             identities.Add(values, new(location.PageId, location.SlotIndex, writer, values, values));
             statement.Metrics.RecordDmlTargetRows(identities.Count);
         }
@@ -215,6 +222,9 @@ internal sealed partial class SqlPlanExecutor
             }
             // Decode owns these binary cells; neither SET nor RETURNING may mutate retained
             // source buffers. Their evaluators request detached binary values on delivery.
+            var memory = statement.Metrics.DmlMemory(_definitions.StatementMemoryBudget)!;
+            memory.Retain(row);
+            memory.Reserve(192); // association record, dictionary growth and apply references
             result.Add(key, identity with { Values = row });
         }
         statement.Metrics.DmlAssociationRowReads = statement.Metrics.RowReads - readsBefore;
@@ -277,5 +287,19 @@ internal sealed partial class SqlPlanExecutor
         var row = (object?[])association.Clone();
         target.CopyTo(row, 0);
         return row;
+    }
+
+    private List<((PageId PageId, int SlotIndex) Location, object?[] Values)> CollectConstraintMatches(
+        IEnumerable<((PageId PageId, int SlotIndex) Location, object?[] Values)> rows, SqlStatementContext statement)
+    {
+        if (statement.Metrics.DmlMemory(_definitions.StatementMemoryBudget) is not { } memory) { return rows.ToList(); }
+        var matches = new List<((PageId PageId, int SlotIndex) Location, object?[] Values)>();
+        foreach (var row in rows)
+        {
+            memory.Retain(row.Values);
+            memory.Reserve(96); // tuple list storage, including growth
+            matches.Add(row);
+        }
+        return matches;
     }
 }

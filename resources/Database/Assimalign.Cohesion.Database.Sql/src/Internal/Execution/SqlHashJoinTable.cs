@@ -37,6 +37,7 @@ internal sealed class SqlHashJoinTable : IDisposable
         bool hasKey = TryHash(row, _keys.InnerOrdinals, _keys.InnerExpressions, out int hash);
         if (!hasKey && !_trackUnmatched) { return; }
         if (_count == _entries.Length) { Grow(cancellationToken); }
+        _metrics.DmlMemory(_budget)?.HashRow(row, adding: true);
         Reserve(RowBytes(row));
         if (!hasKey)
         {
@@ -136,20 +137,22 @@ internal sealed class SqlHashJoinTable : IDisposable
         long bytes = 24L + 8L * row.Length;
         foreach (object? value in row)
         {
-            bytes += value switch
-            {
-                null => 0,
-                string text => (24L + 2L * text.Length + 7) & ~7L,
-                byte[] binary => (24L + binary.Length + 7) & ~7L,
-                // CHAR retains both its padded payload and its trimmed comparison text.
-                // Charge both conservatively even when the strings happen to be identical.
-                SqlCharacter text => 32L + ((24L + 2L * text.Value.Length + 7) & ~7L)
-                    + ((24L + 2L * text.Text.Length + 7) & ~7L),
-                _ => 32, // conservative boxed scalar charge, independent of value width
-            };
+            bytes += ValueBytes(value);
         }
         return bytes;
     }
+
+    internal static long ValueBytes(object? value) => value switch
+    {
+        null => 0,
+        string text => (24L + 2L * text.Length + 7) & ~7L,
+        byte[] binary => (24L + binary.Length + 7) & ~7L,
+        // CHAR retains both its padded payload and its trimmed comparison text.
+        // Charge both conservatively even when the strings happen to be identical.
+        SqlCharacter text => 32L + ((24L + 2L * text.Value.Length + 7) & ~7L)
+            + ((24L + 2L * text.Text.Length + 7) & ~7L),
+        _ => 32, // conservative boxed scalar charge, independent of value width
+    };
 
     private void Reserve(long bytes)
     {
@@ -159,11 +162,15 @@ internal sealed class SqlHashJoinTable : IDisposable
 
     public void Dispose()
     {
+        _metrics.ReleaseHashMemory(_reserved);
+        _reserved = 0;
+        if (_count != 0 && _metrics.DmlMemory(_budget) is { } memory)
+        {
+            for (int i = 0; i < _count; i++) { memory.HashRow(_entries[i].Row, adding: false); }
+        }
         _entries = [];
         _buckets = [];
         _matched = [];
-        _metrics.ReleaseHashMemory(_reserved);
-        _reserved = 0;
         _count = 0;
     }
 

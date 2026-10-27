@@ -1,5 +1,12 @@
 # Assimalign.Cohesion.Database.Sql.Language — Design
 
+## Joined-DML statement memory (#1715, #1751)
+
+DIALECT.md records CS05067 before writes when retained MERGE, UPDATE FROM or DELETE USING
+inputs, associations or selected writes exceed StatementMemoryBudget. Hash builds share that
+grant without a second charge for aliased payload. Syntax, AST and persisted formats are unchanged;
+the engine's joined-DML memory conformance cases cover refusal and under-budget execution.
+
 ## MERGE execution (#1715, SQ-M2)
 
 DIALECT.md records ordered executable actions, BY SOURCE, old/new target RETURNING,
