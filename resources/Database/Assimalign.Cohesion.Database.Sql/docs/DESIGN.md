@@ -6976,6 +6976,9 @@ overload; canonical rendering quotes decoded domain names when required. No pers
 wire message, public interface, visibility grant or project reference changes. NativeAOT smoke
 executes TYPE USING; nonparallel tests force stale-writer waits/retries until counters prove the
 race, and inject failure/cancellation at each preparation stage to verify ownership release.
+TYPE crash-image tests reopen success and cancellation images under all three durability policies,
+checking complete old/new definitions, rows, unique-index seeks and abandoned-owner reclamation
+through copy checkpoints and cleanup.
 
 #### Catalog: Recoverable table rewrite and ordinal compaction (#1265)
 
