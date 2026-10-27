@@ -92,9 +92,13 @@ public sealed class MaintenanceCapacityTests
             // Act: each pass returns exactly one finite slot while the other 63 stay held.
             for (int pass = 0; pass < served.Length; pass++)
             {
+                signal.Reset();
                 finite.Reset();
                 worker.RunIteration(CancellationToken.None);
                 finite.Set();
+                // The callback counter precedes the lane's Ended/slot publication.
+                // Its completion signal establishes the free-slot premise of the next pass.
+                signal.Wait(TimeSpan.FromSeconds(30)).ShouldBeTrue();
                 SpinWait.SpinUntil(() => Volatile.Read(ref finished) >= pass + 1, TimeSpan.FromSeconds(30)).ShouldBeTrue();
             }
 
