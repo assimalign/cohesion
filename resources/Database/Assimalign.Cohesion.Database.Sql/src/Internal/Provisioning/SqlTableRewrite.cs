@@ -63,7 +63,7 @@ internal sealed class SqlTableRewrite
             {
                 try { await _owner.RollbackRewriteAsync(_transaction).ConfigureAwait(false); }
                 catch (Exception cleanup) { failure = new AggregateException(failure, cleanup); }
-                Finish(failure);
+                Finish(_owner.TranslateRewriteFailure(failure));
             }
         }
         finally { _prepared.TrySetResult(); }

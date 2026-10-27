@@ -16,8 +16,10 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed partial class SqlTableRewriteTests
 {
-    [Fact(DisplayName = "Cohesion Test [Sql] - Rewrite: enqueue failure releases the new item's cancellation and admission ownership")]
-    public async Task RewriteTableAsync_EnqueueFailure_ShouldReleaseAdmissionAndAllowRetry()
+    [Theory(DisplayName = "Cohesion Test [Sql] - Rewrite: enqueue failure releases ownership and preserves coded cleanup failures")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RewriteTableAsync_EnqueueFailure_ShouldReleaseAdmissionAndAllowRetry(bool cleanupFailure)
     {
         // Arrange
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
@@ -28,11 +30,21 @@ public sealed partial class SqlTableRewriteTests
         await PrepareAsync(session, timeout.Token);
         var worker = engine.Workers.OfType<SqlProvisioningWorker>().Single();
         var expected = new InvalidOperationException("Injected enqueue failure");
+        var cleanup = new StorageIOException("Injected preparation rollback failure");
         worker.BeforeEnqueue = () => throw expected;
+        database.SchemaProvisioner.RewriteRolledBack = () => { if (cleanupFailure) { throw cleanup; } };
         try
         {
             // Act
-            var failure = await Should.ThrowAsync<InvalidOperationException>(() => database.RewriteTableAsync(Table(database), cancellation.Token).AsTask());
+            Exception failure;
+            if (cleanupFailure)
+            {
+                var coded = await Should.ThrowAsync<DatabaseException>(() => database.RewriteTableAsync(Table(database), cancellation.Token).AsTask());
+                coded.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS06041");
+                coded.InnerException.ShouldBeOfType<AggregateException>().InnerExceptions.ShouldBe(new Exception[] { expected, cleanup });
+                failure = coded.InnerException.ShouldBeOfType<AggregateException>().InnerExceptions[0];
+            }
+            else { failure = await Should.ThrowAsync<InvalidOperationException>(() => database.RewriteTableAsync(Table(database), cancellation.Token).AsTask()); }
 
             // Assert
             failure.ShouldBeSameAs(expected);
@@ -40,7 +52,11 @@ public sealed partial class SqlTableRewriteTests
             cancellation.Cancel();
             await ExecAsync(session, "ALTER TABLE t ADD n INT", timeout.Token);
         }
-        finally { worker.BeforeEnqueue = null; }
+        finally
+        {
+            worker.BeforeEnqueue = null;
+            database.SchemaProvisioner.RewriteRolledBack = null;
+        }
         await database.RewriteTableAsync(Table(database), timeout.Token);
     }
 
