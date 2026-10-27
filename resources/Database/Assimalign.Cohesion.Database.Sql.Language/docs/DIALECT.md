@@ -381,10 +381,12 @@ is irrevocable; cancellation after it returns the committed result. A disconnect
 response. The source uses one statement MVCC snapshot. Retained query output and encoded batch
 buffers share StatementMemoryBudget; exhaustion reports CS05067 and leaves no table.
 The destination remains absent until its entire data build and dedicated writer transaction
-are durable. A snapshot admitted before publication sees an empty destination; one admitted
-afterwards sees every row. Snapshot admission waits through the short writer-commit/catalog-
-publication interval, including BEGIN, auto-commit and explicit ReadCommitted statement snapshots.
-No snapshot sees a partial row set. Conversion, domain, budget, cancellation and storage failures before
+are durable. Ordinary snapshot isolation follows the builder's single commit: a snapshot taken
+before that commit sees no destination rows; one taken after it sees every row once the live
+catalog can bind the table at publication, as with a concurrently created table. A snapshot taken
+between builder commit and publication therefore sees the complete table after publication.
+Statement and BEGIN admission proceed normally through that interval. No snapshot sees a partial
+row set. Conversion, domain, budget, cancellation and storage failures before
 publication leave no table. Crash recovery sees no table or the complete table, and reclaims
 abandoned owners. SQL remains format 26; existing kind-14 reclamation records suffice.
 

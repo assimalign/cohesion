@@ -223,45 +223,40 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
                 ErrorMessages.BeginTransactionCoreAsyncDatabase);
         }
 
-        // BEGIN retains TRUNCATE/rewrite's paired storage/catalog capture, and CTAS
-        // also excludes snapshots in its durable writer/publication interval.
-        await _database.Catalog.TableAsSnapshotGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        // A snapshot and its retained storage bindings must fall on the same side of a
+        // TRUNCATE publication. No table lock or data apply gate is held while BEGIN waits.
+        await _database.Catalog.TruncateSnapshotGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            await _database.Catalog.TruncateSnapshotGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            var transactionStart = (_database.Engine.EngineOptions.TimeProvider ?? TimeProvider.System).GetUtcNow();
+            TransactionContext context;
             try
             {
-                var transactionStart = (_database.Engine.EngineOptions.TimeProvider ?? TimeProvider.System).GetUtcNow();
-                TransactionContext context;
-                try
-                {
-                    context = await _coordinator.BeginAsync(isolationLevel, cancellationToken).ConfigureAwait(false);
-                }
-                catch (Exception exception) when (_database.TranslateFailure(exception) is var offline && !ReferenceEquals(offline, exception))
-                {
-                    throw offline;
-                }
-
-                try
-                {
-                    return new SqlDatabaseTransaction(_coordinator, context, _database,
-                        isolationLevel == IsolationLevel.Snapshot ? _executor.CaptureCatalogSnapshot() : null, transactionStart);
-                }
-                catch
-                {
-                    // Offline storage leaves recovery to abort this context (#1243). Cleanup
-                    // must never replace the capture/construction failure that brought us here.
-                    if (!_database.IsOffline)
-                    {
-                        try { await _coordinator.RollbackAsync(context, CancellationToken.None).ConfigureAwait(false); }
-                        catch (Exception) { /* Preserve the original capture/construction failure. */ }
-                    }
-                    throw;
-                }
+                context = await _coordinator.BeginAsync(isolationLevel, cancellationToken).ConfigureAwait(false);
             }
-            finally { _database.Catalog.TruncateSnapshotGate.Release(); }
+            catch (Exception exception) when (_database.TranslateFailure(exception) is var offline && !ReferenceEquals(offline, exception))
+            {
+                throw offline;
+            }
+
+            try
+            {
+                return new SqlDatabaseTransaction(_coordinator, context, _database,
+                    isolationLevel == IsolationLevel.Snapshot ? _executor.CaptureCatalogSnapshot() : null, transactionStart);
+            }
+            catch
+            {
+                // Offline storage leaves recovery to abort this context (#1243). Cleanup
+                // must never replace the capture/construction failure that brought us here.
+                if (!_database.IsOffline)
+                {
+                    try { await _coordinator.RollbackAsync(context, CancellationToken.None).ConfigureAwait(false); }
+                    catch (Exception) { /* Preserve the original capture/construction failure. */ }
+                }
+                throw;
+            }
         }
-        finally { _database.Catalog.TableAsSnapshotGate.Release(); }
+        finally { _database.Catalog.TruncateSnapshotGate.Release(); }
     }
 
     /// <inheritdoc />
@@ -594,21 +589,15 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
 
                 try
                 {
-                    await _database.Catalog.TableAsSnapshotGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-                    SqlStatementContext scope;
-                    try
-                    {
-                        snapshotPin = await BeginSnapshotPinAsync(transaction.Context, cancellationToken).ConfigureAwait(false);
+                    snapshotPin = await BeginSnapshotPinAsync(transaction.Context, cancellationToken).ConfigureAwait(false);
 
-                        // The scope captures the statement's snapshot after the pin began, so the pin's
-                        // floor is at or below the statement's (#1363). It runs under the transaction's own
-                        // context, not a pinned view: anything phase two reads through that context's
-                        // snapshot must see writers that committed while the statement waited for a lock
-                        // (a cascade's index deletes did, until #1370 matched them by stamps).
-                        scope = new SqlStatementContext(transaction.Context, _coordinator, _provisioningSchema,
-                            _database.Name.ToString(), transaction.CatalogSnapshot, transactionStart: transaction.TransactionStart, resultPreparation: ResultPreparation);
-                    }
-                    finally { _database.Catalog.TableAsSnapshotGate.Release(); }
+                    // The scope captures the statement's snapshot after the pin began, so the pin's
+                    // floor is at or below the statement's (#1363). It runs under the transaction's own
+                    // context, not a pinned view: anything phase two reads through that context's
+                    // snapshot must see writers that committed while the statement waited for a lock
+                    // (a cascade's index deletes did, until #1370 matched them by stamps).
+                    var scope = new SqlStatementContext(transaction.Context, _coordinator, _provisioningSchema,
+                        _database.Name.ToString(), transaction.CatalogSnapshot, transactionStart: transaction.TransactionStart, resultPreparation: ResultPreparation);
                     _lastStatementMetrics = scope.Metrics;
                     return await ExecuteDataOrExplainAsync(request, scope, cancellationToken).ConfigureAwait(false);
                 }
@@ -656,24 +645,20 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
         // visibility and conflict semantics are identical to the explicit path.
         var transactionStart = (_database.Engine.EngineOptions.TimeProvider ?? TimeProvider.System).GetUtcNow();
         TransactionContext context;
-        SqlStatementContext autoScope;
-        await _database.Catalog.TableAsSnapshotGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             context = await _coordinator.BeginAsync(_isolationLevel, cancellationToken).ConfigureAwait(false);
-            autoScope = new SqlStatementContext(context, _coordinator, _provisioningSchema,
-                _database.Name.ToString(), null, _ddlLockOwner, ProvisioningProgress, scriptReceipt, transactionStart, _database.DdlInterlock, ResultPreparation);
         }
         catch (Exception exception) when (_database.TranslateFailure(exception) is var offline && !ReferenceEquals(offline, exception))
         {
             // Refused before the statement wrote anything, a self-committing one included.
             throw offline;
         }
-        finally { _database.Catalog.TableAsSnapshotGate.Release(); }
 
         try
         {
-            var scope = autoScope;
+            var scope = new SqlStatementContext(context, _coordinator, _provisioningSchema,
+                _database.Name.ToString(), null, _ddlLockOwner, ProvisioningProgress, scriptReceipt, transactionStart, _database.DdlInterlock, ResultPreparation);
             _lastStatementMetrics = scope.Metrics;
             var result = await ExecuteDataOrExplainAsync(request, scope, cancellationToken).ConfigureAwait(false);
             if (scriptReceipt is { } receipt && !IsSelfCommitting(request) && result.Status == DatabaseResultStatus.Success)

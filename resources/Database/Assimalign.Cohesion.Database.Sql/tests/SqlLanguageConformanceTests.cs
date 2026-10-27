@@ -857,7 +857,7 @@ public sealed class SqlLanguageConformanceTests
             async (session, result) =>
             {
                 result.AffectedCount.ShouldBe(3);
-                await ExpectRowsAsync(session, "SELECT key FROM copied ORDER BY key LIMIT 1;", [[1]]);
+                await ExpectRowsAsync(session, "SELECT key, label FROM copied ORDER BY key;", [[1, "Ada"], [2, "Grace"], [3, "Alan"]]);
             }),
         [SqlClauses.AlterTable] = new("ALTER TABLE t ADD COLUMN extra INT NOT NULL DEFAULT 7;", _seed,
             expression => expression is SqlAlterTableExpression { Action: SqlAlterAddColumnAction }, VerifyAlterAsync),

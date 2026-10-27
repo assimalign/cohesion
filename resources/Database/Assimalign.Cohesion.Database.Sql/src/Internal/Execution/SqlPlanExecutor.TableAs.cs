@@ -121,26 +121,20 @@ internal sealed partial class SqlPlanExecutor
             // Prepare the actual completion before either irrevocable publication or an
             // observer of it. A duplicate-name no-op can still prepare its zero completion.
             var result = await CompleteAsync(written).ConfigureAwait(false);
-            await _catalog.TableAsSnapshotGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-            try
+            // One builder commit controls row visibility. Snapshots taken before it see
+            // no rows; those taken afterwards see all rows once publication permits binding.
+            if (builder is not null)
             {
-                // Snapshot admission shares this gate: there is no SQL snapshot between
-                // the durable writer commit and catalog publication. Older snapshots retain
-                // the builder in their active set (or beyond their maximum) and see no rows.
-                if (builder is not null)
-                {
-                    await statement.Coordinator.CommitAsync(builder, cancellationToken).ConfigureAwait(false);
-                    builder = null;
-                }
-                TableAsStage?.Invoke("BuilderCommitted", table.ObjectId);
-                if (!await _catalog.PublishTableAsAsync(table, plan.IfNotExists && statement.ProvisioningSchema is null,
-                    publication, cancellationToken).ConfigureAwait(false))
-                {
-                    return await CompleteAsync(0).ConfigureAwait(false);
-                }
-                statement.Metrics.RecordSelfCommit();
+                await statement.Coordinator.CommitAsync(builder, cancellationToken).ConfigureAwait(false);
+                builder = null;
             }
-            finally { _catalog.TableAsSnapshotGate.Release(); }
+            TableAsStage?.Invoke("BuilderCommitted", table.ObjectId);
+            if (!await _catalog.PublishTableAsAsync(table, plan.IfNotExists && statement.ProvisioningSchema is null,
+                publication, cancellationToken).ConfigureAwait(false))
+            {
+                return await CompleteAsync(0).ConfigureAwait(false);
+            }
+            statement.Metrics.RecordSelfCommit();
             AfterSelfCommit?.Invoke();
             return result;
         }

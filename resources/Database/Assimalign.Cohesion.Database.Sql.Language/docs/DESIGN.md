@@ -24,9 +24,11 @@ Output metadata retains domain defaults and their resolved call vectors. WITH DA
 indexed access planning; WITH NO DATA alone suppresses seek-bound evaluation. The complete name
 list follows CREATE VIEW's Cohesion rule, as DIALECT.md records.
 The engine reports copied-row completion counts, shares the statement grant between retained
-source output and batches, handles losing name races as duplicate/no-op, and fences snapshot
-admission across durable builder commit and catalog publication. DIALECT.md also records the
-whole-build metadata lease and statement epoch; syntax and format 26 remain unchanged.
+source output and batches, and handles losing name races as duplicate/no-op. Ordinary snapshot
+isolation follows the builder's single commit: snapshots before it see no rows; snapshots after it,
+including those captured before catalog publication, see every row once the live catalog can bind
+the table. Admission proceeds normally. DIALECT.md also records the whole-build metadata lease
+and statement epoch; syntax and format 26 remain unchanged.
 
 ## Repeated subquery grouping keys (#1718)
 

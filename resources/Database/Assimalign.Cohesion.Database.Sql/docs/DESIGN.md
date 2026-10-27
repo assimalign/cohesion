@@ -6787,14 +6787,15 @@ it. The builder commits durably outside the apply gate after the last flush and 
 before catalog publication. Whole-owner abandonment supplies failure cleanup, so the builder
 needs no growing per-row undo ledger.
 
-The CTAS snapshot-admission semaphore spans the builder commit and catalog publication.
-BEGIN, auto-commit statement snapshots and explicit ReadCommitted statement snapshots all use
-that gate when captured. A snapshot admitted before publication cannot see the builder sequence;
-one attempting admission between the writer commit and catalog commit waits until publication
-finishes. After publication every row is visible to a new snapshot; older snapshots resolve the
-new name but see an empty table. No snapshot can see a partial build. No snapshot survives reopen,
-so no persisted creation marker or format change is needed. This gate is separate from TRUNCATE's
-BEGIN/publication semaphore, preserving ordinary readers admitted during a TRUNCATE marker.
+Ordinary MVCC over the builder's single commit controls visibility. A snapshot taken before that
+commit sees no destination rows. A snapshot taken after it sees every row once the live catalog
+can bind the table at publication, just as for a concurrently created table. This includes snapshots
+taken between builder commit and publication: the rows committed before those snapshots, so they
+see the complete table after publication. No snapshot sees a partial build. CTAS adds no snapshot
+admission gate or per-statement synchronization/allocation; BEGIN, explicit-transaction and
+auto-commit admission retain their pre-CTAS shape. TRUNCATE's BEGIN/publication semaphore is
+unchanged; a BEGIN queued there does not block admission of ordinary statements. No snapshot
+survives reopen, so no persisted creation marker or format change is needed.
 
 Query operators keep their existing materialization policy, as INSERT SELECT does. Before copying,
 the retained child result (row arrays, scalar/text/binary payloads and result-list capacity) is

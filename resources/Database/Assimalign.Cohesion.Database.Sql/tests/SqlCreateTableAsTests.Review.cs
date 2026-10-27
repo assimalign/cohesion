@@ -17,7 +17,7 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 public sealed partial class SqlCreateTableAsTests
 {
     [Fact(DisplayName = "Cohesion Test [Sql] - CTAS: older snapshots see an empty destination and later snapshots see every row")]
-    public async Task ExecuteAsync_PrePublicationSnapshot_ShouldSeeEmptyDestination()
+    public async Task ExecuteAsync_PreBuilderCommitSnapshot_ShouldSeeEmptyDestination()
     {
         // Arrange
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
@@ -169,11 +169,11 @@ public sealed partial class SqlCreateTableAsTests
         }
     }
 
-    [Theory(DisplayName = "Cohesion Test [Sql] - CTAS: snapshot admission in the writer-commit/publication gap waits for complete publication")]
+    [Theory(DisplayName = "Cohesion Test [Sql] - CTAS: admission in the writer-commit/publication gap proceeds and later binding sees all rows")]
     [InlineData("begin")]
     [InlineData("auto")]
     [InlineData("read-committed")]
-    public async Task ExecuteAsync_SnapshotAtPublicationGap_ShouldWaitForPublication(string mode)
+    public async Task ExecuteAsync_SnapshotAtPublicationGap_ShouldProceedAndSeeCompleteRows(string mode)
     {
         // Arrange
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
@@ -194,12 +194,14 @@ public sealed partial class SqlCreateTableAsTests
             if (mode == "begin")
             {
                 beginning = reader.BeginTransactionAsync(IsolationLevel.Snapshot, timeout.Token).AsTask();
-                beginning.IsCompleted.ShouldBeFalse();
+                beginning.IsCompleted.ShouldBeTrue();
             }
             else
             {
-                reading = reader.ExecuteAsync("SELECT * FROM copy", cancellationToken: timeout.Token).AsTask();
-                reading.IsCompleted.ShouldBeFalse();
+                // Finish an unrelated query while CTAS remains unpublished; the live
+                // catalog can bind the new table only after publication.
+                reading = reader.ExecuteAsync("SELECT * FROM src", cancellationToken: timeout.Token).AsTask();
+                reading.IsCompleted.ShouldBeTrue();
             }
         };
         try
@@ -209,20 +211,52 @@ public sealed partial class SqlCreateTableAsTests
 
             // Assert
             observed.ShouldBe(1);
-            if (beginning is not null)
-            {
-                await using var snapshot = await beginning;
-                (await RowsAsync(reader, "SELECT * FROM copy", timeout.Token)).Count.ShouldBe(65);
-            }
-            else
-            {
-                await using var result = (DatabaseResultSet)await reading.ShouldNotBeNull();
-                int rows = 0;
-                await foreach (var row in result.GetRowsAsync(timeout.Token)) { rows++; }
-                rows.ShouldBe(65);
-            }
+            (await RowsAsync(reader, "SELECT id FROM copy ORDER BY id", timeout.Token))
+                .Select(r => (int)r[0]!).ShouldBe(Enumerable.Range(1, 65));
         }
-        finally { SqlPlanExecutor.TableAsStage = null; }
+        finally
+        {
+            SqlPlanExecutor.TableAsStage = null;
+            if (reading is not null) { await using var result = (DatabaseResultSet)await reading; }
+            if (beginning is not null) { await using var snapshot = await beginning; }
+        }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql] - CTAS: BEGIN queued at TRUNCATE admission does not block other statements")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task BeginTransactionAsync_QueuedBehindTruncate_ShouldAllowStatementAdmission(bool explicitTransaction)
+    {
+        // Arrange
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        await using var engine = SqlDatabaseEngine.Create("ctas-begin-admission", new());
+        var database = await engine.CreateDatabaseAsync("db", timeout.Token);
+        await using var beginning = await database.CreateSessionAsync(timeout.Token);
+        await using var reader = await database.CreateSessionAsync(timeout.Token);
+        await SeedAsync(reader, timeout.Token);
+        await using var existing = explicitTransaction ? await reader.BeginTransactionAsync(IsolationLevel.ReadCommitted, timeout.Token) : null;
+        await database.Catalog.TruncateSnapshotGate.WaitAsync(timeout.Token);
+        var queued = beginning.BeginTransactionAsync(IsolationLevel.Snapshot, timeout.Token).AsTask();
+        Task<DatabaseResult>? reading = null;
+        try
+        {
+            // Act
+            queued.IsCompleted.ShouldBeFalse();
+            reading = reader.ExecuteAsync("SELECT * FROM src", cancellationToken: timeout.Token).AsTask();
+
+            // Assert
+            reading.IsCompleted.ShouldBeTrue();
+            var result = (DatabaseResultSet)await reading;
+            int rows = 0;
+            await foreach (var row in result.GetRowsAsync(timeout.Token)) { rows++; }
+            rows.ShouldBe(65);
+        }
+        finally
+        {
+            database.Catalog.TruncateSnapshotGate.Release();
+            await using var snapshot = await queued;
+            if (reading is not null) { await using var result = (DatabaseResultSet)await reading; }
+        }
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - CTAS: intermediate batches append without flushing and the final batch is durable")]
