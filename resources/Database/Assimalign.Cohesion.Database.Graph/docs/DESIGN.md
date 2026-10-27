@@ -477,6 +477,9 @@ normal coordinator release; escalation never grows that set. This caps both reta
 and the manager's end walk without a new kernel release API or an unsafe early release. The
 parent protocol preserves phantom serialization, and the database writer remains mandatory for
 overlapping patterns and ordinary writes. Normal writes allocate no MERGE tracker or cache.
+End cleanup fences tracker charges before releasing the statement lease on the same budget;
+late autocommit grant cleanup cannot race that release. End-between-grants tests assert budget
+and lease release for both explicit transactions and autocommit operations.
 
 Non-parallel tests exercise real transactions for creators, ordinary deleters/replacements,
 directed/undirected relationship overlap, all matched entities, bound endpoints, overlays,

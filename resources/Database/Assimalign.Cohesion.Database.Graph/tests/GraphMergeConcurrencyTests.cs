@@ -435,9 +435,11 @@ public sealed class GraphMergeConcurrencyTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Database.Graph] - MERGE end or cancellation between writer and pattern grants releases late ownership (#1735)")]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task MatchAsync_EndedBetweenGrants_ShouldReleaseLatePatternGrant(bool dispose)
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task MatchAsync_EndedBetweenGrants_ShouldReleaseLatePatternGrant(bool dispose, bool autocommit)
     {
         // Arrange
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
@@ -446,26 +448,36 @@ public sealed class GraphMergeConcurrencyTests
         await using var engine = GraphDatabaseEngine.Create("merge", new());
         var database = await engine.CreateDatabaseAsync("patterns", token);
         await using var session = await database.CreateSessionAsync(cancellationToken: token);
-        await using var transaction = await session.BeginTransactionAsync(IsolationLevel.Snapshot, token);
+        await using var transaction = autocommit ? null : await session.BeginTransactionAsync(IsolationLevel.Snapshot, token);
         var identity = Identity(["Person"]);
         int gates = 0, probes = 0;
+        bool chargedBeforeEnd = false;
+        var budget = new GraphPlanExecutor.ExpansionBudget();
 
         // Act
-        var pending = database.RunAsync(session, operation => GraphMergeConcurrency.MatchAsync(database, operation, identity,
-            (_, _) => { probes++; return ValueTask.FromResult(new GraphMergeRead<ulong>([], [])); }, cancellation.Token,
-            async () =>
-            {
-                gates++;
-                if (dispose) { await session.DisposeAsync(); }
-                else { cancellation.Cancel(); }
-            }), token).AsTask();
+        var pending = database.RunAsync(session, operation =>
+        {
+            operation.QueryBudget = budget;
+            return GraphMergeConcurrency.MatchAsync(database, operation, identity,
+                (_, _) => { probes++; return ValueTask.FromResult(new GraphMergeRead<ulong>([], [])); }, cancellation.Token,
+                async () =>
+                {
+                    gates++;
+                    chargedBeforeEnd = budget.Memory.RetainedBytes > 0;
+                    if (dispose) { await session.DisposeAsync(); }
+                    else { cancellation.Cancel(); }
+                });
+        }, token).AsTask();
 
         // Assert: the uncontended pattern grant occurs after end/cancellation; no probe runs.
         await Should.ThrowAsync<Exception>(pending);
         gates.ShouldBe(1);
         probes.ShouldBe(0);
+        chargedBeforeEnd.ShouldBeTrue();
+        budget.Memory.RetainedBytes.ShouldBe(0);
+        budget.Memory.ActiveLeases.ShouldBe(0);
         await AssertReleasedAsync(database, [identity], token);
-        await transaction.RollbackAsync(token);
+        if (transaction is not null) { await transaction.RollbackAsync(token); }
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Graph] - MERGE freshness charges physical work and aborts at the configured budget (#1735)")]
