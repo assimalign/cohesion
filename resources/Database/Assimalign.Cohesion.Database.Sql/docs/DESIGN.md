@@ -6773,6 +6773,9 @@ committed visibility for read-committed ON CONFLICT). An invisible replacement a
 CS04006 instead of reporting a false FK violation; empty input and MATCH SIMPLE null keys
 need no parent probe and can commit. Seeing the newest ordered publication marker skips all
 retained owners in constant work; older snapshots use an allocation-free indexed scan.
+The ordered vector stores only owner, replacement and marker identities; snapshot descriptions
+remain in the retired-owner directory under the catalog monitor. Replacement identity therefore
+preserves the existing publication/removal array allocation budgets.
 Hook-driven regressions pause child INSERT, child DELETE and a parent DELETE binding a rewriting
 child between discovery and IS grant, assert rediscovery, and verify rollback cannot restore an
 orphan. Parent DELETE must wait for the child's shared lock on the replacement parent's row.
