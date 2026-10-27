@@ -99,9 +99,9 @@
   <data name="SqlQueryParserParseJoinClausesVoid2" xml:space="preserve"><value>Expected '(' after USING.</value></data>
   <data name="SqlQueryParserParseJoinClausesVoid3" xml:space="preserve"><value>Expected a column name in USING.</value></data>
   <data name="SqlQueryParserParseJoinClausesVoid4" xml:space="preserve"><value>Expected ')' after USING columns.</value></data>
-  <data name="SqlQueryParserParseJoinClausesVoid5" xml:space="preserve"><value>SQL supports INNER, LEFT [OUTER], RIGHT [OUTER] and CROSS JOIN; FULL OUTER JOIN is not supported.</value></data>
+  <data name="SqlQueryParserParseJoinClausesVoid5" xml:space="preserve"><value>SQL supports INNER, LEFT [OUTER], RIGHT [OUTER], FULL [OUTER] and CROSS JOIN.</value></data>
   <data name="SqlQueryParserParseJoinClausesVoid6" xml:space="preserve"><value>CROSS JOIN cannot have ON or USING.</value></data>
-  <data name="SqlQueryParserParseJoinClausesVoid7" xml:space="preserve"><value>INNER, LEFT and RIGHT JOIN require ON or USING.</value></data>
+  <data name="SqlQueryParserParseJoinClausesVoid7" xml:space="preserve"><value>INNER, LEFT, RIGHT and FULL JOIN require ON or USING.</value></data>
   <data name="SqlQueryParserParseJoinClausesVoid8" xml:space="preserve"><value>JOIN accepts exactly one of ON or USING.</value></data>
   <data name="QueryParserParseRelationReferenceVoid" xml:space="preserve"><value>Expected SELECT in a derived table.</value></data>
   <data name="QueryParserParseRelationReferenceVoid2" xml:space="preserve"><value>Expected ')' after the derived query.</value></data>

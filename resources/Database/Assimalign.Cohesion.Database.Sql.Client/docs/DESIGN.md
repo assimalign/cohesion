@@ -78,6 +78,14 @@ still starts with the engine code. The connection and explicit transaction remai
 Both-transport tests assert rollback of earlier rows in multi-row INSERT, INSERT SELECT and
 upsert failures. There is no API or wire-format change.
 
+## FULL joins (#1525)
+
+InMemory and loopback TCP conformance use the ordinary result codec for duplicate/NULL keys,
+both unmatched bags, common-typed COALESCE USING outputs and empty inputs. EXPLAIN identifies
+FullHashJoin. Physical eligibility CS05070, direct joined-DML CS05069 and statement hash-budget
+CS05067 preserve structured diagnostics and connection reuse; derived FULL DML sources execute.
+No client API, protocol version or header nullability field changes.
+
 ## Joined DML (#1714)
 
 UPDATE FROM and DELETE USING use the existing command/result exchange. Both InMemory and TCP

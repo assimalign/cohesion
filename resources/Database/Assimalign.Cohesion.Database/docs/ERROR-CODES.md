@@ -186,7 +186,8 @@ structured-carrier messages remain unprefixed.
 | COHSQLE060 | CS05060 | Execution/budgets |
 | COHSQLE067 | CS05067 | Execution/budgets |
 | New (#1714) | CS05068 | Execution/budgets — UPDATE target matched by multiple source associations (before writes) |
-| New (#1525, SQ-J1) | CS05069 | Execution/budgets — direct RIGHT or parenthesized joined DML source would require a different target-outer execution tree |
+| New (#1525, SQ-J1) | CS05069 | Execution/budgets — direct RIGHT, FULL or parenthesized joined DML source would require a different target-outer execution tree |
+| New (#1525, SQ-J2) | CS05070 | Execution/capabilities — FULL JOIN lacks a safe mandatory hash equality or has an unproven ON evaluation |
 | COHSQLE041 | CS06041 | Storage/durability |
 | COHSQLE058 | CS06058 | Storage/durability |
 

@@ -97,7 +97,7 @@ public class SqlLanguageProfileTests
     [InlineData(SqlJoinType.Inner, true)]
     [InlineData(SqlJoinType.LeftOuter, true)]
     [InlineData(SqlJoinType.RightOuter, true)]
-    [InlineData(SqlJoinType.FullOuter, false)]
+    [InlineData(SqlJoinType.FullOuter, true)]
     [InlineData(SqlJoinType.Cross, true)]
     public void Profile_JoinType_DeclaresExactExecutionSurface(SqlJoinType joinType, bool supported)
     {
