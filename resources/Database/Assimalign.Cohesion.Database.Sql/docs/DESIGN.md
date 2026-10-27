@@ -6715,7 +6715,9 @@ DDL generation and applied-schema hash. It always replaces the physical owner, e
 there are no dropped columns. The internal description-based entry refuses stale bindings
 with existing CS04064 before reservation.
 Schema application and maintenance share fail-fast admission; session DDL is excluded for
-the operation. Ordinary readers remain snapshot readers; writers wait for table X. The lock
+the operation. Ordinary readers retain their snapshot layouts. Writers that bound a retired owner,
+including transactions begun before publication, abort retryably with CS04006 after waiting
+for table X; retry the entire transaction against a fresh snapshot. The lock
 and latch order is established in SqlPlanExecutor.RewriteTableAsync. Database disposal cancels
 queued work, claims it if the pump stopped, and joins in-flight cleanup before storage closes.
 The provisioning FIFO uses a short queue monitor and removable rewrite nodes: cancellation
@@ -6744,6 +6746,10 @@ are later runs; there is no second type-only copier. This operation adds no SQL 
 message, public interface, visibility grant or project reference. The maintenance API uses a
 generated SqlObjectName value object for decoded schema and table components, preserving case-insensitive
 catalog identity and delimited-name punctuation; default names are refused at admission.
+FK intent preparation rechecks the physical binding generation after grants and refreshes
+outgoing parents after a swap. Constraint probes against a replacement invisible to the
+statement snapshot abort with CS04006 instead of reporting a false FK violation. Hook-driven
+regressions pause between parent discovery and IS grant and cover retained parent versions.
 Existing codes retain their conditions. SQL record-space format advances once, 26 to 27, fencing the new physical-layout
 publication semantics. Compiled-schema v8 and catalog record shapes stay unchanged. The
 existing coded open gate refuses all earlier files; no upgrade or legacy reader is added.
