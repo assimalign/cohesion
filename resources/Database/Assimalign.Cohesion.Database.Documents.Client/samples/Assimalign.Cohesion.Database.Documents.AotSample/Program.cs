@@ -70,8 +70,21 @@ internal static class Program
             writer = await coordinator.BeginAsync(IsolationLevel.Snapshot, cancellationToken);
             await catalog.DeleteDocumentAsync(collection.Id, "a", writer, cancellationToken);
             await coordinator.RollbackAsync(writer, cancellationToken);
-            Check((await catalog.SearchIndexAsync(collection.Id, "prices", 20m, true, 20m, true, reader.Snapshot, cancellationToken)).Count == 1,
+            async Task<bool> HasPostingAsync()
+            {
+                var afterEnd = await coordinator.BeginAsync(IsolationLevel.Snapshot, cancellationToken);
+                try
+                {
+                    return (await catalog.SearchIndexAsync(collection.Id, "prices", 20m, true, 20m, true, afterEnd.Snapshot, cancellationToken)).Count == 1;
+                }
+                finally { await coordinator.RollbackAsync(afterEnd, CancellationToken.None); }
+            }
+            Check(await HasPostingAsync(),
                 "catalog array delete rollback");
+            writer = await coordinator.BeginAsync(IsolationLevel.Snapshot, cancellationToken);
+            await catalog.DeleteDocumentAsync(collection.Id, "a", writer, cancellationToken);
+            await coordinator.CommitAsync(writer, cancellationToken);
+            Check(!await HasPostingAsync(), "catalog array committed-delete negative control");
         }
         finally { await coordinator.RollbackAsync(reader, CancellationToken.None); }
     }

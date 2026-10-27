@@ -3,7 +3,10 @@
 ## Array-posting NativeAOT guard (#1530)
 
 The engine-linked NativeAOT consumer additionally exercises the catalog's typed DISTINCT array
-descriptor, WHEN filter, v3 metadata round trip and delete rollback. These are catalog checks;
+descriptor, WHEN filter, v3 metadata round trip and delete rollback. Posting checks open a snapshot
+after rollback; a committed-delete negative control uses the same check to prove it detects a
+deletion that survived transaction end. Leading array definitions keep IncludeMissing false.
+These are catalog checks;
 the client API and wire contract do not change. OQL array-index DDL and planning follow in OQ-I2.
 
 ## Comprehension wire conformance (#1728)
