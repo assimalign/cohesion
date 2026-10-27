@@ -1509,8 +1509,10 @@ scalar assignments reevaluate on a target recheck.
 
 Foreign keys see the composed final INSERT/UPDATE/DELETE rows, including overlapping CASCADE,
 SET NULL and SET DEFAULT effects. A child moved away from a deleted parent survives. NO ACTION
-allows a replacement parent key within the statement; RESTRICT refuses substitution. Direct
-CHECK/domain and unique proposal failures remain errors even when a cascade would remove the
+allows a replacement parent key within the statement; RESTRICT refuses substitution. Children
+moved to a deleted parent and then cascaded away retain locks on their old stored
+parents through commit or rollback, so a concurrent parent delete waits before reading children.
+Direct CHECK/domain and unique proposal failures remain errors even when a cascade would remove the
 proposed row. RETURNING and affected counts describe direct actions before referential effects.
 An UPDATE removed by a cascade still validates children of its old stored parent key against
 the final state; surviving old-key children refuse the whole statement with CS03039. Immediate

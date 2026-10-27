@@ -18,6 +18,8 @@ these semantics without changing the syntax or advertised clause count.
 The final-state corpus also checks old parent keys of directly updated rows removed by a
 cascade and immediate unique-before-FK precedence. Actual target-version conflicts carry
 CS04064; host-ended transactions and abandoned lock owners keep their ordinary uncoded abort.
+The recorded two-session cascade corpus checks transaction-duration old-parent locks when a
+direct child update moves into a cascade, for both commit and rollback.
 
 ## ALTER TYPE domain rendering (#1447)
 

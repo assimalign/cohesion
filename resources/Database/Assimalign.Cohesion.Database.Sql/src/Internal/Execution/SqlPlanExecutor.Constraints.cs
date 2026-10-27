@@ -854,11 +854,12 @@ internal sealed partial class SqlPlanExecutor
             await AcquireReferenceIntentLocksAsync(table, statement, cancellationToken, cascade: true).ConfigureAwait(false);
         }
 
-        // Deleting the row releases every reference it holds. The edge it was
-        // reached by is excluded: that parent row is in the deletion set and is
-        // already exclusively locked by this statement.
+        // Deleting the row releases every stored reference. Skip the arrival edge
+        // only when its values are also the stored values: a pending MERGE update
+        // may have moved the child to this parent from a different, unlocked one.
         if (location.PageId.Value >= 0)
-        { CollectReleasedReferences(table, [stored], released, statement, cancellationToken, skip: arrivedBy); }
+        { CollectReleasedReferences(table, [stored], released, statement, cancellationToken,
+            skip: ReferenceEquals(stored, values) ? arrivedBy : null); }
 
         // The incoming references are read after the row and its table are locked,
         // exactly where the recursive walk read them.

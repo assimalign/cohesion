@@ -9,7 +9,7 @@ using Xunit;
 
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Sql.Internal;
-
+using Assimalign.Cohesion.Database.Sql.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
@@ -101,6 +101,50 @@ public sealed class SqlMergeReviewRegressionTests
             (await RowsAsync(observer, "SELECT id FROM t", timeout.Token)).ShouldBe(["1"]);
         }
         finally { SqlPlanExecutor.MergeActionsSelected = null; }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql] - MERGE: moved then cascaded children lock their stored parent until transaction end (#1715)")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ExecuteAsync_MovedThenCascadedChild_ShouldBlockOldParentDelete(bool commit)
+    {
+        // Arrange: T1 moves row 2 from parent 5 to parent 1, then cascades it away.
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        await using var engine = SqlDatabaseEngine.Create("merge-old-parent-lock", new());
+        var database = await engine.CreateDatabaseAsync("db", timeout.Token);
+        await using var mover = await database.CreateSessionAsync(timeout.Token);
+        await using var deleter = await database.CreateSessionAsync(timeout.Token);
+        await mover.ExecuteAsync("CREATE TABLE t(id INT PRIMARY KEY,pid INT REFERENCES t(id) ON DELETE CASCADE)", cancellationToken: timeout.Token);
+        await mover.ExecuteAsync("INSERT INTO t VALUES(1,NULL),(5,NULL),(2,5)", cancellationToken: timeout.Token);
+        await using var move = await mover.BeginTransactionAsync(IsolationLevel.ReadCommitted, timeout.Token);
+        (await mover.ExecuteAsync("MERGE INTO t USING (SELECT 1 AS id UNION ALL SELECT 2) s ON t.id=s.id " +
+            "WHEN MATCHED AND t.id=1 THEN DELETE WHEN MATCHED THEN UPDATE SET pid=1", cancellationToken: timeout.Token)).AffectedCount.ShouldBe(2);
+        await using var delete = await deleter.BeginTransactionAsync(IsolationLevel.ReadCommitted, timeout.Token);
+        using var waits = new LockWaitListener(database.Name);
+        var waiting = waits.WaitForWaitAsync(delete.Context.Sequence, timeout.Token);
+        var pending = deleter.ExecuteAsync("DELETE FROM t WHERE id=5", cancellationToken: timeout.Token).AsTask();
+        try
+        {
+            // Act: a recorded queue event must precede T2's completion; no elapsed-time assertion.
+            (await Task.WhenAny(waiting, pending)).ShouldBeSameAs(waiting);
+            await waiting;
+            pending.IsCompleted.ShouldBeFalse();
+            if (commit) { await move.CommitAsync(timeout.Token); }
+            else { await move.RollbackAsync(timeout.Token); }
+            (await pending).AffectedCount.ShouldBe(1);
+            await delete.CommitAsync(timeout.Token);
+
+            // Assert: rollback restores row 2 before T2 cascades it; commit leaves no child to restore.
+            (await RowsAsync(mover, "SELECT id,pid FROM t ORDER BY id", timeout.Token)).ShouldBe(commit ? [] : ["1,"]);
+            (await RowsAsync(mover, "SELECT c.id FROM t c LEFT JOIN t p ON c.pid=p.id WHERE c.pid IS NOT NULL AND p.id IS NULL", timeout.Token)).ShouldBeEmpty();
+        }
+        finally
+        {
+            if (move.State == TransactionState.Active) { await move.RollbackAsync(CancellationToken.None); }
+            timeout.Cancel();
+            await ((Task)pending).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing | ConfigureAwaitOptions.ContinueOnCapturedContext);
+            await waiting.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing | ConfigureAwaitOptions.ContinueOnCapturedContext);
+        }
     }
 
     [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "AbandonPending")]

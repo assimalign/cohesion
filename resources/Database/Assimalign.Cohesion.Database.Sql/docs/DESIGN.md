@@ -3124,7 +3124,11 @@ referential actions. Statement-local negative page identities represent pending 
 become physical locks or storage reads. Cascades find final child references, so a directly updated
 child that moved away survives, while overlapping SET NULL/DEFAULT assignments compose onto
 its final row. A cascaded rekey retains separate stored values for index removal and effective
-values for downstream reference discovery. CHECK/domain, row encoding and unique proposal
+values for downstream reference discovery. A moved-then-cascaded child also locks the parent
+referenced by its stored values until transaction end: its new cascade edge proves ownership
+only of the new parent, so skipping that edge is safe only for unchanged stored values. This
+closes the undecided-tombstone window even when the MERGE transaction later rolls back.
+CHECK/domain, row encoding and unique proposal
 checks cannot be hidden by a later cascade (executor/nodeModifyTable.c:2327 and
 executor/execIndexing.c:433-455); FK validation sees only the composed final rows.
 NO ACTION accepts a replacement parent key, whereas RESTRICT refuses substitution, following
