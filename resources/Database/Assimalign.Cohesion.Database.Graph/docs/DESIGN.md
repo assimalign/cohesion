@@ -670,8 +670,9 @@ Label expressions (#1139, #1245) supply required labels from a pattern's pure co
 whose label expression is a pure conjunction (`WHERE n:Keep`, `n IS LABELED Keep&Tagged`).
 Pattern labels precede WHERE labels in source order. Every required label participates in property
 index selection with inline or WHERE equality values. Bound entities still take precedence;
-without a seek, the smallest retained-posting estimate across required labels and pure pattern
-unions anchors a label scan, breaking ties by source position. Estimates include historical
+the smallest candidate estimate across property seeks, required labels and pure pattern
+unions chooses the node access path, preferring equality seeks on ties and otherwise retaining
+source position. Retained-posting estimates include historical
 and rolled-back versions and affect cost only; snapshot visibility remains authoritative. Thus
 `(a)->(b:Keep)` and `(a)->(b) WHERE b:Keep` can both start at `b`, expanding right then left.
 EXPLAIN reports the actual LabelScan or IndexSeek label and node ordinal. Every candidate still
@@ -682,6 +683,53 @@ ranges in identity order and decodes each identity once. EXPLAIN uses LabelScan 
 conjunction (`:A&B`) seeks the cheapest required label and evaluates the complete conjunction
 as a residual, avoiding work on a common label's range. Negation, wildcard and mixed Boolean
 expressions retain a full scan unless another safe anchor is available.
+
+Relationship-type anchors (#1633, GQ-R2) compete at every outer singleton edge position.
+A named type or pure disjunction of names selects only those persistent format-5 posting ranges;
+duplicate names are removed. Retained-publication counts, reconstructed on open and incremented
+with relationship publication, sum across the selected types. Each maintenance pass reconciles
+them against retained relationship headers after undo and record/index reclamation, removing
+purged and rolled-back publications without reopening. The directory keeps the immutable type
+name for each relationship identity; stamp-verified references prevent reused slots from counting.
+Planning reads only cached counts and performs no reconciliation or graph-record scan.
+Undirected and left-or-right estimates double that sum conservatively; a self-loop still emits
+one orientation. Pinned history and pending statements can still inflate advisory counts;
+rollback removals are reflected by the next successful maintenance pass. Counts never decide
+visibility. Equality seeks count at most 512 physical index entries and 32 page visits,
+without graph-record decoding. An incomplete count falls back to at least the retained label
+population, rather than treating a partial prefix as an exact selective count. Numeric key
+collisions are included. Ties prefer an equality seek, then the first node candidate, then the
+first relationship candidate; existing first-value/first-indexed-key selection within a label
+is retained. Bound entities remain the first choice.
+Equality probes reuse the clause's index identities rather than rediscovering definitions per
+candidate. A deterministic definition-read regression pins one visible-index pass per clause.
+
+The executor reads the selected relationship postings in identity order, resolves the left
+endpoint for the requested direction and consumes the posting edge directly. It expands the
+remaining right side, then the left side, preserving source-ordered nodes, relationships and
+property checks. It never rescans the anchor edge through adjacency. Undirected edges seed
+both endpoint orientations, except self-loops. The statement overlay has a type-keyed creation
+directory; selected pending creations merge with persisted postings and property replacements
+override stored values. Every candidate retains all pattern, binding, mode and predicate checks.
+Quantified edges (including zero-length matches), wildcards, negations, mixed Boolean type
+expressions and WHERE-only relationship type predicates retain the existing safe access paths.
+An outer fixed edge can anchor a pattern that also contains quantified segments.
+
+Each posting head consumes one physical work unit before its key or record is inspected,
+including union priming and resumed cursor reads, shared by both undirected orientations.
+An exhausted work budget refuses the next head without charging an attempted overrun;
+empty cursor exhaustion adds no unit. Read-ahead resumes after yielding, so LIMIT stops
+without visiting the following posting. Cancellation is checked at every admitted head.
+Cursor staging uses the shared B-tree's bounded owned batches, as other access paths do;
+each accepted hop consumes one viable unit. Endpoint lookups do not add physical units, matching
+existing incident-hop accounting. Cursor batches, pending identities and retained relationship
+properties use the statement memory ledger and unwind on LIMIT, cancellation and failure.
+The large unrelated-graph regression compares identical results with the explicit all-node /
+incident fallback and bounds work by selected postings plus matching endpoint lookups, independent
+of unrelated graph size. Neo4j's fixed relationship token leaf planning was consulted at
+`community/cypher/cypher-planner/src/main/scala/org/neo4j/cypher/internal/compiler/planner/logical/steps/leafplanner/relationshipTypeScanLeafPlanner.scala:47-80`
+under `C:/Source/repos/neo4j/neo4j`; no code copied. No format, public API or shortest-path API change.
+
 Predicates under OR, XOR, NOT or truth tests, and label expressions using
 disjunction, negation or wildcard, supply no required labels. Collection is clause-local and
 only node variables can supply node anchors; a relationship's labeled predicate tests its type. The
@@ -707,7 +755,7 @@ A conjunction or disjunction of labels, and an AND, OR or XOR chain of predicate
 engine evaluates it with a loop that stops at the first operand that decides it, under three-valued
 logic for `AND` (false, otherwise unknown, otherwise true). Validation, name collection and the
 anchor's predicate search walk with an explicit stack. Anchor selection reads the visible indexes
-at most once per clause (`GraphStore.GetIndexes`, grouped by label) and that clause's `WHERE`
+at most once per clause (the internal index-identity view, grouped by label) and that clause's `WHERE`
 chain once for required label conjunctions and equalities, keeping each variable's first non-null value per key; each node then tries,
 for each distinct label in order, only the keys that label has an index on. Planning each clause
 therefore costs time linear in its `E`
@@ -1323,10 +1371,14 @@ with both count fields null in T1.
 | `Match`, `OptionalMatch` below the root | Ordered matching clauses when there are several clauses or an optional; details include the local filter, unsatisfiable flag and new bindings null-extended on optional failure |
 | `ExpandPath` | One chosen finite MATCH pattern |
 | `NodeScan`, `LabelScan`, `IndexSeek` | Its actual anchor node ordinal, label, property and equality value; a seek reports the catalog index name (or physical label/property identity if catalog metadata is absent) |
+| `RelationshipTypeScan` | Its anchor edge ordinal, direction and selected type names; postings tuple, union combination and physical/viable counting rules; no adjacency expansion for the posting edge |
 | `Expand` | One relationship expansion, in executor order: right of the anchor, then left; includes edge ordinal, direction and type/label expression |
 | `InsertPath`, `InsertNode`, `InsertRelationship` | Intended insertion shapes and labels/types; a pure insertion has no read anchor |
 
-Nodes are depth-first pre-order; expansion nodes form a chain below their anchor. Each model
+Nodes are depth-first pre-order; expansion nodes form a chain below their anchor. Anchors with
+cardinality metadata fill EstimatedRows; ActualRows stays null because plain EXPLAIN does not
+execute. Type estimates count possible orientations, label estimates count retained publications,
+and property estimates use the bounded index count described above. Each model
 owns its operator names. The closed plan switch and test-only record-enumeration guard require
 future plan types to add a mapping and one EXPLAIN case.
 
@@ -2672,8 +2724,8 @@ commits or rolls back, and purges while the reader's snapshot stays pinned. Prun
 also count removed entries: each dead relationship version contributes two adjacency entries
 and one type posting, so two replacements and one deletion remove nine entries.
 
-GQ-R2 supplies planner anchors, estimates and large-graph scan-avoidance evidence. This run
-adds no planner use or language behavior. Neo4j token-scan behavior was consulted at
+GQ-R2 consumes these ranges for planner anchors, with advisory estimates and deterministic
+large-graph scan-avoidance evidence; see Planning, execution and bounds. Neo4j token-scan behavior was consulted at
 `community/cypher/cypher-planner/src/main/scala/org/neo4j/cypher/internal/compiler/planner/logical/steps/leafplanner/relationshipTypeScanLeafPlanner.scala:47-80`
 in `C:/Source/repos/neo4j/neo4j`; no code copied. Cohesion persistence and MVCC follow its
 existing label-postings design rather than Neo4j physical storage.

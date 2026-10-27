@@ -186,13 +186,20 @@ structured-carrier messages remain unprefixed.
 | COHSQLE060 | CS05060 | Execution/budgets |
 | COHSQLE067 | CS05067 | Execution/budgets |
 | New (#1714) | CS05068 | Execution/budgets — UPDATE target matched by multiple source associations (before writes) |
-| New (#1525, SQ-J1) | CS05069 | Execution/budgets — direct RIGHT or parenthesized joined DML source would require a different target-outer execution tree |
+| New (#1525, SQ-J1) | CS05069 | Execution/budgets — direct RIGHT, FULL or parenthesized joined DML source would require a different target-outer execution tree |
+| New (#1525, SQ-J2) | CS05070 | Execution/capabilities — FULL JOIN lacks a safe mandatory hash equality or has an unproven ON evaluation |
 | COHSQLE041 | CS06041 | Storage/durability |
 | COHSQLE058 | CS06058 | Storage/durability |
 
 SQLSTATE meanings remain those in [the SQL dialect](../../Assimalign.Cohesion.Database.Sql.Language/docs/DIALECT.md); the Cohesion identities changed, not ISO/PostgreSQL SQLSTATE values.
 
 ## Documents migration
+
+OQL ARRAY/FIRST comprehensions (#1728) reuse CD00002/CD00005 for malformed/deep syntax,
+CD01005 for missing parameters, CD02006/CD02007/CD02008 for scalar failures and CD05001 for
+invalid grouping, aggregate or metadata contexts. CD01027 identifies an empty variable in a
+direct AST. Existing constructor depth and surrounding retained-result budgets also apply;
+no disk or wire format changes.
 
 OQL RETURNING (#1727) preserves existing syntax, binding and value identities for malformed
 projections, duplicate names, missing parameters and scalar failures. Unsupported subqueries
@@ -223,6 +230,7 @@ payload accepts rows plus a matching affected count without capability negotiati
 | COHDOC023 | CD01023 | Binding/names |
 | COHDOC025 | CD01025 | Binding/names |
 | New (#1727) | CD01026 | Binding/names — empty RETURNING output name in a directly constructed AST |
+| New (#1728) | CD01027 | Binding/names — empty comprehension variable in a directly constructed AST |
 | COHDOC006 | CD02006 | Values/types |
 | COHDOC007 | CD02007 | Values/types |
 | COHDOC008 | CD02008 | Values/types |

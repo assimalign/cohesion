@@ -58,7 +58,7 @@ shared storage, with DDL flowing through this assembly's relational Catalog comp
   full pool, so unrelated runtime retention cannot decide its bound (DESIGN, bounded build validation).
 - **SQL execution** — the declared dialect (`Database.Sql.Language/docs/DIALECT.md`)
   planned with rules and executed over stored, system and derived relations: `SELECT` with `WHERE`,
-  projection, INNER/LEFT/RIGHT/CROSS joins with parenthesized groups and RIGHT-to-LEFT normalization, aliased derived sources, `ORDER BY` with per-key `NULLS FIRST/LAST`, `LIMIT/OFFSET`, `DISTINCT`, grouping and aggregates;
+  projection, INNER/LEFT/RIGHT/FULL/CROSS joins with parenthesized groups, RIGHT-to-LEFT normalization and bounded FULL hash execution, aliased derived sources, `ORDER BY` with per-key `NULLS FIRST/LAST`, `LIMIT/OFFSET`, `DISTINCT`, grouping and aggregates;
   non-recursive `WITH` before SELECT/INSERT/UPDATE/DELETE, with ordered SELECT definitions
   materialized once per statement and optional complete output column lists;
   `INSERT` (multi-row, whole-item `DEFAULT`, `DEFAULT VALUES`, nullability);
@@ -204,6 +204,20 @@ SQL. `SqlDatabaseEngine.Create(name, options)` also remains available for standa
 See [DESIGN.md](DESIGN.md) for the execution model and its decisions.
 
 `SqlDatabaseServerOptions.Listener` takes an `IDuplexConnectionListener`, including TCP and InMemory listeners. The server owns accepted duplex connections and their protocol I/O.
+
+## Table maintenance (#1265)
+
+SqlDatabase.RewriteTableAsync(schemaName, tableName, cancellationToken) compacts dropped
+physical ordinals,
+copies live rows and rebuilds indexes on the provisioning worker. Names are decoded SQL
+identifiers, without delimiters. Writers bound to a retired owner wait for the exclusive table
+lock and then abort retryably with CS04006. Transactions begun before publication also abort
+when writing or reading retired tables inside DML; retry the entire transaction. Read-only
+snapshots retain the original layout until they end. Publication is recoverable as one complete owner
+replacement. Cancellation before publication keeps the original table; retry interrupted work
+explicitly. The maintenance operation preserves schema ownership and logical definitions.
+The source lock is acquired before queueing, leaving the worker available to other databases.
+A nonzero engine LockTimeout reports CS04044 on contention; otherwise supply cancellation.
 
 ## Session execution (#1576, 2026-10-16)
 

@@ -18,7 +18,7 @@ namespace Assimalign.Cohesion.Database.Sql.Catalog;
 /// <see cref="Columns"/> are the table's live columns, in order: what <c>SELECT *</c>
 /// returns, what INSERT without a column list fills and what every name resolves
 /// against. A row version stores one component per <i>physical ordinal</i>, and a
-/// column keeps its physical ordinal for the life of the table. Dropping a column
+/// column keeps its physical ordinal for the life of its physical owner. Dropping a column
 /// removes it from <see cref="Columns"/> and records its physical ordinal in
 /// <see cref="DroppedColumnOrdinals"/>; adding one appends a new physical ordinal
 /// after every existing one. A physical ordinal is never reused, so a component
@@ -124,7 +124,7 @@ public sealed class SqlCatalogTable
     /// <summary>
     /// Gets the table's stable object identity — the value data rows, index
     /// registrations, and lock resources are keyed by.
-    /// TRUNCATE replaces this owner identity atomically; older snapshots retain this description.
+    /// TRUNCATE and table rewrite replace this owner identity atomically; older snapshots retain this description.
     /// </summary>
     public ulong ObjectId { get; }
 
@@ -168,7 +168,7 @@ public sealed class SqlCatalogTable
     /// Gets the physical ordinals of the dropped columns, ascending. A version stores a
     /// component at each of them that comes before one of its live columns (the dropped
     /// value, or NULL when written after the drop), which every read skips; the ordinals
-    /// are never reused.
+    /// are never reused within this owner. A table rewrite publishes a fresh compact owner.
     /// </summary>
     public IReadOnlyList<int> DroppedColumnOrdinals { get; }
 

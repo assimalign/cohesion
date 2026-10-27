@@ -626,7 +626,8 @@
   <data name="SqlPlannerPlanInsertSelectSqlPlanning" xml:space="preserve"><value>INSERT SELECT source column {0} of type {1} is incompatible with target column '{2}' of type {3}.</value></data>
   <data name="SqlPlannerBindJoinSqlPlanning" xml:space="preserve"><value>Aggregate functions are not allowed in JOIN ON.</value></data>
   <data name="SqlPlannerBindJoinSqlPlanning2" xml:space="preserve"><value>Column '{0}' appears more than once in USING.</value></data>
-  <data name="RightJoinDmlSource" xml:space="preserve"><value>RIGHT or parenthesized joins in a joined DML source are not supported; the mutation target must remain the outer input.</value></data>
+  <data name="FullJoinCondition" xml:space="preserve"><value>FULL JOIN requires a hash-compatible mandatory equality between its inputs and a proven non-throwing ON condition.</value></data>
+  <data name="RightJoinDmlSource" xml:space="preserve"><value>RIGHT, FULL or parenthesized joins in a joined DML source are not supported; the mutation target must remain the outer input.</value></data>
   <data name="SqlPlannerBindJoinSqlPlanning3" xml:space="preserve"><value>INNER, LEFT and RIGHT JOIN require ON or USING; CROSS JOIN accepts neither.</value></data>
   <data name="SqlPlannerBindJoinSqlPlanning4" xml:space="preserve"><value>USING column '{0}' is {1} on the {2} input.</value></data>
   <data name="SqlPlannerBindJoinSqlPlanning5" xml:space="preserve"><value>Duplicate table name or alias '{0}'; use distinct aliases for a self join.</value></data>
@@ -849,7 +850,8 @@
   <data name="FileNamesOrphanDirectory" xml:space="preserve"><value>Database '{0}' cannot be created: its directory '{1}' is already there without a database in it, left by an interrupted create or drop. Delete the directory, or drop the database, which deletes it, and create the database again.</value></data>
   <data name="FileStorageAlreadyExists" xml:space="preserve"><value>Storage for database '{0}' already exists.</value></data>
   <data name="CatalogTableSubject" xml:space="preserve"><value>table '{0}.{1}'</value></data>
-  <data name="RetainedDroppedColumnHint" xml:space="preserve"><value>It keeps the physical positions of {0} dropped columns, which are never reused (#1241); recreating the table and copying its rows (CREATE TABLE, INSERT ... SELECT) reclaims them.</value></data>
+  <data name="SqlObjectNameInvalid" xml:space="preserve"><value>A SQL object name must contain a non-whitespace character.</value></data>
+  <data name="RetainedDroppedColumnHint" xml:space="preserve"><value>It keeps the physical positions of {0} dropped columns, which are never reused (#1241); RewriteTableAsync compacts them, or recreate the table and copy its rows (CREATE TABLE, INSERT ... SELECT).</value></data>
   <data name="CatalogIndexSubject" xml:space="preserve"><value>index '{0}'</value></data>
   <data name="CatalogRegistrationsSubject" xml:space="preserve"><value>the database's {0} index registrations</value></data>
   <data name="StartupFrameExpected" xml:space="preserve"><value>Expected a startup frame but received {0}.</value></data>

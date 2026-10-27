@@ -1,5 +1,13 @@
 # Documents client design
 
+## Comprehension wire conformance (#1728)
+
+ARRAY/FIRST use the existing OQL request text, JSON result cells and MISSING bitmap on InMemory
+and TCP. DocumentComprehensionWireTests cover nested scope, unknown inputs, mapped MISSING,
+UPDATE RETURNING and statement rollback on scalar failure or retained-array budget exhaustion.
+No client API, frame, capability or format change is required. The NativeAOT consumer exercises
+both operators, registered arguments and RETURNING on both transports.
+
 ## Terminal TCP conformance (#1087)
 
 The real DocumentClient and model server run missing-database handshakes on InMemory and

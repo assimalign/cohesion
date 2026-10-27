@@ -148,8 +148,12 @@ compatible, and uses explicit binary codecs without reflection.
 
 Graph record and tree-registration format 5 requires relationship-type postings (#1633),
 building on format 4's catalog label GUIDs and label postings and format 3's typed adjacency
-and entity revisions. Internal type scans are available to storage tests; planner anchors and
-estimates follow in GQ-R2. Opening an earlier
+and entity revisions. Type-only fixed relationship patterns use these postings as planner anchors,
+competing with label scans and property seeks by advisory estimates. Directed and undirected
+patterns, type unions and statement-local changes retain snapshot visibility and residual checks.
+EXPLAIN reports RelationshipTypeScan, its selected types and edge ordinal, and the estimated
+candidate count. The posting edge requires no incident expansion; unrelated nodes and edges add
+no candidate work. Opening an earlier
 format fails with CG06017 before logical recovery scrub writes; recreate the database with
 this engine. There is no upgrade path.
 

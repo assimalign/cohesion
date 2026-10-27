@@ -494,6 +494,7 @@ CD00007 for the same count rule at parse and plan time:
 | `CD03024` | Index already exists |
 | `CD01025` | Index does not exist |
 | `CD01026` | A directly constructed RETURNING projection has an empty output name |
+| `CD01027` | A directly constructed comprehension has an empty variable name |
 | `CD02026` | Composite index key exceeds the shared 1024-byte limit |
 
 `DocumentQueryRequest.FromOql` and a directly constructed typed query with parse errors
@@ -620,6 +621,35 @@ and structural-equality loops also observe cancellation. The expansion method is
 the owning test assembly to cancel from borrowed JSON reads and verify per-element checks.
 No reflection or runtime code generation is involved. No catalog, storage or wire layout
 changes, format bump or upgrade path are needed; #1135's index v2 remains unchanged.
+
+#### ARRAY and FIRST comprehensions (#1728)
+
+The evaluator consumes OqlComprehensionExpression in every scalar context, including RETURNING
+and registered function arguments. Collection evaluation uses the enclosing context; mapping and
+WHEN receive a persistent inner binding. ARRAY streams qualifying non-MISSING mappings through
+DocumentJsonValue.Array into owned JSON. FIRST stops at the first qualifying mapping, including
+a MISSING mapping, and returns MISSING when none qualifies. Input propagation and WHEN Truth
+match ANY. See the [dialect](../../Assimalign.Cohesion.Database.Documents.Language/docs/DIALECT.md#array-and-first-comprehensions-1728).
+
+Planner scope frames are keyed by expression and enclosing frame for both quantifiers and
+comprehensions. Group-key equivalence compares the input in the outer scope and mapping/WHEN
+in corresponding inner scopes, preventing a shadowed variable from matching an outer group key.
+Metadata and input/function walkers traverse all children; aggregates inside comprehensions retain
+the quantifier prohibition. Closed locally bound expressions qualify as VALUES constants; functions
+keep their existing nonconstant rule. CD01027 refuses an empty direct-AST variable. No interface,
+assembly reference, storage or wire contract is added.
+
+Seek-bound evaluation is speculative for every constant expression, including closed comprehensions
+and quantifiers. An OQL evaluation failure discards that bound; the full residual predicate retains
+the error only for rows and branches that execute it. Cancellation and infrastructure failures
+propagate. VALUES and constructor evaluation keep their ordinary short-circuit semantics.
+
+Cancellation is checked before evaluation and per visited element. ARRAY uses the existing
+constructor depth/decimal/encoding rules and does not cache variable-dependent mappings.
+Surrounding retained-result charging includes comprehension JSON, notably RETURNING's CD05018
+estimate and rollback boundary. Ordinary SELECT retains its existing memory policy.
+DocumentQueryTests.Comprehensions, OqlExecutionConformanceTests and DocumentComprehensionWireTests
+cover values, nested scopes, grouping, registered calls, cancellation and both transports.
 
 #### Result paging (#1129)
 

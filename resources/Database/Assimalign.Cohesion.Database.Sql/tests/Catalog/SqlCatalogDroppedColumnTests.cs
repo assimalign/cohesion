@@ -190,7 +190,7 @@ public sealed class SqlCatalogDroppedColumnTests
         cycles.ShouldBeGreaterThan(1_000);
         failure.Message.ShouldStartWith("The definition of table 'dbo.t' encodes to ", Case.Sensitive);
         failure.Message.ShouldContain($"It keeps the physical positions of {cycles} dropped columns, which are never reused (#1241); " +
-            "recreating the table and copying its rows (CREATE TABLE, INSERT ... SELECT) reclaims them.", Case.Sensitive);
+            "RewriteTableAsync compacts them, or recreate the table and copy its rows (CREATE TABLE, INSERT ... SELECT).", Case.Sensitive);
 
         // The refused alteration changed nothing, in memory or on reopen.
         catalog.TryGetTable("dbo", "t", out var table).ShouldBeTrue();

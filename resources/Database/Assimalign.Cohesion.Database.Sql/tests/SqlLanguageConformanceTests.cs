@@ -21,6 +21,32 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 /// </summary>
 public sealed class SqlLanguageConformanceTests
 {
+    [Theory(DisplayName = "Cohesion Test [Sql] - Rewrite: empty input and NULL foreign keys commit across a parent replacement (#1265)")]
+    [InlineData("UPDATE child SET note=1 WHERE false", 0)]
+    [InlineData("INSERT INTO child VALUES (NULL,1),(NULL,2)", 2)]
+    [InlineData("INSERT INTO child SELECT 1,1 WHERE false", 0)]
+    public async Task RewriteTableAsync_NoParentProbe_ShouldCommitOldSnapshot(string sql, int count)
+    {
+        // Arrange
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        await using var engine = SqlDatabaseEngine.Create("rewrite-no-parent-probe", new());
+        var database = await engine.CreateDatabaseAsync("db", timeout.Token);
+        await using var session = await database.CreateSessionAsync(timeout.Token);
+        await using var stale = await database.CreateSessionAsync(timeout.Token);
+        await ExecuteAsync(session, "CREATE TABLE t (id INT PRIMARY KEY)");
+        await ExecuteAsync(session, "INSERT INTO t VALUES (1)");
+        await ExecuteAsync(session, "CREATE TABLE child (pid INT REFERENCES t(id), note INT)");
+        await using var snapshot = await stale.BeginTransactionAsync(timeout.Token);
+        await database.RewriteTableAsync("dbo", "t", timeout.Token);
+
+        // Act
+        (await stale.ExecuteAsync(sql, cancellationToken: timeout.Token)).AffectedCount.ShouldBe(count);
+        await snapshot.CommitAsync(timeout.Token);
+
+        // Assert
+        (await RowsAsync(session, "SELECT * FROM child")).Count.ShouldBe(count);
+    }
+
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Conformance: TRUNCATE retains joining views and indexed snapshot access (#1716)")]
     public async Task ExecuteAsync_TruncateSnapshot_ShouldRetainJoiningViewAndSeek()
     {
@@ -682,6 +708,8 @@ public sealed class SqlLanguageConformanceTests
                 await ExpectRowsAsync(session, "SELECT t.id, p.email FROM profiles p RIGHT OUTER JOIN t ON p.user_id = t.id ORDER BY t.id;",
                     [[1, "ada@example.test"], [2, null], [3, "alan@example.test"]]);
                 await ExpectRowsAsync(session, "SELECT id FROM (t RIGHT JOIN t copy USING (id)) ORDER BY id;", [[1], [2], [3]]);
+                await ExpectRowsAsync(session, "SELECT id FROM t FULL OUTER JOIN t copy USING (id) ORDER BY id;", [[1], [2], [3]]);
+                await ExpectRowsAsync(session, "SELECT id FROM t FULL JOIN (SELECT 4 AS id) copy USING (id) ORDER BY id;", [[1], [2], [3], [4]]);
                 await ExpectRowsAsync(session, "SELECT d.id, p.email FROM ((SELECT id FROM t) d LEFT JOIN profiles p ON d.id = p.user_id) ORDER BY d.id;",
                     [[1, "ada@example.test"], [2, null], [3, "alan@example.test"]]);
                 await ExpectRowsAsync(session, "SELECT c.COLUMN_NAME FROM INFORMATION_SCHEMA.TABLES t " +

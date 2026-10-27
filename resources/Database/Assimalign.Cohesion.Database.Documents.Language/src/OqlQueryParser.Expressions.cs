@@ -100,6 +100,35 @@ public sealed partial class OqlQueryParser
     private OqlExpression ParsePrimary()
     {
         var start = Current;
+        if ((Is("ARRAY") || Is("FIRST")) && IsComprehension(_position))
+        {
+            bool first = Is("FIRST");
+            Advance();
+            var projection = ParseExpression();
+            if (Failed) { return projection; }
+            Expect("FOR");
+            if (Failed) { return projection; }
+            string variable = Identifier();
+            if (Failed) { return projection; }
+            if (!Failed && Current.Type == TokenType.Colon)
+            {
+                _diagnostics.Add(QueryDiagnostics.UnsupportedClause("position-variable comprehension", Profile.Language, Span(Current, Current)));
+                return new OqlComprehensionExpression(variable, new OqlLiteralExpression(null), projection, isFirst: first, location: Span(start, Previous));
+            }
+            Expect("IN");
+            if (Failed) { return projection; }
+            var collection = ParseExpression();
+            if (Failed) { return projection; }
+            if (!Failed && Current.Type == TokenType.Comma && IsQuantifierBinding(_position + 1))
+            {
+                _diagnostics.Add(QueryDiagnostics.UnsupportedClause("multi-binding comprehension", Profile.Language, Span(Current, Current)));
+                return new OqlComprehensionExpression(variable, collection, projection, isFirst: first, location: Span(start, Previous));
+            }
+            OqlExpression? predicate = !Failed && Take("WHEN") ? ParseExpression() : null;
+            if (Failed) { return projection; }
+            Expect("END");
+            return new OqlComprehensionExpression(variable, collection, projection, predicate, first, Span(start, Previous));
+        }
         if ((Is("ANY") || Is("SOME") || Is("EVERY")) &&
             (IsQuantifierBinding(_position + 1) || Is("ANY") || Is("SOME")))
         {
@@ -207,7 +236,7 @@ public sealed partial class OqlQueryParser
         if (Take(TokenType.LeftParen))
         {
             var expression = ParseExpression();
-            Expect(TokenType.RightParen, "')'");
+            if (!Failed) { Expect(TokenType.RightParen, "')'"); }
             return expression;
         }
         if (Take(TokenType.Asterisk))

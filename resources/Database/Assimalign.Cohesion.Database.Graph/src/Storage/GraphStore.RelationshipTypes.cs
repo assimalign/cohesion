@@ -29,6 +29,7 @@ public sealed partial class GraphStore
         if (!_relationshipTypeTokens.TryGetValue(relationship.Type, out var tokens))
         { _relationshipTypeTokens.Add(relationship.Type, tokens = []); }
         tokens.Add(record.TypeId);
+        _relationshipTypeCardinalities[relationship.Type] = _relationshipTypeCardinalities.GetValueOrDefault(relationship.Type) + 1;
     }
 
     private async ValueTask EnsureRelationshipTypesAsync(TransactionContext context, CancellationToken token)
@@ -97,17 +98,20 @@ public sealed partial class GraphStore
             {
                 token.ThrowIfCancellationRequested();
                 ulong location = entry.Cursor.CurrentEntryReference;
+                if (returned != id)
+                {
+                    var found = ReadAt(location, snapshot);
+                    if (found?.Record.Relationship is { } relationship && relationship.Id == id &&
+                        found.Value.Record.TypeId == entry.Type &&
+                        types.Contains(relationship.Type, StringComparer.Ordinal))
+                    {
+                        returned = id;
+                        yield return relationship;
+                    }
+                }
+                // Resume only when the consumer asks for another relationship. LIMIT and
+                // either undirected orientation can stop without reading the next head.
                 Advance(entry.Cursor, entry.Type);
-                OnRelationshipTypeEntryRead?.Invoke();
-                token.ThrowIfCancellationRequested();
-                if (returned == id) { continue; }
-                visit?.Invoke();
-                var found = ReadAt(location, snapshot);
-                if (found?.Record.Relationship is not { } relationship || relationship.Id != id ||
-                    found.Value.Record.TypeId != entry.Type ||
-                    !types.Contains(relationship.Type, StringComparer.Ordinal)) { continue; }
-                returned = id;
-                yield return relationship;
             }
         }
         finally
@@ -120,10 +124,15 @@ public sealed partial class GraphStore
             // BTreeCursor moves complete synchronously and copy bounded batches. No page or latch
             // survives a move; disposal releases the owned keys on every exit.
             if (!cursor.MoveNextAsync(token).GetAwaiter().GetResult()) { return; }
+            // A cursor stages a head (possibly from its bounded owned batch). Admit the
+            // posting before inspecting that head, including every range's initial head.
+            visit?.Invoke();
             var key = cursor.CurrentKey.Encoded.Span;
             if (key.Length != 24 || new Guid(key.Slice(0, 16), bigEndian: true) != type)
             { throw new StorageCorruptionException(ErrorMessages.RelationshipTypePostingInvalid); }
             Interlocked.Increment(ref _relationshipTypeEntriesVisited);
+            OnRelationshipTypeEntryRead?.Invoke();
+            token.ThrowIfCancellationRequested();
             pending.Enqueue((cursor, type), BinaryPrimitives.ReadUInt64BigEndian(key.Slice(16)));
         }
     }

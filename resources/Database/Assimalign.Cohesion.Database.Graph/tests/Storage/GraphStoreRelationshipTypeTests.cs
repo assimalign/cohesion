@@ -65,6 +65,7 @@ public sealed partial class GraphStoreTests
         // Two replaced versions and one deleted relationship each leave two adjacency
         // entries and one type posting. A visibility-only scan cannot prove their removal.
         (await reopened.PruneIndexesAsync(fixture.Coordinator.PruneBound, CancellationToken.None)).ShouldBe(3L * (2 + 1));
+        reopened.EstimateRelationshipTypeCount(type).ShouldBe(240);
         reopened.ScanRelationshipTypes([type], latest.Snapshot, CancellationToken.None).Select(edge => edge.Id).ShouldBe(found.Select(edge => edge.Id));
     }
 

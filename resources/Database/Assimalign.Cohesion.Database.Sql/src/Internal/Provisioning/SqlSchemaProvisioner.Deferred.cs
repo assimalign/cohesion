@@ -253,6 +253,7 @@ internal sealed partial class SqlSchemaProvisioner
 
     internal async ValueTask StopDeferredAsync()
     {
+        await StopRewriteAsync().ConfigureAwait(false);
         if (Deferred is { } pending)
         {
             await pending.StopAsync().ConfigureAwait(false);

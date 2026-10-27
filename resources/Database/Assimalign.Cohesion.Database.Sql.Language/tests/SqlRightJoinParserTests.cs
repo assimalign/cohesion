@@ -81,7 +81,7 @@ public sealed class SqlRightJoinParserTests
     [InlineData("SELECT * FROM a RIGHT JOIN b", "CK00001")]
     [InlineData("SELECT * FROM a RIGHT JOIN b ON", "CS00003")]
     [InlineData("SELECT * FROM (a RIGHT JOIN b USING (id)", "CS00003")]
-    [InlineData("SELECT * FROM a FULL JOIN b USING (id)", "CK00001")]
+    [InlineData("SELECT * FROM a FULL JOIN b", "CK00001")]
     public void Parse_InvalidRightGroup_ShouldReportDiagnostic(string sql, string code)
     {
         // Arrange / Act

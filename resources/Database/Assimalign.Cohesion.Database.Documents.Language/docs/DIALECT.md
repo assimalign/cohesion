@@ -95,6 +95,41 @@ Cohesion additionally requires transactional rollback on projection failure. Rav
 `src/Raven.Server/Documents/Patch/PatchDocumentCommand.cs:354-356` conditionally returns
 ModifiedDocument; the same clone was inspected for this post-image precedent.
 
+## ARRAY and FIRST comprehensions (#1728)
+
+`ARRAY expr FOR v IN arr [WHEN cond] END` and
+`FIRST expr FOR v IN arr [WHEN cond] END` accept one IN binding. They follow
+[Couchbase range transformations](https://docs.couchbase.com/server/current/n1ql/n1ql-language-reference/collectionops.html#range-transformations).
+The collection evaluates outside the new variable's scope; mapping and WHEN evaluate inside it.
+Nested variables shadow outer variables and fields and restore the enclosing scope at END.
+Parenthesized mappings are accepted, including mappings followed by CASE, nested ARRAY/FIRST or
+ANY/SOME/EVERY expressions without extra parentheses. Mapping and WHEN may nest these forms.
+The expressions compose with all current scalar contexts,
+including registered arguments, grouped projections, aggregate arguments, UNNEST and RETURNING.
+Closed mappings using only local paths also execute in INSERT/UPSERT VALUES. Calls in VALUES
+retain their existing refusal. Aggregates inside a comprehension retain the quantifier
+restriction (CD05001); collection, mapping and WHEN are all validated even on empty inputs.
+
+Closed comprehensions and quantified predicates preserve ordinary short-circuit evaluation in
+WHERE, VALUES and constructors. A failed speculative index-bound evaluation is discarded; its
+OQL error occurs only if execution visits that expression. Cancellation still propagates.
+
+ARRAY keeps input order and omits mapped MISSING values; NULL mappings remain array elements.
+An empty input or no retained mappings returns []. WHEN keeps only SQL++ Truth true, so NULL
+and MISSING conditions exclude the element. FIRST stops at the first qualifying element and
+returns its mapping, including MISSING or NULL; it returns MISSING when none qualifies.
+Both operators return MISSING for MISSING input and NULL for NULL or non-array input, as ANY does.
+Named projections omit MISSING; RAW/VALUE retains the existing conversion of top-level MISSING
+to JSON null. These defaults implement the owner decisions of 2026-10-25; FIRST's selected
+MISSING does not advance to a later element.
+
+WITHIN, position variables, multiple bindings, OBJECT transformation and the retired ARRAY()/FIRST()
+function spellings remain unsupported. Syntax and depth use CD00002/CD00005; CD01027 identifies
+an empty binding in a direct AST. Grouped expression matching and metadata validation preserve
+lexical binding identity. Execution checks cancellation per element. ARRAY constructs owned JSON
+using the existing depth limits; retained RETURNING arrays consume the existing statement budget
+(CD05018), and constructor depth retains CD05015. No wire or persisted format changes.
+
 ## Quoted identifiers
 
 Double-quoted collection, property and alias names accept doubled `""` as one embedded
@@ -222,7 +257,7 @@ NULL or non-array collections give NULL. `NOT ANY x IN [NULL] SATISFIES x = 1 EN
 following [Couchbase ANY](https://github.com/couchbase/query/blob/master/expression/coll_any.go)
 and [EVERY](https://github.com/couchbase/query/blob/master/expression/coll_every.go).
 UNNEST, INNER, LEFT, OUTER, EVERY and SATISFIES stay contextual names. END remains reserved.
-UNNEST in UPDATE/DELETE, FLATTEN calls, multi-binding quantifiers, ARRAY/FIRST comprehensions, NEST,
+UNNEST in UPDATE/DELETE, FLATTEN calls, multi-binding quantifiers, NEST,
 JOIN, WITHIN and ANY AND EVERY remain deferred with CK00001.
 The DML refusal applies at an UNNEST clause, so `DELETE FROM items WHERE ANY x IN tags
 SATISFIES unnest END` and UPDATE predicates/values may read a field named unnest. A MERGE INTO

@@ -142,7 +142,8 @@ internal sealed partial class SqlPlanner
                                 continue;
                             }
                             int treeId = nodes.Count;
-                            string algorithm = treeStep.Hash is not null ? "HashJoin" : treeStep.Access is not null ? "IndexNestedLoop" : "NestedLoop";
+                            string algorithm = treeStep.Kind == SqlJoinType.FullOuter ? "FullHashJoin; unmatched=both"
+                                : treeStep.Hash is not null ? "HashJoin" : treeStep.Access is not null ? "IndexNestedLoop" : "NestedLoop";
                             string normalization = treeStep.Kind == SqlJoinType.RightOuter ? "; normalized RIGHT to LEFT; physical=LeftOuter" : string.Empty;
                             Add("JoinStep", next.Parent, Target(join.Bindings[treeStep.Binding].Source),
                                 detail: $"{treeStep.Kind}; {algorithm}{normalization}; hash_budget=no_spill",

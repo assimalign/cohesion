@@ -63,7 +63,8 @@ No new interface, visibility grant, reference, persistent format or wire message
 | Code | Condition |
 | --- | --- |
 | CS05068 | An UPDATE target has more than one matching source association; no row is written. |
-| CS05069 | Direct RIGHT or parenthesized joined DML source requires an unsupported target-outer execution tree; no row is read or written. |
+| CS05069 | Direct RIGHT, FULL or parenthesized joined DML source requires an unsupported target-outer execution tree; no row is read or written. |
+| CS05070 | FULL JOIN requires a safe mandatory hash equality; refused during binding before either input is read. |
 
 Namespace rules follow PostgreSQL analyze.c:602-621,2560-2578; the owner's cardinality rule
 deliberately differs from nodeModifyTable.c:2599-2608 (first-update behavior).
@@ -365,7 +366,54 @@ database reopen, including when nested aliased groups render as derived SELECTs.
 Direct RIGHT or grouped join trees in UPDATE FROM / DELETE USING fail CS05069 before reads
 or mutation: this run preserves the target-outer identity invariant. A derived SELECT source
 containing RIGHT executes through the existing materialization path with the target pinned.
-FULL stays CK00001; its physical execution remains SQ-J2.
+FULL follows the physical and eligibility contract below.
+
+## FULL physical joins (#1525, SQ-J2)
+
+FULL [OUTER] JOIN uses the normalized tree without swapping its written children. Binding
+requires at least one mandatory hash equality between the children and proves the complete
+ON condition non-throwing with the existing hash-safety rules. CS05070 refuses other forms
+before reading either input, even when an input is empty. This includes inequality-only/OR
+conditions, unproven calls, arithmetic, subqueries, CHAR-only keys and derived text without
+a stored-codec Unicode guarantee. No merge executor, nested-loop FULL fallback or spill is
+introduced. Computed USING COALESCE and proven identity/widening casts can supply hash keys
+in later joins or grouped inner subtrees. PostgreSQL optimizer/path/joinrels.c:1157-1180
+likewise refuses FULL when it cannot produce a merge/hash path.
+
+Column-only equalities retain direct ordinal extraction; operand-analysis sets and expression
+vectors are allocated only for computed keys, with earlier column keys backfilled when a vector
+first becomes necessary. The Release allocation guard retains the pre-FULL ordinary-equijoin
+extraction budget of 1,040 bytes per call.
+
+Both physical sides become nullable. USING keeps one output in written USING order, with
+COALESCE of both common-typed inputs, the resolved equality collation for text, and retained
+identical domain identity. The merged column is nonnullable only when both inputs were
+nonnullable before this FULL; qualified inputs remain separate nullable physical columns.
+PostgreSQL parser/parse_clause.c:1739-1756 supplies the COALESCE rule.
+
+The existing chained hash table retains each build row independently, including duplicate and
+NULL-key rows. NULL keys stay outside bucket chains. A separate bool array tracks matches,
+with one flag per retained entry; growth copies flags and reserves old plus new arrays before
+allocation. A flag is set only after complete ON evaluation is TRUE. After every outer row is
+matched or null-extended, unmatched build entries are emitted once with the outer slots NULL.
+An empty outer still builds and drains the inner. WHERE remains above both null extensions.
+PostgreSQL executor/nodeHashjoin.c:578-592,634-679,729-756 uses the same ON-match distinction
+and separate unmatched/null-key drain; no code was copied.
+
+The statement grant charges the table object (104 bytes including new tracking/evaluator
+fields), bucket/entry arrays, the aligned tracking array header/payload and retained rows.
+Nested tables share the live grant. Success, budget refusal, evaluation failure and cancellation
+release every reservation. CS05067 is unchanged. Only hash-build state is bounded: existing
+outer/intermediate/result materialization retains its existing contract. The build side is
+always the written right child, including when an index exists. EXPLAIN names FullHashJoin and
+unmatched=both in JoinStep detail; ANALYZE retains candidate-pair counts rather than emitted
+unmatched-row counts. Deterministic 64/640-row fixtures compare 4096/409600 loop candidates
+with 64/640 FULL hash candidates, with identical paired values and 128/1280 stored row reads.
+
+Direct FULL DML sources follow CS05069 before reads/writes; derived SELECTs containing FULL
+use existing target-pinned materialization. In-process, InMemory/TCP, live clause conformance,
+parser round trips and the NativeAOT sample exercise these contracts. No public boundary,
+reference, persisted format, protocol frame or metadata field changes.
 
 ## N-way joins (#1109)
 
@@ -3238,10 +3286,10 @@ project reference or InternalsVisibleTo change is required.
   construction, versions are WAL-covered like all record writes (restart keeps
   them correct for free), and aborted stamps revert physically with the page
   images. Deletes tombstone (older snapshots keep the row until the purge
-  worker reclaims below every live horizon). No DDL rewrites a row (ADD and
-  DROP COLUMN change only the catalog, #1023 and #1241): **no statement ever
-  moves a version**, so a location (page, slot) is a version's identity for its
-  whole life — what index entries, row locks and the version store's ledger all
+  worker reclaims below every live horizon). ADD and DROP COLUMN change only the
+  catalog (#1023 and #1241). A rewrite copies live versions into a fresh owner and
+  rebuilds its indexes atomically (#1265); existing versions never move within an
+  owner, so a location (page, slot) remains a version's identity for its whole life — what index entries, row locks and the version store's ledger all
   key on.
 - **Format rule (data-storage format version, catalog-persisted): exactly one
   format, no upgrade path.** The catalog stores the format version of the whole
@@ -3442,7 +3490,7 @@ project reference or InternalsVisibleTo change is required.
     each dropped ordinal costs the table record one five-byte integer component,
     and a definition that outgrows one record is refused (`EnsureStorable`). For a
     table with dropped columns the refusal counts them and names the remedy,
-    recreating the table and copying its rows, since only a new table starts
+    calling RewriteTableAsync (or recreating the table and copying its rows), since a fresh owner starts
     without dropped ordinals (`SqlCatalogDroppedColumnTests`: a two-column table
     reaches the bound after 1,588 ADD/DROP cycles, where PostgreSQL stops at
     "tables can have at most 1600 columns", `tablecmds.c:7445-7452`).
@@ -5935,7 +5983,7 @@ RESTART, generation-mode changes and identity backfill on populated tables remai
 (#1123). Compiled typed schemas cannot declare identity metadata; SQL scripts can create
 identity tables through the ordinary SQL executor.
 
-FULL OUTER, NATURAL and LATERAL joins, qualified wildcards, UPDATE SET
+NATURAL and LATERAL joins, qualified wildcards, UPDATE SET
 subqueries, `Serializable`
 isolation (rejected at begin), persisted statistics, standalone ANALYZE, hash spill,
 and index-only result production (a seek always fetches the row).
@@ -6705,6 +6753,105 @@ Reference behavior was re-derived from local PostgreSQL gram.y:7239-7256,
 tablecmds.c:1915-1917,2033-2090,2225-2258 and heap.c:3701-3782. The snapshot preservation
 and explicit-transaction refusal are the owner's deliberate departures from PostgreSQL.
 
+#### Catalog: Recoverable table rewrite and ordinal compaction (#1265)
+
+SqlDatabase.RewriteTableAsync accepts validated SqlObjectName schema/table components,
+resolves the current immutable description and runs physical maintenance on the existing
+provisioning worker, including for an empty table.
+Schema-owned tables are supported because the operation preserves the logical definition,
+DDL generation and applied-schema hash. It always replaces the physical owner, even when
+there are no dropped columns. The internal description-based entry refuses stale bindings
+with existing CS04064 before reservation.
+Schema application and maintenance share fail-fast admission; session DDL is excluded for
+the operation. Ordinary readers retain their snapshot layouts. Writers that bound a retired owner,
+including transactions begun before publication, abort retryably with CS04006 after waiting
+for table X; retry the entire transaction against a fresh snapshot. The lock
+and latch order in SqlPlanExecutor.RewriteTableAsync is fail-fast schema admission, source-table
+X before queueing, fail-fast EnterMetadata on the worker, then reserved-table X and data apply.
+EnterMetadata must not wait while source-table X is held: definition DDL can own metadata
+while waiting for that table. Catalog reservation/publication hold only their inner catalog
+monitor and storage bracket, and no data apply gate or tree/page latch spans publication.
+Database disposal cancels
+queued work, claims it if the pump stopped, and joins in-flight cleanup before storage closes.
+The provisioning FIFO uses a short queue monitor and removable rewrite nodes: cancellation
+unlinks queued work immediately, so a stalled peer cannot retain canceled database graphs or
+accumulate canceled queue entries. The queue monitor never spans job or cancellation cleanup;
+enqueue may follow the rewrite admission monitor, while removal releases the queue monitor
+before returning admission. Failed enqueue discards the unpublished cancellation source.
+
+The maintenance caller begins the logical transaction and acquires source-table X before
+enqueueing, mirroring deferred schema preparation. An idle transaction blocking one database
+therefore occupies no provisioning worker and cannot stall a peer's migration. The engine's
+nonzero LockTimeout bounds this acquisition and reports CS04044; zero retains the normal
+unlimited lock-wait policy, so a caller holding a conflicting transaction must supply cancellation.
+Preparation, queue cancellation, failed enqueue and disposal retain one transaction/admission
+owner and join its rollback before completion. Deterministic regressions observe the lock wait,
+complete another database's deferred index migration before releasing the holder, and assert
+the caller-held conflict's coded timeout without an elapsed-time assertion.
+Cleanup assertions finish reclamation first: discovery briefly owns a coordinator snapshot
+fence, which must not be mistaken for a leaked maintenance transaction.
+Pre-queue failures use the same SQL failure translation as worker failures; an injected enqueue
+failure plus rollback I/O failure retains both causes under CS06041 before admission is released.
+
+TRUNCATE and rewrite use one ReplaceTableStorageAsync preparation/publication path and one
+catalog reservation/publication transaction. Rewrite decodes the old physical layout, including
+frozen missing values, then writes currently live rows with dense ordinals into the reserved
+owner. Historical versions remain available through the retired owner for old snapshots;
+they do not need copying. Existing committed writer stamps are retained. A batch holds at most
+64 decoded rows and durably inserts its rows and all index entries together, releasing the
+apply gate between batches. Unique indexes are validated before publication. Identity cursors,
+constraints, collation, defaults, missing values, ownership and dependent view identities follow
+the same catalog swap as TRUNCATE CONTINUE IDENTITY. Prepared owners and failures retain
+kind-14 reclamation intents. Every publication or cleanup requests reclamation after its
+statement pin ends. A crash therefore exposes either the complete original layout/index set
+or the complete compact layout/index set, and abandoned/retired owners converge through the
+existing reclamation worker. Interrupted preparation is abandoned; the caller retries explicitly.
+
+The shared copier accepts an internal replacement-definition function and row transform for
+#1447. TYPE syntax, conversion binding, dependency rebinding and its deferred schema intent
+are later runs; there is no second type-only copier. This operation adds no SQL syntax, wire
+message, public interface, visibility grant or project reference. The maintenance API uses a
+generated SqlObjectName value object for decoded schema and table components, preserving case-insensitive
+catalog identity and delimited-name punctuation; default names are refused at admission.
+FK intent preparation rechecks the physical binding generation after grants and refreshes
+outgoing parents after a swap. Retained publications identify their replacement by ObjectId,
+so a later rename cannot hide an invisible compact owner. Only the first non-null, non-self
+key that actually probes a parent checks visibility, using the probe's snapshot (refreshed
+committed visibility for read-committed ON CONFLICT). An invisible replacement aborts with
+CS04006 instead of reporting a false FK violation; empty input and MATCH SIMPLE null keys
+need no parent probe and can commit. Seeing the newest ordered publication marker skips all
+retained owners in constant work; older snapshots use an allocation-free indexed scan.
+The ordered vector stores only owner, replacement and marker identities; snapshot descriptions
+remain in the retired-owner directory under the catalog monitor. Replacement identity therefore
+preserves the existing publication/removal array allocation budgets.
+Hook-driven regressions pause child INSERT, child DELETE and a parent DELETE binding a rewriting
+child between discovery and IS grant, assert rediscovery, and verify rollback cannot restore an
+orphan. Parent DELETE must wait for the child's shared lock on the replacement parent's row.
+The null-key shortcut follows local PostgreSQL src/backend/utils/adt/ri_triggers.c:458-496;
+no reference-engine code is copied.
+Existing codes retain their conditions. SQL remains format 26: ordinary dense table records,
+kind-14 intents and the existing TRUNCATE publication contract are readable by the format-26
+engine, so this operation changes no persisted contract. Compiled-schema v8 and catalog record
+shapes stay unchanged. The existing coded open gate refuses all earlier files; no upgrade or legacy reader is added.
+
+Crash tests retain every write/flush/length image through copy-batch checkpoints, snapshot
+release, reclamation and the free-before-intent-removal window, then reopen every image for
+successful publication and canceled preparation under Synchronous, Grouped and None;
+None models process loss. Snapshot/index, missing-tail, duplicate-row, cancellation, exception,
+lock wait, stale-description, disposal and counter-driven nonparallel stress tests exercise
+admission and every acquired owner. Prepared-owner IDs are captured at reservation; assertions
+check their physical pages after reclamation as well as the live owner. A mutation that removes
+intents without freeing pages fails these guards. The independent commit/BEGIN history checks
+exact parent and child rows and values for both snapshot reads and final state while inserts,
+updates, deletes/cascades, FK writes, DDL and TRUNCATE race rewrites. An independent writer updates
+child FK rows without an earlier parent access or lock; its chosen ids and increments join the
+commit history, and successful child-only writes are required before the run can finish.
+Lost-write and equal-count
+resurrection fault modes exercise the same oracle, including the two-row false-prefix case.
+NativeAOT smoke executes compaction and a rebuilt seek.
+The exclusive rewrite follows local PostgreSQL tablecmds.c:4681-4691,6049,6186; preserving old
+snapshot layouts through owner replacement follows the owner's deliberate TRUNCATE policy.
+
 #### Catalog: Durable table reclamation (decision 77, #1443)
 
 SQL format 11 (formerly 10) adds catalog kind **14**: a typed tuple containing kind Int32,
@@ -6810,19 +6957,17 @@ dropped list.
   `relnatts + 1`, `src/backend/commands/tablecmds.c:7445-7446`), so a column
   re-added under a dropped column's name never shares the dropped column's
   component.
-- **Ordinals are never reclaimed.** Reusing a dropped ordinal would decode the
+- **Ordinals are retained within one physical owner.** Reusing a dropped ordinal would decode the
   dropped value, still stored in older versions, into another column. PostgreSQL
   keeps a dropped attribute's number for good and counts it against its column limit
   (`doc/src/sgml/limits.sgml:133-134`); here each dropped ordinal costs the table
   record one five-byte integer component and counts against the one-record limit
   below. When a table that has dropped columns outgrows the record, the refusal
-  counts them and says that recreating the table and copying its rows reclaims them,
-  since only a new table starts without dropped ordinals (`EncodeTable`; a
+  counts them and recommends RewriteTableAsync or recreating and copying the table;
+  both publish a fresh physical owner without dropped ordinals (`EncodeTable`; a
   two-column table reaches the limit after 1,588 ADD/DROP cycles).
-  Compacting the layout would take a table rewrite that moves every row version and
-  rebuilds its indexes; none exists, and one added later must replace the layout in
-  the same recoverable unit as the versions (the SQL engine's DESIGN, "DROP COLUMN
-  marks the column dropped").
+  RewriteTableAsync compacts the layout through the recoverable replacement described
+  below; older snapshots retain the original physical owner and layout.
 - **Every alteration carries the layout.** ADD/DROP COLUMN and ADD/DROP CONSTRAINT
   copy the dropped ordinals into the replacement, and `PublishTableAsync` refuses,
   with `SqlCatalogException`, a replacement that does not keep the current layout as
@@ -7746,7 +7891,7 @@ CTE definitions and references share one identity map; cached view plans are nev
 
 SqlDatabaseEngineOptions.StatementMemoryBudget is a positive byte count, default 67108864
 (64 MiB), snapshotted with engine options. It bounds concurrently retained hash builds in one
-statement, including nested queries: each table reserves 80 bytes, arrays reserve both old and
+statement, including nested queries: each table reserves 104 bytes, arrays reserve both old and
 new storage during doubling, and retained rows charge their arrays and conservatively sized
 boxed/text/binary cells, including both padded CHAR payloads and trimmed comparison strings.
 The limit governs accounted live hash-build memory, not result

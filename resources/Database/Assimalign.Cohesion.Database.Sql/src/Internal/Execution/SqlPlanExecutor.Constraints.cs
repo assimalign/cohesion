@@ -17,6 +17,8 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 internal sealed partial class SqlPlanExecutor
 {
+    internal static Action<SqlCatalogTable>? ReferenceIntentsDiscovered { get; set; }
+
     private static readonly string _errorEnsureSnapshotSeesCascadeRowFailure3 = ErrorMessages.EnsureSnapshotSeesCascadeRowFailure3;
 
     private static readonly string _errorEnsureSnapshotSeesCascadeRowFailure = ErrorMessages.EnsureSnapshotSeesCascadeRowFailure;
@@ -176,7 +178,7 @@ internal sealed partial class SqlPlanExecutor
         while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            ulong generation = _catalog.DdlGeneration;
+            var generation = _catalog.BindingGeneration;
             var adjacent = new SortedSet<ulong>();
             if (outgoing)
             {
@@ -197,6 +199,7 @@ internal sealed partial class SqlPlanExecutor
                     adjacent.Add(reference.Child.ObjectId);
                 }
             }
+            ReferenceIntentsDiscovered?.Invoke(table);
             adjacent.Remove(table.ObjectId);
             ulong blocked = table.ObjectId;
             LockMode mode = LockMode.IntentExclusive;
@@ -224,8 +227,10 @@ internal sealed partial class SqlPlanExecutor
                 continue;
             }
             EnsureCurrentDefinition(table);
-            if (generation != _catalog.DdlGeneration)
+            if (generation != _catalog.BindingGeneration)
             {
+                // Physical publication can replace an outgoing parent between discovery
+                // and its IS grant. Refresh parents before probing or locking their rows.
                 // Under own IX no new incoming FK can publish (it needs parent X).
                 // Rebuild once under that lock and try any newly discovered children.
                 if (incoming) { references.Incoming.Remove(table.ObjectId); }
@@ -653,6 +658,7 @@ internal sealed partial class SqlPlanExecutor
                     selfKeys.Add(ordinals.Select(ordinal => candidate[ordinal]).ToArray());
                 }
             }
+            bool snapshotChecked = false;
             foreach (var row in rows)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -666,6 +672,20 @@ internal sealed partial class SqlPlanExecutor
                 if (selfKeys?.Contains(keys) == true)
                 {
                     continue;
+                }
+
+                if (!current && !snapshotChecked)
+                {
+                    // Only a real parent probe needs historical versions. ON CONFLICT
+                    // under RC probes with refreshed visibility after arbitration waits.
+                    if (_catalog.SnapshotPredatesReplacement(parent, foreignKeySnapshot ?? statement.Snapshot))
+                    {
+                        string message = string.Format(System.Globalization.CultureInfo.CurrentCulture,
+                            ErrorMessages.StatementTableChanged, parent.Schema, parent.Name);
+                        throw new DatabaseTransactionAbortedException(message,
+                            [new Diagnostic { Code = "CS04006", Severity = DiagnosticSeverity.Error, Message = message }]);
+                    }
+                    snapshotChecked = true;
                 }
 
                 var matches = FinalConstraintRows(reference.ParentKey, keys, statement, cancellationToken,

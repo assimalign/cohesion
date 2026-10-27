@@ -73,6 +73,7 @@ internal sealed partial class DocumentExpressionEvaluator
                 OqlUnaryExpression unary => Unary(unary.Operator, Evaluate(unary.Operand, document, group)),
                 OqlBinaryExpression binary => Binary(binary, document, group),
                 OqlInExpression membership => In(membership, document, group),
+                OqlComprehensionExpression comprehension => Comprehend(comprehension, document, group),
                 OqlQuantifiedExpression quantified => Quantify(quantified, document),
                 OqlBetweenExpression between => Between(between, document, group),
                 OqlLikeExpression like => Like(like, document, group),
@@ -111,7 +112,7 @@ internal sealed partial class DocumentExpressionEvaluator
         System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
         switch (expression)
         {
-            case OqlQuantifiedExpression or OqlInExpression or OqlBetweenExpression or OqlLikeExpression or OqlCaseExpression:
+            case OqlComprehensionExpression or OqlQuantifiedExpression or OqlInExpression or OqlBetweenExpression or OqlLikeExpression or OqlCaseExpression:
                 foreach (var child in DocumentPlanner.PredicateChildren(expression)) { ValidateInputs(child); }
                 break;
             case OqlLiteralExpression { Value: JsonElement } literal:
@@ -224,6 +225,37 @@ internal sealed partial class DocumentExpressionEvaluator
         }
         foreach (var frame in frames) { members.Add(new(frame.Name, frame.Value)); }
         return DocumentJsonValue.Object(members, _writeVerb, _constructorMaxDepth);
+    }
+
+    private object? Comprehend(OqlComprehensionExpression expression, DocumentEvaluationContext document,
+        IReadOnlyList<DocumentEvaluationContext>? group)
+    {
+        var value = Evaluate(expression.Collection, document, group);
+        if (value is DocumentMissing) { return value; }
+        if (value is not JsonElement { ValueKind: JsonValueKind.Array } array) { return null; }
+        if (expression.IsFirst)
+        {
+            foreach (var item in array.EnumerateArray())
+            {
+                _cancellationToken.ThrowIfCancellationRequested();
+                var inner = document.Bind(expression.Variable, ReadJson(item));
+                if (Matches(expression.Predicate, inner, group)) { return Evaluate(expression.Projection, inner, group); }
+            }
+            return DocumentMissing.Instance;
+        }
+        return DocumentJsonValue.Array(Map(), _writeVerb, _constructorMaxDepth, _resultClause);
+
+        IEnumerable<object?> Map()
+        {
+            foreach (var item in array.EnumerateArray())
+            {
+                _cancellationToken.ThrowIfCancellationRequested();
+                var inner = document.Bind(expression.Variable, ReadJson(item));
+                if (!Matches(expression.Predicate, inner, group)) { continue; }
+                var mapped = Evaluate(expression.Projection, inner, group);
+                if (mapped is not DocumentMissing) { yield return mapped; }
+            }
+        }
     }
 
     private object? Quantify(OqlQuantifiedExpression expression, DocumentEvaluationContext document)

@@ -44,6 +44,14 @@ then normal queued waits retaining closure grants and deadlock detection. Hard d
 carry CS04065 mapped to 40P01; explicit victim rollback remains caller-managed under
 statement atomicity. Grammar, diagnostic transport and disk formats are unchanged.
 
+## Parent replacement visibility (#1265)
+
+DIALECT.md records retryable FK probes by replacement ObjectId across renames. Empty input,
+MATCH SIMPLE null keys and input-satisfied self-keys require no parent probe; read-committed
+ON CONFLICT uses refreshed probe visibility. Engine conformance cases exercise empty UPDATE,
+empty INSERT SELECT and all-null FK inserts across a retained parent rewrite. Grammar, AST,
+diagnostic identities and format 26 are unchanged.
+
 ## Bounded SELECT evaluation (#1523)
 
 DIALECT.md records early termination across stored/system, grouped, correlated,
@@ -272,19 +280,19 @@ Sql.Catalog has its own SQL-independent facet.
 
 ## RIGHT and parenthesized join AST (#1525)
 
-The profile admits RIGHT [OUTER] JOIN with ON or ordered USING columns; FULL retains CK00001.
+The profile admits RIGHT and FULL [OUTER] JOIN with ON or ordered USING columns. FULL execution uses a bounded hash operator; unsupported physical conditions fail engine binding with CS05070.
 SqlJoinedTableReference preserves an unaliased parenthesized item and its constituent
 namespaces. A group alias lowers to SqlDerivedTableReference over SELECT *, hiding the
 constituents and retaining optional complete column-alias lists and the existing 32-level derived binding limit. Parser parenthesis guards, expression
 depth, canonical rendering and the conformance corpus cover both forms. The engine keeps
 written ordinals and RIGHT USING's coerced right representative while normalizing physical
-children to LEFT. Direct RIGHT/grouped DML sources fail CS05069 at binding; derived SELECT
-sources can contain RIGHT. No clause, keyword, format or protocol count changes.
+children to LEFT. Direct RIGHT/FULL/grouped DML sources fail CS05069 at binding; derived SELECT
+sources can contain RIGHT or FULL. FULL USING coalesces common-typed values from both inputs; qualified inputs are nullable and merged nullability conservatively combines the original inputs. No clause, keyword, format or protocol count changes.
 
 Relation lookahead checks the token after each leading query wrapper's matching close.
 An alias there starts a derived first relation inside a joined group; SELECT itself and
 query continuations retain the query grammar. This follows PostgreSQL
-src/backend/parser/gram.y:13938-13965,14000-14022 and applies to INNER/LEFT/RIGHT/CROSS,
+src/backend/parser/gram.y:13938-13965,14000-14022 and applies to INNER/LEFT/RIGHT/FULL/CROSS,
 including nested groups and the derived SELECT introduced by canonical group-alias rendering.
 
 ## Design intent

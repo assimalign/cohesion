@@ -42,6 +42,9 @@ counts retain CD00007 and the operand location over both transports.
 UNNEST and quantified predicates use the same query exchange. A star with UNNEST returns
 synthetic whole-document objects; a MISSING LEFT binding is omitted while actual null elements
 remain null. Grouped counts over expanded rows retain Int64 values and metadata.
+ARRAY/FIRST comprehensions use the same exchange and owned JSON/MISSING results, including in
+RETURNING. The [OQL dialect](../../Assimalign.Cohesion.Database.Documents.Language/docs/DIALECT.md#array-and-first-comprehensions-1728)
+defines lexical scope, filtering and input propagation.
 
 OQL INSERT, UPSERT, UPDATE and DELETE return their affected counts through ExecuteAsync.
 With RETURNING, QueryAsync also exposes owned named rows or RAW/VALUE images alongside

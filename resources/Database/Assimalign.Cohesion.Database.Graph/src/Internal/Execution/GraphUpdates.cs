@@ -26,6 +26,7 @@ internal sealed class GraphUpdates : IDisposable
     private readonly Dictionary<ulong, GraphRelationship> _relationships = [];
     private readonly Dictionary<(ulong Node, GraphIncidentDirection Direction), Dictionary<Guid, List<ulong>>> _createdIncident = [];
     private readonly Dictionary<ulong, Guid> _createdTypes = [];
+    private readonly Dictionary<string, List<ulong>> _createdByType = new(StringComparer.Ordinal);
     private readonly Dictionary<GqlRelationshipPattern, Guid[]?> _typeSelections = new(ReferenceEqualityComparer.Instance);
     private readonly HashSet<(bool Node, ulong Id)> _created = [];
     private readonly HashSet<(bool Node, ulong Id)> _changed = [];
@@ -55,9 +56,11 @@ internal sealed class GraphUpdates : IDisposable
             new ReadOnlyDictionary<string, object?>(new Dictionary<string, object?>(properties, StringComparer.Ordinal)));
         _created.Add((false, edge.Id.Value));
         AccountEntity(false, edge.Id.Value, edge, token);
-        Charge(512); // Created identity, type and the two incident-list entries.
+        Charge(640); // Created identity, type, global type list and the two incident-list entries.
         _relationships.Add(edge.Id.Value, edge);
         _createdTypes.Add(edge.Id.Value, typeId);
+        if (!_createdByType.TryGetValue(type, out var typed)) { _createdByType.Add(type, typed = []); }
+        typed.Add(edge.Id.Value);
         AddIncident(from.Value, GraphIncidentDirection.Outgoing);
         AddIncident(to.Value, GraphIncidentDirection.Incoming);
         return edge;
@@ -121,7 +124,7 @@ internal sealed class GraphUpdates : IDisposable
     public void Dispose()
     {
         _nodes.Clear(); _nodeLabels.Clear(); _relationships.Clear(); _createdIncident.Clear();
-        _createdTypes.Clear(); _typeSelections.Clear(); _created.Clear(); _changed.Clear(); _entityValues.Clear();
+        _createdTypes.Clear(); _createdByType.Clear(); _typeSelections.Clear(); _created.Clear(); _changed.Clear(); _entityValues.Clear();
         _memory?.Dispose();
         _memory = null;
     }
@@ -190,6 +193,58 @@ internal sealed class GraphUpdates : IDisposable
                 : _database.Store.StreamAllNodes(snapshot, token, budget.Consume, memory.Add);
             foreach (var node in nodes) { yield return node; }
             await Task.CompletedTask.ConfigureAwait(false);
+        }
+    }
+
+    internal async IAsyncEnumerable<StoredGraphRelationship> StreamTypeAnchorAsync(IReadOnlyList<string> types,
+        GraphPlanExecutor.ExpansionBudget budget, [EnumeratorCancellation] CancellationToken token)
+    {
+        using var memory = new GraphMemoryOwner(budget.Memory);
+        memory.Add(128);
+        var pending = new List<ulong>();
+        foreach (string type in types)
+        {
+            token.ThrowIfCancellationRequested();
+            if (!_createdByType.TryGetValue(type, out var ids)) { continue; }
+            memory.Add(32 + 16L * ids.Count);
+            pending.AddRange(ids);
+        }
+        pending.Sort();
+        int position = 0;
+        foreach (var stored in _database.Store.StreamRelationshipTypes(types, _operation.Context.Snapshot,
+            token, Visit, memory.Add))
+        {
+            while (position < pending.Count && pending[position] <= stored.Id)
+            {
+                if (Created(pending[position++]) is not { } created) { continue; }
+                yield return created;
+            }
+            var edge = _relationships.TryGetValue(stored.Id, out var updated)
+                ? new StoredGraphRelationship(stored.Id, updated.From.Value, updated.To.Value, updated.Type, updated.Properties) : stored;
+            memory.RetainValue(edge.Properties, token);
+            try { yield return edge; }
+            finally { memory.ReleaseValue(edge.Properties); }
+        }
+        while (position < pending.Count)
+        {
+            if (Created(pending[position++]) is { } created) { yield return created; }
+        }
+        await Task.CompletedTask.ConfigureAwait(false);
+
+        void Visit()
+        {
+            token.ThrowIfCancellationRequested();
+            budget.EnsureAvailable();
+            budget.VisitCandidate();
+            budget.Consume();
+            token.ThrowIfCancellationRequested();
+        }
+        StoredGraphRelationship? Created(ulong id)
+        {
+            token.ThrowIfCancellationRequested();
+            if (!_relationships.ContainsKey(id)) { return null; }
+            Visit();
+            return FindRelationship(id);
         }
     }
 
