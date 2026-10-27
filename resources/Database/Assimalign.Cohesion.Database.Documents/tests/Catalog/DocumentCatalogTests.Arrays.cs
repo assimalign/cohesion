@@ -224,9 +224,12 @@ public sealed partial class DocumentCatalogTests
         await f.Coordinator.CommitAsync(deleting);
         (await ReadRawKeysAsync(f, metadata, Latest())).ShouldBeEmpty();
         (await f.Catalog.SearchIndexAsync(f.Collection.Id, "ix", null, true, null, true, old.Snapshot)).Single().Id.ShouldBe("a");
+        f.Coordinator.RunVersionPurgePass(default);
+        (await ReadRawKeysAsync(f, metadata, old.Snapshot)).OrderBy(key => key).ShouldBe(new[] { DocumentIndexKeys.Encode(1m), DocumentIndexKeys.Encode(2m) }.OrderBy(key => key));
         await f.Coordinator.RollbackAsync(old);
         f.Coordinator.RunVersionPurgePass(default).ShouldBeGreaterThan(0);
-        (await ReadRawKeysAsync(f, metadata, Latest())).ShouldBeEmpty();
+        // Reuse the now-unpinned old horizon: tombstones cannot hide unpruned entries from it.
+        (await ReadRawKeysAsync(f, metadata, old.Snapshot)).ShouldBeEmpty();
     }
 
     [Theory(DisplayName = "Cohesion Test [Documents.Catalog] - Recovery scrubs every abandoned array posting after splits (#1530)")]

@@ -19,7 +19,7 @@ public sealed partial class DocumentCatalogTests
     {
         // Arrange: this class is in the non-parallel Document index concurrency collection.
         await using var f = await Fixture.Create();
-        await CreateTypedIndexAsync(f, "ix", [DocumentIndexKey.DistinctArray("items")]);
+        var metadata = await CreateTypedIndexAsync(f, "ix", [DocumentIndexKey.DistinctArray("items")]);
         await f.Write("a", "{\"items\":[1,1,2]}");
         var pinned = await f.Coordinator.BeginAsync(IsolationLevel.Snapshot);
         using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(60));
@@ -73,6 +73,7 @@ public sealed partial class DocumentCatalogTests
         }), CancellationToken.None);
         var all = Task.WhenAll(writerTask, readerTask, purgeTask);
         int releasedWrites = 0, releasedReads = 0, releasedPasses = 0;
+        long releasedIndexPasses = 0;
 
         // Act: one minimum second plus observed progress, then require more work after unpinning.
         try
@@ -82,14 +83,16 @@ public sealed partial class DocumentCatalogTests
             {
                 (await f.Catalog.SearchIndexAsync(f.Collection.Id, "ix", 1m, true, 1m, true, pinned.Snapshot, stop.Token))
                     .Single().Id.ShouldBe("a");
+                (await ReadRawKeysAsync(f, metadata, pinned.Snapshot, stop.Token)).Count.ShouldBe(2);
                 await Task.Delay(5, CancellationToken.None);
             }
             await f.Coordinator.RollbackAsync(pinned);
             releasedWrites = Volatile.Read(ref writes);
             releasedReads = Volatile.Read(ref reads);
             releasedPasses = Volatile.Read(ref passes);
+            releasedIndexPasses = f.IndexPrunePasses;
             while ((Volatile.Read(ref writes) - releasedWrites < 32 || Volatile.Read(ref reads) - releasedReads < 32 ||
-                Volatile.Read(ref passes) - releasedPasses < 4 || Interlocked.Read(ref purged) == 0) &&
+                Volatile.Read(ref passes) - releasedPasses < 4 || f.IndexPostingsPruned == 0) &&
                 !all.IsCompleted && !stop.IsCancellationRequested)
             { await Task.Delay(5, CancellationToken.None); }
         }
@@ -107,8 +110,18 @@ public sealed partial class DocumentCatalogTests
         cancellations.ShouldBe(reads);
         passes.ShouldBeGreaterThanOrEqualTo(4);
         purged.ShouldBeGreaterThan(0);
+        releasedIndexPasses.ShouldBeGreaterThanOrEqualTo(4);
+        (f.IndexPrunePasses - releasedIndexPasses).ShouldBeGreaterThanOrEqualTo(4);
+        f.IndexPostingsPruned.ShouldBeGreaterThan(0);
         (writes - releasedWrites).ShouldBeGreaterThanOrEqualTo(32);
         (reads - releasedReads).ShouldBeGreaterThanOrEqualTo(32);
         (passes - releasedPasses).ShouldBeGreaterThanOrEqualTo(4);
+        // A final committed delete plus purge must physically erase the first version,
+        // even at the old horizon that cannot see any deleting transaction.
+        var deleting = await f.Coordinator.BeginAsync(IsolationLevel.Snapshot);
+        await f.Catalog.DeleteDocumentAsync(f.Collection.Id, "a", deleting);
+        await f.Coordinator.CommitAsync(deleting);
+        for (int i = 0; i < 16; i++) { f.Coordinator.RunVersionPurgePass(CancellationToken.None); }
+        (await ReadRawKeysAsync(f, metadata, pinned.Snapshot)).ShouldBeEmpty();
     }
 }

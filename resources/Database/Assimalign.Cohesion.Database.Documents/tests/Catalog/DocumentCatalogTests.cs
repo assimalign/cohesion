@@ -3,6 +3,7 @@ using System.Buffers.Binary;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Documents.Storage;
@@ -248,8 +249,12 @@ public sealed partial class DocumentCatalogTests
         await f.Storage.TombstoneContentAsync(f.Coordinator, deleting, Content(document));
         await f.Coordinator.CommitAsync(deleting);
         (await f.Search("age", null, true, null, true)).ShouldBeEmpty();
+        var metadata = f.Catalog.GetIndexes(f.Collection.Id, Latest()).Single();
+        f.Coordinator.RunVersionPurgePass(default);
+        (await ReadRawKeysAsync(f, metadata, reader.Snapshot)).ShouldHaveSingleItem();
         await f.Coordinator.CommitAsync(reader);
         f.Coordinator.RunVersionPurgePass(default).ShouldBeGreaterThan(0);
+        (await ReadRawKeysAsync(f, metadata, reader.Snapshot)).ShouldBeEmpty();
     }
 
     [Fact]
@@ -480,11 +485,21 @@ public sealed partial class DocumentCatalogTests
         internal TransactionCoordinator Coordinator { get; }
         internal DocumentCatalog Catalog { get; }
         internal DocumentCollectionMetadata Collection { get; } = new(Guid.NewGuid(), "items");
+        private long _indexPrunePasses;
+        private long _indexPostingsPruned;
+        internal long IndexPrunePasses => Interlocked.Read(ref _indexPrunePasses);
+        internal long IndexPostingsPruned => Interlocked.Read(ref _indexPostingsPruned);
 
         private Fixture()
         {
             Storage = DocumentStorage.Create(Data, Journal, new MemoryStream(), "test");
-            Coordinator = new TransactionCoordinator(Storage, Storage.WriteAheadJournal, Storage.Records);
+            Coordinator = new TransactionCoordinator(Storage, Storage.WriteAheadJournal, Storage.Records, async (bound, ct) =>
+            {
+                long pruned = await Catalog!.PruneIndexesAsync(bound, ct);
+                Interlocked.Add(ref _indexPostingsPruned, pruned);
+                Interlocked.Increment(ref _indexPrunePasses);
+                return pruned;
+            });
             Catalog = DocumentCatalog.Open(Storage, Coordinator);
         }
 

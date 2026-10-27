@@ -2407,7 +2407,10 @@ await or while entering apply/undo. Index cursors release the tree latch before 
 reads. Non-parallel tests require counted progress through replacement, rollback, pinned reads,
 canceled searches and purge, then more progress after unpinning; the duration is only a minimum
 exercise period and a hang ceiling. Injected failures/cancellation after a counted posting prove
-bracket rollback and subsequent reuse.
+bracket rollback and subsequent reuse. The catalog test fixture supplies the coordinator's real
+index-pruner callback. Raw-tree reads at a released old snapshot prove physical erasure after
+purge, while registered pinned snapshots retain their postings; race counters require actual
+index-pruner passes and reclaimed postings after unpinning.
 
 Physical tree generations use reserved storage sequences and are never reused. Root registrations
 carry writer/deleter zero because they describe current physical topology, including nodes holding
