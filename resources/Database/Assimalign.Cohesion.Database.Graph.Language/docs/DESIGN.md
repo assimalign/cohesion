@@ -351,6 +351,9 @@ counted ANY remain outside this delivery (counted ANY retains CK00001).
 
 `GqlPathPattern.Selector` records the kind, count and complete prefix span. Its sealed
 `GqlPathSelector` renders a canonical selector independently of optional mode/path tokens.
+`GqlPathPattern.ToString()` uses the language renderer to emit the complete semantic path,
+including predicates and quantifiers, in selector/mode/PATH/GROUPS order. Round-trip tests
+compare every semantic AST field, normalizing source locations and redundant flat elements.
 Omission preserves exhaustive matching; an explicit ALL retains its own selection plan.
 Selection partitions by the actual ordered start/end identities for each incoming binding,
 even for anonymous endpoints, equal endpoints and an interior scan anchor. ANY selects one

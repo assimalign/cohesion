@@ -118,7 +118,12 @@ contracts still apply; WALK never silently becomes TRAIL. EXPLAIN shows the reso
 `MATCH [p =] <selector> [mode] [PATH | PATHS] [GROUP | GROUPS] <path>` parses and
 binds the selector surface. GROUP/GROUPS applies only to counted SHORTEST; k is an explicit
 positive Int64 literal. The mode defaults to TRAIL. Counts that are missing, signed, zero,
-non-integer, parameters or overflow are CG00011. Counted ANY remains CK00001.
+non-integer, parameters or overflow are CG00011. Counted ANY, including parameter counts,
+remains CK00001 at the complete prefix.
+
+`GqlPathPattern.ToString()` renders the complete semantic path, including its assignment,
+selector, mode, canonical PATH/GROUPS prefix, labels, property constraints, inline WHERE
+and quantifiers. Reparsing preserves the path AST after source locations are normalized.
 
 | Selector | Selection for each ordered endpoint pair and incoming binding |
 | --- | --- |

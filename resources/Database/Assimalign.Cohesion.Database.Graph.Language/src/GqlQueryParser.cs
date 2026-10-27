@@ -419,7 +419,7 @@ public sealed partial class GqlQueryParser : QueryParser
         int next = index + 1;
         bool shortest = head == "SHORTEST" || IsWordAt(next, "SHORTEST");
         if (head != "SHORTEST" && shortest) { next++; }
-        if (head != "ALL" && next < _tokens.Count && _tokens[next].Type == TokenType.Integer) { next++; }
+        if (head != "ALL" && next < _tokens.Count && _tokens[next].Type is TokenType.Integer or TokenType.Parameter) { next++; }
 
         if (TryPathModeAt(next, out _))
         {

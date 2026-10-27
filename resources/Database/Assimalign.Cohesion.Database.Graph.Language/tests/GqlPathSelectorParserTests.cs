@@ -4,6 +4,8 @@ using System.Linq;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Database.Graph.Language.Tests.TestObjects;
+
 namespace Assimalign.Cohesion.Database.Graph.Language.Tests;
 
 public sealed class GqlPathSelectorParserTests
@@ -25,7 +27,7 @@ public sealed class GqlPathSelectorParserTests
             {
                 string prefix = string.Join(" ", new[] { head, mode, pathToken,
                     kind == GqlPathSelectorKind.ShortestGroups ? "GROUPS" : "" }.Where(word => word.Length != 0));
-                string source = $"MATCH p = {prefix} (a)-[r:T]->{{0,3}}(b) RETURN p";
+                string source = $"MATCH p = {prefix} ((a:V {{k:$min}} WHERE a.k > 0)-[r:T WHERE r.w > 0]->{{0,3}}(b) WHERE a.k <> b.k) RETURN p";
                 var statement = (GqlQueryStatement)new GqlQueryParser().Parse(source);
                 statement.Diagnostics.ShouldBeEmpty();
                 var path = statement.GqlExpression.Matches.ShouldHaveSingleItem();
@@ -35,12 +37,53 @@ public sealed class GqlPathSelectorParserTests
                 path.Mode.ShouldBe(mode.Length == 0 ? null : Enum.Parse<GqlPathMode>(mode, true));
                 var location = path.Selector.Location.ShouldNotBeNull();
                 source[location.Start..location.End].ShouldBe(prefix);
-                var roundtrip = (GqlQueryStatement)new GqlQueryParser().Parse($"MATCH {path.Selector} (a)->(b) RETURN a");
+                var roundtrip = (GqlQueryStatement)new GqlQueryParser().Parse($"MATCH {path} RETURN p");
                 roundtrip.Diagnostics.ShouldBeEmpty();
-                roundtrip.GqlExpression.Matches[0].Selector!.Kind.ShouldBe(kind);
-                roundtrip.GqlExpression.Matches[0].Selector!.Count.ShouldBe(count);
+                GqlSemanticTree.Path(roundtrip.GqlExpression.Matches[0]).ShouldBe(GqlSemanticTree.Path(path));
             }
         }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Graph.Language] - Counted ANY parameters retain the complete unsupported prefix (#1734)")]
+    [InlineData("ANY $k")]
+    [InlineData("ANY @k TRAIL PATHS")]
+    [InlineData("ANY 2 WALK PATH")]
+    public void Parse_CountedAny_ShouldReportCapabilityAtPrefix(string prefix)
+    {
+        // Arrange
+        string source = $"MATCH {prefix} (a)->(b) RETURN a";
+        // Act
+        var diagnostic = new GqlQueryParser().Parse(source).Diagnostics.ShouldHaveSingleItem();
+        // Assert
+        diagnostic.Code.ShouldBe("CK00001");
+        source[diagnostic.Start!.Value..diagnostic.End!.Value].ShouldBe(prefix);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Graph.Language] - Complete paths render variables, predicates, directions and quantifiers (#1734)")]
+    [InlineData("p = SHORTEST 2 WALK GROUPS (a WHERE a.k > 0)->{0,3}(b)")]
+    [InlineData("p = SHORTEST 1 TRAIL PATH GROUP (a) ((x WHERE x.k>0)-[r:T WHERE r.w>0]->(y) WHERE x.k<>y.k){0,3} (b)")]
+    [InlineData("p = ANY (\"odd\"\"name\":A|!B {\"odd key\":'a\\nb''c',d:1.5} WHERE \"odd\"\"name\".k <> $min)<-[r:!T WHERE r.w IS NOT NULL]-(b)")]
+    [InlineData("p = ALL SIMPLE (a)<->+(b)")]
+    [InlineData("p = ANY SHORTEST ACYCLIC (a)-*(b)")]
+    [InlineData("p = ALL SHORTEST (a)-[r:T*0]->(b)")]
+    [InlineData("p = WALK (a)->{2}(b)")]
+    [InlineData("p = (a WHERE (a.k>0 AND a.k<3) OR NOT a:Bad)->(b)")]
+    [InlineData("p = ANY (a WHERE CASE a.k WHEN > 1 THEN coalesce(a.k,2) ELSE nullif(a.k,0) END > 0)")]
+    [InlineData("p = ALL (a WHERE {k:[a.k,2]}['k'][0] IN [1,2] AND upper('a') STARTS WITH 'A')")]
+    [InlineData("p = ANY (a WHERE CAST(a.k AS DOUBLE PRECISION) > -1.25 AND CURRENT_DATE IS NOT NULL AND (a.k=1) IS TRUE)")]
+    [InlineData("p = ANY (a WHERE log(2,a.k)>0 AND a IS NOT LABELED Bad)")]
+    [InlineData("p = ANY (a WHERE a.k=1.0 OR a.k=-0.0)")]
+    public void ToString_CompletePath_ShouldRoundTripSemanticTree(string pattern)
+    {
+        // Arrange
+        var original = (GqlQueryStatement)new GqlQueryParser().Parse($"MATCH {pattern} RETURN p");
+        original.Diagnostics.ShouldBeEmpty();
+        var path = original.GqlExpression.Matches.ShouldHaveSingleItem();
+        // Act
+        var reparsed = (GqlQueryStatement)new GqlQueryParser().Parse($"MATCH {path} RETURN p");
+        // Assert: compare all public semantic fields, independently of the renderer; locations and source text are normalized away.
+        reparsed.Diagnostics.ShouldBeEmpty();
+        GqlSemanticTree.Path(reparsed.GqlExpression.Matches.ShouldHaveSingleItem()).ShouldBe(GqlSemanticTree.Path(path));
     }
 
     [Theory(DisplayName = "Cohesion Test [Graph.Language] - Selector count failures are located CG00011 (#1734)")]

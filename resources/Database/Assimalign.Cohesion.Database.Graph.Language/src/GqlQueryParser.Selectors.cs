@@ -21,7 +21,7 @@ public sealed partial class GqlQueryParser
             { Error("CG00011", ErrorMessages.SelectorCountInvalid, number); }
             else { Advance(); }
         }
-        else if (!all && !qualified && Current.Type == TokenType.Integer)
+        else if (!all && !qualified && Current.Type is TokenType.Integer or TokenType.Parameter)
         {
             // Counted ANY is outside #1734's approved selector surface.
             TryPathSearchPrefix(_position - 1, out string construct, out int last);

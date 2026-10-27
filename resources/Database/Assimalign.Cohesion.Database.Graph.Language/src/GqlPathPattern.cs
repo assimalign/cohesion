@@ -1,5 +1,7 @@
 using System.Collections.Generic;
 
+using Assimalign.Cohesion.Database.Graph.Language.Internal;
+
 namespace Assimalign.Cohesion.Database.Graph.Language;
 
 /// <summary>A path of nodes, relationships and parenthesized segments in source order.</summary>
@@ -29,4 +31,8 @@ public sealed record GqlPathPattern(IReadOnlyList<GqlNodePattern> Nodes,
     /// specify a mode; it governs every relationship and parenthesized or quantified segment.
     /// </summary>
     public GqlPathMode? Mode { get; init; }
+
+    /// <summary>Renders the complete path as GQL, including its binding, selector, mode, predicates and repetition bounds.</summary>
+    /// <returns>Canonical path syntax; source locations and optional keyword spellings do not affect rendering.</returns>
+    public override string ToString() => GqlPathRenderer.Render(this);
 }
