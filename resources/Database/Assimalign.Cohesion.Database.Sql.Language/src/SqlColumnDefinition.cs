@@ -24,13 +24,15 @@ public sealed class SqlColumnDefinition
     /// <param name="identity">The identity generation facet, when declared.</param>
     /// <param name="resolvedType">The resolved built-in type, or null for an engine-resolved domain.</param>
     /// <param name="isExplicitlyNullable">Whether a NULL declaration was written, for table-constraint conflict checking.</param>
+    /// <param name="typeName">The decoded type name retained by the parser.</param>
     internal SqlColumnDefinition(string columnName, string dataType, bool isNullable, bool isPrimaryKey, SqlExpression? defaultValue,
         IReadOnlyList<SqlConstraintDefinition>? constraints = null, string? collationName = null, DatabaseTypeInfo? resolvedType = null, SqlIdentityDefinition? identity = null,
-        bool isExplicitlyNullable = false)
+        bool isExplicitlyNullable = false, string? typeName = null)
     {
         Identity = identity;
         ColumnName = columnName;
         DataType = dataType;
+        TypeName = typeName ?? dataType;
         ResolvedType = resolvedType;
         IsNullable = isNullable;
         IsExplicitlyNullable = isExplicitlyNullable;
@@ -49,6 +51,8 @@ public sealed class SqlColumnDefinition
     /// Gets the data type name (e.g., <c>INT</c>, <c>TEXT</c>, <c>VARCHAR(100)</c>).
     /// </summary>
     public string DataType { get; }
+
+    internal string TypeName { get; }
 
     /// <summary>
     /// Gets the built-in type resolved during parsing, or null when the name requires

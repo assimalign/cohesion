@@ -55,10 +55,7 @@ public static class SqlExpressionRenderer
     private static string AlterTypeTarget(SqlColumnDefinition column)
     {
         if (column.ResolvedType is not null) { return CastTarget(column.DataType); }
-        string type = column.DataType;
-        // Parsed domain declarations retain their SQL delimiters. Internal ASTs
-        // may also carry a bare name; quote that name without quoting twice.
-        return type.Length >= 2 && type[0] == '"' && type[^1] == '"' ? type : Identifier(type);
+        return Identifier(column.TypeName);
     }
 
     // Precedence ladder of SqlQueryParser.Expressions.cs, loosest first. An operand whose own

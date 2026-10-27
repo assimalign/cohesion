@@ -88,6 +88,8 @@ public sealed class SqlAlterTableParserTests
     [InlineData("a space", true)]
     [InlineData("a\"quote", true)]
     [InlineData("select", true)]
+    [InlineData("\"odd\"", false)]
+    [InlineData("\"odd\"", true)]
     public void Render_AlterTypeDomain_ShouldPreserveTypeName(string name, bool alreadyQuoted)
     {
         // Arrange

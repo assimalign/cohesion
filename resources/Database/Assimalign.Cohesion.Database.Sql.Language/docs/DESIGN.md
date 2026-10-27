@@ -1,5 +1,13 @@
 # Assimalign.Cohesion.Database.Sql.Language — Design
 
+## ALTER TYPE domain rendering (#1447)
+
+SqlColumnDefinition retains the parser's decoded type name separately from its type spelling.
+ALTER TYPE renders this structured name with identifier escaping, so a decoded domain name
+beginning and ending in quote characters cannot be confused with SQL delimiters. Parser and
+direct-AST round trips cover both forms. DIALECT.md records TYPE's assignment-default casts,
+narrowing rewrites and persisted CHECK rules; the engine's live conformance corpus exercises them.
+
 ## TRUNCATE (#1716, SQ-T1)
 
 SqlTruncateExpression stores an immutable ordered list of SqlTruncateTable targets, each with
