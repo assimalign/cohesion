@@ -376,7 +376,7 @@ internal static partial class DocumentPlanExecutor
         {
             long before = memory.Bytes;
             object?[] values;
-            try { values = logical.Projections.Select(projection => evaluator.EvaluateProjection(projection.Expression, document, group, query.IsValue)).ToArray(); }
+            try { values = logical.Projections.Select(projection => evaluator.EvaluateProjection(projection.Expression, document, group, DocumentRowWriter.WritesBareValue(query))).ToArray(); }
             finally { memory.Release(memory.Bytes - before); }
             if (query.IsValue && values[0] is DocumentMissing) { values[0] = null; }
             for (int i = 0; i < values.Length; i++)
@@ -426,7 +426,7 @@ internal static partial class DocumentPlanExecutor
         }
         bool wholeDocument = query.Projections.Count == 1 && query.Projections[0].Expression is OqlStarExpression;
         return new DocumentQueryResult(columns, output.Select(row => row.Values).ToList(),
-            query.IsValue || wholeDocument, wholeDocument ? output.Select(row => row.Document.RawContent).ToArray() : null, affectedCount,
+            DocumentRowWriter.WritesBareValue(query), wholeDocument ? output.Select(row => row.Document.RawContent).ToArray() : null, affectedCount,
             memory, memory is null ? 0 : output.Sum(row => row.RetainedBytes));
     }
 

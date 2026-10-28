@@ -295,7 +295,7 @@ payload accepts rows plus a matching affected count without capability negotiati
 | COHDOC004 | CD04004 | Transactions/locking |
 | COHDBD001 | CD04101 | Transactions/locking |
 | COHDOC001 | CD05001 | Execution/budgets |
-| COHDOC015 | CD05015 | Execution/budgets — constructor or subquery projection depth, including its named wrapper (#1731) |
+| COHDOC015 | CD05015 | Execution/budgets — constructor, SELECT projection or result formatter depth, including its row wrapper (#1731) |
 | COHDBD002 | CD06102 | Storage/durability |
 | COHDBD003 | CD06103 | Storage/durability |
 | COHDBD004 | CD06104 | Storage/durability |

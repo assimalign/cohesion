@@ -317,7 +317,7 @@ internal static partial class DocumentPlanExecutor
             {
                 values = new object?[logical.Projections.Count];
                 for (int index = 0; index < values.Length; index++)
-                { values[index] = await evaluator.EvaluateProjectionAsync(logical.Projections[index].Expression, document, group, query.IsValue, nested).ConfigureAwait(false); }
+                { values[index] = await evaluator.EvaluateProjectionAsync(logical.Projections[index].Expression, document, group, DocumentRowWriter.WritesBareValue(query), nested).ConfigureAwait(false); }
             }
             finally { memory.Release(memory.Bytes - nested.RetainedBytes - before); }
             if (query.IsValue && values[0] is DocumentMissing) { values[0] = null; }

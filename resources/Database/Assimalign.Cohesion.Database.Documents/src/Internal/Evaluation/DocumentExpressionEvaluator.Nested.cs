@@ -50,8 +50,8 @@ internal sealed partial class DocumentExpressionEvaluator
     internal async ValueTask<object?> EvaluateProjectionAsync(OqlExpression expression, DocumentEvaluationContext document,
         IReadOnlyList<DocumentEvaluationContext>? group, bool bareValue, DocumentNestedExecutionContext nested)
     {
-        // Named projection frames add one object level around the constructed value.
-        _constructorMaxDepth = bareValue || expression is OqlStarExpression ? 256 : 255;
+        // Use the same serialized row shape as the synchronous projection path.
+        _constructorMaxDepth = bareValue ? 256 : 255;
         try
         {
             var value = await EvaluateAsync(expression, document, group, nested).ConfigureAwait(false);

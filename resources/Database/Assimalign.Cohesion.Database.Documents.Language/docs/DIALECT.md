@@ -100,8 +100,11 @@ them by ordinal name. Qualified outer stars (`d.*`) and a nested `FROM d` naming
 also refuse with CK00001 naming correlation. An ordinary unqualified field binds to the inner
 source, as in Couchbase; it does not implicitly capture an outer document field.
 
-Complete async projections, including the named wrapper, are limited to 256 JSON levels.
-Excess depth gives located CD05015 before formatting and leaves the wire session reusable.
+Complete projections on both execution paths are limited to 256 serialized JSON levels.
+RAW/VALUE and lone stars have no enclosing row object and allow 256 value levels. Named columns
+and stars beside other columns allow 255, reserving one level for the row object. This also
+checks developer-function JSON. Excess depth gives located CD05015; the row writer applies the
+same diagnostic as a last defence, preserving the connection after a terminal Failure.
 Subquery expressions are known arrays for the literal-array function-kind rule: LENGTH, ABS
 and CONCAT reject them with CD05001 during planning. Constructors and ARRAY/FIRST retain
 in-order evaluation, serialization and failure reachability on both execution paths. This run adds no disk,

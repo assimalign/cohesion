@@ -470,3 +470,11 @@ both require their own publish/execution evidence. No sample project reference c
 Unknown engine-resolved function names use ExecutionFailure rather than ParseFailure, with
 no StatementParseFailed event. Application callback timeout and I/O errors use the model
 callback diagnostic and leave the exact wire session reusable after a completed failure.
+
+## Projection depth recovery (#1731)
+
+Both evaluators derive depth from the serialized row shape: lone stars and RAW/VALUE are bare;
+other projections reserve one object level. Developer-function JSON follows the same check.
+Depth refusals preserve located CD05015 and the exact server session on InMemory and TCP.
+The row writer also translates its own depth failure with the statement span, allowing the
+existing terminal Failure path to recover even if evaluation missed an overdeep value.

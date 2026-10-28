@@ -3,7 +3,9 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Text.Json;
 
+using Assimalign.Cohesion.Database.Documents.Language;
 using Assimalign.Cohesion.Database.Execution;
+using Assimalign.Cohesion.Database.Language;
 
 using Assimalign.Cohesion.Database.Documents.Protocol;
 
@@ -27,7 +29,24 @@ internal sealed class DocumentRowWriter : IDisposable
         return _buffer.WrittenMemory;
     }
 
-    internal ReadOnlyMemory<byte> Write(DatabaseRow row, IReadOnlyList<DatabaseColumn> columns, bool bareValue)
+    // A lone star is emitted directly; every other named projection has a row wrapper.
+    internal static bool WritesBareValue(OqlSelectExpression query)
+        => query.IsValue || query.Projections.Count == 1 && query.Projections[0].Expression is OqlStarExpression;
+
+    internal ReadOnlyMemory<byte> Write(DatabaseRow row, IReadOnlyList<DatabaseColumn> columns, bool bareValue,
+        Location? location = null, string resultClause = "SELECT")
+    {
+        try { return WriteRow(row, columns, bareValue); }
+        catch (InvalidOperationException exception) when (_writer.CurrentDepth >= 256)
+        {
+            // Encoding is outside statement evaluation. Keep a terminal, located Failure
+            // available even if a future producer bypasses projection validation.
+            throw new DocumentPlanningException("CD05015", string.Format(CultureInfo.CurrentCulture,
+                ErrorMessages.ResultConstructorDepthExceeded, resultClause, "projection"), location, exception);
+        }
+    }
+
+    private ReadOnlyMemory<byte> WriteRow(DatabaseRow row, IReadOnlyList<DatabaseColumn> columns, bool bareValue)
     {
         if (bareValue)
         {

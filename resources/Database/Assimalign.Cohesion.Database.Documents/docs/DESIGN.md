@@ -504,7 +504,7 @@ CD00007 for the same count rule at parse and plan time:
 | `CD03012` | INSERT found an existing key, or INSERT/UPSERT repeated a key in one statement |
 | `CD02013` | Invalid evaluated LIKE escape or a pattern ending in its escape character |
 | `CD01014` | DISTINCT ORDER BY expression is absent from the projection |
-| `CD05015` | A query/RETURNING constructor or subquery projection exceeds the 256-level result limit, including the named wrapper |
+| `CD05015` | A query/RETURNING constructor, SELECT projection or result formatter exceeds the 256-level serialized result limit, including the row wrapper |
 | `CD05018` | Retained statement source rows, ordered candidate buckets, groups, RETURNING results or aggregate values exceed the statement memory budget |
 | `CD00011` | ALL/DISTINCT applied to a scalar or star call |
 | `CD00013` | NULLS without FIRST or LAST |
@@ -661,10 +661,14 @@ boundary, but SQL scalar-cardinality semantics and unconditional init-plan hoist
 EXPLAIN shows SubqueryExpression owners, spans, child plans and cache policy without invoking
 functions. Tests cover snapshot concurrency, own writes, lazy failures, caching counters, shared
 budget/cancellation cleanup, reusing plans after index DDL, both transports and NativeAOT.
-Before returning any async projection, the evaluator validates the complete JSON depth, including
-the named object wrapper, at the projection expression span (CD05015). This also covers JSON
+Before returning a SELECT projection, both evaluators validate the complete JSON depth at the
+projection expression span (CD05015). The row writer owns the shared allowance rule: RAW/VALUE
+and lone stars are bare (256 levels); named columns and stars beside other columns have an
+object wrapper (255 value levels). This also covers JSON
 returned through subqueries, functions, CASE, FIRST and aggregates without a local constructor.
-Overdeep values never reach the result formatter; both wire transports retain a reusable session.
+Developer-function JSON receives the same projection check, even without a local constructor.
+The formatter also translates its own depth refusal to located CD05015 as a last defence; the
+server supplies the statement span and retains a reusable session after a terminal Failure.
 Nested array/object materialization retains the same depth guard and located subquery failure.
 Release measurements preserve the baseline allocations for ordinary plans, native queries and
 selective scans; the statement wrapper adds no ordinary-plan fields.

@@ -97,9 +97,19 @@ internal sealed partial class DocumentExpressionEvaluator
     internal object? EvaluateProjection(OqlExpression expression, DocumentEvaluationContext document,
         IReadOnlyList<DocumentEvaluationContext>? group, bool bareValue)
     {
-        // Named projection frames add one object level around the constructed value.
+        // The caller uses the row writer's bare-value rule, including lone stars.
         _constructorMaxDepth = bareValue ? 256 : 255;
-        try { return Evaluate(expression, document, group); }
+        try
+        {
+            var value = Evaluate(expression, document, group);
+            // Functions and paths can supply JSON without a local constructor.
+            // RETURNING counts complete JSON tokens before serialization and owns CD05019.
+            if (_resultClause == "SELECT")
+            { DocumentJsonValue.ValidateDepth(value, _constructorMaxDepth, resultClause: _resultClause, cancellationToken: _cancellationToken); }
+            return value;
+        }
+        catch (DocumentPlanningException exception) when (exception.Diagnostics[0].Start is null && expression.Location is not null)
+        { throw exception.At(expression.Location); }
         finally { _constructorMaxDepth = 256; }
     }
 
