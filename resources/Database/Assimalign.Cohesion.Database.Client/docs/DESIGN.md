@@ -515,6 +515,8 @@ after any required ROLLBACK, including an already Idle session. This clears logi
 sequence state and timeout overrides; an ordinary ROLLBACK preserves sequence state. Reuse still
 requires Idle certification after the final reset. Graph/Documents retain their family rollback
 path. No new wire message, model reference, capability or public bridge is introduced (#1717).
+Scripted application-exchange peers assert the extra SQL reset and its Idle acknowledgment;
+their cancellation/result-boundary checks and Graph termination path remain strict.
 
 SQL/Graph transaction-status negotiation adds an existing Ready I/T/E frame after Execute
 completion or a statement error. The shared client drains it before returning, rolls back open
