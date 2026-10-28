@@ -355,7 +355,8 @@ public sealed class GraphMergeConcurrencyTests
         await owner.RollbackAsync(token);
 
         // Assert
-        await Should.ThrowAsync<Exception>(pending);
+        if (dispose) { (await Should.ThrowAsync<DatabaseException>(pending)).Diagnostics.ShouldContain(item => item.Code == "CK04002"); }
+        else { await Should.ThrowAsync<OperationCanceledException>(pending); }
         await AssertReleasedAsync(database, [identity], token);
         await waiting.RollbackAsync(token);
         await AssertReleasedAsync(database, [identity], token);
@@ -426,7 +427,8 @@ public sealed class GraphMergeConcurrencyTests
             else { cancellation.Cancel(); }
 
             // Assert
-            await Should.ThrowAsync<Exception>(pending);
+            if (dispose) { (await Should.ThrowAsync<DatabaseException>(pending)).Diagnostics.ShouldContain(item => item.Code == "CK04002"); }
+            else { await Should.ThrowAsync<OperationCanceledException>(pending); }
         }
         finally { await database.Coordinator.RollbackAsync(blocker, token); }
         await AssertReleasedAsync(database, [identity], token);
@@ -435,11 +437,15 @@ public sealed class GraphMergeConcurrencyTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Database.Graph] - MERGE end or cancellation between writer and pattern grants releases late ownership (#1735)")]
-    [InlineData(false, false)]
-    [InlineData(true, false)]
-    [InlineData(false, true)]
-    [InlineData(true, true)]
-    public async Task MatchAsync_EndedBetweenGrants_ShouldReleaseLatePatternGrant(bool dispose, bool autocommit)
+    [InlineData(false, false, false)]
+    [InlineData(true, false, false)]
+    [InlineData(false, true, false)]
+    [InlineData(true, true, false)]
+    [InlineData(false, false, true)]
+    [InlineData(true, false, true)]
+    [InlineData(false, true, true)]
+    [InlineData(true, true, true)]
+    public async Task MatchAsync_EndedBetweenGrants_ShouldReleaseLatePatternGrant(bool dispose, bool autocommit, bool lateGrant)
     {
         // Arrange
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
@@ -460,17 +466,21 @@ public sealed class GraphMergeConcurrencyTests
             operation.QueryBudget = budget;
             return GraphMergeConcurrency.MatchAsync(database, operation, identity,
                 (_, _) => { probes++; return ValueTask.FromResult(new GraphMergeRead<ulong>([], [])); }, cancellation.Token,
-                async () =>
-                {
-                    gates++;
-                    chargedBeforeEnd = budget.Memory.RetainedBytes > 0;
-                    if (dispose) { await session.DisposeAsync(); }
-                    else { cancellation.Cancel(); }
-                });
+                beforePatternLock: lateGrant ? null : EndAsync,
+                beforePatternGrant: lateGrant ? EndAsync : null);
+
+            async ValueTask EndAsync()
+            {
+                gates++;
+                chargedBeforeEnd = budget.Memory.RetainedBytes > 0;
+                if (dispose) { await session.DisposeAsync(); }
+                else { cancellation.Cancel(); }
+            }
         }, token).AsTask();
 
-        // Assert: the uncontended pattern grant occurs after end/cancellation; no probe runs.
-        await Should.ThrowAsync<Exception>(pending);
+        // Assert: an ended operation has a stable code; no probe runs.
+        if (dispose) { (await Should.ThrowAsync<DatabaseException>(pending)).Diagnostics[0].Code.ShouldBe("CK04002"); }
+        else { await Should.ThrowAsync<OperationCanceledException>(pending); }
         gates.ShouldBe(1);
         probes.ShouldBe(0);
         chargedBeforeEnd.ShouldBeTrue();

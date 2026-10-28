@@ -31,6 +31,9 @@ await Check("FOR v IN [1,2,2,NULL] RETURN developer_sum(v), developer_sum(DISTIN
 await Check("FOR v IN [] RETURN developer_sum(v),sum(v)", [[0L,0L]]);
 await Check("RETURN abs(-7),char_length('A😀B')", [[7L,3L]]);
 await Check("RETURN 7", [[7L]]);
+await Check("FOR x IN [1,1,1] MERGE (n:MergeSmoke {id:x}) ON CREATE SET n.hits=1 ON MATCH SET n.hits=n.hits+1 RETURN n.hits", [[3L],[3L],[3L]]);
+await Check("MATCH (a:MergeSmoke {id:1}) MERGE (a)-[r:MergeEdge]-(b:MergeSmoke {id:2}) ON CREATE SET r.hit=1 ON MATCH SET r.hit=r.hit+1 RETURN r.hit", [[1L]]);
+await Check("MERGE (:MergeSmoke {id:2})-[r:MergeEdge]-(:MergeSmoke {id:1}) ON MATCH SET r.hit=r.hit+1 RETURN r.hit", [[2L]]);
 await Check("INSERT (a:W {k:1}) SET a.k=2 RETURN a.k", [[2L]]);
 await session.ExecuteAsync("MATCH (a:W) DELETE a", cancellationToken: CancellationToken.None);
 checks++;

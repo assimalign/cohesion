@@ -8,7 +8,7 @@ using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Graph.Internal;
 
-/// <summary>Transaction-owned serialization and freshness contract for the future MERGE stage.</summary>
+/// <summary>Transaction-owned serialization and freshness contract for the MERGE stage.</summary>
 internal static class GraphMergeConcurrency
 {
     /// <summary>
@@ -23,10 +23,12 @@ internal static class GraphMergeConcurrency
     internal static ValueTask<GraphMergeRead<T>> MatchAsync<T>(GraphDatabase database,
         GraphOperation operation, GraphMergePatternIdentity identity,
         Func<TransactionSnapshot, CancellationToken, ValueTask<GraphMergeRead<T>>> probe,
-        CancellationToken cancellationToken = default, Func<ValueTask>? beforePatternLock = null)
+        CancellationToken cancellationToken = default, Func<ValueTask>? beforePatternLock = null,
+        Func<ValueTask>? beforePatternGrant = null, Action<bool>? onPatternWait = null,
+        Func<ValueTask>? beforeTracker = null, Func<ValueTask>? beforeParentCheck = null)
     {
         ArgumentNullException.ThrowIfNull(identity);
-        return MatchCoreAsync(database, operation, identity, null, null, probe, cancellationToken, beforePatternLock);
+        return MatchCoreAsync(database, operation, identity, null, null, probe, cancellationToken, beforePatternLock, beforePatternGrant, onPatternWait, beforeTracker, beforeParentCheck);
     }
 
     // The key identifies one immutable, fully evaluated pattern. A fresh row evaluation must
@@ -38,41 +40,49 @@ internal static class GraphMergeConcurrency
     {
         ArgumentNullException.ThrowIfNull(evaluatedPattern);
         ArgumentNullException.ThrowIfNull(createIdentity);
-        return MatchCoreAsync(database, operation, null, evaluatedPattern, createIdentity, probe, cancellationToken, null);
+        return MatchCoreAsync(database, operation, null, evaluatedPattern, createIdentity, probe, cancellationToken, null, null, null, null, null);
     }
 
     private static async ValueTask<GraphMergeRead<T>> MatchCoreAsync<T>(GraphDatabase database,
         GraphOperation operation, GraphMergePatternIdentity? identity, object? evaluatedPattern,
         Func<GraphMergePatternIdentity>? createIdentity,
         Func<TransactionSnapshot, CancellationToken, ValueTask<GraphMergeRead<T>>> probe,
-        CancellationToken cancellationToken, Func<ValueTask>? beforePatternLock)
+        CancellationToken cancellationToken, Func<ValueTask>? beforePatternLock, Func<ValueTask>? beforePatternGrant, Action<bool>? onPatternWait,
+        Func<ValueTask>? beforeTracker, Func<ValueTask>? beforeParentCheck)
     {
         ArgumentNullException.ThrowIfNull(probe);
-        operation.EnsureActive();
+        operation.EnsureMergeActive();
         cancellationToken.ThrowIfCancellationRequested();
         // Order: session transaction admission -> database writer -> logical pattern lock ->
         // read-only index/directory/page latches. No latch spans a lock wait or probe callback.
         // Later mutations use their existing mutation gate -> (reentrant) writer -> apply ->
         // B+Tree -> page order. Never weaken the writer lock: differently expressed overlapping
         // patterns need it, and ordinary CREATE/SET/DELETE must also serialize with this check.
-        await database.LockWriterAsync(operation.Context, cancellationToken).ConfigureAwait(false);
         try
         {
+            await database.LockWriterAsync(operation.Context, cancellationToken).ConfigureAwait(false);
+            operation.EnsureMergeActive();
             var statement = operation.Merge;
             identity ??= statement.Identity(evaluatedPattern!, createIdentity!);
             // Instance-free test gate for the end-between-grants interleaving. Production
             // callers omit it; no field or allocation is added to ordinary operations.
             if (beforePatternLock is not null) { await beforePatternLock().ConfigureAwait(false); }
-            var grant = statement.Locks.AcquireAsync(database, operation, identity.Resource, cancellationToken);
+            // Teardown may have fenced and disposed the cached tracker during the callback.
+            // Re-read the ended sentinel before touching it and after any late grant.
+            statement = operation.Merge;
+            if (beforeTracker is not null) { await beforeTracker().ConfigureAwait(false); }
+            var grant = statement.Locks.AcquireAsync(database, operation, identity.Resource, cancellationToken, beforePatternGrant, beforeParentCheck);
             bool waited = !grant.IsCompletedSuccessfully;
+            onPatternWait?.Invoke(waited);
             await grant.ConfigureAwait(false);
-            operation.EnsureActive();
+            statement = operation.Merge;
+            operation.EnsureMergeActive();
             cancellationToken.ThrowIfCancellationRequested();
             await statement.RefreshAsync(waited, cancellationToken).ConfigureAwait(false);
 
             var snapshot = operation.Context.Snapshot;
             var decision = await probe(snapshot, cancellationToken).ConfigureAwait(false);
-            operation.EnsureActive();
+            operation.EnsureMergeActive();
             cancellationToken.ThrowIfCancellationRequested();
             if (operation.Context.IsolationLevel == IsolationLevel.ReadCommitted) { return decision; }
 
@@ -83,7 +93,7 @@ internal static class GraphMergeConcurrency
             var previous = operation.Updates.OverrideReadSnapshot(latest);
             try { committed = await probe(latest, cancellationToken).ConfigureAwait(false); }
             finally { operation.Updates.OverrideReadSnapshot(previous); }
-            operation.EnsureActive();
+            operation.EnsureMergeActive();
             cancellationToken.ThrowIfCancellationRequested();
             if (committed.Matches.Count < decision.Matches.Count ||
                 decision.Matches.Count == 0 && committed.Matches.Count != 0) { throw Conflict(); }
@@ -99,12 +109,19 @@ internal static class GraphMergeConcurrency
                 if (before != database.Store.MergeVersion(entity.Node, entity.Id, latest)) { throw Conflict(); }
             }
         }
-        catch
+        catch (Exception failure)
         {
             // An end can release its locks between the writer grant and the pattern grant.
             // Release a late grant for an untracked owner. For a tracked writer the manager
             // retains ownership until abort/undo completes, exactly as LockWriterAsync does.
             database.Coordinator.LockManager.ReleaseAll(operation.Context.Sequence);
+            // Database shutdown wins over session/statement end, including failed queued
+            // waits. The outer statement boundary translates disposal to CG09019.
+            database.EnsureNotDisposed();
+            // A disposed read can fail inside a probe before its next active-state check.
+            // Session teardown fails writer, parent and pattern waits with a kernel abort.
+            if (failure is ObjectDisposedException or TransactionAbortedException && operation.MergeHasEnded)
+            { throw GraphOperation.Ended(); }
             throw;
         }
     }

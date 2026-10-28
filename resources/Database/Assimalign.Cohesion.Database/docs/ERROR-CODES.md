@@ -320,6 +320,10 @@ transaction-state diagnostics; it allocates no new identity. These changes add n
 | COHDBG009 | CG02009 | Values/types |
 | COHDBG013 | CG02013 | Values/types |
 | COHDBG003 | CG03003 | Schema/constraints |
+| New (#1735, GQ-M2) | CG03004 | Constraints — MERGE equality is null, non-finite or non-scalar |
+| New (#1735, GQ-M2) | CG03005 | Constraints — bound MERGE node is null, absent or incompatible with its node pattern |
+| New (#1735, GQ-M2 fixes) | CG03006 | Constraints — repeated or already-bound MERGE node has labels or properties |
+| New (#1735, GQ-M2 fixes) | CG03007 | Constraints — MERGE relationship variable is already declared before the clause |
 | COHDBG007 | CG04007 | Transactions/locking |
 | COHDBG022 | CG04022 | Transactions/locking |
 | COHDBG023 | CG04023 | Transactions/locking |
@@ -394,7 +398,7 @@ and invariant exceptions and lower child-root typed failures retain their docume
 | CK03001 | Logical database or storage already exists | — |
 | CK03002 | Logical database is absent | — |
 | CK04001 | Requested isolation level is unsupported | — |
-| CK04002 | Statement operation has already completed | — |
+| CK04002 | Statement operation has already completed; MERGE includes session end during writer/parent/pattern waits or late grants while the database is live (database disposal retains CG09019) | — |
 | CK04003 | Active statement apply bracket is absent | — |
 | CK04004 | Session already has an active transaction | — |
 | CK04005 | Transaction has already ended | — |

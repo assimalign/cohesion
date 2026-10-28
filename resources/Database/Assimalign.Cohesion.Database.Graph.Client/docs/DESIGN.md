@@ -365,6 +365,14 @@ Path completion diagnostics follow Neo4j's completion metadata model
 The concrete result stream preserves bounded streaming and adds no public interface.
 CK07001 reports diagnostic overflow without turning successful reads into failures.
 
+## MERGE (#1735)
+
+MERGE uses the existing Execute request, scalar result and negotiated diagnostic carriers. Whole-path
+match/create, ON CREATE/ON MATCH SET, repeated-row overlays, undirected relationships and bound
+reuse execute unchanged over InMemory and TCP. GraphMergeWireTests pins counts, values, EXPLAIN,
+coded refusals and reuse of the exact authenticated session after failure. ExecutePaths keeps the
+existing pre-mutation refusal of writing stages. No protocol capability or wire bytes change.
+
 ## Linear composition (#1145)
 
 QueryAsync executes LET, FILTER, FOR/UNWIND, WITH and RETURN ... NEXT using the existing request encoding. Lists use the negotiated composite-value parameter codec. Final planned column kinds govern Execute admission: scalar LET/FOR values pass, possible composites require negotiation, and carried entities keep the ExecutePaths hint. Read-only composed path requests preserve optionality; a write stage anywhere rejects the request before execution. GraphLinearCompositionWireTests verifies both InMemory and TCP, own-write reads, row-valued insertion maps, bound MATCH maps, map/entity member access, decoded star bindings and Int64 COUNT metadata through WITH. Scope, duplicate carried-name, INSERT-map and runtime container rejections retain coded diagnostics and permit the next statement on the exact same server session. Comma-separated MATCH maps can reference later pattern parts; their clause-wide predicates, including anonymous elements, execute over both transports and validate under EXPLAIN. FOR/UNWIND retains proven node and relationship list element kinds through WITH/NEXT for later MATCH, DELETE and ExecutePaths; scalar/mixed lists retain coded rejection and exact-session reuse. No protocol format changes.

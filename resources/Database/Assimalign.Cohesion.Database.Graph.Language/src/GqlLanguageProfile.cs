@@ -71,6 +71,7 @@ public static class GqlLanguageProfile
         GqlClauses.Case,
         GqlClauses.Create,
         GqlClauses.Insert,
+        GqlClauses.Merge,
         GqlClauses.Set,
         GqlClauses.Remove,
         GqlClauses.Delete,

@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Execution.Internal;
 using Assimalign.Cohesion.Database.Graph.Language;
+using Assimalign.Cohesion.Database.Transactions;
 using Assimalign.Cohesion.Database.Types;
 
 using Assimalign.Cohesion.Database.Graph.Protocol;
@@ -51,7 +52,14 @@ internal static partial class GraphPlanExecutor
         { throw new GraphPlanningException("CG05001", ErrorMessages.ExecuteScalarRequired, plan.Query.Location); }
         if (plan.Writes)
         {
-            await database.LockWriterAsync(operation, token).ConfigureAwait(false);
+            try { await database.LockWriterAsync(operation, token).ConfigureAwait(false); }
+            catch (TransactionAbortedException) when (plan.Stages.Any(static stage => stage.Stage is GqlMergeStage))
+            {
+                // MERGE also waits here before its first stage and lazy tracker exist.
+                database.Coordinator.LockManager.ReleaseAll(operation.Context.Sequence);
+                operation.EnsureMergeActive();
+                throw;
+            }
             // Bindings have already been normalized and snapshotted. Re-normalizing would strip
             // another sigil from an unused key such as "$$unused" and can invent a collision.
             plan = new GraphPlanner(database, operation.Context.Snapshot).Plan(statement.GqlExpression, parameters, paths, token, normalizedParameters: true);
@@ -92,6 +100,15 @@ internal static partial class GraphPlanExecutor
                 case GqlLetStage or GqlFilterStage or GqlForStage:
                     await ReplaceBindingsAsync(StreamStageAsync(plan.Stages[stageIndex], StreamBindingsAsync(bindings, token),
                         layout, budget, operation, parameters, token)).ConfigureAwait(false);
+                    break;
+                case GqlMergeStage merge:
+                    // Capturing affected in a callback allocates a closure for ordinary queries too.
+                    var mergeCount = new System.Runtime.CompilerServices.StrongBox<long>();
+                    await ReplaceBindingsAsync(StreamMergeAsync(database, operation, merge,
+                        stagePlan.MatchClauses[0].Paths[0], bindings, budget, parameters,
+                        mergeCount, token)).ConfigureAwait(false);
+                    affected += mergeCount.Value;
+                    operation.Updates.RefreshMergeBindings(bindings, token, bindingMemory);
                     break;
                 case GqlInsertStage insertion:
                     foreach (var binding in bindings)
