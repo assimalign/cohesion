@@ -262,11 +262,16 @@ internal sealed partial class SqlPlanner
     /// <exception cref="SqlEvaluationException">A call's argument count matches no overload (<c>CS01006</c>).</exception>
     internal static void ValidateDeclaredCalls(SqlExpression expression, SqlFunctionCatalog catalog)
     {
+        SqlSequenceExecution.RefusePersisted(expression);
+        ValidateDeclaredCallsCore(expression, catalog);
+    }
+
+    private static void ValidateDeclaredCallsCore(SqlExpression expression, SqlFunctionCatalog catalog)
+    {
         RuntimeHelpers.EnsureSufficientExecutionStack();
-        SqlSequenceExecution.RefusePersistedNode(expression);
         foreach (var child in Children(expression))
         {
-            ValidateDeclaredCalls(child, catalog);
+            ValidateDeclaredCallsCore(child, catalog);
         }
 
         if (expression is SqlFunctionCallExpression call)

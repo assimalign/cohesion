@@ -13,7 +13,8 @@ Its named profile capability and parser/live conformance cases cover that comple
 NEXT VALUE FOR remains a parsed scalar leaf in RETURNING; the engine refuses that context
 with CS03076 before evaluation, following Microsoft's OUTPUT exclusion. nextval() retains
 PostgreSQL's separate per-row RETURNING evaluation. Persisted-expression checks visit each
-node once rather than recursively walking every node's subtree.
+node once rather than recursively walking every node's subtree. Declared CHECK validation starts
+that walk once at the predicate root, including subqueries, to retain CS03074 for dependencies.
 
 Sequence outputs independent of ordering evaluate after sorting and before pagination: ordered
 OFFSET tuples consume values, while tuples beyond OFFSET + LIMIT do not. Unordered grouped and

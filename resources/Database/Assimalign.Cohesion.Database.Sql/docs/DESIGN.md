@@ -21,7 +21,9 @@ The planner refuses NEXT VALUE FOR in subqueries, derived bodies, CTE definition
 CASE/COALESCE/NULLIF arguments with CS03076, including unused definitions.
 RETURNING also refuses NEXT VALUE FOR during planning, including MERGE and joined DML;
 nextval() retains its independent per-row RETURNING evaluation. Persisted-expression refusal
-visits each node once, including views and declared CHECK expressions.
+visits each node once, including views and declared CHECK expressions. Declared CHECK validation
+runs that refusal once at the predicate root, entering subquery bodies before ordinary CHECK
+binding can report CK00001, so sequence dependencies consistently report CS03074.
 Ordinary evaluators and statement contexts gain no state.
 Literal/parameter names lock only their resolved objects; row-varying names take the
 captured directory's Shared grants before execution. This conservative dynamic-name policy
