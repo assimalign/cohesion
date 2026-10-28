@@ -118,16 +118,19 @@ the role methods write only that instance.
 - Every provider declares `ResourceKind = "SecretStore"`, so a binding can only ever name a
   SecretStore resource of the application. Cross-application store sources are rejected by that
   validation (owner decision 4), for set members as for builders.
-- **The add-secret resolver is explicitly registered.** `UseSecretStore(...)` adds a
-  `SecretStoreAddSecretInputResolver` to `Providers.CommandInputs`. Producer manifests contain no
-  resolver requirements, so `Build()` preserves a command without a resolver as declared. A
-  source-bearing add-secret needs resolution before delivery: the store rejects an unresolved
-  payload. For a store of another application, register the resolver directly in
-  `Providers.CommandInputs`; `UseSecretStore` cannot bind another application's store.
+- **The add-secret resolver is required, not optional.** The SecretStore manifest marks
+  `secretstore.add-secret` `requiresInputResolver` (owner decision of 2026-09-28), so the same
+  validation fails when an application declares `AddSecret` and no resolver for that kind is in its
+  `Providers.CommandInputs`. For one of its own stores the error names this package and
+  `builder.UseSecretStore(...)`; for a store of another application, which `UseSecretStore` cannot
+  bind, it asks for an `IResourceCommandInputResolver` in `Providers.CommandInputs` instead — a
+  `SecretStoreAddSecretInputResolver` added there directly satisfies it. The store still refuses an
+  unresolved add-secret at delivery, as defense in depth.
 - **Per member, never inherited.** On an application set each member's callback gets its own
   surface; a member's roles are exactly what its own `UseSecretStore(...)` chain registered. One
   member's certificate authority or trust store never becomes another member's, and a member whose
-  resources read a store it did not register fails at set start naming the member and the
+  resources read a store it did not register, or that declares `AddSecret` with no add-secret
+  resolver registered, fails at set start naming the member and the
   `application.UseSecretStore("<store>")` call to add.
 
 ## Call path
@@ -325,9 +328,10 @@ certificate throws naming the endpoint, and `cohesion trust add` refuses the gra
 `Build()` — and an application set, for each member — runs the ApplicationModel provider validation
 this design relies on: every bound resource exists, belongs to the declaring application, and has the
 provider's `ResourceKind`; every `<store>:<key>` mount of the application has a registration;
-cross-application sources are rejected. Commands require no implicit providers at `Build()`.
-Without an explicitly registered input resolver, an `AddSecret` payload is delivered as declared
-and the store rejects its unresolved source. `UseSecretStore`'s early
+cross-application sources are rejected; and every declared `secretstore.add-secret` command has a
+registered input resolver, because the target's manifest requires one. Without `UseSecretStore`,
+an `AddSecret` declaration therefore fails `Build()` instead of reaching the store unresolved; the
+store's rejection of such a payload stays as defense in depth. `UseSecretStore`'s early
 manifest-kind check and each provider's refusal of a connection whose `ResourceKind` is not
 `SecretStore` remain as the first and last checks.
 

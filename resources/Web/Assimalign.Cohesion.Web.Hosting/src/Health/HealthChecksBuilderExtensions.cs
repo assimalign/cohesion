@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 
-using Assimalign.Cohesion.Hosting.Resources;
+using Assimalign.Cohesion.Hosting.Health;
 using Assimalign.Cohesion.Web.Health;
 using WebHealthStatus = Assimalign.Cohesion.Web.Health.HealthStatus;
 
@@ -73,11 +73,11 @@ public static class HealthChecksBuilderExtensions
 
         return contribution.Status switch
         {
-            Assimalign.Cohesion.Hosting.Resources.HealthStatus.Healthy =>
+            Assimalign.Cohesion.Hosting.Health.HealthStatus.Healthy =>
                 HealthCheckResult.Healthy(contribution.Description, contribution.Data),
-            Assimalign.Cohesion.Hosting.Resources.HealthStatus.Degraded =>
+            Assimalign.Cohesion.Hosting.Health.HealthStatus.Degraded =>
                 HealthCheckResult.Degraded(contribution.Description, data: contribution.Data),
-            Assimalign.Cohesion.Hosting.Resources.HealthStatus.Unhealthy =>
+            Assimalign.Cohesion.Hosting.Health.HealthStatus.Unhealthy =>
                 HealthCheckResult.Unhealthy(contribution.Description, data: contribution.Data),
             _ => throw new ArgumentOutOfRangeException(
                 nameof(contribution),

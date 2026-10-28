@@ -32,9 +32,7 @@ internal sealed class ConsumerWorkspace : IDisposable
         "Assimalign.Cohesion.Sdk.ApplicationModel",
         "Assimalign.Cohesion.Sdk.Web",
         "Assimalign.Cohesion.Sdk.ConfigurationStore",
-#if !COHESION_APPLICATION_MODEL_TESTS
-        "Assimalign.Cohesion.Sdk.Database",
-#endif
+        "Assimalign.Cohesion.Sdk.Database"
     ];
     private static readonly string _repositoryRoot = FindRepositoryRoot();
     private static readonly string _packageVersion = ResolvePackageVersion();

@@ -6,6 +6,7 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.ApplicationModel;
+using Assimalign.Cohesion.Hosting.Resources;
 
 namespace Assimalign.Cohesion.LogSpace.ApplicationModel.Tests;
 
@@ -44,6 +45,17 @@ public sealed class LogSpaceResourceTests
         first.Resource.ShouldBeOfType<LogSpaceResource>();
         second.Dependencies.ShouldContain(first);
         Should.Throw<ArgumentNullException>(() => builder.AddLogSpace(null!));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [LogSpace.ApplicationModel] - Control plane: isolates empty command sets")]
+    public void CreateControlPlane_ShouldReturnIsolatedEmptyPlanes()
+    {
+        IResourceControlPlane first = LogSpaceResourceControlPlane.Create();
+        IResourceControlPlane second = LogSpaceResourceControlPlane.Create();
+        first.ShouldNotBeSameAs(second);
+        first.AcceptedCommandKinds.ShouldBeEmpty();
+        first.Commands.ShouldBeEmpty();
+        first.ObservedEndpoints.ShouldBeEmpty();
     }
 
     [Theory(DisplayName = "Cohesion Test [LogSpace.ApplicationModel] - Planning: rejects incompatible area facts")]

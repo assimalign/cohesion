@@ -32,6 +32,8 @@ to application authors.
 - SecretStore planner — `StatefulSet`, an HTTP or HTTPS `api` endpoint, a persistent
   `data` Volume, exactly one stable replica, a sized per-replica claim, endpoint
   services, and a headless governing service.
+- `SecretStoreResourceControlPlane` — the SecretStore default control-plane factory,
+  including the generic `cohesion.trust.add` trust-grant operation.
 
 `SecretStore.Hosting` exposes the control plane and store protocol beneath
 `/cohesion/v1` on `api`. The transport-neutral plane aggregates health, readiness and
@@ -46,6 +48,8 @@ identities. `Enroll(platformStore)` is deferred to item 31t.
 
 - `Assimalign.Cohesion.ApplicationModel` for manifests, planned resources, and the
   platform-neutral realization-plan IR.
+- `Assimalign.Cohesion.Hosting.Resources` for the default-control-plane contract and
+  runtime registration seam.
 
 The project is guarded by COHAM001 and never references SecretStore runtime, gateway,
 or platform packages. Runtime endpoint and mount values flow through the shared

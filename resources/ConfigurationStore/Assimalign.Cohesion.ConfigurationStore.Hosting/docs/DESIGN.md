@@ -26,12 +26,7 @@ snapshot only after its durable replacement succeeds, so a failed write cannot c
 use `configurationstore.set-value` with JSON payload `{ "value": string|null }` or
 `configurationstore.remove-value`; the command key is `<namespace>/<key>` and splits at the last
 slash. Health, readiness, liveness, observed endpoints, and graceful stop share the standard
-`/cohesion/v1` control-plane surface. So do the runtime-surface routes of the deployment record:
-`GET /cohesion/v1/configuration`, `GET /cohesion/v1/configuration/status` and
-`POST /cohesion/v1/actions/{name}` reach Web.Hosting's
-`ResourceControlPlaneMiddleware.TryServeRuntimeSurfaceAsync` after this endpoint's own credential
-or loopback check and before its unknown-route `404`, so a gateway reads the store's surface and
-configuration status exactly as it does a Web resource's.
+`/cohesion/v1` control-plane surface.
 
 ## Trust
 

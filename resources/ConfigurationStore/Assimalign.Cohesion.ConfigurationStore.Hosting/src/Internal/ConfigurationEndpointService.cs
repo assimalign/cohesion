@@ -12,12 +12,12 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Connections.Security;
 using Assimalign.Cohesion.Hosting;
+using Assimalign.Cohesion.Hosting.Health;
 using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Http.Connections;
 using Assimalign.Cohesion.Web;
 using Assimalign.Cohesion.Web.Hosting;
-using Assimalign.Cohesion.Web.Hosting.Resources;
 
 using HttpStatusCode = Assimalign.Cohesion.Http.HttpStatusCode;
 
@@ -254,15 +254,6 @@ internal sealed class ConfigurationEndpointService : IHostService, IDisposable
         if (path == Route("/cohesion/v1/commands"))
         {
             await HandleCommandsAsync(context, authorization.Caller?.Application).ConfigureAwait(false);
-            return;
-        }
-
-        // The runtime surface, configuration status and actions, served after this host's own authorization.
-        if (isNamespaced && _controlPlane is not null &&
-            await ResourceControlPlaneMiddleware.TryServeRuntimeSurfaceAsync(
-                    _controlPlane, _resourceContext, path[_basePath.Length..], context)
-                .ConfigureAwait(false))
-        {
             return;
         }
 

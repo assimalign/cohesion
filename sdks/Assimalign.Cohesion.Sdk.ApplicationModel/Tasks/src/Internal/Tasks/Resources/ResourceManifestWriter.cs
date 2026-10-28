@@ -11,7 +11,7 @@ internal static class ResourceManifestWriter
         using var writer = new Utf8JsonWriter(stream, new JsonWriterOptions { Indented = true });
 
         writer.WriteStartObject();
-        writer.WriteString("schema", "cohesion/resource/v2");
+        writer.WriteString("schema", "cohesion/resource/v1");
         writer.WriteString("name", manifest.Name);
         writer.WriteString("kind", manifest.Kind);
         writer.WriteString("application", manifest.Application);
@@ -138,6 +138,24 @@ internal static class ResourceManifestWriter
             writer.WriteEndArray();
             writer.WriteBoolean("optional", reference.Optional);
             writer.WriteString("manifest", reference.Manifest);
+            writer.WriteEndObject();
+        }
+        writer.WriteEndArray();
+
+        writer.WriteStartArray("commands");
+        foreach (ResourceCommandModel command in manifest.Commands)
+        {
+            // A command is its kind as a string unless the resource requires the gateway to resolve
+            // its inputs; only then is it the object form, so other manifests stay byte-identical.
+            if (!command.RequiresInputResolver)
+            {
+                writer.WriteStringValue(command.Kind);
+                continue;
+            }
+
+            writer.WriteStartObject();
+            writer.WriteString("kind", command.Kind);
+            writer.WriteBoolean("requiresInputResolver", true);
             writer.WriteEndObject();
         }
         writer.WriteEndArray();

@@ -40,7 +40,7 @@ collapsed above, is in [docs/DEPENDENCIES.md](../../docs/DEPENDENCIES.md).
 - `Assimalign.Cohesion.EventHub` defines the public area-root application and builder contracts alongside the existing event-hub abstraction.
 - `Assimalign.Cohesion.EventHub.Hosting` provides the concrete creation entry point and host lifecycle with explicit `IHostService` registration.
 
-- `Assimalign.Cohesion.EventHub.ApplicationModel` supplies the typed manifest, planner, dependency descriptor and opaque runtime metadata as a NuGet-only package.
+- `Assimalign.Cohesion.EventHub.ApplicationModel` supplies the typed manifest, planner, descriptor, and default control-plane factory as a NuGet-only package.
 
 ## Layering and dependencies
 

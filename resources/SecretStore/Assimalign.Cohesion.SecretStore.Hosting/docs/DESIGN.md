@@ -52,11 +52,7 @@ The host implements these routes over a real HTTP/1 listener:
 | `/cohesion/v1/certificates/enrollment-request` | `GET`, `HEAD` | Returns the pending CSR for `application` and `resource`. |
 | `/cohesion/v1/certificates/enroll` | `POST` | An enrolled authority signs a matching intermediate-CA CSR. |
 | `/cohesion/v1/certificates/enrollment` | `POST` | Completes a pending enrollment with the issued certificate and issuer chain. |
-| `/cohesion/v1/configuration`, `/configuration/status` | `GET`, `HEAD` | The deployment record's runtime surface and the instance's configuration status. |
-| `/cohesion/v1/actions/{name}` | `POST` | Invokes a declared action. |
 
-The last two rows are served by Web.Hosting's `ResourceControlPlaneMiddleware.TryServeRuntimeSurfaceAsync`
-after this endpoint's own authorization, so their status codes and documents match every other host's.
 Unsupported methods return `405` with `Allow`; malformed input returns `400`; unknown namespaced
 routes return `404`. Secret and certificate responses are marked `no-store, no-cache`. `HEAD`
 follows `GET` validation and headers without writing a body.

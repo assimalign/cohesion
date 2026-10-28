@@ -138,13 +138,13 @@ what is deliberately not emitted.
 Within its area the module references the Web root, `Web.Routing`, `Web.Server`, and `Web.Health`.
 Routing supplies the pipeline terminal; Server supplies the engine, telemetry and exchange features,
 including request id, completion and drain; Health supplies the independent health model used by the
-health adapter. COHRES002 permits Web libraries except Web.Testing, Web.ApplicationModel,
+Hosting.Health adapter. COHRES002 permits Web libraries except Web.Testing, Web.ApplicationModel,
 Web.ApplicationModel.Orchestration, the App.Web producers, and harnesses. The two ApplicationModel
 packages also stay outside its resolved closure. Every reference ships in each area framework
 that carries this module.
 
 The module also references Cohesion hosting, configuration, DI, logging, and transport
-infrastructure. It integrates Hosting.Resources and its health contracts itself (owner decision 57,
+infrastructure. It integrates Hosting.Health and Hosting.Resources itself (owner decision 57,
 2026-10-13); the Web root references no hosting library. Public integration namespaces stay
 `Assimalign.Cohesion.Web.Hosting.Health` and `.Resources`, but package references now use
 `Assimalign.Cohesion.Web.Hosting`. The former two packages are removed.
@@ -188,8 +188,7 @@ forwarders at final teardown; a factory obtained from its service provider canno
 ## Health integration
 
 The adapter in Web.Hosting extends `IHealthChecksBuilder` with `AddContributor`.
-It references `Assimalign.Cohesion.Web.Health` and `Assimalign.Cohesion.Hosting.Resources`, which owns
-the health contracts under its `Assimalign.Cohesion.Hosting.Resources` namespace.
+It references `Assimalign.Cohesion.Web.Health` and `Assimalign.Cohesion.Hosting.Health`.
 The Web health model and HTTP endpoints remain in `Web.Health`.
 
 ### Usage
@@ -236,7 +235,7 @@ further invocation.
 
 This integration lives in Web.Hosting under `src/Resources/`, keeping the
 `Assimalign.Cohesion.Web.Hosting.Resources` namespace. Its dependencies are Web root, Web.Server
-(for `IWebResponseCompletionFeature`, #1379), Hosting.Resources (including health contracts), and
+(for `IWebResponseCompletionFeature`, #1379), Hosting.Resources, Hosting.Health, and
 IdentityModel.Token.JsonWebToken. Web roots and features cannot reference the hosting module;
 other areas' hosting modules consume it privately. App.Web exposes it publicly.
 
@@ -266,8 +265,6 @@ await foreach (IHttpContext exchange in exchanges)
 ```
 
 `ResourceControlPlaneMiddleware.InvokeAsync(IResourceControlPlane controlPlane, ResourceContext resourceContext, bool isApplicationReady, int? controlPlanePort, IHttpContext context, WebApplicationMiddleware next)` returns a `Task` for one exchange. Required reference arguments cannot be null. A mismatched non-null port forwards every path to `next`; null applies no port gate. Unknown namespaced paths apply the gateway credential check or standalone loopback restriction before returning 404.
-
-`ResourceControlPlaneMiddleware.TryServeRuntimeSurfaceAsync(IResourceControlPlane controlPlane, ResourceContext? resourceContext, string path, IHttpContext context)` serves only `GET /cohesion/v1/configuration`, `GET /cohesion/v1/configuration/status` and `POST /cohesion/v1/actions/{name}` and returns whether `path` was one of them. It authorizes nothing: a host that routes its own control plane calls it after admitting the request, as the ConfigurationStore, IdentityHub and SecretStore endpoint services do.
 
 Acquire the lifetime during composition, then register `InvokeAsync` ahead of routes the terminal should own. The owning host supplies readiness and listener selection and drains concurrent requests before disposing the lease. Existing callers that only call `Validate` and `InvokeAsync` remain supported: they reuse the parsed key and validation profile but create and dispose a temporary ECDSA handle for each signed token. Stop registers a callback on `IWebResponseCompletionFeature` when present; the callback requests stop with `CancellationToken.None` after transmission. A custom server without the feature uses the request token for the direct-stop fallback.
 

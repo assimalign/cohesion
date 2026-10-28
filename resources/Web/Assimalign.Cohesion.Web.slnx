@@ -474,20 +474,4 @@
 	<Folder Name="/Web/analyzers/Assimalign.Cohesion.SourceGeneration.Web/tests/">
 		<Project Path="../../analyzers/Assimalign.Cohesion.SourceGeneration.Web/tests/Assimalign.Cohesion.SourceGeneration.Web.Tests.csproj" />
 	</Folder>
-	<Folder Name="/Web/Assimalign.Cohesion.Web.Hosting.Management/src/">
-		<Project Path="Assimalign.Cohesion.Web.Hosting.Management/src/Assimalign.Cohesion.Web.Hosting.Management.csproj" />
-	</Folder>
-	<Folder Name="/Web/Assimalign.Cohesion.Web.Hosting.Management/tests/">
-		<Project Path="Assimalign.Cohesion.Web.Hosting.Management/tests/Assimalign.Cohesion.Web.Hosting.Management.Tests.csproj" />
-	</Folder>
-	<Folder Name="/Web/Assimalign.Cohesion.Web.Hosting.Management/samples/Assimalign.Cohesion.Web.Management.AotGuard/">
-		<Project Path="Assimalign.Cohesion.Web.Hosting.Management/samples/Assimalign.Cohesion.Web.Management.AotGuard/Assimalign.Cohesion.Web.Management.AotGuard.csproj" />
-	</Folder>
-	<Folder Name="/Web/Assimalign.Cohesion.Web.Hosting.Management/">
-		<File Path="Assimalign.Cohesion.Web.Hosting.Management/README.md" />
-	</Folder>
-	<Folder Name="/Web/Assimalign.Cohesion.Web.Hosting.Management/docs/">
-		<File Path="Assimalign.Cohesion.Web.Hosting.Management/docs/DESIGN.md" />
-		<File Path="Assimalign.Cohesion.Web.Hosting.Management/docs/OVERVIEW.md" />
-	</Folder>
 </Solution>

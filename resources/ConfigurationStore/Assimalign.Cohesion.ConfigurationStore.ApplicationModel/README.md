@@ -1,6 +1,9 @@
 # Assimalign.Cohesion.ConfigurationStore.ApplicationModel
 
-This package describes resource manifests, dependencies and deployment plans. Its only direct Cohesion dependency is ApplicationModel, whose contracts depend only on Core. Sdk.ApplicationModel generates control-plane registration in the enabled resource executable; Hosting.Resources and the resource host own the runtime surface and apply the deployment record. The gateway observes infrastructure and delivers the record.
+The ConfigurationStore area's declarative, AOT-compatible orchestration package. It
+wraps an enabled configuration-store executable's build-produced `ResourceManifest`
+in a typed resource, produces a platform-neutral `ResourcePlan`, and supplies the
+area's default resource-control-plane factory.
 
 ```csharp
 ResourceManifest manifest = ResourceManifest.Load("resource.json");
@@ -21,9 +24,14 @@ and a headless governing service.
 The ConfigurationStore SDK defaults `CohesionMaxReplicas` to `1`; its local durable store has no
 replication protocol, so scaling must not happen accidentally.
 
-## Runtime manifest boundary
+## Default control plane
 
-The producer supplies runtime metadata; this package preserves it without referencing runtime types. The SDK registers the generic control plane in the executable. Producer manifests contain no command catalog or state declarations; configured runtime handlers provide the live state contracts.
+`ConfigurationStoreResourceControlPlane.Create()` returns a fresh isolated
+`IResourceControlPlane`. An enabled resource's generated
+`ResourceControlPlane.g.cs` registers that factory and seeds it with observed
+endpoints; `ConfigurationStore.Hosting` consumes the registration through
+`Hosting.Resources` and exposes the standard health, readiness, liveness, endpoint,
+stop, and command-discovery routes on the manifest's `api` endpoint.
 
 The control plane advertises `configurationstore.add-namespace` alongside
 `configurationstore.set-value` and `configurationstore.remove-value`. AddNamespace accepts an
@@ -31,9 +39,10 @@ optional seed and creates an owned namespace; the existing typed value verbs ope
 
 ## Dependency boundary
 
-The project has one direct Cohesion dependency:
+The project has exactly two direct Cohesion dependencies:
 
 - `Assimalign.Cohesion.ApplicationModel`
+- `Assimalign.Cohesion.Hosting.Resources`
 
 COHAM001 guards the full production closure. The package never references
 ConfigurationStore runtime, Hosting, gateway, or platform libraries, and its plan

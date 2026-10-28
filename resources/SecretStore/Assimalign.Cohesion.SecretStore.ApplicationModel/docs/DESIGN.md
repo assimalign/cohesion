@@ -2,9 +2,13 @@
 
 ## Design intent
 
-This package describes resource manifests, dependencies and deployment plans. Its only direct Cohesion dependency is ApplicationModel, whose contracts depend only on Core. Sdk.ApplicationModel generates control-plane registration in the enabled resource executable; Hosting.Resources and the resource host own the runtime surface and apply the deployment record. The gateway observes infrastructure and delivers the record.
+This project is the SecretStore area's AOT-compatible, dependency-guarded
+orchestration package. It gives a gateway a typed secret-store resource, a
+platform-neutral realization planner, and the default-control-plane factory that
+every orchestration-enabled secret-store executable registers. It never references
+`SecretStore.Hosting`, a gateway implementation, or a platform object model.
 
-An enabled `Sdk.SecretStore` executable produces `cohesion/resource/v2` at build time.
+An enabled `Sdk.SecretStore` executable produces `cohesion/resource/v1` at build time.
 Generated gateway code passes that `ResourceManifest` to `AddSecretStore(...)`; this
 package does not reconstruct artifact, endpoint, mount, or lifecycle facts from
 executable naming conventions.
@@ -16,7 +20,13 @@ executable naming conventions.
   persistence, trust, and certificate workflows.
 - `Assimalign.Cohesion.SecretStore.Client` is the thin gateway-side protocol client.
 - `Assimalign.Cohesion.SecretStore.ApplicationModel` describes the resource to an
-  orchestrator and preserves producer-owned runtime metadata.
+  orchestrator and supplies its default control-plane contract.
+
+The ApplicationModel package does not reference any of the other three. Its only
+direct Cohesion references are `Assimalign.Cohesion.ApplicationModel` and
+`Assimalign.Cohesion.Hosting.Resources`. The enabled customer executable is the
+composition root that receives both the runtime and generated control-plane
+registration.
 
 ## Manifest-backed resource
 
@@ -86,7 +96,14 @@ ISecretStoreResourceDescriptor secrets = builder.AddSecretStore(
 Generated gateway verbs supply the manifest and expose the same optional typed
 options; application authors normally do not load the JSON themselves.
 
-## Runtime manifest boundary and protocol boundary
+## Default control plane and protocol boundary
+
+`SecretStoreResourceControlPlane.Create()` returns a fresh
+`Hosting.Resources.IResourceControlPlane`. The enabled resource's generated
+`ResourceControlPlane.g.cs` registers that factory with `ResourceRuntime` and seeds it
+with the invocation's observed endpoints. `SecretStore.Hosting` reads the registration
+through the shared seam and serves it on the manifest's `api` endpoint; neither package
+references the other.
 
 The transport-neutral plane supplies health, readiness, liveness, observed endpoints,
 graceful stop, and command discovery. Hosting exposes those operations together with
@@ -110,6 +127,13 @@ authorization decision. Hosting validates the bootstrap credential and enrollmen
 request before it changes the trusted-issuer set.
 
 ## AOT posture
+
+COHAM001 constrains the complete production dependency closure to
+`Assimalign.Cohesion.Core`, `Assimalign.Cohesion.ApplicationModel`, plain Hosting,
+`Hosting.Health`, `Hosting.Resources`, the permitted ProtectedData facade, and BCL
+assemblies. The planner uses typed records and ordinary loops only. Golden
+serialization uses `ResourcePlanJsonContext`; there is no reflection, runtime code
+generation, SecretStore runtime dependency, or platform SDK dependency.
 
 ## Non-goals
 
@@ -204,11 +228,3 @@ Restricted trust grants accept `{trustKey,allowedCommandKinds}` while unrestrict
 the bare JWK payload. The protected trust document round-trips the optional string array; absent
 or empty means every command kind is allowed. Enroll(platformStore) is deferred to item 31t:
 automatic Platform enrollment needs a gateway-owned mediator and Platform-audience signer.
-
-## Runtime-independent dependency direction
-
-```mermaid
-flowchart LR
-    Area["SecretStore.ApplicationModel"] --> Model["ApplicationModel"]
-    Model --> Core["Core"]
-```

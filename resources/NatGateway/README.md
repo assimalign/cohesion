@@ -42,7 +42,7 @@ collapsed above, is in [docs/DEPENDENCIES.md](../../docs/DEPENDENCIES.md).
 - `Assimalign.Cohesion.NatGateway` defines the public area-root application and builder contracts alongside the existing NAT-gateway abstraction.
 - `Assimalign.Cohesion.NatGateway.Hosting` provides the concrete creation entry point and the caller-configurable host-service lifecycle.
 
-- `Assimalign.Cohesion.NatGateway.ApplicationModel` supplies the typed manifest, planner, dependency descriptor and opaque runtime metadata as a NuGet-only package.
+- `Assimalign.Cohesion.NatGateway.ApplicationModel` supplies the typed manifest, planner, descriptor, and default control-plane factory as a NuGet-only package.
 
 ## Layering and dependencies
 

@@ -90,15 +90,6 @@ references, application trust key, bootstrap credential, and other frozen `COHES
 values. `AsyncLocal` propagation isolates parallel hosts; process environment variables are not
 mutated to emulate per-resource state.
 
-The context's `COHESION_CONFIG_DIRECTORY` value is the member's deployment-record directory. The
-gateway keeps records with the same `FileResourceRecordStore` the Local gateway uses, under its
-state root, and the guided base writes each member's deployment layer before invoking it, so a
-member applies management overrides from that directory exactly as an out-of-process resource
-does. A member's deployment generation hashes its plan with its entry assembly's module version id
-(`DescribeArtifact`). A deterministic build changes that id only when the assembly's content
-changes, so a member whose code changed starts a new generation and drops its overrides, while
-re-running or rebuilding unchanged code keeps them.
-
 Members retain independent service providers, configuration, logging, health contributors, and
 default control planes. Registration is keyed by assembly, while invocation state is scoped to
 one ambient frame. No member's control plane or health contributors can leak into another
@@ -264,6 +255,6 @@ Manifest probe `Http` is `ResourceHttpPath?`, control-plane `Path` is `ResourceH
 `Source` is `ResourceMountSource?`. Consumers use the underlying `Value` when composing addresses
 or comparing raw text. Valid string initializers remain supported; malformed strings are refused
 at construction or typed JSON import. Default structs still pass through explicit manifest/plan
-validation. JSON stays plain strings/nulls under `cohesion/resource/v2`; no transport message,
+validation. JSON stays plain strings/nulls under `cohesion/resource/v1`; no transport message,
 Database storage format, diagnostic identity, event or counter changes. All binary consumers
 must be rebuilt together, including installed SDK/framework E2E payloads.

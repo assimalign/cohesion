@@ -39,9 +39,6 @@ internal sealed class ControlPlaneResourceDocument
 
     public required string Kind { get; init; }
 
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? ResourceGroup { get; init; }
-
     public required string State { get; init; }
 
     public IReadOnlyList<ControlPlaneEndpointDocument> Endpoints { get; init; } =

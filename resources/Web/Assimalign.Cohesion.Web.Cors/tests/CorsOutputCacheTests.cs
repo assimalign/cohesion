@@ -23,48 +23,6 @@ namespace Assimalign.Cohesion.Web.Cors.Tests;
 /// <summary>Checks that deferred CORS grants compose with the output cache's earlier response snapshot.</summary>
 public class CorsOutputCacheTests
 {
-    [Theory(DisplayName = "Cohesion Test [Web.Cors] - Dynamic cache: Removing the default should clear grants replayed from a cached response")]
-    [InlineData(WebApplicationTestProtocol.Http1)]
-    [InlineData(WebApplicationTestProtocol.Http2)]
-    public async Task UseDynamicCors_DefaultRemoved_ShouldRemoveCachedCorsGrant(WebApplicationTestProtocol protocol)
-    {
-        // Arrange
-        const string origin = "https://alpha.example";
-        using CancellationTokenSource cancellation = new(TimeSpan.FromSeconds(30));
-        await using WebApplicationTestFactory factory = new(new WebApplicationTestFactoryOptions { Protocol = protocol });
-        factory.Builder.Services.AddRouting();
-        int invocations = 0;
-        CorsPolicyStore store = CorsPolicyStore.Create(new CorsConfiguration
-        {
-            DefaultPolicy = new CorsPolicyConfiguration { Origins = [origin] },
-        });
-        IRouterBuilder routes = factory.Application.UseRouting();
-        factory.Application.UseDynamicCors(store);
-        factory.Application.UseOutputCache(options => options.AddBasePolicy(policy => policy.Duration = TimeSpan.FromMinutes(30)));
-        routes.Map(CohesionHttpMethod.Get, "/variant", new RouterRouteHandler(async context =>
-        {
-            Interlocked.Increment(ref invocations);
-            context.Response.StatusCode = CohesionHttpStatusCode.Ok;
-            context.Response.Headers[HttpHeaderKey.AccessControlAllowOrigin] = origin;
-            context.Response.Headers[HttpHeaderKey.AccessControlAllowCredentials] = "true";
-            await context.Response.Body.WriteAsync("cached"u8.ToArray(), context.RequestCancelled);
-        }));
-        using HttpClient client = factory.CreateClient();
-
-        // Act
-        using HttpResponseMessage before = await SendAsync(client, origin, cancellation.Token);
-        store.Replace(new CorsConfiguration());
-        using HttpResponseMessage after = await SendAsync(client, origin, cancellation.Token);
-
-        // Assert
-        before.Headers.GetValues("Access-Control-Allow-Origin").Single().ShouldBe(origin);
-        after.Headers.Contains("Age").ShouldBeTrue();
-        invocations.ShouldBe(1);
-        (await after.Content.ReadAsStringAsync(cancellation.Token)).ShouldBe("cached");
-        after.Headers.Contains("Access-Control-Allow-Origin").ShouldBeFalse();
-        after.Headers.Contains("Access-Control-Allow-Credentials").ShouldBeFalse();
-    }
-
     [Theory(DisplayName = "Cohesion Test [Web.Cors] - Output cache: Origin variants stay separate and cache hits receive the current CORS grant")]
     [InlineData(WebApplicationTestProtocol.Http1)]
     [InlineData(WebApplicationTestProtocol.Http2)]

@@ -131,6 +131,9 @@ public sealed class CohesionCreateResourceManifest : Task
     /// <summary>Gets or sets the declared settings.</summary>
     public ITaskItem[] Settings { get; set; } = [];
 
+    /// <summary>Gets or sets the command kinds accepted by the resource's default control plane.</summary>
+    public ITaskItem[] Commands { get; set; } = [];
+
     /// <summary>Gets or sets the declared resource references.</summary>
     public ITaskItem[] ResourceReferences { get; set; } = [];
 
@@ -207,6 +210,7 @@ public sealed class CohesionCreateResourceManifest : Task
         ValidateMetadata(Probes, "CohesionProbe", "Endpoint", "Http", "Tcp", "Exec", "Grpc", "None");
         ValidateMetadata(Mounts, "CohesionMount", "Kind", "ContainerPath", "Source", "Size");
         ValidateMetadata(Settings, "CohesionSetting", "Default", "Type");
+        ValidateMetadata(Commands, "CohesionCommand", "RequiresInputResolver");
         ValidateMetadata(ResourceReferences, "CohesionResourceReference", "Version", "Optional", "Endpoints");
         ValidateMetadata(ResourceProperties, "CohesionResourceProperty", "Value");
 
@@ -217,6 +221,7 @@ public sealed class CohesionCreateResourceManifest : Task
         List<ResourceReferenceModel> references = ParseReferences();
         Dictionary<string, ResourceProbeModel> probes = ParseProbes(endpoints);
         Dictionary<string, string> properties = ParseProperties();
+        List<ResourceCommandModel> commands = ParseCommands();
 
         EnsureUniqueIdentifiers(settings.Select(setting => setting.Key), "CohesionSetting");
         EnsureUniqueIdentifiers(references.Select(reference => reference.Resource), "CohesionResourceReference");
@@ -293,6 +298,7 @@ public sealed class CohesionCreateResourceManifest : Task
         }
         manifest.Mounts.AddRange(mounts);
         manifest.Settings.AddRange(settings);
+        manifest.Commands.AddRange(commands);
         manifest.References.AddRange(references);
         foreach ((string key, string value) in properties)
         {
@@ -451,6 +457,41 @@ public sealed class CohesionCreateResourceManifest : Task
         return result;
     }
 
+    // One entry per command kind, sorted ordinally. RequiresInputResolver marks a kind whose declared
+    // payload the gateway must resolve before delivery; an item declaring the same kind twice must
+    // agree on it.
+    private List<ResourceCommandModel> ParseCommands()
+    {
+        var commands = new SortedDictionary<string, bool>(StringComparer.Ordinal);
+        foreach (ITaskItem item in Commands)
+        {
+            string kind = item.ItemSpec.Trim();
+            if (kind.Length == 0)
+            {
+                Log.LogError("CohesionCommand requires a non-empty command kind.");
+                continue;
+            }
+
+            bool requiresInputResolver = ParseBoolean(
+                item.GetMetadata("RequiresInputResolver"),
+                $"CohesionCommand '{kind}' RequiresInputResolver");
+            if (commands.TryGetValue(kind, out bool existing))
+            {
+                if (existing != requiresInputResolver)
+                {
+                    Log.LogError(
+                        $"CohesionCommand '{kind}' is declared more than once with different RequiresInputResolver values.");
+                }
+
+                continue;
+            }
+
+            commands.Add(kind, requiresInputResolver);
+        }
+
+        return commands.Select(pair => new ResourceCommandModel(pair.Key, pair.Value)).ToList();
+    }
+
     private List<ResourceSettingModel> ParseSettings()
     {
         var result = new List<ResourceSettingModel>(Settings.Length);
@@ -556,7 +597,7 @@ public sealed class CohesionCreateResourceManifest : Task
             ITaskItem? resolved = ResolveManifestItem(identity);
             if (resolved is null)
             {
-                Log.LogError($"CohesionResourceReference '{identity}' did not resolve to a supported Cohesion resource manifest.");
+                Log.LogError($"CohesionResourceReference '{identity}' did not resolve to a cohesion/resource/v1 manifest.");
                 continue;
             }
             if (string.Equals(resolved.GetMetadata("ApplicationModel"), "disabled", StringComparison.OrdinalIgnoreCase))
@@ -656,10 +697,9 @@ public sealed class CohesionCreateResourceManifest : Task
         using JsonDocument document = JsonDocument.Parse(File.ReadAllText(path));
         JsonElement root = document.RootElement;
         RequireObject(root, "root", path);
-        string schema = RequiredString(root, "schema", path);
-        if (schema != "cohesion/resource/v2")
+        if (!string.Equals(RequiredString(root, "schema", path), "cohesion/resource/v1", StringComparison.Ordinal))
         {
-            throw new InvalidDataException($"Cohesion resource manifest '{path}' must declare schema 'cohesion/resource/v2'.");
+            throw new InvalidDataException($"Cohesion resource manifest '{path}' does not declare schema 'cohesion/resource/v1'.");
         }
 
         string resource = RequiredString(root, "name", path);

@@ -12,7 +12,7 @@ Each build creates a new context, invokes every registered service factory exact
 
 ## Boundaries
 
-The module references the area root, DependencyInjection, Hosting, and Hosting.Resources (including its health contracts) publicly. Its Web, Web.Hosting, HTTP, and transport implementation dependencies are private, with their resolved closure supplied by the area runtime framework. Hosting never references its own ApplicationModel package. It uses no reflection or dynamic activation and remains trimming- and NativeAOT-safe.
+The module references the area root, DependencyInjection, Hosting, Hosting.Health, and Hosting.Resources publicly. Its Web, Web.Hosting, HTTP, and transport implementation dependencies are private, with their resolved closure supplied by the area runtime framework. Hosting never references its own ApplicationModel package. It uses no reflection or dynamic activation and remains trimming- and NativeAOT-safe.
 
 ## Enabled resource lifecycle
 

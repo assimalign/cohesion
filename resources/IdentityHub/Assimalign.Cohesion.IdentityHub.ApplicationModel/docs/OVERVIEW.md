@@ -2,7 +2,7 @@
 
 This package supplies the manifest-backed `IdentityHubResource`, typed
 `IdentityHubResourceOptions`, `AddIdentityHub(...)`, the IdentityHub planner, and the
-producer-owned runtime manifest metadata.
+default `IdentityHubResourceControlPlane` factory.
 
 The planner requires a singleton `StatefulSet`, an HTTPS-over-TCP endpoint named `https`,
 and exactly one persistent, sized `data` Volume. The SDK defaults that endpoint to private
@@ -14,6 +14,7 @@ workload later.
 ## Dependencies
 
 - `Assimalign.Cohesion.ApplicationModel`
+- `Assimalign.Cohesion.Hosting.Resources`
 
 COHAM001 guards the full production dependency closure. The package never references
 IdentityHub.Hosting, a gateway assembly, or a platform SDK.

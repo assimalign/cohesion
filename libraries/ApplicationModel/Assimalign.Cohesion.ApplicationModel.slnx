@@ -30,7 +30,6 @@
 	</Folder>
 	<Folder Name="/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway/tests/">
 		<Project Path="Assimalign.Cohesion.ApplicationModel.Gateway/tests/Assimalign.Cohesion.ApplicationModel.Gateway.Tests.csproj" />
-		<Project Path="Assimalign.Cohesion.ApplicationModel.Gateway/tests/TestHost/Assimalign.Cohesion.ApplicationModel.Gateway.TestHost.csproj" />
 	</Folder>
 	<Folder Name="/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane/">
 		<File Path="Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane/README.md" />

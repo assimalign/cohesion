@@ -4,7 +4,9 @@ RezolvrResource wraps a manifest snapshot and typed RezolvrResourceOptions, and 
 
 SDK defaults retain dns udp:53, dns-tcp tcp:53, and admin http/tcp:8081. Only admin hosts the control plane; the filler does not implement DNS service.
 
-This package describes resource manifests, dependencies and deployment plans. Its only direct Cohesion dependency is ApplicationModel, whose contracts depend only on Core. Sdk.ApplicationModel generates control-plane registration in the enabled resource executable; Hosting.Resources and the resource host own the runtime surface and apply the deployment record. The gateway observes infrastructure and delivers the record.
+RezolvrResourceControlPlane.Create returns a fresh Hosting.Resources control plane accepting the two record command kinds. Runtime Hosting discovers the generated registration and serves its protocol through the private Web.Hosting resource control-plane integration. Unsupported command envelopes are refused with 501.
+
+The package is NuGet-only (developer-experience design D4/O2), never a framework member. Its only direct dependencies are ApplicationModel and Hosting.Resources; COHAM001 checks its full resolved closure. Public resource/options values follow PlannedResource and ResourceOptions; the descriptor is interface-first and its implementation is internal. No runtime hosting, DI, reflection serialization, or gateway implementation enters this package.
 
 ## Declarative commands (item 31c)
 
@@ -15,7 +17,7 @@ This package describes resource manifests, dependencies and deployment plans. It
 
 Kinds use verb-noun kebab under the area prefix. The examples `rezolvr.record` and
 `identityhub.audience` in developer-experience design section 7 are illustrative; item 27's design
-rewrite should reflect the landed convention. Producer manifests no longer carry command catalogs; the existing command delivery surface is separate from runtime state management.
+rewrite should reflect the landed convention. Manifest commands remain bare JSON strings.
 Typed verbs validate argument shape and use source-generated JSON metadata. Build validates the
 advertised kind, canonical payload, deterministic id, and uniqueness of the target ownership key.
 The default control plane handles id replay and owner isolation; each area handler also accepts
@@ -33,11 +35,3 @@ The command registry survives restart and restores ownership before the listener
 
 Records are stored, not served as DNS answers. ResolverEndpointService remains parked. DNS serving
 and reconciling a durable Volume with the Deployment contract are deferred area work.
-
-## Runtime-independent dependency direction
-
-```mermaid
-flowchart LR
-    Area["Rezolvr.ApplicationModel"] --> Model["ApplicationModel"]
-    Model --> Core["Core"]
-```

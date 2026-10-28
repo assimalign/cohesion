@@ -9,9 +9,7 @@ The server is application-scoped. That keeps model, observed state, trusted issu
 observations, listener lifetime, and Local discovery metadata isolated when an
 `IMultiModelApplicationGateway` owns more than one application.
 
-Requests are matched by a small internal router for the five fixed `/cohesion/v1` routes and
-the ten `/cohesion/v2` management routes, which serve the deployment record through the gateway's
-`IResourceManagementProvider` after a management-grant check.
+Requests are matched by a small internal router for the five fixed `/cohesion/v1` templates.
 The package used to route with `Web.Routing` and dropped it because a library may not reference a
 `resources/**` package. Matching, `404`/`405` handling, `Allow` values, and route values did not
 change. DESIGN.md lists the exact rules.
@@ -61,6 +59,6 @@ existing overload and its unrestricted behavior.
 The serving gateway carries the matched issuer's list onto the authenticated principal and checks
 both apply and delete. A forbidden kind returns the existing 409 Rejected observation with a detail
 naming the issuer and kind. It does not dispatch the command or release existing ownership.
-Command-token scope and owner-equals-issuer checks remain in force.
+Manifest advertisement, command-token scope and owner-equals-issuer checks remain in force.
 
 HTTP connections are accepted with `AcceptAsync` from a typed HTTP listener over the configured TCP duplex listener. Each serving task owns and disposes its accepted connection.

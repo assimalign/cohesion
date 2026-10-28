@@ -24,7 +24,6 @@ internal sealed class RezolvrResourceDescriptor : IRezolvrResourceDescriptor
     public RezolvrResource Resource { get; }
     IApplicationResource IApplicationResourceDescriptor.Resource => Resource;
     public ResourcePlan? Plan => _inner.Plan;
-    public ResourceGroupName? ResourceGroup => _inner.ResourceGroup;
     public IReadOnlyList<IApplicationResourceDescriptor> Dependencies => _inner.Dependencies;
     public IReadOnlyList<IResourceCommand> Commands => _inner.Commands;
 
@@ -58,7 +57,6 @@ internal sealed class RezolvrResourceDescriptor : IRezolvrResourceDescriptor
 
         public RezolvrResource Resource => _target.Resource;
         public ResourcePlan? Plan => _target.Plan;
-        public ResourceGroupName? ResourceGroup => _target.ResourceGroup;
         public IReadOnlyList<IApplicationResourceDescriptor> Dependencies => _target.Dependencies;
         public IReadOnlyList<IResourceCommand> Commands => _target.Commands;
     }

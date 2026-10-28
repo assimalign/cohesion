@@ -49,9 +49,17 @@ ApplicationModel packages have an additional rollout guard:
 
 > **COHAM001** — When a non-harness `resources/**` assembly whose name ends in
 > `.ApplicationModel` sets `<CohesionApplicationModelGuard>true</CohesionApplicationModelGuard>`,
-> its dependency closure is limited to Core, ApplicationModel and Microsoft.NETCore.App BCL assemblies. Runtime registration is generated in the executable. Every resource area follows the same guard; a frozen area's pending integration is not a dependency exception.
+> its entire dependency closure is limited to `Assimalign.Cohesion.Core` (the Core assembly's
+> actual name), `Assimalign.Cohesion.ApplicationModel`, `Assimalign.Cohesion.Hosting`,
+> `Assimalign.Cohesion.Hosting.Health`, `Assimalign.Cohesion.Hosting.Resources`, BCL assemblies
+> supplied by `Microsoft.NETCore.App`, and the `System.Security.Cryptography.ProtectedData` BCL
+> facade used by Hosting.Resources' Windows-only mount carrier. The opt-in is a migration gate, not an
+> architectural exemption: once enabled, a project cannot add to the allowlist locally.
 
-The base ApplicationModel remains Core-only. A resource's runtime surface (configuration sections, actions, tools) is owned by Hosting.Resources and reaches a gateway as a build-output document, never as a type reference. Gateway packages deliver the resource's deployment record and supply live infrastructure metadata (`docs/RUNTIME_CONTRACT.md`, "Deployment record").
+The Hosting-area dependency graph behind that closure is fixed: Hosting.Health references Core
+only; Hosting.Resources references Core, plain Hosting, Hosting.Health, and ProtectedData; plain
+Hosting references neither sibling. An area ApplicationModel reaches the closure through its
+direct Hosting.Resources reference.
 
 The opposite direction has its own guard, because resources consume libraries and libraries never
 depend on resources:
@@ -158,7 +166,9 @@ semicolon-delimited, in its own csproj:
   (owner decision 57, 2026-10-13). Any other project needs the
   deviation protocol case-by-case; there is no standing `.Application` exemption.
 - The former standing exemption for `Assimalign.Cohesion.<Area>.ApplicationModel` is retired by
-  the signed-off realization-plan design. An area ApplicationModel directly references `Assimalign.Cohesion.ApplicationModel`; it does not reference a resource runtime.
+  the signed-off realization-plan design. An area ApplicationModel directly references
+  `Assimalign.Cohesion.ApplicationModel` and `Assimalign.Cohesion.Hosting.Resources`, but never
+  the plain host directly or its area's runtime module `Assimalign.Cohesion.<Area>.Hosting`;
   `COHAM001` enforces the complete resolved-assembly boundary as each project opts in.
 - Do not use the property to route around design pressure: if a feature library "needs" hosting,
   the missing piece is almost always a seam on the area root or a component integration (that is
@@ -186,7 +196,7 @@ Orchestration is an opt-in build behavior on that executable:
 - With the default `disabled` value, the project is a plain application: no manifest, generated
   resource surface, control-plane registration, or orchestration diagnostics.
 - `<Area>.ApplicationModel` remains the declarative orchestration plane (manifest-backed typed
-  resource, planner, and `Add<Area>(...)` verbs) and never
+  resource, planner, `Add<Area>(...)` verbs, and default-control-plane contract) and never
   references the area's runtime.
 
 An SDK consumer is the composition root and may reference `<Area>.Hosting`; it is not a shipped
@@ -329,14 +339,14 @@ this way. Web is the reference implementation (`resources/Web/Assimalign.Cohesio
   Child-to-child references are fine. The breakdown signal for either shape is the root (or a
   child root) pulling in anything feature- or model-specific.
 - **Hosting integrations live in the runtime module:** an area's
-  `Assimalign.Cohesion.<Area>.Hosting` integrates health and the runtime surface from
+  `Assimalign.Cohesion.<Area>.Hosting` integrates `Assimalign.Cohesion.Hosting.Health` and
   `Assimalign.Cohesion.Hosting.Resources` itself. Public members live in `src/Health/` and
   `src/Resources/`, with namespaces `Assimalign.Cohesion.<Area>.Hosting.Health` and
   `Assimalign.Cohesion.<Area>.Hosting.Resources`. The precedent is `Web.Hosting` (owner
   decision 57, 2026-10-13).
   A separate `Assimalign.Cohesion.<Area>.Hosting.<Suffix>` package is permitted only for an
   integration that must not land in every framework that carries the runtime module, so it stays
-  opt-in, as Web.Hosting.Management does for its deployment-record configuration sections. Such a package keeps the hosting-family constraints: it may
+  opt-in; no area has one today. Such a package keeps the hosting-family constraints: it may
   reference the base Hosting library and siblings, the area root, features, other hosting-family
   integrations, and other areas' packages. It may never reference its own exact `<Area>.Hosting`
   module, and roots and features may not reference it (COHRES001). The exact module may consume
@@ -373,8 +383,8 @@ this way. Web is the reference implementation (`resources/Web/Assimalign.Cohesio
 - `Assimalign.Cohesion.<Area>.Hosting` — the runtime module, referencing the area root, its own hosting
   family, the same-area libraries the runtime itself needs, and non-area infrastructure. Roots and
   feature libraries reference no `Assimalign.Cohesion.Hosting*` library. Enabled-resource
-  implementations consume the plain lifecycle host and `Assimalign.Cohesion.Hosting.Resources`
-  without referencing their area's ApplicationModel package.
+  implementations consume the plain lifecycle host, `Assimalign.Cohesion.Hosting.Resources`, and
+  `Assimalign.Cohesion.Hosting.Health` without referencing their area's ApplicationModel package.
   **The module may reference any library in its own area except COHRES002's exclusions** (owner
   decision 2026-10-09), so runtime machinery that belongs in its own package — a server, a router
   the host drives — no longer has to be pushed into the root or routed through an exemption.
@@ -387,7 +397,11 @@ this way. Web is the reference implementation (`resources/Web/Assimalign.Cohesio
   owner decision 34). It composes through its container ("Hosting composition — DI is the dependency
   control", above).
 - `Assimalign.Cohesion.<Area>.ApplicationModel` — the AOT-compatible, dependency-guarded declarative plane: a
-  manifest-backed typed resource, platform-neutral planner, and `Add<Area>(...)` graph verbs. Its direct Cohesion dependency is `Assimalign.Cohesion.ApplicationModel`; runtime registration is generated into the enabled resource executable, independently of the model package. Database sources remain frozen and may violate this enforced boundary until their separate migration; no exemption is retained.
+  manifest-backed typed resource, platform-neutral planner, `Add<Area>(...)` graph verbs, and the
+  area's default-control-plane contract/factory. Its direct Cohesion references are
+  `Assimalign.Cohesion.ApplicationModel` and `Assimalign.Cohesion.Hosting.Resources`. It never
+  references `<Area>.Hosting`; generated code in an enabled consumer executable registers the two
+  sides through `Assimalign.Cohesion.Hosting.Resources.ResourceRuntime`.
   **Every ApplicationModel package declares the `Assimalign.Cohesion.ApplicationModel` namespace**
   (`RootNamespace` and every `namespace` directive; `COHAM002` checks the project property), never
   `Assimalign.Cohesion.<Area>.ApplicationModel`: an apphost's `Program.cs` composes every area with
@@ -433,12 +447,18 @@ this way. Web is the reference implementation (`resources/Web/Assimalign.Cohesio
     Kind: reference `Assimalign.Cohesion.<Kind>.ApplicationModel.Orchestration` and call
     `builder.Use<Kind>(...)`, or for a member
     `set.AddApplication(Applications.<Member>, application => application.Use<Kind>("<store>"))`.
-    `cohesion/resource/v2` manifests list no command kinds, so the former check that a command
-    whose target marked its kind `requiresInputResolver` has a registered resolver (R11 of
-    2026-09-28) is gone with the catalog: an area's Orchestration package still registers the
-    resolver its kinds need in `Use<Area>(...)` (precedent: `secretstore.add-secret`, resolved by
-    `UseSecretStore`), and the receiving runtime rejects an unresolved payload. Claims and actions
-    replace commands under the approved deployment-record design (D4).
+    The same package-and-verb hint, built from the target's manifest Kind, is produced when the
+    application declares a command whose target manifest marks its kind `requiresInputResolver`
+    and registers no `IResourceCommandInputResolver` for that kind (owner decision of 2026-09-28,
+    R11 in `docs/DEVELOPER_EXPERIENCE_DESIGN.md`; for a target of another application the error
+    asks for the resolver in `Providers.CommandInputs` instead). So an area whose command payloads
+    carry source expressions (`parameter:<name>`, `<store>:<key>`) that only the delivering gateway
+    can resolve marks those kinds `RequiresInputResolver="true"` on their `CohesionCommand` items in
+    `sdks/Assimalign.Cohesion.Sdk.<Area>/Targets/Sdk.<Area>.props`, and its Orchestration package's
+    `Use<Area>(...)` registers the resolver (precedent: `secretstore.add-secret` in
+    `Sdk.SecretStore.props`, resolved by `UseSecretStore`). An unmarked kind with no resolver is
+    delivered as declared; the SecretStore runtime still rejects an unresolved `add-secret` as
+    defense in depth.
     A package or verb named any other way sends the developer to a package that does not exist.
   - **References:** `Assimalign.Cohesion.ApplicationModel`, the area's own `<Area>.Client`, and
     other `libraries/**` packages outside the Hosting and Gateway families. It never references

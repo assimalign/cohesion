@@ -43,7 +43,7 @@ collapsed above, is in [docs/DEPENDENCIES.md](../../docs/DEPENDENCIES.md).
 
 - `Assimalign.Cohesion.Rezolvr` defines the public area-root application and builder contracts for the standalone server product.
 - `Assimalign.Cohesion.Rezolvr.Hosting` provides the concrete creation entry point and the caller-configurable host-service lifecycle.
-- `Assimalign.Cohesion.Rezolvr.ApplicationModel` supplies the typed manifest, planner, dependency descriptor and opaque runtime metadata as a NuGet-only package.
+- `Assimalign.Cohesion.Rezolvr.ApplicationModel` supplies the typed manifest, planner, descriptor, and default control-plane factory as a NuGet-only package.
 
 ## Layering and dependencies
 

@@ -16,7 +16,7 @@ public sealed class FrameworkManifestTests
     private static readonly string _repositoryRoot = FindRepositoryRoot();
     private static readonly string _resourcesRoot = Path.Combine(_repositoryRoot, "resources");
 
-    // App's list: the ItemGroups App.props conditions on $(CohesionFrameworkName).
+    // App's list: the one ItemGroup App.props conditions on $(CohesionFrameworkName).
     // Area lists live in resources/<Area>/Assimalign.Cohesion.<Area>.Runtime/Directory.Build.props.
     private static readonly string _appManifestPath = Path.Combine(
         _repositoryRoot,
@@ -56,8 +56,8 @@ public sealed class FrameworkManifestTests
             "Assimalign.Cohesion.FileSystem",
             "Assimalign.Cohesion.FileSystem.Physical",
             "Assimalign.Cohesion.Hosting",
+            "Assimalign.Cohesion.Hosting.Health",
             "Assimalign.Cohesion.Hosting.Resources",
-            "Assimalign.Cohesion.Hosting.Telemetry",
             "Assimalign.Cohesion.Logging",
             "Assimalign.Cohesion.Logging.Console",
             "Assimalign.Cohesion.Logging.EventSource",
@@ -72,7 +72,7 @@ public sealed class FrameworkManifestTests
             .ToArray();
 
         // Assert
-        roots.Length.ShouldBe(16);
+        roots.Length.ShouldBe(17);
         declaredAssemblies.ShouldBe([AppFramework]);
         actualClosure.ShouldBe(expectedClosure);
     }
@@ -218,14 +218,9 @@ public sealed class FrameworkManifestTests
                 $"{refsListPath} must not declare members of its own.");
         }
 
-        appPropsFrameworkGroups.ShouldNotBeEmpty(
-            "App.props must condition its framework ItemGroups on $(CohesionFrameworkName).");
-        foreach (XElement group in appPropsFrameworkGroups)
-        {
-            ReadFrameworkCondition((string?)group.Attribute("Condition")).ShouldBe(AppFramework);
-            group.Elements().Select(element => element.Name.LocalName).Distinct(StringComparer.Ordinal)
-                .ShouldHaveSingleItem("Each App.props ItemGroup must contain exactly one item type.");
-        }
+        XElement appGroup = appPropsFrameworkGroups.ShouldHaveSingleItem(
+            "App.props must condition exactly one ItemGroup on $(CohesionFrameworkName).");
+        ReadFrameworkCondition((string?)appGroup.Attribute("Condition")).ShouldBe(AppFramework);
     }
 
     [Fact(DisplayName = "Cohesion Test [Framework] - split membership groups retain public, private and analyzer entries")]
@@ -596,22 +591,16 @@ public sealed class FrameworkManifestTests
 
     private static IReadOnlyDictionary<string, XElement> LoadFrameworkGroups()
     {
-        // App's groups come from App.props, keyed by their $(CohesionFrameworkName) condition and
-        // combined in declaration order. An area's unconditioned membership groups form one
-        // logical list in its Runtime producer's Directory.Build.props. Add throws on a framework
-        // defined twice.
+        // App's group comes from App.props, keyed by its $(CohesionFrameworkName) condition.
+        // An area's unconditioned membership groups form one logical list in its Runtime
+        // producer's Directory.Build.props. Add throws on a framework defined twice.
         var groups = new Dictionary<string, XElement>(StringComparer.OrdinalIgnoreCase);
         foreach (XElement group in ReadElements(_appManifestPath, "ItemGroup"))
         {
             string? framework = ReadFrameworkCondition((string?)group.Attribute("Condition"));
             if (framework is not null)
             {
-                if (!groups.TryGetValue(framework, out XElement? combined))
-                {
-                    combined = new XElement("ItemGroup");
-                    groups.Add(framework, combined);
-                }
-                combined.Add(group.Elements().Select(static element => new XElement(element)));
+                groups.Add(framework, group);
             }
         }
 

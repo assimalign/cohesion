@@ -17,10 +17,9 @@ of authorization (#155) and antiforgery (#1057); a preflight protects them only 
 will not send without one.
 
 The package owns one immutable policy (`CorsPolicy`) and its builder, one options object (`CorsOptions`),
-one sealed metadata carrier (`CorsMetadata`), the static `UseCors` and opt-in `UseDynamicCors` pipeline
-verbs, the `RequireCors` and `DisableCors` convention verbs, and the internal evaluation. The dynamic
-path adds declarative configuration transfer types and an isolated `CorsPolicyStore`. It has no feature
-interface: nothing downstream needs the CORS decision.
+one sealed metadata carrier (`CorsMetadata`), the `UseCors` pipeline verb, the `RequireCors` and
+`DisableCors` convention verbs, and the internal evaluation. It has no feature interface: nothing downstream
+needs the CORS decision.
 
 ## The protocol in one picture
 
@@ -151,48 +150,6 @@ it, the same posture Web.RateLimiting takes for an unknown policy name.
 
 The options are captured when `UseCors` runs. The middleware copies the default policy and the named
 policies into a frozen dictionary, so options changed later cannot change a running pipeline.
-
-### Opt-in dynamic configuration
-
-`CorsPolicyStore.Create(CorsConfiguration)` builds the default and each named policy through the same
-`CorsPolicyBuilder` validation as static composition. The transfer objects describe origins, methods,
-request and exposed headers, wildcard flags, credentials and a whole-second preflight lifetime.
-Stored configuration is reconstructed from the resulting policies, preserving normalized origins,
-method normalization and deduplication. No caller-owned arrays or dictionaries are retained.
-`CorsJsonContext` supplies camel-case, reflection-free JSON metadata and rejects unknown properties
-and null values for non-nullable collections. It never serializes executable predicates.
-
-`UseDynamicCors(store)` installs the existing middleware with an explicit store reference. At policy
-selection it reads one published snapshot containing the default and frozen named-policy dictionary.
-The resulting immutable policy remains captured by the response-starting callback, so a concurrent
-replacement cannot mix the origin decision from one policy with the headers of another.
-`UseCors` retains its static snapshot semantics and existing signature.
-
-`Replace(configuration)` builds and normalizes the complete replacement before taking the publication
-lock. Under that lock it verifies that every currently registered policy name remains in the replacement,
-then atomically publishes the new snapshot. This protects routes already bound to a name, including names
-added by a concurrent earlier replacement. A failed validation or omitted name leaves all published
-policies unchanged. Existing policy contents can change, new names can be added and the default policy
-can be removed. Concurrent valid replacements are last-writer-wins; there is no version precondition.
-Reads use `GetConfiguration()` to return a detached copy of one normalized snapshot.
-
-An absent dynamic default also registers a response-starting callback that removes CORS grant headers
-for requests without endpoint CORS metadata. An output cache can have captured headers before an
-earlier policy's response-starting callback corrected them; removing the default must not revive those
-stored grants. Explicit `DisableCors` remains an opt-out and permits an endpoint to own its headers.
-Policy validation and name-retention failures at this configuration boundary are `ArgumentException`,
-so a caller such as the deployment-record section can report invalid input separately from a
-server failure. Static builder
-validation keeps its existing exception types.
-
-Inline endpoint policies and `DisableCors` keep their existing precedence; dynamic configuration
-controls only the default and named policies. The store deliberately has no HTTP, hosting, persistence,
-service-container or application-model dependency. A resource publishes the store as the live `Web:Cors`
-section of its deployment record through the opt-in Web.Hosting.Management package, which merges the
-record's layers over the store's initial configuration and calls `Replace`. Store lifetime is one
-process; the record, not the store, carries changes to restarted and new instances. A browser may retain a preflight grant until its
-advertised cache lifetime expires, so replacement is effective on subsequent server requests rather
-than an immediate revocation of browser cache entries.
 
 The convention verbs are generic extension members over routing's `IRouterConventionBuilder`, so one verb
 serves a route and a group and returns the receiver's builder type: `RequireCors(name)`,
@@ -477,10 +434,9 @@ dependency or framework member.
   and a pattern language invites suffix-matching mistakes.
 - **Exposing every response header** (`Access-Control-Expose-Headers: *`): it is a wildcard only for requests
   without credentials.
-- **An arbitrary per-request policy provider** (ASP.NET Core's `ICorsPolicyProvider`): each request selects
-  an immutable policy from a static configuration or an explicitly supplied `CorsPolicyStore`. Dynamic
-  configuration replaces complete validated snapshots; it does not run service lookup or user-provided
-  configuration callbacks during requests. An executable origin decision remains the predicate's job.
+- **A per-request policy provider** (ASP.NET Core's `ICorsPolicyProvider`): policies are static and selected
+  by endpoint metadata, which keeps evaluation trimming-safe and visible at the route. A dynamic origin
+  decision is the predicate's job.
 - **Blocking requests from denied origins:** CORS grants reads; it is not access control.
 - **WebSocket origin checks:** the WebSocket handshake is not subject to CORS. `UseWebSockets`
   (`Assimalign.Cohesion.Web.WebSockets`) refuses a cross-site handshake with `403` unless its origin
@@ -519,13 +475,6 @@ preflight with no candidate, with and without a default policy; a preflight for 
 request to an endpoint with a policy; `UseCors` registered ahead of `UseRouting` and missing altogether, both
 failing closed at dispatch; the real exception boundary on either side of `UseCors` keeping the CORS
 headers on its `500`; streamed heads enforcing the policy after handler changes; and a preflight over HTTP/2.
-
-`tests/CorsPolicyStoreTests.cs` covers normalized and detached configuration, complete failure rollback,
-named-policy retention, default-policy removal, JSON round trips and malformed input, dynamic named
-preflight changes, immutable policy retention through response commit, independent store isolation,
-inline/disabled metadata precedence and unchanged static `UseCors` capture semantics. The
-deployment-record section is tested in Web.Hosting.Management, and the record changing real requests
-is tested in Web.Hosting.
 
 ## HTTP interceptor consumer compatibility (#1465)
 

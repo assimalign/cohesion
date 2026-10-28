@@ -11,10 +11,6 @@
 		TaskName="Assimalign.Cohesion.Sdk.ApplicationModel.Tasks.CohesionValidateImageManifest"
 		AssemblyFile="..\Tasks\Assimalign.Cohesion.Sdk.ApplicationModel.Tasks.dll"
 		Runtime="NET" />
-	<UsingTask
-		TaskName="Assimalign.Cohesion.Sdk.ApplicationModel.Tasks.CohesionDescribeResource"
-		AssemblyFile="..\Tasks\Assimalign.Cohesion.Sdk.ApplicationModel.Tasks.dll"
-		Runtime="NET" />
 
 	<PropertyGroup>
 		<CohesionApplication Condition="'$(CohesionApplication)' == '' and '$(CohesionApplicationName)' != ''">$(CohesionApplicationName)</CohesionApplication>
@@ -26,8 +22,6 @@
 		<CohesionPackRuntime Condition="'$(CohesionPackRuntime)' == ''">false</CohesionPackRuntime>
 		<CohesionImageRequired Condition="'$(CohesionImageRequired)' == ''">false</CohesionImageRequired>
 		<CohesionPackImageArchive Condition="'$(CohesionPackImageArchive)' == ''">false</CohesionPackImageArchive>
-		<CohesionDescribeResource Condition="'$(CohesionDescribeResource)' == ''">true</CohesionDescribeResource>
-		<CohesionDescribeTimeoutSeconds Condition="'$(CohesionDescribeTimeoutSeconds)' == ''">60</CohesionDescribeTimeoutSeconds>
 	</PropertyGroup>
 
 	<ItemDefinitionGroup>

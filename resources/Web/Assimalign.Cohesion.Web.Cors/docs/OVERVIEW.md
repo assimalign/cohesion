@@ -21,9 +21,6 @@ and selected per endpoint from routing metadata.
 - **Per-endpoint policy selection**: a named policy, an inline policy, or `DisableCors`, attached with
   convention verbs to a route or a group and read last-wins from the endpoint `UseRouting` publishes; the
   default policy covers everything else.
-- **Opt-in live configuration** (`CorsPolicyStore`, `UseDynamicCors`): a declarative default and named
-  policy set can be validated and replaced atomically while requests continue. `CorsJsonContext`
-  supplies reflection-free JSON metadata for the configuration contract.
 
 ## Dependencies
 
@@ -91,48 +88,3 @@ Individual string arguments still work: `policy.WithHeaders("Content-Type", "X-T
 `HttpFieldName[]` instead of `string[]`. The immutable policy's `Headers` and `ExposedHeaders`
 now contain `HttpFieldName`; use `.Value` for their text. Names compare ordinally without case,
 and CORS continues to reject `*` and invalid or uninitialized names.
-
-## Replace policies while the application runs
-
-Use one store per application. To let the resource's gateway change it while the application runs,
-publish it as a deployment-record section with the opt-in Web.Hosting.Management package:
-
-```csharp
-CorsPolicyStore cors = CorsPolicyStore.Create(new CorsConfiguration
-{
-    DefaultPolicy = new CorsPolicyConfiguration
-    {
-        Origins = ["https://app.example"],
-        Methods = ["PUT", "DELETE"],
-        Headers = ["Content-Type", "Authorization"],
-        AllowCredentials = true,
-        PreflightMaxAgeSeconds = 600,
-    },
-});
-
-builder.Services.AddSingleton<ResourceConfigurationSection>(cors.AsResourceConfiguration());
-WebApplication app = builder.Build();
-app.UseRouting();
-app.UseDynamicCors(cors);
-
-// Code can also publish a complete replacement directly:
-cors.Replace(replacement);
-```
-
-`CorsPolicyStore` owns policy state. No endpoint is opened by this package: the deployment record
-reaches the store through the resource's control plane, which owns authorization. `GetConfiguration()` returns a detached normalized
-copy, and mutating input or returned objects never changes the running pipeline. `Replace` validates
-every policy before publication; a failure preserves the previous configuration. Requests already
-processing a response keep the policy they selected, and subsequent requests select the replacement.
-
-Replacement controls the default and named policy set. Existing named policies must remain present
-so routes referencing them continue to resolve; new names can be added. The default policy can be
-removed; requests without endpoint CORS metadata then have grant headers removed at response commit,
-including grants replayed by an output cache. Inline `RequireCors(policy)` policies and `DisableCors()`
-retain their precedence, and disabled endpoints can continue managing their own CORS headers.
-Executable origin predicates remain in static `UseCors` configuration because a delegate cannot be
-round-tripped as JSON. Static `UseCors` behavior is unchanged.
-
-Configuration is process-local. The deployment record carries a change to restarted and scaled-out
-instances, and the resource's next deployment replaces it unless the change was made in code. Already cached browser preflight grants remain usable until their cache
-lifetime expires; changing the server's policy cannot revoke those cached grants immediately.

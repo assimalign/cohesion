@@ -19,6 +19,7 @@ using Assimalign.Cohesion.FileSystem;
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Http.Connections;
 using Assimalign.Cohesion.Hosting;
+using Assimalign.Cohesion.Hosting.Health;
 using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.Hosting.Telemetry;
 using Assimalign.Cohesion.Internal;
@@ -358,26 +359,6 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
                     _context.ServiceProvider.GetRequiredService<IEnumerable<IHealthContributor>>())
                 {
                     _controlPlane.AddHealthContributor(contributor);
-                }
-
-                // The runtime surface closes when the host is attached, so every section, action and
-                // tool the application registered reaches the control plane first.
-                foreach (ResourceConfigurationSection section in
-                    _context.ServiceProvider.GetRequiredService<IEnumerable<ResourceConfigurationSection>>())
-                {
-                    _controlPlane.AddConfiguration(section);
-                }
-
-                foreach (ResourceAction action in
-                    _context.ServiceProvider.GetRequiredService<IEnumerable<ResourceAction>>())
-                {
-                    _controlPlane.AddAction(action);
-                }
-
-                foreach (ResourceTool tool in
-                    _context.ServiceProvider.GetRequiredService<IEnumerable<ResourceTool>>())
-                {
-                    _controlPlane.AddTool(tool);
                 }
 
                 ResourceRuntime.HostBuilt(app, _controlPlane);

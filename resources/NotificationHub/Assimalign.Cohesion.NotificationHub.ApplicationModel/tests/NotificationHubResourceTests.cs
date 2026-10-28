@@ -6,6 +6,7 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.ApplicationModel;
+using Assimalign.Cohesion.Hosting.Resources;
 
 namespace Assimalign.Cohesion.NotificationHub.ApplicationModel.Tests;
 
@@ -44,6 +45,17 @@ public sealed class NotificationHubResourceTests
         first.Resource.ShouldBeOfType<NotificationHubResource>();
         second.Dependencies.ShouldContain(first);
         Should.Throw<ArgumentNullException>(() => builder.AddNotificationHub(null!));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [NotificationHub.ApplicationModel] - Control plane: isolates empty command sets")]
+    public void CreateControlPlane_ShouldReturnIsolatedEmptyPlanes()
+    {
+        IResourceControlPlane first = NotificationHubResourceControlPlane.Create();
+        IResourceControlPlane second = NotificationHubResourceControlPlane.Create();
+        first.ShouldNotBeSameAs(second);
+        first.AcceptedCommandKinds.ShouldBeEmpty();
+        first.Commands.ShouldBeEmpty();
+        first.ObservedEndpoints.ShouldBeEmpty();
     }
 
     [Theory(DisplayName = "Cohesion Test [NotificationHub.ApplicationModel] - Planning: rejects incompatible area facts")]

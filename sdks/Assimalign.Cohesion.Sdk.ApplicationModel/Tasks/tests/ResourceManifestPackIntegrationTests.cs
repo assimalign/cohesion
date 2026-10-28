@@ -78,8 +78,7 @@ public sealed class ResourceManifestPackIntegrationTests
             [
                 "README.md",
                 "buildTransitive/EnabledWeb.Manifest.props",
-                "cohesion/resource.json",
-                "cohesion/resource.runtime.json"
+                "cohesion/resource.json"
             ];
 
             payloadEntries.SequenceEqual(expectedPayloadEntries, StringComparer.Ordinal)
@@ -91,10 +90,6 @@ public sealed class ResourceManifestPackIntegrationTests
             JsonElement artifact = manifest.RootElement.GetProperty("artifact");
             artifact.GetProperty("project").ValueKind.ShouldBe(JsonValueKind.Null);
             artifact.GetProperty("apphost").ValueKind.ShouldBe(JsonValueKind.Null);
-
-            // The build's describe run produced the surface, so a gateway reads it from the package.
-            using JsonDocument surface = JsonDocument.Parse(ReadEntry(archive, "cohesion/resource.runtime.json"));
-            surface.RootElement.GetProperty("schema").GetString().ShouldBe("cohesion/runtime/v1");
 
             XDocument nuspec = XDocument.Parse(ReadEntry(archive, "EnabledWeb.Manifest.nuspec"));
             XNamespace packageNamespace = nuspec.Root!.Name.Namespace;

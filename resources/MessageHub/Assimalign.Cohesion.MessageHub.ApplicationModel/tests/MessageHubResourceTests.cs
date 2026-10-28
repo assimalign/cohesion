@@ -6,6 +6,7 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.ApplicationModel;
+using Assimalign.Cohesion.Hosting.Resources;
 
 namespace Assimalign.Cohesion.MessageHub.ApplicationModel.Tests;
 
@@ -44,6 +45,17 @@ public sealed class MessageHubResourceTests
         first.Resource.ShouldBeOfType<MessageHubResource>();
         second.Dependencies.ShouldContain(first);
         Should.Throw<ArgumentNullException>(() => builder.AddMessageHub(null!));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [MessageHub.ApplicationModel] - Control plane: isolates empty command sets")]
+    public void CreateControlPlane_ShouldReturnIsolatedEmptyPlanes()
+    {
+        IResourceControlPlane first = MessageHubResourceControlPlane.Create();
+        IResourceControlPlane second = MessageHubResourceControlPlane.Create();
+        first.ShouldNotBeSameAs(second);
+        first.AcceptedCommandKinds.ShouldBeEmpty();
+        first.Commands.ShouldBeEmpty();
+        first.ObservedEndpoints.ShouldBeEmpty();
     }
 
     [Theory(DisplayName = "Cohesion Test [MessageHub.ApplicationModel] - Planning: rejects incompatible area facts")]

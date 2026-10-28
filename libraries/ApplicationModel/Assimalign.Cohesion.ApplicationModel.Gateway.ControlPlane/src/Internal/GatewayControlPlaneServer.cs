@@ -21,7 +21,7 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane.Internal;
 
 [global::System.Diagnostics.DebuggerDisplay("GatewayControlPlaneServer")]
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
-internal sealed partial class GatewayControlPlaneServer : IApplicationGatewayControlPlane
+internal sealed class GatewayControlPlaneServer : IApplicationGatewayControlPlane
 {
     private const long MaximumCommandBytes = 1024 * 1024;
 
@@ -67,11 +67,9 @@ internal sealed partial class GatewayControlPlaneServer : IApplicationGatewayCon
             : GetMetadataPath(metadataDirectory, application);
         _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
         _dispatchers = dispatchers ?? throw new ArgumentNullException(nameof(dispatchers));
-        // Tried in this order. The v1 routes keep the order Web.Routing's inbound-precedence sort gave
-        // them before the dependency was removed: each has a distinct segment count, and PUT precedes
-        // DELETE on the shared command template, so a 405 lists "PUT, DELETE". Among the v2 management
-        // routes a literal segment precedes the parameter in the same position: GET
-        // configuration/status is the status route, while PATCH configuration/status names a section.
+        // Tried in this order, which is the order Web.Routing's inbound-precedence sort gave these
+        // templates before the dependency was removed: each template has a distinct segment count,
+        // and PUT precedes DELETE on the shared command template, so a 405 lists "PUT, DELETE".
         _router = new ControlPlaneRouter(
             new ControlPlaneRoute(
                 CohesionHttpMethod.Get,
@@ -92,47 +90,7 @@ internal sealed partial class GatewayControlPlaneServer : IApplicationGatewayCon
             new ControlPlaneRoute(
                 CohesionHttpMethod.Delete,
                 "/cohesion/v1/resources/{name}/commands/{id}",
-                HandleDeleteCommandAsync),
-            new ControlPlaneRoute(
-                CohesionHttpMethod.Get,
-                "/cohesion/v2/resources/{name}/configuration",
-                HandleGetConfigurationAsync),
-            new ControlPlaneRoute(
-                CohesionHttpMethod.Get,
-                "/cohesion/v2/resources/{name}/configuration/status",
-                HandleGetConfigurationStatusAsync),
-            new ControlPlaneRoute(
-                CohesionHttpMethod.Patch,
-                "/cohesion/v2/resources/{name}/configuration/{section}",
-                HandleMergeOverrideAsync),
-            new ControlPlaneRoute(
-                CohesionHttpMethod.Put,
-                "/cohesion/v2/resources/{name}/configuration/{section}",
-                HandleReplaceOverrideAsync),
-            new ControlPlaneRoute(
-                CohesionHttpMethod.Delete,
-                "/cohesion/v2/resources/{name}/configuration/{section}",
-                HandleRemoveOverrideAsync),
-            new ControlPlaneRoute(
-                CohesionHttpMethod.Put,
-                "/cohesion/v2/resources/{name}/claims/{owner}",
-                HandleReplaceClaimsAsync),
-            new ControlPlaneRoute(
-                CohesionHttpMethod.Post,
-                "/cohesion/v2/resources/{name}/actions/{action}",
-                HandleInvokeActionAsync),
-            new ControlPlaneRoute(
-                CohesionHttpMethod.Get,
-                "/cohesion/v2/resources/{name}/instances",
-                HandleGetInstancesAsync),
-            new ControlPlaneRoute(
-                CohesionHttpMethod.Get,
-                "/cohesion/v2/resources/{name}/platform/{platform}/{extension}",
-                HandleGetPlatformSurfaceAsync),
-            new ControlPlaneRoute(
-                CohesionHttpMethod.Patch,
-                "/cohesion/v2/resources/{name}/platform/{platform}/{extension}",
-                HandleChangePlatformSurfaceAsync));
+                HandleDeleteCommandAsync));
     }
 
     public Uri Address => _address ?? throw new InvalidOperationException(
@@ -184,7 +142,6 @@ internal sealed partial class GatewayControlPlaneServer : IApplicationGatewayCon
                 _callers = SnapshotCallers(model);
                 _commandCredentials = trustedIssuers as IResourceCommandCredentialProvider;
                 _transportTrust = trustedIssuers as IResourceTransportTrustProvider;
-                _management = trustedIssuers as IResourceManagementProvider;
                 _tcpListener = tcpListener;
                 _httpListener = httpListener;
                 _serverCancellation = new CancellationTokenSource();
@@ -304,7 +261,6 @@ internal sealed partial class GatewayControlPlaneServer : IApplicationGatewayCon
                 _trustedIssuers = null;
                 _callers = Array.Empty<IApplicationCallerAuthenticator>();
                 _commandCredentials = null;
-                _management = null;
                 lock (_documentGate)
                 {
                     _document = null;
@@ -518,7 +474,6 @@ internal sealed partial class GatewayControlPlaneServer : IApplicationGatewayCon
         {
             Name = descriptor.Resource.Name.ToString(),
             Kind = manifest!.Kind,
-            ResourceGroup = descriptor.ResourceGroup?.Value,
             State = lifecycle.ToString(),
             Endpoints = endpoints,
         };
@@ -877,6 +832,15 @@ internal sealed partial class GatewayControlPlaneServer : IApplicationGatewayCon
         ResourceCommand command,
         CancellationToken cancellationToken)
     {
+        if (!AcceptsCommand(manifest, command.Kind))
+        {
+            return CreateObservation(
+                command,
+                "Rejected",
+                $"Resource '{manifest.Name}' does not declare command kind '{command.Kind}'.",
+                result: null);
+        }
+
         IResourceCommandDispatcher? dispatcher = FindDispatcher(manifest.Kind);
         if (dispatcher is null)
         {
@@ -1217,6 +1181,19 @@ internal sealed partial class GatewayControlPlaneServer : IApplicationGatewayCon
         }
 
         return fallback;
+    }
+
+    private static bool AcceptsCommand(ResourceManifest manifest, string kind)
+    {
+        for (int index = 0; index < manifest.Commands.Count; index++)
+        {
+            if (string.Equals(manifest.Commands[index].Kind, kind, StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static bool CommandMatches(

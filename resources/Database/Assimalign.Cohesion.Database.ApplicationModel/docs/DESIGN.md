@@ -180,7 +180,7 @@ Manifest probe `Http` is `ResourceHttpPath?`, control-plane `Path` is `ResourceH
 `Source` is `ResourceMountSource?`. Consumers use the underlying `Value` when composing addresses
 or comparing raw text. Valid string initializers remain supported; malformed strings are refused
 at construction or typed JSON import. Default structs still pass through explicit manifest/plan
-validation. JSON stays plain strings/nulls under `cohesion/resource/v2`; no transport message,
+validation. JSON stays plain strings/nulls under `cohesion/resource/v1`; no transport message,
 Database storage format, diagnostic identity, event or counter changes. All binary consumers
 must be rebuilt together, including installed SDK/framework E2E payloads.
 

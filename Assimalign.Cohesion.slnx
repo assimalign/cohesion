@@ -206,7 +206,6 @@
 	</Folder>
 	<Folder Name="/cohesion/libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway/tests/">
 		<Project Path="libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway/tests/Assimalign.Cohesion.ApplicationModel.Gateway.Tests.csproj" />
-		<Project Path="libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway/tests/TestHost/Assimalign.Cohesion.ApplicationModel.Gateway.TestHost.csproj" />
 	</Folder>
 	<Folder Name="/cohesion/libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane/">
 		<File Path="libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane/README.md" />
@@ -3017,27 +3016,6 @@
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Testing/fixtures/Assimalign.Cohesion.Database.SampleHost/Assimalign.Cohesion.Database.SampleHost.csproj" />
 		<File Path="resources/Database/Assimalign.Cohesion.Database.Testing/fixtures/Assimalign.Cohesion.Database.SampleHost/README.md" />
 	</Folder>
-	<Folder Name="/libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway/fixtures/Assimalign.Cohesion.Web.HttpsHost/">
-		<Project Path="libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway/fixtures/Assimalign.Cohesion.Web.HttpsHost/Assimalign.Cohesion.Web.HttpsHost.csproj" />
-		<File Path="libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway/fixtures/Assimalign.Cohesion.Web.HttpsHost/README.md" />
-	</Folder>
-	<Folder Name="/libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway/fixtures/Assimalign.Cohesion.Web.ManagedHost/">
-		<Project Path="libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway/fixtures/Assimalign.Cohesion.Web.ManagedHost/Assimalign.Cohesion.Web.ManagedHost.csproj" />
-		<File Path="libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway/fixtures/Assimalign.Cohesion.Web.ManagedHost/README.md" />
-	</Folder>
-	<Folder Name="/cohesion/libraries/Hosting/Assimalign.Cohesion.Hosting.Telemetry/">
-		<File Path="libraries/Hosting/Assimalign.Cohesion.Hosting.Telemetry/README.md" />
-	</Folder>
-	<Folder Name="/cohesion/libraries/Hosting/Assimalign.Cohesion.Hosting.Telemetry/docs/">
-		<File Path="libraries/Hosting/Assimalign.Cohesion.Hosting.Telemetry/docs/DESIGN.md" />
-		<File Path="libraries/Hosting/Assimalign.Cohesion.Hosting.Telemetry/docs/OVERVIEW.md" />
-	</Folder>
-	<Folder Name="/cohesion/libraries/Hosting/Assimalign.Cohesion.Hosting.Telemetry/src/">
-		<Project Path="libraries/Hosting/Assimalign.Cohesion.Hosting.Telemetry/src/Assimalign.Cohesion.Hosting.Telemetry.csproj" />
-	</Folder>
-	<Folder Name="/cohesion/libraries/Hosting/Assimalign.Cohesion.Hosting.Telemetry/tests/">
-		<Project Path="libraries/Hosting/Assimalign.Cohesion.Hosting.Telemetry/tests/Assimalign.Cohesion.Hosting.Telemetry.Tests.csproj" />
-	</Folder>
 	<Folder Name="/cohesion/libraries/OpenTelemetry/Assimalign.Cohesion.OpenTelemetry/">
 		<File Path="libraries/OpenTelemetry/Assimalign.Cohesion.OpenTelemetry/README.md" />
 	</Folder>
@@ -3047,10 +3025,6 @@
 	</Folder>
 	<Folder Name="/cohesion/libraries/OpenTelemetry/Assimalign.Cohesion.OpenTelemetry/tests/">
 		<Project Path="libraries/OpenTelemetry/Assimalign.Cohesion.OpenTelemetry/tests/Assimalign.Cohesion.OpenTelemetry.Tests.csproj" />
-	</Folder>
-	<Folder Name="/libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway/fixtures/Assimalign.Cohesion.LogSpace.SinkHost/">
-		<Project Path="libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway/fixtures/Assimalign.Cohesion.LogSpace.SinkHost/Assimalign.Cohesion.LogSpace.SinkHost.csproj" />
-		<File Path="libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway/fixtures/Assimalign.Cohesion.LogSpace.SinkHost/README.md" />
 	</Folder>
 	<Folder Name="/cohesion/analyzers/Assimalign.Cohesion.SourceGeneration.ObjectMapping/" />
 	<Folder Name="/cohesion/analyzers/Assimalign.Cohesion.SourceGeneration.ObjectMapping/src/">
@@ -3191,22 +3165,6 @@
 		<File Path="scripts/tests/CohesionPackaging.Tests.ps1" />
 		<File Path="scripts/tests/CohesionReleasePolicy.Tests.ps1" />
 		<File Path="scripts/tests/CohesionSolutions.Tests.ps1" />
-	</Folder>
-	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Hosting.Management/src/">
-		<Project Path="resources/Web/Assimalign.Cohesion.Web.Hosting.Management/src/Assimalign.Cohesion.Web.Hosting.Management.csproj" />
-	</Folder>
-	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Hosting.Management/tests/">
-		<Project Path="resources/Web/Assimalign.Cohesion.Web.Hosting.Management/tests/Assimalign.Cohesion.Web.Hosting.Management.Tests.csproj" />
-	</Folder>
-	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Hosting.Management/samples/Assimalign.Cohesion.Web.Management.AotGuard/">
-		<Project Path="resources/Web/Assimalign.Cohesion.Web.Hosting.Management/samples/Assimalign.Cohesion.Web.Management.AotGuard/Assimalign.Cohesion.Web.Management.AotGuard.csproj" />
-	</Folder>
-	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Hosting.Management/">
-		<File Path="resources/Web/Assimalign.Cohesion.Web.Hosting.Management/README.md" />
-	</Folder>
-	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Hosting.Management/docs/">
-		<File Path="resources/Web/Assimalign.Cohesion.Web.Hosting.Management/docs/DESIGN.md" />
-		<File Path="resources/Web/Assimalign.Cohesion.Web.Hosting.Management/docs/OVERVIEW.md" />
 	</Folder>
 	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Testing/fixtures/Assimalign.Cohesion.Database.TcpSdkHost/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Testing/fixtures/Assimalign.Cohesion.Database.TcpSdkHost/Assimalign.Cohesion.Database.TcpSdkHost.csproj" />

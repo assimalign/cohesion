@@ -102,14 +102,7 @@ The generated application name is used in two ways:
   reads the attribute to discover identity.
 
 Every captured manifest produces a `Manifests.<Name>` member, and nothing else is generated
-per resource. When the manifest item names a runtime surface that exists (`RuntimeSurfacePath`
-metadata: `resource.runtime.json` beside a project reference's build output, or
-`cohesion/resource.runtime.json` in a manifest package), the member is
-`ResourceManifest.Parse(...) with { Surface = ResourceSurface.Parse(...) }`. The surface is a
-separate `cohesion/runtime/v1` document, so it is attached rather than parsed as a manifest member,
-and the reader rejects a file with another schema. A gateway's `Configure(...)` calls are validated
-against it at `Build()`; a resource without one composes unchanged and refuses only deployment
-configuration. Composition is explicit and hand-written: the gateway's `Program.cs` passes
+per resource. Composition is explicit and hand-written: the gateway's `Program.cs` passes
 `Manifests.<Name>` to the verb of the area's ApplicationModel package
 (`builder.AddWeb(Manifests.OrdersApi, new WebResourceOptions { Replicas = 2 })`), to a
 third-party ApplicationModel package's verb, or to `builder.AddResource(Manifests.<Name>)`

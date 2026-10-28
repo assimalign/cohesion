@@ -4,12 +4,6 @@ EventHubResource wraps a manifest snapshot and typed EventHubResourceOptions, an
 
 SDK defaults are http/tcp:8080 and a Deployment. Replica counts use generic manifest limits; there is no Scheduler singleton constraint.
 
-This package describes resource manifests, dependencies and deployment plans. Its only direct Cohesion dependency is ApplicationModel, whose contracts depend only on Core. Sdk.ApplicationModel generates control-plane registration in the enabled resource executable; Hosting.Resources and the resource host own the runtime surface and apply the deployment record. The gateway observes infrastructure and delivers the record.
+EventHubResourceControlPlane.Create returns a fresh Hosting.Resources control plane with no accepted command kinds. Runtime Hosting discovers the generated registration and serves its protocol through the private Web.Hosting resource control-plane integration. Unsupported command envelopes are refused with 501; domain commands are deferred to item 31c.
 
-## Runtime-independent dependency direction
-
-```mermaid
-flowchart LR
-    Area["EventHub.ApplicationModel"] --> Model["ApplicationModel"]
-    Model --> Core["Core"]
-```
+The package is NuGet-only (developer-experience design D4/O2), never a framework member. Its only direct dependencies are ApplicationModel and Hosting.Resources; COHAM001 checks its full resolved closure. Public resource/options values follow PlannedResource and ResourceOptions; the descriptor is interface-first and its implementation is internal. No runtime hosting, DI, reflection serialization, or gateway implementation enters this package.

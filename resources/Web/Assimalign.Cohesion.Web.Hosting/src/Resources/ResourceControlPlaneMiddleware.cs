@@ -11,6 +11,7 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Hosting;
+using Assimalign.Cohesion.Hosting.Health;
 using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Web.Hosting.Internal;
@@ -59,11 +60,7 @@ public static class ResourceControlPlaneMiddleware
     private const string EndpointsPath = "/cohesion/v1/endpoints";
     private const string StopPath = "/cohesion/v1/stop";
     private const string CommandsPath = "/cohesion/v1/commands";
-    private const string ConfigurationPath = "/cohesion/v1/configuration";
-    private const string ConfigurationStatusPath = "/cohesion/v1/configuration/status";
-    private const string ActionsPathPrefix = "/cohesion/v1/actions/";
     private const string HostReadinessContributionName = "cohesion.host";
-    private const int MaximumActionInputLength = 1024 * 1024;
 
     /// <summary>Serves a control-plane route or forwards the request to the next middleware.</summary>
     /// <param name="controlPlane">The resource's registered control plane.</param>
@@ -106,10 +103,6 @@ public static class ResourceControlPlaneMiddleware
         bool isRead = context.Request.Method == HttpMethod.Get || context.Request.Method == HttpMethod.Head;
 
         bool isNamespacedControlPlanePath = IsNamespacedControlPlanePath(path);
-        if (isNamespacedControlPlanePath)
-        {
-            context.Response.Headers[HttpHeaderKey.CacheControl] = "no-store";
-        }
         if (isNamespacedControlPlanePath && resourceContext.GatewayName is null &&
             !IsLoopbackPeer(context))
         {
@@ -270,11 +263,6 @@ public static class ResourceControlPlaneMiddleware
             return;
         }
 
-        if (await TryServeRuntimeSurfaceAsync(controlPlane, resourceContext, path, context).ConfigureAwait(false))
-        {
-            return;
-        }
-
         if (isNamespacedControlPlanePath)
         {
             context.Response.StatusCode = HttpStatusCode.NotFound;
@@ -282,72 +270,6 @@ public static class ResourceControlPlaneMiddleware
         }
 
         await next.Invoke(context).ConfigureAwait(false);
-    }
-
-    /// <summary>
-    /// Serves the runtime-surface routes of a resource control plane, for a host that routes and authorizes its own
-    /// control plane: <c>GET /cohesion/v1/configuration</c>, <c>GET /cohesion/v1/configuration/status</c> and
-    /// <c>POST /cohesion/v1/actions/{name}</c>.
-    /// </summary>
-    /// <param name="controlPlane">The resource's registered control plane.</param>
-    /// <param name="resourceContext">The resource identity, which names the instance in the status; null when the host has none.</param>
-    /// <param name="path">The request path relative to the host's control-plane base, such as <c>/cohesion/v1/configuration</c>.</param>
-    /// <param name="context">The current HTTP exchange.</param>
-    /// <returns>Whether <paramref name="path"/> is one of the routes, in which case the response is complete.</returns>
-    /// <remarks>
-    /// This method authorizes nothing: call it only for a request the host has already admitted to its namespaced
-    /// control-plane routes. <see cref="InvokeAsync"/> serves the same routes after its own authorization. A route
-    /// requested with another method answers 405, an unknown action 404, an input that does not bind 400, and an
-    /// input over 1 MiB 413.
-    /// </remarks>
-    /// <exception cref="ArgumentNullException"><paramref name="controlPlane"/>, <paramref name="path"/> or <paramref name="context"/> is null.</exception>
-    public static async ValueTask<bool> TryServeRuntimeSurfaceAsync(
-        IResourceControlPlane controlPlane,
-        ResourceContext? resourceContext,
-        string path,
-        IHttpContext context)
-    {
-        ArgumentNullException.ThrowIfNull(controlPlane);
-        ArgumentNullException.ThrowIfNull(path);
-        ArgumentNullException.ThrowIfNull(context);
-        bool isRead = context.Request.Method == HttpMethod.Get || context.Request.Method == HttpMethod.Head;
-        if (path == ConfigurationPath)
-        {
-            if (!isRead)
-            {
-                SetMethodNotAllowed(context, "GET, HEAD");
-                return true;
-            }
-
-            await WriteJsonAsync(context, controlPlane.Surface.WriteTo).ConfigureAwait(false);
-            return true;
-        }
-
-        if (path == ConfigurationStatusPath)
-        {
-            if (!isRead)
-            {
-                SetMethodNotAllowed(context, "GET, HEAD");
-                return true;
-            }
-
-            await WriteConfigurationStatusAsync(controlPlane, resourceContext, context).ConfigureAwait(false);
-            return true;
-        }
-
-        if (path.StartsWith(ActionsPathPrefix, StringComparison.Ordinal))
-        {
-            if (context.Request.Method != HttpMethod.Post)
-            {
-                SetMethodNotAllowed(context, "POST");
-                return true;
-            }
-
-            await InvokeActionAsync(controlPlane, context, path[ActionsPathPrefix.Length..]).ConfigureAwait(false);
-            return true;
-        }
-
-        return false;
     }
 
     /// <summary>Validates the identity required by a gateway-managed resource during composition.</summary>
@@ -538,90 +460,6 @@ public static class ResourceControlPlaneMiddleware
             writer.WriteString("detail", detail);
             writer.WriteEndObject();
         });
-
-    private static Task WriteConfigurationStatusAsync(
-        IResourceControlPlane controlPlane,
-        ResourceContext? resource,
-        IHttpContext context)
-    {
-        // The status names the platform instance and the surface the process runs, so the gateway can
-        // attribute each instance's applied record and detect a process whose build differs from the plan.
-        string? instance = resource is not null &&
-            resource.TryGetEnvironmentValue(AppEnvironment.Variables.ResourceInstance, out string? value)
-                ? value
-                : null;
-        string surfaceDigest = controlPlane.Surface.Digest;
-        ResourceConfigurationStatus status = controlPlane.ConfigurationStatus;
-        return WriteJsonAsync(context, writer =>
-        {
-            writer.WriteStartObject();
-            if (instance is not null)
-            {
-                writer.WriteString("instance", instance);
-            }
-            writer.WriteString("surfaceDigest", surfaceDigest);
-            writer.WritePropertyName("configuration");
-            status.WriteTo(writer);
-            writer.WriteEndObject();
-        });
-    }
-
-    private static async Task InvokeActionAsync(IResourceControlPlane controlPlane, IHttpContext context, string segment)
-    {
-        if (!ResourceActionName.TryCreate(segment, out ResourceActionName name))
-        {
-            context.Response.StatusCode = HttpStatusCode.NotFound;
-            return;
-        }
-
-        byte[]? input = await ReadBodyAsync(context, MaximumActionInputLength).ConfigureAwait(false);
-        if (input is null)
-        {
-            context.Response.StatusCode = HttpStatusCode.RequestEntityTooLarge;
-            return;
-        }
-
-        ReadOnlyMemory<byte> result;
-        try
-        {
-            result = await controlPlane.InvokeActionAsync(name, input, context.RequestCancelled).ConfigureAwait(false);
-        }
-        catch (NotSupportedException)
-        {
-            context.Response.StatusCode = HttpStatusCode.NotFound;
-            return;
-        }
-        catch (ArgumentException)
-        {
-            context.Response.StatusCode = HttpStatusCode.BadRequest;
-            return;
-        }
-
-        context.Response.StatusCode = HttpStatusCode.Ok;
-        context.Response.Headers[HttpHeaderKey.ContentType] = "application/json; charset=utf-8";
-        await context.Response.Body.WriteAsync(result, context.RequestCancelled).ConfigureAwait(false);
-    }
-
-    // Returns null when the body is longer than the limit.
-    private static async ValueTask<byte[]?> ReadBodyAsync(IHttpContext context, int limit)
-    {
-        var buffer = new ArrayBufferWriter<byte>();
-        while (true)
-        {
-            int read = await context.Request.Body.ReadAsync(buffer.GetMemory(8192), context.RequestCancelled)
-                .ConfigureAwait(false);
-            if (read == 0)
-            {
-                return buffer.WrittenSpan.ToArray();
-            }
-
-            buffer.Advance(read);
-            if (buffer.WrittenCount > limit)
-            {
-                return null;
-            }
-        }
-    }
 
     private static string GetRequiredString(JsonElement element, string name)
     {

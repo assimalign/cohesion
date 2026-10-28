@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Net;
-using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -30,8 +29,7 @@ public sealed class StandaloneControlPlaneTests
         // Arrange
         using ConfigurationEndpointService service = CreateService(basePath);
         var remoteEndPoint = new IPEndPoint(IPAddress.Parse(peer), 41000);
-        foreach (string route in new[] { "", "/", "/healthz", "/readyz", "/livez", "/endpoints", "/namespaces", "/commands", "/stop",
-            "/configuration", "/configuration/status", "/actions/ping", "/unknown" })
+        foreach (string route in new[] { "", "/", "/healthz", "/readyz", "/livez", "/endpoints", "/namespaces", "/commands", "/stop", "/unknown" })
         {
             foreach (HttpMethod method in new[] { HttpMethod.Get, HttpMethod.Post, HttpMethod.Delete })
             {
@@ -162,55 +160,11 @@ public sealed class StandaloneControlPlaneTests
         }
     }
 
-    [Fact(DisplayName = "Cohesion Test [ConfigurationStore.Hosting] - Invoke: the runtime surface, its status and its actions are served on the control plane")]
-    public async Task InvokeAsync_RuntimeSurfaceRoutes_ShouldServeTheControlPlane()
-    {
-        // Arrange
-        using ConfigurationEndpointService service = CreateService(basePath: "/store", controlPlane: RuntimeSurfaceTestObjects.CreateControlPlane());
-        var loopback = new IPEndPoint(IPAddress.Loopback, 41000);
-        await using var surface = new ConfigurationControlPlaneExchange("/store/cohesion/v1/configuration", HttpMethod.Get, loopback);
-        await using var status = new ConfigurationControlPlaneExchange("/store/cohesion/v1/configuration/status", HttpMethod.Get, loopback);
-        await using var ping = new ConfigurationControlPlaneExchange("/store/cohesion/v1/actions/ping", HttpMethod.Post, loopback);
-        await using var missing = new ConfigurationControlPlaneExchange("/store/cohesion/v1/actions/missing", HttpMethod.Post, loopback);
-        await ping.Request.Body.WriteAsync("""{"text":"hi"}"""u8.ToArray());
-        ping.Request.Body.Position = 0;
-
-        // Act
-        await service.InvokeAsync(surface, UnexpectedNext);
-        await service.InvokeAsync(status, UnexpectedNext);
-        await service.InvokeAsync(ping, UnexpectedNext);
-        await service.InvokeAsync(missing, UnexpectedNext);
-
-        // Assert
-        surface.Response.StatusCode.ShouldBe(HttpStatusCode.Ok);
-        using (JsonDocument document = RuntimeSurfaceTestObjects.ReadBody(surface.Response.Body))
-        {
-            document.RootElement.GetProperty("schema").GetString().ShouldBe("cohesion/runtime/v1");
-            document.RootElement.GetProperty("configuration")[0].GetProperty("path").GetString().ShouldBe("Store:Limits");
-        }
-
-        status.Response.StatusCode.ShouldBe(HttpStatusCode.Ok);
-        using (JsonDocument document = RuntimeSurfaceTestObjects.ReadBody(status.Response.Body))
-        {
-            document.RootElement.GetProperty("surfaceDigest").GetString().ShouldStartWith("sha256:");
-            document.RootElement.GetProperty("configuration").GetProperty("sections").GetArrayLength().ShouldBe(0);
-        }
-
-        ping.Response.StatusCode.ShouldBe(HttpStatusCode.Ok);
-        using (JsonDocument document = RuntimeSurfaceTestObjects.ReadBody(ping.Response.Body))
-        {
-            document.RootElement.GetProperty("text").GetString().ShouldBe("hi");
-        }
-
-        missing.Response.StatusCode.ShouldBe(HttpStatusCode.NotFound);
-    }
-
     private static ConfigurationEndpointService CreateService(
         string basePath = "",
         ResourceContext? resourceContext = null,
         Uri? endpoint = null,
-        string? dataPath = null,
-        IResourceControlPlane? controlPlane = null)
+        string? dataPath = null)
     {
         var repository = new ConfigurationStoreRepository(
             dataPath ?? Path.Combine(Path.GetTempPath(), "cohesion-configuration-control-plane", Guid.NewGuid().ToString("N")),
@@ -218,7 +172,7 @@ public sealed class StandaloneControlPlaneTests
         return new ConfigurationEndpointService(
             endpoint ?? new Uri("http://127.0.0.1:8080" + basePath),
             repository,
-            controlPlane ?? ResourceControlPlane.Create(),
+            ResourceControlPlane.Create(),
             resourceContext ?? new ResourceContext(environmentName: "test"),
             new ConfigurationStoreApplicationContext("test", null));
     }

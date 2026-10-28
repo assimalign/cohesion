@@ -7,7 +7,7 @@
 	-->
 	<PropertyGroup>
 		<CohesionResourceApplicationModel Condition="'$(CohesionResourceApplicationModel)' == ''">Assimalign.Cohesion.EmailHub.ApplicationModel</CohesionResourceApplicationModel>
-		<CohesionResourceControlPlaneType Condition="'$(CohesionResourceControlPlaneType)' == ''">Assimalign.Cohesion.Hosting.Resources.ResourceControlPlane</CohesionResourceControlPlaneType>
+		<CohesionResourceControlPlaneType Condition="'$(CohesionResourceControlPlaneType)' == ''">Assimalign.Cohesion.ApplicationModel.EmailHubResourceControlPlane</CohesionResourceControlPlaneType>
 		<CohesionResourceKind Condition="'$(CohesionResourceKind)' == ''">EmailHub</CohesionResourceKind>
 		<CohesionControlPlaneEndpoint Condition="'$(CohesionControlPlaneEndpoint)' == ''">http</CohesionControlPlaneEndpoint>
 		<CohesionControlPlanePath Condition="'$(CohesionControlPlanePath)' == ''">/cohesion/v1</CohesionControlPlanePath>
@@ -16,8 +16,6 @@
 
 	<ItemGroup>
 		<CohesionEndpoint Include="http" Scheme="http" ContainerPort="8080" Public="false" />
-	</ItemGroup>
-	<ItemGroup>
 		<CohesionProbe Include="readiness" Endpoint="http" Http="/readyz" />
 		<CohesionProbe Include="liveness" Endpoint="http" Http="/livez" />
 	</ItemGroup>

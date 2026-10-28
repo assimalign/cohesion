@@ -25,6 +25,8 @@ internal sealed class ResourceManifestModel
 
     public List<ResourceSettingModel> Settings { get; } = [];
 
+    public List<ResourceCommandModel> Commands { get; } = [];
+
     public List<ResourceReferenceModel> References { get; } = [];
 
     public required ResourceLifecycleModel Lifecycle { get; init; }
@@ -65,6 +67,8 @@ internal sealed record ResourceMountModel(
     string? Size);
 
 internal sealed record ResourceSettingModel(string Key, string? Default, string Type);
+
+internal sealed record ResourceCommandModel(string Kind, bool RequiresInputResolver);
 
 internal sealed class ResourceReferenceModel
 {

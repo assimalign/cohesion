@@ -23,14 +23,4 @@
 		<Project Path="../../../libraries/DependencyInjection/Assimalign.Cohesion.DependencyInjection/src/Assimalign.Cohesion.DependencyInjection.csproj" />
 		<Project Path="../../../libraries/Logging/Assimalign.Cohesion.Logging/src/Assimalign.Cohesion.Logging.csproj" />
 	</Folder>
-	<Folder Name="/Assimalign.Cohesion.Web.Hosting/dependencies/Assimalign.Cohesion.Web.Hosting.Management/src/">
-		<Project Path="../Assimalign.Cohesion.Web.Hosting.Management/src/Assimalign.Cohesion.Web.Hosting.Management.csproj" />
-	</Folder>
-	<Folder Name="/Assimalign.Cohesion.Web.Hosting/dependencies/Assimalign.Cohesion.Web.Hosting.Management/">
-		<File Path="../Assimalign.Cohesion.Web.Hosting.Management/README.md" />
-	</Folder>
-	<Folder Name="/Assimalign.Cohesion.Web.Hosting/dependencies/Assimalign.Cohesion.Web.Hosting.Management/docs/">
-		<File Path="../Assimalign.Cohesion.Web.Hosting.Management/docs/DESIGN.md" />
-		<File Path="../Assimalign.Cohesion.Web.Hosting.Management/docs/OVERVIEW.md" />
-	</Folder>
 </Solution>

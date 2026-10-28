@@ -7,7 +7,7 @@
 	-->
 	<PropertyGroup>
 		<CohesionResourceApplicationModel Condition="'$(CohesionResourceApplicationModel)' == ''">Assimalign.Cohesion.NatGateway.ApplicationModel</CohesionResourceApplicationModel>
-		<CohesionResourceControlPlaneType Condition="'$(CohesionResourceControlPlaneType)' == ''">Assimalign.Cohesion.Hosting.Resources.ResourceControlPlane</CohesionResourceControlPlaneType>
+		<CohesionResourceControlPlaneType Condition="'$(CohesionResourceControlPlaneType)' == ''">Assimalign.Cohesion.ApplicationModel.NatGatewayResourceControlPlane</CohesionResourceControlPlaneType>
 		<CohesionResourceKind Condition="'$(CohesionResourceKind)' == ''">NatGateway</CohesionResourceKind>
 		<CohesionResourceComposable>false</CohesionResourceComposable>
 		<CohesionControlPlaneEndpoint Condition="'$(CohesionControlPlaneEndpoint)' == ''">http</CohesionControlPlaneEndpoint>
@@ -17,8 +17,6 @@
 
 	<ItemGroup>
 		<CohesionEndpoint Include="http" Scheme="http" ContainerPort="8080" Public="false" />
-	</ItemGroup>
-	<ItemGroup>
 		<CohesionProbe Include="readiness" Endpoint="http" Http="/readyz" />
 		<CohesionProbe Include="liveness" Endpoint="http" Http="/livez" />
 	</ItemGroup>

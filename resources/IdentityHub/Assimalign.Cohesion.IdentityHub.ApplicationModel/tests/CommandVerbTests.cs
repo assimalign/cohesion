@@ -20,13 +20,13 @@ public sealed class CommandVerbTests
     [Theory(DisplayName = "Cohesion Test [IdentityHub.ApplicationModel] - Commands: deterministic canonical declarations pass Build")]
     [InlineData(0)]
     [InlineData(1)]
-    public void Build_ExplicitCommand_ShouldPreserveCanonicalIdentity(int verb)
+    public void Build_AdvertisedCommand_ShouldPreserveCanonicalIdentity(int verb)
     {
         IApplicationBuilder first = CreateBuilder();
-        IIdentityHubResourceDescriptor descriptor = first.AddIdentityHub(Manifest());
+        IIdentityHubResourceDescriptor descriptor = first.AddIdentityHub(Manifest() with { Commands = [new ResourceManifestCommand(Kind(verb))] });
         Declare(descriptor, verb, false);
         IApplicationBuilder second = CreateBuilder();
-        IIdentityHubResourceDescriptor copy = second.AddIdentityHub(Manifest());
+        IIdentityHubResourceDescriptor copy = second.AddIdentityHub(Manifest() with { Commands = [new ResourceManifestCommand(Kind(verb))] });
         Declare(copy, verb, false);
 
         descriptor.DependsOn(Array.Empty<IApplicationResourceDescriptor>()).ShouldBeSameAs(descriptor);
@@ -40,15 +40,16 @@ public sealed class CommandVerbTests
         Encoding.UTF8.GetString(command.Payload.Span).ShouldBe(Payload(verb));
     }
 
-    /// <summary>Explicit command authoring does not require a producer command catalog.</summary>
-    [Theory(DisplayName = "Cohesion Test [IdentityHub.ApplicationModel] - Commands: Build accepts explicit authoring without manifest command metadata")]
+    /// <summary>Manifest support is checked by the shared build validator.</summary>
+    [Theory(DisplayName = "Cohesion Test [IdentityHub.ApplicationModel] - Commands: Build rejects an unadvertised kind")]
     [InlineData(0)]
     [InlineData(1)]
-    public void Build_CommandWithoutManifestCatalog_ShouldBuild(int verb)
+    public void Build_UnadvertisedCommand_ShouldNameKind(int verb)
     {
         IApplicationBuilder builder = CreateBuilder();
         Declare(builder.AddIdentityHub(Manifest()), verb, false);
-        builder.Build().Model.Commands.Single().Kind.ShouldBe(Kind(verb));
+        Should.Throw<InvalidOperationException>(() => builder.Build()).Message
+            .ShouldContain($"does not accept command kind '{Kind(verb)}'", Case.Sensitive);
     }
 
     /// <summary>One target key cannot carry two different desired commands.</summary>
@@ -58,7 +59,7 @@ public sealed class CommandVerbTests
     public void Build_DuplicateKey_ShouldNameConflict(int verb)
     {
         IApplicationBuilder builder = CreateBuilder();
-        IIdentityHubResourceDescriptor descriptor = builder.AddIdentityHub(Manifest());
+        IIdentityHubResourceDescriptor descriptor = builder.AddIdentityHub(Manifest() with { Commands = [new ResourceManifestCommand(Kind(verb))] });
         Declare(descriptor, verb, false);
         if (verb == 0)
         {

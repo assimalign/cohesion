@@ -109,65 +109,19 @@ Disabled projects generate no manifest, resource API, control-plane registration
 or application-model diagnostic. The base guard handles the distinct error in
 which a project says `enabled` but never imports this SDK.
 
-Resources emit `cohesion/resource/v2`, which contains resource facts only: no command kinds
-and no runtime member. A resource's runtime surface is a separate `cohesion/runtime/v1`
-document: Hosting.Resources freezes it from the sections, actions and tools the application
-registers, serves it on the control plane, and writes it when the host is built with
-`COHESION_DESCRIBE_PATH` set. `resource.json` is embedded before compile, so the surface cannot live
-inside it; the describe step below produces it after the build.
-
-The v1 manifest and its command declaration surface have been removed. Every area SDK selects
-the generic runtime control-plane factory and emits the same v2 contract. A project that still
-declares `CohesionCommand` items fails the build (`CohesionValidateRetiredResourceInputs`)
-instead of having them ignored.
-
-## Describe step
-
-`CohesionDescribeResource` runs after `Build` for an enabled resource and turns the built
-executable into `resource.runtime.json` beside the build output
-(`CohesionResourceRuntimeSurfacePath`, default `$(OutDir)resource.runtime.json`). The
-`CohesionDescribeResource` task runs the apphost (or the .NET host over the assembly when there is
-no apphost) with `COHESION_DESCRIBE_PATH` set; Hosting.Resources writes the frozen surface there
-when the area builder attaches the host and ends the process before `Program.cs` runs it.
-
-```mermaid
-sequenceDiagram
-    participant Build as "CohesionDescribeResource target"
-    participant Exe as "Resource executable"
-    participant Runtime as "Hosting.Resources"
-    Build->>Exe: start with COHESION_DESCRIBE_PATH and placeholder references
-    Exe->>Runtime: area builder Build attaches the host
-    Runtime->>Runtime: freeze the runtime surface
-    Runtime-->>Build: write the surface, exit 0
-    Build->>Build: validate cohesion/runtime/v1, keep resource.runtime.json
-```
-
-The run is a standalone describe, not a gateway launch:
-
-- **Environment.** Every inherited `COHESION_*` variable is removed. Each declared reference endpoint
-  gets `COHESION_DEPENDENCY_<RES>_<EP>_URL` in the referenced endpoint's own scheme and container
-  port at the reserved host `cohesion-describe.invalid`, so a resource that reads its references while
-  it composes still builds its host; nothing listens there, and a resource that connects before
-  building its host fails to describe. Mounts already fall back to their container paths; a required
-  setting needs a default.
-- **Outcomes.** Exit 0 with a surface keeps it (rewritten only when it changed). Exit 0 without one is a
-  resource that built no host: it has no surface, and the build logs a message. A non-zero exit, a
-  timeout (`CohesionDescribeTimeoutSeconds`, default 60; 0 or less is a build error) or a document that is not
-  `cohesion/runtime/v1` is warning COHSDK012 naming the leading lines of the failure; the build
-  continues and any older surface is deleted, so a gateway never reads one that no longer matches.
-- **When it runs.** Only builds for this machine's runtime identifier can run, so a build for another
-  RID (an image publish) keeps the surface of the build that could. Design-time builds skip it, and
-  `CohesionDescribeResource=false` turns it off. A stamp in the intermediate directory makes it
-  incremental on the assembly, its copy-local references, the project and the manifest, whether or
-  not the last run produced a surface.
-- **Consumers.** A manifest package carries the surface as `cohesion/resource.runtime.json`, and
-  `CohesionGetManifest` returns its path as `RuntimeSurfacePath` metadata, so a gateway reads it
-  without loading the resource's code.
-
-Running `Program.cs` at build time is the accepted cost of a static surface (decision D2 of the
-deployment-record program): side effects before the host is built run during the build too. The
-rejected alternative, assembly-attribute catalogs read as metadata, would over-approximate (listing
-sections the application never registers) and need a schema generator in every feature library.
+`CohesionCommand` items become the manifest's deterministic `commands` array.
+Names are trimmed, deduplicated ordinally, and sorted. The item accepts one
+metadata, `RequiresInputResolver` (`true` or `false`, empty meaning `false`); a
+kind declared more than once must carry the same value. An unflagged kind is
+written as a string and a flagged one as
+`{ "kind": "...", "requiresInputResolver": true }`, so a manifest that flags
+nothing is unchanged. The flag tells a gateway that the resource accepts the
+command only after an `IResourceCommandInputResolver` has rewritten its declared
+payload; `Build()` fails when the declaring application registers no resolver
+for the kind, while unflagged kinds are still delivered as declared.
+`Sdk.SecretStore` flags `secretstore.add-secret`. The packed manifest's
+`RESOURCE_MANIFEST_README.md` states the full contract. Command declaration and
+execution remain runtime application-model concerns.
 
 ## Gateway composition contract
 
@@ -247,7 +201,6 @@ runs restore with the Visual Studio MSBuild selected by `vswhere`.
 | COHSDK008 | Error | An enabled application model requires executable output. |
 | COHSDK009 | Error | Resource-property keys must use the current kind's prefix. |
 | COHSDK010 | Error | Certificate metadata violates the HTTPS/Secret-mount contract. |
-| COHSDK012 | Warning | The describe run failed, timed out, or wrote no valid runtime surface; the resource has none. |
 
 COHSDK002 and COHSDK011 remain base-SDK diagnostics.
 

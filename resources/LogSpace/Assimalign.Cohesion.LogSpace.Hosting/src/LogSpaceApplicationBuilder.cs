@@ -175,19 +175,6 @@ public sealed class LogSpaceApplicationBuilder : ILogSpaceApplicationBuilder
             var application = new LogSpaceApplication(new LogSpaceApplicationOptions(), _context);
             if (_controlPlane is not null)
             {
-                // The runtime surface closes when the host is attached, so registered sections, actions and tools reach the control plane first.
-                foreach (ResourceConfigurationSection section in _context.ServiceProvider.GetRequiredService<global::System.Collections.Generic.IEnumerable<ResourceConfigurationSection>>())
-                {
-                    _controlPlane.AddConfiguration(section);
-                }
-                foreach (ResourceAction resourceAction in _context.ServiceProvider.GetRequiredService<global::System.Collections.Generic.IEnumerable<ResourceAction>>())
-                {
-                    _controlPlane.AddAction(resourceAction);
-                }
-                foreach (ResourceTool tool in _context.ServiceProvider.GetRequiredService<global::System.Collections.Generic.IEnumerable<ResourceTool>>())
-                {
-                    _controlPlane.AddTool(tool);
-                }
                 ResourceRuntime.HostBuilt(application, _controlPlane);
             }
 

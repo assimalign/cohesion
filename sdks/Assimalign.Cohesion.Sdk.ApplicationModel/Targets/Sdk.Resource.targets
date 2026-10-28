@@ -47,8 +47,6 @@
 			Include="$(CohesionRepositoryDirectory)resources\**\src\$(CohesionResourceApplicationModel).csproj"
 			Condition="'$(CohesionRepositoryDirectory)' != ''" />
 
-	</ItemGroup>
-	<ItemGroup Condition="'$(_CohesionResourceEnabled)' == 'true' and '$(CohesionResourceApplicationModel)' != '' and '$(CohesionSkipResourceApplicationModelReference)' != 'true'">
 		<CohesionProjectReference
 			Include="$(CohesionResourceApplicationModel)"
 			Condition="'@(_CohesionResourceApplicationModelProject)' != ''">
@@ -56,8 +54,6 @@
 			<CohesionSdkApplicationModel>true</CohesionSdkApplicationModel>
 		</CohesionProjectReference>
 
-	</ItemGroup>
-	<ItemGroup Condition="'$(_CohesionResourceEnabled)' == 'true' and '$(CohesionResourceApplicationModel)' != '' and '$(CohesionSkipResourceApplicationModelReference)' != 'true'">
 		<CohesionPackageReference
 			Include="$(CohesionResourceApplicationModel)"
 			Version="$(CohesionVersion)"
@@ -83,11 +79,7 @@
 
 	<ItemGroup Condition="'$(_CohesionResourceEnabled)' == 'true'">
 		<_CohesionResourceProjectReference Include="@(CohesionResourceReference->WithMetadataValue('Extension', '.csproj'))" />
-	</ItemGroup>
-	<ItemGroup Condition="'$(_CohesionResourceEnabled)' == 'true'">
 		<_CohesionResourcePackageReference Include="@(CohesionResourceReference)" Exclude="@(_CohesionResourceProjectReference)" />
-	</ItemGroup>
-	<ItemGroup Condition="'$(_CohesionResourceEnabled)' == 'true'">
 		<ProjectReference
 			Include="@(_CohesionResourceProjectReference)"
 			ReferenceOutputAssembly="false"
@@ -105,14 +97,10 @@
 			PrivateAssets="all"
 			ExcludeAssets="all"
 			Condition="'$(CohesionResourceReferencesAreRuntime)' == 'true'" />
-	</ItemGroup>
-	<ItemGroup Condition="'$(_CohesionResourceEnabled)' == 'true'">
 		<PackageReference
 			Include="@(_CohesionResourcePackageReference)"
 			PrivateAssets="all" />
 
-	</ItemGroup>
-	<ItemGroup Condition="'$(_CohesionResourceEnabled)' == 'true'">
 		<!--
 			The generated sources and the embedded manifest are build outputs, so their items are
 			added by the targets that produce them (CohesionCreateResourceManifest and
@@ -162,16 +150,6 @@
 	</Target>
 
 	<!--
-		cohesion/resource/v2 has no commands catalog, so a CohesionCommand item would be ignored silently.
-		A resource's control plane accepts the command kinds its handlers register at startup.
-	-->
-	<Target Name="CohesionValidateRetiredResourceInputs" BeforeTargets="CohesionCreateResourceManifest"
-		Condition="'$(_CohesionResourceEnabled)' == 'true'">
-		<Error Condition="'@(CohesionCommand)' != ''"
-			Text="CohesionCommand is no longer supported. cohesion/resource/v2 declares no command kinds; the resource's control plane accepts the kinds its registered command handlers handle." />
-	</Target>
-
-	<!--
 		Runs before BeforeCompile so the generated sources are part of the compile
 		dependency cache, and in design-time builds so Visual Studio compiles them after a
 		clean. ResolveProjectReferences is deliberately not a dependency: manifests are
@@ -213,6 +191,7 @@
 			Probes="@(CohesionProbe)"
 			Mounts="@(CohesionMount)"
 			Settings="@(CohesionSetting)"
+			Commands="@(CohesionCommand)"
 			ResourceReferences="@(CohesionResourceReference)"
 			ReferencedManifests="@(_CohesionReferencedManifest);@(CohesionResourceManifest)"
 			ResourceProperties="@(CohesionResourceProperty)">
@@ -224,65 +203,7 @@
 		<ItemGroup>
 			<Compile Include="$(CohesionResourceSourcePath)" />
 			<Compile Include="$(CohesionResourceControlPlaneSourcePath)" />
-		</ItemGroup>
-		<ItemGroup>
 			<FileWrites Include="$(CohesionResourceManifestPath);$(CohesionResourceSourcePath);$(CohesionResourceControlPlaneSourcePath)" />
-		</ItemGroup>
-	</Target>
-
-	<!--
-		Describes the built resource: runs it with COHESION_DESCRIBE_PATH set, so its host writes the
-		frozen cohesion/runtime/v1 surface and exits before Program.cs runs it, and keeps the result as
-		resource.runtime.json beside the build output. Only a build for this machine's runtime can run,
-		so a build for another runtime identifier (an image publish, for one) keeps the surface of the
-		build that could. A failed run is warning COHSDK012 and leaves no surface; the stamp makes the run
-		incremental whether or not it produced one, and records which, so a surface deleted from the
-		output directory is described again. CohesionDescribeResource=false skips it.
-	-->
-	<PropertyGroup>
-		<_CohesionDescribeEnabled Condition="'$(_CohesionResourceEnabled)' == 'true' and '$(CohesionDescribeResource)' == 'true' and '$(DesignTimeBuild)' != 'true' and ('$(RuntimeIdentifier)' == '' or '$(RuntimeIdentifier)' == '$(NETCoreSdkRuntimeIdentifier)')">true</_CohesionDescribeEnabled>
-	</PropertyGroup>
-
-	<Target
-		Name="_CohesionInvalidateDescribeStamp"
-		Condition="'$(_CohesionDescribeEnabled)' == 'true' and Exists('$(_CohesionDescribeStampPath)') and !Exists('$(CohesionResourceRuntimeSurfacePath)')">
-		<ReadLinesFromFile File="$(_CohesionDescribeStampPath)">
-			<Output TaskParameter="Lines" PropertyName="_CohesionDescribeStampState" />
-		</ReadLinesFromFile>
-		<Delete Files="$(_CohesionDescribeStampPath)" Condition="'$(_CohesionDescribeStampState)' == 'described'" />
-	</Target>
-
-	<Target
-		Name="CohesionDescribeResource"
-		AfterTargets="Build"
-		DependsOnTargets="_CohesionInvalidateDescribeStamp"
-		Inputs="@(IntermediateAssembly);@(ReferenceCopyLocalPaths);$(MSBuildProjectFullPath);$(CohesionResourceManifestPath)"
-		Outputs="$(_CohesionDescribeStampPath)"
-		Condition="'$(_CohesionDescribeEnabled)' == 'true'">
-		<CohesionDescribeResource
-			ProjectPath="$(MSBuildProjectFullPath)"
-			AssemblyPath="$(TargetPath)"
-			AppHostPath="$(TargetDir)$(TargetName)$(_NativeExecutableExtension)"
-			DotNetHostPath="$(DOTNET_HOST_PATH)"
-			ManifestPath="$(CohesionResourceManifestPath)"
-			ReferencedManifests="@(_CohesionReferencedManifest);@(CohesionResourceManifest)"
-			SurfacePath="$(CohesionResourceRuntimeSurfacePath)"
-			WorkingDirectory="$(TargetDir)"
-			TimeoutSeconds="$(CohesionDescribeTimeoutSeconds)">
-			<Output TaskParameter="Described" PropertyName="_CohesionDescribed" />
-		</CohesionDescribeResource>
-		<WriteLinesToFile
-			File="$(_CohesionDescribeStampPath)"
-			Lines="described"
-			Overwrite="true"
-			Condition="'$(_CohesionDescribed)' == 'true'" />
-		<WriteLinesToFile
-			File="$(_CohesionDescribeStampPath)"
-			Lines="none"
-			Overwrite="true"
-			Condition="'$(_CohesionDescribed)' != 'true'" />
-		<ItemGroup>
-			<FileWrites Include="$(_CohesionDescribeStampPath);$(CohesionResourceRuntimeSurfacePath)" />
 		</ItemGroup>
 	</Target>
 
@@ -326,13 +247,6 @@
 				Include="$(CohesionContainerArchiveOutputPath)"
 				PackagePath="cohesion/images/$([System.IO.Path]::GetFileName('$(CohesionContainerArchiveOutputPath)'))"
 				Condition="'$(CohesionPackImageArchive)' == 'true' and '$(CohesionContainerArchiveOutputPath)' != '' and Exists('$(CohesionContainerArchiveOutputPath)')" />
-			<!-- Present when the build's describe run produced a surface; a gateway reads it without the resource's code. -->
-			<CohesionResourcePackAsset
-				Include="$(CohesionResourceRuntimeSurfacePath)"
-				PackagePath="cohesion/resource.runtime.json"
-				Condition="Exists('$(CohesionResourceRuntimeSurfacePath)')" />
-		</ItemGroup>
-		<ItemGroup>
 			<TfmSpecificPackageFile Include="@(CohesionResourcePackAsset)" />
 			<TfmSpecificPackageFile Include="$(MSBuildThisFileDirectory)Assimalign.Cohesion.Sdk.ResourceManifest.props">
 				<PackagePath>buildTransitive/$(PackageId).props</PackagePath>
@@ -340,8 +254,6 @@
 			<TfmSpecificPackageFile Include="$(MSBuildThisFileDirectory)RESOURCE_MANIFEST_README.md">
 				<PackagePath>README.md</PackagePath>
 			</TfmSpecificPackageFile>
-		</ItemGroup>
-		<ItemGroup>
 			<FileWrites Include="$(CohesionPackResourceManifestPath)" />
 		</ItemGroup>
 	</Target>
@@ -366,8 +278,6 @@
 				Include="$(_CohesionResourceManifestFullPath)"
 				Condition="'$(_CohesionResourceEnabled)' == 'true'">
 				<ManifestPath>$(_CohesionResourceManifestFullPath)</ManifestPath>
-				<!-- Where the build's describe run writes the runtime surface; the file exists only after a build that produced one. -->
-				<RuntimeSurfacePath>$(_CohesionResourceRuntimeSurfaceFullPath)</RuntimeSurfacePath>
 				<ApplicationModel>enabled</ApplicationModel>
 				<ProjectName>$(MSBuildProjectName)</ProjectName>
 				<ProjectFullPath>$(MSBuildProjectFullPath)</ProjectFullPath>
@@ -418,13 +328,9 @@
 			<_CohesionInProcessContentCandidate
 				Include="@(_NoneWithTargetPath)"
 				Condition="'%(_NoneWithTargetPath.CopyToOutputDirectory)' == 'Always' or '%(_NoneWithTargetPath.CopyToOutputDirectory)' == 'PreserveNewest' or '%(_NoneWithTargetPath.CopyToOutputDirectory)' == 'IfDifferent' or '%(_NoneWithTargetPath.CopyToPublishDirectory)' == 'Always' or '%(_NoneWithTargetPath.CopyToPublishDirectory)' == 'PreserveNewest' or '%(_NoneWithTargetPath.CopyToPublishDirectory)' == 'IfDifferent'" />
-		</ItemGroup>
-		<ItemGroup>
 			<_CohesionInProcessCompileCandidate
 				Include="@(Compile)"
 				Condition="'%(Compile.CopyToOutputDirectory)' == 'Always' or '%(Compile.CopyToOutputDirectory)' == 'PreserveNewest' or '%(Compile.CopyToOutputDirectory)' == 'IfDifferent' or '%(Compile.CopyToPublishDirectory)' == 'Always' or '%(Compile.CopyToPublishDirectory)' == 'PreserveNewest' or '%(Compile.CopyToPublishDirectory)' == 'IfDifferent'" />
-		</ItemGroup>
-		<ItemGroup>
 			<!-- Apphost is a generated build artifact, not project-declared resource content. -->
 			<_CohesionInProcessContentCandidate
 				Remove="@(_CohesionInProcessContentCandidate)"
@@ -437,8 +343,6 @@
 
 		<ItemGroup>
 			<_CohesionInProcessContentCandidate Include="@(_CohesionInProcessCompileWithTargetPath)" />
-		</ItemGroup>
-		<ItemGroup>
 			<_CohesionInProcessContentResult
 				Include="@(_CohesionInProcessContentCandidate->'%(FullPath)')"
 				KeepMetadata="CopyToOutputDirectory;CopyToPublishDirectory;TargetPath">

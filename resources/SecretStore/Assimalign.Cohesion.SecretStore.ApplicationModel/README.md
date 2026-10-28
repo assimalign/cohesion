@@ -1,6 +1,9 @@
 # Assimalign.Cohesion.SecretStore.ApplicationModel
 
-This package describes resource manifests, dependencies and deployment plans. Its only direct Cohesion dependency is ApplicationModel, whose contracts depend only on Core. Sdk.ApplicationModel generates control-plane registration in the enabled resource executable; Hosting.Resources and the resource host own the runtime surface and apply the deployment record. The gateway observes infrastructure and delivers the record.
+The SecretStore area's declarative, AOT-compatible orchestration package. It wraps
+an enabled secret-store executable's build-produced `ResourceManifest` in a typed
+resource, produces a platform-neutral `ResourcePlan`, and supplies the area's default
+resource-control-plane factory.
 
 ```csharp
 ResourceManifest manifest = ResourceManifest.Load("resource.json");
@@ -20,9 +23,18 @@ stable replica, a sized per-replica claim, and a headless governing service. Rep
 values other than one are rejected because the store has no replication or consensus
 protocol yet.
 
-## Runtime manifest boundary
+## Default control plane
 
-The producer supplies runtime metadata; this package preserves it without referencing runtime types. The SDK registers the generic control plane in the executable. Producer manifests contain no command catalog or state declarations; configured runtime handlers provide the live state contracts.
+`SecretStoreResourceControlPlane.Create()` returns a fresh isolated
+`IResourceControlPlane` that advertises `secretstore.add-secret`,
+`secretstore.issue-certificate`, and the `cohesion.trust.add` trust-grant upsert that only the
+gateway's registered trust store (`SecretStoreTrustedIssuerStore`, through
+`builder.UseSecretStore(store).AsTrustStore()`) sends. The manifest advertises only the two declarative SecretStore kinds.
+The enabled resource's generated `ResourceControlPlane.g.cs` registers that
+factory and seeds it with observed endpoints. `SecretStore.Hosting` consumes the
+registration through `Hosting.Resources` and serves health, readiness, liveness,
+observed endpoints, graceful stop, trust bootstrap, secret reads, certificate reads,
+and enrollment under `/cohesion/v1` on the manifest's `api` endpoint.
 
 The typed descriptor exposes `AddSecret` and `IssueCertificate`. Secret declarations
 carry a parameter or resource source reference; literal secret material is forbidden.
@@ -30,9 +42,10 @@ carry a parameter or resource source reference; literal secret material is forbi
 
 ## Dependency boundary
 
-The project has one direct Cohesion dependency:
+The project has exactly two direct Cohesion dependencies:
 
 - `Assimalign.Cohesion.ApplicationModel`
+- `Assimalign.Cohesion.Hosting.Resources`
 
 COHAM001 guards the full production closure. The package never references the
 SecretStore runtime, a gateway, or platform libraries, and its plan contains no

@@ -44,6 +44,10 @@ internal static class SecretStoreManifestFactory
                     Size = "10Gi",
                 },
             ],
+            Commands =
+            [
+                new ResourceManifestCommand("cohesion.trust.add"),
+            ],
             Lifecycle = new ResourceManifestLifecycle
             {
                 Workload = WorkloadKind.StatefulSet,

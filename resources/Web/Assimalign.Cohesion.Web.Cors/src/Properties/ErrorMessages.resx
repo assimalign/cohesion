@@ -156,12 +156,6 @@
   <data name="DefaultCorsPolicyAlreadyRegistered" xml:space="preserve">
     <value>A default CORS policy is already registered.</value>
   </data>
-  <data name="DynamicCorsPolicyRemovalNotAllowed" xml:space="preserve">
-    <value>The replacement CORS configuration must retain the named policy &apos;{0}&apos; so endpoints referencing it continue to resolve.</value>
-  </data>
-  <data name="DynamicCorsPolicyInvalid" xml:space="preserve">
-    <value>The CORS policy configuration is invalid. Every policy must allow an origin, wildcard options cannot be combined with their explicit lists, and any-origin cannot allow credentials.</value>
-  </data>
   <data name="OpaqueOriginPredicateRequired" xml:space="preserve">
     <value>The &apos;null&apos; origin cannot be allowed by value: sandboxed documents, local files and cross-origin redirects all send it, so allowing it would allow all of them. Call SetIsOriginAllowed to accept it deliberately.</value>
   </data>

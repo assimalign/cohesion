@@ -4,6 +4,7 @@ using System.Text;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Hosting;
+using Assimalign.Cohesion.Hosting.Health;
 using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Web.Hosting;

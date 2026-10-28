@@ -30,10 +30,11 @@ builder.UseSecretStore(secrets)       // Sources["secrets"] + the add-secret res
 ```
 
 - `UseSecretStore` registers the store as the source of every `secrets:<key>` Secret mount and
-  adds one `SecretStoreAddSecretInputResolver` to `Providers.CommandInputs`. Producer manifests
-  declare no resolver requirements; `Build()` preserves a command without a resolver as declared.
-  A source-bearing `AddSecret` needs resolution before delivery, and the store rejects an
-  unresolved payload.
+  adds one `SecretStoreAddSecretInputResolver` to `Providers.CommandInputs`. An application that
+  declares `AddSecret` needs that resolver: the SecretStore manifest marks `secretstore.add-secret`
+  `requiresInputResolver`, so `Build()` fails without it, naming this package and
+  `builder.UseSecretStore(...)`. The store's rejection of an unresolved add-secret remains as
+  defense in depth.
 - `AsCertificateAuthority` makes the store issue the TLS leaf of every endpoint that declares a
   certificate mount without a source (`certs/<resource>-<endpoint>`).
 - `AsTrustStore` persists `cohesion trust add` grants in the store (`cohesion.trust.add`) and reads
@@ -78,8 +79,8 @@ await set.RunAsync();
 Each member gets only what its own callback registers: `appa` does not inherit `platform`'s
 certificate authority or trust store, and two members with a store of the same name each bind their
 own. When the member declares the named resource with another kind, the call is refused at set start
-naming the member; a member whose resources read a store without registering its source provider
-fails at set start with the member name and the
+naming the member; a store-backed member without `UseSecretStore` — one whose resources read the
+store, or that declares `AddSecret` for it — fails at set start with the member name and the
 `application.UseSecretStore("<store>")` call to add.
 
 ## Dependencies
@@ -99,9 +100,8 @@ area-prefixed to stay unambiguous there.
 
 `Assimalign.Cohesion.ApplicationModel.Gateway` has no built-in store client any more: it resolves
 SecretStore sources, default certificates, trusted issuers, and `secretstore.add-secret` payloads
-only through the providers this package registers, and `Build()` validates resource bindings and
-mount source registrations against the model. Command input resolvers remain explicit optional
-composition registrations; the receiving control plane validates delivered command payloads. This package
+only through the providers this package registers, and `Build()` validates those registrations
+against the model, including the add-secret resolver wherever `AddSecret` is declared. This package
 reproduces the gateway's former behaviour request for request;
 [DESIGN.md](DESIGN.md) records the equivalence and the few deliberate differences. A Local
 application gets that behaviour back by registering every role:

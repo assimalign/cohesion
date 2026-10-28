@@ -44,16 +44,18 @@ public sealed class ResourceCommandSdkIntegrationTests
         source.ShouldNotContain("AddCommandConfiguration(", Case.Sensitive);
         source.ShouldNotContain("AddCommandSecrets(", Case.Sensitive);
 
-        // Assert: v2 resources declare no command catalog and no runtime member; the runtime surface
-        // is a separate document. Database keeps its legacy commands.
+        // Assert: Sdk.SecretStore marks add-secret RequiresInputResolver in the manifest the gateway reads.
         string secretsManifestPath = Directory.EnumerateFiles(
             Path.Combine(workspace.ProjectDirectory("CommandSecretStore"), "obj"), "resource.json", SearchOption.AllDirectories)
             .First();
         using (JsonDocument secretsManifest = JsonDocument.Parse(File.ReadAllText(secretsManifestPath)))
         {
-            secretsManifest.RootElement.GetProperty("schema").GetString().ShouldBe("cohesion/resource/v2");
-            secretsManifest.RootElement.TryGetProperty("commands", out _).ShouldBeFalse();
-            secretsManifest.RootElement.TryGetProperty("runtime", out _).ShouldBeFalse();
+            JsonElement[] commands = secretsManifest.RootElement.GetProperty("commands").EnumerateArray().ToArray();
+            commands.ShouldContain(static command => command.ValueKind == JsonValueKind.Object &&
+                command.GetProperty("kind").GetString() == "secretstore.add-secret" &&
+                command.GetProperty("requiresInputResolver").GetBoolean());
+            commands.ShouldContain(static command => command.ValueKind == JsonValueKind.String &&
+                command.GetString() == "secretstore.issue-certificate");
         }
 
         // Assert: the SDK injects the referenced areas' ApplicationModel packages and no client.
@@ -76,7 +78,8 @@ public sealed class ResourceCommandSdkIntegrationTests
         references.ShouldNotContain("Assimalign.Cohesion.ConfigurationStore.Hosting");
         references.ShouldNotContain("Assimalign.Cohesion.SecretStore.Hosting");
 
-        // Act: describe checks the mixed v1/v2 model without invoking resource processes.
+        // Act: describe calls Build(), which requires the fixture's add-secret input resolver, then
+        // compares manifest commands with the area's factory, excluding protocol bootstrap commands.
         DotNetBuildResult describe = await workspace.RunBuiltProjectAsync(
             "CommandGateway", ["--mode=describe", "--gateway=local", "--environment=Local"], cancellationSource.Token);
 

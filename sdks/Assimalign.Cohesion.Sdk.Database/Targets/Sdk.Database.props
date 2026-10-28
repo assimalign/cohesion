@@ -7,7 +7,7 @@
 	-->
 	<PropertyGroup>
 		<CohesionResourceApplicationModel Condition="'$(CohesionResourceApplicationModel)' == ''">Assimalign.Cohesion.Database.ApplicationModel</CohesionResourceApplicationModel>
-		<CohesionResourceControlPlaneType Condition="'$(CohesionResourceControlPlaneType)' == ''">Assimalign.Cohesion.Hosting.Resources.ResourceControlPlane</CohesionResourceControlPlaneType>
+		<CohesionResourceControlPlaneType Condition="'$(CohesionResourceControlPlaneType)' == ''">Assimalign.Cohesion.ApplicationModel.DatabaseResourceControlPlane</CohesionResourceControlPlaneType>
 		<CohesionResourceKind Condition="'$(CohesionResourceKind)' == ''">Database</CohesionResourceKind>
 		<CohesionControlPlaneEndpoint Condition="'$(CohesionControlPlaneEndpoint)' == ''">admin</CohesionControlPlaneEndpoint>
 		<CohesionControlPlanePath Condition="'$(CohesionControlPlanePath)' == ''">/cohesion/v1</CohesionControlPlanePath>
@@ -16,6 +16,9 @@
 		<CohesionMaxReplicas Condition="'$(CohesionMaxReplicas)' == ''">1</CohesionMaxReplicas>
 	</PropertyGroup>
 
+	<ItemGroup>
+		<CohesionCommand Include="database.add-database;database.add-principal" />
+	</ItemGroup>
 	<ItemGroup>
 		<CohesionEndpoint Include="db" Scheme="cohesion-db" ContainerPort="5740" Public="false" />
 		<CohesionEndpoint Include="admin" Scheme="http" ContainerPort="8081" Public="false" />

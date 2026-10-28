@@ -363,7 +363,7 @@ public sealed class SecretStoreOrchestrationExtensionsTests
         builder.Providers.CommandInputs.ShouldHaveSingleItem().ShouldBeOfType<SecretStoreAddSecretInputResolver>();
     }
 
-    [Fact(DisplayName = "Cohesion Test [SecretStore.ApplicationModel.Orchestration] - Build: UseSecretStore freezes the explicit add-secret input resolver")]
+    [Fact(DisplayName = "Cohesion Test [SecretStore.ApplicationModel.Orchestration] - Build: UseSecretStore satisfies the add-secret input-resolver requirement the SecretStore manifest declares")]
     public void Build_AddSecretWithUseSecretStore_ShouldSucceed()
     {
         // Arrange
@@ -379,8 +379,8 @@ public sealed class SecretStoreOrchestrationExtensionsTests
         model.Providers.CommandInputs.ShouldHaveSingleItem().ShouldBeOfType<SecretStoreAddSecretInputResolver>();
     }
 
-    [Fact(DisplayName = "Cohesion Test [SecretStore.ApplicationModel.Orchestration] - Build: an add-secret without UseSecretStore retains its declared input without implicit providers")]
-    public void Build_AddSecretWithoutUseSecretStore_ShouldPreserveDeclaredInput()
+    [Fact(DisplayName = "Cohesion Test [SecretStore.ApplicationModel.Orchestration] - Build: an add-secret declared without UseSecretStore fails and names the package and verb")]
+    public void Build_AddSecretWithoutUseSecretStore_ShouldNamePackageAndVerb()
     {
         // Arrange
         IApplicationBuilder builder = CreateBuildableBuilder();
@@ -388,24 +388,19 @@ public sealed class SecretStoreOrchestrationExtensionsTests
         DeclareAddSecret(builder, store);
 
         // Act
-        IApplicationModel model = builder.Build().Model;
+        InvalidOperationException exception = Should.Throw<InvalidOperationException>(() => builder.Build());
 
         // Assert
-        IResourceCommand command = model.Commands.ShouldHaveSingleItem();
-        command.Kind.ShouldBe("secretstore.add-secret");
-        command.Key.ShouldBe("tls");
-        using JsonDocument payload = JsonDocument.Parse(command.Payload);
-        payload.RootElement.GetProperty("source").GetString().ShouldBe("parameter:tls");
-        payload.RootElement.TryGetProperty("resolvedValue", out _).ShouldBeFalse();
-        model.Providers.CommandInputs.ShouldBeEmpty();
-        model.Providers.Sources.ShouldBeEmpty();
+        exception.Message.ShouldContain("command 'secretstore.add-secret'", Case.Sensitive);
+        exception.Message.ShouldContain("Assimalign.Cohesion.SecretStore.ApplicationModel.Orchestration", Case.Sensitive);
+        exception.Message.ShouldContain("builder.UseSecretStore(...)", Case.Sensitive);
     }
 
     private static IApplicationBuilder CreateBuildableBuilder() =>
         Application.CreateBuilder(ApplicationName.Parse("appa"), ["--environment", AppEnvironment.Keys.Local])
             .UseGateway(new StoreGateway(new StoreController("secrets", new Dictionary<string, int>())));
 
-    // Producer resource facts contain no command catalog or input-resolver requirements.
+    // The shape Sdk.SecretStore produces: add-secret carries a source the gateway must resolve.
     private static ResourceManifest AddSecretStoreManifest() => new()
     {
         Name = "secrets",
@@ -437,6 +432,7 @@ public sealed class SecretStoreOrchestrationExtensionsTests
             Replicas = 1,
             MaxReplicas = 1,
         },
+        Commands = [new ResourceManifestCommand("secretstore.add-secret") { RequiresInputResolver = true }],
     };
 
     private static void DeclareAddSecret(IApplicationBuilder builder, IApplicationResourceDescriptor store)

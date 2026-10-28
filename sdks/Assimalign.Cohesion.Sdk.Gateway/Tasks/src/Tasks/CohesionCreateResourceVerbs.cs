@@ -202,10 +202,9 @@ public sealed class CohesionCreateResourceVerbs : Task
         using JsonDocument document = JsonDocument.Parse(File.ReadAllText(path));
         JsonElement root = document.RootElement;
         RequireObject(root, "root", path);
-        string schema = RequiredString(root, "schema", path);
-        if (schema != "cohesion/resource/v2")
+        if (!string.Equals(RequiredString(root, "schema", path), "cohesion/resource/v1", StringComparison.Ordinal))
         {
-            throw new InvalidDataException($"Cohesion resource manifest '{path}' must declare schema 'cohesion/resource/v2'.");
+            throw new InvalidDataException($"Cohesion resource manifest '{path}' does not declare schema 'cohesion/resource/v1'.");
         }
 
         JsonElement artifact = RequiredObject(root, "artifact", path);
@@ -218,7 +217,6 @@ public sealed class CohesionCreateResourceVerbs : Task
             Kind = RequiredString(root, "kind", path),
             ApplicationModel = RequiredString(root, "applicationModel", path),
             RawJson = root.GetRawText(),
-            RawSurfaceJson = ReadSurface(Value(item.GetMetadata("RuntimeSurfacePath"))),
             Composable = OptionalBoolean(artifact, "composable", path),
             ControlPlaneEndpoint = RequiredString(controlPlane, "endpoint", path),
             ControlPlanePath = RequiredString(controlPlane, "path", path),
@@ -278,35 +276,46 @@ public sealed class CohesionCreateResourceVerbs : Task
                 OptionalBoolean(reference, "optional", path)));
         }
 
-        if (root.TryGetProperty("commands", out _))
+        // A command is its kind as a string, or { "kind": "...", "requiresInputResolver": true } when
+        // the resource requires the gateway to resolve its inputs (ResourceManifestCommand).
+        foreach (JsonElement command in RequiredArray(root, "commands", path).EnumerateArray())
         {
-            throw new InvalidDataException($"Cohesion resource manifest '{path}' cannot declare commands.");
+            bool valid = command.ValueKind switch
+            {
+                JsonValueKind.String => !string.IsNullOrWhiteSpace(command.GetString()),
+                JsonValueKind.Object => IsCommandObject(command),
+                _ => false,
+            };
+            if (!valid)
+            {
+                throw new InvalidDataException(
+                    $"Cohesion resource manifest '{path}' commands must be non-empty strings or objects with a " +
+                    "non-empty string 'kind' and an optional boolean 'requiresInputResolver'.");
+            }
         }
+
         return manifest;
     }
 
-    // The surface the resource's describe step wrote beside its build output (RuntimeSurfacePath on a project
-    // reference's manifest item) or packed beside its manifest (a package's buildTransitive props). A resource
-    // without one is still composable; Build() then refuses only deployment configuration for it.
-    private static string? ReadSurface(string? path)
+    private static bool IsCommandObject(JsonElement command)
     {
-        if (path is null || !File.Exists(path))
+        bool hasKind = false;
+        foreach (JsonProperty property in command.EnumerateObject())
         {
-            return null;
+            switch (property.Name)
+            {
+                case "kind" when property.Value.ValueKind == JsonValueKind.String &&
+                    !string.IsNullOrWhiteSpace(property.Value.GetString()):
+                    hasKind = true;
+                    break;
+                case "requiresInputResolver" when property.Value.ValueKind is JsonValueKind.True or JsonValueKind.False:
+                    break;
+                default:
+                    return false;
+            }
         }
 
-        string text = File.ReadAllText(path);
-        using JsonDocument document = JsonDocument.Parse(text);
-        JsonElement root = document.RootElement;
-        if (root.ValueKind != JsonValueKind.Object ||
-            !root.TryGetProperty("schema", out JsonElement schema) ||
-            schema.ValueKind != JsonValueKind.String ||
-            schema.GetString() != "cohesion/runtime/v1")
-        {
-            throw new InvalidDataException($"Cohesion runtime surface '{path}' must declare schema 'cohesion/runtime/v1'.");
-        }
-
-        return text;
+        return hasKind;
     }
 
     private void MarkDirectReferences(IReadOnlyList<GatewayManifest> manifests)

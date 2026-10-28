@@ -6,6 +6,7 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.ApplicationModel;
+using Assimalign.Cohesion.Hosting.Resources;
 
 namespace Assimalign.Cohesion.NatGateway.ApplicationModel.Tests;
 
@@ -44,6 +45,17 @@ public sealed class NatGatewayResourceTests
         first.Resource.ShouldBeOfType<NatGatewayResource>();
         second.Dependencies.ShouldContain(first);
         Should.Throw<ArgumentNullException>(() => builder.AddNatGateway(null!));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [NatGateway.ApplicationModel] - Control plane: isolates empty command sets")]
+    public void CreateControlPlane_ShouldReturnIsolatedEmptyPlanes()
+    {
+        IResourceControlPlane first = NatGatewayResourceControlPlane.Create();
+        IResourceControlPlane second = NatGatewayResourceControlPlane.Create();
+        first.ShouldNotBeSameAs(second);
+        first.AcceptedCommandKinds.ShouldBeEmpty();
+        first.Commands.ShouldBeEmpty();
+        first.ObservedEndpoints.ShouldBeEmpty();
     }
 
     [Theory(DisplayName = "Cohesion Test [NatGateway.ApplicationModel] - Planning: rejects incompatible area facts")]

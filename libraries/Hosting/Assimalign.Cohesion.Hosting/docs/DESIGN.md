@@ -216,14 +216,15 @@ join the same work.
 | Package | Direct dependencies | Policy boundary |
 | --- | --- | --- |
 | `Assimalign.Cohesion.Hosting` | Core | Plain lifecycle only |
-| `Assimalign.Cohesion.Hosting.Resources` | Core, Hosting, ProtectedData | Health contracts and aggregation, resource invocation, context, supervisor protocol, and process policy |
+| `Assimalign.Cohesion.Hosting.Health` | Core | Transport-neutral health data only |
+| `Assimalign.Cohesion.Hosting.Resources` | Core, Hosting, Hosting.Health, ProtectedData | Resource invocation, context, supervisor protocol, and process policy |
 
-Hosting does not reference Resources. Resources owns health contracts and is the
+Hosting does not reference either sibling. Health does not reference Hosting. Resources is the
 opt-in composition layer and installs its runner through `HostContext.Runner`.
 
-Resources ships in the base `Assimalign.Cohesion.App` framework. All opt-in resource SDKs
+Both siblings still ship in the base `Assimalign.Cohesion.App` framework. All opt-in resource SDKs
 generate calls to `Hosting.Resources.ResourceRuntime`, so Resources belongs beside the shared
-Hosting assembly. Framework presence is not activation: only an
+Hosting assembly and Health follows transitively. Framework presence is not activation: only an
 enabled `CohesionApplicationModel` registration causes an area builder to install the runner.
 
 ## Non-goals
@@ -231,7 +232,7 @@ enabled `CohesionApplicationModel` registration causes an area builder to instal
 - Process signal handling, stdout readiness messages, exit-code classification, and resource
   invocation belong to `Assimalign.Cohesion.Hosting.Resources`.
 - Health contributors and aggregated health values belong to
-  `Assimalign.Cohesion.Hosting.Resources` and its matching namespace.
+  `Assimalign.Cohesion.Hosting.Health`.
 - Dependency injection, configuration, logging, and HTTP delivery belong to their respective
   packages.
 - Hosting does not install a synchronization context or task scheduler.

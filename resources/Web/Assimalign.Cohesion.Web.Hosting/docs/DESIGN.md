@@ -21,7 +21,7 @@ takes such a reference only for runtime machinery it composes itself, because ea
 under owner decision 33: `Web.Routing` for the pipeline terminal (`WebApplicationTerminal`) and the
 `IRouterEndpointFeature` it dispatches, and `Web.Server` for the engine and the per-exchange features
 it publishes. Web.Health supplies the independent
-health model that this module's health adapter uses. Applications still see the whole Web family because the
+health model that this module's Hosting.Health adapter uses. Applications still see the whole Web family because the
 `App.Web` shared framework (via `Sdk.Web`) delivers every Web assembly; builder
 verbs ship with their features: feature registration is a component integration each feature
 package declares and the application's compilation projects onto `builder.Services`
@@ -619,7 +619,7 @@ and honors its generated `Hosting.Resources` `ResourceRuntime` registration. Dur
 in-process resource invocation, the ambient invocation's logical member assembly takes
 precedence; no caller-stack reflection is required. When enabled, the builder
 binds the ambient `http` endpoint, aggregates `AddHealthCheck` registrations and
-DI-registered `Hosting.Resources` `IHealthContributor`s, observes ambient endpoints, and attaches
+DI-registered `Hosting.Health` `IHealthContributor`s, observes ambient endpoints, and attaches
 the built host for graceful stop. A fixed terminal layer wraps the final resolved
 pipeline — including a pipeline supplied through `IWebApplicationBuilder.AddPipeline` —
 so it always runs before user dispatch. It serves `/healthz`, `/readyz`, and `/livez`
@@ -667,7 +667,7 @@ failure, so a later start cannot use disposed services or middleware. **Breaking
 Existing public interfaces and borrowed instance ownership are unchanged.
 
 This module consumes the plain `Hosting` lifecycle plus the opt-in `Hosting.Resources`
-runtime/control-plane and `Hosting.Resources` contribution contracts. It never references
+runtime/control-plane and `Hosting.Health` contribution contracts. It never references
 `Web.ApplicationModel` or `Web.ApplicationModel.Orchestration` (COHRES002 exclusions). Its
 health integration references `Web.Health`. The no-argument and options
 overloads remain plain applications: they install no control-plane terminal, so the ordinary
@@ -1434,7 +1434,7 @@ That export is logs. The server's spans and HTTP metrics are emitted on their ow
 ## Hosting integrations (decision 57)
 
 The root contracts and feature libraries reference no `Assimalign.Cohesion.Hosting*` library.
-Web.Hosting integrates Hosting.Resources and its health contracts itself (owner decision 57,
+Web.Hosting integrates Hosting.Health and Hosting.Resources itself (owner decision 57,
 2026-10-13). The public members retain their `.Hosting.Health` and `.Hosting.Resources`
 namespaces under `src/Health/` and `src/Resources/`. No separate Web hosting-family package
 exists. A future `<Area>.Hosting.<Suffix>` package is permitted only for an integration that
@@ -1457,7 +1457,7 @@ Web.ApplicationModel.Orchestration.
 
 ## Health integration
 
-Web.Hosting integrates `Hosting.Resources` contributors with the independently consumable
+Web.Hosting integrates `Hosting.Health` contributors with the independently consumable
 `Web.Health` model (owner decision 57, 2026-10-13). The public adapter lives in
 `src/Health/`, keeping the `Assimalign.Cohesion.Web.Hosting.Health` namespace.
 COHRES001 prevents Web roots and features from referencing this module; application
@@ -1498,15 +1498,9 @@ frameworks carry Web.Health privately; the 16 besides Database gain that member 
 
 ## Resource control plane
 
-### Runtime surface and the deployment record
-
-`WebApplicationBuilder.Build` hands every `ResourceConfigurationSection`, `ResourceAction` and `ResourceTool` the application registered in `Services` to the control plane before `ResourceRuntime.HostBuilt` attaches the host, which freezes the surface; the container stays the only composition registry. The control-plane terminal serves `GET /cohesion/v1/configuration` (the `cohesion/runtime/v1` surface), `GET /cohesion/v1/configuration/status` (the instance, the surface digest and the configuration status) and `POST /cohesion/v1/actions/{name}` (a bounded JSON body of at most 1 MiB; 200 with the result, 400 for input that does not bind, 404 for an unknown action, 413 for an oversized body) after the existing listener and credential checks. Every namespaced response carries `Cache-Control: no-store`. The record itself is applied by Hosting.Resources, not here: Web.Hosting has no endpoint that writes configuration. The runtime references no CORS feature; the optional Web.Hosting.Management package publishes the live `Web:Cors` section. See [resource management](../../../../docs/libraries/ApplicationModel/RESOURCE_MANAGEMENT.md).
-
-The three routes are also public as `ResourceControlPlaneMiddleware.TryServeRuntimeSurfaceAsync(controlPlane, resourceContext, path, context)`, for an area host that routes and authorizes its own control plane instead of using this terminal. ConfigurationStore, IdentityHub and SecretStore serve their data-plane and namespaced routes from one endpoint service each; they call the helper after their own credential or loopback check and before their unknown-path `404`, so a gateway reads their surface and status and invokes their actions exactly as it does a Web resource's. The helper authorizes nothing, which is why it takes a path the host has already admitted rather than installing middleware. One implementation keeps the status document, action body limit and error mapping identical across every host.
-
 The resource control-plane integration extends `IWebApplicationPipelineBuilder` with `UseResourceControlPlane(controlPlane, resourceContext, isApplicationReady, controlPlanePort = null)`. Callers install it first on a private listener. It owns no port, host, service container, or configuration provider. The readiness callback observes the owning resource host's `HostState.Started`, not merely listener startup.
 
-The route and envelope contract is shared by the automatic Web pipeline and the explicit verb: public `/healthz`, `/readyz`, `/livez` aliases; namespaced health, readiness, liveness, endpoints, stop, commands, configuration, configuration status, and actions beneath `/cohesion/v1`. Reads allow GET/HEAD, stop and actions allow POST, and commands allow GET/HEAD/POST/DELETE. Unknown namespaced routes are 404 after the access check. Health reports preserve diagnostic values and ordinal contribution/endpoint ordering. HEAD suppresses bodies. The bare probes are never authorized, so the health writer publishes only what the control plane reports: a contributor that throws appears with the fixed description `The contributor threw an exception.`, never its exception message, and an exception a contributor places in its data appears as `The contributor reported an exception.`, never its `ToString()` (Hosting.Resources design, #1409). The writer's own data switch writes the same fixed text for an `Exception` value, as defense in depth: a custom `IResourceControlPlane` (`ResourceRuntime.RegisterControlPlane` accepts any implementation) passes its report through unfiltered, and every shipped area's control plane is the default one. Other unrecognized values are still written through `ToString()`.
+The route and envelope contract is shared by the automatic Web pipeline and the explicit verb: public `/healthz`, `/readyz`, `/livez` aliases; namespaced health, readiness, liveness, endpoints, stop, and commands beneath `/cohesion/v1`. Reads allow GET/HEAD, stop allows POST, and commands allow GET/HEAD/POST/DELETE. Unknown namespaced routes are 404 after the access check. Health reports preserve diagnostic values and ordinal contribution/endpoint ordering. HEAD suppresses bodies. The bare probes are never authorized, so the health writer publishes only what the control plane reports: a contributor that throws appears with the fixed description `The contributor threw an exception.`, never its exception message, and an exception a contributor places in its data appears as `The contributor reported an exception.`, never its `ToString()` (Hosting.Resources design, #1409). The writer's own data switch writes the same fixed text for an `Exception` value, as defense in depth: a custom `IResourceControlPlane` (`ResourceRuntime.RegisterControlPlane` accepts any implementation) passes its report through unfiltered, and every shipped area's control plane is the default one. Other unrecognized values are still written through `ToString()`.
 
 Managed namespaced requests first consult the resource's registered `IResourceCredentialVerifier` (`ResourceRuntime.TryGetCredentialVerifier(resourceContext)`, see the Hosting.Resources design), passing the `Authorization` value split into scheme and credential. A `NoResult` verdict falls through to the default application-key verification; any other verdict is final. The default verifies an ES256 JWT with the published application P-256 JWK: issuer/application, subject/gateway, key id, signature, required temporal claims and jti, and at most 24 hours from issuance to expiry. It configures the IdentityModel.Token.JsonWebToken validation profile with `ResourceCredentialProfile` constants (Hosting.Resources). Both packages compile the stateless `Es256JsonWebTokenValidation` helper owned by IdentityModel.Token.JsonWebToken, so issuer resolution, trusted key-id selection, signature verification, and claim rules remain in one source location. The helper accepts the existing `IJsonWebTokenSignatureVerifier` contract and adds no public JWT API. Either authorization path yields a `ResourceCaller`, and the management plane admits only `Kind=Gateway` callers whose `Application` is the ambient application and whose `Subject` is the ambient gateway — for application-key tokens exactly the former `iss`/`sub` rule. Invalid credentials are 401 with a Bearer challenge; an authentic credential for another resource audience, or a caller that is not this application's gateway, is 403.
 
@@ -1551,7 +1545,7 @@ ResourceControlPlaneMiddleware exposes InvokeAsync for manually composed hosts, 
 
 **Breaking behavior change from 10.0.0-preview.1 (#1410).** The default Web server runs every response-completion callback in registration order even when an earlier callback throws, and reports each failure through `WebServerEventSource.CompletionCallbackFailed`. A middleware callback registered before the control plane can therefore no longer prevent the deferred stop after its `202` acknowledgement. The real-server regression authenticates as a gateway over the in-memory transport, whose non-IP peer is deliberately refused in standalone mode. It holds an earlier callback until the client receives `202`, lets it throw, and observes the control plane's stop request with `CancellationToken.None`.
 
-Serialization uses Utf8JsonWriter and JsonDocument only. The control-plane dependencies are Web root, Web.Server, Hosting.Resources (including health contracts), and IdentityModel.Token.JsonWebToken, all referenced by Web.Hosting. App.Web exposes the integration publicly; other areas consume the hosting module privately. Neither Web.ApplicationModel nor Web.ApplicationModel.Orchestration enters Web.Hosting's resolved closure (COHRES002).
+Serialization uses Utf8JsonWriter and JsonDocument only. The control-plane dependencies are Web root, Web.Server, Hosting.Resources, Hosting.Health, and IdentityModel.Token.JsonWebToken, all referenced by Web.Hosting. App.Web exposes the integration publicly; other areas consume the hosting module privately. Neither Web.ApplicationModel nor Web.ApplicationModel.Orchestration enters Web.Hosting's resolved closure (COHRES002).
 
 The tests now live under `tests/Resources/` in Web.Hosting.Tests and may reference the sample Program: COHRES001/002 skip the tests leaf via `_CohesionHostingRuleApplies`; COHAM001/COHRES003 skip harness path segments via `_CohesionResourceBoundaryRulesApply` (Build.Rules.targets). These are separate gates, not exemptions.
 

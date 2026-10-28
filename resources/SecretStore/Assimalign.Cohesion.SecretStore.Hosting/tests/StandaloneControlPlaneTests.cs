@@ -1,14 +1,12 @@
 using System;
 using System.Linq;
 using System.Net;
-using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 
 using Shouldly;
 using Xunit;
 
-using Assimalign.Cohesion.DependencyInjection;
 using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.Http;
@@ -34,9 +32,6 @@ public sealed class StandaloneControlPlaneTests
     [InlineData("/cohesion/v1/certificates/enrollment-request", "GET")]
     [InlineData("/cohesion/v1/certificates/enroll", "POST")]
     [InlineData("/cohesion/v1/certificates/enrollment", "POST")]
-    [InlineData("/cohesion/v1/configuration", "GET")]
-    [InlineData("/cohesion/v1/configuration/status", "GET")]
-    [InlineData("/cohesion/v1/actions/ping", "POST")]
     [InlineData("/cohesion/v1/unknown", "GET")]
     public async Task InvokeAsync_StandaloneNonLoopbackCaller_ShouldForbidNamespacedRoute(string path, string method)
     {
@@ -188,60 +183,6 @@ public sealed class StandaloneControlPlaneTests
         {
             await ((IHost)application).StopAsync(cancellation.Token);
         }
-    }
-
-    [Fact(DisplayName = "Cohesion Test [SecretStore.Hosting] - Standalone: the runtime surface, its status and its actions are served on the control plane")]
-    public async Task InvokeAsync_RuntimeSurfaceRoutes_ShouldServeTheControlPlane()
-    {
-        // Arrange: the store's own collaborators, with a control plane that declares a section and an action.
-        using var directory = new TemporaryDirectory();
-        ResourceContext resource = CreateStandaloneContext(directory.Path);
-        using IDisposable scope = ResourceRuntime.CreateScope(resource);
-        await using SecretStoreApplication application = SecretStoreTestHost.CreateBuilder().Build();
-        IServiceProvider services = application.Context.ServiceProvider;
-        using var endpoint = new SecretsEndpointService(
-            new Uri("http://127.0.0.1:8443"),
-            services.GetRequiredService<SecretStoreRepository>(),
-            services.GetRequiredService<TrustedIssuerStore>(),
-            services.GetRequiredService<CertificateAuthorityManager>(),
-            RuntimeSurfaceTestObjects.CreateControlPlane(),
-            resource,
-            application.Context);
-        var loopback = new IPEndPoint(IPAddress.Loopback, 50000);
-        await using var surface = new ControlPlaneExchange("/cohesion/v1/configuration", HttpMethod.Get, loopback);
-        await using var status = new ControlPlaneExchange("/cohesion/v1/configuration/status", HttpMethod.Get, loopback);
-        await using var ping = new ControlPlaneExchange("/cohesion/v1/actions/ping", HttpMethod.Post, loopback);
-        await using var missing = new ControlPlaneExchange("/cohesion/v1/actions/missing", HttpMethod.Post, loopback);
-        await ping.Request.Body.WriteAsync("""{"text":"hi"}"""u8.ToArray());
-        ping.Request.Body.Position = 0;
-
-        // Act
-        await endpoint.InvokeAsync(surface, _ => throw new InvalidOperationException("Control-plane routes are terminal."));
-        await endpoint.InvokeAsync(status, _ => throw new InvalidOperationException("Control-plane routes are terminal."));
-        await endpoint.InvokeAsync(ping, _ => throw new InvalidOperationException("Control-plane routes are terminal."));
-        await endpoint.InvokeAsync(missing, _ => throw new InvalidOperationException("Control-plane routes are terminal."));
-
-        // Assert
-        surface.Response.StatusCode.ShouldBe(HttpStatusCode.Ok);
-        using (JsonDocument document = RuntimeSurfaceTestObjects.ReadBody(surface.Response.Body))
-        {
-            document.RootElement.GetProperty("schema").GetString().ShouldBe("cohesion/runtime/v1");
-            document.RootElement.GetProperty("configuration")[0].GetProperty("path").GetString().ShouldBe("Store:Limits");
-        }
-
-        status.Response.StatusCode.ShouldBe(HttpStatusCode.Ok);
-        using (JsonDocument document = RuntimeSurfaceTestObjects.ReadBody(status.Response.Body))
-        {
-            document.RootElement.GetProperty("surfaceDigest").GetString().ShouldStartWith("sha256:");
-        }
-
-        ping.Response.StatusCode.ShouldBe(HttpStatusCode.Ok);
-        using (JsonDocument document = RuntimeSurfaceTestObjects.ReadBody(ping.Response.Body))
-        {
-            document.RootElement.GetProperty("text").GetString().ShouldBe("hi");
-        }
-
-        missing.Response.StatusCode.ShouldBe(HttpStatusCode.NotFound);
     }
 
     private static ResourceContext CreateStandaloneContext(string dataPath) =>

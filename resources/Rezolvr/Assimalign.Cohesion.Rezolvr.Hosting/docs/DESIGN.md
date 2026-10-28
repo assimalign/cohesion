@@ -12,7 +12,7 @@ Each build creates a new context, invokes every registered service factory exact
 
 ## Boundaries
 
-The module references the area root, DependencyInjection, Hosting, and Hosting.Resources (including its health contracts) publicly. Its Web, Web.Hosting, HTTP, and transport implementation dependencies are private, with their resolved closure supplied by the area runtime framework. Hosting never references its own ApplicationModel package. It uses no reflection or dynamic activation and remains trimming- and NativeAOT-safe.
+The module references the area root, DependencyInjection, Hosting, Hosting.Health, and Hosting.Resources publicly. Its Web, Web.Hosting, HTTP, and transport implementation dependencies are private, with their resolved closure supplied by the area runtime framework. Hosting never references its own ApplicationModel package. It uses no reflection or dynamic activation and remains trimming- and NativeAOT-safe.
 
 ## Enabled resource lifecycle
 
@@ -29,7 +29,7 @@ Web.Hosting's resource control-plane middleware is installed first on the privat
 
 Kinds use verb-noun kebab under the area prefix. The examples `rezolvr.record` and
 `identityhub.audience` in developer-experience design section 7 are illustrative; item 27's design
-rewrite should reflect the landed convention. Producer manifests no longer carry command catalogs; the existing command delivery surface is separate from runtime state management.
+rewrite should reflect the landed convention. Manifest commands remain bare JSON strings.
 Typed verbs validate argument shape and use source-generated JSON metadata. Build validates the
 advertised kind, canonical payload, deterministic id, and uniqueness of the target ownership key.
 The default control plane handles id replay and owner isolation; each area handler also accepts

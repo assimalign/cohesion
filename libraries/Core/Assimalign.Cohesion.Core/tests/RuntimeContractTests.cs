@@ -15,9 +15,6 @@ public class RuntimeContractTests
     [
         "COHESION_APPLICATION",
         "COHESION_RESOURCE",
-        "COHESION_RESOURCE_INSTANCE",
-        "COHESION_CONFIG_DIRECTORY",
-        "COHESION_DESCRIBE_PATH",
         "COHESION_GATEWAY",
         "COHESION_ENVIRONMENT",
         "COHESION_CONTENT_ROOT",

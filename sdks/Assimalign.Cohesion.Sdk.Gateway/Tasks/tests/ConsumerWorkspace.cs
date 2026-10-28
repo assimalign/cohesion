@@ -46,6 +46,7 @@ internal sealed class ConsumerWorkspace : IDisposable
         "Assimalign.Cohesion.IdentityModel.Token",
         "Assimalign.Cohesion.IdentityModel.Token.JsonWebToken",
         "Assimalign.Cohesion.Hosting",
+        "Assimalign.Cohesion.Hosting.Health",
         "Assimalign.Cohesion.Hosting.Resources",
         "Assimalign.Cohesion.Http",
         "Assimalign.Cohesion.Http.Connections",

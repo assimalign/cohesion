@@ -27,7 +27,7 @@ namespace Assimalign.Cohesion.SecretStore.Client.Tests;
 public sealed class ResourceCommandProtocolTests
 {
     static ResourceCommandProtocolTests() => ResourceRuntime.RegisterControlPlane(
-        typeof(ResourceCommandProtocolTests).Assembly, () => ResourceControlPlane.Create(["cohesion.trust.add", "secretstore.add-secret", "secretstore.issue-certificate"]));
+        typeof(ResourceCommandProtocolTests).Assembly, SecretStoreResourceControlPlane.Create);
 
     /// <summary>Authenticated apply, replay, refusal and deletion round-trip through the actual host.</summary>
     [Fact(DisplayName = "Cohesion Test [SecretStore.Client] - Commands: authenticated loopback apply replay refusal and delete preserve trust responses")]

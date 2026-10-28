@@ -28,6 +28,8 @@ options to application authors.
 - ConfigurationStore planner — exactly one `api` endpoint and one `data` Volume,
   exactly one stable workload replica, a sized per-replica claim, the API service, and a
   headless governing service.
+- `ConfigurationStoreResourceControlPlane` — the ConfigurationStore default
+  control-plane factory.
 
 The control plane advertises the `configurationstore.set-value` and
 `configurationstore.remove-value` wire kinds served by ConfigurationStore.Hosting.
@@ -38,6 +40,8 @@ Value keys cannot contain `/`; namespaces may. Each target/key permits one desir
 
 - `Assimalign.Cohesion.ApplicationModel` for manifests, planned resources, and the
   platform-neutral realization-plan IR.
+- `Assimalign.Cohesion.Hosting.Resources` for the default control-plane contract and
+  runtime seam.
 
 The project is guarded by COHAM001 and never references ConfigurationStore runtime,
 gateway, or platform packages. Runtime endpoint and mount values flow through the
