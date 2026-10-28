@@ -9,6 +9,21 @@ namespace Assimalign.Cohesion.Database.Sql.Language.Tests;
 
 public sealed class SqlSequenceParserTests
 {
+    [Theory(DisplayName = "Cohesion Test [Sql.Language] - NEXT lookahead: ordinary identifiers retain their grammar")]
+    [InlineData("SELECT next FROM t ORDER BY next")]
+    [InlineData("SELECT t.next AS next FROM t ORDER BY next")]
+    [InlineData("SELECT next.k FROM next")]
+    [InlineData("SELECT abs(next) FROM t")]
+    [InlineData("CREATE FUNCTION f(next INT) RETURNS INT RETURN next")]
+    public void Parse_NextIdentifier_ShouldRemainAnIdentifier(string sql)
+    {
+        // Arrange / Act
+        var statement = new SqlQueryParser().Parse(sql + ";");
+
+        // Assert
+        statement.Diagnostics.ShouldBeEmpty(string.Join("; ", statement.Diagnostics.Select(d => d.Code + ": " + d.Message)));
+    }
+
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - Sequences: every option round trips canonically")]
     [InlineData("CREATE SEQUENCE s;")]
     [InlineData("CREATE SEQUENCE IF NOT EXISTS dbo.s AS SMALLINT START 3 INCREMENT 2 MINVALUE -5 MAXVALUE 100 CACHE 9 CYCLE;")]

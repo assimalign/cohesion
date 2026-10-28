@@ -653,7 +653,7 @@ public sealed partial class SqlQueryParser
             return MissingExpression(ref lexer, pos);
         }
 
-        if (IsWord(ref lexer, "NEXT")) { return ParseNextValue(ref lexer, pos); }
+        if (IsWord(ref lexer, "NEXT") && StartsNextValue(lexer)) { return ParseNextValue(ref lexer, pos); }
 
         // Whole VALUES items and SET values are handled by ParseDefaultableValue. A bare
         // DEFAULT is never a scalar, including when a column has that quoted name

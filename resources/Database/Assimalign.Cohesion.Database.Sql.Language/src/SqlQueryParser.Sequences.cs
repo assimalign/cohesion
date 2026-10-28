@@ -6,6 +6,10 @@ namespace Assimalign.Cohesion.Database.Sql.Language;
 
 public sealed partial class SqlQueryParser
 {
+    private static bool StartsNextValue(TokenLexer lexer)
+        => MoveTypeLookahead(ref lexer) && IsWord(ref lexer, "VALUE") &&
+            MoveTypeLookahead(ref lexer) && IsWord(ref lexer, "FOR");
+
     private SqlQueryExpression ParseSequence(ref TokenLexer lexer, int position, bool alter)
     {
         RequireSchemaClause(ref lexer, alter ? SqlClauses.AlterSequence : SqlClauses.CreateSequence);
