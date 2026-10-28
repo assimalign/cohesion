@@ -30,7 +30,7 @@ public sealed class GraphCompositeWireTests
             "MATCH (a:N {k:1})-[rs:T]->{2}(b) RETURN [r IN rs | r.w]",
             "MATCH p=(a:N {k:1})-[:T]->{2}(b) RETURN [r IN relationships(p) | r.w]",
             "MATCH (a:N {k:1})-[rs:T]->{2}(b) WITH [r IN rs | {w:r.w}] AS values RETURN [v IN values | v.w]",
-            "MATCH (a:N {k:1})-[rs:T]->{2}(b) RETURN [r IN rs[..] | [r IN [r] | r.w][0]]",
+            "MATCH (a:N {k:1})-[rs:T]->{2}(b) RETURN [r IN rs[0..] | [r IN [r] | r.w][0]]",
         })
         {
             var row = (await connection.QueryAsync(source, cancellationToken: harness.Token)).ShouldHaveSingleItem();
@@ -43,7 +43,7 @@ public sealed class GraphCompositeWireTests
         values[0].ShouldBeOfType<object?[]>().ShouldBe(new object?[] { 2L, 6L });
         values[1].ShouldBeOfType<object?[]>().ShouldBe(new object?[] { null, 3L });
         values[2].ShouldBeNull(); values[3].ShouldBeNull();
-        foreach (string expression in new[] { "[r IN rs | r]", "[r IN rs WHERE FALSE]", "rs[..]", "[r IN rs | {r:r}]" })
+        foreach (string expression in new[] { "[r IN rs | r]", "[r IN rs WHERE FALSE]", "rs[0..]", "[r IN rs | {r:r}]" })
         {
             var error = await Should.ThrowAsync<GraphClientException>(async () => await connection.QueryAsync(
                 "MATCH (a:N {k:1})-[rs:T]->{2}(b) INSERT (:Unwritten) RETURN " + expression, cancellationToken: harness.Token));

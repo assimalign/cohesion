@@ -317,6 +317,7 @@ transaction-state diagnostics; it allocates no new identity. These changes add n
 | GQL0009 | CG00009 | Language/syntax |
 | GQL0010 | CG00010 | Language/syntax |
 | New (#1734) | CG00011 | Language/syntax — SHORTEST selector requires a positive Int64 literal count |
+| New (#1736, GQ-C1 fixes) | CG00012 | Language/syntax — list slice omits both bounds; rejected during planning |
 | COHDBG002 | CG01002 | Binding/names |
 | COHDBG010 | CG01010 | Binding/names |
 | COHDBG011 | CG01011 | Binding/names |

@@ -2,7 +2,8 @@ using Assimalign.Cohesion.Database.Language;
 
 namespace Assimalign.Cohesion.Database.Graph.Language;
 
-/// <summary>A list slice with inclusive start and exclusive end, each optionally omitted.</summary>
+/// <summary>A list slice with inclusive start and exclusive end.</summary>
+/// <remarks>Either bound may be omitted; planning requires at least one bound.</remarks>
 [global::System.Diagnostics.DebuggerDisplay("GqlListSliceExpression")]
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(GqlListSliceExpression.DebugView))]
 public sealed class GqlListSliceExpression : GqlExpression

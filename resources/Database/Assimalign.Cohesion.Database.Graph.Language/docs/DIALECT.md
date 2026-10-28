@@ -484,10 +484,12 @@ comprehensions. Missing projection keeps each element. WHERE keeps only TRUE and
 for FALSE/NULL. A NULL list returns NULL; an empty list returns []. Names and parameters still
 validate before execution. Aggregates can supply the source; body aggregates fail CG05024.
 
-Slices `list[from..to]`, `list[from..]`, `list[..to]` and `list[..]` use inclusive start,
+Slices `list[from..to]`, `list[from..]` and `list[..to]` use inclusive start,
 exclusive end and omitted zero/list-length defaults. Negative bounds count from the end; bounds
-clamp, and reversed ranges give []. Explicit NULL bounds or NULL sources give NULL. Numeric bounds
-truncate toward zero then require Int32 range, following Neo4j. Invalid list sources or bounds
+clamp, and reversed ranges give []. Explicit NULL bounds or NULL sources give NULL. Planning
+rejects both omitted bounds (CG00012) and known non-integer bound types (CG02014), even under
+EXPLAIN. Dynamic numeric bounds truncate toward zero then require Int32 range, matching Neo4j
+runtime conversion. Invalid list sources or bounds
 are CG02014; filters require Boolean/NULL (CG02013).
 
 Scalar projections over entity groups/path lists, such as `[r IN rs | r.w]`, cross Execute.

@@ -896,8 +896,15 @@ internal sealed partial class GraphPlanner
                     case GqlListComprehensionExpression comprehension:
                         ValidateComprehension(comprehension, allowAggregates, ordering, variableScope, iterators);
                         break;
+                    case GqlListSliceExpression slice:
+                        if (slice.From is null && slice.To is null)
+                        { throw new GraphPlanningException("CG00012", ErrorMessages.SliceBoundRequired, slice.Location); }
+                        ValidateSliceBound(slice.From, ordering, iterators);
+                        ValidateSliceBound(slice.To, ordering, iterators);
+                        foreach (var child in GraphValueExpressions.Children(slice).Reverse()) { pending.Push((child, function)); }
+                        break;
                     case GqlListExpression or GqlMapExpression or GqlCaseExpression or GqlCoalesceExpression or
-                        GqlNullIfExpression or GqlSubscriptExpression or GqlListSliceExpression:
+                        GqlNullIfExpression or GqlSubscriptExpression:
                         foreach (var child in GraphValueExpressions.Children(expression).Reverse()) { pending.Push((child, function)); }
                         break;
                     case GqlStringPredicateExpression predicate when Enum.IsDefined(predicate.Operator):
@@ -913,6 +920,35 @@ internal sealed partial class GraphPlanner
                         throw new GraphPlanningException("CG05001", ErrorMessages.GraphPlannerPlanCoreGraphPlanning7, expression?.Location);
                 }
             }
+        }
+        void ValidateSliceBound(GqlExpression? bound, bool ordering, IReadOnlySet<string>? iterators)
+        {
+            // Neo4j checks known expression types semantically, while parameters use its
+            // runtime numeric conversion (which also accepts/truncates floating values).
+            if (bound is null or GqlParameterExpression) { return; }
+            var kind = SliceBoundKind(bound, ordering, iterators);
+            if (kind != GraphFunctionKind.Unknown && (kind & GraphFunctionKind.Integral) == 0 ||
+                bound is GqlLiteralExpression { Value: not null } literal && GraphValueComparer.IsNumber(literal.Value) &&
+                (Convert.ToDecimal(literal.Value, System.Globalization.CultureInfo.InvariantCulture) < int.MinValue ||
+                 Convert.ToDecimal(literal.Value, System.Globalization.CultureInfo.InvariantCulture) > int.MaxValue))
+            { throw new GraphPlanningException("CG02014", ErrorMessages.ListOperationInvalid, bound.Location); }
+        }
+        GraphFunctionKind SliceBoundKind(GqlExpression expression, bool ordering, IReadOnlySet<string>? iterators)
+        {
+            System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
+            if (expression is GqlParameterExpression) { return GraphFunctionKind.Unknown; }
+            if (expression is GqlUnaryExpression { Operator: "+" or "-" } unary)
+            { return SliceBoundKind(unary.Operand, ordering, iterators); }
+            if (expression is GqlBinaryExpression { Operator: "+" or "-" or "*" or "/" or "%" } binary)
+            {
+                var left = SliceBoundKind(binary.Left, ordering, iterators);
+                var right = SliceBoundKind(binary.Right, ordering, iterators);
+                if (left == GraphFunctionKind.NonIntegral || right == GraphFunctionKind.NonIntegral)
+                { return GraphFunctionKind.NonIntegral; }
+                if (left == GraphFunctionKind.Integral && right == GraphFunctionKind.Integral)
+                { return GraphFunctionKind.Integral; }
+            }
+            return KnownFunctionKind(expression, ordering, iterators);
         }
         void ValidateComprehension(GqlListComprehensionExpression expression, bool allowAggregates, bool ordering,
             IReadOnlySet<string>? variableScope, IReadOnlySet<string>? iterators)

@@ -198,7 +198,7 @@ The function table advertises the aggregates and core scalar functions listed be
 | `LIMIT` | Unsigned Int64 literal or named parameter after RETURN | Unordered reads can stop upstream expansion after OFFSET/LIMIT; ordered finite pages retain OFFSET + LIMIT rows; never reduces mutation inputs |
 | `CASE` | Simple and searched CASE, COALESCE and NULLIF case abbreviations | First matching alternative, lazy selected branch; absent ELSE yields NULL |
 | `LIST COMPREHENSION` | `[x IN list [WHERE predicate] [| projection]]` | Lexical ordered filtering/projection; NULL list returns NULL |
-| `LIST SLICING` | `list[from..to]`, either or both bounds optional | Inclusive start, exclusive end, negative offsets and clamped bounds |
+| `LIST SLICING` | `list[from..to]`, either bound optional, at least one required | Inclusive start, exclusive end, negative offsets and clamped bounds |
 | `INSERT` | Scalar value-expression node/path insertion, optionally following a match; a node takes a label conjunction (`:A&B`, `:A:B`), a relationship one type and a directed edge (`-[:T]->`, `<-[:T]-`) | Inserts nodes and relationships transactionally |
 | `CREATE` | Same insertion grammar as `INSERT`; compatibility extension | Same transactional insertion path |
 | `MERGE` | One complete fixed path, followed by zero or more ON CREATE SET or ON MATCH SET actions | Matches every complete path or creates every unbound part; includes fixed undirected relationships, bound node reuse, overlays and Snapshot freshness checks |
@@ -807,12 +807,14 @@ The source must be a list (not a string, map or binary scalar). Function-spelled
 remain legal. Aggregates may supply the source list; an aggregate in WHERE or projection is
 CG05024, including under EXPLAIN. All names and parameters validate even for empty/NULL sources.
 
-`list[from..to]`, `list[from..]`, `list[..to]` and `list[..]` use an inclusive start and
+`list[from..to]`, `list[from..]` and `list[..to]` use an inclusive start and
 exclusive end. Omitted bounds mean zero/list length. Negative bounds count from the end;
 bounds clamp to the list, and a reversed/empty interval yields an empty list. Explicit NULL
 bounds or a NULL source yield NULL. Bounds evaluate before the NULL result is selected.
-Following Neo4j's numeric conversion, finite floating bounds truncate toward zero before
-signed Int32 range validation; Decimal bounds use the same rule exactly. Invalid sources,
+Following Neo4j semantic analysis, planning rejects a slice with both bounds omitted (CG00012)
+and known non-integer bound types (CG02014), including integral-valued FLOAT literals.
+Dynamic bounds retain Neo4j runtime conversion: finite numeric values truncate toward zero
+before signed Int32 range validation; Decimal values use the same rule exactly. Invalid sources,
 bound kinds or ranges are CG02014. Non-Boolean filters retain CG02013. Missing/empty iterator
 names in hand-built ASTs use CG01017; ordinary missing bindings retain CG05001.
 
@@ -839,6 +841,7 @@ Reference evidence (local Neo4j clone, paths relative to its root):
 - `community/cypher/front-end/parser/v25/parser/src/main/antlr4/org/neo4j/cypher/internal/parser/v25/Cypher25Parser.g4:714-716`: optional filter/projection grammar; `community/cypher/front-end/parser/parser-test/src/test/scala/org/neo4j/cypher/internal/ast/factory/expression/LabelExpressionsParserTest.scala:741-752,780-824,880-958` fixes the label/projection bar ambiguity.
 - `community/cypher/interpreted-runtime/src/main/scala/org/neo4j/cypher/internal/runtime/interpreted/commands/expressions/ExtractFunction.scala:35-52` and `FilterFunction.scala:36-52`: ordered element evaluation, TRUE-only filtering and NULL-in/NULL-out inheritance.
 - `community/cypher/front-end/ast/src/main/scala/org/neo4j/cypher/internal/ast/semantics/SemanticExpressionCheck.scala:1099-1117,1265-1281`: source checking, scoped iterator declaration and projected element type.
+- `community/cypher/front-end/ast/src/main/scala/org/neo4j/cypher/internal/ast/semantics/SemanticExpressionCheck.scala:726-737` and `community/cypher/front-end/ast-test/src/test/scala/org/neo4j/cypher/internal/ast/semantics/ListSliceTest.scala:51-82`: at least one bound and INTEGER bound types, independently of runtime conversion.
 - `community/cypher/interpreted-runtime/src/main/scala/org/neo4j/cypher/internal/runtime/interpreted/commands/expressions/ListSlice.scala:34-66` and `community/cypher/runtime-util/src/main/java/org/neo4j/cypher/operations/CypherFunctions.java:3257-3301,3485-3509,3533-3550`: open bounds, NULL propagation, negative offsets and numeric Int32 conversion.
 
 The parser/conformance corpus, GraphListComprehensionTests, GraphCompositeWireTests and Graph
@@ -1132,6 +1135,7 @@ GqlOrderPagingTests and GraphOrderPagingWireTests pin the executable surface.
 | `CG00009` | The statement nests groups, unary expressions, CASE, subscripts or collection constructors deeper than the parsing thread's stack can follow. Reported at the group, unary, constructor or subscript token that could not be entered; the parse stops there and reports nothing else. The same text parses on a thread with more stack, so the engine's `GraphQueryRequest.FromGql` reports it as `CG05008`, statement too complex, not as a parse error |
 | `CG00010` | Unknown function call; the message names the unregistered spelling |
 | `CG00011` | A counted SHORTEST selector omits a positive Int64 literal count or supplies zero, a sign, a non-integer, a parameter or overflow |
+| `CG00012` | A list slice omits both start and end bounds; rejected during planning, including EXPLAIN |
 
 Locations use zero-based absolute UTF-16 offsets with exclusive ends and one-based line numbers.
 A line breaks at LF, CR, NEL (U+0085), LS (U+2028) or PS (U+2029), and CR LF is one break

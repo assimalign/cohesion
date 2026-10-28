@@ -48,6 +48,7 @@
   <data name="CompositeLimit" xml:space="preserve"><value>Graph values are limited to depth 64, 65536 values and 16777216 encoded bytes.</value></data>
   <data name="CompositeMalformed" xml:space="preserve"><value>Malformed or oversized Graph composite value.</value></data>
   <data name="CompositeRequired" xml:space="preserve"><value>This operation requires a list or map with a valid index or field name.</value></data>
+  <data name="SliceBoundRequired" xml:space="preserve"><value>A list slice requires a start or end bound.</value></data>
   <data name="ListOperationInvalid" xml:space="preserve">
     <value>A list operation requires a list source and numeric slice bounds in the signed 32-bit range.</value>
   </data>

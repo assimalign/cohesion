@@ -1840,7 +1840,8 @@ to exercise that enforcement path; compiled provisioning is not included.
 | `CG01015` | Duplicate final result column name, implicit or explicit, under ordinal case-sensitive comparison; rejected during planning before execution |
 | `CG01016` | A path search prefilter, with or without an explicit selector, references a variable introduced by a peer path in the same MATCH; located at the offending reference. Its own path bindings (including quantified singletons) and the scope entering MATCH are allowed |
 | `CG01017` | A hand-built list comprehension omits its iterator name |
-| `CG02014` | Invalid list-operation source or numeric slice bound kind/range |
+| `CG00012` | List slice omits both bounds; refused during planning, including EXPLAIN |
+| `CG02014` | Invalid list-operation source or slice bound kind/range; known non-integer bound types fail planning |
 | `CG07016` | A composite result requires graph.composite-values; ExecutionFailure before ResultHeader, preserving the authenticated session |
 | `CG06017` | Unsupported graph record or tree-registration format, including formats 1–4: opening is refused before logical recovery scrub with the remedy to recreate the database. Graph.Storage retains the code in its StorageCorruptionException cause's Diagnostics; the engine retains it as an additional Error diagnostic beside CG06018 under DatabaseCorruptionException / CK06003. No upgrade path exists |
 | `CG06018` | Missing or unrecoverable files; preserve the complete file set for recovery and restore missing sidecars from backup |
@@ -2194,7 +2195,9 @@ refusal or cancellation. No query without these expressions acquires an iterator
 additional shape callback closure. Comprehension/slice child enumeration uses separate iterators
 so ordinary expression walks retain their original iterator size. The Release dispatch measurements preserve baseline allocation
 costs; result checks and both wire transports cover scalar admission and pre-write entity refusal.
-Numeric slice bounds follow Neo4j: truncate toward zero, require Int32 range, then normalize
+Slice admission follows Neo4j semantic analysis: both omitted bounds use CG00012; known
+non-integer bounds use CG02014 during planning. Dynamic numeric bounds follow its runtime
+conversion: truncate toward zero, require Int32 range, then normalize
 negative offsets and clamp. NULL sources/bounds yield NULL and filters retain only TRUE.
 See the language design's [semantics and local reference citations](../../Assimalign.Cohesion.Database.Graph.Language/docs/DESIGN.md#list-comprehensions-and-slices-1736-gq-c1).
 No disk, protocol or public interface boundary changes accompany this run.
