@@ -395,6 +395,7 @@ internal static class SqlPersistedExpression
             Same(a.FunctionName, b.FunctionName) && a.Arguments.Count == b.Arguments.Count &&
             (a.Quantifier == SqlSetQuantifier.Distinct) == (b.Quantifier == SqlSetQuantifier.Distinct) &&
             a.HasWithinGroupOrdering == b.HasWithinGroupOrdering &&
+            (a.Filter is null) == (b.Filter is null) &&
             SameList(a.OrderBy, b.OrderBy, (x, y) => x.IsDescending == y.IsDescending && x.NullPlacement == y.NullPlacement),
         (SqlCaseExpression a, SqlCaseExpression b) => (a.Input is null) == (b.Input is null) &&
             (a.ElseResult is null) == (b.ElseResult is null) && a.WhenClauses.Count == b.WhenClauses.Count,

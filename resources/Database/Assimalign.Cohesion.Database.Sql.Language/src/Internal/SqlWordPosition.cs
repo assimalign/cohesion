@@ -11,7 +11,7 @@ internal enum SqlWordPosition
     /// <c>SELECT</c> or a comparison operator;
     /// <c>COLLATION</c> and <c>FULLTEXT</c> after <c>CREATE</c>; <c>GROUPING SETS</c> and the <c>GROUPING</c>, <c>ROLLUP</c>, <c>CUBE</c> and
     /// <c>GROUPING_ID</c> calls; <c>PERCENT</c> and <c>WITH TIES</c> after FETCH or TOP;
-    /// <c>FILTER (...)</c> and <c>WITHIN GROUP</c> after a call;
+    /// <c>WITHIN GROUP</c> after a non-LISTAGG call;
     /// <c>ANY</c> and <c>SOME</c> with an array operand after a comparison operator; <c>LATERAL</c> after
     /// <c>FROM</c> or <c>JOIN</c>; and <c>~</c> in prefix or infix position.
     /// </summary>

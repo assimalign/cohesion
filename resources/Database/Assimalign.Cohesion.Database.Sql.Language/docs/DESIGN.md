@@ -303,6 +303,15 @@ No profile clause or keyword is added. DIALECT.md specifies syntax, defaults and
 
 ## Aggregate modifiers and string aggregation (#1115)
 
+FILTER and Boolean/statistical aggregates (#1720, SQ-H1) extend this representation:
+SqlFunctionCallExpression.Filter retains the optional condition, including depth and source
+extent. Rendering, semantic child walks, aggregate-level correlation and persisted equality
+include it. FILTER adds one named clause and nine function names join the executable profile.
+The profile has 59 declared clauses, or 64 including the five documented exclusions.
+Window aggregates and window calls in FILTER retain CK00001. The catalog owns aggregate
+admission (CS05072 for FILTER on scalar calls); a same-scope aggregate in the condition is
+CS05073. Child queries bind independently. See DIALECT.md for types, NULLs and rounding.
+
 SqlFunctionCallExpression retains a SqlSetQuantifier and ordered input keys for every call;
 the engine catalog decides which calls are aggregates. Depth measurement, rendering and
 structural equality include the keys. LISTAGG WITHIN GROUP normalizes onto the same ordered

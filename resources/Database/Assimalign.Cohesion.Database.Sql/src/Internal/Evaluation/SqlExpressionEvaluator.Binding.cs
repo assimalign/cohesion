@@ -90,7 +90,9 @@ internal sealed partial class SqlExpressionEvaluator
     /// method (or the switch) is entered, on every call.
     /// </para>
     /// </remarks>
-    private SqlBoundExpression Bind(SqlExpression expression, out SqlCollationCandidate collation, bool requireBoolean = false)
+    // Statistical arguments normalize numeric alternatives throughout this walk. The flag
+    // stays local to binding; ordinary expressions and child query scopes keep their rules.
+    private SqlBoundExpression Bind(SqlExpression expression, out SqlCollationCandidate collation, bool requireBoolean = false, bool statisticsInput = false)
     {
         RuntimeHelpers.EnsureSufficientExecutionStack();
 
@@ -111,33 +113,36 @@ internal sealed partial class SqlExpressionEvaluator
         switch (expression)
         {
             case SqlLogicalExpression logical:
-                return BindLogical(logical, out collation);
+                return BindLogical(logical, out collation, statisticsInput);
             case SqlBinaryExpression binary:
-                return BindBinary(binary, out collation);
+                return BindBinary(binary, out collation, statisticsInput);
             case SqlUnaryExpression unary:
-                return BindUnary(unary, out collation);
+                return BindUnary(unary, out collation, statisticsInput);
             case SqlDistinctExpression distinct:
-                return BindDistinct(distinct, out collation);
+                return BindDistinct(distinct, out collation, statisticsInput);
             case SqlBooleanTestExpression test:
-                return BindBooleanTest(test, out collation);
+                return BindBooleanTest(test, out collation, statisticsInput);
             case SqlIsNullExpression isNull:
-                return BindIsNull(isNull, out collation);
+                return BindIsNull(isNull, out collation, statisticsInput);
             case SqlBetweenExpression between:
-                return BindBetween(between, out collation);
+                return BindBetween(between, out collation, statisticsInput);
             case SqlQuantifiedComparisonExpression quantified:
-                return BindQuantifiedComparison(quantified, out collation);
+                return BindQuantifiedComparison(quantified, out collation, statisticsInput);
             case SqlInExpression membership:
-                return BindIn(membership, out collation);
+                return BindIn(membership, out collation, statisticsInput);
             case SqlLikeExpression like:
-                return BindLike(like, out collation);
+                return BindLike(like, out collation, statisticsInput);
             case SqlCaseExpression conditional:
-                return BindCase(conditional, out collation, requireBoolean);
+                var boundCase = BindCase(conditional, out collation, requireBoolean, statisticsInput);
+                return statisticsInput ? ConvertStatisticsAlternative(conditional, boundCase) : boundCase;
             case SqlFunctionCallExpression call:
-                return BindCall(call, out collation, requireBoolean);
+                var boundCall = BindCall(call, out collation, requireBoolean, statisticsInput);
+                return statisticsInput && SqlStandardLibrary.IsCoalesce(call.FunctionName)
+                    ? ConvertStatisticsAlternative(call, boundCall) : boundCall;
             case SqlCastExpression cast:
-                return BindCast(cast, out collation);
+                return BindCast(cast, out collation, statisticsInput);
             case SqlCollateExpression collate:
-                return BindCollate(collate, out collation);
+                return BindCollate(collate, out collation, statisticsInput);
             default:
                 return BindLeaf(expression, out collation);
         }
@@ -170,10 +175,10 @@ internal sealed partial class SqlExpressionEvaluator
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private SqlBoundExpression BindBinary(SqlBinaryExpression binary, out SqlCollationCandidate collation)
+    private SqlBoundExpression BindBinary(SqlBinaryExpression binary, out SqlCollationCandidate collation, bool statisticsInput)
     {
-        var left = Bind(binary.Left, out SqlCollationCandidate leftCollation);
-        var right = Bind(binary.Right, out SqlCollationCandidate rightCollation);
+        var left = Bind(binary.Left, out SqlCollationCandidate leftCollation, statisticsInput: statisticsInput);
+        var right = Bind(binary.Right, out SqlCollationCandidate rightCollation, statisticsInput: statisticsInput);
         if (binary.Operator is SqlBinaryOperator.Equal or SqlBinaryOperator.NotEqual or SqlBinaryOperator.LessThan
             or SqlBinaryOperator.LessOrEqual or SqlBinaryOperator.GreaterThan or SqlBinaryOperator.GreaterOrEqual)
         {
@@ -224,10 +229,10 @@ internal sealed partial class SqlExpressionEvaluator
             : value;
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private SqlBoundExpression BindDistinct(SqlDistinctExpression distinct, out SqlCollationCandidate collation)
+    private SqlBoundExpression BindDistinct(SqlDistinctExpression distinct, out SqlCollationCandidate collation, bool statisticsInput)
     {
-        var left = Bind(distinct.Left, out SqlCollationCandidate leftCollation);
-        var right = Bind(distinct.Right, out SqlCollationCandidate rightCollation);
+        var left = Bind(distinct.Left, out SqlCollationCandidate leftCollation, statisticsInput: statisticsInput);
+        var right = Bind(distinct.Right, out SqlCollationCandidate rightCollation, statisticsInput: statisticsInput);
         left = BindCharacterComparand(distinct.Left, left, distinct.Right);
         right = BindCharacterComparand(distinct.Right, right, distinct.Left);
         collation = CollationOf(distinct, [leftCollation, rightCollation]);
@@ -236,9 +241,9 @@ internal sealed partial class SqlExpressionEvaluator
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private SqlBoundExpression BindBooleanTest(SqlBooleanTestExpression test, out SqlCollationCandidate collation)
+    private SqlBoundExpression BindBooleanTest(SqlBooleanTestExpression test, out SqlCollationCandidate collation, bool statisticsInput)
     {
-        var operand = Bind(test.Operand, out SqlCollationCandidate operandCollation, requireBoolean: true);
+        var operand = Bind(test.Operand, out SqlCollationCandidate operandCollation, requireBoolean: true, statisticsInput: statisticsInput);
         var type = StaticTypeOf(test.Operand);
         if (type is not (DatabaseType.Boolean or DatabaseType.Null) && !TryBooleanLiteral(test.Operand, out _)
             && operand is not (SqlBoundCase { ResultType: DatabaseType.Boolean } or SqlBoundCoalesce { ResultType: DatabaseType.Boolean }))
@@ -249,19 +254,19 @@ internal sealed partial class SqlExpressionEvaluator
         return new SqlBoundBooleanTest(operand, test.TruthValue, test.IsNegated, test.Location);
     }
 
-    private SqlBoundExpression BindIsNull(SqlIsNullExpression isNull, out SqlCollationCandidate collation)
+    private SqlBoundExpression BindIsNull(SqlIsNullExpression isNull, out SqlCollationCandidate collation, bool statisticsInput)
     {
-        var operand = Bind(isNull.Operand, out SqlCollationCandidate operandCollation);
+        var operand = Bind(isNull.Operand, out SqlCollationCandidate operandCollation, statisticsInput: statisticsInput);
         collation = CollationOf(isNull, [operandCollation]);
         return new SqlBoundIsNull(operand, isNull.IsNegated);
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private SqlBoundExpression BindBetween(SqlBetweenExpression between, out SqlCollationCandidate collation)
+    private SqlBoundExpression BindBetween(SqlBetweenExpression between, out SqlCollationCandidate collation, bool statisticsInput)
     {
-        var operand = Bind(between.Operand, out SqlCollationCandidate operandCollation);
-        var low = Bind(between.Low, out SqlCollationCandidate lowCollation);
-        var high = Bind(between.High, out SqlCollationCandidate highCollation);
+        var operand = Bind(between.Operand, out SqlCollationCandidate operandCollation, statisticsInput: statisticsInput);
+        var low = Bind(between.Low, out SqlCollationCandidate lowCollation, statisticsInput: statisticsInput);
+        var high = Bind(between.High, out SqlCollationCandidate highCollation, statisticsInput: statisticsInput);
         // PostgreSQL parse_expr.c:1325-1333 binds the two comparisons separately.
         // Neither bound may change the value used to compare against the other.
         var lowOperand = BindCharacterComparand(between.Operand, operand, between.Low);
@@ -275,12 +280,12 @@ internal sealed partial class SqlExpressionEvaluator
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private SqlBoundExpression BindLike(SqlLikeExpression like, out SqlCollationCandidate collation)
+    private SqlBoundExpression BindLike(SqlLikeExpression like, out SqlCollationCandidate collation, bool statisticsInput)
     {
-        var operand = Bind(like.Operand, out SqlCollationCandidate operandCollation);
-        var pattern = Bind(like.Pattern, out SqlCollationCandidate patternCollation);
+        var operand = Bind(like.Operand, out SqlCollationCandidate operandCollation, statisticsInput: statisticsInput);
+        var pattern = Bind(like.Pattern, out SqlCollationCandidate patternCollation, statisticsInput: statisticsInput);
         SqlCollationCandidate escapeCollation = default;
-        var escape = like.Escape is null ? new SqlBoundConstant("\\") : Bind(like.Escape, out escapeCollation);
+        var escape = like.Escape is null ? new SqlBoundConstant("\\") : Bind(like.Escape, out escapeCollation, statisticsInput: statisticsInput);
         collation = CollationOf(like, [operandCollation, patternCollation, escapeCollation]);
         var effective = SqlBoundCollation.Of(operandCollation,
             SqlCollationCandidate.Fold(patternCollation, escapeCollation), _defaultCollation);
@@ -332,9 +337,9 @@ internal sealed partial class SqlExpressionEvaluator
     /// type, and for a domain target a cast to its base type when none to the domain is registered.
     /// </remarks>
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private SqlBoundExpression BindCast(SqlCastExpression cast, out SqlCollationCandidate collation)
+    private SqlBoundExpression BindCast(SqlCastExpression cast, out SqlCollationCandidate collation, bool statisticsInput)
     {
-        var operand = Bind(cast.Operand, out SqlCollationCandidate operandCollation);
+        var operand = Bind(cast.Operand, out SqlCollationCandidate operandCollation, statisticsInput: statisticsInput);
         collation = CollationOf(cast, [operandCollation]);
         SqlType target;
         try
@@ -402,10 +407,10 @@ internal sealed partial class SqlExpressionEvaluator
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private SqlBoundExpression BindCollate(SqlCollateExpression collate, out SqlCollationCandidate collation)
+    private SqlBoundExpression BindCollate(SqlCollateExpression collate, out SqlCollationCandidate collation, bool statisticsInput)
     {
         // COLLATE changes how a value compares, never the value: the operand stands for it.
-        var operand = Bind(collate.Operand, out SqlCollationCandidate operandCollation);
+        var operand = Bind(collate.Operand, out SqlCollationCandidate operandCollation, statisticsInput: statisticsInput);
         collation = CollationOf(collate, [operandCollation]);
         return operand;
     }
@@ -455,14 +460,14 @@ internal sealed partial class SqlExpressionEvaluator
             : MissingParameter(parameter.ParameterName, parameter.Location);
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private SqlBoundExpression BindLogical(SqlLogicalExpression logical, out SqlCollationCandidate collation)
+    private SqlBoundExpression BindLogical(SqlLogicalExpression logical, out SqlCollationCandidate collation, bool statisticsInput)
     {
         // Every term of the chain at one level, however long the chain (#1151).
         var operands = new SqlBoundExpression[logical.Operands.Count];
         var collations = new SqlCollationCandidate[operands.Length];
         for (int index = 0; index < operands.Length; index++)
         {
-            operands[index] = Bind(logical.Operands[index], out collations[index], requireBoolean: true);
+            operands[index] = Bind(logical.Operands[index], out collations[index], requireBoolean: true, statisticsInput: statisticsInput);
         }
 
         collation = CollationOf(logical, collations);
@@ -470,7 +475,7 @@ internal sealed partial class SqlExpressionEvaluator
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private SqlBoundExpression BindUnary(SqlUnaryExpression unary, out SqlCollationCandidate collation)
+    private SqlBoundExpression BindUnary(SqlUnaryExpression unary, out SqlCollationCandidate collation, bool statisticsInput)
     {
         // The BIGINT minimum's magnitude is one past BIGINT's maximum, so its literal cannot be
         // parsed before the sign applies. A negated integer literal of exactly that magnitude is
@@ -484,7 +489,7 @@ internal sealed partial class SqlExpressionEvaluator
             return new SqlBoundConstant(long.MinValue);
         }
 
-        var operand = Bind(unary.Operand, out SqlCollationCandidate operandCollation, requireBoolean: unary.Operator == SqlUnaryOperator.Not);
+        var operand = Bind(unary.Operand, out SqlCollationCandidate operandCollation, requireBoolean: unary.Operator == SqlUnaryOperator.Not, statisticsInput: statisticsInput);
         collation = CollationOf(unary, [operandCollation]);
         var bound = new SqlBoundUnary(unary.Operator, operand, unary.Location);
 
@@ -511,9 +516,9 @@ internal sealed partial class SqlExpressionEvaluator
 
     [MethodImpl(MethodImplOptions.NoInlining)]
     private SqlBoundExpression BindQuantifiedComparison(SqlQuantifiedComparisonExpression expression,
-        out SqlCollationCandidate collation)
+        out SqlCollationCandidate collation, bool statisticsInput)
     {
-        var operand = Bind(expression.Operand, out SqlCollationCandidate operandCollation);
+        var operand = Bind(expression.Operand, out SqlCollationCandidate operandCollation, statisticsInput: statisticsInput);
         collation = default; // The predicate produces BOOLEAN; collation belongs to its comparison.
         if (_subquerySlots is null || !_subquerySlots.TryGetValue(expression, out var slot))
         {
@@ -527,9 +532,9 @@ internal sealed partial class SqlExpressionEvaluator
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private SqlBoundExpression BindIn(SqlInExpression membership, out SqlCollationCandidate collation)
+    private SqlBoundExpression BindIn(SqlInExpression membership, out SqlCollationCandidate collation, bool statisticsInput)
     {
-        var operand = Bind(membership.Operand, out SqlCollationCandidate operandCollation);
+        var operand = Bind(membership.Operand, out SqlCollationCandidate operandCollation, statisticsInput: statisticsInput);
         var values = membership.Values;
         var collations = new SqlCollationCandidate[1 + (values?.Count ?? 0)];
         collations[0] = operandCollation;
@@ -569,7 +574,7 @@ internal sealed partial class SqlExpressionEvaluator
         DatabaseType comparisonType = InComparisonType(membership.Operand);
         for (int index = 0; index < candidates.Length; index++)
         {
-            candidates[index] = Bind(values[index], out collations[index + 1]);
+            candidates[index] = Bind(values[index], out collations[index + 1], statisticsInput: statisticsInput);
             comparisons[index] = SqlBoundCollation.Of(operandCollation, collations[index + 1], _defaultCollation);
             referencesColumn[index] = ReferencesTableColumn(values[index]);
             if (!referencesColumn[index])
@@ -625,13 +630,13 @@ internal sealed partial class SqlExpressionEvaluator
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private SqlBoundExpression BindCase(SqlCaseExpression conditional, out SqlCollationCandidate collation, bool requireBoolean)
+    private SqlBoundExpression BindCase(SqlCaseExpression conditional, out SqlCollationCandidate collation, bool requireBoolean, bool statisticsInput)
     {
         SqlBoundExpression? input = null;
         SqlCollationCandidate inputCollation = default;
         if (conditional.Input is not null)
         {
-            input = Bind(conditional.Input, out inputCollation);
+            input = Bind(conditional.Input, out inputCollation, statisticsInput: statisticsInput);
         }
 
         // CASE conditions select a result; their collation does not describe that result.
@@ -641,12 +646,12 @@ internal sealed partial class SqlExpressionEvaluator
         var results = new SqlCollationCandidate[clauses.Count + (conditional.ElseResult is null ? 0 : 1)];
         for (int index = 0; index < whens.Length; index++)
         {
-            var condition = Bind(clauses[index].Condition, out SqlCollationCandidate conditionCollation, requireBoolean: input is null);
+            var condition = Bind(clauses[index].Condition, out SqlCollationCandidate conditionCollation, requireBoolean: input is null, statisticsInput: statisticsInput);
             if (conditional.Input is not null)
             {
                 condition = BindCharacterComparand(clauses[index].Condition, condition, conditional.Input);
             }
-            var result = Bind(clauses[index].Result, out results[index], requireBoolean);
+            var result = Bind(clauses[index].Result, out results[index], requireBoolean, statisticsInput: statisticsInput);
             if (textResult) { result = CharacterToText(clauses[index].Result, result); }
             whens[index] = new SqlBoundWhen(condition, result,
                 input is null ? default : SqlBoundCollation.Of(inputCollation, conditionCollation, _defaultCollation), clauses[index].Condition.Location);
@@ -655,7 +660,7 @@ internal sealed partial class SqlExpressionEvaluator
         SqlBoundExpression? elseResult = null;
         if (conditional.ElseResult is not null)
         {
-            elseResult = Bind(conditional.ElseResult, out results[^1], requireBoolean);
+            elseResult = Bind(conditional.ElseResult, out results[^1], requireBoolean, statisticsInput: statisticsInput);
             if (textResult) { elseResult = CharacterToText(conditional.ElseResult, elseResult); }
         }
 
@@ -676,12 +681,12 @@ internal sealed partial class SqlExpressionEvaluator
     /// <c>src/backend/optimizer/util/clauses.c</c>); one that fails is left to fail when it is reached.
     /// </summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private SqlBoundExpression BindCall(SqlFunctionCallExpression call, out SqlCollationCandidate collation, bool requireBoolean)
+    private SqlBoundExpression BindCall(SqlFunctionCallExpression call, out SqlCollationCandidate collation, bool requireBoolean, bool statisticsInput)
     {
         if (SqlStandardLibrary.IsEvaluatorForm(call.FunctionName) && !SqlStandardLibrary.IsCoalesce(call.FunctionName))
         {
             ValidateEvaluatorForm(call);
-            var operands = BindArguments(call.Arguments, out var specialCollation);
+            var operands = BindArguments(call.Arguments, out var specialCollation, statisticsInput);
             collation = CollationOf(call, ChildCollations(call));
             // NULLIF uses equality's CHAR identity for untyped text, while returning the
             // original first value. PostgreSQL: src/backend/parser/parse_expr.c:1083.
@@ -722,7 +727,7 @@ internal sealed partial class SqlExpressionEvaluator
         var collations = new SqlCollationCandidate[arguments.Length];
         for (int index = 0; index < arguments.Length; index++)
         {
-            arguments[index] = Bind(call.Arguments[index], out collations[index], requireBoolean && coalesce);
+            arguments[index] = Bind(call.Arguments[index], out collations[index], requireBoolean && coalesce, statisticsInput: statisticsInput);
         }
 
         collation = CollationOf(call, collations);

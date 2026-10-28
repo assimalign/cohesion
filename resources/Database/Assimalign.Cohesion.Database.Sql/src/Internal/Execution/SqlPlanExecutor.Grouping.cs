@@ -65,6 +65,13 @@ internal sealed partial class SqlPlanExecutor
             }
             for (int i = 0; i < states.Length; i++)
             {
+                if (aggregates[i].Filter is not null)
+                {
+                    // PostgreSQL execExpr.c:3719-3740: reject before arguments, subqueries,
+                    // DISTINCT tuples and ordering keys can execute or retain a value.
+                    await PrepareSubqueriesAsync(aggregates[i].Filter, row, statement, cancellationToken).ConfigureAwait(false);
+                    if (!evaluator.Matches(aggregates[i].Filter, row)) { continue; }
+                }
                 foreach (var argument in aggregates[i].Arguments)
                 {
                     await PrepareSubqueriesAsync(argument, row, statement, cancellationToken).ConfigureAwait(false);

@@ -13,4 +13,5 @@ internal sealed record SqlSubqueryBinding(
     SqlSubqueryKind Kind,
     bool IsNegated,
     int ScopeId,
-    bool IsCorrelated);
+    bool IsCorrelated,
+    bool IsDeferred = false);
