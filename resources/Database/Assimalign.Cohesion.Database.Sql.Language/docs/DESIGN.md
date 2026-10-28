@@ -1,5 +1,13 @@
 # Assimalign.Cohesion.Database.Sql.Language — Design
 
+## Sequence catalog review (#1717)
+
+DIALECT.md distinguishes format 27's TYPE default-assignment flag from current format 28's
+sequence records. Existing-sequence relation collisions use CS03070 (42P07) and identify the
+existing kind; table-on-table collisions retain their existing identity. The engine conformance
+regressions exercise CREATE TABLE, CTAS, RENAME and CREATE VIEW at this boundary. Sequence SQL
+syntax remains deferred to SQ-S2.
+
 ## WITH RECURSIVE binding (#1719, SQ-R1)
 
 WITH RECURSIVE declares visibility of every name throughout its WITH list. Acyclic

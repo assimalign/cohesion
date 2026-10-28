@@ -75,6 +75,7 @@ public sealed partial class SqlCatalog
         {
             ThrowIfOffline();
             string key = SqlObjectIdentity.View(view.Schema, view.Name);
+            if (_sequences.ContainsKey((view.Schema, view.Name))) { throw RelationNameCollision(view.Schema, view.Name); }
             if (_tables.ContainsKey((view.Schema, view.Name))) { throw new SqlCatalogException("CS03033", ErrorMessages.ViewTargetIsTable); }
             _views.TryGetValue(key, out var previous);
             if (previous is not null && !orReplace) { throw new SqlCatalogException("CS03033", string.Format(CultureInfo.CurrentCulture, ErrorMessages.ViewExists, view.Schema, view.Name)); }

@@ -2708,7 +2708,7 @@ utility.c:1480-1483 and namespace.c:526-531.
 
 AUTHORIZATION and nested schema elements are rejected with CK00001. Atomic nested statements
 would require a separate DDL execution contract because each existing statement self-commits.
-Record-space format 27 has no upgrade reader: export older databases, recreate and explicitly
+Record-space format 28 has no upgrade reader: export older databases, recreate and explicitly
 CREATE SCHEMA for non-dbo table namespaces before importing. Namespace records are not synthesized.
 
 The area root carries only the model-independent ownership contracts (`DatabaseObjectOwner`,
@@ -3531,7 +3531,7 @@ project reference or InternalsVisibleTo change is required.
   format, no upgrade path.** The catalog stores the format version of the whole
   data file set, rows and the index trees that ride it (a kind-4 record for
   versions 1–3, a kind-8 record from version 4). The engine reads and writes
-  format 27 only: format 6's stamped rows in per-object page chains whose index keys use the
+  format 28 only: format 6's stamped rows in per-object page chains whose index keys use the
   temporal identity encoding (#1099, below), in index trees of B-tree page format
   2, which order entries by key, entry reference and writer (#1194,
   `Database.Indexing` DESIGN), decoded through each table's physical column
@@ -3557,7 +3557,7 @@ project reference or InternalsVisibleTo change is required.
   after a crash. No format bump is needed: the claim is consulted only for marker-free catalogs
   (RecordSpaceFormatVersion == 1), which carry no format number. Older engines harmlessly
   ignore the claim, so a bump would fence no interrupted catalog and would unnecessarily
-  refuse every intact format-27 database. Claim-file creation and deletion are not directory-fsynced.
+  refuse every intact format-28 database. Claim-file creation and deletion are not directory-fsynced.
   A lost create loses the proof and refuses adoption; a lost delete leaves a stale claim fenced
   by the checkpointed data header. Neither permits adopting committed data as creation.
   Create and open complete a marker-free catalog only when the catalog-owned internal
@@ -6214,7 +6214,8 @@ takes 35 and 16 µs.
 
 ## Non-goals (current cut)
 
-Identity columns execute, but general sequences, currval/lastval/SCOPE_IDENTITY, OVERRIDING,
+Identity columns execute; standalone sequence catalog/allocation is internal. SQL sequence DDL,
+currval/lastval/SCOPE_IDENTITY, OVERRIDING,
 RESTART, generation-mode changes and identity backfill on populated tables remain excluded
 (#1123). Compiled typed schemas cannot declare identity metadata; SQL scripts can create
 identity tables through the ordinary SQL executor.
@@ -6895,6 +6896,82 @@ The SQL model's schema authority (area architecture:
 two questions for the planner: *what objects exist* (with stable identities) and
 *what shape are they* — and it must answer identically after any crash.
 
+#### Catalog: Standalone sequences and shared allocation (#1717, SQ-S1)
+
+SQL format **28** supersedes 27 with kind **18** sequence definitions and kind **19**
+reservations. Kind 18 stores object id, SQL namespace, relation name, integer type, START,
+INCREMENT, MINVALUE, MAXVALUE, CACHE and CYCLE as a typed tuple. Kind 19 stores object id,
+durable endpoint and a called flag; a false flag persists an explicit restart before first use.
+Earlier database formats are refused by the existing format gate; compiled-schema v8 is unchanged.
+All new types and sequence entry points are internal, accessible to the owning Sql test assembly.
+There is no new SQL syntax, function, session state, public API or wire message in this run.
+
+Sequences, tables and views share the case-insensitive relation namespace, checked again at
+publication (including CTAS and table rename). Schema RESTRICT includes sequences; CASCADE
+retires their definitions and counters in the schema transaction. Object ids share the catalog
+counter and are never reused. Immutable sequence incarnations and internal snapshot captures
+remain stable; allocating from a dropped or replaced incarnation fails with CS04067.
+Create, alter, restart and drop commit metadata and cursor changes atomically under the catalog
+monitor. Ordinary alter validates and persists the last fetched value (`Next - old increment`),
+discards the unused reservation, and continues with the new increment. Reopen has already advanced
+Next beyond the durable endpoint, so the same formula remains safe there. An ALTER commit precedes
+any later reservation; no value above the fetched endpoint was handed out. PostgreSQL anchors are
+sequence.c:479,513,838,1558-1570. Explicit restart may deliberately reissue values. START remains metadata
+when restarting. SQL binding, script receipts and ownership admission are SQ-S2/SQ-S3 work.
+
+Resolved defaults follow PostgreSQL src/backend/commands/sequence.c:1415-1587: BIGINT, increment
+1, cache 1, no cycle; ascending minimum 1 and type maximum; descending type minimum and maximum
+-1; START is the directional bound. Only SMALLINT, INTEGER and BIGINT are accepted for sequences.
+Increment must be nonzero, cache positive, bounds within the type and strictly ordered, and START
+and restart/current value within bounds. Duplicate syntactic options belong to the future binder.
+The relation collision rule follows sequence.c:112-152. Exhaustion reuses CS02002 and does not
+advance state or create a reservation. CYCLE wraps to the directional bound (sequence.c:735-784).
+CYCLE and explicit restart intentionally permit repeated numbers; crash recovery skips the last
+durable block before resuming that same cycle policy.
+
+Both identity and sequence allocation use one engine-wide cursor algorithm and the same 32-value
+reservation limit. CACHE is persisted metadata; it neither changes this durability block size nor
+creates PostgreSQL-style per-session caches. Allocation stays ordered under the catalog monitor;
+concurrent commit order may differ. Int128 arithmetic covers full signed ranges and extreme
+increments without overflow. Reservations stop at a bound, and wrapping begins another durable
+reservation. The storage commit policy confirms a reservation before any covered value is handed
+out (sequence.c:58,706-727); None retains its documented process-crash-only guarantee.
+Reopen skips every durable reserved endpoint, including unused values. Allocation does not
+advance DDL generation and is independent of the data transaction, so rollback leaves gaps.
+The identity cursor retains T1's three-field carrier layout; sequence-only restart metadata
+lives in its sealed internal derived carrier, without an extra object. Cached sequence allocation allocates zero managed bytes;
+cached identity allocation retains T1's existing readonly-column facet lookup budget.
+Internal sequence captures use Catalog.Sequences; the existing SqlCatalogSnapshot layout and
+empty-catalog capture path stay unchanged until SQL binding is added in SQ-S2. Identity counters remain table-owned kind 16 until SQ-S3; their bounds, 32-value gaps, diagnostics,
+TRUNCATE RESTART/CONTINUE, rewrite and TYPE behavior remain unchanged.
+
+Lock order is existing caller object grants, catalog monitor, catalog storage transaction/apply
+gate, then page latches. The allocator acquires no engine/coordinator lock and never waits for DML.
+Create/replace/drop share that monitor with allocation. Storage and monitor scopes release on
+all failures; an unconfirmed commit fences the storage until reopen. Cancellation is checked
+before and after entering catalog mutation scopes. Internal hooks observe allocator entry and
+reservation commits for deterministic faults and contention tests; production installs none.
+Synchronous and asynchronous database disposal close allocation under that monitor before either
+storage closes, so cached identity and sequence values cannot escape after disposal. Truncated
+kind-18 and kind-19 decoding failures retain CS06061 before the located corruption wrapper.
+Every collision involving an existing sequence, and every sequence creation collision, uses
+CS03070 (42P07) and names the existing relation kind; table-on-table collisions retain CS03049.
+Planning reads both monotonically increasing binding generations with volatile reads, without
+taking the catalog monitor. The default collation is immutable after catalog open and also reads
+without that monitor. Metadata resolution still takes it; scalar planning no longer waits for a
+reservation commit. The synchronous/grouped crash sweep includes every ALTER and
+RESTART write, validating complete old/new cursors and ALTER's fetched endpoint.
+
+| Code | Internal sequence condition | SQLSTATE |
+| --- | --- | --- |
+| CS02002 | Range exhausted without CYCLE (shared identity condition) | 22003 |
+| CS03069 | Invalid resolved options | 22023 |
+| CS03070 | Occupied relation name; message names the existing kind | 42P07 |
+| CS03071 | Missing namespace | 3F000 |
+| CS03072 | Oversized sequence definition | 54000 |
+| CS04067 | Dropped or replaced catalog incarnation | 40001 |
+| CS06061 | Malformed sequence definition, ownership directory or reservation | XX001 |
+
 #### Catalog: Atomic TRUNCATE storage replacement (#1716, SQ-T1)
 
 TRUNCATE resolves and deduplicates its list, computes the incoming FK closure (or refuses
@@ -6922,7 +6999,7 @@ All columns, constraints, ownership, physical ordinals
 and frozen missing values are copied. CONTINUE moves the exact volatile cursor/block and the
 durable last reservation; RESTART removes the counter so allocation resumes at START. No new
 record layout, durable record kind, public catalog member, interface or format version is needed:
-SQL remains format 27. Failed preparation and crash recovery use kind 14 unchanged.
+SQL remains format 28. Failed preparation and crash recovery use kind 14 unchanged.
 
 A short-lived coordinator snapshot pin brackets catalog publication: it is active before the
 swap and rolled back just afterwards. Its sequence is a visibility marker, with no persisted
@@ -7048,7 +7125,7 @@ including reservation-hook, lock, binding and builder failures and a lost name r
 intent is then listed as pending until reclamation finishes, matching reopen. Earlier failures leave
 no table; the existing worker reclaims the abandoned owner after the statement/snapshot fences
 clear. Recovery restores either no table plus reclamation
-work, or the entire table with no intent. SQL stays format 27: ordinary table records and kind 14
+work, or the entire table with no intent. SQL stays format 28: ordinary table records and kind 14
 already express this protocol. There is no public catalog seam, friend grant or new interface.
 CTAS follows existing self-committing DDL and is refused inside BEGIN with CS04003 (25001);
 commit-time transactional DDL needs broader catalog machinery and remains outside this run.
@@ -7148,7 +7225,7 @@ The populated-table worker handoff and expanded crash/wire convergence coverage 
 
 CS02064 identifies a missing assignment cast for an old value, USING result or default (42804).
 Existing constraint, conversion, view, locking and storage codes retain their conditions.
-SQL format 27 gates table extension 7's RecastDefault Boolean beside each missing-value literal;
+SQL format 28 gates table extension 7's RecastDefault Boolean beside each missing-value literal;
 earlier SQL files are refused without an upgrade reader. Compiled-schema v8, dense row encoding,
 replacement markers and reclamation intents are unchanged. The language assembly
 adds the public sealed SqlAlterColumnTypeAction leaf and SqlExpressionRenderer.Render(SqlAlterTableExpression)
@@ -7237,8 +7314,8 @@ child between discovery and IS grant, assert rediscovery, and verify rollback ca
 orphan. Parent DELETE must wait for the child's shared lock on the replacement parent's row.
 The null-key shortcut follows local PostgreSQL src/backend/utils/adt/ri_triggers.c:458-496;
 no reference-engine code is copied.
-Existing codes retain their conditions. SQL remains format 27: ordinary dense table records,
-kind-14 intents and the existing TRUNCATE publication contract are readable by the format-27
+Existing codes retain their conditions. SQL remains format 28: ordinary dense table records,
+kind-14 intents and the existing TRUNCATE publication contract are readable by the format-28
 engine, so this operation changes no persisted contract. Compiled-schema v8 and catalog record
 shapes stay unchanged. The existing coded open gate refuses all earlier files; no upgrade or legacy reader is added.
 
@@ -7332,7 +7409,7 @@ would tell every caller the value is changeable and then guard that promise at
 runtime.
 
 Table metadata extension version 2 introduced one collation identifier per column
-after the existing constraints. Current format 27 requires the complete table extension 7 record,
+after the existing constraints. Current format 28 requires the complete table extension 7 record,
 including resolved-call vectors, identity facets and frozen missing-value literals described below. Column additions,
 drops, and restart preserve explicit overrides. An index inherits its key
 columns' effective collations; the SQL engine verifies index eligibility and
@@ -7410,7 +7487,7 @@ codec, the key encoding and every comparison read, so they do not consult the do
   column (the primary key's implicit NOT NULL).
 - **Persistence: table extension version 4** (data-storage format 7). After the dropped
   ordinals, one optional string per live column, NULL for a column of a built-in type,
-  which this catalog always writes. Current format 27 also requires the call vectors, identity facets and extension 7 missing-value literals and TYPE default-assignment flags;
+  which this catalog always writes. Current format 28 also requires the call vectors, identity facets and extension 7 missing-value literals and TYPE default-assignment flags;
   the format gate refuses earlier databases rather than loading their definitions. A persisted blank
   name fails the load with `SqlCatalogException`, as does a blank `domainName` at the
   column's constructor (`ArgumentException`).

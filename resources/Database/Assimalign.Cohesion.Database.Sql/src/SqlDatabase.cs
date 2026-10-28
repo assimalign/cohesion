@@ -647,6 +647,7 @@ public sealed partial class SqlDatabase : DatabaseInstance
     /// <inheritdoc />
     protected override void DisposeCore()
     {
+        _catalog.CloseAllocation();
         TableReclamation.Stop();
         _schemaProvisioner.StopDeferredAsync().AsTask().GetAwaiter().GetResult();
         // An offline database closes without writing anything (#1243): both file sets are
@@ -681,6 +682,7 @@ public sealed partial class SqlDatabase : DatabaseInstance
     /// <inheritdoc />
     protected override async ValueTask DisposeAsyncCore()
     {
+        _catalog.CloseAllocation();
         TableReclamation.Stop();
         await _schemaProvisioner.StopDeferredAsync().ConfigureAwait(false);
         // See DisposeCore: an offline database closes without writing anything (#1243).
