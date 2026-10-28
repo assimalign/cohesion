@@ -67,7 +67,7 @@ sequenceDiagram
 | Type | Role |
 | --- | --- |
 | `ApplicationGateway` | The orchestrator. Implements `IApplicationGateway` (`RunAsync`) and `IResourceManifestPublisher` (`PublishAsync`, the publication endpoint's logic). `RecordAsync` records a write's snapshot and saves the record. Exposes `Model`, `Resources` (the aggregates), `StartupTimeout`, and `Started`. |
-| `IInfrastructureProvider` | The platform: plans a resource (`PlanResourceAsync`), deploys resources and child gateways, tears down resources and child gateways, and supplies each resource's infrastructure actions. |
+| `IInfrastructureProvider` | The platform: plans a resource (`PlanResourceAsync`), deploys resources and child gateways, reports a deployed resource's outputs (`GetResourceOutputsAsync`), tears down resources and child gateways, and supplies each resource's infrastructure actions. |
 | `InfrastructurePlan`, `InfrastructureChange` | What deploying a resource would change (`None`, `Create`, `Update`) and the revision the provider would run. |
 | `IGatewayStore`, `GatewayRecord`, `GatewayResourceRecord` | The gateway's persisted record: child gateways and, per resource, the revision deployed, the state recorded, and the instances registered. |
 | `JsonFileGatewayStore` | One indented JSON file per gateway, replaced atomically on each save; snapshot values as base64. The placeholder for a store over the Database area. |
@@ -165,6 +165,16 @@ lease, so an instance that died while the gateway was down leaves within one lea
 an instance the gateway does not know, such as after a restart without a record, answers `false`,
 and the instance publishes again. Registration, renewal and expiry take one lock per resource, so
 an instance that publishes again while its lease expires is kept or dropped as a whole.
+
+**G16 — Outputs are read once startup completes (owner request, 2026-10-28).** After every created
+or updated resource has published, the gateway asks the provider for each resource's outputs
+(`GetResourceOutputsAsync`), records them on its aggregate, and saves the record when any changed.
+An adopted resource starts with the outputs recorded for the workload that still runs, then takes
+the platform's current values, so an address the platform changed while the gateway was down is
+picked up. `TryGetOutput` resolves a placeholder for a resource this gateway runs. A placeholder
+for another gateway's resource does not resolve here yet: it needs gateway-to-gateway
+publication. Reading outputs per resource, in dependency order, before deploying its dependents
+comes with the readiness gate.
 
 **G9 — No HTTP here, yet.** COHLIB001 bars a library from referencing Web, and COHRES003 bars Web
 (any resource package) from referencing a `Gateway*` assembly, so neither side can bind the other

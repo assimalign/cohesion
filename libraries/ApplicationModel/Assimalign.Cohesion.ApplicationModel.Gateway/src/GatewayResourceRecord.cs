@@ -15,9 +15,11 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway;
 /// </param>
 /// <param name="State">The snapshots recorded since that revision was deployed, one per action.</param>
 /// <param name="Instances">The manifests of the instances registered with the gateway.</param>
+/// <param name="Outputs">The values the platform reported for the deployed resource, by name.</param>
 public sealed record GatewayResourceRecord(
     ProviderName Provider,
     ResourceName Name,
     string Revision,
     IReadOnlyList<ResourceStateSnapshot> State,
-    IReadOnlyList<ResourceManifest> Instances);
+    IReadOnlyList<ResourceManifest> Instances,
+    IReadOnlyDictionary<OutputName, string> Outputs);

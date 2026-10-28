@@ -29,16 +29,19 @@ public sealed class ApplicationResource : IApplicationResource
     private readonly FrozenDictionary<ResourceActionName, IApplicationResourceAction> _actions;
     private ReadOnlyCollection<ResourceManifest> _instancesView = ReadOnlyCollection<ResourceManifest>.Empty;
     private ReadOnlyCollection<ResourceStateSnapshot> _stateView;
+    private FrozenDictionary<OutputName, string> _outputs;
 
     private ApplicationResource(
         ApplicationResourceManifest manifest,
         SortedDictionary<ResourceActionName, ResourceStateSnapshot> state,
-        SortedDictionary<ResourceActionName, IApplicationResourceAction> actions)
+        SortedDictionary<ResourceActionName, IApplicationResourceAction> actions,
+        FrozenDictionary<OutputName, string> outputs)
     {
         Manifest = manifest;
         _state = state;
         _stateView = Copy(state.Values);
         _actions = actions.ToFrozenDictionary();
+        _outputs = outputs;
         Actions = Copy(actions.Values);
     }
 
@@ -54,6 +57,9 @@ public sealed class ApplicationResource : IApplicationResource
     /// <inheritdoc/>
     public IReadOnlyCollection<IApplicationResourceAction> Actions { get; }
 
+    /// <inheritdoc/>
+    public IReadOnlyDictionary<OutputName, string> Outputs => Volatile.Read(ref _outputs);
+
     /// <summary>
     /// Creates the aggregate of a declared resource.
     /// </summary>
@@ -66,18 +72,24 @@ public sealed class ApplicationResource : IApplicationResource
     /// The infrastructure actions the gateway exposes on the resource; <see langword="null"/> or
     /// empty for none.
     /// </param>
+    /// <param name="outputs">
+    /// The outputs recorded earlier for the workload that still runs; <see langword="null"/> or empty
+    /// for none yet.
+    /// </param>
     /// <returns>The aggregate.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="manifest"/> is <see langword="null"/>.</exception>
     /// <exception cref="ArgumentException">
     /// The manifest's provider or name is <see langword="default"/>; <paramref name="state"/> holds a
-    /// <see langword="null"/> snapshot or two snapshots for one action; or <paramref name="actions"/>
+    /// <see langword="null"/> snapshot or two snapshots for one action; <paramref name="actions"/>
     /// holds a <see langword="null"/> action, an action without a name or with an operation other
-    /// than Read or Write, or two actions with one name.
+    /// than Read or Write, or two actions with one name; or <paramref name="outputs"/> holds an output
+    /// without a name or a value.
     /// </exception>
     public static ApplicationResource Create(
         ApplicationResourceManifest manifest,
         IEnumerable<ResourceStateSnapshot>? state = null,
-        IEnumerable<IApplicationResourceAction>? actions = null)
+        IEnumerable<IApplicationResourceAction>? actions = null,
+        IReadOnlyDictionary<OutputName, string>? outputs = null)
     {
         ArgumentNullException.ThrowIfNull(manifest);
 
@@ -129,7 +141,42 @@ public sealed class ApplicationResource : IApplicationResource
             }
         }
 
-        return new ApplicationResource(manifest, snapshots, exposed);
+        return new ApplicationResource(manifest, snapshots, exposed, CopyOutputs(manifest, outputs ?? FrozenDictionary<OutputName, string>.Empty, nameof(outputs)));
+    }
+
+    /// <summary>
+    /// Replaces the resource's outputs with the values its platform reported.
+    /// </summary>
+    /// <param name="outputs">The outputs, by name.</param>
+    /// <returns>Whether any output was added, removed, or changed.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="outputs"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException"><paramref name="outputs"/> holds an output without a name or a value.</exception>
+    public bool SetOutputs(IReadOnlyDictionary<OutputName, string> outputs)
+    {
+        ArgumentNullException.ThrowIfNull(outputs);
+
+        FrozenDictionary<OutputName, string> copy = CopyOutputs(Manifest, outputs, nameof(outputs));
+        lock (_lock)
+        {
+            FrozenDictionary<OutputName, string> current = _outputs;
+            bool changed = current.Count != copy.Count;
+            foreach (KeyValuePair<OutputName, string> output in copy)
+            {
+                if (changed)
+                {
+                    break;
+                }
+
+                changed = !current.TryGetValue(output.Key, out string? value) || !string.Equals(value, output.Value, StringComparison.Ordinal);
+            }
+
+            if (changed)
+            {
+                Volatile.Write(ref _outputs, copy);
+            }
+
+            return changed;
+        }
     }
 
     /// <inheritdoc/>
@@ -265,6 +312,19 @@ public sealed class ApplicationResource : IApplicationResource
         return false;
     }
 
+    private static FrozenDictionary<OutputName, string> CopyOutputs(ApplicationResourceManifest manifest, IReadOnlyDictionary<OutputName, string> outputs, string parameter)
+    {
+        foreach (KeyValuePair<OutputName, string> output in outputs)
+        {
+            if (output.Key.Value is null || output.Value is null)
+            {
+                throw new ArgumentException(Format(ErrorMessages.ApplicationResourceOutputsNull, manifest.Provider, manifest.Name), parameter);
+            }
+        }
+
+        return outputs.ToFrozenDictionary();
+    }
+
     private static ReadOnlyCollection<T> Copy<T>(ICollection<T> values)
     {
         var copy = new T[values.Count];
@@ -293,5 +353,7 @@ public sealed class ApplicationResource : IApplicationResource
         public IReadOnlyCollection<ResourceStateSnapshot> State => _resource.State;
 
         public IReadOnlyCollection<IApplicationResourceAction> Actions => _resource.Actions;
+
+        public IReadOnlyDictionary<OutputName, string> Outputs => _resource.Outputs;
     }
 }

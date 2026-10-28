@@ -10,6 +10,9 @@
   <data name="ProviderNameMissing" xml:space="preserve"><value>A provider name is required.</value></data>
   <data name="ResourceNameMissing" xml:space="preserve"><value>A resource name is required.</value></data>
   <data name="ResourcePermissionMissing" xml:space="preserve"><value>A permission is required; a default permission is not one.</value></data>
+  <data name="OutputNameInvalid" xml:space="preserve"><value>An output name is lowercase ASCII letters and digits in hyphen-separated words, at most 64 characters.</value></data>
+  <data name="OutputNameMissing" xml:space="preserve"><value>An output name is required; a default output name is not one.</value></data>
+  <data name="ApplicationResourceOutputsNull" xml:space="preserve"><value>Resource '{0}/{1}' was given null outputs, an output without a name, or an output without a value.</value></data>
   <data name="ResourceInstanceKeyMissing" xml:space="preserve"><value>A resource instance key is required.</value></data>
   <data name="ResourceManifestActionsMissing" xml:space="preserve"><value>The instance manifest has no action list.</value></data>
   <data name="ApplicationResourceDuplicate" xml:space="preserve"><value>Gateway '{0}' already declares resource '{1}/{2}'.</value></data>

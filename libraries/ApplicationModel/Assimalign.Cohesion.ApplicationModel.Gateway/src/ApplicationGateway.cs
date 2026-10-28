@@ -3,6 +3,7 @@ using System.Collections.Frozen;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text.Json;
@@ -192,6 +193,7 @@ public sealed class ApplicationGateway : IApplicationGateway, IResourceManifestP
 
             await SaveAsync(cancellationToken).ConfigureAwait(false);
             await AwaitStartupAsync(model, cancellationToken).ConfigureAwait(false);
+            await ReadOutputsAsync(model, cancellationToken).ConfigureAwait(false);
 
             // Retire what the model no longer declares only once the deployment has started, so a
             // failed deployment leaves the previous one's resources running.
@@ -369,6 +371,33 @@ public sealed class ApplicationGateway : IApplicationGateway, IResourceManifestP
         return targets;
     }
 
+    /// <summary>
+    /// Gets the value recorded for one output of a resource this gateway runs.
+    /// </summary>
+    /// <param name="output">The placeholder for the output.</param>
+    /// <param name="value">The recorded value, or <see langword="null"/> when there is none.</param>
+    /// <returns>
+    /// <see langword="true"/> when the gateway runs the resource and recorded the output;
+    /// <see langword="false"/> when the resource belongs to another gateway, the gateway has not read
+    /// its outputs yet, or the platform reported no such output.
+    /// </returns>
+    /// <exception cref="ArgumentNullException"><paramref name="output"/> is <see langword="null"/>.</exception>
+    public bool TryGetOutput(ApplicationResourceOutput output, [NotNullWhen(true)] out string? value)
+    {
+        ArgumentNullException.ThrowIfNull(output);
+
+        value = null;
+        IApplicationModel? model = Model;
+        FrozenDictionary<(ProviderName Provider, ResourceName Name), GatewayResource>? resources = Volatile.Read(ref _resources);
+        if (model is null || resources is null || output.Gateway != model.Name)
+        {
+            return false;
+        }
+
+        return resources.TryGetValue((output.Provider, output.Name), out GatewayResource? resource)
+            && resource.Aggregate.Outputs.TryGetValue(output.Output, out value);
+    }
+
     private GatewayResource GetResource(ProviderName provider, ResourceName name)
     {
         FrozenDictionary<(ProviderName Provider, ResourceName Name), GatewayResource>? resources = Volatile.Read(ref _resources);
@@ -415,11 +444,17 @@ public sealed class ApplicationGateway : IApplicationGateway, IResourceManifestP
             recorded.Remove((manifest.Provider, manifest.Name), out GatewayResourceRecord? previous);
             bool sameDefinition = previous is not null && previous.Revision == revision;
 
-            ApplicationResource aggregate = ApplicationResource.Create(manifest, sameDefinition ? previous!.State : null, actions);
+            // The outputs, like the instances, belong to the workload that still runs.
+            bool sameWorkload = sameDefinition && plan.Change == InfrastructureChange.None;
+            ApplicationResource aggregate = ApplicationResource.Create(
+                manifest,
+                sameDefinition ? previous!.State : null,
+                actions,
+                sameWorkload ? previous!.Outputs : null);
             var resource = new GatewayResource(aggregate, plan.Change, revision);
-            if (sameDefinition && plan.Change == InfrastructureChange.None)
+            if (sameWorkload)
             {
-                foreach (ResourceManifest instance in previous!.Instances)
+                foreach (ResourceManifest instance in previous!.Instances ?? [])
                 {
                     resource.Register(instance);
                 }
@@ -514,6 +549,25 @@ public sealed class ApplicationGateway : IApplicationGateway, IResourceManifestP
             Format(ErrorMessages.GatewayStartupTimedOut, model.Name, missed.Count, StartupTimeout, string.Join(", ", names)));
     }
 
+    // Reads every running resource's outputs from its platform, and saves the record when any changed.
+    private async Task ReadOutputsAsync(IApplicationModel model, CancellationToken cancellationToken)
+    {
+        bool changed = false;
+        foreach (GatewayResource resource in _ordered)
+        {
+            ApplicationResourceManifest manifest = resource.Aggregate.Manifest;
+            IReadOnlyDictionary<OutputName, string>? outputs = await _infrastructure.GetResourceOutputsAsync(model, manifest, cancellationToken).ConfigureAwait(false)
+                ?? throw new InvalidOperationException(Format(ErrorMessages.GatewayResourceOutputsNull, manifest.Provider, manifest.Name));
+
+            changed |= resource.Aggregate.SetOutputs(outputs);
+        }
+
+        if (changed)
+        {
+            await SaveAsync(cancellationToken).ConfigureAwait(false);
+        }
+    }
+
     private async Task RetireAsync(IApplicationModel model, CancellationToken cancellationToken)
     {
         foreach (GatewayResourceRecord retired in Volatile.Read(ref _retiredResources))
@@ -563,7 +617,8 @@ public sealed class ApplicationGateway : IApplicationGateway, IResourceManifestP
                 aggregate.Manifest.Name,
                 resource.Revision,
                 [.. aggregate.State],
-                [.. aggregate.Instances]));
+                [.. aggregate.Instances],
+                aggregate.Outputs));
         }
 
         // A retired resource or gateway stays recorded until its teardown succeeds, so a failed

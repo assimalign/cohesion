@@ -53,6 +53,12 @@ public interface IApplicationResource
     IReadOnlyCollection<IApplicationResourceAction> Actions { get; }
 
     /// <summary>
+    /// Gets the values the resource's platform reported once it was deployed, such as its endpoint;
+    /// empty until the gateway has read them.
+    /// </summary>
+    IReadOnlyDictionary<OutputName, string> Outputs { get; }
+
+    /// <summary>
     /// Executes one invocation of an infrastructure action.
     /// </summary>
     /// <param name="action">The action's name.</param>

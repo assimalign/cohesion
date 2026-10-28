@@ -39,6 +39,21 @@ internal sealed class TestInfrastructure : IInfrastructureProvider
 
     public ConcurrentDictionary<ResourceInstanceKey, (TestInstance Instance, ResourceControlPlane ControlPlane)> Instances { get; } = new();
 
+    /// <summary>
+    /// The outputs the platform reports for each resource; an endpoint named after the resource and
+    /// its gateway unless a test sets other values.
+    /// </summary>
+    public ConcurrentDictionary<ResourceName, IReadOnlyDictionary<OutputName, string>> Outputs { get; } = new();
+
+    public ValueTask<IReadOnlyDictionary<OutputName, string>> GetResourceOutputsAsync(IApplicationModel model, ApplicationResourceManifest resource, CancellationToken cancellationToken = default)
+    {
+        IReadOnlyDictionary<OutputName, string> outputs = Outputs.TryGetValue(resource.Name, out IReadOnlyDictionary<OutputName, string>? configured)
+            ? configured
+            : new Dictionary<OutputName, string> { [OutputName.Endpoint] = $"http://{resource.Name}.{model.Name}.svc" };
+
+        return ValueTask.FromResult(outputs);
+    }
+
     public IReadOnlyCollection<IApplicationResourceAction> GetResourceActions(IApplicationModel model, ApplicationResourceManifest resource)
     {
         return [Scale];

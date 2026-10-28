@@ -41,6 +41,25 @@ public interface IApplicationResourceDescriptor
     IReadOnlyList<ApplicationResourceDependency> Dependencies { get; }
 
     /// <summary>
+    /// Gets the placeholder for the endpoint the resource's platform gives it, through which its
+    /// dependents reach every instance, such as a load balancer's address.
+    /// </summary>
+    ApplicationResourceOutput Endpoint => Output(OutputName.Endpoint);
+
+    /// <summary>
+    /// Gets the placeholder for one of the resource's outputs: a value it has only once it is
+    /// deployed.
+    /// </summary>
+    /// <remarks>
+    /// The gateway that runs the resource records the value its infrastructure provider reports, and
+    /// fills it in where another resource refers to it.
+    /// </remarks>
+    /// <param name="name">The output's name.</param>
+    /// <returns>The placeholder.</returns>
+    /// <exception cref="System.ArgumentException"><paramref name="name"/> is <see langword="default"/>.</exception>
+    ApplicationResourceOutput Output(OutputName name);
+
+    /// <summary>
     /// Declares that this resource depends on another and needs the specified permissions on it.
     /// </summary>
     /// <remarks>

@@ -73,6 +73,16 @@ internal sealed class ApplicationResourceDescriptor : IApplicationResourceDescri
         return this;
     }
 
+    public ApplicationResourceOutput Output(OutputName name)
+    {
+        if (name.Value is null)
+        {
+            throw new ArgumentException(ErrorMessages.OutputNameMissing, nameof(name));
+        }
+
+        return new ApplicationResourceOutput(Set.Name, Provider, Name, name);
+    }
+
     public ApplicationResourceManifest ToManifest()
     {
         return new ApplicationResourceManifest(Provider, Name, Array.AsReadOnly(_dependencies.ToArray()));

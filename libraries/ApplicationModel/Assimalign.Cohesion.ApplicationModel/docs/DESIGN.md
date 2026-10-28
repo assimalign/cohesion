@@ -160,6 +160,17 @@ statuses a control plane uses (`NotFound`, `NotSupported`, `Rejected` for input 
 The contract lives here rather than in the gateway library so a transport can expose the actions
 without referencing a gateway package.
 
+**D16 — Outputs are placeholders until the platform reports them (owner request, 2026-10-28).** A
+resource has values only once it is deployed, such as the endpoint of the load balancer in front of
+its instances. A descriptor hands out an `ApplicationResourceOutput` for one (`Endpoint`, or
+`Output(name)`), which names its gateway, resource, and output, and carries no value. The gateway
+that runs the resource records what its infrastructure provider reports on the aggregate
+(`IApplicationResource.Outputs`, `ApplicationResource.SetOutputs`) and fills the value in where a
+dependent refers to it. Output names follow the action-name grammar; the provider decides which
+outputs a resource has. Values are strings, as configuration and environment variables carry them.
+Outputs belong to the logical resource, not to an instance: an instance's own address is a separate
+question for the gateway-to-instance channel.
+
 ## Threading
 
 An application builder and its sets are composed on one thread and are not safe for concurrent

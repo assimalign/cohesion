@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Threading.Tasks;
 
@@ -40,10 +41,11 @@ public sealed class JsonFileGatewayStoreTests : IDisposable
         JsonFileGatewayStore store = JsonFileGatewayStore.Create(_directory.FullPath);
         var instance = new ResourceManifest("Web", "orders-api", ResourceInstanceKey.New(), [new ResourceActionDescriptor("cors", ResourceActionKind.ReadWrite, IsStateful: true)]);
         byte[] binary = [0xFF, 0x00, 0x7B];
+        var outputs = new Dictionary<OutputName, string> { [OutputName.Endpoint] = "http://orders-api.root.svc" };
         var saved = new GatewayRecord(
             "root",
             ["east"],
-            [new GatewayResourceRecord("Web", "orders-api", "abc:1", [ResourceStateSnapshot.Create("cors", binary)], [instance])]);
+            [new GatewayResourceRecord("Web", "orders-api", "abc:1", [ResourceStateSnapshot.Create("cors", binary)], [instance], outputs)]);
 
         // Act
         await store.SaveAsync(saved);
@@ -58,6 +60,7 @@ public sealed class JsonFileGatewayStoreTests : IDisposable
         resource.State.ShouldHaveSingleItem().Value.ToArray().ShouldBe(binary);
         resource.Instances.ShouldHaveSingleItem().ShouldBe(instance with { Actions = resource.Instances[0].Actions });
         resource.Instances[0].Actions.ShouldBe(instance.Actions);
+        resource.Outputs.ShouldBe(outputs);
     }
 
     [Fact(DisplayName = DisplayPrefix + "A save replaces the previous record and leaves no temporary file")]

@@ -64,6 +64,22 @@ public interface IInfrastructureProvider
     ValueTask DeployResourceAsync(IApplicationModel model, ApplicationResourceManifest resource, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Reads the values the platform gave a deployed resource, such as the endpoint of the load
+    /// balancer or service in front of its instances.
+    /// </summary>
+    /// <remarks>
+    /// The gateway reads every resource's outputs once its startup completes, records them on the
+    /// resource, and fills them in where a dependent resource refers to them
+    /// (<see cref="ApplicationResourceOutput"/>). Answer from what the platform runs: an output the
+    /// platform assigns later, such as a load balancer's address, is read again on the next run.
+    /// </remarks>
+    /// <param name="model">The model the gateway runs.</param>
+    /// <param name="resource">The resource, from the model's <see cref="IApplicationModel.Deployment"/>.</param>
+    /// <param name="cancellationToken">Cancels the read.</param>
+    /// <returns>The outputs by name; empty when the resource has none.</returns>
+    ValueTask<IReadOnlyDictionary<OutputName, string>> GetResourceOutputsAsync(IApplicationModel model, ApplicationResourceManifest resource, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Starts a child gateway with its deployment manifest, or updates one already running; a child
     /// already running that manifest is left as it is.
     /// </summary>
