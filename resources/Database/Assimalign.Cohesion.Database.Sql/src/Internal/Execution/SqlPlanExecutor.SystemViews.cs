@@ -110,6 +110,7 @@ internal sealed partial class SqlPlanExecutor
                     for (int ordinal = 0; ordinal < table.Columns.Count; ordinal++)
                     {
                         var column = table.Columns[ordinal];
+                        var sequence = column.Identity is null ? null : catalog.Sequences.FirstOrDefault(sequence => sequence.IsIdentity && sequence.OwnerTableId == table.ObjectId && string.Equals(sequence.OwnerColumn, column.Name, StringComparison.OrdinalIgnoreCase));
                         yield return
                         [
                             database, table.Schema, table.Name, column.Name, (long)ordinal + 1,
@@ -120,11 +121,11 @@ internal sealed partial class SqlPlanExecutor
                             SystemDateTimePrecision(column.Type.Type),
                             column.Identity is null ? "NO" : "YES",
                             column.Identity is { } identity ? identity.IsAlways ? "ALWAYS" : "BY DEFAULT" : null,
-                            column.Identity?.Start.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                            column.Identity?.Increment.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                            column.Identity is null ? null : SqlPlanner.IdentityTypeBounds(column.Type.Type, column.Identity.Increment).Maximum.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                            column.Identity is null ? null : SqlPlanner.IdentityTypeBounds(column.Type.Type, column.Identity.Increment).Minimum.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                            column.Identity is null ? null : "NO",
+                            sequence?.Options.Start.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                            sequence?.Options.Increment.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                            sequence?.Options.Maximum.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                            sequence?.Options.Minimum.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                            sequence is null ? null : sequence.Options.Cycle ? "YES" : "NO",
                         ];
                     }
                     break;

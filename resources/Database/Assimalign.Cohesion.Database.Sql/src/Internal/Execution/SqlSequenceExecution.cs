@@ -49,19 +49,35 @@ internal sealed class SqlSequenceExecution : IDisposable
     // No catalog monitor or definition lease spans a lock wait. Non-definition table/CTAS
     // leases remain compatible with sequence DDL's non-definition lease. Constant references lock only
     // their objects; dynamic name expressions conservatively lock the captured directory.
-    // Grants belong to the transaction, including failed statements, cancellation and disposal;
+    // DML uses the transaction owner; provisioning uses its retained DDL owner, matching
+    // table grants and avoiding self-waits against its pre-acquired sequence X grants.
+    // Grants belong to that owner, including failed statements, cancellation and disposal;
     // the session/coordinator's existing commit/rollback/timeout cleanup releases them.
     internal static async ValueTask<SqlSequenceExecution> OpenAsync(SqlCatalog catalog, SqlStatementContext statement,
         SqlSequenceSessionState session, CancellationToken cancellationToken, SqlSequenceUsage? usage = null)
     {
+        // Identity/default binding pins an object id. One immutable incarnation needs no
+        // temporary directory, LINQ ordering buffers or copied singleton collection.
+        if (usage is { DynamicNames: false } && usage.Names.Count == 1 && usage.Names[0] is ulong id)
+        {
+            var sequence = catalog.FindSequence(id);
+            if (sequence is not null)
+            {
+                await statement.Coordinator.LockManager.AcquireAsync(statement.DdlLockOwner,
+                    LockResource.Object(id), LockMode.Shared, cancellationToken).ConfigureAwait(false);
+                CheckGrant(statement, statement.DdlLockOwner);
+                sequence = catalog.FindSequence(id);
+            }
+            return new SqlSequenceExecution(catalog, session, sequence?.Singleton ?? Array.Empty<SqlCatalogSequence>(), cancellationToken);
+        }
         var captured = (usage is null || usage.DynamicNames ? catalog.Sequences : ResolveNames(catalog, session, usage))
             .DistinctBy(sequence => sequence.ObjectId).OrderBy(sequence => sequence.ObjectId).ToArray();
         var current = new List<SqlCatalogSequence>(captured.Length);
         foreach (var sequence in captured)
         {
-            await statement.Coordinator.LockManager.AcquireAsync(statement.Transaction.Sequence,
+            await statement.Coordinator.LockManager.AcquireAsync(statement.DdlLockOwner,
                 LockResource.Object(sequence.ObjectId), LockMode.Shared, cancellationToken).ConfigureAwait(false);
-            CheckGrant(statement, statement.Transaction.Sequence);
+            CheckGrant(statement, statement.DdlLockOwner);
             // ALTER may have committed while this request waited: bind its new options under our lock.
             var resolved = catalog.FindSequence(sequence.ObjectId);
             if (resolved?.ObjectId == sequence.ObjectId) { current.Add(resolved); }
@@ -90,11 +106,14 @@ internal sealed class SqlSequenceExecution : IDisposable
     // AsyncLocal changes made inside OpenAsync do not flow back to its caller.
     internal void Enter() => _current.Value = this;
     public void Dispose() => _current.Value = _previous;
-    internal RowScope BeginRow()
+    internal IReadOnlyDictionary<ulong, long>? CaptureRow() => _rowValues.Count == 0 ? null : new Dictionary<ulong, long>(_rowValues);
+
+    internal RowScope BeginRow(IReadOnlyDictionary<ulong, long>? seed = null)
     {
         var previous = _rowValues;
         if (_rowDepth++ == 0) { _rowValues.Clear(); }
         else { _rowValues = new(); }
+        if (seed is not null) { foreach (var pair in seed) { _rowValues[pair.Key] = pair.Value; } }
         return new RowScope(this, previous);
     }
 
@@ -149,6 +168,25 @@ internal sealed class SqlSequenceExecution : IDisposable
         return next;
     }
 
+    internal long AllocatePreparedIdentity(SqlCatalogSequence sequence)
+    {
+        long value = _catalog.AllocateSequence(sequence);
+        _session.Values[sequence.ObjectId] = value; _session.Last = sequence.ObjectId;
+        return value;
+    }
+
+    internal long AllocateIdentity(ulong tableId, string column)
+    {
+        SqlCatalogSequence? sequence = null;
+        for (int i = 0; i < _sequences.Count; i++)
+        { var candidate = _sequences[i]; if (candidate.IsIdentity && candidate.OwnerTableId == tableId && string.Equals(candidate.OwnerColumn, column, StringComparison.OrdinalIgnoreCase)) { sequence = candidate; break; } }
+        if (sequence is null) { throw new SqlPlanningException("CS04067", ErrorMessages.SequenceChanged); }
+        long value = _catalog.AllocateSequence(sequence.ObjectId);
+        _session.Values[sequence.ObjectId] = value;
+        _session.Last = sequence.ObjectId;
+        return value;
+    }
+
     private SqlCatalogSequence Resolve(object name)
     {
         if (Equals(name, _lastName) && _lastResolved is { } cached) { return cached; }
@@ -171,7 +209,7 @@ internal sealed class SqlSequenceExecution : IDisposable
             ?? throw new SqlPlanningException("CS03073", ErrorMessages.SequenceMissing);
     }
 
-    private static bool TryName(string text, out string schema, out string name)
+    internal static bool TryName(string text, out string schema, out string name)
     {
         var parts = new List<string>(2);
         int index = 0;
@@ -242,12 +280,12 @@ internal sealed class SqlSequenceExecution : IDisposable
             case SqlCreateViewExpression view:
                 foreach (var node in SqlViewQuery.Nodes(view.Query)) { RefusePersistedNode(node); } break;
             case SqlCreateTableExpression create:
-                foreach (var column in create.Columns) { RefusePersisted(column.DefaultValue); foreach (var c in column.Constraints) { RefusePersisted(c.CheckExpression); } }
+                foreach (var column in create.Columns) { SqlSequenceDefault.RefuseUnsupported(column.DefaultValue); foreach (var c in column.Constraints) { RefusePersisted(c.CheckExpression); } }
                 foreach (var c in create.Constraints) { RefusePersisted(c.CheckExpression); }
                 break;
-            case SqlAlterTableExpression { Action: SqlAlterSetDefaultAction change }: RefusePersisted(change.DefaultValue); break;
+            case SqlAlterTableExpression { Action: SqlAlterSetDefaultAction change }: SqlSequenceDefault.RefuseUnsupported(change.DefaultValue); break;
             case SqlAlterTableExpression { Action: SqlAlterAddColumnAction add }:
-                RefusePersisted(add.Column.DefaultValue); foreach (var c in add.Column.Constraints) { RefusePersisted(c.CheckExpression); } break;
+                SqlSequenceDefault.RefuseUnsupported(add.Column.DefaultValue); foreach (var c in add.Column.Constraints) { RefusePersisted(c.CheckExpression); } break;
             case SqlAlterTableExpression { Action: SqlAlterAddConstraintAction add }: RefusePersisted(add.Constraint.CheckExpression); break;
         }
     }

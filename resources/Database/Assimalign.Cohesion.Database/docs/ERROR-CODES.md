@@ -177,6 +177,10 @@ structured-carrier messages remain unprefixed.
 | New (#1717, SQ-S2) | CS03075 | Schema/catalog — setval value is outside the sequence bounds (22003) |
 | New (#1717, SQ-S2) | CS03076 | Schema/expression — sequence value in an unsupported evaluation context, including NEXT VALUE FOR in RETURNING, or detached from execution (0A000) |
 | New (#1717, SQ-S2) | CS03077 | Schema/expression — malformed sequence reference or runtime sequence-call argument (22023) |
+| New (#1717, SQ-S3) | CS03078 | Schema/identity — ADD GENERATED requires NOT NULL (55000) |
+| New (#1717, SQ-S3) | CS03079 | Schema/identity — column has no identity (55000) |
+| New (#1717, SQ-S3) | CS03080 | Schema/dependency — sequence required by identity or column default (2BP01) |
+| New (#1717, SQ-S3) | CS03081 | Schema/ownership — invalid sequence OWNED BY target or identity ownership change (55000) |
 | COHSQLP001 | CS03101 | Schema/constraints |
 | COHSQLP002 | CS03102 | Schema/constraints |
 | COHSQLP003 | CS03103 | Schema/constraints |

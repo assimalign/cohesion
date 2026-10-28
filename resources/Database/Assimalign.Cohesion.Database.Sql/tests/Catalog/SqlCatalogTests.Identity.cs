@@ -59,7 +59,9 @@ public partial class SqlCatalogTests
         }
 
         // Act / Assert
-        Should.Throw<SqlCatalogException>(() => SqlCatalog.Open(storage)).Message.ShouldContain("id", Case.Sensitive);
+        var failure = Should.Throw<SqlCatalogException>(() => SqlCatalog.Open(storage));
+        if (nullable || increment == 0) { failure.Message.ShouldContain("id", Case.Sensitive); }
+        else { failure.Diagnostics[0].Code.ShouldBe("CS06061"); }
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql.Catalog] - Identity: corrupt counter records fail closed")]
@@ -83,8 +85,8 @@ public partial class SqlCatalogTests
 
         // Act / Assert
         var failure = Should.Throw<SqlCatalogException>(() => SqlCatalog.Open(storage));
-        if (!duplicate && !orphan) { failure.Message.ShouldBe("Identity counter of column 'id' is invalid."); }
-        else { failure.Message.ShouldContain("identity", Case.Insensitive); }
+        failure.Diagnostics[0].Code.ShouldBe("CS06059");
+        failure.Message.ShouldEndWith("Malformed or duplicate identity counter record.", Case.Sensitive);
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql.Catalog] - Identity: DROP TABLE removes the counter before reopen and recreate starts at START")]

@@ -17,7 +17,7 @@ internal sealed partial class SqlPlanExecutor
     // Physical compaction and ALTER TYPE share this copier and publication path.
     internal async Task RewriteTableAsync(SqlCatalogTable table, SqlStatementContext statement,
         CancellationToken cancellationToken, Func<SqlCatalogTable, ulong, SqlCatalogTable>? describe = null,
-        Func<object?[], object?[]>? transform = null, Action<SqlCatalogTable, SqlCatalogIndex[]>? validate = null, bool definitionChange = false)
+        Func<object?[], object?[]>? transform = null, Action<SqlCatalogTable, SqlCatalogIndex[]>? validate = null, bool definitionChange = false, IReadOnlyList<SqlCatalogIndex>? additionalIndexes = null)
     {
         // Lock/latch order: fail-fast schema admission -> old table X (before queueing)
         // -> fail-fast metadata admission (on the worker) -> reserved table X
@@ -29,8 +29,10 @@ internal sealed partial class SqlPlanExecutor
         // and logical transaction pin outlive all copying, directory cleanup and undo.
         // A source scan may retain a source-page pin (no latch) before target apply;
         // source and target owners are disjoint and reclamation waits for these pins.
+        var ownedGrants = await LockOwnedSequencesAsync([table], statement, cancellationToken).ConfigureAwait(false);
         await statement.Coordinator.LockManager.AcquireAsync(statement.DdlLockOwner,
             LockResource.Object(table.ObjectId), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
+        VerifyOwnedSequences([table], ownedGrants, statement);
         // Exact description identity also refuses a metadata edit with unchanged owner id.
         if (!_catalog.TryGetTable(table.Schema, table.Name, out var current) || !ReferenceEquals(current, table))
         {
@@ -40,13 +42,13 @@ internal sealed partial class SqlPlanExecutor
         describe ??= static (previous, id) => new SqlCatalogTable(id, previous.Schema, previous.Name,
             previous.Columns, previous.PrimaryKeyColumns, previous.Owner, previous.OwningSchema, previous.Constraints);
         await ReplaceTableStorageAsync([table], null, describe, transform, copyRows: true, restartIdentity: false,
-            SqlObjectIdentity.Table(table.Schema, table.Name), statement, cancellationToken, validate, definitionChange).ConfigureAwait(false);
+            SqlObjectIdentity.Table(table.Schema, table.Name), statement, cancellationToken, validate, definitionChange, additionalIndexes).ConfigureAwait(false);
     }
 
     private async Task ReplaceTableStorageAsync(SqlCatalogTable[] previous, IReadOnlyList<SqlCatalogTable>? named,
         Func<SqlCatalogTable, ulong, SqlCatalogTable>? describe, Func<object?[], object?[]>? transform,
         bool copyRows, bool restartIdentity, string actualObject, SqlStatementContext statement, CancellationToken cancellationToken,
-        Action<SqlCatalogTable, SqlCatalogIndex[]>? validate = null, bool definitionChange = false)
+        Action<SqlCatalogTable, SqlCatalogIndex[]>? validate = null, bool definitionChange = false, IReadOnlyList<SqlCatalogIndex>? additionalIndexes = null)
     {
         var oldIndexes = previous.SelectMany(table => _catalog.GetIndexes(table.ObjectId)).ToArray();
         var retiredIndexes = new Dictionary<SqlCatalogIndex, BTreeIndex>(ReferenceEqualityComparer.Instance);
@@ -59,6 +61,8 @@ internal sealed partial class SqlPlanExecutor
             .ToDictionary(pair => pair.ObjectId, pair => pair.Replacement);
         var indexes = oldIndexes.Select(index => new SqlCatalogIndex(mapping[index.TableObjectId].ObjectId,
             index.Name, index.ColumnNames, index.IsUnique, index.Owner, index.OwningSchema, index.IsPrimaryKey)).ToArray();
+        if (additionalIndexes is { Count: > 0 })
+        { indexes = indexes.Concat(additionalIndexes.Select(index => new SqlCatalogIndex(replacements[0].ObjectId, index.Name, index.ColumnNames, index.IsUnique, index.Owner, index.OwningSchema, index.IsPrimaryKey))).ToArray(); }
         var created = new List<SqlCatalogIndex>();
         bool published = false;
         Exception? operationFailure = null;
@@ -68,6 +72,15 @@ internal sealed partial class SqlPlanExecutor
             else { TruncateReserved?.Invoke(); }
             foreach (var table in replacements)
             {
+                // Newly reserved sequences are unreachable through either SQL name/id
+                // lookup. Taking their X grant here cannot wait for another session.
+                foreach (var column in copyRows ? table.Columns.Where(column => column.Identity is not null && previous[0].FindColumn(column.Name)?.Identity is null) : Enumerable.Empty<SqlCatalogColumn>())
+                {
+                    var sequence = _catalog.IdentitySequence(table.ObjectId, column.Name);
+                    await statement.Coordinator.LockManager.AcquireAsync(statement.DdlLockOwner,
+                        LockResource.Object(sequence.ObjectId), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
+                    SqlSequenceExecution.CheckGrant(statement, statement.DdlLockOwner);
+                }
                 await statement.Coordinator.LockManager.AcquireAsync(statement.DdlLockOwner,
                     LockResource.Object(table.ObjectId), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
                 _definitions.Get(table, cancellationToken);

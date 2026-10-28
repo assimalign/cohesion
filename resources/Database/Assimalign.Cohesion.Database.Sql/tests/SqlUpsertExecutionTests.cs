@@ -546,9 +546,8 @@ public sealed class SqlUpsertExecutionTests
 
         // Assert
         CheckRows(await RowsAsync(session, "SELECT * FROM t ORDER BY id"), [[1, "a", 3], [4, "b", 40]]);
-        var failure = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(
-            "INSERT INTO t (name) VALUES ('a') ON CONFLICT (name) DO UPDATE SET id = DEFAULT"));
-        failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS03025");
+        await session.ExecuteAsync("INSERT INTO t (name) VALUES ('a') ON CONFLICT (name) DO UPDATE SET id = DEFAULT");
+        CheckRows(await RowsAsync(session, "SELECT id FROM t WHERE name='a'"), [[6]]);
     }
 
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Upsert: materialized SELECT and DEFAULT VALUES share arbitration")]

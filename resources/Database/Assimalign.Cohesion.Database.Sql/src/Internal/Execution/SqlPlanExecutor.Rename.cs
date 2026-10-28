@@ -11,6 +11,7 @@ using Assimalign.Cohesion.Database.Language;
 using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Sql.Language;
+using Assimalign.Cohesion.Database.Transactions;
 using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
@@ -62,7 +63,13 @@ internal sealed partial class SqlPlanExecutor
             .OrderBy(child => child.ObjectId).ToArray();
         foreach (var child in children)
         {
-            await AcquireObjectLockAsync(statement, child.Schema, child.Name, "ALTER TABLE RENAME dependency", cancellationToken).ConfigureAwait(false);
+            // Only FK names change on this child; sequence ownership/options do not.
+            // Its table X serializes the metadata, and taking a child sequence lock here
+            // would reverse the established sequence-before-target-table order.
+            await statement.Coordinator.LockManager.AcquireAsync(statement.DdlLockOwner,
+                LockResource.Object(child.ObjectId), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
+            SqlSequenceExecution.CheckGrant(statement, statement.DdlLockOwner);
+            EnsureCanChange(child.Owner, child.Name, child.OwningSchema, "ALTER TABLE RENAME dependency", statement);
             EnsureCurrentDefinition(child);
         }
         EnsureCurrentDefinition(plan.Table);

@@ -15,6 +15,7 @@ internal sealed record SqlInsertSelectPlan(
     IReadOnlyList<int> TargetOrdinals,
     SqlPlan Source) : SqlPlan
 {
+    public Assimalign.Cohesion.Database.Sql.Language.SqlIdentityOverride Overriding { get; init; }
     public IReadOnlyList<SqlProjection>? Returning { get; init; }
     public SqlOnConflictPlan? OnConflict { get; init; }
 

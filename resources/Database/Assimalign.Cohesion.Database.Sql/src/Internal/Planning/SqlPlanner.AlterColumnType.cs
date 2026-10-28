@@ -78,6 +78,12 @@ internal sealed partial class SqlPlanner
         // Only unknown strings acquired the old column identity; numeric/Boolean
         // literals already have their own identity (tablecmds.c:15269-15304).
         var expression = SqlPersistedExpression.Load(previous.DefaultLiteral!, "ALTER COLUMN DEFAULT");
+        if (SqlSequenceDefault.IsCandidate(expression))
+        {
+            if (!CanAssignInsertType(DatabaseType.Int64, target.Storage.Type))
+            { throw new SqlPlanningException("CS05013", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DefaultTypeIncompatible, previous.Name, DatabaseType.Int64, target.Storage.Type)); }
+            return previous.DefaultLiteral!;
+        }
         var scope = new SqlExpressionEvaluator([], null, defaultCollation: _catalog.DefaultCollation,
             functions: _functions, cancellationToken: _cancellationToken, foldConstants: false);
         SqlDefinitionBinder.PinCalls(expression, scope, previous.DefaultFunctionCalls);

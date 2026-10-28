@@ -15,7 +15,7 @@ internal sealed partial class SqlPlanner
     /// no rows. Value-dependent conversions are checked by the shared insert path.
     /// </summary>
     private SqlInsertSelectPlan PlanInsertSelect(SqlCatalogTable table, IReadOnlyList<int> targetOrdinals,
-        SqlQueryBodyExpression source)
+        SqlQueryBodyExpression source, SqlIdentityOverride overriding = SqlIdentityOverride.None)
     {
         var plan = PlanQuery(source);
         var projections = InsertSourceProjections(plan);
@@ -27,6 +27,7 @@ internal sealed partial class SqlPlanner
         for (int i = 0; i < projections.Count; i++)
         {
             var target = table.Columns[targetOrdinals[i]];
+            if (target.Identity is not null && overriding == SqlIdentityOverride.User) { continue; }
             var sourceType = projections[i].Type;
             if (!CanAssignInsertType(sourceType, target.Type.Type))
             {

@@ -169,7 +169,7 @@ public sealed partial class SqlCatalog
         lock (_sync)
         {
             ThrowIfOffline();
-            return new SqlCatalogSnapshot(_tables.Values.Select(slot => slot.Table), _indexes.Values.Select(slot => slot.Index), _defaultCollation, _functions.Values.Select(slot => slot.Value), _domains.Values.Select(slot => slot.Value), _namespaces.Values.Select(slot => slot.Value), _views.Values.Select(slot => slot.Value)) { Sequences = _sequences.Count == 0 ? [] : Array.AsReadOnly(_sequences.Values.Select(slot => slot.Value).ToArray()) };
+            return new SqlCatalogSnapshot(_tables.Values.Select(slot => slot.Table), _indexes.Values.Select(slot => slot.Index), _defaultCollation, _functions.Values.Select(slot => slot.Value), _domains.Values.Select(slot => slot.Value), _namespaces.Values.Select(slot => slot.Value), _views.Values.Select(slot => slot.Value)) { Sequences = _sequences.Count == 0 ? [] : Sequences };
         }
     }
 
@@ -224,7 +224,10 @@ public sealed partial class SqlCatalog
                 (intent is null ? _preparedTruncateOwners.Contains(objectId) : !ReferenceEquals(intent, location))) { return default; }
             using var transaction = _storage.BeginTransaction();
             _storage.DeleteRow(transaction, location.PageId, location.SlotIndex);
+            DefinitionSlot<SqlCatalogSequence>[] orphaned = _sequences.Count == 0 ? [] : _sequences.Values.Where(slot => slot.Value.OwnerTableId == objectId).ToArray();
+            foreach (var sequence in orphaned) { DeleteSequence(transaction, sequence); }
             transaction.Commit();
+            foreach (var sequence in orphaned) { RemoveSequence(sequence.Value); }
             _pendingReclamations.Remove(objectId);
             _truncateRetirementsPublishing.Remove(objectId);
             _preparedTruncateOwners.Remove(objectId);
@@ -485,7 +488,10 @@ public sealed partial class SqlCatalog
             using (var transaction = _storage.BeginTransaction())
             {
                 var location = _storage.InsertRow(transaction, EncodeTable(table));
-                CommitCatalogChange(transaction, checked(_nextObjectId + 1), publication, actualObject: SqlObjectIdentity.Table(schema, name), createsObject: true);
+                ulong next = checked(_nextObjectId + 1);
+                var owned = StageOwnedSequences(transaction, null, table, ref next);
+                CommitCatalogChange(transaction, next, publication, actualObject: SqlObjectIdentity.Table(schema, name), createsObject: true);
+                owned();
                 _tables[(schema, name)] = new TableSlot(table, location);
             }
 
@@ -594,7 +600,8 @@ public sealed partial class SqlCatalog
                 var reclamationLocation = _storage.InsertRow(transaction, slot.Table.ObjectId,
                     SqlReclamationRecord.Encode(slot.Table.ObjectId, schema, name));
                 _storage.DeleteRow(transaction, slot.Location.PageId, slot.Location.SlotIndex);
-                DeleteIdentityCounter(transaction, slot.Table.ObjectId);
+                ulong next = _nextObjectId;
+                var owned = StageOwnedSequences(transaction, slot.Table, null, ref next);
 
                 foreach (var indexSlot in droppedIndexes)
                 {
@@ -608,12 +615,12 @@ public sealed partial class SqlCatalog
                 }
 
                 CommitCatalogChange(transaction, publication: publication, actualObject: SqlObjectIdentity.Table(schema, name));
+                owned();
                 _registrationsLocation = registrationsLocation;
                 _pendingReclamations.Add(slot.Table.ObjectId, new SqlReclamationIntent(reclamationLocation.PageId, reclamationLocation.SlotIndex));
             }
 
             _tables.Remove((schema, name));
-            _identityCounters.Remove(slot.Table.ObjectId);
 
             foreach (var indexSlot in droppedIndexes)
             {
@@ -1335,6 +1342,8 @@ public sealed partial class SqlCatalog
                         if (!_pendingReclamations.TryAdd(intent.ObjectId, new SqlReclamationIntent(unit.PageId, unit.SlotIndex))) { throw new System.IO.InvalidDataException(); }
                         _nextObjectId = Math.Max(_nextObjectId, intent.ObjectId + 1);
                         break;
+                    case 16: // Retired table-owned identity counters are never read in format 29.
+                        throw new SqlCatalogException("CS06059", ErrorMessages.IdentityCounterMalformed);
                     case sequenceRecordKind:
                     case sequenceCounterRecordKind:
                         try
@@ -1345,9 +1354,6 @@ public sealed partial class SqlCatalog
                         catch (Exception failure) when (failure is SqlCatalogException or DatabaseTypeException
                             or ArgumentException or OverflowException or FormatException)
                         { throw new SqlCatalogException("CS06061", ErrorMessages.SequenceRecordMalformed, failure); }
-                        break;
-                    case identityCounterRecordKind:
-                        LoadIdentityCounter(ref reader, unit.PageId, unit.SlotIndex);
                         break;
                     case tableRecordKind:
                         var table = DecodeTable(ref reader);
@@ -1472,7 +1478,7 @@ public sealed partial class SqlCatalog
         }
 
         var tablesById = _tables.Values.ToDictionary(slot => slot.Table.ObjectId, slot => slot.Table);
-        ValidateIdentityCounters(tablesById);
+
         ValidateSequenceDirectory(tablesById);
         ValidateViewDirectory(tablesById);
 
@@ -1542,17 +1548,16 @@ public sealed partial class SqlCatalog
     private void ReplaceTable(TableSlot slot, SqlCatalogTable updated, SqlCatalogScriptPublication? publication)
     {
         ValidateColumns(updated.Schema, updated.Name, updated.Columns, updated.PrimaryKeyColumns);
-        EnsureIdentityKept(slot.Table, updated);
         byte[] record = EncodeTable(updated);
 
         using (var transaction = _storage.BeginTransaction())
         {
             var location = UpsertRecord(transaction, slot.Location, record);
-            bool removedIdentity = !updated.Columns.Any(column => column.Identity is not null);
-            if (removedIdentity) { DeleteIdentityCounter(transaction, updated.ObjectId); }
-            CommitCatalogChange(transaction, publication: publication, actualObject: SqlObjectIdentity.Table(updated.Schema, updated.Name));
+            ulong next = _nextObjectId;
+            var owned = StageOwnedSequences(transaction, slot.Table, updated, ref next);
+            CommitCatalogChange(transaction, next, publication: publication, actualObject: SqlObjectIdentity.Table(updated.Schema, updated.Name));
+            owned();
             _tables[(updated.Schema, updated.Name)] = new TableSlot(updated, location);
-            if (removedIdentity) { _identityCounters.Remove(updated.ObjectId); }
         }
     }
 
@@ -1642,7 +1647,7 @@ public sealed partial class SqlCatalog
                 {
                     throw new SqlCatalogException("CS03053", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.IdentityMetadataInvalid, column.Name));
                 }
-                var (minimum, maximum) = IdentityBounds(column.Type.Type, identity.Increment);
+                var (minimum, maximum) = SqlSequenceOptions.IntegerBounds(column.Type.Type, identity: true);
                 if (hasIdentity || column.IsNullable || column.DefaultLiteral is not null || column.DomainName is not null ||
                     identity.Start < minimum || identity.Start > maximum)
                 {
@@ -2394,7 +2399,6 @@ public sealed partial class SqlCatalog
                 }
             }
             EnsurePhysicalLayoutKept(existing?.Table, table);
-            if (existing is not null) { EnsureIdentityKept(existing.Table, table); }
             ValidateColumns(table.Schema, table.Name, table.Columns, table.PrimaryKeyColumns);
             ValidateConstraints(table);
             var names = new HashSet<string>(table.Constraints.Select(constraint => constraint.Name), StringComparer.OrdinalIgnoreCase);
@@ -2426,7 +2430,10 @@ public sealed partial class SqlCatalog
                 var intent = _pendingReclamations[table.ObjectId];
                 _storage.DeleteRow(transaction, intent.PageId, intent.SlotIndex);
             }
-            CommitCatalogChange(transaction, publication: publication, actualObject: SqlObjectIdentity.Table(table.Schema, table.Name), createsObject: !replaceExisting);
+            ulong next = _nextObjectId;
+            var owned = StageOwnedSequences(transaction, existing?.Table, table, ref next);
+            CommitCatalogChange(transaction, next, publication: publication, actualObject: SqlObjectIdentity.Table(table.Schema, table.Name), createsObject: !replaceExisting);
+            owned();
             if (prepared)
             {
                 _pendingReclamations.Remove(table.ObjectId);

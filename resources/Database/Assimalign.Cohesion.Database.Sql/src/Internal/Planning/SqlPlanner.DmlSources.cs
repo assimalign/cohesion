@@ -16,6 +16,8 @@ internal sealed partial class SqlPlanner
         {
             var children = BindDmlSubqueries(where, target);
             var table = ResolveTable(target);
+            RecordIdentityUsage(table);
+            RecordReferentialSequenceUsage(table);
             return (table, DmlEvaluator(table.Columns, null, target), null, children);
         }
 
@@ -24,6 +26,8 @@ internal sealed partial class SqlPlanner
             throw new SqlPlanningException("CS05069", ErrorMessages.RightJoinDmlSource, statement.Location);
         }
         var targetTable = ResolveTable(target);
+        RecordIdentityUsage(targetTable);
+        RecordReferentialSequenceUsage(targetTable);
         var first = new SqlRelationSource(targetTable);
         // Cache derived-source bindings across namespace construction and expression binding.
         _queryScopes ??= new();

@@ -39,7 +39,7 @@ internal sealed partial class SqlPlanExecutor
             rows.Add(row);
         }
         return await ExecuteInsertRowsAsync(plan.Table, plan.TargetOrdinals, rows, statement, cancellationToken, plan.Returning,
-            onConflict: plan.OnConflict).ConfigureAwait(false);
+            onConflict: plan.OnConflict, overriding: plan.Overriding).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -50,7 +50,7 @@ internal sealed partial class SqlPlanExecutor
     private async Task<DatabaseResult> ExecuteInsertRowsAsync(SqlCatalogTable table, IReadOnlyList<int> targetOrdinals,
         IReadOnlyList<object?[]> sourceRows, SqlStatementContext statement, CancellationToken cancellationToken,
         IReadOnlyList<SqlProjection>? returning = null, IReadOnlyList<SqlBoundExpression[]>? valueRows = null,
-        SqlOnConflictPlan? onConflict = null)
+        SqlOnConflictPlan? onConflict = null, Assimalign.Cohesion.Database.Sql.Language.SqlIdentityOverride overriding = default, IReadOnlyList<IReadOnlyDictionary<ulong, long>?>? sequenceRows = null)
     {
         await AcquireReferenceIntentLocksAsync(table, statement, cancellationToken, incoming: onConflict?.DoUpdate == true).ConfigureAwait(false);
         var indexes = GetLiveIndexes(table, statement);
@@ -59,15 +59,24 @@ internal sealed partial class SqlPlanExecutor
         var defaults = bound.DefaultValues;
         // Identity and non-immutable calls (including sequence functions) must interleave
         // with conflict projection. Constants and immutable expressions keep batch locking.
-        bool orderedDefaults = onConflict is not null && Enumerable.Range(0, table.Columns.Count).Any(ordinal =>
+        bool orderedDefaults = false;
+        if (onConflict is not null)
         {
-            if (table.Columns[ordinal].Identity is null && defaults[ordinal] is not SqlBoundDefault { RequiresSourceOrder: true })
-            { return false; }
-            int target = -1;
-            for (int i = 0; i < targetOrdinals.Count; i++) { if (targetOrdinals[i] == ordinal) { target = i; break; } }
-            return target < 0 || valueRows?.Any(row => row[target].Kind == SqlBoundExpressionKind.DefaultItem) == true ||
-                onConflict.Assignments.Any(assignment => assignment.Ordinal == ordinal && assignment.Value.Kind == SqlBoundExpressionKind.DefaultItem);
-        });
+            for (int ordinal = 0; ordinal < table.Columns.Count && !orderedDefaults; ordinal++)
+            {
+                if (table.Columns[ordinal].Identity is null && defaults[ordinal] is not SqlBoundDefault { RequiresSourceOrder: true }) { continue; }
+                int target = -1;
+                for (int i = 0; i < targetOrdinals.Count; i++) { if (targetOrdinals[i] == ordinal) { target = i; break; } }
+                orderedDefaults = target < 0 || table.Columns[ordinal].Identity is not null && overriding == Assimalign.Cohesion.Database.Sql.Language.SqlIdentityOverride.User;
+                if (!orderedDefaults && valueRows is not null)
+                {
+                    for (int i = 0; i < valueRows.Count; i++)
+                    { if (valueRows[i][target].Kind == SqlBoundExpressionKind.DefaultItem) { orderedDefaults = true; break; } }
+                }
+                for (int i = 0; i < onConflict.Assignments.Count && !orderedDefaults; i++)
+                { var assignment = onConflict.Assignments[i]; orderedDefaults = assignment.Ordinal == ordinal && assignment.Value.Kind == SqlBoundExpressionKind.DefaultItem; }
+            }
+        }
         var domainEvaluator = bound.Domains.Count == 0 ? null : ExecutionEvaluator(null, cancellationToken, transactionTimestamp: statement.TransactionStart);
         var rows = new List<(byte[] Record, object?[] Values)>(sourceRows.Count);
         int identityOrdinal = -1;
@@ -94,6 +103,7 @@ internal sealed partial class SqlPlanExecutor
         {
             for (int rowIndex = 0; rowIndex < sourceRows.Count; rowIndex++)
             {
+                using var sequenceRow = SqlSequenceExecution.Current?.BeginRow(sequenceRows?[rowIndex]);
                 var sourceRow = sourceRows[rowIndex];
                 cancellationToken.ThrowIfCancellationRequested();
                 if (sourceRow.Length != targetOrdinals.Count)
@@ -106,7 +116,7 @@ internal sealed partial class SqlPlanExecutor
                 // Reserve a requested identity before any column's NOT NULL/default validation,
                 // including when ALTER appended it after another required column. A failed row
                 // consumes its generated value; explicit BY DEFAULT assignments never allocate.
-                if (identityOrdinal >= 0 && (identityTargetIndex < 0 || valueRows is not null &&
+                if (identityOrdinal >= 0 && (identityTargetIndex < 0 || overriding == Assimalign.Cohesion.Database.Sql.Language.SqlIdentityOverride.User || valueRows is not null &&
                     valueRows[rowIndex][identityTargetIndex].Kind == SqlBoundExpressionKind.DefaultItem))
                 {
                     values[identityOrdinal] = ResolveColumnDefault(table, identityOrdinal, defaults[identityOrdinal], statement, cancellationToken);
@@ -119,7 +129,8 @@ internal sealed partial class SqlPlanExecutor
                         continue;
                     }
                     int ordinal = targetOrdinals[i];
-                    if (table.Columns[ordinal].Identity is { IsAlways: true })
+                    if (table.Columns[ordinal].Identity is not null && overriding == Assimalign.Cohesion.Database.Sql.Language.SqlIdentityOverride.User) { continue; }
+                    if (table.Columns[ordinal].Identity is { IsAlways: true } && overriding != Assimalign.Cohesion.Database.Sql.Language.SqlIdentityOverride.System)
                     {
                         throw SqlPlanningException.IdentityViolation(table.Columns[ordinal].Name, ErrorMessages.IdentityInsertForbidden);
                     }
@@ -198,7 +209,7 @@ internal sealed partial class SqlPlanExecutor
         {
             try
             {
-                return CoerceForColumn(_catalog.AllocateIdentity(table), column);
+                return CoerceForColumn(SqlSequenceExecution.Current!.AllocateIdentity(table.ObjectId, column.Name), column);
             }
             catch (SqlCatalogException failure)
             {

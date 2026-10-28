@@ -1,5 +1,15 @@
 # Assimalign.Cohesion.Database.Sql.Language — Design
 
+## Owned identity syntax (#1717, SQ-S3)
+
+The identity AST retains explicit sequence options, SERIAL aliases lower to built-in integer
+BY DEFAULT identities, and ALTER identity actions are separate sealed leaves. INSERT and
+MERGE INSERT retain an explicit override enum, and sequence options retain structured owning
+table/column references. Renderer and capability profile cover the new forms; contextual
+names remain usable. The dialect records one identity per table, root constant sequence
+defaults, repeated-option limits and all owner choices. Catalog linkage and crash recovery
+belong to Sql; no compiled typed-schema declaration changed.
+
 ## Sequence grammar (#1717, SQ-S2)
 
 NEXT VALUE FOR is selected only after lookahead recognizes all three words. Unquoted
@@ -31,11 +41,11 @@ grouping-set deferral retains every group that passes HAVING, and deferred colla
 retention. Grouping-set group/aggregate state retains its existing statement-budget charge on
 both sequence and sequence-free paths; sequence deferral adds none.
 
-CREATE/ALTER/DROP SEQUENCE use sealed statement leaves and a closed option list preserving explicit NO bounds and bare RESTART. NEXT VALUE FOR is a scalar leaf; REGCLASS and its PostgreSQL suffix normalize to the existing cast AST. Sequence DDL and NEXT VALUE have independent profile gates and renderer round trips. Existing syntax identities reject malformed or duplicate options; OWNED BY remains CK00001. Five advertised function signatures execute in SQL, with per-row standard sharing independent of nextval. The language and live SQL conformance tables cover all four new clauses; no storage or wire contract changes. See DIALECT for defaults and accepted exclusions.
+CREATE/ALTER/DROP SEQUENCE use sealed statement leaves and a closed option list preserving explicit NO bounds and bare RESTART. NEXT VALUE FOR is a scalar leaf; REGCLASS and its PostgreSQL suffix normalize to the existing cast AST. Sequence DDL and NEXT VALUE have independent profile gates and renderer round trips. Existing syntax identities reject malformed or duplicate options; OWNED BY is represented by its owning table and column, or NONE. Five advertised function signatures execute in SQL, with per-row standard sharing independent of nextval. The language and live SQL conformance tables cover all four new clauses; no storage or wire contract changes. See DIALECT for defaults and accepted exclusions.
 
 ## Sequence catalog review (#1717)
 
-DIALECT.md distinguishes format 27's TYPE default-assignment flag from current format 28's
+DIALECT.md distinguishes format 27's TYPE default-assignment flag from current format 29's
 sequence records. Existing-sequence relation collisions use CS03070 (42P07) and identify the
 existing kind; table-on-table collisions retain their existing identity. The engine conformance
 regressions exercise CREATE TABLE, CTAS, RENAME and CREATE VIEW at this boundary. Sequence SQL

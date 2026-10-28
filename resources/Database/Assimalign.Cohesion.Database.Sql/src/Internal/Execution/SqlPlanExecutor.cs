@@ -192,6 +192,8 @@ internal sealed partial class SqlPlanExecutor
                 return await ExecuteCreateIndexAsync(createIndex, statement, cancellationToken).ConfigureAwait(false);
             case SqlDropIndexPlan dropIndex:
                 return await ExecuteDropIndexAsync(dropIndex, statement, cancellationToken).ConfigureAwait(false);
+            case SqlAlterIdentityPlan identity:
+                return await ExecuteAlterIdentityAsync(identity, statement, cancellationToken).ConfigureAwait(false);
             case SqlAddColumnPlan addColumn:
                 return await ExecuteAddColumnAsync(addColumn, statement, cancellationToken).ConfigureAwait(false);
             case SqlRenamePlan rename:
@@ -605,6 +607,7 @@ internal sealed partial class SqlPlanExecutor
         // empty row they are evaluated against does not have.
         var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken);
         var values = new List<object?[]>(plan.Rows.Count);
+        List<IReadOnlyDictionary<ulong, long>?>? sequenceRows = null;
         foreach (var valueRow in plan.Rows)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -617,9 +620,17 @@ internal sealed partial class SqlPlanExecutor
                     row[i] = evaluator.Evaluate(valueRow[i], Array.Empty<object?>(), copySharedBinary: true);
                 }
             }
+            var captured = SqlSequenceExecution.Current?.CaptureRow();
+            if (captured is not null)
+            {
+                sequenceRows ??= new(plan.Rows.Count);
+                while (sequenceRows.Count < values.Count) { sequenceRows.Add(null); }
+                sequenceRows.Add(captured);
+            }
+            else { sequenceRows?.Add(null); }
             values.Add(row);
         }
-        return await ExecuteInsertRowsAsync(plan.Table, plan.TargetOrdinals, values, statement, cancellationToken, plan.Returning, plan.Rows, plan.OnConflict).ConfigureAwait(false);
+        return await ExecuteInsertRowsAsync(plan.Table, plan.TargetOrdinals, values, statement, cancellationToken, plan.Returning, plan.Rows, plan.OnConflict, plan.Overriding, sequenceRows).ConfigureAwait(false);
     }
 
     private Task<DatabaseResult> ExecuteUpdateAsync(SqlUpdatePlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
@@ -1328,9 +1339,11 @@ internal sealed partial class SqlPlanExecutor
             throw new SqlExecutionException(SqlExecutionException.UndefinedTableCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.TableMissing, plan.Schema, plan.Name));
         }
 
+        var ownedGrants = await LockOwnedSequencesAsync([before], statement, cancellationToken).ConfigureAwait(false);
         await statement.Coordinator.LockManager.AcquireAsync(
             statement.DdlLockOwner, LockResource.Object(before.ObjectId), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
 
+        VerifyOwnedSequences([before], ownedGrants, statement);
         SqlCatalogTable current = ReadCurrentTable(before);
         EnsureCanChange(current.Owner, current.Name, current.OwningSchema, "ALTER TABLE DROP COLUMN", statement);
         EnsureSameIdentity(before, current);
@@ -1381,9 +1394,11 @@ internal sealed partial class SqlPlanExecutor
         // The DDL-vs-writer interlock: an Exclusive table lock waits for every
         // in-flight row writer (IntentExclusive holders) to finish before the
         // table is dropped — and blocks new ones until this transaction ends.
+        var ownedGrants = await LockOwnedSequencesAsync([table], statement, cancellationToken).ConfigureAwait(false);
         await statement.Coordinator.LockManager.AcquireAsync(
             statement.DdlLockOwner, LockResource.Object(table.ObjectId), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
 
+        VerifyOwnedSequences([table], ownedGrants, statement);
         SqlCatalogTable current = ReadCurrentTable(table);
         EnsureCanChange(current.Owner, current.Name, current.OwningSchema, "DROP TABLE", statement);
         EnsureSameIdentity(table, current);
@@ -1445,9 +1460,11 @@ internal sealed partial class SqlPlanExecutor
     {
         if (_catalog.TryGetTable(schema, name, out var table))
         {
+            var ownedGrants = await LockOwnedSequencesAsync([table], statement, cancellationToken).ConfigureAwait(false);
             await statement.Coordinator.LockManager.AcquireAsync(
                 statement.DdlLockOwner, LockResource.Object(table.ObjectId), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
 
+            VerifyOwnedSequences([table], ownedGrants, statement);
             SqlCatalogTable current = ReadCurrentTable(table);
             EnsureCanChange(current.Owner, current.Name, current.OwningSchema, operation, statement);
             EnsureSameIdentity(table, current);

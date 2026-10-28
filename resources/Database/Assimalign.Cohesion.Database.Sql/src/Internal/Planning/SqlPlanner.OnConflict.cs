@@ -59,7 +59,7 @@ internal sealed partial class SqlPlanner
             if (!assigned.Add(ordinal))
             { throw new SqlPlanningException("CS01019", string.Format(CultureInfo.CurrentCulture,
                 ErrorMessages.DuplicateAssignment, assignment.ColumnName), assignment.Value.Location); }
-            if (table.Columns[ordinal].Identity is { IsAlways: true })
+            if (table.Columns[ordinal].Identity is { IsAlways: true } && assignment.Value is not SqlDefaultExpression)
             { throw SqlPlanningException.IdentityViolation(assignment.ColumnName, ErrorMessages.IdentityUpdateForbidden); }
             if (assignment.Value is SqlDefaultExpression) { assignments.Add((ordinal, SqlBoundDefaultItem.Instance)); continue; }
             Validate(assignment.Value);

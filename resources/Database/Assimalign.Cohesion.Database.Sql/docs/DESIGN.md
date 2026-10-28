@@ -1,5 +1,61 @@
 # Assimalign.Cohesion.Database.Sql — Design
 
+## Owned identity sequences (#1717, SQ-S3)
+
+SQL format **29** extends kind 18 with owning table id, column name and identity ownership;
+kind 16 is retired and never decoded. Format 28 and earlier are refused by the existing open
+gate. Compiled-schema v8 and wire/result framing are unchanged. Table creation, identity
+addition/removal, renames, storage replacement and owned-sequence deletion publish directory
+changes in the same catalog transaction. Reopen validates global sequence ids before orphan cleanup, both ownership directions and
+sequence-default references; interrupted prepared sequences remain invisible and are reclaimed.
+
+Identity allocation uses the shared kind-19 allocator, sequence object grants and session
+currval/lastval state. Its cached catalog allocation remains allocation-free. Direct identity facet lookup also
+avoids enumerator allocation. A single pinned sequence reuses its immutable singleton capture;
+sequence-free DDL skips owned-sequence bookkeeping. Release allocation caps remain unchanged.
+The retirement probe warms append and removal and takes the minimum of three equal-size
+100-owner rounds, excluding confirmed process-shared scratch-buffer misses. Both standalone
+and identity CACHE default to 1; the established durable reservation limit remains 32.
+Column DEFAULT nextval/NEXT VALUE FOR retains an S:object-id dependency in the existing
+persisted call vector. RESTRICT identifies the dependent default; CASCADE clears defaults
+atomically. Compound and dynamic sequence defaults, views and other persisted contexts keep
+CS03074. Schema CASCADE clears cross-schema defaults. Default DDL takes Shared sequence grants before
+table grants and revalidates every S:id under the publication monitor; deletion during a wait
+cannot leave a dangling default. Ordinary owned-object removal refuses
+external defaults until explicitly removed. No cross-assembly visibility or public interface
+was added; language AST leaves remain sealed and concrete-first.
+
+Lock/latch order is sequence grants (each captured set ordered by object id), table/row grants, coordinator apply gate,
+catalog monitor and storage latches. DML captures identity/default sequences before taking
+table grants, including referential action targets. ALTER identity and owned-object removal
+use X grants; allocation uses S grants. After table grants, DDL verifies the owned sequence
+set has not changed. Every grant belongs to the transaction owner and existing cleanup owns
+success, failure, cancellation and disposal. Newly prepared invisible sequence ids cannot
+have external waiters and acquire their X grants before copying. Worker rewrite preparation
+also takes sequence grants before its old-table X grant. Deferred provisioning reserves
+owned sequence X grants before its table set and uses that retained owner for statement
+sequence grants, so worker steps cannot wait against their own reservation.
+
+Populated ADD identity uses the same recoverable prepared-owner copier and atomic publisher
+as ALTER TYPE, inline on the SQL DDL execution path. Physical owner-page/slot scan order
+assigns values; source MVCC stamps, existing indexes and new enforcing indexes are preserved.
+Copied chunks are durable before publication; a crash leaves either the old table or the full
+new column. Backfill calls the shared allocator outside the apply gate and records the caller's
+sequence state. ADD GENERATED on an existing NOT NULL column retains its data. TRUNCATE
+maps ownership to replacement ids and persists restart endpoints in the publication commit.
+
+The SQL dialect records defaults, one identity per table, SERIAL's deliberate BY DEFAULT
+meaning, override behavior and the remaining exclusions. PostgreSQL anchors are
+parse_utilcmd.c:389-563, sequence.c:1598-1694, tablecmds.c:8322-8680 and
+rewriteHandler.c:930-972,1015-1027. The new diagnostics are:
+
+| Code | Condition | SQLSTATE |
+|---|---|---|
+| CS03078 | ADD GENERATED needs an existing NOT NULL column | 55000 |
+| CS03079 | The column has no identity | 55000 |
+| CS03080 | A sequence is required by an identity or column default | 2BP01 |
+| CS03081 | Invalid sequence column ownership or identity ownership change | 55000 |
+
 ## SQL sequence surface (#1717, SQ-S2)
 
 Ready reports whether currval/lastval entries or changed session settings require reset. Pool return
@@ -103,10 +159,10 @@ describes reset-value sources; src/backend/utils/misc/guc.c:1927-1929 preserves 
 settings, and :1940-1945 restores reset_val. Pool return consults Ready after ROLLBACK and sends
 the family-declared reset only for retained state. The two-byte Ready changes no message identifier.
 
-Persisted DEFAULT/CHECK/domain/view/function expressions and declared-script sequence DDL are refused
+Persisted CHECK/domain/view/function expressions and declared-script sequence DDL are refused; column sequence defaults use the SQ-S3 dependency path and other compound sequence DEFAULT expressions remain refused
 with CS03074 until dependency and receipt ownership are modeled. CASCADE/RESTRICT are equivalent
-for these unowned generators. SQL format 28 already represents all definitions and counters.
-SQ-S3 owns identity linkage, SERIAL and owned dependencies. The full SQL-visible defaults,
+for these unowned generators. SQL format 29 already represents all definitions and counters.
+SQ-S3 supplies identity linkage, SERIAL and owned dependencies. The full SQL-visible defaults,
 setval semantics, standard row sharing and deliberate PostgreSQL differences are in DIALECT.
 Reference: PostgreSQL src/backend/commands/sequence.c:867-1044,1415-1587; NEXT VALUE FOR is absent
 from PostgreSQL, whose doc/src/sgml/ref/create_sequence.sgml compatibility section confirms it.
@@ -418,44 +474,15 @@ parse_utilcmd.c:202). The live invalid-statement conformance corpus checks both 
 boundaries, statement atomicity, connection usability, existing CS00005 type limits and
 CS05017 aggregate placement. No public API or persisted representation changes.
 
-## Identity execution (#1123)
+## Identity execution (#1123, #1717)
 
-CREATE and ADD column planning validate the identity mode, integer type, nonzero increment,
-START range, DEFAULT exclusion and one-column limit before catalog writes. ADD checks no live
-rows under the existing exclusive DDL lock. Typed schema reconciliation refuses identity facets
-with SqlSchemaMigrationException / CS03105 and "Nothing was changed.".
-Identity metadata implies NOT NULL; COLUMN_DEFAULT remains null. INFORMATION_SCHEMA appends
-seven identity fields after DATETIME_PRECISION, preserving its previous ordinals.
-
-The common INSERT VALUES / INSERT SELECT path allocates omitted or DEFAULT identity values
-before any column's NOT NULL/default validation or application of the row write set, independent
-of the identity column's ordinal. BY DEFAULT UPDATE DEFAULT shares that path;
-ALWAYS rejects explicit INSERT values and every UPDATE assignment with CS03025. Explicit
-BY DEFAULT values leave the counter untouched; existing indexes enforce any later collision.
-All rows are materialized before application, so range exhaustion inserts nothing. Existing
-plans and EXPLAIN mappings remain sufficient.
-
-SqlCatalog.AllocateIdentity reserves up to 32 values per durable catalog commit, separate from
-the data transaction and table record. It holds only the catalog's existing metadata lock and
-adds no coordinator lock or table replacement. Rollback or a failing constraint consumes values;
-allocation order does not imply commit order. After reopen, allocation skips every reserved
-value, including unused ones, so no returned value is reused after a crash. This follows the
-nontransactional and ahead-of-use logging pattern in PostgreSQL sequence.c:690-729,808-849
-(local reference clone), with one database-wide catalog cursor instead of per-session caches.
-The block size 32 is an implementation choice; the final block is shortened to the column's
-direction-dependent bounds: ascending 1 through the type maximum, descending the type minimum
-through -1 (PostgreSQL `src/backend/commands/sequence.c:1462,1494,1529`). Planning, catalog
-validation, allocation and INFORMATION_SCHEMA use these same bounds. Exhaustion names the
-column, SQL type and limit once, with the catalog exception retained as its cause.
-Int128 intermediates make all counter arithmetic checked independently
-of SQL expression arithmetic. Table DROP retires the counter atomically; recreate begins at START.
-The unreleased record-space format advances **14 -> 15**, table extension **4 -> 5**, with no
-upgrade path. No new interface, visibility grant, project reference or wire format is introduced.
-
-The common column parser refuses explicit NULL with NOT NULL, PRIMARY KEY or IDENTITY
-in either order using CS00003 and the column name, including table primary keys. ALTER of
-an existing primary key uses that coded refusal too. SERIAL/BIGSERIAL/SMALLSERIAL are
-rejected when SQL or native domains are created, with CK00001 and an IDENTITY suggestion.
+Identity definitions imply NOT NULL and exclude a separate DEFAULT. SQL accepts one identity
+column per table; typed schema reconciliation continues to refuse identity facets with CS03105.
+INFORMATION_SCHEMA.COLUMNS exposes the generation mode and current owned sequence options.
+Omitted or DEFAULT values allocate before row validation; rollback and failed constraints leave
+gaps. ALWAYS accepts UPDATE DEFAULT, and explicit INSERT values require OVERRIDING SYSTEM
+VALUE. OVERRIDING USER VALUE generates either kind. The shared allocator, owned-sequence
+lifecycle, recoverable populated-table backfill and lock order are described above.
 
 ## RIGHT normalization and grouped namespaces (#1525, SQ-J1)
 
@@ -2907,7 +2934,7 @@ utility.c:1480-1483 and namespace.c:526-531.
 
 AUTHORIZATION and nested schema elements are rejected with CK00001. Atomic nested statements
 would require a separate DDL execution contract because each existing statement self-commits.
-Record-space format 28 has no upgrade reader: export older databases, recreate and explicitly
+Record-space format 29 has no upgrade reader: export older databases, recreate and explicitly
 CREATE SCHEMA for non-dbo table namespaces before importing. Namespace records are not synthesized.
 
 The area root carries only the model-independent ownership contracts (`DatabaseObjectOwner`,
@@ -3737,7 +3764,7 @@ project reference or InternalsVisibleTo change is required.
   format, no upgrade path.** The catalog stores the format version of the whole
   data file set, rows and the index trees that ride it (a kind-4 record for
   versions 1–3, a kind-8 record from version 4). The engine reads and writes
-  format 28 only: format 6's stamped rows in per-object page chains whose index keys use the
+  format 29 only: format 6's stamped rows in per-object page chains whose index keys use the
   temporal identity encoding (#1099, below), in index trees of B-tree page format
   2, which order entries by key, entry reference and writer (#1194,
   `Database.Indexing` DESIGN), decoded through each table's physical column
@@ -3763,7 +3790,7 @@ project reference or InternalsVisibleTo change is required.
   after a crash. No format bump is needed: the claim is consulted only for marker-free catalogs
   (RecordSpaceFormatVersion == 1), which carry no format number. Older engines harmlessly
   ignore the claim, so a bump would fence no interrupted catalog and would unnecessarily
-  refuse every intact format-28 database. Claim-file creation and deletion are not directory-fsynced.
+  refuse every intact format-29 database. Claim-file creation and deletion are not directory-fsynced.
   A lost create loses the proof and refuses adoption; a lost delete leaves a stale claim fenced
   by the checkpointed data header. Neither permits adopting committed data as creation.
   Create and open complete a marker-free catalog only when the catalog-owned internal
@@ -6420,9 +6447,7 @@ takes 35 and 16 µs.
 
 ## Non-goals (current cut)
 
-Identity columns and the SQ-S2 standalone sequence DDL/functions execute. SQ-S3 retains
-SCOPE_IDENTITY, OVERRIDING, identity RESTART, generation-mode changes, identity linkage to
-standalone sequences and identity backfill on populated tables as exclusions (#1123, #1717).
+Identity columns, standalone sequences, identity ALTER/RESTART, OVERRIDING, SERIAL and populated-table backfill execute. SCOPE_IDENTITY and pg_get_serial_sequence remain excluded (#1123, #1717).
 Compiled typed schemas cannot declare identity metadata; SQL scripts can create
 identity tables through the ordinary SQL executor.
 
@@ -7104,8 +7129,8 @@ two questions for the planner: *what objects exist* (with stable identities) and
 
 #### Catalog: Standalone sequences and shared allocation (#1717, SQ-S1)
 
-SQL format **28** supersedes 27 with kind **18** sequence definitions and kind **19**
-reservations. Kind 18 stores object id, SQL namespace, relation name, integer type, START,
+SQL format **28** introduced kind **18** sequence definitions and kind **19** reservations;
+current format **29** extends kind 18 with ownership and refuses earlier files. Kind 18 stores object id, SQL namespace, relation name, integer type, START,
 INCREMENT, MINVALUE, MAXVALUE, CACHE and CYCLE as a typed tuple. Kind 19 stores object id,
 durable endpoint and a called flag; a false flag persists an explicit restart before first use.
 Earlier database formats are refused by the existing format gate; compiled-schema v8 is unchanged.
@@ -7148,7 +7173,7 @@ The identity cursor retains T1's three-field carrier layout; sequence-only resta
 lives in its sealed internal derived carrier, without an extra object. Cached sequence allocation allocates zero managed bytes;
 cached identity allocation retains T1's existing readonly-column facet lookup budget.
 Internal allocator captures use Catalog.Sequences. SQ-S2 extends SqlCatalogSnapshot internally
-with immutable sequence descriptions; empty sequence directories reuse the empty array. Identity counters remain table-owned kind 16 until SQ-S3; their bounds, 32-value gaps, diagnostics,
+with immutable sequence descriptions; empty sequence directories reuse the empty array. Identities use owned kind-18 definitions and kind-19 counters in SQ-S3; their bounds, 32-value gaps, diagnostics,
 TRUNCATE RESTART/CONTINUE, rewrite and TYPE behavior remain unchanged.
 
 Lock order is existing caller object grants, catalog monitor, catalog storage transaction/apply
@@ -7205,7 +7230,7 @@ All columns, constraints, ownership, physical ordinals
 and frozen missing values are copied. CONTINUE moves the exact volatile cursor/block and the
 durable last reservation; RESTART removes the counter so allocation resumes at START. No new
 record layout, durable record kind, public catalog member, interface or format version is needed:
-SQL remains format 28. Failed preparation and crash recovery use kind 14 unchanged.
+SQL remains format 29. Failed preparation and crash recovery use kind 14 unchanged.
 
 A short-lived coordinator snapshot pin brackets catalog publication: it is active before the
 swap and rolled back just afterwards. Its sequence is a visibility marker, with no persisted
@@ -7331,7 +7356,7 @@ including reservation-hook, lock, binding and builder failures and a lost name r
 intent is then listed as pending until reclamation finishes, matching reopen. Earlier failures leave
 no table; the existing worker reclaims the abandoned owner after the statement/snapshot fences
 clear. Recovery restores either no table plus reclamation
-work, or the entire table with no intent. SQL stays format 28: ordinary table records and kind 14
+work, or the entire table with no intent. SQL stays format 29: ordinary table records and kind 14
 already express this protocol. There is no public catalog seam, friend grant or new interface.
 CTAS follows existing self-committing DDL and is refused inside BEGIN with CS04003 (25001);
 commit-time transactional DDL needs broader catalog machinery and remains outside this run.
@@ -7370,7 +7395,7 @@ Integer identity types may change within the existing integer family, retaining 
 Domain identity targets refuse, following PostgreSQL parse_utilcmd.c:3700-3727 and
 sequence.c:1382-1389. Publication validates the allocated counter against the target range
 (sequence.c:1547-1571), trims unissued reservation tails to that range and persists a valid
-kind-16 endpoint. This preserves the live cursor without making a narrower table unreadable
+kind-19 endpoint. This preserves the live cursor without making a narrower table unreadable
 after reopen; ordinary restart may still skip unused reserved values, as before.
 Full-definition storage-type, scale, domain and collation changes share this rewrite; decision
 49a's validation-only nullability/length/precision path remains intact. Full definitions refuse
@@ -7520,8 +7545,8 @@ child between discovery and IS grant, assert rediscovery, and verify rollback ca
 orphan. Parent DELETE must wait for the child's shared lock on the replacement parent's row.
 The null-key shortcut follows local PostgreSQL src/backend/utils/adt/ri_triggers.c:458-496;
 no reference-engine code is copied.
-Existing codes retain their conditions. SQL remains format 28: ordinary dense table records,
-kind-14 intents and the existing TRUNCATE publication contract are readable by the format-28
+Existing codes retain their conditions. SQL remains format 29: ordinary dense table records,
+kind-14 intents and the existing TRUNCATE publication contract are readable by the format-29
 engine, so this operation changes no persisted contract. Compiled-schema v8 and catalog record
 shapes stay unchanged. The existing coded open gate refuses all earlier files; no upgrade or legacy reader is added.
 
@@ -7615,7 +7640,7 @@ would tell every caller the value is changeable and then guard that promise at
 runtime.
 
 Table metadata extension version 2 introduced one collation identifier per column
-after the existing constraints. Current format 28 requires the complete table extension 7 record,
+after the existing constraints. Current format 29 requires the complete table extension 7 record,
 including resolved-call vectors, identity facets and frozen missing-value literals described below. Column additions,
 drops, and restart preserve explicit overrides. An index inherits its key
 columns' effective collations; the SQL engine verifies index eligibility and
@@ -7693,7 +7718,7 @@ codec, the key encoding and every comparison read, so they do not consult the do
   column (the primary key's implicit NOT NULL).
 - **Persistence: table extension version 4** (data-storage format 7). After the dropped
   ordinals, one optional string per live column, NULL for a column of a built-in type,
-  which this catalog always writes. Current format 28 also requires the call vectors, identity facets and extension 7 missing-value literals and TYPE default-assignment flags;
+  which this catalog always writes. Current format 29 also requires the call vectors, identity facets and extension 7 missing-value literals and TYPE default-assignment flags;
   the format gate refuses earlier databases rather than loading their definitions. A persisted blank
   name fails the load with `SqlCatalogException`, as does a blank `domainName` at the
   column's constructor (`ArgumentException`).
@@ -8096,34 +8121,20 @@ No behavior changed. The `Abstractions/` folder is gone.
 `SqlCatalogException : DatabaseException` for catalog violations (duplicate or
 missing tables/columns, primary-key drops, malformed persisted records).
 
-#### Catalog: Identity counter records (#1123)
+#### Catalog: Owned identity records (#1123, #1717)
 
-Catalog kind **16** is pre-assigned to identity counters (15 is reserved for #1030; 17 for
-#1124). Its tuple is kind Int32, owning table ObjectId Int64, and last reserved value Int64.
-There is at most one counter per table; load refuses duplicates, orphaned counters, out-of-range
-values and values outside the START/INCREMENT progression. Generator bounds follow PostgreSQL
-`src/backend/commands/sequence.c:1462,1494`: ascending 1 through the type maximum,
-descending the type minimum through -1. Load builds one ObjectId-to-table map, so validating
-all counters costs O(tables + counters), including the single pass over table columns.
-Identity metadata is immutable SqlCatalogColumn.Identity / SqlCatalogIdentity in table-extension
-version **5**. SQL record-space
-format **15** supersedes 14; earlier files are refused, with no migration or compatibility reader.
-
-AllocateIdentity is a concrete public catalog member, as ReserveTableAsync and PublishTableAsync
-are. Under the existing metadata lock it durably reserves up to 32 values with checked Int128
-intermediate arithmetic before delivering any. Reservations self-commit only the counter and
-never replace the table object, advance DDL generation or publish script receipts. The cursor
-and unused block stay private and volatile; reopen begins after the last reserved value, so
-crashes cannot reuse a delivered value. Unconfirmed commits fence the catalog through its existing
-storage-offline gate. Data transaction rollback does not reclaim values. DROP TABLE deletes the
-counter in the catalog's unpublication transaction; dropping the identity column likewise retires
-it atomically. A recreated table gets a fresh ObjectId and starts from START.
+Kind 16 is retired. Format 29 represents identities with the shared kind-18 sequence definition
+and kind-19 durable reservation. The definition records the owning table id, column and identity
+flag. Ownership and table metadata publish atomically, and load checks both directions.
+AllocateIdentity remains the existing concrete public entry point and uses the same allocator
+as standalone sequences. Cached allocation creates no managed objects. Durable reservations
+self-commit outside data transactions, so rollback leaves gaps and reopen skips unused values.
+Dropping a table or column removes its owned sequences in the catalog publication transaction.
 
 #### Catalog: Non-goals
 
-- Identity linkage to general sequences (SQ-S3) and permissions (permissions are
-  a future SQL engine feature, #177). Virtual system views are engine projections
-  of this catalog and require no view records here.
+- Permissions remain a future SQL engine feature (#177). Virtual system views are engine
+  projections of this catalog and require no view records here.
 - Multi-statement DDL atomicity (see self-committing DDL above). The migration
   layer compensates completed reversible statements on failure; an MVCC bracket
   spanning catalog and data DDL requires a future catalog batch-transaction seam.

@@ -62,6 +62,7 @@ public sealed partial class SqlCatalog
             var tables = new Dictionary<(string Schema, string Name), SqlCatalogTable>(TableNameComparer.Instance);
             var indexes = new List<SqlCatalogIndex>();
             var views = new Dictionary<string, SqlCatalogView>(StringComparer.OrdinalIgnoreCase);
+            var sequences = new Dictionary<ulong, SqlCatalogSequence>();
             foreach (var retired in _orderedTruncations)
             {
                 if (snapshot.IsVisible(retired.Marker)) { continue; }
@@ -71,6 +72,7 @@ public sealed partial class SqlCatalog
                 // predates, rather than a later empty replacement of the same table.
                 if (!tables.TryAdd((table.Schema, table.Name), table)) { continue; }
                 indexes.AddRange(before.GetIndexes(table.ObjectId));
+                foreach (var sequence in before.Sequences.Where(sequence => sequence.OwnerTableId == table.ObjectId)) { sequences.TryAdd(sequence.ObjectId, sequence); }
                 foreach (var view in before.Views.Where(view => view.TableDependencies.Contains(table.ObjectId)))
                 {
                     views.TryAdd(SqlObjectIdentity.View(view.Schema, view.Name), view);
@@ -82,7 +84,8 @@ public sealed partial class SqlCatalog
                 _indexes.Values.Select(slot => slot.Index).Concat(indexes),
                 _defaultCollation, _functions.Values.Select(slot => slot.Value), _domains.Values.Select(slot => slot.Value),
                 _namespaces.Values.Select(slot => slot.Value),
-                _views.Where(pair => !views.ContainsKey(pair.Key)).Select(pair => pair.Value.Value).Concat(views.Values));
+                _views.Where(pair => !views.ContainsKey(pair.Key)).Select(pair => pair.Value.Value).Concat(views.Values))
+                { Sequences = Array.AsReadOnly(_sequencesById.Values.Where(sequence => !sequences.ContainsKey(sequence.ObjectId)).Concat(sequences.Values).ToArray()) };
         }
     }
 
@@ -129,8 +132,15 @@ public sealed partial class SqlCatalog
             // publication/cleanup has finished; successful publication removes these intents.
             var locations = replacements.Select(table => _storage.InsertRow(transaction, table.ObjectId,
                 SqlReclamationRecord.Encode(table.ObjectId, table.Schema, table.Name))).ToArray();
+            Action[] owned = describe is null ? [] : replacements.Select((table, index) =>
+            {
+                var additions = table.Columns.Where(column => column.Identity is not null && expected[index].FindColumn(column.Name)?.Identity is null).ToArray();
+                if (additions.Length == 0) { return (Action)(() => { }); }
+                return StageOwnedSequences(transaction, null, new SqlCatalogTable(table.ObjectId, table.Schema, table.Name, additions), ref next);
+            }).ToArray();
             var counterLocation = PersistCounter(transaction, next, _ddlGeneration);
             transaction.Commit();
+            foreach (var publish in owned) { publish(); }
             _counterLocation = counterLocation;
             _nextObjectId = next;
             for (int index = 0; index < replacements.Length; index++)
@@ -187,7 +197,8 @@ public sealed partial class SqlCatalog
                 return (pair.Key, Old: pair.Value, View: replacement, Record: record);
             }).ToArray();
             var before = new SqlCatalogSnapshot(expected, _indexes.Values.Select(slot => slot.Index).Where(index => ids.Contains(index.TableObjectId)),
-                views: _views.Values.Select(slot => slot.Value).Where(view => view.TableDependencies.Any(ids.Contains)));
+                views: _views.Values.Select(slot => slot.Value).Where(view => view.TableDependencies.Any(ids.Contains)))
+                { Sequences = _sequences.Count == 0 ? [] : Array.AsReadOnly(_sequencesById.Values.Where(sequence => ids.Contains(sequence.OwnerTableId)).ToArray()) };
             var tableRecords = replacements.Select(EncodeTable).ToArray();
             var indexRecords = indexes.Select(EncodeIndex).ToArray();
             using var transaction = _storage.BeginTransaction();
@@ -201,40 +212,8 @@ public sealed partial class SqlCatalog
             foreach (var slot in oldIndexes) { _storage.DeleteRow(transaction, slot.Location.PageId, slot.Location.SlotIndex); }
             var retired = expected.Select(table => (table.ObjectId, Location: _storage.InsertRow(transaction, table.ObjectId,
                 SqlReclamationRecord.Encode(table.ObjectId, table.Schema, table.Name)))).ToArray();
-            var counters = new List<(ulong Id, SqlAllocationCounter Counter)>();
-            foreach (var table in expected)
-            {
-                DeleteIdentityCounter(transaction, table.ObjectId);
-                if (!restartIdentity && _identityCounters.TryGetValue(table.ObjectId, out var previous) && previous.Location is not null)
-                {
-                    var column = mapping[table.ObjectId].Columns.Single(column => column.Identity is not null);
-                    var identity = column.Identity!;
-                    var (minimum, maximum) = IdentityBounds(column.Type.Type, identity.Increment);
-                    Int128 last = previous.Next - identity.Increment;
-                    // PostgreSQL sequence.c:1547-1571 validates the current sequence
-                    // value when its bounds change. Unissued reservations are local:
-                    // trim their tail to the new range, retaining the allocation cursor.
-                    // Persisting an old out-of-range reservation would fail reopen's
-                    // counter validation even when every converted row fits the type.
-                    if (last < minimum || last > maximum)
-                    {
-                        throw new SqlCatalogException("CS02002", string.Format(System.Globalization.CultureInfo.CurrentCulture,
-                            ErrorMessages.IdentityReplacementRange, column.Name, column.Type.Type));
-                    }
-                    int remaining = previous.Remaining;
-                    while (remaining > 0)
-                    {
-                        Int128 endpoint = previous.Next + (Int128)(remaining - 1) * identity.Increment;
-                        if (endpoint >= minimum && endpoint <= maximum) { break; }
-                        remaining--;
-                    }
-                    long reserved = checked((long)(remaining == 0 ? last : previous.Next + (Int128)(remaining - 1) * identity.Increment));
-                    ulong id = mapping[table.ObjectId].ObjectId;
-                    var record = new DatabaseKeyWriter().AppendInt32(identityCounterRecordKind).AppendInt64((long)id).AppendInt64(reserved).ToArray();
-                    counters.Add((id, new SqlAllocationCounter { Next = previous.Next, Remaining = remaining,
-                        Location = _storage.InsertRow(transaction, record) }));
-                }
-            }
+            ulong next = _nextObjectId;
+            Action[] owned = _sequences.Count == 0 ? [] : expected.Select(table => StageOwnedSequences(transaction, table, mapping[table.ObjectId], ref next, restartIdentity)).ToArray();
             foreach (var table in replacements)
             {
                 var location = _pendingReclamations[table.ObjectId];
@@ -254,8 +233,7 @@ public sealed partial class SqlCatalog
             foreach (var slot in oldIndexes) { _indexes.Remove((slot.Index.TableObjectId, slot.Index.Name)); }
             foreach (var slot in indexSlots) { _indexes[(slot.Index.TableObjectId, slot.Index.Name)] = slot; }
             foreach (var view in viewSlots) { _views[view.Key] = view.Slot; }
-            foreach (var table in expected) { _identityCounters.Remove(table.ObjectId); }
-            foreach (var counter in counters) { _identityCounters.Add(counter.Id, counter.Counter); }
+            foreach (var publish in owned) { publish(); }
             foreach (var table in replacements)
             {
                 _pendingReclamations.Remove(table.ObjectId);

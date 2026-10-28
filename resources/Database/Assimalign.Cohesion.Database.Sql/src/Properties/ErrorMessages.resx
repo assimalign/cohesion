@@ -324,6 +324,11 @@
 
   <data name="IdentityIntegerRequired" xml:space="preserve"><value>An identity column requires an integer storage type.</value></data>
 
+  <data name="IdentityNotNullRequired" xml:space="preserve"><value>The column must be NOT NULL before ADD GENERATED AS IDENTITY.</value></data>
+  <data name="IdentityRequired" xml:space="preserve"><value>The column is not an identity column.</value></data>
+  <data name="SequenceIdentityDependent" xml:space="preserve"><value>Sequence '{0}.{1}' is required by identity column '{2}.{3}.{4}'.</value></data>
+  <data name="SequenceOwnershipInvalid" xml:space="preserve"><value>OWNED BY requires a column of a table in the sequence's schema; an identity sequence cannot change ownership.</value></data>
+  <data name="SequenceDefaultDependent" xml:space="preserve"><value>Sequence '{0}.{1}' is required by the default of column '{2}.{3}.{4}'.</value></data>
   <data name="IdentityCounterMalformed" xml:space="preserve"><value>Malformed or duplicate identity counter record.</value></data>
 
   <data name="IdentityCounterOrphaned" xml:space="preserve"><value>An identity counter has no owning identity column.</value></data>

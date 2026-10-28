@@ -18,6 +18,7 @@ internal sealed partial class SqlPlanner
     private SqlPlan PlanMerge(SqlMergeExpression merge)
     {
         var (table, evaluator, source, queries) = BindDmlSources(merge.Table, [merge.Source], merge.Condition, merge, merge: true);
+        RecordIdentityUsage(table);
         var associations = source!.Associations;
         if (merge.Actions.Count == 0) { throw Invalid(); }
         var terminal = new HashSet<SqlMergeMatchKind>();
@@ -71,8 +72,8 @@ internal sealed partial class SqlPlanner
             {
                 for (int i = 0; i < insertValues.Count; i++)
                 {
-                    ValidateIdentity(ordinals[i], insertValues[i], update: false);
-                    values.Add(BindValue(ordinals[i], insertValues[i], scope));
+                    if (clause.Overriding == SqlIdentityOverride.None) { ValidateIdentity(ordinals[i], insertValues[i], update: false); }
+                    values.Add(clause.Overriding == SqlIdentityOverride.User && table.Columns[ordinals[i]].Identity is not null ? SqlBoundDefaultItem.Instance : BindValue(ordinals[i], insertValues[i], scope));
                 }
             }
             actions.Add(new(clause.MatchKind, clause.Action, condition, assignments, ordinals, values, clause.IsDefaultValues, actionQueries));
@@ -134,7 +135,7 @@ internal sealed partial class SqlPlanner
 
         void ValidateIdentity(int ordinal, SqlExpression expression, bool update)
         {
-            if (table.Columns[ordinal].Identity is { IsAlways: true } && (update || expression is not SqlDefaultExpression))
+            if (table.Columns[ordinal].Identity is { IsAlways: true } && expression is not SqlDefaultExpression)
             { throw SqlPlanningException.IdentityViolation(table.Columns[ordinal].Name, update ? ErrorMessages.IdentityUpdateForbidden : ErrorMessages.IdentityInsertForbidden); }
         }
 

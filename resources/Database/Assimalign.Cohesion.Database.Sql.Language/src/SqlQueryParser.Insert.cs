@@ -50,12 +50,7 @@ public sealed partial class SqlQueryParser
                 Location.Create(1, 1, pos, _lastTokenEnd));
         }
 
-        if (IsWord(ref lexer, "OVERRIDING"))
-        {
-            RejectIdentityConstruct(ref lexer, "OVERRIDING ... VALUE");
-            return new SqlInsertExpression(table, columns, null, null, false, null,
-                Location.Create(1, 1, pos, _lastTokenEnd));
-        }
+        var overriding = ParseIdentityOverride(ref lexer);
 
         // VALUES, DEFAULT VALUES or SELECT
         List<IReadOnlyList<SqlExpression>>? values = null;
@@ -89,7 +84,7 @@ public sealed partial class SqlQueryParser
         var returning = ParseReturning(ref lexer, table, onConflict is not null);
 
         return new SqlInsertExpression(table, columns, values, selectSource, isDefaultValues, null,
-            Location.Create(1, 1, pos, _lastTokenEnd), returning, onConflict);
+            Location.Create(1, 1, pos, _lastTokenEnd), returning, onConflict) { Overriding = overriding };
     }
 
     private SqlOnConflictClause? ParseOnConflict(ref TokenLexer lexer)
