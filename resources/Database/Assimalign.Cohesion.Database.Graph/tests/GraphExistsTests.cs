@@ -13,45 +13,50 @@ namespace Assimalign.Cohesion.Database.Graph.Tests;
 
 public sealed class GraphExistsTests
 {
-    private const string seed = "INSERT (a:N {k:1})-[:T]->(b:N {k:2}), (a)-[:T]->(b), (b)-[:T]->(c:N {k:3}), (:N {k:4})";
+    internal const string Seed = "INSERT (a:N {k:1})-[:T]->(b:N {k:2}), (a)-[:T]->(b), (b)-[:T]->(c:N {k:3}), (:N {k:4})";
+
+    public static IEnumerable<object[]> PatternCases =>
+    [
+        ["MATCH (a:N) RETURN a.k, EXISTS { MATCH (a)-[:T]->(b) } ORDER BY a.k", "1,True;2,True;3,False;4,False"],
+        ["MATCH (a:N) WHERE NOT EXISTS { (a)-[:T]->(b) } RETURN a.k ORDER BY a.k", "3;4"],
+        ["MATCH (a:N) WHERE EXISTS { (a)-[:T]->(b) WHERE b.k > a.k } RETURN a.k ORDER BY a.k", "1;2"],
+        ["MATCH (a:N) RETURN a.k ORDER BY EXISTS { (a)-[:T]->() }, a.k", "3;4;1;2"],
+        ["MATCH (a:N) RETURN CASE WHEN EXISTS { (a)->() } THEN a.k ELSE 0 END AS k ORDER BY k", "0;0;1;2"],
+        ["MATCH (a:N) WHERE FALSE OR EXISTS { MATCH (a)<-[:T]-(b) WHERE b.k = 1 } RETURN a.k", "2"],
+        ["MATCH (a:N) WHERE NOT EXISTS { (a)->(b) WHERE NOT EXISTS { (b)->(c) WHERE c.k > a.k } } RETURN a.k ORDER BY a.k", "1;3;4"],
+        ["MATCH (a:N) RETURN [x IN [a] WHERE EXISTS { (x)->() } | x.k] AS ks ORDER BY a.k", "1;2;;"],
+        ["MATCH (a:N) WHERE any(x IN [a] WHERE EXISTS { (x)->() }) RETURN a.k ORDER BY a.k", "1;2"],
+        ["MATCH (a:N) WHERE EXISTS { MATCH (a)->(b) MATCH (b)->(c) WHERE c.k = 3 } RETURN a.k", "1"],
+        ["MATCH (a:N) LET v = a.k RETURN EXISTS { (b:N) WHERE b.k = v }", "True;True;True;True"],
+        ["MATCH (a)-[r:T]->(b) WHERE EXISTS { ()-[r:T]->() WHERE b.k > a.k } RETURN a.k ORDER BY a.k", "1;1;2"],
+        ["MATCH p=(a)-[:T]->(b) RETURN EXISTS { MATCH p=()-[:T]->() }", "True;True;True"],
+        ["OPTIONAL MATCH (a:Missing) RETURN EXISTS { MATCH (a)->() }, NOT EXISTS { (a)->() }", "False,True"],
+        ["OPTIONAL MATCH ()-[r:Missing]->() RETURN EXISTS { ()-[r]->() }", "False"],
+        ["RETURN EXISTS { MATCH (:Missing) }, NOT EXISTS { (:Missing) }", "False,True"],
+        ["MATCH p=(a)-[:T]->(b) FOR x IN [p] RETURN EXISTS { x=()-[:T]->() }", "True;True;True"],
+        ["LET a=NULL RETURN EXISTS { (a) }, NOT EXISTS { (a) }", "False,True"],
+        ["MATCH (a:N) RETURN a.k AS x ORDER BY EXISTS { (b:N) WHERE b.k = x }, x", "1;2;3;4"],
+        ["MATCH (a:N) FOR copy IN [1,1] FILTER EXISTS { (a)->() } RETURN a.k ORDER BY a.k", "1;1;2;2"],
+        ["MATCH (a:N WHERE EXISTS { (a)->() }) RETURN a.k ORDER BY a.k", "1;2"],
+        ["MATCH (a:N {k:CASE WHEN EXISTS { (b:N) WHERE b.k=2 } THEN 1 ELSE 0 END}), (b:N {k:2}) RETURN a.k", "1"],
+        ["MATCH p=(a)-[:T]->(b) RETURN EXISTS { p=()-[:T]->{1,2}() }, EXISTS { p=() }", "True,False;True,False;True,False"],
+        ["MATCH (a:N) RETURN EXISTS { (a)->() } AS yes, count(*) AS c GROUP BY EXISTS { (a)->() } ORDER BY yes", "False,2;True,2"],
+        ["MATCH (a:N) RETURN sum(CASE WHEN EXISTS { (a)->() } THEN 1 ELSE 0 END)", "2"],
+        ["MATCH (a:N) RETURN count(*) ORDER BY EXISTS { (a:N) WHERE a.k=1 }", "4"],
+        ["MATCH (a:N) RETURN DISTINCT a.k AS k ORDER BY EXISTS { (a:N) WHERE a.k=k }, k", "1;2;3;4"],
+        ["MATCH (a:N) RETURN EXISTS { (a) ((m)->(n)){1} () } AS yes,count(*) AS c ORDER BY all(a IN [NULL] WHERE EXISTS { (a) ((m)->(n)){1} () })", "True,2;False,2"],
+        ["MATCH (a:N) RETURN DISTINCT a.k AS k ORDER BY EXISTS { (a:N {k:1}) }, k", "1;2;3;4"],
+    ];
 
     [Theory(DisplayName = "Cohesion Test [Graph] - EXISTS: correlated values are Boolean in every expression position")]
-    [InlineData("MATCH (a:N) RETURN a.k, EXISTS { MATCH (a)-[:T]->(b) } ORDER BY a.k", "1,True;2,True;3,False;4,False")]
-    [InlineData("MATCH (a:N) WHERE NOT EXISTS { (a)-[:T]->(b) } RETURN a.k ORDER BY a.k", "3;4")]
-    [InlineData("MATCH (a:N) WHERE EXISTS { (a)-[:T]->(b) WHERE b.k > a.k } RETURN a.k ORDER BY a.k", "1;2")]
-    [InlineData("MATCH (a:N) RETURN a.k ORDER BY EXISTS { (a)-[:T]->() }, a.k", "3;4;1;2")]
-    [InlineData("MATCH (a:N) RETURN CASE WHEN EXISTS { (a)->() } THEN a.k ELSE 0 END AS k ORDER BY k", "0;0;1;2")]
-    [InlineData("MATCH (a:N) WHERE FALSE OR EXISTS { MATCH (a)<-[:T]-(b) WHERE b.k = 1 } RETURN a.k", "2")]
-    [InlineData("MATCH (a:N) WHERE NOT EXISTS { (a)->(b) WHERE NOT EXISTS { (b)->(c) WHERE c.k > a.k } } RETURN a.k ORDER BY a.k", "1;3;4")]
-    [InlineData("MATCH (a:N) RETURN [x IN [a] WHERE EXISTS { (x)->() } | x.k] AS ks ORDER BY a.k", "1;2;;")]
-    [InlineData("MATCH (a:N) WHERE any(x IN [a] WHERE EXISTS { (x)->() }) RETURN a.k ORDER BY a.k", "1;2")]
-    [InlineData("MATCH (a:N) WHERE EXISTS { MATCH (a)->(b) MATCH (b)->(c) WHERE c.k = 3 } RETURN a.k", "1")]
-    [InlineData("MATCH (a:N) LET v = a.k RETURN EXISTS { (b:N) WHERE b.k = v }", "True;True;True;True")]
-    [InlineData("MATCH (a)-[r:T]->(b) WHERE EXISTS { ()-[r:T]->() WHERE b.k > a.k } RETURN a.k ORDER BY a.k", "1;1;2")]
-    [InlineData("MATCH p=(a)-[:T]->(b) RETURN EXISTS { MATCH p=()-[:T]->() }", "True;True;True")]
-    [InlineData("OPTIONAL MATCH (a:Missing) RETURN EXISTS { MATCH (a)->() }, NOT EXISTS { (a)->() }", "False,True")]
-    [InlineData("OPTIONAL MATCH ()-[r:Missing]->() RETURN EXISTS { ()-[r]->() }", "False")]
-    [InlineData("RETURN EXISTS { MATCH (:Missing) }, NOT EXISTS { (:Missing) }", "False,True")]
-    [InlineData("MATCH p=(a)-[:T]->(b) FOR x IN [p] RETURN EXISTS { x=()-[:T]->() }", "True;True;True")]
-    [InlineData("LET a=NULL RETURN EXISTS { (a) }, NOT EXISTS { (a) }", "False,True")]
-    [InlineData("MATCH (a:N) RETURN a.k AS x ORDER BY EXISTS { (b:N) WHERE b.k = x }, x", "1;2;3;4")]
-    [InlineData("MATCH (a:N) FOR copy IN [1,1] FILTER EXISTS { (a)->() } RETURN a.k ORDER BY a.k", "1;1;2;2")]
-    [InlineData("MATCH (a:N WHERE EXISTS { (a)->() }) RETURN a.k ORDER BY a.k", "1;2")]
-    [InlineData("MATCH (a:N {k:CASE WHEN EXISTS { (b:N) WHERE b.k=2 } THEN 1 ELSE 0 END}), (b:N {k:2}) RETURN a.k", "1")]
-    [InlineData("MATCH p=(a)-[:T]->(b) RETURN EXISTS { p=()-[:T]->{1,2}() }, EXISTS { p=() }", "True,False;True,False;True,False")]
-    [InlineData("MATCH (a:N) RETURN EXISTS { (a)->() } AS yes, count(*) AS c GROUP BY EXISTS { (a)->() } ORDER BY yes", "False,2;True,2")]
-    [InlineData("MATCH (a:N) RETURN sum(CASE WHEN EXISTS { (a)->() } THEN 1 ELSE 0 END)", "2")]
-    [InlineData("MATCH (a:N) RETURN count(*) ORDER BY EXISTS { (a:N) WHERE a.k=1 }", "4")]
-    [InlineData("MATCH (a:N) RETURN DISTINCT a.k AS k ORDER BY EXISTS { (a:N) WHERE a.k=k }, k", "1;2;3;4")]
-    [InlineData("MATCH (a:N) RETURN EXISTS { (a) ((m)->(n)){1} () } AS yes,count(*) AS c ORDER BY all(a IN [NULL] WHERE EXISTS { (a) ((m)->(n)){1} () })", "True,2;False,2")]
-    [InlineData("MATCH (a:N) RETURN DISTINCT a.k AS k ORDER BY EXISTS { (a:N {k:1}) }, k", "1;2;3;4")]
+    [MemberData(nameof(PatternCases))]
     public async Task ExecuteAsync_CorrelatedPattern_ShouldReturnExpectedRowsAsync(string query, string expected)
     {
         // Arrange
         await using var engine = GraphDatabaseEngine.Create("exists-values", new());
         var database = await engine.CreateDatabaseAsync("graph", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
-        await session.ExecuteAsync(seed, cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync(Seed, cancellationToken: CancellationToken.None);
         // Act
         var rows = await RowsAsync(session, query);
         // Assert
@@ -117,7 +122,7 @@ public sealed class GraphExistsTests
         await using var engine = GraphDatabaseEngine.Create("exists-explain", new());
         var database = await engine.CreateDatabaseAsync("graph", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
-        await session.ExecuteAsync(seed, cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync(Seed, cancellationToken: CancellationToken.None);
         // Act
         var rows = await RowsAsync(session, "EXPLAIN MATCH (a:N) WHERE NOT EXISTS { (a)-[:T]->(b) } RETURN EXISTS { (a)<-[:T]-() }");
         // Assert
@@ -127,7 +132,56 @@ public sealed class GraphExistsTests
         rows.ShouldContain(row => Equals(row[2], "Expand"));
     }
 
-    private static string Text(object? value) => value is object?[] list ? string.Join(',', list.Select(Text)) : value?.ToString() ?? "NULL";
+    [Fact(DisplayName = "Cohesion Test [Graph] - EXISTS: shared syntax binds independently in each lexical occurrence")]
+    public async Task ExecuteAsync_SharedExistsAst_ShouldMatchParsedOccurrencesAsync()
+    {
+        // Arrange
+        await using var engine = GraphDatabaseEngine.Create("exists-shared", new());
+        var database = await engine.CreateDatabaseAsync("graph", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.ExecuteAsync("INSERT (:N)", cancellationToken: CancellationToken.None);
+        var shared = new GqlExistsExpression([new GqlMatchClause([new GqlPathPattern([new GqlNodePattern("x", ["N"], new Dictionary<string, GqlExpression>())], [])], null, false)]);
+        var query = new GqlQueryExpression([], null, [], [], false,
+            [new GqlProjection(shared, "standalone"), new GqlProjection(new GqlListComprehensionExpression("x",
+                new GqlListExpression([new GqlLiteralExpression(null)]), projection: shared), "scoped")]);
+        var expected = await RowsAsync(session, "RETURN EXISTS { (x:N) } AS standalone, [x IN [NULL] | EXISTS { (x:N) }] AS scoped");
+        // Act
+        await using var result = (DatabaseResultSet)await session.ExecuteAsync(new GraphQueryRequest(new GqlQueryStatement(query)), CancellationToken.None);
+        var actual = new List<object?[]>();
+        await foreach (var row in result.GetRowsAsync(CancellationToken.None))
+        { actual.Add(Enumerable.Range(0, row.FieldCount).Select(row.GetValue).ToArray()); }
+        // Assert
+        expected.Single()[0].ShouldBe(true);
+        expected.Single()[1].ShouldBeOfType<object?[]>().ShouldBe(new object?[] { false });
+        actual.Single()[0].ShouldBe(expected.Single()[0]);
+        actual.Single()[1].ShouldBeOfType<object?[]>().ShouldBe(expected.Single()[1].ShouldBeOfType<object?[]>());
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Graph] - EXISTS: shadowing iterators are local dependencies through nested scopes")]
+    [InlineData("any(x IN [1] WHERE x = 1)")]
+    [InlineData("any(x IN [1] WHERE any(y IN [x] WHERE y = 1))")]
+    [InlineData("any(x IN [1] WHERE EXISTS { (m:N) WHERE x = 1 })")]
+    [InlineData("size([x IN [1] WHERE x = 1 | x]) = 1")]
+    [InlineData("size([x IN [1] WHERE EXISTS { (m:N) WHERE x = 1 } | x]) = 1")]
+    [InlineData("any(y IN [1] WHERE any(x IN [y] WHERE EXISTS { (m:N) WHERE x = 1 }))")]
+    [InlineData("reduce(x = 0, y IN [1] | x + y) = 1")]
+    public async Task ExecuteAsync_ShadowedOuterName_ShouldNotRequireGroupingAsync(string predicate)
+    {
+        // Arrange
+        await using var engine = GraphDatabaseEngine.Create("exists-shadow", new());
+        var database = await engine.CreateDatabaseAsync("graph", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.ExecuteAsync(Seed, cancellationToken: CancellationToken.None);
+        string suffix = "RETURN count(*) + CASE WHEN EXISTS { (n:N) WHERE " + predicate + " } THEN 1 ELSE 0 END";
+        var renamed = await RowsAsync(session, "MATCH (unused:N) " + suffix);
+        // Act
+        var rows = await RowsAsync(session, "MATCH (x:N) " + suffix);
+        // Assert
+        rows.Single().Single().ShouldBe(5L);
+        rows.Single().ShouldBe(renamed.Single());
+    }
+
+    internal static string Text(object? value) => value is object?[] list ? string.Join(',', list.Select(Text)) : value?.ToString() ?? "NULL";
 
     internal static async Task<List<object?[]>> RowsAsync(GraphDatabaseSession session, string query)
     {

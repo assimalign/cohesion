@@ -816,7 +816,10 @@ positions enforce their node/relationship/path kinds (CG01019 statically, CG0201
 EXISTS is available throughout Boolean and value expressions, including CASE, projection,
 ordering, list comprehensions and list predicates. Aggregates inside inner predicates retain
 ordinary MATCH's aggregate-placement refusal. No disk or wire format changes are involved.
-Unsupported predicate vocabulary inside an EXISTS body uses the same context-aware CK00001 checks as outer
+Hand-built ASTs may reuse the same expression in multiple lexical scopes; each occurrence
+binds independently. Iterators shadow enclosing names inside their bodies, including through
+nested EXISTS, without adding dependencies on the shadowed binding. Unsupported predicate
+vocabulary inside an EXISTS body uses the same context-aware CK00001 checks as outer
 predicates, while pattern variables, labels, relationship types and property names remain names.
 
 Behavior consulted, no code copied: C:/Source/repos/neo4j/neo4j/

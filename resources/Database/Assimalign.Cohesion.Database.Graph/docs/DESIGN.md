@@ -755,6 +755,13 @@ parameters and statement budget. It yields borrowed inner rows without a cardina
 GQ-C3 can drain this boundary to collect results. The EXISTS semi consumer requests one advance
 and disposes immediately; scalar NOT supplies anti evaluation. Nested scopes copy binding
 metadata at planning and retain the per-row argument values without modifying the outer row.
+Programmatic ASTs may share subtrees: a copy-on-change binding pass gives each lexical EXISTS
+occurrence its own identity before authoritative validation, grouping and plan registration.
+Ordinary validation discovers whether binding is needed; only source-free statements containing
+EXISTS take the bound planning pass. Path identity/depth/shape checks precede copying. Iterator scopes
+track shadowed imports so only references to the actual enclosing binding propagate outward.
+This follows Neo4j's lexical dependency subtraction for filter, extract and reduce scopes
+(`C:/Source/repos/neo4j/neo4j/community/cypher/front-end/expressions/src/main/scala/org/neo4j/cypher/internal/expressions/ScopeExpression.scala:42-60,94-99`).
 Bound paths follow their supplied node/edge identities through the matcher; correlated node
 and relationship positions keep their outer identity. NULL pattern arguments short-circuit
 before optional null extension. New inner variables never enter the outer binding layout.
