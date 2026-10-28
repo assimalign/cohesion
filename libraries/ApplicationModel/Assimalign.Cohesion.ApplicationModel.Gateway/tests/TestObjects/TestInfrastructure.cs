@@ -90,7 +90,7 @@ internal sealed class TestInfrastructure : IInfrastructureProvider
     public async Task<TestInstance> StartInstanceAsync(ProviderName provider, ResourceName name, CancellationToken cancellationToken = default)
     {
         var instance = new TestInstance(provider, name);
-        ResourceControlPlane controlPlane = ResourceControlPlane.Create(instance, Gateway!, TestSerializer.Json);
+        ResourceControlPlane controlPlane = ResourceControlPlane.Create(instance, new GatewayForwarder(this), TestSerializer.Json);
         await controlPlane.StartAsync(cancellationToken);
         Instances[instance.Key] = (instance, controlPlane);
         return instance;

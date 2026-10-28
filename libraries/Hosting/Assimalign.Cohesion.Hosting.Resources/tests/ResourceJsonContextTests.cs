@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Text;
 using System.Text.Json;
@@ -60,6 +61,24 @@ public class ResourceJsonContextTests
     {
         // Act / Assert
         Should.Throw<JsonException>(() => JsonSerializer.Deserialize(json, ResourceJsonContext.Default.IReadOnlyListResourceStateSnapshot));
+    }
+
+    [Fact(DisplayName = DisplayPrefix + "A publication is written as its snapshots and its lease")]
+    public void Serialize_Publication_ShouldCarrySnapshotsAndLease()
+    {
+        // Arrange
+        var publication = new ResourcePublication(
+            [ResourceStateSnapshot.Create("cors", """{"origins":["https://shop.example"]}"""u8.ToArray())],
+            TimeSpan.FromSeconds(30));
+
+        // Act
+        string json = JsonSerializer.Serialize(publication, ResourceJsonContext.Default.ResourcePublication);
+        ResourcePublication? read = JsonSerializer.Deserialize(json, ResourceJsonContext.Default.ResourcePublication);
+
+        // Assert
+        json.ShouldBe("""{"snapshots":[{"action":"cors","value":{"origins":["https://shop.example"]}}],"lease":"00:00:30"}""");
+        read.ShouldNotBeNull().Lease.ShouldBe(TimeSpan.FromSeconds(30));
+        read.Snapshots.ShouldHaveSingleItem().Action.ShouldBe((ResourceActionName)"cors");
     }
 
     [Fact(DisplayName = DisplayPrefix + "A result with an embedded output and a state snapshot survives a round trip")]

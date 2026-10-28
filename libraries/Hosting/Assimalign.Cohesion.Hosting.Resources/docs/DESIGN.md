@@ -56,7 +56,7 @@ flowchart TB
 | `ResourceManifest`, `ResourceActionDescriptor` | What an instance publishes about itself when its host starts. |
 | `IResourceControlPlane`, `ResourceControlPlane` | The instance's runtime: an `IHostService` that publishes the manifest and restores returned state on start, then executes actions and restores state on request. |
 | `IResourceService` | The host service an area registers: it runs the transport that serves the control plane, then the control plane. In-process code finds the control plane among the host's services through it. |
-| `IResourceManifestPublisher`, `ResourceManifestPublisher`, `ResourceManifestPublisherOptions` | The seam to the gateway, its abstract base, and the options of the HTTP publisher `ResourceManifestPublisher.Create` returns (D13). A local gateway accepts anonymous publication. |
+| `IResourceManifestPublisher`, `ResourceManifestPublisher`, `ResourceManifestPublisherOptions` | The seam to the gateway, its abstract base, and the options of the HTTP publisher `ResourceManifestPublisher.Create` returns (D13). Publication answers with a `ResourcePublication` (snapshots and a lease); `RenewAsync` renews the lease (D14). A local gateway accepts anonymous publication. |
 | `IResourceHealthContributor`, `HealthContribution` | Health, contributed per component. A default contribution is `Unhealthy`, so unset health fails closed. |
 
 Value objects carry the identity: `ProviderName`, `ProviderId`, `ResourceName`, `ResourceId`,
@@ -91,7 +91,8 @@ sequenceDiagram
    control plane's transport, then starts the control plane. A host starts services in registration
    order, so the instance serves only after the returned state is in effect.
 2. `StartAsync` publishes the manifest and restores every snapshot the publisher returns. A failed
-   publication or restore fails the host's start and leaves the control plane unstarted.
+   publication or restore fails the host's start and leaves the control plane unstarted. When the
+   answer carries a lease, the control plane renews it until `StopAsync` (D14).
 3. Between `StartAsync` and `StopAsync`, `ExecuteAsync` runs actions and `RestoreAsync` applies
    snapshots. Outside that window both throw `InvalidOperationException`.
 
@@ -188,6 +189,18 @@ used. A factory such as `Assimalign.Cohesion.Http.ClientFactory` pools and rotat
 publications do not exhaust sockets. Without a callback, every publisher in the process shares one
 `SocketsHttpHandler`, whose connections are recycled every two minutes. Another transport derives
 from `ResourceManifestPublisher`.
+
+**D14 — Registrations are leases (owner decision, 2026-10-28).** Instances published once and sent
+nothing after, so a gateway could not tell a dead instance from a live one, least of all after its
+own restart. The publication answer, a `ResourcePublication`, now carries a lease. The control plane
+renews it three times per lease through `IResourceManifestPublisher.RenewAsync`, which carries no
+snapshots, so renewals cost no restores. A gateway that answers `false` does not know the instance:
+the control plane publishes again and restores the answer, which is idempotent (D3). A failed
+renewal is retried on the next one, so an unreachable gateway never stops the instance. Over HTTP a
+renewal is a `PUT` of the manifest to the publication endpoint; `404` means unknown. *Rejected:*
+renewing by publishing again, which would restore every snapshot, and rebuild what each one
+applies, on every renewal. *Rejected for now:* asking the platform which instances run, which
+detects a death faster but needs each provider to map its instances to instance keys.
 
 ## Concurrency
 

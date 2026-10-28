@@ -307,6 +307,82 @@ public class ResourceControlPlaneTests
         action.Current.Level.ShouldBe("Information");
     }
 
+    [Fact(DisplayName = DisplayPrefix + "A publication with a lease is renewed until the control plane stops")]
+    public async Task StartAsync_WithLease_ShouldRenewUntilStopped()
+    {
+        // Arrange
+        var publisher = new TestPublisher { Lease = TimeSpan.FromMilliseconds(150) };
+        ResourceControlPlane controlPlane = ResourceControlPlane.Create(new TestResource(), publisher, TestSerializer.Json);
+
+        // Act
+        await controlPlane.StartAsync(CancellationToken.None);
+        await Eventually.WaitUntilAsync(() => publisher.Renewals >= 2);
+        await controlPlane.StopAsync(CancellationToken.None);
+        int renewals = publisher.Renewals;
+        await Task.Delay(300);
+
+        // Assert
+        publisher.Renewals.ShouldBe(renewals);
+        publisher.Published.ShouldHaveSingleItem();
+    }
+
+    [Fact(DisplayName = DisplayPrefix + "An instance its gateway no longer knows publishes again and restores the answer")]
+    public async Task Renewal_WhenGatewayDoesNotKnowTheInstance_ShouldPublishAgainAndRestore()
+    {
+        // Arrange
+        var action = new LogLevelAction();
+        var publisher = new TestPublisher(ResourceStateSnapshot.Create(_logLevel, """{"Level":"Warning"}"""u8.ToArray()))
+        {
+            Lease = TimeSpan.FromMilliseconds(150),
+            Known = false,
+        };
+        ResourceControlPlane controlPlane = ResourceControlPlane.Create(new TestResource(action), publisher, TestSerializer.Json);
+
+        // Act
+        await controlPlane.StartAsync(CancellationToken.None);
+        await Eventually.WaitUntilAsync(() => publisher.Published.Count >= 2 && action.Applied.Count >= 2);
+        await controlPlane.StopAsync(CancellationToken.None);
+
+        // Assert
+        action.Current.Level.ShouldBe("Warning");
+    }
+
+    [Fact(DisplayName = DisplayPrefix + "An unreachable gateway does not stop the instance: renewals are retried")]
+    public async Task Renewal_WhenGatewayIsUnreachable_ShouldKeepServingAndRetry()
+    {
+        // Arrange
+        var publisher = new TestPublisher
+        {
+            Lease = TimeSpan.FromMilliseconds(150),
+            RenewalFailure = new TimeoutException("The gateway did not answer."),
+        };
+        ResourceControlPlane controlPlane = ResourceControlPlane.Create(new TestResource(new LogLevelAction()), publisher, TestSerializer.Json);
+        await controlPlane.StartAsync(CancellationToken.None);
+
+        // Act
+        await Eventually.WaitUntilAsync(() => publisher.Renewals >= 3);
+        ResourceActionResult read = await controlPlane.ExecuteAsync(_logLevel, ResourceActionContext.Create(ResourceActionKind.Read, TestSerializer.Json), CancellationToken.None);
+        await controlPlane.StopAsync(CancellationToken.None);
+
+        // Assert
+        read.Status.ShouldBe(ResourceActionStatus.Succeeded);
+    }
+
+    [Fact(DisplayName = DisplayPrefix + "A lease that is not positive fails the start")]
+    public async Task StartAsync_WithNonPositiveLease_ShouldFailAndStayUnstarted()
+    {
+        // Arrange
+        var publisher = new TestPublisher { Lease = TimeSpan.Zero };
+        ResourceControlPlane controlPlane = ResourceControlPlane.Create(new TestResource(new TestAction()), publisher, TestSerializer.Json);
+
+        // Act
+        await Should.ThrowAsync<InvalidOperationException>(() => controlPlane.StartAsync(CancellationToken.None));
+
+        // Assert
+        await Should.ThrowAsync<InvalidOperationException>(async () =>
+            await controlPlane.ExecuteAsync(_flushCache, ResourceActionContext.Create(ResourceActionKind.Write, TestSerializer.Json), CancellationToken.None));
+    }
+
     private static async Task<ResourceControlPlane> StartAsync(TestResource resource)
     {
         ResourceControlPlane controlPlane = ResourceControlPlane.Create(resource, new TestPublisher(), TestSerializer.Json);

@@ -23,13 +23,15 @@
   <data name="ResourceStateSnapshotNull" xml:space="preserve"><value>A state snapshot cannot be a null value.</value></data>
   <data name="ResourceControlPlaneAlreadyStarted" xml:space="preserve"><value>The resource control plane has already been started.</value></data>
   <data name="ResourceControlPlaneNotStarted" xml:space="preserve"><value>The resource control plane is not started; it accepts invocations and restores only between StartAsync and StopAsync.</value></data>
-  <data name="ResourcePublicationNull" xml:space="preserve"><value>The manifest publisher returned null instead of a snapshot list.</value></data>
+  <data name="ResourcePublicationNull" xml:space="preserve"><value>The manifest publisher returned null instead of a publication, or a publication without a snapshot list.</value></data>
+  <data name="ResourcePublicationLeaseInvalid" xml:space="preserve"><value>The manifest publisher returned a lease of {0}; a lease is positive.</value></data>
   <data name="ResourcePublicationSnapshotNull" xml:space="preserve"><value>The manifest publisher returned a null snapshot.</value></data>
   <data name="ResourcePublicationSnapshotDuplicate" xml:space="preserve"><value>The manifest publisher returned more than one snapshot for action '{0}'.</value></data>
   <data name="ResourceStateRestoreFailed" xml:space="preserve"><value>The snapshot the manifest publisher returned for action '{0}' was not restored ({1}). {2}</value></data>
   <data name="ResourceStateSnapshotInvalid" xml:space="preserve"><value>A state snapshot is a JSON object with a string 'action' and a 'value'.</value></data>
   <data name="ManifestEndpointInvalid" xml:space="preserve"><value>A manifest endpoint is an absolute http or https URL.</value></data>
   <data name="ManifestPublicationRefused" xml:space="preserve"><value>The gateway at '{0}' refused the resource manifest with HTTP status {1}.</value></data>
+  <data name="ManifestRenewalRefused" xml:space="preserve"><value>The gateway at '{0}' refused the instance's renewal with HTTP status {1}.</value></data>
   <data name="ManifestHttpClientNull" xml:space="preserve"><value>The HTTP client factory returned null instead of a client.</value></data>
   <data name="ResourceContentTypeUnsupported" xml:space="preserve"><value>The content serializer does not know type '{0}'. Create it with the source-generated context that declares the type.</value></data>
   <data name="ResourceActionStateUnsupported" xml:space="preserve"><value>The content serializer cannot write the state of action '{0}': it does not know the state's type.</value></data>

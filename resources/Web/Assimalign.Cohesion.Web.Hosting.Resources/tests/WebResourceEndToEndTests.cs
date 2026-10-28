@@ -108,6 +108,37 @@ public sealed class WebResourceEndToEndTests
         gateway.Manifests.ShouldHaveSingleItem();
     }
 
+    [Fact(DisplayName = DisplayPrefix + "A managed instance renews its registration while it runs")]
+    public async Task Start_WithLease_ShouldRenewTheRegistration()
+    {
+        // Arrange
+        await using GatewayStandIn gateway = await GatewayStandIn.StartAsync();
+        gateway.LeaseWith(TimeSpan.FromMilliseconds(300));
+
+        // Act
+        await using RunningResource instance = await RunningResource.StartAsync(gateway.ManifestEndpoint, new WebCorsPolicy { Origins = [shop] });
+        await Eventually.WaitUntilAsync(() => gateway.Renewals >= 2);
+
+        // Assert
+        gateway.Manifests.ShouldHaveSingleItem();
+    }
+
+    [Fact(DisplayName = DisplayPrefix + "An instance its gateway forgot publishes its manifest again")]
+    public async Task Renewal_WhenGatewayForgetsTheInstance_ShouldPublishAgain()
+    {
+        // Arrange
+        await using GatewayStandIn gateway = await GatewayStandIn.StartAsync();
+        gateway.LeaseWith(TimeSpan.FromMilliseconds(300));
+        await using RunningResource instance = await RunningResource.StartAsync(gateway.ManifestEndpoint, new WebCorsPolicy { Origins = [shop] });
+
+        // Act
+        gateway.ForgetInstances();
+        await Eventually.WaitUntilAsync(() => gateway.Manifests.Count >= 2);
+
+        // Assert
+        gateway.Manifests.ShouldAllBe(manifest => manifest.Key == instance.Resource.Key);
+    }
+
     [Fact(DisplayName = DisplayPrefix + "The gateway reads the CORS policy in effect")]
     public async Task CorsRead_FromGateway_ShouldReturnThePolicyInEffect()
     {

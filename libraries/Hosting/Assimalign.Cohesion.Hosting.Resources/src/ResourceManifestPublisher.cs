@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -14,11 +13,13 @@ namespace Assimalign.Cohesion.Hosting.Resources;
 /// <remarks>
 /// <para>
 /// <see cref="Create"/> returns the HTTP publisher. Publication is one <c>POST</c> of the manifest,
-/// written by the options' content serializer, to the gateway's endpoint. The gateway answers with
-/// the list of snapshots the instance must restore, or <c>204 No Content</c> when there are none.
-/// Any other status refuses the publication: <see cref="PublishAsync"/> throws, so the instance's
-/// host does not start, and the gateway tears down an instance whose manifest never arrives.
-/// Publication is anonymous; a local gateway accepts it as such.
+/// written by the options' content serializer, to the gateway's endpoint. The gateway answers with a
+/// <see cref="ResourcePublication"/>: the snapshots the instance must restore and its lease, or
+/// <c>204 No Content</c> for neither. Any other status refuses the publication:
+/// <see cref="PublishAsync"/> throws, so the instance's host does not start, and the gateway tears
+/// down an instance whose manifest never arrives. A renewal is a <c>PUT</c> of the same manifest to
+/// the same endpoint: <c>404 Not Found</c> means the gateway does not know the instance. Both are
+/// anonymous; a local gateway accepts them as such.
 /// </para>
 /// <para>
 /// Derive from this class to publish over another transport.
@@ -34,7 +35,10 @@ public abstract class ResourceManifestPublisher : IResourceManifestPublisher
     }
 
     /// <inheritdoc/>
-    public abstract ValueTask<IReadOnlyList<ResourceStateSnapshot>> PublishAsync(ResourceManifest manifest, CancellationToken cancellationToken = default);
+    public abstract ValueTask<ResourcePublication> PublishAsync(ResourceManifest manifest, CancellationToken cancellationToken = default);
+
+    /// <inheritdoc/>
+    public abstract ValueTask<bool> RenewAsync(ResourceManifest manifest, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Creates a publisher that posts the manifest to a gateway over HTTP.

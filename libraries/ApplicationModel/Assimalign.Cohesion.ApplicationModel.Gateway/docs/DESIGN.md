@@ -157,6 +157,15 @@ longer declares are torn down only after the deployment has started. A failed de
 leaves the previous one running. They stay in the record until their teardown succeeds, so a failed
 run retries them.
 
+**G15 — Instances hold leases (owner decision, 2026-10-28).** A publication's answer carries a
+lease of `LeaseDuration`, 30 seconds by default, and `RenewAsync` renews it. The gateway keeps
+renewal times in memory, not in the record, and unregisters an instance whose lease lapses, then
+saves the record. After startup every registered instance, the adopted ones included, gets one full
+lease, so an instance that died while the gateway was down leaves within one lease. A renewal from
+an instance the gateway does not know, such as after a restart without a record, answers `false`,
+and the instance publishes again. Registration, renewal and expiry take one lock per resource, so
+an instance that publishes again while its lease expires is kept or dropped as a whole.
+
 **G9 — No HTTP here, yet.** COHLIB001 bars a library from referencing Web, and COHRES003 bars Web
 (any resource package) from referencing a `Gateway*` assembly, so neither side can bind the other
 today. The options are: serve HTTP from this library tier with `Http.Connections`, as the retired
@@ -176,9 +185,8 @@ candidates for an event source.
 ## Open questions
 
 1. **HTTP binding** (G9): which of the three options.
-2. **Instance liveness after a restart.** Resolved for adoption (G10–G12). A restarted gateway knows
-   its instances only from the record and trusts them until they publish again. Instances publish
-   once and send no heartbeat, so an instance that died while the gateway was down stays registered.
+2. **Instance liveness.** Resolved by leases (G15). A lease only bounds how long a dead instance stays
+   registered; asking the platform which instances run would detect a death sooner.
 3. **Startup failure scope.** Only missed new resources are torn down (G13). Should a failed startup
    tear down the whole deployment instead, or roll updates back?
 4. **Rollout strategy.** An update's rollout is the platform's. Rolling a change through a logical

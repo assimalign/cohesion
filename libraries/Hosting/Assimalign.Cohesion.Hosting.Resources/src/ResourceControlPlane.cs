@@ -39,9 +39,14 @@ public sealed class ResourceControlPlane : IResourceControlPlane
     private const int started = 2;
     private const int stopped = 3;
 
+    private static readonly TimeSpan _minimumRenewalInterval = TimeSpan.FromMilliseconds(10);
+
     private readonly IResourceManifestPublisher _publisher;
     private readonly FrozenDictionary<ResourceActionName, IResourceAction> _actions;
     private readonly SemaphoreSlim _mutations = new(1, 1);
+    private readonly Lock _renewalLock = new();
+    private CancellationTokenSource? _renewal;
+    private Task _renewing = Task.CompletedTask;
     private int _lifecycle;
 
     private ResourceControlPlane(
@@ -171,14 +176,23 @@ public sealed class ResourceControlPlane : IResourceControlPlane
     }
 
     /// <summary>
-    /// Publishes the instance's manifest, then restores every snapshot the publisher returns.
+    /// Publishes the instance's manifest, restores every snapshot the publisher returns, and, when
+    /// the publication carries a lease, starts renewing it.
     /// </summary>
+    /// <remarks>
+    /// Renewal runs until <see cref="StopAsync"/>, three times per lease, so one lost renewal does
+    /// not lapse the registration. A gateway that does not know the instance, such as one restarted
+    /// without its record, receives the manifest again, and the control plane restores what it
+    /// answers with. A failed renewal is retried on the next one: the instance keeps serving while
+    /// its gateway is unreachable.
+    /// </remarks>
     /// <param name="cancellationToken">Cancels publication and restores.</param>
     /// <returns>A task that completes when the returned state is in effect.</returns>
     /// <exception cref="InvalidOperationException">
     /// The control plane was already started; the publisher returned <see langword="null"/>, a
-    /// <see langword="null"/> snapshot, or two snapshots for one action; or a snapshot was not
-    /// restored. A failed start leaves the control plane unstarted.
+    /// publication without a snapshot list, a lease that is not positive, a <see langword="null"/>
+    /// snapshot, or two snapshots for one action; or a snapshot was not restored. A failed start
+    /// leaves the control plane unstarted.
     /// </exception>
     public async Task StartAsync(CancellationToken cancellationToken = default)
     {
@@ -187,14 +201,22 @@ public sealed class ResourceControlPlane : IResourceControlPlane
             throw new InvalidOperationException(ErrorMessages.ResourceControlPlaneAlreadyStarted);
         }
 
-        bool published = false;
+        ResourcePublication publication;
         try
         {
-            IReadOnlyList<ResourceStateSnapshot> snapshots = await _publisher.PublishAsync(Manifest, cancellationToken).ConfigureAwait(false)
-                ?? throw new InvalidOperationException(ErrorMessages.ResourcePublicationNull);
+            ResourcePublication? published = await _publisher.PublishAsync(Manifest, cancellationToken).ConfigureAwait(false);
+            if (published?.Snapshots is null)
+            {
+                throw new InvalidOperationException(ErrorMessages.ResourcePublicationNull);
+            }
+
+            if (published.Lease is { } lease && lease <= TimeSpan.Zero)
+            {
+                throw new InvalidOperationException(Format(ErrorMessages.ResourcePublicationLeaseInvalid, lease));
+            }
 
             var restored = new HashSet<ResourceActionName>();
-            foreach (ResourceStateSnapshot snapshot in snapshots)
+            foreach (ResourceStateSnapshot snapshot in published.Snapshots)
             {
                 if (snapshot is null)
                 {
@@ -213,25 +235,50 @@ public sealed class ResourceControlPlane : IResourceControlPlane
                 }
             }
 
-            published = true;
+            publication = published;
         }
-        finally
+        catch
         {
             // A failed start returns to created so the host may start the control plane again; a
             // stop that raced the start keeps its stopped state.
-            Interlocked.CompareExchange(ref _lifecycle, published ? started : created, starting);
+            Interlocked.CompareExchange(ref _lifecycle, created, starting);
+            throw;
+        }
+
+        lock (_renewalLock)
+        {
+            if (Interlocked.CompareExchange(ref _lifecycle, started, starting) == starting && publication.Lease is { } renewed)
+            {
+                var renewal = new CancellationTokenSource();
+                _renewal = renewal;
+                _renewing = RenewAsync(renewed, renewal.Token);
+            }
         }
     }
 
     /// <summary>
-    /// Stops accepting action invocations and restores.
+    /// Stops accepting action invocations and restores, and stops renewing the registration.
     /// </summary>
-    /// <param name="cancellationToken">Unused; stopping completes synchronously.</param>
-    /// <returns>A completed task.</returns>
-    public Task StopAsync(CancellationToken cancellationToken = default)
+    /// <param name="cancellationToken">Unused; stopping waits only for a renewal in flight to end.</param>
+    /// <returns>A task that completes when renewal has stopped.</returns>
+    public async Task StopAsync(CancellationToken cancellationToken = default)
     {
-        Volatile.Write(ref _lifecycle, stopped);
-        return Task.CompletedTask;
+        CancellationTokenSource? renewal;
+        Task renewing;
+        lock (_renewalLock)
+        {
+            Volatile.Write(ref _lifecycle, stopped);
+            renewal = _renewal;
+            renewing = _renewing;
+            _renewal = null;
+        }
+
+        if (renewal is not null)
+        {
+            renewal.Cancel();
+            await renewing.ConfigureAwait(false);
+            renewal.Dispose();
+        }
     }
 
     /// <inheritdoc/>
@@ -307,6 +354,50 @@ public sealed class ResourceControlPlane : IResourceControlPlane
         finally
         {
             _mutations.Release();
+        }
+    }
+
+    private async Task RenewAsync(TimeSpan lease, CancellationToken cancellationToken)
+    {
+        TimeSpan interval = lease / 3;
+        if (interval < _minimumRenewalInterval)
+        {
+            interval = _minimumRenewalInterval;
+        }
+
+        using var timer = new PeriodicTimer(interval);
+        try
+        {
+            while (await timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false))
+            {
+                try
+                {
+                    if (await _publisher.RenewAsync(Manifest, cancellationToken).ConfigureAwait(false))
+                    {
+                        continue;
+                    }
+
+                    // The gateway does not know the instance: publish again and restore what it
+                    // answers with. Restores are idempotent, so state already in effect is harmless.
+                    ResourcePublication? publication = await _publisher.PublishAsync(Manifest, cancellationToken).ConfigureAwait(false);
+                    foreach (ResourceStateSnapshot? snapshot in publication?.Snapshots ?? [])
+                    {
+                        if (snapshot is not null)
+                        {
+                            await RestoreCoreAsync(snapshot, cancellationToken).ConfigureAwait(false);
+                        }
+                    }
+                }
+                catch (Exception) when (!cancellationToken.IsCancellationRequested)
+                {
+                    // Deliberately broad: each transport reports an unreachable or refusing gateway
+                    // in its own terms. The instance keeps serving and retries on the next tick.
+                }
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // The control plane stopped.
         }
     }
 

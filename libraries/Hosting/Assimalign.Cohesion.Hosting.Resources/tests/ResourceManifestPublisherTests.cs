@@ -43,26 +43,27 @@ public class ResourceManifestPublisherTests
         received.Actions.ShouldBe(manifest.Actions);
     }
 
-    [Fact(DisplayName = DisplayPrefix + "The snapshots the gateway answers with are returned")]
+    [Fact(DisplayName = DisplayPrefix + "The snapshots and lease the gateway answers with are returned")]
     public async Task PublishAsync_WhenGatewayAnswersWithSnapshots_ShouldReturnThem()
     {
         // Arrange
         var handler = new StubHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
         {
-            Content = new StringContent("""[{"action":"log-level","value":{"Level":"Debug"}}]""", Encoding.UTF8, "application/json"),
+            Content = new StringContent("""{"snapshots":[{"action":"log-level","value":{"Level":"Debug"}}],"lease":"00:00:30"}""", Encoding.UTF8, "application/json"),
         });
         ResourceManifestPublisher publisher = CreatePublisher(handler);
 
         // Act
-        IReadOnlyList<ResourceStateSnapshot> snapshots = await publisher.PublishAsync(CreateManifest(new LogLevelAction()));
+        ResourcePublication publication = await publisher.PublishAsync(CreateManifest(new LogLevelAction()));
 
         // Assert
-        ResourceStateSnapshot snapshot = snapshots.ShouldHaveSingleItem();
+        publication.Lease.ShouldBe(TimeSpan.FromSeconds(30));
+        ResourceStateSnapshot snapshot = publication.Snapshots.ShouldHaveSingleItem();
         snapshot.Action.ShouldBe((ResourceActionName)"log-level");
         Encoding.UTF8.GetString(snapshot.Value.Span).ShouldBe("""{"Level":"Debug"}""");
     }
 
-    [Theory(DisplayName = DisplayPrefix + "No content or an empty body means nothing to restore")]
+    [Theory(DisplayName = DisplayPrefix + "No content or an empty body means nothing to restore and no lease")]
     [InlineData(HttpStatusCode.NoContent)]
     [InlineData(HttpStatusCode.OK)]
     public async Task PublishAsync_WhenGatewayAnswersWithNothing_ShouldReturnEmpty(HttpStatusCode status)
@@ -72,10 +73,11 @@ public class ResourceManifestPublisherTests
         ResourceManifestPublisher publisher = CreatePublisher(handler);
 
         // Act
-        IReadOnlyList<ResourceStateSnapshot> snapshots = await publisher.PublishAsync(CreateManifest());
+        ResourcePublication publication = await publisher.PublishAsync(CreateManifest());
 
         // Assert
-        snapshots.ShouldBeEmpty();
+        publication.Snapshots.ShouldBeEmpty();
+        publication.Lease.ShouldBeNull();
     }
 
     [Fact(DisplayName = DisplayPrefix + "A refused publication throws with the gateway's status")]
@@ -92,13 +94,13 @@ public class ResourceManifestPublisherTests
         exception.StatusCode.ShouldBe(HttpStatusCode.ServiceUnavailable);
     }
 
-    [Fact(DisplayName = DisplayPrefix + "An answer that is not a snapshot list is refused content")]
+    [Fact(DisplayName = DisplayPrefix + "An answer that is not a publication is refused content")]
     public async Task PublishAsync_WhenGatewayAnswersWithMalformedList_ShouldThrowResourceContentException()
     {
         // Arrange
         var handler = new StubHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
         {
-            Content = new StringContent("""{"action":"log-level"}""", Encoding.UTF8, "application/json"),
+            Content = new StringContent("""[{"action":"log-level"}]""", Encoding.UTF8, "application/json"),
         });
         ResourceManifestPublisher publisher = CreatePublisher(handler);
 
@@ -154,16 +156,62 @@ public class ResourceManifestPublisherTests
         // Arrange
         var handler = new StubHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
         {
-            Content = new StringContent("""[{"action":"log-level","value":{"Level":"Debug"}}]""", Encoding.UTF8, "application/json"),
+            Content = new StringContent("""{"snapshots":[{"action":"log-level","value":{"Level":"Debug"}}],"lease":"00:00:30"}""", Encoding.UTF8, "application/json"),
         });
         var action = new LogLevelAction();
         ResourceControlPlane controlPlane = ResourceControlPlane.Create(new TestResource(action), CreatePublisher(handler), TestSerializer.Json);
 
         // Act
         await controlPlane.StartAsync();
+        await controlPlane.StopAsync();
 
         // Assert
         action.Current.ShouldBe(new LogLevelSetting("Debug"));
+    }
+
+    [Fact(DisplayName = DisplayPrefix + "A renewal puts the manifest to the endpoint")]
+    public async Task RenewAsync_WhenGatewayKnowsTheInstance_ShouldPutTheManifest()
+    {
+        // Arrange
+        var handler = new StubHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.NoContent));
+        ResourceManifestPublisher publisher = CreatePublisher(handler);
+
+        // Act
+        bool renewed = await publisher.RenewAsync(CreateManifest());
+
+        // Assert
+        renewed.ShouldBeTrue();
+        handler.Method.ShouldBe(HttpMethod.Put);
+        handler.RequestUri.ShouldBe(_endpoint);
+        handler.MediaType.ShouldBe("application/json");
+    }
+
+    [Fact(DisplayName = DisplayPrefix + "A renewal the gateway answers with 404 means it does not know the instance")]
+    public async Task RenewAsync_WhenGatewayDoesNotKnowTheInstance_ShouldReturnFalse()
+    {
+        // Arrange
+        var handler = new StubHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.NotFound));
+        ResourceManifestPublisher publisher = CreatePublisher(handler);
+
+        // Act
+        bool renewed = await publisher.RenewAsync(CreateManifest());
+
+        // Assert
+        renewed.ShouldBeFalse();
+    }
+
+    [Fact(DisplayName = DisplayPrefix + "A refused renewal throws with the gateway's status")]
+    public async Task RenewAsync_WhenGatewayRefuses_ShouldThrow()
+    {
+        // Arrange
+        var handler = new StubHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.InternalServerError));
+        ResourceManifestPublisher publisher = CreatePublisher(handler);
+
+        // Act
+        HttpRequestException exception = await Should.ThrowAsync<HttpRequestException>(() => publisher.RenewAsync(CreateManifest()).AsTask());
+
+        // Assert
+        exception.StatusCode.ShouldBe(HttpStatusCode.InternalServerError);
     }
 
     [Theory(DisplayName = DisplayPrefix + "An endpoint must be an absolute http or https URL")]

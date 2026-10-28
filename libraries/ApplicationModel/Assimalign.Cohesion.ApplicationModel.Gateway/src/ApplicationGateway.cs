@@ -34,9 +34,13 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway;
 /// </para>
 /// <para>
 /// The gateway saves its record after every change, so a gateway restarted with the same model
-/// adopts what runs instead of deploying it again. The gateway is transport-neutral: a transport
-/// hands each publication to <see cref="PublishAsync"/>, and an in-process resource can publish to
-/// the gateway directly, because it is an <see cref="IResourceManifestPublisher"/>.
+/// adopts what runs instead of deploying it again. Every registration carries a lease of
+/// <see cref="LeaseDuration"/>: an instance renews it (<see cref="RenewAsync"/>), and one that stops
+/// renewing is unregistered once it lapses. After startup every registered instance, the adopted
+/// ones included, has one full lease to renew, so an instance that died while the gateway was down
+/// leaves within one lease. The gateway is transport-neutral: a transport hands each publication to
+/// <see cref="PublishAsync"/>, and an in-process resource can publish to the gateway directly,
+/// because it is an <see cref="IResourceManifestPublisher"/>.
 /// </para>
 /// </remarks>
 [DebuggerDisplay("{Model}")]
@@ -48,6 +52,8 @@ public sealed class ApplicationGateway : IApplicationGateway, IResourceManifestP
     private const int stopped = 2;
 
     private static readonly TimeSpan _defaultStartupTimeout = TimeSpan.FromMinutes(5);
+    private static readonly TimeSpan _defaultLeaseDuration = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan _minimumExpiryInterval = TimeSpan.FromMilliseconds(10);
 
     private readonly IInfrastructureProvider _infrastructure;
     private readonly IGatewayStore _store;
@@ -61,17 +67,23 @@ public sealed class ApplicationGateway : IApplicationGateway, IResourceManifestP
     private IApplicationModel? _model;
     private int _lifecycle;
 
-    private ApplicationGateway(IInfrastructureProvider infrastructure, IGatewayStore store, TimeSpan startupTimeout)
+    private ApplicationGateway(IInfrastructureProvider infrastructure, IGatewayStore store, TimeSpan startupTimeout, TimeSpan leaseDuration)
     {
         _infrastructure = infrastructure;
         _store = store;
         StartupTimeout = startupTimeout;
+        LeaseDuration = leaseDuration;
     }
 
     /// <summary>
     /// Gets how long every created or updated resource has to publish its first manifest.
     /// </summary>
     public TimeSpan StartupTimeout { get; }
+
+    /// <summary>
+    /// Gets how long an instance stays registered without renewing its lease.
+    /// </summary>
+    public TimeSpan LeaseDuration { get; }
 
     /// <summary>
     /// Gets the model the gateway runs, or <see langword="null"/> before <see cref="RunAsync"/>.
@@ -118,10 +130,13 @@ public sealed class ApplicationGateway : IApplicationGateway, IResourceManifestP
     /// How long every created or updated resource has to publish its first manifest; five minutes
     /// when <see langword="null"/>.
     /// </param>
+    /// <param name="leaseDuration">
+    /// How long an instance stays registered without renewing; thirty seconds when <see langword="null"/>.
+    /// </param>
     /// <returns>The gateway.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="infrastructure"/> or <paramref name="store"/> is <see langword="null"/>.</exception>
-    /// <exception cref="ArgumentOutOfRangeException"><paramref name="startupTimeout"/> is not positive.</exception>
-    public static ApplicationGateway Create(IInfrastructureProvider infrastructure, IGatewayStore store, TimeSpan? startupTimeout = null)
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="startupTimeout"/> or <paramref name="leaseDuration"/> is not positive.</exception>
+    public static ApplicationGateway Create(IInfrastructureProvider infrastructure, IGatewayStore store, TimeSpan? startupTimeout = null, TimeSpan? leaseDuration = null)
     {
         ArgumentNullException.ThrowIfNull(infrastructure);
         ArgumentNullException.ThrowIfNull(store);
@@ -129,7 +144,10 @@ public sealed class ApplicationGateway : IApplicationGateway, IResourceManifestP
         TimeSpan timeout = startupTimeout ?? _defaultStartupTimeout;
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(timeout, TimeSpan.Zero, nameof(startupTimeout));
 
-        return new ApplicationGateway(infrastructure, store, timeout);
+        TimeSpan lease = leaseDuration ?? _defaultLeaseDuration;
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(lease, TimeSpan.Zero, nameof(leaseDuration));
+
+        return new ApplicationGateway(infrastructure, store, timeout, lease);
     }
 
     /// <summary>
@@ -178,9 +196,16 @@ public sealed class ApplicationGateway : IApplicationGateway, IResourceManifestP
             // Retire what the model no longer declares only once the deployment has started, so a
             // failed deployment leaves the previous one's resources running.
             await RetireAsync(model, cancellationToken).ConfigureAwait(false);
+
+            // Every registered instance, the adopted ones included, has one full lease from here.
+            foreach (GatewayResource resource in _ordered)
+            {
+                resource.RenewAll();
+            }
+
             _started.TrySetResult();
 
-            await Task.Delay(Timeout.Infinite, cancellationToken).ConfigureAwait(false);
+            await ExpireAsync(cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -201,11 +226,11 @@ public sealed class ApplicationGateway : IApplicationGateway, IResourceManifestP
 
     /// <summary>
     /// Registers a published instance manifest with its resource, saves the gateway's record, and
-    /// returns the state the instance must restore before it serves.
+    /// returns the state the instance must restore before it serves, with its lease.
     /// </summary>
     /// <param name="manifest">The manifest the instance published.</param>
     /// <param name="cancellationToken">Cancels saving the record.</param>
-    /// <returns>The snapshots the instance must restore.</returns>
+    /// <returns>The snapshots the instance must restore, and a lease of <see cref="LeaseDuration"/>.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="manifest"/> is <see langword="null"/>.</exception>
     /// <exception cref="ArgumentException">The manifest has no instance key or no action list.</exception>
     /// <exception cref="ApplicationGatewayException">
@@ -213,7 +238,7 @@ public sealed class ApplicationGateway : IApplicationGateway, IResourceManifestP
     /// not run the resource (<see cref="ApplicationGatewayErrorCode.ResourceUnknown"/>), or stopped
     /// accepting it after it missed its startup window (<see cref="ApplicationGatewayErrorCode.ResourceTornDown"/>).
     /// </exception>
-    public ValueTask<IReadOnlyList<ResourceStateSnapshot>> PublishAsync(ResourceManifest manifest, CancellationToken cancellationToken = default)
+    public ValueTask<ResourcePublication> PublishAsync(ResourceManifest manifest, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(manifest);
 
@@ -223,15 +248,43 @@ public sealed class ApplicationGateway : IApplicationGateway, IResourceManifestP
             throw Closed(resource);
         }
 
-        IReadOnlyList<ResourceStateSnapshot> restore = resource.Aggregate.Register(manifest);
+        IReadOnlyList<ResourceStateSnapshot> restore = resource.Register(manifest);
         if (!resource.TryMarkRegistered())
         {
             // The startup window closed between the check above and the registration.
-            resource.Aggregate.Unregister(manifest.Key);
+            resource.Unregister(manifest.Key);
             throw Closed(resource);
         }
 
         return SaveRegistrationAsync(resource, manifest.Key, restore, cancellationToken);
+    }
+
+    /// <summary>
+    /// Renews a registered instance's lease.
+    /// </summary>
+    /// <param name="manifest">The manifest the instance published.</param>
+    /// <param name="cancellationToken">Unused; renewal completes synchronously.</param>
+    /// <returns>
+    /// <see langword="true"/> when the lease was renewed; <see langword="false"/> when the gateway
+    /// does not know the instance, which then publishes again.
+    /// </returns>
+    /// <exception cref="ArgumentNullException"><paramref name="manifest"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ApplicationGatewayException">
+    /// The gateway is not running (<see cref="ApplicationGatewayErrorCode.PublicationsClosed"/>), does
+    /// not run the resource (<see cref="ApplicationGatewayErrorCode.ResourceUnknown"/>), or stopped
+    /// accepting it after it missed its startup window (<see cref="ApplicationGatewayErrorCode.ResourceTornDown"/>).
+    /// </exception>
+    public ValueTask<bool> RenewAsync(ResourceManifest manifest, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(manifest);
+
+        GatewayResource resource = GetResource(manifest.Provider, manifest.Name);
+        if (resource.IsClosed)
+        {
+            throw Closed(resource);
+        }
+
+        return ValueTask.FromResult(resource.TryRenew(manifest.Key));
     }
 
     /// <summary>
@@ -264,7 +317,7 @@ public sealed class ApplicationGateway : IApplicationGateway, IResourceManifestP
         return SaveRecordingAsync(targets, cancellationToken);
     }
 
-    private async ValueTask<IReadOnlyList<ResourceStateSnapshot>> SaveRegistrationAsync(
+    private async ValueTask<ResourcePublication> SaveRegistrationAsync(
         GatewayResource resource,
         ResourceInstanceKey key,
         IReadOnlyList<ResourceStateSnapshot> restore,
@@ -277,11 +330,37 @@ public sealed class ApplicationGateway : IApplicationGateway, IResourceManifestP
         catch
         {
             // An instance whose registration was not recorded fails its start and publishes again.
-            resource.Aggregate.Unregister(key);
+            resource.Unregister(key);
             throw;
         }
 
-        return restore;
+        return new ResourcePublication(restore, LeaseDuration);
+    }
+
+    // Unregisters every instance whose lease lapsed, three times per lease, until the run is
+    // cancelled.
+    private async Task ExpireAsync(CancellationToken cancellationToken)
+    {
+        TimeSpan interval = LeaseDuration / 3;
+        if (interval < _minimumExpiryInterval)
+        {
+            interval = _minimumExpiryInterval;
+        }
+
+        using var timer = new PeriodicTimer(interval);
+        while (await timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false))
+        {
+            int expired = 0;
+            foreach (GatewayResource resource in _ordered)
+            {
+                expired += resource.Expire(LeaseDuration);
+            }
+
+            if (expired > 0)
+            {
+                await SaveAsync(cancellationToken).ConfigureAwait(false);
+            }
+        }
     }
 
     private async ValueTask<IReadOnlyList<ResourceInstanceKey>> SaveRecordingAsync(IReadOnlyList<ResourceInstanceKey> targets, CancellationToken cancellationToken)
@@ -337,15 +416,15 @@ public sealed class ApplicationGateway : IApplicationGateway, IResourceManifestP
             bool sameDefinition = previous is not null && previous.Revision == revision;
 
             ApplicationResource aggregate = ApplicationResource.Create(manifest, sameDefinition ? previous!.State : null, actions);
+            var resource = new GatewayResource(aggregate, plan.Change, revision);
             if (sameDefinition && plan.Change == InfrastructureChange.None)
             {
                 foreach (ResourceManifest instance in previous!.Instances)
                 {
-                    aggregate.Register(instance);
+                    resource.Register(instance);
                 }
             }
 
-            var resource = new GatewayResource(aggregate, plan.Change, revision);
             lookup.Add((manifest.Provider, manifest.Name), resource);
             ordered.Add(resource);
             aggregates.Add(aggregate);
