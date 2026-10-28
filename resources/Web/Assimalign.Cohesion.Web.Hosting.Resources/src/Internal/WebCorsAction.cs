@@ -1,5 +1,4 @@
 using System;
-using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -19,7 +18,7 @@ internal sealed class WebCorsAction : IResourceAction
     public WebCorsAction(WebCorsPolicy policy)
     {
         Middleware = new ResourceCorsMiddleware(CorsMiddlewareCapture.Create(policy));
-        _state = ResourceActionState<WebCorsPolicy>.Create(policy, WebResourceJsonContext.Default.WebCorsPolicy, Apply);
+        _state = ResourceActionState<WebCorsPolicy>.Create(policy, Apply);
     }
 
     public ResourceCorsMiddleware Middleware { get; }
@@ -36,30 +35,22 @@ internal sealed class WebCorsAction : IResourceAction
     {
         if (context.Operation == ResourceActionKind.Read)
         {
-            return ResourceActionResult.Success(_state.Value, WebResourceJsonContext.Default.WebCorsPolicy);
+            return ResourceActionResult.Success(_state.Value, context.Serializer);
         }
 
-        WebCorsPolicy? policy = context.ReadInput(WebResourceJsonContext.Default.WebCorsPolicy);
+        WebCorsPolicy? policy = context.ReadInput<WebCorsPolicy>();
         if (policy is null)
         {
             return ResourceActionResult.Rejected(ErrorMessages.CorsPolicyRequired);
         }
 
-        try
-        {
-            await _state.SetAsync(policy, cancellationToken).ConfigureAwait(false);
-        }
-        catch (JsonException exception)
-        {
-            // Apply refused the policy (see Apply): the writer's error, and nothing changed.
-            return ResourceActionResult.Rejected(exception.Message);
-        }
-
+        // A policy CORS refuses throws from Apply; the control plane reports it as rejected.
+        await _state.SetAsync(policy, cancellationToken).ConfigureAwait(false);
         return ResourceActionResult.Success();
     }
 
-    // A policy CORS refuses is not a value of the state's type: a write reports it as rejected and a
-    // restore as a snapshot that does not fit, and the policy in effect stays.
+    // A policy CORS refuses is content the instance does not accept: a write reports it as rejected,
+    // a restore as a snapshot that does not fit, and the policy in effect stays.
     private void Apply(WebCorsPolicy policy)
     {
         IWebApplicationMiddleware middleware;
@@ -69,7 +60,7 @@ internal sealed class WebCorsAction : IResourceAction
         }
         catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
         {
-            throw new JsonException(exception.Message, exception);
+            throw new ResourceContentException(exception.Message, exception);
         }
 
         Middleware.Replace(middleware);

@@ -1,19 +1,17 @@
 using System;
 using System.Diagnostics;
-using System.Text.Json;
-using System.Text.Json.Serialization.Metadata;
 using System.Threading;
 using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Hosting.Resources;
 
 /// <summary>
-/// The typed state of a stateful action: its current value, how a new value is applied to the
-/// instance, and how the value is written to and read from a snapshot.
+/// The typed state of a stateful action: its current value, and how a new value is applied to the
+/// instance.
 /// </summary>
 /// <typeparam name="TState">
 /// The state's type. Use an immutable type, such as a record, so a value read while a write is
-/// applied is never torn.
+/// applied is never torn. The control plane's content serializer must know it.
 /// </typeparam>
 /// <remarks>
 /// <para>
@@ -21,7 +19,8 @@ namespace Assimalign.Cohesion.Hosting.Resources;
 /// created, so creation applies nothing. Every later value passes through the apply callback, from
 /// an action's write (<see cref="SetAsync"/>) or a restored snapshot (<see cref="RestoreAsync"/>),
 /// and becomes current only when the callback succeeds. A snapshot therefore always describes a
-/// value that was applied.
+/// value that was applied. A callback that refuses a value throws
+/// <see cref="ResourceContentException"/>, which a control plane reports as rejected.
 /// </para>
 /// <para>
 /// The state does not serialize changes itself: its control plane runs one write or restore at a
@@ -32,14 +31,12 @@ namespace Assimalign.Cohesion.Hosting.Resources;
 [DebuggerTypeProxy(typeof(ResourceActionState<>.DebugView))]
 public sealed class ResourceActionState<TState> : IResourceActionState
 {
-    private readonly JsonTypeInfo<TState> _typeInfo;
     private readonly Func<TState, CancellationToken, ValueTask> _apply;
     private TState _value;
 
-    private ResourceActionState(TState value, JsonTypeInfo<TState> typeInfo, Func<TState, CancellationToken, ValueTask> apply)
+    private ResourceActionState(TState value, Func<TState, CancellationToken, ValueTask> apply)
     {
         _value = value;
-        _typeInfo = typeInfo;
         _apply = apply;
     }
 
@@ -56,6 +53,7 @@ public sealed class ResourceActionState<TState> : IResourceActionState
     /// <returns>A task that completes when the value is in effect.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="value"/> is <see langword="null"/>.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
+    /// <exception cref="ResourceContentException">The apply callback refused the value.</exception>
     public async ValueTask SetAsync(TState value, CancellationToken cancellationToken = default)
     {
         if (value is null)
@@ -70,19 +68,26 @@ public sealed class ResourceActionState<TState> : IResourceActionState
     }
 
     /// <inheritdoc/>
-    public ReadOnlyMemory<byte> GetSnapshot()
+    public ReadOnlyMemory<byte> GetSnapshot(IResourceContentSerializer serializer)
     {
-        return JsonSerializer.SerializeToUtf8Bytes(_value, _typeInfo);
+        ArgumentNullException.ThrowIfNull(serializer);
+
+        return serializer.Serialize(_value);
     }
 
     /// <inheritdoc/>
-    /// <exception cref="JsonException">The snapshot is not a value of <typeparamref name="TState"/>, or is the JSON literal <c>null</c>.</exception>
-    public ValueTask RestoreAsync(ReadOnlyMemory<byte> snapshot, CancellationToken cancellationToken = default)
+    /// <exception cref="ResourceContentException">
+    /// The snapshot is not a value of <typeparamref name="TState"/>, is a null value, or the apply
+    /// callback refused it.
+    /// </exception>
+    public ValueTask RestoreAsync(ReadOnlyMemory<byte> snapshot, IResourceContentSerializer serializer, CancellationToken cancellationToken = default)
     {
-        TState? value = JsonSerializer.Deserialize(snapshot.Span, _typeInfo);
+        ArgumentNullException.ThrowIfNull(serializer);
+
+        TState? value = serializer.Deserialize<TState>(snapshot);
         if (value is null)
         {
-            throw new JsonException(ErrorMessages.ResourceStateSnapshotNull);
+            throw new ResourceContentException(ErrorMessages.ResourceStateSnapshotNull);
         }
 
         return SetAsync(value, cancellationToken);
@@ -92,36 +97,33 @@ public sealed class ResourceActionState<TState> : IResourceActionState
     /// Creates the state of a stateful action whose new values are applied asynchronously.
     /// </summary>
     /// <param name="value">The initial value: the state the resource's code defines.</param>
-    /// <param name="typeInfo">The source-generated metadata of the state type.</param>
     /// <param name="apply">Applies a new value to the instance.</param>
     /// <returns>The state.</returns>
     /// <exception cref="ArgumentNullException">An argument is <see langword="null"/>.</exception>
-    public static ResourceActionState<TState> Create(TState value, JsonTypeInfo<TState> typeInfo, Func<TState, CancellationToken, ValueTask> apply)
+    public static ResourceActionState<TState> Create(TState value, Func<TState, CancellationToken, ValueTask> apply)
     {
         if (value is null)
         {
             throw new ArgumentNullException(nameof(value));
         }
 
-        ArgumentNullException.ThrowIfNull(typeInfo);
         ArgumentNullException.ThrowIfNull(apply);
 
-        return new ResourceActionState<TState>(value, typeInfo, apply);
+        return new ResourceActionState<TState>(value, apply);
     }
 
     /// <summary>
     /// Creates the state of a stateful action whose new values are applied synchronously.
     /// </summary>
     /// <param name="value">The initial value: the state the resource's code defines.</param>
-    /// <param name="typeInfo">The source-generated metadata of the state type.</param>
     /// <param name="apply">Applies a new value to the instance.</param>
     /// <returns>The state.</returns>
     /// <exception cref="ArgumentNullException">An argument is <see langword="null"/>.</exception>
-    public static ResourceActionState<TState> Create(TState value, JsonTypeInfo<TState> typeInfo, Action<TState> apply)
+    public static ResourceActionState<TState> Create(TState value, Action<TState> apply)
     {
         ArgumentNullException.ThrowIfNull(apply);
 
-        return Create(value, typeInfo, (state, _) =>
+        return Create(value, (state, _) =>
         {
             apply.Invoke(state);
             return ValueTask.CompletedTask;

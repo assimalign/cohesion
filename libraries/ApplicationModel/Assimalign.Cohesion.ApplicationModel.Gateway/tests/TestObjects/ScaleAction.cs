@@ -18,7 +18,7 @@ internal sealed class ScaleAction : IApplicationResourceAction
 
     public ValueTask<ResourceActionResult> ExecuteAsync(ResourceActionContext context, CancellationToken cancellationToken = default)
     {
-        ScaleSetting? setting = context.ReadInput(TestJsonContext.Default.ScaleSetting);
+        ScaleSetting? setting = context.ReadInput<ScaleSetting>();
         if (setting is null || setting.Replicas < 0)
         {
             return ValueTask.FromResult(ResourceActionResult.Rejected("Replicas must be zero or more."));

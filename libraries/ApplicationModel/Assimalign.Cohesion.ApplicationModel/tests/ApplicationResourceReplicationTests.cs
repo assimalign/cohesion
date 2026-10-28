@@ -27,7 +27,7 @@ public class ApplicationResourceReplicationTests
         async Task<TestResource> StartInstanceAsync()
         {
             var instance = new TestResource();
-            ResourceControlPlane controlPlane = ResourceControlPlane.Create(instance, publisher);
+            ResourceControlPlane controlPlane = ResourceControlPlane.Create(instance, publisher, TestSerializer.Json);
             await controlPlane.StartAsync(CancellationToken.None);
             instances.Add(instance.Key, (instance, controlPlane));
             return instance;
@@ -40,7 +40,7 @@ public class ApplicationResourceReplicationTests
         // snapshot and restores it on the instances the aggregate names.
         ResourceActionResult write = await instances[first.Key].ControlPlane.ExecuteAsync(
             "log-level",
-            ResourceActionContext.Create(ResourceActionKind.Write, """{"Level":"Debug"}"""u8.ToArray()),
+            ResourceActionContext.Create(ResourceActionKind.Write, TestSerializer.Json, """{"Level":"Debug"}"""u8.ToArray()),
             CancellationToken.None);
         foreach (ResourceInstanceKey target in resource.Record(first.Key, write.State!))
         {

@@ -183,9 +183,9 @@ public class ApplicationResourceTests
         ApplicationResource resource = ApplicationResource.Create(TestManifests.OrdersApi, actions: [new TestInfrastructureAction("scale"), restart]);
 
         // Act
-        ResourceActionResult executed = await resource.ExecuteAsync("restart", ResourceActionContext.Create(ResourceActionKind.Write));
-        ResourceActionResult unsupported = await resource.ExecuteAsync("restart", ResourceActionContext.Create(ResourceActionKind.Read));
-        ResourceActionResult missing = await resource.ExecuteAsync("delete", ResourceActionContext.Create(ResourceActionKind.Write));
+        ResourceActionResult executed = await resource.ExecuteAsync("restart", ResourceActionContext.Create(ResourceActionKind.Write, TestSerializer.Json));
+        ResourceActionResult unsupported = await resource.ExecuteAsync("restart", ResourceActionContext.Create(ResourceActionKind.Read, TestSerializer.Json));
+        ResourceActionResult missing = await resource.ExecuteAsync("delete", ResourceActionContext.Create(ResourceActionKind.Write, TestSerializer.Json));
 
         // Assert
         resource.Actions.Select(action => action.Name.Value).ShouldBe(["restart", "scale"]);

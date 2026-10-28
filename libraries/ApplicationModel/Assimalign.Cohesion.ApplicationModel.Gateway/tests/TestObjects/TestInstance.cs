@@ -12,7 +12,7 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway.Tests;
 internal sealed class TestInstance : IResource, IResourceAction
 {
     private readonly ResourceActionState<LogLevelSetting> _state =
-        ResourceActionState<LogLevelSetting>.Create(new LogLevelSetting("Information"), TestJsonContext.Default.LogLevelSetting, _ => { });
+        ResourceActionState<LogLevelSetting>.Create(new LogLevelSetting("Information"), _ => { });
 
     public TestInstance(ProviderName provider, ResourceName name)
     {
@@ -42,10 +42,10 @@ internal sealed class TestInstance : IResource, IResourceAction
     {
         if (context.Operation == ResourceActionKind.Read)
         {
-            return ResourceActionResult.Success(_state.Value, TestJsonContext.Default.LogLevelSetting);
+            return ResourceActionResult.Success(_state.Value, context.Serializer);
         }
 
-        await _state.SetAsync(context.ReadInput(TestJsonContext.Default.LogLevelSetting)!, cancellationToken);
+        await _state.SetAsync(context.ReadInput<LogLevelSetting>()!, cancellationToken);
         return ResourceActionResult.Success();
     }
 }

@@ -13,10 +13,7 @@ internal sealed class LogLevelAction : IResourceAction
 
     public LogLevelAction(string initialLevel = "Information")
     {
-        _state = ResourceActionState<LogLevelSetting>.Create(
-            new LogLevelSetting(initialLevel),
-            TestJsonContext.Default.LogLevelSetting,
-            setting => Applied.Add(setting));
+        _state = ResourceActionState<LogLevelSetting>.Create(new LogLevelSetting(initialLevel), setting => Applied.Add(setting));
     }
 
     public List<LogLevelSetting> Applied { get; } = [];
@@ -33,10 +30,10 @@ internal sealed class LogLevelAction : IResourceAction
     {
         if (context.Operation == ResourceActionKind.Read)
         {
-            return ResourceActionResult.Success(_state.Value, TestJsonContext.Default.LogLevelSetting);
+            return ResourceActionResult.Success(_state.Value, context.Serializer);
         }
 
-        LogLevelSetting? setting = context.ReadInput(TestJsonContext.Default.LogLevelSetting);
+        LogLevelSetting? setting = context.ReadInput<LogLevelSetting>();
         if (setting is null || string.IsNullOrWhiteSpace(setting.Level))
         {
             return ResourceActionResult.Rejected("A log level is required.");

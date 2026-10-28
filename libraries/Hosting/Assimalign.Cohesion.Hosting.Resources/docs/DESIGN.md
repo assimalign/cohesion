@@ -49,12 +49,14 @@ flowchart TB
 | --- | --- |
 | `IResource` | One running instance: `Provider` + `Name` (shared by every instance), `Key` (this instance), its actions and health contributors. `Id` derives from provider and name. |
 | `IResourceAction` | A named operation. `Kind` says which operations it accepts (`Read`, `Write`, or both); `State`, when present, is what its writes change. |
-| `IResourceActionState`, `ResourceActionState<TState>` | The state a stateful action's writes change. A snapshot is the whole value as UTF-8 JSON; restoring one applies it. |
-| `ResourceActionContext`, `ResourceActionResult` | One invocation and its outcome. Payloads are UTF-8 JSON, read and written through caller-supplied `JsonTypeInfo<T>`. |
+| `IResourceActionState`, `ResourceActionState<TState>` | The state a stateful action's writes change. A snapshot is the whole value, written by the content serializer; restoring one applies it. |
+| `ResourceActionContext`, `ResourceActionResult` | One invocation and its outcome. The context carries the control plane's content serializer, which reads the input and writes the output. |
+| `IResourceContentSerializer`, `JsonResourceContentSerializer`, `ResourceContentException` | The format of everything an instance exchanges (D12). JSON over source-generated contexts is the default; content the instance refuses is a `ResourceContentException`. |
 | `ResourceStateSnapshot` | One action's state, as a gateway keeps it until the next deployment. |
 | `ResourceManifest`, `ResourceActionDescriptor` | What an instance publishes about itself when its host starts. |
 | `IResourceControlPlane`, `ResourceControlPlane` | The instance's runtime: an `IHostService` that publishes the manifest and restores returned state on start, then executes actions and restores state on request. |
-| `IResourceManifestPublisher` | The seam to the gateway. The transport and its authentication belong to the implementation; a local gateway accepts anonymous publication. |
+| `IResourceService` | The host service an area registers: it runs the transport that serves the control plane, then the control plane. In-process code finds the control plane among the host's services through it. |
+| `IResourceManifestPublisher`, `ResourceManifestPublisher`, `ResourceManifestPublisherOptions` | The seam to the gateway, its abstract base, and the options of the HTTP publisher `ResourceManifestPublisher.Create` returns (D13). A local gateway accepts anonymous publication. |
 | `IResourceHealthContributor`, `HealthContribution` | Health, contributed per component. A default contribution is `Unhealthy`, so unset health fails closed. |
 
 Value objects carry the identity: `ProviderName`, `ProviderId`, `ResourceName`, `ResourceId`,
@@ -85,8 +87,9 @@ sequenceDiagram
     CPB-->>GW: Succeeded
 ```
 
-1. The area registers the control plane ahead of the services that serve traffic. A host starts
-   services in registration order, so the instance serves only after the returned state is in effect.
+1. The area registers its `IResourceService` ahead of the services that serve traffic. It opens the
+   control plane's transport, then starts the control plane. A host starts services in registration
+   order, so the instance serves only after the returned state is in effect.
 2. `StartAsync` publishes the manifest and restores every snapshot the publisher returns. A failed
    publication or restore fails the host's start and leaves the control plane unstarted.
 3. Between `StartAsync` and `StopAsync`, `ExecuteAsync` runs actions and `RestoreAsync` applies
@@ -127,8 +130,9 @@ happens next. A publisher may retry inside `PublishAsync`.
 
 **D6 — Dispatch returns statuses.** `NotFound`, `NotSupported`, and `Rejected` are results, so a
 transport maps them to its own codes (404, 405, 400 over HTTP) without catching exceptions. A
-`JsonException` while binding input or a snapshot is `Rejected`. Any other exception is a failure
-and reaches the transport. `ResourceActionResult.NotFound()` and `NotSupported()` are public so
+`ResourceContentException`, from the serializer binding input or a snapshot or from an action or
+apply callback refusing a value, is `Rejected`. Any other exception is a failure and reaches the
+transport. `ResourceActionResult.NotFound()` and `NotSupported()` are public so
 other dispatchers, such as an application resource's infrastructure actions, report the same results.
 
 **D7 — Ids are version 5 UUIDs with one namespace per kind.** The scaffold derived both ids from the
@@ -157,7 +161,33 @@ platform removes it, so no action can destroy what it manages.
 **D11 — State is an interface plus a sealed generic.** The scaffold's abstract
 `ResourceActionState` exposed `object? State { get; set; }`, which boxed and had no serialization
 contract. `IResourceActionState` is the contract the control plane uses; `ResourceActionState<TState>`
-is the typed implementation areas construct, with source-generated JSON metadata and an apply callback.
+is the typed implementation areas construct, with an apply callback. It is written and read by the
+control plane's content serializer (D12).
+
+**D12 — The content format is a serializer the platform chooses (owner request, 2026-10-28).**
+Actions, states, the publisher, and the transports took `JsonTypeInfo<T>` directly, which fixed
+the format at JSON in every area. `IResourceContentSerializer` is now the one place the format
+lives: a control plane is created with one, invocation contexts carry it, and transports write the
+manifest and results with it and label content with its media type. A platform that exchanges
+another format brings its own serializer, and that serializer must know every type the instances
+exchange, this library's and each area's action types. The owner accepted that cost.
+`JsonResourceContentSerializer` is the default. It resolves each type from `ResourceJsonContext`,
+then from the contexts it was created with, and writes each type with its own context's options,
+so an area's naming survives being combined with others. *Rejected:* one merged
+`JsonSerializerOptions` over all resolvers would impose one naming policy on every area's types.
+Content the instance refuses is a `ResourceContentException` rather than a `JsonException`, so the
+control plane's error model no longer names a format. `ResourceControlPlane.Create` snapshots
+every state once, so a serializer that does not know a state's type fails at composition. Otherwise
+it would fail the first write, after the write had already changed the instance.
+
+**D13 — The HTTP publisher is internal behind an abstract base and options (owner request,
+2026-10-28).** `ResourceManifestPublisher.Create(ResourceManifestPublisherOptions)` returns the
+HTTP implementation. The options' `HttpClientFactory` callback is called once per publication,
+and the client it returns is disposed afterward, the way an HTTP client factory's clients are
+used. A factory such as `Assimalign.Cohesion.Http.ClientFactory` pools and rotates the handlers, so
+publications do not exhaust sockets. Without a callback, every publisher in the process shares one
+`SocketsHttpHandler`, whose connections are recycled every two minutes. Another transport derives
+from `ResourceManifestPublisher`.
 
 ## Concurrency
 
@@ -180,8 +210,10 @@ That change lands with the chunk that first builds such a package.
 
 ## AOT
 
-No reflection or runtime code generation. JSON goes through caller-supplied `JsonTypeInfo<T>`, and
-the generated value objects carry their own JSON converters.
+No reflection or runtime code generation. `JsonResourceContentSerializer` resolves metadata only
+from source-generated contexts, and an undeclared type is `NotSupportedException`, never a
+reflection fallback. The generated value objects carry their own JSON converters. A platform's own
+serializer has to meet the same bar.
 
 ## Diagnostics
 

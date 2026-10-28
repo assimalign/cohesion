@@ -16,7 +16,7 @@ public class ResourceJsonContextTests
     {
         // Arrange
         var resource = new TestResource(new LogLevelAction());
-        ResourceManifest manifest = ResourceControlPlane.Create(resource, new TestPublisher()).Manifest;
+        ResourceManifest manifest = ResourceControlPlane.Create(resource, new TestPublisher(), TestSerializer.Json).Manifest;
 
         // Act
         byte[] json = JsonSerializer.SerializeToUtf8Bytes(manifest, ResourceJsonContext.Default.ResourceManifest);
@@ -60,5 +60,53 @@ public class ResourceJsonContextTests
     {
         // Act / Assert
         Should.Throw<JsonException>(() => JsonSerializer.Deserialize(json, ResourceJsonContext.Default.IReadOnlyListResourceStateSnapshot));
+    }
+
+    [Fact(DisplayName = DisplayPrefix + "A result with an embedded output and a state snapshot survives a round trip")]
+    public void Deserialize_ResultWithOutputAndState_ShouldRoundTrip()
+    {
+        // Arrange
+        const string json = """{"status":"Succeeded","output":{"origins":["https://partner.example"]},"state":{"action":"cors","value":{"origins":["https://partner.example"]}}}""";
+
+        // Act
+        ResourceActionResult? read = JsonSerializer.Deserialize(json, ResourceJsonContext.Default.ResourceActionResult);
+        string written = JsonSerializer.Serialize(read!, ResourceJsonContext.Default.ResourceActionResult);
+
+        // Assert
+        read.ShouldNotBeNull();
+        read.Status.ShouldBe(ResourceActionStatus.Succeeded);
+        Encoding.UTF8.GetString(read.Output.Span).ShouldBe("""{"origins":["https://partner.example"]}""");
+        ResourceStateSnapshot state = read.State.ShouldNotBeNull();
+        state.Action.ShouldBe((ResourceActionName)"cors");
+        Encoding.UTF8.GetString(state.Value.Span).ShouldBe("""{"origins":["https://partner.example"]}""");
+        written.ShouldBe(json);
+    }
+
+    [Fact(DisplayName = DisplayPrefix + "A rejection is written with its reason and nothing else")]
+    public void Serialize_Rejection_ShouldCarryOnlyStatusAndReason()
+    {
+        // Act
+        string json = JsonSerializer.Serialize(ResourceActionResult.Rejected("A log level is required."), ResourceJsonContext.Default.ResourceActionResult);
+        ResourceActionResult? read = JsonSerializer.Deserialize(json, ResourceJsonContext.Default.ResourceActionResult);
+
+        // Assert
+        json.ShouldBe("""{"status":"Rejected","reason":"A log level is required."}""");
+        read.ShouldNotBeNull().Status.ShouldBe(ResourceActionStatus.Rejected);
+        read.Reason.ShouldBe("A log level is required.");
+        read.Output.IsEmpty.ShouldBeTrue();
+        read.State.ShouldBeNull();
+    }
+
+    [Theory(DisplayName = DisplayPrefix + "A result without a known status, or a rejection without a reason, is refused")]
+    [InlineData("""{}""")]
+    [InlineData("""{"status":"Unavailable"}""")]
+    [InlineData("""{"status":1}""")]
+    [InlineData("""{"status":"Rejected"}""")]
+    [InlineData("""{"status":"Succeeded","state":{"action":"cors"}}""")]
+    [InlineData("""[]""")]
+    public void Deserialize_MalformedResult_ShouldThrow(string json)
+    {
+        // Act / Assert
+        Should.Throw<JsonException>(() => JsonSerializer.Deserialize(json, ResourceJsonContext.Default.ResourceActionResult));
     }
 }

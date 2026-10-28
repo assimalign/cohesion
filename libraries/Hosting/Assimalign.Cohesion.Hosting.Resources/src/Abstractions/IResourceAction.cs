@@ -49,9 +49,9 @@ public interface IResourceAction
     /// <param name="context">The invocation: the requested operation and its input.</param>
     /// <param name="cancellationToken">Cancels the invocation.</param>
     /// <returns>The invocation's result.</returns>
-    /// <exception cref="System.Text.Json.JsonException">
-    /// The input is not a value of the action's input type. A control plane reports it as
-    /// <see cref="ResourceActionStatus.Rejected"/>.
+    /// <exception cref="ResourceContentException">
+    /// The input is not a value of the action's input type, or the instance refuses the value. A
+    /// control plane reports it as <see cref="ResourceActionStatus.Rejected"/>.
     /// </exception>
     ValueTask<ResourceActionResult> ExecuteAsync(ResourceActionContext context, CancellationToken cancellationToken = default);
 }

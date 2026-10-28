@@ -6,16 +6,17 @@ using System.Text.Json.Serialization;
 namespace Assimalign.Cohesion.Hosting.Resources;
 
 /// <summary>
-/// Converts a <see cref="ResourceStateSnapshot"/> to and from its wire form: an object whose
+/// Converts a <see cref="ResourceStateSnapshot"/> to and from its JSON form: an object whose
 /// <c>action</c> names the action and whose <c>value</c> is the state as embedded JSON.
 /// </summary>
 /// <remarks>
 /// <code language="json">{ "action": "cors", "value": { "origins": [ "https://shop.example" ] } }</code>
+/// The snapshot's value must be JSON, as <see cref="JsonResourceContentSerializer"/> writes it.
 /// </remarks>
 public sealed class ResourceStateSnapshotJsonConverter : JsonConverter<ResourceStateSnapshot>
 {
     /// <summary>
-    /// Reads a snapshot from its wire form.
+    /// Reads a snapshot from its JSON form.
     /// </summary>
     /// <param name="reader">The reader, positioned on the snapshot.</param>
     /// <param name="typeToConvert">The type to convert.</param>
@@ -24,11 +25,26 @@ public sealed class ResourceStateSnapshotJsonConverter : JsonConverter<ResourceS
     /// <exception cref="JsonException">The JSON is not a snapshot, or its action name is invalid.</exception>
     public override ResourceStateSnapshot? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
     {
-        if (reader.TokenType == JsonTokenType.Null)
-        {
-            return null;
-        }
+        return reader.TokenType == JsonTokenType.Null ? null : ReadSnapshot(ref reader);
+    }
 
+    /// <summary>
+    /// Writes a snapshot in its JSON form.
+    /// </summary>
+    /// <param name="writer">The writer.</param>
+    /// <param name="value">The snapshot.</param>
+    /// <param name="options">The serializer options.</param>
+    /// <exception cref="ArgumentException">The snapshot's value is not JSON.</exception>
+    public override void Write(Utf8JsonWriter writer, ResourceStateSnapshot value, JsonSerializerOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(writer);
+        ArgumentNullException.ThrowIfNull(value);
+
+        WriteSnapshot(writer, value);
+    }
+
+    internal static ResourceStateSnapshot ReadSnapshot(ref Utf8JsonReader reader)
+    {
         if (reader.TokenType != JsonTokenType.StartObject)
         {
             throw new JsonException(ErrorMessages.ResourceStateSnapshotInvalid);
@@ -46,10 +62,7 @@ public sealed class ResourceStateSnapshotJsonConverter : JsonConverter<ResourceS
                     action = reader.GetString();
                     break;
                 case "value":
-                    using (JsonDocument document = JsonDocument.ParseValue(ref reader))
-                    {
-                        value = Encoding.UTF8.GetBytes(document.RootElement.GetRawText());
-                    }
+                    value = ReadRawValue(ref reader);
                     break;
                 case "action":
                     throw new JsonException(ErrorMessages.ResourceStateSnapshotInvalid);
@@ -72,21 +85,18 @@ public sealed class ResourceStateSnapshotJsonConverter : JsonConverter<ResourceS
         return ResourceStateSnapshot.Create(name, value);
     }
 
-    /// <summary>
-    /// Writes a snapshot in its wire form.
-    /// </summary>
-    /// <param name="writer">The writer.</param>
-    /// <param name="value">The snapshot.</param>
-    /// <param name="options">The serializer options.</param>
-    public override void Write(Utf8JsonWriter writer, ResourceStateSnapshot value, JsonSerializerOptions options)
+    internal static void WriteSnapshot(Utf8JsonWriter writer, ResourceStateSnapshot value)
     {
-        ArgumentNullException.ThrowIfNull(writer);
-        ArgumentNullException.ThrowIfNull(value);
-
         writer.WriteStartObject();
         writer.WriteString("action", value.Action.Value);
         writer.WritePropertyName("value");
         writer.WriteRawValue(value.Value.Span);
         writer.WriteEndObject();
+    }
+
+    internal static byte[] ReadRawValue(ref Utf8JsonReader reader)
+    {
+        using JsonDocument document = JsonDocument.ParseValue(ref reader);
+        return Encoding.UTF8.GetBytes(document.RootElement.GetRawText());
     }
 }

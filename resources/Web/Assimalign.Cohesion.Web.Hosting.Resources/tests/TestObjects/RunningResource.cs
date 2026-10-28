@@ -5,6 +5,9 @@ using System.Net;
 using System.Net.Http;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.DependencyInjection;
+using Assimalign.Cohesion.Hosting;
+using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.Http;
 
 using HttpStatusCode = Assimalign.Cohesion.Http.HttpStatusCode;
@@ -40,7 +43,15 @@ internal sealed class RunningResource : IAsyncDisposable
     /// </summary>
     public HttpClient ControlPlane { get; }
 
-    public static async Task<RunningResource> StartAsync(Uri? manifestEndpoint, WebCorsPolicy cors)
+    /// <summary>
+    /// Gets the resource services among the host's services, as an in-process gateway finds them.
+    /// </summary>
+    public IReadOnlyList<IResourceService> ResourceServices => _application.Context.ServiceProvider
+        .GetRequiredService<IEnumerable<IHostService>>()
+        .OfType<IResourceService>()
+        .ToArray();
+
+    public static async Task<RunningResource> StartAsync(Uri? manifestEndpoint, WebCorsPolicy cors, Action<WebResourceBuilder>? configure = null)
     {
         int applicationPort = TestPorts.GetFree();
         int controlPlanePort = TestPorts.GetFree();
@@ -52,6 +63,7 @@ internal sealed class RunningResource : IAsyncDisposable
             resource.ManifestEndpoint = manifestEndpoint;
             resource.ControlPlaneEndpoint = new Uri($"http://127.0.0.1:{controlPlanePort}/");
             resource.AddCors(cors);
+            configure?.Invoke(resource);
         });
 
         WebApplication application = builder.Build();

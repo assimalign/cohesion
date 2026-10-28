@@ -4,8 +4,9 @@ using System.Text.Json.Serialization;
 namespace Assimalign.Cohesion.Hosting.Resources;
 
 /// <summary>
-/// The state of one stateful action as UTF-8 JSON: what a gateway keeps after a write and restores
-/// on instances that start before the resource is next deployed.
+/// The state of one stateful action, written by the control plane's content serializer: what a
+/// gateway keeps after a write and restores on instances that start before the resource is next
+/// deployed.
 /// </summary>
 [JsonConverter(typeof(ResourceStateSnapshotJsonConverter))]
 public sealed class ResourceStateSnapshot
@@ -22,7 +23,7 @@ public sealed class ResourceStateSnapshot
     public ResourceActionName Action { get; }
 
     /// <summary>
-    /// Gets the state's value as UTF-8 JSON.
+    /// Gets the state's value as content.
     /// </summary>
     public ReadOnlyMemory<byte> Value { get; }
 
@@ -31,7 +32,7 @@ public sealed class ResourceStateSnapshot
     /// </summary>
     /// <remarks>The snapshot keeps a copy of <paramref name="value"/>, so the caller may reuse its buffer.</remarks>
     /// <param name="action">The name of the action whose state this is.</param>
-    /// <param name="value">The state's value as UTF-8 JSON.</param>
+    /// <param name="value">The state's value, written by the control plane's content serializer.</param>
     /// <returns>The snapshot.</returns>
     /// <exception cref="ArgumentException">
     /// <paramref name="action"/> is <see langword="default"/>, or <paramref name="value"/> is empty.

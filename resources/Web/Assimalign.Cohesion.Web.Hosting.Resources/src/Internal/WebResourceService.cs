@@ -10,29 +10,29 @@ using Assimalign.Cohesion.Hosting.Resources;
 namespace Assimalign.Cohesion.Web.Hosting.Resources.Internal;
 
 /// <summary>
-/// The private Web host that serves a resource instance's control plane on its own listener,
-/// separate from the application's listeners and pipeline.
+/// Runs a Web resource instance: a private Web host that serves the instance's control plane on its
+/// own listener, separate from the application's listeners and pipeline, and the control plane.
 /// </summary>
 /// <remarks>
-/// It is registered ahead of the control plane, so it listens before the control plane publishes
-/// the manifest; until the control plane has started, invocations answer 503. Disposal releases
-/// the host and the manifest publisher.
+/// Starting opens the listener first, so the control plane is reachable as soon as the gateway has
+/// its manifest, then starts the control plane, which publishes and restores; until it has started,
+/// invocations answer 503. A control plane that fails to start closes the listener again. Disposal
+/// releases the private host.
 /// </remarks>
-internal sealed class WebResourceControlPlaneHost : IHostService, IAsyncDisposable
+internal sealed class WebResourceService : IResourceService, IAsyncDisposable
 {
-    private readonly IResourceControlPlane _controlPlane;
     private readonly IPEndPoint _endPoint;
-    private readonly IDisposable _publisher;
     private WebApplication? _application;
 
-    public WebResourceControlPlaneHost(IResourceControlPlane controlPlane, IPEndPoint endPoint, IDisposable publisher)
+    public WebResourceService(IResourceControlPlane controlPlane, IPEndPoint endPoint)
     {
-        _controlPlane = controlPlane;
+        ControlPlane = controlPlane;
         _endPoint = endPoint;
-        _publisher = publisher;
     }
 
     public ServiceId Id { get; } = ServiceId.New();
+
+    public IResourceControlPlane ControlPlane { get; }
 
     public async Task StartAsync(CancellationToken cancellationToken = default)
     {
@@ -40,17 +40,29 @@ internal sealed class WebResourceControlPlaneHost : IHostService, IAsyncDisposab
         builder.Server.UseServer(options => options.UseHttp1(tcp => tcp.EndPoint = _endPoint));
 
         WebApplication application = builder.Build();
-        application.Use((context, _) => ControlPlaneHttpHandler.InvokeAsync(_controlPlane, context));
+        IResourceControlPlane controlPlane = ControlPlane;
+        application.Use((context, _) => ControlPlaneHttpHandler.InvokeAsync(controlPlane, context));
         _application = application;
 
         await ((IWebApplication)application).StartAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await controlPlane.StartAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            await ((IWebApplication)application).StopAsync(CancellationToken.None).ConfigureAwait(false);
+            throw;
+        }
     }
 
-    public Task StopAsync(CancellationToken cancellationToken = default)
+    public async Task StopAsync(CancellationToken cancellationToken = default)
     {
-        return _application is { } application
-            ? ((IWebApplication)application).StopAsync(cancellationToken)
-            : Task.CompletedTask;
+        await ControlPlane.StopAsync(cancellationToken).ConfigureAwait(false);
+        if (_application is { } application)
+        {
+            await ((IWebApplication)application).StopAsync(cancellationToken).ConfigureAwait(false);
+        }
     }
 
     public async ValueTask DisposeAsync()
@@ -59,8 +71,6 @@ internal sealed class WebResourceControlPlaneHost : IHostService, IAsyncDisposab
         {
             await ((IAsyncDisposable)application).DisposeAsync().ConfigureAwait(false);
         }
-
-        _publisher.Dispose();
     }
 
     /// <summary>

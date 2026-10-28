@@ -2,6 +2,7 @@ using System;
 using System.Net.Http;
 using System.Text;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 
 using Shouldly;
@@ -41,6 +42,72 @@ public sealed class WebResourceEndToEndTests
         manifest.Actions.ShouldHaveSingleItem().ShouldBe(new ResourceActionDescriptor("cors", ResourceActionKind.ReadWrite, IsStateful: true));
     }
 
+    [Fact(DisplayName = DisplayPrefix + "A managed instance runs one resource service, whose control plane published the manifest")]
+    public async Task Start_WithGateway_ShouldRunOneResourceService()
+    {
+        // Arrange
+        await using GatewayStandIn gateway = await GatewayStandIn.StartAsync();
+
+        // Act
+        await using RunningResource instance = await RunningResource.StartAsync(gateway.ManifestEndpoint, new WebCorsPolicy { Origins = [shop] });
+
+        // Assert
+        IResourceService service = instance.ResourceServices.ShouldHaveSingleItem();
+        service.ControlPlane.Resource.ShouldBeSameAs(instance.Resource);
+        service.ControlPlane.Manifest.Key.ShouldBe(gateway.Manifests.ShouldHaveSingleItem().Key);
+    }
+
+    [Fact(DisplayName = DisplayPrefix + "An unmanaged instance runs no resource service")]
+    public async Task Start_WithoutManifestEndpoint_ShouldRunNoResourceService()
+    {
+        // Act
+        await using RunningResource instance = await RunningResource.StartAsync(manifestEndpoint: null, new WebCorsPolicy { Origins = [shop] });
+
+        // Assert
+        instance.ResourceServices.ShouldBeEmpty();
+    }
+
+    [Fact(DisplayName = DisplayPrefix + "A platform's own serializer writes the publication and the control plane's content")]
+    public async Task Start_WithCustomSerializer_ShouldUseItEndToEnd()
+    {
+        // Arrange
+        await using GatewayStandIn gateway = await GatewayStandIn.StartAsync();
+        var serializer = new RecordingSerializer();
+        await using RunningResource instance = await RunningResource.StartAsync(gateway.ManifestEndpoint, new WebCorsPolicy { Origins = [shop] },
+            resource => resource.Serializer = serializer);
+
+        // Act
+        using HttpResponseMessage response = await instance.ControlPlane.GetAsync("actions/cors");
+
+        // Assert
+        response.StatusCode.ShouldBe(NetHttpStatusCode.OK);
+        response.Content.Headers.ContentType.ShouldNotBeNull().MediaType.ShouldBe(serializer.MediaType);
+        serializer.Written.ShouldContain(typeof(ResourceManifest));
+        serializer.Written.ShouldContain(typeof(WebCorsPolicy));
+        serializer.Written.ShouldContain(typeof(ResourceActionResult));
+        gateway.Manifests.ShouldHaveSingleItem();
+    }
+
+    [Fact(DisplayName = DisplayPrefix + "The HTTP client callback supplies the client the instance publishes with")]
+    public async Task Start_WithHttpClientFactory_ShouldPublishWithItsClient()
+    {
+        // Arrange
+        await using GatewayStandIn gateway = await GatewayStandIn.StartAsync();
+        int created = 0;
+
+        // Act
+        await using RunningResource instance = await RunningResource.StartAsync(gateway.ManifestEndpoint, new WebCorsPolicy { Origins = [shop] },
+            resource => resource.HttpClientFactory = () =>
+            {
+                Interlocked.Increment(ref created);
+                return new HttpClient();
+            });
+
+        // Assert
+        created.ShouldBe(1);
+        gateway.Manifests.ShouldHaveSingleItem();
+    }
+
     [Fact(DisplayName = DisplayPrefix + "The gateway reads the CORS policy in effect")]
     public async Task CorsRead_FromGateway_ShouldReturnThePolicyInEffect()
     {
@@ -75,7 +142,8 @@ public sealed class WebResourceEndToEndTests
         response.StatusCode.ShouldBe(NetHttpStatusCode.OK);
         using JsonDocument envelope = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         envelope.RootElement.GetProperty("status").GetString().ShouldBe("Succeeded");
-        envelope.RootElement.GetProperty("state").GetProperty("origins")[0].GetString().ShouldBe(partner);
+        envelope.RootElement.GetProperty("state").GetProperty("action").GetString().ShouldBe("cors");
+        envelope.RootElement.GetProperty("state").GetProperty("value").GetProperty("origins")[0].GetString().ShouldBe(partner);
         (await instance.GetAllowedOriginAsync(partner)).ShouldBe(partner);
         (await instance.GetAllowedOriginAsync(shop)).ShouldBeNull();
         instance.Resource.CorsPolicy.ShouldNotBeNull().Origins.ShouldBe([partner]);
@@ -132,7 +200,7 @@ public sealed class WebResourceEndToEndTests
             snapshot = envelope.RootElement.GetProperty("state").GetRawText();
         }
 
-        gateway.AnswerWith("""[{"action":"cors","value":""" + snapshot + "}]");
+        gateway.AnswerWith("[" + snapshot + "]");
 
         // Act
         await using RunningResource second = await RunningResource.StartAsync(gateway.ManifestEndpoint, new WebCorsPolicy { Origins = [shop] });

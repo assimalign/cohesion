@@ -164,7 +164,7 @@ public class ApplicationGatewayTests
         // Act: the write runs once; the gateway records it and restores it on the others.
         ResourceActionResult write = await firstControlPlane.ExecuteAsync(
             "log-level",
-            ResourceActionContext.Create(ResourceActionKind.Write, """{"Level":"Debug"}"""u8.ToArray()));
+            ResourceActionContext.Create(ResourceActionKind.Write, TestSerializer.Json, """{"Level":"Debug"}"""u8.ToArray()));
         foreach (ResourceInstanceKey target in ordersApi.Record(first.Key, write.State!))
         {
             await infrastructure.Instances[target].ControlPlane.RestoreAsync(write.State!);
@@ -193,10 +193,10 @@ public class ApplicationGatewayTests
         IApplicationResource ordersApi = gateway.Resources.Single();
 
         // Act
-        ResourceActionResult scaled = await ordersApi.ExecuteAsync("scale", ResourceActionContext.Create(ResourceActionKind.Write, """{"Replicas":3}"""u8.ToArray()));
-        ResourceActionResult read = await ordersApi.ExecuteAsync("scale", ResourceActionContext.Create(ResourceActionKind.Read));
-        ResourceActionResult unknown = await ordersApi.ExecuteAsync("restart", ResourceActionContext.Create(ResourceActionKind.Write));
-        ResourceActionResult rejected = await ordersApi.ExecuteAsync("scale", ResourceActionContext.Create(ResourceActionKind.Write, "not json"u8.ToArray()));
+        ResourceActionResult scaled = await ordersApi.ExecuteAsync("scale", ResourceActionContext.Create(ResourceActionKind.Write, TestSerializer.Json, """{"Replicas":3}"""u8.ToArray()));
+        ResourceActionResult read = await ordersApi.ExecuteAsync("scale", ResourceActionContext.Create(ResourceActionKind.Read, TestSerializer.Json));
+        ResourceActionResult unknown = await ordersApi.ExecuteAsync("restart", ResourceActionContext.Create(ResourceActionKind.Write, TestSerializer.Json));
+        ResourceActionResult rejected = await ordersApi.ExecuteAsync("scale", ResourceActionContext.Create(ResourceActionKind.Write, TestSerializer.Json, "not json"u8.ToArray()));
         stop.Cancel();
         await run;
 

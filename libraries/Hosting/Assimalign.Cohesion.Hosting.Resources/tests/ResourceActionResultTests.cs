@@ -10,11 +10,11 @@ public class ResourceActionResultTests
 {
     private const string DisplayPrefix = "Cohesion Test [Hosting] - ResourceActionResult: ";
 
-    [Fact(DisplayName = DisplayPrefix + "A typed output is serialized through source-generated metadata")]
-    public void Success_WithTypedOutput_ShouldCarryUtf8Json()
+    [Fact(DisplayName = DisplayPrefix + "A typed output is written by the invocation's serializer")]
+    public void Success_WithTypedOutput_ShouldCarrySerializedContent()
     {
         // Arrange & Act
-        ResourceActionResult result = ResourceActionResult.Success(new LogLevelSetting("Debug"), TestJsonContext.Default.LogLevelSetting);
+        ResourceActionResult result = ResourceActionResult.Success(new LogLevelSetting("Debug"), TestSerializer.Json);
 
         // Assert
         result.Status.ShouldBe(ResourceActionStatus.Succeeded);

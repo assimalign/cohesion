@@ -35,8 +35,9 @@ public static class WebResourceExtensions
         /// <returns>The resource instance.</returns>
         /// <exception cref="ArgumentNullException"><paramref name="builder"/> is <see langword="null"/>.</exception>
         /// <exception cref="ArgumentException">
-        /// <paramref name="name"/> is <see langword="default"/>, or the control-plane endpoint is not
-        /// an absolute http URL whose host is an IP address or localhost.
+        /// <paramref name="name"/> is <see langword="default"/>; the manifest endpoint is not an
+        /// absolute http or https URL; the control-plane endpoint is not an absolute http URL whose
+        /// host is an IP address or localhost; or the serializer does not know an action's state type.
         /// </exception>
         /// <exception cref="InvalidOperationException">The resource has a manifest endpoint but no control-plane endpoint.</exception>
         public WebResource AddResource(ResourceName name, Action<WebResourceBuilder>? configure = null)
@@ -60,16 +61,22 @@ public static class WebResourceExtensions
             Uri controlPlaneEndpoint = resourceBuilder.ControlPlaneEndpoint
                 ?? throw new InvalidOperationException(string.Format(CultureInfo.CurrentCulture,
                     ErrorMessages.ControlPlaneEndpointRequired, AppEnvironment.Variables.ControlPlaneEndpoint));
-            IPEndPoint listener = WebResourceControlPlaneHost.ParseEndpoint(controlPlaneEndpoint);
+            IPEndPoint listener = WebResourceService.ParseEndpoint(controlPlaneEndpoint);
 
-            HttpResourceManifestPublisher publisher = HttpResourceManifestPublisher.Create(manifestEndpoint);
-            ResourceControlPlane controlPlane = ResourceControlPlane.Create(resource, publisher);
+            IResourceContentSerializer serializer = resourceBuilder.Serializer;
+            ResourceManifestPublisher publisher = ResourceManifestPublisher.Create(new ResourceManifestPublisherOptions
+            {
+                Endpoint = manifestEndpoint,
+                HttpClientFactory = resourceBuilder.HttpClientFactory,
+                Serializer = serializer,
+            });
+            ResourceControlPlane controlPlane = ResourceControlPlane.Create(resource, publisher, serializer);
 
-            // Lifecycle services start in registration order, before every Web server: the control
-            // plane's listener first, then the control plane, which publishes and restores. The
-            // application serves traffic only once the restored state is in effect.
-            builder.AddService(_ => new WebResourceControlPlaneHost(controlPlane, listener, publisher));
-            builder.AddService(controlPlane);
+            // Lifecycle services start in registration order, before every Web server. The resource
+            // service opens the control plane's listener, then starts the control plane, which
+            // publishes and restores, so the application serves traffic only once the restored state
+            // is in effect.
+            builder.AddService(_ => new WebResourceService(controlPlane, listener));
 
             return resource;
         }

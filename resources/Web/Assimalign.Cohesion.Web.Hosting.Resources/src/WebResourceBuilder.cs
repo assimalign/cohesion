@@ -1,4 +1,5 @@
 using System;
+using System.Net.Http;
 
 using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.Web.Hosting.Resources.Internal;
@@ -7,11 +8,13 @@ namespace Assimalign.Cohesion.Web.Hosting.Resources;
 
 /// <summary>
 /// Configures the Web resource that <c>builder.AddResource(name, ...)</c> adds: where it publishes
-/// its manifest, where it serves its control plane, and the actions it exposes.
+/// its manifest, where it serves its control plane, the format of its control-plane content, and
+/// the actions it exposes.
 /// </summary>
 public sealed class WebResourceBuilder
 {
     private WebCorsAction? _cors;
+    private IResourceContentSerializer _serializer = JsonResourceContentSerializer.Create(WebResourceJsonContext.Default);
 
     internal WebResourceBuilder(ResourceName name)
     {
@@ -44,6 +47,31 @@ public sealed class WebResourceBuilder
     /// provisioning gateway sets.
     /// </remarks>
     public Uri? ControlPlaneEndpoint { get; set; }
+
+    /// <summary>
+    /// Gets or sets the serializer of the instance's control-plane content: its manifest, action
+    /// inputs and outputs, state snapshots, and results.
+    /// </summary>
+    /// <remarks>
+    /// Defaults to JSON over <see cref="WebResourceJsonContext"/>. A gateway platform that exchanges
+    /// another format sets its own serializer, which must know <see cref="WebCorsPolicy"/>.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException">The value is <see langword="null"/>.</exception>
+    public IResourceContentSerializer Serializer
+    {
+        get => _serializer;
+        set => _serializer = value ?? throw new ArgumentNullException(nameof(value));
+    }
+
+    /// <summary>
+    /// Gets or sets the callback that creates the HTTP client the instance publishes its manifest
+    /// with; <see langword="null"/> uses a client over a handler shared by the whole process.
+    /// </summary>
+    /// <remarks>
+    /// Called once per publication; the client is disposed afterward. Return one from an HTTP client
+    /// factory to share its pooled handlers: <c>() =&gt; clients.Create("gateway")</c>.
+    /// </remarks>
+    public Func<HttpClient>? HttpClientFactory { get; set; }
 
     /// <summary>
     /// Exposes the application's default CORS policy as the resource's <c>cors</c> action, starting

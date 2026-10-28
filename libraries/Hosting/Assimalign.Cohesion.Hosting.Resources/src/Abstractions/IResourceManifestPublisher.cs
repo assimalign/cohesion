@@ -15,7 +15,9 @@ namespace Assimalign.Cohesion.Hosting.Resources;
 /// </para>
 /// <para>
 /// The transport and its authentication belong to the implementation; a local gateway accepts an
-/// anonymous publication.
+/// anonymous publication. <see cref="ResourceManifestPublisher.Create"/> creates the HTTP
+/// implementation. A snapshot's value must be written by the content serializer of the control
+/// plane that restores it.
 /// </para>
 /// </remarks>
 public interface IResourceManifestPublisher

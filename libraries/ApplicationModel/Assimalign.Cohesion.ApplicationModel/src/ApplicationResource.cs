@@ -4,7 +4,6 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Globalization;
-using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -153,9 +152,10 @@ public sealed class ApplicationResource : IApplicationResource
         {
             result = await target.ExecuteAsync(context, cancellationToken).ConfigureAwait(false);
         }
-        catch (JsonException exception)
+        catch (ResourceContentException exception)
         {
-            // The input did not bind to the action's input type: the caller's error, not the action's.
+            // The input did not bind to the action's input type, or the action refused its value:
+            // the caller's error, not the action's.
             return ResourceActionResult.Rejected(exception.Message);
         }
 

@@ -9,8 +9,9 @@ namespace Assimalign.Cohesion.Hosting.Resources;
 /// </summary>
 /// <remarks>
 /// The control plane is transport-neutral. A transport, such as the Web endpoint an area embeds,
-/// maps its requests onto <see cref="ExecuteAsync"/> and <see cref="RestoreAsync"/>. Both are
-/// accepted only between <see cref="IHostService.StartAsync"/> and <see cref="IHostService.StopAsync"/>.
+/// maps its requests onto <see cref="ExecuteAsync"/> and <see cref="RestoreAsync"/>, and reads and
+/// writes their content with <see cref="Serializer"/>. Both are accepted only between
+/// <see cref="IHostService.StartAsync"/> and <see cref="IHostService.StopAsync"/>.
 /// </remarks>
 public interface IResourceControlPlane : IHostService
 {
@@ -23,6 +24,12 @@ public interface IResourceControlPlane : IHostService
     /// Gets the manifest the control plane publishes when its host starts.
     /// </summary>
     ResourceManifest Manifest { get; }
+
+    /// <summary>
+    /// Gets the content serializer the control plane writes its states' snapshots with. A transport
+    /// creates invocation contexts with it and writes the manifest and results with it.
+    /// </summary>
+    IResourceContentSerializer Serializer { get; }
 
     /// <summary>
     /// Executes one invocation of an action.

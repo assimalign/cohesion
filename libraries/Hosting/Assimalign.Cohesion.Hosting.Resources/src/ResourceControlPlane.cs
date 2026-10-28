@@ -3,7 +3,6 @@ using System.Collections.Frozen;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
-using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -26,6 +25,10 @@ namespace Assimalign.Cohesion.Hosting.Resources;
 /// snapshot a write returns is the state that write left. The control plane reads the resource's
 /// actions once, when it is created.
 /// </para>
+/// <para>
+/// Content refused with <see cref="ResourceContentException"/>, by the content serializer or by an
+/// action, is reported as <see cref="ResourceActionStatus.Rejected"/> and changes nothing.
+/// </para>
 /// </remarks>
 [DebuggerDisplay("{Resource.Provider}/{Resource.Name} {Resource.Key}")]
 [DebuggerTypeProxy(typeof(DebugView))]
@@ -44,11 +47,13 @@ public sealed class ResourceControlPlane : IResourceControlPlane
     private ResourceControlPlane(
         IResource resource,
         IResourceManifestPublisher publisher,
+        IResourceContentSerializer serializer,
         FrozenDictionary<ResourceActionName, IResourceAction> actions,
         ResourceManifest manifest)
     {
         Resource = resource;
         Manifest = manifest;
+        Serializer = serializer;
         _publisher = publisher;
         _actions = actions;
     }
@@ -62,23 +67,31 @@ public sealed class ResourceControlPlane : IResourceControlPlane
     /// <inheritdoc/>
     public ResourceManifest Manifest { get; }
 
+    /// <inheritdoc/>
+    public IResourceContentSerializer Serializer { get; }
+
     /// <summary>
     /// Creates the control plane of a resource instance.
     /// </summary>
     /// <param name="resource">The resource instance.</param>
     /// <param name="publisher">Publishes the instance's manifest when its host starts.</param>
+    /// <param name="serializer">
+    /// Writes and reads the instance's content. It must know the type of every action's state, which
+    /// creation checks, and every action's input and output type.
+    /// </param>
     /// <returns>The control plane.</returns>
-    /// <exception cref="ArgumentNullException"><paramref name="resource"/> or <paramref name="publisher"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentNullException">An argument is <see langword="null"/>.</exception>
     /// <exception cref="ArgumentException">
     /// The resource's provider, name, or key is <see langword="default"/>; it returns a
-    /// <see langword="null"/> collection; or one of its actions is <see langword="null"/>, has no
+    /// <see langword="null"/> collection; one of its actions is <see langword="null"/>, has no
     /// name, shares a name with another, declares an operation other than Read or Write, or has
-    /// state without accepting writes.
+    /// state without accepting writes; or <paramref name="serializer"/> cannot write an action's state.
     /// </exception>
-    public static ResourceControlPlane Create(IResource resource, IResourceManifestPublisher publisher)
+    public static ResourceControlPlane Create(IResource resource, IResourceManifestPublisher publisher, IResourceContentSerializer serializer)
     {
         ArgumentNullException.ThrowIfNull(resource);
         ArgumentNullException.ThrowIfNull(publisher);
+        ArgumentNullException.ThrowIfNull(serializer);
 
         if (resource.Provider.Value is null)
         {
@@ -123,8 +136,8 @@ public sealed class ResourceControlPlane : IResourceControlPlane
                 throw new ArgumentException(Format(ErrorMessages.ResourceActionKindInvalid, name), nameof(resource));
             }
 
-            bool stateful = action.State is not null;
-            if (stateful && !action.Kind.HasFlag(ResourceActionKind.Write))
+            IResourceActionState? state = action.State;
+            if (state is not null && !action.Kind.HasFlag(ResourceActionKind.Write))
             {
                 throw new ArgumentException(Format(ErrorMessages.ResourceActionStateReadOnly, name), nameof(resource));
             }
@@ -134,13 +147,27 @@ public sealed class ResourceControlPlane : IResourceControlPlane
                 throw new ArgumentException(Format(ErrorMessages.ResourceActionNameDuplicate, name), nameof(resource));
             }
 
-            descriptors.Add(new ResourceActionDescriptor(name, action.Kind, stateful));
+            // A serializer that cannot write a state would fail the first write after it changed the
+            // instance, leaving state the gateway never sees: refuse it before anything runs.
+            if (state is not null)
+            {
+                try
+                {
+                    _ = state.GetSnapshot(serializer);
+                }
+                catch (NotSupportedException exception)
+                {
+                    throw new ArgumentException(Format(ErrorMessages.ResourceActionStateUnsupported, name), nameof(serializer), exception);
+                }
+            }
+
+            descriptors.Add(new ResourceActionDescriptor(name, action.Kind, state is not null));
         }
 
         descriptors.Sort(static (left, right) => left.Name.CompareTo(right.Name));
 
         var manifest = new ResourceManifest(resource.Provider, resource.Name, resource.Key, descriptors.AsReadOnly());
-        return new ResourceControlPlane(resource, publisher, actions.ToFrozenDictionary(), manifest);
+        return new ResourceControlPlane(resource, publisher, serializer, actions.ToFrozenDictionary(), manifest);
     }
 
     /// <summary>
@@ -234,7 +261,7 @@ public sealed class ResourceControlPlane : IResourceControlPlane
             ResourceActionResult result = await InvokeAsync(target, context, cancellationToken).ConfigureAwait(false);
             if (result.Status == ResourceActionStatus.Succeeded && target.State is { } state)
             {
-                return result.WithState(ResourceStateSnapshot.Create(target.Name, state.GetSnapshot()));
+                return result.WithState(ResourceStateSnapshot.Create(target.Name, state.GetSnapshot(Serializer)));
             }
 
             return result;
@@ -269,12 +296,12 @@ public sealed class ResourceControlPlane : IResourceControlPlane
         await _mutations.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            await state.RestoreAsync(snapshot.Value, cancellationToken).ConfigureAwait(false);
+            await state.RestoreAsync(snapshot.Value, Serializer, cancellationToken).ConfigureAwait(false);
             return ResourceActionResult.Success();
         }
-        catch (JsonException exception)
+        catch (ResourceContentException exception)
         {
-            // The snapshot does not describe a value of the state's type: the sender's error.
+            // The snapshot does not describe a value the state accepts: the sender's error.
             return ResourceActionResult.Rejected(exception.Message);
         }
         finally
@@ -290,9 +317,10 @@ public sealed class ResourceControlPlane : IResourceControlPlane
         {
             result = await action.ExecuteAsync(context, cancellationToken).ConfigureAwait(false);
         }
-        catch (JsonException exception)
+        catch (ResourceContentException exception)
         {
-            // The input did not bind to the action's input type: the caller's error, not the action's.
+            // The input did not bind to the action's input type, or the action refused its value:
+            // the caller's error, not the action's.
             return ResourceActionResult.Rejected(exception.Message);
         }
 
@@ -326,5 +354,7 @@ public sealed class ResourceControlPlane : IResourceControlPlane
         public IResource Resource => _controlPlane.Resource;
 
         public ResourceManifest Manifest => _controlPlane.Manifest;
+
+        public IResourceContentSerializer Serializer => _controlPlane.Serializer;
     }
 }

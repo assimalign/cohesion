@@ -11,7 +11,7 @@ namespace Assimalign.Cohesion.ApplicationModel.Tests;
 internal sealed class LogLevelAction : IResourceAction
 {
     private readonly ResourceActionState<LogLevelSetting> _state =
-        ResourceActionState<LogLevelSetting>.Create(new LogLevelSetting("Information"), TestJsonContext.Default.LogLevelSetting, _ => { });
+        ResourceActionState<LogLevelSetting>.Create(new LogLevelSetting("Information"), _ => { });
 
     public LogLevelSetting Current => _state.Value;
 
@@ -25,10 +25,10 @@ internal sealed class LogLevelAction : IResourceAction
     {
         if (context.Operation == ResourceActionKind.Read)
         {
-            return ResourceActionResult.Success(_state.Value, TestJsonContext.Default.LogLevelSetting);
+            return ResourceActionResult.Success(_state.Value, context.Serializer);
         }
 
-        LogLevelSetting? setting = context.ReadInput(TestJsonContext.Default.LogLevelSetting);
+        LogLevelSetting? setting = context.ReadInput<LogLevelSetting>();
         if (setting is null)
         {
             return ResourceActionResult.Rejected("A log level is required.");

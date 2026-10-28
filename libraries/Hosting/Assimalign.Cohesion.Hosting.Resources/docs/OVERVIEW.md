@@ -26,15 +26,27 @@ An area defines its actions and hands the instance to a control plane:
 // A stateful control: a read reports the level, a write sets it.
 ResourceActionState<LogLevelSetting> state = ResourceActionState<LogLevelSetting>.Create(
     new LogLevelSetting("Information"),          // the level the application's code configured
-    AreaJsonContext.Default.LogLevelSetting,     // source-generated, so it is NativeAOT-safe
     setting => logging.SetMinimumLevel(setting.Level));
 
-ResourceControlPlane controlPlane = ResourceControlPlane.Create(resource, publisher);
+// The format of everything the instance exchanges: JSON over source-generated contexts by
+// default, so it is NativeAOT-safe. A platform may bring its own serializer instead.
+IResourceContentSerializer serializer = JsonResourceContentSerializer.Create(AreaJsonContext.Default);
 
-// Register it before the services that serve traffic: the host starts it first, and it
-// restores the state written since the last deployment before they start.
-builder.AddService(controlPlane);
+ResourceManifestPublisher publisher = ResourceManifestPublisher.Create(new ResourceManifestPublisherOptions
+{
+    Endpoint = manifestEndpoint,                          // COHESION_MANIFEST_ENDPOINT
+    HttpClientFactory = () => clients.Create("gateway"), // optional: pooled handlers
+    Serializer = serializer,
+});
+
+ResourceControlPlane controlPlane = ResourceControlPlane.Create(resource, publisher, serializer);
+
+// Wrap it in the area's IResourceService and register that before the services that serve
+// traffic: the host starts it first, and it restores the state written since the last
+// deployment before they start.
+builder.AddService(new AreaResourceService(controlPlane));
 ```
 
-A transport then calls `controlPlane.ExecuteAsync(name, ResourceActionContext.Create(...))` for an
-invocation and `controlPlane.RestoreAsync(snapshot)` when the gateway replicates a write.
+A transport then calls `controlPlane.ExecuteAsync(name, ResourceActionContext.Create(operation,
+controlPlane.Serializer, input))` for an invocation and `controlPlane.RestoreAsync(snapshot)` when
+the gateway replicates a write.

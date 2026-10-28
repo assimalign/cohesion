@@ -1,6 +1,5 @@
 using System;
-using System.Text.Json;
-using System.Text.Json.Serialization.Metadata;
+using System.Text.Json.Serialization;
 
 namespace Assimalign.Cohesion.Hosting.Resources;
 
@@ -8,11 +7,19 @@ namespace Assimalign.Cohesion.Hosting.Resources;
 /// The result of executing an action or restoring its state.
 /// </summary>
 /// <remarks>
+/// <para>
 /// An action returns <see cref="Success()"/> or <see cref="Rejected(string)"/>. A dispatcher, such
 /// as a control plane, reports <see cref="NotFound()"/> and <see cref="NotSupported()"/> itself, and
 /// a control plane adds <see cref="State"/> after a successful write to a stateful action. An action
 /// that fails rather than refuses throws, and the exception reaches the transport.
+/// </para>
+/// <para>
+/// A transport sends a result with the control plane's content serializer. In JSON it reads
+/// <c>{ "status": "Succeeded", "output": …, "reason": "…", "state": { "action": "…", "value": … } }</c>,
+/// with each optional member present only when set (<see cref="ResourceActionResultJsonConverter"/>).
+/// </para>
 /// </remarks>
+[JsonConverter(typeof(ResourceActionResultJsonConverter))]
 public sealed class ResourceActionResult
 {
     private static readonly ResourceActionResult _succeeded = new(ResourceActionStatus.Succeeded, default, null, null);
@@ -33,7 +40,8 @@ public sealed class ResourceActionResult
     public ResourceActionStatus Status { get; }
 
     /// <summary>
-    /// Gets the action's output as UTF-8 JSON; empty when it has none.
+    /// Gets the action's output as content written by the control plane's content serializer; empty
+    /// when it has none.
     /// </summary>
     public ReadOnlyMemory<byte> Output { get; }
 
@@ -79,7 +87,7 @@ public sealed class ResourceActionResult
     /// <summary>
     /// Creates a successful result with an output.
     /// </summary>
-    /// <param name="output">The output as UTF-8 JSON.</param>
+    /// <param name="output">The output, written by the control plane's content serializer.</param>
     /// <returns>The result.</returns>
     public static ResourceActionResult Success(ReadOnlyMemory<byte> output)
     {
@@ -91,14 +99,15 @@ public sealed class ResourceActionResult
     /// </summary>
     /// <typeparam name="TOutput">The output type.</typeparam>
     /// <param name="output">The output value.</param>
-    /// <param name="typeInfo">The source-generated metadata of the output type.</param>
+    /// <param name="serializer">The invocation's content serializer (<see cref="ResourceActionContext.Serializer"/>).</param>
     /// <returns>The result.</returns>
-    /// <exception cref="ArgumentNullException"><paramref name="typeInfo"/> is <see langword="null"/>.</exception>
-    public static ResourceActionResult Success<TOutput>(TOutput output, JsonTypeInfo<TOutput> typeInfo)
+    /// <exception cref="ArgumentNullException"><paramref name="serializer"/> is <see langword="null"/>.</exception>
+    /// <exception cref="NotSupportedException"><paramref name="serializer"/> does not know <typeparamref name="TOutput"/>.</exception>
+    public static ResourceActionResult Success<TOutput>(TOutput output, IResourceContentSerializer serializer)
     {
-        ArgumentNullException.ThrowIfNull(typeInfo);
+        ArgumentNullException.ThrowIfNull(serializer);
 
-        return new ResourceActionResult(ResourceActionStatus.Succeeded, JsonSerializer.SerializeToUtf8Bytes(output, typeInfo), null, null);
+        return Success(serializer.Serialize(output));
     }
 
     /// <summary>
@@ -117,5 +126,11 @@ public sealed class ResourceActionResult
     internal ResourceActionResult WithState(ResourceStateSnapshot state)
     {
         return new ResourceActionResult(Status, Output, Reason, state);
+    }
+
+    // Rebuilds a result a transport received; the converter has validated the parts.
+    internal static ResourceActionResult Create(ResourceActionStatus status, ReadOnlyMemory<byte> output, string? reason, ResourceStateSnapshot? state)
+    {
+        return new ResourceActionResult(status, output, reason, state);
     }
 }

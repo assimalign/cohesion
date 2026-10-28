@@ -1,7 +1,5 @@
 using System;
-using System.Buffers;
 using System.IO;
-using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -17,17 +15,17 @@ namespace Assimalign.Cohesion.Web.Hosting.Resources.Internal;
 /// <list type="bullet">
 /// <item><c>GET /manifest</c>: the instance's manifest.</item>
 /// <item><c>GET /actions/{name}</c>: reads an action.</item>
-/// <item><c>POST /actions/{name}</c>: writes an action; the body is its JSON input.</item>
-/// <item><c>PUT /state/{name}</c>: restores an action's state; the body is the snapshot's JSON value.</item>
+/// <item><c>POST /actions/{name}</c>: writes an action; the body is its input.</item>
+/// <item><c>PUT /state/{name}</c>: restores an action's state; the body is the snapshot's value.</item>
 /// </list>
-/// An action or restore answers with <c>{ "status", "output"?, "reason"?, "state"? }</c>, where
-/// <c>state</c> is the snapshot a successful write to a stateful action left. Statuses map to 200
-/// (succeeded), 400 (rejected), 404 (no such action), 405 (operation not accepted), and 503 (the
-/// control plane is not started).
+/// Bodies in both directions are written by the control plane's content serializer, and responses
+/// carry its media type. An action or restore answers with its <see cref="ResourceActionResult"/>,
+/// whose <c>state</c> is the snapshot a successful write to a stateful action left. Statuses map to
+/// 200 (succeeded), 400 (rejected), 404 (no such action), 405 (operation not accepted), and 503 with
+/// no body (the control plane is not started).
 /// </remarks>
 internal static class ControlPlaneHttpHandler
 {
-    private const string jsonContentType = "application/json";
     private const string actionsPrefix = "/actions/";
     private const string statePrefix = "/state/";
 
@@ -36,6 +34,7 @@ internal static class ControlPlaneHttpHandler
         string path = context.Request.Path.Value ?? string.Empty;
         HttpMethod method = context.Request.Method;
         CancellationToken cancellationToken = context.RequestCancelled;
+        IResourceContentSerializer serializer = controlPlane.Serializer;
 
         if (path == "/manifest")
         {
@@ -45,8 +44,7 @@ internal static class ControlPlaneHttpHandler
                 return;
             }
 
-            byte[] manifest = JsonSerializer.SerializeToUtf8Bytes(controlPlane.Manifest, ResourceJsonContext.Default.ResourceManifest);
-            await WriteJsonAsync(context, HttpStatusCode.Ok, manifest, cancellationToken).ConfigureAwait(false);
+            await WriteAsync(context, serializer, HttpStatusCode.Ok, serializer.Serialize(controlPlane.Manifest), cancellationToken).ConfigureAwait(false);
             return;
         }
 
@@ -65,15 +63,15 @@ internal static class ControlPlaneHttpHandler
             ResourceActionResult result;
             try
             {
-                result = await controlPlane.ExecuteAsync(action, ResourceActionContext.Create(operation, input), cancellationToken).ConfigureAwait(false);
+                result = await controlPlane.ExecuteAsync(action, ResourceActionContext.Create(operation, serializer, input), cancellationToken).ConfigureAwait(false);
             }
-            catch (InvalidOperationException exception)
+            catch (InvalidOperationException)
             {
-                await WriteUnavailableAsync(context, exception, cancellationToken).ConfigureAwait(false);
+                context.Response.StatusCode = HttpStatusCode.ServiceUnavailable;
                 return;
             }
 
-            await WriteResultAsync(context, result, cancellationToken).ConfigureAwait(false);
+            await WriteResultAsync(context, serializer, result, cancellationToken).ConfigureAwait(false);
             return;
         }
 
@@ -88,7 +86,7 @@ internal static class ControlPlaneHttpHandler
             byte[] value = await ReadBodyAsync(context, cancellationToken).ConfigureAwait(false);
             if (value.Length == 0)
             {
-                await WriteResultAsync(context, ResourceActionResult.Rejected("A snapshot value is required."), cancellationToken).ConfigureAwait(false);
+                await WriteResultAsync(context, serializer, ResourceActionResult.Rejected(ErrorMessages.SnapshotValueRequired), cancellationToken).ConfigureAwait(false);
                 return;
             }
 
@@ -97,13 +95,13 @@ internal static class ControlPlaneHttpHandler
             {
                 result = await controlPlane.RestoreAsync(ResourceStateSnapshot.Create(action, value), cancellationToken).ConfigureAwait(false);
             }
-            catch (InvalidOperationException exception)
+            catch (InvalidOperationException)
             {
-                await WriteUnavailableAsync(context, exception, cancellationToken).ConfigureAwait(false);
+                context.Response.StatusCode = HttpStatusCode.ServiceUnavailable;
                 return;
             }
 
-            await WriteResultAsync(context, result, cancellationToken).ConfigureAwait(false);
+            await WriteResultAsync(context, serializer, result, cancellationToken).ConfigureAwait(false);
             return;
         }
 
@@ -124,7 +122,7 @@ internal static class ControlPlaneHttpHandler
         return buffer.ToArray();
     }
 
-    private static Task WriteResultAsync(IHttpContext context, ResourceActionResult result, CancellationToken cancellationToken)
+    private static Task WriteResultAsync(IHttpContext context, IResourceContentSerializer serializer, ResourceActionResult result, CancellationToken cancellationToken)
     {
         HttpStatusCode status = result.Status switch
         {
@@ -134,54 +132,13 @@ internal static class ControlPlaneHttpHandler
             _ => HttpStatusCode.MethodNotAllowed,
         };
 
-        var buffer = new ArrayBufferWriter<byte>();
-        using (var writer = new Utf8JsonWriter(buffer))
-        {
-            writer.WriteStartObject();
-            writer.WriteString("status", result.Status.ToString());
-            if (!result.Output.IsEmpty)
-            {
-                writer.WritePropertyName("output");
-                writer.WriteRawValue(result.Output.Span);
-            }
-
-            if (result.Reason is not null)
-            {
-                writer.WriteString("reason", result.Reason);
-            }
-
-            if (result.State is { } state)
-            {
-                writer.WritePropertyName("state");
-                writer.WriteRawValue(state.Value.Span);
-            }
-
-            writer.WriteEndObject();
-        }
-
-        return WriteJsonAsync(context, status, buffer.WrittenMemory, cancellationToken);
+        return WriteAsync(context, serializer, status, serializer.Serialize(result), cancellationToken);
     }
 
-    // The control plane accepts invocations only while started: before its publication completes
-    // and after it stops, the instance is unavailable rather than wrong.
-    private static Task WriteUnavailableAsync(IHttpContext context, InvalidOperationException exception, CancellationToken cancellationToken)
-    {
-        var buffer = new ArrayBufferWriter<byte>();
-        using (var writer = new Utf8JsonWriter(buffer))
-        {
-            writer.WriteStartObject();
-            writer.WriteString("status", "Unavailable");
-            writer.WriteString("reason", exception.Message);
-            writer.WriteEndObject();
-        }
-
-        return WriteJsonAsync(context, HttpStatusCode.ServiceUnavailable, buffer.WrittenMemory, cancellationToken);
-    }
-
-    private static async Task WriteJsonAsync(IHttpContext context, HttpStatusCode status, ReadOnlyMemory<byte> body, CancellationToken cancellationToken)
+    private static async Task WriteAsync(IHttpContext context, IResourceContentSerializer serializer, HttpStatusCode status, ReadOnlyMemory<byte> body, CancellationToken cancellationToken)
     {
         context.Response.StatusCode = status;
-        context.Response.Headers[HttpHeaderKey.ContentType] = jsonContentType;
+        context.Response.Headers[HttpHeaderKey.ContentType] = serializer.MediaType;
         await context.Response.Body.WriteAsync(body, cancellationToken).ConfigureAwait(false);
     }
 }
