@@ -31,6 +31,7 @@ internal sealed class DatabaseConnector
     private bool _isClosed;
     private int _opened;
     private ProtocolTransactionStatus? _transactionStatus;
+    private bool _hasRetainedState;
 
     internal DatabaseConnector(IDuplexConnectionFactory connectionFactory, DatabaseConnectionSettings settings, ProtocolMessageFamily family)
     {
@@ -345,7 +346,9 @@ internal sealed class DatabaseConnector
         var frame = await _reader!.ReadFrameAsync(timeout.Token).ConfigureAwait(false);
         if (frame is null || frame.Value.Type != ProtocolMessageType.Ready)
         { throw new ProtocolException(ErrorMessages.TransactionStatusMissing); }
-        _transactionStatus = ProtocolTransactionStatusMessage.Decode(frame.Value.Payload.Span).Status;
+        var ready = ProtocolTransactionStatusMessage.Decode(frame.Value.Payload.Span);
+        _transactionStatus = ready.Status;
+        _hasRetainedState = ready.HasRetainedState;
     }
 
     // Return owns the connector exclusively, after the lease joined its last exchange. No pool lock
@@ -355,15 +358,19 @@ internal sealed class DatabaseConnector
         if (!Family.Capabilities.Contains(ProtocolCapability.TransactionStatus)) { return true; }
         if (!Capabilities.Contains(ProtocolCapability.TransactionStatus.Name)) { return false; }
         if (_transactionStatus is null) { return false; }
+        if (_transactionStatus == ProtocolTransactionStatus.Idle && !_hasRetainedState) { return true; }
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         try
         {
             if (_transactionStatus != ProtocolTransactionStatus.Idle)
             { await ExecuteAsync(new TransactionRollbackExchange(Family, "ROLLBACK"), timeout.Token).ConfigureAwait(false); }
             if (_transactionStatus != ProtocolTransactionStatus.Idle) { return false; }
-            if (Family.Name.Equals("Sql", StringComparison.Ordinal))
-            { await ExecuteAsync(new TransactionRollbackExchange(Family, "DISCARD ALL"), timeout.Token).ConfigureAwait(false); }
-            return _transactionStatus == ProtocolTransactionStatus.Idle;
+            if (_hasRetainedState)
+            {
+                if (Family.ResetStatement is not { } reset) { return false; }
+                await ExecuteAsync(new TransactionRollbackExchange(Family, reset), timeout.Token).ConfigureAwait(false);
+            }
+            return _transactionStatus == ProtocolTransactionStatus.Idle && !_hasRetainedState;
         }
         catch
         {

@@ -2,8 +2,9 @@
 
 ## SQL sequence surface (#1717, SQ-S2)
 
-Pool return clears logical SQL session state with DISCARD ALL through the existing Execute
-envelope after any required rollback. Ordinary rollback preserves sequence state. DISCARD ALL
+Ready reports whether currval/lastval entries or changed session settings require reset. Pool return
+uses DISCARD ALL through the existing Execute envelope only when the last Ready reports retained
+state, after any required rollback. A clean return needs no reset exchange. Ordinary rollback preserves sequence state. DISCARD ALL
 inside an explicit transaction refuses with CS04070 (25001), leaving that transaction active.
 
 The language AST retains explicit sequence options in written order and gives NEXT VALUE FOR
@@ -56,7 +57,8 @@ lock wait. Locks retained by earlier transaction statements can still
 form genuine cycles; the lock manager detects them. setval uses the same durable
 counter record and invalidates unused reservations; session updates occur only after that commit.
 SQL allocation resolves the stable ObjectId after locking and calls SQ-S1 with that current incarnation. No second
-allocator, public interface, shipped visibility grant, project reference or disk/wire bump is added.
+allocator, public interface, shipped visibility grant, project reference or disk format bump is added.
+The negotiated statement Ready payload changes to two bytes, as specified in Protocol DESIGN.
 SqlCatalogSnapshot now captures immutable internal sequence descriptions for information schema;
 empty directories reuse the empty list. Cached bound nextval adds 24 managed bytes for its BIGINT result box, while the shared allocator adds none. The reservation-commit monitor still blocks relation
 lookups; SQL scalar planning remains monitor-free as SQ-S1 established. RETURNING lists containing
@@ -72,9 +74,12 @@ Correlated deferred inputs filter before retention and stream through the bounde
 its retained rows, keys and conservative capacity overhead share StatementMemoryBudget (CS05067).
 Only sequence plans allocate this budget owner; ordinary collectors retain their instance layout.
 Cached sort aliases retain the declared output type, including numeric CASE promotion.
-DISCARD ALL clears sequence state and timeout overrides outside a transaction; ordinary rollback
-preserves it. Pool return sends DISCARD ALL over the existing Execute envelope after any rollback
-(PostgreSQL src/backend/commands/discard.c:59-78). No new wire message is needed.
+DISCARD ALL clears sequence state and restores the timeout values configured before the first
+statement; ordinary rollback preserves them. These initial host overrides remain reset values even
+when a caller changes a setting or discards repeatedly. PostgreSQL src/include/utils/guc.h:88
+describes reset-value sources; src/backend/utils/misc/guc.c:1927-1929 preserves noninteractive
+settings, and :1940-1945 restores reset_val. Pool return consults Ready after ROLLBACK and sends
+the family-declared reset only for retained state. The two-byte Ready changes no message identifier.
 
 Persisted DEFAULT/CHECK/domain/view/function expressions and declared-script sequence DDL are refused
 with CS03074 until dependency and receipt ownership are modeled. CASCADE/RESTRICT are equivalent

@@ -460,6 +460,10 @@ and invariant exceptions and lower child-root typed failures retain their docume
 
 ## Developer function conditions
 
+Sequence session reset (#1717) reuses CS04070 for DISCARD inside BEGIN and CK07002 for malformed
+two-byte statement Ready (I/T/E plus 0/1 retained state). Host timeout reset values survive DISCARD;
+clean Ready certification avoids a reset exchange. No new diagnostic identity is allocated.
+
 Engine builders register application functions in the same frozen per-engine catalog as native
 functions. Callback failures retain the original exception as their inner exception. At the function
 boundary, existing Database, storage and timeout failures keep their identity. Engine execution

@@ -70,6 +70,9 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
     private SqlSequenceSessionState? _sequenceState;
     internal SqlSequenceSessionState SequenceState => _sequenceState ??= new SqlSequenceSessionState();
 
+    internal bool HasRetainedState => _sequenceState is { Values.Count: > 0 } ||
+        _resetValuesCaptured && (_statementTimeout != _initialStatementTimeout || _lockTimeout != _initialLockTimeout);
+
     private readonly SqlDatabase _database;
     private readonly TransactionCoordinator _coordinator;
     private readonly SqlQueryExecutor _executor;
@@ -85,6 +88,9 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
     private CancellationTokenSource? _statementTimer;
     private CancellationToken _statementCallerToken;
     private TimeSpan? _lockTimeout;
+    private bool _resetValuesCaptured;
+    private TimeSpan? _initialStatementTimeout;
+    private TimeSpan? _initialLockTimeout;
 
     /// <summary>Opens a session over a database.</summary>
     /// <param name="database">The database.</param>
@@ -135,6 +141,7 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
     /// Gets or sets this session's statement execution timeout override. Null inherits the engine
     /// option; zero disables it. Changes apply to subsequent statements. A started commit always
     /// completes. Like execution, setting this property requires single-threaded session use.
+    /// DISCARD ALL restores the value configured before the session's first statement.
     /// </summary>
     /// <exception cref="ArgumentOutOfRangeException">The value is negative or exceeds int.MaxValue milliseconds.</exception>
     public TimeSpan? StatementTimeout
@@ -151,6 +158,7 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
     /// Gets or sets this session's timeout override for each individual lock wait, including
     /// unique-index waits. Null inherits the engine option; zero disables it. Changes apply to
     /// subsequent statements and require single-threaded session use.
+    /// DISCARD ALL restores the value configured before the session's first statement.
     /// </summary>
     /// <exception cref="ArgumentOutOfRangeException">The value is negative or exceeds int.MaxValue milliseconds.</exception>
     public TimeSpan? LockTimeout
@@ -283,6 +291,12 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
 
     private ValueTask<DatabaseResult> ExecuteRequestAsync(SqlQueryRequest request, CancellationToken cancellationToken, SqlCatalogScriptPublication? scriptReceipt = null)
     {
+        if (!_resetValuesCaptured)
+        {
+            _initialStatementTimeout = _statementTimeout;
+            _initialLockTimeout = _lockTimeout;
+            _resetValuesCaptured = true;
+        }
         var statementTimeout = StatementTimeout ?? _database.Engine.EngineOptions.StatementTimeout;
         var lockTimeout = LockTimeout ?? _database.Engine.EngineOptions.LockTimeout;
         return request.Statement.SqlExpression is SqlTransactionExpression || (statementTimeout == TimeSpan.Zero && lockTimeout == TimeSpan.Zero)
@@ -889,8 +903,8 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
         {
             if (transaction is not null) { return TransactionDiagnostic("CS04070", ErrorMessages.DiscardInTransaction); }
             _sequenceState = null;
-            _statementTimeout = null;
-            _lockTimeout = null;
+            _statementTimeout = _initialStatementTimeout;
+            _lockTimeout = _initialLockTimeout;
             return new SqlQueryResult(DatabaseResultStatus.Success, affectedCount: 0);
         }
         if (control.CommandType == SqlQueryCommandType.Begin)

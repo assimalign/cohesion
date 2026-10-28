@@ -128,7 +128,7 @@
   <data name="SequenceCurrentUndefined" xml:space="preserve"><value>currval is not yet defined for this sequence in this session.</value></data>
   <data name="SequenceLastUndefined" xml:space="preserve"><value>lastval is not yet defined in this session.</value></data>
   <data name="SequenceArgumentsInvalid" xml:space="preserve"><value>Sequence calls require a sequence name or object id, an integer value and an optional Boolean is_called.</value></data>
-  <data name="SequencePositionUnsupported" xml:space="preserve"><value>NEXT VALUE FOR requires a row value position; subqueries, derived tables, CTE definitions, CASE/COALESCE/NULLIF arguments, predicates, grouping keys, ordering expressions and row counts are not supported.</value></data>
+  <data name="SequencePositionUnsupported" xml:space="preserve"><value>NEXT VALUE FOR requires a row value position; subqueries, derived tables, CTE definitions, CASE/COALESCE/NULLIF arguments, predicates, grouping keys, ordering expressions, row counts and RETURNING lists are not supported.</value></data>
   <data name="SequenceTransactionEnded" xml:space="preserve"><value>The transaction ended while acquiring sequence locks.</value></data>
   <data name="SequencePlanningUnsupported" xml:space="preserve"><value>Sequence operations require an executing SQL statement scope.</value></data>
   <data name="SequencePersistedUnsupported" xml:space="preserve"><value>Sequence operations in persisted DEFAULT, CHECK, view and SQL function expressions are not supported.</value></data>

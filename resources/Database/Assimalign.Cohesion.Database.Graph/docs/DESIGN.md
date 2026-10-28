@@ -3574,3 +3574,10 @@ unknown calls; no frame layout or version changes.
 
 Interleaved same-process Release comparisons retain bounded native-dispatch allocation overhead;
 elapsed-time distributions remain descriptive rather than an acceptance gate.
+
+## Ready retained-state contract (#1717)
+
+Every negotiated statement Ready now carries transaction I/T/E followed by a zero retained-state
+byte. This model retains no state requiring a family reset and declares no reset statement. Pool
+return therefore sends only a needed ROLLBACK. The exact two-byte public record/payload replaces
+the former form without a compatibility reader; see Database.Protocol DESIGN.

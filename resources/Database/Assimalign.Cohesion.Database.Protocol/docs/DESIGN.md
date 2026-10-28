@@ -395,8 +395,11 @@ SQL, Graph and Documents advertise the shared `transaction-status` capability in
 Startup Ready keeps its version/capability payload. When negotiated, each Execute (also Graph
 ExecutePaths and Documents Command) ends with an existing Ready frame (byte 4). It follows
 ResultComplete/PathsComplete or statement Error for SQL/Graph, and Complete or Failure for Documents.
-Its payload is exactly one ASCII byte: `I` idle, `T` explicit transaction active, `E` explicit
-transaction failed. No new message identifier, protocol version or on-disk format is introduced.
+Its payload is exactly two bytes: ASCII `I` idle, `T` explicit transaction active or `E` explicit
+transaction failed, then a retained-session-state byte (`0` clean, `1` requires reset). Other
+lengths and retained-state bytes are malformed (CK07002). This replaces the former one-byte
+payload and public record without a compatibility reader (#1717). The existing transaction-status
+capability gates it; no new identifier, protocol version or on-disk format is introduced.
 Unnegotiated peers retain their original bytes. Ping/Pong and terminal connection errors have no
 postamble. Malformed status payloads use CK07002 and are protocol violations.
 
@@ -426,3 +429,14 @@ structured diagnostic carrier exists. Standard .NET guards retain their argument
 Protocol debugger views filter private framing/session machinery and project only reviewed public/protected names, versions, capability flags, already-materialized collections and relationships. They do not perform stream I/O, decode payloads, negotiate capabilities or materialize a new collection. Error/Exception subclasses and EventSource types remain excluded.
 
 Concrete eligible types carry their own concise display and private nested DebugView at the end of the type; an effective inherited display/proxy pair is reused. Projections are public read-only members of that private view and never reveal private/internal data. Empty views use the constant type name. Debugger attributes and nested infrastructure add no public API, instance fields to existing runtime types, storage/wire format change or successful-path work.
+
+## Retained session reset (#1717)
+
+The last statement Ready certifies both transaction state and retained session state. SQL reports
+currval/lastval entries or timeout settings different from the session reset values; Graph and
+Documents always report zero retained state. ProtocolMessageFamily declares ResetStatement
+(SQL: DISCARD ALL; Graph/Documents: null). Pool return sends ROLLBACK only when needed, then
+rechecks the new Ready before sending the declared reset only for retained state. Reuse requires
+Idle plus zero retained state. A clean idle return performs no exchange. A failed, malformed or
+timed-out reset discards the connector. Startup Ready, Ping/Pong and unnegotiated framing stay
+unchanged. The strict two-byte payload is covered by codec and scripted/live transport counters.

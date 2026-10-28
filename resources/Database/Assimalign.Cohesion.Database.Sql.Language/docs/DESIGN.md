@@ -1164,3 +1164,7 @@ expressions. Its projection uses nonvirtual CommandType; Text is omitted because
 subclass can override that getter. Scalar-expression views expose existing syntax data without
 walking depth or diagnostics enumerations. Parser inspection does not advance lexers or initialize
 a language profile through its protected getter.
+
+DISCARD ALL restores the host timeout values captured before the session's first statement.
+Negotiated Ready carries transaction status and retained session state in two bytes; clean
+returns and user-discarded sessions require no extra reset exchange. See Protocol DESIGN (#1717).

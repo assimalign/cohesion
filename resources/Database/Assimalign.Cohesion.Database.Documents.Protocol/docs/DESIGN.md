@@ -33,7 +33,11 @@ Eligible types follow the [Database conventions](../../Assimalign.Cohesion.Datab
 ## Transaction-status agreement (#1725)
 
 Documents advertises the existing core transaction-status capability without Diagnostics.
-Negotiated Ready follows Complete or Failure for Execute (64) and Command (69), carrying I, T or E.
+Negotiated Ready follows Complete or Failure for Execute (64) and Command (69). Its exact two-byte
+payload carries ASCII I, T or E followed by a retained-session-state byte, always zero for Documents
+(#1717). It replaces the former one-byte public record/payload without a compatibility reader;
+other lengths or retained bytes outside 0/1 are CK07002. The family declares no retained-state
+reset statement. Pool return sends only a needed ROLLBACK and requires Idle with zero retained state.
 Legacy 2.0 and unnegotiated 2.1 responses retain their terminal framing. Reset uses the existing
 Execute payload with ROLLBACK and an empty JSON object; Complete (66) must carry two zero Int64
 counts, followed by Idle. No new message identifiers or protocol version are introduced.
