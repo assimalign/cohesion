@@ -635,6 +635,9 @@ public sealed partial class SqlQueryParser : QueryParser
         SqlCreateTableExpression => "CREATE TABLE",
         SqlCreateTableAsExpression => "CREATE TABLE AS",
         SqlCreateSchemaExpression => "CREATE SCHEMA",
+        SqlCreateSequenceExpression => SqlClauses.CreateSequence,
+        SqlAlterSequenceExpression => SqlClauses.AlterSequence,
+        SqlDropSequenceExpression => SqlClauses.DropSequence,
         SqlCreateViewExpression => "CREATE VIEW",
         SqlCreateIndexExpression => "CREATE INDEX",
         SqlDropTableExpression => "DROP TABLE",
@@ -836,6 +839,8 @@ public sealed partial class SqlQueryParser : QueryParser
         else if (IsWord(ref lexer, "MERGE")) { statement = ParseMerge(ref lexer); }
         else if (IsWord(ref lexer, "UPDATE")) { statement = ParseUpdate(ref lexer); }
         else if (IsWord(ref lexer, "DELETE")) { statement = ParseDelete(ref lexer); }
+        else if (IsSequenceDdlHeader(lexer))
+        { statement = IsWord(ref lexer, "CREATE") ? ParseCreate(ref lexer) : IsWord(ref lexer, "ALTER") ? ParseAlterTable(ref lexer) : ParseDrop(ref lexer); }
         else
         {
             RequireSkippedConstruct(start, lexer.Current.Position + lexer.Current.Value.Length,
@@ -1028,6 +1033,9 @@ public sealed partial class SqlQueryParser : QueryParser
                 location = null!;
                 return false;
             }
+            if (IsWord(ref lexer, "SEQUENCE") && previousToken == firstToken &&
+                (firstToken.ToUpperInvariant() is "CREATE" or "ALTER" or "DROP"))
+            { clause = string.Empty; location = null!; return false; }
             createTable |= firstToken.Equals("CREATE", StringComparison.OrdinalIgnoreCase) && IsKeyword(ref lexer, "TABLE");
             if (firstToken.Equals("CREATE", StringComparison.OrdinalIgnoreCase) &&
                 (IsKeyword(ref lexer, "VIEW") || (createTable && IsKeyword(ref lexer, "AS") && fromScopes.Count == 0)))

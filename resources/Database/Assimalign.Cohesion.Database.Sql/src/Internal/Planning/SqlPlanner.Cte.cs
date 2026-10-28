@@ -76,7 +76,7 @@ internal sealed partial class SqlPlanner
             {
                 state.HasRecursion = true;
                 (_queryScopes ??= new()).DeferQueryEvaluation = true;
-                _scopelessEvaluator = null;
+                CachedScopelessEvaluator = null;
             }
             // PostgreSQL parse_cte.c:214-229 analyzes non-recursive definitions in
             // declaration order and publishes each only after its body is bound.

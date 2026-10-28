@@ -209,6 +209,7 @@ internal static class SqlPersistedExpression
     /// <exception cref="SqlEvaluationException">A function call's arguments do not match its signature (<c>CS01006</c>).</exception>
     internal static void Bind(SqlExpression expression, SqlExpressionEvaluator evaluator, bool declaring = false)
     {
+        SqlSequenceExecution.RefusePersistedNode(expression);
         ArgumentNullException.ThrowIfNull(expression);
         ArgumentNullException.ThrowIfNull(evaluator);
         RuntimeHelpers.EnsureSufficientExecutionStack();

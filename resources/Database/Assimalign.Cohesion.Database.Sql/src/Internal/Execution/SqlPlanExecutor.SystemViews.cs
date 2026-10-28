@@ -52,6 +52,19 @@ internal sealed partial class SqlPlanExecutor
         // immutable catalog snapshot as the statement, including FK targets.
         var catalog = statement.RequireCatalogSnapshot();
         string database = statement.DatabaseName;
+        if (view.Name == "SEQUENCES")
+        {
+            foreach (var sequence in catalog.Sequences)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var options = sequence.Options;
+                string Text(long value) => value.ToString(CultureInfo.InvariantCulture);
+                yield return [database, sequence.Schema, sequence.Name, SystemDataType(options.Type),
+                    options.Type == DatabaseType.Int16 ? 16L : options.Type == DatabaseType.Int32 ? 32L : 64L,
+                    2L, 0L, Text(options.Start), Text(options.Minimum), Text(options.Maximum), Text(options.Increment), options.Cycle ? "YES" : "NO"];
+            }
+            yield break;
+        }
         if (view.Name == "SCHEMATA")
         {
             foreach (var schema in catalog.Namespaces)

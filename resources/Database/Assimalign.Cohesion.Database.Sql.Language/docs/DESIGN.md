@@ -1,5 +1,9 @@
 # Assimalign.Cohesion.Database.Sql.Language — Design
 
+## Sequence grammar (#1717, SQ-S2)
+
+CREATE/ALTER/DROP SEQUENCE use sealed statement leaves and a closed option list preserving explicit NO bounds and bare RESTART. NEXT VALUE FOR is a scalar leaf; REGCLASS and its PostgreSQL suffix normalize to the existing cast AST. Sequence DDL and NEXT VALUE have independent profile gates and renderer round trips. Existing syntax identities reject malformed or duplicate options; OWNED BY remains CK00001. Five advertised function signatures execute in SQL, with per-row standard sharing independent of nextval. The language and live SQL conformance tables cover all four new clauses; no storage or wire contract changes. See DIALECT for defaults and accepted exclusions.
+
 ## Sequence catalog review (#1717)
 
 DIALECT.md distinguishes format 27's TYPE default-assignment flag from current format 28's

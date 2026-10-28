@@ -159,6 +159,7 @@ public sealed partial class SqlCatalog
             foreach (var sequence in sequences)
             {
                 _sequences.Remove((sequence.Value.Schema, sequence.Value.Name));
+                _sequencesById.Remove(sequence.Value.ObjectId);
                 _sequenceCounters.Remove(sequence.Value.ObjectId);
             }
             _namespaces.Remove(name);

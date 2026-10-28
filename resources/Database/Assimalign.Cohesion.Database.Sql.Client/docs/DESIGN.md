@@ -1,5 +1,9 @@
 # Database.Sql.Client — Design
 
+## Sequence wire surface (#1717, SQ-S2)
+
+The ordinary execute exchange carries sequence DDL, functions, NEXT VALUE FOR, EXPLAIN and INFORMATION_SCHEMA.SEQUENCES on InMemory and TCP. Undefined session state and explicit-transaction DDL refusals remain structured execution failures with usable connections. Session currval/lastval survive rollback and remain isolated between physical connections. No client ABI, protocol identifier or frame changes.
+
 ## Terminal TCP conformance (#1087)
 
 The real SqlClient and model server run missing-database handshakes on InMemory and

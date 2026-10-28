@@ -40,9 +40,10 @@ internal sealed partial class SqlPlanExecutor
         var snapshot = _catalog.CaptureSnapshot();
         var schema = snapshot.Namespaces.FirstOrDefault(value => value.Name.Equals(plan.Name, StringComparison.OrdinalIgnoreCase));
         var contents = ObjectsInNamespace(snapshot, plan.Name);
+        var sequences = snapshot.Sequences.Where(s => s.Schema.Equals(plan.Name, StringComparison.OrdinalIgnoreCase)).OrderBy(s => s.ObjectId).ToArray();
         if (!plan.Cascade && contents.Views.Length != 0)
         { throw new SqlPlanningException("CS03302", string.Format(CultureInfo.CurrentCulture, ErrorMessages.EngineViewDropDependent, plan.Name, contents.Views[0].Schema, contents.Views[0].Name)); }
-        if (!plan.Cascade && contents.Tables.Length != 0)
+        if (!plan.Cascade && (contents.Tables.Length != 0 || sequences.Length != 0))
         {
             throw new SqlPlanningException("CS03030", string.Format(CultureInfo.CurrentCulture, ErrorMessages.EngineNamespaceDependentObjects, plan.Name));
         }
@@ -53,6 +54,12 @@ internal sealed partial class SqlPlanExecutor
             await statement.Coordinator.LockManager.AcquireAsync(statement.DdlLockOwner,
                 LockResource.Object(table.ObjectId), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
         }
+        foreach (var sequence in sequences)
+        {
+            BeforeSequenceDdlLock?.Invoke();
+            await statement.Coordinator.LockManager.AcquireAsync(statement.DdlLockOwner,
+                LockResource.Object(sequence.ObjectId), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
+        }
         using var metadata = statement.DdlInterlock is { } interlock
             ? statement.ProvisioningSchema is not null
                 ? await interlock.EnterMetadataAsync(definition: true, cancellationToken).ConfigureAwait(false)
@@ -61,7 +68,7 @@ internal sealed partial class SqlPlanExecutor
         var current = _catalog.CaptureSnapshot();
         var currentSchema = current.Namespaces.FirstOrDefault(value => value.Name.Equals(plan.Name, StringComparison.OrdinalIgnoreCase));
         var currentContents = ObjectsInNamespace(current, plan.Name);
-        if (!ReferenceEquals(schema, currentSchema) || !contents.Tables.SequenceEqual(currentContents.Tables) ||
+        if (!sequences.SequenceEqual(current.Sequences.Where(s => s.Schema.Equals(plan.Name, StringComparison.OrdinalIgnoreCase)).OrderBy(s => s.ObjectId)) || !ReferenceEquals(schema, currentSchema) || !contents.Tables.SequenceEqual(currentContents.Tables) ||
             !contents.AffectedTables.SequenceEqual(currentContents.AffectedTables) || !contents.Indexes.SequenceEqual(currentContents.Indexes) || !contents.Views.SequenceEqual(currentContents.Views))
         {
             // The statement's ordinary cleanup releases its complete lock set. Never publish

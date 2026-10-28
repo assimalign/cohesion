@@ -136,6 +136,9 @@ internal sealed partial class SqlPlanExecutor
             case SqlBoundCall call:
                 foreach (var argument in call.Arguments) { yield return argument; }
                 break;
+            case SqlBoundSequence sequence:
+                foreach (var argument in sequence.Arguments) { yield return argument; }
+                break;
             case SqlBoundSpecialForm form:
                 foreach (var argument in form.Arguments) { yield return argument; }
                 break;

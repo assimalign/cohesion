@@ -33,7 +33,20 @@ public sealed class SqlCatalogSnapshot
     /// <summary>Gets the persisted user views present at capture time.</summary>
     public IReadOnlyList<SqlCatalogView> Views { get; }
 
-    private readonly IReadOnlyDictionary<ulong, IReadOnlyList<SqlCatalogIndex>> _indexes;
+    // Keep ordinary captures at their existing size: only a nonempty sequence directory
+    // wraps the index directory in this existing reference slot.
+    private readonly object _directories;
+    private IReadOnlyDictionary<ulong, IReadOnlyList<SqlCatalogIndex>> IndexDirectory
+        => _directories is SequenceDirectories directories ? directories.Indexes : (IReadOnlyDictionary<ulong, IReadOnlyList<SqlCatalogIndex>>)_directories;
+
+    internal IReadOnlyList<Internal.SqlCatalogSequence> Sequences
+    {
+        get => _directories is SequenceDirectories directories ? directories.Sequences : [];
+        init
+        {
+            if (value.Count > 0) { _directories = new SequenceDirectories(IndexDirectory, value); }
+        }
+    }
 
     internal SqlCatalogSnapshot(IEnumerable<SqlCatalogTable> tables, IEnumerable<SqlCatalogIndex> indexes, Collation? defaultCollation = null,
         IEnumerable<SqlCatalogFunction>? functions = null, IEnumerable<SqlCatalogDomain>? domains = null,
@@ -45,7 +58,7 @@ public sealed class SqlCatalogSnapshot
         Namespaces = Array.AsReadOnly((namespaces ?? []).ToArray());
         DefaultCollation = defaultCollation ?? Collation.Binary;
         Tables = Array.AsReadOnly(tables.ToArray());
-        _indexes = indexes.GroupBy(index => index.TableObjectId).ToDictionary(
+        _directories = indexes.GroupBy(index => index.TableObjectId).ToDictionary(
             group => group.Key, group => (IReadOnlyList<SqlCatalogIndex>)Array.AsReadOnly(group.ToArray()));
     }
 
@@ -59,7 +72,7 @@ public sealed class SqlCatalogSnapshot
     /// <param name="objectId">The table's catalog object identity.</param>
     /// <returns>The captured indexes, or an empty list when none exist.</returns>
     public IReadOnlyList<SqlCatalogIndex> GetIndexes(ulong objectId)
-        => _indexes.TryGetValue(objectId, out var indexes) ? indexes : Array.Empty<SqlCatalogIndex>();
+        => IndexDirectory.TryGetValue(objectId, out var indexes) ? indexes : Array.Empty<SqlCatalogIndex>();
 
     /// <summary>Finds a captured table by its case-insensitive SQL namespace and name.</summary>
     /// <param name="schema">The SQL namespace.</param>
@@ -80,6 +93,15 @@ public sealed class SqlCatalogSnapshot
 
         table = null!;
         return false;
+    }
+
+    private sealed class SequenceDirectories
+    {
+        public SequenceDirectories(IReadOnlyDictionary<ulong, IReadOnlyList<SqlCatalogIndex>> indexes, IReadOnlyList<Internal.SqlCatalogSequence> sequences)
+        { Indexes = indexes; Sequences = sequences; }
+
+        public IReadOnlyDictionary<ulong, IReadOnlyList<SqlCatalogIndex>> Indexes { get; }
+        public IReadOnlyList<Internal.SqlCatalogSequence> Sequences { get; }
     }
 
     private sealed class DebugView

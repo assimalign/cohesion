@@ -19,7 +19,7 @@ public static class SqlLanguageProfile
         "SET", "VALUES", "INTO", "RETURNING",
         "FUNCTION", "DOMAIN", "RETURNS", "RETURN", "IMMUTABLE", "STABLE", "VOLATILE", "STRICT", "CALLED", "INPUT",
         // DDL
-        "CREATE", "DROP", "TRUNCATE", "ALTER", "TABLE", "INDEX", "VIEW", "IF",
+        "CREATE", "DROP", "TRUNCATE", "ALTER", "TABLE", "INDEX", "SEQUENCE", "VIEW", "IF",
         "ADD", "COLUMN",
         "PRIMARY", "KEY", "FOREIGN", "REFERENCES",
         "CONSTRAINT", "DEFAULT", "CHECK", "UNIQUE", "COLLATE",
@@ -66,6 +66,8 @@ public static class SqlLanguageProfile
         "ABS", "ROUND", "FLOOR", "CEILING", "CEIL", "POWER", "SQRT", "MOD", "SIGN", "EXP", "LN", "LOG10",
         // Temporal
         "CURRENT_DATE", "CURRENT_TIME", "CURRENT_TIMESTAMP", "LOCALTIME", "LOCALTIMESTAMP", "NOW", "EXTRACT", "DATE_TRUNC",
+        // Sequences
+        "NEXTVAL", "CURRVAL", "SETVAL", "LASTVAL",
         // UUID
         "GEN_RANDOM_UUID",
     ];
@@ -86,6 +88,10 @@ public static class SqlLanguageProfile
         SqlClauses.CreateTableAs,
         SqlClauses.CreateSchema,
         SqlClauses.Identity,
+        SqlClauses.CreateSequence,
+        SqlClauses.AlterSequence,
+        SqlClauses.DropSequence,
+        SqlClauses.NextValue,
         SqlClauses.CreateIndex,
         SqlClauses.AlterTable,
         SqlClauses.DropTable,

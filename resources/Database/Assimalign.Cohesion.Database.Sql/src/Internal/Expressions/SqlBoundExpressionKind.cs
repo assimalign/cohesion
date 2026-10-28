@@ -27,6 +27,9 @@ internal enum SqlBoundExpressionKind : byte
     /// <summary>NULLIF and EXTRACT evaluator forms.</summary>
     SpecialForm,
 
+    /// <summary>A session sequence operation.</summary>
+    Sequence,
+
     /// <summary><see cref="SqlBoundLogical"/>: an <c>AND</c> or <c>OR</c> chain.</summary>
     Logical,
 

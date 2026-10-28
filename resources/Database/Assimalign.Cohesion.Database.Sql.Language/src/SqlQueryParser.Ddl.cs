@@ -53,8 +53,7 @@ public sealed partial class SqlQueryParser
         }
         if (IsWord(ref lexer, "SEQUENCE"))
         {
-            RejectIdentityConstruct(ref lexer, "CREATE SEQUENCE");
-            return new SqlQueryExpression(SqlQueryCommandType.Create, null, Location.Create(1, 1, pos, _lastTokenEnd));
+            return ParseSequence(ref lexer, pos, alter: false);
         }
         return ParseCreateTable(ref lexer, pos);
     }
@@ -433,6 +432,7 @@ public sealed partial class SqlQueryParser
     {
         var pos = lexer.Current.Position;
         Advance(ref lexer); // consume ALTER
+        if (IsWord(ref lexer, "SEQUENCE")) { return ParseSequence(ref lexer, pos, alter: true); }
 
         // TABLE is required: ALTER INDEX ix RENAME TO iy used to report IX as the
         // unsupported ALTER TABLE action.
@@ -736,6 +736,7 @@ public sealed partial class SqlQueryParser
     {
         var pos = lexer.Current.Position;
         Advance(ref lexer); // consume DROP
+        if (IsWord(ref lexer, "SEQUENCE")) { return ParseDropSequence(ref lexer, pos); }
 
         if (IsKeyword(ref lexer, "VIEW")) { return ParseDropView(ref lexer, pos); }
         if (IsWord(ref lexer, "SCHEMA"))

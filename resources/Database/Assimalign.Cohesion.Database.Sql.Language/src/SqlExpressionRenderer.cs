@@ -31,7 +31,7 @@ namespace Assimalign.Cohesion.Database.Sql.Language;
 /// carries an error renders, but need not parse back to itself.
 /// </para>
 /// </remarks>
-public static class SqlExpressionRenderer
+public static partial class SqlExpressionRenderer
 {
     /// <summary>Renders an ALTER COLUMN TYPE statement as canonical SQL without a terminator.</summary>
     /// <param name="query">The parsed statement.</param>
@@ -321,6 +321,7 @@ public static class SqlExpressionRenderer
         SqlBinaryExpression binary => Binary(binary),
         SqlUnaryExpression unary => Unary(unary),
         SqlLiteralExpression literal => Literal(literal),
+        SqlNextValueExpression next => "NEXT VALUE FOR " + SequenceName(next.Sequence),
         SqlDefaultExpression => "DEFAULT",
         SqlColumnReferenceExpression column => Column(column),
         SqlParameterExpression parameter => parameter.ParameterName,

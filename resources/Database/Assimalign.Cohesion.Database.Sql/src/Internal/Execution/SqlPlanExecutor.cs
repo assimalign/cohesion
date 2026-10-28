@@ -170,6 +170,8 @@ internal sealed partial class SqlPlanExecutor
                 return await ExecuteDeleteAsync(delete, statement, cancellationToken).ConfigureAwait(false);
             case SqlMergePlan merge:
                 return await ExecuteMergeAsync(merge, statement, cancellationToken).ConfigureAwait(false);
+            case SqlSequencePlan sequence:
+                return await ExecuteSequenceDdlAsync(sequence, statement, cancellationToken).ConfigureAwait(false);
             case SqlCreateTablePlan create:
                 return await ExecuteCreateTableAsync(create, statement, cancellationToken).ConfigureAwait(false);
             case SqlCreateTableAsPlan create:
@@ -351,6 +353,7 @@ internal sealed partial class SqlPlanExecutor
 
     private static bool ContainsVolatileCall(SqlBoundExpression? expression)
     {
+        if (expression is SqlBoundSequence) { return true; }
         System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
         if (expression is null) { return false; }
         if (expression is SqlBoundCall { Function.Volatility: SqlFunctionVolatility.Volatile }) { return true; }
@@ -371,6 +374,7 @@ internal sealed partial class SqlPlanExecutor
         SqlExpressionEvaluator evaluator, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        SqlSequenceExecution.Current?.BeginRow();
         var output = new object?[projections.Count];
         for (int i = 0; i < output.Length; i++)
         {
@@ -530,6 +534,7 @@ internal sealed partial class SqlPlanExecutor
         foreach (var valueRow in plan.Rows)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            SqlSequenceExecution.Current?.BeginRow();
             var row = new object?[valueRow.Length];
             for (int i = 0; i < row.Length; i++)
             {

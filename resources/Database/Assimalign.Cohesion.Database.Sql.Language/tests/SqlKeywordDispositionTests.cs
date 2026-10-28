@@ -54,7 +54,7 @@ public sealed class SqlKeywordDispositionTests
         ["ADD"] = Parses("ALTER TABLE t ADD COLUMN c INT"),
         ["COLUMN"] = Parses("ALTER TABLE t ADD COLUMN c INT"),
         ["INDEX"] = Parses("CREATE INDEX ix ON t (a)"),
-        ["SEQUENCE"] = Rejects("CREATE SEQUENCE ids", "CREATE SEQUENCE"),
+        ["SEQUENCE"] = Parses("CREATE SEQUENCE ids"),
         ["SERIAL"] = Rejects("CREATE TABLE t (id SERIAL)", "SERIAL"),
         ["BIGSERIAL"] = Rejects("CREATE TABLE t (id BIGSERIAL)", "BIGSERIAL"),
         ["SMALLSERIAL"] = Rejects("CREATE TABLE t (id SMALLSERIAL)", "SMALLSERIAL"),

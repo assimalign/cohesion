@@ -35,6 +35,8 @@ internal sealed partial class SqlPlanner
     private void ValidateFunctionCalls(SqlQueryExpression statement)
     {
         RuntimeHelpers.EnsureSufficientExecutionStack();
+        if (statement.CommandType is SqlQueryCommandType.Create or SqlQueryCommandType.Alter && statement is not SqlCreateTableAsExpression)
+        { SqlSequenceExecution.RefusePersistedStatement(statement); }
         switch (statement)
         {
             case SqlSetOperationExpression set:
@@ -51,9 +53,9 @@ internal sealed partial class SqlPlanner
                             pending.Push((operation.Left, false));
                             continue;
                         }
-                        foreach (var order in operation.OrderBy) { ValidateFunctionCalls(order.Expression); }
-                        ValidateFunctionCalls(operation.Limit);
-                        ValidateFunctionCalls(operation.Offset);
+                        foreach (var order in operation.OrderBy) { ValidateFunctionCalls(order.Expression, allowNextValue: false); }
+                        ValidateFunctionCalls(operation.Limit, allowNextValue: false);
+                        ValidateFunctionCalls(operation.Offset, allowNextValue: false);
                     }
                     else { ValidateFunctionCalls((SqlQueryExpression)item.Query); }
                 }
@@ -65,7 +67,7 @@ internal sealed partial class SqlPlanner
                 if (insert.OnConflict is { } conflict)
                 {
                     foreach (var assignment in conflict.Assignments) { ValidateFunctionCalls(assignment.Value); }
-                    ValidateFunctionCalls(conflict.Where);
+                    ValidateFunctionCalls(conflict.Where, allowNextValue: false);
                 }
                 if (insert.Returning is not null)
                 {
@@ -88,10 +90,10 @@ internal sealed partial class SqlPlanner
                 break;
             case SqlMergeExpression merge:
                 ValidateSourceFunctionCalls([merge.Source]);
-                ValidateFunctionCalls(merge.Condition);
+                ValidateFunctionCalls(merge.Condition, allowNextValue: false);
                 foreach (var action in merge.Actions)
                 {
-                    ValidateFunctionCalls(action.Condition);
+                    ValidateFunctionCalls(action.Condition, allowNextValue: false);
                     foreach (var assignment in action.Assignments) { ValidateFunctionCalls(assignment.Value); }
                     foreach (var value in action.Values ?? []) { ValidateFunctionCalls(value); }
                 }
@@ -107,7 +109,7 @@ internal sealed partial class SqlPlanner
                 {
                     ValidateFunctionCalls(assignment.Value);
                 }
-                ValidateFunctionCalls(update.Where);
+                ValidateFunctionCalls(update.Where, allowNextValue: false);
                 break;
             case SqlDeleteExpression delete:
                 ValidateSourceFunctionCalls(delete.Using);
@@ -115,7 +117,7 @@ internal sealed partial class SqlPlanner
                 {
                     foreach (var column in delete.Returning) { ValidateFunctionCalls(column.Expression); }
                 }
-                ValidateFunctionCalls(delete.Where);
+                ValidateFunctionCalls(delete.Where, allowNextValue: false);
                 break;
             case SqlCreateTableExpression create:
                 foreach (var column in create.Columns)
@@ -156,7 +158,7 @@ internal sealed partial class SqlPlanner
             foreach (var join in sources[i].Joins)
             {
                 ValidateRelationFunctionCalls(join.Table);
-                ValidateFunctionCalls(join.Condition);
+                ValidateFunctionCalls(join.Condition, allowNextValue: false);
             }
         }
     }
@@ -175,16 +177,43 @@ internal sealed partial class SqlPlanner
     {
         foreach (var column in select.Columns) { ValidateFunctionCalls(column.Expression); }
         ValidateSourceFunctionCalls(select.From);
-        ValidateFunctionCalls(select.Where);
-        foreach (var key in select.GroupBy) { ValidateFunctionCalls(key); }
-        ValidateFunctionCalls(select.Having);
-        foreach (var order in select.OrderBy) { ValidateFunctionCalls(order.Expression); }
-        ValidateFunctionCalls(select.Limit);
-        ValidateFunctionCalls(select.Offset);
+        ValidateFunctionCalls(select.Where, allowNextValue: false);
+        foreach (var key in select.GroupBy) { ValidateFunctionCalls(key, allowNextValue: false); }
+        ValidateFunctionCalls(select.Having, allowNextValue: false);
+        foreach (var order in select.OrderBy) { ValidateFunctionCalls(order.Expression, allowNextValue: false); }
+        ValidateFunctionCalls(select.Limit, allowNextValue: false);
+        ValidateFunctionCalls(select.Offset, allowNextValue: false);
     }
 
-    private void ValidateFunctionCalls(SqlExpression? expression)
+    private void RecordSequenceUsage(SqlExpression? expression)
     {
+        SqlExpression? operand;
+        if (expression is SqlNextValueExpression next)
+        { (SequenceUsage ??= new()).Names.Add(SqlSequenceExecution.Name(next.Sequence)); return; }
+        if (expression is SqlCastExpression cast && cast.TargetType.Equals("REGCLASS", StringComparison.OrdinalIgnoreCase)) { operand = cast.Operand; }
+        else if (expression is SqlFunctionCallExpression call && SqlSequenceExecution.IsFunction(call.FunctionName))
+        {
+            var usage = SequenceUsage ??= new();
+            if (call.FunctionName.Equals("LASTVAL", StringComparison.OrdinalIgnoreCase)) { usage.Names.Add(SqlSequenceUsage.LastValue); return; }
+            operand = call.Arguments.Count > 0 ? call.Arguments[0] : null;
+        }
+        else { return; }
+        var names = SequenceUsage ??= new();
+        while (operand is SqlCastExpression reference && reference.TargetType.Equals("REGCLASS", StringComparison.OrdinalIgnoreCase)) { operand = reference.Operand; }
+        if (operand is SqlLiteralExpression or SqlParameterExpression)
+        {
+            var bound = ScopelessEvaluator.Bind(operand);
+            if (bound is SqlBoundConstant constant) { names.Names.Add(constant.Value); return; }
+            if (bound is SqlBoundParameter parameter) { names.Names.Add(parameter.Value); return; }
+        }
+        names.DynamicNames = true;
+    }
+
+    private void ValidateFunctionCalls(SqlExpression? expression, bool allowNextValue = true)
+    {
+        if (!allowNextValue && expression is SqlNextValueExpression)
+        { throw new SqlPlanningException("CS03076", ErrorMessages.SequencePositionUnsupported, expression.Location); }
+        RecordSequenceUsage(expression);
         _containsLike |= expression is SqlLikeExpression;
         // Subqueries recurse through here as well as children (#1151).
         RuntimeHelpers.EnsureSufficientExecutionStack();
@@ -209,7 +238,7 @@ internal sealed partial class SqlPlanner
 
         foreach (var child in Children(expression))
         {
-            ValidateFunctionCalls(child);
+            ValidateFunctionCalls(child, allowNextValue && !(expression is SqlFunctionCallExpression parent && (ReferenceEquals(parent.Filter, child) || _functions.Catalog.IsAggregate(parent.FunctionName))));
         }
 
         if (expression is SqlFunctionCallExpression call && _functions.ViewCalls?.ContainsKey(call) != true)
@@ -230,6 +259,7 @@ internal sealed partial class SqlPlanner
     internal static void ValidateDeclaredCalls(SqlExpression expression, SqlFunctionCatalog catalog)
     {
         RuntimeHelpers.EnsureSufficientExecutionStack();
+        SqlSequenceExecution.RefusePersisted(expression);
         foreach (var child in Children(expression))
         {
             ValidateDeclaredCalls(child, catalog);

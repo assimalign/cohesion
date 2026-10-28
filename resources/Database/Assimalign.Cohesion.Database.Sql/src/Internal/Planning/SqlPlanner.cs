@@ -40,8 +40,31 @@ internal sealed partial class SqlPlanner
     private readonly SqlFunctionEnvironment _functions;
 
     /// <summary>Backs <see cref="ScopelessEvaluator"/>.</summary>
-    private SqlExpressionEvaluator? _scopelessEvaluator;
+    // Ordinary planners retain their original one-reference cache. Sequence planning alone
+    // wraps that cache with usage metadata, so adding the SQL surface costs no ordinary bytes.
+    private object? _scopelessState;
     private bool _containsLike;
+
+    private SqlExpressionEvaluator? CachedScopelessEvaluator
+    {
+        get => _scopelessState is SqlSequenceUsage usage ? usage.Evaluator : _scopelessState as SqlExpressionEvaluator;
+        set
+        {
+            if (_scopelessState is SqlSequenceUsage usage) { usage.Evaluator = value; }
+            else { _scopelessState = value; }
+        }
+    }
+
+    private SqlSequenceUsage? SequenceUsage
+    {
+        get => _scopelessState as SqlSequenceUsage;
+        set
+        {
+            var evaluator = CachedScopelessEvaluator;
+            if (value is not null) { value.Evaluator = evaluator; _scopelessState = value; }
+            else { _scopelessState = evaluator; }
+        }
+    }
 
     /// <summary>Initializes a planner for one statement.</summary>
     /// <param name="catalog">The database's catalog.</param>
@@ -106,6 +129,8 @@ internal sealed partial class SqlPlanner
             if (_commonTableState?.HasRecursion == true && ViewDefinitionBinding is null)
             { throw new SqlUnsupportedQueryException(ErrorMessages.CteRecursiveExecution, location: expression.Location); }
             plan.ContainsLike = _containsLike;
+            if (SequenceUsage is { } usage)
+            { usage.Evaluator = null; plan = new SqlSequenceScopePlan(plan, usage) { ContainsLike = _containsLike }; }
             return plan;
         }
         catch (SqlEvaluationException exception) when (exception.Diagnostics[0].Start is null && expression.Location is not null)
@@ -135,6 +160,7 @@ internal sealed partial class SqlPlanner
         ValidateFunctionCalls(expression);
         return expression switch
         {
+            SqlCreateSequenceExpression or SqlAlterSequenceExpression or SqlDropSequenceExpression => new SqlSequencePlan(expression),
             SqlCreateFunctionExpression or SqlDropFunctionExpression or SqlCreateDomainExpression or SqlDropDomainExpression
                 => new SqlDefinitionPlan(expression),
             SqlQueryBodyExpression query => PlanQuery(query),
@@ -876,7 +902,7 @@ internal sealed partial class SqlPlanner
     /// The empty column scope that VALUES rows and LIMIT/OFFSET counts bind and evaluate against,
     /// created on first use and shared by the statement.
     /// </summary>
-    private SqlExpressionEvaluator ScopelessEvaluator => _scopelessEvaluator ??=
+    private SqlExpressionEvaluator ScopelessEvaluator => CachedScopelessEvaluator ??=
         new SqlExpressionEvaluator(Array.Empty<SqlCatalogColumn>(), _parameters, defaultCollation: _catalog.DefaultCollation, functions: _functions, cancellationToken: _cancellationToken, foldConstants: FoldQueryConstants);
 
     /// <summary>Whether <c>*</c> appears anywhere in an expression, outside a subquery.</summary>
@@ -1414,6 +1440,7 @@ internal sealed partial class SqlPlanner
     /// <exception cref="SqlEvaluationException">The name is neither a built-in type nor a registered domain (<c>CS02010</c>).</exception>
     internal static SqlType ResolveCastTarget(SqlCastExpression cast, SqlTypeCatalog types)
     {
+        if (cast.TargetType.Equals("REGCLASS", StringComparison.OrdinalIgnoreCase)) { return SqlType.BigInt; }
         if (cast.TargetTypeInfo is { } builtIn)
         {
             return SqlType.ForStorage(builtIn);
@@ -1717,6 +1744,7 @@ internal sealed partial class SqlPlanner
     private static void ValidateCast(SqlCastExpression cast, SqlExpressionEvaluator evaluator,
         IReadOnlyDictionary<SqlExpression, DatabaseType>? boundSubqueries, IReadOnlyDictionary<SqlExpression, int>? boundValues)
     {
+        if (cast.TargetType.Equals("REGCLASS", StringComparison.OrdinalIgnoreCase)) { return; }
         var types = evaluator.Functions.Types;
         var target = ResolveCastTarget(cast, types);
         // Reuse the binder's CASE, arithmetic and aggregate result inference, while an
@@ -1899,6 +1927,7 @@ internal sealed partial class SqlPlanner
     private bool ContainsVolatileCall(SqlExpression expression)
     {
         RuntimeHelpers.EnsureSufficientExecutionStack();
+        if (expression is SqlNextValueExpression || expression is SqlCastExpression { TargetType: "REGCLASS" }) { return true; }
         if (expression is SqlFunctionCallExpression call && !SqlStandardLibrary.IsEvaluatorForm(call.FunctionName))
         {
             try

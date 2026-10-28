@@ -370,6 +370,8 @@ internal sealed partial class SqlPlanner
             SqlLiteralType.Binary => DatabaseType.Binary,
             _ => DatabaseType.Null,
         },
+        SqlNextValueExpression => DatabaseType.Int64,
+        SqlFunctionCallExpression call when SqlSequenceExecution.IsFunction(call.FunctionName) => DatabaseType.Int64,
         SqlFunctionCallExpression call when SqlStandardLibrary.IsCoalesce(call.FunctionName)
             => CoalesceGroupType(call.Arguments, columns, evaluator),
         SqlFunctionCallExpression call when call.FunctionName.Equals("NULLIF", StringComparison.OrdinalIgnoreCase)

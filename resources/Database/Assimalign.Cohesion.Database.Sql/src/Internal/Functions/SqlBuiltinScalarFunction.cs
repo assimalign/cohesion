@@ -87,6 +87,10 @@ internal sealed class SqlBuiltinScalarFunction : SqlScalarFunction
             case "CURRENT_TIME": case "LOCALTIME": return TimeOnly.FromDateTime(args.Context.TransactionStart!.Value.UtcDateTime);
             case "CURRENT_TIMESTAMP": case "NOW": return args.Context.TransactionStart!.Value.ToUniversalTime();
             case "LOCALTIMESTAMP": return DateTime.SpecifyKind(args.Context.TransactionStart!.Value.UtcDateTime, DateTimeKind.Unspecified);
+            case "NEXTVAL": case "CURRVAL": case "SETVAL": case "LASTVAL":
+                var sequences = SqlSequenceExecution.Current ?? throw new SqlPlanningException("CS04069", ErrorMessages.SequenceLastUndefined);
+                return sequences.Evaluate(Name, args.Count == 0 ? null : args[0].ToObject(), args.Count < 2 ? null : args[1].ToObject(),
+                    args.Count < 3 ? true : args[2].ToObject(), []);
             case "GEN_RANDOM_UUID": return Guid.NewGuid();
             case "DATE_TRUNC": return SqlTemporalFunctions.Truncate(args.GetString(0), args[1].ToObject()!);
             case "CONCAT": case "CONCAT_WS":

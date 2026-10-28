@@ -67,6 +67,9 @@ namespace Assimalign.Cohesion.Database.Sql;
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.SqlDatabaseSession.DebugView))]
 public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest>
 {
+    private SqlSequenceSessionState? _sequenceState;
+    internal SqlSequenceSessionState SequenceState => _sequenceState ??= new SqlSequenceSessionState();
+
     private readonly SqlDatabase _database;
     private readonly TransactionCoordinator _coordinator;
     private readonly SqlQueryExecutor _executor;
@@ -492,7 +495,7 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
     private async ValueTask<DatabaseResult> ExecuteMetadataStatementAsync(SqlQueryRequest request, CancellationToken cancellationToken, SqlCatalogScriptPublication? scriptReceipt)
     {
         // DROP SCHEMA takes its definition lease in the executor, after all table locks.
-        if (request.Statement.SqlExpression is SqlDropSchemaExpression)
+        if (request.Statement.SqlExpression is SqlDropSchemaExpression or SqlAlterSequenceExpression or SqlDropSequenceExpression)
         {
             if (_ddlLockOwner is null) { _database.DdlInterlock.CheckDefinitionAdmission(_database.Name.ToString()); }
             return await ExecuteStatementCoreAsync(request, cancellationToken, scriptReceipt).ConfigureAwait(false);
@@ -704,7 +707,7 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
             {
                 return ExecuteSelfCommittingResultAsync(request, scope, cancellationToken);
             }
-            var execution = _executor.ExecuteAsync(request, scope, cancellationToken);
+            var execution = _executor.ExecuteAsync(request, scope, cancellationToken, this);
             // Reads encode during delivery. Embedded execution keeps its direct task path.
             return ResultPreparation is not null && request.Statement.SqlExpression.CommandType is
                 SqlQueryCommandType.Insert or SqlQueryCommandType.Update or SqlQueryCommandType.Delete or SqlQueryCommandType.Merge
@@ -724,15 +727,17 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
         try
         {
             var plan = planner.Plan(explain.Statement, scope.Snapshot);
+            var sequenceUsage = plan.SequenceUsage;
+            if (plan is SqlSequenceScopePlan sequenceScope) { plan = sequenceScope.Input; }
             var executor = new SqlPlanExecutor(_database.DataStorage, _database.Catalog, _database.IndexManager, _database.Definitions);
             plan = executor.Cost(plan, scope, cancellationToken);
             scope.Metrics.IsPlanned = true;
             if (explain.Analyze)
             {
                 scope.Metrics.BeginAnalysis();
-                return ExecuteExplainAnalyzeAsync(executor, plan, scope, request.Statement.Diagnostics, cancellationToken);
+                return ExecuteExplainAnalyzeAsync(executor, plan, scope, request.Statement.Diagnostics, cancellationToken, sequenceUsage);
             }
-            var result = SqlPlanner.Describe(plan, request.Statement.Diagnostics);
+            var result = SqlPlanner.Describe(sequenceUsage is null ? plan : new SqlSequenceScopePlan(plan, sequenceUsage), request.Statement.Diagnostics);
             return Task.FromResult<DatabaseResult>(result);
         }
         catch (SqlUnsupportedQueryException exception)
@@ -741,17 +746,18 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
         }
     }
 
-    private static async Task<DatabaseResult> ExecuteExplainAnalyzeAsync(SqlPlanExecutor executor, SqlPlan plan,
-        SqlStatementContext scope, IEnumerable<Diagnostic> diagnostics, CancellationToken cancellationToken)
+    private async Task<DatabaseResult> ExecuteExplainAnalyzeAsync(SqlPlanExecutor executor, SqlPlan plan,
+        SqlStatementContext scope, IEnumerable<Diagnostic> diagnostics, CancellationToken cancellationToken, SqlSequenceUsage? sequenceUsage)
     {
-        await using var result = (DatabaseResultSet)await executor.ExecuteAsync(plan, scope, cancellationToken).ConfigureAwait(false);
+        await using var result = (DatabaseResultSet)await (sequenceUsage is not null ? _executor.ExecuteSequencesAsync(executor, plan, scope, this, cancellationToken, sequenceUsage)
+            : executor.ExecuteAsync(plan, scope, cancellationToken)).ConfigureAwait(false);
         // Drain the SELECT before returning its description; dispose its ordinary result on every exit.
         await foreach (var row in result.GetRowsAsync(cancellationToken).ConfigureAwait(false))
         {
             cancellationToken.ThrowIfCancellationRequested();
             for (int ordinal = 0; ordinal < row.FieldCount; ordinal++) { _ = row.GetValue(ordinal); }
         }
-        return SqlPlanner.Describe(plan, diagnostics, scope.Metrics);
+        return SqlPlanner.Describe(sequenceUsage is null ? plan : new SqlSequenceScopePlan(plan, sequenceUsage), diagnostics, scope.Metrics);
     }
 
     private static async Task<DatabaseResult> PrepareExecutionResultAsync(Task<DatabaseResult> execution,
@@ -764,12 +770,12 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
         // CTAS prepares its row count after copying and before catalog publication.
         if (request.Statement.SqlExpression is SqlCreateTableAsExpression)
         {
-            return await _executor.ExecuteAsync(request, scope, cancellationToken).ConfigureAwait(false);
+            return await _executor.ExecuteAsync(request, scope, cancellationToken, this).ConfigureAwait(false);
         }
         // The remaining DDL statements return only a zero-count completion. Prepare that fixed
         // result before invoking the executor: catalog publication may commit inside execution.
         var prepared = await scope.PrepareResultAsync(new SqlQueryResult(DatabaseResultStatus.Success, 0), cancellationToken).ConfigureAwait(false);
-        var result = await _executor.ExecuteAsync(request, scope, cancellationToken).ConfigureAwait(false);
+        var result = await _executor.ExecuteAsync(request, scope, cancellationToken, this).ConfigureAwait(false);
         return result.Status == DatabaseResultStatus.Success ? prepared : result;
     }
 

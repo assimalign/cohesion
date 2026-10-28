@@ -56,7 +56,7 @@ internal sealed class SqlQueryExecutor
     /// context (write stamps, visibility snapshot) and the paired storage bracket
     /// the mutations ride.
     /// </summary>
-    internal Task<DatabaseResult> ExecuteAsync(SqlQueryRequest request, SqlStatementContext statement, CancellationToken cancellationToken = default)
+    internal Task<DatabaseResult> ExecuteAsync(SqlQueryRequest request, SqlStatementContext statement, CancellationToken cancellationToken = default, SqlDatabaseSession? session = null)
     {
         ArgumentNullException.ThrowIfNull(request);
         cancellationToken.ThrowIfCancellationRequested();
@@ -78,8 +78,19 @@ internal sealed class SqlQueryExecutor
 
         statement.Metrics.IsPlanned = true;
         var executor = new SqlPlanExecutor(_storage, _catalog, _indexManager, _definitions);
+        var sequenceUsage = plan.SequenceUsage;
+        if (plan is SqlSequenceScopePlan sequenceScope) { plan = sequenceScope.Input; }
         plan = executor.Cost(plan, statement, cancellationToken);
-        return executor.ExecuteAsync(plan, statement, cancellationToken);
+        return sequenceUsage is not null ? ExecuteSequencesAsync(executor, plan, statement, session, cancellationToken, sequenceUsage)
+            : executor.ExecuteAsync(plan, statement, cancellationToken);
+    }
+
+    internal async Task<DatabaseResult> ExecuteSequencesAsync(SqlPlanExecutor executor, SqlPlan plan, SqlStatementContext statement,
+        SqlDatabaseSession? session, CancellationToken cancellationToken, SqlSequenceUsage? usage = null)
+    {
+        using var sequences = await SqlSequenceExecution.OpenAsync(_catalog, statement, session?.SequenceState ?? new SqlSequenceSessionState(), cancellationToken, usage ?? plan.SequenceUsage).ConfigureAwait(false);
+        sequences.Enter();
+        return await executor.ExecuteAsync(plan, statement, cancellationToken).ConfigureAwait(false);
     }
 
     private sealed class DebugView

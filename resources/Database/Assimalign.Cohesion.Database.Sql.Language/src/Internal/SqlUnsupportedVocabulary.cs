@@ -39,7 +39,6 @@ internal static class SqlUnsupportedVocabulary
         new("NATURAL", SqlClauses.Natural, SqlWordPosition.Clause),
         new("USING", SqlClauses.Using, SqlWordPosition.Clause),
         new("ALL", SqlClauses.All, SqlWordPosition.Rule),
-        new("SEQUENCE", "CREATE SEQUENCE", SqlWordPosition.Rule),
         new("SERIAL", "SERIAL", SqlWordPosition.Rule),
         new("BIGSERIAL", "BIGSERIAL", SqlWordPosition.Rule),
         new("SMALLSERIAL", "SMALLSERIAL", SqlWordPosition.Rule),

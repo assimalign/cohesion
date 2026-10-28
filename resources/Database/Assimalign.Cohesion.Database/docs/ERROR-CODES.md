@@ -165,6 +165,11 @@ structured-carrier messages remain unprefixed.
 | New (#1717) | CS03070 | Schema/catalog — occupied sequence/table/view relation name (42P07) |
 | New (#1717) | CS03071 | Schema/catalog — sequence namespace is absent (3F000) |
 | New (#1717) | CS03072 | Schema/catalog — sequence definition exceeds the record limit (54000) |
+| New (#1717, SQ-S2) | CS03073 | Schema/catalog — sequence name or object identity is absent (42P01) |
+| New (#1717, SQ-S2) | CS03074 | Schema/catalog — sequence operation in a persisted expression or declared provisioning script is unsupported (0A000) |
+| New (#1717, SQ-S2) | CS03075 | Schema/catalog — setval value is outside the sequence bounds (22003) |
+| New (#1717, SQ-S2) | CS03076 | Schema/expression — sequence value in an unsupported evaluation context or detached from execution (0A000) |
+| New (#1717, SQ-S2) | CS03077 | Schema/expression — malformed sequence reference or runtime sequence-call argument (22023) |
 | COHSQLP001 | CS03101 | Schema/constraints |
 | COHSQLP002 | CS03102 | Schema/constraints |
 | COHSQLP003 | CS03103 | Schema/constraints |
@@ -191,6 +196,8 @@ structured-carrier messages remain unprefixed.
 | New (w11 review) | CS04065 | Transactions/locking — hard deadlock (`40P01`) |
 | New (#1716) | CS04066 | Transactions/locking — TRUNCATE inside an explicit transaction (25001) |
 | New (#1717) | CS04067 | Transactions/locking — dropped or replaced sequence incarnation (40001) |
+| New (#1717, SQ-S2) | CS04068 | Transactions/session state — currval is undefined for this sequence in this session (55000) |
+| New (#1717, SQ-S2) | CS04069 | Transactions/session state — lastval is undefined or its sequence was dropped (55000) |
 | COHSQLE004 | CS05004 | Execution/budgets |
 | COHSQLE007 | CS05007 | Execution/budgets |
 | COHSQLE013 | CS05013 | Execution/budgets |
