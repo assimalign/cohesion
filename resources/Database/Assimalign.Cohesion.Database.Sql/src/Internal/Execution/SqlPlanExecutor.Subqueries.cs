@@ -13,13 +13,15 @@ internal sealed partial class SqlPlanExecutor
         SqlStatementContext statement, CancellationToken cancellationToken)
     {
         var parent = _subqueryValues;
-        var frame = new SqlSubqueryValues(parent, queries[0].ScopeId, queries);
+        bool deferred = false;
+        for (int index = 0; index < queries.Count; index++) { deferred |= queries[index].IsDeferred; }
+        var frame = new SqlSubqueryValues(parent, queries[0].ScopeId, queries, lazy: deferred);
         _subqueryValues = frame;
         try
         {
             foreach (var query in queries)
             {
-                if (query.IsCorrelated) { continue; }
+                if (query.IsCorrelated || query.IsDeferred) { continue; }
                 if (!frame.StatementValues.TryGetValue(query.Slot, out var values))
                 {
                     values = await MaterializeSubqueryAsync(query, statement, cancellationToken).ConfigureAwait(false);

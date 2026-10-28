@@ -115,6 +115,12 @@ public sealed partial class GqlQueryParser
         if (Failed) { return new GqlLiteralExpression(null, Span(start, start)); }
         if (Is("CASE")) { return ParseCase(); }
         if (Is("COALESCE") || Is("NULLIF")) { return ParseCaseAbbreviation(); }
+        if (Current.Type == TokenType.Keyword && start.Text.ToUpperInvariant() is "ALL" or "ANY" or "NONE" or "SINGLE" &&
+            _tokens[_position + 1].Type == TokenType.LeftParen)
+        {
+            Unsupported(start.Text.ToUpperInvariant(), start);
+            return new GqlLiteralExpression(null, Span(start, start));
+        }
         if (Current.Type == TokenType.Function && Is("CAST") && _tokens[_position + 1].Type == TokenType.LeftParen) { return ParseCast(); }
         if (Current.Type == TokenType.Function && (Is("CURRENT_DATE") || Is("CURRENT_TIMESTAMP")))
         {
@@ -232,7 +238,6 @@ public sealed partial class GqlQueryParser
                 }
                 else { Error("CG00004", ErrorMessages.GqlQueryParserParseLiteralVoid2, start); }
             }
-            else if (Current.Type is TokenType.LeftBracket or TokenType.LeftBrace) { Error("CK00001", Current.Type == TokenType.LeftBracket ? ErrorMessages.GqlQueryParserParseLiteralVoid3 : ErrorMessages.GqlQueryParserParseLiteralVoid4, Current); }
             else { Error("CG00002", ErrorMessages.GqlQueryParserParseLiteralVoid5, start); }
         }
         return new GqlLiteralExpression(value, Span(start, Previous));

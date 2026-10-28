@@ -22,7 +22,8 @@ null extension, WALK/TRAIL/SIMPLE/ACYCLIC modes (implicit TRAIL), quantified rel
 `-[r:T|U]->`, every directed ISO edge in full and abbreviated form (`->`, `<-`, `-`, `<->`), scalar
 Boolean, arithmetic, null/truth, list-membership and string filters and labeled predicates (`n IS NOT LABELED A`, `n:A|B`),
 core element/string/math functions, CAST, Cypher conversions, transaction-start CURRENT_DATE/CURRENT_TIMESTAMP,
-CASE, COALESCE, NULLIF, list/map literals and parameters, subscripts and map/entity property access,
+CASE, COALESCE, NULLIF, list/map literals and parameters, lexical list comprehensions, open-ended list slices,
+subscripts and map/entity property access,
 LET and FILTER, FOR (Cypher UNWIND), RETURN ... NEXT and Cypher WITH,
 RETURN expressions and aliases, DISTINCT/ALL, RETURN * and standalone RETURN,
 COUNT, SUM, AVG, MIN, MAX and COLLECT_LIST (Cypher collect), with implicit or ISO GROUP BY,

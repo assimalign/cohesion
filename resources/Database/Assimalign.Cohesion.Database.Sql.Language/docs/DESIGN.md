@@ -1,5 +1,13 @@
 # Assimalign.Cohesion.Database.Sql.Language — Design
 
+## Sequence catalog review (#1717)
+
+DIALECT.md distinguishes format 27's TYPE default-assignment flag from current format 28's
+sequence records. Existing-sequence relation collisions use CS03070 (42P07) and identify the
+existing kind; table-on-table collisions retain their existing identity. The engine conformance
+regressions exercise CREATE TABLE, CTAS, RENAME and CREATE VIEW at this boundary. Sequence SQL
+syntax remains deferred to SQ-S2.
+
 ## WITH RECURSIVE binding (#1719, SQ-R1)
 
 WITH RECURSIVE declares visibility of every name throughout its WITH list. Acyclic
@@ -294,6 +302,15 @@ query/call comparisons include placement, preserving persisted view round trips.
 No profile clause or keyword is added. DIALECT.md specifies syntax, defaults and errors.
 
 ## Aggregate modifiers and string aggregation (#1115)
+
+FILTER and Boolean/statistical aggregates (#1720, SQ-H1) extend this representation:
+SqlFunctionCallExpression.Filter retains the optional condition, including depth and source
+extent. Rendering, semantic child walks, aggregate-level correlation and persisted equality
+include it. FILTER adds one named clause and nine function names join the executable profile.
+The profile has 59 declared clauses, or 64 including the five documented exclusions.
+Window aggregates and window calls in FILTER retain CK00001. The catalog owns aggregate
+admission (CS05072 for FILTER on scalar calls); a same-scope aggregate in the condition is
+CS05073. Child queries bind independently. See DIALECT.md for types, NULLs and rounding.
 
 SqlFunctionCallExpression retains a SqlSetQuantifier and ordered input keys for every call;
 the engine catalog decides which calls are aggregates. Depth measurement, rendering and

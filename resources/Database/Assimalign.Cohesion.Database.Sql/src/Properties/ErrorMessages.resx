@@ -115,6 +115,18 @@
     <value>{0} subquery requires exactly one output column; found {1}.</value>
   </data>
   <data name="EngineIdentityIntegerRequired" xml:space="preserve"><value>IDENTITY requires a built-in integer type</value></data>
+  <data name="SequenceIncrementZero" xml:space="preserve"><value>INCREMENT must not be zero.</value></data>
+  <data name="SequenceBoundsInvalid" xml:space="preserve"><value>Sequence MINVALUE and MAXVALUE must fit the data type, with MINVALUE less than MAXVALUE.</value></data>
+  <data name="SequenceStartInvalid" xml:space="preserve"><value>Sequence START must be within MINVALUE and MAXVALUE.</value></data>
+  <data name="SequenceRestartInvalid" xml:space="preserve"><value>Sequence restart or current value must be within MINVALUE and MAXVALUE.</value></data>
+  <data name="SequenceCacheInvalid" xml:space="preserve"><value>Sequence CACHE must be at least one.</value></data>
+  <data name="SequenceTypeInvalid" xml:space="preserve"><value>Sequence data type must be SMALLINT, INTEGER or BIGINT.</value></data>
+  <data name="SequenceNamespaceMissing" xml:space="preserve"><value>The sequence namespace does not exist.</value></data>
+  <data name="SequenceRelationExists" xml:space="preserve"><value>{0} '{1}.{2}' already exists.</value></data>
+  <data name="SequenceExhausted" xml:space="preserve"><value>Sequence '{0}.{1}' has exhausted its range.</value></data>
+  <data name="SequenceChanged" xml:space="preserve"><value>The sequence was dropped or changed; resolve its current catalog description.</value></data>
+  <data name="SequenceRecordTooLarge" xml:space="preserve"><value>The sequence definition exceeds the catalog record limit.</value></data>
+  <data name="SequenceRecordMalformed" xml:space="preserve"><value>Sequence catalog metadata or reservation is malformed.</value></data>
   <data name="IdentityAlreadyDeclared" xml:space="preserve"><value>a table may have only one identity column</value></data>
   <data name="IdentityZeroIncrement" xml:space="preserve"><value>INCREMENT must not be zero</value></data>
   <data name="IdentityDefaultConflict" xml:space="preserve"><value>IDENTITY cannot be combined with DEFAULT</value></data>
@@ -254,6 +266,15 @@
   <data name="ViewBindingFailed" xml:space="preserve"><value>View '{0}.{1}' cannot be bound. {2}</value></data>
   <data name="ViewContractChanged" xml:space="preserve"><value>A source definition changed its output type, modifiers, domain or collation.</value></data>
   <data name="AggregateModifiersOnScalar" xml:space="preserve"><value>DISTINCT, ALL or ORDER BY specified, but '{0}' is not an aggregate function.</value></data>
+  <data name="FilterRequiresAggregate" xml:space="preserve">
+    <value>FILTER is allowed only on aggregate calls.</value>
+  </data>
+  <data name="FilterContainsAggregate" xml:space="preserve">
+    <value>Aggregate functions are not allowed in FILTER conditions.</value>
+  </data>
+  <data name="StatisticsOutOfRange" xml:space="preserve">
+    <value>The statistical aggregate result is outside its numeric type range.</value>
+  </data>
   <data name="DistinctOrderingArgument" xml:space="preserve"><value>In an aggregate with DISTINCT, ORDER BY expressions must appear in the argument list.</value></data>
   <data name="StringAggregateTypeHint" xml:space="preserve"><value> Use CAST(... AS TEXT) for non-text inputs; the delimiter must be a string constant or parameter.</value></data>
   <data name="StringAggregateDelimiter" xml:space="preserve"><value>STRING_AGG/LISTAGG delimiter must be a string constant or parameter known at plan time.</value></data>

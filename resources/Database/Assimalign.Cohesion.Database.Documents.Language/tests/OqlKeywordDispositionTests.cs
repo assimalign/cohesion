@@ -34,8 +34,10 @@ public sealed class OqlKeywordDispositionTests
         ["ORDER"] = Parses("SELECT a FROM c ORDER BY a"),
         ["ASC"] = Parses("SELECT a FROM c ORDER BY a ASC"),
         ["DESC"] = Parses("SELECT a FROM c ORDER BY a DESC"),
+        ["NULLS"] = Parses("SELECT a FROM c ORDER BY a NULLS FIRST"),
         ["AS"] = Parses("SELECT a AS b FROM c AS d"),
         ["CREATE"] = Parses("CREATE INDEX ix ON c (a)"),
+        ["INCLUDE"] = Parses("CREATE INDEX ix ON c (a INCLUDE MISSING)"),
         ["INDEX"] = Parses("CREATE INDEX ix ON c (a)"),
         ["ON"] = Parses("CREATE INDEX ix ON c (a)"),
         ["DROP"] = Parses("DROP INDEX ix ON c"),
@@ -258,6 +260,7 @@ public sealed class OqlKeywordDispositionTests
     private static string[] Words()
         => OqlLanguageProfile.Instance.Keywords.ToArray()
             .Concat(OqlUnsupportedVocabulary.Words.Select(word => word.Spelling))
+            .Concat(new[] { "NULLS", "INCLUDE" })
             .Concat(new[] { "UNNEST", "INNER", "LEFT", "OUTER", "EVERY", "SATISFIES" }).Append("EXPLAIN") // Contextual statement prefix; identifier cases live in this corpus too.
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();

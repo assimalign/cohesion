@@ -125,8 +125,9 @@ public sealed partial class SqlCatalog
             EnsureNoViewReads(expected, columnName, rename: true);
             if (columnName is null)
             {
-                if (_tables.ContainsKey((expected.Schema, newName)) || _views.ContainsKey(SqlObjectIdentity.View(expected.Schema, newName)))
+                if (RelationExists(expected.Schema, newName))
                 {
+                    if (_sequences.ContainsKey((expected.Schema, newName))) { throw RelationNameCollision(expected.Schema, newName); }
                     throw new SqlCatalogException("CS03049", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.RenameTableCollision, expected.Schema, newName));
                 }
             }

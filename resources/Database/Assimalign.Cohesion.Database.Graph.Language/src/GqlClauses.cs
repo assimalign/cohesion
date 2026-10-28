@@ -102,6 +102,12 @@ public static class GqlClauses
     /// <summary>Evaluates conditional branches in an expression.</summary>
     public const string Case = "CASE";
 
+    /// <summary>A list comprehension with an iterator, optional filter and optional projection.</summary>
+    public const string ListComprehension = "LIST COMPREHENSION";
+
+    /// <summary>A list slice with optional inclusive start and exclusive end.</summary>
+    public const string ListSlice = "LIST SLICING";
+
     /// <summary>Invokes a graph query procedure.</summary>
     public const string Call = "CALL";
 

@@ -25,6 +25,9 @@
   <data name="ArithmeticOperands" xml:space="preserve"><value>Arithmetic requires numeric operands; string concatenation requires two strings.</value></data>
   <data name="LogicalNodeRequired" xml:space="preserve"><value>AND joins predicates in a GqlLogicalExpression; a GqlBinaryExpression holds a scalar operation.</value></data>
   <data name="MembershipListRequired" xml:space="preserve"><value>IN requires a list.</value></data>
+  <data name="IteratorNameRequired" xml:space="preserve">
+    <value>A list comprehension requires a nonempty iterator name.</value>
+  </data>
   <data name="UnsupportedStringPredicate" xml:space="preserve"><value>Unsupported string predicate.</value></data>
   <data name="ParameterCollision" xml:space="preserve"><value>Parameter '{0}' has more than one binding after removing its sigil.</value></data>
   <data name="ParameterUnbound" xml:space="preserve"><value>Parameter '{0}' is not bound.</value></data>
@@ -45,12 +48,19 @@
   <data name="CompositeLimit" xml:space="preserve"><value>Graph values are limited to depth 64, 65536 values and 16777216 encoded bytes.</value></data>
   <data name="CompositeMalformed" xml:space="preserve"><value>Malformed or oversized Graph composite value.</value></data>
   <data name="CompositeRequired" xml:space="preserve"><value>This operation requires a list or map with a valid index or field name.</value></data>
+  <data name="SliceBoundRequired" xml:space="preserve"><value>A list slice requires a start or end bound.</value></data>
+  <data name="ListOperationInvalid" xml:space="preserve">
+    <value>A list operation requires a list source and numeric slice bounds in the signed 32-bit range.</value>
+  </data>
   <data name="CompositeCapabilityRequired" xml:space="preserve"><value>Graph composite values require the graph.composite-values capability.</value></data>
   <data name="CaseInvalid" xml:space="preserve"><value>A CASE requires alternatives and COALESCE requires at least two operands.</value></data>
   <data name="PageValueInvalid" xml:space="preserve"><value>Paging requires a non-negative integer value in the signed 64-bit range.</value></data>
   <data name="PageExpressionRequired" xml:space="preserve"><value>Paging requires an unsigned integer literal or parameter.</value></data>
   <data name="DistinctSortNotProjected" xml:space="preserve"><value>ORDER BY with RETURN DISTINCT may only reference projected values.</value></data>
   <data name="AggregatePlacement" xml:space="preserve"><value>An aggregate requires a valid function and operand in RETURN; aggregates cannot be nested or used in WHERE or GROUP BY.</value></data>
+  <data name="IteratorAggregateInvalid" xml:space="preserve">
+    <value>An aggregate is not allowed in a list comprehension predicate or projection.</value>
+  </data>
   <data name="GroupByMismatch" xml:space="preserve"><value>GROUP BY must list exactly the non-aggregated RETURN expressions.</value></data>
   <data name="GroupedExpressionRequired" xml:space="preserve"><value>An expression after grouping may only reference grouping keys, aggregates declared in RETURN, or their ORDER BY aliases.</value></data>
   <data name="SortShapeInvalid" xml:space="preserve"><value>Ordering and paging require a RETURN with valid sort items.</value></data>

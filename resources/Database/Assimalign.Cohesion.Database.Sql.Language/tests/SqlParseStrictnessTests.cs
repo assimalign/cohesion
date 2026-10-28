@@ -220,7 +220,6 @@ public sealed class SqlParseStrictnessTests
     [InlineData("SELECT * FROM «LATERAL» (SELECT b FROM u) AS x;", "LATERAL subquery")]
     [InlineData("SELECT PERCENTILE_CONT(0.5) «WITHIN GROUP» (ORDER BY a) FROM t;", "WITHIN GROUP")]
     [InlineData("SELECT MODE() «WITHIN GROUP» (ORDER BY a) AS m FROM t;", "WITHIN GROUP")]
-    [InlineData("SELECT COUNT(*) «FILTER» (WHERE a > 1) AS n FROM t;", "FILTER")]
     [InlineData("CREATE «MATERIALIZED» VIEW v AS SELECT a FROM t;", "CREATE MATERIALIZED VIEW")]
     public void Parse_RecognizedConstruct_ShouldReportOneDiagnostic(string marked, string construct)
     {

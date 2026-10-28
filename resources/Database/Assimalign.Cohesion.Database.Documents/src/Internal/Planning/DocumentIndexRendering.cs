@@ -14,6 +14,9 @@ internal static class DocumentIndexRendering
         $"DISTINCT ARRAY {Element(key.Path)} FOR v IN {Source(key.ArraySource)}" +
         (key.When is null ? string.Empty : $" WHEN {Predicate(key.When)}") + " END";
 
+    internal static string Key(DocumentIndexMetadata index, int ordinal) => Key(index.Keys[ordinal]) +
+        (ordinal == 0 && index.IncludeMissing ? " INCLUDE MISSING" : string.Empty);
+
     private static string Element(string path) => path.Length == 0 ? "v" : Path(path, "v");
 
     private static string Source(string path) => Path(path, string.Empty);

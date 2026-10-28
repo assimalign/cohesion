@@ -55,7 +55,6 @@ internal static class SqlUnsupportedVocabulary
         new("ROLLUP", "ROLLUP", SqlWordPosition.Rule),
         new("CUBE", "CUBE", SqlWordPosition.Rule),
         new("GROUPING_ID", "GROUPING_ID", SqlWordPosition.Rule),
-        new("FILTER", "FILTER", SqlWordPosition.Rule),
         new("WITHIN", "WITHIN GROUP", SqlWordPosition.Rule),
         new("ANY", "ANY array comparison", SqlWordPosition.Rule),
         new("SOME", "SOME array comparison", SqlWordPosition.Rule),

@@ -71,6 +71,8 @@ internal sealed partial class DocumentPlanner
         if (plan is DocumentSystemCollectionPlan && logical is { Query.Unnest.Count: 0 } &&
             AggregateDetail(logical) is { } aggregates)
         { detail += "; " + aggregates; }
+        if (plan is DocumentCreateIndexPlan creation)
+        { detail = "include_missing=" + creation.IncludeMissing; }
         Add(DescribeOperator(plan), null, indexName, detail);
         var returning = plan switch
         {
@@ -153,12 +155,21 @@ internal sealed partial class DocumentPlanner
             return parent;
         }
 
-        void AddAccess(DocumentAccessPath access, int parent)
+        void AddAccess(DocumentAccessPath access, int parent, DocumentOrderingPath? analysis = null)
         {
             switch (access)
             {
+                case DocumentOrderingPath ordering:
+                    AddAccess(ordering.Input, parent, ordering);
+                    foreach (var candidate in ordering.Candidates)
+                    {
+                        Add("IndexOrderCandidate", parent, candidate.Path.Index.Name,
+                            "include_missing=" + candidate.Path.Index.IncludeMissing + "; " + OrderDetail(candidate.Ordering) +
+                            "; consumed=False; sort=retained");
+                    }
+                    break;
                 case DocumentScanPath:
-                    Add("CollectionScan", parent);
+                    Add("CollectionScan", parent, detail: analysis is null ? null : OrderDetail(new(false, "collection_scan")));
                     break;
                 case DocumentIndexPath seek:
                     var bounds = new List<string>();
@@ -174,13 +185,19 @@ internal sealed partial class DocumentPlanner
                     {
                         description += $"; estimate_kind={(estimate.IsComplete ? "exact_index_entries" : "lower_bound")}; probe_entries={estimate.EntriesExamined}; probe_pages={estimate.PagesVisited}";
                     }
+                    if (analysis is not null)
+                    {
+                        var eligibility = analysis.Candidates.First(candidate => candidate.Path.Index.ObjectId == seek.Index.ObjectId).Ordering;
+                        description += "; include_missing=" + seek.Index.IncludeMissing + "; " + OrderDetail(eligibility) + "; consumed=False; sort=retained";
+                    }
                     Add("IndexSeek", parent, seek.Index.Name, description, seek.Estimate?.Count);
                     break;
                 case DocumentIntersectionPath intersection:
                     int id = nodes.Count;
-                    Add("IndexIntersection", parent, detail: $"inputs={intersection.Inputs.Count}; estimate_kind=upper_bound",
+                    Add("IndexIntersection", parent, detail: $"inputs={intersection.Inputs.Count}; estimate_kind=upper_bound" +
+                        (analysis is null ? "" : "; " + OrderDetail(new(false, "intersection_erases_order"))),
                         estimated: System.Linq.Enumerable.Min(intersection.Inputs, path => path.Estimate!.Value.Count));
-                    foreach (var input in intersection.Inputs) { AddAccess(input, id); }
+                    foreach (var input in intersection.Inputs) { AddAccess(input, id, analysis); }
                     break;
                 default:
                     throw new UnreachableException();
@@ -225,6 +242,16 @@ internal sealed partial class DocumentPlanner
         }
     }
 
+    private static string OrderDetail(DocumentOrderEligibility ordering) =>
+        $"order_eligible={ordering.Eligible}; order_reason={ordering.Reason}" +
+        (ordering.Eligible ? $"; order_direction={(ordering.Reverse ? "reverse" : "forward")}; equality_keys={ordering.EqualityKeys}; order_prefix_keys={ordering.OrderPrefixKeys}; tie_break=document_identity; equal_key_buckets=complete" : "");
+
+    // Render written placement separately from scan eligibility; sorting is retained in O1.
+    private static string OrderingDetail(DocumentLogicalPlan logical) => string.Join(", ", logical.Query.OrderBy.Select(order =>
+        (order.Expression is OqlPathExpression path ? IndexPath(path, logical.Query.Alias) : order.Expression is OqlMetaExpression meta ? "META()." + meta.Member : "expression") +
+        (order.Descending ? " DESC" : " ASC") + (order.NullPlacement switch
+        { OqlNullPlacement.First => " NULLS FIRST", OqlNullPlacement.Last => " NULLS LAST", _ => "" })));
+
     private static string AccessName(DocumentAccessPath access) => access switch
     {
         DocumentIndexPath => "IndexSeek",
@@ -233,7 +260,8 @@ internal sealed partial class DocumentPlanner
     };
 
     private static string SelectDetail(DocumentLogicalPlan logical)
-        => $"filter={logical.Query.Predicate is not null}; grouped={logical.IsGrouped}; order_keys={logical.Query.OrderBy.Count}; limit={logical.Limit?.ToString(CultureInfo.InvariantCulture) ?? "none"}; offset={logical.Offset.ToString(CultureInfo.InvariantCulture)}";
+        => $"filter={logical.Query.Predicate is not null}; grouped={logical.IsGrouped}; order_keys={logical.Query.OrderBy.Count}; limit={logical.Limit?.ToString(CultureInfo.InvariantCulture) ?? "none"}; offset={logical.Offset.ToString(CultureInfo.InvariantCulture)}" +
+            (logical.Query.OrderBy.Count == 0 ? "" : "; ordering=" + OrderingDetail(logical) + "; sort=retained");
 
     private static string Value(object value) => value is string text
         ? "'" + text.Replace("'", "''", StringComparison.Ordinal) + "'"

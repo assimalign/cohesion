@@ -132,6 +132,7 @@ internal static class SqlTreeDump
             case SqlFunctionCallExpression function:
                 builder.Append("Call(").Append(Text(function.FunctionName)).Append(", ").Append(function.Quantifier).Append(", ").Append(function.HasWithinGroupOrdering).Append(", ");
                 AppendList(builder, function.Arguments);
+                if (function.Filter is not null) { builder.Append(", FILTER "); Append(builder, function.Filter); }
                 foreach (var order in function.OrderBy)
                 {
                     builder.Append(order.NullPlacement).Append(' ').Append(order.IsDescending ? ", DESC " : ", ASC ");

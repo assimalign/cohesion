@@ -50,7 +50,7 @@ internal static partial class DocumentPlanExecutor
         var query = plan.Logical.Query;
         var evaluator = new DocumentExpressionEvaluator(query.Alias, parameters, cancellationToken, writeVerb, operation.TransactionStart,
             query.Unnest.Count > 0 ? query.Alias ?? query.Collection : null, database.Engine.Functions, database.Name, operation: operation);
-        var candidates = await ReadCandidatesAsync(database, operation, plan.Collection, plan.Access, cancellationToken).ConfigureAwait(false);
+        var candidates = await ReadCandidatesAsync(database, operation, plan.Collection, plan.Access is DocumentOrderingPath ordering ? ordering.Input : plan.Access, cancellationToken).ConfigureAwait(false);
 
         using var sourceMemory = evaluator.Memory.Reserve();
         // Catalog identities and the ordinal sort's staging arrays remain live with
@@ -354,8 +354,9 @@ internal static partial class DocumentPlanExecutor
                 {
                     for (int i = 0; i < query.OrderBy.Count; i++)
                     {
-                        int comparison = DocumentExpressionEvaluator.Compare(left.OrderKeys[i], right.OrderKeys[i]);
-                        if (comparison != 0) { return query.OrderBy[i].Descending ? -comparison : comparison; }
+                        var order = query.OrderBy[i];
+                        int comparison = DocumentExpressionEvaluator.CompareOrdered(left.OrderKeys[i], right.OrderKeys[i], order);
+                        if (comparison != 0) { return comparison; }
                     }
                     return left.Ordinal.CompareTo(right.Ordinal);
                 });
@@ -449,7 +450,7 @@ internal static partial class DocumentPlanExecutor
         if (plan.IfNotExists && database.Catalog.GetIndexes(plan.Collection.Id, operation.Context.Snapshot).Any(index => index.Name == plan.IndexName))
         { return DocumentCommandResult.Success; }
         await database.Catalog.CreateIndexAsync(plan.Collection.Id, plan.IndexName, plan.Keys, plan.IsUnique,
-            false, operation.Context, cancellationToken).ConfigureAwait(false);
+            plan.IncludeMissing, operation.Context, cancellationToken).ConfigureAwait(false);
         return DocumentCommandResult.Success;
     }
 

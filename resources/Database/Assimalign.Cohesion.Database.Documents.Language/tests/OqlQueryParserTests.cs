@@ -46,6 +46,7 @@ public sealed class OqlQueryParserTests
     [InlineData("SELECT SUM(score), AVG(score), MIN(score), MAX(score), COUNT(score) FROM people")]
     [InlineData("SELECT country, COUNT(*) AS total FROM people GROUP BY country HAVING COUNT(*) > 1 ORDER BY total DESC")]
     [InlineData("SELECT region, age FROM people ORDER BY region ASC, age DESC")]
+    [InlineData("SELECT region, age FROM people ORDER BY region ASC NULLS LAST, age DESC NULLS FIRST")]
     [InlineData("/* outer /* nested */ comment */ SELECT name -- trailing comment\nFROM people;")]
     [InlineData("SELECT p.flatten, p.select, p.array FROM people p")]
     [InlineData("SELECT 'FLATTEN' AS \"DEFINE\" FROM people /* ELEMENT */")]

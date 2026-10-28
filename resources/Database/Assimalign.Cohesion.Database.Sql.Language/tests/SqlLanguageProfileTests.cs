@@ -42,6 +42,7 @@ public class SqlLanguageProfileTests
     [InlineData(SqlClauses.From, "SELECT * FROM t;")]
     [InlineData(SqlClauses.Join, "SELECT * FROM t JOIN u ON t.id = u.id;")]
     [InlineData(SqlClauses.Where, "SELECT * FROM t WHERE id = 1;")]
+    [InlineData(SqlClauses.Filter, "SELECT COUNT(*) FILTER (WHERE a > 0) FROM t;")]
     [InlineData(SqlClauses.GroupBy, "SELECT id FROM t GROUP BY id;")]
     [InlineData(SqlClauses.Having, "SELECT id FROM t GROUP BY id HAVING COUNT(*) > 0;")]
     [InlineData(SqlClauses.OrderBy, "SELECT * FROM t ORDER BY id;")]

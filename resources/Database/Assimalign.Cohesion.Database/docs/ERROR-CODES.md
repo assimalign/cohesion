@@ -121,7 +121,7 @@ structured-carrier messages remain unprefixed.
 | New (#1719, SQ-R1) | CS01060 | Binding/names — Recursive term has more than one self-reference (42P19) |
 | New (#1719, SQ-R1) | CS01061 | Binding/names — Aggregate at the query level containing a recursive reference (42P19) |
 | COHSQLE001 | CS02001 | Values/types |
-| COHSQLE002 | CS02002 | Values/types |
+| COHSQLE002 | CS02002 | Values/types — identity or standalone sequence range exhaustion (#1717) |
 | COHSQLE003 | CS02003 | Values/types |
 | COHSQLE010 | CS02010 | Values/types |
 | COHSQLE011 | CS02011 | Values/types |
@@ -161,6 +161,10 @@ structured-carrier messages remain unprefixed.
 | COHSQLE066 | CS03066 | Schema/constraints |
 | New (#1716) | CS03067 | Schema/constraints — TRUNCATE omits a required referencing table (0A000) |
 | New (#1716) | CS03068 | Schema/catalog — CTAS output names are missing, blank, duplicate or have the wrong width (42601) |
+| New (#1717) | CS03069 | Schema/catalog — invalid resolved sequence options (22023) |
+| New (#1717) | CS03070 | Schema/catalog — occupied sequence/table/view relation name (42P07) |
+| New (#1717) | CS03071 | Schema/catalog — sequence namespace is absent (3F000) |
+| New (#1717) | CS03072 | Schema/catalog — sequence definition exceeds the record limit (54000) |
 | COHSQLP001 | CS03101 | Schema/constraints |
 | COHSQLP002 | CS03102 | Schema/constraints |
 | COHSQLP003 | CS03103 | Schema/constraints |
@@ -186,6 +190,7 @@ structured-carrier messages remain unprefixed.
 | COHSQLE064 | CS04064 | Transactions/locking — serialization failure, including a concurrently changed MERGE target under Snapshot (#1715) |
 | New (w11 review) | CS04065 | Transactions/locking — hard deadlock (`40P01`) |
 | New (#1716) | CS04066 | Transactions/locking — TRUNCATE inside an explicit transaction (25001) |
+| New (#1717) | CS04067 | Transactions/locking — dropped or replaced sequence incarnation (40001) |
 | COHSQLE004 | CS05004 | Execution/budgets |
 | COHSQLE007 | CS05007 | Execution/budgets |
 | COHSQLE013 | CS05013 | Execution/budgets |
@@ -203,12 +208,18 @@ structured-carrier messages remain unprefixed.
 | New (#1525, SQ-J1) | CS05069 | Execution/budgets — direct RIGHT, FULL or parenthesized joined DML source would require a different target-outer execution tree |
 | New (#1525, SQ-J2) | CS05070 | Execution/capabilities — FULL JOIN lacks a safe mandatory hash equality or has an unproven ON evaluation |
 | New (#1715, SQ-M1) | CS05071 | Action planning — MERGE WHEN follows an unconditional clause of the same match kind |
+| New (#1720, SQ-H1) | CS05072 | Execution/placement — FILTER on a non-aggregate call (42809) |
+| New (#1720, SQ-H1) | CS05073 | Execution/placement — same-scope aggregate in FILTER (42803) |
 | COHSQLE041 | CS06041 | Storage/durability |
 | COHSQLE058 | CS06058 | Storage/durability |
 
 SQLSTATE meanings remain those in [the SQL dialect](../../Assimalign.Cohesion.Database.Sql.Language/docs/DIALECT.md); the Cohesion identities changed, not ISO/PostgreSQL SQLSTATE values.
 
 ## Documents migration
+
+OQL null placement (#1730) adds CD00013 for a malformed NULLS suffix and CD01032 for an
+invalid directly constructed placement. Existing CD05018 still bounds sorting; #1632 ordering
+proof probes fall back on exhaustion and add no execution failure or format change.
 
 OQL aggregate quantifiers and native aggregates (#1729, OQ-G1) add CD00011 for a scalar/star
 quantifier and CD01029 for an invalid directly constructed call quantifier. Existing CD02007
@@ -244,6 +255,7 @@ payload accepts rows plus a matching affected count without capability negotiati
 | OQL0010 | CD00010 | Language/syntax |
 | New (#1729, OQ-G1) | CD00011 | Language/syntax — ALL/DISTINCT on a scalar or star call |
 | New (#1729, OQ-G2) | CD00012 | Language/syntax — GROUP AS without preceding GROUP BY terms |
+| New (#1730) | CD00013 | Language/syntax — NULLS without FIRST or LAST |
 | COHDOC002 | CD01002 | Binding/names |
 | COHDOC003 | CD01003 | Binding/names |
 | COHDOC005 | CD01005 | Binding/names |
@@ -258,6 +270,7 @@ payload accepts rows plus a matching affected count without capability negotiati
 | New (#1729, OQ-G1) | CD01029 | Binding/names — invalid aggregate quantifier or target in a directly constructed call AST |
 | New (#1729, OQ-G2) | CD01030 | Binding/names — invalid grouping alias declaration, shape or collision with FROM/UNNEST |
 | New (#1729, OQ-G2) | CD01031 | Binding/names — GROUP AS referenced in an aggregate's row input |
+| New (#1730) | CD01032 | Binding/names — invalid null placement in a direct ordering AST |
 | COHDOC006 | CD02006 | Values/types |
 | COHDOC007 | CD02007 | Values/types |
 | COHDOC008 | CD02008 | Values/types |
@@ -311,14 +324,17 @@ transaction-state diagnostics; it allocates no new identity. These changes add n
 | GQL0009 | CG00009 | Language/syntax |
 | GQL0010 | CG00010 | Language/syntax |
 | New (#1734) | CG00011 | Language/syntax — SHORTEST selector requires a positive Int64 literal count |
+| New (#1736, GQ-C1 fixes) | CG00012 | Language/syntax — list slice omits both bounds; rejected during planning |
 | COHDBG002 | CG01002 | Binding/names |
 | COHDBG010 | CG01010 | Binding/names |
 | COHDBG011 | CG01011 | Binding/names |
 | COHDBG014 | CG01014 | Binding/names |
 | COHDBG015 | CG01015 | Binding/names |
 | New (#1734) | CG01016 | Binding/names — path search prefilter references a binding introduced by a peer path in the same MATCH, with or without an explicit selector |
+| New (#1736, GQ-C1) | CG01017 | Binding/names — missing/empty comprehension iterator declaration in a hand-built AST |
 | COHDBG009 | CG02009 | Values/types |
 | COHDBG013 | CG02013 | Values/types |
+| New (#1736, GQ-C1) | CG02014 | Values/types — invalid list-operation source or numeric slice-bound kind/range |
 | COHDBG003 | CG03003 | Schema/constraints |
 | New (#1735, GQ-M2) | CG03004 | Constraints — MERGE equality is null, non-finite or non-scalar |
 | New (#1735, GQ-M2) | CG03005 | Constraints — bound MERGE node is null, absent or incompatible with its node pattern |
@@ -334,6 +350,7 @@ transaction-state diagnostics; it allocates no new identity. These changes add n
 | COHDBG020 | CG05020 | Execution/budgets — retained statement memory, including selector history and output |
 | New (#1536) | CG05022 | Execution — selected shortest-path record is absent while reconstruction's operation remains active |
 | New (#1735, GQ-M1) | CG05023 | Execution — invalid bound MERGE pattern lock identity |
+| New (#1736, GQ-C1) | CG05024 | Execution — aggregate inside a list comprehension predicate or projection |
 | COHDBG006 | CG06006 | Storage/durability |
 | COHDBG012 | CG06012 | Storage/durability |
 | COHDBG017 | CG06017 | Storage/durability |
@@ -410,6 +427,7 @@ and invariant exceptions and lower child-root typed failures retain their docume
 | CK07004 | Session is closed | — |
 | CS06059 | Persisted SQL catalog metadata is malformed | XX001 |
 | CS06060 | SQL catalog metadata format/version is unsupported | 0A000 |
+| CS06061 | Standalone sequence catalog definition or reservation is malformed | XX001 |
 | CD04102 | Catalog snapshot conflict | — |
 | CD04103 | Expected document version differs | — |
 | CD04104 | No explicit document transaction is open for COMMIT or ROLLBACK (#1725) | — |

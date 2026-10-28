@@ -62,21 +62,29 @@ internal sealed partial class SqlPlanner
     {
         RuntimeHelpers.EnsureSufficientExecutionStack();
         var queries = new List<SqlSubqueryBinding>();
+        List<SqlFunctionCallExpression>? filteredCalls = null;
         foreach (var expression in sources)
         {
+            // Sources visits each parent before its children. Retain ancestry candidates
+            // only for FILTER, keeping ordinary subquery binding allocation-neutral.
+            if (expression is SqlFunctionCallExpression { Filter: not null } filtered)
+            {
+                (filteredCalls ??= new()).Add(filtered);
+            }
+            bool deferred = IsFilteredSource(filteredCalls, expression);
             switch (expression)
             {
                 case SqlSubqueryExpression scalar:
-                    BindSubquery(scalar, scalar.Select, SqlSubqueryKind.Scalar, false, queries, owner, dml, ref scope);
+                    BindSubquery(scalar, scalar.Select, SqlSubqueryKind.Scalar, false, queries, owner, dml, ref scope, deferred);
                     break;
                 case SqlExistsExpression exists:
-                    BindSubquery(exists, exists.Subquery, SqlSubqueryKind.Exists, exists.IsNegated, queries, owner, dml, ref scope);
+                    BindSubquery(exists, exists.Subquery, SqlSubqueryKind.Exists, exists.IsNegated, queries, owner, dml, ref scope, deferred);
                     break;
                 case SqlQuantifiedComparisonExpression quantified:
-                    BindSubquery(quantified, quantified.Subquery, SqlSubqueryKind.Set, false, queries, owner, dml, ref scope);
+                    BindSubquery(quantified, quantified.Subquery, SqlSubqueryKind.Set, false, queries, owner, dml, ref scope, deferred);
                     break;
                 case SqlInExpression { Subquery: not null } member:
-                    BindSubquery(member, member.Subquery, SqlSubqueryKind.Set, false, queries, owner, dml, ref scope);
+                    BindSubquery(member, member.Subquery, SqlSubqueryKind.Set, false, queries, owner, dml, ref scope, deferred);
                     break;
             }
         }
@@ -87,7 +95,7 @@ internal sealed partial class SqlPlanner
     // Keep child binding out of a closure: a stored-only query allocates no scope state.
     private void BindSubquery(SqlExpression source, SqlQueryBodyExpression query, SqlSubqueryKind kind, bool negated,
         List<SqlSubqueryBinding> queries, SqlSelectExpression? owner, SqlTableReference? dml,
-        ref SqlCorrelationScope? scope)
+        ref SqlCorrelationScope? scope, bool deferred)
     {
         if (_subqueryDepth >= 32)
         {
@@ -138,7 +146,17 @@ internal sealed partial class SqlPlanner
         _subqueryTypes[source] = kind == SqlSubqueryKind.Scalar ? type : DatabaseType.Boolean;
         _subquerySlots[source] = slot;
         queries.Add(new SqlSubqueryBinding(child, slot.Id, type, collation, kind, negated,
-            scope.Id, dependencies.Count > 0));
+            scope.Id, dependencies.Count > 0, deferred));
+    }
+
+    private static bool IsFilteredSource(List<SqlFunctionCallExpression>? calls, SqlExpression source)
+    {
+        if (calls is null) { return false; }
+        foreach (var call in calls)
+        {
+            if (ContainsNode(call, source)) { return true; }
+        }
+        return false;
     }
 
     /// <summary>

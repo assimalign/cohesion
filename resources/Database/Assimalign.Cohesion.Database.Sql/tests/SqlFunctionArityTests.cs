@@ -292,11 +292,20 @@ public sealed class SqlFunctionArityTests : IDisposable
 
         // Act
         var row = (await RowsAsync(session,
-            $"SELECT {string.Join(", ", aggregates.Select(name => name == "STRING_AGG" ? "STRING_AGG(CAST(age AS TEXT), ',' ORDER BY age)" : name == "LISTAGG" ? "LISTAGG(CAST(age AS TEXT), ',') WITHIN GROUP (ORDER BY age)" : $"{name}(age)" ))} FROM t;")).ShouldHaveSingleItem();
+            $"SELECT {string.Join(", ", aggregates.Select(name => name switch
+            {
+                "STRING_AGG" => "STRING_AGG(CAST(age AS TEXT), ',' ORDER BY age)",
+                "LISTAGG" => "LISTAGG(CAST(age AS TEXT), ',') WITHIN GROUP (ORDER BY age)",
+                "BOOL_AND" or "BOOL_OR" or "EVERY" => $"{name}(age > 0)",
+                "STDDEV" or "STDDEV_POP" or "STDDEV_SAMP" or "VARIANCE" or "VAR_POP" or "VAR_SAMP" => $"{name}(1)",
+                _ => $"{name}(age)",
+            }))} FROM t;")).ShouldHaveSingleItem();
 
         // Assert: AVG, COUNT, MAX, MIN, SUM over 36, -45 and 41.
-        aggregates.ShouldBe(["AVG", "COUNT", "LISTAGG", "MAX", "MIN", "STRING_AGG", "SUM"]);
-        row.ShouldBe(new object?[] { 32m / 3m, 3L, "-45,36,41", 41, -45, "-45,36,41", 32m });
+        aggregates.ShouldBe(["AVG", "BOOL_AND", "BOOL_OR", "COUNT", "EVERY", "LISTAGG", "MAX", "MIN",
+            "STDDEV", "STDDEV_POP", "STDDEV_SAMP", "STRING_AGG", "SUM", "VARIANCE", "VAR_POP", "VAR_SAMP"]);
+        row.ShouldBe(new object?[] { 32m / 3m, false, true, 3L, false, "-45,36,41", 41, -45,
+            0m, 0m, 0m, "-45,36,41", 32m, 0m, 0m, 0m });
     }
 
     /// <summary>

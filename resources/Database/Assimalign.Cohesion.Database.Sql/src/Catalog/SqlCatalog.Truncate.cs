@@ -30,7 +30,14 @@ public sealed partial class SqlCatalog
     // drift to compiled-schema and declared-script verification. Reopen has no cached plans.
     internal (ulong Definition, ulong Storage) BindingGeneration
     {
-        get { lock (_sync) { ThrowIfOffline(); return (_ddlGeneration, _storageBindingGeneration); } }
+        get
+        {
+            ThrowIfOffline();
+            // Both components only increase. A mixed observation cannot hide an
+            // intervening change at the planner's final comparison. Metadata reads
+            // still take _sync; generation-only checks need no reservation flush.
+            return (Volatile.Read(ref _ddlGeneration), Volatile.Read(ref _storageBindingGeneration));
+        }
     }
 
     // BEGIN holds this only across creation of its MVCC snapshot and catalog capture;
@@ -194,7 +201,7 @@ public sealed partial class SqlCatalog
             foreach (var slot in oldIndexes) { _storage.DeleteRow(transaction, slot.Location.PageId, slot.Location.SlotIndex); }
             var retired = expected.Select(table => (table.ObjectId, Location: _storage.InsertRow(transaction, table.ObjectId,
                 SqlReclamationRecord.Encode(table.ObjectId, table.Schema, table.Name)))).ToArray();
-            var counters = new List<(ulong Id, IdentityCounter Counter)>();
+            var counters = new List<(ulong Id, SqlAllocationCounter Counter)>();
             foreach (var table in expected)
             {
                 DeleteIdentityCounter(transaction, table.ObjectId);
@@ -224,7 +231,7 @@ public sealed partial class SqlCatalog
                     long reserved = checked((long)(remaining == 0 ? last : previous.Next + (Int128)(remaining - 1) * identity.Increment));
                     ulong id = mapping[table.ObjectId].ObjectId;
                     var record = new DatabaseKeyWriter().AppendInt32(identityCounterRecordKind).AppendInt64((long)id).AppendInt64(reserved).ToArray();
-                    counters.Add((id, new IdentityCounter { Next = previous.Next, Remaining = remaining,
+                    counters.Add((id, new SqlAllocationCounter { Next = previous.Next, Remaining = remaining,
                         Location = _storage.InsertRow(transaction, record) }));
                 }
             }
@@ -264,7 +271,7 @@ public sealed partial class SqlCatalog
             AppendOrderedTruncations(expected, replacements, marker);
             _registrations = merged;
             _registrationsLocation = registrationsLocation;
-            _storageBindingGeneration = bindingGeneration;
+            Volatile.Write(ref _storageBindingGeneration, bindingGeneration);
             return default;
         }
     }

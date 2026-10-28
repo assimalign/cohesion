@@ -24,8 +24,8 @@
   <data name="GqlQueryParserParseScalarVoid" xml:space="preserve"><value>Expected a named parameter after $ or @.</value></data>
   <data name="GqlQueryParserParseLiteralVoid" xml:space="preserve"><value>Integer literal is outside the signed 64-bit range.</value></data>
   <data name="GqlQueryParserParseLiteralVoid2" xml:space="preserve"><value>Floating-point literal is invalid or outside the finite double range.</value></data>
-  <data name="GqlQueryParserParseLiteralVoid3" xml:space="preserve"><value>List-valued properties are unsupported by graph storage.</value></data>
-  <data name="GqlQueryParserParseLiteralVoid4" xml:space="preserve"><value>Map-valued properties are unsupported by graph storage.</value></data>
+  <data name="ListPropertyUnsupported" xml:space="preserve"><value>List-valued properties are unsupported by graph storage.</value></data>
+  <data name="MapPropertyUnsupported" xml:space="preserve"><value>Map-valued properties are unsupported by graph storage.</value></data>
   <data name="GqlQueryParserParseLiteralVoid5" xml:space="preserve"><value>Expected a scalar literal.</value></data>
   <data name="GqlQueryParserParseFunctionVoid" xml:space="preserve"><value>Function {0} does not accept a set quantifier.</value></data>
   <data name="GqlQueryParserParseFunctionVoid2" xml:space="preserve"><value>Function {0} requires {1} to {2} arguments.</value></data>

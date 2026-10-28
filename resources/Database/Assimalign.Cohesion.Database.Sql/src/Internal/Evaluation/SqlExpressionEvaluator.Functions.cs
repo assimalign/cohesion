@@ -115,8 +115,9 @@ internal sealed partial class SqlExpressionEvaluator
     /// </summary>
     /// <param name="arguments">The call's arguments.</param>
     /// <param name="collation">The collation the arguments' values compare under.</param>
+    /// <param name="statisticsInput">Whether to normalize every numeric CASE/COALESCE boundary.</param>
     /// <returns>The bound arguments.</returns>
-    internal SqlBoundExpression[] BindArguments(IReadOnlyList<SqlExpression> arguments, out SqlBoundCollation collation)
+    internal SqlBoundExpression[] BindArguments(IReadOnlyList<SqlExpression> arguments, out SqlBoundCollation collation, bool statisticsInput = false)
     {
         if (arguments.Count == 1 && arguments[0] is SqlStarExpression star)
         {
@@ -125,14 +126,16 @@ internal sealed partial class SqlExpressionEvaluator
         }
         if (arguments.Count == 1)
         {
-            return [Bind(arguments[0], out collation)];
+            var value = Bind(arguments[0], out SqlCollationCandidate candidate, statisticsInput: statisticsInput);
+            collation = SqlBoundCollation.Of(candidate, default, _defaultCollation);
+            return [value];
         }
 
         var bound = new SqlBoundExpression[arguments.Count];
         var candidates = new SqlCollationCandidate[arguments.Count];
         for (int index = 0; index < bound.Length; index++)
         {
-            bound[index] = Bind(arguments[index], out candidates[index]);
+            bound[index] = Bind(arguments[index], out candidates[index], statisticsInput: statisticsInput);
         }
 
         collation = SqlBoundCollation.Of(SqlCollationCandidate.Fold(candidates), default, _defaultCollation);
@@ -402,7 +405,7 @@ internal sealed partial class SqlExpressionEvaluator
                 bool needed = SqlFunctionResolver.NeedsArgumentTypes(overloads, arguments);
                 if (needed)
                 {
-                    TypeArguments(arguments, types);
+                    TypeArguments(arguments, types, overloads);
                 }
 
                 var function = SqlFunctionResolver.Choose(call.FunctionName, overloads, arguments, needed ? types : default);
@@ -414,7 +417,7 @@ internal sealed partial class SqlExpressionEvaluator
                 {
                     if (!needed)
                     {
-                        TypeArguments(arguments, types);
+                        TypeArguments(arguments, types, overloads);
                     }
 
                     typed = (function, SqlFunctionResolver.ResultType(function, types));
@@ -443,17 +446,67 @@ internal sealed partial class SqlExpressionEvaluator
         }
 
         Span<DatabaseType> types = arguments.Count <= 16 ? stackalloc DatabaseType[arguments.Count] : new DatabaseType[arguments.Count];
-        TypeArguments(arguments, types);
+        TypeArguments(arguments, types, overloads);
         return SqlFunctionResolver.Choose(call.FunctionName, overloads, arguments, types);
     }
 
     /// <summary>Types a call's arguments, each once.</summary>
-    private void TypeArguments(IReadOnlyList<SqlExpression> arguments, Span<DatabaseType> types)
+    private void TypeArguments(IReadOnlyList<SqlExpression> arguments, Span<DatabaseType> types, SqlFunction[] overloads)
     {
         for (int index = 0; index < types.Length; index++)
         {
-            types[index] = StaticTypeOf(arguments[index]);
+            types[index] = overloads[0] is SqlStatisticsFunction ? StatisticsInputType(arguments[index]) : StaticTypeOf(arguments[index]);
         }
+    }
+
+    // Statistics have different exact/floating overloads. The ordinary evaluator keeps
+    // the first alternative's type for CASE/COALESCE; these calls need their numeric
+    // common type and a matching conversion before DISTINCT or the transition runs.
+    private DatabaseType StatisticsInputType(SqlExpression expression)
+    {
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+        if (expression is SqlCaseExpression conditional)
+        {
+            var type = conditional.ElseResult is null ? DatabaseType.Null : StatisticsInputType(conditional.ElseResult);
+            foreach (var clause in conditional.WhenClauses) { type = StatisticsAlternative(type, StatisticsInputType(clause.Result)); }
+            return type;
+        }
+        if (expression is SqlFunctionCallExpression call && SqlStandardLibrary.IsCoalesce(call.FunctionName))
+        {
+            var type = DatabaseType.Null;
+            foreach (var argument in call.Arguments) { type = StatisticsAlternative(type, StatisticsInputType(argument)); }
+            return type;
+        }
+        if (expression is SqlFunctionCallExpression nullIf && nullIf.FunctionName.Equals("NULLIF", StringComparison.OrdinalIgnoreCase)
+            && nullIf.Arguments.Count > 0)
+        {
+            return StatisticsInputType(nullIf.Arguments[0]);
+        }
+        return StaticTypeOf(expression);
+    }
+
+    private static DatabaseType StatisticsAlternative(DatabaseType first, DatabaseType next)
+    {
+        if (first == DatabaseType.Null) { return next; }
+        if (next == DatabaseType.Null || first == next) { return first; }
+        if (!SqlFunctionResolver.IsNumeric(first) || !SqlFunctionResolver.IsNumeric(next)) { return first; }
+        if (first == DatabaseType.Float64 || next == DatabaseType.Float64) { return DatabaseType.Float64; }
+        if (first == DatabaseType.Float32 || next == DatabaseType.Float32) { return DatabaseType.Float32; }
+        if (first == DatabaseType.Decimal || next == DatabaseType.Decimal) { return DatabaseType.Decimal; }
+        if (first == DatabaseType.Int64 || next == DatabaseType.Int64) { return DatabaseType.Int64; }
+        if (first == DatabaseType.Int32 || next == DatabaseType.Int32) { return DatabaseType.Int32; }
+        return first == DatabaseType.Int16 || next == DatabaseType.Int16 ? DatabaseType.Int16 : DatabaseType.Int8;
+    }
+
+    // Children have already bound and converted their own alternatives. PostgreSQL
+    // parse_expr.c:1742-1768,2244-2257 likewise converts each CASE/COALESCE boundary.
+    private SqlBoundExpression ConvertStatisticsAlternative(SqlExpression syntax, SqlBoundExpression value)
+    {
+        var type = StatisticsInputType(syntax);
+        if (!SqlFunctionResolver.IsNumeric(type)) { return value; }
+        var target = SqlType.ForStorage(new DatabaseTypeInfo(type));
+        return new SqlBoundCast(value, target.Name, target, _functions.Types.ResolveCasts(null, target),
+            _functions.Database, _defaultCollation, syntax.Location);
     }
 
     /// <summary>

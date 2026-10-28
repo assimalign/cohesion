@@ -35,6 +35,11 @@ internal static class GraphProjectionText
             GqlTruthTestExpression test => Describe(test.Operand) + (test.IsNegated ? " IS NOT " : " IS ") +
                 (test.TruthValue is null ? "UNKNOWN" : test.TruthValue.Value ? "TRUE" : "FALSE"),
             GqlListExpression list => "[" + string.Join(", ", list.Items.Select(Describe)) + "]",
+            GqlListComprehensionExpression comprehension => "[" + Name(comprehension.Variable) + " IN " + Describe(comprehension.List) +
+                (comprehension.Predicate is null ? "" : " WHERE " + Describe(comprehension.Predicate)) +
+                (comprehension.Projection is null ? "" : " | " + Describe(comprehension.Projection)) + "]",
+            GqlListSliceExpression slice => "(" + Describe(slice.Operand) + ")[" + (slice.From is null ? "" : Describe(slice.From)) +
+                ".." + (slice.To is null ? "" : Describe(slice.To)) + "]",
             GqlMapExpression map => "{" + string.Join(", ", map.Entries.Select(entry => Name(entry.Key) + ": " + Describe(entry.Value))) + "}",
             GqlCaseExpression conditional => "CASE " + (conditional.Operand is null ? "" : Describe(conditional.Operand) + " ") +
                 string.Join(" ", conditional.Alternatives.Select(branch => "WHEN " + (branch.Comparison.StartsWith("IS", StringComparison.Ordinal) ? branch.Comparison : (branch.Comparison == "=" ? "" : branch.Comparison + " ") + Describe(branch.When)) + " THEN " + Describe(branch.Then))) +
