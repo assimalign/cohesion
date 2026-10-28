@@ -27,7 +27,9 @@ queued Exclusive requests stall later dynamic statements. New names enter the ne
 A sequence-only binding wrapper carries usage metadata and becomes an EXPLAIN parent;
 the session unwraps it before costing/execution. Ordinary plans retain their original fields.
 The planner reuses its existing scopeless-cache slot for optional sequence metadata. Ordinary
-planning and execution therefore preserve the existing Release allocation guards. ALTER/RESTART/DROP take Exclusive
+planning and execution therefore preserve the existing Release allocation guards.
+Sequence-dependent ordering checks use static loops so sequence-free execution allocates no closure.
+ALTER/RESTART/DROP take Exclusive
 grants before a non-definition metadata lease, re-resolve by object identity and then publish.
 Unrelated CREATE INDEX leases remain compatible. CREATE guards check occupied relations before
 option validation under the publication monitor; DROP/ALTER IF EXISTS skip disappearance while

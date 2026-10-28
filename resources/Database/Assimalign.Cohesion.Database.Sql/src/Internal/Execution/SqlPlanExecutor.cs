@@ -312,7 +312,7 @@ internal sealed partial class SqlPlanExecutor
             return projected;
         }
         if (HasSequenceProjection(projections) &&
-            (outputSlots is null || !outputSlots.Values.Any(index => ContainsSequenceCall(projections[index].Value))))
+            !OrderingUsesSequence(projections, outputSlots?.Values))
         {
             // PostgreSQL planner.c:6703-6763 postpones volatile outputs independent of
             // sorting. Alias/ordinal keys need only their referenced, non-sequence outputs.
@@ -431,6 +431,15 @@ internal sealed partial class SqlPlanExecutor
     {
         if (projections is null || SqlSequenceExecution.Current is null) { return false; }
         foreach (var projection in projections) { if (ContainsSequenceCall(projection.Value)) { return true; } }
+        return false;
+    }
+
+    private static bool OrderingUsesSequence(IReadOnlyList<SqlProjection> projections, IEnumerable<int>? slots)
+    {
+        if (slots is not null)
+        {
+            foreach (int index in slots) { if (ContainsSequenceCall(projections[index].Value)) { return true; } }
+        }
         return false;
     }
 

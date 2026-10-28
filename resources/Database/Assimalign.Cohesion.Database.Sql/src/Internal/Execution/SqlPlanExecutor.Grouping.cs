@@ -93,7 +93,7 @@ internal sealed partial class SqlPlanExecutor
         var matches = new List<object?[]>();
         var sequenceOrdering = !plan.IsDistinct && HasSequenceProjection(plan.Projections)
             ? OrderingOutputSlots(plan.OrderBy, projectionStart) : null;
-        bool deferredSequence = sequenceOrdering is not null && !sequenceOrdering.Any(index => ContainsSequenceCall(plan.Projections[index].Value));
+        bool deferredSequence = sequenceOrdering is not null && !OrderingUsesSequence(plan.Projections, sequenceOrdering);
         bool correlatedOrdering = _subqueryValues is { HasCorrelatedQueries: true } && plan.OrderBy.Count > 0;
         var collected = new SqlRowCollector(plan.OrderBy, _subqueryValues,
             plan.IsDistinct ? null : plan.Limit, plan.IsDistinct ? null : plan.Offset, cancellationToken, statement.Metrics);
