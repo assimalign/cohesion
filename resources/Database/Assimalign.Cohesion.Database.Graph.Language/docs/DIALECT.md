@@ -38,6 +38,22 @@ statement's lifetime guard reports `CG09019`. These are ExecutionFailure respons
 leave the wire session ready. An aborted explicit transaction requires rollback before
 further statements. The engine's `GraphEngineFailureWireTests` supplies the fault corpus.
 
+## EXISTS and NOT EXISTS
+
+EXISTS { MATCH pattern [WHERE predicate] ... } and EXISTS { pattern [, pattern] [WHERE predicate] }
+return TRUE on the first inner row and FALSE on no rows. NOT EXISTS negates that Boolean.
+Explicit blocks permit the same successive MATCH and OPTIONAL MATCH clauses as an outer query.
+Outer variables, enclosing EXISTS locals and list iterators correlate; new inner names do not
+escape. A NULL outer entity in a pattern position matches nothing. Inner reads share the
+statement snapshot, own writes, cancellation and work/memory budgets. EXISTS is available in
+WHERE, CASE, projections, ORDER BY, comprehensions and list predicates.
+
+Full query bodies (RETURN, WITH, NEXT, UNION, CALL, ordering, paging and writes), parenthesized
+EXISTS, COUNT/COLLECT blocks and bare pattern predicates are CK00001. Empty/unbraced EXISTS
+uses CG00013; incompatible static/runtime pattern arguments use CG01019/CG02016. A malformed
+hand-built body or absent bound subplan uses CG05027. EXPLAIN includes SemiApply/AntiSemiApply,
+the inner plan and correlated names. These scalar results use existing InMemory/TCP framing.
+
 ## MATCH and OPTIONAL MATCH
 
 MATCH and OPTIONAL MATCH clauses execute in source order. Each WHERE belongs to its own

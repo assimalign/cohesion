@@ -746,6 +746,32 @@ rejected before it reaches the session and changes nothing. Each refusal is an `
 
 ## Planning, execution and bounds
 
+### Correlated pattern subplans (#1537, GQ-E1)
+
+GraphCorrelatedSubplan owns the planned inner MATCH stream and its lexical argument contract.
+GraphPlanExecutor.ExecuteCorrelatedAsync reuses the ordinary MATCH planner, endpoint/type
+adjacency and label/type anchors with the same GraphOperation, snapshot, update overlay,
+parameters and statement budget. It yields borrowed inner rows without a cardinality limit;
+GQ-C3 can drain this boundary to collect results. The EXISTS semi consumer requests one advance
+and disposes immediately; scalar NOT supplies anti evaluation. Nested scopes copy binding
+metadata at planning and retain the per-row argument values without modifying the outer row.
+Bound paths follow their supplied node/edge identities through the matcher; correlated node
+and relationship positions keep their outer identity. NULL pattern arguments short-circuit
+before optional null extension. New inner variables never enter the outer binding layout.
+
+The existing function-binding reference carries a lazy GraphCorrelatedBindings registry,
+avoiding new planner/plan/operation fields and allocations for statements without EXISTS.
+Scalar evaluation remains synchronous: completed inner ValueTasks are consumed directly;
+asynchronous storage reads join through a context-free Task at this internal seam. Every
+inner await uses ConfigureAwait(false); stream cleanup owns its cursor and memory leases on
+first match, exhaustion, cancellation and evaluation/budget failures. EXPLAIN emits each
+semi/anti apply with its correlated variables and ordinary inner MATCH operators.
+
+Deterministic counters verify first-match work and complete iterator cleanup, while draining
+consumers collect every inner row through the same boundary. Generated recommendations agree
+with an independent brute-force oracle; see the language design for grammar and the local
+Neo4j references followed. No public interface, disk or wire contract changes are required.
+
 ### Linear composition (#1145)
 
 The planner validates each source-ordered stage against its incoming scope. LET adds bindings; FOR/UNWIND retains a proven node or relationship element kind from COLLECT, homogeneous entity lists and compatible result branches, while unproven or mixed elements stay Value bindings; a RETURN/NEXT or WITH boundary retains only referenceable projected columns, including entity kinds, optionality, composite possibilities and Int64 COUNT metadata. Carried columns use binding names independently of displayed source text; duplicate carried names are CG01015 during planning, including EXPLAIN. MATCH anchors prefer carried entities. An INSERT introduces its label and relationship-type names for later stages without retaining negative token-cache entries. Unknown names empty only their MATCH stage.
@@ -1841,9 +1867,12 @@ to exercise that enforcement path; compiled provisioning is not included.
 | `CG01016` | A path search prefilter, with or without an explicit selector, references a variable introduced by a peer path in the same MATCH; located at the offending reference. Its own path bindings (including quantified singletons) and the scope entering MATCH are allowed |
 | `CG01017` | A hand-built list comprehension omits its iterator name |
 | `CG01018` | Reduce/list-predicate iterator declaration is missing/empty, or a reduce accumulator is missing/empty or equals its iterator |
+| `CG01019` | Binding/names — outer binding has a proven incompatible correlated pattern kind |
 | `CG00012` | List slice omits both bounds; refused during planning, including EXPLAIN |
+| `CG00013` | Language/syntax — EXISTS omits its nonempty braced pattern |
 | `CG02014` | Invalid list-operation source or slice bound kind/range; known non-integer bound types fail planning |
 | `CG02015` | Reduce/list-predicate source is neither a list nor NULL; known incompatible kinds fail planning |
+| `CG02016` | Values/types — runtime correlated argument has an incompatible entity kind |
 | `CG07016` | A composite result requires graph.composite-values; ExecutionFailure before ResultHeader, preserving the authenticated session |
 | `CG06017` | Unsupported graph record or tree-registration format, including formats 1–4: opening is refused before logical recovery scrub with the remedy to recreate the database. Graph.Storage retains the code in its StorageCorruptionException cause's Diagnostics; the engine retains it as an additional Error diagnostic beside CG06018 under DatabaseCorruptionException / CK06003. No upgrade path exists |
 | `CG06018` | Missing or unrecoverable files; preserve the complete file set for recovery and restore missing sidecars from backup |
@@ -1854,6 +1883,7 @@ to exercise that enforcement path; compiled provisioning is not included.
 | `CG05024` | Aggregate in a list comprehension predicate or projection |
 | `CG05025` | Malformed reduce/list-predicate body or quantifier AST, or an aggregate inside that body |
 | `CG05026` | Reduce shape/type analysis exceeds the fixed statement planning cap of 65,536 visited nodes or closure steps |
+| `CG05027` | Execution — malformed or missing correlated subplan or missing argument |
 | `CG08021` | Query limits are nonpositive or exceed the configured engine ceilings; invalid engine ceilings use the same code in the configuration exception message |
 | `CK06101` | `Database.Indexing`'s code, carried unchanged: opening a database whose property-index pages are in a B-tree page format this engine does not read (format 1, written before #1194) fails with "Database 'x' cannot be opened. CK06101: …", checked before recovery's scrub, so a cleanly closed database's files stay as they were (a crashed one has had only the storage layer's journal redo and undo, and keeps its journal) |
 | `CK06001` | `Database.Storage`'s code, carried unchanged: opening a database whose file set is in another storage format (#1251) fails with "Database 'x' cannot be opened. CK06001: …", the storage's `StorageFormatException` as its inner exception, refused before its journal is read, so the files stay as they were |

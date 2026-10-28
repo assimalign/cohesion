@@ -78,7 +78,7 @@ public sealed class GqlKeywordDispositionTests
         ["CONTAINS"] = Parses("MATCH (a) WHERE a.name CONTAINS 'A' RETURN a"),
         // ISO <is label expression> (#1139 flipped the #1101 pin); IS NULL and truth tests execute since #1140.
         ["IS"] = Parses("MATCH (n IS A) RETURN n"),
-        ["EXISTS"] = Rejects("MATCH (a) WHERE EXISTS { (a)-[]->(b) } RETURN a", "EXISTS"),
+        ["EXISTS"] = Parses("MATCH (a) WHERE EXISTS { (a)-[]->(b) } RETURN a"),
         ["LIKE"] = Rejects("MATCH (a) WHERE a.name LIKE 'A%' RETURN a", "LIKE"),
         ["BETWEEN"] = Rejects("MATCH (a) WHERE a.x BETWEEN 1 AND 2 RETURN a", "BETWEEN"),
         ["NONE"] = Parses("RETURN none(x IN [1,2] WHERE x < 0)"),

@@ -281,6 +281,19 @@ public sealed partial class GqlQueryParser : QueryParser
                 _tokens[i - 1].Type == TokenType.Colon && i - 1 != mapSeparatorPosition)) { continue; }
             if (i + 1 < _tokens.Count && _tokens[i + 1].Type == TokenType.Colon) { continue; }
             string value = token.Text.ToUpperInvariant();
+            // The expression parser owns the complete EXISTS grammar and its nested refusals.
+            // Skip the block here so inner MATCH selectors and names retain pattern context.
+            if (value == "EXISTS" && i + 1 < _tokens.Count && _tokens[i + 1].Type == TokenType.LeftBrace)
+            {
+                int depth = 0;
+                for (i++; i < _tokens.Count; i++)
+                {
+                    if (_tokens[i].Type == TokenType.LeftBrace) { depth++; }
+                    if (_tokens[i].Type == TokenType.RightBrace && --depth == 0) { break; }
+                    if (_tokens[i].Type == TokenType.Eof) { break; }
+                }
+                continue;
+            }
             if (value == "WHERE" && inPattern && patternDepth > 0)
             { inlinePredicateDepth = patternDepth; continue; }
             // MATCH owns selector validation, including malformed counts and nested prefixes.

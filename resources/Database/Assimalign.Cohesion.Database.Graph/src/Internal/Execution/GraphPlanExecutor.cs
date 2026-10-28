@@ -217,11 +217,11 @@ internal static partial class GraphPlanExecutor
     private sealed record DeferredProperty(GqlExpression Expression, object? Value, bool Exists, DeferredProperty? Previous);
 
     private static DeferredProperty? DeferProperties(IReadOnlyDictionary<string, GqlExpression> expected,
-        IReadOnlyDictionary<string, object?> actual, IReadOnlyDictionary<string, object?> bindings, DeferredProperty? deferred)
+        IReadOnlyDictionary<string, object?> actual, IReadOnlyDictionary<string, object?> bindings, DeferredProperty? deferred, GraphCorrelatedBindings? correlated)
     {
         foreach (var property in expected)
         {
-            if (!GraphValueExpressions.ReferencesUnbound(property.Value, bindings)) { continue; }
+            if (!GraphValueExpressions.ReferencesUnbound(property.Value, bindings, correlated)) { continue; }
             bool exists = actual.TryGetValue(property.Key, out var value);
             deferred = new DeferredProperty(property.Value, value, exists, deferred);
         }
@@ -271,7 +271,7 @@ internal static partial class GraphPlanExecutor
         return true;
     }
     private static bool PropertiesMatch(IReadOnlyDictionary<string, GqlExpression> expected, IReadOnlyDictionary<string, object?> actual, IReadOnlyDictionary<string, object?> bindings, GraphEvaluationContext context, IReadOnlyDictionary<string, object?>? parameters, bool deferUnbound = false)
-        => expected.All(item => deferUnbound && GraphValueExpressions.ReferencesUnbound(item.Value, bindings) ||
+        => expected.All(item => deferUnbound && GraphValueExpressions.ReferencesUnbound(item.Value, bindings, context.Operation?.FunctionBindings as GraphCorrelatedBindings) ||
             actual.TryGetValue(item.Key, out var value) && GraphExpressionEvaluator.Equal(GraphExpressionEvaluator.PropertyScalar(item.Value, bindings, context, parameters), value));
 
     private static async ValueTask<long> CreateAsync(GraphDatabase database, GraphOperation operation, GqlPathPattern path,

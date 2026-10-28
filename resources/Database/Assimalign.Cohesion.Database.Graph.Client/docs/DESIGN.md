@@ -40,6 +40,13 @@ sequenceDiagram
     GraphConnection-->>App: GraphPath enumeration
 ```
 
+## Correlated existence predicates (#1537)
+
+EXISTS/NOT EXISTS return ordinary Boolean scalar cells through the existing Execute exchange.
+InMemory/TCP conformance verifies correlated parameters, anti filtering, iterator and NULL
+bindings, EXPLAIN, coded refusals and continued reuse of the authenticated session. The client
+requires no new capability, result kind, protocol version or engine dependency.
+
 ## Scalar completion
 
 Reduce and ALL/ANY/NONE/SINGLE (#1736, GQ-C2) use the existing Execute exchange. InMemory/TCP

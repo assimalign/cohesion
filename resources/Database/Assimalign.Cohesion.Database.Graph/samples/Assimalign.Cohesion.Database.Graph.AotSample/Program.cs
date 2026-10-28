@@ -58,6 +58,10 @@ await Check("LET x=TRUE MATCH (n:N {k:1}) RETURN x AS old ORDER BY [x IN [n] WHE
 await Check("LET x=[TRUE] MATCH (n:N {k:1}) RETURN x[0] AS old ORDER BY all(x IN [n] WHERE old)", [[1L]]);
 await Check("MATCH (a:N {k:1})-[rs:T]->{2}(b) RETURN size([r IN rs | type(r)]), [n IN [a,b] | n.k][1]", [[2L,3L]]);
 await Check("MATCH (a:N)-[:T]->(b:N) RETURN a.k,b.k ORDER BY a.k", [[1L, 2L], [2L, 3L]]);
+await Check("MATCH (a:N) RETURN a.k,EXISTS { MATCH (a)-[:T]->(b) } ORDER BY a.k", [[1L,1L],[2L,1L],[3L,0L]]);
+await Check("MATCH (a:N) WHERE NOT EXISTS { (a)-[:T]->() } RETURN a.k", [[3L]]);
+await Check("MATCH (a:N) WHERE any(x IN [a] WHERE EXISTS { (x)->(b) WHERE EXISTS { (b)->() } }) RETURN a.k", [[1L]]);
+await Check("OPTIONAL MATCH (a:AbsentExists) RETURN EXISTS { (a)->() }, NOT EXISTS { (a)->() }", [[0L,1L]]);
 {
     var paths = (GraphPathsQueryResult)await session.ExecuteAsync(GraphPathsQueryRequest.FromGql(
         "MATCH p=(a:N {k:1})-[:T]->+(b:N) RETURN p LIMIT 1"), CancellationToken.None);

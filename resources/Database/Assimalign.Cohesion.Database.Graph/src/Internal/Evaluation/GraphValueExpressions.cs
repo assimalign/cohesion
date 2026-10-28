@@ -16,6 +16,13 @@ internal static partial class GraphValueExpressions
         while (pending.TryPop(out var expression))
         {
             token.ThrowIfCancellationRequested();
+            if (expression is GqlExistsExpression exists)
+            {
+                RuntimeHelpers.EnsureSufficientExecutionStack();
+                foreach (var input in ExistsInputs(exists))
+                { if (ReferencesAny(input, names, token)) { return true; } }
+                continue;
+            }
             if (expression is GqlReduceExpression reduce)
             {
                 RuntimeHelpers.EnsureSufficientExecutionStack();
@@ -59,7 +66,7 @@ internal static partial class GraphValueExpressions
         return false;
     }
 
-    internal static bool ReferencesUnbound(GqlExpression root, IReadOnlyDictionary<string, object?> bindings)
+    internal static bool ReferencesUnbound(GqlExpression root, IReadOnlyDictionary<string, object?> bindings, GraphCorrelatedBindings? correlated = null)
     {
         // The common inline literal/parameter/property cases need no traversal allocation.
         switch (root)
@@ -73,28 +80,35 @@ internal static partial class GraphValueExpressions
         pending.Push(root);
         while (pending.TryPop(out var expression))
         {
+            if (expression is GqlExistsExpression exists)
+            {
+                if (correlated is null || !correlated.Subplans.TryGetValue(exists, out var subplan)) { return true; }
+                foreach (string correlatedName in subplan.CorrelatedVariables)
+                { if (!bindings.ContainsKey(correlatedName)) { return true; } }
+                continue;
+            }
             if (expression is GqlReduceExpression reduce)
             {
                 RuntimeHelpers.EnsureSufficientExecutionStack();
-                if (ReferencesUnbound(reduce.List, bindings) || ReferencesUnbound(reduce.Initial, bindings)) { return true; }
+                if (ReferencesUnbound(reduce.List, bindings, correlated) || ReferencesUnbound(reduce.Initial, bindings, correlated)) { return true; }
                 var inner = new GraphIteratorBinding(new GraphIteratorBinding(bindings, reduce.Accumulator), reduce.Variable);
-                if (ReferencesUnbound(reduce.Body, inner)) { return true; }
+                if (ReferencesUnbound(reduce.Body, inner, correlated)) { return true; }
                 continue;
             }
             if (expression is GqlListPredicateExpression predicate)
             {
                 RuntimeHelpers.EnsureSufficientExecutionStack();
-                if (ReferencesUnbound(predicate.List, bindings) ||
-                    ReferencesUnbound(predicate.Predicate, new GraphIteratorBinding(bindings, predicate.Variable))) { return true; }
+                if (ReferencesUnbound(predicate.List, bindings, correlated) ||
+                    ReferencesUnbound(predicate.Predicate, new GraphIteratorBinding(bindings, predicate.Variable), correlated)) { return true; }
                 continue;
             }
             if (expression is GqlListComprehensionExpression comprehension)
             {
                 RuntimeHelpers.EnsureSufficientExecutionStack();
-                if (ReferencesUnbound(comprehension.List, bindings)) { return true; }
+                if (ReferencesUnbound(comprehension.List, bindings, correlated)) { return true; }
                 var inner = new GraphIteratorBinding(bindings, comprehension.Variable);
-                if (comprehension.Predicate is not null && ReferencesUnbound(comprehension.Predicate, inner) ||
-                    comprehension.Projection is not null && ReferencesUnbound(comprehension.Projection, inner)) { return true; }
+                if (comprehension.Predicate is not null && ReferencesUnbound(comprehension.Predicate, inner, correlated) ||
+                    comprehension.Projection is not null && ReferencesUnbound(comprehension.Projection, inner, correlated)) { return true; }
                 continue;
             }
             string? name = expression switch
