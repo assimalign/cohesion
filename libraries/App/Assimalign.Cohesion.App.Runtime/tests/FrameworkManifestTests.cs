@@ -56,7 +56,6 @@ public sealed class FrameworkManifestTests
             "Assimalign.Cohesion.FileSystem",
             "Assimalign.Cohesion.FileSystem.Physical",
             "Assimalign.Cohesion.Hosting",
-            "Assimalign.Cohesion.Hosting.Health",
             "Assimalign.Cohesion.Hosting.Resources",
             "Assimalign.Cohesion.Logging",
             "Assimalign.Cohesion.Logging.Console",
@@ -72,7 +71,7 @@ public sealed class FrameworkManifestTests
             .ToArray();
 
         // Assert
-        roots.Length.ShouldBe(16);
+        roots.Length.ShouldBe(15);
         declaredAssemblies.ShouldBe([AppFramework]);
         actualClosure.ShouldBe(expectedClosure);
     }

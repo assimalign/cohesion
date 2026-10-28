@@ -8,8 +8,9 @@ namespace Assimalign.Cohesion.Web.Compression.Internal;
 
 /// <summary>
 /// Precompiles the configured eligible media types (<see cref="ResponseCompressionOptions.MimeTypes"/>)
-/// into a fast request-time match over a response's <c>Content-Type</c>. Built once when
-/// <c>UseResponseCompression</c> is called; the per-response test is allocation-free.
+/// into a fast request-time match over a response's <c>Content-Type</c>. Built once, when
+/// <see cref="ResponseCompressionBuilder.Build"/> creates the middleware; the per-response test is
+/// allocation-free.
 /// </summary>
 /// <remarks>
 /// A configured entry may be an exact media type (<c>application/json</c>), a subtype wildcard

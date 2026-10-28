@@ -35,12 +35,13 @@ public class RateLimitingRouteConventionTests
 
         await using WebApplicationTestFactory factory = new();
         factory.Builder.Services.AddRouting();
+        factory.Builder.Services.AddRateLimiting(rateLimiting => rateLimiting.Options.AddPolicy("expensive", SinglePermitPerPath()));
 
         IRouterBuilder routes = factory.Application.UseRouting();
         routes.Map(CohesionHttpMethod.Get, "/expensive", Ok()).RequireRateLimiting("expensive");
         routes.Map(CohesionHttpMethod.Get, "/cheap", Ok());
 
-        factory.Application.UseRateLimiting(options => options.AddPolicy("expensive", SinglePermitPerPath()));
+        factory.Application.UseRateLimiting();
 
         using HttpClient client = factory.CreateClient();
 

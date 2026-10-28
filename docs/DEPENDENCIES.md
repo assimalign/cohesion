@@ -29,12 +29,12 @@ not an edge.
 
 | | Count |
 | --- | --- |
-| Projects indexed | 664 |
-| Shipped library/resource projects | 238 |
+| Projects indexed | 662 |
+| Shipped library/resource projects | 237 |
 | Library areas | 21 |
 | Resource areas | 18 |
-| Declared project references | 718 |
-| Declared shared-source links | 49 |
+| Declared project references | 715 |
+| Declared shared-source links | 64 |
 
 ## Ambiguous project names
 
@@ -374,22 +374,20 @@ flowchart LR
 
 ### `libraries/Hosting`
 
-3 shipped projects.
+2 shipped projects.
 
 Intra-area references:
 
 ```mermaid
 flowchart LR
     N0["Hosting"]
-    N1["Hosting.Health"]
-    N2["Hosting.Resources"]
-    N2 --> N0
+    N1["Hosting.Resources"]
+    N1 --> N0
 ```
 
 | Project | References | Private references | Shared source | Packages |
 | --- | --- | --- | --- | --- |
 | `Assimalign.Cohesion.Hosting` | `Assimalign.Cohesion.Core` | — | — | — |
-| `Assimalign.Cohesion.Hosting.Health` | `Assimalign.Cohesion.Core` | — | — | — |
 | `Assimalign.Cohesion.Hosting.Resources` | `Assimalign.Cohesion.Core`<br>`Assimalign.Cohesion.Hosting` | — | — | — |
 
 ### `libraries/Http`
@@ -1011,34 +1009,34 @@ _More than twelve projects: the table below is the area's graph (see the node ce
 | `Assimalign.Cohesion.Web.Authentication.Certificate` | `Assimalign.Cohesion.Http.Tls`<br>`Assimalign.Cohesion.Web.Authentication`<br>`Assimalign.Cohesion.Web.Server` | — | — | — |
 | `Assimalign.Cohesion.Web.Authentication.Cookie` | `Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Http.Cookies`<br>`Assimalign.Cohesion.Http.Forwarded`<br>`Assimalign.Cohesion.Security.DataProtection`<br>`Assimalign.Cohesion.Web.Authentication`<br>`Assimalign.Cohesion.Web.Routing`<br>`Assimalign.Cohesion.Web.Server` | — | — | — |
 | `Assimalign.Cohesion.Web.Authorization` | `Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.Authentication`<br>`Assimalign.Cohesion.Web.Routing`<br>`Assimalign.Cohesion.Web.Server` | — | `Assimalign.Cohesion.Core/ComponentIntegration` | — |
-| `Assimalign.Cohesion.Web.Caching` | `Assimalign.Cohesion.Caching`<br>`Assimalign.Cohesion.Caching.InMemory`<br>`Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Http.Forwarded`<br>`Assimalign.Cohesion.Http.Streaming`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.Routing`<br>`Assimalign.Cohesion.Web.Server` | — | — | — |
-| `Assimalign.Cohesion.Web.Compression` | `Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Http.Forwarded`<br>`Assimalign.Cohesion.Http.Streaming`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.Server` | — | — | — |
-| `Assimalign.Cohesion.Web.CookiePolicy` | `Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Http.Cookies`<br>`Assimalign.Cohesion.Http.Forwarded`<br>`Assimalign.Cohesion.Web` | — | — | — |
+| `Assimalign.Cohesion.Web.Caching` | `Assimalign.Cohesion.Caching`<br>`Assimalign.Cohesion.Caching.InMemory`<br>`Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Http.Forwarded`<br>`Assimalign.Cohesion.Http.Streaming`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.Routing`<br>`Assimalign.Cohesion.Web.Server` | — | `Assimalign.Cohesion.Core/ComponentIntegration` | — |
+| `Assimalign.Cohesion.Web.Compression` | `Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Http.Forwarded`<br>`Assimalign.Cohesion.Http.Streaming`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.Server` | — | `Assimalign.Cohesion.Core/ComponentIntegration` | — |
+| `Assimalign.Cohesion.Web.CookiePolicy` | `Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Http.Cookies`<br>`Assimalign.Cohesion.Http.Forwarded`<br>`Assimalign.Cohesion.Web` | — | `Assimalign.Cohesion.Core/ComponentIntegration` | — |
 | `Assimalign.Cohesion.Web.Cors` | `Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.Routing`<br>`Assimalign.Cohesion.Web.Server` | — | `Assimalign.Cohesion.Core/ComponentIntegration` | — |
-| `Assimalign.Cohesion.Web.Diagnostics` | `Assimalign.Cohesion.Http.Forwarded`<br>`Assimalign.Cohesion.Http.Streaming`<br>`Assimalign.Cohesion.Logging`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.Routing`<br>`Assimalign.Cohesion.Web.Server` | — | — | — |
+| `Assimalign.Cohesion.Web.Diagnostics` | `Assimalign.Cohesion.Http.Forwarded`<br>`Assimalign.Cohesion.Http.Streaming`<br>`Assimalign.Cohesion.Logging`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.Routing`<br>`Assimalign.Cohesion.Web.Server` | — | `Assimalign.Cohesion.Core/ComponentIntegration` | — |
 | `Assimalign.Cohesion.Web.ErrorHandling` | `Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Http.Streaming`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.ProblemDetails`<br>`Assimalign.Cohesion.Web.Server` | — | `Assimalign.Cohesion.Core/ComponentIntegration` | — |
 | `Assimalign.Cohesion.Web.Forms` | `Assimalign.Cohesion.Http.Forms`<br>`Assimalign.Cohesion.Http.Streaming`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.ProblemDetails`<br>`Assimalign.Cohesion.Web.Server` | — | — | — |
-| `Assimalign.Cohesion.Web.ForwardedHeaders` | `Assimalign.Cohesion.Http.Forwarded`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.Server` | — | — | — |
+| `Assimalign.Cohesion.Web.ForwardedHeaders` | `Assimalign.Cohesion.Http.Forwarded`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.Server` | — | `Assimalign.Cohesion.Core/ComponentIntegration` | — |
 | `Assimalign.Cohesion.Web.Health` | `Assimalign.Cohesion.Web` | — | — | — |
-| `Assimalign.Cohesion.Web.HostFiltering` | `Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Http.Forwarded`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.Server` | — | — | — |
-| `Assimalign.Cohesion.Web.Hosting` | `Assimalign.Cohesion.Configuration`<br>`Assimalign.Cohesion.Configuration.CommandLine`<br>`Assimalign.Cohesion.Configuration.EnvironmentVariables`<br>`Assimalign.Cohesion.Configuration.Json`<br>`Assimalign.Cohesion.Connections`<br>`Assimalign.Cohesion.Connections.Quic`<br>`Assimalign.Cohesion.Connections.Security`<br>`Assimalign.Cohesion.Connections.Tcp`<br>`Assimalign.Cohesion.DependencyInjection`<br>`Assimalign.Cohesion.FileSystem`<br>`Assimalign.Cohesion.FileSystem.Physical`<br>`Assimalign.Cohesion.Hosting`<br>`Assimalign.Cohesion.Hosting.Health`<br>`Assimalign.Cohesion.Http.Connections`<br>`Assimalign.Cohesion.Http.ExtendedConnect`<br>`Assimalign.Cohesion.Http.ProtocolUpgrade`<br>`Assimalign.Cohesion.Http.RequestLimits`<br>`Assimalign.Cohesion.Logging`<br>`Assimalign.Cohesion.Logging.EventSource`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.Health`<br>`Assimalign.Cohesion.Web.Routing`<br>`Assimalign.Cohesion.Web.Server` | — | — | — |
+| `Assimalign.Cohesion.Web.HostFiltering` | `Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Http.Forwarded`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.Server` | — | `Assimalign.Cohesion.Core/ComponentIntegration` | — |
+| `Assimalign.Cohesion.Web.Hosting` | `Assimalign.Cohesion.Configuration`<br>`Assimalign.Cohesion.Configuration.CommandLine`<br>`Assimalign.Cohesion.Configuration.EnvironmentVariables`<br>`Assimalign.Cohesion.Configuration.Json`<br>`Assimalign.Cohesion.Connections`<br>`Assimalign.Cohesion.Connections.Quic`<br>`Assimalign.Cohesion.Connections.Security`<br>`Assimalign.Cohesion.Connections.Tcp`<br>`Assimalign.Cohesion.DependencyInjection`<br>`Assimalign.Cohesion.FileSystem`<br>`Assimalign.Cohesion.FileSystem.Physical`<br>`Assimalign.Cohesion.Hosting`<br>`Assimalign.Cohesion.Http.Connections`<br>`Assimalign.Cohesion.Http.ExtendedConnect`<br>`Assimalign.Cohesion.Http.ProtocolUpgrade`<br>`Assimalign.Cohesion.Http.RequestLimits`<br>`Assimalign.Cohesion.Logging`<br>`Assimalign.Cohesion.Logging.EventSource`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.Routing`<br>`Assimalign.Cohesion.Web.Server` | — | — | — |
 | `Assimalign.Cohesion.Web.Hosting.Resources` | `Assimalign.Cohesion.Hosting`<br>`Assimalign.Cohesion.Hosting.Resources`<br>`Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.Cors`<br>`Assimalign.Cohesion.Web.Hosting`<br>`Assimalign.Cohesion.Web.Server` | — | — | — |
-| `Assimalign.Cohesion.Web.HttpsPolicy` | `Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Http.Forwarded`<br>`Assimalign.Cohesion.Web` | — | — | — |
+| `Assimalign.Cohesion.Web.HttpsPolicy` | `Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Http.Forwarded`<br>`Assimalign.Cohesion.Web` | — | `Assimalign.Cohesion.Core/ComponentIntegration` | — |
 | `Assimalign.Cohesion.Web.OpenApi` | `Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Http.Forms`<br>`Assimalign.Cohesion.OpenApi`<br>`Assimalign.Cohesion.OpenApi.Attributes`<br>`Assimalign.Cohesion.OpenApi.Integration`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.Api`<br>`Assimalign.Cohesion.Web.Authentication`<br>`Assimalign.Cohesion.Web.Authorization`<br>`Assimalign.Cohesion.Web.ProblemDetails`<br>`Assimalign.Cohesion.Web.Routing`<br>`Assimalign.Cohesion.Web.Serialization` | — | `Assimalign.Cohesion.Core/ComponentIntegration` | — |
 | `Assimalign.Cohesion.Web.ProblemDetails` | `Assimalign.Cohesion.Http` | — | — | — |
-| `Assimalign.Cohesion.Web.Query` | `Assimalign.Cohesion.Web` | — | — | — |
-| `Assimalign.Cohesion.Web.RateLimiting` | `Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Http.Forwarded`<br>`Assimalign.Cohesion.Http.Streaming`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.Routing`<br>`Assimalign.Cohesion.Web.Server` | — | — | `System.Threading.RateLimiting` |
-| `Assimalign.Cohesion.Web.RequestTimeouts` | `Assimalign.Cohesion.Http.Streaming`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.ProblemDetails`<br>`Assimalign.Cohesion.Web.Routing`<br>`Assimalign.Cohesion.Web.Server` | — | — | — |
-| `Assimalign.Cohesion.Web.Rewrite` | `Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Http.Forwarded`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.Routing` | — | — | — |
+| `Assimalign.Cohesion.Web.Query` | `Assimalign.Cohesion.Web` | — | `Assimalign.Cohesion.Core/ComponentIntegration` | — |
+| `Assimalign.Cohesion.Web.RateLimiting` | `Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Http.Forwarded`<br>`Assimalign.Cohesion.Http.Streaming`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.Routing`<br>`Assimalign.Cohesion.Web.Server` | — | `Assimalign.Cohesion.Core/ComponentIntegration` | `System.Threading.RateLimiting` |
+| `Assimalign.Cohesion.Web.RequestTimeouts` | `Assimalign.Cohesion.Http.Streaming`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.ProblemDetails`<br>`Assimalign.Cohesion.Web.Routing`<br>`Assimalign.Cohesion.Web.Server` | — | `Assimalign.Cohesion.Core/ComponentIntegration` | — |
+| `Assimalign.Cohesion.Web.Rewrite` | `Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Http.Forwarded`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.Routing` | — | `Assimalign.Cohesion.Core/ComponentIntegration` | — |
 | `Assimalign.Cohesion.Web.Routing` | `Assimalign.Cohesion.Http.Forwarded`<br>`Assimalign.Cohesion.Web` | — | `Assimalign.Cohesion.Core/ComponentIntegration` | — |
-| `Assimalign.Cohesion.Web.SecurityHeaders` | `Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.Routing`<br>`Assimalign.Cohesion.Web.Server` | — | — | — |
+| `Assimalign.Cohesion.Web.SecurityHeaders` | `Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.Routing`<br>`Assimalign.Cohesion.Web.Server` | — | `Assimalign.Cohesion.Core/ComponentIntegration` | — |
 | `Assimalign.Cohesion.Web.Serialization` | `Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Web` | — | `Assimalign.Cohesion.Core/ComponentIntegration` | — |
 | `Assimalign.Cohesion.Web.Server` | `Assimalign.Cohesion.Connections`<br>`Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Http.Connections`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.Routing` | — | — | — |
-| `Assimalign.Cohesion.Web.Sessions` | `Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Http.Cookies`<br>`Assimalign.Cohesion.Http.Forwarded`<br>`Assimalign.Cohesion.Http.Sessions`<br>`Assimalign.Cohesion.Http.Streaming`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.Server` | — | — | — |
-| `Assimalign.Cohesion.Web.StaticFiles` | `Assimalign.Cohesion.FileSystem`<br>`Assimalign.Cohesion.FileSystem.Physical`<br>`Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.Routing`<br>`Assimalign.Cohesion.Web.Server` | — | — | — |
+| `Assimalign.Cohesion.Web.Sessions` | `Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Http.Cookies`<br>`Assimalign.Cohesion.Http.Forwarded`<br>`Assimalign.Cohesion.Http.Sessions`<br>`Assimalign.Cohesion.Http.Streaming`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.Server` | — | `Assimalign.Cohesion.Core/ComponentIntegration` | — |
+| `Assimalign.Cohesion.Web.StaticFiles` | `Assimalign.Cohesion.FileSystem`<br>`Assimalign.Cohesion.FileSystem.Physical`<br>`Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.Routing`<br>`Assimalign.Cohesion.Web.Server` | — | `Assimalign.Cohesion.Core/ComponentIntegration` | — |
 | `Assimalign.Cohesion.Web.Testing` | `Assimalign.Cohesion.Connections`<br>`Assimalign.Cohesion.Connections.InMemory`<br>`Assimalign.Cohesion.DependencyInjection`<br>`Assimalign.Cohesion.Hosting`<br>`Assimalign.Cohesion.Http.Connections`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.Hosting` | — | — | — |
 | `Assimalign.Cohesion.Web.Validation` | `Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.ObjectValidation`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.ProblemDetails`<br>`Assimalign.Cohesion.Web.Routing`<br>`Assimalign.Cohesion.Web.Serialization` | — | `Assimalign.Cohesion.Core/ComponentIntegration` | — |
-| `Assimalign.Cohesion.Web.WebSockets` | `Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Http.Forwarded`<br>`Assimalign.Cohesion.Http.WebSockets`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.Routing`<br>`Assimalign.Cohesion.Web.Server` | — | — | — |
+| `Assimalign.Cohesion.Web.WebSockets` | `Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Http.Forwarded`<br>`Assimalign.Cohesion.Http.WebSockets`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.Routing`<br>`Assimalign.Cohesion.Web.Server` | — | `Assimalign.Cohesion.Core/ComponentIntegration` | — |
 
 ## Most-referenced assemblies
 
@@ -1049,8 +1047,8 @@ warning, not a problem in itself: these are the assemblies whose contracts cost 
 | --- | --- | --- |
 | `Assimalign.Cohesion.Http` | 103 | Assimalign.Cohesion.ApiManager.Hosting, Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane, Assimalign.Cohesion.ConfigurationStore.Hosting.Tests, Assimalign.Cohesion.Connections.NamedPipes.Tests, … |
 | `Assimalign.Cohesion.Hosting.Resources` | 84 | Assimalign.Cohesion.ApiManager.ApplicationModel, Assimalign.Cohesion.ApiManager.ApplicationModel.Tests, Assimalign.Cohesion.ApiManager.Hosting, Assimalign.Cohesion.ApiManager.Hosting.Tests, … |
+| `Assimalign.Cohesion.Core` | 81 | Assimalign.Cohesion.Amqp.Connections, Assimalign.Cohesion.ApiManager, Assimalign.Cohesion.ApplicationModel, Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane, … |
 | `Assimalign.Cohesion.Web` | 76 | Assimalign.Cohesion.ApiManager.Hosting, Assimalign.Cohesion.ConfigurationStore.Hosting.Tests, Assimalign.Cohesion.Database, Assimalign.Cohesion.Database.Hosting.Tests, … |
-| `Assimalign.Cohesion.Core` | 67 | Assimalign.Cohesion.Amqp.Connections, Assimalign.Cohesion.ApiManager, Assimalign.Cohesion.ApplicationModel, Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane, … |
 | `Assimalign.Cohesion.Connections` | 44 | Assimalign.Cohesion.Amqp.Connections, Assimalign.Cohesion.Amqp.Connections.Tests, Assimalign.Cohesion.Connections.InMemory, Assimalign.Cohesion.Connections.NamedPipes, … |
 | `Assimalign.Cohesion.Connections.Tcp` | 43 | Assimalign.Cohesion.ApiManager.Hosting, Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane, Assimalign.Cohesion.Connections.Tcp.Tests, Assimalign.Cohesion.Database.Blob.Client.Tests, … |
 | `Assimalign.Cohesion.Web.Hosting` | 43 | Assimalign.Cohesion.ApiManager.Hosting, Assimalign.Cohesion.ConfigurationStore.Hosting, Assimalign.Cohesion.Database.Hosting, Assimalign.Cohesion.EmailHub.Hosting, … |
@@ -1063,11 +1061,11 @@ warning, not a problem in itself: these are the assemblies whose contracts cost 
 | `Assimalign.Cohesion.Http.Streaming` | 25 | Assimalign.Cohesion.Http.Connections.Tests, Assimalign.Cohesion.Http.ServerSentEvents, Assimalign.Cohesion.Http.ServerSentEvents.Examples.Sse, Assimalign.Cohesion.Http.ServerSentEvents.Tests, … |
 | `Assimalign.Cohesion.Web.Testing` | 25 | Assimalign.Cohesion.Web.Antiforgery.Tests, Assimalign.Cohesion.Web.Api.Tests, Assimalign.Cohesion.Web.Authentication.Bearer.Tests, Assimalign.Cohesion.Web.Authentication.Cookie.Tests, … |
 | `Assimalign.Cohesion.DependencyInjection` | 23 | Assimalign.Cohesion.ApiManager.Hosting, Assimalign.Cohesion.ConfigurationStore.Hosting, Assimalign.Cohesion.Database.Hosting, Assimalign.Cohesion.DependencyInjection.Tests, … |
-| `Assimalign.Cohesion.Hosting.Health` | 22 | Assimalign.Cohesion.ApiManager.Hosting, Assimalign.Cohesion.ConfigurationStore.Hosting, Assimalign.Cohesion.Database.Hosting, Assimalign.Cohesion.Database.Hosting.Tests, … |
 | `Assimalign.Cohesion.Web.Server` | 22 | Assimalign.Cohesion.Web.Antiforgery, Assimalign.Cohesion.Web.Authentication.Bearer, Assimalign.Cohesion.Web.Authentication.Certificate, Assimalign.Cohesion.Web.Authentication.Cookie, … |
 | `Assimalign.Cohesion.Http.Forwarded` | 20 | Assimalign.Cohesion.Http.Antiforgery, Assimalign.Cohesion.Http.Antiforgery.Tests, Assimalign.Cohesion.Http.Forwarded.Tests, Assimalign.Cohesion.Web.Authentication.Cookie, … |
 | `Assimalign.Cohesion.IdentityModel` | 20 | Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane, Assimalign.Cohesion.ConfigurationStore.ApplicationModel.Orchestration.Tests, Assimalign.Cohesion.ConfigurationStore.Hosting.Tests, Assimalign.Cohesion.IdentityHub, … |
 | `Assimalign.Cohesion.Database.Types` | 19 | Assimalign.Cohesion.Database, Assimalign.Cohesion.Database.Blob.Client, Assimalign.Cohesion.Database.Client, Assimalign.Cohesion.Database.Documents, … |
+| `Assimalign.Cohesion.Hosting.Health` | 19 | Assimalign.Cohesion.ApiManager.Hosting, Assimalign.Cohesion.ConfigurationStore.Hosting, Assimalign.Cohesion.Database.Hosting, Assimalign.Cohesion.Database.Hosting.Tests, … |
 | `Assimalign.Cohesion.FileSystem` | 17 | Assimalign.Cohesion.Configuration.FileSystem, Assimalign.Cohesion.Configuration.FileSystem.Tests, Assimalign.Cohesion.Configuration.Ini.Tests, Assimalign.Cohesion.Configuration.Json.Tests, … |
 | `Assimalign.Cohesion.Hosting.Telemetry` | 17 | Assimalign.Cohesion.ApiManager.Hosting, Assimalign.Cohesion.ConfigurationStore.Hosting, Assimalign.Cohesion.Database.Hosting, Assimalign.Cohesion.EmailHub.Hosting, … |
 | `Assimalign.Cohesion.IdentityModel.Token` | 15 | Assimalign.Cohesion.ConfigurationStore.ApplicationModel.Orchestration.Tests, Assimalign.Cohesion.ConfigurationStore.Hosting.Tests, Assimalign.Cohesion.IdentityHub.Hosting, Assimalign.Cohesion.IdentityHub.Hosting.Tests, … |
@@ -1075,7 +1073,7 @@ warning, not a problem in itself: these are the assemblies whose contracts cost 
 
 ## Harnesses
 
-317 test, sample, example, and fixture projects are indexed for fan-in but excluded from the
+316 test, sample, example, and fixture projects are indexed for fan-in but excluded from the
 area graphs above: they consume the shipped assemblies rather than forming part of the product
 graph, and the dependency guards exempt them by path.
 
@@ -1090,7 +1088,7 @@ membership is an item list, not a project reference: App's kernel roots in
 | `examples/` | 5 |
 | `fixtures/` | 14 |
 | `samples/` | 12 |
-| `tests/` | 286 |
+| `tests/` | 285 |
 
 Samples, which live in the repository-root `samples/` tree:
 

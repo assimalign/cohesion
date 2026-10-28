@@ -77,7 +77,6 @@
 		<Project Path="../../libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel/src/Assimalign.Cohesion.ApplicationModel.csproj" />
 		<Project Path="../../libraries/Hosting/Assimalign.Cohesion.Hosting.Resources/src/Assimalign.Cohesion.Hosting.Resources.csproj" />
 		<Project Path="../../libraries/Hosting/Assimalign.Cohesion.Hosting/src/Assimalign.Cohesion.Hosting.csproj" />
-		<Project Path="../../libraries/Hosting/Assimalign.Cohesion.Hosting.Health/src/Assimalign.Cohesion.Hosting.Health.csproj" />
 		<Project Path="../../libraries/DependencyInjection/Assimalign.Cohesion.DependencyInjection/src/Assimalign.Cohesion.DependencyInjection.csproj" />
 		<Project Path="../../libraries/Logging/Assimalign.Cohesion.Logging/src/Assimalign.Cohesion.Logging.csproj" />
 		<Project Path="../../libraries/Logging/Assimalign.Cohesion.Logging.Console/src/Assimalign.Cohesion.Logging.Console.csproj" />

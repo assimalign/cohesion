@@ -5,10 +5,12 @@
 A Cohesion application terminates its own HTTP traffic. There is no IIS or nginx rewrite tier assumed in
 front of it, so the URL work such a tier usually does has to be expressible in the application: canonical
 URLs (scheme, host, trailing slash, case), migration of legacy paths, and internal rewrites that map a public
-URL onto the resource that serves it. This package is that work as one pipeline verb,
-`UseRewrite(rules => ...)`, over code-first rules registered at composition time (issue #782).
+URL onto the resource that serves it. This package is that work as code-first rules registered at
+composition time with `builder.Services.AddRewrite(rewrite => ...)` and placed in the pipeline with
+`UseRewrite()` (issue #782).
 
-The package owns the `UseRewrite` verb, the `RewriteOptions` rule list, the `IRewriteRule` and
+The package owns the `AddRewrite` component integration over `RewriteBuilder`, the `UseRewrite` verb, the
+`RewriteOptions` rule list, the `IRewriteRule` and
 `IRewriteContext` contracts for custom rules, the `IRewriteFeature` that keeps the original URL readable,
 the `RewriteFlow` and `RewriteMatchTarget` enums, and the internal engine: the middleware, the request view,
 the target parser and the built-in rules.
@@ -71,15 +73,16 @@ the context the middleware received, and so does a rewrite back to the same path
 ### `IRewriteFeature`
 
 The first rewrite of a request publishes the feature with the request's path and query as the middleware
-received them, which are the values the client sent. A later rewrite (a second `UseRewrite`, or one inside a
-branch after one at the application level) keeps the first one's originals. The feature lives only while the
+received them, which are the values the client sent. A later rewrite (the registration placed again inside a
+branch after the application level, or a second rewrite middleware placed with `Use`) keeps the first one's
+originals. The feature lives only while the
 rest of the pipeline runs: the middleware removes it when `next` returns, so it is present exactly where
 `Request` carries rewritten values.
 
 ### The pitfall the view carries
 
 A component that holds a context across `next` sees the values of the context it holds. For the middleware
-registered ahead of `UseRewrite` that is intended: an access log, the exception boundary and the server's own
+placed ahead of `UseRewrite` that is intended: an access log, the exception boundary and the server's own
 request telemetry describe the URL the client sent. It is a trap for a middleware that captures the context
 before the rewrite and expects to see the rewrite after `next` returns. Two further consequences:
 
@@ -155,8 +158,8 @@ Restart is the only way a rule set can loop, because a pass runs each rule once.
 (default `10`, nginx's bound for the same loop) bounds the passes a request may take. A request that would
 need more fails with an `InvalidOperationException` naming the bound. A rule set that keeps restarting has a
 bug, and a `500` that surfaces it is better than a request that spins or a silent half-rewrite. The bound is
-per middleware: a second `UseRewrite` has its own, and there is no re-execution of the pipeline that could
-chain them.
+per placement: the middleware placed again in a branch, or a second rewrite middleware, counts its own passes,
+and there is no re-execution of the pipeline that could chain them.
 
 The canonicalization helpers cannot loop the client either: each is idempotent, so the URL it redirects to
 is one it leaves alone. A pair of hand-written redirects that point at each other is a client-side loop the
@@ -294,6 +297,30 @@ Each helper is a redirect rule that answers only when the URL is not already in 
 - **Inside a branch** the path helpers work on the path below the prefix: the branch root is never given or
   stripped a trailing slash, and only the path below the prefix is lowercased.
 
+## Registration: `AddRewrite` configures, `UseRewrite` places (2026-10-28)
+
+`builder.Services.AddRewrite(rewrite => ...)` is a generated component integration over `RewriteBuilder`.
+The rules are added to `RewriteBuilder.Options`, and each is built and validated as it is added, so an invalid
+pattern, target, status, flow or match target throws inside the `AddRewrite` call. `RewriteBuilder.Build`
+copies the rule list and `MaxPasses` into the middleware, which the verb registers as a container-owned
+`IWebApplicationMiddleware` singleton; changing the options afterwards has no effect. The
+`(services, rewrite) => ...` overload builds when the middleware is first resolved, as the pipeline is
+composed, so its misconfiguration fails the start instead of the registration.
+
+`UseRewrite()` takes no arguments: it places the last registration of the rewrite middleware it finds in
+`IWebApplicationContext.Middleware`. The rules have no default. An empty rule set passes every request
+through, so placing one would turn a forgotten `AddRewrite` into a verb that silently does nothing; placing
+`UseRewrite()` without a registration fails the pipeline composition with an `InvalidOperationException`
+that names `AddRewrite`, the same shape as `UseHostFiltering`. A registration whose callback adds no rules is
+accepted: it is explicit, and a rule set composed conditionally (by environment, say) may be empty.
+
+Placing `UseRewrite()` more than once, at the application level and again inside a `Map(path)` branch,
+places the same middleware each time. A branch that needs rules of its own builds a second middleware with
+`new RewriteBuilder()` and places it with the raw `Use(IWebApplicationMiddleware)`; that middleware is not a
+registration the host enumerates. *Rejected:* the former `UseRewrite(Action<RewriteOptions> configure)`.
+Configuration on the pipeline verb split the feature's settings across two call sites and kept them out of
+the registrations the host enumerates.
+
 ## Ordering
 
 `UseRewrite` runs ahead of everything that reads the path: `UseStaticFiles`, `UseRouting` and the endpoint.
@@ -316,22 +343,23 @@ The server starts a request's span and records its `url.path` before the pipelin
 transport created, so telemetry keeps the client's path. It reads `http.route` from the endpoint feature after
 the pipeline returns, and the features are shared with the view, so the route is the one the rewritten path
 matched: a request to `/legacy/orders/9` rewritten to `/orders/9` reports `url.path=/legacy/orders/9` and
-`http.route=/orders/{id:int}`. `UseHttpLogging`, registered ahead of `UseRewrite`, logs the client's path too.
-Middleware registered after `UseRewrite` that logs the path logs the rewritten one, and reads
+`http.route=/orders/{id:int}`. `UseHttpLogging`, placed ahead of `UseRewrite`, logs the client's path too.
+Middleware placed after `UseRewrite` that logs the path logs the rewritten one, and reads
 `IRewriteFeature` for the original. The package itself emits no log entries or spans: it has no logger seam
 of its own, and the rewrite is visible in the route the request reports.
 
 `UseHttpLogging` captures the request body through its own `IHttpContext`/`IHttpRequest` view, wrapping the
 body exposed by the request it receives. Capture works after `UseRewrite` and request decompression;
-registered after decompression, it observes decoded bytes. Capture remains opt-in, content-type gated and
+placed after decompression, it observes decoded bytes. Capture remains opt-in, content-type gated and
 bounded, and observes only bytes consumed downstream.
 
 ## Error model
 
 | When | What | Where it surfaces |
 | --- | --- | --- |
-| Registration | An invalid pattern, a malformed target, a reference to an undefined group, an absolute or fragment rewrite target, a rewrite target that decodes to an invalid path | `ArgumentException` from the `Add*` call, so at startup |
-| Registration | A status other than `301`, `302`, `307` or `308`; an undefined `RewriteFlow` or `RewriteMatchTarget`; an HTTPS port outside 1–65535; `MaxPasses` below `1` | `ArgumentOutOfRangeException` |
+| Registration | An invalid pattern, a malformed target, a reference to an undefined group, an absolute or fragment rewrite target, a rewrite target that decodes to an invalid path | `ArgumentException` from the `Add*` call inside `AddRewrite`, so at startup (at the pipeline's composition for the `(services, rewrite) => ...` overload) |
+| Registration | A status other than `301`, `302`, `307` or `308`; an undefined `RewriteFlow` or `RewriteMatchTarget`; an HTTPS port outside 1–65535; `MaxPasses` below `1` | `ArgumentOutOfRangeException`, likewise |
+| Composition | `UseRewrite()` placed with no `AddRewrite` registration | `InvalidOperationException` naming `AddRewrite`, when the application starts |
 | Request | Rules restart more than `MaxPasses` times | `InvalidOperationException`; the exception boundary answers `500` |
 | Request | A capture makes the target decode to an invalid path or an empty query key | `400 Bad Request`, bodyless |
 | Request | A string pattern's match exceeds its one-second timeout | `RegexMatchTimeoutException`; `500` |
@@ -343,8 +371,9 @@ the BCL types say so.
 ## AOT posture
 
 Interpreted, `NonBacktracking` and source-generated regular expressions are all AOT-safe; `Compiled` is never
-used. Composition is plain delegates and arrays built at registration, with no reflection, no service container
-and no configuration binding. The Web NativeAOT guard
+used. Composition is plain delegates and arrays built at registration, with no reflection and no configuration
+binding; the package references no service container, because the `AddRewrite` verb is generated into the
+application that calls it. The Web NativeAOT guard
 (`resources/Web/Assimalign.Cohesion.Web.Hosting/samples/Assimalign.Cohesion.Web.AotGuard`) publishes a rewrite
 and a redirect rule with trim and AOT warnings as errors and exercises both over HTTP.
 

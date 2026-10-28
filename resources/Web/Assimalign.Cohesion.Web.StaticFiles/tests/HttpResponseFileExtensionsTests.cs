@@ -81,7 +81,7 @@ public class HttpResponseFileExtensionsTests
         // validators; a cache that revalidates either URL with the other's ETag gets a 304.
         using InMemoryFileSystem site = StaticSite.Create(("app.js", "let x = 1;"));
         var builder = new TestPipelineBuilder();
-        builder.UseStaticFiles(site);
+        builder.Use(StaticFilesMount.Build(site));
         var served = new TestHttpContext("/app.js", HttpMethod.Get);
         await builder.Build().ExecuteAsync(served);
 

@@ -219,9 +219,6 @@
   <data name="EndpointProtocolUnsupported" xml:space="preserve">
     <value>The HTTP endpoint &apos;{0}&apos; declares an unsupported &apos;Protocol&apos; (&apos;{1}&apos;). Supported values: Http1, Http2, Https, Http1s, Http2s, Http3.</value>
   </data>
-  <data name="HealthContributorStatusUnsupported" xml:space="preserve">
-    <value>The contributor returned an unsupported health status.</value>
-  </data>
   <data name="Http3QuicRequired" xml:space="preserve">
     <value>The HTTP endpoint &apos;{0}&apos; declares &apos;Protocol&apos; Http3, which requires QUIC (Windows, Linux, or macOS).</value>
   </data>

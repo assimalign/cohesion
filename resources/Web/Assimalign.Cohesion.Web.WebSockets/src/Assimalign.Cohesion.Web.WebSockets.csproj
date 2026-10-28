@@ -15,4 +15,7 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Forwarded" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http.WebSockets" />
 	</ItemGroup>
+	<ItemGroup>
+		<CohesionSharedSource Include="Assimalign.Cohesion.Core" Module="ComponentIntegration" />
+	</ItemGroup>
 </Project>

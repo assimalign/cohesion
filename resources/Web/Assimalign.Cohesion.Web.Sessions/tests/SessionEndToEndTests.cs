@@ -4,8 +4,10 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.DependencyInjection;
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Web.Sessions;
+using Assimalign.Cohesion.Web.Sessions.Tests.TestObjects;
 using Assimalign.Cohesion.Web.Testing;
 
 using Shouldly;
@@ -19,9 +21,10 @@ namespace Assimalign.Cohesion.Web.Sessions.Tests;
 /// <summary>
 /// Full-pipeline coverage over the <see cref="WebApplicationTestFactory"/>
 /// (in-memory HTTP/1.1): a session round-trips across two requests on one client
-/// through the session-id cookie, and a request that never touches the session
-/// establishes nothing. Requests are sequential on one client (safe for the
-/// sequential in-memory dispatch).
+/// through the session-id cookie, a request that never touches the session
+/// establishes nothing, and the cookie and store <c>builder.Services.AddSessions</c>
+/// registers are the ones <c>UseSessions()</c> places. Requests are sequential on one
+/// client (safe for the sequential in-memory dispatch).
 /// </summary>
 public class SessionEndToEndTests
 {
@@ -117,5 +120,69 @@ public class SessionEndToEndTests
 
         // Assert
         secondClientFirstHit.ShouldBe("1");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Sessions] - E2E: The cookie and store AddSessions registers are the ones UseSessions uses")]
+    public async Task AddSessions_CustomCookieNameAndStore_ShouldEstablishThatCookieOverThatStore()
+    {
+        // Arrange — the generated verb registers the configured middleware; UseSessions() places it.
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        CancellationToken cancellationToken = cancellation.Token;
+
+        await using WebApplicationTestFactory factory = new();
+        RecordingSessionStore store = new();
+        factory.Builder.Services.AddSessions(sessions =>
+        {
+            sessions.UseStore(store);
+            sessions.Options.CookieName = "sid";
+        });
+
+        factory.Application.UseSessions();
+        factory.Application.Use(async (context, next) =>
+        {
+            IHttpSession session = await context.LoadSessionAsync(context.RequestCancelled);
+            session.SetString("user", "alice");
+            context.Response.StatusCode = CohesionHttpStatusCode.Ok;
+        });
+
+        using HttpClient client = factory.CreateClient();
+
+        // Act
+        using HttpResponseMessage response = await client.GetAsync("/", cancellationToken);
+
+        // Assert — the session committed after the pipeline unwound, before the response was sent.
+        response.Headers.GetValues("Set-Cookie").ShouldHaveSingleItem().ShouldStartWith("sid=", Case.Sensitive);
+        store.SetCount.ShouldBe(1);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Sessions] - E2E: The service-provider AddSessions overload can take its store from the container")]
+    public async Task AddSessions_WithServiceProvider_ShouldUseTheContainerStore()
+    {
+        // Arrange — this overload builds on first resolve, so its callback can resolve a store the
+        // application registered.
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        CancellationToken cancellationToken = cancellation.Token;
+
+        await using WebApplicationTestFactory factory = new();
+        RecordingSessionStore store = new();
+        factory.Builder.Services.AddSingleton<IHttpSessionStore>(store);
+        factory.Builder.Services.AddSessions((services, sessions) => sessions.UseStore(services.GetRequiredService<IHttpSessionStore>()));
+
+        factory.Application.UseSessions();
+        factory.Application.Use(async (context, next) =>
+        {
+            IHttpSession session = await context.LoadSessionAsync(context.RequestCancelled);
+            session.SetString("user", "alice");
+            context.Response.StatusCode = CohesionHttpStatusCode.Ok;
+        });
+
+        using HttpClient client = factory.CreateClient();
+
+        // Act
+        using HttpResponseMessage response = await client.GetAsync("/", cancellationToken);
+
+        // Assert
+        response.Headers.GetValues("Set-Cookie").ShouldHaveSingleItem().ShouldStartWith(".Cohesion.Session=", Case.Sensitive);
+        store.SetCount.ShouldBe(1);
     }
 }

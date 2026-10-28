@@ -137,8 +137,8 @@ seam with the hardened `Http.Cookies` model. This package references
 §4.1.1 `token`, and `CookiePath` is `HttpCookiePath`, an RFC 6265 `path-value`.
 Their implicit string conversions throw `ArgumentException` at assignment for
 out-of-grammar input, before the setter runs. The value types cannot validate
-`default`, so both `UseSessions` overloads refuse it at composition with the
-existing option-specific message and parameter name `configure`. The empty
+`default`, so Web.Sessions' `AddSessions` refuses it at registration with the
+existing option-specific message and parameter name `Options`. The empty
 path remains valid. Request cookie lookup and replacement compare typed names.
 
 This dependency follows the public option surface; cookie establishment and

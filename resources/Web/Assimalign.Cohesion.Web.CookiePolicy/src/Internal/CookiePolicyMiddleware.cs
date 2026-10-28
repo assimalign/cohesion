@@ -43,7 +43,7 @@ internal sealed class CookiePolicyMiddleware : IWebApplicationMiddleware
         IHttpFeatureCollection features = context.Features;
 
         // Consent is decided once per exchange, by the first consent feature installed on it. A nested
-        // registration (a branch that registers its own policy) reuses the outer registration's, while its
+        // policy (a branch that places its own) reuses the outer policy's, while its
         // attribute rules add to the outer ones; an application-supplied feature installed earlier, for
         // example one driven by a consent-management platform, is honored the same way.
         ICookieConsentFeature? consent = features.Get<ICookieConsentFeature>();

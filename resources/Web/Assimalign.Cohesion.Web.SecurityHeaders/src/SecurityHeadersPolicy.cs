@@ -10,8 +10,10 @@ namespace Assimalign.Cohesion.Web.SecurityHeaders;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <c>UseSecurityHeaders</c> hands a new instance to its configuration callback and captures a copy of
-/// it, so a reference kept by the callback cannot change the pipeline afterward. Endpoint metadata
+/// <see cref="SecurityHeadersBuilder"/> exposes a new instance as its <see cref="SecurityHeadersBuilder.Options"/>,
+/// which <c>builder.Services.AddSecurityHeaders(headers =&gt; ...)</c> configures, and
+/// <see cref="SecurityHeadersBuilder.Build"/> captures a copy of it, so a reference kept by the callback
+/// cannot change the registered middleware afterward. Endpoint metadata
 /// either replaces the policy (<see cref="SecurityHeadersMetadata(SecurityHeadersPolicy)"/>, which also
 /// captures a copy) or adjusts a copy of the pipeline's policy
 /// (<see cref="SecurityHeadersMetadata(Action{SecurityHeadersPolicy})"/>).

@@ -4,7 +4,8 @@
 
 The plain Hosting package coordinates a host lifetime without assuming how an application is
 supervised, how health is transported, or whether the process represents a Cohesion resource.
-Those policies live in sibling packages and integrate through the public run seam.
+Those policies live in other packages and integrate as ordinary host services: Hosting.Resources
+registers its resource service as an `IHostLifecycleService`.
 
 ## Lifecycle coordinator
 
@@ -191,14 +192,12 @@ join the same work.
 | Package | Direct dependencies | Policy boundary |
 | --- | --- | --- |
 | `Assimalign.Cohesion.Hosting` | Core | Plain lifecycle only |
-| `Assimalign.Cohesion.Hosting.Health` | Core | Transport-neutral health data only |
 | `Assimalign.Cohesion.Hosting.Resources` | Core, Hosting | Resource instances, their control plane, and the resource service that joins one to its gateway |
 
-Hosting does not reference either sibling. Health does not reference Hosting. Resources is the
-opt-in composition layer: an area registers its `ResourceService`, an `IHostLifecycleService`, with
+Hosting does not reference Resources. Resources is the opt-in composition layer: an area registers its `ResourceService`, an `IHostLifecycleService`, with
 the application's host.
 
-Both siblings still ship in the base `Assimalign.Cohesion.App` framework. Framework presence is not
+Resources still ships in the base `Assimalign.Cohesion.App` framework. Framework presence is not
 activation: an application becomes a managed resource only when its area's Hosting.Resources
 package registers a resource service.
 
@@ -209,8 +208,8 @@ package registers a resource service.
   and a platform restarts a process on any failed exit.
 - Other signals, and shutdown signals outside a run: Hosting registers SIGINT, SIGQUIT and SIGTERM
   only while `RunAsync` runs.
-- Health contributors and aggregated health values belong to
-  `Assimalign.Cohesion.Hosting.Health`.
+- Health checks. A resource reports its health through Hosting.Resources
+  (`IResourceHealthContributor`), and a Web application serves health endpoints through Web.Health.
 - Dependency injection, configuration, logging, and HTTP delivery belong to their respective
   packages.
 - Hosting does not install a synchronization context or task scheduler.

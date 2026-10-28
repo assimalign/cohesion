@@ -172,9 +172,10 @@ public sealed class WebDefaultEventSourceForwardingTests
         builder.Logging.AddProvider(recorded).AddRule(rule);
         TcpConnectionListener listener = CreateListener();
         builder.Server.UseServer(options => options.UseHttp1(listener));
+        builder.Services.AddHttpLogging((services, logging) => logging.UseLoggerFactory(services.GetRequiredService<ILoggerFactory>()));
         await using WebApplication application = builder.Build();
         ILoggerFactory factory = application.Context.ServiceProvider.GetRequiredService<ILoggerFactory>();
-        application.UseHttpLogging(factory);
+        application.UseHttpLogging();
         application.Use((context, next) =>
         {
             context.Response.StatusCode = Assimalign.Cohesion.Http.HttpStatusCode.Ok;

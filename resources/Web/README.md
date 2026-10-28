@@ -85,13 +85,20 @@ an application:
 
 - **Registration verbs are component integrations on `builder.Services`.** Each feature package
   declares `[assembly: ComponentIntegration(...)]` targeting
-  `Assimalign.Cohesion.DependencyInjection.IServiceProviderBuilder.AddSingleton` with
-  `Contract = typeof(IHttpFeature)`, and the generator projects the verb into the application, so
-  neither the package nor `Web.Hosting` takes a reference for it. `Sdk.Web` applications get the
+  `Assimalign.Cohesion.DependencyInjection.IServiceProviderBuilder.AddSingleton`, and the generator
+  projects the verb into the application, so neither the package nor `Web.Hosting` takes a reference
+  for it. The contract is what the feature's pipeline verb reads: `IWebApplicationMiddleware` for the
+  configured middleware (most features), `IWebApplicationSetting` for a value an operator may change
+  (CORS), or `IHttpFeature` for state each exchange carries. `Sdk.Web` applications get the
   generator from the App framework; in-repo projects add
   `<CohesionAnalyzerReference Include="Assimalign.Cohesion.SourceGeneration" />`.
 - **Pipeline verbs stay `extension(...)` members** of the feature package: `Use<Feature>` on
   `IWebApplicationPipelineBuilder`, `Map*` on the pipeline and router surfaces.
+- **`Add` configures, `Use` places** (owner decision, 2026-10-28). Every `Use<Feature>()` is
+  parameterless: it places what its `Add` verb registered (the last registration; every mount, for
+  static files), the defaults when nothing is registered, or fails the pipeline's composition with a
+  message naming the `Add` verb when the feature has no safe default (`UseForwardedHeaders`,
+  `UseHostFiltering`, `UseQueryConditionals`, `UseRewrite`, `UseHttpLogging`).
 - **Every `IHttpFeature` registration is a singleton.** `Web.Hosting` rejects a scoped or transient
   one, one registered under a narrower contract, and a disposable instance or implementation type at
   `Build`, and a disposable feature a factory registration produces at the pipeline build, where the
@@ -109,6 +116,23 @@ an application:
 | `Web.Serialization` | `AddContentSerialization(serialization => ...)`, `AddJsonSerialization(resolver, ...)` | builder template (`ContentSerializationBuilder`); static factory (`SerializationComponents`) |
 | `Web.Validation` | `AddValidation(validation => validation.Options.AddProfile(...))` | builder template (`ValidationBuilder`) |
 | `Web.OpenApi` | `AddOpenApi()`, `AddOpenApi(openApi => openApi.Options.Title = ...)` | builder template (`OpenApiBuilder`) |
+| `Web.Cors` | `AddCors(cors => cors.Options.AddDefaultPolicy(...))` | builder template (`CorsBuilder`), registers the `cors` setting |
+| `Web.ErrorHandling` | `AddStatusCodePages(pages => pages.Options.Responder = ...)` | builder template (`StatusCodePagesBuilder`), registers middleware |
+| `Web.ForwardedHeaders` | `AddForwardedHeaders(forwarded => forwarded.Options.Headers = ...)` | builder template (`ForwardedHeadersBuilder`), registers middleware |
+| `Web.HttpsPolicy` | `AddHttpsRedirection(...)`, `AddHsts(hsts => hsts.Options.Preload = true)` | builder templates (`HttpsRedirectionBuilder`, `HstsBuilder`), register middleware |
+| `Web.HostFiltering` | `AddHostFiltering(hosts => hosts.Options.AllowedHosts.Add(...))` | builder template (`HostFilteringBuilder`), registers middleware |
+| `Web.Caching` | `AddOutputCache(cache => cache.UseStore(store).Options.AddBasePolicy(...))` | builder template (`OutputCacheBuilder`), registers middleware |
+| `Web.Compression` | `AddResponseCompression(...)`, `AddRequestDecompression(...)` | builder templates (`ResponseCompressionBuilder`, `RequestDecompressionBuilder`), register middleware |
+| `Web.CookiePolicy` | `AddCookiePolicy(cookies => cookies.Options.Secure = ...)` | builder template (`CookiePolicyBuilder`), registers middleware |
+| `Web.Diagnostics` | `AddHttpLogging((services, logging) => logging.UseLoggerFactory(...))` | builder template (`HttpLoggingBuilder`), registers middleware |
+| `Web.Query` | `AddQueryValidation(...)`, `AddQueryConditionals(conditionals => conditionals.UseResourceValidators(...))` | builder templates (`WebQueryValidationBuilder`, `WebQueryConditionalsBuilder`), register middleware |
+| `Web.RateLimiting` | `AddRateLimiting(limits => limits.Options.GlobalPolicy = ...)` | builder template (`RateLimitingBuilder`), registers middleware |
+| `Web.RequestTimeouts` | `AddRequestTimeouts(timeouts => timeouts.Options.DefaultPolicy = ...)` | builder template (`RequestTimeoutsBuilder`), registers middleware |
+| `Web.Rewrite` | `AddRewrite(rewrite => rewrite.Options.AddRedirect(...))` | builder template (`RewriteBuilder`), registers middleware |
+| `Web.SecurityHeaders` | `AddSecurityHeaders(headers => headers.Options.ReferrerPolicy = ...)` | builder template (`SecurityHeadersBuilder`), registers middleware |
+| `Web.Sessions` | `AddSessions(sessions => sessions.UseStore(store))` | builder template (`SessionsBuilder`), registers middleware |
+| `Web.StaticFiles` | `AddStaticFiles(files => files.UseFileSystem(fileSystem))` | builder template (`StaticFilesBuilder`), registers a mount |
+| `Web.WebSockets` | `AddWebSockets(webSockets => webSockets.Options.AllowedOrigins.Add(...))` | builder template (`WebSocketsBuilder`), registers middleware |
 
 Every registration verb is a builder template unless it has a required value argument. The
 template's configure callback is optional (owner decision 39, 2026-10-10, #1395), so a verb with

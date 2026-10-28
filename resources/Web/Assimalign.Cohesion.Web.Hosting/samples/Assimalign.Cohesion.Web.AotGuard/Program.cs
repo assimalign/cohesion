@@ -49,9 +49,10 @@ string[] hostArgs = smoke
     : args;
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(hostArgs);
-// The feature registration verbs are component integrations on the service registrations (#1380):
-// each registers one IHttpFeature singleton the host stamps onto every exchange. Their configure
-// callbacks are optional (#1395), so a verb with nothing to configure is called bare.
+// The feature registration verbs are component integrations on the service registrations (#1380).
+// Each owns its feature's configuration and registers what the feature's Use verb reads: a request
+// feature, a setting (CORS), or the configured middleware. Their configure callbacks are optional
+// (#1395), so a verb with nothing to configure is called bare.
 builder.Services
     .AddRouting()
     .AddJsonSerialization(GuardJsonContext.Default)
@@ -76,7 +77,21 @@ builder.Services
     // CORS registers the application's cors setting; UseCors() below only places the middleware.
     .AddCors(cors => cors.Options
         .AddDefaultPolicy(policy => policy.WithOrigins(GuardSmoke.TrustedOrigin))
-        .AddPolicy("json-clients", policy => policy.WithOrigins(GuardSmoke.TrustedOrigin).WithHeaders("Content-Type")));
+        .AddPolicy("json-clients", policy => policy.WithOrigins(GuardSmoke.TrustedOrigin).WithHeaders("Content-Type")))
+    // Middleware registrations: each builds the configured middleware its Use verb below places. The
+    // rewrite rules cover an interpreted pattern and a source-generated one.
+    .AddRewrite(rewrite => rewrite.Options
+        .AddRedirect("^/old-greeting$", "/greeting", HttpStatusCode.MovedPermanently)
+        .AddRewrite("^/legacy/items/(\\d+)$", "/items/$1")
+        .AddRewrite(GuardRewriteRules.CatalogValue(), "/values/${id}"))
+    .AddRequestTimeouts(timeouts => timeouts.Options.DefaultPolicy = new RequestTimeoutPolicy { Timeout = TimeSpan.FromSeconds(30) })
+    .AddRateLimiting(rateLimiting => rateLimiting.Options.GlobalPolicy = RateLimitingPolicy.Create(
+        static (IHttpContext _) => "global",
+        static (string _) => new FixedWindowRateLimiter(new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = 1000,
+            Window = TimeSpan.FromMinutes(1),
+        })));
 
 await using WebApplication application = builder.Build();
 
@@ -84,12 +99,8 @@ await using WebApplication application = builder.Build();
 application.UseSecurityHeaders();
 application.UseErrorHandling();
 
-// Ahead of static files and routing, so both see the rewritten URL; redirects ahead of rewrites. The
-// rules cover an interpreted pattern and a source-generated one.
-application.UseRewrite(rules => rules
-    .AddRedirect("^/old-greeting$", "/greeting", HttpStatusCode.MovedPermanently)
-    .AddRewrite("^/legacy/items/(\\d+)$", "/items/$1")
-    .AddRewrite(GuardRewriteRules.CatalogValue(), "/values/${id}"));
+// Ahead of static files and routing, so both see the rewritten URL; redirects ahead of rewrites.
+application.UseRewrite();
 application.UseCookiePolicy();
 application.UseResponseCompression();
 application.UseRequestDecompression();
@@ -109,14 +120,8 @@ application.UseRouting();
 // first: it answers preflights before anything that could reject one.
 application.UseCors();
 application.UseAuthorization();
-application.UseRequestTimeouts(TimeSpan.FromSeconds(30));
-application.UseRateLimiting(options => options.GlobalPolicy = RateLimitingPolicy.Create(
-    static (IHttpContext _) => "global",
-    static (string _) => new FixedWindowRateLimiter(new FixedWindowRateLimiterOptions
-    {
-        PermitLimit = 1000,
-        Window = TimeSpan.FromMinutes(1),
-    })));
+application.UseRequestTimeouts();
+application.UseRateLimiting();
 application.UseAntiforgery();
 
 // WebSockets (decision 16): the origin policy goes last, closest to the endpoints that accept.

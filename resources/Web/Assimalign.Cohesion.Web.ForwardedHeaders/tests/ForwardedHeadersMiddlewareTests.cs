@@ -36,9 +36,10 @@ public class ForwardedHeadersMiddlewareTests
     /// </summary>
     private static void ComposeEchoApplication(WebApplicationTestFactory factory, Action<ForwardedHeadersOptions> configure)
     {
+        factory.Builder.Services.AddForwardedHeaders(forwarded => configure(forwarded.Options));
         WebApplication app = factory.Application;
 
-        app.UseForwardedHeaders(configure);
+        app.UseForwardedHeaders();
         app.Use(async (context, next) =>
         {
             IHttpForwardedFeature? feature = context.Features.Get<IHttpForwardedFeature>();
@@ -194,8 +195,9 @@ public class ForwardedHeadersMiddlewareTests
         using CancellationTokenSource cancellation = new(_testTimeout);
         await using WebApplicationTestFactory factory = new();
 
+        factory.Builder.Services.AddForwardedHeaders(forwarded => forwarded.Options.Headers = ForwardedHeaderNames.XForwarded);
         WebApplication app = factory.Application;
-        app.UseForwardedHeaders(options => options.Headers = ForwardedHeaderNames.XForwarded);
+        app.UseForwardedHeaders();
         app.Use(async (context, next) =>
         {
             string payload = string.Join('|',
@@ -250,15 +252,28 @@ public class ForwardedHeadersMiddlewareTests
         payload.ShouldBe("no-feature|Http|localhost|none");
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web.ForwardedHeaders] - Pipeline: Composing with ForwardedHeaderNames.None should fail fast at build time")]
-    public async Task Pipeline_HeadersNone_ShouldThrowAtCompositionTime()
+    [Fact(DisplayName = "Cohesion Test [Web.ForwardedHeaders] - AddForwardedHeaders: Registering ForwardedHeaderNames.None should fail at registration")]
+    public async Task AddForwardedHeaders_HeadersNone_ShouldThrowAtRegistration()
     {
         // Arrange
         await using WebApplicationTestFactory factory = new();
-        WebApplication app = factory.Application;
 
-        // Act / Assert — misconfiguration surfaces when the pipeline is composed, not
+        // Act / Assert — misconfiguration surfaces where the trust model is registered, not
         // silently at request time.
-        Should.Throw<ArgumentException>(() => app.UseForwardedHeaders(options => { }));
+        Should.Throw<ArgumentException>(() => factory.Builder.Services.AddForwardedHeaders(forwarded => { }));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.ForwardedHeaders] - UseForwardedHeaders: Without a registered trust model the application should fail to start")]
+    public async Task UseForwardedHeaders_WithoutRegistration_ShouldFailToStart()
+    {
+        // Arrange — there is no default trust model to fall back to.
+        await using WebApplicationTestFactory factory = new();
+        WebApplication app = factory.Application;
+        app.UseForwardedHeaders();
+
+        // Act / Assert — composing the pipeline, which starting the application does, names the verb to call.
+        InvalidOperationException exception = await Should.ThrowAsync<InvalidOperationException>(
+            () => ((IWebApplication)app).StartAsync());
+        exception.Message.ShouldContain("AddForwardedHeaders", Case.Sensitive);
     }
 }

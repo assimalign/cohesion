@@ -35,11 +35,12 @@ public class CorsOutputCacheTests
         factory.Builder.Services.AddCors(cors => cors.Options.AddDefaultPolicy(policy => policy
             .WithOrigins("https://alpha.example", "https://beta.example")
             .AllowCredentials()));
+        factory.Builder.Services.AddOutputCache(cache => cache.Options.AddBasePolicy(policy => policy.Duration = TimeSpan.FromMinutes(30)));
         int invocations = 0;
 
         IRouterBuilder routes = factory.Application.UseRouting();
         factory.Application.UseCors();
-        factory.Application.UseOutputCache(options => options.AddBasePolicy(policy => policy.Duration = TimeSpan.FromMinutes(30)));
+        factory.Application.UseOutputCache();
         routes.Map(CohesionHttpMethod.Get, "/variant", new RouterRouteHandler(async context =>
         {
             int invocation = Interlocked.Increment(ref invocations);

@@ -28,7 +28,8 @@ public enum WebSocketTestProtocol
 
 /// <summary>
 /// A real Web application: the default server (with its default upgrade interceptor and drain
-/// signal), <c>UseWebSockets</c>, and one terminal handler. HTTP/1.1 and HTTP/2 listen on a loopback
+/// signal), the policy <c>AddWebSockets</c> registered and <c>UseWebSockets</c> placed, and one
+/// terminal handler. HTTP/1.1 and HTTP/2 listen on a loopback
 /// TCP port; HTTP/3 listens on an in-memory multiplexed listener (<see cref="Http3Listener"/>), which
 /// needs neither QUIC nor a certificate.
 /// </summary>
@@ -76,12 +77,20 @@ internal sealed class WebSocketTestServer : IAsyncDisposable
         Func<IHttpContext, Task> handler,
         CancellationToken cancellationToken)
     {
+        // A configuration registers through the generated AddWebSockets verb; without one nothing is
+        // registered and UseWebSockets() places the default policy.
         return StartAsync(
             protocol,
-            builder => { },
+            builder =>
+            {
+                if (configure is not null)
+                {
+                    builder.Services.AddWebSockets(webSockets => configure(webSockets.Options));
+                }
+            },
             application =>
             {
-                application.UseWebSockets(configure);
+                application.UseWebSockets();
                 application.Use((context, next) => handler(context));
             },
             cancellationToken);

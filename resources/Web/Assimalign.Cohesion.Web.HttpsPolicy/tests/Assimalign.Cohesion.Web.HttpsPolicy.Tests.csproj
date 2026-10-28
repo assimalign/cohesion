@@ -20,4 +20,7 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Connections" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.InMemory" />
 	</ItemGroup>
+	<ItemGroup>
+		<CohesionAnalyzerReference Include="Assimalign.Cohesion.SourceGeneration" />
+	</ItemGroup>
 </Project>

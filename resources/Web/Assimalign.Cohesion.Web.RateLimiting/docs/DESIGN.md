@@ -11,15 +11,17 @@ reimplements a limiter** — no token bucket, no window accounting. That boundar
 #783): Cohesion adapts the BCL primitives, matching the Resilience area's stated intent for the
 client-side limiter (`Assimalign.Cohesion.Resilience.RateLimiting`).
 
-The package owns: two options-carried hooks, one options object, one sealed policy type, one sealed
-metadata carrier, a static partition-key helper, a typed feature, and one `extension(IWebApplicationPipelineBuilder)`
-verb. Everything request-time is an `AcquireAsync` against a prebuilt limiter and a status write.
+The package owns: two options-carried hooks, one options object, one builder (`RateLimitingBuilder`, whose
+registration verb `builder.Services.AddRateLimiting` is a generated component integration), one sealed
+policy type, one sealed metadata carrier, a static partition-key helper, a typed feature, and one
+parameterless `extension(IWebApplicationPipelineBuilder)` verb that places the middleware. Everything
+request-time is an `AcquireAsync` against a prebuilt limiter and a status write.
 
 ## The policy model — a global limiter plus named policies, additive
 
 `RateLimitingOptions` carries a `GlobalPolicy` and a set of named policies (`AddPolicy`). A
-`RateLimitingPolicy` is a `PartitionedRateLimiter<IHttpContext>` plus a permit count — built once, at
-builder time.
+`RateLimitingPolicy` is a `PartitionedRateLimiter<IHttpContext>` plus a permit count — built once, when
+the application registers rate limiting (`RateLimitingBuilder.Options`).
 
 - **The global limiter is the must-have.** It is applied to **every** request that reaches the
   middleware and acquired **up-front**, before any downstream work, with the limiter's **full queueing
@@ -88,7 +90,7 @@ flowchart TD
 
 - **The endpoint's policy** is the published match's `RateLimitingMetadata`, read last-wins
   (`GetMetadata<RateLimitingMetadata>()`), so an endpoint-level declaration overrides a group-level one. A
-  named policy is resolved against `options.AddPolicy`; an unknown name throws
+  named policy is resolved against `rateLimiting.Options.AddPolicy`; an unknown name throws
   `InvalidOperationException`, a configuration error surfaced by the first request that reaches it.
 - **Declared with convention verbs (#1055).** `RequireRateLimiting(name)`, `RequireRateLimiting(policy)`
   and `DisableRateLimiting()` are generic extension members over routing's `IRouterConventionBuilder`, so
@@ -113,7 +115,7 @@ router installing its match through a feature-collection decorator. That seam wa
 `void`), which forced a non-queueing `AttemptAcquire` on the endpoint gate and an internal exception
 signal to carry a rejection back to the middleware. Both are gone.
 
-The old position is now the hazard. Registered ahead of `UseRouting`, the middleware sees no endpoint, so
+The old position is now the hazard. Placed ahead of `UseRouting`, the middleware sees no endpoint, so
 endpoint policies would silently stop applying. `RateLimitingMetadata` therefore implements
 `IRouteMiddlewareMetadata`: `RequiredMiddleware` is `UseRateLimiting`, or `null` for `Disabled`. The
 middleware acknowledges every non-preflight endpoint it processes
@@ -132,25 +134,53 @@ request waits for a permit up to the queue limit, and stops waiting when the req
 global lease is acquired first and held while the request waits in an endpoint policy's queue, so a queued
 request still counts against a global concurrency limiter.
 
+## Registration: `AddRateLimiting` configures, `UseRateLimiting` places (2026-10-28)
+
+`builder.Services.AddRateLimiting(rateLimiting => ...)` is a generated component integration over
+`RateLimitingBuilder`. It builds the middleware once, from a snapshot of `RateLimitingBuilder.Options` (the
+global policy, the named-policy map, the rejection status, and both hooks), and registers it as a
+container-owned `IWebApplicationMiddleware` singleton. The middleware reads its options on every request,
+so the snapshot is what keeps a later change to the options, a later `AddPolicy` included, from reaching a
+middleware already registered; the policies themselves are shared, so a policy keeps one limiter wherever
+it is used. The builder adds no validation of its own: a policy rejects a non-positive permit count when
+it is created and `AddPolicy` rejects a duplicate name, both inside the `AddRateLimiting` callback, so a
+misconfiguration still fails at registration.
+
+`UseRateLimiting()` takes no arguments. It places the last registration of the middleware it finds in
+`IWebApplicationContext.Middleware`, or, when the application registered none, a middleware with the
+defaults. The defaults are safe, so placing them is not a misconfiguration: no global limit and no named
+policy, which leaves only endpoints whose `RateLimitingMetadata` carries an inline policy limited, and a
+request for an endpoint that names a policy fails with `InvalidOperationException` rather than running
+unlimited. That is what `UseRateLimiting()` without a callback always meant, and the route-convention
+verbs' inline policies rely on it.
+
+*Rejected:* the former `UseRateLimiting(Action<RateLimitingOptions>? configure)`; a configuration callback
+on the pipeline verb split the feature's settings across two call sites and kept them out of the
+registrations the host enumerates.
+
 ## Ordering
 
 `UseForwardedHeaders` → `UseRouting` → `UseRateLimiting` → … → endpoint.
 
 - **After `UseForwardedHeaders`**, so `RateLimitPartitionKeys.ClientAddress` keys on the effective client.
 - **After `UseRouting`**, so the endpoint and its `RateLimitingMetadata` are published when the middleware
-  runs. Registered ahead of `UseRouting`, the global limiter still applies to every request, but an
+  runs. Placed ahead of `UseRouting`, the global limiter still applies to every request, but an
   endpoint whose metadata names a policy fails at dispatch (see "Fail closed" above).
 
 ## Lifetime and disposal posture
 
-Limiters are built **once**, at builder time, and live for the **application lifetime**. A
-`PartitionedRateLimiter<T>` is `IAsyncDisposable`, but the Web pipeline exposes **no disposal hook** a
-feature package can attach to — so the accepted posture is **process-lifetime**: the middleware holds the
-limiters and they are reclaimed at process exit, along with the internal replenishment timers the window
-and token-bucket limiters run. This is recorded honestly rather than hidden; a pipeline-level disposal
-hook is a recorded follow-up. **Per-request leases** are a separate concern and *are* released
-deterministically: each acquired lease is held on the feature and disposed when the request completes
-(the middleware's `finally`), which is the lifetime a concurrency limiter's permit requires.
+Limiters are built **once**, when the application registers rate limiting, and live for the **application
+lifetime**. A `PartitionedRateLimiter<T>` is `IAsyncDisposable`. The middleware `AddRateLimiting`
+registers is a container-owned singleton, which the application's service provider disposes at shutdown,
+but the middleware is not disposable and **never disposes its limiters**: a policy is the application's
+object, which it may share (between the global and a named slot, across two registrations, or as an
+inline endpoint policy the route table holds), so disposing it would first need a rule for who owns a
+shared limiter. The accepted posture therefore stays **process-lifetime**: the limiters are reclaimed at
+process exit, along with the internal replenishment timers the window and token-bucket limiters run.
+This is recorded honestly rather than hidden; disposing them at shutdown is a recorded follow-up.
+**Per-request leases** are a separate concern and *are* released deterministically: each acquired lease
+is held on the feature and disposed when the request completes (the middleware's `finally`), which is
+the lifetime a concurrency limiter's permit requires.
 
 ## Rejection handling
 
@@ -163,7 +193,7 @@ default is **bodyless**, which composes with the status-code-pages middleware (#
 bare 429. A rejection on an **already-committed response head** (detected via the response-streaming
 feature) cannot rewrite the status, so the exchange is aborted at the protocol layer instead — the same
 defensive path `Web.RequestTimeouts` takes. In normal use this never trips, because both gates run before
-`next`; only a middleware registered ahead of rate limiting could have committed the head.
+`next`; only a middleware placed ahead of rate limiting could have committed the head.
 
 ## Diagnostics
 
@@ -221,18 +251,22 @@ with `EventSourceSupport=true`. Limiter behavior and exact rejection accounting 
 
 ## Scope-creep candidates (recorded, not taken)
 
-- A pipeline-level disposal hook so the middleware can dispose its limiters at application shutdown instead
-  of relying on process-lifetime reclamation.
+- Disposing the limiters at application shutdown instead of relying on process-lifetime reclamation. The
+  hook exists now, because the container disposes the middleware `AddRateLimiting` registers; what is
+  missing is an ownership rule, so a limiter the application shares is never disposed underneath it.
 - A hosting-composition seam that wires `OnDecision` to Cohesion OpenTelemetry/metrics without a
   feature-package → hosting reference.
 - Surfacing the BCL "queued" transition to `OnDecision` if a clean per-lease signal becomes available.
 
 ## Testing
 
-`tests/RateLimitingMiddlewareTests.cs` drives the middleware through its public verb over a capturing
-pipeline builder and an `IHttpContext` double (`tests/TestObjects/`); a stage ahead of the middleware
-publishes a fake route match, which is what `UseRouting` does. `tests/RateLimitingEndToEndTests.cs` drives
-it over the in-memory `WebApplicationTestFactory` with the real router. Determinism comes from a
+`tests/RateLimitingMiddlewareTests.cs` builds the middleware through `RateLimitingBuilder` and drives it over
+a composing pipeline builder and an `IHttpContext` double (`tests/TestObjects/`); a stage ahead of the
+middleware publishes a fake route match, which is what `UseRouting` does. The same pipeline builder's
+application context lists registered middleware, so the `UseRateLimiting` tests cover placement: the
+registered middleware, the last of two registrations, the defaults without one, and the `Build` snapshot.
+`tests/RateLimitingEndToEndTests.cs` drives it over the in-memory `WebApplicationTestFactory` with the real
+router, registering through the generated `AddRateLimiting` verb (both overloads). Determinism comes from a
 **fixed-window, one-permit** policy: a window limiter does not return its permit on lease disposal, so a
 second same-window request is rejected with **no timing dependency** (the window is an hour, far beyond any
 test). The **concurrency** limiter (permit returned on completion) covers the "permit held for the request

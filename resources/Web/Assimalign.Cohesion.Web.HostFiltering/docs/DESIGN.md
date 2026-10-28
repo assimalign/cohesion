@@ -13,8 +13,10 @@ The package is deliberately thin: the *matching* primitives — the
 matcher `HttpHostMatcher` — live in `Assimalign.Cohesion.Http` (see its
 `docs/DESIGN.md`, "Host values and allowlist matching"), because they are typed
 protocol value logic every consumer must agree on. This package owns only the
-Web-pipeline surface: the options object, the `UseHostFiltering` verb, and the
-internal middleware.
+Web-pipeline surface: the options object, the `HostFilteringBuilder` behind the
+generated `builder.Services.AddHostFiltering` registration verb, the
+`UseHostFiltering` verb that places what it registered, and the internal
+middleware.
 
 ## Why a feature package, not hosting-injected middleware
 
@@ -31,22 +33,25 @@ Web.HostFiltering project" note is superseded by that direction.
 
 The consequence is the composition model changing from *hosting-guaranteed*
 first position to a **registration-order contract**: `UseHostFiltering` is
-documented (and tested) as *register it at the front*; the area's
+documented (and tested) as *place it at the front*; the area's
 [middleware order](../../../../docs/resources/Web/MIDDLEWARE_ORDER.md) gives its exact place. This follows the Web area's
 middleware-first direction — the application owns its pipeline order — and it
 resolves the forwarded-headers ordering question by putting the decision where
 it belongs (see below). What was kept from the first iteration:
 
 - **Builder-time compilation.** The allowlist compiles into an
-  `HttpHostMatcher` exactly once, inside the `UseHostFiltering` call. Invalid
-  patterns throw `ArgumentException` at registration — configuration errors
-  surface at startup, never as per-request behavior. Registration is
-  dependency-free per the Web-area rule: no service container, no
-  configuration binding, no request-time service location.
-- **Explicit opt-in.** Not calling the verb means no filtering (the pre-#781
-  behavior, zero overhead). Calling it demands a non-empty allowlist — an
-  empty one would compile to deny-all and is treated as a configuration error;
-  pass `*` to accept any host while keeping the empty-host policy enforced.
+  `HttpHostMatcher` exactly once, inside the `AddHostFiltering` call
+  (`HostFilteringBuilder.Build`). Invalid patterns throw `ArgumentException`
+  at registration — configuration errors surface at startup, never as
+  per-request behavior. The package stays dependency-free per the Web-area
+  rule: the registration verb is generated into the application, and the
+  package references no service container, no configuration binding, and does
+  no request-time service location.
+- **Explicit opt-in.** Not using host filtering means no filtering (the
+  pre-#781 behavior, zero overhead). Registering it demands a non-empty
+  allowlist — an empty one would compile to deny-all and is treated as a
+  configuration error; register `*` to accept any host while keeping the
+  empty-host policy enforced.
 - **The request-time check.** The transports already resolve the wire host
   with the correct per-version precedence (HTTP/1.1 absolute/authority-form
   target supersedes `Host` per RFC 9112 §3.2.2; HTTP/2 / HTTP/3 `:authority`
@@ -103,7 +108,7 @@ consumers: **it validates `context.EffectiveHost`**, which is
   accepted a hop that carried one, and
 - the transport-resolved wire host otherwise — no forwarded-headers
   middleware, an untrusted peer, a hop that forwarded no host, or a
-  registration that puts this guard ahead of `UseForwardedHeaders`.
+  placement that puts this guard ahead of `UseForwardedHeaders`.
 
 **Why the effective host.** The forwarded walk shape-checks `host` assertions
 but leaves *which* hosts are acceptable to a consumer allowlist. The effective
@@ -124,10 +129,10 @@ client that asserts `X-Forwarded-Host` directly is validated on its wire host.
 The trust model decides *whose* host assertion is believed; this guard decides
 whether the believed host is one the application serves.
 
-**Ordering.** Register `UseHostFiltering` directly after `UseForwardedHeaders`
+**Ordering.** Place `UseHostFiltering` directly after `UseForwardedHeaders`
 (only `UseHttpLogging` and `UseSecurityHeaders`, which read no client identity,
 go ahead of both; the area's [middleware order](../../../../docs/resources/Web/MIDDLEWARE_ORDER.md) gives the
-full sequence), and allowlist the **public** names clients use. Registered
+full sequence), and allowlist the **public** names clients use. Placed
 the other way round, the guard runs before the feature exists and validates
 the wire host — a supported, deliberate configuration for deployments that want
 to bound the upstream authority instead, but then the forwarded host is not
@@ -137,6 +142,30 @@ registered after it validates the forwarded host implicitly) and which also
 offers a separate forwarded-host allowlist
 (`ForwardedHeadersOptions.AllowedHosts`); here the rewrite is replaced by the
 effective read, and the one allowlist covers both cases.
+
+## Registration: `AddHostFiltering` configures, `UseHostFiltering` places (2026-10-28)
+
+`builder.Services.AddHostFiltering(hosts => ...)` is a generated component
+integration over `HostFilteringBuilder`. It builds the middleware once, which
+compiles `HostFilteringBuilder.Options.AllowedHosts` into the matcher and so
+rejects an empty allowlist or an invalid pattern with `ArgumentException`
+where the application registers it, and registers the middleware as a
+container-owned `IWebApplicationMiddleware` singleton. The middleware keeps the
+compiled matcher and the empty-host flag, so changing the options afterwards
+has no effect. The `(services, hosts) => ...` overload builds when the
+middleware is first resolved, as the pipeline is composed, so its
+misconfiguration fails the start instead of the registration.
+
+`UseHostFiltering()` takes no arguments: it places the last registration of
+the middleware it finds in `IWebApplicationContext.Middleware`. There is no
+default allowlist to fall back to — filtering every request against nothing
+would deny all of them, and accepting every host would make the verb a no-op —
+so placing it without a registration fails the pipeline composition with an
+`InvalidOperationException` that names `AddHostFiltering`, the same shape as
+`UseForwardedHeaders`. *Rejected:* the former
+`UseHostFiltering(Action<HostFilteringOptions> configure)`; a configuration
+callback on the pipeline verb split the feature's settings across two call
+sites and kept them out of the registrations the host enumerates.
 
 ## AOT posture
 
@@ -202,19 +231,24 @@ did not exist in 10.0.0-preview.1, so it adds no breaking change against that re
 HTTP/1.1 and HTTP/2 `:authority`, registration-order short-circuiting,
 case-insensitivity, request-port ignoring, wildcard depth/apex/lookalikes,
 IPv6 literals, the `*` pattern, and registration-time failure for invalid or
-empty allowlists. Raw HTTP/1.1 exchanges over the in-memory transport cover
-what `HttpClient` cannot produce: a missing `Host` header (the empty-host
-policy both ways) and absolute-form request-targets superseding the `Host`
-header (RFC 9112 §3.2.2). The pattern grammar itself is unit-tested with the
+empty allowlists (a bare `AddHostFiltering()` included). Every case registers
+through the generated `AddHostFiltering` verb; placement is covered by the last
+of two registrations winning, the start failure without a registration, and
+the service-provider overload (its allowlist applied, and an empty one failing
+the start rather than the registration). Raw HTTP/1.1 exchanges over the
+in-memory transport cover what `HttpClient` cannot produce: a missing `Host`
+header (the empty-host policy both ways) and absolute-form request-targets
+superseding the `Host` header (RFC 9112 §3.2.2). The pattern grammar itself is unit-tested with the
 matcher in `Assimalign.Cohesion.Http`.
 
 `tests/HostFilteringForwardedTests.cs` composes the real forwarded-headers
-middleware (the test project references `Web.ForwardedHeaders`) in front of the
-guard over the same factory, whose in-memory peer is trusted as a local
-transport — the simulated proxy. It pins that an allowlisted forwarded host is
-accepted even when the wire host is not, that a forwarded host outside the
-allowlist is rejected even when the wire host is allowlisted, and that without
-the forwarded-headers middleware, or with the guard registered ahead of it, the
-wire host is validated and forwarding headers are ignored.
+middleware (the test project references `Web.ForwardedHeaders`, registered with
+its own generated `AddForwardedHeaders` verb) in front of the guard over the
+same factory, whose in-memory peer is trusted as a local transport — the
+simulated proxy. It pins that an allowlisted forwarded host is accepted even
+when the wire host is not, that a forwarded host outside the allowlist is
+rejected even when the wire host is allowlisted, and that without the
+forwarded-headers middleware, or with the guard placed ahead of it, the wire
+host is validated and forwarding headers are ignored.
 
 Transport integration tests consume duplex byte pipes through `IDuplexConnection` and HTTP connections through `IHttpConnection`. Their listeners use `AcceptAsync`; HTTP/3 stream fixtures use `IMultiplexedConnectionStream`. These contract names do not alter this package's request/response behavior.

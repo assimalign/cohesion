@@ -5,16 +5,15 @@ construction, service startup and shutdown, restartable run state, and the compl
 `RunAsync` starts the host, waits for a shutdown request or signal, and drains it. Its only
 Cohesion assembly dependency is `Assimalign.Cohesion.Core`.
 
-The package deliberately does not own resource behavior or health contracts. Direct package
-consumers can add the sibling packages only when those capabilities are needed:
+The package deliberately does not own resource behavior. Direct package consumers add the sibling
+package only when they need it:
 
 | Package | Responsibility | Direct dependencies |
 | --- | --- | --- |
 | `Assimalign.Cohesion.Hosting` | Host lifecycle, contexts, services, and the complete run | Core |
-| `Assimalign.Cohesion.Hosting.Health` | Transport-neutral health contracts and snapshots | Core |
 | `Assimalign.Cohesion.Hosting.Resources` | Resource instances: actions and state, the control plane, manifest publication, and the resource service that joins an instance to its gateway | Core, Hosting |
 
-The base `Assimalign.Cohesion.App` framework delivers both siblings beside plain Hosting.
+The base `Assimalign.Cohesion.App` framework delivers Hosting.Resources beside plain Hosting.
 Delivery is not activation: an application becomes a managed resource only when its area's
 Hosting.Resources package registers a resource service.
 

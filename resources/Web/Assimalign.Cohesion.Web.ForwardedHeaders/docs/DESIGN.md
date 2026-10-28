@@ -38,14 +38,14 @@ flowchart LR
 
 ## The trust model is explicit, and header selection is part of it
 
-`ForwardedHeadersOptions` carries four inputs, validated and snapshotted at composition
-time (`UseForwardedHeaders` — no request-time configuration reads, no service
-location):
+`ForwardedHeadersOptions` carries four inputs, validated and snapshotted where the trust model
+is registered (`ForwardedHeadersBuilder.Build`, which `builder.Services.AddForwardedHeaders(...)`
+calls — no request-time configuration reads, no service location):
 
 - **`Headers`** (`ForwardedHeaderNames` flags) — which headers to honor. There is no
   safe default: a header the proxy does not manage arrives exactly as the attacker sent
   it, so honoring it hands over the nearest-hop position of the chain. `None` is
-  rejected at composition time rather than silently no-opping (contrast ASP.NET, whose
+  rejected at registration rather than silently no-opping (contrast ASP.NET, whose
   middleware silently does nothing until configured — a misconfiguration that surfaces
   as a subtle production identity bug instead of a thrown exception).
 - **`KnownProxies` / `KnownNetworks`** — the trust boundary, as exact addresses and CIDR
@@ -117,6 +117,19 @@ magically become proxy-aware; it has to opt into the effective view. In exchange
 wire truth is never destroyed, "what did the transport actually see" stays answerable
 (no `X-Original-*` header shuffling), and the resolution is observable
 (`TrustedHopCount`) rather than implicit.
+
+## Registration: `AddForwardedHeaders` configures, `UseForwardedHeaders` places (2026-10-28)
+
+The trust model is configured only where it is registered. `builder.Services.AddForwardedHeaders(
+forwarded => ...)` is a generated component integration over `ForwardedHeadersBuilder`: it builds the
+middleware once, which validates the options, and registers it as an `IWebApplicationMiddleware`.
+`UseForwardedHeaders()` takes no arguments and places the last such registration it finds in
+`IWebApplicationContext.Middleware`. There is no default trust model, so placing the middleware
+without a registration fails the pipeline's composition, which the application's start performs,
+with a message that names `AddForwardedHeaders`. *Rejected:* the former
+`UseForwardedHeaders(Action<ForwardedHeadersOptions>)` and `UseForwardedHeaders(options)`; configuration
+on a pipeline verb splits a feature's settings across two call sites and keeps them out of the
+registrations the host enumerates.
 
 ## Ordering contract — ahead of every identity consumer
 

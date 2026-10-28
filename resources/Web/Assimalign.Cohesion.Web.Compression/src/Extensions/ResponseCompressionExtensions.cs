@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 
 using Assimalign.Cohesion.Web;
 using Assimalign.Cohesion.Web.Compression.Internal;
@@ -6,45 +7,52 @@ using Assimalign.Cohesion.Web.Compression.Internal;
 namespace Assimalign.Cohesion.Web.Compression;
 
 /// <summary>
-/// Pipeline-builder verbs that add response compression to a web application. They compose against
-/// the root <see cref="IWebApplicationPipelineBuilder"/> and are dependency-free: options are
-/// captured at builder time and the middleware resolves nothing per request.
+/// Pipeline-builder verb that places response compression in a web application. It composes against
+/// the root <see cref="IWebApplicationPipelineBuilder"/> and is dependency-free: the middleware is
+/// configured where it is registered and resolves nothing per request.
 /// </summary>
 public static class ResponseCompressionExtensions
 {
     extension(IWebApplicationPipelineBuilder builder)
     {
         /// <summary>
-        /// Adds middleware that negotiates gzip/Brotli from each request's <c>Accept-Encoding</c> and
-        /// compresses eligible responses (configured media types, above the size threshold), stamping
-        /// <c>Content-Encoding</c> and <c>Vary: Accept-Encoding</c> and dropping the stale
-        /// <c>Content-Length</c>. Already-encoded responses and streamed responses are left untouched,
+        /// Places the middleware that negotiates gzip/Brotli from each request's <c>Accept-Encoding</c>
+        /// and compresses eligible responses (configured media types, above the size threshold),
+        /// stamping <c>Content-Encoding</c> and <c>Vary: Accept-Encoding</c> and dropping the stale
+        /// <c>Content-Length</c>: the middleware the application registered with
+        /// <c>builder.Services.AddResponseCompression(compression =&gt; ...)</c>, or one with the defaults
+        /// when it registered none. Already-encoded responses and streamed responses are left untouched,
         /// and HTTPS dynamic content is compressed only when explicitly enabled (BREACH).
         /// </summary>
-        /// <param name="configure">
-        /// An optional callback to configure the codings, eligible media types, size threshold,
-        /// compression level, and the HTTPS opt-in. When <see langword="null"/>, the defaults apply
-        /// (gzip and Brotli, the seeded text/structured-text media types, a 1&#8239;KiB threshold,
-        /// <c>Fastest</c> level, HTTPS off).
-        /// </param>
         /// <returns>The same <see cref="IWebApplicationPipelineBuilder"/> for chaining.</returns>
         /// <exception cref="ArgumentNullException"><paramref name="builder"/> is <see langword="null"/>.</exception>
-        /// <exception cref="ArgumentException">Both <c>EnableGzip</c> and <c>EnableBrotli</c> were disabled, leaving no coding to offer, or a configured media-type pattern is invalid.</exception>
         /// <remarks>
-        /// Register this early in the pipeline so it wraps the response body of every middleware whose
+        /// <para>
+        /// The codings, eligible media types, size threshold, compression level, and the HTTPS opt-in
+        /// are configured where the middleware is registered (<see cref="ResponseCompressionBuilder"/>);
+        /// this verb only positions it. The defaults are gzip and Brotli, the seeded text and
+        /// structured-text media types, a 1&#8239;KiB threshold, the <c>Fastest</c> level, and HTTPS off.
+        /// When the application registered compression more than once, the last registration wins.
+        /// </para>
+        /// <para>
+        /// Place this early in the pipeline so it wraps the response body of every middleware whose
         /// output it should compress. It composes with the exception boundary and content-negotiated
         /// writes: it appends to any existing <c>Vary</c> rather than clobbering it. With output caching,
-        /// register it after <c>UseOutputCache</c>, which itself follows <c>UseRouting</c>, so the cache
+        /// place it after <c>UseOutputCache</c>, which itself follows <c>UseRouting</c>, so the cache
         /// stores the encoded variant under the <c>Vary</c> this middleware stamps.
+        /// </para>
         /// </remarks>
-        public IWebApplicationPipelineBuilder UseResponseCompression(Action<ResponseCompressionOptions>? configure = null)
+        public IWebApplicationPipelineBuilder UseResponseCompression()
         {
             ArgumentNullException.ThrowIfNull(builder);
 
-            ResponseCompressionOptions options = new();
-            configure?.Invoke(options);
+            return builder.Use(static (context, next) =>
+            {
+                IWebApplicationMiddleware middleware = context.Middleware.OfType<ResponseCompressionMiddleware>().LastOrDefault()
+                    ?? new ResponseCompressionBuilder().Build();
 
-            return builder.Use(new ResponseCompressionMiddleware(options));
+                return exchange => middleware.InvokeAsync(exchange, next);
+            });
         }
     }
 }

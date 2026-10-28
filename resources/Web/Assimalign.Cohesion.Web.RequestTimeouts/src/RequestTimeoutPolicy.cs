@@ -7,8 +7,9 @@ namespace Assimalign.Cohesion.Web.RequestTimeouts;
 
 /// <summary>
 /// A request-timeout policy: how long a request may execute before it is timed out, and how the
-/// timeout is answered on the wire. The global default policy is configured at builder time
-/// through <see cref="RequestTimeoutOptions.DefaultPolicy"/>; per-endpoint policies are attached
+/// timeout is answered on the wire. The global default policy is configured where the middleware is
+/// registered, through <see cref="RequestTimeoutOptions.DefaultPolicy"/> on
+/// <c>builder.Services.AddRequestTimeouts(timeouts =&gt; ...)</c>; per-endpoint policies are attached
 /// to routes as <see cref="RequestTimeoutMetadata"/> and override the default.
 /// </summary>
 /// <remarks>

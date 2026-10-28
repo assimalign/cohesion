@@ -1,8 +1,9 @@
 # Assimalign.Cohesion.Web.WebSockets — Overview
 
 WebSockets for the Web pipeline. `MapWebSocket` maps a socket endpoint that answers every handshake
-shape, and `UseWebSockets` guards and shapes every WebSocket an endpoint accepts through
-`context.WebSockets` (`Assimalign.Cohesion.Http.WebSockets`).
+shape, and the policy `builder.Services.AddWebSockets(...)` configures and `UseWebSockets()` places
+guards and shapes every WebSocket an endpoint accepts through `context.WebSockets`
+(`Assimalign.Cohesion.Http.WebSockets`).
 
 ## Scope
 
@@ -29,15 +30,19 @@ using System.Net.WebSockets;
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Web.WebSockets;
 
+WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
+builder.Services.AddRouting();
+builder.Services.AddWebSockets(webSockets =>
+{
+    webSockets.Options.AllowedOrigins.Add("https://app.example");   // besides the request's own origin
+    webSockets.Options.KeepAliveInterval = TimeSpan.FromSeconds(20);
+});
+
 WebApplication app = builder.Build();
 
-// Behind a proxy, register UseForwardedHeaders(...) first: the origin check reads the effective
+// Behind a proxy, place UseForwardedHeaders() first: the origin check reads the effective
 // scheme and host it resolves.
-app.UseWebSockets(options =>
-{
-    options.AllowedOrigins.Add("https://app.example");   // besides the request's own origin
-    options.KeepAliveInterval = TimeSpan.FromSeconds(20);
-});
+app.UseWebSockets();
 
 app.MapWebSocket("/chat/{room}", async (IHttpContext context, WebSocket socket) =>
 {
@@ -59,17 +64,24 @@ which negotiates HTTP/2 through ALPN. `MapWebSocket` maps both methods on one ro
 - an overload chooses the accept options per handshake, for example a subprotocol the client
   offered: `app.MapWebSocket("/chat", handler, context => new HttpWebSocketAcceptOptions { SubProtocol = ... })`.
 
-Without `UseWebSockets` in the pipeline, a `MapWebSocket` endpoint applies the default policy
-itself, so a socket endpoint is never left without the cross-site defense.
+Configuration lives on the `Add` verb only ("Add configures, Use places"). `UseWebSockets()` takes no
+arguments: it places the policy `AddWebSockets` registered (the last one, when the application
+registered several), or the default policy when it registered none. Without `UseWebSockets` in the
+pipeline, a `MapWebSocket` endpoint applies the default policy itself, so a socket endpoint is never
+left without the cross-site defense; a registered policy applies only where `UseWebSockets()` places it.
 
 The endpoint's own `CloseAsync` or `CloseOutputAsync` keeps working after a drain close: the policy
 coordinates the two, so a receive loop written the usual way ends cleanly.
 
 ## Options
 
+Set on `WebSocketsBuilder.Options` in the `AddWebSockets` callback. `WebSocketsBuilder.Build()`
+validates and snapshots them; an invalid allowed origin throws `ArgumentException` where the policy is
+registered.
+
 | Option | Default | Meaning |
 | --- | --- | --- |
-| `AllowedOrigins` | empty | Serialized origins, besides the request's own, whose pages may open a socket; validated when `UseWebSockets` runs |
+| `AllowedOrigins` | empty | Serialized origins, besides the request's own, whose pages may open a socket; validated when `AddWebSockets` registers the policy |
 | `AllowAnyOrigin` | `false` | Turns the hijacking defense off, for sockets that carry no ambient credentials |
 | `KeepAliveInterval` | 30 seconds | How often an idle socket sends a keep-alive frame |
 | `KeepAliveTimeout` | infinite | How long to wait for a pong before aborting; infinite sends unsolicited pongs |

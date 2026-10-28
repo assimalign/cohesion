@@ -54,10 +54,9 @@ The stop-begun marker belongs to the run, so a later run starts with fresh seman
 | Package | Owns |
 | --- | --- |
 | `Assimalign.Cohesion.Hosting` | Plain host lifetime and service execution |
-| `Assimalign.Cohesion.Hosting.Health` | Health vocabulary shared by resource and delivery packages |
 | `Assimalign.Cohesion.Hosting.Resources` | Resource instances, their control plane, and the resource service that joins one to its gateway |
 
-Consumers can reference Health without Hosting. The base `Assimalign.Cohesion.App` framework
-delivers Resources and Health beside Hosting. Their presence does not activate resource behavior:
+The base `Assimalign.Cohesion.App` framework delivers Resources beside Hosting. Its presence does
+not activate resource behavior:
 an application becomes a managed resource only when its area's Hosting.Resources package
 registers a resource service.

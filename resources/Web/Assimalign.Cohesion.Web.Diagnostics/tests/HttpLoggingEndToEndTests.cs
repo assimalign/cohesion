@@ -3,6 +3,7 @@ using System.Text;
 
 using Assimalign.Cohesion.Connections;
 using Assimalign.Cohesion.Connections.InMemory;
+using Assimalign.Cohesion.DependencyInjection;
 using Assimalign.Cohesion.Http.Connections;
 using Assimalign.Cohesion.Logging;
 using Assimalign.Cohesion.Web.Diagnostics.Tests.TestObjects;
@@ -60,8 +61,9 @@ public class HttpLoggingEndToEndTests
         using ILoggerFactory loggerFactory = new LoggerFactoryBuilder().AddProvider(recorded).Build();
 
         await using WebApplicationTestFactory factory = new();
+        factory.Builder.Services.AddHttpLogging(logging => logging.UseLogger(loggerFactory.Create(new HttpLoggingOptions().Category)));
         factory.Application
-            .UseHttpLogging(loggerFactory.Create(new HttpLoggingOptions().Category))
+            .UseHttpLogging()
             .Use(async (context, next) =>
             {
                 context.Response.StatusCode = CohesionHttpStatusCode.Ok;
@@ -106,8 +108,9 @@ public class HttpLoggingEndToEndTests
         using ILoggerFactory loggerFactory = new LoggerFactoryBuilder().AddProvider(recorded).Build();
 
         await using WebApplicationTestFactory factory = new();
+        factory.Builder.Services.AddHttpLogging(logging => logging.UseLogger(loggerFactory.Create(new HttpLoggingOptions().Category)));
         factory.Application
-            .UseHttpLogging(loggerFactory.Create(new HttpLoggingOptions().Category))
+            .UseHttpLogging()
             .Use((context, next) =>
             {
                 context.Response.StatusCode = CohesionHttpStatusCode.Ok;
@@ -159,10 +162,13 @@ public class HttpLoggingEndToEndTests
         using ILoggerFactory loggerFactory = new LoggerFactoryBuilder().AddProvider(recorded).Build();
 
         await using WebApplicationTestFactory factory = new();
+        factory.Builder.Services.AddHttpLogging(logging =>
+        {
+            logging.UseLogger(loggerFactory.Create(new HttpLoggingOptions().Category));
+            logging.Options.Fields = HttpLoggingFields.Default | HttpLoggingFields.RequestQuery;
+        });
         factory.Application
-            .UseHttpLogging(
-                loggerFactory.Create(new HttpLoggingOptions().Category),
-                options => options.Fields = HttpLoggingFields.Default | HttpLoggingFields.RequestQuery)
+            .UseHttpLogging()
             .Use((context, next) =>
             {
                 context.Response.StatusCode = CohesionHttpStatusCode.Ok;
@@ -188,15 +194,15 @@ public class HttpLoggingEndToEndTests
         using ILoggerFactory loggerFactory = new LoggerFactoryBuilder().AddProvider(recorded).Build();
 
         await using WebApplicationTestFactory factory = new();
+        factory.Builder.Services.AddHttpLogging(logging =>
+        {
+            logging.UseLogger(loggerFactory.Create(new HttpLoggingOptions().Category));
+            logging.Options.Fields = HttpLoggingFields.All;
+            logging.Options.RequestBodyLimit = 8;
+            logging.Options.ResponseBodyLimit = 8;
+        });
         factory.Application
-            .UseHttpLogging(
-                loggerFactory.Create(new HttpLoggingOptions().Category),
-                options =>
-                {
-                    options.Fields = HttpLoggingFields.All;
-                    options.RequestBodyLimit = 8;
-                    options.ResponseBodyLimit = 8;
-                })
+            .UseHttpLogging()
             .Use(async (context, next) =>
             {
                 context.Response.StatusCode = CohesionHttpStatusCode.Ok;
@@ -227,10 +233,13 @@ public class HttpLoggingEndToEndTests
         using ILoggerFactory loggerFactory = new LoggerFactoryBuilder().AddProvider(recorded).Build();
 
         await using WebApplicationTestFactory factory = new();
+        factory.Builder.Services.AddHttpLogging(logging =>
+        {
+            logging.UseLogger(loggerFactory.Create(new HttpLoggingOptions().Category));
+            logging.Options.Fields = HttpLoggingFields.All;
+        });
         factory.Application
-            .UseHttpLogging(
-                loggerFactory.Create(new HttpLoggingOptions().Category),
-                options => options.Fields = HttpLoggingFields.All)
+            .UseHttpLogging()
             .Use(async (context, next) =>
             {
                 context.Response.StatusCode = CohesionHttpStatusCode.Ok;
@@ -266,7 +275,8 @@ public class HttpLoggingEndToEndTests
         await using WebApplicationTestFactory factory = new();
         factory.Builder.Services.AddRouting();
 
-        factory.Application.UseHttpLogging(loggerFactory.Create(new HttpLoggingOptions().Category));
+        factory.Builder.Services.AddHttpLogging(logging => logging.UseLogger(loggerFactory.Create(new HttpLoggingOptions().Category)));
+        factory.Application.UseHttpLogging();
 
         IRouterBuilder routes = factory.Application.UseRouting();
         routes.Map(new Route(
@@ -312,7 +322,8 @@ public class HttpLoggingEndToEndTests
         await using WebApplicationTestFactory factory = new();
         factory.Builder.Services.AddRouting();
 
-        factory.Application.UseHttpLogging(loggerFactory.Create(new HttpLoggingOptions().Category));
+        factory.Builder.Services.AddHttpLogging(logging => logging.UseLogger(loggerFactory.Create(new HttpLoggingOptions().Category)));
+        factory.Application.UseHttpLogging();
 
         RouterRouteHandler ok = new(context =>
         {
@@ -350,7 +361,8 @@ public class HttpLoggingEndToEndTests
         await using WebApplicationTestFactory factory = new();
         factory.Builder.Services.AddRouting();
 
-        factory.Application.UseHttpLogging(loggerFactory.Create(new HttpLoggingOptions().Category));
+        factory.Builder.Services.AddHttpLogging(logging => logging.UseLogger(loggerFactory.Create(new HttpLoggingOptions().Category)));
+        factory.Application.UseHttpLogging();
 
         IRouterBuilder routes = factory.Application.UseRouting();
         routes.Map(new Route(
@@ -391,7 +403,8 @@ public class HttpLoggingEndToEndTests
         await using WebApplicationTestFactory factory = new();
         factory.Builder.Services.AddRouting();
 
-        factory.Application.UseHttpLogging(loggerFactory.Create(new HttpLoggingOptions().Category));
+        factory.Builder.Services.AddHttpLogging(logging => logging.UseLogger(loggerFactory.Create(new HttpLoggingOptions().Category)));
+        factory.Application.UseHttpLogging();
 
         IRouterBuilder routes = factory.Application.UseRouting();
         routes.Map(new Route(
@@ -429,8 +442,9 @@ public class HttpLoggingEndToEndTests
         using ILoggerFactory loggerFactory = new LoggerFactoryBuilder().AddProvider(recorded).Build();
 
         await using WebApplicationTestFactory factory = new();
+        factory.Builder.Services.AddHttpLogging(logging => logging.UseLogger(loggerFactory.Create(new HttpLoggingOptions().Category)));
         factory.Application
-            .UseHttpLogging(loggerFactory.Create(new HttpLoggingOptions().Category))
+            .UseHttpLogging()
             // Async lambda so overload resolution binds the request-time middleware shape
             // (Func<IHttpContext, WebApplicationMiddleware, Task>) - a bare throw expression
             // would also satisfy the pipeline-build-time Use overload.
@@ -467,8 +481,9 @@ public class HttpLoggingEndToEndTests
         await using InMemoryConnectionListener transport = new();
         await using WebApplicationTestFactory factory = new();
         factory.Builder.Server.UseServer(options => options.UseHttp1(transport));
+        factory.Builder.Services.AddHttpLogging(logging => logging.UseLogger(loggerFactory.Create(new HttpLoggingOptions().Category)));
         factory.Application
-            .UseHttpLogging(loggerFactory.Create(new HttpLoggingOptions().Category))
+            .UseHttpLogging()
             .Use(ReadBodyToEndAsync);
 
         // Act
@@ -501,8 +516,9 @@ public class HttpLoggingEndToEndTests
         await using InMemoryConnectionListener transport = new();
         await using WebApplicationTestFactory factory = new();
         factory.Builder.Server.UseServer(options => options.UseHttp1(transport, http1 => http1.Limits.MaxRequestBodySize = 16));
+        factory.Builder.Services.AddHttpLogging(logging => logging.UseLogger(loggerFactory.Create(new HttpLoggingOptions().Category)));
         factory.Application
-            .UseHttpLogging(loggerFactory.Create(new HttpLoggingOptions().Category))
+            .UseHttpLogging()
             .Use(ReadBodyToEndAsync);
 
         // Act
@@ -537,8 +553,9 @@ public class HttpLoggingEndToEndTests
         await using InMemoryConnectionListener transport = new();
         await using WebApplicationTestFactory factory = new();
         factory.Builder.Server.UseServer(options => options.UseHttp1(transport));
+        factory.Builder.Services.AddHttpLogging(logging => logging.UseLogger(loggerFactory.Create(new HttpLoggingOptions().Category)));
         factory.Application
-            .UseHttpLogging(loggerFactory.Create(new HttpLoggingOptions().Category))
+            .UseHttpLogging()
             .Use(async (context, next) =>
             {
                 try
@@ -584,8 +601,9 @@ public class HttpLoggingEndToEndTests
         await using InMemoryConnectionListener transport = new();
         await using WebApplicationTestFactory factory = new();
         factory.Builder.Server.UseServer(options => options.UseHttp1(transport));
+        factory.Builder.Services.AddHttpLogging(logging => logging.UseLogger(loggerFactory.Create(new HttpLoggingOptions().Category)));
         factory.Application
-            .UseHttpLogging(loggerFactory.Create(new HttpLoggingOptions().Category))
+            .UseHttpLogging()
             .Use(ReadBodyToEndAsync);
 
         // Act
@@ -602,6 +620,91 @@ public class HttpLoggingEndToEndTests
         entry.Level.ShouldBe(LogLevel.Information);
         entry.Attributes[HttpLoggingAttributes.ResponseStatusCode].ShouldBe(204);
         entry.Attributes.ContainsKey(HttpLoggingAttributes.ClientFault).ShouldBeFalse();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Diagnostics] - E2E: AddHttpLogging over the application's logger factory should write through the application's providers")]
+    public async Task AddHttpLogging_ApplicationLoggerFactory_ShouldWriteThroughTheApplicationsProviders()
+    {
+        // Arrange — the documented composition: the provider overload resolves the ILoggerFactory the host
+        // registers when it builds, so the entries reach the providers the application configured.
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        RecordingLoggerProvider recorded = new();
+
+        await using WebApplicationTestFactory factory = new();
+        factory.Builder.Logging.AddProvider(recorded);
+        factory.Builder.Services.AddHttpLogging((services, logging) => logging.UseLoggerFactory(services.GetRequiredService<ILoggerFactory>()));
+        factory.Application
+            .UseHttpLogging()
+            .Use((context, next) =>
+            {
+                context.Response.StatusCode = CohesionHttpStatusCode.Ok;
+                return Task.CompletedTask;
+            });
+
+        using HttpClient client = factory.CreateClient();
+
+        // Act
+        (await client.GetAsync("/application-factory", cancellation.Token)).Dispose();
+
+        // Assert — the host logs through the same providers, so pick the access-log entry by its category.
+        ILoggerEntry entry = await WaitForAccessLogEntryAsync(recorded, cancellation.Token);
+        entry.Level.ShouldBe(LogLevel.Information);
+        entry.Attributes[HttpLoggingAttributes.Event].ShouldBe(HttpLoggingAttributes.EventExchange);
+        entry.Attributes[HttpLoggingAttributes.RequestPath].ShouldBe("/application-factory");
+        entry.Attributes[HttpLoggingAttributes.ResponseStatusCode].ShouldBe(200);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Diagnostics] - E2E: AddHttpLogging without a logger should fail inside the AddHttpLogging call")]
+    public async Task AddHttpLogging_WithoutLogger_ShouldFailAtRegistration()
+    {
+        // Arrange — the builder template builds eagerly, and there is no default logger.
+        await using WebApplicationTestFactory factory = new();
+
+        // Act
+        InvalidOperationException exception = Should.Throw<InvalidOperationException>(() => factory.Builder.Services.AddHttpLogging());
+
+        // Assert
+        exception.Message.ShouldContain("UseLoggerFactory", Case.Sensitive);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Diagnostics] - E2E: UseHttpLogging without a registration should fail the application's start")]
+    public async Task UseHttpLogging_WithoutRegistration_ShouldFailToStart()
+    {
+        // Arrange
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        await using WebApplicationTestFactory factory = new();
+        IWebApplication application = factory.Application;
+        factory.Application.UseHttpLogging();
+
+        // Act — composing the pipeline, which starting the application does, names the verb to call.
+        InvalidOperationException exception = await Should.ThrowAsync<InvalidOperationException>(
+            () => application.StartAsync(cancellation.Token));
+
+        // Assert
+        exception.Message.ShouldContain("AddHttpLogging", Case.Sensitive);
+    }
+
+    /// <summary>
+    /// Waits until the recording provider has seen an HTTP access-log entry: one under the middleware's
+    /// default category, among whatever else the application logs through the same providers.
+    /// </summary>
+    private static async Task<ILoggerEntry> WaitForAccessLogEntryAsync(RecordingLoggerProvider recorded, CancellationToken cancellationToken)
+    {
+        string category = new HttpLoggingOptions().Category;
+
+        while (true)
+        {
+            foreach (ILoggerEntry entry in recorded.Entries)
+            {
+                if (entry.Category == category)
+                {
+                    return entry;
+                }
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            await Task.Delay(10, cancellationToken);
+        }
     }
 
     /// <summary>Reads the request body to its end, letting a failed read escape, then answers 204.</summary>
@@ -667,10 +770,13 @@ public class HttpLoggingEndToEndTests
         using ILoggerFactory loggerFactory = new LoggerFactoryBuilder().AddProvider(recorded).Build();
 
         await using WebApplicationTestFactory factory = new();
+        factory.Builder.Services.AddHttpLogging(logging =>
+        {
+            logging.UseLogger(loggerFactory.Create(new HttpLoggingOptions().Category));
+            logging.Options.LogRequestStart = true;
+        });
         factory.Application
-            .UseHttpLogging(
-                loggerFactory.Create(new HttpLoggingOptions().Category),
-                options => options.LogRequestStart = true)
+            .UseHttpLogging()
             .Use((context, next) =>
             {
                 context.Response.StatusCode = CohesionHttpStatusCode.Ok;
@@ -705,10 +811,13 @@ public class HttpLoggingEndToEndTests
         using ILoggerFactory loggerFactory = new LoggerFactoryBuilder().AddProvider(recorded).Build();
 
         await using WebApplicationTestFactory factory = new();
+        factory.Builder.Services.AddHttpLogging(logging =>
+        {
+            logging.UseLogger(loggerFactory.Create(new HttpLoggingOptions().Category));
+            logging.Options.ClientAddressResolver = _ => IPAddress.Parse("203.0.113.9");
+        });
         factory.Application
-            .UseHttpLogging(
-                loggerFactory.Create(new HttpLoggingOptions().Category),
-                options => options.ClientAddressResolver = _ => IPAddress.Parse("203.0.113.9"))
+            .UseHttpLogging()
             .Use((context, next) =>
             {
                 context.Response.StatusCode = CohesionHttpStatusCode.Ok;
@@ -748,8 +857,9 @@ public class HttpLoggingEndToEndTests
                 .Build();
 
             await using WebApplicationTestFactory factory = new();
+            factory.Builder.Services.AddHttpLogging(logging => logging.UseLoggerFactory(loggerFactory));
             factory.Application
-                .UseHttpLogging(loggerFactory)
+                .UseHttpLogging()
                 .Use((context, next) =>
                 {
                     context.Response.StatusCode = CohesionHttpStatusCode.Ok;

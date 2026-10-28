@@ -127,7 +127,6 @@ jobs:
             'Assimalign.Cohesion.Connections.Tcp'
             'Assimalign.Cohesion.Connections.Tls'
             'Assimalign.Cohesion.Hosting'
-            'Assimalign.Cohesion.Hosting.Health'
             'Assimalign.Cohesion.Hosting.Resources'
             'Assimalign.Cohesion.Http'
             'Assimalign.Cohesion.Http.Connections'

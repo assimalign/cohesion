@@ -20,14 +20,15 @@ using NetHttpStatusCode = System.Net.HttpStatusCode;
 namespace Assimalign.Cohesion.Web.RateLimiting.Tests;
 
 /// <summary>
-/// Full-pipeline coverage over the <see cref="WebApplicationTestFactory"/> (in-memory HTTP/1.1): the
-/// global limiter answers a second same-window request with 429 + Retry-After on the wire, a per-endpoint
-/// policy gates its route through the real router when registered after <c>UseRouting</c>, a CORS
-/// preflight leaves the policy untouched, the OnRejected hook shapes the wire response, an unconfigured
-/// middleware passes everything through, and a middleware registered ahead of <c>UseRouting</c> keeps
-/// its global limiter but fails an endpoint whose policy it could not apply. Requests are sequential on
-/// one client — safe for the window limiter (its permit is not returned on completion) and for the
-/// sequential in-memory dispatch.
+/// Full-pipeline coverage over the <see cref="WebApplicationTestFactory"/> (in-memory HTTP/1.1), with the
+/// policies registered through the generated <c>builder.Services.AddRateLimiting</c> verb and placed by
+/// <c>UseRateLimiting()</c>: the global limiter answers a second same-window request with 429 +
+/// Retry-After on the wire, a per-endpoint policy gates its route through the real router when placed
+/// after <c>UseRouting</c>, a CORS preflight leaves the policy untouched, the OnRejected hook shapes the
+/// wire response, an unregistered middleware passes everything through, the last of two registrations
+/// wins, and a middleware placed ahead of <c>UseRouting</c> keeps its global limiter but fails an
+/// endpoint whose policy it could not apply. Requests are sequential on one client — safe for the window
+/// limiter (its permit is not returned on completion) and for the sequential in-memory dispatch.
 /// </summary>
 public class RateLimitingEndToEndTests
 {
@@ -42,8 +43,9 @@ public class RateLimitingEndToEndTests
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();
+        factory.Builder.Services.AddRateLimiting(rateLimiting => rateLimiting.Options.GlobalPolicy = FixedWindowSingle());
 
-        factory.Application.UseRateLimiting(options => options.GlobalPolicy = FixedWindowSingle());
+        factory.Application.UseRateLimiting();
         factory.Application.Use((context, next) =>
         {
             context.Response.StatusCode = CohesionHttpStatusCode.Ok;
@@ -69,8 +71,9 @@ public class RateLimitingEndToEndTests
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();
+        factory.Builder.Services.AddRateLimiting(rateLimiting => rateLimiting.Options.GlobalPolicy = FixedWindowSingle());
 
-        factory.Application.UseRateLimiting(options => options.GlobalPolicy = FixedWindowSingle());
+        factory.Application.UseRateLimiting();
         factory.Application.Use((context, next) =>
         {
             context.Response.StatusCode = CohesionHttpStatusCode.Ok;
@@ -97,6 +100,7 @@ public class RateLimitingEndToEndTests
 
         await using WebApplicationTestFactory factory = new();
         factory.Builder.Services.AddRouting();
+        factory.Builder.Services.AddRateLimiting(rateLimiting => rateLimiting.Options.AddPolicy("expensive", FixedWindowSingle("expensive")));
 
         int endpointInvocations = 0;
 
@@ -112,7 +116,7 @@ public class RateLimitingEndToEndTests
             }),
             new RouterRouteMetadataCollection(new RateLimitingMetadata("expensive"))));
 
-        factory.Application.UseRateLimiting(options => options.AddPolicy("expensive", FixedWindowSingle("expensive")));
+        factory.Application.UseRateLimiting();
 
         using HttpClient client = factory.CreateClient();
 
@@ -135,6 +139,7 @@ public class RateLimitingEndToEndTests
 
         await using WebApplicationTestFactory factory = new();
         factory.Builder.Services.AddRouting();
+        factory.Builder.Services.AddRateLimiting(rateLimiting => rateLimiting.Options.AddPolicy("writes", FixedWindowSingle("writes")));
 
         IRouterBuilder routes = factory.Application.UseRouting();
         routes.Map(new Route(
@@ -147,7 +152,7 @@ public class RateLimitingEndToEndTests
             }),
             new RouterRouteMetadataCollection(new RateLimitingMetadata("writes"))));
 
-        factory.Application.UseRateLimiting(options => options.AddPolicy("writes", FixedWindowSingle("writes")));
+        factory.Application.UseRateLimiting();
 
         using HttpClient client = factory.CreateClient();
         using HttpRequestMessage preflight = new(NetHttpMethod.Options, "/items/7");
@@ -175,8 +180,9 @@ public class RateLimitingEndToEndTests
 
         await using WebApplicationTestFactory factory = new();
         factory.Builder.Services.AddRouting();
+        factory.Builder.Services.AddRateLimiting(rateLimiting => rateLimiting.Options.GlobalPolicy = FixedWindowSingle());
 
-        factory.Application.UseRateLimiting(options => options.GlobalPolicy = FixedWindowSingle());
+        factory.Application.UseRateLimiting();
 
         IRouterBuilder routes = factory.Application.UseRouting();
         routes.Map(new Route(
@@ -208,6 +214,7 @@ public class RateLimitingEndToEndTests
 
         await using WebApplicationTestFactory factory = new();
         factory.Builder.Services.AddRouting();
+        factory.Builder.Services.AddRateLimiting(rateLimiting => rateLimiting.Options.AddPolicy("expensive", FixedWindowSingle("expensive")));
 
         InvalidOperationException? dispatchFailure = null;
         int endpointInvocations = 0;
@@ -226,7 +233,7 @@ public class RateLimitingEndToEndTests
             }
         });
 
-        factory.Application.UseRateLimiting(options => options.AddPolicy("expensive", FixedWindowSingle("expensive")));
+        factory.Application.UseRateLimiting();
 
         IRouterBuilder routes = factory.Application.UseRouting();
         routes.Map(new Route(
@@ -259,15 +266,16 @@ public class RateLimitingEndToEndTests
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();
-
-        factory.Application.UseRateLimiting(options =>
+        factory.Builder.Services.AddRateLimiting(rateLimiting =>
         {
-            options.GlobalPolicy = FixedWindowSingle();
-            options.OnRejected = async (rejection, token) =>
+            rateLimiting.Options.GlobalPolicy = FixedWindowSingle();
+            rateLimiting.Options.OnRejected = async (rejection, token) =>
             {
                 await rejection.Context.Response.Body.WriteAsync(Encoding.UTF8.GetBytes("throttled"), token);
             };
         });
+
+        factory.Application.UseRateLimiting();
         factory.Application.Use((context, next) =>
         {
             context.Response.StatusCode = CohesionHttpStatusCode.Ok;
@@ -309,6 +317,75 @@ public class RateLimitingEndToEndTests
             using HttpResponseMessage response = await client.GetAsync("/", cancellationToken);
             response.StatusCode.ShouldBe(NetHttpStatusCode.OK);
         }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.RateLimiting] - E2E: The last AddRateLimiting registration should be the one UseRateLimiting places")]
+    public async Task AddRateLimiting_RegisteredTwice_ShouldApplyTheLastRegistration()
+    {
+        // Arrange — both registrations exhaust after one request; the first rejects with 503, the last
+        // with the default 429.
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        CancellationToken cancellationToken = cancellation.Token;
+
+        await using WebApplicationTestFactory factory = new();
+        factory.Builder.Services.AddRateLimiting(rateLimiting =>
+        {
+            rateLimiting.Options.GlobalPolicy = FixedWindowSingle("first");
+            rateLimiting.Options.RejectionStatusCode = CohesionHttpStatusCode.ServiceUnavailable;
+        });
+        factory.Builder.Services.AddRateLimiting(rateLimiting => rateLimiting.Options.GlobalPolicy = FixedWindowSingle("last"));
+
+        factory.Application.UseRateLimiting();
+        factory.Application.Use((context, next) =>
+        {
+            context.Response.StatusCode = CohesionHttpStatusCode.Ok;
+            return Task.CompletedTask;
+        });
+
+        using HttpClient client = factory.CreateClient();
+
+        // Act
+        using HttpResponseMessage first = await client.GetAsync("/", cancellationToken);
+        using HttpResponseMessage second = await client.GetAsync("/", cancellationToken);
+
+        // Assert
+        first.StatusCode.ShouldBe(NetHttpStatusCode.OK);
+        second.StatusCode.ShouldBe(NetHttpStatusCode.TooManyRequests);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.RateLimiting] - E2E: AddRateLimiting with a service-provider callback should configure the middleware UseRateLimiting places")]
+    public async Task AddRateLimiting_ServiceProviderCallback_ShouldConfigureThePlacedMiddleware()
+    {
+        // Arrange — the provider overload builds on first resolve, when the pipeline is composed.
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        CancellationToken cancellationToken = cancellation.Token;
+
+        bool configured = false;
+
+        await using WebApplicationTestFactory factory = new();
+        factory.Builder.Services.AddRateLimiting((services, rateLimiting) =>
+        {
+            configured = services is not null;
+            rateLimiting.Options.GlobalPolicy = FixedWindowSingle();
+        });
+
+        factory.Application.UseRateLimiting();
+        factory.Application.Use((context, next) =>
+        {
+            context.Response.StatusCode = CohesionHttpStatusCode.Ok;
+            return Task.CompletedTask;
+        });
+
+        using HttpClient client = factory.CreateClient();
+
+        // Act
+        using HttpResponseMessage first = await client.GetAsync("/", cancellationToken);
+        using HttpResponseMessage second = await client.GetAsync("/", cancellationToken);
+
+        // Assert
+        configured.ShouldBeTrue();
+        first.StatusCode.ShouldBe(NetHttpStatusCode.OK);
+        second.StatusCode.ShouldBe(NetHttpStatusCode.TooManyRequests);
     }
 
     private static RateLimitingPolicy FixedWindowSingle(string key = "test")

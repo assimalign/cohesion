@@ -12,8 +12,8 @@ namespace Assimalign.Cohesion.Web.SecurityHeaders;
 /// Each verb appends a <see cref="SecurityHeadersMetadata"/> through
 /// <see cref="IRouterConventionBuilder.WithMetadata"/>, composed when the route table is built; the most
 /// specific declaration wins. The override applies to every response for a request routed to the
-/// endpoint, error responses included, and only where <c>UseSecurityHeaders</c> is registered. Responses
-/// that never reach an endpoint keep the pipeline's policy.
+/// endpoint, error responses included, and only where <c>UseSecurityHeaders</c> places the middleware.
+/// Responses that never reach an endpoint keep the pipeline's policy.
 /// </remarks>
 public static class SecurityHeadersRouteConventionExtensions
 {
@@ -21,7 +21,8 @@ public static class SecurityHeadersRouteConventionExtensions
     {
         /// <summary>
         /// Adjusts the pipeline's security-headers policy for the route (or every route of the group): the
-        /// callback receives a copy of the policy configured on <c>UseSecurityHeaders</c>.
+        /// callback receives a copy of the policy the application registered with <c>AddSecurityHeaders</c>,
+        /// or of the defaults when it registered none.
         /// </summary>
         /// <param name="configure">
         /// The adjustment, for example <c>policy =&gt; policy.Framing = FramingPolicy.SameOrigin</c>. It is

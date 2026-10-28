@@ -26,7 +26,7 @@ public class RewriteRequestViewTests
         // Arrange
         IHttpContext? downstream = null;
         TestPipelineBuilder builder = new();
-        builder.UseRewrite(rules => rules.AddRewrite("^/products/(\\d+)$", "/product?id=$1"));
+        builder.Use(TestRewriteMiddleware.Build(rules => rules.AddRewrite("^/products/(\\d+)$", "/product?id=$1")));
         builder.Run(context =>
         {
             downstream = context;
@@ -73,7 +73,7 @@ public class RewriteRequestViewTests
     {
         // Arrange
         TestPipelineBuilder builder = new();
-        builder.UseRewrite(rules => rules.AddRewrite("^/a$", "/b"));
+        builder.Use(TestRewriteMiddleware.Build(rules => rules.AddRewrite("^/a$", "/b")));
         builder.Run(context => context.CancelAsync());
         TestHttpContext original = new("/a");
 
@@ -90,7 +90,7 @@ public class RewriteRequestViewTests
         // Arrange
         DownstreamProbe probe = new();
         TestPipelineBuilder builder = new();
-        builder.UseRewrite(rules => rules.AddRewrite("^/old/(.*)$", "/new/$1?v=2"));
+        builder.Use(TestRewriteMiddleware.Build(rules => rules.AddRewrite("^/old/(.*)$", "/new/$1?v=2")));
         builder.Run(probe.InvokeAsync);
         TestHttpContext context = new("/old/page", "v=1");
         IHttpQueryCollection originalQuery = context.Request.Query;
@@ -113,8 +113,8 @@ public class RewriteRequestViewTests
         // Arrange
         DownstreamProbe probe = new();
         TestPipelineBuilder builder = new();
-        builder.UseRewrite(rules => rules.AddRewrite("^/a$", "/b?step=1"));
-        builder.UseRewrite(rules => rules.AddRewrite("^/b$", "/c?step=2"));
+        builder.Use(TestRewriteMiddleware.Build(rules => rules.AddRewrite("^/a$", "/b?step=1")));
+        builder.Use(TestRewriteMiddleware.Build(rules => rules.AddRewrite("^/b$", "/c?step=2")));
         builder.Run(probe.InvokeAsync);
         TestHttpContext context = new("/a", "client=1");
 
@@ -134,7 +134,7 @@ public class RewriteRequestViewTests
     {
         // Arrange
         TestPipelineBuilder builder = new();
-        builder.UseRewrite(rules => rules.AddRewrite("^/a$", "/b"));
+        builder.Use(TestRewriteMiddleware.Build(rules => rules.AddRewrite("^/a$", "/b")));
         builder.Run(_ => throw new InvalidOperationException("downstream fault"));
         TestHttpContext context = new("/a");
 
@@ -159,7 +159,7 @@ public class RewriteRequestViewTests
             await next(context);
             afterNext = context.Request.Path.Value;
         });
-        builder.UseRewrite(rules => rules.AddRewrite("^/old$", "/new"));
+        builder.Use(TestRewriteMiddleware.Build(rules => rules.AddRewrite("^/old$", "/new")));
         builder.Use(async (IHttpContext context, WebApplicationMiddleware next) =>
         {
             inside = context.Request.Path.Value;
@@ -184,7 +184,7 @@ public class RewriteRequestViewTests
         IHttpContext? downstream = null;
         TestPipelineBuilder builder = new();
         builder.Use(next => context => next(new BodyView(context, decoded)));
-        builder.UseRewrite(rules => rules.AddRewrite("^/a$", "/b"));
+        builder.Use(TestRewriteMiddleware.Build(rules => rules.AddRewrite("^/a$", "/b")));
         builder.Run(context =>
         {
             downstream = context;

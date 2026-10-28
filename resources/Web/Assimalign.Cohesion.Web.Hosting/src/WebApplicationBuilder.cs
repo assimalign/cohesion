@@ -15,7 +15,6 @@ using Assimalign.Cohesion.FileSystem;
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Http.Connections;
 using Assimalign.Cohesion.Hosting;
-using Assimalign.Cohesion.Hosting.Health;
 using Assimalign.Cohesion.Internal;
 using Assimalign.Cohesion.Logging;
 using Assimalign.Cohesion.Web.Hosting.Internal;
@@ -26,8 +25,8 @@ namespace Assimalign.Cohesion.Web.Hosting;
 /// Composes a Web application. Every dependency the application runs with is a registration in
 /// <see cref="Services"/>: lifecycle services (<see cref="IHostService"/>), servers
 /// (<see cref="IWebApplicationServer"/>), request features (<see cref="IHttpFeature"/>), HTTP exchange
-/// interceptors (<see cref="IHttpExchangeInterceptor"/>), and health contributions
-/// (<see cref="IHealthContributor"/>).
+/// interceptors (<see cref="IHttpExchangeInterceptor"/>), middleware (<see cref="IWebApplicationMiddleware"/>),
+/// and settings (<see cref="IWebApplicationSetting"/>).
 /// </summary>
 /// <remarks>
 /// The root <see cref="IWebApplicationBuilder"/> verbs are implemented explicitly as shims over
@@ -146,22 +145,6 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
     /// concurrent entry-point applications can therefore forward the same event more than once.
     /// </remarks>
     public bool EnableEventSourceForwarding { get; set; } = true;
-
-    /// <summary>
-    /// Adds a named contribution to the application's aggregate health, readiness, and liveness
-    /// reports.
-    /// </summary>
-    /// <param name="name">The stable contribution name.</param>
-    /// <param name="check">The health evaluator.</param>
-    /// <returns>The same builder for chaining.</returns>
-    public WebApplicationBuilder AddHealthCheck(string name, ResourceHealthCheck check)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(name);
-        ArgumentNullException.ThrowIfNull(check);
-
-        Services.AddSingleton<IHealthContributor>(new DelegateHealthContributor(name, check));
-        return this;
-    }
 
     /// <summary>
     /// Adds a lifecycle service to the application.
