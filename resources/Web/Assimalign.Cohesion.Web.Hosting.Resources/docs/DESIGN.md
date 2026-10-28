@@ -9,9 +9,10 @@
 `builder.AddResource(name, resource => ...)` makes a Web application a managed resource instance.
 When the gateway that provisioned it set a manifest endpoint, the instance publishes its manifest,
 restores the state the gateway kept before the application serves, and serves its control plane
-on a private listener. The package also exposes the application's default CORS policy as the
-resource's `cors` action. Without a manifest endpoint the application runs unmanaged, with the
-state its code defines.
+on a private listener. The resource's own actions come from the settings the application
+registered, such as its default CORS policy as the `cors` action, and the application can add
+actions of its own. Without a manifest endpoint the application runs unmanaged, with the state its
+code defines.
 
 ## References
 
@@ -38,8 +39,8 @@ managed instance, `AddResource` builds these pieces and registers the last two a
 
 | Piece | Role |
 | --- | --- |
-| `WebResource` (internal) | The `IResource`: provider `Web`, the resource's name, a new instance key, and one action for each registered setting the resource knows, built when the application is built. |
-| `ResourceControlPlane` | Hosting.Resources' control plane over the resource and the content serializer. |
+| `WebResource` (internal) | The `IResource`: provider `Web`, the resource's name, a new instance key, one action for each registered setting the resource knows, then the actions the application added, built when the application is built. |
+| `ResourceControlPlane` | Hosting.Resources' control plane over the resource, writing JSON through the resource's own context and the contexts the added actions came with. |
 | `ResourceManifestPublisher` | The HTTP publisher for `COHESION_MANIFEST_ENDPOINT`, with the builder's optional HTTP client callback. |
 | `ResourceService` | Publishes and restores in `StartingAsync`, then renews the lease until `StopAsync`. |
 | `WebResourceControlPlaneServer` (internal) | Serves the control plane on `COHESION_CONTROL_PLANE_ENDPOINT`. |
@@ -68,10 +69,13 @@ stops them in reverse. A managed instance runs like this:
 | `POST /actions/{name}` | Writes an action; the body is its input. |
 | `PUT /state/{name}` | Restores an action's state; the body is the snapshot's value. |
 
-Bodies are written by the control plane's content serializer and labeled with its media type. A
-result is `{status, output?, reason?, state?: {action, value}}` in JSON. Statuses are 200
-(succeeded), 400 (rejected), 404 (no such action), and 405 (operation not accepted); any other
-failure is the engine's 500.
+Bodies are JSON, labeled `application/json`. A result is
+`{status, output?, reason?, state?: {action, value}}`. Statuses are 200 (succeeded), 400 (rejected),
+404 (no such action), and 405 (operation not accepted); any other failure is the engine's 500.
+
+The `cors` action's content is the default policy in camel case, such as
+`{"origins": ["https://shop.example"], "methods": ["GET"], "allowCredentials": false}`. An empty
+`origins` list means no default policy; `*` alone allows any origin, method, or header.
 
 ## Decisions
 
@@ -106,15 +110,32 @@ keeps no copy of the state: a read reports the setting's value as a `WebCorsPoli
 a restore builds a `CorsPolicy` and sets it, which the CORS middleware applies from the next
 request. A policy CORS refuses is rejected and the setting keeps its value. A setting the resource
 has no action for, or a feature the application never registered, stays out of the manifest.
-*Rejected:* configuring CORS on the resource (`AddCors` on `WebResourceBuilder`, served by
+*Rejected:* configuring CORS on the resource (`AddCors` on the resource's builder, served by
 `app.UseCors(resource)`), the first version. Exposing an existing application then meant rewriting
 it, and the action rebuilt CORS through a capturing pipeline builder to swap the middleware.
+
+**W5 — The resource's own actions are hidden; the application adds its own (owner request,
+2026-10-28).** The actions the resource builds from settings, and their content types such as the
+`cors` action's policy, are internal: the gateway and its platform see only content, described by
+the manifest and this document. `WebResourceOptions.AddAction` adds an action the application
+defines, as an instance or as a factory that runs once the application's container exists. Added
+actions follow the resource's own in the manifest. A name already in use fails the application's
+build, because the control plane rejects duplicate names, so an added action cannot replace one of
+the resource's own.
+
+**W6 — Control-plane content is JSON, written per action through its own context (owner request,
+2026-10-28).** Hiding the resource's content types rules out a serializer the platform chooses:
+such a serializer must know every type an instance exchanges, which only public types allow. The
+serializer is therefore JSON over Hosting.Resources' context, the resource's internal context, and
+the context each added action came with, in that order. A platform needs no resource's types: it
+stores snapshots as opaque bytes and passes action content through. *Rejected:* the resource's
+builder taking a platform's serializer, the previous version; it made every action's content type
+public API, and a platform had to track every area's types.
 
 ## Open questions
 
 1. **Authentication.** Publication and the control plane are anonymous.
-2. **Content type.** The control plane does not check a request's `Content-Type` against its
-   serializer's media type, and nothing tells an instance which serializer its platform uses.
+2. **Content type.** The control plane does not check that a request's `Content-Type` is JSON.
 3. **Predicate policies.** A CORS policy built with `SetIsOriginAllowed` holds code: it reads as a
    policy with no origins, and a write replaces it. Web.Cors needs to say when a policy has no data
    form, so the action can refuse to report or overwrite it.

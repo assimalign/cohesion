@@ -23,14 +23,15 @@ public static class WebResourceExtensions
         /// The application keeps its own composition: a feature registers its setting the way it
         /// always does, and the resource exposes each setting it knows. The <c>cors</c> setting that
         /// <c>builder.Services.AddCors(...)</c> registers becomes the <c>cors</c> action, whose writes
-        /// change the default policy the middleware <c>UseCors()</c> placed applies.
+        /// change the default policy the middleware <c>UseCors()</c> placed applies. Actions the
+        /// application defines are added with <see cref="WebResourceOptions.AddAction(IResourceAction, System.Text.Json.Serialization.JsonSerializerContext)"/>.
         /// </para>
         /// <para>
         /// When the resource has a manifest endpoint (by default the
         /// <see cref="AppEnvironment.Variables.ManifestEndpoint"/> variable its gateway sets), the
         /// instance is managed. Before any of the application's services or servers start, it
         /// publishes its manifest and restores the state the gateway answers with; it then serves its
-        /// control plane on <see cref="WebResourceBuilder.ControlPlaneEndpoint"/>, ahead of the
+        /// control plane on <see cref="WebResourceOptions.ControlPlaneEndpoint"/>, ahead of the
         /// application's servers and until they have drained. A publication the gateway refuses or
         /// cannot receive fails the application's start.
         /// </para>
@@ -39,7 +40,7 @@ public static class WebResourceExtensions
         /// </para>
         /// </remarks>
         /// <param name="name">The resource's name, such as <c>orders-api</c>.</param>
-        /// <param name="configure">Configures the resource's endpoints and content format.</param>
+        /// <param name="configure">Configures the resource's endpoints and adds the application's own actions.</param>
         /// <returns>The same builder for chaining.</returns>
         /// <exception cref="ArgumentNullException"><paramref name="builder"/> is <see langword="null"/>.</exception>
         /// <exception cref="ArgumentException">
@@ -48,7 +49,7 @@ public static class WebResourceExtensions
         /// host is an IP address or localhost.
         /// </exception>
         /// <exception cref="InvalidOperationException">The resource has a manifest endpoint but no control-plane endpoint.</exception>
-        public WebApplicationBuilder AddResource(ResourceName name, Action<WebResourceBuilder>? configure = null)
+        public WebApplicationBuilder AddResource(ResourceName name, Action<WebResourceOptions>? configure = null)
         {
             ArgumentNullException.ThrowIfNull(builder);
 
@@ -57,34 +58,39 @@ public static class WebResourceExtensions
                 throw new ArgumentException(ErrorMessages.ResourceNameMissing, nameof(name));
             }
 
-            var resourceBuilder = new WebResourceBuilder(name);
-            configure?.Invoke(resourceBuilder);
+            var options = new WebResourceOptions(name);
+            configure?.Invoke(options);
 
-            if (resourceBuilder.ManifestEndpoint is not { } manifestEndpoint)
+            if (options.ManifestEndpoint is not { } manifestEndpoint)
             {
                 return builder;
             }
 
-            Uri controlPlaneEndpoint = resourceBuilder.ControlPlaneEndpoint
+            Uri controlPlaneEndpoint = options.ControlPlaneEndpoint
                 ?? throw new InvalidOperationException(string.Format(CultureInfo.CurrentCulture,
                     ErrorMessages.ControlPlaneEndpointRequired, AppEnvironment.Variables.ControlPlaneEndpoint));
             IPEndPoint listener = WebResourceControlPlaneServer.ParseEndpoint(controlPlaneEndpoint);
 
-            IResourceContentSerializer serializer = resourceBuilder.Serializer;
+            // Control-plane content is JSON. The resource's own actions write their types through its
+            // internal context, and each action the application added through the context it came with.
+            IResourceContentSerializer serializer = JsonResourceContentSerializer.Create([WebResourceJsonContext.Default, .. options.JsonContexts]);
             ResourceManifestPublisher publisher = ResourceManifestPublisher.Create(new ResourceManifestPublisherOptions
             {
                 Endpoint = manifestEndpoint,
-                HttpClientFactory = resourceBuilder.HttpClientFactory,
+                HttpClientFactory = options.HttpClientFactory,
                 Serializer = serializer,
             });
 
             // The control plane exposes the settings the application registered, so it is created once
             // the application's container exists: the first of the two services the build resolves
             // creates it, and the other shares it.
+            Func<WebApplicationContext, IResourceAction>[] addedActions = [.. options.Actions];
             ResourceControlPlane? controlPlane = null;
             ResourceControlPlane GetControlPlane(WebApplicationContext context)
             {
-                return controlPlane ??= ResourceControlPlane.Create(new WebResource(name, context.Settings), serializer);
+                return controlPlane ??= ResourceControlPlane.Create(
+                    new WebResource(name, context.Settings, CreateAddedActions(addedActions, context)),
+                    serializer);
             }
 
             // The resource service publishes and restores in StartingAsync, which the host completes
@@ -96,5 +102,17 @@ public static class WebResourceExtensions
 
             return builder;
         }
+    }
+
+    private static IResourceAction[] CreateAddedActions(Func<WebApplicationContext, IResourceAction>[] factories, WebApplicationContext context)
+    {
+        var actions = new IResourceAction[factories.Length];
+        for (int i = 0; i < factories.Length; i++)
+        {
+            actions[i] = factories[i].Invoke(context)
+                ?? throw new InvalidOperationException(ErrorMessages.ResourceActionFactoryResultNull);
+        }
+
+        return actions;
     }
 }

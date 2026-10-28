@@ -10,8 +10,9 @@ the application's features registered as resource actions. The design record is
 
 ## Scope
 
-- In scope: the `AddResource` verb on `WebApplicationBuilder`, the actions over registered settings
-  (the `cors` action over the `cors` setting), and the HTTP server for the control plane.
+- In scope: the `AddResource` verb on `WebApplicationBuilder` and its `WebResourceOptions`, the
+  resource's own actions over registered settings (the `cors` action over the `cors` setting), the
+  actions the application adds with `AddAction`, and the HTTP server for the control plane.
 - Out of scope: the resource contracts and the resource service (Hosting.Resources), the settings
   themselves (each feature package and the Web root), gateways and application resources
   (ApplicationModel and its Gateway).
@@ -34,3 +35,12 @@ await app.RunAsync();
 
 The provisioning gateway sets `COHESION_MANIFEST_ENDPOINT` and `COHESION_CONTROL_PLANE_ENDPOINT`.
 Without the first, the application runs unmanaged with the settings its code defines.
+
+An application adds an action of its own with its JSON context, which declares the action's
+content types:
+
+```csharp
+builder.AddResource("orders-api", resource => resource
+    .AddAction(context => new FlushCacheAction(context.ServiceProvider.GetRequiredService<OrderCache>()))
+    .AddAction(new LogLevelAction(), OrdersJsonContext.Default));
+```

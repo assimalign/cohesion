@@ -8,14 +8,15 @@ namespace Assimalign.Cohesion.Web.Hosting.Resources.Internal;
 
 /// <summary>
 /// One running instance of a Web resource: the application this process serves, with an action for
-/// each setting the application registered that the resource knows how to expose.
+/// each setting the application registered that the resource knows how to expose, followed by the
+/// actions the application added.
 /// </summary>
 internal sealed class WebResource : IResource
 {
-    public WebResource(ResourceName name, IEnumerable<IWebApplicationSetting> settings)
+    public WebResource(ResourceName name, IEnumerable<IWebApplicationSetting> settings, IEnumerable<IResourceAction> addedActions)
     {
         Name = name;
-        Actions = CreateActions(settings);
+        Actions = [.. CreateActions(settings), .. addedActions];
     }
 
     public ProviderName Provider { get; } = "Web";

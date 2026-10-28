@@ -9,4 +9,5 @@
   <data name="ControlPlaneEndpointInvalid" xml:space="preserve"><value>A control-plane endpoint is an absolute http URL whose host is an IP address or localhost, such as http://127.0.0.1:5199/.</value></data>
   <data name="CorsPolicyRequired" xml:space="preserve"><value>A CORS policy is required.</value></data>
   <data name="SnapshotValueRequired" xml:space="preserve"><value>A snapshot value is required.</value></data>
+  <data name="ResourceActionFactoryResultNull" xml:space="preserve"><value>An action factory passed to WebResourceOptions.AddAction returned null.</value></data>
 </root>

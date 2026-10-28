@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Net.Http;
 using System.Text;
 using System.Text.Json;
@@ -8,7 +9,9 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.DependencyInjection;
 using Assimalign.Cohesion.Hosting.Resources;
+using Assimalign.Cohesion.Web.Hosting.Resources.Internal;
 
 using NetHttpStatusCode = System.Net.HttpStatusCode;
 
@@ -80,25 +83,80 @@ public sealed class WebResourceEndToEndTests
         instance.ResourceServices.ShouldBeEmpty();
     }
 
-    [Fact(DisplayName = DisplayPrefix + "A platform's own serializer writes the publication and the control plane's content")]
-    public async Task Start_WithCustomSerializer_ShouldUseItEndToEnd()
+    [Fact(DisplayName = DisplayPrefix + "An action the application adds is published and served beside the resource's own")]
+    public async Task AddAction_WithJsonContext_ShouldPublishAndServeTheAction()
     {
         // Arrange
         await using GatewayStandIn gateway = await GatewayStandIn.StartAsync();
-        var serializer = new RecordingSerializer();
         await using RunningResource instance = await RunningResource.StartAsync(gateway.ManifestEndpoint, new WebCorsPolicy { Origins = [shop] },
-            resource => resource.Serializer = serializer);
+            resource => resource.AddAction(new GreetingAction("hello"), GreetingJsonContext.Default));
 
         // Act
-        using HttpResponseMessage response = await instance.ControlPlane.GetAsync("actions/cors");
+        using HttpResponseMessage response = await instance.ControlPlane.PostAsync("actions/greeting",
+            new StringContent("""{"text":"welcome"}""", Encoding.UTF8, "application/json"));
+
+        // Assert
+        gateway.Manifests.ShouldHaveSingleItem().Actions.Select(static action => action.Name)
+            .ShouldBe(new ResourceActionName[] { "cors", "greeting" });
+        response.StatusCode.ShouldBe(NetHttpStatusCode.OK);
+        response.Content.Headers.ContentType.ShouldNotBeNull().MediaType.ShouldBe("application/json");
+        using JsonDocument envelope = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        envelope.RootElement.GetProperty("state").GetProperty("action").GetString().ShouldBe("greeting");
+        envelope.RootElement.GetProperty("state").GetProperty("value").GetProperty("text").GetString().ShouldBe("welcome");
+    }
+
+    [Fact(DisplayName = DisplayPrefix + "An action factory creates the action from the built application's services")]
+    public async Task AddAction_WithFactory_ShouldCreateTheActionFromTheApplication()
+    {
+        // Arrange
+        await using GatewayStandIn gateway = await GatewayStandIn.StartAsync();
+        await using RunningResource instance = await RunningResource.StartAsync(gateway.ManifestEndpoint, cors: null,
+            resource => resource.AddAction(
+                context => new GreetingAction(context.ServiceProvider.GetRequiredService<Greeting>().Text),
+                GreetingJsonContext.Default),
+            beforeResource: builder => builder.Services.AddSingleton(new Greeting("from the application")));
+
+        // Act
+        using HttpResponseMessage response = await instance.ControlPlane.GetAsync("actions/greeting");
 
         // Assert
         response.StatusCode.ShouldBe(NetHttpStatusCode.OK);
-        response.Content.Headers.ContentType.ShouldNotBeNull().MediaType.ShouldBe(serializer.MediaType);
-        serializer.Written.ShouldContain(typeof(ResourceManifest));
-        serializer.Written.ShouldContain(typeof(WebCorsPolicy));
-        serializer.Written.ShouldContain(typeof(ResourceActionResult));
-        gateway.Manifests.ShouldHaveSingleItem();
+        using JsonDocument envelope = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        envelope.RootElement.GetProperty("output").GetProperty("text").GetString().ShouldBe("from the application");
+    }
+
+    [Fact(DisplayName = DisplayPrefix + "A new instance restores an added action's state through the application's context")]
+    public async Task AddAction_WithGatewaySnapshot_ShouldRestoreTheAddedAction()
+    {
+        // Arrange
+        await using GatewayStandIn gateway = await GatewayStandIn.StartAsync();
+        gateway.AnswerWith("""[{"action":"greeting","value":{"text":"restored"}}]""");
+
+        // Act
+        await using RunningResource instance = await RunningResource.StartAsync(gateway.ManifestEndpoint, cors: null,
+            resource => resource.AddAction(new GreetingAction("hello"), GreetingJsonContext.Default));
+
+        // Assert
+        using HttpResponseMessage response = await instance.ControlPlane.GetAsync("actions/greeting");
+        using JsonDocument envelope = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        envelope.RootElement.GetProperty("output").GetProperty("text").GetString().ShouldBe("restored");
+    }
+
+    [Fact(DisplayName = DisplayPrefix + "An added action named like one of the resource's own fails the application's start")]
+    public async Task AddAction_WithTakenName_ShouldFailTheStart()
+    {
+        // Arrange
+        await using GatewayStandIn gateway = await GatewayStandIn.StartAsync();
+
+        // Act
+        ArgumentException exception = await Should.ThrowAsync<ArgumentException>(() => RunningResource.StartAsync(
+            gateway.ManifestEndpoint,
+            new WebCorsPolicy { Origins = [shop] },
+            resource => resource.AddAction(new GreetingAction(name: "cors"), GreetingJsonContext.Default)));
+
+        // Assert
+        exception.Message.ShouldContain("cors", Case.Sensitive);
+        gateway.Manifests.ShouldBeEmpty();
     }
 
     [Fact(DisplayName = DisplayPrefix + "The HTTP client callback supplies the client the instance publishes with")]

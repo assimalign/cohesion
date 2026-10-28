@@ -70,7 +70,7 @@ internal sealed class RunningResource : IAsyncDisposable
     public static async Task<RunningResource> StartAsync(
         Uri? manifestEndpoint,
         WebCorsPolicy? cors,
-        Action<WebResourceBuilder>? configure = null,
+        Action<WebResourceOptions>? configure = null,
         Action<WebApplicationBuilder>? beforeResource = null)
     {
         int applicationPort = TestPorts.GetFree();

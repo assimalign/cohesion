@@ -1,9 +1,9 @@
 using System.Collections.Generic;
 
-namespace Assimalign.Cohesion.Web.Hosting.Resources;
+namespace Assimalign.Cohesion.Web.Hosting.Resources.Internal;
 
 /// <summary>
-/// The default CORS policy of a Web resource instance: the state its <c>cors</c> action reads and
+/// The default CORS policy of a Web resource instance: the content the <c>cors</c> action reads and
 /// writes, and the snapshot its gateway restores on new instances.
 /// </summary>
 /// <remarks>
@@ -13,11 +13,12 @@ namespace Assimalign.Cohesion.Web.Hosting.Resources;
 /// header. An empty <see cref="Methods"/> or <see cref="Headers"/> list keeps the CORS defaults.
 /// </para>
 /// <para>
-/// On the wire the policy is camel-case JSON:
+/// The type is the resource's own: the gateway and its platform see only the content, camel-case
+/// JSON written through <see cref="WebResourceJsonContext"/>:
 /// <c>{ "origins": [ "https://shop.example" ], "methods": [ "GET", "POST" ], "allowCredentials": false }</c>.
 /// </para>
 /// </remarks>
-public sealed record WebCorsPolicy
+internal sealed record WebCorsPolicy
 {
     /// <summary>
     /// Gets the origins allowed to call the application, or <c>*</c> alone for any origin.
