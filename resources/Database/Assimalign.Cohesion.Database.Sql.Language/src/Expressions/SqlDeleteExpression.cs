@@ -9,7 +9,7 @@ using Assimalign.Cohesion.Database.Language;
 /// </summary>
 public sealed class SqlDeleteExpression : SqlQueryExpression
 {
-    /// <summary>Gets the statement's non-recursive WITH definitions, in declaration order.</summary>
+    /// <summary>Gets the statement's WITH definitions, in declaration order.</summary>
     public IReadOnlyList<SqlCommonTableExpression> CommonTables { get; internal set; } = [];
 
     /// <summary>

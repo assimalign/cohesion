@@ -11,6 +11,10 @@ internal sealed class DocumentBindingScopes
 {
     private readonly Dictionary<(OqlExpression, DocumentBindingScope?), DocumentBindingScope> _scopes = new();
 
+    internal void RegisterGroup(OqlSelectExpression query, DocumentBindingScope scope) => _scopes.Add((query, null), scope);
+
+    internal DocumentBindingScope? FindGroup(OqlSelectExpression query) => _scopes.GetValueOrDefault((query, null));
+
     internal DocumentBindingScope Enter(OqlExpression expression, string variable, DocumentBindingScope? parent)
     {
         var key = (expression, parent);

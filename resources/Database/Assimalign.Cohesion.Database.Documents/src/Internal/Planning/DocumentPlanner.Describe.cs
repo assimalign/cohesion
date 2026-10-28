@@ -198,7 +198,13 @@ internal sealed partial class DocumentPlanner
         foreach (var projection in logical.Projections) { Visit(projection.Expression); }
         if (logical.Query.Having is { } having) { Visit(having); }
         foreach (var order in logical.Query.OrderBy) { Visit(order.Expression); }
-        return calls.Count == 0 ? null : "aggregates=" + string.Join(", ", calls);
+        string? detail = calls.Count == 0 ? null : "aggregates=" + string.Join(", ", calls);
+        if (logical.Query.GroupAs is string groupAs) { detail = Append(detail, "group_as=" + groupAs); }
+        if (logical.Query.GroupAliases.Any(name => name is not null))
+        { detail = Append(detail, "group_aliases=" + string.Join(", ", logical.Query.GroupAliases.Select(name => name ?? "<unnamed>"))); }
+        return detail;
+
+        static string Append(string? detail, string value) => detail is null ? value : detail + "; " + value;
 
         void Visit(OqlExpression expression)
         {

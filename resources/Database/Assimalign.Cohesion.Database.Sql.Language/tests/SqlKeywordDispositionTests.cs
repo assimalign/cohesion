@@ -107,6 +107,7 @@ public sealed class SqlKeywordDispositionTests
         ["LIMIT"] = Parses("SELECT a FROM t LIMIT 1"),
         ["OFFSET"] = Parses("SELECT a FROM t LIMIT 1 OFFSET 1"),
         ["FETCH"] = Parses("SELECT a FROM t FETCH NEXT 1 ROWS ONLY"),
+        ["FOR"] = Rejects("SELECT a FROM t FOR UPDATE", "FOR UPDATE/SHARE"),
         ["PERCENT"] = Rejects("SELECT TOP (1) PERCENT a FROM t", "PERCENT"),
         ["TIES"] = Rejects("SELECT a FROM t FETCH FIRST 1 ROW WITH TIES", "WITH TIES"),
         ["NEXT"] = Parses("SELECT a FROM t FETCH NEXT 1 ROWS ONLY"),
@@ -145,7 +146,7 @@ public sealed class SqlKeywordDispositionTests
         ["END"] = Parses("SELECT CASE WHEN a = 1 THEN 'x' ELSE 'y' END FROM t"),
         // CTEs and transactions
         ["WITH"] = Parses("WITH c AS (SELECT a FROM t) SELECT a FROM c"),
-        ["RECURSIVE"] = Rejects("WITH RECURSIVE c AS (SELECT a FROM t) SELECT a FROM c", SqlClauses.Recursive),
+        ["RECURSIVE"] = Parses("WITH RECURSIVE c (n) AS (SELECT 1 UNION ALL SELECT n+1 FROM c) SELECT n FROM c"),
         ["MATERIALIZED"] = Rejects("WITH c AS MATERIALIZED (SELECT a FROM t) SELECT * FROM c", "[NOT] MATERIALIZED"),
         ["SEARCH"] = Rejects("WITH c AS (SELECT a FROM t) SEARCH DEPTH FIRST BY a SET ord SELECT * FROM c", "SEARCH/CYCLE"),
         ["BEGIN"] = Parses("BEGIN TRANSACTION"),

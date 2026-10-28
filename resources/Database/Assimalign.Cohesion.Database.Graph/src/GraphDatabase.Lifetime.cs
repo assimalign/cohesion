@@ -64,7 +64,12 @@ public sealed partial class GraphDatabase
         {
             T result;
             try { result = await action(operation).ConfigureAwait(false); }
-            finally { operation.Updates.Dispose(); }
+            finally
+            {
+                // Execution has stopped. Keep lease cleanup on this flow in the existing bracket.
+                try { operation.Updates.Dispose(); }
+                finally { operation.ReleaseMerge(); }
+            }
             await operation.CompleteAsync().ConfigureAwait(false);
             return result;
         }

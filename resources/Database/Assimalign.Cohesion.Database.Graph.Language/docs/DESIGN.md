@@ -93,7 +93,7 @@ flowchart LR
     Executor["Graph executor"] --> Planner
 ```
 
-`GqlQueryExpression.Stages` carries source-ordered MATCH, LET, FILTER, FOR/UNWIND, INSERT/CREATE, SET, REMOVE, DELETE, RETURN/WITH and NEXT nodes. `Segments` splits that list at explicit NEXT boundaries. The original constructors retain a single-segment facade for hand-built ASTs. Stage records retain Cypher spellings for conformance checks; the base constructor is private protected, following the Database concrete-first variant rule.
+`GqlQueryExpression.Stages` carries source-ordered MATCH, LET, FILTER, FOR/UNWIND, INSERT/CREATE, MERGE, SET, REMOVE, DELETE, RETURN/WITH and NEXT nodes. `Segments` splits that list at explicit NEXT boundaries. The original constructors retain a single-segment facade for hand-built ASTs. Stage records retain Cypher spellings for conformance checks; the base constructor is private protected, following the Database concrete-first variant rule.
 
 The flat single-segment facade carries ordered `GqlMatchClause(Paths, Predicate, Optional)` records, insertion paths, deletion variables,
 a detach flag, expression projections, a `GqlSetQuantifier` (ALL by default), `ReturnStar`, and an optional `GqlCatalogSurface` for dedicated metadata statements.
@@ -129,6 +129,26 @@ same shape, names equal ordinally and chains with the same operands in the same 
 hold for a hand-built tree of any depth. The public chain constructors copy their operand sequence;
 only the parser hands a list it built to a node without copying it.
 
+## MERGE (#1735)
+
+GqlMergeStage carries one Path and ordered OnCreate/OnMatch item lists. The parser accepts either
+branch order with repeated branches; each kind's SET items append in source order. ON remains
+contextual so existing variable names are preserved.
+GqlMergeStage.ToString renders CREATE before MATCH using the
+existing path/scalar renderer. Both branches share ordinary SET grammar. A MERGE accepts one path;
+comma-separated independent MERGEs use successive clauses. Variable-length/quantified paths,
+named path assignments, path modes/selectors, parenthesized update groups and inline predicates
+remain refused by update-pattern validation. The engine validates creation-compatible labels,
+relationship types, incoming-only equality expressions and both branch scopes before execution,
+including EXPLAIN. Already-declared relationship variables are refused (CG03007); a repeated or
+already-bound node must be a bare variable (CG03006). New relationships require one type.
+MERGE property equalities use CG03004 for non-scalar values, whether planning proves them or
+evaluation produces them (a variable, parameter or expression); a list or map literal written
+directly in a pattern is still refused by the literal parser with CK00001. Other property writes
+retain CG03003. Required properties can be supplied by ON CREATE before the
+finished created entity is validated. Row-dependent equalities can use a per-row index seek.
+GqlMergeParserTests and the profile execution corpus pin grammar, rendering and live behavior.
+
 ## SET and REMOVE (#1149)
 
 SET/REMOVE recognize `IS` as a label assignment only immediately after an item target.
@@ -142,7 +162,7 @@ GQL token; SQL/OQL lexer behavior is unchanged. GRAPH and SCHEMA are contextual 
 The private token uses a parser-only spelling and is consumed only by whole-map SET, so it
 cannot become unary addition, property assignment or a quantified path elsewhere.
 Whole-map parameters and expressions remain CK00001, as do literal composite properties.
-MERGE with either ON CREATE SET or ON MATCH SET produces exactly one CK00001 naming MERGE.
+MERGE embeds both SET branch bodies using the same parser and update validation (#1735).
 Leading SET/REMOVE and nested assignment targets are CG00002. See [DIALECT.md](DIALECT.md#set-and-remove)
 for row ordering, NULL, no-op and count semantics. `GqlUpdateParserTests` pins the AST and
 diagnostics; the live profile corpus covers node properties/labels and relationship properties
@@ -178,6 +198,7 @@ The function table advertises the aggregates and core scalar functions listed be
 | `CASE` | Simple and searched CASE, COALESCE and NULLIF case abbreviations | First matching alternative, lazy selected branch; absent ELSE yields NULL |
 | `INSERT` | Scalar value-expression node/path insertion, optionally following a match; a node takes a label conjunction (`:A&B`, `:A:B`), a relationship one type and a directed edge (`-[:T]->`, `<-[:T]-`) | Inserts nodes and relationships transactionally |
 | `CREATE` | Same insertion grammar as `INSERT`; compatibility extension | Same transactional insertion path |
+| `MERGE` | One complete fixed path, followed by zero or more ON CREATE SET or ON MATCH SET actions | Matches every complete path or creates every unbound part; includes fixed undirected relationships, bound node reuse, overlays and Snapshot freshness checks |
 | `SET` | ISO property assignment, literal-map replacement and node labels with IS or colon; D3 `+=` and repeated-colon labels | Applies items left to right per row, with one published replacement per updated entity per statement |
 | `REMOVE` | Property keys or node labels with IS or colon | Removes keys/labels, ignoring OPTIONAL NULL targets |
 | `DELETE` | Bound node/relationship variables following a match | Refuses deleting a node that still has incident relationships |
@@ -215,6 +236,7 @@ stage        := [OPTIONAL] MATCH match-paths [WHERE predicate]
               | FOR variable IN predicate
               | UNWIND predicate AS variable
               | (INSERT | CREATE) paths
+              | MERGE path (ON (CREATE | MATCH) SET set-items)*
               | SET set-item (',' set-item)*
               | REMOVE remove-item (',' remove-item)*
               | [DETACH] DELETE variables
@@ -1044,7 +1066,7 @@ GqlOrderPagingTests and GraphOrderPagingWireTests pin the executable surface.
 
 | Code | Meaning |
 | --- | --- |
-| `CK00001` | Recognized construct outside the executable profile, reported once at its own span: OPTIONAL block operands, MANDATORY MATCH, procedures, excluded functions and datetime forms, unsupported CAST targets, HAVING and statistical aggregates (STDDEV_SAMP/POP, PERCENTILE_CONT/DISC), substituted/whole-map parameters, composite properties, comprehensions, slicing, map projections, questioned paths, subpath variables, nested quantifiers, standalone ORDER BY/page statements, set operations, FOR ordinality/offset suffixes, NEXT YIELD, server/session scope, undirected (tilde) edges, nested path modes/selectors, unselected unbounded WALK, counted ANY, `NODETACH DELETE`, and `MERGE` |
+| `CK00001` | Recognized construct outside the executable profile, reported once at its own span: OPTIONAL block operands, MANDATORY MATCH, procedures, excluded functions and datetime forms, unsupported CAST targets, HAVING and statistical aggregates (STDDEV_SAMP/POP, PERCENTILE_CONT/DISC), substituted/whole-map parameters, composite properties, comprehensions, slicing, map projections, questioned paths, subpath variables, nested quantifiers, standalone ORDER BY/page statements, set operations, FOR ordinality/offset suffixes, NEXT YIELD, server/session scope, undirected (tilde) edges, nested path modes/selectors, unselected unbounded WALK, counted ANY and `NODETACH DELETE` |
 | `CG00001` | Empty statement |
 | `CG00002` | Malformed supported syntax, invalid statement composition, leftover tokens, or a character GQL does not use (`?`, `#`, `^`, ```, ...) |
 | `CG00003` | Unterminated string, quoted name, or block comment |
@@ -1081,7 +1103,7 @@ WALK capability checks; executable mode words no longer occur in the unsupported
 | `MATCH ALL (...)`, `MATCH ALL TRAIL (...)`, `MATCH ANY (...)` | selector AST | complete prefix span | executes per endpoint pair under statement budgets |
 | `MATCH ANY 2 (...)` | `ANY PATH SEARCH` | complete prefix span | outside #1734 |
 | `MATCH (n) NODETACH DELETE n` | `NODETACH DELETE` | both words | pin |
-| `MERGE (n)` | `MERGE` | `MERGE` | pin |
+| `MERGE (n)` | MERGE stage AST | complete clause | executes whole-pattern match/create (#1735) |
 
 #1101 pinned the label-expression operators (`LABEL DISJUNCTION`, `LABEL CONJUNCTION`,
 `LABEL NEGATION`, `WILDCARD LABEL`) and `(n IS A)` (`IS LABEL EXPRESSION`) here; #1139 made them

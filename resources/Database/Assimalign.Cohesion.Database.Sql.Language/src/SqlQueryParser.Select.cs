@@ -214,6 +214,7 @@ public sealed partial class SqlQueryParser
             }
         }
         else if (!IsAtEnd(ref lexer) && IsIdentifierOrKeyword(ref lexer) &&
+                 !TryReadSelectLockingStrength(lexer, out _) &&
                  !IsStatementBoundaryKeyword(ref lexer))
         {
             // Check it's not a keyword that starts the next clause

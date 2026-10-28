@@ -30,6 +30,7 @@ internal static class SqlUnsupportedVocabulary
         new("RECURSIVE", SqlClauses.Recursive, SqlWordPosition.Clause),
         new("MATERIALIZED", "[NOT] MATERIALIZED", SqlWordPosition.Rule),
         new("SEARCH", "SEARCH/CYCLE", SqlWordPosition.Rule),
+        new("FOR", "FOR UPDATE/SHARE", SqlWordPosition.Rule),
         new("WINDOW", SqlClauses.Window, SqlWordPosition.Clause),
         new("PERCENT", "PERCENT", SqlWordPosition.Rule),
         new("TIES", "WITH TIES", SqlWordPosition.Rule),

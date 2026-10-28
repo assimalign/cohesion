@@ -78,6 +78,7 @@ public sealed class GraphAdjacencyFilterTests
         }, timeout.Token);
         // Assert
         output.Count.ShouldBe(1);
+        // The label scan visits Hub and expansion visits one selected edge.
         budget.Physical.ShouldBe(2);
         budget.Viable.ShouldBe(1);
     }

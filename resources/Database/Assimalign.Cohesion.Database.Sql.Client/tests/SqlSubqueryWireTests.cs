@@ -46,6 +46,32 @@ public sealed class SqlSubqueryWireTests
         (await QueryAsync(connection, "SELECT id FROM users ORDER BY id")).Select(row => row[0]).ShouldBe(new object?[] { 1, 2 });
     }
 
+    [Theory(DisplayName = "Cohesion Test [Sql.Client] - Recursive WITH: acyclic visibility executes and recursion retains its planning refusal")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task QueryAsync_RecursiveVisibility_ShouldPreservePlanningGate(bool tcp)
+    {
+        // Arrange
+        await using var harness = await SqlClientTestHarness.StartAsync(tcp: tcp);
+        await using var connection = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout());
+
+        // Act
+        var rows = await QueryAsync(connection, "WITH RECURSIVE picked AS (SELECT id FROM users) SELECT id FROM picked ORDER BY id");
+        var unsupported = await Should.ThrowAsync<SqlClientException>(() => QueryAsync(connection,
+            "WITH RECURSIVE picked(id) AS (SELECT 1 UNION ALL SELECT id+1 FROM picked WHERE id<3) SELECT id FROM picked"));
+        var invalid = await Should.ThrowAsync<SqlClientException>(() => QueryAsync(connection,
+            "WITH RECURSIVE picked(id) AS (SELECT id FROM picked UNION ALL SELECT 1) SELECT id FROM picked"));
+
+        // Assert
+        rows.Select(row => row[0]).ShouldBe(new object?[] { 1, 2 });
+        unsupported.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
+        unsupported.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CK00001");
+        unsupported.ConnectionUsable.ShouldBeTrue();
+        invalid.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS01055");
+        invalid.ConnectionUsable.ShouldBeTrue();
+        (await QueryAsync(connection, "SELECT id FROM users ORDER BY id")).Select(row => row[0]).ShouldBe(new object?[] { 1, 2 });
+    }
+
     [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - Derived tables: blank output names fail the statement and preserve the transaction")]
     [InlineData("SELECT * FROM (SELECT id AS \"\" FROM users) d")]
     [InlineData("SELECT * FROM (SELECT id FROM users) d (\" \")")]
@@ -286,7 +312,6 @@ public sealed class SqlSubqueryWireTests
     [InlineData("SELECT id FROM users WHERE id = ALL (1, 2)")]
     [InlineData("SELECT id FROM users WHERE id = SOME (1, 2)")]
 
-    [InlineData("WITH RECURSIVE picked AS (SELECT id FROM users) SELECT id FROM picked")]
     [InlineData("WITH d AS (DELETE FROM users RETURNING *) SELECT * FROM d")]
 
 

@@ -185,7 +185,9 @@ internal sealed partial class DocumentPlanner
             (query.Having is not null && ContainsAggregate(query.Having, functions)) || query.OrderBy.Any(order => ContainsAggregate(order.Expression, functions));
         variables?.Remove(query.Alias ?? query.Collection);
         var unnestVariables = variables;
+        var groupScope = query.GroupAliases.Count > 0 || query.GroupAs is not null ? GroupScope(query, unnestVariables) : null;
         var scopes = grouped || query.IsDistinct || query.IsValue && query.OrderBy.Count > 0 ? new DocumentBindingScopes() : null;
+        if (groupScope is not null) { scopes!.RegisterGroup(query, groupScope); }
         if (query.Predicate is not null)
         {
             Validate(query.Predicate, allowAggregate: false, functions: functions);
@@ -198,7 +200,8 @@ internal sealed partial class DocumentPlanner
         {
             cancellationToken.ThrowIfCancellationRequested();
             Validate(projection.Expression, allowAggregate: true, allowStar: !grouped, functions: functions);
-            if (grouped) { ValidateGrouped(projection.Expression, query, unnestVariables, scopes!, functions); }
+            if (grouped) { ValidateGrouped(projection.Expression, query, unnestVariables, scopes!, functions, groupScope); }
+            if (query.GroupAs is not null) { ValidateGroupArrayInput(projection.Expression, query, scopes!, functions); }
             string name = query.IsValue ? "value" : projection.Alias ?? projection.Expression switch
             {
                 OqlStarExpression => "document",
@@ -211,22 +214,25 @@ internal sealed partial class DocumentPlanner
             {
                 throw new DocumentPlanningException("CD01003", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.PlannerCreateLogicalPlanFailure3, name), projection.Expression.Location);
             }
-            projections.Add(new DocumentProjection(name, projection.Expression, StaticType(projection.Expression, functions)));
+            projections.Add(new DocumentProjection(name, projection.Expression,
+                groupScope is null ? StaticType(projection.Expression, functions) : GroupProjectionType(projection.Expression, query, functions)));
         }
         if (query.Having is not null)
         {
             Validate(query.Having, allowAggregate: true, functions: functions);
-            ValidateGrouped(query.Having, query, unnestVariables, scopes!, functions);
+            ValidateGrouped(query.Having, query, unnestVariables, scopes!, functions, groupScope);
+            if (query.GroupAs is not null) { ValidateGroupArrayInput(query.Having, query, scopes!, functions); }
         }
         foreach (var order in query.OrderBy)
         {
             if (query.IsDistinct && !query.Projections.Any(projection =>
-                EquivalentExpression(projection.Expression, order.Expression, query.Alias, unnestVariables, scopes!)))
+                EquivalentGroupedExpression(projection.Expression, order.Expression, query, unnestVariables, scopes!)))
             {
                 throw new DocumentPlanningException("CD01014", ErrorMessages.DistinctOrderNotProjected, order.Expression.Location);
             }
             Validate(order.Expression, allowAggregate: true, functions: functions);
-            if (grouped) { ValidateGrouped(order.Expression, query, unnestVariables, scopes!, functions); }
+            if (grouped) { ValidateGrouped(order.Expression, query, unnestVariables, scopes!, functions, groupScope); }
+            if (query.GroupAs is not null) { ValidateGroupArrayInput(order.Expression, query, scopes!, functions); }
         }
         bool canStopEarly = !grouped && !query.IsDistinct && (query.OrderBy.Count == 0 ||
             query.OrderBy.Count == 1 && query.OrderBy[0].Expression is OqlMetaExpression { Member: "id" }) &&
@@ -234,7 +240,7 @@ internal sealed partial class DocumentPlanner
                 (projection.Type != DatabaseType.Null || projection.Expression is
                     OqlLiteralExpression { Value: null or JsonElement { ValueKind: JsonValueKind.Null } } or OqlMissingExpression));
         var projectedOrdering = query.IsValue ? query.OrderBy.Select(order =>
-            EquivalentExpression(query.Projections[0].Expression, order.Expression, query.Alias, unnestVariables, scopes!)).ToArray() : [];
+            EquivalentGroupedExpression(query.Projections[0].Expression, order.Expression, query, unnestVariables, scopes!)).ToArray() : [];
         return new DocumentLogicalPlan(query, projections, grouped, limit, offset, unnestVariables, canStopEarly, projectedOrdering);
     }
 

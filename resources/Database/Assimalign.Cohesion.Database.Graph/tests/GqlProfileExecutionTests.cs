@@ -234,6 +234,18 @@ public sealed class GqlProfileExecutionTests
                 Mutation("MATCH (a:Person {name: 'Bob'}), (b:Person {name: 'Isolated'}) INSERT (a)<-[:KNOWS {weight: 3}]-(b)", 1,
                     new ExecutionCase("MATCH (a:Person {name: 'Isolated'})-[r:KNOWS]->(b) RETURN b.name, r.weight", [["Bob", 3L]])),
             ],
+            [GqlClauses.Merge] =
+            [
+                new("MERGE (n:Person {name:'Alice'}) ON MATCH SET n.age = n.age + 1 RETURN n.age", [[43L]], 1),
+                new("MERGE (n:Person {name:'Alice'}) ON MATCH SET n.age=n.age+1 ON MATCH SET n.age=n.age+2 RETURN n.age", [[45L]], 1),
+                new("MERGE (n:MergeRepeat) ON CREATE SET n.x=1 ON CREATE SET n.x=n.x+2 RETURN n.x", [[3L]], 1),
+                new("MERGE (n:MergeLoop {id:1})-[:SELF]->(n) RETURN n.id", [[1L]], 2),
+                Mutation("MERGE (n:Person {name:'New'}) ON CREATE SET n.age = 9", 1,
+                    new ExecutionCase("MATCH (n:Person {name:'New'}) RETURN n.age", [[9L]])),
+                new("FOR x IN [1,1,1] MERGE (n:MergeRow {id:x}) ON CREATE SET n.hits=1 ON MATCH SET n.hits=n.hits+1 RETURN n.hits", [[3L],[3L],[3L]], 1),
+                Mutation("MERGE (:Person {name:'Alice'})-[:NEW_EDGE]-(:Person {name:'Bob'})", 3,
+                    new ExecutionCase("MATCH (n:Person {name:'Alice'}) RETURN count(*)", [[2L]])),
+            ],
             [GqlClauses.Delete] =
             [
                 Mutation("MATCH (a:Person {name: 'Isolated'}) DELETE a", 1,
@@ -477,6 +489,7 @@ public sealed class GqlProfileExecutionTests
 
     private static bool UsesClause(string clause, GqlQueryExpression query) => clause switch
     {
+        GqlClauses.Merge => query.Stages.Any(stage => stage is GqlMergeStage),
         GqlClauses.Set => query.Stages.Any(stage => stage is GqlSetStage),
         GqlClauses.Remove => query.Stages.Any(stage => stage is GqlRemoveStage),
         GqlClauses.QuantifiedPath => query.MatchClauses.SelectMany(clause => clause.Paths).SelectMany(PatternPaths).Any(path => path.Relationships.Any(edge => edge.Quantifier is not null) || path.Elements?.Any(element => element is GqlParenthesizedPathPattern { Quantifier: not null }) == true),

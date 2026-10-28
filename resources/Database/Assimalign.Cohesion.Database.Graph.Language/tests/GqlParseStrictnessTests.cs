@@ -74,8 +74,6 @@ public sealed class GqlParseStrictnessTests
     [InlineData("MATCH (a) «CALL» db.labels() YIELD label RETURN label", "CALL")]
     // Delete without detaching (pin)
     [InlineData("MATCH (n) «NODETACH DELETE» n", "NODETACH DELETE")]
-    // MERGE (pin; already CK00001 before #1101)
-    [InlineData("«MERGE» (n)", "MERGE")]
     public void Parse_IsoConstruct_ShouldReportOneCapabilityDiagnostic(string marked, string construct)
     {
         // Arrange

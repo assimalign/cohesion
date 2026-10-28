@@ -26,14 +26,15 @@ internal sealed class GraphMergeLocks : IDisposable
         {
             lock (_sync)
             {
-                ObjectDisposedException.ThrowIf(_disposed, this);
+                if (_disposed) { throw GraphOperation.Ended(); }
                 return EntryBytes * (long)(_entries.Count + (_parent ? 1 : 0));
             }
         }
     }
 
     internal async ValueTask AcquireAsync(GraphDatabase database, GraphOperation operation,
-        LockResource resource, CancellationToken token = default)
+        LockResource resource, CancellationToken token = default, Func<ValueTask>? beforePatternGrant = null,
+        Func<ValueTask>? beforeParentCheck = null)
     {
         var manager = database.Coordinator.LockManager;
         var owner = operation.Context.Sequence;
@@ -41,7 +42,7 @@ internal sealed class GraphMergeLocks : IDisposable
         bool acquireParent;
         lock (_sync)
         {
-            ObjectDisposedException.ThrowIf(_disposed, this);
+            if (_disposed) { throw GraphOperation.Ended(); }
             acquireParent = !_parent;
             if (acquireParent)
             {
@@ -53,12 +54,13 @@ internal sealed class GraphMergeLocks : IDisposable
         if (acquireParent)
         {
             await manager.AcquireAsync(owner, parent, LockMode.IntentExclusive, token).ConfigureAwait(false);
-            operation.EnsureActive();
+            if (beforeParentCheck is not null) { await beforeParentCheck().ConfigureAwait(false); }
+            operation.EnsureMergeActive();
         }
         bool escalate;
         lock (_sync)
         {
-            ObjectDisposedException.ThrowIf(_disposed, this);
+            if (_disposed) { throw GraphOperation.Ended(); }
             if (_escalated || _entries.Contains(resource)) { return; }
             escalate = _entries.Count == EntryLimit;
             if (!escalate)
@@ -75,6 +77,9 @@ internal sealed class GraphMergeLocks : IDisposable
             lock (_sync) { _escalated = true; }
             return;
         }
+        // Instance-free test seam: end after bookkeeping but before the manager sees the
+        // request, exercising an actual late grant to an owner already released by teardown.
+        if (beforePatternGrant is not null) { await beforePatternGrant().ConfigureAwait(false); }
         await manager.AcquireAsync(owner, resource, LockMode.Exclusive, token).ConfigureAwait(false);
 
         void Charge() => operation.Merge.ChargeLock();

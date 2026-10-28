@@ -180,5 +180,31 @@ public sealed partial class SqlQueryParser
         query.LimitSyntaxKind = limitSyntaxKind;
         if (offset is not null) { query.Offset = offset; }
         query.IncludeTailDepth();
+
+        // PostgreSQL gram.y:13119-13176,13803-13840: row locking is a SELECT
+        // tail, not a token pair anywhere in an expression or qualified name.
+        if (TryReadSelectLockingStrength(lexer, out int lockingEnd))
+        {
+            RequireSkippedConstruct(lexer.Current.Position, lockingEnd, "FOR UPDATE/SHARE");
+            SkipQueryRemainder(ref lexer);
+        }
+    }
+
+    private static bool TryReadSelectLockingStrength(TokenLexer lexer, out int end)
+    {
+        end = 0;
+        if (!IsWord(ref lexer, "FOR") || !AdvancePastComments(ref lexer)) { return false; }
+        if (IsWord(ref lexer, "NO"))
+        {
+            if (!AdvancePastComments(ref lexer) || !IsWord(ref lexer, "KEY") ||
+                !AdvancePastComments(ref lexer) || !IsKeyword(ref lexer, "UPDATE")) { return false; }
+        }
+        else if (IsWord(ref lexer, "KEY"))
+        {
+            if (!AdvancePastComments(ref lexer) || !IsWord(ref lexer, "SHARE")) { return false; }
+        }
+        else if (!IsKeyword(ref lexer, "UPDATE") && !IsWord(ref lexer, "SHARE")) { return false; }
+        end = CurrentTokenEnd(ref lexer);
+        return true;
     }
 }

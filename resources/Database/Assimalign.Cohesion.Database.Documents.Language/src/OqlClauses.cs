@@ -105,6 +105,9 @@ public static class OqlClauses
     /// <summary>Groups values by one or more expressions.</summary>
     public const string GroupBy = "GROUP BY";
 
+    /// <summary>Retains each group's input binding wrappers as an array.</summary>
+    public const string GroupAs = "GROUP AS";
+
     /// <summary>Restricts grouped values by a predicate.</summary>
     public const string Having = "HAVING";
 

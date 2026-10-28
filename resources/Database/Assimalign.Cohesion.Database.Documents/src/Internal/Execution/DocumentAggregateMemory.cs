@@ -66,7 +66,7 @@ internal sealed class DocumentAggregateMemory
     internal void ReleaseResult(long bytes, int generation)
     { if (generation == _generation) { Release(bytes); } }
 
-    // Lifetime owner for source rows, group keys/state and future GROUP AS wrappers.
+    // Lifetime owner for source rows, group keys/state, GROUP AS wrappers and DML buffers.
     // Each owner releases only its own reservations, including on refused/canceled work.
     internal Reservation Reserve() => new(this);
 
@@ -84,6 +84,12 @@ internal sealed class DocumentAggregateMemory
         internal void Charge(long bytes) { _memory.Charge(bytes); _bytes += bytes; }
 
         internal void Retain(object? value) => Charge(64L + _memory.ValueBytes(value));
+
+        // Transfer a successful materialization's charge without releasing it from
+        // the shared counter. The caller adopts immediately, before any further work.
+        internal long Detach() { long bytes = _bytes; _bytes = 0; return bytes; }
+
+        internal void Adopt(long bytes) => _bytes += bytes;
 
         internal void Rewind(long bytes)
         {

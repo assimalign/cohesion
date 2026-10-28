@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Collections.Generic;
 using Assimalign.Cohesion.Database.Language;
 
@@ -22,16 +23,19 @@ public sealed class OqlSelectExpression : OqlExpression
     /// <param name="offset">The optional number of rows to skip, as a signed integer literal or parameter.</param>
     /// <param name="location">The source span.</param>
     /// <param name="unnest">The ordered array bindings applied before WHERE.</param>
+    /// <param name="groupAliases">The optional aliases parallel to <paramref name="groupBy"/>; null entries leave terms unnamed.</param>
+    /// <param name="groupAs">The optional GROUP AS binding for the array of input binding wrappers.</param>
     public OqlSelectExpression(string collection, string? alias, IReadOnlyList<OqlProjection> projections,
         OqlExpression? predicate, IReadOnlyList<OqlExpression> groupBy, OqlExpression? having,
         IReadOnlyList<OqlOrdering> orderBy, bool isDistinct, bool isValue, OqlExpression? limit = null,
-        OqlExpression? offset = null, Location? location = null, IReadOnlyList<OqlUnnestExpression>? unnest = null) : base(location)
+        OqlExpression? offset = null, Location? location = null, IReadOnlyList<OqlUnnestExpression>? unnest = null,
+        IReadOnlyList<string?>? groupAliases = null, string? groupAs = null) : base(location)
     {
         Collection = collection;
         Alias = alias;
         Projections = projections;
         Predicate = predicate;
-        GroupBy = groupBy;
+        GroupBy = groupAliases is null && groupAs is null ? groupBy : new Grouping(groupBy, groupAliases ?? [], groupAs);
         Having = having;
         OrderBy = orderBy;
         IsDistinct = isDistinct;
@@ -58,6 +62,10 @@ public sealed class OqlSelectExpression : OqlExpression
     public OqlExpression? Predicate { get; }
     /// <summary>Gets the grouping expressions.</summary>
     public IReadOnlyList<OqlExpression> GroupBy { get; }
+    /// <summary>Gets the group-term aliases, parallel to GroupBy, or an empty list when no terms have aliases.</summary>
+    public IReadOnlyList<string?> GroupAliases => (GroupBy as Grouping)?.Aliases ?? [];
+    /// <summary>Gets the optional name of the array of input binding wrappers.</summary>
+    public string? GroupAs => (GroupBy as Grouping)?.GroupAs;
     /// <summary>Gets the optional group predicate.</summary>
     public OqlExpression? Having { get; }
     /// <summary>Gets the ordering expressions, from primary to final key.</summary>
@@ -66,6 +74,22 @@ public sealed class OqlSelectExpression : OqlExpression
     public OqlExpression? Limit { get; }
     /// <summary>Gets the optional number of rows to skip.</summary>
     public OqlExpression? Offset { get; }
+
+    // Keep ordinary SELECT nodes and their allocation measurements unchanged. Optional
+    // grouping metadata travels with the existing key list, including planner copies.
+    private sealed class Grouping : IReadOnlyList<OqlExpression>
+    {
+        public Grouping(IReadOnlyList<OqlExpression> keys, IReadOnlyList<string?> aliases, string? groupAs)
+        { Keys = keys; Aliases = aliases; GroupAs = groupAs; }
+
+        public IReadOnlyList<OqlExpression> Keys { get; }
+        public IReadOnlyList<string?> Aliases { get; }
+        public string? GroupAs { get; }
+        public int Count => Keys.Count;
+        public OqlExpression this[int index] => Keys[index];
+        public IEnumerator<OqlExpression> GetEnumerator() => Keys.GetEnumerator();
+        IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+    }
 
     private sealed class DebugView
     {
@@ -84,6 +108,8 @@ public sealed class OqlSelectExpression : OqlExpression
         public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.Documents.Language.OqlProjection> Projections => _target.Projections;
         public global::Assimalign.Cohesion.Database.Documents.Language.OqlExpression? Predicate => _target.Predicate;
         public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.Documents.Language.OqlExpression> GroupBy => _target.GroupBy;
+        public IReadOnlyList<string?> GroupAliases => _target.GroupAliases;
+        public string? GroupAs => _target.GroupAs;
         public global::Assimalign.Cohesion.Database.Documents.Language.OqlExpression? Having => _target.Having;
         public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.Documents.Language.OqlOrdering> OrderBy => _target.OrderBy;
         public global::Assimalign.Cohesion.Database.Documents.Language.OqlExpression? Limit => _target.Limit;

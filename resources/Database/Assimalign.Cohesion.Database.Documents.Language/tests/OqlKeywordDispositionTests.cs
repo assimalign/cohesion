@@ -99,6 +99,7 @@ public sealed class OqlKeywordDispositionTests
         ["ROLLBACK"] = Parses("ROLLBACK"),
         ["SAVEPOINT"] = Rejects("SAVEPOINT point", "SAVEPOINT"),
         ["WITH"] = Rejects("WITH x AS (SELECT a FROM c) SELECT a FROM x", "WITH"),
+        ["LETTING"] = Rejects("SELECT a FROM c GROUP BY a LETTING x = 1", "LETTING"),
         ["JOIN"] = Rejects("SELECT * FROM c JOIN d ON c.a = d.a", "JOIN"),
         ["UNION"] = Rejects("SELECT a FROM c UNION SELECT a FROM d", "UNION"),
         ["INTERSECT"] = Rejects("SELECT a FROM c INTERSECT SELECT a FROM d", "INTERSECT"),

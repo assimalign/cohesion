@@ -15,7 +15,7 @@ public abstract class SqlQueryBodyExpression : SqlQueryExpression
     /// <param name="location">The source location.</param>
     private protected SqlQueryBodyExpression(string? text, Location? location) : base(SqlQueryCommandType.Select, text, location) { }
 
-    /// <summary>Gets the non-recursive WITH definitions in declaration order.</summary>
+    /// <summary>Gets the WITH definitions in declaration order.</summary>
     public IReadOnlyList<SqlCommonTableExpression> CommonTables
     {
         get => _commonTables;
