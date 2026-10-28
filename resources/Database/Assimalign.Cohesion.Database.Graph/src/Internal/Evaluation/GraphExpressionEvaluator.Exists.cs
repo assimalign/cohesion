@@ -11,10 +11,11 @@ internal static partial class GraphExpressionEvaluator
         if (context.Database is null || context.Operation is not { } operation ||
             operation.FunctionBindings is not GraphCorrelatedBindings registry || !registry.Subplans.TryGetValue(expression, out var subplan))
         { throw new GraphPlanningException("CG05027", ErrorMessages.CorrelatedPlanRequired, expression.Location); }
-        // Scalar evaluation is synchronous throughout this engine. The inner stream's awaits
-        // never capture a synchronization context. Consume a completed ValueTask directly;
-        // only a genuinely asynchronous storage read needs a blocking join at this seam.
+        // Invariant: every inner evaluation completes synchronously, including failures.
+        // Before any read can suspend this seam needs a real async scalar evaluation path.
+        // Count incomplete tasks at the actual join so cold/warm corpus tests guard it.
         var result = GraphPlanExecutor.ExistsAsync(context.Database, operation, subplan, bindings, parameters, operation.FunctionCancellation);
+        registry.ObserveInnerEvaluation(result.IsCompleted);
         return result.IsCompletedSuccessfully ? result.Result : result.AsTask().GetAwaiter().GetResult();
     }
 }

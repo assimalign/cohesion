@@ -1,11 +1,13 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 using Xunit.Abstractions;
+using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Graph.Internal;
 using Assimalign.Cohesion.Database.Graph.Language;
 using Assimalign.Cohesion.Database.Graph.Tests.TestObjects;
@@ -18,6 +20,75 @@ public sealed class GraphExistsLifetimeTests
 {
     private readonly ITestOutputHelper _output;
     public GraphExistsLifetimeTests(ITestOutputHelper output) { _output = output; }
+
+    [Fact(DisplayName = "Cohesion Test [Graph] - EXISTS: cold and warm corpus has zero suspended inner evaluations")]
+    public async Task ExecuteAsync_ColdAndWarmCorpus_ShouldCompleteEveryInnerEvaluationSynchronouslyAsync()
+    {
+        // Arrange: reopen before each case so its first read uses a fresh store and page pool.
+        string root = Path.Combine(Path.GetTempPath(), "cohesion-exists-sync-" + Guid.NewGuid().ToString("N"));
+        long evaluations = 0;
+        int cold = 0, warm = 0;
+        try
+        {
+            foreach (var item in GraphExistsTests.PatternCases)
+            {
+                await using (var seedEngine = GraphDatabaseEngine.Create("exists-sync", new() { RootPath = root }))
+                {
+                    var seedDatabase = await seedEngine.CreateDatabaseAsync("graph", CancellationToken.None);
+                    await using var seedSession = await seedDatabase.CreateSessionAsync(CancellationToken.None);
+                    await seedSession.ExecuteAsync(GraphExistsTests.Seed, cancellationToken: CancellationToken.None);
+                }
+                await using (var engine = GraphDatabaseEngine.Create("exists-sync", new() { RootPath = root }))
+                {
+                    var database = await engine.OpenDatabaseAsync("graph", CancellationToken.None);
+                    await using var session = await database.CreateSessionAsync(CancellationToken.None);
+                    var statement = GraphQueryRequest.FromGql((string)item[0]).Statement;
+                    for (int pass = 0; pass < 2; pass++)
+                    {
+                        // Act: exercise the actual scalar join throughout each statement.
+                        await database.RunAsync(session, async operation =>
+                        {
+                            await using var result = (DatabaseResultSet)await GraphPlanExecutor.ExecuteAsync(database, operation, statement, null, CancellationToken.None);
+                            var rows = new List<object?[]>();
+                            await foreach (var row in result.GetRowsAsync(CancellationToken.None))
+                            { rows.Add(Enumerable.Range(0, row.FieldCount).Select(row.GetValue).ToArray()); }
+                            // Assert: prove the seam ran, check results, and reject every suspension.
+                            var registry = operation.FunctionBindings.ShouldBeOfType<GraphCorrelatedBindings>();
+                            registry.InnerEvaluations.ShouldBeGreaterThan(0);
+                            registry.SuspendedInnerEvaluations.ShouldBe(0, (string)item[0]);
+                            evaluations += registry.InnerEvaluations;
+                            string.Join(';', rows.Select(row => string.Join(',', row.Select(GraphExistsTests.Text)))).ShouldBe((string)item[1]);
+                            return true;
+                        }, CancellationToken.None);
+                        if (pass == 0) { cold++; } else { warm++; }
+                    }
+                }
+                await using var cleanup = GraphDatabaseEngine.Create("exists-sync", new() { RootPath = root });
+                await cleanup.DropDatabaseAsync("graph", CancellationToken.None);
+            }
+            cold.ShouldBe(GraphExistsTests.PatternCases.Count());
+            warm.ShouldBe(cold);
+            _output.WriteLine($"EXISTS synchronous seam: cold statements={cold}; warm statements={warm}; inner evaluations={evaluations}; suspended=0.");
+        }
+        finally { if (Directory.Exists(root)) { Directory.Delete(root, recursive: true); } }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Graph] - EXISTS: the tripwire distinguishes suspension from synchronous faults")]
+    public void ObserveInnerEvaluation_IncompleteTask_ShouldCountSuspensionOnly()
+    {
+        // Arrange
+        var registry = new GraphCorrelatedBindings(new Dictionary<GqlNamedFunctionCallExpression, GraphFunction>(),
+            new Dictionary<GqlExpression, GraphCorrelatedSubplan>(), null);
+        var pending = new TaskCompletionSource<bool>();
+        // Act
+        registry.ObserveInnerEvaluation(ValueTask.FromResult(true).IsCompleted);
+        registry.ObserveInnerEvaluation(ValueTask.FromException<bool>(new InvalidOperationException()).IsCompleted);
+        registry.ObserveInnerEvaluation(pending.Task.IsCompleted);
+        pending.SetResult(true);
+        // Assert
+        registry.InnerEvaluations.ShouldBe(3);
+        registry.SuspendedInnerEvaluations.ShouldBe(1);
+    }
 
     [Fact(DisplayName = "Cohesion Test [Graph] - EXISTS: registered calls preserve ordinary projection and ordering evaluation")]
     public async Task ExecuteAsync_RegisteredInnerPredicate_ShouldEvaluateEachExpressionAsync()
@@ -62,6 +133,8 @@ public sealed class GraphExistsLifetimeTests
             GraphExpressionEvaluator.Evaluate(query.Projections[0].Expression, arguments, operation.EvaluationContext).ShouldBe(false);
             advances.ShouldBe(1);
             disposed.ShouldBe(1);
+            registry.InnerEvaluations.ShouldBe(1);
+            registry.SuspendedInnerEvaluations.ShouldBe(0);
             budget.Physical.ShouldBe(2);
             budget.Viable.ShouldBe(1);
             arguments.Keys.ShouldBe(new[] { "a" });
@@ -103,6 +176,8 @@ public sealed class GraphExistsLifetimeTests
             }
             advances.ShouldBe(40);
             disposed.ShouldBe(40);
+            registry.InnerEvaluations.ShouldBe(40);
+            registry.SuspendedInnerEvaluations.ShouldBe(0);
             budget.Physical.ShouldBe(40);
             _output.WriteLine($"{(negated ? "AntiSemiApply" : "SemiApply")}: 40 outer rows, 200 available inner rows each; advances={advances}; physical={budget.Physical}; disposed={disposed}.");
             // The same boundary can be drained by GQ-C3 without a second correlation mechanism.
@@ -144,6 +219,8 @@ public sealed class GraphExistsLifetimeTests
             if (failure == "cancel") { Should.Throw<OperationCanceledException>(evaluate); budget.Physical.ShouldBe(3); }
             else { Should.Throw<DatabaseException>(evaluate).Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(failure == "work" ? "CG05004" : failure == "memory" ? "CG05020" : "CG02013"); }
             disposed.ShouldBe(1);
+            registry.InnerEvaluations.ShouldBe(1);
+            registry.SuspendedInnerEvaluations.ShouldBe(0);
             budget.Memory.RetainedBytes.ShouldBe(0);
             budget.Memory.ActiveLeases.ShouldBe(0);
             return ValueTask.FromResult(true);

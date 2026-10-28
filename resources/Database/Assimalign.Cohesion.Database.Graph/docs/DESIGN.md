@@ -768,9 +768,14 @@ before optional null extension. New inner variables never enter the outer bindin
 
 The existing function-binding reference carries a lazy GraphCorrelatedBindings registry,
 avoiding new planner/plan/operation fields and allocations for statements without EXISTS.
-Scalar evaluation remains synchronous: completed inner ValueTasks are consumed directly;
-asynchronous storage reads join through a context-free Task at this internal seam. Every
-inner await uses ConfigureAwait(false); stream cleanup owns its cursor and memory leases on
+Scalar evaluation remains synchronous: completed inner ValueTasks are consumed directly.
+The invariant is that every inner evaluation completes synchronously, including cold stores
+and faulted/canceled results. The registry counts evaluations and incomplete ValueTasks at
+the actual scalar join; the cold/warm EXISTS corpus asserts a nonzero count and zero suspended
+evaluations. The prerequisite is that before any inner read can suspend, the EXISTS seam needs
+a real async evaluation path, as OQ-Q1 built for OQL. The existing blocking fallback is not
+permission to add a suspending read source. Every inner await uses ConfigureAwait(false);
+stream cleanup owns its cursor and memory leases on
 first match, exhaustion, cancellation and evaluation/budget failures. EXPLAIN emits each
 semi/anti apply with its correlated variables and ordinary inner MATCH operators.
 

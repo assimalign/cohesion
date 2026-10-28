@@ -20,6 +20,14 @@ internal sealed class GraphCorrelatedBindings : IReadOnlyDictionary<GqlNamedFunc
     internal IReadOnlySet<GqlExpression>? Anti { get; }
     internal System.Action? OnInnerAdvance { get; set; }
     internal System.Action? OnInnerDisposed { get; set; }
+    internal long InnerEvaluations { get; private set; }
+    internal long SuspendedInnerEvaluations { get; private set; }
+
+    internal void ObserveInnerEvaluation(bool completed)
+    {
+        InnerEvaluations++;
+        if (!completed) { SuspendedInnerEvaluations++; }
+    }
     public int Count => _functions.Count;
     public IEnumerable<GqlNamedFunctionCallExpression> Keys => _functions.Keys;
     public IEnumerable<GraphFunction> Values => _functions.Values;
