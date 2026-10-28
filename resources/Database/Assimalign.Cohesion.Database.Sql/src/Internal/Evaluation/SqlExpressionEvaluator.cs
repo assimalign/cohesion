@@ -543,6 +543,7 @@ internal sealed partial class SqlExpressionEvaluator
 
     private SqlCollationCandidate FindCollationCore(SqlExpression expression, bool bound)
     {
+        if (expression is SqlFunctionCallExpression grouping && SqlStandardLibrary.IsGrouping(grouping.FunctionName)) { return default; }
         if (_projectionSources is not null && _projectionSources.TryGetValue(expression, out var source))
         {
             return source.ColumnOrdinal is int ordinal ? ColumnCollation(ordinal) : FindCollation(source.Expression, bound);

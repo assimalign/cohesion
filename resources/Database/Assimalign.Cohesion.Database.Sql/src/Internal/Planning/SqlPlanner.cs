@@ -1544,6 +1544,11 @@ internal sealed partial class SqlPlanner
             if (evaluator.IsBoundValue(expression)) { return; }
             throw new SqlPlanningException("CS01053", ErrorMessages.MergeActionContext, expression.Location);
         }
+        if (expression is SqlFunctionCallExpression grouping && IsGrouping(grouping))
+        {
+            if (evaluator.IsBoundValue(expression)) { return; }
+            throw new SqlPlanningException("CS05074", ErrorMessages.GroupingPlacement, expression.Location);
+        }
         bool isBound = boundSubqueries is not null && boundSubqueries.ContainsKey(expression);
         if (expression is SqlFunctionCallExpression { Filter: not null } filtered &&
             !evaluator.Functions.Catalog.IsAggregate(filtered.FunctionName))
@@ -1953,6 +1958,7 @@ internal sealed partial class SqlPlanner
     /// </remarks>
     internal static IEnumerable<SqlExpression> Children(SqlExpression expression) => expression switch
     {
+        SqlGroupingSetExpression grouping => grouping.Items,
         SqlLogicalExpression logical => logical.Operands,
         SqlFunctionCallExpression { Filter: not null } function => FilterOperands(function),
         SqlFunctionCallExpression function => function.OrderBy.Count == 0 ? function.Arguments :

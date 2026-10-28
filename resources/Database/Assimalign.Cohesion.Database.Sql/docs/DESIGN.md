@@ -1528,6 +1528,39 @@ flowchart LR
   conversion remains cached and applies only built-in storage coercion; a domain check runs when
   the value is assigned. A canceled refresh after definition DDL has published leaves the cache
   pending; the next statement or provisioning operation rebuilds it with its own token.
+- **Grouping sets (#1720, SQ-H2).** A separate plan leaf and execution frame retain
+  expanded sets and GROUPING argument ordinals without enlarging plain grouping plans,
+  accumulator objects or async frames. Plain binding/execution keeps the established path;
+  the additional dispatch walk allocates nothing. Expansion follows PostgreSQL
+  parse_agg.c:1864–2102: products, per-set column deduplication and optional DISTINCT
+  set deduplication after the 4096-set limit. Composite items are units. The owner's
+  required GROUPING SETS-inside-ROLLUP/CUBE form recursively distributes alternatives
+  within included prefixes/subsets; PostgreSQL parse_clause.c:2231 rejects that direction.
+  Every set identity enters its hash key, so duplicate sets and subtotal NULLs never
+  share state with other sets or stored NULLs.
+  A logical transition evaluates FILTER, arguments and input ordering once per row
+  before feeding all sets, as execExpr.c:3708–3740 does. Volatile calls never share
+  a logical transition. Immutable input tuples may alias, while mutable ordered
+  representatives are copied per set to keep DISTINCT replacement independent.
+  Completed rows contain masked keys, independent aggregate results and GROUPING masks before HAVING,
+  projection, ordering or correlated reads. The rightmost argument is bit zero
+  (execExprInterp.c:5310–5336). GROUPING_ID aliases GROUPING; 1–31 arguments produce
+  non-null INTEGER metadata. Current-level key binding reports CS01062, invalid
+  arity CS01063, placement CS05074 and expansion CS05075. View call identities omit
+  the grouping primitive while retaining functions within its arguments and keys.
+  COHESION_SCHEMA.FUNCTIONS advertises GROUPING and GROUPING_ID as SPECIAL FORM;
+  neither has a scalar catalog overload or an application-overridable identity.
+  State uses the existing statement grant and releases it on every exit: conservative
+  fixed allowances cover each group/dictionary entry and native accumulator, with
+  retained keys, DISTINCT/ordered tuples and growing string output charged separately.
+  Application-owned accumulator allocations remain application-owned; no new sizing
+  interface or spill path is introduced. EXPLAIN describes set count, mask convention
+  and the budget. In-process generated UNION ALL equivalence, empty inputs, 1–4-bit
+  masks, views/reopen, memory refusals, wire and NativeAOT checks cover the contract.
+  No disk/wire format or public implementation boundary changes.
+  A generated-data comparison against PostgreSQL 18.6 covers ten grouping forms;
+  the same corpus also matches independent UNION ALL aggregates. Plain grouped-key
+  and expression-key queries retain the base's Release allocations exactly.
 - **FILTER and statistics (#1720, SQ-H1).** The source-bound optional predicate executes
   before argument or ordering subqueries, evaluation, coercion, DISTINCT retention or transition
   calls. Only TRUE admits a row. Independent children inside a filtered call are deferred until
@@ -3269,6 +3302,10 @@ Deviates from interface-first (database-area.md); new public syntax leaves are s
 | CS05071 | WHEN follows an unconditional clause of the same match kind |
 | CS05072 | FILTER on a scalar call (42809) |
 | CS05073 | Aggregate in FILTER (42803) |
+| CS01062 | GROUPING argument is not a grouping expression of the current query level (42803) |
+| CS01063 | GROUPING requires 1–31 non-star expression arguments (54023) |
+| CS05074 | GROUPING outside grouped output, or in aggregate/grouping inputs (42803) |
+| CS05075 | Pre-DISTINCT grouping-set expansion exceeds 4096 sets (54001) |
 
 Existing names/duplicates/arity/parameters use CS01014/015/019/006/020; non-Boolean predicates
 and incompatible assignment types use CS02003; aggregates use CS05017; identity uses CS03025.

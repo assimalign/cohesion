@@ -21,6 +21,7 @@ internal sealed partial class SqlExpressionEvaluator
     /// </exception>
     internal SqlFunction? ResolveFunction(SqlFunctionCallExpression call)
     {
+        if (SqlStandardLibrary.IsGrouping(call.FunctionName)) { return null; }
         // A MERGE action slot has its own type; an application function with the same
         // spelling must not supply its arity, length or domain metadata.
         if (_projectionSources?.ContainsKey(call) == true &&
@@ -333,6 +334,7 @@ internal sealed partial class SqlExpressionEvaluator
     /// <returns>The static type, or <see cref="DatabaseType.Null"/>.</returns>
     internal DatabaseType StaticCallType(SqlFunctionCallExpression call, bool scalarOnly = false)
     {
+        if (SqlStandardLibrary.IsGrouping(call.FunctionName)) { return DatabaseType.Int32; }
         if (call.FunctionName.Equals("EXTRACT", StringComparison.OrdinalIgnoreCase)) { return DatabaseType.Decimal; }
         if (call.FunctionName.Equals("NULLIF", StringComparison.OrdinalIgnoreCase)) { return call.Arguments.Count > 0 ? StaticTypeOf(call.Arguments[0]) : DatabaseType.Null; }
         if (SqlStandardLibrary.IsCoalesce(call.FunctionName))

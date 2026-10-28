@@ -120,6 +120,8 @@ structured-carrier messages remain unprefixed.
 | New (#1719, SQ-R1) | CS01059 | Binding/names — Recursive reference in a prohibited EXCEPT operand (42P19) |
 | New (#1719, SQ-R1) | CS01060 | Binding/names — Recursive term has more than one self-reference (42P19) |
 | New (#1719, SQ-R1) | CS01061 | Binding/names — Aggregate at the query level containing a recursive reference (42P19) |
+| New (#1720, SQ-H2) | CS01062 | Binding/grouping — GROUPING argument is not a grouping expression of the current query level (42803) |
+| New (#1720, SQ-H2) | CS01063 | Binding/grouping — GROUPING requires 1–31 non-star expression arguments (54023) |
 | COHSQLE001 | CS02001 | Values/types |
 | COHSQLE002 | CS02002 | Values/types — identity or standalone sequence range exhaustion (#1717) |
 | COHSQLE003 | CS02003 | Values/types |
@@ -210,6 +212,8 @@ structured-carrier messages remain unprefixed.
 | New (#1715, SQ-M1) | CS05071 | Action planning — MERGE WHEN follows an unconditional clause of the same match kind |
 | New (#1720, SQ-H1) | CS05072 | Execution/placement — FILTER on a non-aggregate call (42809) |
 | New (#1720, SQ-H1) | CS05073 | Execution/placement — same-scope aggregate in FILTER (42803) |
+| New (#1720, SQ-H2) | CS05074 | Execution/placement — GROUPING outside grouped output, or in grouping/aggregate inputs (42803) |
+| New (#1720, SQ-H2) | CS05075 | Execution/expansion — more than 4096 grouping sets before DISTINCT (54001) |
 | COHSQLE041 | CS06041 | Storage/durability |
 | COHSQLE058 | CS06058 | Storage/durability |
 
