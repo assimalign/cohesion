@@ -49,7 +49,7 @@ public sealed class DocumentSubqueryParityTests
             "SUM(ARRAY_LENGTH([{v}]))", "ARRAY_AGG({v})", "COUNT(DISTINCT {v})", "MIN({v})", "MAX({v})",
             "[@deep, tick(1), {v}]", "{a:@deep, b:tick(1), c:{v}}",
             "ARRAY CASE WHEN x = 1 THEN @deep ELSE tick(1) END FOR x IN [{v},2] END"];
-        string[] values = ["0", "1", "NULL", "TRUE", "FALSE", "'abc'", "[]", "[1]", "{a:1}"];
+        string[] values = ["0", "1", "NULL", "TRUE", "FALSE", "'abc'", "[]", "[1]", "{a:1}", "[NULL]", "[1,NULL]", "[{a:1},{}]", "[[1],[]]", "[{a:[NULL]}]"];
         foreach (string form in forms)
         {
             foreach (string value in values)
@@ -73,6 +73,98 @@ public sealed class DocumentSubqueryParityTests
         yield return ["FIRST q.a[0] FOR q IN [{a:[1]}] END", "FIRST q.a[0] FOR q IN (SELECT RAW {a:[1]} FROM items LIMIT 1) END"];
         yield return ["META().id", "CASE WHEN EXISTS (SELECT RAW 1 FROM items) THEN META().id END"];
 
+    }
+
+    public static IEnumerable<object[]> QueryPositions()
+    {
+        yield return ["SELECT n FROM items WHERE n IN [1,2,3] ORDER BY n", "SELECT n FROM items WHERE n IN (SELECT RAW n FROM items) ORDER BY n", 1];
+        yield return ["SELECT n FROM items ORDER BY [1,2,3], n DESC", "SELECT n FROM items ORDER BY (SELECT RAW n FROM items), n DESC", 1];
+        yield return ["SELECT COUNT(*) AS c FROM items GROUP BY [1,2,3]", "SELECT COUNT(*) AS c FROM items GROUP BY (SELECT RAW n FROM items)", 1];
+        yield return ["SELECT COUNT(*) AS c FROM items HAVING EXISTS [1,2,3]", "SELECT COUNT(*) AS c FROM items HAVING EXISTS (SELECT RAW n FROM items)", 1];
+        yield return ["SELECT * FROM items WHERE TRUE", "SELECT * FROM items WHERE EXISTS (SELECT RAW n FROM items)", 1];
+        yield return ["SELECT *, n AS w FROM items WHERE TRUE", "SELECT *, n AS w FROM items WHERE EXISTS (SELECT RAW n FROM items)", 1];
+        yield return ["SELECT * FROM items d UNNEST [1,2,3] AS v", "SELECT * FROM items d UNNEST (SELECT RAW n FROM items) AS v", 1];
+        yield return ["SELECT *, 1 AS w FROM items d UNNEST [1,2,3] AS v", "SELECT *, 1 AS w FROM items d UNNEST (SELECT RAW n FROM items) AS v", 1];
+        yield return ["SELECT * FROM items d LEFT UNNEST [] AS v", "SELECT * FROM items d LEFT UNNEST (SELECT RAW n FROM items WHERE FALSE) AS v", 1];
+        yield return ["SELECT [NULL,{a:1},[2]] AS v FROM items", "SELECT (SELECT RAW v FROM items s UNNEST [NULL,{a:1},[2]] AS v LIMIT 3) AS v FROM items", 1];
+        yield return ["SELECT [tick(1),tick(2),tick(3)] AS v FROM items", "SELECT (SELECT RAW tick(n) FROM items) AS v FROM items", 3];
+        yield return ["SELECT n FROM items WHERE FALSE", "SELECT n FROM items WHERE FALSE AND EXISTS (SELECT RAW tick(n) FROM items)", 0];
+        yield return ["SELECT n FROM items WHERE TRUE", "SELECT n FROM items WHERE TRUE OR EXISTS (SELECT RAW tick(n) FROM items)", 0];
+        yield return ["SELECT CASE WHEN TRUE THEN n ELSE [] END AS v FROM items", "SELECT CASE WHEN TRUE THEN n ELSE (SELECT RAW tick(n) FROM items) END AS v FROM items", 0];
+        yield return ["SELECT 1/0 AS v FROM items WHERE TRUE", "SELECT 1/0 AS v FROM items WHERE EXISTS (SELECT RAW n FROM items)", 1];
+        yield return ["SELECT n FROM items WHERE 1/0 > 0 AND TRUE", "SELECT n FROM items WHERE 1/0 > 0 AND EXISTS (SELECT RAW n FROM items)", 0];
+        yield return ["SELECT n FROM items WHERE TRUE ORDER BY 1/0", "SELECT n FROM items WHERE EXISTS (SELECT RAW n FROM items) ORDER BY 1/0", 1];
+        yield return ["SELECT * FROM items d UNNEST [@deep] AS v", "SELECT * FROM items d UNNEST (SELECT RAW @deep FROM items LIMIT 1) AS v", 1];
+        yield return ["SELECT *, 1 AS w FROM items d UNNEST [@deep] AS v", "SELECT *, 1 AS w FROM items d UNNEST (SELECT RAW @deep FROM items LIMIT 1) AS v", 1];
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Documents] - Subqueries: clause parity includes rows locations callbacks and execution counts")]
+    [MemberData(nameof(QueryPositions))]
+    public async Task ExecuteAsync_QueryPositions_ShouldMatchRowsAndWorkAsync(string synchronous, string asynchronous, int subqueries)
+    {
+        // Arrange
+        int calls = 0;
+        var builder = DocumentDatabaseEngine.CreateBuilder("position-parity");
+        builder.Functions.Add(DocumentScalarFunction.Create<decimal, decimal>("tick", value => { calls++; return value; }));
+        await using var engine = builder.Build();
+        var database = await engine.CreateDatabaseAsync("test", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await DocumentSubqueryTests.SeedAsync(session);
+        // Act
+        var expected = await EvaluateQueryAsync(synchronous);
+        session.LastQuerySubqueriesExecuted.ShouldBe(0);
+        var actual = await EvaluateQueryAsync(asynchronous);
+        // Assert
+        actual.Rows.ShouldBe(expected.Rows);
+        actual.Code.ShouldBe(expected.Code);
+        actual.Calls.ShouldBe(expected.Calls);
+        actual.Line.ShouldBe(expected.Line);
+        actual.Location.ShouldBe(expected.Location);
+        // Error spans after the changed operand keep their offsets relative to the
+        // identical suffix; spans before it (including 1/0) retain exact positions.
+        CanonicalOffset(synchronous, asynchronous, expected.Start, true).ShouldBe(CanonicalOffset(synchronous, asynchronous, actual.Start, false));
+        CanonicalOffset(synchronous, asynchronous, expected.End, true).ShouldBe(CanonicalOffset(synchronous, asynchronous, actual.End, false));
+        session.LastQuerySubqueriesExecuted.ShouldBe(subqueries);
+
+        async Task<(string[] Rows, string? Code, int? Start, int? End, int? Line, object? Location, int Calls)> EvaluateQueryAsync(string query)
+        {
+            calls = 0;
+            try
+            {
+                await using var result = (DatabaseResultSet)await session.ExecuteAsync(query, DocumentSubqueryRegressionTests.DeepParameters(), CancellationToken.None);
+                var rows = new List<string>();
+                await foreach (var row in result.GetRowsAsync(CancellationToken.None))
+                {
+                    var values = new List<string>();
+                    for (int column = 0; column < row.FieldCount; column++)
+                    {
+                        object? value = row.GetValue(column);
+                        values.Add(result.Columns[column].Name + ":" + result.Columns[column].Type + ":" + (row.IsMissing(column) ? "MISSING" :
+                            value is JsonElement json ? "Json:" + json.GetRawText() : value?.GetType().Name + ":" + Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture)));
+                    }
+                    rows.Add(string.Join("|", values));
+                }
+                return (rows.ToArray(), null, null, null, null, null, calls);
+            }
+            catch (DatabaseException exception)
+            {
+                var diagnostic = exception.Diagnostics.Single();
+                diagnostic.Start.ShouldNotBeNull();
+                diagnostic.End.ShouldNotBeNull();
+                return ([], diagnostic.Code, diagnostic.Start, diagnostic.End, diagnostic.Line, diagnostic.Location, calls);
+            }
+        }
+    }
+
+    private static int? CanonicalOffset(string control, string nested, int? offset, bool synchronous)
+    {
+        if (offset is null) { return null; }
+        int prefix = 0;
+        while (prefix < Math.Min(control.Length, nested.Length) && control[prefix] == nested[prefix]) { prefix++; }
+        int suffix = 0;
+        while (suffix < Math.Min(control.Length, nested.Length) - prefix && control[^(suffix + 1)] == nested[^(suffix + 1)]) { suffix++; }
+        int end = (synchronous ? control.Length : nested.Length) - suffix;
+        return offset <= prefix ? offset : offset >= end ? prefix + 1 + offset - end : prefix + 1;
     }
 
     [Theory(DisplayName = "Cohesion Test [Documents] - Subqueries: generated expressions preserve values failures and callback reachability")]

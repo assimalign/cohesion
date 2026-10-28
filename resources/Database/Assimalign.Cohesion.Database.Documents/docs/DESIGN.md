@@ -622,7 +622,10 @@ ordinary queries. Only operand dispatch, await/iteration scheduling, lazy branch
 synchronous constant-constructor caching and scratch release brackets remain separate: ordinary
 queries keep their original allocation path, while async release excludes nested-owned values.
 The permanent generated parity corpus compares equivalent literal/subquery operands, including
-NULL/MISSING, results and runtime kinds, diagnostic codes and developer callback counts.
+NULL/MISSING, null/object/nested arrays, results and runtime kinds, diagnostic codes and
+developer callback counts. Several-row clause pairs cover WHERE, ORDER BY, GROUP BY, HAVING,
+star and UNNEST, compare normalized diagnostic spans/lines/location kinds, and assert exact
+subquery-execution counts for cached, per-evaluation and skipped expressions.
 
 Execution is lazy at the expression read. CASE, Boolean short circuits, FIRST and conditional
 functions retain their original reachability, with no work, callbacks, retention or runtime errors

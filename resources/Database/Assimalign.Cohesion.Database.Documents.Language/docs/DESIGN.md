@@ -15,6 +15,23 @@ The OQL name is retained, but the language basis is SQL++ for JSON, following Co
 SQL++ for Query. The executable subset below is the dialect contract; it does not claim
 complete SQL++ support. MISSING and NULL are separate values (#1126, owner D2/D2a).
 
+## Operator conformance (#1731)
+
+The [dialect precedence table](DIALECT.md#expression-subqueries-and-exists-1731-oq-q1) records
+all supported operators. IS presence tests now bind above comparison, IN, BETWEEN, LIKE and
+ESCAPE operands, adopting Couchbase's boundary and changing earlier unparenthesized results.
+The shared predicate tier remains otherwise unchanged. Parser and execution conformance cover
+each IS operand boundary. The added string operator || lowers to CONCAT with its existing kind
+validation; IS [NOT] DISTINCT FROM retains explicit top-level unknown handling and structural
+value equality. Vocabulary rows and the MISSING/NULL/value matrix pin both additions. These spellings use
+existing tokens and introduce no keyword reservations.
+
+| Operator vocabulary | Syntax tree | Execution contract |
+| --- | --- | --- |
+| String concatenation: &#124;&#124; | CONCAT call with two arguments | Existing CONCAT kind and unknown rules |
+| IS DISTINCT FROM | Binary expression | FALSE only for definite SQL++ equality after top-level unknown handling |
+| IS NOT DISTINCT FROM | Binary expression | SQL++ equality after top-level unknown handling |
+
 ## Less-than followed by minus (#1647)
 
 OQL leaves the shared profile's `RecognizeLeftArrow` option disabled. `a<-1` and `a <- 1` parse

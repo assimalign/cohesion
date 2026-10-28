@@ -57,11 +57,45 @@ MISSING, and NULL for NULL, scalars or objects. NOT EXISTS composes with ordinar
 EXISTS binds below IS presence tests, IS [NOT] DISTINCT FROM, CONCAT (`||`) and arithmetic,
 and above IN, BETWEEN, LIKE, comparisons,
 NOT, AND and OR. Thus `EXISTS x IS NULL` means `EXISTS (x IS NULL)`, while `EXISTS a = TRUE`
-means `(EXISTS a) = TRUE` and `NOT EXISTS x AND y` means `(NOT (EXISTS x)) AND y`. The parser
-follows the [Couchbase precedence block](https://github.com/couchbase/query/blob/6d40d1dd24e256588af2ff5bf6627ca76135397c/parser/n1ql/n1ql.y#L389-L409).
-`||` uses the existing CONCAT function and its literal-kind validation. IS [NOT] DISTINCT FROM
+means `(EXISTS a) = TRUE` and `NOT EXISTS x AND y` means `(NOT (EXISTS x)) AND y`. These
+boundaries follow the [Couchbase precedence block](https://github.com/couchbase/query/blob/6d40d1dd24e256588af2ff5bf6627ca76135397c/parser/n1ql/n1ql.y#L389-L409).
+IS now binds tighter than comparisons and the operands of IN, BETWEEN, LIKE and ESCAPE.
+This changes earlier OQL results: with n = 1, 2, 3, WHERE n = 1 IS NOT NULL formerly admitted
+all three rows; it now means n = (1 IS NOT NULL) and admits none. The adopted SQL++ results
+include FALSE for 1 = NULL IS NULL and 2 BETWEEN 1 AND 3 IS NOT NULL, NULL for
+1 IN [1] IS NULL, and FALSE for 2 BETWEEN 1 IS NOT NULL AND 3. Parenthesize an entire
+predicate before IS when that predicate's result is the intended operand.
+
+The full supported expression precedence, tightest first, is below. Parentheses override it;
+CASE, constructors, comprehensions and quantifiers delimit their contained expressions.
+OQL retains its shared comparison/predicate tier; the adopted Couchbase boundary puts IS above
+all of that tier. ESCAPE is a suffix of LIKE and parses its value with the same operand rule.
+
+| Precedence | Operators | Grouping |
+| --- | --- | --- |
+| 1 | Path member and array navigation: . and [] | Left |
+| 2 | Unary + and - | Right |
+| 3 | * / % | Left |
+| 4 | + - | Left |
+| 5 | String concatenation: &#124;&#124; | Left |
+| 6 | IS [NOT] NULL/MISSING/VALUED; IS [NOT] DISTINCT FROM | Left |
+| 7 | EXISTS | Right |
+| 8 | = != <> < <= > >=; [NOT] IN; [NOT] BETWEEN; [NOT] LIKE with optional ESCAPE | Left |
+| 9 | NOT | Right |
+| 10 | AND | Left |
+| 11 | OR | Left |
+
+The string operator &#124;&#124; is an addition in #1731 and uses the existing CONCAT function
+and its literal-kind validation. Two strings concatenate; MISSING wins over NULL, NULL propagates,
+and a wrong-kind stored value yields NULL. Incompatible literal numbers, arrays and objects give
+CD05001 at planning. No implicit string conversion occurs. IS [NOT] DISTINCT FROM is also an addition in #1731. It
 handles top-level NULL/MISSING explicitly and otherwise uses SQL++ equality, following
 [Couchbase func_distinct.go:51-73,134-156](https://github.com/couchbase/query/blob/6d40d1dd24e256588af2ff5bf6627ca76135397c/expression/func_distinct.go#L51-L156).
+For either distinctness operator, two MISSING operands or two NULL operands are not distinct;
+one MISSING or one NULL against another kind is distinct. Valued inputs use structural equality:
+IS DISTINCT FROM is FALSE only for definite equality, while IS NOT DISTINCT FROM returns the
+underlying equality result (including NULL for arrays whose element comparison is unknown).
+The conformance matrix covers MISSING, NULL, numbers, strings, arrays, objects and null elements.
 WITHIN remains a named CK00001 deferred form. The truth table follows
 [Couchbase coll_exists.go:40-53](https://github.com/couchbase/query/blob/6d40d1dd24e256588af2ff5bf6627ca76135397c/expression/coll_exists.go#L40-L53).
 The retired ODMG EXISTS binding quantifier remains a named CK00001 refusal.

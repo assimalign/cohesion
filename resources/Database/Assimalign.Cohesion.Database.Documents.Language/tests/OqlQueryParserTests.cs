@@ -28,6 +28,10 @@ public sealed class OqlQueryParserTests
     }
 
     [Theory]
+    [InlineData("SELECT n = 1 IS NOT NULL, 1 = NULL IS NULL, 1 IN [1] IS NULL FROM items")]
+    [InlineData("SELECT 2 BETWEEN 1 AND 3 IS NOT NULL, 2 BETWEEN 1 IS NOT NULL AND 3 FROM items")]
+    [InlineData("SELECT 'abc' LIKE 'a%' IS NOT NULL, 'a%' LIKE 'a!%' ESCAPE '!' IS NOT NULL FROM items")]
+    [InlineData("SELECT 'a' || 'b', MISSING IS DISTINCT FROM NULL, NULL IS NOT DISTINCT FROM NULL FROM items")]
     [InlineData("SELECT * FROM people")]
     [InlineData("select * from people;")]
     [InlineData("SELECT p.name FROM people AS p WHERE p.age >= $age")]
