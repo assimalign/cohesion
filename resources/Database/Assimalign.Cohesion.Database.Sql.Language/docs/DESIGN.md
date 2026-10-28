@@ -28,7 +28,7 @@ DIALECT.md distinguishes format 27's TYPE default-assignment flag from current f
 sequence records. Existing-sequence relation collisions use CS03070 (42P07) and identify the
 existing kind; table-on-table collisions retain their existing identity. The engine conformance
 regressions exercise CREATE TABLE, CTAS, RENAME and CREATE VIEW at this boundary. Sequence SQL
-syntax remains deferred to SQ-S2.
+syntax is delivered by SQ-S2 as described above.
 
 ## WITH RECURSIVE binding (#1719, SQ-R1)
 

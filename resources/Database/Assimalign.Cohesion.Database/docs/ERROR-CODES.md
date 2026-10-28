@@ -74,6 +74,10 @@ SQL syntax uses `CS00001`–`CS00099`. `CS00009` is the informational note for a
 statement semicolon; it does not refuse parsing or execution. `CS00100` is retired and reserved:
 the migration described it as a profile refusal, but the parser used it for this note.
 Recognized unsupported clauses use `CK00001`.
+Sequence session reset (#1717) reuses CS04070 for DISCARD inside BEGIN and CK07002 for malformed
+two-byte statement Ready (I/T/E plus 0/1 retained state). Host timeout reset values survive DISCARD;
+clean Ready certification avoids a reset exchange. No new diagnostic identity is allocated.
+
 SQL UPDATE ... FROM and DELETE ... USING execute (#1714). Multiple source associations for
 one UPDATE target report CS05068 before any mutation; DELETE deduplicates physical targets.
 Quantified comparisons (#1718) reuse CS01015 for name binding, CS02055 for incompatible
@@ -459,10 +463,6 @@ and invariant exceptions and lower child-root typed failures retain their docume
 | CV07001 | Session belongs to another database | — |
 
 ## Developer function conditions
-
-Sequence session reset (#1717) reuses CS04070 for DISCARD inside BEGIN and CK07002 for malformed
-two-byte statement Ready (I/T/E plus 0/1 retained state). Host timeout reset values survive DISCARD;
-clean Ready certification avoids a reset exchange. No new diagnostic identity is allocated.
 
 Engine builders register application functions in the same frozen per-engine catalog as native
 functions. Callback failures retain the original exception as their inner exception. At the function

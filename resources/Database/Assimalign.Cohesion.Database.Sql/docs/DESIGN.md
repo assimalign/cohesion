@@ -8511,6 +8511,9 @@ SqlDatabaseEngineOptions.StatementMemoryBudget is a positive byte count, default
 statement, including nested queries: each table reserves 104 bytes, arrays reserve both old and
 new storage during doubling, and retained rows charge their arrays and conservatively sized
 boxed/text/binary cells, including both padded CHAR payloads and trimmed comparison strings.
+The limit also covers the filtered rows, keys and capacity allowances retained by deferred
+sequence projection collectors, including bounded top-N selection (#1717). Those collectors
+release replaced candidates immediately and release all remaining grants on every exit.
 The limit governs accounted live hash-build memory, joined-DML retention and CTAS retention described above. General
 result materialization, planning and transient scalar hashing remain outside this grant. Hash-build
 reservation precedes retained allocation; CTAS admits the completed query output before copying.

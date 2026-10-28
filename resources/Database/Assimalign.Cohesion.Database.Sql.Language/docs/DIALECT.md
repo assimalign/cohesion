@@ -120,17 +120,16 @@ sequences in the directory captured at statement execution. Newly created sequen
 become visible to the next statement. This blocks ALTER and DROP of unrelated sequences
 until transaction end, makes one lock request per captured sequence, and a queued Exclusive request
 stalls later dynamic-name statements under FIFO admission. This deliberate directory policy
-keeps all waits in the deadlock graph and avoids synchronous evaluation-time lock waits; use
+keeps sequence object waits in the deadlock graph and avoids synchronous evaluation-time lock waits; use
 literal or parameter names to limit blocking to their referenced objects.
 ALTER, RESTART, DROP and DROP SCHEMA CASCADE take conflicting Exclusive grants and
-wait until every holder commits, rolls back or closes. Descriptions are resolved
-after a cancellable metadata admission wait as well; ALTER/DROP wait for unrelated definition
+wait until every holder commits, rolls back or closes. ALTER/DROP also wait for unrelated definition
 DDL, including CREATE VIEW and DROP SCHEMA, within the session lock timeout (CS04044).
 Sequence object grants precede their metadata lease. DROP SCHEMA takes sequence grants,
 table grants, then its definition lease; definition holders never wait for object grants.
 Compatible non-definition table/CTAS leases may precede object grants without blocking sequence
-metadata admission. Descriptions are resolved
-after locking; a concurrent ALTER cannot fail a running nextval. Deadlock detection,
+metadata admission. Descriptions are resolved after locking and metadata admission;
+a concurrent ALTER cannot fail a running nextval. Deadlock detection,
 lock timeouts and cancellation use the ordinary engine paths. An explicit transaction
 retains sequence locks after a failed statement under the existing lock contract.
 
