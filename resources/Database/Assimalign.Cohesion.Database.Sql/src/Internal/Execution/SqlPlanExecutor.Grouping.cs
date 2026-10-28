@@ -126,13 +126,13 @@ internal sealed partial class SqlPlanExecutor
                 continue;
             }
             if (deferredSequence) { matches.Add(row[..projectionStart]); continue; }
-            if (sequenceOrdering is not null && collected.SkipSequenceOffset()) { continue; }
             for (int i = 0; i < plan.Projections.Count; i++)
             {
                 await PrepareSubqueriesAsync(plan.Projections[i].Value, row, statement, cancellationToken).ConfigureAwait(false);
                 row[projectionStart + i] = NormalizeGroupValue(
                     evaluator.Evaluate(plan.Projections[i].Value!, row, copySharedBinary: true), plan.Projections[i].Type);
             }
+            if (sequenceOrdering is not null && collected.SkipSequenceOffset()) { continue; }
             if (correlatedOrdering) { matches.Add(row); }
             else
             {

@@ -53,7 +53,7 @@ internal sealed class SqlRowCollector
 
     internal bool IsBounded => _orderBy.Count > 0 && _canBound;
 
-    /// <summary>Skips an unordered sequence input before its volatile projection runs.</summary>
+    /// <summary>Discards an already projected unordered sequence row within OFFSET without retaining it.</summary>
     internal bool SkipSequenceOffset()
     {
         if (_orderBy.Count != 0 || _visited >= _offset) { return false; }

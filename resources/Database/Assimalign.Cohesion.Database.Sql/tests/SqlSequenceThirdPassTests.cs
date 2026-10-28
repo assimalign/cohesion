@@ -99,11 +99,11 @@ public sealed partial class SqlSequenceThirdPassTests
         _output.WriteLine("survivors=2; projected values=2,4; filtered row calls=0; next=5");
     }
 
-    [Theory(DisplayName = "Cohesion Test [Sql] - Unordered sequence window: skip OFFSET before projection and stop at LIMIT")]
+    [Theory(DisplayName = "Cohesion Test [Sql] - Unordered sequence window: project OFFSET rows before discarding and stop at LIMIT")]
     [InlineData(" GROUP BY k")]
     [InlineData(" WHERE EXISTS (SELECT 1 FROM u WHERE u.k=t.k)")]
     [InlineData(" WHERE EXISTS (SELECT 1 FROM u WHERE u.k=t.k) GROUP BY k")]
-    public async Task Execute_UnorderedSequenceWindowCorpus_ShouldProjectOnlySurvivors(string clauses)
+    public async Task Execute_UnorderedSequenceWindowCorpus_ShouldProjectOffsetRows(string clauses)
     {
         // Arrange
         await using var engine = SqlDatabaseEngine.Create("third-pass", new());
@@ -119,9 +119,9 @@ public sealed partial class SqlSequenceThirdPassTests
         var rows = await Rows(session, "SELECT nextval('s'), k FROM t" + clauses + " LIMIT 1 OFFSET 1");
 
         // Assert
-        rows.ShouldHaveSingleItem().ShouldBe(new object?[] { 1L, 2 });
-        (await Rows(session, "SELECT nextval('s')"))[0][0].ShouldBe(2L);
-        _output.WriteLine("offset=1; limit=1; projected calls=1; next=2");
+        rows.ShouldHaveSingleItem().ShouldBe(new object?[] { 2L, 2 });
+        (await Rows(session, "SELECT nextval('s')"))[0][0].ShouldBe(3L);
+        _output.WriteLine("offset=1; limit=1; projected calls=2; next=3");
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - Bounded sequence top N: charge and release on success, cancellation, predicate/projection errors and budget refusal")]

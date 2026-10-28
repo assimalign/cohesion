@@ -18,12 +18,12 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed partial class SqlSequenceSecondPassTests
 {
-    [Theory(DisplayName = "Cohesion Test [Sql] - Sequence OFFSET: projection follows each plan's window and ordering")]
+    [Theory(DisplayName = "Cohesion Test [Sql] - Sequence OFFSET: every plan projects offset rows before discarding them")]
     [InlineData("SELECT nextval('s'), k FROM t LIMIT 1 OFFSET 1", 2L)]
     [InlineData("SELECT nextval('s'), k FROM t ORDER BY k LIMIT 1 OFFSET 1", 2L)]
-    [InlineData("SELECT nextval('s'), k FROM t GROUP BY k LIMIT 1 OFFSET 1", 1L)]
+    [InlineData("SELECT nextval('s'), k FROM t GROUP BY k LIMIT 1 OFFSET 1", 2L)]
     [InlineData("SELECT nextval('s'), k FROM t GROUP BY k ORDER BY k LIMIT 1 OFFSET 1", 2L)]
-    [InlineData("SELECT nextval('s'), (SELECT max(v) FROM u WHERE u.k=t.k) FROM t LIMIT 1 OFFSET 1", 1L)]
+    [InlineData("SELECT nextval('s'), (SELECT max(v) FROM u WHERE u.k=t.k) FROM t LIMIT 1 OFFSET 1", 2L)]
     [InlineData("SELECT nextval('s'), (SELECT max(v) FROM u WHERE u.k=t.k) FROM t ORDER BY k LIMIT 1 OFFSET 1", 2L)]
     [InlineData("SELECT nextval('s'), (SELECT max(v) FROM u WHERE u.k=t.k) v FROM t ORDER BY v LIMIT 1 OFFSET 1", 2L)]
     public async Task Execute_SequenceOffset_ShouldFollowPlanWindow(string sql, long expected)

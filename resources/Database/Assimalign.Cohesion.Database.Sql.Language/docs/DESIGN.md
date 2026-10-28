@@ -16,12 +16,15 @@ PostgreSQL's separate per-row RETURNING evaluation. Persisted-expression checks 
 node once rather than recursively walking every node's subtree. Declared CHECK validation starts
 that walk once at the predicate root, including subqueries, to retain CS03074 for dependencies.
 
-Sequence outputs independent of ordering evaluate after sorting and before pagination: ordered
-OFFSET tuples consume values, while tuples beyond OFFSET + LIMIT do not. Unordered grouped and
-correlated inputs apply WHERE/HAVING, skip OFFSET, project each surviving row immediately and stop
-at LIMIT, without deferred input retention or charges. Bounded ordered top-N rows and keys share
+Sequence outputs independent of ordering evaluate after sorting and before pagination, stopping
+after OFFSET + LIMIT. Every path projects qualifying OFFSET rows in their own row scopes before
+discarding them, consuming their
+sequence values. Rows rejected by WHERE/HAVING consume no projection values.
+Unordered grouped and correlated inputs apply WHERE/HAVING, project each qualifying row immediately,
+discard OFFSET rows and stop at LIMIT, without deferred
+input retention or charges. Bounded ordered top-N rows and keys share
 the existing statement memory budget (CS05067). Unbounded ordered deferral stays uncharged like
-sequence-free sorting and grouping. The ordinary unordered uncorrelated path remains unchanged.
+sequence-free sorting and grouping.
 Deferred ordering collations require full retention even with LIMIT and remain uncharged.
 
 CREATE/ALTER/DROP SEQUENCE use sealed statement leaves and a closed option list preserving explicit NO bounds and bare RESTART. NEXT VALUE FOR is a scalar leaf; REGCLASS and its PostgreSQL suffix normalize to the existing cast AST. Sequence DDL and NEXT VALUE have independent profile gates and renderer round trips. Existing syntax identities reject malformed or duplicate options; OWNED BY remains CK00001. Five advertised function signatures execute in SQL, with per-row standard sharing independent of nextval. The language and live SQL conformance tables cover all four new clauses; no storage or wire contract changes. See DIALECT for defaults and accepted exclusions.

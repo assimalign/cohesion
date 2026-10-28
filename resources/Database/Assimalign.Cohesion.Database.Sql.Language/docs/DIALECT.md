@@ -65,16 +65,17 @@ NULL arguments propagate NULL. Calls are volatile, evaluated left to right once
 per reached row; repeated nextval calls each allocate. Multi-row VALUES assigns
 values in written tuple and expression order. INSERT SELECT assigns in the
 source's evaluation order. Independent sequence outputs evaluate after ORDER BY and before
-LIMIT/OFFSET, including ordering by another output's alias or ordinal. Ordered OFFSET tuples evaluate
-and consume values; tuples beyond OFFSET + LIMIT do not. With a fresh s, LIMIT 1 OFFSET 1
+LIMIT/OFFSET, including ordering by another output's alias or ordinal; these independent outputs
+beyond OFFSET + LIMIT are not projected. Every path projects qualifying OFFSET rows in their own
+row scopes and consumes their sequence values before discarding them.
+Rows rejected by WHERE/HAVING consume no projection values. With a fresh s, LIMIT 1 OFFSET 1
 returns nextval 2 and leaves 3 next. A sequence output used as a sort key evaluates before sorting
 (PostgreSQL src/backend/optimizer/plan/planner.c:2216-2225;
 src/backend/executor/nodeLimit.c:91-116). Unordered grouped and correlated inputs apply WHERE/HAVING,
-skip OFFSET, project each surviving row immediately and stop at LIMIT; filtered and skipped rows
-consume no projection value. They retain no deferred input and charge no grant. Ordered deferred
+project each qualifying row immediately, discard OFFSET rows and stop at LIMIT.
+They retain no deferred input and charge no grant. Ordered deferred
 inputs filter before bounded top-N retention, charged to StatementMemoryBudget (CS05067).
-Unbounded ordered deferral is uncharged, matching sequence-free sorting and grouping. Ordinary
-unordered uncorrelated SELECT retains its existing projection-before-OFFSET behavior.
+Unbounded ordered deferral is uncharged, matching sequence-free sorting and grouping.
 Without ORDER BY the source row order is unspecified;
 sequence values are not ordered by transaction commit. Short-circuited expressions
 do not call the allocator. Plain EXPLAIN never allocates; EXPLAIN ANALYZE SELECT

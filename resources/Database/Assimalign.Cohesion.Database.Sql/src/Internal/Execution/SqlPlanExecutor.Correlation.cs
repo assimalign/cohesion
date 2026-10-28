@@ -267,7 +267,6 @@ internal sealed partial class SqlPlanExecutor
             using var rowScope = SqlSequenceExecution.Current?.BeginRow();
             await PrepareSubqueriesAsync(where, source, statement, cancellationToken).ConfigureAwait(false);
             if (!evaluator.Matches(where, source)) { continue; }
-            if (skip > 0) { skip--; continue; }
             var output = new object?[projections.Count];
             for (int index = 0; index < output.Length; index++)
             {
@@ -283,6 +282,7 @@ internal sealed partial class SqlPlanExecutor
                     }
                 }
             }
+            if (skip > 0) { skip--; continue; }
             returned.Add(output);
             if (--remaining == 0) { break; }
         }
