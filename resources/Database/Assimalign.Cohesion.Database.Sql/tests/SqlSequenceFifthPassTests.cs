@@ -28,7 +28,7 @@ public sealed partial class SqlSequenceFifthPassTests
             {
                 foreach (bool having in new[] { false, true })
                 {
-                    foreach (int window in new[] { 0, 1, 2 })
+                    foreach (int window in new[] { 0, 1, 2, 3 })
                     { yield return new object[] { grouping, ordered, having, window }; }
                 }
             }
@@ -46,13 +46,13 @@ public sealed partial class SqlSequenceFifthPassTests
         await Exec(session, "CREATE SEQUENCE s");
         await Exec(session, "CREATE SEQUENCE v");
         await Exec(session, "CREATE TABLE t(k INT)");
-        await Exec(session, "INSERT INTO t VALUES (3),(1),(2)");
+        await Exec(session, "INSERT INTO t VALUES (3),(1),(2),(0),(-1)");
         string clauses = " FROM t WHERE k>0 GROUP BY " + grouping + (having ? " HAVING SUM(k)>1" : "");
         string order = ordered ? " ORDER BY g, k" : "";
-        string page = window == 0 ? "" : window == 1 ? " LIMIT 1 OFFSET 1" : " LIMIT 2";
+        string page = window == 0 ? "" : window == 1 ? " LIMIT 1 OFFSET 1" : window == 2 ? " LIMIT 2" : " OFFSET 1";
         int groups = (grouping == "k" ? 3 : 4) - (having ? 1 : 0);
-        int offset = window == 1 ? 1 : 0;
-        int projected = window == 0 ? groups : 2;
+        int offset = window is 1 or 3 ? 1 : 0;
+        int projected = window is 0 or 3 ? groups : 2;
         var ordinary = await Rows(session, "SELECT k, GROUPING(k) g, SUM(k)" + clauses + order);
         int retained = 0;
         SqlPlanExecutor.SequenceCandidatesRetained = count => retained = Math.Max(retained, count);
@@ -74,13 +74,12 @@ public sealed partial class SqlSequenceFifthPassTests
             (await Rows(session, "SELECT nextval('s'), nextval('v')"))[0].ShouldBe(new object?[] { (long)projected + 1, (long)projected + 1 });
             _output.WriteLine($"grouping={grouping}; ordered={ordered}; having={having}; offset={offset}; projected={projected}; delivered={rows.Length}; next={projected + 1}; retained={retained}");
 
-            // A sequence used only by HAVING still needs a fresh row scope per group.
+            // The shared planner still refuses standard sequence values in predicates.
             await Exec(session, "ALTER SEQUENCE v RESTART WITH 1");
-            var predicateRows = await Rows(session, "SELECT k, GROUPING(k) FROM t GROUP BY " + grouping +
-                " HAVING NEXT VALUE FOR v>1 ORDER BY k");
-            int allGroups = grouping == "k" ? 3 : 4;
-            predicateRows.Length.ShouldBe(allGroups - 1);
-            (await Rows(session, "SELECT nextval('v')"))[0][0].ShouldBe((long)allGroups + 1);
+            var failure = await Should.ThrowAsync<DatabaseException>(() => Rows(session,
+                "SELECT k, GROUPING(k) FROM t GROUP BY " + grouping + " HAVING NEXT VALUE FOR v>1"));
+            failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS03076");
+            (await Rows(session, "SELECT nextval('v')"))[0][0].ShouldBe(1L);
         }
         finally { SqlPlanExecutor.SequenceCandidatesRetained = null; }
     }

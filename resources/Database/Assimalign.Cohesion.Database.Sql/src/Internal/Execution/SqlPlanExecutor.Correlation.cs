@@ -316,8 +316,8 @@ internal sealed partial class SqlPlanExecutor
         SqlBoundExpression? where, HashSet<int> orderingSlots)
     {
         if (limit?.Count == 0) { return MaterializeProjected(projections, []); }
-        using var collected = new SqlSequenceRowCollector(orderBy, _subqueryValues, limit,
-            offset, cancellationToken, statement.Metrics, _definitions.StatementMemoryBudget);
+        var collected = new SqlRowCollector(orderBy, _subqueryValues, limit,
+            offset, cancellationToken, statement.Metrics);
         if (collected.IsComplete) { return MaterializeProjected(projections, []); }
         foreach (var source in matches)
         {
@@ -344,7 +344,7 @@ internal sealed partial class SqlPlanExecutor
             if (collected.IsComplete) { break; }
         }
         var returned = new List<object?[]>();
-        foreach (var ordered in collected.Finish())
+        foreach (var ordered in collected.Finish(includeOffset: true))
         {
             using var rowScope = SqlSequenceExecution.Current?.BeginRow();
             var output = new object?[projections.Count];

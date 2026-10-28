@@ -75,9 +75,11 @@ returns nextval 2 and leaves 3 next. A sequence output used as a sort key evalua
 (PostgreSQL src/backend/optimizer/plan/planner.c:2216-2225;
 src/backend/executor/nodeLimit.c:91-116). Unordered grouped and correlated inputs apply WHERE/HAVING,
 project each qualifying row immediately, discard OFFSET rows and stop at LIMIT.
-They retain no deferred input and charge no grant. Ordered deferred
-inputs filter before bounded top-N retention, charged to StatementMemoryBudget (CS05067).
-Unbounded ordered deferral is uncharged, matching sequence-free sorting and grouping.
+They retain no deferred input and charge no grant. Ordered deferred inputs filter before retention
+and use the same uncharged sorting as sequence-free queries on plain, correlated, grouped and
+grouping-set paths. LIMIT and deep OFFSET pages add no deferral charge; fixed collations bound
+retention by OFFSET + LIMIT, while deferred collations retain all candidates. Existing grouping-set
+group/aggregate state charges still apply equally with and without sequence outputs.
 Without ORDER BY the source row order is unspecified;
 sequence values are not ordered by transaction commit. Short-circuited expressions
 do not call the allocator. Plain EXPLAIN never allocates; EXPLAIN ANALYZE SELECT

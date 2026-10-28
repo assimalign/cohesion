@@ -124,10 +124,10 @@ public sealed partial class SqlSequenceThirdPassTests
         _output.WriteLine("offset=1; limit=1; projected calls=2; next=3");
     }
 
-    [Theory(DisplayName = "Cohesion Test [Sql] - Bounded sequence top N: charge and release on success, cancellation, predicate/projection errors and budget refusal")]
+    [Theory(DisplayName = "Cohesion Test [Sql] - Bounded sequence top N: no sort charge on success, cancellation, predicate/projection errors or low budgets")]
     [InlineData(false, 0)][InlineData(false, 1)][InlineData(false, 2)][InlineData(false, 3)][InlineData(false, 4)]
     [InlineData(true, 0)][InlineData(true, 1)][InlineData(true, 2)][InlineData(true, 3)][InlineData(true, 4)]
-    public async Task Execute_BoundedSequenceTopNExit_ShouldReleaseEveryGrant(bool grouped, int exit)
+    public async Task Execute_BoundedSequenceTopNExit_ShouldKeepSortUncharged(bool grouped, int exit)
     {
         // Arrange
         await using var engine = SqlDatabaseEngine.Create("third-pass", new() { StatementMemoryBudget = exit == 4 ? 600 : 8192 });
@@ -151,29 +151,33 @@ public sealed partial class SqlSequenceThirdPassTests
         try
         {
             // Act
-            if (exit == 0) { (await Rows(session, sql, cancel.Token)).Length.ShouldBe(2); }
+            if (exit is 0 or 4) { (await Rows(session, sql, cancel.Token)).Length.ShouldBe(exit == 0 ? 2 : 4); }
             else if (exit == 1) { await Should.ThrowAsync<OperationCanceledException>(() => Rows(session, sql, cancel.Token)); }
             else
             {
                 var failure = await Should.ThrowAsync<DatabaseException>(() => Rows(session, sql, cancel.Token));
-                failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(exit == 4 ? "CS05067" : "CS02001");
+                failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS02001");
             }
 
             // Assert
             var metrics = session.LastStatementMetrics!;
             if (grouped && exit == 2)
             {
-                // HAVING completes before ordered deferral starts: no grant existed yet.
+                // HAVING completes before ordered deferral starts: no candidates existed yet.
                 peak.ShouldBe(0);
-                metrics.PeakHashMemoryBytes.ShouldBe(0);
             }
             else
             {
                 peak.ShouldBeGreaterThan(0);
-                metrics.PeakHashMemoryBytes.ShouldBeGreaterThan(0);
             }
+            metrics.PeakHashMemoryBytes.ShouldBe(0);
             metrics.HashMemoryBytes.ShouldBe(0);
             if (exit == 0) { peak.ShouldBe(2); }
+            if (exit == 4)
+            {
+                peak.ShouldBe(4);
+                (await Rows(session, "SELECT nextval('s')"))[0][0].ShouldBe(5L);
+            }
             _output.WriteLine($"grouped={grouped}; exit={exit}; retained peak={peak}; charged peak={metrics.PeakHashMemoryBytes}; final grant={metrics.HashMemoryBytes}");
         }
         finally { SqlPlanExecutor.SequenceCandidatesRetained = null; }

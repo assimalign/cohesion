@@ -51,8 +51,6 @@ internal sealed class SqlRowCollector
 
     internal int RetainedCount => _orderBy.Count == 0 ? _rows.Count : _ordered.Count;
 
-    internal bool IsBounded => _orderBy.Count > 0 && _canBound;
-
     /// <summary>Discards an already projected unordered sequence row within OFFSET without retaining it.</summary>
     internal bool SkipSequenceOffset()
     {

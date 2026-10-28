@@ -24,10 +24,11 @@ GROUPING SETS, ROLLUP, CUBE and GROUPING() follow the same sequence row scopes a
 including subtotal and empty groups; HAVING runs before projection.
 Unordered grouped and correlated inputs apply WHERE/HAVING, project each qualifying row immediately,
 discard OFFSET rows and stop at LIMIT, without deferred
-input retention or charges. Bounded ordered top-N rows and keys share
-the existing statement memory budget (CS05067). Unbounded ordered deferral stays uncharged like
-sequence-free sorting and grouping.
-Deferred ordering collations require full retention even with LIMIT and remain uncharged.
+input retention or charges. Ordered deferral uses the ordinary uncharged sort collector on plain,
+correlated, grouped and grouping-set paths, including LIMIT and deep OFFSET pages. Retention is
+bounded by OFFSET + LIMIT when ordering collations are fixed; deferred collations require full
+retention. Grouping-set group/aggregate state retains its existing statement-budget charge on
+both sequence and sequence-free paths; sequence deferral adds none.
 
 CREATE/ALTER/DROP SEQUENCE use sealed statement leaves and a closed option list preserving explicit NO bounds and bare RESTART. NEXT VALUE FOR is a scalar leaf; REGCLASS and its PostgreSQL suffix normalize to the existing cast AST. Sequence DDL and NEXT VALUE have independent profile gates and renderer round trips. Existing syntax identities reject malformed or duplicate options; OWNED BY remains CK00001. Five advertised function signatures execute in SQL, with per-row standard sharing independent of nextval. The language and live SQL conformance tables cover all four new clauses; no storage or wire contract changes. See DIALECT for defaults and accepted exclusions.
 

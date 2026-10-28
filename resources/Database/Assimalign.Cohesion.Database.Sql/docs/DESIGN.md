@@ -78,13 +78,17 @@ src/backend/optimizer/plan/planner.c:2216-2225 places Limit above projection, an
 src/backend/executor/nodeLimit.c:91-116 pulls offset tuples through its child.
 Unordered grouped/correlated sequence inputs apply WHERE/HAVING, project each qualifying row
 immediately, discard OFFSET rows and stop at LIMIT, retaining no deferred input and charging no grant.
-Predicate and projection effects therefore interleave per row (PostgreSQL
+Scan and grouped predicate/projection effects interleave per reached row (PostgreSQL
 src/include/executor/execScan.h:224-235 and src/backend/executor/nodeAgg.c:1378-1384).
-Ordered deferral keeps filtering before retention. Bounded top-N retained rows, keys and conservative
-capacity overhead share StatementMemoryBudget (CS05067); unbounded ordered deferral is uncharged,
-matching sequence-free sorting and the group table. Only bounded sequence collectors allocate
-this budget owner; deferred ordering collations require uncharged full retention even with LIMIT.
-Ordinary collectors retain their instance layout.
+Correlated joins filter every candidate pair before projection, buffering qualifying pairs;
+nextval() in their WHERE therefore runs for every pair even under LIMIT 1. The projection window
+then consumes OFFSET rows and stops at LIMIT. PostgreSQL also evaluates WHERE below the Limit
+node above it (src/backend/executor/nodeNestloop.c:213-220 and nodeLimit.c:91-116).
+Ordered deferral keeps filtering before retention and uses the ordinary uncharged sort collector
+on plain, correlated, grouped and grouping-set paths, including LIMIT and deep OFFSET pages.
+Top-N retention stays bounded by OFFSET + LIMIT; deferred ordering collations require full retention.
+Neither form adds a StatementMemoryBudget charge. Grouping-set group/aggregate state retains its
+existing charge for both sequence and sequence-free queries. Ordinary collectors retain their instance layout.
 Cached sort aliases retain the declared output type, including numeric CASE promotion.
 DISCARD ALL clears sequence state and restores the timeout values configured before the first
 statement; ordinary rollback preserves them. These initial host overrides remain reset values even
@@ -8575,11 +8579,11 @@ SqlDatabaseEngineOptions.StatementMemoryBudget is a positive byte count, default
 statement, including nested queries: each table reserves 104 bytes, arrays reserve both old and
 new storage during doubling, and retained rows charge their arrays and conservatively sized
 boxed/text/binary cells, including both padded CHAR payloads and trimmed comparison strings.
-The limit also covers filtered rows, keys and capacity allowances retained by bounded ordered
-sequence top-N selection (#1717). Those collectors release replaced candidates immediately and
-release all remaining grants on every exit. Unordered grouped/correlated sequence projection
-streams without retaining inputs. Unbounded ordered sequence deferral, sequence-free sorting and
-the group table remain uncharged, so adding a sequence output does not impose an unbounded grant.
+Ordered sequence deferral uses the same uncharged collector as sequence-free sorting (#1717),
+including bounded top-N selection and deep OFFSET pages on plain, correlated, grouped and
+grouping-set paths. LIMIT controls retention, without introducing a separate accounting rule.
+Unordered grouped/correlated sequence projection streams without retaining inputs. Plain grouping
+remains uncharged; grouping-set group/aggregate state retains its existing charge on both paths.
 The limit governs accounted live hash-build memory, joined-DML retention and CTAS retention described above. General
 result materialization, planning and transient scalar hashing remain outside this grant. Hash-build
 reservation precedes retained allocation; CTAS admits the completed query output before copying.

@@ -70,14 +70,14 @@ public sealed partial class SqlSequenceSecondPassTests
             rows.Length.ShouldBe(filtered ? 3 : 10);
             _output.WriteLine($"input=4096; filtered={filtered}; peak retained={peak}; charged peak={session.LastStatementMetrics!.PeakHashMemoryBytes}");
             peak.ShouldBe(filtered ? 3 : 10);
-            session.LastStatementMetrics!.PeakHashMemoryBytes.ShouldBeGreaterThan(0);
+            session.LastStatementMetrics!.PeakHashMemoryBytes.ShouldBe(0);
             session.LastStatementMetrics.HashMemoryBytes.ShouldBe(0);
         }
         finally { SqlPlanExecutor.SequenceCandidatesRetained = null; }
     }
 
-    [Fact(DisplayName = "Cohesion Test [Sql] - Deferred sequence retention: large payloads are charged before projection")]
-    public async Task Execute_DeferredSequenceInputOverBudget_ShouldRefuseBeforeNextval()
+    [Fact(DisplayName = "Cohesion Test [Sql] - Deferred sequence retention: large payloads follow ordinary uncharged sorting")]
+    public async Task Execute_DeferredSequenceLargeInput_ShouldMatchOrdinarySort()
     {
         // Arrange
         await using var engine = SqlDatabaseEngine.Create("second-pass", new() { StatementMemoryBudget = 1024 });
@@ -88,12 +88,15 @@ public sealed partial class SqlSequenceSecondPassTests
         await Exec(session, "CREATE TABLE u(k INT, v INT)");
         await Exec(session, "INSERT INTO t VALUES (1,'" + new string('x', 1024) + "')");
 
-        // Act / Assert
-        var failure = await Should.ThrowAsync<DatabaseException>(() => Rows(session,
-            "SELECT nextval('s'), (SELECT max(v) FROM u WHERE u.k=t.k) FROM t ORDER BY k LIMIT 1"));
-        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS05067");
+        // Act
+        var rows = await Rows(session,
+            "SELECT nextval('s'), (SELECT max(v) FROM u WHERE u.k=t.k) FROM t ORDER BY k LIMIT 1");
+
+        // Assert
+        rows.ShouldHaveSingleItem().ShouldBe(new object?[] { 1L, null });
+        session.LastStatementMetrics!.PeakHashMemoryBytes.ShouldBe(0);
         session.LastStatementMetrics!.HashMemoryBytes.ShouldBe(0);
-        (await Rows(session, "SELECT nextval('s')"))[0][0].ShouldBe(1L);
+        (await Rows(session, "SELECT nextval('s')"))[0][0].ShouldBe(2L);
     }
 
 }

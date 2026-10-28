@@ -17,24 +17,27 @@ public sealed partial class SqlSequenceThirdPassTests
         var collation = new SqlBoundCollation(new SqlDeferredCollation(default, default, Collation.Binary));
         var order = new[] { new SqlBoundOrdering(new SqlBoundSlot(0), false, false, collation) };
         var limit = new SqlRowCount(null, "LIMIT", null, 1);
+        var offset = new SqlRowCount(null, "OFFSET", null, 3);
         var metrics = new SqlStatementMetrics();
-        var ordinary = new SqlRowCollector(order, null, limit, null, CancellationToken.None);
-        using (var sequence = new SqlSequenceRowCollector(order, null, limit, null, CancellationToken.None, metrics, 8192))
-        {
-            // Act
-            for (int value = 128; value > 0; value--)
-            {
-                ordinary.Add([value], [value]);
-                sequence.Add([value], [value]);
-            }
+        var ordinary = new SqlRowCollector(order, null, limit, offset, CancellationToken.None);
+        var sequence = new SqlRowCollector(order, null, limit, offset, CancellationToken.None, metrics);
 
-            // Assert
-            sequence.RetainedCount.ShouldBe(128);
-            sequence.Finish().ShouldHaveSingleItem().ShouldBe(ordinary.Finish().ShouldHaveSingleItem());
-            metrics.PeakOrderedRows.ShouldBe(128);
-            metrics.PeakHashMemoryBytes.ShouldBe(0);
+        // Act
+        for (int value = 128; value > 0; value--)
+        {
+            ordinary.Add([value], [value]);
+            sequence.Add([value], [value]);
         }
+
+        // Assert: deferral includes the three OFFSET rows for projection before discard.
+        sequence.RetainedCount.ShouldBe(128);
+        var selected = sequence.Finish(includeOffset: true);
+        selected.Count.ShouldBe(4);
+        for (int index = 0; index < selected.Count; index++) { selected[index].ShouldBe(new object?[] { index + 1 }); }
+        selected[3].ShouldBe(ordinary.Finish().ShouldHaveSingleItem());
+        metrics.PeakOrderedRows.ShouldBe(128);
+        metrics.PeakHashMemoryBytes.ShouldBe(0);
         metrics.HashMemoryBytes.ShouldBe(0);
-        _output.WriteLine("LIMIT=1; ordinary and sequence retained=128; charged peak=0; final grant=0");
+        _output.WriteLine("LIMIT=1; OFFSET=3; retained=128; selected for projection=4; charged peak=0; final grant=0");
     }
 }
