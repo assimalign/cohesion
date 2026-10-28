@@ -821,8 +821,9 @@ public sealed class SqlLanguageConformanceTests
             expression => expression is SqlSelectExpression { Where: SqlBinaryExpression { Right: SqlCollateExpression } }, [[1]]),
         [SqlClauses.GroupBy] = Query("SELECT age > 40, COUNT(*), SUM(age) FROM t GROUP BY age > 40 ORDER BY age > 40;",
             expression => expression is SqlSelectExpression { GroupBy.Count: 1 }, [[false, 1L, 36m], [true, 2L, 86m]]),
-        [SqlClauses.Filter] = Query("SELECT COUNT(*) FILTER (WHERE age > 40), SUM(age) FILTER (WHERE age > 40) FROM t;",
-            expression => expression is SqlSelectExpression select && select.Columns[0].Expression is SqlFunctionCallExpression { Filter: not null }, [[2L, 86m]]),
+        [SqlClauses.Filter] = Query("SELECT COUNT(*) FILTER (WHERE age > 40), SUM(age) FILTER (WHERE age > 40), " +
+            "VAR_POP(COALESCE(CASE WHEN id=1 THEN 16777217 ELSE CAST(16777216 AS REAL) END, CAST(0 AS DOUBLE PRECISION))) FILTER (WHERE id > 0) FROM t;",
+            expression => expression is SqlSelectExpression select && select.Columns[0].Expression is SqlFunctionCallExpression { Filter: not null }, [[2L, 86m, 0d]]),
         [SqlClauses.Having] = Query("SELECT age > 40, COUNT(*), SUM(age) FROM t WHERE age > 35 GROUP BY age > 40 HAVING SUM(age) > 50;",
             expression => expression is SqlSelectExpression { Having: not null }, [[true, 2L, 86m]]),
         [SqlClauses.OrderBy] = new("SELECT id, age AS years FROM ordering_rows ORDER BY years + 1 ASC NULLS LAST, 1 DESC;",

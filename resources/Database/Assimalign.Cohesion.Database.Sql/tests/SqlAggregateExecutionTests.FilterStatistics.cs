@@ -14,6 +14,42 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed partial class SqlAggregateExecutionTests
 {
+    private const string realStatisticsChoice = "CASE WHEN id=1 THEN 16777217 ELSE CAST(16777216 AS REAL) END";
+
+    [Theory(DisplayName = "Cohesion Test [Sql] - Statistics: nested alternatives convert at every numeric boundary (#1720)")]
+    [InlineData("COALESCE(" + realStatisticsChoice + ", CAST(0 AS DOUBLE PRECISION))")]
+    [InlineData("CASE WHEN id=1 THEN COALESCE(16777217, CAST(NULL AS REAL)) ELSE CAST(16777216 AS DOUBLE PRECISION) END")]
+    [InlineData("COALESCE(CASE WHEN id=1 THEN COALESCE(CASE id WHEN 1 THEN 16777217 END, CAST(0 AS REAL)) ELSE CAST(16777216 AS REAL) END, CAST(0 AS DOUBLE PRECISION))")]
+    [InlineData("COALESCE(NULLIF(" + realStatisticsChoice + ", 0), CAST(0 AS DOUBLE PRECISION))")]
+    [InlineData("NULLIF(" + realStatisticsChoice + ", 0)")]
+    [InlineData("COALESCE(CASE WHEN id=1 THEN CAST(16777217 AS NUMERIC) ELSE CAST(16777216 AS REAL) END, CAST(0 AS DOUBLE PRECISION))")]
+    [InlineData("COALESCE(CAST(" + realStatisticsChoice + " AS DOUBLE PRECISION), CAST(0 AS DOUBLE PRECISION))")]
+    [InlineData("COALESCE((" + realStatisticsChoice + ") + 0, CAST(0 AS DOUBLE PRECISION))")]
+    public async Task Statistics_NestedAlternatives_ShouldConvertBeforeEnclosingExpressions(string expression)
+    {
+        // Arrange
+        await using var engine = CreateEngine();
+        var database = await engine.CreateDatabaseAsync("statistics");
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+
+        // Act / Assert: the reported nesting keeps ordinary scalar alternative behavior.
+        var ordinary = await RowsAsync(session, $"SELECT COALESCE({realStatisticsChoice}, CAST(0 AS DOUBLE PRECISION)) " +
+            "FROM (SELECT 1 AS id UNION ALL SELECT 2) s ORDER BY id;");
+        ordinary.Select(row => Convert.ToDouble(row[0])).ShouldBe(new[] { 16777217d, 16777216d });
+
+        foreach (string filter in new[] { "", " FILTER (WHERE id > 0)" })
+        {
+            // Act
+            await using var result = (await ExecuteAsync(session,
+                $"SELECT VAR_POP({expression}){filter}, VAR_SAMP(DISTINCT {expression}){filter}, STDDEV_POP({expression}){filter} " +
+                "FROM (SELECT 1 AS id UNION ALL SELECT 2) s;")).ShouldBeAssignableTo<DatabaseResultSet>();
+
+            // Assert
+            result.Columns.ShouldAllBe(column => column.Type == DatabaseType.Float64 && column.IsNullable);
+            (await ReadRowsAsync(result)).ShouldHaveSingleItem().ShouldBe(new object?[] { 0d, null, 0d });
+        }
+    }
+
     [Theory(DisplayName = "Cohesion Test [Sql] - FILTER: every native aggregate admits only TRUE rows")]
     [InlineData("")]
     [InlineData(" GROUP BY region")]

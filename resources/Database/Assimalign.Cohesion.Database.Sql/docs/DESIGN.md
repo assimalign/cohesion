@@ -1538,8 +1538,11 @@ flowchart LR
   allocate only for filtered calls. EVERY uses the BOOL_AND transition; Boolean
   aggregates are strict and return NULL without non-NULL input. Statistical signatures choose
   Numeric for signed integer/Decimal inputs and Double for Real/Double inputs (untyped NULL
-  chooses Double). CASE/COALESCE statistical inputs use their numeric common type, with a bound conversion
-  before DISTINCT and transition calls; ordinary scalar-call alternative typing is unchanged.
+  chooses Double). Every CASE/COALESCE node within a statistical input converts to its own
+  numeric common type before its enclosing expression, DISTINCT and transition calls. This
+  preserves intermediate REAL rounding through nesting, NULLIF, casts and arithmetic; NULLIF
+  inherits its normalized first operand's type. The binding flag follows only the statistical
+  argument's expression tree; ordinary alternative typing and child query scopes are unchanged.
   Exact transitions retain scale-28 BigInteger sums and sums of squares; final division/root
   rounds once into the engine's 96-bit Decimal domain, with midpoint ties
   away from zero. A root is rounded from the exact rational variance, including sub-Decimal
@@ -1552,7 +1555,8 @@ flowchart LR
   References: PostgreSQL execExpr.c:3719-3740; parse_func.c:339-348;
   parse_agg.c:420-422,941-943; pg_aggregate.dat:335-363,448-477,523-533;
   float.c:3090-3142; numeric.c:6060-6139,11683-11758; pg_type.dat:225-226;
-  parse_func.c:1284-1360 (preferred Double for an untyped NULL). No reference code is copied.
+  parse_func.c:1284-1360 (preferred Double for an untyped NULL);
+  parse_expr.c:1742-1768,2244-2257 (per-node CASE/COALESCE conversions). No reference code is copied.
 - **Aggregate modifiers (#1115).** DISTINCT and input ordering wrap the accumulator ABI in
   the executor, including application aggregates. Coerced tuples use SqlValueComparer equality
   and each argument's collation. Ordered calls buffer evaluated values and keys, prepare key

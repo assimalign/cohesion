@@ -422,7 +422,7 @@ src/backend/commands/tablecmds.c:2033-2090 and src/backend/catalog/heap.c:3701-3
 
 ## Statement matrix
 
-With INSERT ... ON CONFLICT (#1118), DML RETURNING (#1117), persisted CREATE/DROP VIEW (#1124), CREATE/DROP SCHEMA (#1030), set operations (#1114), quantified comparisons (#1718), UPDATE ... FROM / DELETE ... USING (#1714), TRUNCATE and CREATE TABLE AS (#1716) and MERGE (#1715), the profile has **58 of 63 declared clauses** measured against the live SQL engine, including MERGE actions and RETURNING. WITH RECURSIVE (#1719, SQ-R1) adds one declared binding-only clause; recursive execution remains CK00001 until SQ-R2.
+With INSERT ... ON CONFLICT (#1118), DML RETURNING (#1117), persisted CREATE/DROP VIEW (#1124), CREATE/DROP SCHEMA (#1030), set operations (#1114), quantified comparisons (#1718), UPDATE ... FROM / DELETE ... USING (#1714), TRUNCATE and CREATE TABLE AS (#1716), MERGE (#1715) and aggregate FILTER (#1720), the profile has **59 of 64 declared clauses** measured against the live SQL engine, including MERGE actions and RETURNING. WITH RECURSIVE (#1719, SQ-R1) adds one declared binding-only clause; recursive execution remains CK00001 until SQ-R2.
 Phase 22 measured 33 of 49.
 The earlier 32/48 figure included `JOIN`, `GROUP BY`, `HAVING`, and `SUBQUERY`,
 removed in Phase 12e (#1019–#1021), plus a no-op `CAST` removed in Phase 13.
@@ -1967,8 +1967,11 @@ results are nullable Boolean. Sample statistics return NULL for one value; popul
 statistics return zero for one finite value. Signed integer and Decimal inputs return nullable
 Decimal (`numeric`); Real and Double inputs return nullable Float64 (`double precision`).
 An untyped NULL statistical argument resolves to Double. Other argument types fail with
-CS01006. CASE/COALESCE statistical inputs use a numeric common type before DISTINCT and
-accumulation, including REAL rounding before its widening to Double. Integer/Decimal
+CS01006. Each CASE/COALESCE node within a statistical input converts to its own numeric
+common type before its enclosing expression, DISTINCT and accumulation, including REAL
+rounding before an outer widening to Double. This also applies through NULLIF, casts and
+arithmetic; NULLIF takes its normalized first operand's type. Ordinary scalar expressions
+retain their existing alternative typing. Integer/Decimal
 transitions accumulate exact scaled sums and squares, avoiding
 intermediate overflow and double rounding even near BIGINT and Decimal limits. The final
 result uses the engine's existing 96-bit Decimal domain, choosing up to 28 fractional digits
@@ -1981,7 +1984,8 @@ finite-input overflow is CS02002. No arbitrary-precision numeric result type is 
 References: PostgreSQL execExpr.c:3719-3740; parse_func.c:339-348; parse_agg.c:420-422,941-943;
 pg_aggregate.dat:335-363,448-477,523-533; float.c:3090-3142; numeric.c:6060-6139,11683-11758;
 pg_type.dat:225-226 and parse_func.c:1284-1360 (preferred Double for an untyped NULL);
-parse_expr.c:1740-1742 and parse_coerce.c:1346-1456 (CASE common type, ELSE first).
+parse_expr.c:1740-1768,2244-2257 and parse_coerce.c:1346-1456 (CASE/COALESCE common types
+and conversions at each node, CASE ELSE first).
 
 ### Ordinary grouping and aggregate inputs
 
@@ -2409,7 +2413,7 @@ and complete strengths follow PostgreSQL `src/backend/parser/gram.y:13119-13176,
 WITH RECURSIVE before MERGE is refused with CK00001 at RECURSIVE, even for acyclic
 definitions (PostgreSQL `src/backend/parser/parse_merge.c:124-129`). Plain WITH
 before MERGE remains supported and shares SELECT's CTE binding and materialization.
-These contextual exclusions do not change the 58/63 declared-clause count.
+These contextual exclusions do not change the 59/64 declared-clause count.
 
 References re-derived from the local PostgreSQL clone: src/backend/parser/parse_cte.c:
 345-400 (output checks and hints), 580-632 (unknown anchor output), 648-725 and 863-906

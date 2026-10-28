@@ -107,10 +107,10 @@ internal sealed partial class SqlPlanner
                 arguments[0] = sourceScope.Bind(call.Arguments[0], out collation);
                 for (int j = 1; j < arguments.Length; j++) { arguments[j] = sourceScope.Bind(call.Arguments[j]); }
             }
-            else { arguments = sourceScope.BindArguments(call.Arguments, out collation); }
-            if (function is SqlStatisticsFunction)
+            else
             {
-                arguments[0] = sourceScope.BindStatisticsInput(call.Arguments[0], arguments[0]);
+                arguments = sourceScope.BindArguments(call.Arguments, out collation,
+                    statisticsInput: function is SqlStatisticsFunction);
             }
             sourceScope.BindParameterCoercions(function, arguments, collation);
             boundAggregates[i] = new SqlGroupAggregate(call, function, arguments,

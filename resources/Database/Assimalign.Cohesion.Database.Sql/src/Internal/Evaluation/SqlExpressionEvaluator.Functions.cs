@@ -115,8 +115,9 @@ internal sealed partial class SqlExpressionEvaluator
     /// </summary>
     /// <param name="arguments">The call's arguments.</param>
     /// <param name="collation">The collation the arguments' values compare under.</param>
+    /// <param name="statisticsInput">Whether to normalize every numeric CASE/COALESCE boundary.</param>
     /// <returns>The bound arguments.</returns>
-    internal SqlBoundExpression[] BindArguments(IReadOnlyList<SqlExpression> arguments, out SqlBoundCollation collation)
+    internal SqlBoundExpression[] BindArguments(IReadOnlyList<SqlExpression> arguments, out SqlBoundCollation collation, bool statisticsInput = false)
     {
         if (arguments.Count == 1 && arguments[0] is SqlStarExpression star)
         {
@@ -125,14 +126,16 @@ internal sealed partial class SqlExpressionEvaluator
         }
         if (arguments.Count == 1)
         {
-            return [Bind(arguments[0], out collation)];
+            var value = Bind(arguments[0], out SqlCollationCandidate candidate, statisticsInput: statisticsInput);
+            collation = SqlBoundCollation.Of(candidate, default, _defaultCollation);
+            return [value];
         }
 
         var bound = new SqlBoundExpression[arguments.Count];
         var candidates = new SqlCollationCandidate[arguments.Count];
         for (int index = 0; index < bound.Length; index++)
         {
-            bound[index] = Bind(arguments[index], out candidates[index]);
+            bound[index] = Bind(arguments[index], out candidates[index], statisticsInput: statisticsInput);
         }
 
         collation = SqlBoundCollation.Of(SqlCollationCandidate.Fold(candidates), default, _defaultCollation);
@@ -474,6 +477,11 @@ internal sealed partial class SqlExpressionEvaluator
             foreach (var argument in call.Arguments) { type = StatisticsAlternative(type, StatisticsInputType(argument)); }
             return type;
         }
+        if (expression is SqlFunctionCallExpression nullIf && nullIf.FunctionName.Equals("NULLIF", StringComparison.OrdinalIgnoreCase)
+            && nullIf.Arguments.Count > 0)
+        {
+            return StatisticsInputType(nullIf.Arguments[0]);
+        }
         return StaticTypeOf(expression);
     }
 
@@ -490,10 +498,10 @@ internal sealed partial class SqlExpressionEvaluator
         return first == DatabaseType.Int16 || next == DatabaseType.Int16 ? DatabaseType.Int16 : DatabaseType.Int8;
     }
 
-    internal SqlBoundExpression BindStatisticsInput(SqlExpression syntax, SqlBoundExpression value)
+    // Children have already bound and converted their own alternatives. PostgreSQL
+    // parse_expr.c:1742-1768,2244-2257 likewise converts each CASE/COALESCE boundary.
+    private SqlBoundExpression ConvertStatisticsAlternative(SqlExpression syntax, SqlBoundExpression value)
     {
-        if (syntax is not SqlCaseExpression && !(syntax is SqlFunctionCallExpression call &&
-            SqlStandardLibrary.IsCoalesce(call.FunctionName))) { return value; }
         var type = StatisticsInputType(syntax);
         if (!SqlFunctionResolver.IsNumeric(type)) { return value; }
         var target = SqlType.ForStorage(new DatabaseTypeInfo(type));
