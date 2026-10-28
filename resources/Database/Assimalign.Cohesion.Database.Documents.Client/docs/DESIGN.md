@@ -19,6 +19,14 @@ syntax/context/overflow/budget diagnostics over InMemory and TCP. Budget failure
 work; rollback permits reuse of the connection. The NativeAOT sample exercises all six names
 and quantifiers on both transports. Source/group staging now shares the statement counter (#1753); aggregate-span fixtures admit source retention before testing the aggregate limit. The 32 MiB response fixtures explicitly allow 256 MiB of statement retention while retaining their existing 8 MiB formatter allocation assertion. No client API, capability, codec, frame or version changes.
 
+## Subquery wire conformance (#1731, OQ-Q1)
+
+Expression SELECT arrays, EXISTS and IN (SELECT RAW ...) use ordinary JSON cells over InMemory
+and TCP. DocumentSubqueryWireTests checks RAW/object arrays, membership, empty EXISTS, lazy
+failure suppression, EXPLAIN cache policy, located correlation refusal and connection reuse.
+The existing NativeAOT consumer checks arrays, EXISTS, IN and lazy conditional behavior on both
+transports. No client public API, frame, capability or version changes are needed.
+
 ## Comprehension wire conformance (#1728)
 
 ARRAY/FIRST use the existing OQL request text, JSON result cells and MISSING bitmap on InMemory

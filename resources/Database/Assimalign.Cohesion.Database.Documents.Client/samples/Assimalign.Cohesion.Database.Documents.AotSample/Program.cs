@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Net;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -149,6 +150,12 @@ internal static class Program
             Check(functions["a"] is long arrayLength && arrayLength == 2, "scalar array Int64");
             Check((decimal)functions["c"]! == 1m, "scalar conditional");
             Check(functions["l"] is long length && length == 2, "scalar code points Int64");
+            var subqueries = await connection.QueryAsync("SELECT (SELECT RAW name FROM items) AS names, EXISTS (SELECT RAW name FROM items) AS present FROM items", cancellationToken: token);
+            Check(subqueries.Count > 0 && ((JsonElement)subqueries[0][0]!).GetArrayLength() == subqueries.Count && Equals(subqueries[0][1], true), "nested SELECT arrays and EXISTS");
+            var subqueryIn = await connection.QueryAsync("SELECT name FROM items WHERE name IN (SELECT RAW name FROM items)", cancellationToken: token);
+            Check(subqueryIn.Count == subqueries.Count, "IN SELECT RAW");
+            var lazySubquery = await connection.QueryAsync("SELECT COALESCE(1, (SELECT RAW 1/0 FROM items)) AS n FROM items LIMIT 1", cancellationToken: token);
+            Check(lazySubquery.Count == 1 && Equals(lazySubquery[0][0], 1m), "lazy nested SELECT");
             var count = await connection.QueryAsync("SELECT COUNT(*) AS n FROM items", cancellationToken: token);
             Check(count.Columns[0].Type == Assimalign.Cohesion.Database.Types.DatabaseType.Int64 && count.Single()[0] is long number && number == 1, "COUNT Int64");
             var aggregates = (await connection.QueryAsync(
