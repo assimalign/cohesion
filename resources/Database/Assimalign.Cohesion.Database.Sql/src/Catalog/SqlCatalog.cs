@@ -251,11 +251,9 @@ public sealed partial class SqlCatalog
     {
         get
         {
-            lock (_sync)
-            {
-                ThrowIfOffline();
-                return _defaultCollation;
-            }
+            // Established before Open publishes the catalog and immutable thereafter.
+            ThrowIfOffline();
+            return _defaultCollation;
         }
     }
 
@@ -1615,7 +1613,7 @@ public sealed partial class SqlCatalog
         }
         _counterLocation = location;
         _nextObjectId = identity;
-        _ddlGeneration = generation;
+        Volatile.Write(ref _ddlGeneration, generation);
     }
 
     private (PageId PageId, int SlotIndex) PersistCounter(

@@ -6956,7 +6956,10 @@ storage closes, so cached identity and sequence values cannot escape after dispo
 kind-18 and kind-19 decoding failures retain CS06061 before the located corruption wrapper.
 Every collision involving an existing sequence, and every sequence creation collision, uses
 CS03070 (42P07) and names the existing relation kind; table-on-table collisions retain CS03049.
-The synchronous/grouped crash sweep includes every ALTER and
+Planning reads both monotonically increasing binding generations with volatile reads, without
+taking the catalog monitor. The default collation is immutable after catalog open and also reads
+without that monitor. Metadata resolution still takes it; scalar planning no longer waits for a
+reservation commit. The synchronous/grouped crash sweep includes every ALTER and
 RESTART write, validating complete old/new cursors and ALTER's fetched endpoint.
 
 | Code | Internal sequence condition | SQLSTATE |

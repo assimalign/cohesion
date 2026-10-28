@@ -30,7 +30,14 @@ public sealed partial class SqlCatalog
     // drift to compiled-schema and declared-script verification. Reopen has no cached plans.
     internal (ulong Definition, ulong Storage) BindingGeneration
     {
-        get { lock (_sync) { ThrowIfOffline(); return (_ddlGeneration, _storageBindingGeneration); } }
+        get
+        {
+            ThrowIfOffline();
+            // Both components only increase. A mixed observation cannot hide an
+            // intervening change at the planner's final comparison. Metadata reads
+            // still take _sync; generation-only checks need no reservation flush.
+            return (Volatile.Read(ref _ddlGeneration), Volatile.Read(ref _storageBindingGeneration));
+        }
     }
 
     // BEGIN holds this only across creation of its MVCC snapshot and catalog capture;
@@ -264,7 +271,7 @@ public sealed partial class SqlCatalog
             AppendOrderedTruncations(expected, replacements, marker);
             _registrations = merged;
             _registrationsLocation = registrationsLocation;
-            _storageBindingGeneration = bindingGeneration;
+            Volatile.Write(ref _storageBindingGeneration, bindingGeneration);
             return default;
         }
     }
