@@ -37,7 +37,10 @@ tests assert DatabaseNotFound and reuse a one-slot pool to expose leaked failed 
 
 InMemory and TCP tests execute every ASC/DESC NULLS combination over mixed values and MISSING,
 including aliases, multiple keys and paging. INCLUDE MISSING catalog rendering and EXPLAIN
-eligibility travel in existing rows. No client API, capability, codec or frame changes.
+eligibility, consumed=True and sort=elided travel in existing rows. Ordered cursor pages match
+the forced-sort control across complete duplicate prefixes and residual rejections on both
+transports; dynamic projections preserve full-result type inference. The NativeAOT sample checks
+selected consumption and LIMIT/OFFSET execution. No client API, capability, codec or frame changes.
 
 ## Contract-only dependencies
 

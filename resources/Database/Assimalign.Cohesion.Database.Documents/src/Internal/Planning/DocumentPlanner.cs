@@ -67,9 +67,21 @@ internal sealed partial class DocumentPlanner
         var collection = ResolveCollection(query.Collection, query.Location);
         var indexes = _catalog.GetIndexes(collection.Id, _snapshot);
         var access = ChooseAccess(query.Predicate, query.Alias, indexes, logical.UnnestVariables, query.Unnest);
-        // O1 describes eligibility only. Keep ordinary execution allocations unchanged
-        // until O2 consumes these candidates; the description planner requests estimates.
-        if (_estimateSinglePath && logical.Query.OrderBy.Count > 0) { access = AnalyzeOrdering(logical, access, indexes); }
+        if (logical.Query.OrderBy.Count > 0 && (_estimateSinglePath || indexes.Count > 0 &&
+            access is not DocumentIntersectionPath && !logical.IsGrouped && !query.IsDistinct && query.Unnest.Count == 0 &&
+            logical.Query.OrderBy.All(order => order.Expression is OqlPathExpression)))
+        {
+            var ordering = AnalyzeOrdering(logical, access, indexes);
+            if (_estimateSinglePath || ordering.Consumed is not null) { access = ordering; }
+            if (ordering.Consumed is not null)
+            {
+                // Type inference observes every match before paging. Only fixed result
+                // types can stop content reads without changing the result header.
+                logical = logical with { CanStopEarly = logical.Projections.All(projection =>
+                    projection.Expression is not OqlStarExpression && (projection.Type != DatabaseType.Null ||
+                    projection.Expression is OqlLiteralExpression { Value: null or JsonElement { ValueKind: JsonValueKind.Null } } or OqlMissingExpression)) };
+            }
+        }
         return new DocumentPlan(logical, collection, access);
     }
 

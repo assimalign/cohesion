@@ -50,6 +50,8 @@ internal static partial class DocumentPlanExecutor
         var query = plan.Logical.Query;
         var evaluator = new DocumentExpressionEvaluator(query.Alias, parameters, cancellationToken, writeVerb, operation.TransactionStart,
             query.Unnest.Count > 0 ? query.Alias ?? query.Collection : null, database.Engine.Functions, database.Name, operation: operation);
+        if (plan.Access is DocumentOrderingPath { Consumed: { } consumed })
+        { return await ExecuteOrderedSelectAsync(database, operation, plan, consumed, evaluator, cancellationToken).ConfigureAwait(false); }
         var candidates = await ReadCandidatesAsync(database, operation, plan.Collection, plan.Access is DocumentOrderingPath ordering ? ordering.Input : plan.Access, cancellationToken).ConfigureAwait(false);
 
         using var sourceMemory = evaluator.Memory.Reserve();
@@ -236,11 +238,11 @@ internal static partial class DocumentPlanExecutor
             logical.Limit is long limit && Math.Max(0L, matched - logical.Offset) >= limit;
 
     private static DatabaseResult ExecuteRows(DocumentLogicalPlan logical, List<DocumentEvaluationContext> matches,
-        DocumentExpressionEvaluator evaluator, CancellationToken cancellationToken)
+        DocumentExpressionEvaluator evaluator, CancellationToken cancellationToken, bool ordered = false)
     {
         var memory = evaluator.Memory;
         long before = memory.Bytes;
-        try { return ExecuteRowsCore(logical, matches, evaluator, cancellationToken); }
+        try { return ExecuteRowsCore(logical, matches, evaluator, cancellationToken, ordered); }
         catch
         {
             memory.Release(memory.Bytes - before);
@@ -249,7 +251,7 @@ internal static partial class DocumentPlanExecutor
     }
 
     private static DatabaseResult ExecuteRowsCore(DocumentLogicalPlan logical, List<DocumentEvaluationContext> matches,
-        DocumentExpressionEvaluator evaluator, CancellationToken cancellationToken)
+        DocumentExpressionEvaluator evaluator, CancellationToken cancellationToken, bool ordered)
     {
         var query = logical.Query;
         var memory = evaluator.Memory;
@@ -331,7 +333,7 @@ internal static partial class DocumentPlanExecutor
             }
             output = distinct;
         }
-        if (query.OrderBy.Count > 0)
+        if (!ordered && query.OrderBy.Count > 0)
         {
             long orderBytes = 0;
             try

@@ -20,7 +20,13 @@ internal sealed partial class DocumentPlanner
                 logical.UnnestVariables, logical.Query.Unnest) as DocumentIndexPath ?? new DocumentIndexPath(index, null, null);
             candidates.Add(new DocumentOrderedIndexCandidate(path, OrderEligibility(logical, path)));
         }
-        return new DocumentOrderingPath(input, candidates.AsReadOnly());
+        // Retain an intersection's bounded identity merge. Otherwise prefer the
+        // predicate chooser's index if it supplies order, then ordinal index name.
+        var consumed = input is DocumentIntersectionPath ? null :
+            candidates.FirstOrDefault(candidate => candidate.Ordering.Eligible &&
+                input is DocumentIndexPath selected && selected.Index.ObjectId == candidate.Path.Index.ObjectId) ??
+            candidates.FirstOrDefault(candidate => candidate.Ordering.Eligible);
+        return new DocumentOrderingPath(input, candidates.AsReadOnly(), consumed);
     }
 
     private DocumentOrderEligibility OrderEligibility(DocumentLogicalPlan logical, DocumentIndexPath path)
@@ -43,11 +49,16 @@ internal sealed partial class DocumentPlanner
         // Single-column equality seeks preserve the older bound shape.
         if (index.Keys.Count == 1 && path.Lower is { Inclusive: true } lower && path.Upper is { Inclusive: true } upper &&
             DocumentExpressionEvaluator.Compare(lower.Value, upper.Value) == 0) { equality = [lower.Value]; }
-        foreach (var term in query.OrderBy)
+        for (int termIndex = 0; termIndex < query.OrderBy.Count; termIndex++)
         {
+            var term = query.OrderBy[termIndex];
             while (at < equality.Count && !Matches(term.Expression, index.Paths[at])) { at++; }
             if (at >= index.Paths.Count || !Matches(term.Expression, index.Paths[at]))
             { return Refuse(term.Expression is OqlPathExpression ? "not_an_index_prefix" : "non_index_expression"); }
+            // VALUE/RAW projects MISSING as NULL before sorting by the projected
+            // expression. The physical two-key distinction cannot supply that tie.
+            if (query.IsValue && logical.ProjectedOrdering[termIndex] && !Proves(index.Paths[at], 0))
+            { return Refuse("value_missing_becomes_null"); }
             bool constant = at < equality.Count;
             if (!constant)
             {

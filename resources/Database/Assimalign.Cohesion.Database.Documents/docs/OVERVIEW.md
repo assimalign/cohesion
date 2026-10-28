@@ -27,6 +27,12 @@ scalar keys. Matching ANY and direct UNNEST sources use deduplicated document ca
 retaining full predicate residuals and UNNEST multiplicity. DESIGN and DIALECT state the measured
 selective fetch bound and its limit for unfiltered multi-field predicates.
 
+Proven scalar index order serves ORDER BY forward or reverse and elides sorting. INCLUDE MISSING
+supports ORDER BY alone; sparse indexes require a predicate rejecting leading MISSING. Complete
+equal-key buckets retain document identity ties. Fixed result types permit early LIMIT/OFFSET;
+projections needing full-result type inference retain complete reads. DESIGN and DIALECT state
+the eligibility and fallback rules.
+
 `DocumentDatabaseServer.Create(engine, options)` or `engineBuilder.AddServer(options => ...)`
 serves OQL and document/collection commands on a consumer-supplied listener. Each authenticated
 connection binds one database. [Documents.Client](../../Assimalign.Cohesion.Database.Documents.Client/docs/OVERVIEW.md)
