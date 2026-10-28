@@ -8,7 +8,86 @@ namespace Assimalign.Cohesion.Database.Documents.Language.Tests;
 
 public sealed class OqlSubqueryParserTests
 {
+    [Theory(DisplayName = "Cohesion Test [Documents.Language] - EXISTS: precedence follows the SQL++ boundaries")]
+    [InlineData("EXISTS x IS NULL", "EXISTS", "IS NULL")]
+    [InlineData("EXISTS x IS NOT MISSING", "EXISTS", "IS NOT MISSING")]
+    [InlineData("EXISTS x IS VALUED", "EXISTS", "IS VALUED")]
+    [InlineData("EXISTS x IS DISTINCT FROM y", "EXISTS", "IS DISTINCT FROM")]
+    [InlineData("EXISTS x IS NOT DISTINCT FROM y", "EXISTS", "IS NOT DISTINCT FROM")]
+    [InlineData("EXISTS x || y", "EXISTS", "CONCAT")]
+    [InlineData("EXISTS x + y", "EXISTS", "+")]
+    [InlineData("EXISTS x - y", "EXISTS", "-")]
+    [InlineData("EXISTS x * y", "EXISTS", "*")]
+    [InlineData("EXISTS x / y", "EXISTS", "/")]
+    [InlineData("EXISTS x % y", "EXISTS", "%")]
+    [InlineData("EXISTS x = TRUE", "=", "EXISTS")]
+    [InlineData("EXISTS x != TRUE", "!=", "EXISTS")]
+    [InlineData("EXISTS x < TRUE", "<", "EXISTS")]
+    [InlineData("EXISTS x <= TRUE", "<=", "EXISTS")]
+    [InlineData("EXISTS x > TRUE", ">", "EXISTS")]
+    [InlineData("EXISTS x >= TRUE", ">=", "EXISTS")]
+    [InlineData("EXISTS x IN [TRUE]", "IN", "EXISTS")]
+    [InlineData("EXISTS x BETWEEN FALSE AND TRUE", "BETWEEN", "EXISTS")]
+    [InlineData("EXISTS x LIKE 'a'", "LIKE", "EXISTS")]
+    [InlineData("NOT EXISTS x", "NOT", "EXISTS")]
+    [InlineData("EXISTS x AND y", "AND", "EXISTS")]
+    [InlineData("EXISTS x OR y", "OR", "EXISTS")]
+    [InlineData("NOT EXISTS x AND y", "AND", "NOT")]
+    public void Parse_ExistsPrecedence_ShouldRetainExpectedOperandTree(string expression, string root, string child)
+    {
+        // Arrange / Act
+        var statement = (OqlQueryStatement)new OqlQueryParser().Parse("SELECT " + expression + " FROM c");
+        // Assert
+        statement.Diagnostics.ShouldBeEmpty();
+        var node = statement.OqlExpression.ShouldBeOfType<OqlSelectExpression>().Projections.Single().Expression;
+        Operation(node).ShouldBe(root);
+        var operand = node switch
+        {
+            OqlUnaryExpression unary => unary.Operand,
+            OqlBinaryExpression binary => binary.Left,
+            OqlInExpression membership => membership.Operand,
+            OqlBetweenExpression between => between.Operand,
+            OqlLikeExpression like => like.Operand,
+            _ => throw new InvalidOperationException(),
+        };
+        Operation(operand).ShouldBe(child);
+        if (expression == "NOT EXISTS x AND y")
+        { Operation(operand.ShouldBeOfType<OqlUnaryExpression>().Operand).ShouldBe("EXISTS"); }
+
+        static string Operation(OqlExpression node) => node switch
+        {
+            OqlUnaryExpression unary => unary.Operator,
+            OqlBinaryExpression binary => binary.Operator,
+            OqlCallExpression call => call.Name,
+            OqlInExpression => "IN", OqlBetweenExpression => "BETWEEN", OqlLikeExpression => "LIKE",
+            _ => node.GetType().Name,
+        };
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Documents.Language] - EXISTS: deferred operator spellings retain their parser refusals")]
+    [InlineData("EXISTS a WITHIN b", "CK00001")]
+    public void Parse_DeferredExistsBoundary_ShouldPreserveRefusal(string expression, string code)
+    {
+        // Arrange / Act
+        var statement = new OqlQueryParser().Parse("SELECT " + expression + " FROM c");
+        // Assert
+        statement.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == code);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Documents.Language] - EXISTS: long membership chains remain expressions")]
+    public void Parse_ExistsMembershipChain_ShouldParseWithoutBindingRefusal()
+    {
+        // Arrange
+        string text = "SELECT " + string.Concat(Enumerable.Repeat("EXISTS x IN ", 1024)) + "[TRUE] FROM c";
+        // Act
+        var statement = new OqlQueryParser().Parse(text);
+        // Assert
+        statement.Diagnostics.ShouldBeEmpty();
+    }
+
     [Theory(DisplayName = "Cohesion Test [Documents.Language] - Subqueries: SELECT expressions compose with SQL++ operators")]
+    [InlineData("SELECT 1 IS DISTINCT FROM (SELECT RAW n FROM d) FROM c")]
+    [InlineData("SELECT ARRAY x IS DISTINCT FROM (SELECT RAW n FROM d) FOR x IN [1] END AS FIRST FROM c")]
     [InlineData("SELECT (SELECT RAW n FROM d) AS a FROM c")]
     [InlineData("SELECT (SELECT RAW n FROM d) AS UNIQUE FROM c")]
     [InlineData("SELECT (SELECT RAW (SELECT RAW n FROM d) FROM d), 1 AS FIRST FROM c")]

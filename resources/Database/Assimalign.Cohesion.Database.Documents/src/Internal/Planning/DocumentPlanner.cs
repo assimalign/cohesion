@@ -588,10 +588,12 @@ internal sealed partial class DocumentPlanner
                 return;
             case OqlStarExpression when allowStar:
                 return;
-            case OqlBinaryExpression binary when binary.Operator is "AND" or "OR" or "=" or "!=" or "<>" or "<" or "<=" or ">" or ">=" or "+" or "-" or "*" or "/" or "%":
+            case OqlBinaryExpression binary when binary.Operator is "IS DISTINCT FROM" or "IS NOT DISTINCT FROM" or "AND" or "OR" or "=" or "!=" or "<>" or "<" or "<=" or ">" or ">=" or "+" or "-" or "*" or "/" or "%":
                 Validate(binary.Left, allowAggregate, functions: functions);
                 Validate(binary.Right, allowAggregate, functions: functions);
                 return;
+            case OqlUnaryExpression { Operator: ".*" }:
+                throw new DocumentPlanningException("CK00001", ErrorMessages.QualifiedStarDeferred, expression.Location);
             case OqlUnaryExpression unary when unary.Operator is "+" or "-" or "NOT" or "EXISTS" or "IS NULL" or "IS NOT NULL" or "IS MISSING" or "IS NOT MISSING" or "IS VALUED" or "IS NOT VALUED":
                 Validate(unary.Operand, allowAggregate, functions: functions);
                 return;

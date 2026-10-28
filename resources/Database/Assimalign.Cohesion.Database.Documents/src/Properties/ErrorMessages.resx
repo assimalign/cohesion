@@ -238,4 +238,5 @@
   <data name="FunctionUnknown" xml:space="preserve"><value>Unknown OQL function '{0}'.</value></data>
   <data name="FunctionArityInvalid" xml:space="preserve"><value>Invalid argument count for OQL function '{0}'.</value></data>
   <data name="TextTransactionStatusRequired" xml:space="preserve"><value>Text transaction control requires the negotiated transaction-status capability.</value></data>
+  <data name="QualifiedStarDeferred" xml:space="preserve"><value>Qualified star projections are not supported yet.</value></data>
 </root>

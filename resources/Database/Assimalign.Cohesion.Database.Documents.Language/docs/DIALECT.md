@@ -43,7 +43,9 @@ A parenthesized SELECT is an expression returning an array with zero, one or man
 there is no scalar-cardinality error. SELECT RAW and SELECT VALUE return projected values;
 ordinary named SELECT projections return objects with the usual omitted-MISSING members.
 A lone star retains object roots; a nonobject root is wrapped under `document`, so ordinary
-subquery elements remain objects. Top-level SELECT star keeps its existing stored-value rule. RAW/VALUE MISSING
+subquery elements remain objects. Star results deliberately follow this engine's top-level
+SELECT-star shape instead of Couchbase's alias-keyed form. Top-level SELECT star keeps its
+existing stored-value rule. RAW/VALUE MISSING
 becomes a null array element. FROM remains required in every SELECT. Subqueries may nest and
 appear in SELECT projections, WHERE, GROUP BY, HAVING, ORDER BY, function arguments, constructors,
 CASE, comprehensions, quantified predicates and UNNEST operands. Each nested query has its own
@@ -52,12 +54,21 @@ metadata, grouping and binding scope. See the pinned
 
 `EXISTS expression` returns TRUE for a nonempty array, FALSE for an empty array, MISSING for
 MISSING, and NULL for NULL, scalars or objects. NOT EXISTS composes with ordinary negation.
-EXISTS binds like a unary sign; parenthesize a compound operand. The truth table follows
+EXISTS binds below IS presence tests, IS [NOT] DISTINCT FROM, CONCAT (`||`) and arithmetic,
+and above IN, BETWEEN, LIKE, comparisons,
+NOT, AND and OR. Thus `EXISTS x IS NULL` means `EXISTS (x IS NULL)`, while `EXISTS a = TRUE`
+means `(EXISTS a) = TRUE` and `NOT EXISTS x AND y` means `(NOT (EXISTS x)) AND y`. The parser
+follows the [Couchbase precedence block](https://github.com/couchbase/query/blob/6d40d1dd24e256588af2ff5bf6627ca76135397c/parser/n1ql/n1ql.y#L389-L409).
+`||` uses the existing CONCAT function and its literal-kind validation. IS [NOT] DISTINCT FROM
+handles top-level NULL/MISSING explicitly and otherwise uses SQL++ equality, following
+[Couchbase func_distinct.go:51-73,134-156](https://github.com/couchbase/query/blob/6d40d1dd24e256588af2ff5bf6627ca76135397c/expression/func_distinct.go#L51-L156).
+WITHIN remains a named CK00001 deferred form. The truth table follows
 [Couchbase coll_exists.go:40-53](https://github.com/couchbase/query/blob/6d40d1dd24e256588af2ff5bf6627ca76135397c/expression/coll_exists.go#L40-L53).
 The retired ODMG EXISTS binding quantifier remains a named CK00001 refusal.
 
 `value [NOT] IN (SELECT RAW ...)` uses existing array IN semantics. VALUE is accepted as RAW's
-existing synonym. A direct SELECT without RAW/VALUE in this position gives CD00014 at SELECT;
+existing synonym. A direct SELECT without RAW/VALUE in this position gives CD00014 at SELECT.
+This conservative guard is deliberately narrower than Couchbase, pending owner sign-off;
 an extra pair of parentheses denotes an ordinary expression in the existing value-list grammar.
 MISSING on the left propagates MISSING; NULL on the left remains NULL, even for an empty array.
 A match wins over null elements; an unmatched null element yields NULL. Nested RAW MISSING rows
@@ -84,7 +95,16 @@ next execution, including a reused request after CREATE/DROP INDEX.
 Deferred forms use CK00001 and name the form: correlated subqueries (OQ-Q3), derived
 `FROM (SELECT ...) AS alias` (OQ-Q2), and subqueries anywhere inside INSERT, UPSERT, UPDATE or
 DELETE, including RETURNING (OQ-Q3). References to outer FROM/UNNEST, group or comprehension
-bindings are correlation; inner declarations shadow them by ordinal name. This run adds no disk,
+bindings, and outer projection aliases from ORDER BY, are correlation; inner declarations shadow
+them by ordinal name. Qualified outer stars (`d.*`) and a nested `FROM d` naming an outer alias
+also refuse with CK00001 naming correlation. An ordinary unqualified field binds to the inner
+source, as in Couchbase; it does not implicitly capture an outer document field.
+
+Complete async projections, including the named wrapper, are limited to 256 JSON levels.
+Excess depth gives located CD05015 before formatting and leaves the wire session reusable.
+Subquery expressions are known arrays for the literal-array function-kind rule: LENGTH, ABS
+and CONCAT reject them with CD05001 during planning. Constructors and ARRAY/FIRST retain
+in-order evaluation, serialization and failure reachability on both execution paths. This run adds no disk,
 protocol, frame or capability version. InMemory, TCP and NativeAOT use the ordinary JSON cells.
 
 ## RETURNING (#1727)

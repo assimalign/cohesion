@@ -20,34 +20,50 @@ internal sealed partial class DocumentExpressionEvaluator
         if (expression.Array is { } collection)
         {
             var value = Evaluate(collection, document, group);
-            if (operand is DocumentMissing || value is DocumentMissing) { return DocumentMissing.Instance; }
-            if (value is not JsonElement { ValueKind: JsonValueKind.Array } array) { return null; }
-            // Keep #1127's NULL-left rule, including an empty array.
-            if (operand is null) { return null; }
-            foreach (var item in array.EnumerateArray())
-            {
-                _cancellationToken.ThrowIfCancellationRequested();
-                var itemValue = ReadJson(item);
-                var equal = Equal(operand, itemValue);
-                if (equal is true) { return !expression.Negated; }
-                if (itemValue is null) { nullItem = true; }
-            }
-            return nullItem ? null : expression.Negated;
+            return InArray(operand, value, expression.Negated);
         }
         // Couchbase expression/coll_in.go:58-159: a match wins, then NULL, then MISSING.
         foreach (var item in expression.Values)
         {
             var value = Evaluate(item, document, group);
-            if (value is DocumentMissing) { missing = true; }
-            else if (value is null) { nullItem = true; }
-            else if (operand is not null and not DocumentMissing && Equal(operand, value) is true) { matched = true; }
+            AddInItem(operand, value, ref missing, ref nullItem, ref matched);
         }
+        return FinishIn(expression.Negated, operand, missing, nullItem, matched);
+    }
+
+    private object? InArray(object? operand, object? value, bool negated)
+    {
+        bool nullItem = false;
+        if (operand is DocumentMissing || value is DocumentMissing) { return DocumentMissing.Instance; }
+        if (value is not JsonElement { ValueKind: JsonValueKind.Array } array) { return null; }
+        // Keep #1127's NULL-left rule, including an empty array.
+        if (operand is null) { return null; }
+        foreach (var item in array.EnumerateArray())
+        {
+            _cancellationToken.ThrowIfCancellationRequested();
+            var itemValue = ReadJson(item);
+            var equal = Equal(operand, itemValue);
+            if (equal is true) { return !negated; }
+            if (itemValue is null) { nullItem = true; }
+        }
+        return nullItem ? null : negated;
+    }
+
+    private void AddInItem(object? operand, object? value, ref bool missing, ref bool nullItem, ref bool matched)
+    {
+        if (value is DocumentMissing) { missing = true; }
+        else if (value is null) { nullItem = true; }
+        else if (operand is not null and not DocumentMissing && Equal(operand, value) is true) { matched = true; }
+    }
+
+    private static object? FinishIn(bool negated, object? operand, bool missing, bool nullItem, bool matched)
+    {
         if (operand is DocumentMissing) { return DocumentMissing.Instance; }
         if (operand is null) { return null; }
-        if (matched) { return !expression.Negated; }
+        if (matched) { return !negated; }
         if (nullItem) { return null; }
         if (missing) { return DocumentMissing.Instance; }
-        return expression.Negated;
+        return negated;
     }
 
     private object? Between(OqlBetweenExpression expression, DocumentEvaluationContext document, IReadOnlyList<DocumentEvaluationContext>? group)
@@ -55,6 +71,11 @@ internal sealed partial class DocumentExpressionEvaluator
         var operand = Evaluate(expression.Operand, document, group);
         var lower = Evaluate(expression.Lower, document, group);
         var upper = Evaluate(expression.Upper, document, group);
+        return ApplyBetween(expression, operand, lower, upper);
+    }
+
+    private static object? ApplyBetween(OqlBetweenExpression expression, object? operand, object? lower, object? upper)
+    {
         // Couchbase expression/comp_between.go:54-72 checks both unknown comparisons
         // before returning a Boolean, even if one ordinary bound would exclude the value.
         if (operand is DocumentMissing || lower is DocumentMissing || upper is DocumentMissing) { return DocumentMissing.Instance; }
@@ -64,14 +85,17 @@ internal sealed partial class DocumentExpressionEvaluator
         return expression.Negated ? !matches : matches;
     }
 
+    private bool CaseMatches(OqlCaseExpression expression, object? operand, object? condition)
+        => expression.Operand is null ? Truth(condition) is true :
+            operand is not null and not DocumentMissing && condition is not null and not DocumentMissing && Equal(operand, condition) is true;
+
     private object? Case(OqlCaseExpression expression, DocumentEvaluationContext document, IReadOnlyList<DocumentEvaluationContext>? group)
     {
         var operand = expression.Operand is null ? null : Evaluate(expression.Operand, document, group);
         foreach (var branch in expression.Branches)
         {
             var condition = Evaluate(branch.Key, document, group);
-            bool matches = expression.Operand is null ? Truth(condition) is true :
-                operand is not null and not DocumentMissing && condition is not null and not DocumentMissing && Equal(operand, condition) is true;
+            bool matches = CaseMatches(expression, operand, condition);
             if (matches) { return Evaluate(branch.Value, document, group); }
         }
         // Couchbase expression/case_simple.go:83-108 and case_searched.go:73-98:
@@ -86,24 +110,38 @@ internal sealed partial class DocumentExpressionEvaluator
         {
             var pattern = Evaluate(expression.Pattern, document, group);
             var escape = expression.Escape is null ? "\\" : Evaluate(expression.Escape, document, group);
-            // Couchbase expression/comp_like.go:105-109: MISSING precedes non-string/NULL.
-            if (operand is DocumentMissing || pattern is DocumentMissing || escape is DocumentMissing) { return DocumentMissing.Instance; }
-            if (operand is not string || pattern is not string text || escape is not string escapeText) { return null; }
-            int escapeScalar = -1;
-            foreach (var rune in escapeText.EnumerateRunes())
-            {
-                if (escapeScalar >= 0)
-                {
-                    throw new DocumentPlanningException("CD02013", ErrorMessages.LikeEscapeInvalid, expression.Escape?.Location);
-                }
-                escapeScalar = rune.Value;
-            }
-            tokens = CompileLike(text, escapeScalar);
-            if (DocumentPlanner.IsConstant(expression.Pattern) && (expression.Escape is null || DocumentPlanner.IsConstant(expression.Escape)))
-            {
-                _likePatterns.Add(expression, tokens);
-            }
+            if (!PrepareLike(expression, operand, pattern, escape, out tokens, out var result)) { return result; }
         }
+        return ApplyLike(expression, operand, tokens);
+    }
+
+    private bool PrepareLike(OqlLikeExpression expression, object? operand, object? pattern, object? escape,
+        out int[] tokens, out object? result)
+    {
+        tokens = [];
+        result = null;
+        // Couchbase expression/comp_like.go:105-109: MISSING precedes non-string/NULL.
+        if (operand is DocumentMissing || pattern is DocumentMissing || escape is DocumentMissing) { result = DocumentMissing.Instance; return false; }
+        if (operand is not string || pattern is not string text || escape is not string escapeText) { result = null; return false; }
+        int escapeScalar = -1;
+        foreach (var rune in escapeText.EnumerateRunes())
+        {
+            if (escapeScalar >= 0)
+            {
+                throw new DocumentPlanningException("CD02013", ErrorMessages.LikeEscapeInvalid, expression.Escape?.Location);
+            }
+            escapeScalar = rune.Value;
+        }
+        tokens = CompileLike(text, escapeScalar);
+        if (DocumentPlanner.IsConstant(expression.Pattern) && (expression.Escape is null || DocumentPlanner.IsConstant(expression.Escape)))
+        {
+            _likePatterns.Add(expression, tokens);
+        }
+        return true;
+    }
+
+    private object? ApplyLike(OqlLikeExpression expression, object? operand, int[] tokens)
+    {
         if (operand is DocumentMissing) { return DocumentMissing.Instance; }
         if (operand is not string input) { return null; }
         bool matches = MatchLike(input, tokens);

@@ -511,7 +511,13 @@ they do not open or close expression scopes. ARRAY()/FIRST() retain their dedica
 
 OqlSubqueryExpression is a sealed AST leaf retaining its OqlSelectExpression and full
 parenthesized span. EXISTS uses OqlUnaryExpression with operator EXISTS, preserving ordinary
-NOT composition. ParseSelect stops at its matching closing parenthesis; recursive expression
+NOT composition. EXISTS has a precedence tier between IN and IS, below CONCAT/arithmetic and above
+comparisons, NOT, AND and OR. The `||` spelling lowers to the existing CONCAT call; IS [NOT]
+DISTINCT FROM retains its operator in OqlBinaryExpression and uses shared value equality.
+The retired EXISTS binding quantifier is recognized by its
+unnested colon; an ordinary `EXISTS x IN array` remains an IN expression. Qualified-star
+syntax retains its path in a unary `.*` node so planning can name correlation before refusing
+an otherwise unsupported qualified star. ParseSelect stops at its matching closing parenthesis; recursive expression
 parsing shares CD00005's 128-level limit. The capability scan admits nested SELECT only within
 a SELECT statement and names derived FROM or SUBQUERY in DML for deferred forms. SELECT
 quantifiers and reserved labels retain their existing positional rules within nested scopes.
@@ -561,6 +567,8 @@ array        := '[' [expression (',' expression)*] ']'
 ordering     := expression [ASC | DESC] [NULLS (FIRST | LAST)]
 path         := identifier ('.' identifier | '[' integer ']' | '[' string ']')*
 presence-test := expression IS [NOT] (NULL | MISSING | VALUED)
+distinctness  := expression IS [NOT] DISTINCT FROM expression
+concat       := expression '||' expression
 subquery     := '(' query ')'
 exists       := EXISTS expression
 membership   := expression [NOT] IN ('(' expression (',' expression)* ')' | expression)
@@ -606,7 +614,8 @@ fractional precision and overflow report `CD02007` (SQLSTATE 22003) at the liter
 The parser reports malformed numeric syntax as `CD00004`; it adapts optional integer digits
 (`.5`) and leading zeros to JSON syntax without changing the number's value.
 
-Operator precedence, lowest first: `OR`, `AND`, comparisons, presence tests and IN/BETWEEN/LIKE, addition/subtraction,
+Operator precedence, lowest first: `OR`, `AND`, `NOT`, comparisons and IN/BETWEEN/LIKE,
+`EXISTS`, IS presence/distinctness tests, CONCAT (`||`), addition/subtraction,
 multiplication/division/remainder, unary signs. `NOT` binds around comparisons, so
 `NOT age < 18` means `NOT (age < 18)`. Comparison operators are `=`, `!=`, `<>`, `<`, `<=`, `>`,
 and `>=`; the AST normalizes `<>` to `!=`. Presence tests are unary `IS [NOT] NULL`,

@@ -116,10 +116,13 @@ public sealed class OqlExecutionConformanceTests
             [
                 new("SELECT (SELECT RAW name FROM items WHERE name = 'alpha') AS names FROM items WHERE name = 'beta'", [[Json("[\"alpha\"]")]]),
                 new("SELECT name FROM items WHERE name IN (SELECT RAW name FROM items WHERE category = 'b')", [["gamma"]]),
+                new("SELECT (SELECT RAW name FROM items s WHERE category = 'b') AS names FROM items d WHERE name = 'alpha'", [[Json("[\"gamma\"]")]]),
             ],
             [OqlClauses.Exists] =
             [
                 new("SELECT EXISTS [] AS empty, EXISTS [NULL] AS nonempty, NOT EXISTS [] AS negated FROM items WHERE name = 'alpha'", [[false, true, true]]),
+                new("SELECT EXISTS 'a' || 'b' AS c, EXISTS NULL IS DISTINCT FROM MISSING AS d, NULL IS NOT DISTINCT FROM NULL AS n FROM items WHERE name = 'alpha'", [[null, null, true]]),
+                new("SELECT EXISTS [] IS NULL AS p, EXISTS [] = FALSE AS q, NOT EXISTS [] AND TRUE AS r FROM items WHERE name = 'alpha'", [[null, true, true]]),
             ],
             [OqlClauses.Distinct] =
             [

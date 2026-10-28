@@ -238,8 +238,7 @@ internal sealed partial class DocumentExpressionEvaluator
         IReadOnlyList<DocumentEvaluationContext>? group)
     {
         var value = Evaluate(expression.Collection, document, group);
-        if (value is DocumentMissing) { return value; }
-        if (value is not JsonElement { ValueKind: JsonValueKind.Array } array) { return null; }
+        if (!TryCollection(value, out var array, out var unknown)) { return unknown; }
         if (expression.IsFirst)
         {
             foreach (var item in array.EnumerateArray())
@@ -260,24 +259,35 @@ internal sealed partial class DocumentExpressionEvaluator
                 var inner = document.Bind(expression.Variable, ReadJson(item));
                 if (!Matches(expression.Predicate, inner, group)) { continue; }
                 var mapped = Evaluate(expression.Projection, inner, group);
-                if (mapped is not DocumentMissing) { yield return mapped; }
+                if (KeepMapped(expression, mapped)) { yield return mapped; }
             }
         }
     }
+
+    private static bool TryCollection(object? value, out JsonElement array, out object? unknown)
+    {
+        array = value is JsonElement { ValueKind: JsonValueKind.Array } json ? json : default;
+        unknown = value is DocumentMissing ? value : null;
+        return array.ValueKind == JsonValueKind.Array;
+    }
+
+    private static bool? QuantifiedResult(OqlQuantifiedExpression expression, object? value)
+        => (Truth(value) is true) != expression.IsEvery ? !expression.IsEvery : null;
+
+    private static bool KeepMapped(OqlComprehensionExpression expression, object? value)
+        => expression.IsFirst || value is not DocumentMissing;
 
     private object? Quantify(OqlQuantifiedExpression expression, DocumentEvaluationContext document,
         IReadOnlyList<DocumentEvaluationContext>? group)
     {
         var value = Evaluate(expression.Collection, document, group);
-        if (value is DocumentMissing) { return value; }
-        if (value is not JsonElement { ValueKind: JsonValueKind.Array } array) { return null; }
+        if (!TryCollection(value, out var array, out var unknown)) { return unknown; }
         // Couchbase expression/coll_any.go and coll_every.go test sv.Truth(), so
         // NULL/MISSING element results are not true; only the collection propagates them.
         foreach (var item in array.EnumerateArray())
         {
             _cancellationToken.ThrowIfCancellationRequested();
-            bool truth = Truth(Evaluate(expression.Predicate, document.Bind(expression.Variable, ReadJson(item)), group)) is true;
-            if (truth != expression.IsEvery) { return !expression.IsEvery; }
+            if (QuantifiedResult(expression, Evaluate(expression.Predicate, document.Bind(expression.Variable, ReadJson(item)), group)) is bool result) { return result; }
         }
         return expression.IsEvery;
     }
@@ -389,27 +399,43 @@ internal sealed partial class DocumentExpressionEvaluator
     private object? Binary(OqlBinaryExpression expression, DocumentEvaluationContext document, IReadOnlyList<DocumentEvaluationContext>? group)
     {
         var left = Evaluate(expression.Left, document, group);
-        if (expression.Operator is "AND" or "OR") { left = Truth(left); }
-        if (expression.Operator == "AND" && left is false) { return false; }
-        if (expression.Operator == "OR" && left is true) { return true; }
-        var right = Evaluate(expression.Right, document, group);
-        if (expression.Operator is "AND" or "OR") { right = Truth(right); }
-        if (expression.Operator == "AND")
+        if (ShortCircuitBinary(expression.Operator, ref left)) { return left is true; }
+        return ApplyBinary(expression.Operator, left, Evaluate(expression.Right, document, group));
+    }
+
+    private static bool ShortCircuitBinary(string operation, ref object? left)
+    {
+        if (operation is "AND" or "OR") { left = Truth(left); }
+        return operation == "AND" && left is false || operation == "OR" && left is true;
+    }
+
+    private object? ApplyBinary(string operation, object? left, object? right)
+    {
+        if (operation is "AND" or "OR") { right = Truth(right); }
+        if (operation == "AND")
         {
             if (right is false) { return false; }
             if (left is DocumentMissing || right is DocumentMissing) { return DocumentMissing.Instance; }
             return left is true && right is true ? true : null;
         }
-        if (expression.Operator == "OR")
+        if (operation == "OR")
         {
             if (right is true) { return true; }
             if (left is null || right is null) { return null; }
             if (left is DocumentMissing || right is DocumentMissing) { return DocumentMissing.Instance; }
             return left is false && right is false ? false : null;
         }
+        if (operation is "IS DISTINCT FROM" or "IS NOT DISTINCT FROM")
+        {
+            // Couchbase expression/func_distinct.go:51-73,134-156: the top-level
+            // unknown cases are definite; otherwise consume SQL++ value equality.
+            object? equal = left is DocumentMissing || right is DocumentMissing ? left is DocumentMissing && right is DocumentMissing :
+                left is null || right is null ? left is null && right is null : Equal(left, right);
+            return operation == "IS NOT DISTINCT FROM" ? equal : equal is not true;
+        }
         if (left is DocumentMissing || right is DocumentMissing) { return DocumentMissing.Instance; }
         if (left is null || right is null) { return null; }
-        return expression.Operator switch
+        return operation switch
         {
             "=" => Equal(left, right),
             "!=" or "<>" => Unary("NOT", Equal(left, right)),
@@ -422,7 +448,7 @@ internal sealed partial class DocumentExpressionEvaluator
             "*" => Number(left) * Number(right),
             "/" => Number(right) == 0 ? throw new DocumentPlanningException("CD02006", ErrorMessages.ExpressionEvaluatorBinaryFailure) : Number(left) / Number(right),
             "%" => Number(right) == 0 ? throw new DocumentPlanningException("CD02006", ErrorMessages.ExpressionEvaluatorBinaryFailure2) : Number(left) % Number(right),
-            _ => throw new DocumentPlanningException("CD05001", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExpressionEvaluatorBinaryFailure3, expression.Operator)),
+            _ => throw new DocumentPlanningException("CD05001", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExpressionEvaluatorBinaryFailure3, operation)),
         };
     }
 
@@ -444,52 +470,72 @@ internal sealed partial class DocumentExpressionEvaluator
 
     private object? Aggregate(OqlCallExpression call, DocumentAggregateFunction function, IReadOnlyList<DocumentEvaluationContext> group)
     {
-        var context = new DocumentFunctionContext(_databaseName, _cancellationToken, _transactionStart);
         string name = function.Name.ToString().ToUpperInvariant();
         var memory = Memory;
         bool star = call.Arguments.Count == 1 && call.Arguments[0] is OqlStarExpression;
-        SortedSet<object?>? seen = call.Quantifier == OqlAggregateQuantifier.Distinct
-            ? new(Comparer<object?>.Create((left, right) => Compare(left, right, _cancellationToken))) : null;
+        var seen = DistinctValues(call);
         long before = memory.Bytes;
         object? result;
         try
         {
-            // All calls own bounded native transition state. Statistics keep exact
-            // moments of at most 604 bits, independent of the number of inputs.
-            memory.Charge(name is "STDDEV" or "VARIANCE" ? 768 : 256);
-            var accumulator = function is DocumentBuiltinAggregateFunction native
-                ? native.CreateAccumulator(in context, memory, _writeVerb, _constructorMaxDepth, _resultClause)
-                : function.CreateAccumulator(in context);
-            if (seen is not null) { memory!.Charge(128); }
+            var accumulator = CreateAggregate(function, name, memory, seen is not null);
             foreach (var document in group)
             {
                 _cancellationToken.ThrowIfCancellationRequested();
                 var values = star ? Array.Empty<object?>() : call.Arguments.Select(argument => Evaluate(argument, document)).ToArray();
-                if (seen is not null)
-                {
-                    object? value = values[0];
-                    // ARRAY_AGG admits NULL. All other native aggregates ignore both
-                    // unknowns; custom aggregates retain their declared unknown policy.
-                    if (function.NullBehavior == DocumentNullBehavior.PropagateMissingOrNull && value is null or DocumentMissing ||
-                        function is DocumentBuiltinAggregateFunction && (name == "ARRAY_AGG" && value is DocumentMissing ||
-                        name is "STDDEV" or "VARIANCE" && value is not (decimal or long) ||
-                        name is "BOOL_AND" or "BOOL_OR" or "EVERY" && value is not bool))
-                    { continue; }
-                    if (value is not (null or DocumentMissing) && !function.AcceptsArgument(0, FunctionKind(value))) { continue; }
-                    if (seen.Contains(value)) { continue; }
-                    memory!.Retain(value);
-                    seen.Add(value);
-                }
-                var arguments = new DocumentArguments(values, in context);
-                accumulator.Add(in arguments);
+                AddAggregate(function, name, accumulator, seen, values, memory);
             }
-            result = accumulator.Finish().Value;
-            if (name == "ARRAY_AGG" && result is not null) { memory!.Retain(result); }
+            result = RetainAggregateResult(name, accumulator.Finish().Value, memory);
         }
         finally { memory.Release(memory.Bytes - before); }
         // The independent JSON result outlives the input list, until the enclosing
         // expression transfers its output or discards its scratch values.
-        if (name == "ARRAY_AGG" && result is not null) { memory!.Retain(result); }
+        return RetainAggregateResult(name, result, memory);
+    }
+
+    private void AddAggregate(DocumentAggregateFunction function, string name, DocumentAggregateAccumulator accumulator,
+        SortedSet<object?>? seen, object?[] values, DocumentAggregateMemory memory)
+    {
+        if (seen is not null)
+        {
+            object? value = values[0];
+            // ARRAY_AGG admits NULL. All other native aggregates ignore both
+            // unknowns; custom aggregates retain their declared unknown policy.
+            if (function.NullBehavior == DocumentNullBehavior.PropagateMissingOrNull && value is null or DocumentMissing ||
+                function is DocumentBuiltinAggregateFunction && (name == "ARRAY_AGG" && value is DocumentMissing ||
+                name is "STDDEV" or "VARIANCE" && value is not (decimal or long) ||
+                name is "BOOL_AND" or "BOOL_OR" or "EVERY" && value is not bool))
+            { return; }
+            if (value is not (null or DocumentMissing) && !function.AcceptsArgument(0, FunctionKind(value))) { return; }
+            if (seen.Contains(value)) { return; }
+            memory!.Retain(value);
+            seen.Add(value);
+        }
+        var context = new DocumentFunctionContext(_databaseName, _cancellationToken, _transactionStart);
+        var arguments = new DocumentArguments(values, in context);
+        accumulator.Add(in arguments);
+    }
+
+    private SortedSet<object?>? DistinctValues(OqlCallExpression call)
+        => call.Quantifier == OqlAggregateQuantifier.Distinct
+            ? new(Comparer<object?>.Create((left, right) => Compare(left, right, _cancellationToken))) : null;
+
+    private DocumentAggregateAccumulator CreateAggregate(DocumentAggregateFunction function, string name,
+        DocumentAggregateMemory memory, bool distinct)
+    {
+        // Native transition state is bounded independently of the input count.
+        memory.Charge(name is "STDDEV" or "VARIANCE" ? 768 : 256);
+        var context = new DocumentFunctionContext(_databaseName, _cancellationToken, _transactionStart);
+        var accumulator = function is DocumentBuiltinAggregateFunction native
+            ? native.CreateAccumulator(in context, memory, _writeVerb, _constructorMaxDepth, _resultClause)
+            : function.CreateAccumulator(in context);
+        if (distinct) { memory.Charge(128); }
+        return accumulator;
+    }
+
+    private static object? RetainAggregateResult(string name, object? result, DocumentAggregateMemory memory)
+    {
+        if (name == "ARRAY_AGG" && result is not null) { memory.Retain(result); }
         return result;
     }
 

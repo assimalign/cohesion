@@ -9,6 +9,28 @@ namespace Assimalign.Cohesion.Database.Documents.Client.Tests;
 
 public sealed class DocumentSubqueryWireTests
 {
+    [Theory(DisplayName = "Cohesion Test [Documents.Client] - Subqueries: overdeep projections return a located error and leave both transports reusable")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task QueryAsync_OverdeepSubquery_ShouldRefuseWithoutClosingSessionAsync(bool tcp)
+    {
+        // Arrange
+        await using var harness = await DocumentClientTestHarness.StartAsync(tcp);
+        await using var connection = await harness.Client.ConnectAsync(harness.Token);
+        await connection.CreateCollectionAsync("items", harness.Token);
+        await connection.QueryAsync("INSERT INTO items (KEY, VALUE) VALUES ('a', {n:1})", cancellationToken: harness.Token);
+        using var json = JsonDocument.Parse(new string('[', 255) + "0" + new string(']', 255), new JsonDocumentOptions { MaxDepth = 256 });
+        var parameters = new System.Collections.Generic.Dictionary<string, object?> { ["p"] = json.RootElement };
+        // Act
+        var error = await Should.ThrowAsync<DocumentClientException>(async () => await connection.QueryAsync(
+            "SELECT (SELECT RAW @p FROM items) AS v FROM items", parameters, harness.Token));
+        // Assert
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD05015");
+        error.Diagnostics.Single().Start.ShouldNotBeNull();
+        connection.IsOpen.ShouldBeTrue();
+        (await connection.QueryAsync("SELECT n FROM items", cancellationToken: harness.Token)).Single()[0].ShouldBe(1m);
+    }
+
     [Theory(DisplayName = "Cohesion Test [Documents.Client] - Subqueries: arrays EXISTS IN and deferred forms cross both transports")]
     [InlineData(false)]
     [InlineData(true)]

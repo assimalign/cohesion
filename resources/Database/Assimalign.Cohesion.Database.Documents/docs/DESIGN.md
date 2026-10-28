@@ -504,7 +504,7 @@ CD00007 for the same count rule at parse and plan time:
 | `CD03012` | INSERT found an existing key, or INSERT/UPSERT repeated a key in one statement |
 | `CD02013` | Invalid evaluated LIKE escape or a pattern ending in its escape character |
 | `CD01014` | DISTINCT ORDER BY expression is absent from the projection |
-| `CD05015` | A query/RETURNING array or object constructor exceeds the 256-level result limit |
+| `CD05015` | A query/RETURNING constructor or subquery projection exceeds the 256-level result limit, including the named wrapper |
 | `CD05018` | Retained statement source rows, ordered candidate buckets, groups, RETURNING results or aggregate values exceed the statement memory budget |
 | `CD00011` | ALL/DISTINCT applied to a scalar or star call |
 | `CD00013` | NULLS without FIRST or LAST |
@@ -609,7 +609,20 @@ the binding-frame extension point for OQ-Q3. Every nested access uses ReadCandid
 asynchronous index/intersection access; there is no sync-over-async bridge. The context drives the
 existing selection, grouping and result helpers through a separate async expression/row path.
 The original synchronous evaluator and executor remain the allocation path for ordinary queries.
-The trade-off is maintaining equivalent operator implementations on the two evaluation paths.
+Both paths call the same helpers for Boolean short circuits, binary operations, IN, BETWEEN,
+CASE matching, LIKE compilation/cache/results, collection admission, quantified truth, lazy
+conditional arguments, scalar invocation and aggregate creation/admission/result retention.
+DocumentJsonValue owns constructor serialization, MISSING handling, duplicate-key policy and
+result-depth errors. Async array constructors and ARRAY comprehensions request and serialize one
+value before evaluating the next; FIRST stops after its first admitted mapping. Async objects
+admit each evaluated member directly into the same map helper as synchronous objects, without
+pre-evaluating a list. Both retain the existing last-non-MISSING map stage before final object
+serialization, including the failure order of replaced values; changing that order would change
+ordinary queries. Only operand dispatch, await/iteration scheduling, lazy branch loops,
+synchronous constant-constructor caching and scratch release brackets remain separate: ordinary
+queries keep their original allocation path, while async release excludes nested-owned values.
+The permanent generated parity corpus compares equivalent literal/subquery operands, including
+NULL/MISSING, results and runtime kinds, diagnostic codes and developer callback counts.
 
 Execution is lazy at the expression read. CASE, Boolean short circuits, FIRST and conditional
 functions retain their original reachability, with no work, callbacks, retention or runtime errors
@@ -620,7 +633,10 @@ LastQuerySubqueriesExecuted is an internal statement counter used by determinist
 
 The operation owns the existing DocumentAggregateMemory counter. The nested context owns one
 reservation and all materialized subquery arrays until statement exit, including per-evaluation
-arrays. Each nested executor owns source/group/sort scratch and its temporary result, sharing that
+arrays. OQ-Q3 changes this ownership contract: uncached results must belong to the evaluating
+row, transferring ownership only to surviving group, order and output consumers; statement-long
+retention must not become the common per-row correlation path. Each nested executor owns
+source/group/sort scratch and its temporary result, sharing that
 same counter; nested result disposal releases its row reservations. Before array serialization the
 context reserves a conservative bound (three times value retention plus item/array overhead,
 covering JSON escaping), then shrinks to the actual owned JSON representation and slot overhead.
@@ -632,13 +648,24 @@ own lifetime beyond source JsonDocument disposal. No public execution seam, visi
 project reference, persisted contract or wire shape was added.
 
 Subqueries preserve zero/multiple-row SQL++ arrays, including RAW/VALUE null normalization and
-object-star preservation (nonobject roots wrap under document). EXISTS uses Couchbase coll_exists.go:40-53; the array
+object-star preservation (nonobject roots wrap under document). Star deliberately follows this
+engine's top-level SELECT-star shape rather than Couchbase's alias-keyed shape. Direct non-RAW
+IN subqueries retain the conservative CD00014 guard pending owner sign-off; this is a deliberate
+SQL++ deviation. Outer projection aliases are in ORDER BY's enclosing scope; inner declarations
+shadow them. Qualified outer stars and FROM references to outer aliases are named correlation
+refusals. Unqualified fields otherwise bind to the inner source, as in Couchbase. EXISTS uses
+Couchbase coll_exists.go:40-53; the array
 contract follows subqueries.adoc:26-68 at the pinned versions linked in the language DIALECT.
 PostgreSQL src/backend/optimizer/plan/subselect.c:392-410 informed the separate subplan ownership
 boundary, but SQL scalar-cardinality semantics and unconditional init-plan hoisting are not adopted.
 EXPLAIN shows SubqueryExpression owners, spans, child plans and cache policy without invoking
 functions. Tests cover snapshot concurrency, own writes, lazy failures, caching counters, shared
 budget/cancellation cleanup, reusing plans after index DDL, both transports and NativeAOT.
+Before returning any async projection, the evaluator validates the complete JSON depth, including
+the named object wrapper, at the projection expression span (CD05015). This also covers JSON
+returned through subqueries, functions, CASE, FIRST and aggregates without a local constructor.
+Overdeep values never reach the result formatter; both wire transports retain a reusable session.
+Nested array/object materialization retains the same depth guard and located subquery failure.
 Release measurements preserve the baseline allocations for ordinary plans, native queries and
 selective scans; the statement wrapper adds no ordinary-plan fields.
 

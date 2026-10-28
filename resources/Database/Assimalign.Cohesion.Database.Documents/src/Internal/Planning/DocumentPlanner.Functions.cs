@@ -34,14 +34,14 @@ internal sealed partial class DocumentPlanner
 
     private static void ValidateFunctionKind(DocumentFunction function, int index, OqlExpression argument)
     {
-        // Only a literal (including unary minus) or constructor has a statically wrong kind.
+        // Literals (including unary minus), constructors and subquery arrays prove their kind.
         // Calls and paths may return NULL/MISSING at runtime, so their metadata is not a proof.
         var literal = argument;
         while (literal is OqlUnaryExpression { Operator: "+" or "-" } unary) { literal = unary.Operand; }
-        if (literal is not (OqlLiteralExpression or OqlArrayExpression or OqlObjectExpression)) { return; }
+        if (literal is not (OqlLiteralExpression or OqlSubqueryExpression or OqlArrayExpression or OqlObjectExpression)) { return; }
         var kind = literal switch
         {
-            OqlArrayExpression => JsonValueKind.Array,
+            OqlSubqueryExpression or OqlArrayExpression => JsonValueKind.Array,
             OqlObjectExpression => JsonValueKind.Object,
             OqlLiteralExpression value => DocumentExpressionEvaluator.FunctionKind(value.Value),
             _ => JsonValueKind.Undefined,
