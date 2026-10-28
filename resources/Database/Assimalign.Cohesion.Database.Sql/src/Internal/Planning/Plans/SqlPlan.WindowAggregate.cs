@@ -21,7 +21,19 @@ internal sealed record SqlWindowAggregatePlan(SqlPlan Input, IReadOnlyList<SqlCa
 
     private sealed class DebugView
     {
-        public DebugView(SqlWindowAggregatePlan value) { _ = value; }
+        private readonly SqlWindowAggregatePlan _value;
+        public DebugView(SqlWindowAggregatePlan value) { _value = value; }
+        public SqlPlan Input => _value.Input;
+        public IReadOnlyList<SqlCatalogColumn> Columns => _value.Columns;
+        public IReadOnlyList<SqlRelationBinding>? Bindings => _value.Bindings;
+        public int InputWidth => _value.InputWidth;
+        public IReadOnlyList<SqlWindowGroup> Groups => _value.Groups;
+        public IReadOnlyList<SqlProjection> Projections => _value.Projections;
+        public IReadOnlyList<SqlBoundOrdering> OrderBy => _value.OrderBy;
+        public SqlRowCount? Limit => _value.Limit;
+        public SqlRowCount? Offset => _value.Offset;
+        public bool IsDistinct => _value.IsDistinct;
+        public IReadOnlyDictionary<SqlExpression, int>? OrderByProjections => _value.OrderByProjections;
     }
 }
 
@@ -38,6 +50,12 @@ internal sealed record SqlWindowGroup(IReadOnlyList<SqlExpression> PartitionSynt
 
     private sealed class DebugView
     {
-        public DebugView(SqlWindowGroup value) { _ = value; }
+        private readonly SqlWindowGroup _value;
+        public DebugView(SqlWindowGroup value) { _value = value; }
+        public IReadOnlyList<SqlExpression> PartitionSyntax => _value.PartitionSyntax;
+        public IReadOnlyList<SqlOrderByColumn> OrderSyntax => _value.OrderSyntax;
+        public IReadOnlyList<SqlBoundOrdering> Partition => _value.Partition;
+        public IReadOnlyList<SqlBoundOrdering> Ordering => _value.Ordering;
+        public List<SqlWindowFunction> Functions => _value.Functions;
     }
 }
