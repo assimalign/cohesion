@@ -18,6 +18,9 @@ internal sealed partial class SqlPlanner
     {
         var (groupKeys, groupingSets) = ExpandGroupingSets(select, evaluator);
         List<(SqlFunctionCallExpression Call, int[] Arguments)>? groupingCalls = null;
+        List<SqlBoundGrouping>? outerCalls = null;
+        if (_queryScopes?.GroupingCalls?.TryGetValue(select, out outerCalls) == true && outerCalls.Count > 0)
+        { groupingCalls = outerCalls.Select(call => (call.Call, call.Arguments)).ToList(); }
         foreach (var key in groupKeys)
         {
             if (ContainsAggregate(key))
@@ -70,6 +73,11 @@ internal sealed partial class SqlPlanner
         {
             for (int i = 0; i < groupingCalls.Count; i++)
             { slots[groupingCalls[i].Call] = groupKeys.Count + aggregates.Count + i; }
+            if (outerCalls is not null)
+            {
+                for (int i = 0; i < outerCalls.Count; i++)
+                { outerCalls[i].Ordinal = groupKeys.Count + aggregates.Count + i; }
+            }
         }
 
         // Every slot is known now. The input relation, the keys and the aggregates' operands bind
@@ -153,6 +161,7 @@ internal sealed partial class SqlPlanner
             }
             if (expression is SqlFunctionCallExpression grouping && IsGrouping(grouping))
             {
+                if (evaluator.OuterGrouping(grouping) is not null) { return; }
                 var arguments = new int[grouping.Arguments.Count];
                 for (int i = 0; i < arguments.Length; i++)
                 {
@@ -161,6 +170,8 @@ internal sealed partial class SqlPlanner
                     if (!ContainsGrouping(argument) && !ContainsAggregate(argument))
                     {
                         ValidateExpression(argument, evaluator, _subqueryTypes);
+                        if (argument is SqlColumnReferenceExpression column && evaluator.IsOuterColumn(column))
+                        { throw new SqlPlanningException("CS01062", ErrorMessages.GroupingArgument, argument.Location); }
                         for (int k = 0; k < groupKeys.Count; k++)
                         { if (SameGroupExpression(argument, groupKeys[k], evaluator)) { index = k; break; } }
                     }
@@ -276,6 +287,41 @@ internal sealed partial class SqlPlanner
 
     private static bool IsGrouping(SqlFunctionCallExpression call) => SqlStandardLibrary.IsGrouping(call.FunctionName);
 
+    private void BindOuterGroupingCalls(SqlSelectExpression select)
+    {
+        foreach (var expression in SubquerySources(select))
+        {
+            if (expression is not SqlFunctionCallExpression call || !IsGrouping(call)) { continue; }
+            int level = AggregateLevel(call, new List<SqlSelectExpression?> { select });
+            if (level <= 0) { continue; }
+            var owner = OuterScope!;
+            for (int i = 1; i < level; i++) { owner = owner.Parent!; }
+            // parse_agg.c:348-358 chooses the argument level; the correlation scope
+            // also records whether that level is currently producing grouped output.
+            if (owner.GroupBy is null)
+            { throw new SqlPlanningException("CS05074", ErrorMessages.GroupingPlacement, call.Location); }
+            var arguments = new int[call.Arguments.Count];
+            for (int i = 0; i < arguments.Length; i++)
+            {
+                var argument = call.Arguments[i];
+                int key = -1;
+                if (!ContainsGrouping(argument) && !ContainsAggregate(argument) &&
+                    (argument is not SqlColumnReferenceExpression ||
+                        AggregateLevel(call, new List<SqlSelectExpression?> { select }, argument) == level))
+                {
+                    for (int k = 0; k < owner.GroupBy.Count; k++)
+                    {
+                        if (SameGroupExpression(argument, owner.GroupBy[k], owner.Local)) { key = k; break; }
+                    }
+                }
+                if (key < 0) { throw new SqlPlanningException("CS01062", ErrorMessages.GroupingArgument, argument.Location); }
+                arguments[i] = key;
+            }
+            owner.GroupingCalls!.Add(new SqlBoundGrouping(call, owner.Id, arguments));
+            OuterDependencies!.Add(owner.Id);
+        }
+    }
+
     private static IEnumerable<SqlExpression> GroupingKeys(IEnumerable<SqlExpression> elements)
     {
         RuntimeHelpers.EnsureSufficientExecutionStack();
@@ -293,6 +339,7 @@ internal sealed partial class SqlPlanner
         SqlSelectExpression select, SqlExpressionEvaluator evaluator)
     {
         if (!select.GroupBy.Any(element => element is SqlGroupingSetExpression)) { return (select.GroupBy, null); }
+        foreach (var element in select.GroupBy) { ValidateNesting(element, false); }
         var keys = new List<SqlExpression>();
         foreach (var expression in GroupingKeys(select.GroupBy))
         {
@@ -315,6 +362,18 @@ internal sealed partial class SqlPlanner
             { if (sets[i].AsSpan().SequenceEqual(sets[i - 1])) { sets.RemoveAt(i); } }
         }
         return (keys, sets.ToArray());
+
+        static void ValidateNesting(SqlExpression expression, bool withinRollupOrCube)
+        {
+            RuntimeHelpers.EnsureSufficientExecutionStack();
+            if (expression is not SqlGroupingSetExpression group) { return; }
+            // parse_clause.c:2225-2235: composites and nested SETS flatten, but
+            // SETS may contain ROLLUP/CUBE only in this direction.
+            if (withinRollupOrCube && group.Kind == SqlGroupingSetKind.Sets)
+            { throw new SqlPlanningException("CS00010", ErrorMessages.GroupingSetsNesting, group.Location); }
+            bool restricted = withinRollupOrCube || group.Kind is SqlGroupingSetKind.Rollup or SqlGroupingSetKind.Cube;
+            foreach (var item in group.Items) { ValidateNesting(item, restricted); }
+        }
 
         List<int[]> Expand(SqlExpression expression)
         {

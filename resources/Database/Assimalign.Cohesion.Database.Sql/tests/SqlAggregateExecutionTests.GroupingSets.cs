@@ -94,8 +94,9 @@ public sealed partial class SqlAggregateExecutionTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - Grouping sets: nested elements and duplicate sets retain independent states")]
-    [InlineData("ROLLUP(GROUPING SETS ((a),(b)),c)", 5)]
-    [InlineData("CUBE(GROUPING SETS ((a),(b)),c)", 6)]
+    [InlineData("GROUPING SETS (ROLLUP(a,b),CUBE(c))", 5)]
+    [InlineData("GROUPING SETS ((a,b),GROUPING SETS ((b),()))", 3)]
+    [InlineData("ROLLUP((a,(b,c)))", 2)]
     [InlineData("CUBE((a,b),c)", 4)]
     [InlineData("ROLLUP(a),ROLLUP(a)", 4)]
     [InlineData("DISTINCT ROLLUP(a),ROLLUP(a)", 2)]
@@ -231,7 +232,6 @@ public sealed partial class SqlAggregateExecutionTests
     [InlineData("SELECT GROUPING(a) FILTER(WHERE TRUE) FROM t GROUP BY a;", "CS05072")]
     [InlineData("SELECT GROUPING(DISTINCT a) FROM t GROUP BY a;", "CS05032")]
     [InlineData("SELECT GROUPING(a ORDER BY a) FROM t GROUP BY a;", "CS05032")]
-    [InlineData("SELECT (SELECT GROUPING(t.a) FROM t q GROUP BY q.b) FROM t GROUP BY a;", "CS01062")]
     [InlineData("CREATE TABLE invalid(v INT CHECK(GROUPING(v)=0));", "CS05074")]
     public async Task GroupingSets_InvalidContext_ShouldRefuseWithCode(string sql, string code)
     {

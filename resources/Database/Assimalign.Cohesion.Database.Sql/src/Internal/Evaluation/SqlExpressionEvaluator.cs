@@ -169,6 +169,16 @@ internal sealed partial class SqlExpressionEvaluator
 
     // Grouping and ordering already resolved these nodes to completed value slots.
     internal bool IsBoundValue(SqlExpression expression) => _valueOrdinals?.ContainsKey(expression) == true;
+    internal SqlBoundGrouping? OuterGrouping(SqlFunctionCallExpression call)
+    {
+        for (var scope = _typing?.OuterScope; scope is not null; scope = scope.Parent)
+        {
+            if (scope.GroupingCalls is null) { continue; }
+            foreach (var grouping in scope.GroupingCalls)
+            { if (ReferenceEquals(grouping.Call, call)) { return grouping; } }
+        }
+        return null;
+    }
     internal bool HasOutputValues => _projectionSources is not null;
     internal bool IsOutputValue(SqlExpression expression) => _projectionSources?.ContainsKey(expression) == true;
 
@@ -290,6 +300,9 @@ internal sealed partial class SqlExpressionEvaluator
         {
             case SqlBoundExpressionKind.OuterColumn:
                 return EvaluateOuter((SqlBoundOuterColumn)expression, copySharedBinary);
+            case SqlBoundExpressionKind.Grouping:
+                var grouping = (SqlBoundGrouping)expression;
+                return _subqueryValues!.FindScope(grouping.Scope).Row![grouping.Ordinal];
             case SqlBoundExpressionKind.Column:
                 int columnOrdinal = ((SqlBoundColumn)expression).Ordinal;
                 return copySharedBinary ? DeliverColumn(row, columnOrdinal) : row[columnOrdinal];

@@ -683,6 +683,11 @@ internal sealed partial class SqlExpressionEvaluator
     [MethodImpl(MethodImplOptions.NoInlining)]
     private SqlBoundExpression BindCall(SqlFunctionCallExpression call, out SqlCollationCandidate collation, bool requireBoolean, bool statisticsInput)
     {
+        if (SqlStandardLibrary.IsGrouping(call.FunctionName) && OuterGrouping(call) is { } grouping)
+        {
+            collation = default;
+            return grouping;
+        }
         if (SqlStandardLibrary.IsEvaluatorForm(call.FunctionName) && !SqlStandardLibrary.IsCoalesce(call.FunctionName))
         {
             ValidateEvaluatorForm(call);

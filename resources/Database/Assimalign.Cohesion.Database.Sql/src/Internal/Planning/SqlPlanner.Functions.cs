@@ -214,6 +214,7 @@ internal sealed partial class SqlPlanner
 
         if (expression is SqlFunctionCallExpression call && _functions.ViewCalls?.ContainsKey(call) != true)
         {
+            if (IsGrouping(call)) { (_queryScopes ??= new()).HasGroupingCalls = true; }
             CheckCall(call, _functions.Catalog);
         }
     }

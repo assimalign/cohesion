@@ -70,7 +70,14 @@ internal sealed partial class SqlPlanner
         if (SubqueryRoots(select).Any(expression => WithinRepeatedGroupKey(expression))) { return scope; }
         var groupingKeys = select.GroupBy.Any(key => key is SqlGroupingSetExpression)
             ? GroupingKeys(select.GroupBy).Distinct(new GroupExpressionComparer(this, scope.Local)).ToArray() : select.GroupBy;
-        return new SqlCorrelationScope(scope.Id, scope.Local, scope.Parent, groupingKeys) { Bindings = scope.Bindings };
+        List<SqlBoundGrouping>? groupingCalls = null;
+        if (_queryScopes!.HasGroupingCalls)
+        {
+            var calls = (_queryScopes.GroupingCalls ??= new());
+            if (!calls.TryGetValue(select, out groupingCalls)) { calls.Add(select, groupingCalls = []); }
+        }
+        return new SqlCorrelationScope(scope.Id, scope.Local, scope.Parent, groupingKeys, groupingCalls)
+        { Bindings = scope.Bindings };
 
         bool WithinRepeatedGroupKey(SqlExpression expression)
         {

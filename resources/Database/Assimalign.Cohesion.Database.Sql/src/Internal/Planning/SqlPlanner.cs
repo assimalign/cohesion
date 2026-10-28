@@ -1546,7 +1546,7 @@ internal sealed partial class SqlPlanner
         }
         if (expression is SqlFunctionCallExpression grouping && IsGrouping(grouping))
         {
-            if (evaluator.IsBoundValue(expression)) { return; }
+            if (evaluator.IsBoundValue(expression) || evaluator.OuterGrouping(grouping) is not null) { return; }
             throw new SqlPlanningException("CS05074", ErrorMessages.GroupingPlacement, expression.Location);
         }
         bool isBound = boundSubqueries is not null && boundSubqueries.ContainsKey(expression);

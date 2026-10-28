@@ -279,7 +279,7 @@
     <value>Too many grouping sets present (maximum 4096).</value>
   </data>
   <data name="GroupingArgument" xml:space="preserve">
-    <value>Arguments to GROUPING must be grouping expressions of the current query level.</value>
+    <value>Arguments to GROUPING must be grouping expressions of the associated query level.</value>
   </data>
   <data name="GroupingArity" xml:space="preserve">
     <value>GROUPING requires between 1 and 31 expression arguments.</value>
@@ -922,4 +922,5 @@
   <data name="HandshakeDatabaseMissing" xml:space="preserve"><value>The server's engine has no database named '{0}'.</value></data>
   <data name="AuthenticationResponseExpected" xml:space="preserve"><value>Expected an authenticate response but received {0}.</value></data>
   <data name="PrincipalAuthenticationFailed" xml:space="preserve"><value>Authentication failed for principal '{0}'.</value></data>
+  <data name="GroupingSetsNesting" xml:space="preserve"><value>GROUPING SETS cannot be nested inside ROLLUP or CUBE.</value></data>
 </root>

@@ -18,6 +18,7 @@ internal sealed partial class SqlPlanner
         IReadOnlyList<SqlRelationBinding>? bindings, SqlExpressionEvaluator evaluator, IReadOnlyList<SqlJoinStep> steps, SqlJoinTree? tree = null)
     {
         bool extended = false;
+        extended |= _queryScopes?.GroupingCalls?.TryGetValue(select, out var outerCalls) == true && outerCalls.Count > 0;
         for (int i = 0; i < select.GroupBy.Count; i++) { extended |= select.GroupBy[i] is SqlGroupingSetExpression; }
         for (int i = 0; i < select.Columns.Count; i++) { extended |= ContainsGrouping(select.Columns[i].Expression); }
         if (select.Having is not null) { extended |= ContainsGrouping(select.Having); }

@@ -19,5 +19,6 @@ public sealed class SqlGroupingSetExpression : SqlExpression
     public SqlGroupingSetKind Kind { get; }
 
     /// <summary>Gets the ordered child expressions or grouping elements; an empty composite denotes ().</summary>
+    /// <remarks>Planning refuses GROUPING SETS nested inside ROLLUP or CUBE; the reverse nesting is supported.</remarks>
     public IReadOnlyList<SqlExpression> Items { get; }
 }

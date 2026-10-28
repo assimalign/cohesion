@@ -102,7 +102,7 @@ internal sealed partial class SqlPlanner
                 SqlJoinPlan p => string.Join("; ", p.Steps.Select(step => $"{step.Kind}: {(step.Hash is not null ? "bounded in-memory hash" : step.Access is null ? "buffered inputs" : "correlated equality-prefix seek")}")) + "; " +
                     QueryDetail(p.Where is not null, p.OrderBy, p.IsDistinct, p.Limit, p.Offset),
                 SqlGroupPlan p => $"keys={p.Keys.Count}; aggregates={p.Aggregates.Count}; having={p.Having is not null}; " +
-                    (p is not SqlGroupingSetsPlan extended ? "" : $"grouping_sets={extended.GroupingSets?.Length ?? 1}; subtotal_masks=postgresql; memory=statement_budget; spill=none; ") +
+                    (p is not SqlGroupingSetsPlan extended ? "" : GroupingSetsDetail(extended)) +
                     (p.Aggregates.Any(aggregate => aggregate.Filter is not null) ? $"filtered_aggregates={p.Aggregates.Count(aggregate => aggregate.Filter is not null)}; " : "") +
                     QueryDetail(false, p.OrderBy, p.IsDistinct, p.Limit, p.Offset),
                 SqlInsertPlan p => DmlDetail($"values rows={p.Rows.Count}", p.Returning),
@@ -305,6 +305,14 @@ internal sealed partial class SqlPlanner
         ReadOnlyMemory<byte> bytes => "X'" + Convert.ToHexString(bytes.Span) + "'",
         _ => Convert.ToString(value, CultureInfo.InvariantCulture) ?? "NULL",
     };
+
+    private static string GroupingSetsDetail(SqlGroupingSetsPlan plan)
+    {
+        var sets = plan.GroupingSets ?? [Enumerable.Range(0, plan.Keys.Count).ToArray()];
+        string membership = string.Join(",", sets.Select(set => "(" +
+            string.Join(",", set.Select(key => key.ToString(CultureInfo.InvariantCulture))) + ")"));
+        return FormattableString.Invariant($"grouping_sets={sets.Length}; set_keys=[{membership}]; subtotal_masks=postgresql; memory=statement_budget; spill=none; ");
+    }
 
     private static string QueryDetail(bool filter, IReadOnlyList<SqlBoundOrdering> orderBy, bool distinct, SqlRowCount? limit, SqlRowCount? offset)
     {

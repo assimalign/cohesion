@@ -2114,8 +2114,9 @@ parameter and also provides ISO LISTAGG.
 `ROLLUP (...)` and `CUBE (...)`, combined by Cartesian product. Composite `(a,b)`
 items are units inside ROLLUP/CUBE. GROUPING SETS concatenates its children;
 ROLLUP includes every prefix and the empty prefix; CUBE includes every subset.
-Nested grouping elements recursively expand, including GROUPING SETS inside ROLLUP/CUBE
-as required by the Cohesion owner. That last form extends PostgreSQL's accepted syntax.
+ROLLUP and CUBE may appear inside GROUPING SETS. Nested composites and inner
+GROUPING SETS flatten as in PostgreSQL; GROUPING SETS inside ROLLUP or CUBE is
+refused during planning with CS00010 / 42601, including through a composite wrapper.
 Repeated columns within a set collapse. Duplicate sets remain separate by default or
 with `GROUP BY ALL`; `GROUP BY DISTINCT` removes them after expansion. The pre-DISTINCT
 expansion limit is 4096 sets (CS05075 / 54001). GROUP BY ordinals remain unsupported.
@@ -2129,7 +2130,11 @@ remain separate from subtotals. Empty input produces one row per empty set and n
 for nonempty sets; COUNT is zero and nullable native aggregates are NULL.
 
 `GROUPING(expr, ...)` returns a non-NULL INTEGER mask. Its 1–31 arguments must match
-grouping expressions of the current query level and are not evaluated by the call.
+grouping expressions of the associated query level and are not evaluated by the call.
+The arguments determine that level: a call inside a subquery whose arguments refer
+only to an outer level reads that level's mask, with or without an inner GROUP BY.
+Arguments from different levels cannot match the associated level's grouping keys
+(CS01062); the call's textual location does not create an inner mask.
 The rightmost argument occupies the least significant bit; a bit is one when the
 expression is absent from the current set. Repeated arguments repeat the corresponding
 bit. `GROUPING_ID` is a documented Cohesion alias of GROUPING, not a separate PostgreSQL
@@ -2142,10 +2147,14 @@ CS05074 / 42803. Existing CS05072/CS05032 reject FILTER/aggregate modifiers on G
 
 Grouping-set and grouping-mask plans charge retained state to StatementMemoryBudget and refuse with CS05067;
 there is no spill. Plain GROUP BY retains its original path. EXPLAIN adds expanded
-`grouping_sets`, PostgreSQL mask order and statement-budget/no-spill details for these
-queries. Views persist canonical grouping syntax and reload it without a format change.
+`grouping_sets` and `set_keys=[(...),...]` (zero-based grouping-key ordinals for
+every expanded set, retaining duplicates), PostgreSQL mask order and
+statement-budget/no-spill details for these queries. Views persist canonical grouping
+syntax and reload it without a format change.
 
-References re-derived against the local PostgreSQL clone: parser/parse_agg.c:1161–1169,
+References re-derived against the local PostgreSQL clone: parser/parse_agg.c:348–358
+(argument-level ownership), src/test/regress/sql/groupingsets.sql:676–684 (outer calls),
+parser/parse_agg.c:1161–1169,
 1746–1763,1864–2102 (limits, argument matching, expansion/deduplication),
 parser/parse_clause.c:2223–2238 (composite items and nesting restriction), and
 executor/execExprInterp.c:5310–5336 (mask bits). See also PostgreSQL's
