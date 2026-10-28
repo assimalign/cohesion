@@ -148,8 +148,10 @@ internal sealed partial class SqlPlanner
             {
                 case SqlWindowAggregatePlan window:
                     int windowParent = id;
-                    foreach (var group in window.Groups)
+                    // Parents describe later stages; the first execution group is nearest its input.
+                    for (int groupIndex = window.Groups.Count - 1; groupIndex >= 0; groupIndex--)
                     {
+                        var group = window.Groups[groupIndex];
                         int groupId = nodes.Count;
                         Add("WindowAgg", windowParent, null, null,
                             "partition=" + string.Join(", ", group.PartitionSyntax.Select(SqlExpressionRenderer.Render)) +

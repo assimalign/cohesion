@@ -268,6 +268,9 @@ public sealed class SqlWindowExecutionTests
         // Assert
         var windows = plan.Where(row => Equals(row[2], "WindowAgg")).ToArray();
         windows.Length.ShouldBe(2);
+        windows[0][5]!.ToString()!.ShouldContain("functions=RANK; sort_shared=true");
+        windows[1][5]!.ToString()!.ShouldContain("functions=ROW_NUMBER; sort_shared=false");
+        windows[1][1].ShouldBe(windows[0][0]);
         windows.Select(row => row[5]).ShouldContain(value => value!.ToString()!.Contains("sort_shared=true", StringComparison.Ordinal));
         windows.Select(row => row[7]).ShouldBe([3L,3L]);
         windows.Sum(Sorts).ShouldBe(1);
