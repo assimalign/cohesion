@@ -35,6 +35,17 @@ public sealed partial class OqlQueryParser
                         left = new OqlInExpression(left, ParseExpression(4), negated, Span(start, Previous));
                         continue;
                     }
+                    if (Is("SELECT"))
+                    {
+                        var parenthesis = Previous;
+                        var queryStart = Current;
+                        var query = ParseSelect();
+                        if (!Failed && !query.IsValue)
+                        { Error("CD00014", ErrorMessages.InSubqueryRequiresRaw, queryStart); }
+                        if (!Failed) { Expect(TokenType.RightParen, "')'"); }
+                        left = new OqlInExpression(left, new OqlSubqueryExpression(query, Span(parenthesis, Previous)), negated, Span(start, Previous));
+                        continue;
+                    }
                     do { values.Add(ParseExpression()); } while (!Failed && Take(TokenType.Comma));
                     Expect(TokenType.RightParen, "')'");
                     left = new OqlInExpression(left, values.AsReadOnly(), negated, Span(start, Previous));
@@ -173,6 +184,10 @@ public sealed partial class OqlQueryParser
             _diagnostics.Add(QueryDiagnostics.UnsupportedParameterForm("CD00002", Span(start, end)));
             return new OqlLiteralExpression(null, Span(start, end));
         }
+        if (Take("EXISTS"))
+        {
+            return new OqlUnaryExpression("EXISTS", ParseExpression(6), Span(start, Previous));
+        }
         if (Take("NOT"))
         {
             return new OqlUnaryExpression("NOT", ParseExpression(3), Span(start, Previous));
@@ -235,6 +250,12 @@ public sealed partial class OqlQueryParser
         }
         if (Take(TokenType.LeftParen))
         {
+            if (Is("SELECT"))
+            {
+                var query = ParseSelect();
+                if (!Failed) { Expect(TokenType.RightParen, "')'"); }
+                return new OqlSubqueryExpression(query, Span(start, Previous));
+            }
             var expression = ParseExpression();
             if (!Failed) { Expect(TokenType.RightParen, "')'"); }
             return expression;

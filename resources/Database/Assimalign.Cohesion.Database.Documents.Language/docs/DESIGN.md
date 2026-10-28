@@ -94,7 +94,8 @@ Lexical recognition preserves the established vocabulary so rejected constructs 
 | `DROP COLLECTION` | Yes | One database-local collection, optionally `IF EXISTS` |
 | `CREATE INDEX` | Yes | 1..32 ordered scalar paths or one DISTINCT ARRAY key; scalar-only UNIQUE; IF NOT EXISTS |
 | `DROP INDEX` | Yes | One named index in one collection, optional IF EXISTS; ON is required |
-| `SUBQUERY` | No | A nested `SELECT` reports this capability name at the inner keyword, including UPDATE SET/WHERE, DELETE and INSERT/UPSERT VALUES, with or without EXPLAIN |
+| `SUBQUERY` | Yes | Parenthesized uncorrelated SELECT returns an array; derived FROM, correlation and DML subqueries remain named CK00001 refusals |
+| `EXISTS` | Yes | Unary collection operator; arrays test nonemptiness, MISSING propagates, other inputs give NULL |
 | `MERGE` | No (pin) | SQL++ merge; stays a pin with no T1 item lifting it, and #1101 owns it |
 
 `OqlFunctions.All` is the public, immutable standard-function metadata consumed by the
@@ -227,7 +228,7 @@ this language has no separate expression renderer. RAW/VALUE enforces one non-st
 without an alias. Named projections reuse SELECT's expression parsing and reserved AS labels.
 RETURNING stays contextual: destinations, properties, output bindings and aliases keep that name.
 The recognized-vocabulary row remains for contextual coverage and unsupported prefix/SELECT use.
-The capability scan recognizes nested SELECT in RETURNING as SUBQUERY, including INSERT VALUES.
+The capability scan names SUBQUERY in DML at nested SELECT in RETURNING, including INSERT VALUES.
 
 The engine binds only the target image (alias or implicit collection binding), validates scalar
 contexts before writes, and uses SELECT projection names/types and JSON semantics. Aggregate
@@ -506,6 +507,21 @@ CASE, nested ARRAY/FIRST and ANY/SOME/EVERY are skipped as complete expressions 
 the enclosing FOR, including within WHEN. Dotted members, AS labels and object keys are names;
 they do not open or close expression scopes. ARRAY()/FIRST() retain their dedicated CK00001 refusal.
 
+## Expression subqueries (#1731, OQ-Q1)
+
+OqlSubqueryExpression is a sealed AST leaf retaining its OqlSelectExpression and full
+parenthesized span. EXISTS uses OqlUnaryExpression with operator EXISTS, preserving ordinary
+NOT composition. ParseSelect stops at its matching closing parenthesis; recursive expression
+parsing shares CD00005's 128-level limit. The capability scan admits nested SELECT only within
+a SELECT statement and names derived FROM or SUBQUERY in DML for deferred forms. SELECT
+quantifiers and reserved labels retain their existing positional rules within nested scopes.
+IN with a direct SELECT requires RAW or VALUE (CD00014); an ordinary parenthesized expression
+keeps the existing value-list interpretation. Source Text remains the statement renderer;
+there is no separate OQL AST renderer. The engine renders nested plans in EXPLAIN.
+The [dialect](DIALECT.md#expression-subqueries-and-exists-1731-oq-q1) records every default,
+cache policy, scope, retention and deferred form. OqlSubqueryParserTests and the engine's
+advertised-clause corpus cover the syntax together with the runtime and transport suites.
+
 ## Grammar, statement, and expression trees
 
 ```text
@@ -545,6 +561,8 @@ array        := '[' [expression (',' expression)*] ']'
 ordering     := expression [ASC | DESC] [NULLS (FIRST | LAST)]
 path         := identifier ('.' identifier | '[' integer ']' | '[' string ']')*
 presence-test := expression IS [NOT] (NULL | MISSING | VALUED)
+subquery     := '(' query ')'
+exists       := EXISTS expression
 membership   := expression [NOT] IN ('(' expression (',' expression)* ')' | expression)
 range-test   := expression [NOT] BETWEEN expression AND expression
 pattern-test := expression [NOT] LIKE expression [ESCAPE expression]
@@ -603,7 +621,7 @@ inside either bound can still group a Boolean expression. CASE is a primary expr
 OqlInExpression retains either a nonempty Values list or an Array expression; even
 `x IN (d.tags)` compares x with the whole array as one structural item. The array operand
 parses above comparison precedence, so `x IN d.tags AND p` is a conjunction. A nested SELECT
-still names SUBQUERY, including inside SATISFIES.
+uses the approved RAW/VALUE array operand exception; a non-RAW direct SELECT gives CD00014.
 The other public nodes are OqlBetweenExpression, OqlLikeExpression and OqlCaseExpression.
 Negated predicates preserve unknown results. Structural equality returns NULL for otherwise equal
 arrays/objects containing NULL, so IN and simple CASE do not match them. A definite structural
@@ -673,6 +691,7 @@ The keyword-disposition corpus covers these identifiers both with and without th
 | `CD00010` | A duplicate variable within one FROM/UNNEST or quantifier binding list, at the repeated name |
 | `CD00011` | ALL/DISTINCT on a scalar or star call, at the quantifier |
 | `CD00013` | NULLS without FIRST or LAST, at the expected option |
+| `CD00014` | Direct IN subquery requires SELECT RAW or SELECT VALUE |
 
 Every error has an absolute start/end span and source line. End-of-input errors use the source
 length for both offsets. A line breaks at LF, CR, NEL (U+0085), LS (U+2028) or PS (U+2029), and

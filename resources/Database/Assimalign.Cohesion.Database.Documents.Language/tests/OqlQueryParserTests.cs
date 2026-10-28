@@ -121,7 +121,7 @@ public sealed class OqlQueryParserTests
     [InlineData("DEFINE people AS SELECT * FROM people", "DEFINE", 0)]
     [InlineData("SELECT ELEMENT(address) FROM people", "ELEMENT", 7)]
     [InlineData("SELECT FLATTEN(address) FROM people", "FLATTEN", 7)]
-    [InlineData("SELECT (SELECT city FROM addresses) FROM people", "SUBQUERY", 8)]
+    [InlineData("SELECT * FROM (SELECT city FROM addresses) p", "derived FROM subquery", 15)]
     [InlineData("CREATE DATABASE other", "CREATE", 0)]
     [InlineData("DROP DATABASE other", "DROP", 0)]
     [InlineData("USE other", "USE", 0)]
@@ -131,7 +131,7 @@ public sealed class OqlQueryParserTests
 
         diagnostic.Message!.ShouldContain(clause);
         diagnostic.Start.ShouldBe(start);
-        diagnostic.End.ShouldBe(start + (clause == "SUBQUERY" ? "SELECT".Length : clause == "IN array form" ? 2 : clause.Length));
+        diagnostic.End.ShouldBe(start + (clause == "derived FROM subquery" ? "SELECT".Length : clause == "IN array form" ? 2 : clause.Length));
         diagnostic.Line.ShouldBe(1);
     }
 

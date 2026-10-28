@@ -27,6 +27,7 @@ internal static partial class DocumentPlanExecutor
         var plan = new DocumentPlanner(database.Catalog, operation.Context.Snapshot, parameters, cancellationToken, functions: database.Engine.Functions).Plan(statement.OqlExpression);
         return plan switch
         {
+            DocumentNestedPlan nested => await ExecuteNestedStatementAsync(database, operation, nested, parameters, cancellationToken).ConfigureAwait(false),
             DocumentDeletePlan delete => await ExecuteDeleteAsync(database, operation, delete, parameters, cancellationToken).ConfigureAwait(false),
             DocumentUpdatePlan update => await ExecuteUpdateAsync(database, operation, update, parameters, cancellationToken).ConfigureAwait(false),
             DocumentInsertPlan insert => await ExecuteWriteAsync(database, operation, insert.Collection, insert.Statement, insert.Statement.Values, null, true, insert.Returning, parameters, cancellationToken).ConfigureAwait(false),

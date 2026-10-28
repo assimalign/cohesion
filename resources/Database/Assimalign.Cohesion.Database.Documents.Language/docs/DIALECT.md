@@ -37,6 +37,56 @@ response discards the session and leaves an unacknowledged commit's outcome unkn
 has arrived, bounded status cleanup ignores caller cancellation. No request identifier, protocol
 version or persisted format changes. CD07002 remains live for this capability requirement.
 
+## Expression subqueries and EXISTS (#1731, OQ-Q1)
+
+A parenthesized SELECT is an expression returning an array with zero, one or many elements;
+there is no scalar-cardinality error. SELECT RAW and SELECT VALUE return projected values;
+ordinary named SELECT projections return objects with the usual omitted-MISSING members.
+A lone star retains object roots; a nonobject root is wrapped under `document`, so ordinary
+subquery elements remain objects. Top-level SELECT star keeps its existing stored-value rule. RAW/VALUE MISSING
+becomes a null array element. FROM remains required in every SELECT. Subqueries may nest and
+appear in SELECT projections, WHERE, GROUP BY, HAVING, ORDER BY, function arguments, constructors,
+CASE, comprehensions, quantified predicates and UNNEST operands. Each nested query has its own
+metadata, grouping and binding scope. See the pinned
+[SQL++ subquery contract](https://github.com/couchbaselabs/docs-devex/blob/c3bb1549af4887019b9983e371d9e8b4f569052c/modules/n1ql/pages/n1ql-language-reference/subqueries.adoc#L26-L68).
+
+`EXISTS expression` returns TRUE for a nonempty array, FALSE for an empty array, MISSING for
+MISSING, and NULL for NULL, scalars or objects. NOT EXISTS composes with ordinary negation.
+EXISTS binds like a unary sign; parenthesize a compound operand. The truth table follows
+[Couchbase coll_exists.go:40-53](https://github.com/couchbase/query/blob/6d40d1dd24e256588af2ff5bf6627ca76135397c/expression/coll_exists.go#L40-L53).
+The retired ODMG EXISTS binding quantifier remains a named CK00001 refusal.
+
+`value [NOT] IN (SELECT RAW ...)` uses existing array IN semantics. VALUE is accepted as RAW's
+existing synonym. A direct SELECT without RAW/VALUE in this position gives CD00014 at SELECT;
+an extra pair of parentheses denotes an ordinary expression in the existing value-list grammar.
+MISSING on the left propagates MISSING; NULL on the left remains NULL, even for an empty array.
+A match wins over null elements; an unmatched null element yields NULL. Nested RAW MISSING rows
+become null elements before membership testing, matching the existing RAW result rule.
+
+Nested plans execute on the outer statement's operation, fixed snapshot, parameters, frozen
+function catalog, transaction clock, cancellation token and retained-memory counter (CD05018).
+They see the transaction's earlier writes. Deterministic uncorrelated results cache lazily by AST
+identity for that statement. NOW_STR/NOW_MILLIS and every registered developer callback disable
+caching, including when nested further inside the query. Their plans still bind only once per
+statement. An unreached CASE, AND/OR or lazy conditional argument performs no nested execution,
+consumes no nested work or retention, invokes no callback and raises no runtime error. Static
+parameter, numeric, name, metadata and grouping validation still applies to every branch.
+
+Every materialized nested array, including a per-evaluation result, remains retained until the
+statement exits. Arrays are independently owned JSON values, and output projection clones remain
+valid after the statement. Nested source rows, results, scratch and arrays share the existing
+memory budget. A conservative reservation precedes array serialization and then shrinks to its
+measured representation. Cancellation or failure releases all nested reservations. EXPLAIN binds
+without executing and shows each SubqueryExpression, owning clause/span, nested access plan and
+`cached_for_statement` or `per_evaluation` policy. Plans are statement-local and rebuilt on the
+next execution, including a reused request after CREATE/DROP INDEX.
+
+Deferred forms use CK00001 and name the form: correlated subqueries (OQ-Q3), derived
+`FROM (SELECT ...) AS alias` (OQ-Q2), and subqueries anywhere inside INSERT, UPSERT, UPDATE or
+DELETE, including RETURNING (OQ-Q3). References to outer FROM/UNNEST, group or comprehension
+bindings are correlation; inner declarations shadow them by ordinal name. This run adds no disk,
+protocol, frame or capability version. InMemory, TCP and NativeAOT use the ordinary JSON cells.
+
 ## RETURNING (#1727)
 
 INSERT and UPSERT (VALUES or SELECT), UPDATE and DELETE accept a final
@@ -164,7 +214,7 @@ group aliases omit their members; explicit NULL members remain. LEFT UNNEST's ab
 therefore omits t. Unnamed group terms add no wrapper member. No group-array element ordering
 is promised. This follows Couchbase's [GROUP BY / GROUP AS wrapper and alias contract](https://github.com/couchbaselabs/docs-devex/blob/c3bb1549af4887019b9983e371d9e8b4f569052c/modules/n1ql/pages/n1ql-language-reference/groupby.adoc#L47-L81),
 with the owner's requirement to include group-term aliases. LETTING stays unavailable (CK00001),
-as do subqueries and FROM-array sources. LETTING remains contextual as a field or FROM/UNNEST name; use AS or quotes for a group-term alias named letting.
+as do correlated subqueries and FROM-array sources. LETTING remains contextual as a field or FROM/UNNEST name; use AS or quotes for a group-term alias named letting.
 
 Group terms evaluate against the input row, independently of other group-term aliases.
 Named terms then bind each member's computed value for aggregate row inputs and bind the

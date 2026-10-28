@@ -253,6 +253,7 @@ public sealed partial class OqlQueryParser : QueryParser
         int parentheses = 0;
         bool inSelectList = false;
         int selectHead = -2;
+        Stack<(int Depth, bool InSelectList, int SelectHead)>? selectScopes = null;
         int callQuantifier = -2;
         int fetchHead = -2;
         int pagingHead = -2;
@@ -268,7 +269,16 @@ public sealed partial class OqlQueryParser : QueryParser
             }
 
             if (token.Type == TokenType.LeftParen) { parentheses++; }
-            else if (token.Type == TokenType.RightParen) { parentheses--; }
+            else if (token.Type == TokenType.RightParen)
+            {
+                parentheses--;
+                if (selectScopes is { Count: > 0 } && selectScopes.Peek().Depth > parentheses)
+                {
+                    var enclosing = selectScopes.Pop();
+                    inSelectList = enclosing.InSelectList;
+                    selectHead = enclosing.SelectHead;
+                }
+            }
 
             if (token.Type is not (TokenType.Keyword or TokenType.Function or TokenType.Identifier))
             {
@@ -402,9 +412,11 @@ public sealed partial class OqlQueryParser : QueryParser
                 break;
             }
 
-            // EXISTS is supported only in the positional DDL modifier. Keep malformed
+            // EXISTS is an expression operator and a positional DDL modifier. Keep malformed
             // modifiers on the syntax path too (CREATE COLLECTION IF EXISTS reports NOT).
-            if (value == "EXISTS" && IsDdlExistenceToken(index))
+            if (value == "EXISTS" && (IsDdlExistenceToken(index) ||
+                !IsWord(_tokens[statementStart], "CREATE") && !IsWord(_tokens[statementStart], "DROP") &&
+                index > statementStart && !IsQuantifierBinding(index + 1)))
             {
                 continue;
             }
@@ -435,9 +447,14 @@ public sealed partial class OqlQueryParser : QueryParser
                 // A SELECT inside an expression is nested even when it is the first one.
                 if (statementWithoutQuery || selected || parentheses > 0 || returningList)
                 {
-                    result.Add((OqlClauses.Subquery, token));
+                    if (statementWithoutQuery || !IsWord(_tokens[statementStart], "SELECT"))
+                    { _diagnostics.Add(QueryDiagnostics.UnsupportedClause("SUBQUERY in DML", Profile.Language, Span(token, token))); }
+                    else if (index > 1 && _tokens[index - 1].Type == TokenType.LeftParen && IsWord(_tokens[index - 2], "FROM"))
+                    { _diagnostics.Add(QueryDiagnostics.UnsupportedClause("derived FROM subquery", Profile.Language, Span(token, token))); }
                 }
 
+                if (parentheses > 0)
+                { (selectScopes ??= new()).Push((parentheses, inSelectList, selectHead)); }
                 selected = true;
                 selectHead = index;
                 inSelectList = true;
@@ -470,7 +487,7 @@ public sealed partial class OqlQueryParser : QueryParser
             }
             if (value == "EXISTS" && IsQuantifierBinding(index + 1))
             {
-                AddUnsupported(result, "EXISTS", token);
+                _diagnostics.Add(QueryDiagnostics.UnsupportedClause("EXISTS binding quantifier", Profile.Language, Span(token, token)));
                 index += 2;
                 continue;
             }
@@ -491,6 +508,11 @@ public sealed partial class OqlQueryParser : QueryParser
                 if (value == "LIMIT") { continue; }
             }
 
+            if (value == "EXISTS")
+            {
+                _diagnostics.Add(QueryDiagnostics.UnsupportedClause("EXISTS", Profile.Language, Span(token, token)));
+                break;
+            }
             if (!OqlUnsupportedVocabulary.TryFind(value, out var word) || Supports(word.Construct) && value != "RETURNING")
             {
                 continue;

@@ -76,7 +76,7 @@ public sealed class DocumentClientDiagnosticTests
     public async Task QueryAsync_MultipleParseDiagnostics_ShouldPreserveCompleteCarrier(bool tcp)
     {
         // Arrange
-        const string statement = "SELECT (SELECT a FROM nested) FROM items JOIN other ON items.a = other.a";
+        const string statement = "SELECT * FROM (SELECT a FROM nested) items JOIN other ON items.a = other.a";
         await using var harness = await DocumentClientTestHarness.StartAsync(tcp);
         await using var connection = await harness.Client.ConnectAsync(harness.Token);
         await using var embedded = await harness.Database.CreateSessionAsync(harness.Token);

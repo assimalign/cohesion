@@ -112,6 +112,15 @@ public sealed class OqlExecutionConformanceTests
                 new("SELECT COUNT(*) AS total, SUM(amount) AS sum, AVG(amount) AS average, MIN(amount) AS minimum, MAX(amount) AS maximum FROM items WHERE amount > 100",
                     [[0L, null, null, null, null]]),
             ],
+            [OqlClauses.Subquery] =
+            [
+                new("SELECT (SELECT RAW name FROM items WHERE name = 'alpha') AS names FROM items WHERE name = 'beta'", [[Json("[\"alpha\"]")]]),
+                new("SELECT name FROM items WHERE name IN (SELECT RAW name FROM items WHERE category = 'b')", [["gamma"]]),
+            ],
+            [OqlClauses.Exists] =
+            [
+                new("SELECT EXISTS [] AS empty, EXISTS [NULL] AS nonempty, NOT EXISTS [] AS negated FROM items WHERE name = 'alpha'", [[false, true, true]]),
+            ],
             [OqlClauses.Distinct] =
             [
                 new("SELECT DISTINCT category FROM items ORDER BY category", [["a"], ["b"]]),
@@ -540,6 +549,8 @@ public sealed class OqlExecutionConformanceTests
         OqlClauses.Unset => expression is OqlUpdateExpression { Unset.Count: > 0 },
         OqlClauses.Values => expression is OqlInsertExpression { Values.Count: > 0 },
         OqlClauses.Select => expression is OqlSelectExpression { Projections.Count: > 0 },
+        OqlClauses.Subquery => Assimalign.Cohesion.Database.Documents.Internal.DocumentPlanner.HasSubquery(expression),
+        OqlClauses.Exists => expression is OqlSelectExpression exists && exists.Projections.Any(p => p.Expression is OqlUnaryExpression { Operator: "EXISTS" }),
         OqlClauses.Distinct => expression is OqlSelectExpression { IsDistinct: true },
         OqlClauses.SelectValue => expression is OqlSelectExpression { IsValue: true },
         OqlClauses.ObjectConstructor => expression is OqlSelectExpression objectQuery && objectQuery.Projections.Any(p => p.Expression is OqlObjectExpression),

@@ -116,6 +116,9 @@ internal sealed partial class DocumentExpressionEvaluator
         System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
         switch (expression)
         {
+            case OqlSubqueryExpression subquery:
+                ValidateInputs(subquery.Query);
+                break;
             case OqlComprehensionExpression or OqlQuantifiedExpression or OqlInExpression or OqlBetweenExpression or OqlLikeExpression or OqlCaseExpression:
                 foreach (var child in DocumentPlanner.PredicateChildren(expression)) { ValidateInputs(child); }
                 break;
@@ -425,6 +428,7 @@ internal sealed partial class DocumentExpressionEvaluator
 
     private static object? Unary(string operation, object? value) => operation switch
     {
+        "EXISTS" => value is DocumentMissing ? value : value is JsonElement { ValueKind: JsonValueKind.Array } array ? array.GetArrayLength() > 0 : null,
         "IS MISSING" => value is DocumentMissing,
         "IS NOT MISSING" => value is not DocumentMissing,
         "IS VALUED" => value is not null and not DocumentMissing,
