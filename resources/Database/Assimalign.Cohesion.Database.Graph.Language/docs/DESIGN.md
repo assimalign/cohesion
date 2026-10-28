@@ -142,8 +142,10 @@ remain refused by update-pattern validation. The engine validates creation-compa
 relationship types, incoming-only equality expressions and both branch scopes before execution,
 including EXPLAIN. Already-declared relationship variables are refused (CG03007); a repeated or
 already-bound node must be a bare variable (CG03006). New relationships require one type.
-MERGE property equalities use CG03004 for both proven and evaluated non-scalar values; other
-property writes retain CG03003. Required properties can be supplied by ON CREATE before the
+MERGE property equalities use CG03004 for non-scalar values, whether planning proves them or
+evaluation produces them (a variable, parameter or expression); a list or map literal written
+directly in a pattern is still refused by the literal parser with CK00001. Other property writes
+retain CG03003. Required properties can be supplied by ON CREATE before the
 finished created entity is validated. Row-dependent equalities can use a per-row index seek.
 GqlMergeParserTests and the profile execution corpus pin grammar, rendering and live behavior.
 
