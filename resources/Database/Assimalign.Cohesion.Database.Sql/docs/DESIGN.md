@@ -45,6 +45,8 @@ output rows remain charged until the stage ends; scratch releases at each partit
 Accounting is deliberately conservative for aliased values and retained intermediate outputs;
 SQ-W3 refines full retained-memory accounting. There is no spill. LIMIT cannot truncate the
 input partitions. Window-free queries retain their existing plan and object layouts.
+Named-window enumeration uses separate iterators so extra retained enumerators do not
+increase ordinary query or persisted-view traversal allocations.
 
 Views render, compare and reload window expressions and named definitions through canonical SQL;
 costing and joined-DML source-intent traversal descend through the window input. Internal raw

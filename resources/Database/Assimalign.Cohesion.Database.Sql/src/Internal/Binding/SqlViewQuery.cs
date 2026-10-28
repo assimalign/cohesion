@@ -67,6 +67,19 @@ internal static class SqlViewQuery
     }
 
     internal static IEnumerable<SqlExpression> Expressions(SqlQueryBodyExpression query)
+        => query is SqlSelectExpression { Windows.Count: > 0 } select
+            ? OrdinaryExpressions(query).Concat(WindowDefinitions(select)) : OrdinaryExpressions(query);
+
+    private static IEnumerable<SqlExpression> WindowDefinitions(SqlSelectExpression select)
+    {
+        foreach (var window in select.Windows)
+        {
+            foreach (var key in window.Specification.PartitionBy) { yield return key; }
+            foreach (var key in window.Specification.OrderBy) { yield return key.Expression; }
+        }
+    }
+
+    private static IEnumerable<SqlExpression> OrdinaryExpressions(SqlQueryBodyExpression query)
     {
         if (query is SqlSelectExpression select)
         {
@@ -75,11 +88,6 @@ internal static class SqlViewQuery
             if (select.Where is { } where) { yield return where; }
             foreach (var key in select.GroupBy) { yield return key; }
             if (select.Having is { } having) { yield return having; }
-            foreach (var window in select.Windows)
-            {
-                foreach (var key in window.Specification.PartitionBy) { yield return key; }
-                foreach (var key in window.Specification.OrderBy) { yield return key.Expression; }
-            }
         }
         foreach (var order in query.OrderBy) { yield return order.Expression; }
         if (query.Limit is { } limit) { yield return limit; }
