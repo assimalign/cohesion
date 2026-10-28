@@ -54,6 +54,7 @@ internal sealed partial class SqlPlanExecutor
             BeforeSequenceDdlLock?.Invoke();
             await statement.Coordinator.LockManager.AcquireAsync(statement.DdlLockOwner,
                 LockResource.Object(sequence.ObjectId), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
+            SqlSequenceExecution.CheckGrant(statement, statement.DdlLockOwner);
         }
         foreach (var table in contents.AffectedTables)
         {

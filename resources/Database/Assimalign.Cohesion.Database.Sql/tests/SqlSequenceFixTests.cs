@@ -422,6 +422,44 @@ public sealed class SqlSequenceFixTests
         finally { SqlSequenceExecution.AfterSequenceGrant = null; db.Coordinator.LockManager.ReleaseAll(transaction.Sequence); }
     }
 
+    [Theory(DisplayName = "Cohesion Test [Sql] - Sequence DDL grants: an ended owner cannot publish or retain X grants")]
+    [InlineData("DROP SEQUENCE x.a, x.b")][InlineData("DROP SCHEMA x CASCADE")]
+    public async Task Execute_EndedDdlOwner_ShouldReleaseSequenceGrantsBeforePublication(string sql)
+    {
+        // Arrange
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        await using var engine = SqlDatabaseEngine.Create("sequence-fix", new());
+        var db = await engine.CreateDatabaseAsync("db", timeout.Token);
+        await using var session = await db.CreateSessionAsync(timeout.Token);
+        await Exec(session, "CREATE SCHEMA x");
+        await Exec(session, "CREATE SEQUENCE x.a"); await Exec(session, "CREATE SEQUENCE x.b");
+        await Exec(session, "CREATE TABLE x.t(id INT)");
+        var plan = new SqlPlanner(db.Catalog, null).Plan(SqlQueryRequest.FromSql(sql).Statement.SqlExpression);
+        var transaction = await db.Coordinator.BeginAsync(IsolationLevel.ReadCommitted, timeout.Token);
+        int grants = 0;
+        SqlSequenceExecution.AfterSequenceGrant = _ =>
+        {
+            if (Interlocked.Increment(ref grants) == 1) { db.Coordinator.RollbackAsync(transaction, CancellationToken.None).AsTask().GetAwaiter().GetResult(); }
+        };
+        try
+        {
+            // Act / Assert
+            var executor = new SqlPlanExecutor(db.DataStorage, db.Catalog, db.IndexManager, db.Definitions);
+            await Should.ThrowAsync<TransactionAbortedException>(() => executor.ExecuteAsync(plan,
+                new SqlStatementContext(transaction, db.Coordinator), timeout.Token));
+            grants.ShouldBe(1);
+            db.Catalog.Sequences.Count.ShouldBe(2);
+            var observer = await db.Coordinator.BeginAsync(IsolationLevel.ReadCommitted, timeout.Token);
+            try
+            {
+                foreach (var sequence in db.Catalog.Sequences)
+                { db.Coordinator.LockManager.TryAcquire(observer.Sequence, LockResource.Object(sequence.ObjectId), LockMode.Exclusive).ShouldBeTrue(); }
+            }
+            finally { await db.Coordinator.RollbackAsync(observer, CancellationToken.None); }
+        }
+        finally { SqlSequenceExecution.AfterSequenceGrant = null; db.Coordinator.LockManager.ReleaseAll(transaction.Sequence); }
+    }
+
     [Theory(DisplayName = "Cohesion Test [Sql] - Sequence RETURNING: durable reservations leave the writer gate available")]
     [InlineData("INSERT INTO t VALUES (2) RETURNING nextval('s')")]
     [InlineData("INSERT INTO t VALUES (1) ON CONFLICT(k) DO UPDATE SET k = excluded.k RETURNING setval('s', 9)")]

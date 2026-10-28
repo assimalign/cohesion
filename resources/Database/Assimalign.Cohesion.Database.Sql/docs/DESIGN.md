@@ -35,7 +35,8 @@ Unrelated CREATE INDEX leases remain compatible. CREATE guards check occupied re
 option validation under the publication monitor; DROP/ALTER IF EXISTS skip disappearance while
 waiting. DROP SCHEMA locks sequences before tables. Waits enter the existing deadlock graph, and transaction/timeout cleanup
 owns release. Each sequence grant rechecks transaction state and returns the finished owner's
-grants, covering a host rollback between acquisitions. Failed statements retain prior
+grants, covering a host rollback between acquisitions for function S grants and sequence/schema
+DDL X grants. An end observed after a sequence grant refuses before publication. Failed statements retain prior
 explicit-transaction sequence grants as other locks do.
 
 The established latch order is object grants, metadata admission where needed, the data apply

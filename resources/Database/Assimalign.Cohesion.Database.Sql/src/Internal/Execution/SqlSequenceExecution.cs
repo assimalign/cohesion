@@ -34,6 +34,16 @@ internal sealed class SqlSequenceExecution : IDisposable
     internal static SqlSequenceExecution? Current => _current.Value;
     internal static Action<TransactionContext>? AfterSequenceGrant { get; set; }
 
+    internal static void CheckGrant(SqlStatementContext statement, TransactionSequence owner)
+    {
+        AfterSequenceGrant?.Invoke(statement.Transaction);
+        if (statement.Transaction.State != TransactionState.Active)
+        {
+            statement.Coordinator.LockManager.ReleaseAll(owner);
+            throw new TransactionAbortedException(_transactionEnded);
+        }
+    }
+
     // Lock/latch order: transaction-owned sequence object locks (ascending ObjectId), then
     // table/row locks, then the data apply gate, then catalog _sync and storage latches.
     // No catalog monitor or metadata lease spans a lock wait. Constant references lock only
@@ -50,12 +60,7 @@ internal sealed class SqlSequenceExecution : IDisposable
         {
             await statement.Coordinator.LockManager.AcquireAsync(statement.Transaction.Sequence,
                 LockResource.Object(sequence.ObjectId), LockMode.Shared, cancellationToken).ConfigureAwait(false);
-            AfterSequenceGrant?.Invoke(statement.Transaction);
-            if (statement.Transaction.State != TransactionState.Active)
-            {
-                statement.Coordinator.LockManager.ReleaseAll(statement.Transaction.Sequence);
-                throw new TransactionAbortedException(_transactionEnded);
-            }
+            CheckGrant(statement, statement.Transaction.Sequence);
             // ALTER may have committed while this request waited: bind its new options under our lock.
             var resolved = catalog.FindSequence(sequence.ObjectId);
             if (resolved?.ObjectId == sequence.ObjectId) { current.Add(resolved); }

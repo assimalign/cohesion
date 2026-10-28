@@ -39,6 +39,7 @@ internal sealed partial class SqlPlanExecutor
         {
             BeforeSequenceDdlLock?.Invoke();
             await statement.Coordinator.LockManager.AcquireAsync(statement.DdlLockOwner, LockResource.Object(sequence!.ObjectId), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
+            SqlSequenceExecution.CheckGrant(statement, statement.DdlLockOwner);
         }
         using var metadata = statement.DdlInterlock?.EnterMetadata(statement.DatabaseName, definition: false);
         var resolved = new List<SqlCatalogSequence>();
