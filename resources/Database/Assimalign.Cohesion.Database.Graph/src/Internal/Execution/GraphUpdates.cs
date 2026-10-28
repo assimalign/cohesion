@@ -177,10 +177,14 @@ internal sealed class GraphUpdates : IDisposable
         using var memory = new GraphMemoryOwner(budget.Memory);
         var index = anchor.Property is { } indexedKey && anchor.Label is { } indexedLabel
             ? OverlayIndex(indexedLabel, indexedKey, budget, token) : null;
-        // Seek only the value's change set. Scans must charge every overlay comparison,
-        // including nodes rejected by labels or property residuals.
+        // Select the access path's postings before charging comparisons. Only a NodeScan
+        // visits unrelated labels; property residuals still charge every selected candidate.
         IEnumerable<GraphNode> candidates = index is not null
-            ? (index.Added(anchor.Value) ?? []).Select(id => _nodes[id]) : _nodes.Values;
+            ? (index.Added(anchor.Value) ?? []).Select(id => _nodes[id])
+            : _nodes.Count == 0 ? _nodes.Values
+            : anchor.UnionLabels is { } union ? PendingNodes(union, memory)
+            : anchor.Label is { } label ? (_nodeLabels.TryGetValue(label, out var ids) ? ids : []).Select(id => _nodes[id])
+            : _nodes.Values;
         var selected = new List<GraphNode>();
         memory.Add(32);
         foreach (var node in candidates)
@@ -211,7 +215,7 @@ internal sealed class GraphUpdates : IDisposable
                 var node = pending[position++];
                 yield return new(node.Id.Value, node.Labels, node.Properties);
             }
-            if (index?.Removed(anchor.Value)?.Contains(stored.Id) != true && !_nodes.ContainsKey(stored.Id)) { yield return stored; }
+            if (!_nodes.ContainsKey(stored.Id)) { yield return stored; }
         }
         while (position < pending.Count)
         {
@@ -283,12 +287,16 @@ internal sealed class GraphUpdates : IDisposable
         }
     }
 
-    private IEnumerable<GraphNode> PendingNodes(IReadOnlyList<string> labels)
+    private IEnumerable<GraphNode> PendingNodes(IReadOnlyList<string> labels, GraphMemoryOwner? memory = null)
     {
         var selected = new HashSet<ulong>();
+        memory?.Add(128);
         foreach (string label in labels)
         {
-            if (_nodeLabels.TryGetValue(label, out var ids)) { selected.UnionWith(ids); }
+            if (_nodeLabels.TryGetValue(label, out var ids))
+            {
+                foreach (ulong id in ids) { if (selected.Add(id)) { memory?.Add(64); } }
+            }
         }
         return selected.Select(id => _nodes[id]);
     }
@@ -297,17 +305,6 @@ internal sealed class GraphUpdates : IDisposable
         => _nodes.Count == 0 ? stored : stored.Where(node => !_nodes.ContainsKey(node.Id))
             .Concat(pending.Select(node => new StoredGraphNode(node.Id.Value, node.Labels, node.Properties)))
             .OrderBy(node => node.Id).ToArray();
-
-    internal async ValueTask<IReadOnlyList<StoredGraphNode>> SearchIndexAsync(string label, string key, object? value, CancellationToken token)
-    {
-        var budget = _operation.QueryBudget ??= new();
-        var found = new List<StoredGraphNode>();
-        await foreach (var node in StreamAnchorAsync(new(0, label, key, value), budget, token).ConfigureAwait(false))
-        {
-            if (node.Properties.TryGetValue(key, out var actual) && GraphValueComparer.Instance.Equals(actual, value)) { found.Add(node); }
-        }
-        return found;
-    }
 
     private bool HasReadIndex(string label, string key) => _operation.MergeReadSnapshot is null ||
         _database.Store.HasIndex(label, key, ReadSnapshot);
@@ -326,8 +323,7 @@ internal sealed class GraphUpdates : IDisposable
         {
             token.ThrowIfCancellationRequested();
             budget.Consume(); // Build once from earlier statement changes, never once per row.
-            AddOriginal(index, label, key, node.Id.Value);
-            index.Replace(label, key, null, node, false, Charge);
+            index.Replace(label, key, null, node, Charge);
         }
         _nodeIndexes.Add((label, key), index);
         return index;
@@ -340,17 +336,8 @@ internal sealed class GraphUpdates : IDisposable
         {
             _operation.FunctionCancellation.ThrowIfCancellationRequested();
             _operation.QueryBudget?.Consume();
-            if (previous is null && current is { } added) { AddOriginal(entry.Value, entry.Key.Label, entry.Key.Key, added.Id.Value); }
-            entry.Value.Replace(entry.Key.Label, entry.Key.Key, previous, current, false, Charge);
+            entry.Value.Replace(entry.Key.Label, entry.Key.Key, previous, current, Charge);
         }
-    }
-
-    private void AddOriginal(GraphOverlayIndex index, string label, string key, ulong id)
-    {
-        if (IsCreated(true, id)) { return; }
-        _operation.QueryBudget?.Consume();
-        if (_database.Store.FindNode(id, ReadSnapshot) is { } stored)
-        { index.Replace(label, key, new(new(id), stored.Labels, stored.Properties), null, true, Charge); }
     }
 
     internal Guid[]? SelectTypes(GqlRelationshipPattern pattern)

@@ -66,6 +66,7 @@ internal sealed class GraphOperation
 
     internal void EnsureMergeActive()
     {
+        Database.EnsureNotDisposed();
         // Session close precedes operation teardown. It already ends this statement even
         // while rollback or snapshot-pin release has not yet published the ended sentinel.
         if (MergeHasEnded)
@@ -122,8 +123,8 @@ internal sealed class GraphOperation
 
     internal void EnsureActive()
     {
-        if (_mergeLease is not null && _session.State == SessionState.Closed) { throw Ended(); }
         Database.EnsureNotDisposed();
+        if (_mergeLease is not null && _session.State == SessionState.Closed) { throw Ended(); }
         Database.ThrowIfOffline();
         try { _session.ThrowIfNotOpen(); }
         catch (DatabaseException) when (_mergeLease is not null && _session.State == SessionState.Closed)

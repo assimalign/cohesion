@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Execution.Internal;
 using Assimalign.Cohesion.Database.Graph.Language;
+using Assimalign.Cohesion.Database.Transactions;
 using Assimalign.Cohesion.Database.Types;
 
 using Assimalign.Cohesion.Database.Graph.Protocol;
@@ -51,7 +52,14 @@ internal static partial class GraphPlanExecutor
         { throw new GraphPlanningException("CG05001", ErrorMessages.ExecuteScalarRequired, plan.Query.Location); }
         if (plan.Writes)
         {
-            await database.LockWriterAsync(operation, token).ConfigureAwait(false);
+            try { await database.LockWriterAsync(operation, token).ConfigureAwait(false); }
+            catch (TransactionAbortedException) when (plan.Stages.Any(static stage => stage.Stage is GqlMergeStage))
+            {
+                // MERGE also waits here before its first stage and lazy tracker exist.
+                database.Coordinator.LockManager.ReleaseAll(operation.Context.Sequence);
+                operation.EnsureMergeActive();
+                throw;
+            }
             // Bindings have already been normalized and snapshotted. Re-normalizing would strip
             // another sigil from an unused key such as "$$unused" and can invent a collision.
             plan = new GraphPlanner(database, operation.Context.Snapshot).Plan(statement.GqlExpression, parameters, paths, token, normalizedParameters: true);

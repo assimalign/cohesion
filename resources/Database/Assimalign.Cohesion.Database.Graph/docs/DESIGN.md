@@ -424,7 +424,7 @@ No new public execution boundary or interface is added.
 | CG03005 | Null or absent bound node, or incompatible bound identity |
 | CG03006 | Repeated or already-bound node decorated with labels or properties |
 | CG03007 | Relationship variable declared before MERGE |
-| CK04002 | Operation ended before tracker acquisition or during a late pattern grant |
+| CK04002 | Statement or session ended while the database is live, including writer, parent and pattern lock queues and late grants |
 
 The executor gives every anonymous element a collision-free internal binding, constructs a fully
 evaluated path and lock identity, then delegates both probes to GraphMergeConcurrency. Each probe
@@ -451,12 +451,18 @@ the expression as its value placeholder. The executor substitutes the already-ev
 before both probes, so an UNWIND upsert performs a seek per row and view. Row-dependent
 seeks rank ahead of every label or relationship-type scan, including zero published counts,
 because those estimates exclude the growing statement overlay. EXPLAIN renders the placeholder
-as GQL expression text. Property seeks maintain a lazy value-keyed view of added and removed
+as GQL expression text. Property seeks maintain a lazy value-keyed view of current
 overlay postings for each label/property, updated on creation, replacement, relabeling and deletion.
 Exact graph scalar equality supplies the keys, including numeric equality across CLR tags.
 Building a view charges each earlier overlay entry once; each probe charges its value lookup and
-matching entries, and each subsequent change charges index maintenance. Overlay label scans
-charge every compared node, including rejected labels. Retained change buckets and entries use
+matching entries, and each subsequent change charges index maintenance. Persisted candidates
+whose identities are in the overlay are already suppressed; original-value removal postings
+would duplicate that check and are not retained. Overlay label scans visit only the selected
+label's postings; unions deduplicate those postings, and only NodeScan visits every overlay node.
+Every visited candidate is charged, including property-residual rejections. This follows Neo4j's
+label-specific transaction diff set in
+`community/kernel/src/main/java/org/neo4j/kernel/impl/newapi/DefaultNodeLabelIndexCursor.java:58-68`
+(local clone, behavior consulted; no code copied). Retained change buckets and entries use
 the existing statement memory lease. The MERGE read-view override lives in MERGE's lazy state,
 so this cache adds no object size or eager allocation to ordinary writes. This follows Neo4j's
 value lookup of transaction-state index additions at
@@ -562,8 +568,11 @@ sentinel and disposes only locks, with operation release in finally. RunAsync re
 memory lease on its flow after execution has stopped, even if teardown already ended the operation.
 Late Merge access returns CK04002; a closing session also ends the statement before rollback
 and pin release publish that sentinel. A disposed pattern tracker reports the same code when
-teardown wins after the seam re-reads its state. A disposed read inside a probe also uses CK04002
-once the statement has ended. The seam rechecks the sentinel before touching its cached tracker
+teardown wins after the seam re-reads its state. Failed writer, parent and pattern queue waits
+also use CK04002 when the session ends while the database is live. Database disposal takes
+precedence and retains CG09019, including engine shutdown during UNWIND MERGE and a disposed
+read inside a probe. Every failure releases late lock ownership before reporting its code.
+The seam rechecks the sentinel before touching its cached tracker
 and after a late grant. A losing CompareExchange releases its unpublished lease. End-between-grants tests assert budget
 and lease release for both explicit transactions and autocommit operations.
 
@@ -1815,7 +1824,7 @@ to exercise that enforcement path; compiled provisioning is not included.
 | `CG01002` | Unknown label or relationship type in a schema write (`CreateIndexAsync`, `DropLabelAsync`, `DropRelationshipTypeAsync`), a failed statement. A read never reports it; see `CG01010` and `CG01011` |
 | `CG03003` | Proven incompatible function argument kind; schema/data mismatch, restricted deletion or invalid graph mutation; deterministic catalog identity reuse/rename, identity mismatch, index retargeting or missing owner |
 | `CG03004` | MERGE equality is null, non-finite or non-scalar |
-| `CG03005` | Bound MERGE entity or repeated-node equality is absent or incompatible with constraints/endpoints |
+| `CG03005` | Bound MERGE node is null, absent or incompatible with its node pattern |
 | `CG05004` | Physical-work budget or 64-hop path limit exceeded |
 | `CG07005` | Session/database binding mismatch |
 | `CG06006` | Storage, index, or malformed catalog-record failure translated at the engine boundary |

@@ -355,7 +355,8 @@ public sealed class GraphMergeConcurrencyTests
         await owner.RollbackAsync(token);
 
         // Assert
-        await Should.ThrowAsync<Exception>(pending);
+        if (dispose) { (await Should.ThrowAsync<DatabaseException>(pending)).Diagnostics.ShouldContain(item => item.Code == "CK04002"); }
+        else { await Should.ThrowAsync<OperationCanceledException>(pending); }
         await AssertReleasedAsync(database, [identity], token);
         await waiting.RollbackAsync(token);
         await AssertReleasedAsync(database, [identity], token);
@@ -426,7 +427,8 @@ public sealed class GraphMergeConcurrencyTests
             else { cancellation.Cancel(); }
 
             // Assert
-            await Should.ThrowAsync<Exception>(pending);
+            if (dispose) { (await Should.ThrowAsync<DatabaseException>(pending)).Diagnostics.ShouldContain(item => item.Code == "CK04002"); }
+            else { await Should.ThrowAsync<OperationCanceledException>(pending); }
         }
         finally { await database.Coordinator.RollbackAsync(blocker, token); }
         await AssertReleasedAsync(database, [identity], token);

@@ -177,8 +177,8 @@ public sealed class GraphMergeSecondPassTests
         ["rows"] = Enumerable.Range(0, count).Select(i => new Dictionary<string, object?> { ["id"] = (long)i }).ToArray(),
     };
 
-    [Fact(DisplayName = "Cohesion Test [Graph] - label-scan overlay probes charge rejected labels (#1735)")]
-    public async Task StreamAnchorAsync_UnmatchedLabels_ShouldChargeComparisons()
+    [Fact(DisplayName = "Cohesion Test [Graph] - label-scan overlay probes visit only the selected postings (#1735)")]
+    public async Task StreamAnchorAsync_UnmatchedLabels_ShouldAvoidComparisons()
     {
         // Arrange
         await using var engine = GraphDatabaseEngine.Create("second", new());
@@ -195,7 +195,7 @@ public sealed class GraphMergeSecondPassTests
             { node.Id.ShouldBe(0UL); }
 
             // Assert
-            budget.Consumed.ShouldBe(1000);
+            budget.Consumed.ShouldBe(0);
             return true;
         }, CancellationToken.None);
     }

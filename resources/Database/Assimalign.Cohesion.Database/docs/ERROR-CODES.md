@@ -384,7 +384,7 @@ and invariant exceptions and lower child-root typed failures retain their docume
 | CK03001 | Logical database or storage already exists | — |
 | CK03002 | Logical database is absent | — |
 | CK04001 | Requested isolation level is unsupported | — |
-| CK04002 | Statement operation has already completed, including MERGE teardown between grants and a late pattern grant | — |
+| CK04002 | Statement operation has already completed; MERGE includes session end during writer/parent/pattern waits or late grants while the database is live (database disposal retains CG09019) | — |
 | CK04003 | Active statement apply bracket is absent | — |
 | CK04004 | Session already has an active transaction | — |
 | CK04005 | Transaction has already ended | — |

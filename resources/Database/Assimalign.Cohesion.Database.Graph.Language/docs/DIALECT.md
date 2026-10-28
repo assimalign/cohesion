@@ -222,7 +222,10 @@ Every decision uses the database writer lock followed by a logical pattern lock.
 the complete pattern against the latest committed view and reports retryable CG04024 if a decided
 match changes/disappears or a decided creation gains a committed match. ReadCommitted refreshes
 and re-matches after serialization. Pattern locks remain transaction-owned until commit/rollback;
-any failed statement aborts its explicit transaction. No disk or wire version changes.
+any failed statement aborts its explicit transaction. Session or statement end while the database
+is live reports CK04002, including writer, parent and pattern lock waits and late grants.
+Database disposal takes precedence and reports CG09019, including engine shutdown during
+UNWIND MERGE. No disk or wire version changes.
 
 ## SET and REMOVE
 

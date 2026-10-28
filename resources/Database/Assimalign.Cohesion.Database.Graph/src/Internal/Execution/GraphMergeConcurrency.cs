@@ -58,9 +58,10 @@ internal static class GraphMergeConcurrency
         // Later mutations use their existing mutation gate -> (reentrant) writer -> apply ->
         // B+Tree -> page order. Never weaken the writer lock: differently expressed overlapping
         // patterns need it, and ordinary CREATE/SET/DELETE must also serialize with this check.
-        await database.LockWriterAsync(operation.Context, cancellationToken).ConfigureAwait(false);
         try
         {
+            await database.LockWriterAsync(operation.Context, cancellationToken).ConfigureAwait(false);
+            operation.EnsureMergeActive();
             var statement = operation.Merge;
             identity ??= statement.Identity(evaluatedPattern!, createIdentity!);
             // Instance-free test gate for the end-between-grants interleaving. Production
@@ -114,8 +115,13 @@ internal static class GraphMergeConcurrency
             // Release a late grant for an untracked owner. For a tracked writer the manager
             // retains ownership until abort/undo completes, exactly as LockWriterAsync does.
             database.Coordinator.LockManager.ReleaseAll(operation.Context.Sequence);
+            // Database shutdown wins over session/statement end, including failed queued
+            // waits. The outer statement boundary translates disposal to CG09019.
+            database.EnsureNotDisposed();
             // A disposed read can fail inside a probe before its next active-state check.
-            if (failure is ObjectDisposedException && operation.MergeHasEnded) { throw GraphOperation.Ended(); }
+            // Session teardown fails writer, parent and pattern waits with a kernel abort.
+            if (failure is ObjectDisposedException or TransactionAbortedException && operation.MergeHasEnded)
+            { throw GraphOperation.Ended(); }
             throw;
         }
     }
