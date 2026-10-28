@@ -1233,6 +1233,7 @@ internal sealed partial class GraphPlanner
             { return new GraphAnchor(i, shape.Nodes[i].SelectMany(node => node.Labels).FirstOrDefault(), null, null); }
         }
         GraphAnchor? scan = null;
+        GraphAnchor? rowSeek = null;
         long scanCost = long.MaxValue;
         for (int i = 0; i < (sourceOnly ? 1 : shape.Nodes.Count); i++)
         {
@@ -1267,6 +1268,8 @@ internal sealed partial class GraphPlanner
                     string? bestKey = null;
                     ulong bestIndex = 0;
                     FirstValue best = new(int.MaxValue, null!);
+                    string? rowKey = null;
+                    FirstValue rowValue = new(int.MaxValue, null!);
                     foreach (var index in keys)
                     {
                         string key = index.Key;
@@ -1276,13 +1279,19 @@ internal sealed partial class GraphPlanner
                         if (inline.TryGetValue(key, out var property)) { candidate = property; }
                         else if (equalities.TryGetValue(key, out var equality)) { candidate = new(inline.Count + equality.Position, equality.Value); }
                         else { continue; }
+                        if (candidate.Value is GqlExpression && candidate.Position < rowValue.Position)
+                        { rowKey = key; rowValue = candidate; }
                         if (candidate.Position < best.Position) { best = candidate; bestKey = key; bestIndex = index.Id; }
+                    }
+                    // An earlier constant indexed property must not hide a usable row seek.
+                    if (rowKey is not null)
+                    {
+                        rowSeek ??= new GraphAnchor(i, label, rowKey, rowValue.Value) { EstimatedRows = 1 };
+                        continue;
                     }
                     if (bestKey is not null)
                     {
-                        // A row-dependent MERGE equality is evaluated once by its executor.
-                        // Choose the seek here; bind its value from that row before either probe.
-                        long cost = best.Value is GqlExpression ? 1 : _database.Store.EstimateIndexCount(bestIndex, label, best.Value, _snapshot, token);
+                        long cost = _database.Store.EstimateIndexCount(bestIndex, label, best.Value, _snapshot, token);
                         // Prefer an equality seek on a tie, preserving the established preference
                         // for a seek over its own label scan. Other ties retain source order.
                         if (scan is null || cost < scanCost || cost == scanCost && scan.Property is null)
@@ -1291,6 +1300,10 @@ internal sealed partial class GraphPlanner
                 }
             }
         }
+        // Published counts exclude statement-local creations and replacements. A zero-count
+        // label or type scan is therefore no bound on a row-dependent MERGE probe's cost.
+        // Keep the first eligible row seek ahead of every scan, regardless of estimates.
+        if (rowSeek is not null) { return rowSeek; }
         // Only outer singleton edges can seed a path. Repeated bodies may match zero times;
         // anchoring on one of their postings would lose those matches.
         for (int i = 0; !sourceOnly && i < shape.Segments.Count; i++)

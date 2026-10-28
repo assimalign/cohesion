@@ -22,7 +22,7 @@ internal static partial class GraphPlanExecutor
         foreach (var incoming in input)
         {
             token.ThrowIfCancellationRequested();
-            operation.EnsureActive();
+            operation.EnsureMergeActive();
             budget.Consume();
             using var memory = new GraphMemoryOwner(budget.Memory);
             memory.Add(512 + 128L * incoming.Count + 256L * (stage.Path.Nodes.Count + stage.Path.Relationships.Count) +

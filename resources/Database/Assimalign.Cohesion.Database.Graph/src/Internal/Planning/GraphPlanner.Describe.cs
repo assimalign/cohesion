@@ -214,6 +214,7 @@ internal sealed partial class GraphPlanner
     private static string Value(object? value) => value switch
     {
         null => "NULL",
+        GqlExpression expression => GraphProjectionText.Describe(expression),
         string text => "'" + text.Replace("'", "''", StringComparison.Ordinal) + "'",
         _ => Convert.ToString(value, CultureInfo.InvariantCulture) ?? "NULL",
     };

@@ -34,6 +34,7 @@ internal sealed class GraphMergeStatement : IDisposable
     }
 
     internal GraphMergeLocks Locks { get; }
+    internal TransactionSnapshot? ReadSnapshot { get; set; }
     internal TransactionSnapshot Latest => _latest ??= _database.LatestSnapshot(_operation.Context);
     internal bool SnapshotCaptured => _refreshed;
     internal void ChargeLock() => _memory.Add(GraphMergeLocks.EntryBytes);
@@ -69,6 +70,7 @@ internal sealed class GraphMergeStatement : IDisposable
         _identityKey = null;
         _identity = null;
         _latest = null;
+        ReadSnapshot = null;
         // Also covers a tracker first published concurrently with the transaction's end.
         // Fence new lock charges before releasing the statement's lease on the same budget.
         try { EndLocks(); }

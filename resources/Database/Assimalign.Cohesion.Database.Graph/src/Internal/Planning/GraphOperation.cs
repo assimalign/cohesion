@@ -50,7 +50,29 @@ internal sealed class GraphOperation
     // Query memory is flow-owned. Teardown fences locks; the running probe releases its
     // memory lease on its own flow, after it has stopped accounting work and memory.
     internal void ReleaseMerge() => _mergeLease?.Dispose();
-    private static DatabaseException Ended() => DatabaseException.CreateGraphFailure("CK04002", ErrorMessages.GraphOperationEnsureActiveDatabase);
+    internal TransactionSnapshot? MergeReadSnapshot => _mergeLease?.ReadSnapshot;
+    internal TransactionSnapshot? OverrideMergeReadSnapshot(TransactionSnapshot? snapshot)
+    {
+        // The running flow owns this lease even after teardown fences the tracker. It must
+        // still restore its read override in finally without trying to reopen ended state.
+        var statement = _mergeLease ?? Merge;
+        var previous = statement.ReadSnapshot;
+        statement.ReadSnapshot = snapshot;
+        return previous;
+    }
+    internal static DatabaseException Ended() => DatabaseException.CreateGraphFailure("CK04002", ErrorMessages.GraphOperationEnsureActiveDatabase);
+    internal bool MergeHasEnded => _session.State == SessionState.Closed ||
+        Context.State != TransactionState.Active || Volatile.Read(ref _finished) != 0;
+
+    internal void EnsureMergeActive()
+    {
+        // Session close precedes operation teardown. It already ends this statement even
+        // while rollback or snapshot-pin release has not yet published the ended sentinel.
+        if (MergeHasEnded)
+        { throw Ended(); }
+        try { EnsureActive(); }
+        catch (DatabaseException) when (_session.State == SessionState.Closed) { throw Ended(); }
+    }
 
     /// <summary>Initializes a new instance of the <see cref="GraphOperation"/> class.</summary>
     /// <param name="database">The database the statement runs on.</param>
@@ -100,9 +122,12 @@ internal sealed class GraphOperation
 
     internal void EnsureActive()
     {
+        if (_mergeLease is not null && _session.State == SessionState.Closed) { throw Ended(); }
         Database.EnsureNotDisposed();
         Database.ThrowIfOffline();
-        _session.ThrowIfNotOpen();
+        try { _session.ThrowIfNotOpen(); }
+        catch (DatabaseException) when (_mergeLease is not null && _session.State == SessionState.Closed)
+        { throw Ended(); }
         if (Context.State != TransactionState.Active || Volatile.Read(ref _finished) != 0)
         {
             throw DatabaseException.CreateGraphFailure("CK04002", ErrorMessages.GraphOperationEnsureActiveDatabase);

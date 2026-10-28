@@ -307,7 +307,7 @@ transaction-state diagnostics; it allocates no new identity. These changes add n
 | COHDBG013 | CG02013 | Values/types |
 | COHDBG003 | CG03003 | Schema/constraints |
 | New (#1735, GQ-M2) | CG03004 | Constraints — MERGE equality is null, non-finite or non-scalar |
-| New (#1735, GQ-M2) | CG03005 | Constraints — bound MERGE entity is absent or incompatible with its pattern/endpoints |
+| New (#1735, GQ-M2) | CG03005 | Constraints — bound MERGE node is null, absent or incompatible with its node pattern |
 | New (#1735, GQ-M2 fixes) | CG03006 | Constraints — repeated or already-bound MERGE node has labels or properties |
 | New (#1735, GQ-M2 fixes) | CG03007 | Constraints — MERGE relationship variable is already declared before the clause |
 | COHDBG007 | CG04007 | Transactions/locking |

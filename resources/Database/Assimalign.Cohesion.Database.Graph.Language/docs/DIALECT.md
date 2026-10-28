@@ -202,7 +202,8 @@ rendering preserves that order within each kind. Multiple paths are CG00002.
 Property maps evaluate once per input row against the incoming scope. Equalities must be finite,
 non-null storage scalars (CG03004 for proven or evaluated invalid equalities; supplied parameters
 retain their ordinary binding validation). Row-dependent equalities seek an available property
-index with each row's evaluated value; a dropped index falls back to a scan. A runtime NULL bound
+index with each row's evaluated value, ahead of label or relationship-type scans even when
+their published count is zero; a dropped index falls back to a scan. A runtime NULL bound
 node or absent bound node uses CG03005. MERGE does not
 modify a bound entity to make the pattern fit. Nodes require creation-compatible label conjunctions;
 relationships need exactly one type. Fixed either-direction relationships match either

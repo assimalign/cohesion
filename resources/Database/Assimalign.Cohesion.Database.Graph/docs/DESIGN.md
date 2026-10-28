@@ -448,7 +448,20 @@ owns storage publication and affected counts; it does not own schema validation.
 
 The planner chooses an indexed label/property for row-dependent MERGE equalities and retains
 the expression as its value placeholder. The executor substitutes the already-evaluated row value
-before both probes, so an UNWIND upsert performs a seek per row and view. Latest probes retain
+before both probes, so an UNWIND upsert performs a seek per row and view. Row-dependent
+seeks rank ahead of every label or relationship-type scan, including zero published counts,
+because those estimates exclude the growing statement overlay. EXPLAIN renders the placeholder
+as GQL expression text. Property seeks maintain a lazy value-keyed view of added and removed
+overlay postings for each label/property, updated on creation, replacement, relabeling and deletion.
+Exact graph scalar equality supplies the keys, including numeric equality across CLR tags.
+Building a view charges each earlier overlay entry once; each probe charges its value lookup and
+matching entries, and each subsequent change charges index maintenance. Overlay label scans
+charge every compared node, including rejected labels. Retained change buckets and entries use
+the existing statement memory lease. The MERGE read-view override lives in MERGE's lazy state,
+so this cache adds no object size or eager allocation to ordinary writes. This follows Neo4j's
+value lookup of transaction-state index additions at
+`community/kernel/src/main/java/org/neo4j/kernel/impl/newapi/TxStateIndexChanges.java:333-345`
+(local clone, behavior consulted; no code copied). Latest probes retain
 the dropped-index fallback to a label scan. Ordinary MATCH anchor selection is unchanged.
 EXPLAIN describes the probe and both branches; InMemory/TCP conformance and NativeAOT exercise the
 same stage. Ordinary CREATE/SET/DELETE/MATCH retain their existing paths and lock resources. Release fixtures
@@ -544,8 +557,11 @@ End cleanup fences tracker charges before releasing the statement lease on the s
 late autocommit grant cleanup cannot race that release. FinishAsync atomically publishes an ended
 sentinel and disposes only locks, with operation release in finally. RunAsync releases the statement
 memory lease on its flow after execution has stopped, even if teardown already ended the operation.
-Late Merge access returns CK04002; the seam rechecks the sentinel before touching its cached
-tracker and after a late grant. A losing CompareExchange releases its unpublished lease. End-between-grants tests assert budget
+Late Merge access returns CK04002; a closing session also ends the statement before rollback
+and pin release publish that sentinel. A disposed pattern tracker reports the same code when
+teardown wins after the seam re-reads its state. A disposed read inside a probe also uses CK04002
+once the statement has ended. The seam rechecks the sentinel before touching its cached tracker
+and after a late grant. A losing CompareExchange releases its unpublished lease. End-between-grants tests assert budget
 and lease release for both explicit transactions and autocommit operations.
 
 Non-parallel tests exercise real transactions for creators, ordinary deleters/replacements,

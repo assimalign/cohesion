@@ -78,7 +78,9 @@ public sealed class GraphAdjacencyFilterTests
         }, timeout.Token);
         // Assert
         output.Count.ShouldBe(1);
-        budget.Physical.ShouldBe(2);
+        // The label scan compares both overlay nodes, including the rejected Leaf, then
+        // expansion visits one selected edge. Unrelated relationship types remain unvisited.
+        budget.Physical.ShouldBe(3);
         budget.Viable.ShouldBe(1);
     }
 
