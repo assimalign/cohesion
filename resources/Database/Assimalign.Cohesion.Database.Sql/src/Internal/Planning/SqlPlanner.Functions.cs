@@ -214,6 +214,7 @@ internal sealed partial class SqlPlanner
 
         if (expression is SqlFunctionCallExpression call && _functions.ViewCalls?.ContainsKey(call) != true)
         {
+            if (IsGrouping(call)) { (_queryScopes ??= new()).HasGroupingCalls = true; }
             CheckCall(call, _functions.Catalog);
         }
     }
@@ -281,6 +282,13 @@ internal sealed partial class SqlPlanner
 
     private static void CheckCallCore(SqlFunctionCallExpression call, SqlFunctionCatalog catalog)
     {
+        if (IsGrouping(call))
+        {
+            if (call.Arguments.Count is < 1 or > 31 || System.Linq.Enumerable.Any(call.Arguments, argument => argument is SqlStarExpression))
+            { throw new SqlPlanningException("CS01063", ErrorMessages.GroupingArity, call.Location); }
+            ValidateCallModifiers(call, catalog);
+            return;
+        }
         if (IsMergeAction(call))
         {
             if (call.Filter is not null)

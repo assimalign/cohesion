@@ -75,6 +75,15 @@ public static class SqlClauses
     /// <summary>A <c>GROUP BY</c> clause.</summary>
     public const string GroupBy = "GROUP BY";
 
+    /// <summary>The GROUPING SETS grouping element.</summary>
+    public const string GroupingSets = "GROUPING SETS";
+
+    /// <summary>The ROLLUP grouping element.</summary>
+    public const string Rollup = "ROLLUP";
+
+    /// <summary>The CUBE grouping element.</summary>
+    public const string Cube = "CUBE";
+
     /// <summary>An aggregate input FILTER condition.</summary>
     public const string Filter = "FILTER";
 

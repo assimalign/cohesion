@@ -13,8 +13,22 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 internal sealed partial class SqlPlanner
 {
-    /// <summary>Binds aggregation above a normal filtered relation plan.</summary>
     private SqlGroupPlan PlanGroup(SqlSelectExpression select, SqlCatalogTable? table,
+        SqlSystemViewDefinition? view, IReadOnlyList<SqlCatalogColumn> columns,
+        IReadOnlyList<SqlRelationBinding>? bindings, SqlExpressionEvaluator evaluator, IReadOnlyList<SqlJoinStep> steps, SqlJoinTree? tree = null)
+    {
+        bool extended = false;
+        extended |= _queryScopes?.GroupingCalls?.TryGetValue(select, out var outerCalls) == true && outerCalls.Count > 0;
+        for (int i = 0; i < select.GroupBy.Count; i++) { extended |= select.GroupBy[i] is SqlGroupingSetExpression; }
+        for (int i = 0; i < select.Columns.Count; i++) { extended |= ContainsGrouping(select.Columns[i].Expression); }
+        if (select.Having is not null) { extended |= ContainsGrouping(select.Having); }
+        for (int i = 0; i < select.OrderBy.Count; i++) { extended |= ContainsGrouping(select.OrderBy[i].Expression); }
+        return extended ? PlanGroupingSets(select, table, view, columns, bindings, evaluator, steps, tree)
+            : PlanPlainGroup(select, table, view, columns, bindings, evaluator, steps, tree);
+    }
+
+    /// <summary>Binds aggregation above a normal filtered relation plan.</summary>
+    private SqlGroupPlan PlanPlainGroup(SqlSelectExpression select, SqlCatalogTable? table,
         SqlSystemViewDefinition? view, IReadOnlyList<SqlCatalogColumn> columns,
         IReadOnlyList<SqlRelationBinding>? bindings, SqlExpressionEvaluator evaluator, IReadOnlyList<SqlJoinStep> steps, SqlJoinTree? tree = null)
     {
@@ -375,6 +389,7 @@ internal sealed partial class SqlPlanner
         SqlFunctionCallExpression call when call.FunctionName.Equals("NULLIF", StringComparison.OrdinalIgnoreCase)
             => GroupExpressionType(call.Arguments[0], columns, evaluator),
         SqlFunctionCallExpression call when SqlStandardLibrary.IsEvaluatorForm(call.FunctionName) => evaluator.StaticCallType(call),
+        SqlFunctionCallExpression call when IsGrouping(call) => DatabaseType.Int32,
         SqlFunctionCallExpression call => CallResultType(call, columns, evaluator),
         SqlUnaryExpression { Operator: SqlUnaryOperator.Not } => DatabaseType.Boolean,
         // Unary plus returns its operand unchanged; only negation widens exact integers.

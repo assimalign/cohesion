@@ -10,20 +10,23 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlCorrelationScope.DebugView))]
 internal sealed class SqlCorrelationScope
 {
+    private readonly object? _groupBy;
+
     internal SqlCorrelationScope(int id, SqlExpressionEvaluator local, SqlCorrelationScope? parent,
-        IReadOnlyList<SqlExpression>? groupBy = null)
+        IReadOnlyList<SqlExpression>? groupBy = null, List<SqlBoundGrouping>? groupingCalls = null)
     {
         Id = id;
         Local = local;
         Parent = parent;
-        GroupBy = groupBy;
+        _groupBy = groupingCalls is null ? groupBy : new GroupingState(groupBy!, groupingCalls);
     }
 
     internal IReadOnlyList<SqlRelationBinding>? Bindings { get; init; }
     internal int Id { get; }
     internal SqlExpressionEvaluator Local { get; }
     internal SqlCorrelationScope? Parent { get; }
-    internal IReadOnlyList<SqlExpression>? GroupBy { get; }
+    internal IReadOnlyList<SqlExpression>? GroupBy => _groupBy is GroupingState grouping ? grouping.Keys : _groupBy as IReadOnlyList<SqlExpression>;
+    internal List<SqlBoundGrouping>? GroupingCalls => (_groupBy as GroupingState)?.Calls;
 
     internal SqlOuterReference Resolve(SqlColumnReferenceExpression column)
     {
@@ -65,6 +68,8 @@ internal sealed class SqlCorrelationScope
         }
         return new SqlOuterReference(Id, value, Local.ColumnMetadata(column));
     }
+
+    private sealed record GroupingState(IReadOnlyList<SqlExpression> Keys, List<SqlBoundGrouping> Calls);
 
     private sealed class DebugView
     {

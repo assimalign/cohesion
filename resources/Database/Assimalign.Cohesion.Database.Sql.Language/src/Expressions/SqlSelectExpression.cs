@@ -15,7 +15,7 @@ public sealed class SqlSelectExpression : SqlQueryBodyExpression
     /// <param name="columns">The columns in the SELECT list.</param>
     /// <param name="from">The comma-separated FROM join trees.</param>
     /// <param name="where">The WHERE filter expression.</param>
-    /// <param name="groupBy">The GROUP BY expressions.</param>
+    /// <param name="groupBy">The GROUP BY expressions and grouping elements.</param>
     /// <param name="having">The HAVING filter expression.</param>
     /// <param name="orderBy">The ORDER BY columns.</param>
     /// <param name="limit">The LIMIT expression.</param>
@@ -24,6 +24,7 @@ public sealed class SqlSelectExpression : SqlQueryBodyExpression
     /// <param name="text">The raw statement text.</param>
     /// <param name="location">The source location.</param>
     /// <param name="limitSyntaxKind">The spelling that supplied the row limit.</param>
+    /// <param name="isGroupByDistinct">Whether duplicate expanded grouping sets are removed.</param>
     internal SqlSelectExpression(
         IReadOnlyList<SqlSelectColumn> columns,
         IReadOnlyList<SqlFromItem> from,
@@ -36,13 +37,15 @@ public sealed class SqlSelectExpression : SqlQueryBodyExpression
         bool isDistinct,
         string? text,
         Location? location,
-        SqlLimitSyntaxKind? limitSyntaxKind = null)
+        SqlLimitSyntaxKind? limitSyntaxKind = null,
+        bool isGroupByDistinct = false)
         : base(text, location)
     {
         Columns = columns;
         From = from;
         Where = where;
         GroupBy = groupBy;
+        IsGroupByDistinct = isGroupByDistinct;
         Having = having;
         OrderBy = orderBy;
         Limit = limit;
@@ -112,9 +115,12 @@ public sealed class SqlSelectExpression : SqlQueryBodyExpression
     public SqlExpression? Where { get; }
 
     /// <summary>
-    /// Gets the GROUP BY expressions.
+    /// Gets the GROUP BY expressions and grouping elements.
     /// </summary>
     public IReadOnlyList<SqlExpression> GroupBy { get; }
+
+    /// <summary>Gets whether GROUP BY DISTINCT removes duplicate expanded grouping sets.</summary>
+    public bool IsGroupByDistinct { get; }
 
     /// <summary>
     /// Gets the HAVING filter expression, if present.

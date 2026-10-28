@@ -50,7 +50,7 @@ internal sealed partial class SqlPlanner
         finalPlanner.ViewDefinitionBinding = finalBinding;
         var finalPlan = finalPlanner.PlanOnce(frozen);
         var calls = SqlViewQuery.Nodes(frozen).OfType<SqlFunctionCallExpression>()
-            .Where(call => !SqlStandardLibrary.IsEvaluatorForm(call.FunctionName)).Select(call => finalBinding.Calls[call]).ToArray();
+            .Where(call => !SqlStandardLibrary.IsEvaluatorForm(call.FunctionName) && !IsGrouping(call)).Select(call => finalBinding.Calls[call]).ToArray();
         var view = new SqlCatalogView(schema, existing?.Name ?? create.View.TableName, canonical, output,
             finalBinding.Tables.ToArray(), finalBinding.Dependencies.Concat(calls).ToArray(), calls);
         _parsedViews.Add(view, new ParsedView(frozen));
@@ -110,7 +110,7 @@ internal sealed partial class SqlPlanner
                     { throw new SqlPlanningException("CS01009", ErrorMessages.ViewFunctionMissing); }
                     var query = _parsedViews.GetValue(view, value => new ParsedView(SqlPersistedExpression.LoadQuery(value.Definition, "view " + value.Schema + "." + value.Name))).Query;
                     var functionNodes = SqlViewQuery.Nodes(query).OfType<SqlFunctionCallExpression>()
-                        .Where(call => !SqlStandardLibrary.IsEvaluatorForm(call.FunctionName)).ToArray();
+                        .Where(call => !SqlStandardLibrary.IsEvaluatorForm(call.FunctionName) && !IsGrouping(call)).ToArray();
                     if (functionNodes.Length != view.FunctionCalls.Count || functionNodes.Where((call, index) =>
                         !view.FunctionCalls[index].StartsWith("F:" + SqlObjectIdentity.Quote(call.FunctionName.ToUpperInvariant()) + "(", StringComparison.Ordinal)).Any())
                     { throw ViewError(ErrorMessages.ViewRoundTrip); }

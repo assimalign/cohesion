@@ -303,6 +303,19 @@ No profile clause or keyword is added. DIALECT.md specifies syntax, defaults and
 
 ## Aggregate modifiers and string aggregation (#1115)
 
+SQ-H2 (#1720) adds sealed SqlGroupingSetExpression leaves with ordered children and
+Composite/Sets/Rollup/Cube kind. SqlSelectExpression retains GROUP BY DISTINCT;
+empty composites represent (). Contextual recursive parsing shares nesting guards,
+and canonical rendering preserves composite units, nested elements and DISTINCT.
+GROUPING/GROUPING_ID use the existing call AST and bind to subtotal slots in Sql,
+including correlated calls owned by the arguments' outer query level. Parsing retains
+recursive grouping shapes; planning flattens composites/inner GROUPING SETS and
+refuses GROUPING SETS inside ROLLUP/CUBE with CS00010, following PostgreSQL
+parse_clause.c:2225–2235. ROLLUP/CUBE inside GROUPING SETS remains supported.
+The profile adds three grouping clauses and two function names; their former four
+unsupported-vocabulary rows leave. Parser, renderer and live conformance advance together.
+No public construction bridge, interface, catalog format or wire format is added.
+
 FILTER and Boolean/statistical aggregates (#1720, SQ-H1) extend this representation:
 SqlFunctionCallExpression.Filter retains the optional condition, including depth and source
 extent. Rendering, semantic child walks, aggregate-level correlation and persisted equality

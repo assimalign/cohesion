@@ -422,7 +422,7 @@ src/backend/commands/tablecmds.c:2033-2090 and src/backend/catalog/heap.c:3701-3
 
 ## Statement matrix
 
-With INSERT ... ON CONFLICT (#1118), DML RETURNING (#1117), persisted CREATE/DROP VIEW (#1124), CREATE/DROP SCHEMA (#1030), set operations (#1114), quantified comparisons (#1718), UPDATE ... FROM / DELETE ... USING (#1714), TRUNCATE and CREATE TABLE AS (#1716), MERGE (#1715) and aggregate FILTER (#1720), the profile has **59 of 64 declared clauses** measured against the live SQL engine, including MERGE actions and RETURNING. WITH RECURSIVE (#1719, SQ-R1) adds one declared binding-only clause; recursive execution remains CK00001 until SQ-R2.
+With INSERT ... ON CONFLICT (#1118), DML RETURNING (#1117), persisted CREATE/DROP VIEW (#1124), CREATE/DROP SCHEMA (#1030), set operations (#1114), quantified comparisons (#1718), UPDATE ... FROM / DELETE ... USING (#1714), TRUNCATE and CREATE TABLE AS (#1716), MERGE (#1715) and aggregate FILTER (#1720), the profile has **62 of 67 declared clauses** measured against the live SQL engine, including MERGE actions and RETURNING. WITH RECURSIVE (#1719, SQ-R1) adds one declared binding-only clause; recursive execution remains CK00001 until SQ-R2.
 Phase 22 measured 33 of 49.
 The earlier 32/48 figure included `JOIN`, `GROUP BY`, `HAVING`, and `SUBQUERY`,
 removed in Phase 12e (#1019–#1021), plus a no-op `CAST` removed in Phase 13.
@@ -471,7 +471,7 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | `CAST` | Supported subset, measured | Built-in conversions across all 19 shared types according to the [conversion matrix](#explicit-conversion-cast-1022-e3), plus application-registered casts (E3's cast registry), in projections, predicates, ordering, and DML expressions, including the SQL server/client. See the exact pair and error contract below. CAST executes in DEFAULT; CHECK still rejects CAST. |
 | `COLLATE` | Supported subset, measured | Column and expression overrides: `binary`, `case_insensitive`, `case_accent_insensitive`, plus compatibility `invariant` with scan execution only. Effective collation governs comparisons, `LIKE`, ordering, grouping, `DISTINCT`, and unique keys. See the collation contract below. |
 | `JOIN` / `USING` | Supported subset, measured | N-way INNER (or bare JOIN), LEFT [OUTER], RIGHT [OUTER], FULL [OUTER], CROSS and comma joins over stored/system/derived sources, with parenthesized join groups. INNER/LEFT/RIGHT/FULL require ON or USING; CROSS accepts neither. FULL requires hash-compatible conditions (CS05070 otherwise). NATURAL, LATERAL and qualified wildcards remain excluded. See the precise contract below. |
-| `GROUP BY` / `HAVING` | Supported subset, measured | One or more grouping expressions; `WHERE` filters input rows and `HAVING` filters groups after aggregation. Composes with supported N-way joins, `ORDER BY`, `LIMIT`, and `OFFSET`, including server/client execution. Ungrouped, unaggregated projected columns are errors. `DISTINCT`/`ALL` and aggregate input `ORDER BY` execute; STRING_AGG and LISTAGG concatenate text. Grouping extensions, windows, and other ordered-set aggregates report `CK00001`. |
+| `GROUP BY` / `HAVING` | Supported subset, measured | One or more grouping expressions; `WHERE` filters input rows and `HAVING` filters groups after aggregation. Composes with supported N-way joins, `ORDER BY`, `LIMIT`, and `OFFSET`, including server/client execution. Ungrouped, unaggregated projected columns are errors. `DISTINCT`/`ALL` and aggregate input `ORDER BY` execute; STRING_AGG and LISTAGG concatenate text. GROUPING SETS, ROLLUP, CUBE, empty sets and GROUPING masks execute; windows and other ordered-set aggregates report `CK00001`. |
 | Subqueries / `INSERT ... SELECT` | Supported subset, measured | Correlated and uncorrelated scalar, `IN`/`NOT IN`, `EXISTS`/`NOT EXISTS`, and scalar `op ANY`, `op SOME` or `op ALL` queries in supported SELECT expressions and UPDATE/DELETE WHERE predicates, plus aliased derived tables and transactional insert-source queries. Each body may be a set operation (#1114). All use the outer statement snapshot; nesting is limited to 32 subquery levels, within the statement's expression nesting limit (256 levels by default, `CS00006`). Subqueries in UPDATE SET, VALUES, CHECK/DEFAULT, and LIMIT/OFFSET/FETCH/TOP expressions report `CK00001`. See the subquery contract below. |
 | `TOP` / `FETCH` | Supported subset, measured | Row counts normalize to LIMIT/Offset plan fields; see [Pagination](#pagination-1107). PERCENT, WITH TIES and DML TOP retain CK00001. |
 | `SELECT ALL` | Recognized, not supported | rejected with `CK00001` |
@@ -2098,8 +2098,7 @@ exceed 1,048,576 UTF-16 units. Ordered calls check while buffering, before sorti
 DISTINCT calls retain one representative per equivalence class, selected in sorted input
 order, so case-insensitive aggregation preserves one input spelling.
 
-Empty grouping sets (GROUP BY ()), GROUPING SETS, ROLLUP, CUBE,
-GROUPING/GROUPING_ID, windows, non-LISTAGG WITHIN GROUP, and LISTAGG ON OVERFLOW
+Windows, non-LISTAGG WITHIN GROUP, and LISTAGG ON OVERFLOW
 (including ERROR and TRUNCATE) retain CK00001. ON OVERFLOW is matched contextually
 inside LISTAGG and names the whole construct once; OVERFLOW remains an ordinary identifier.
 FILTER adds one named clause; the T1 modifiers add none.
@@ -2108,6 +2107,58 @@ Reference behavior: PostgreSQL src/backend/parser/gram.y:16017-16129,
 parse_agg.c:189-203,231-233 and parse_func.c:324-341; executor/nodeAgg.c:832-834,888-898;
 utils/adt/varlena.c:4331-4366,4506-4515. Cohesion restricts the delimiter to a literal or
 parameter and also provides ISO LISTAGG.
+
+## Grouping sets and subtotal masks (#1720, SQ-H2)
+
+`GROUP BY` accepts plain expression keys, `()`, `GROUPING SETS ((...), ...)`,
+`ROLLUP (...)` and `CUBE (...)`, combined by Cartesian product. Composite `(a,b)`
+items are units inside ROLLUP/CUBE. GROUPING SETS concatenates its children;
+ROLLUP includes every prefix and the empty prefix; CUBE includes every subset.
+ROLLUP and CUBE may appear inside GROUPING SETS. Nested composites and inner
+GROUPING SETS flatten as in PostgreSQL; GROUPING SETS inside ROLLUP or CUBE is
+refused during planning with CS00010 / 42601, including through a composite wrapper.
+Repeated columns within a set collapse. Duplicate sets remain separate by default or
+with `GROUP BY ALL`; `GROUP BY DISTINCT` removes them after expansion. The pre-DISTINCT
+expansion limit is 4096 sets (CS05075 / 54001). GROUP BY ordinals remain unsupported.
+
+Each set owns independent aggregate states, DISTINCT tuples and ordered-input
+representatives. A logical aggregate evaluates FILTER once per input before its
+arguments and ordering keys, then feeds the admitted values to every set. Volatile
+logical calls are not shared. Absent grouping expressions read as NULL
+in projection, HAVING, ORDER BY and correlated grouped-column reads. Real NULL keys
+remain separate from subtotals. Empty input produces one row per empty set and no row
+for nonempty sets; COUNT is zero and nullable native aggregates are NULL.
+
+`GROUPING(expr, ...)` returns a non-NULL INTEGER mask. Its 1–31 arguments must match
+grouping expressions of the associated query level and are not evaluated by the call.
+The arguments determine that level: a call inside a subquery whose arguments refer
+only to an outer level reads that level's mask, with or without an inner GROUP BY.
+Arguments from different levels cannot match the associated level's grouping keys
+(CS01062); the call's textual location does not create an inner mask.
+The rightmost argument occupies the least significant bit; a bit is one when the
+expression is absent from the current set. Repeated arguments repeat the corresponding
+bit. `GROUPING_ID` is a documented Cohesion alias of GROUPING, not a separate PostgreSQL
+primitive. Plain GROUP BY returns zero masks. `COHESION_SCHEMA.FUNCTIONS` lists
+GROUPING and GROUPING_ID as SPECIAL FORM entries, with no catalog overloads or
+independently invocable scalar callback. GROUPING is allowed in grouped SELECT,
+HAVING and ORDER BY, outside aggregate inputs and grouping keys. Reference mismatch
+is CS01062 / 42803, argument count/star is CS01063 / 54023 and invalid placement is
+CS05074 / 42803. Existing CS05072/CS05032 reject FILTER/aggregate modifiers on GROUPING.
+
+Grouping-set and grouping-mask plans charge retained state to StatementMemoryBudget and refuse with CS05067;
+there is no spill. Plain GROUP BY retains its original path. EXPLAIN adds expanded
+`grouping_sets` and `set_keys=[(...),...]` (zero-based grouping-key ordinals for
+every expanded set, retaining duplicates), PostgreSQL mask order and
+statement-budget/no-spill details for these queries. Views persist canonical grouping
+syntax and reload it without a format change.
+
+References re-derived against the local PostgreSQL clone: parser/parse_agg.c:348–358
+(argument-level ownership), src/test/regress/sql/groupingsets.sql:676–684 (outer calls),
+parser/parse_agg.c:1161–1169,
+1746–1763,1864–2102 (limits, argument matching, expansion/deduplication),
+parser/parse_clause.c:2223–2238 (composite items and nesting restriction), and
+executor/execExprInterp.c:5310–5336 (mask bits). See also PostgreSQL's
+[grouping-set semantics](https://www.postgresql.org/docs/current/queries-table-expressions.html#QUERIES-GROUPING-SETS).
 
 ## Set operations (#1114)
 
@@ -2413,7 +2464,7 @@ and complete strengths follow PostgreSQL `src/backend/parser/gram.y:13119-13176,
 WITH RECURSIVE before MERGE is refused with CK00001 at RECURSIVE, even for acyclic
 definitions (PostgreSQL `src/backend/parser/parse_merge.c:124-129`). Plain WITH
 before MERGE remains supported and shares SELECT's CTE binding and materialization.
-These contextual exclusions do not change the 59/64 declared-clause count.
+These contextual exclusions do not change the 62/67 declared-clause count.
 
 References re-derived from the local PostgreSQL clone: src/backend/parser/parse_cte.c:
 345-400 (output checks and hints), 580-632 (unknown anchor output), 648-725 and 863-906
@@ -3773,8 +3824,7 @@ operator outside the profile's keywords that a dedicated rule recognizes and
 rejects with `CK00001`: `RECURSIVE`, `[NOT] MATERIALIZED`, `SEARCH`/`CYCLE`,
 `SELECT ALL`, SELECT-tail `FOR UPDATE` / `FOR NO KEY UPDATE` / `FOR SHARE` /
 `FOR KEY SHARE`,
-`CREATE COLLATION`, `CREATE FULLTEXT`, `GROUPING SETS` and
-the `GROUPING`, `ROLLUP`, `CUBE` and `GROUPING_ID` calls, and
+`CREATE COLLATION`, `CREATE FULLTEXT`, and
 `WITHIN GROUP` after a non-LISTAGG call, LISTAGG ON OVERFLOW (contextual), the `ANY`/`SOME` (and `ALL`) array comparisons,
 `LATERAL`, `~`, `SEQUENCE`, `SERIAL`, `BIGSERIAL`, `SMALLSERIAL`, `OVERRIDING`,
 `MINVALUE`, `MAXVALUE`, `CYCLE`, `CACHE`, `RESTART`, plus `PERCENT` and `WITH TIES` after

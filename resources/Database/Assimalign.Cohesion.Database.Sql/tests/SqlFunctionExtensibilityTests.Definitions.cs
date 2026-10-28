@@ -481,7 +481,7 @@ public sealed partial class SqlFunctionExtensibilityTests
             ExecuteAsync(session, "INSERT INTO COHESION_SCHEMA.FUNCTIONS (FUNCTION_NAME) VALUES ('x')"));
 
         // Assert
-        rows.Select(row => (string)row[0]!).ShouldBe(engine.Functions.Select(function => function.Name).Concat(new[] { "COALESCE", "NULLIF", "CASE", "CAST", "EXTRACT" }));
+        rows.Select(row => (string)row[0]!).ShouldBe(engine.Functions.Select(function => function.Name).Concat(new[] { "COALESCE", "NULLIF", "GROUPING", "GROUPING_ID", "CASE", "CAST", "EXTRACT" }));
         rows.Single(row => Equals(row[0], "UPPER")).ShouldBe(["UPPER", "SCALAR", "TEXT", 1L, "TEXT", "IMMUTABLE", "RETURNS NULL ON NULL INPUT", "YES"]);
         rows.Single(row => Equals(row[0], "COUNT") && Equals(row[2], "*")).ShouldBe(["COUNT", "AGGREGATE", "*", 0L, "BIGINT", null, "RETURNS NULL ON NULL INPUT", "YES"]);
         rows.Single(row => Equals(row[0], "COUNT") && Equals(row[2], "ANY")).ShouldBe(["COUNT", "AGGREGATE", "ANY", 1L, "BIGINT", null, "RETURNS NULL ON NULL INPUT", "YES"]);
@@ -490,6 +490,8 @@ public sealed partial class SqlFunctionExtensibilityTests
         rows.Single(row => Equals(row[0], "is_missing")).ShouldBe(["is_missing", "SCALAR", "ANY", 1L, "BOOLEAN", "IMMUTABLE", "CALLED ON NULL INPUT", "NO"]);
         rows.Single(row => Equals(row[0], "median")).ShouldBe(["median", "AGGREGATE", "DOUBLE", 1L, "DOUBLE", null, "RETURNS NULL ON NULL INPUT", "NO"]);
         rows.Single(row => Equals(row[0], "COALESCE")).ShouldBe(["COALESCE", "SPECIAL FORM", null, null, null, null, null, "YES"]);
+        rows.Single(row => Equals(row[0], "GROUPING")).ShouldBe(["GROUPING", "SPECIAL FORM", null, null, null, null, null, "YES"]);
+        rows.Single(row => Equals(row[0], "GROUPING_ID")).ShouldBe(["GROUPING_ID", "SPECIAL FORM", null, null, null, null, null, "YES"]);
         registered.ShouldBe([["clamp"], ["is_missing"], ["median"]]);
         readOnly.Message.ShouldBe("System view 'COHESION_SCHEMA.FUNCTIONS' is read-only.");
     }
