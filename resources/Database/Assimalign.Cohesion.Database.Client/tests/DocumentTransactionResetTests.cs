@@ -141,7 +141,7 @@ public sealed class DocumentTransactionResetTests
                             {
                                 await CompleteAsync(channel, scenario == "rollback-results" ? 1 : 0, scenario == "rollback-affected" ? -1 : 0);
                                 await WriteAsync(channel, ProtocolMessageType.Ready,
-                                    [scenario == "rollback-active" ? (byte)'T' : scenario == "rollback-failed" ? (byte)'E' : scenario == "rollback-status" ? (byte)0 : (byte)'I'], token);
+                                    [scenario == "rollback-active" ? (byte)'T' : scenario == "rollback-failed" ? (byte)'E' : scenario == "rollback-status" ? (byte)0 : (byte)'I', 0], token);
                             }
                         }
                     }
