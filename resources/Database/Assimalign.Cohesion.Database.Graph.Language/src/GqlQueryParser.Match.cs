@@ -215,11 +215,11 @@ public sealed partial class GqlQueryParser
         return new GqlQueryExpression(stages.AsReadOnly(), Span(start, Previous));
     }
 
-    private void RejectCompositePropertyLiteral(GqlExpression value)
+    private void RejectCompositePropertyValue(GqlExpression value)
     {
-        // Parentheses do not turn a list/map literal into a computed scalar value.
-        if (value is GqlListExpression or GqlMapExpression)
-        { _diagnostics.Add(QueryDiagnostics.UnsupportedClause("LIST OR MAP LITERAL IN PROPERTY VALUE", Profile.Language, value.Location ?? Span(Current, Current))); }
+        // Decide from the completed expression: indexing/field access can produce a scalar.
+        if (value is GqlListExpression or GqlMapExpression or GqlListComprehensionExpression or GqlListSliceExpression)
+        { _diagnostics.Add(QueryDiagnostics.UnsupportedClause("LIST OR MAP PROPERTY VALUE", Profile.Language, value.Location ?? Span(Current, Current))); }
     }
 
     private GqlExpression ParsePageValue()
@@ -275,9 +275,8 @@ public sealed partial class GqlQueryParser
             {
                 string property = Identifier(allowKeyword: true);
                 Expect(TokenType.Equals, "'='");
-                if (Current.Type is TokenType.LeftBrace or TokenType.LeftBracket) { _ = ParseScalar(); break; }
                 var value = ParsePredicate();
-                if (!Failed) { RejectCompositePropertyLiteral(value); }
+                if (!Failed) { RejectCompositePropertyValue(value); }
                 items.Add(new GqlSetPropertyItem(variable, property, value, Span(startItem, Previous)));
             }
             else if (Is("IS") || Current.Type == TokenType.Colon)
@@ -300,11 +299,6 @@ public sealed partial class GqlQueryParser
                     break;
                 }
                 var properties = ParseProperties();
-                if (!Failed)
-                {
-                    foreach (var value in properties.Values)
-                    { RejectCompositePropertyLiteral(value); if (Failed) { break; } }
-                }
                 items.Add(new GqlSetPropertiesItem(variable, properties, merge, Span(startItem, Previous)));
             }
         } while (!Failed && Take(TokenType.Comma));

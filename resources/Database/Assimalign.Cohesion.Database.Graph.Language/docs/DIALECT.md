@@ -200,8 +200,10 @@ Each clause takes one path; use successive MERGE clauses for separate decisions.
 order is accepted, with repeated branches; each kind's SET items append in source order and
 rendering preserves that order within each kind. Multiple paths are CG00002.
 Property maps evaluate once per input row against the incoming scope. Equalities must be finite,
-non-null storage scalars (CG03004 for proven or evaluated invalid equalities; supplied parameters
-retain their ordinary binding validation). Row-dependent equalities seek an available property
+non-null storage scalars. The parser first reads each complete property expression: direct
+list/map literals, comprehensions and unindexed slices retain CK00001; indexed scalar results
+are accepted. Other proven or evaluated invalid equalities use CG03004; supplied parameters
+retain their ordinary binding validation. Row-dependent equalities seek an available property
 index with each row's evaluated value, ahead of label or relationship-type scans even when
 their published count is zero; a dropped index falls back to a scan. A runtime NULL bound
 node or absent bound node uses CG03005. MERGE does not

@@ -136,6 +136,8 @@ public sealed class GqlProfileExecutionTests
             ],
             [GqlClauses.Set] =
             [
+                Mutation("MATCH (a:Person {name:[x IN ['Alice'] | x][0]}) SET a.age=[x IN [a.age] | x+1][0]", 1,
+                    new ExecutionCase("MATCH (a:Person {name:'Alice'}) RETURN a.age", [[43L]])),
                 Mutation("MATCH (a:Person {name:'Alice'}) SET a.age=43", 1,
                     new ExecutionCase("MATCH (a:Person {name:'Alice'}) RETURN a.age", [[43L]])),
                 Mutation("MATCH (a:Person {name:'Alice'}) SET a:Admin", 1,
@@ -234,6 +236,7 @@ public sealed class GqlProfileExecutionTests
             ],
             [GqlClauses.Insert] =
             [
+                new("INSERT (n:ComprehensionProperty {k:[x IN [1] | x+10][0]}) RETURN n.k", [[11L]], 1),
                 Mutation("INSERT (: \"L\"\"X\" {\"p\"\"q\": 7})-[:\"T\"\"Y\"]->()", 3,
                     new ExecutionCase("MATCH (\"a\"\"b\":\"L\"\"X\")-[:\"T\"\"Y\"]->() RETURN \"a\"\"b\".\"p\"\"q\" AS \"c\"\"d\"", [[7L]])),
                 new("INSERT (:Person {name: $name})", [], 1,
@@ -246,6 +249,8 @@ public sealed class GqlProfileExecutionTests
             ],
             [GqlClauses.Merge] =
             [
+                Mutation("UNWIND [1,2,1] AS k MERGE (n:ComprehensionMerge {k:[x IN [k] | x*2][0]}) ON CREATE SET n.c=[x IN [k] | x+10][0] ON MATCH SET n.m=[x IN [k] | x+20][0]", 2,
+                    new ExecutionCase("MATCH (n:ComprehensionMerge) RETURN n.k,n.c,n.m ORDER BY n.k", [[2L,11L,21L],[4L,12L,null]])),
                 new("MERGE (n:Person {name:'Alice'}) ON MATCH SET n.age = n.age + 1 RETURN n.age", [[43L]], 1),
                 new("MERGE (n:Person {name:'Alice'}) ON MATCH SET n.age=n.age+1 ON MATCH SET n.age=n.age+2 RETURN n.age", [[45L]], 1),
                 new("MERGE (n:MergeRepeat) ON CREATE SET n.x=1 ON CREATE SET n.x=n.x+2 RETURN n.x", [[3L]], 1),

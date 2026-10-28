@@ -142,7 +142,10 @@ remain refused by update-pattern validation. The engine validates creation-compa
 relationship types, incoming-only equality expressions and both branch scopes before execution,
 including EXPLAIN. Already-declared relationship variables are refused (CG03007); a repeated or
 already-bound node must be a bare variable (CG03006). New relationships require one type.
-MERGE property equalities use CG03004 for both proven and evaluated non-scalar values; other
+Property positions parse the complete expression before admission. Direct list/map literals,
+comprehensions and slices that still yield a container are refused by the parser with CK00001,
+including inside MERGE patterns and literal-map updates. Indexing or field access that yields a
+scalar is accepted. Other proven or evaluated invalid MERGE equalities use CG03004; ordinary
 property writes retain CG03003. Required properties can be supplied by ON CREATE before the
 finished created entity is validated. Row-dependent equalities can use a per-row index seek.
 GqlMergeParserTests and the profile execution corpus pin grammar, rendering and live behavior.
@@ -159,7 +162,7 @@ inspection facades. ISO sections 13.3 and 13.4 supply property, all-property and
 GQL token; SQL/OQL lexer behavior is unchanged. GRAPH and SCHEMA are contextual label names.
 The private token uses a parser-only spelling and is consumed only by whole-map SET, so it
 cannot become unary addition, property assignment or a quantified path elsewhere.
-Whole-map parameters and expressions remain CK00001, as do literal composite properties.
+Whole-map parameters and expressions remain CK00001, as do statically composite property values.
 MERGE embeds both SET branch bodies using the same parser and update validation (#1735).
 Leading SET/REMOVE and nested assignment targets are CG00002. See [DIALECT.md](DIALECT.md#set-and-remove)
 for row ordering, NULL, no-op and count semantics. `GqlUpdateParserTests` pins the AST and

@@ -2180,6 +2180,10 @@ iterator frames over the enclosing binding. Sources evaluate once; nested frames
 mutating outer rows. Shape callbacks resolve each iterator against its source element at every
 container depth, so scalar properties of entity groups/path lists pass Execute through slices,
 WITH/NEXT and nested projections. Entity-valued results remain statically refused until #1662.
+Property positions admit indexed scalar comprehensions in MATCH, INSERT, SET and MERGE,
+including both MERGE action branches and per-row UNWIND evaluation. The parser rejects completed
+list/map constructors, comprehensions and unindexed slices with CK00001. Dynamic invalid property
+results retain CG03003 for ordinary writes and CG03004 for MERGE equalities.
 Grouping and deferred pattern-property checks respect lexical names. EXPLAIN validates the same
 scopes without evaluating bodies. Aggregates are permitted in sources, but not iterator bodies.
 

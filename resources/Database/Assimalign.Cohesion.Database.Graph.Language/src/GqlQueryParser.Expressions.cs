@@ -238,7 +238,6 @@ public sealed partial class GqlQueryParser
                 }
                 else { Error("CG00004", ErrorMessages.GqlQueryParserParseLiteralVoid2, start); }
             }
-            else if (Current.Type is TokenType.LeftBracket or TokenType.LeftBrace) { Error("CK00001", Current.Type == TokenType.LeftBracket ? ErrorMessages.GqlQueryParserParseLiteralVoid3 : ErrorMessages.GqlQueryParserParseLiteralVoid4, Current); }
             else { Error("CG00002", ErrorMessages.GqlQueryParserParseLiteralVoid5, start); }
         }
         return new GqlLiteralExpression(value, Span(start, Previous));
