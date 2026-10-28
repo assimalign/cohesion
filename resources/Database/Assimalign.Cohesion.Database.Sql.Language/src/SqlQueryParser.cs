@@ -117,7 +117,15 @@ public sealed partial class SqlQueryParser : QueryParser
         string firstToken = CurrentText(ref lexer);
         SqlQueryExpression expression;
 
-        if (lexer.Current.Type == TokenType.Keyword)
+        if (IsWord(ref lexer, "DISCARD"))
+        {
+            Advance(ref lexer);
+            if (!IsWord(ref lexer, "ALL")) { AddExpectedDiagnostic(ref lexer, "ALL"); }
+            else { Advance(ref lexer); }
+            expression = new SqlTransactionExpression(SqlQueryCommandType.Discard,
+                Location.Create(1, 1, firstTokenPosition, _lastTokenEnd));
+        }
+        else if (lexer.Current.Type == TokenType.Keyword)
         {
             var keyword = lexer.Current.Value;
 

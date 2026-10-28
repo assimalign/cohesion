@@ -70,7 +70,11 @@ executes sequence effects. EXPLAIN also describes sequence DDL without executing
 
 currval is undefined until this session calls nextval for that sequence, or
 setval with is_called true; lastval is undefined until nextval chooses a sequence.
-Both use session state, which survives rollback and statement failures. setval
+Both use session state, which survives rollback and statement failures. DISCARD ALL clears
+this state and session timeout overrides outside BEGIN; inside BEGIN it reports CS04070
+(25001). Pool return rolls back an open transaction, then runs DISCARD ALL through the
+existing Execute exchange before reusing the connection. PostgreSQL
+src/backend/commands/discard.c:59-78 likewise resets sequence caches with DISCARD ALL. setval
 with omitted is_called means true: it changes currval and makes the next allocation
 value + increment. False leaves currval/lastval unchanged and makes the next
 allocation return value itself. setval does not select a new lastval sequence.

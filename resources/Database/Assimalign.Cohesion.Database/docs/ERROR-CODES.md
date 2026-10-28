@@ -198,6 +198,7 @@ structured-carrier messages remain unprefixed.
 | New (#1717) | CS04067 | Transactions/locking — dropped or replaced sequence incarnation (40001) |
 | New (#1717, SQ-S2) | CS04068 | Transactions/session state — currval is undefined for this sequence in this session (55000) |
 | New (#1717, SQ-S2) | CS04069 | Transactions/session state — lastval is undefined or its sequence was dropped (55000) |
+| New (#1717, SQ-S2 fix) | CS04070 | Transactions/session state — DISCARD ALL inside an explicit transaction (25001) |
 | COHSQLE004 | CS05004 | Execution/budgets |
 | COHSQLE007 | CS05007 | Execution/budgets |
 | COHSQLE013 | CS05013 | Execution/budgets |

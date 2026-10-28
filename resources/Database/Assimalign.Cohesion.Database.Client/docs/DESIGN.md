@@ -510,6 +510,12 @@ Reference consulted: RavenDB test/StressTests/Voron/InvalidReleasesOfScratchPage
 
 ## Server-reported transaction reset (#1540)
 
+SQL pool return also sends DISCARD ALL through the existing family-selected Execute envelope
+after any required ROLLBACK, including an already Idle session. This clears logical-session
+sequence state and timeout overrides; an ordinary ROLLBACK preserves sequence state. Reuse still
+requires Idle certification after the final reset. Graph/Documents retain their family rollback
+path. No new wire message, model reference, capability or public bridge is introduced (#1717).
+
 SQL/Graph transaction-status negotiation adds an existing Ready I/T/E frame after Execute
 completion or a statement error. The shared client drains it before returning, rolls back open
 or failed transactions on pool return, and only reuses an Idle session. Cleanup runs outside the

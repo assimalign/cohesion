@@ -10,6 +10,59 @@ namespace Assimalign.Cohesion.Database.Sql.Client.Tests;
 
 public sealed class SqlSequenceWireTests
 {
+    [Theory(DisplayName = "Cohesion Test [Sql.Client] - Pool reset: sequence state belongs to one logical session")]
+    [InlineData(false, false)][InlineData(false, true)][InlineData(true, false)][InlineData(true, true)]
+    public async Task Connect_PooledSequenceState_ShouldStartUndefined(bool tcp, bool transaction)
+    {
+        // Arrange
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        await using var harness = await SqlClientTestHarness.StartAsync(tcp: tcp, configureSettings: settings => settings.MaxPoolSize = 1);
+        Guid physicalSession;
+        await using (var a = await harness.Client.ConnectAsync(timeout.Token))
+        {
+            physicalSession = harness.Server.Sessions.Single().Id;
+            await a.ExecuteAsync("CREATE SEQUENCE s START 47", cancellationToken: timeout.Token);
+            if (transaction) { await a.ExecuteAsync("BEGIN", cancellationToken: timeout.Token); }
+            (await a.QueryAsync("SELECT nextval('s')", cancellationToken: timeout.Token)).Single()[0].ShouldBe(47L);
+            if (!transaction)
+            {
+                await a.ExecuteAsync("BEGIN", cancellationToken: timeout.Token);
+                await a.ExecuteAsync("ROLLBACK", cancellationToken: timeout.Token);
+                (await a.QueryAsync("SELECT currval('s')", cancellationToken: timeout.Token)).Single()[0].ShouldBe(47L);
+            }
+        }
+
+        // Act / Assert
+        await using var b = await harness.Client.ConnectAsync(timeout.Token);
+        harness.Server.Sessions.Single().Id.ShouldBe(physicalSession);
+        var failure = await Should.ThrowAsync<SqlClientException>(async () => await b.QueryAsync("SELECT currval('s'), lastval()", cancellationToken: timeout.Token));
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS04068");
+        var last = await Should.ThrowAsync<SqlClientException>(async () => await b.QueryAsync("SELECT lastval()", cancellationToken: timeout.Token));
+        last.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS04069");
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql.Client] - DISCARD ALL: active transaction refusal preserves state until reset")]
+    [InlineData(false)][InlineData(true)]
+    public async Task Execute_DiscardAll_ShouldRequireIdleAndClearSequenceState(bool tcp)
+    {
+        // Arrange
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        await using var harness = await SqlClientTestHarness.StartAsync(tcp: tcp);
+        await using var connection = await harness.Client.ConnectAsync(timeout.Token);
+        await connection.ExecuteAsync("CREATE SEQUENCE s", cancellationToken: timeout.Token);
+        await connection.QueryAsync("SELECT nextval('s')", cancellationToken: timeout.Token);
+        await connection.ExecuteAsync("BEGIN", cancellationToken: timeout.Token);
+
+        // Act / Assert
+        var error = await Should.ThrowAsync<SqlClientException>(async () => await connection.ExecuteAsync("DISCARD ALL", cancellationToken: timeout.Token));
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS04070");
+        (await connection.QueryAsync("SELECT currval('s')", cancellationToken: timeout.Token)).Single()[0].ShouldBe(1L);
+        await connection.ExecuteAsync("ROLLBACK", cancellationToken: timeout.Token);
+        await connection.ExecuteAsync("DISCARD ALL", cancellationToken: timeout.Token);
+        var reset = await Should.ThrowAsync<SqlClientException>(async () => await connection.QueryAsync("SELECT currval('s')", cancellationToken: timeout.Token));
+        reset.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS04068");
+    }
+
     private static object?[] Values(SqlRow row) => Enumerable.Range(0, row.FieldCount).Select(i => row[i]).ToArray();
 
     [Theory(DisplayName = "Cohesion Test [Sql.Client] - Sequences: DDL, functions, state, metadata and EXPLAIN use both transports")]

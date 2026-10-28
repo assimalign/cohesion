@@ -5,6 +5,10 @@
 NEXT VALUE FOR is selected only after lookahead recognizes all three words. Unquoted
 next remains a column, alias, table, and function-argument name in its ordinary positions.
 
+DISCARD ALL uses the session-control statement leaf and a distinct command kind. It is
+contextual at the command head, needs complete parsing, and travels over ordinary Execute.
+The engine refuses it inside a transaction and clears logical-session state otherwise.
+
 CREATE/ALTER/DROP SEQUENCE use sealed statement leaves and a closed option list preserving explicit NO bounds and bare RESTART. NEXT VALUE FOR is a scalar leaf; REGCLASS and its PostgreSQL suffix normalize to the existing cast AST. Sequence DDL and NEXT VALUE have independent profile gates and renderer round trips. Existing syntax identities reject malformed or duplicate options; OWNED BY remains CK00001. Five advertised function signatures execute in SQL, with per-row standard sharing independent of nextval. The language and live SQL conformance tables cover all four new clauses; no storage or wire contract changes. See DIALECT for defaults and accepted exclusions.
 
 ## Sequence catalog review (#1717)

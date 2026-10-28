@@ -2,6 +2,10 @@
 
 ## SQL sequence surface (#1717, SQ-S2)
 
+Pool return clears logical SQL session state with DISCARD ALL through the existing Execute
+envelope after any required rollback. Ordinary rollback preserves sequence state. DISCARD ALL
+inside an explicit transaction refuses with CS04070 (25001), leaving that transaction active.
+
 The language AST retains explicit sequence options in written order and gives NEXT VALUE FOR
 its own leaf; duplicate options are syntax failures. The SQL planner binds sequence calls as
 volatile BIGINT leaves, with the five typed built-in signatures also present in the function
@@ -44,6 +48,7 @@ from PostgreSQL, whose doc/src/sgml/ref/create_sequence.sgml compatibility secti
 | Code | Sequence SQL condition | SQLSTATE |
 | --- | --- | --- |
 | CS03073 | Missing sequence name or object identity | 42P01 |
+| CS04070 | DISCARD ALL inside an explicit transaction | 25001 |
 | CS03074 | Unsupported persisted dependency or declared-script ownership | 0A000 |
 | CS03075 | setval outside sequence bounds | 22003 |
 | CS03076 | Sequence value in an unsupported evaluation context or detached from execution | 0A000 |

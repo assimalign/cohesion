@@ -918,4 +918,5 @@
   <data name="HandshakeDatabaseMissing" xml:space="preserve"><value>The server's engine has no database named '{0}'.</value></data>
   <data name="AuthenticationResponseExpected" xml:space="preserve"><value>Expected an authenticate response but received {0}.</value></data>
   <data name="PrincipalAuthenticationFailed" xml:space="preserve"><value>Authentication failed for principal '{0}'.</value></data>
+  <data name="DiscardInTransaction" xml:space="preserve"><value>DISCARD ALL cannot execute inside a transaction.</value></data>
 </root>

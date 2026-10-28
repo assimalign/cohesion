@@ -877,6 +877,14 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
         SqlTransactionExpression control, CancellationToken cancellationToken)
     {
         var transaction = CurrentTransaction;
+        if (control.CommandType == SqlQueryCommandType.Discard)
+        {
+            if (transaction is not null) { return TransactionDiagnostic("CS04070", ErrorMessages.DiscardInTransaction); }
+            _sequenceState = null;
+            _statementTimeout = null;
+            _lockTimeout = null;
+            return new SqlQueryResult(DatabaseResultStatus.Success, affectedCount: 0);
+        }
         if (control.CommandType == SqlQueryCommandType.Begin)
         {
             if (transaction is not null)

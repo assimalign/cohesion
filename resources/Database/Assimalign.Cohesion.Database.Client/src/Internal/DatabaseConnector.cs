@@ -354,12 +354,15 @@ internal sealed class DatabaseConnector
     {
         if (!Family.Capabilities.Contains(ProtocolCapability.TransactionStatus)) { return true; }
         if (!Capabilities.Contains(ProtocolCapability.TransactionStatus.Name)) { return false; }
-        if (_transactionStatus == ProtocolTransactionStatus.Idle) { return true; }
         if (_transactionStatus is null) { return false; }
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         try
         {
-            await ExecuteAsync(new TransactionRollbackExchange(Family), timeout.Token).ConfigureAwait(false);
+            if (_transactionStatus != ProtocolTransactionStatus.Idle)
+            { await ExecuteAsync(new TransactionRollbackExchange(Family, "ROLLBACK"), timeout.Token).ConfigureAwait(false); }
+            if (_transactionStatus != ProtocolTransactionStatus.Idle) { return false; }
+            if (Family.Name.Equals("Sql", StringComparison.Ordinal))
+            { await ExecuteAsync(new TransactionRollbackExchange(Family, "DISCARD ALL"), timeout.Token).ConfigureAwait(false); }
             return _transactionStatus == ProtocolTransactionStatus.Idle;
         }
         catch
@@ -373,9 +376,12 @@ internal sealed class DatabaseConnector
     [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Client.Internal.DatabaseConnector.TransactionRollbackExchange.DebugView))]
     private sealed class TransactionRollbackExchange : DatabaseProtocolExchange<bool>
     {
-        internal TransactionRollbackExchange(ProtocolMessageFamily family)
+        private readonly string _statement;
+
+        internal TransactionRollbackExchange(ProtocolMessageFamily family, string statement)
             : base(family, transactionStatus: true)
         {
+            _statement = statement;
         }
 
         protected override async ValueTask<bool> ExecuteCoreAsync(ProtocolFrameReader reader, ProtocolFrameWriter writer,
@@ -391,7 +397,7 @@ internal sealed class DatabaseConnector
             if (!Family.Supports((ProtocolMessageType)execute) || !Family.Supports((ProtocolMessageType)complete))
             { throw new ProtocolException(ErrorMessages.TransactionResetInvalid); }
             var payload = new List<byte>();
-            ProtocolPayload.WriteString(payload, "ROLLBACK");
+            ProtocolPayload.WriteString(payload, _statement);
             if (documents)
             {
                 ProtocolPayload.WriteInt32(payload, 2);
