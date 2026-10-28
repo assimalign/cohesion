@@ -573,7 +573,7 @@ complete ISO SQL support; the boundaries below are part of the contract.
 
 | Statement | Status | Notes |
 |---|---|---|
-| `DISCARD ALL` | Supported, measured | Clear sequence state and session timeout overrides outside an explicit transaction; pool return uses the existing Execute exchange. |
+| `DISCARD ALL` | Supported, measured | Clear sequence state and restore the timeout values set before the session's first statement, outside an explicit transaction; pool return uses the existing Execute exchange. |
 | `SELECT` | Supported subset, measured | Stored tables, persisted read-only views, virtual system relations and aliased derived queries, with written-order N-way INNER/LEFT/RIGHT/FULL/CROSS joins and comma items over these source kinds; `DISTINCT`, projections and aliases, scalar expressions, `WHERE`, grouping, multi-expression `ORDER BY ASC/DESC` with per-key `NULLS FIRST`/`NULLS LAST`, nonnegative integer `LIMIT`/`OFFSET`, ISO `FETCH FIRST`/`NEXT`, and the SQL Server `TOP` lexical alias. `COUNT(*)`, `COUNT(expr)`, `SUM`, `AVG`, `MIN`, `MAX`, `STRING_AGG`, and `LISTAGG` execute in grouped and ungrouped queries, with DISTINCT/ALL and ordered inputs. See the aggregate contract below. `SELECT` without `FROM` uses one implicit row, including in CTE bodies. |
 | CREATE / ALTER / DROP SEQUENCE | Supported, measured | Standalone integer sequences, guarded DDL, all documented options, restart and list drops; see the sequence contract above. |
 | NEXT VALUE FOR | Supported, measured | Per-row sequence value sharing in SELECT, VALUES and SET; refused in RETURNING with CS03076, following Microsoft's OUTPUT exclusion. nextval/currval/setval/lastval remain volatile BIGINT functions. |
