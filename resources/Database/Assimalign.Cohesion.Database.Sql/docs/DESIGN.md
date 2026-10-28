@@ -6964,7 +6964,7 @@ RESTART write, validating complete old/new cursors and ALTER's fetched endpoint.
 
 | Code | Internal sequence condition | SQLSTATE |
 | --- | --- | --- |
-| CS02002 | Range exhausted without CYCLE (shared identity condition) | 22003 |
+| CS02002 | Range exhausted without CYCLE (shared identity condition; PostgreSQL raises 2200H `sequence_generator_limit_exceeded` here, so SQ-S2 decides whether nextval keeps this code) | 22003 |
 | CS03069 | Invalid resolved options | 22023 |
 | CS03070 | Occupied relation name; message names the existing kind | 42P07 |
 | CS03071 | Missing namespace | 3F000 |
@@ -7225,8 +7225,8 @@ The populated-table worker handoff and expanded crash/wire convergence coverage 
 
 CS02064 identifies a missing assignment cast for an old value, USING result or default (42804).
 Existing constraint, conversion, view, locking and storage codes retain their conditions.
-SQL format 28 gates table extension 7's RecastDefault Boolean beside each missing-value literal;
-earlier SQL files are refused without an upgrade reader. Compiled-schema v8, dense row encoding,
+SQL format 27 introduced table extension 7's RecastDefault Boolean beside each missing-value literal
+(the current format is 28, which added the sequence records); earlier SQL files are refused without an upgrade reader. Compiled-schema v8, dense row encoding,
 replacement markers and reclamation intents are unchanged. The language assembly
 adds the public sealed SqlAlterColumnTypeAction leaf and SqlExpressionRenderer.Render(SqlAlterTableExpression)
 overload; canonical rendering quotes the AST's decoded domain name, including names whose actual
