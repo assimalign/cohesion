@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Globalization;
 using System.Linq;
 using System.Runtime.ExceptionServices;
 using System.Threading;
@@ -123,7 +122,7 @@ internal sealed partial class SqlPlanExecutor
                 await PrepareSubqueriesAsync(function.Arguments[0], rows[sorted[start]], statement, cancellationToken).ConfigureAwait(false);
                 var value = evaluator.Evaluate(function.Arguments[0], rows[sorted[start]]);
                 if (value is null) { continue; }
-                buckets[f] = Convert.ToInt64(value, CultureInfo.InvariantCulture);
+                buckets[f] = WindowInteger(value, function);
                 if (buckets[f] <= 0) { throw new SqlExecutionException("CS05078", ErrorMessages.WindowBucketCount, location: function.Expression.Location); }
             }
             long dense = 0;
@@ -168,7 +167,7 @@ internal sealed partial class SqlPlanExecutor
                 await PrepareSubqueriesAsync(args[1], current, statement, cancellationToken).ConfigureAwait(false);
                 var value = evaluator.Evaluate(args[1], current);
                 if (value is null) { return null; }
-                offset = Convert.ToInt64(value, CultureInfo.InvariantCulture);
+                offset = WindowInteger(value, function);
             }
             // Decimal arithmetic prevents Int64.MinValue negation or index-add overflow.
             decimal target = position + (function.Name == "LEAD" ? (decimal)offset : -(decimal)offset);
@@ -188,6 +187,12 @@ internal sealed partial class SqlPlanExecutor
             return NormalizeGroupValue(result, function.Type);
         }
     }
+
+    private static long WindowInteger(object value, SqlWindowFunction function) => value switch
+    {
+        sbyte number => number, short number => number, int number => number, long number => number,
+        _ => throw new SqlExecutionException("CS02068", ErrorMessages.WindowIntegerArgument, location: function.Expression.Location),
+    };
 
     private static int Tile(int index, int rows, long buckets)
     {

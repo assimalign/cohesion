@@ -10,6 +10,7 @@ using Assimalign.Cohesion.Database.Language;
 public sealed class SqlSelectExpression : SqlQueryBodyExpression
 {
     private readonly object _grouping;
+
     /// <summary>
     /// Initializes a new <see cref="SqlSelectExpression"/>.
     /// </summary>
@@ -26,6 +27,7 @@ public sealed class SqlSelectExpression : SqlQueryBodyExpression
     /// <param name="location">The source location.</param>
     /// <param name="limitSyntaxKind">The spelling that supplied the row limit.</param>
     /// <param name="isGroupByDistinct">Whether duplicate expanded grouping sets are removed.</param>
+    /// <param name="windows">The optional named windows in declaration order.</param>
     internal SqlSelectExpression(
         IReadOnlyList<SqlSelectColumn> columns,
         IReadOnlyList<SqlFromItem> from,

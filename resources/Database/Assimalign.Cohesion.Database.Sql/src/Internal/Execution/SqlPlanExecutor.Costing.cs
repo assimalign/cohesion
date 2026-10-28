@@ -36,6 +36,7 @@ internal sealed partial class SqlPlanExecutor
             SqlDeletePlan p => p with { Access = Choose(p.Table, p.Access), Source = RewriteDmlSource(p.Source) },
             SqlMergePlan p => p with { Source = RewriteDmlSource(p.Source)! },
             SqlJoinPlan p => CostJoin(p),
+            SqlWindowAggregatePlan p => p with { Input = Rewrite(p.Input) },
             SqlGroupPlan p => p with { Input = Rewrite(p.Input) },
             SqlSubqueryPlan p => p with { Input = Rewrite(p.Input), Queries = p.Queries.Select(q => q with { Query = Rewrite(q.Query) }).ToArray() },
             SqlCorrelatedSubqueryPlan p => p with { Input = Rewrite(p.Input), Queries = p.Queries.Select(q => q with { Query = Rewrite(q.Query) }).ToArray() },

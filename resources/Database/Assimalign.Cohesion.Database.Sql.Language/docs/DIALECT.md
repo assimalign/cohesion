@@ -17,8 +17,9 @@ may contain grouped expressions, aggregates and GROUPING, but cannot contain win
 RANK leaves peer gaps; DENSE_RANK does not. PERCENT_RANK is (rank-1)/(partition rows-1),
 or zero for a singleton. CUME_DIST includes the last peer. Without window ORDER BY, all rows
 are peers and navigation/ROW_NUMBER use an unspecified order. Ranking outputs are BIGINT,
-distribution outputs DOUBLE PRECISION and NTILE outputs INTEGER. They retain standard NULL
-placement (ascending NULLS LAST, descending NULLS FIRST) unless overridden.
+distribution outputs DOUBLE PRECISION and NTILE outputs INTEGER. They retain the engine's NULL
+placement (ascending NULLS FIRST, descending NULLS LAST) unless overridden, following
+the existing engine rule. This differs from PostgreSQL's defaults.
 
 NTILE evaluates its integer bucket argument once on the first row of each ordered partition;
 NULL returns NULL and nonpositive counts report CS05078 (22014). Larger buckets precede
@@ -26,11 +27,14 @@ smaller ones. Counts larger than the partition leave trailing buckets empty. LAG
 offset 1 and default NULL when omitted, respect NULL values, accept per-row signed integer
 offsets (negative reverses direction), and return NULL for NULL offsets. Offset zero reads the
 current row; an out-of-partition target uses that row's default. Value/default expressions use
-the engine's common numeric typing and registered casts; unknown text constants coerce to
-the selected value type. Offsets and bucket counts accept the engine's signed integer types,
+the engine's common-type implicit-cast rules and registered casts; unknown text constants coerce to
+the selected value type during binding, including unused defaults, with ordinary CAST diagnostics. Offsets and bucket counts accept the engine's signed integer types,
 including BIGINT, with overflow-safe navigation through the full Int64 range.
 NEXT VALUE FOR retains its existing CS03076 exclusion in window arguments and keys;
 PostgreSQL-style nextval() keeps its ordinary per-call evaluation.
+If the first NTILE argument is NULL, the entire partition returns NULL even when later
+rows' bucket expressions differ. This follows the SQ-W1 contract; PostgreSQL can retry
+initialization after a NULL argument (windowfuncs.c:424-440).
 
 The WindowAgg stage groups equal partition/order specifications and processes longer orderings
 before compatible prefixes so those groups share a sort. EXPLAIN names partition/order keys,

@@ -5,7 +5,7 @@
 InMemory and TCP use the existing result and diagnostic exchanges for window rankings,
 navigation, named definitions and EXPLAIN. Tests pin BIGINT ranks, DOUBLE PRECISION
 distributions, INTEGER tiles, numeric navigation default unification, coded placement/name/
-bucket refusals and reusable connections. No client surface or protocol format changes.
+bucket and CS05079 budget refusals and reusable connections. No client surface or protocol format changes.
 
 ## Sequence wire surface (#1717, SQ-S2)
 

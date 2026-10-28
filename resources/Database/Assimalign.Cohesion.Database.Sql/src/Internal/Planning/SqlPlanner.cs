@@ -1864,7 +1864,7 @@ internal sealed partial class SqlPlanner
         };
     }
 
-    internal static bool IsNumeric(DatabaseType type) => type is DatabaseType.Int8 or DatabaseType.Int16 or DatabaseType.Int32
+    private static bool IsNumeric(DatabaseType type) => type is DatabaseType.Int8 or DatabaseType.Int16 or DatabaseType.Int32
         or DatabaseType.Int64 or DatabaseType.Float32 or DatabaseType.Float64 or DatabaseType.Decimal or DatabaseType.Null;
 
     /// <summary>Whether a projection or an ordering key of a SELECT calls an aggregate, which makes the SELECT a grouping.</summary>

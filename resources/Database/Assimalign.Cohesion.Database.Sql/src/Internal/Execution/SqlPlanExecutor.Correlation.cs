@@ -283,6 +283,7 @@ internal sealed partial class SqlPlanExecutor
                 }
             }
             if (skip > 0) { skip--; continue; }
+            SqlWindowMemory.For(statement.Metrics)?.Retain(output);
             returned.Add(output);
             if (--remaining == 0) { break; }
         }
@@ -366,6 +367,7 @@ internal sealed partial class SqlPlanExecutor
                     }
                 }
             }
+            SqlWindowMemory.For(statement.Metrics)?.Retain(output);
             returned.Add(output);
         }
         return MaterializeProjected(projections, ApplyRowWindow(returned, limit, offset));

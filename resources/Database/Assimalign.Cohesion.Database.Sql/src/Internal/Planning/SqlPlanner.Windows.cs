@@ -148,7 +148,7 @@ internal sealed partial class SqlPlanner
             if (group is null)
             {
                 var partition = keys.Partition.Select(key =>
-                { var value = scope.Bind(key, out SqlBoundCollation collation); return new SqlBoundOrdering(value, false, false, collation); }).ToArray();
+                { var value = scope.Bind(key, out SqlBoundCollation collation); return new SqlBoundOrdering(value, false, true, collation); }).ToArray();
                 group = new(keys.Partition, keys.Order, partition, BindOrdering(keys.Order, scope), []);
                 groups.Add(group);
             }
@@ -168,8 +168,10 @@ internal sealed partial class SqlPlanner
                 var source = scope.StaticTypeOf(window.Function.Arguments[index]);
                 if (source == type || source == DatabaseType.Null) { return; }
                 var target = SqlType.ForStorage(new DatabaseTypeInfo(type));
-                arguments[index] = new SqlBoundCast(arguments[index], target.Name, target, _functions.Types.ResolveCasts(null, target),
+                var cast = new SqlBoundCast(arguments[index], target.Name, target, _functions.Types.ResolveCasts(null, target),
                     _functions.Database, _catalog.DefaultCollation, sourceType: source);
+                arguments[index] = window.Function.Arguments[index] is SqlLiteralExpression { LiteralType: SqlLiteralType.String } literal
+                    ? new SqlBoundConstant(SqlCastConverter.Convert(literal.Value, cast, _cancellationToken)) : cast;
             }
         }
         // Longer orderings first allow a later prefix to reuse the same sorted row index.
@@ -206,7 +208,7 @@ internal sealed partial class SqlPlanner
 
         static (SqlExpression Expression, bool Descending, bool NullsFirst) Key(SqlWindowGroup group, int index)
         {
-            if (index < group.PartitionSyntax.Count) { return (group.PartitionSyntax[index], false, false); }
+            if (index < group.PartitionSyntax.Count) { return (group.PartitionSyntax[index], false, true); }
             var order = group.OrderSyntax[index - group.PartitionSyntax.Count];
             return (order.Expression, order.IsDescending, NullsFirst(order));
         }

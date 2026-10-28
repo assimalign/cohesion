@@ -178,6 +178,8 @@ public sealed class SqlKeywordDispositionTests
         ["PARTITION"] = Parses("SELECT RANK() OVER(PARTITION BY a) FROM t"),
         ["WINDOW"] = Parses("SELECT a FROM t WINDOW w AS (ORDER BY a)"),
         ["RANGE"] = Rejects(WindowFrame("RANGE"), "window frame"),
+        ["GROUPS"] = Rejects("SELECT ROW_NUMBER() OVER(GROUPS CURRENT ROW) FROM t", "GROUPS window frame"),
+        ["EXCLUDE"] = Rejects("SELECT ROW_NUMBER() OVER(EXCLUDE TIES) FROM t", "EXCLUDE window frame"),
         ["ROW"] = Rejects(WindowFrame("ROWS"), "window frame"),
         ["PRECEDING"] = Rejects(WindowFrame("ROWS"), "window frame"),
         ["FOLLOWING"] = Rejects("SELECT SUM(a) OVER (ORDER BY a ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING) FROM t", "window frame"),

@@ -76,6 +76,7 @@ public sealed class SqlWindowExecutionTests
         object?[][] expected = [[1,10m,10m],[2,30m,10m],[3,1.5m,2.5m],[4,null,null],[5,1.5m,2.5m]];
         for (int i = 0; i < rows.Count; i++) { rows[i].ShouldBe(expected[i]); }
         (await Rows(session, "SELECT LAG(1,1,'8') OVER ()"))[0][0].ShouldBe(8);
+        (await Rows(session, "SELECT LAG(DATE '2025-01-01',1,TIMESTAMP '2025-02-01 00:00:00') OVER()"))[0][0].ShouldBe(new DateTime(2025,2,1));
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - Windows: a singleton, empty input and all-peer partitions retain their boundaries")]
@@ -107,10 +108,13 @@ public sealed class SqlWindowExecutionTests
         // Act
         var rows = await Rows(session, "SELECT id,RANK() OVER(PARTITION BY p ORDER BY k),LAG(k) OVER(PARTITION BY p ORDER BY id) FROM t ORDER BY id;");
         var grouped = await Rows(session, "SELECT k,RANK() OVER(ORDER BY k) FROM t GROUP BY k ORDER BY k;");
+        var defaults = await Rows(session, "SELECT id,RANK() OVER(ORDER BY k),RANK() OVER(ORDER BY k DESC) FROM t ORDER BY id;");
         // Assert
         rows[0].ShouldBe([1,1L,null]); rows[1].ShouldBe([2,1L,"a  "]);
         rows[2].ShouldBe([3,3L,"A  "]); rows[3].ShouldBe([4,1L,null]);
         grouped.Select(row => row[1]).ShouldBe([1L,2L,3L]);
+        defaults[0].ShouldBe([1,2L,2L]); defaults[1].ShouldBe([2,2L,2L]);
+        defaults[2].ShouldBe([3,4L,1L]); defaults[3].ShouldBe([4,1L,4L]);
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - Windows: named inheritance, grouped inputs, CTEs, DISTINCT and ordering compose")]
@@ -128,6 +132,10 @@ public sealed class SqlWindowExecutionTests
         var nested = await Rows(session, "WITH q AS (SELECT p,ROW_NUMBER() OVER b AS n FROM t WINDOW a AS (PARTITION BY p),b AS(a ORDER BY v)) SELECT DISTINCT p FROM q WHERE n=1 ORDER BY RANK() OVER (ORDER BY p DESC) LIMIT 2;");
         var namedSubtotal = await Rows(session, "SELECT ROW_NUMBER() OVER w+1 FROM t GROUP BY ROLLUP(p) WINDOW w AS(ORDER BY GROUPING(p),p) ORDER BY 1;");
         var scalar = await Rows(session, "SELECT p,(SELECT RANK() OVER() FROM t x WHERE x.v=t.v) FROM t WHERE v=40;");
+        await Execute(session, "CREATE TABLE u(id INT,n BIGINT);");
+        await Execute(session, "INSERT INTO u VALUES(1,0),(2,0),(3,0);");
+        await Execute(session, "UPDATE u SET n=w.n FROM (SELECT p,ROW_NUMBER() OVER(ORDER BY SUM(v)) AS n FROM t GROUP BY p) w WHERE u.id=w.p;");
+        var updated = await Rows(session, "SELECT id,n FROM u ORDER BY id;");
         // Assert
         rows[0].ShouldBe([1,30L,2L,null]);
         rows[1].ShouldBe([2,40L,1L,30L]);
@@ -136,6 +144,7 @@ public sealed class SqlWindowExecutionTests
         nested.Select(r => r[0]).ShouldBe([3,2]);
         namedSubtotal.Select(r => r[0]).ShouldBe([2L,3L,4L,5L]);
         scalar.ShouldHaveSingleItem().ShouldBe([2,1L]);
+        updated[0].ShouldBe([1,2L]); updated[1].ShouldBe([2,3L]); updated[2].ShouldBe([3,1L]);
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - Windows: invalid names, copies, signatures, placement and offsets have stable codes")]
@@ -147,6 +156,7 @@ public sealed class SqlWindowExecutionTests
     [InlineData("SELECT RANK(id) OVER() FROM t", "CS00011")]
     [InlineData("SELECT LAG(id,1.2) OVER() FROM t", "CS02068")]
     [InlineData("SELECT LAG(id,1,TRUE) OVER() FROM t", "CS02069")]
+    [InlineData("SELECT LAG(id,0,'bad') OVER() FROM t", "CS02022")]
     [InlineData("SELECT NTILE(0) OVER() FROM t", "CS05078")]
     [InlineData("SELECT NTILE(-1) OVER() FROM t", "CS05078")]
     [InlineData("SELECT RANK() FROM t", "CS05076")]
@@ -159,6 +169,7 @@ public sealed class SqlWindowExecutionTests
     [InlineData("SELECT RANK() OVER w FROM t WINDOW w AS(ORDER BY RANK() OVER())", "CS05076")]
     [InlineData("SELECT SUM(RANK() OVER()) FROM t", "CS05076")]
     [InlineData("SELECT id FROM t LIMIT RANK() OVER()", "CS05076")]
+    [InlineData("UPDATE t SET id=2 RETURNING RANK() OVER()", "CS05076")]
     [InlineData("SELECT LAG(NEXT VALUE FOR s) OVER() FROM t", "CS03076")]
     [InlineData("SELECT RANK() OVER(ORDER BY NEXT VALUE FOR s) FROM t", "CS03076")]
     public async Task Execute_InvalidWindows_ShouldReturnCode(string sql, string code)
@@ -191,6 +202,7 @@ public sealed class SqlWindowExecutionTests
         rows[0].ShouldBe([1,0.2d,0d]);
         tiles.Select(r => r[0]).ShouldBe([1,1,2,2,3]);
         (await Rows(session, "SELECT NTILE(NULL) OVER() FROM t")).ShouldAllBe(r => r[0] == null);
+        (await Rows(session, "SELECT NTILE(n) OVER(ORDER BY id) FROM t WHERE id>=3")).ShouldAllBe(r => r[0] == null);
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - Windows: budget refusal releases every reservation and permits later reads")]
@@ -209,6 +221,34 @@ public sealed class SqlWindowExecutionTests
         session.LastStatementMetrics.ShouldNotBeNull().HashMemoryBytes.ShouldBe(0);
         SqlWindowMemory.Current.ShouldBeNull();
         (await Rows(session, "SELECT id FROM t LIMIT 1")).Count.ShouldBe(1);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Sql] - Windows: cancellation during key evaluation releases the complete grant")]
+    public async Task Execute_CancelledWindowKeys_ShouldReleaseMemory()
+    {
+        // Arrange
+        using var cancellation = new CancellationTokenSource();
+        int calls = 0;
+        var builder = SqlDatabaseEngine.CreateBuilder("window-cancellation");
+        builder.Functions.Add(SqlScalarFunction.Create<int,int>("cancel_window_key", value =>
+        {
+            if (++calls == 3) { cancellation.Cancel(); }
+            return value;
+        }));
+        await using var engine = await builder.BuildAsync(CancellationToken.None);
+        var db = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+        await using var session = await db.CreateSessionAsync(CancellationToken.None);
+        await Execute(session, "CREATE TABLE t(id INT);");
+        await Execute(session, "INSERT INTO t VALUES(1),(2),(3),(4),(5);");
+        // Act
+        var error = await Should.ThrowAsync<OperationCanceledException>(async () => await session.ExecuteAsync(
+            "SELECT RANK() OVER(ORDER BY cancel_window_key(id)) FROM t;", cancellationToken: cancellation.Token));
+        // Assert
+        calls.ShouldBe(3);
+        error.CancellationToken.ShouldBe(cancellation.Token);
+        session.LastStatementMetrics.ShouldNotBeNull().HashMemoryBytes.ShouldBe(0);
+        SqlWindowMemory.Current.ShouldBeNull();
+        (await Rows(session, "SELECT COUNT(*) FROM t")).ShouldHaveSingleItem()[0].ShouldBe(5L);
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - Windows: prefix-compatible stages share one sort with deterministic work counts")]

@@ -17,8 +17,9 @@ may contain grouped expressions, aggregates and GROUPING, but cannot contain win
 RANK leaves peer gaps; DENSE_RANK does not. PERCENT_RANK is (rank-1)/(partition rows-1),
 or zero for a singleton. CUME_DIST includes the last peer. Without window ORDER BY, all rows
 are peers and navigation/ROW_NUMBER use an unspecified order. Ranking outputs are BIGINT,
-distribution outputs DOUBLE PRECISION and NTILE outputs INTEGER. They retain standard NULL
-placement (ascending NULLS LAST, descending NULLS FIRST) unless overridden.
+distribution outputs DOUBLE PRECISION and NTILE outputs INTEGER. They retain the engine's NULL
+placement (ascending NULLS FIRST, descending NULLS LAST) unless overridden, following
+the existing engine rule in SqlPlanner.Ordering.cs:13-18. This differs from PostgreSQL's defaults.
 
 NTILE evaluates its integer bucket argument once on the first row of each ordered partition;
 NULL returns NULL and nonpositive counts report CS05078 (22014). Larger buckets precede
@@ -26,11 +27,14 @@ smaller ones. Counts larger than the partition leave trailing buckets empty. LAG
 offset 1 and default NULL when omitted, respect NULL values, accept per-row signed integer
 offsets (negative reverses direction), and return NULL for NULL offsets. Offset zero reads the
 current row; an out-of-partition target uses that row's default. Value/default expressions use
-the engine's common numeric typing and registered casts; unknown text constants coerce to
-the selected value type. Offsets and bucket counts accept the engine's signed integer types,
+the engine's common-type implicit-cast rules and registered casts; unknown text constants coerce to
+the selected value type during binding, including unused defaults, with ordinary CAST diagnostics. Offsets and bucket counts accept the engine's signed integer types,
 including BIGINT, with overflow-safe navigation through the full Int64 range.
 NEXT VALUE FOR remains excluded from window inputs with existing CS03076; nextval()
 retains per-call evaluation. Window inputs do not extend standard sequence row-sharing scopes.
+The brief's once-per-partition NTILE rule includes a NULL first argument, which fixes NULL
+for that partition. PostgreSQL windowfuncs.c:424-440 leaves initialization unset after NULL
+and can retry on a later row; this run follows the explicit SQ-W1 contract for that corner.
 
 The WindowAgg stage groups equal partition/order specifications and processes longer orderings
 before compatible prefixes so those groups share a sort. EXPLAIN names partition/order keys,
@@ -43,6 +47,8 @@ SQ-W3 refines full retained-memory accounting. There is no spill. LIMIT cannot t
 input partitions. Window-free queries retain their existing plan and object layouts.
 
 Views render, compare and reload window expressions and named definitions through canonical SQL;
+costing and joined-DML source-intent traversal descend through the window input. Internal raw
+materialized rows preserve CHAR comparison identity until the final delivery boundary.
 no disk or wire version changes. Reference semantics were re-derived from PostgreSQL
 src/backend/parser/parse_clause.c:2766-2902, parser/parse_agg.c:879-994,
 utils/adt/windowfuncs.c:139-154,264-285,334-369,416-482,534-575 and

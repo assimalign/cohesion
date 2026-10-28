@@ -24,12 +24,24 @@ internal sealed partial class SqlExpressionEvaluator
         bool unknownOther = args[2] is SqlLiteralExpression { LiteralType: SqlLiteralType.Null or SqlLiteralType.String };
         if (unknownFirst) { return other == DatabaseType.Null ? DatabaseType.String : other; }
         if (unknownOther || first == other) { return first; }
-        if (SqlPlanner.IsNumeric(first) && SqlPlanner.IsNumeric(other))
+        if (Category(first) != 0 && Category(first) == Category(other))
         {
-            if (first is DatabaseType.Float32 or DatabaseType.Float64 || other is DatabaseType.Float32 or DatabaseType.Float64) { return DatabaseType.Float64; }
-            if (first == DatabaseType.Decimal || other == DatabaseType.Decimal) { return DatabaseType.Decimal; }
-            return DatabaseType.Int64;
+            var common = first;
+            if (CanConvert(first, other) && !CanConvert(other, first)) { common = other; }
+            if (CanConvert(first, common) && CanConvert(other, common)) { return common; }
         }
         throw new SqlPlanningException("CS02069", ErrorMessages.WindowDefaultType, window.Location);
+
+        bool CanConvert(DatabaseType from, DatabaseType to) => from == to ||
+            _functions.Types.ResolveCast(null, from, SqlType.ForStorage(new DatabaseTypeInfo(to))) is { Context: SqlCastContext.Implicit };
+
+        static int Category(DatabaseType type) => type switch
+        {
+            DatabaseType.Int8 or DatabaseType.Int16 or DatabaseType.Int32 or DatabaseType.Int64 or
+                DatabaseType.Decimal or DatabaseType.Float32 or DatabaseType.Float64 => 1,
+            DatabaseType.Character or DatabaseType.String => 2,
+            DatabaseType.Date or DatabaseType.DateTime or DatabaseType.DateTimeOffset => 3,
+            _ => 0,
+        };
     }
 }

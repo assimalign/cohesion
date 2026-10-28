@@ -234,8 +234,8 @@ internal static class SqlStandardLibrary
     /// <summary>
     /// Checks a function name: an identifier (a letter or underscore, then letters, digits and
     /// underscores, as the lexer reads one) that is neither a special form, a SQL keyword, a name
-    /// the dialect reserves for a built-in that does not execute yet (<c>RANK</c>, <c>LEAD</c>,
-    /// <c>NTILE</c>, ...), a type name (<c>INT</c>, <c>DATE</c>, ...) nor a quantifier or
+    /// the dialect reserves for a window operator or a deferred built-in (<c>RANK</c>, <c>LEAD</c>,
+    /// <c>FIRST_VALUE</c>, ...), a type name (<c>INT</c>, <c>DATE</c>, ...) nor a quantifier or
     /// date-time value function (<c>ANY</c>, <c>SOME</c>, <c>LOCALTIMESTAMP</c>, ...). A reserved
     /// name an application took would fail its build the day the engine ships the built-in, and a
     /// type or quantifier name collides with grammar the dialect will parse.
