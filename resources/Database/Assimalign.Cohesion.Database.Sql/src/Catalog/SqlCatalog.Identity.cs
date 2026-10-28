@@ -23,6 +23,7 @@ public sealed partial class SqlCatalog
     /// <exception cref="SqlCatalogException">The description is stale, has no identity column, or the counter is exhausted.</exception>
     /// <exception cref="StorageException">The reservation cannot be persisted.</exception>
     /// <exception cref="StorageOfflineException">A reservation commit was not confirmed; reopen before allocating again.</exception>
+    /// <exception cref="ObjectDisposedException">The owning database has been disposed.</exception>
     /// <remarks>Allocation is independent of data transactions and does not advance the DDL generation.
     /// Rollback and restart can leave gaps. No caller receives a value before its reservation commit.</remarks>
     public long AllocateIdentity(SqlCatalogTable table)
@@ -31,6 +32,7 @@ public sealed partial class SqlCatalog
         AllocationEntering?.Invoke();
         lock (_sync)
         {
+            ObjectDisposedException.ThrowIf(_allocationClosed, this);
             ThrowIfOffline();
             if (!_tables.TryGetValue((table.Schema, table.Name), out var current) || !ReferenceEquals(current.Table, table))
             {

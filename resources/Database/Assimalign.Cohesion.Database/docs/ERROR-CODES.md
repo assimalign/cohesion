@@ -161,10 +161,10 @@ structured-carrier messages remain unprefixed.
 | COHSQLE066 | CS03066 | Schema/constraints |
 | New (#1716) | CS03067 | Schema/constraints — TRUNCATE omits a required referencing table (0A000) |
 | New (#1716) | CS03068 | Schema/catalog — CTAS output names are missing, blank, duplicate or have the wrong width (42601) |
-| New (#1717) | CS03069 | Schema/catalog — invalid resolved sequence options |
-| New (#1717) | CS03070 | Schema/catalog — occupied sequence/table/view relation name |
-| New (#1717) | CS03071 | Schema/catalog — sequence namespace is absent |
-| New (#1717) | CS03072 | Schema/catalog — sequence definition exceeds the record limit |
+| New (#1717) | CS03069 | Schema/catalog — invalid resolved sequence options (22023) |
+| New (#1717) | CS03070 | Schema/catalog — occupied sequence/table/view relation name (42P07) |
+| New (#1717) | CS03071 | Schema/catalog — sequence namespace is absent (3F000) |
+| New (#1717) | CS03072 | Schema/catalog — sequence definition exceeds the record limit (54000) |
 | COHSQLP001 | CS03101 | Schema/constraints |
 | COHSQLP002 | CS03102 | Schema/constraints |
 | COHSQLP003 | CS03103 | Schema/constraints |
@@ -190,7 +190,7 @@ structured-carrier messages remain unprefixed.
 | COHSQLE064 | CS04064 | Transactions/locking — serialization failure, including a concurrently changed MERGE target under Snapshot (#1715) |
 | New (w11 review) | CS04065 | Transactions/locking — hard deadlock (`40P01`) |
 | New (#1716) | CS04066 | Transactions/locking — TRUNCATE inside an explicit transaction (25001) |
-| New (#1717) | CS04067 | Transactions/locking — dropped or replaced sequence incarnation |
+| New (#1717) | CS04067 | Transactions/locking — dropped or replaced sequence incarnation (40001) |
 | COHSQLE004 | CS05004 | Execution/budgets |
 | COHSQLE007 | CS05007 | Execution/budgets |
 | COHSQLE013 | CS05013 | Execution/budgets |

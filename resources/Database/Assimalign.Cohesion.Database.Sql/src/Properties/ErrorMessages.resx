@@ -122,7 +122,7 @@
   <data name="SequenceCacheInvalid" xml:space="preserve"><value>Sequence CACHE must be at least one.</value></data>
   <data name="SequenceTypeInvalid" xml:space="preserve"><value>Sequence data type must be SMALLINT, INTEGER or BIGINT.</value></data>
   <data name="SequenceNamespaceMissing" xml:space="preserve"><value>The sequence namespace does not exist.</value></data>
-  <data name="SequenceRelationExists" xml:space="preserve"><value>A table, view or sequence already has this relation name.</value></data>
+  <data name="SequenceRelationExists" xml:space="preserve"><value>{0} '{1}.{2}' already exists.</value></data>
   <data name="SequenceExhausted" xml:space="preserve"><value>Sequence '{0}.{1}' has exhausted its range.</value></data>
   <data name="SequenceChanged" xml:space="preserve"><value>The sequence was dropped or changed; resolve its current catalog description.</value></data>
   <data name="SequenceRecordTooLarge" xml:space="preserve"><value>The sequence definition exceeds the catalog record limit.</value></data>

@@ -8,6 +8,14 @@ namespace Assimalign.Cohesion.Database.Sql.Catalog;
 public sealed partial class SqlCatalog
 {
     private const int allocationReservationSize = 32;
+    private bool _allocationClosed;
+
+    // Disposal and allocation share the catalog monitor, including cached values.
+    // Closing waits for an in-flight reservation before either storage can close.
+    internal void CloseAllocation()
+    {
+        lock (_sync) { _allocationClosed = true; }
+    }
 
     // Test-only observation/fault seams; no callback is installed by the engine.
     internal Action? AllocationEntering { get; set; }

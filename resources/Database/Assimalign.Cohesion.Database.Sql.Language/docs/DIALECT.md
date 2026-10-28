@@ -1101,7 +1101,7 @@ evaluates USING, domains and CHECKs before entering the database-wide physical a
 Failed builds expose their abandoned owner through pending reclamations until its pages are freed.
 Full-definition identity-type changes retain their refusal; use explicit TYPE for integer identity conversion.
 Populated-table provisioning handoff and expanded crash/wire coverage follow in SQ-A3.
-SQL format 28 gates the per-column TYPE default-assignment flag in table extension 7; older files
+SQL format 27 introduced the per-column TYPE default-assignment flag in table extension 7; older files
 refuse without an upgrade reader. Compiled-schema v8 is unchanged.
 CS02064 names a missing assignment pathway for the value, USING result or default (42804).
 Reference anchors: PostgreSQL tablecmds.c:14949-14998,15142-15199,15269-15304,15612-15624 and
@@ -3836,7 +3836,11 @@ wrappers and domain CHECKs, including domains in casts and function parameter/re
 Reopening with the original compatible registration restores use.
 New declarations still reject incompatible volatility. CHECK rechecks Immutable-only admission
 on every bind. Domain defaults remain literal-only
-and carry an empty call list. Call vectors were introduced in format 10; the current record-space format is 25, with no compatibility reader.
+and carry an empty call list. Call vectors were introduced in format 10; the current record-space format is 28, with no compatibility reader.
+Format 28 adds the internal sequence definition and reservation records (#1717). Relation-name
+collisions involving an existing sequence use CS03070 (42P07), as sequence creation does for any
+occupied relation name; the diagnostic names the existing kind. Table-on-table collisions retain
+CS03049. Sequence SQL syntax remains SQ-S2 work.
 
 Domains share E3's type namespace and coercion/check path. Columns inherit their domain's
 literal default unless they supply one; explicit DEFAULT NULL overrides inheritance. Domain

@@ -6912,8 +6912,11 @@ retires their definitions and counters in the schema transaction. Object ids sha
 counter and are never reused. Immutable sequence incarnations and internal snapshot captures
 remain stable; allocating from a dropped or replaced incarnation fails with CS04067.
 Create, alter, restart and drop commit metadata and cursor changes atomically under the catalog
-monitor. Ordinary alter discards unused reserved values and continues from the durable endpoint
-with the new increment; explicit restart may deliberately reissue values. START remains metadata
+monitor. Ordinary alter validates and persists the last fetched value (`Next - old increment`),
+discards the unused reservation, and continues with the new increment. Reopen has already advanced
+Next beyond the durable endpoint, so the same formula remains safe there. An ALTER commit precedes
+any later reservation; no value above the fetched endpoint was handed out. PostgreSQL anchors are
+sequence.c:479,513,838,1558-1570. Explicit restart may deliberately reissue values. START remains metadata
 when restarting. SQL binding, script receipts and ownership admission are SQ-S2/SQ-S3 work.
 
 Resolved defaults follow PostgreSQL src/backend/commands/sequence.c:1415-1587: BIGINT, increment
@@ -6948,16 +6951,23 @@ Create/replace/drop share that monitor with allocation. Storage and monitor scop
 all failures; an unconfirmed commit fences the storage until reopen. Cancellation is checked
 before and after entering catalog mutation scopes. Internal hooks observe allocator entry and
 reservation commits for deterministic faults and contention tests; production installs none.
+Synchronous and asynchronous database disposal close allocation under that monitor before either
+storage closes, so cached identity and sequence values cannot escape after disposal. Truncated
+kind-18 and kind-19 decoding failures retain CS06061 before the located corruption wrapper.
+Every collision involving an existing sequence, and every sequence creation collision, uses
+CS03070 (42P07) and names the existing relation kind; table-on-table collisions retain CS03049.
+The synchronous/grouped crash sweep includes every ALTER and
+RESTART write, validating complete old/new cursors and ALTER's fetched endpoint.
 
-| Code | Internal sequence condition |
-| --- | --- |
-| CS02002 | Range exhausted without CYCLE (shared identity condition) |
-| CS03069 | Invalid resolved options |
-| CS03070 | Occupied relation name |
-| CS03071 | Missing namespace |
-| CS03072 | Oversized sequence definition |
-| CS04067 | Dropped or replaced catalog incarnation |
-| CS06061 | Malformed sequence definition, ownership directory or reservation |
+| Code | Internal sequence condition | SQLSTATE |
+| --- | --- | --- |
+| CS02002 | Range exhausted without CYCLE (shared identity condition) | 22003 |
+| CS03069 | Invalid resolved options | 22023 |
+| CS03070 | Occupied relation name; message names the existing kind | 42P07 |
+| CS03071 | Missing namespace | 3F000 |
+| CS03072 | Oversized sequence definition | 54000 |
+| CS04067 | Dropped or replaced catalog incarnation | 40001 |
+| CS06061 | Malformed sequence definition, ownership directory or reservation | XX001 |
 
 #### Catalog: Atomic TRUNCATE storage replacement (#1716, SQ-T1)
 

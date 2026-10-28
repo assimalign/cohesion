@@ -475,6 +475,7 @@ public sealed partial class SqlCatalog
             ThrowIfOffline();
             if (RelationExists(schema, name))
             {
+                if (_sequences.ContainsKey((schema, name))) { throw RelationNameCollision(schema, name); }
                 throw new SqlCatalogException("CS03049", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.RenameTableCollision, schema, name));
             }
 
@@ -1337,11 +1338,15 @@ public sealed partial class SqlCatalog
                         _nextObjectId = Math.Max(_nextObjectId, intent.ObjectId + 1);
                         break;
                     case sequenceRecordKind:
-                        try { LoadSequence(ref reader, (unit.PageId, unit.SlotIndex)); }
-                        catch (SqlCatalogException failure) { throw new SqlCatalogException("CS06061", ErrorMessages.SequenceRecordMalformed, failure); }
-                        break;
                     case sequenceCounterRecordKind:
-                        LoadSequenceCounter(ref reader, (unit.PageId, unit.SlotIndex));
+                        try
+                        {
+                            if (kind == sequenceRecordKind) { LoadSequence(ref reader, (unit.PageId, unit.SlotIndex)); }
+                            else { LoadSequenceCounter(ref reader, (unit.PageId, unit.SlotIndex)); }
+                        }
+                        catch (Exception failure) when (failure is SqlCatalogException or DatabaseTypeException
+                            or ArgumentException or OverflowException or FormatException)
+                        { throw new SqlCatalogException("CS06061", ErrorMessages.SequenceRecordMalformed, failure); }
                         break;
                     case identityCounterRecordKind:
                         LoadIdentityCounter(ref reader, unit.PageId, unit.SlotIndex);
@@ -2244,6 +2249,7 @@ public sealed partial class SqlCatalog
             ThrowIfOffline();
             if (RelationExists(schema, name))
             {
+                if (_sequences.ContainsKey((schema, name))) { throw RelationNameCollision(schema, name); }
                 throw new SqlCatalogException("CS03049", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.RenameTableCollision, schema, name));
             }
             ValidateColumns(schema, name, columns, primaryKeyColumns);
@@ -2377,7 +2383,7 @@ public sealed partial class SqlCatalog
             {
                 throw new SqlCatalogException("CS05060", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.PublishTableCoreAsyncSqlCatalog2, table.Schema, table.Name));
             }
-            if (_sequences.ContainsKey((table.Schema, table.Name))) { throw new SqlCatalogException("CS03070", ErrorMessages.SequenceRelationExists); }
+            if (_sequences.ContainsKey((table.Schema, table.Name))) { throw RelationNameCollision(table.Schema, table.Name); }
             if (_views.ContainsKey(SqlObjectIdentity.View(table.Schema, table.Name))) { throw new SqlCatalogException("CS03033", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ViewExists, table.Schema, table.Name)); }
             if (existing is not null)
             {

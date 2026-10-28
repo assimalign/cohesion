@@ -43,7 +43,7 @@ public sealed partial class SqlCatalog
             ThrowIfOffline();
             cancellationToken.ThrowIfCancellationRequested();
             if (!_namespaces.ContainsKey(schema)) { throw new SqlCatalogException("CS03071", ErrorMessages.SequenceNamespaceMissing); }
-            if (RelationExists(schema, name)) { throw new SqlCatalogException("CS03070", ErrorMessages.SequenceRelationExists); }
+            if (RelationExists(schema, name)) { throw RelationNameCollision(schema, name); }
             var sequence = new SqlCatalogSequence(_nextObjectId, schema, name, options);
             byte[] record = EncodeSequence(sequence);
             using var transaction = _storage.BeginTransaction();
@@ -55,7 +55,7 @@ public sealed partial class SqlCatalog
     }
 
     // Resolved replacement options are supplied by the future SQL binder. Ordinary
-    // replacement retains the durable high-water mark and discards its unused tail;
+    // replacement retains the last fetched value and discards its unused reservation;
     // explicit restart is transactional and may deliberately reissue old values.
     internal ValueTask<SqlCatalogSequence> AlterSequenceAsync(SqlCatalogSequence expected, SqlSequenceOptions options,
         long? restart = null, CancellationToken cancellationToken = default)
@@ -71,7 +71,11 @@ public sealed partial class SqlCatalog
             var previous = RequireSequence(expected);
             _sequenceCounters.TryGetValue(expected.ObjectId, out var oldCounter);
             bool called = restart is null && oldCounter is { IsCalled: true };
-            long reserved = restart ?? oldCounter?.Reserved ?? expected.Options.Start;
+            // PostgreSQL sequence.c:479,513,1558-1570: ALTER validates and keeps
+            // the fetched value, never the logged-ahead reservation (see :838).
+            // After recovery Next - increment already equals the durable endpoint.
+            long reserved = restart ?? (called ? (long)(oldCounter!.Next - expected.Options.Increment) :
+                oldCounter?.Reserved ?? expected.Options.Start);
             options.ValidateRestart(reserved);
             var updated = new SqlCatalogSequence(expected.ObjectId, expected.Schema, expected.Name, options);
             byte[] record = EncodeSequence(updated);
@@ -111,6 +115,7 @@ public sealed partial class SqlCatalog
         AllocationEntering?.Invoke();
         lock (_sync)
         {
+            ObjectDisposedException.ThrowIf(_allocationClosed, this);
             ThrowIfOffline();
             RequireSequence(sequence);
             var options = sequence.Options;
@@ -128,6 +133,12 @@ public sealed partial class SqlCatalog
 
     private bool RelationExists(string schema, string name)
         => _tables.ContainsKey((schema, name)) || _views.ContainsKey(SqlObjectIdentity.View(schema, name)) || _sequences.ContainsKey((schema, name));
+
+    private SqlCatalogException RelationNameCollision(string schema, string name)
+    {
+        string kind = _sequences.ContainsKey((schema, name)) ? "Sequence" : _tables.ContainsKey((schema, name)) ? "Table" : "View";
+        return new SqlCatalogException("CS03070", string.Format(CultureInfo.CurrentCulture, ErrorMessages.SequenceRelationExists, kind, schema, name));
+    }
 
     private DefinitionSlot<SqlCatalogSequence> RequireSequence(SqlCatalogSequence expected)
     {

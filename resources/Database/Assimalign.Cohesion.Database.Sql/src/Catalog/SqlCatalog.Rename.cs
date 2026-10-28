@@ -127,6 +127,7 @@ public sealed partial class SqlCatalog
             {
                 if (RelationExists(expected.Schema, newName))
                 {
+                    if (_sequences.ContainsKey((expected.Schema, newName))) { throw RelationNameCollision(expected.Schema, newName); }
                     throw new SqlCatalogException("CS03049", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.RenameTableCollision, expected.Schema, newName));
                 }
             }
