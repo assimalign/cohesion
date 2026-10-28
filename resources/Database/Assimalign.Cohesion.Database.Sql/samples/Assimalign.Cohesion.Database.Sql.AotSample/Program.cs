@@ -35,6 +35,10 @@ internal static class Program
         "slugify(Note) AS note_slug, or_none(Note) AS note_or FROM customers ORDER BY Id";
 
     private const string aggregates = "SELECT product(Score) AS p, median(Score) AS m, join_names(Name) AS names, COUNT(*) AS c FROM customers";
+    private const string aggregateFilter = "SELECT COUNT(*) FILTER (WHERE Score > 0), " +
+        "SUM(1/0) FILTER (WHERE FALSE), BOOL_AND(Score > 0), BOOL_OR(Score > 150), EVERY(Score > 0), " +
+        "VAR_SAMP(Score), VARIANCE(Score), STDDEV_POP(Score), VAR_POP(CAST(Score AS DOUBLE PRECISION)), " +
+        "VAR_POP(CASE WHEN Score=100 THEN 1 ELSE CAST(3 AS DOUBLE PRECISION) END) FROM customers";
 
     private const string mergeBinding = "MERGE INTO default_guard AS t USING default_guard AS s ON t.id=s.id " +
         "WHEN MATCHED THEN UPDATE SET note=s.id WHEN NOT MATCHED THEN INSERT DEFAULT VALUES " +
@@ -427,6 +431,8 @@ internal static class Program
         }
         Check("in process: scalars of every arity, strict and non-strict", await RowsAsync(session, projection), _projection);
         Check("in process: typed and hand-written aggregates", await RowsAsync(session, aggregates), _aggregates);
+        Check("in process: FILTER and Boolean/statistical aggregates", await RowsAsync(session, aggregateFilter),
+            [[2L, null, true, true, true, 5000m, 5000m, 50m, 2500d, 1d]]);
         Check("in process: COHESION_SCHEMA.FUNCTIONS", await RowsAsync(session, registered), _registered);
         Check("in process: a domain column, application casts and a cast to DATE", await RowsAsync(session, domains), _domains);
         CheckFailure("in process: the domain's check refuses a row",
@@ -586,6 +592,8 @@ internal static class Program
         Check("over the wire: CHAR length", fixedCodes.Columns[0].MaxLength == 3, true);
         Check("over the wire: scalars of every arity, strict and non-strict", await RowsAsync(connection, projection, timeout.Token), _projection);
         Check("over the wire: typed and hand-written aggregates", await RowsAsync(connection, aggregates, timeout.Token), _aggregates);
+        Check("over the wire: FILTER and Boolean/statistical aggregates", await RowsAsync(connection, aggregateFilter, timeout.Token),
+            [[2L, null, true, true, true, 5000m, 5000m, 50m, 2500d, 1d]]);
         Check("over the wire: COHESION_SCHEMA.FUNCTIONS", await RowsAsync(connection, registered, timeout.Token), _registered);
         Check("over the wire: a domain column, application casts and a cast to DATE", await RowsAsync(connection, domains, timeout.Token), _domains);
         CheckFailure("over the wire: the domain's check refuses a row",

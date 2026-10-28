@@ -487,6 +487,11 @@ The package has no public interface left and no `Abstractions/` folder
 
 ## Aggregate modifiers (#1115)
 
+FILTER and statistics (#1720, SQ-H1): InMemory and TCP conformance exercise filtered COUNT,
+DISTINCT, ordered STRING_AGG/LISTAGG, Boolean aliases, exact and floating statistics, empty
+results and EXPLAIN through the existing scalar codecs. Nullable Boolean/Decimal/Double
+metadata is preserved. No client ABI or wire format changes.
+
 COUNT/SUM DISTINCT and ordered STRING_AGG use the existing statement/result framing.
 The live wire corpus verifies values, nullable String metadata and independent aggregate
 slots; excluded grouping/window forms continue to report usable-connection CK00001.
