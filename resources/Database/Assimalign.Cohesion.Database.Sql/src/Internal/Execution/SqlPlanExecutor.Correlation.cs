@@ -162,6 +162,18 @@ internal sealed partial class SqlPlanExecutor
         bool distinct, SqlExpressionEvaluator evaluator, SqlStatementContext statement, CancellationToken cancellationToken,
         SqlBoundExpression? where = null)
     {
+        if (!distinct && HasSequenceProjection(projections))
+        {
+            var candidates = matches.ToList();
+            if (candidates.Count == 0) { return MaterializeProjected(projections, []); }
+            var slots = OrderingOutputSlots(orderBy, candidates[0].Length);
+            if (!slots.Any(index => ContainsSequenceCall(projections[index].Value)))
+            {
+                return await MaterializeSequenceSelectAsync(candidates, projections, orderBy, limit, offset,
+                    evaluator, statement, cancellationToken, where, slots).ConfigureAwait(false);
+            }
+            matches = candidates;
+        }
         var collected = new SqlRowCollector(orderBy, _subqueryValues,
             distinct ? null : limit, distinct ? null : offset, cancellationToken, statement.Metrics);
         Collation[]? projectionCollations = null;
@@ -171,6 +183,7 @@ internal sealed partial class SqlPlanExecutor
             cancellationToken.ThrowIfCancellationRequested();
             await PrepareSubqueriesAsync(where, source, statement, cancellationToken).ConfigureAwait(false);
             if (!evaluator.Matches(where, source)) { continue; }
+            using var rowScope = SqlSequenceExecution.Current?.BeginRow();
             var output = new object?[projections.Count];
             for (int i = 0; i < output.Length; i++)
             {
@@ -212,5 +225,84 @@ internal sealed partial class SqlPlanExecutor
             if (collected.IsComplete) { break; }
         }
         return FinishSelect(collected.Finish(), projections, limit, offset, distinct, evaluator, cancellationToken, projectionCollations);
+    }
+
+    private static HashSet<int> OrderingOutputSlots(IReadOnlyList<SqlBoundOrdering> ordering, int width)
+    {
+        var result = new HashSet<int>();
+        foreach (var order in ordering) { Visit(order.Key); }
+        return result;
+        void Visit(SqlBoundExpression expression)
+        {
+            RuntimeHelpers.EnsureSufficientExecutionStack();
+            if (expression is SqlBoundSlot slot && slot.Ordinal >= width) { result.Add(slot.Ordinal - width); }
+            if (expression is SqlBoundCase choice)
+            {
+                if (choice.Input is not null) { Visit(choice.Input); }
+                if (choice.ElseResult is not null) { Visit(choice.ElseResult); }
+                foreach (var when in choice.Whens) { Visit(when.Condition); Visit(when.Result); }
+            }
+            if (expression is SqlBoundLogical logical) { foreach (var operand in logical.Operands) { Visit(operand); } }
+            if (expression is SqlBoundCoalesce coalesce) { foreach (var argument in coalesce.Arguments) { Visit(argument); } }
+            foreach (var child in BoundChildren(expression)) { Visit(child); }
+        }
+    }
+
+    private async Task<DatabaseResult> MaterializeSequenceSelectAsync(IEnumerable<object?[]> matches,
+        IReadOnlyList<SqlProjection> projections, IReadOnlyList<SqlBoundOrdering> orderBy, SqlRowCount? limit, SqlRowCount? offset,
+        SqlExpressionEvaluator evaluator, SqlStatementContext statement, CancellationToken cancellationToken,
+        SqlBoundExpression? where, HashSet<int> orderingSlots)
+    {
+        var collected = new SqlRowCollector(orderBy, _subqueryValues, limit, offset, cancellationToken, statement.Metrics);
+        if (collected.IsComplete) { return MaterializeProjected(projections, []); }
+        foreach (var source in matches)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            await PrepareSubqueriesAsync(where, source, statement, cancellationToken).ConfigureAwait(false);
+            if (!evaluator.Matches(where, source)) { continue; }
+            var ordered = new object?[source.Length + projections.Count];
+            source.CopyTo(ordered, 0);
+            foreach (int index in orderingSlots)
+            {
+                var projection = projections[index];
+                await PrepareSubqueriesAsync(projection.Value, source, statement, cancellationToken).ConfigureAwait(false);
+                ordered[source.Length + index] = projection.ColumnOrdinal is int ordinal ? evaluator.DeliverColumn(source, ordinal)
+                    : evaluator.Evaluate(projection.Value!, source, copySharedBinary: true);
+            }
+            var keys = new object?[orderBy.Count];
+            for (int index = 0; index < keys.Length; index++)
+            {
+                await PrepareSubqueriesAsync(orderBy[index].Key, ordered, statement, cancellationToken).ConfigureAwait(false);
+                keys[index] = evaluator.Evaluate(orderBy[index].Key, ordered);
+            }
+            collected.Add(ordered, keys);
+            if (collected.IsComplete) { break; }
+        }
+        var returned = new List<object?[]>();
+        foreach (var ordered in collected.Finish())
+        {
+            using var rowScope = SqlSequenceExecution.Current?.BeginRow();
+            var output = new object?[projections.Count];
+            for (int index = 0; index < output.Length; index++)
+            {
+                var projection = projections[index];
+                if (orderingSlots.Contains(index)) { output[index] = ordered[ordered.Length - projections.Count + index]; }
+                else
+                {
+                    await PrepareSubqueriesAsync(projection.Value, ordered, statement, cancellationToken).ConfigureAwait(false);
+                    output[index] = projection.ColumnOrdinal is int ordinal ? evaluator.DeliverColumn(ordered, ordinal)
+                        : NormalizeGroupValue(evaluator.Evaluate(projection.Value!, ordered, copySharedBinary: true), projection.Type);
+                }
+                if (output[index] is byte[])
+                {
+                    for (int previous = 0; previous < index; previous++)
+                    {
+                        if (ReferenceEquals(output[previous], output[index])) { output[index] = SqlBinaryValue.CopyShared(output[index]); break; }
+                    }
+                }
+            }
+            returned.Add(output);
+        }
+        return MaterializeProjected(projections, returned);
     }
 }

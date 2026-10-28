@@ -17,12 +17,13 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 internal sealed class SqlSequenceExecution : IDisposable
 {
     private static readonly AsyncLocal<SqlSequenceExecution?> _current = new();
+    private static readonly string _transactionEnded = ErrorMessages.SequenceTransactionEnded;
     private readonly SqlCatalog _catalog;
     private readonly SqlSequenceSessionState _session;
     private readonly IReadOnlyList<SqlCatalogSequence> _sequences;
     private readonly SqlSequenceExecution? _previous;
-    private readonly Dictionary<ulong, long> _rowValues = new();
-    private object?[]? _row;
+    private Dictionary<ulong, long> _rowValues = new();
+    private int _rowDepth;
     private object? _lastName;
     private SqlCatalogSequence? _lastResolved;
     private readonly CancellationToken _cancellationToken;
@@ -31,6 +32,7 @@ internal sealed class SqlSequenceExecution : IDisposable
     { _catalog = catalog; _session = session; _sequences = sequences; _previous = Current; _cancellationToken = cancellationToken; }
 
     internal static SqlSequenceExecution? Current => _current.Value;
+    internal static Action<TransactionContext>? AfterSequenceGrant { get; set; }
 
     // Lock/latch order: transaction-owned sequence object locks (ascending ObjectId), then
     // table/row locks, then the data apply gate, then catalog _sync and storage latches.
@@ -48,6 +50,12 @@ internal sealed class SqlSequenceExecution : IDisposable
         {
             await statement.Coordinator.LockManager.AcquireAsync(statement.Transaction.Sequence,
                 LockResource.Object(sequence.ObjectId), LockMode.Shared, cancellationToken).ConfigureAwait(false);
+            AfterSequenceGrant?.Invoke(statement.Transaction);
+            if (statement.Transaction.State != TransactionState.Active)
+            {
+                statement.Coordinator.LockManager.ReleaseAll(statement.Transaction.Sequence);
+                throw new TransactionAbortedException(_transactionEnded);
+            }
             // ALTER may have committed while this request waited: bind its new options under our lock.
             var resolved = catalog.FindSequence(sequence.ObjectId);
             if (resolved?.ObjectId == sequence.ObjectId) { current.Add(resolved); }
@@ -76,7 +84,25 @@ internal sealed class SqlSequenceExecution : IDisposable
     // AsyncLocal changes made inside OpenAsync do not flow back to its caller.
     internal void Enter() => _current.Value = this;
     public void Dispose() => _current.Value = _previous;
-    internal void BeginRow() { _row = null; _rowValues.Clear(); }
+    internal RowScope BeginRow()
+    {
+        var previous = _rowValues;
+        if (_rowDepth++ == 0) { _rowValues.Clear(); }
+        else { _rowValues = new(); }
+        return new RowScope(this, previous);
+    }
+
+    [global::System.Diagnostics.DebuggerDisplay("Sequence row scope")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(RowScope.DebugView))]
+    internal readonly struct RowScope : IDisposable
+    {
+        private readonly SqlSequenceExecution _execution;
+        private readonly Dictionary<ulong, long> _previous;
+        internal RowScope(SqlSequenceExecution execution, Dictionary<ulong, long> previous)
+        { _execution = execution; _previous = previous; }
+        public void Dispose() { _execution._rowValues = _previous; _execution._rowDepth--; }
+        private sealed class DebugView { public DebugView(RowScope scope) { _ = scope; } }
+    }
 
     internal object? Evaluate(string operation, object? name, object? value, object? isCalled, object?[] row)
     {
@@ -108,7 +134,6 @@ internal sealed class SqlSequenceExecution : IDisposable
         }
         if (operation == "NEXT VALUE FOR")
         {
-            if (!ReferenceEquals(_row, row)) { _rowValues.Clear(); _row = row; }
             if (_rowValues.TryGetValue(sequence.ObjectId, out long existing)) { return existing; }
         }
         long next = _catalog.AllocateSequence(sequence.ObjectId);
@@ -196,15 +221,14 @@ internal sealed class SqlSequenceExecution : IDisposable
     internal static void RefusePersisted(SqlExpression? expression)
     {
         if (expression is null) { return; }
-        System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
-        RefusePersistedNode(expression);
-        foreach (var child in SqlPlanner.Children(expression)) { RefusePersisted(child); }
+        foreach (var node in SqlViewQuery.Nodes(expression)) { RefusePersistedNode(node); }
     }
 
     internal static void RefusePersistedStatement(SqlQueryExpression expression)
     {
         switch (expression)
         {
+            case SqlCreateDomainExpression domain: RefusePersisted(domain.DefaultValue); RefusePersisted(domain.Check); break;
             case SqlCreateFunctionExpression function: RefusePersisted(function.Body); break;
             case SqlCreateViewExpression view:
                 foreach (var node in SqlViewQuery.Nodes(view.Query)) { RefusePersisted(node); } break;

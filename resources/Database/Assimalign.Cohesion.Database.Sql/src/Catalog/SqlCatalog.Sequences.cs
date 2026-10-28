@@ -67,7 +67,25 @@ public sealed partial class SqlCatalog
         }
     }
 
-    // Resolved replacement options are supplied by the future SQL binder. Ordinary
+    // Existence and option validation share the publication monitor. PostgreSQL
+    // sequence.c:135-159 skips an occupied relation before init_params runs.
+    internal ValueTask<SqlCatalogSequence?> CreateSequenceIfAbsentAsync(string schema, string name,
+        Func<SqlSequenceOptions> options, bool ifNotExists, CancellationToken cancellationToken)
+    {
+        lock (_sync)
+        {
+            ThrowIfOffline();
+            cancellationToken.ThrowIfCancellationRequested();
+            if (RelationExists(schema, name))
+            {
+                if (ifNotExists) { return ValueTask.FromResult<SqlCatalogSequence?>(null); }
+                throw RelationNameCollision(schema, name);
+            }
+            return ValueTask.FromResult<SqlCatalogSequence?>(CreateSequenceAsync(schema, name, options(), cancellationToken).Result);
+        }
+    }
+
+    // The SQL DDL executor supplies resolved replacement options. Ordinary
     // replacement retains the last fetched value and discards its unused reservation;
     // explicit restart is transactional and may deliberately reissue old values.
     internal ValueTask<SqlCatalogSequence> AlterSequenceAsync(SqlCatalogSequence expected, SqlSequenceOptions options,
@@ -175,6 +193,7 @@ public sealed partial class SqlCatalog
             using var transaction = _storage.BeginTransaction();
             var location = UpsertRecord(transaction, counter?.Location,
                 EncodeAllocation(sequenceCounterRecordKind, sequence.ObjectId, value, isCalled));
+            ReservationCommitting?.Invoke();
             transaction.Commit();
             _sequenceCounters[sequence.ObjectId] = new SqlSequenceCounter
             { Next = RecoverAllocation(value, sequence.Options.Increment, isCalled), Reserved = value, IsCalled = isCalled, Location = location };

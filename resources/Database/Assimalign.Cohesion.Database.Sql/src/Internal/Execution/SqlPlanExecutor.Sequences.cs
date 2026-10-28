@@ -15,6 +15,7 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 internal sealed partial class SqlPlanExecutor
 {
     internal static Action? BeforeSequenceDdlLock { get; set; }
+    internal static Action? BeforeSequenceCreate { get; set; }
 
     private async Task<DatabaseResult> ExecuteSequenceDdlAsync(SqlSequencePlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
@@ -23,10 +24,10 @@ internal sealed partial class SqlPlanExecutor
         if (plan.Expression is SqlCreateSequenceExpression create)
         {
             string schema = create.Sequence.SchemaName ?? SqlPlanner.DefaultSchema;
-            var options = SequenceOptions(create.Options, null);
-            if (_catalog.FindSequence(schema, create.Sequence.TableName) is not null && create.IfNotExists)
-            { return new SqlQueryResult(DatabaseResultStatus.Success, 0); }
-            await SelfCommitAsync(statement, _catalog.CreateSequenceAsync(schema, create.Sequence.TableName, options, cancellationToken)).ConfigureAwait(false);
+            BeforeSequenceCreate?.Invoke();
+            var created = await _catalog.CreateSequenceIfAbsentAsync(schema, create.Sequence.TableName,
+                () => SequenceOptions(create.Options, null), create.IfNotExists, cancellationToken).ConfigureAwait(false);
+            if (created is not null) { statement.Metrics.RecordSelfCommit(); AfterSelfCommit?.Invoke(); }
             return new SqlQueryResult(DatabaseResultStatus.Success, 0);
         }
         var names = plan.Expression is SqlAlterSequenceExpression alter ? new[] { alter.Sequence }
@@ -39,11 +40,13 @@ internal sealed partial class SqlPlanExecutor
             BeforeSequenceDdlLock?.Invoke();
             await statement.Coordinator.LockManager.AcquireAsync(statement.DdlLockOwner, LockResource.Object(sequence!.ObjectId), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
         }
-        using var metadata = statement.DdlInterlock?.EnterMetadata(statement.DatabaseName, definition: true);
+        using var metadata = statement.DdlInterlock?.EnterMetadata(statement.DatabaseName, definition: false);
         var resolved = new List<SqlCatalogSequence>();
         for (int i = 0; i < names.Count; i++)
         {
+            if (expected[i] is null && ifExists) { continue; }
             var sequence = _catalog.FindSequence(names[i].SchemaName ?? SqlPlanner.DefaultSchema, names[i].TableName);
+            if (sequence is null && ifExists) { continue; }
             if (sequence?.ObjectId != expected[i]?.ObjectId) { throw new SqlPlanningException("CS04067", ErrorMessages.SequenceChanged); }
             if (sequence is not null) { resolved.Add(sequence); }
         }

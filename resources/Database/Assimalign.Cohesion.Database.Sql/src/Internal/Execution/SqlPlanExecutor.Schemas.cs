@@ -49,16 +49,16 @@ internal sealed partial class SqlPlanExecutor
         }
         // Definition DDL must never wait for transaction locks under its metadata lease:
         // a deferred migration owns table reservations and waits for that lease between steps.
-        foreach (var table in contents.AffectedTables)
-        {
-            await statement.Coordinator.LockManager.AcquireAsync(statement.DdlLockOwner,
-                LockResource.Object(table.ObjectId), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
-        }
         foreach (var sequence in sequences)
         {
             BeforeSequenceDdlLock?.Invoke();
             await statement.Coordinator.LockManager.AcquireAsync(statement.DdlLockOwner,
                 LockResource.Object(sequence.ObjectId), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
+        }
+        foreach (var table in contents.AffectedTables)
+        {
+            await statement.Coordinator.LockManager.AcquireAsync(statement.DdlLockOwner,
+                LockResource.Object(table.ObjectId), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
         }
         using var metadata = statement.DdlInterlock is { } interlock
             ? statement.ProvisioningSchema is not null

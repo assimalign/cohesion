@@ -14,30 +14,48 @@ and EXPLAIN node and reuses the self-committing metadata path; BEGIN refuses it 
 
 Sequence execution opens an async-flow scope only for a plan containing a sequence operation.
 It carries the session's lazy currval dictionary and lastval object identity, the captured sequence
-directory and per-row NEXT VALUE cache. Ordinary evaluators and statement contexts gain no state.
+directory and scoped per-row NEXT VALUE cache. Disposable value-type row scopes save and restore
+the outer dictionary across nested projections; shared empty arrays never identify a row.
+The planner refuses NEXT VALUE FOR in subqueries, derived bodies, CTE definitions and
+CASE/COALESCE/NULLIF arguments with CS03076, including unused definitions.
+Ordinary evaluators and statement contexts gain no state.
 Literal/parameter names lock only their resolved objects; row-varying names take the
 captured directory's Shared grants before execution. This conservative dynamic-name policy
-avoids synchronous waits under the DML apply gate. New sequence names enter the next statement.
+avoids synchronous evaluation-time lock waits and retains the documented directory-wide blocking:
+unrelated ALTER/DROP waits until transaction end, each captured sequence costs one request, and
+queued Exclusive requests stall later dynamic statements. New names enter the next statement.
 A sequence-only binding wrapper carries usage metadata and becomes an EXPLAIN parent;
 the session unwraps it before costing/execution. Ordinary plans retain their original fields.
 The planner reuses its existing scopeless-cache slot for optional sequence metadata. Ordinary
 planning and execution therefore preserve the existing Release allocation guards. ALTER/RESTART/DROP take Exclusive
-grants before the metadata lease, re-resolve by object identity and then publish. DROP SCHEMA
-locks sequences too. Waits enter the existing deadlock graph, and transaction/timeout cleanup
-owns release. Failed statements retain prior explicit-transaction sequence grants as other locks do.
+grants before a non-definition metadata lease, re-resolve by object identity and then publish.
+Unrelated CREATE INDEX leases remain compatible. CREATE guards check occupied relations before
+option validation under the publication monitor; DROP/ALTER IF EXISTS skip disappearance while
+waiting. DROP SCHEMA locks sequences before tables. Waits enter the existing deadlock graph, and transaction/timeout cleanup
+owns release. Each sequence grant rechecks transaction state and returns the finished owner's
+grants, covering a host rollback between acquisitions. Failed statements retain prior
+explicit-transaction sequence grants as other locks do.
 
 The established latch order is object grants, metadata admission where needed, the data apply
 gate for DML, catalog monitor and catalog storage/page latches. No catalog monitor or metadata
-lease spans a sequence lock wait. Object ordering across earlier transaction statements and
-schema drops can differ; the lock manager detects those cycles. setval uses the same durable
+lease spans a sequence lock wait. Locks retained by earlier transaction statements can still
+form genuine cycles; the lock manager detects them. setval uses the same durable
 counter record and invalidates unused reservations; session updates occur only after that commit.
 SQL allocation resolves the stable ObjectId after locking and calls SQ-S1 with that current incarnation. No second
 allocator, public interface, shipped visibility grant, project reference or disk/wire bump is added.
 SqlCatalogSnapshot now captures immutable internal sequence descriptions for information schema;
 empty directories reuse the empty list. Cached bound nextval adds 24 managed bytes for its BIGINT result box, while the shared allocator adds none. The reservation-commit monitor still blocks relation
-lookups; SQL scalar planning remains monitor-free as SQ-S1 established.
+lookups; SQL scalar planning remains monitor-free as SQ-S1 established. RETURNING lists containing
+sequence calls evaluate after preparation and before the global apply gate, so durable reservation
+and setval commits never occupy that gate. Deterministic held-reservation probes record writer
+gate waits dropping from one to zero for INSERT, upsert, UPDATE, DELETE and their joined paths.
+Independent sequence outputs project after Sort and Limit, including alias/ordinal ordering and
+grouped/correlated paths (PostgreSQL planner.c:6703-6763); sequence sort keys still evaluate first.
+DISCARD ALL clears sequence state and timeout overrides outside a transaction; ordinary rollback
+preserves it. Pool return sends DISCARD ALL over the existing Execute envelope after any rollback
+(PostgreSQL src/backend/commands/discard.c:59-78). No new wire message is needed.
 
-Persisted DEFAULT/CHECK/view/function expressions and declared-script sequence DDL are refused
+Persisted DEFAULT/CHECK/domain/view/function expressions and declared-script sequence DDL are refused
 with CS03074 until dependency and receipt ownership are modeled. CASCADE/RESTRICT are equivalent
 for these unowned generators. SQL format 28 already represents all definitions and counters.
 SQ-S3 owns identity linkage, SERIAL and owned dependencies. The full SQL-visible defaults,
@@ -6302,10 +6320,10 @@ takes 35 and 16 µs.
 
 ## Non-goals (current cut)
 
-Identity columns execute; standalone sequence catalog/allocation is internal. SQL sequence DDL,
-currval/lastval/SCOPE_IDENTITY, OVERRIDING,
-RESTART, generation-mode changes and identity backfill on populated tables remain excluded
-(#1123). Compiled typed schemas cannot declare identity metadata; SQL scripts can create
+Identity columns and the SQ-S2 standalone sequence DDL/functions execute. SQ-S3 retains
+SCOPE_IDENTITY, OVERRIDING, identity RESTART, generation-mode changes, identity linkage to
+standalone sequences and identity backfill on populated tables as exclusions (#1123, #1717).
+Compiled typed schemas cannot declare identity metadata; SQL scripts can create
 identity tables through the ordinary SQL executor.
 
 NATURAL and LATERAL joins, qualified wildcards, UPDATE SET

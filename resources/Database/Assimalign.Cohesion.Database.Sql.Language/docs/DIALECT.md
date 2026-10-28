@@ -39,8 +39,9 @@ RESTART [WITH n]; bare RESTART uses the configured START. START changes that
 configured value without restarting. DROP SEQUENCE [IF EXISTS] accepts a name
 list and optional CASCADE | RESTRICT (default RESTRICT). Names default to dbo,
 share the table/view namespace, and follow the engine's case-insensitive identifier
-rules, including quoted names. IF NOT EXISTS currently skips an existing sequence;
-an occupied table/view name still fails CS03070. DROP validates its entire list
+rules, including quoted names. IF NOT EXISTS atomically skips any occupied relation name
+before validating options (PostgreSQL sequence.c:135-159). IF EXISTS skips a sequence removed
+during the Exclusive wait; a replacement identity still refuses CS04067. DROP validates its entire list
 before one catalog commit. SQL sequence DDL is self-committing and is refused
 inside BEGIN with CS04003, exactly like table DDL.
 
@@ -63,7 +64,10 @@ resolve for each statement rather than pinning names across DROP/recreate.
 NULL arguments propagate NULL. Calls are volatile, evaluated left to right once
 per reached row; repeated nextval calls each allocate. Multi-row VALUES assigns
 values in written tuple and expression order. INSERT SELECT assigns in the
-source's evaluation order. Without ORDER BY the source row order is unspecified;
+source's evaluation order. Independent sequence outputs evaluate after ORDER BY and
+LIMIT/OFFSET, including ordering by another output's alias or ordinal; a sequence output
+used as a sort key must evaluate before sorting (PostgreSQL planner.c:6703-6763).
+Without ORDER BY the source row order is unspecified;
 sequence values are not ordered by transaction commit. Short-circuited expressions
 do not call the allocator. Plain EXPLAIN never allocates; EXPLAIN ANALYZE SELECT
 executes sequence effects. EXPLAIN also describes sequence DDL without executing it.
@@ -93,7 +97,7 @@ and [Microsoft's NEXT VALUE FOR contract](https://learn.microsoft.com/en-us/sql/
 Session/setval behavior follows local PostgreSQL src/backend/commands/sequence.c:867-1044;
 option defaults and restart follow :1415-1587. Privileges remain out of scope (#177).
 
-Sequence calls and REGCLASS are refused in persisted DEFAULT, CHECK, view and SQL
+Sequence calls and REGCLASS are refused in persisted DEFAULT, CHECK, domain, view and SQL
 function expressions with CS03074 (0A000), including typed defaults. Thus this run
 creates no default dependency for CASCADE to remove; RESTRICT and CASCADE have the
 same effect for standalone sequences. OWNED BY, SERIAL aliases and identity
@@ -105,7 +109,11 @@ Sequence statements resolve literal and parameter names to object identities and
 Shared object locks through the transaction lock manager before row evaluation.
 Constant references lock only their objects. Row-varying names conservatively lock all
 sequences in the directory captured at statement execution. Newly created sequences
-become visible to the next statement.
+become visible to the next statement. This blocks ALTER and DROP of unrelated sequences
+until transaction end, makes one lock request per captured sequence, and a queued Exclusive request
+stalls later dynamic-name statements under FIFO admission. This deliberate directory policy
+keeps all waits in the deadlock graph and avoids synchronous evaluation-time lock waits; use
+literal or parameter names to limit blocking to their referenced objects.
 ALTER, RESTART, DROP and DROP SCHEMA CASCADE take conflicting Exclusive grants and
 wait until every holder commits, rolls back or closes. Descriptions are resolved
 after locking; a concurrent ALTER cannot fail a running nextval. Deadlock detection,
@@ -119,6 +127,13 @@ MINIMUM_VALUE, MAXIMUM_VALUE, INCREMENT and CYCLE_OPTION. Precision is 16/32/64,
 radix 2, scale 0; option values are invariant text and CYCLE_OPTION is YES/NO.
 Identity-owned generators are not listed until SQ-S3. Existing result framing carries
 all DDL, functions, EXPLAIN and metadata over InMemory and TCP. LIMIT/OFFSET sequence calls evaluate once at execution before the input rows; EXPLAIN still has no effects. Detached evaluation without a statement scope refuses CS03076 (0A000). NEXT VALUE FOR is limited to row value positions: predicates, aggregate arguments, grouping keys, direct ordering expressions and row counts refuse CS03076 before allocation; ordering by a projected alias remains valid.
+Subqueries at any depth, derived tables, CTE definitions (including unused ones), and
+CASE/COALESCE/NULLIF arguments also refuse NEXT VALUE FOR with CS03076 during planning,
+following Microsoft's cited contract. Each remaining projected or VALUES row owns a
+disposable cache scope; nested executions save and restore the outer cache. INSERT SELECT
+assigns a distinct value to each row while sharing repeated standard occurrences within it.
+RETURNING lists containing sequence calls evaluate before the global apply gate, keeping
+durable reservation and setval commits outside that gate. Sequence effects remain nontransactional.
 
 ## Identity columns (#1123)
 
@@ -3987,7 +4002,7 @@ and carry an empty call list. Call vectors were introduced in format 10; the cur
 Format 28 adds the internal sequence definition and reservation records (#1717). Relation-name
 collisions involving an existing sequence use CS03070 (42P07), as sequence creation does for any
 occupied relation name; the diagnostic names the existing kind. Table-on-table collisions retain
-CS03049. Sequence SQL syntax remains SQ-S2 work.
+CS03049. Standalone sequence SQL syntax is delivered by SQ-S2; identity integration remains SQ-S3 work.
 
 Domains share E3's type namespace and coercion/check path. Columns inherit their domain's
 literal default unless they supply one; explicit DEFAULT NULL overrides inheritance. Domain

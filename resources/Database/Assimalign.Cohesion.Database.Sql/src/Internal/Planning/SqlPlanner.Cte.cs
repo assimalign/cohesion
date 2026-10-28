@@ -86,7 +86,7 @@ internal sealed partial class SqlPlanner
                 state.Dependencies = new(ReferenceEqualityComparer.Instance);
                 state.BindingOperands = CollectCommonTableOperands(definition.Body);
                 state.BindingUnused = !state.Referenced.Contains(definition);
-                ValidateFunctionCalls(definition.Body);
+                ValidateFunctionCalls(definition.Body, allowNextValue: false);
                 SqlDerivedRelation relation;
                 if (recursive?.Contains(definition) == true) { relation = BindRecursiveDefinition(definition); }
                 else

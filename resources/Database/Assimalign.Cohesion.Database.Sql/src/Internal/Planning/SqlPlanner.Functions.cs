@@ -28,11 +28,12 @@ internal sealed partial class SqlPlanner
     /// registered is as known as a built-in (phase E2).
     /// </remarks>
     /// <param name="statement">The statement about to be planned.</param>
+    /// <param name="allowNextValue">Whether this query may supply per-row NEXT VALUE FOR outputs.</param>
     /// <exception cref="DatabaseException">The statement calls an unknown function.</exception>
     /// <exception cref="SqlEvaluationException">
     /// The statement calls a function with a number of arguments no overload accepts (<c>CS01006</c>).
     /// </exception>
-    private void ValidateFunctionCalls(SqlQueryExpression statement)
+    private void ValidateFunctionCalls(SqlQueryExpression statement, bool allowNextValue = true)
     {
         RuntimeHelpers.EnsureSufficientExecutionStack();
         if (statement.CommandType is SqlQueryCommandType.Create or SqlQueryCommandType.Alter && statement is not SqlCreateTableAsExpression)
@@ -57,11 +58,11 @@ internal sealed partial class SqlPlanner
                         ValidateFunctionCalls(operation.Limit, allowNextValue: false);
                         ValidateFunctionCalls(operation.Offset, allowNextValue: false);
                     }
-                    else { ValidateFunctionCalls((SqlQueryExpression)item.Query); }
+                    else { ValidateFunctionCalls((SqlQueryExpression)item.Query, allowNextValue); }
                 }
                 break;
             case SqlSelectExpression select:
-                ValidateFunctionCalls(select);
+                ValidateFunctionCalls(select, allowNextValue);
                 break;
             case SqlInsertExpression insert:
                 if (insert.OnConflict is { } conflict)
@@ -165,7 +166,7 @@ internal sealed partial class SqlPlanner
 
     private void ValidateRelationFunctionCalls(SqlRelationReference relation)
     {
-        if (relation is SqlDerivedTableReference derived) { ValidateFunctionCalls(derived.Query); }
+        if (relation is SqlDerivedTableReference derived) { ValidateFunctionCalls(derived.Query, allowNextValue: false); }
         else if (relation is SqlJoinedTableReference group)
         {
             RuntimeHelpers.EnsureSufficientExecutionStack();
@@ -173,9 +174,9 @@ internal sealed partial class SqlPlanner
         }
     }
 
-    private void ValidateFunctionCalls(SqlSelectExpression select)
+    private void ValidateFunctionCalls(SqlSelectExpression select, bool allowNextValue = true)
     {
-        foreach (var column in select.Columns) { ValidateFunctionCalls(column.Expression); }
+        foreach (var column in select.Columns) { ValidateFunctionCalls(column.Expression, allowNextValue); }
         ValidateSourceFunctionCalls(select.From);
         ValidateFunctionCalls(select.Where, allowNextValue: false);
         foreach (var key in select.GroupBy) { ValidateFunctionCalls(key, allowNextValue: false); }
@@ -223,22 +224,25 @@ internal sealed partial class SqlPlanner
                 return;
             // Children treats a query body as opaque; its own clauses are checked here.
             case SqlSubqueryExpression scalar:
-                ValidateFunctionCalls(scalar.Select);
+                ValidateFunctionCalls(scalar.Select, allowNextValue: false);
                 break;
             case SqlExistsExpression exists:
-                ValidateFunctionCalls(exists.Subquery);
+                ValidateFunctionCalls(exists.Subquery, allowNextValue: false);
                 break;
             case SqlInExpression { Subquery: not null } membership:
-                ValidateFunctionCalls(membership.Subquery);
+                ValidateFunctionCalls(membership.Subquery, allowNextValue: false);
                 break;
             case SqlQuantifiedComparisonExpression quantified:
-                ValidateFunctionCalls(quantified.Subquery);
+                ValidateFunctionCalls(quantified.Subquery, allowNextValue: false);
                 break;
         }
 
         foreach (var child in Children(expression))
         {
-            ValidateFunctionCalls(child, allowNextValue && !(expression is SqlFunctionCallExpression parent && (ReferenceEquals(parent.Filter, child) || _functions.Catalog.IsAggregate(parent.FunctionName))));
+            ValidateFunctionCalls(child, allowNextValue && expression is not SqlCaseExpression &&
+                !(expression is SqlFunctionCallExpression parent && (ReferenceEquals(parent.Filter, child) ||
+                _functions.Catalog.IsAggregate(parent.FunctionName) || parent.FunctionName.Equals("COALESCE", StringComparison.OrdinalIgnoreCase) ||
+                parent.FunctionName.Equals("NULLIF", StringComparison.OrdinalIgnoreCase))));
         }
 
         if (expression is SqlFunctionCallExpression call && _functions.ViewCalls?.ContainsKey(call) != true)

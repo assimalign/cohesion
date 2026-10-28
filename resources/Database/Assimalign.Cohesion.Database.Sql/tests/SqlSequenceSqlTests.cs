@@ -398,17 +398,19 @@ public sealed class SqlSequenceSqlTests
         await using var b = await database.CreateSessionAsync(timeout.Token);
         await Exec(a, "CREATE SCHEMA sales"); await Exec(a, "CREATE TABLE sales.t(id INT)");
         await Exec(a, "CREATE SEQUENCE sales.s");
-        await Exec(a, "BEGIN"); await Rows(a, "SELECT nextval('sales.s')");
+        await Exec(a, "BEGIN"); await Exec(a, "INSERT INTO sales.t VALUES (1)");
         var requested = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        SqlPlanExecutor.BeforeSequenceDdlLock = () => requested.TrySetResult();
+        using var waits = new LockWaitListener("db");
+        waits.Observed = value => { if (value.EventName == "LockWaitStart") { requested.TrySetResult(); } };
         Task<DatabaseResult>? drop = null;
         try
         {
-            // Act: schema drop holds the table and waits for the sequence; INSERT closes the cycle.
+            // Act: earlier transaction work holds the table; schema drop owns the sequence
+            // and queues for that table. A later sequence request closes a genuine cycle.
             drop = b.ExecuteAsync("DROP SCHEMA sales CASCADE", cancellationToken: timeout.Token).AsTask();
             await requested.Task.WaitAsync(timeout.Token);
             drop.IsCompleted.ShouldBeFalse();
-            await Refuses(a, "INSERT INTO sales.t VALUES (1)", "CS04065");
+            await Refuses(a, "SELECT nextval('sales.s')", "CS04065");
             await Exec(a, "ROLLBACK");
             await drop.WaitAsync(timeout.Token);
 
@@ -418,7 +420,6 @@ public sealed class SqlSequenceSqlTests
         }
         finally
         {
-            SqlPlanExecutor.BeforeSequenceDdlLock = null;
             if (a.CurrentTransaction is { } transaction) { await transaction.RollbackAsync(CancellationToken.None); }
             if (drop is not null) { try { await drop.WaitAsync(timeout.Token); } catch { /* Retain the test failure. */ } }
         }

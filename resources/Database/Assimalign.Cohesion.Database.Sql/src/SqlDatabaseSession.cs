@@ -494,8 +494,11 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
 
     private async ValueTask<DatabaseResult> ExecuteMetadataStatementAsync(SqlQueryRequest request, CancellationToken cancellationToken, SqlCatalogScriptPublication? scriptReceipt)
     {
-        // DROP SCHEMA takes its definition lease in the executor, after all table locks.
-        if (request.Statement.SqlExpression is SqlDropSchemaExpression or SqlAlterSequenceExpression or SqlDropSequenceExpression)
+        // Sequence DDL uses its object grants; unrelated metadata leases remain compatible.
+        if (request.Statement.SqlExpression is SqlAlterSequenceExpression or SqlDropSequenceExpression)
+        { return await ExecuteStatementCoreAsync(request, cancellationToken, scriptReceipt).ConfigureAwait(false); }
+        // DROP SCHEMA takes its definition lease in the executor, after sequence and table locks.
+        if (request.Statement.SqlExpression is SqlDropSchemaExpression)
         {
             if (_ddlLockOwner is null) { _database.DdlInterlock.CheckDefinitionAdmission(_database.Name.ToString()); }
             return await ExecuteStatementCoreAsync(request, cancellationToken, scriptReceipt).ConfigureAwait(false);

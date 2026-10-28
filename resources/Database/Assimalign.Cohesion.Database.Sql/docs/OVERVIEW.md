@@ -319,8 +319,9 @@ See [DESIGN.md](DESIGN.md) for the persistence model and decisions.
 
 
 Standalone sequences have internal catalog objects and share the identity allocator (#1717,
-SQ-S1). SQL format 28 adds sequence definitions and reservations; SQL sequence syntax and public
-entry points remain deferred. Both allocators reserve up to 32 values before use, retain rollback
+SQ-S1). SQ-S2 delivers CREATE/ALTER/DROP SEQUENCE, NEXT VALUE FOR, nextval/currval/setval/lastval,
+REGCLASS references and INFORMATION_SCHEMA.SEQUENCES. SQL format 28 stores definitions and reservations.
+Both allocators reserve up to 32 values before use, retain rollback
 and recovery gaps, and serialize allocation engine-wide. CACHE is stored without per-session
 caches. See DESIGN for option defaults, incarnation checks and the lock order.
 
