@@ -778,7 +778,11 @@ IsRecursiveScope records the list modifier on each AST definition, independently
 of whether it self-references. Binding retains the existing case-insensitive name
 rules, requires complete output-name lists and conservatively makes recursive
 columns nullable. Independent ready definitions retain declaration-order priority.
-Row-locking FOR UPDATE/SHARE forms are contextual CK00001 refusals in all queries.
+Complete FOR UPDATE, FOR NO KEY UPDATE, FOR SHARE and FOR KEY SHARE strengths
+are refused with CK00001 only in the SELECT tail; qualified identifiers and
+implicit aliases remain valid. WITH RECURSIVE before MERGE refuses with CK00001
+at the modifier even for acyclic lists, following PostgreSQL
+`src/backend/parser/parse_merge.c:124-129`. Plain WITH before MERGE remains supported.
 
 References re-derived from the local PostgreSQL clone: src/backend/parser/parse_cte.c:
 345-400 (output checks and hints), 580-632 (unknown anchor output), 648-725 and 863-906
@@ -3103,7 +3107,15 @@ Regression cases pair MERGE USING with UPDATE FROM for stored tables, system rel
 views, aliased derived queries and supported INNER/LEFT/CROSS joins, before and after
 canonical rendering. Unsupported source forms retain the existing read-source codes;
 no VALUES relation is added. The parser reserves a trailing source CROSS JOIN's ON for MERGE.
-WITH-prefixed MERGE is outside the requested statement grammar.
+Plain WITH-prefixed MERGE shares SELECT's CTE namespace and binding: definitions bind
+in declaration order, every definition is validated, and only reachable definitions
+materialize once under the statement snapshot. SqlWithPlan wraps the MERGE input;
+USING, ON, action subqueries and RETURNING use the bound CTE outputs, and the joined
+statement mark brackets materialization and writes. Keyword-spelled CTE names such as
+over, partition, window and natural work after USING and as output qualifiers.
+WITH RECURSIVE before MERGE is refused at RECURSIVE with CK00001 even for acyclic
+lists (PostgreSQL `src/backend/parser/parse_merge.c:124-129`). Other consumers bind
+recursive lists before the SQ-R2 planning/execution gate described above.
 Each action retains its own bound condition/value subqueries. A lazy action frame prepares
 only reached scalar branches; independent query values cache per statement, correlated values
 expire per candidate. A failed condition never evaluates the action's values. The first matching

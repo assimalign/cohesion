@@ -150,7 +150,9 @@ first match and ordinal access distinguishes them. Plain UPDATE/DELETE without s
 Explicit source columns execute. A real visible source named/aliased OLD or NEW
 masks that pseudo-relation refusal. SET and RETURNING subqueries retain CK00001.
 Delimited OLD/NEW qualifiers remain ordinary identifiers through canonical rendering.
-Keyword-spelled CTE names are accepted after DELETE USING; WITH RECURSIVE binds as described below.
+Keyword-spelled CTE names, including `over`, `partition`, `window` and `natural`, are
+accepted in definitions, qualifiers and DELETE/MERGE USING sources; WITH RECURSIVE
+binds as described below.
 
 Namespace behavior follows the local PostgreSQL `src/backend/parser/analyze.c:602-621,2560-2578`.
 Target/source associations are collected before SET evaluation or writes. Multiple matching
@@ -477,7 +479,9 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | `NATURAL JOIN` | Recognized, not supported | rejected with `CK00001` |
 | `UNION` / `INTERSECT` / `EXCEPT` | Supported, measured | Each accepts ALL or DISTINCT (default); available in every query position, with parenthesized operands and combined ordering/paging. See [Set operations](#set-operations-1114). |
 | `WITH` (CTEs) | Supported subset, measured | Ordered non-recursive SELECT bodies before SELECT, INSERT, UPDATE, DELETE or MERGE; optional output column lists; also INSERT INTO t WITH ... SELECT |
-| `WITH RECURSIVE` | Parsed and bound; execution deferred | Dependency analysis, anchor output contract and PostgreSQL recursive-reference restrictions; valid recursion refuses planning/EXPLAIN/execution with CK00001 until SQ-R2. Acyclic lists execute. |
+| `WITH RECURSIVE` | Parsed and bound; execution deferred | Dependency analysis, anchor output contract and PostgreSQL recursive-reference restrictions; valid recursion refuses planning/EXPLAIN/execution with CK00001 until SQ-R2. Acyclic lists execute except before MERGE. |
+| `WITH RECURSIVE ... MERGE` | Recognized, not supported | CK00001 at RECURSIVE even for acyclic lists; plain WITH ... MERGE binds and executes. |
+| `SELECT ... FOR UPDATE` / `FOR NO KEY UPDATE` / `FOR SHARE` / `FOR KEY SHARE` | Recognized, not supported | Complete locking strengths in the SELECT tail report CK00001, including in subqueries and CTE bodies. Deliberate change from CS00003 in #1719; qualified identifiers and implicit aliases retain their ordinary meaning. |
 | Window functions / `OVER` / `WINDOW` | Recognized, not supported | function names lexed; clauses rejected with `CK00001` |
 | `CREATE [OR REPLACE] VIEW` / `DROP VIEW` | Yes | Persisted read-only views; DROP defaults to RESTRICT and supports CASCADE |
 | `CONSTRAINT` / `FOREIGN KEY` / `REFERENCES` / `CHECK` / `UNIQUE` constraints | Supported subset, measured | Column and table declarations normalize into constraint definitions; UNIQUE lowers to a unique catalog index. NULL is an equal index key: a second NULL violates a single-column UNIQUE constraint. Foreign-key NULL values are allowed; CHECK accepts UNKNOWN and rejects FALSE. CHECK expressions must be deterministic Boolean row expressions with the engine's scalar functions (built-in or registered, `IMMUTABLE` only), each called with arguments its signature accepts (`CS01006` otherwise); parameters and aggregates are excluded. CHECK predicates and DEFAULT expressions are stored as canonical text and parsed once per table version; see [Persisted definitions are canonical](#persisted-definitions-are-canonical). |
@@ -1453,7 +1457,10 @@ WHEN clause). BY TARGET is the default
 unmatched direction. INSERT takes one VALUES row or DEFAULT VALUES; whole-item DEFAULT and
 existing identity policies apply. Target names must be unique and match the VALUES width.
 Bare target/source aliases are also accepted. Sources use existing stored/system/view,
-derived-query and joined-relation binding. WITH-prefixed MERGE shares SELECT CTE binding and materialization (#1719).
+derived-query and joined-relation binding. Plain WITH-prefixed MERGE shares SELECT CTE
+binding and reachable-only materialization (#1719). WITH RECURSIVE before MERGE is
+refused at the RECURSIVE token with CK00001, including acyclic definitions, following
+PostgreSQL `src/backend/parser/parse_merge.c:124-129`.
 The UPDATE FROM source forms also bind in MERGE USING and survive canonical rendering,
 including views, aliased derived queries and CROSS JOIN sources. A trailing source CROSS
 JOIN leaves the following ON for MERGE. VALUES relations, table functions, LATERAL,
@@ -2246,7 +2253,7 @@ clauses nest below it, so the [expression nesting limit](#expression-nesting-lim
 (256 levels by default) bounds the statement as a whole, subqueries included. The
 32-level subquery limit is fixed; it does not follow the configured expression limit.
 
-Nested or recursive CTEs, lateral joins,
+Nested WITH, recursive CTE execution, lateral joins,
 and subqueries in UPDATE SET, INSERT VALUES, CHECK/DEFAULT,
 or LIMIT/OFFSET/FETCH/TOP expressions remain excluded with `CK00001`. Ordinary numeric
 LIMIT/OFFSET/FETCH/TOP clauses on queries containing subqueries do execute. CHECK remains
@@ -2341,7 +2348,18 @@ IsRecursiveScope records the list modifier on each AST definition, independently
 of whether it self-references. Binding retains the existing case-insensitive name
 rules, requires complete output-name lists and conservatively makes recursive
 columns nullable. Independent ready definitions retain declaration-order priority.
-Row-locking FOR UPDATE/SHARE forms are contextual CK00001 refusals in all queries.
+The complete row-locking strengths FOR UPDATE, FOR NO KEY UPDATE, FOR SHARE and
+FOR KEY SHARE are contextual CK00001 refusals after the SELECT's clauses, including
+in subqueries and CTE bodies. This deliberately replaces their previous CS00003
+syntax refusal. Qualified identifiers such as `t.for` with implicit aliases `share`,
+`no` or `key`, and explicit `AS share`, retain their ordinary meaning. Incomplete
+strengths such as FOR NO or FOR KEY UPDATE remain CS00003. The grammar position
+and complete strengths follow PostgreSQL `src/backend/parser/gram.y:13119-13176,13803-13840`.
+
+WITH RECURSIVE before MERGE is refused with CK00001 at RECURSIVE, even for acyclic
+definitions (PostgreSQL `src/backend/parser/parse_merge.c:124-129`). Plain WITH
+before MERGE remains supported and shares SELECT's CTE binding and materialization.
+These contextual exclusions do not change the 58/63 declared-clause count.
 
 References re-derived from the local PostgreSQL clone: src/backend/parser/parse_cte.c:
 345-400 (output checks and hints), 580-632 (unknown anchor output), 648-725 and 863-906
@@ -3699,7 +3717,8 @@ construct. The table holds the clause keywords the preflight scan rejects,
 such as `WINDOW` in the statement matrix. UNION, INTERSECT and EXCEPT remain profile keywords and execute; CORRESPONDING is rejected contextually after an operator and optional quantifier, without reserving that identifier. It also holds every other word or
 operator outside the profile's keywords that a dedicated rule recognizes and
 rejects with `CK00001`: `RECURSIVE`, `[NOT] MATERIALIZED`, `SEARCH`/`CYCLE`,
-`SELECT ALL`,
+`SELECT ALL`, SELECT-tail `FOR UPDATE` / `FOR NO KEY UPDATE` / `FOR SHARE` /
+`FOR KEY SHARE`,
 `CREATE COLLATION`, `CREATE FULLTEXT`, `GROUPING SETS` and
 the `GROUPING`, `ROLLUP`, `CUBE` and `GROUPING_ID` calls, `FILTER (...)` and
 `WITHIN GROUP` after a non-LISTAGG call, LISTAGG ON OVERFLOW (contextual), the `ANY`/`SOME` (and `ALL`) array comparisons,

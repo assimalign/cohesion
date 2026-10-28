@@ -127,8 +127,16 @@ public sealed partial class SqlCteExecutionTests
 
         // Assert
         error.Code.ShouldBe("CK00001");
-        error.Message!.ShouldContain("Recursive CTE planning", Case.Sensitive);
-        session.LastStatementMetrics!.RecordsExamined.ShouldBe(0);
+        if (statement.StartsWith("MERGE", StringComparison.Ordinal))
+        {
+            error.Message!.ShouldContain("WITH RECURSIVE for MERGE", Case.Sensitive);
+            error.Start.ShouldBe(5);
+        }
+        else
+        {
+            error.Message!.ShouldContain("Recursive CTE planning", Case.Sensitive);
+            session.LastStatementMetrics!.RecordsExamined.ShouldBe(0);
+        }
         (await RowsAsync(session, "SELECT id FROM t ORDER BY id")).Select(row => row[0]).ShouldBe([1, 2, 3]);
     }
 
@@ -224,7 +232,7 @@ public sealed partial class SqlCteExecutionTests
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - Recursive WITH: non-recursive MERGE sources execute through dependency ordering")]
-    public async Task Execute_AcyclicMergePrefix_ShouldMaterializeAndUpdate()
+    public async Task Execute_NonRecursiveMergePrefix_ShouldMaterializeAndUpdate()
     {
         // Arrange
         await using var engine = SqlDatabaseEngine.Create("recursive-merge", new());
@@ -233,7 +241,7 @@ public sealed partial class SqlCteExecutionTests
         await SeedAsync(session);
 
         // Act
-        var result = await session.ExecuteAsync("WITH RECURSIVE b AS (SELECT n FROM a), a AS (SELECT 2 AS n) MERGE INTO t USING b ON t.id=b.n WHEN MATCHED THEN UPDATE SET id=9;", cancellationToken: CancellationToken.None);
+        var result = await session.ExecuteAsync("WITH a AS (SELECT 2 AS n), b AS (SELECT n FROM a) MERGE INTO t USING b ON t.id=b.n WHEN MATCHED THEN UPDATE SET id=9;", cancellationToken: CancellationToken.None);
 
         // Assert
         result.AffectedCount.ShouldBe(1);

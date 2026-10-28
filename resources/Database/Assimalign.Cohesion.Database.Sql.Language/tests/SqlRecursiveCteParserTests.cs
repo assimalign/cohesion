@@ -19,11 +19,11 @@ public sealed class SqlRecursiveCteParserTests
     [InlineData("INSERT INTO t SELECT n FROM r")]
     [InlineData("UPDATE t SET id=r.n FROM r WHERE t.id=r.n")]
     [InlineData("DELETE FROM t USING r WHERE t.id=r.n")]
-    [InlineData("MERGE INTO t USING r ON t.id=r.n WHEN MATCHED THEN DO NOTHING")]
-    public void Parse_RecursivePrefix_ShouldPreserveSyntaxOnRoundTrip(string statement)
+    [InlineData("MERGE INTO t USING r ON t.id=r.n WHEN MATCHED THEN DO NOTHING", false)]
+    public void Parse_WithPrefix_ShouldPreserveSyntaxOnRoundTrip(string statement, bool recursive = true)
     {
         // Arrange
-        string sql = "WITH RECURSIVE r (n) AS (SELECT 1 UNION ALL SELECT n+1 FROM r WHERE n<3) " + statement + ";";
+        string sql = "WITH " + (recursive ? "RECURSIVE " : "") + "r (n) AS (SELECT 1 UNION ALL SELECT n+1 FROM r WHERE n<3) " + statement + ";";
 
         // Act
         var query = Parse(sql);
@@ -32,12 +32,12 @@ public sealed class SqlRecursiveCteParserTests
 
         // Assert
         var definition = Definitions(query).ShouldHaveSingleItem();
-        definition.IsRecursiveScope.ShouldBeTrue();
+        definition.IsRecursiveScope.ShouldBe(recursive);
         definition.Columns.ShouldBe(["n"]);
         var union = definition.Body.ShouldBeOfType<SqlSetOperationExpression>();
         union.IsAll.ShouldBeTrue();
         union.Operator.ShouldBe(SqlSetOperator.Union);
-        Definitions(roundTrip).ShouldHaveSingleItem().IsRecursiveScope.ShouldBeTrue();
+        Definitions(roundTrip).ShouldHaveSingleItem().IsRecursiveScope.ShouldBe(recursive);
         Render(roundTrip).ShouldBe(rendered);
     }
 

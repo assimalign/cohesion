@@ -11,11 +11,13 @@ public sealed partial class SqlQueryParser
         var definitions = new List<SqlCommonTableExpression>();
         Advance(ref lexer); // WITH
         bool recursive = IsKeyword(ref lexer, "RECURSIVE");
+        int recursiveStart = lexer.Current.Position;
+        int recursiveEnd = CurrentTokenEnd(ref lexer);
         if (recursive) { Advance(ref lexer); }
         do
         {
             int start = lexer.Current.Position;
-            if (!IsNameToken(ref lexer))
+            if (!IsCommonTableNameToken(ref lexer))
             {
                 AddExpectedDiagnostic(ref lexer, "a common table expression name");
                 return EmptyWithQuery();
@@ -59,7 +61,18 @@ public sealed partial class SqlQueryParser
         else if (!insertSource && IsKeyword(ref lexer, "INSERT")) { statement = ParseInsert(ref lexer); }
         else if (!insertSource && IsKeyword(ref lexer, "UPDATE")) { statement = ParseUpdate(ref lexer); }
         else if (!insertSource && IsKeyword(ref lexer, "DELETE")) { statement = ParseDelete(ref lexer); }
-        else if (!insertSource && IsKeyword(ref lexer, "MERGE")) { statement = ParseMerge(ref lexer); }
+        else if (!insertSource && IsKeyword(ref lexer, "MERGE"))
+        {
+            // PostgreSQL src/backend/parser/parse_merge.c:124-129 rejects the
+            // modifier even when every CTE is acyclic. Plain WITH stays supported.
+            if (recursive)
+            {
+                RequireSkippedConstruct(recursiveStart, recursiveEnd, "WITH RECURSIVE for MERGE");
+                ConsumeRemaining(ref lexer);
+                return EmptyWithQuery();
+            }
+            statement = ParseMerge(ref lexer);
+        }
         else
         {
             AddExpectedDiagnostic(ref lexer, insertSource ? "SELECT after WITH" : "SELECT, INSERT, UPDATE, DELETE or MERGE after WITH");
@@ -85,6 +98,13 @@ public sealed partial class SqlQueryParser
     }
 
     private static SqlSelectExpression EmptyWithQuery() => new([], [], null, [], null, [], null, null, false, null, null);
+
+    private static bool IsCommonTableNameToken(ref TokenLexer lexer)
+        => IsNameToken(ref lexer) || IsContextualCommonTableKeyword(ref lexer);
+
+    private static bool IsContextualCommonTableKeyword(ref TokenLexer lexer)
+        => IsKeyword(ref lexer, "OVER") || IsKeyword(ref lexer, "PARTITION") ||
+           IsKeyword(ref lexer, "WINDOW") || IsKeyword(ref lexer, "NATURAL");
 
     // WITH ties AS (...) names a relation. WITH TIES after a paging clause does not.
     private static bool WithStartsNamedDefinition(TokenLexer lexer)

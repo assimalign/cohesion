@@ -36,7 +36,16 @@ IsRecursiveScope records the list modifier on each AST definition, independently
 of whether it self-references. Binding retains the existing case-insensitive name
 rules, requires complete output-name lists and conservatively makes recursive
 columns nullable. Independent ready definitions retain declaration-order priority.
-Row-locking FOR UPDATE/SHARE forms are contextual CK00001 refusals in all queries.
+Complete FOR UPDATE, FOR NO KEY UPDATE, FOR SHARE and FOR KEY SHARE strengths
+are recognized only in the SELECT tail and refused with CK00001, including in
+subqueries and CTE bodies (PostgreSQL `src/backend/parser/gram.y:13119-13176,13803-13840`).
+Qualified identifiers and implicit aliases retain their ordinary parsing; incomplete
+strengths remain syntax errors. FOR is in the recognized-unsupported vocabulary and
+keyword-disposition corpus, without becoming a reserved identifier.
+
+Plain WITH before MERGE shares SELECT CTE binding and materialization. WITH RECURSIVE
+before MERGE refuses at the RECURSIVE token with CK00001, even for acyclic lists,
+following PostgreSQL `src/backend/parser/parse_merge.c:124-129`.
 
 References re-derived from the local PostgreSQL clone: src/backend/parser/parse_cte.c:
 345-400 (output checks and hints), 580-632 (unknown anchor output), 648-725 and 863-906
@@ -138,7 +147,9 @@ Visible source OLD/NEW names mask pseudo-relations. The profile now advertises U
 DELETE USING; DIALECT.md records pre-write CS05068 and physical-target DELETE deduplication.
 Joined execution uses target-outer predicate pushdown/costing, one materialization per CTE, and
 statement unwind before WITH/subquery wrappers. Both project overviews reflect executable support.
-DELETE's top-level USING source position recognizes keyword-spelled CTE references, while WITH RECURSIVE now binds under #1719. Canonical rendering delimits ordinary OLD/NEW column qualifiers
+DELETE and MERGE's top-level USING source positions recognize keyword-spelled CTE
+references, including over, partition, window and natural in definitions and
+qualifiers, while WITH RECURSIVE now binds under #1719. Canonical rendering delimits ordinary OLD/NEW column qualifiers
 so a quoted identifier cannot become a RETURNING pseudo-relation on reparse.
 Bare RETURNING * follows PostgreSQL's visible namespace expansion: target columns, then sources
 in FROM/USING order with USING merges preserved and duplicate output names allowed. The engine

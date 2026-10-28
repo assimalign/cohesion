@@ -107,6 +107,7 @@ public sealed class SqlKeywordDispositionTests
         ["LIMIT"] = Parses("SELECT a FROM t LIMIT 1"),
         ["OFFSET"] = Parses("SELECT a FROM t LIMIT 1 OFFSET 1"),
         ["FETCH"] = Parses("SELECT a FROM t FETCH NEXT 1 ROWS ONLY"),
+        ["FOR"] = Rejects("SELECT a FROM t FOR UPDATE", "FOR UPDATE/SHARE"),
         ["PERCENT"] = Rejects("SELECT TOP (1) PERCENT a FROM t", "PERCENT"),
         ["TIES"] = Rejects("SELECT a FROM t FETCH FIRST 1 ROW WITH TIES", "WITH TIES"),
         ["NEXT"] = Parses("SELECT a FROM t FETCH NEXT 1 ROWS ONLY"),

@@ -70,7 +70,9 @@ shared storage, with DDL flowing through this assembly's relational Catalog comp
 - **SQL execution** — the declared dialect (`Database.Sql.Language/docs/DIALECT.md`)
   planned with rules and executed over stored, system and derived relations: `SELECT` with `WHERE`,
   projection, INNER/LEFT/RIGHT/FULL/CROSS joins with parenthesized groups, RIGHT-to-LEFT normalization and bounded FULL hash execution, aliased derived sources, `ORDER BY` with per-key `NULLS FIRST/LAST`, `LIMIT/OFFSET`, `DISTINCT`, grouping and aggregates;
-  `WITH [RECURSIVE]` before SELECT/INSERT/UPDATE/DELETE/MERGE (recursive bodies bind and refuse planning with CK00001 until SQ-R2), with ordered SELECT definitions
+  `WITH [RECURSIVE]` before SELECT/INSERT/UPDATE/DELETE and plain `WITH` before MERGE
+  (recursive bodies bind and refuse planning with CK00001 until SQ-R2; WITH RECURSIVE
+  before MERGE reports CK00001 at RECURSIVE), with ordered SELECT definitions
   materialized once per statement and optional complete output column lists;
   `INSERT` (multi-row, whole-item `DEFAULT`, `DEFAULT VALUES`, nullability);
   `UPDATE` (including `SET c = DEFAULT`)/`DELETE` with correlated and uncorrelated WHERE subqueries and accurate
