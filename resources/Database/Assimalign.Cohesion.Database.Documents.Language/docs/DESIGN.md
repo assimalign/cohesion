@@ -936,9 +936,12 @@ DISTINCT, UNNEST, nonindex expressions and intersections retain their stated fal
 
 Lossy array/object values never establish ordering. UNIQUE enforces scalar keys; direct scalar
 comparisons or NULL/MISSING tests can also prove a domain. Otherwise a snapshot-visible,
-512-entry/32-page absence probe checks complex tags on the first varying component, without
-fetching documents. Incomplete probes and later varying components without a scalar proof
-report scalar_domain_unproven. This deliberately conservative fallback needs no new diagnostic.
+one-entry/32-page existence probe checks complex tags on the first varying component, without
+fetching documents. A visible match stops immediately; an invisible first entry leaves the domain
+unproven. Incomplete probes and later varying components without a scalar proof report
+scalar_domain_unproven. This deliberately conservative fallback needs no new diagnostic.
+Ordering reuses the ordinary access analysis; every structural and predicate proof runs before
+probing. Rejected ordinary plans allocate no EXPLAIN candidate graph.
 A shorter ORDER BY than the physical key still requires a complete equal-ORDER-BY-prefix bucket,
 including all trailing physical components, before identity sorting and LIMIT termination.
 Execution consumes a proven scalar index in forward or reverse order and elides the result
@@ -953,8 +956,9 @@ release the cursor and reservations.
 
 With fixed projection types, LIMIT/OFFSET stop after OFFSET + LIMIT residual survivors. LIMIT 0
 opens no cursor. One next-bucket entry establishes completeness, and the B-tree may already have
-read ahead in its bounded batch. SELECT * has a fixed JSON type and stops early on a consumed ordered path. Projections needing result type inference
-still read all matching documents so column headers retain the existing full-result contract;
+read ahead in its bounded batch. SELECT * has a fixed JSON type and stops early on a consumed
+ordered path. Projections needing result type inference still read all matching documents so
+column headers retain the existing full-result contract;
 their proven index order still elides sorting. EXPLAIN reports consumed=True; sort=elided on the
 selected access and candidate, early_paging, and paging_reason=result_type_inference when needed.
 VALUE/RAW ordering by its projected expression retains sorting unless MISSING is rejected,
@@ -967,7 +971,9 @@ windows (4,032 exact comparisons), with complete duplicate buckets, residual rej
 scalar extremes, MISSING/NULL, escaped strings and trailing coarse tags. Controlled concurrent
 insert/update/delete/index replacement tests cover autocommit, Snapshot and ReadCommitted,
 plus own writes, rollback and cancellation. InMemory/TCP and the NativeAOT consumer exercise
-consumption and paging without new API, wire or disk formats.
+consumption and paging without new API, wire or disk formats. Star paging regressions cover
+both directions and the 256 KiB statement budget; rejected-shape allocation guards cover complex
+values, mixed directions, unproven MISSING, later scalar domains and array indexes.
 
 ## Access estimates (#1527)
 

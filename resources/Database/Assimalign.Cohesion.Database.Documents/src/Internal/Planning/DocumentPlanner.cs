@@ -66,14 +66,13 @@ internal sealed partial class DocumentPlanner
         var logical = CreateLogicalPlan(query, _cancellationToken, _parameters, _functions);
         var collection = ResolveCollection(query.Collection, query.Location);
         var indexes = _catalog.GetIndexes(collection.Id, _snapshot);
-        var access = ChooseAccess(query.Predicate, query.Alias, indexes, logical.UnnestVariables, query.Unnest);
+        var access = ChooseAccess(query.Predicate, query.Alias, indexes, out var accessCandidates, logical.UnnestVariables, query.Unnest);
         if (logical.Query.OrderBy.Count > 0 && (_estimateSinglePath || indexes.Count > 0 &&
             access is not DocumentIntersectionPath && !logical.IsGrouped && !query.IsDistinct && query.Unnest.Count == 0 &&
             logical.Query.OrderBy.All(order => order.Expression is OqlPathExpression)))
         {
-            var ordering = AnalyzeOrdering(logical, access, indexes);
-            if (_estimateSinglePath || ordering.Consumed is not null) { access = ordering; }
-            if (ordering.Consumed is not null)
+            access = AnalyzeOrdering(logical, access, indexes, accessCandidates);
+            if (access is DocumentOrderingPath { Consumed: not null })
             {
                 // Type inference observes every match before paging. Only fixed result
                 // types can stop content reads without changing the result header.
@@ -264,6 +263,11 @@ internal sealed partial class DocumentPlanner
 
     private DocumentAccessPath ChooseAccess(OqlExpression? predicate, string? alias, IReadOnlyList<DocumentIndexMetadata> indexes,
         IReadOnlySet<string>? variables = null, IReadOnlyList<OqlUnnestExpression>? unnest = null)
+        => ChooseAccess(predicate, alias, indexes, out _, variables, unnest);
+
+    private DocumentAccessPath ChooseAccess(OqlExpression? predicate, string? alias, IReadOnlyList<DocumentIndexMetadata> indexes,
+        out List<(DocumentIndexPath Path, int Prefix, bool Range)> analyzed,
+        IReadOnlySet<string>? variables = null, IReadOnlyList<OqlUnnestExpression>? unnest = null)
     {
         var predicates = new List<(string Path, string? LegacyPath, string Operator, object Value)>();
         if (predicate is not null) { Collect(predicate); }
@@ -283,6 +287,7 @@ internal sealed partial class DocumentPlanner
             if (scopes is null) { continue; }
             AddArrayCandidates(index);
         }
+        analyzed = candidates;
 
         // Keep captured array-key detection state off the scalar iteration path.
         void AddArrayCandidates(DocumentIndexMetadata index)
@@ -335,13 +340,15 @@ internal sealed partial class DocumentPlanner
         if (candidates.Count == 0) { return new DocumentScanPath(); }
         if (candidates.Count == 1 && !_estimateSinglePath) { return candidates[0].Path; }
         var probed = new List<DocumentIndexPath>(candidates.Count);
-        foreach (var (path, prefix, range) in candidates)
+        for (int i = 0; i < candidates.Count; i++)
         {
+            var (path, prefix, range) = candidates[i];
             var index = path.Index;
             var estimate = _catalog.CountIndexRange(index, path.EqualityPrefix ?? [], path.Lower?.Value,
                 path.Lower?.Inclusive ?? false, path.Upper?.Value, path.Upper?.Inclusive ?? false,
                 _snapshot, _cancellationToken);
             var candidate = path with { Estimate = estimate };
+            candidates[i] = (candidate, prefix, range);
             probed.Add(candidate);
             long cost = estimate.IsComplete ? estimate.Count : Math.Max(1024, estimate.Count * 2);
             bool better = best is null || cost < bestCost || cost == bestCost &&

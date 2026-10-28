@@ -29,7 +29,7 @@ selective fetch bound and its limit for unfiltered multi-field predicates.
 
 Proven scalar index order serves ORDER BY forward or reverse and elides sorting. INCLUDE MISSING
 supports ORDER BY alone; sparse indexes require a predicate rejecting leading MISSING. Complete
-equal-key buckets retain document identity ties. Fixed result types permit early LIMIT/OFFSET;
+equal-key buckets retain document identity ties. Fixed result types, including SELECT *, permit early LIMIT/OFFSET;
 projections needing full-result type inference retain complete reads. DESIGN and DIALECT state
 the eligibility and fallback rules.
 

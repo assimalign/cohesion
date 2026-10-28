@@ -14,6 +14,32 @@ namespace Assimalign.Cohesion.Database.Documents.Tests;
 
 public sealed class DocumentOrderedAccessTests
 {
+    [Fact(DisplayName = "Cohesion Test [Documents] - Complex order existence probing stops at its first visible match (#1632)")]
+    public async Task Plan_ComplexDomainProbe_ShouldStopAtFirstVisibleEntryAsync()
+    {
+        // Arrange
+        await using var engine = DocumentDatabaseEngine.Create("complex-order-probe", new());
+        var database = await engine.CreateDatabaseAsync("test", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        var collection = await session.CreateCollectionAsync("items", CancellationToken.None);
+        for (int i = 0; i < 512; i++)
+        { await collection.PutAsync(session, i.ToString("D3"), "{\"v\":[1,2]}"u8.ToArray(), cancellationToken: CancellationToken.None); }
+        await session.ExecuteAsync("CREATE INDEX ix ON items (v INCLUDE MISSING)", cancellationToken: CancellationToken.None);
+
+        // Act
+        var probe = await database.RunAsync(session, operation =>
+        {
+            var metadata = database.Catalog.FindCollection("items", operation.Context.Snapshot)!.Value;
+            var index = database.Catalog.GetIndexes(metadata.Id, operation.Context.Snapshot).Single();
+            return ValueTask.FromResult(database.Catalog.ProbeComplexOrderKeys(index, [], operation.Context.Snapshot, CancellationToken.None));
+        }, CancellationToken.None);
+
+        // Assert: existence is sufficient to reject; completeness is irrelevant.
+        probe.Count.ShouldBe(1);
+        probe.EntriesExamined.ShouldBe(1);
+        probe.PagesVisited.ShouldBeLessThanOrEqualTo(32);
+    }
+
     [Theory(DisplayName = "Cohesion Test [Documents] - EXPLAIN proves index ordering and reports consumption (#1632)")]
     [InlineData("a", "", "a", false, "leading_missing_not_rejected")]
     [InlineData("a", "WHERE a IS NOT MISSING", "a", true, "forward")]

@@ -235,6 +235,12 @@ public sealed class OqlExecutionConformanceTests
             ],
             [OqlClauses.Limit] =
             [
+                new("SELECT * FROM items ORDER BY k LIMIT 1", [[Json("{\"k\":1}")]],
+                    ["DELETE FROM items", "INSERT INTO items (KEY, VALUE) VALUES ('one', {'k':1}), ('two', {'k':2})",
+                     "CREATE INDEX ordered_k ON items (k INCLUDE MISSING)"]),
+                new("SELECT * FROM items ORDER BY k DESC LIMIT 1", [[Json("{\"k\":2}")]],
+                    ["DELETE FROM items", "INSERT INTO items (KEY, VALUE) VALUES ('one', {'k':1}), ('two', {'k':2})",
+                     "CREATE INDEX ordered_k ON items (k INCLUDE MISSING)"]),
                 new("SELECT META().id FROM items ORDER BY category DESC LIMIT 2 OFFSET 1", [["a"], ["b"]],
                     ["CREATE INDEX ordered_category ON items (category INCLUDE MISSING, amount)"]),
                 new("SELECT name FROM items ORDER BY name LIMIT 2", [["alpha"], ["beta"]]),
