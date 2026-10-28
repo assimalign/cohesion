@@ -62,11 +62,12 @@ internal static class DocumentSystemCollections
             writer.WriteString("COLLECTION_CATALOG", database);
             writer.WriteString("COLLECTION_NAME", collection);
             writer.WriteString("INDEX_NAME", index.Name);
-            writer.WriteString("PATH", DocumentIndexRendering.Key(index.Keys[0]));
+            writer.WriteString("PATH", DocumentIndexRendering.Key(index, 0));
             writer.WriteStartArray("PATHS");
-            foreach (var key in index.Keys) { writer.WriteStringValue(DocumentIndexRendering.Key(key)); }
+            for (int ordinal = 0; ordinal < index.Keys.Count; ordinal++) { writer.WriteStringValue(DocumentIndexRendering.Key(index, ordinal)); }
             writer.WriteEndArray();
             writer.WriteBoolean("IS_UNIQUE", index.IsUnique);
+            writer.WriteBoolean("INCLUDE_MISSING", index.IncludeMissing);
             writer.WriteEndObject();
         }
         using var document = JsonDocument.Parse(buffer.WrittenMemory);

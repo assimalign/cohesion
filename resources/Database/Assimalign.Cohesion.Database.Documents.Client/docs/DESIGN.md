@@ -33,6 +33,12 @@ The real DocumentClient and model server run missing-database handshakes on InMe
 loopback TCP for at least one second and 200 consecutive coded refusals per transport. The
 tests assert DatabaseNotFound and reuse a one-slot pool to expose leaked failed rentals.
 
+## Ordering wire conformance (#1730, #1632)
+
+InMemory and TCP tests execute every ASC/DESC NULLS combination over mixed values and MISSING,
+including aliases, multiple keys and paging. INCLUDE MISSING catalog rendering and EXPLAIN
+eligibility travel in existing rows. No client API, capability, codec or frame changes.
+
 ## Contract-only dependencies
 
 Direct references are Database.Client, Documents.Protocol, Database.Types, Database.Protocol, Database.Execution and Connections. Wire contracts live in each model Protocol assembly, shared by client and engine. This client has no engine, area-root, storage, transaction, indexing, model parser or schema reference. Cache.Client remains an empty placeholder. Engine-free trimming and NativeAOT coverage lives in Database.Client/samples/Assimalign.Cohesion.Database.Client.AotSample.

@@ -15,6 +15,7 @@ namespace Assimalign.Cohesion.Database.Documents.Language;
 /// </remarks>
 public static class OqlLanguageProfile
 {
+    // NULLS and INCLUDE are contextual suffixes, preserving existing field names.
     // EXPLAIN is recognized only at the statement prefix; elsewhere it remains an identifier.
     private static readonly string[] _keywords =
     [

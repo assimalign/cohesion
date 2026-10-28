@@ -513,6 +513,22 @@ internal sealed partial class DocumentExpressionEvaluator
         };
     }
 
+    // FIRST/LAST moves the nullish block. Direction still reverses MISSING vs NULL,
+    // matching Couchbase orderby.adoc:85-99 and the owner's 2026-10-25 decision.
+    internal static int CompareOrdered(object? left, object? right, OqlOrdering order)
+    {
+        if (order.NullPlacement != OqlNullPlacement.Default)
+        {
+            static bool Nullish(object? value) => value is null or DocumentMissing or
+                JsonElement { ValueKind: JsonValueKind.Null or JsonValueKind.Undefined };
+            bool leftNullish = Nullish(left), rightNullish = Nullish(right);
+            if (leftNullish != rightNullish)
+            { return leftNullish == (order.NullPlacement == OqlNullPlacement.First) ? -1 : 1; }
+        }
+        int comparison = Compare(left, right);
+        return order.Descending ? -comparison : comparison;
+    }
+
     private static int Kind(object? value) => value switch
     {
         DocumentMissing => -1,

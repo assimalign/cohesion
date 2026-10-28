@@ -224,6 +224,8 @@ public sealed class OqlExecutionConformanceTests
             ],
             [OqlClauses.OrderBy] =
             [
+                new("SELECT name AS label, amount FROM items ORDER BY amount DESC NULLS FIRST, label ASC NULLS LAST",
+                    [["delta", null], ["beta", 6m], ["gamma", 4m], ["alpha", 2m]]),
                 new("SELECT name AS label, amount FROM items ORDER BY amount DESC, label ASC",
                     [["beta", 6m], ["gamma", 4m], ["alpha", 2m], ["delta", null]]),
             ],
@@ -256,6 +258,8 @@ public sealed class OqlExecutionConformanceTests
             ],
             [OqlClauses.CreateIndex] =
             [
+                new("CREATE INDEX inclusive ON items (amount INCLUDE MISSING)", [["amount INCLUDE MISSING", true]],
+                    VerificationStatement: "SELECT PATH, INCLUDE_MISSING FROM COHESION_SCHEMA.INDEXES"),
                 new("CREATE INDEX by_score ON items (details.score)", [["by_score", "details.score", false]],
                     VerificationStatement: "SELECT INDEX_NAME, PATH, IS_UNIQUE FROM COHESION_SCHEMA.INDEXES"),
                 new("CREATE UNIQUE INDEX by_name ON items (name)", [["by_name", "name", "name", null, true]],

@@ -328,6 +328,21 @@ public sealed partial class DocumentCatalog
             SeekRange(definition, equalityPrefix, lower, includeLower, upper, includeUpper),
             entryLimit: 512, pageLimit: 32, cancellationToken: cancellationToken);
 
+    // A bounded absence proof over the first varying component's lossy tags, without
+    // reading document content. Incomplete probes never establish scalar equivalence.
+    internal BTreeRangeCount ProbeComplexOrderKeys(DocumentIndexMetadata definition, IReadOnlyList<object> equalityPrefix,
+        TransactionSnapshot snapshot, CancellationToken cancellationToken)
+    {
+        var prefix = DocumentIndexKeys.EncodePrefix(equalityPrefix).Encoded;
+        var start = new byte[prefix.Length + 1];
+        prefix.Span.CopyTo(start);
+        start[^1] = 6;
+        var end = (byte[])start.Clone();
+        end[^1] = 8;
+        return ResolveIndex(definition).CountRange(snapshot, new IndexKeyRange(new IndexKey(start), new IndexKey(end), true, false),
+            entryLimit: 512, pageLimit: 32, cancellationToken: cancellationToken);
+    }
+
     private static IndexKeyRange SeekRange(DocumentIndexMetadata definition, IReadOnlyList<object> equalityPrefix,
         object? lower, bool includeLower, object? upper, bool includeUpper)
     {
