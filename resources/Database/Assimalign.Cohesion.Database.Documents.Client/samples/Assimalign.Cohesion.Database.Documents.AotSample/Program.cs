@@ -231,7 +231,9 @@ internal static class Program
             await connection.ExecuteAsync("CREATE INDEX ordering_ix ON ordering (v INCLUDE MISSING)", cancellationToken: token);
             var orderingPlan = await connection.QueryAsync("EXPLAIN SELECT META().id FROM ordering ORDER BY v DESC", cancellationToken: token);
             Check(orderingPlan.Documents.Any(document => document.GetProperty("operator").GetString() == "IndexOrderCandidate" &&
-                document.GetProperty("detail").GetString()!.Contains("order_eligible=True", StringComparison.Ordinal)), "ordered eligibility only");
+                document.GetProperty("detail").GetString()!.Contains("consumed=True; sort=elided", StringComparison.Ordinal)), "ordered index consumption");
+            var orderedPage = await connection.QueryAsync("SELECT META().id FROM ordering ORDER BY v DESC LIMIT 1 OFFSET 1", cancellationToken: token);
+            Check(orderedPage.Count == 1 && orderedPage.Single().GetValue(0) is "n", "ordered index early page");
             Check(await connection.ExecuteAsync("DROP COLLECTION ordering", cancellationToken: token) == 0, "ordering cleanup");
             Check(await connection.ExecuteAsync("CREATE INDEX by_score ON items (score)", cancellationToken: token) == 0, "index create");
             var explained = await connection.QueryAsync("EXPLAIN SELECT score FROM items WHERE score >= 2", cancellationToken: token);
