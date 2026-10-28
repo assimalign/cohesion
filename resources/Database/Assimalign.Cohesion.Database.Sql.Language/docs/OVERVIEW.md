@@ -10,7 +10,8 @@ binding SQL DDL/CAST type names to the shared type system (`Database.Types`).
 
 Aggregate calls retain FILTER conditions, DISTINCT/ALL and ordered inputs. The executable
 profile includes BOOL_AND/BOOL_OR/EVERY and sample/population variance and standard deviation
-(#1720, SQ-H1); window aggregates and grouping sets remain deferred.
+(#1720, SQ-H1). GROUPING SETS, ROLLUP, CUBE, empty sets, GROUP BY DISTINCT and
+GROUPING/GROUPING_ID subtotal masks execute (#1720, SQ-H2). Window aggregates remain deferred.
 
 - **Parser** — UNION/INTERSECT/EXCEPT with ALL or DISTINCT in every query position, `WITH [RECURSIVE]` before SELECT/INSERT/UPDATE/DELETE and plain `WITH` before MERGE (recursive bodies bind; execution is deferred to SQ-R2; WITH RECURSIVE before MERGE reports CK00001), plus `SELECT` (INNER/LEFT/RIGHT/FULL/CROSS joins, parenthesized join groups, derived tables, grouping, ordering, limits, subqueries), `INSERT`
   (multi-row, whole-item `DEFAULT`, `DEFAULT VALUES`, `INSERT ... SELECT`), `UPDATE`

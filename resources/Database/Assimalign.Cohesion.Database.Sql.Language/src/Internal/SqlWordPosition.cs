@@ -9,8 +9,8 @@ internal enum SqlWordPosition
     /// <summary>
     /// Where a dedicated rule recognizes it: <c>WITH</c> as a statement prefix; <c>ALL</c> after
     /// <c>SELECT</c> or a comparison operator;
-    /// <c>COLLATION</c> and <c>FULLTEXT</c> after <c>CREATE</c>; <c>GROUPING SETS</c> and the <c>GROUPING</c>, <c>ROLLUP</c>, <c>CUBE</c> and
-    /// <c>GROUPING_ID</c> calls; <c>PERCENT</c> and <c>WITH TIES</c> after FETCH or TOP;
+    /// <c>COLLATION</c> and <c>FULLTEXT</c> after <c>CREATE</c>;
+    /// <c>PERCENT</c> and <c>WITH TIES</c> after FETCH or TOP;
     /// <c>WITHIN GROUP</c> after a non-LISTAGG call;
     /// <c>ANY</c> and <c>SOME</c> with an array operand after a comparison operator; <c>LATERAL</c> after
     /// <c>FROM</c> or <c>JOIN</c>; and <c>~</c> in prefix or infix position.

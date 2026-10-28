@@ -32,6 +32,11 @@ internal static class SqlTreeDump
     {
         switch (expression)
         {
+            case SqlGroupingSetExpression group:
+                builder.Append("Grouping(").Append(group.Kind).Append(", ");
+                AppendList(builder, group.Items);
+                builder.Append(')');
+                break;
             case null:
                 builder.Append("null");
                 break;
@@ -218,7 +223,7 @@ internal static class SqlTreeDump
             Append(builder, definition.Body);
             builder.Append(')');
         }
-        builder.Append("], distinct=").Append(select.IsDistinct).Append(", columns=[");
+        builder.Append("], distinct=").Append(select.IsDistinct).Append(", groupDistinct=").Append(select.IsGroupByDistinct).Append(", columns=[");
         for (int index = 0; index < select.Columns.Count; index++)
         {
             builder.Append(index > 0 ? ", " : string.Empty);
