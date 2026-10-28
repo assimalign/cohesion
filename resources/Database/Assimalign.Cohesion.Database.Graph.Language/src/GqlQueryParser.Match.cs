@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using Assimalign.Cohesion.Database.Language;
+using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Graph.Language;
 
@@ -219,7 +220,15 @@ public sealed partial class GqlQueryParser
     {
         // Decide from the completed expression: indexing/field access can produce a scalar.
         if (value is GqlListExpression or GqlMapExpression or GqlListComprehensionExpression or GqlListSliceExpression)
-        { _diagnostics.Add(QueryDiagnostics.UnsupportedClause("LIST OR MAP PROPERTY VALUE", Profile.Language, value.Location ?? Span(Current, Current))); }
+        {
+            var location = value.Location ?? Span(Current, Current);
+            _diagnostics.Add(new Diagnostic
+            {
+                Code = "CK00001", Severity = DiagnosticSeverity.Error, Location = DiagnosticLocation.Absolute,
+                Message = value is GqlMapExpression ? ErrorMessages.MapPropertyUnsupported : ErrorMessages.ListPropertyUnsupported,
+                Start = location.Start, End = location.End, Line = location.StartLine,
+            });
+        }
     }
 
     private GqlExpression ParsePageValue()

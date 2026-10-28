@@ -145,7 +145,8 @@ already-bound node must be a bare variable (CG03006). New relationships require 
 Property positions parse the complete expression before admission. Direct list/map literals,
 comprehensions and slices that still yield a container are refused by the parser with CK00001,
 including inside MERGE patterns and literal-map updates. Indexing or field access that yields a
-scalar is accepted. Other proven or evaluated invalid MERGE equalities use CG03004; ordinary
+scalar is accepted. The CK00001 diagnostic retains the established list/map storage-refusal
+wording and spans the completed expression. Other proven or evaluated invalid MERGE equalities use CG03004; ordinary
 property writes retain CG03003. Required properties can be supplied by ON CREATE before the
 finished created entity is validated. Row-dependent equalities can use a per-row index seek.
 GqlMergeParserTests and the profile execution corpus pin grammar, rendering and live behavior.

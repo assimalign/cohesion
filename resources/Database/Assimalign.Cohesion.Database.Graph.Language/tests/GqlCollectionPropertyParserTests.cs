@@ -40,7 +40,9 @@ public sealed class GqlCollectionPropertyParserTests
         {
             var statement = new GqlQueryParser().Parse(query);
             // Assert
-            statement.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CK00001");
+            var diagnostic = statement.Diagnostics.ShouldHaveSingleItem();
+            diagnostic.Code.ShouldBe("CK00001");
+            diagnostic.Message.ShouldNotBeNull().ShouldContain("unsupported by graph storage", Case.Sensitive);
         }
     }
 }
