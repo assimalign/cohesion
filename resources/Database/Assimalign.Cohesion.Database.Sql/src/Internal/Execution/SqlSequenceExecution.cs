@@ -217,8 +217,11 @@ internal sealed class SqlSequenceExecution : IDisposable
         { throw SqlEvaluationException.FunctionSignatureMismatch(call.FunctionName, "sequence arguments", count.ToString(CultureInfo.InvariantCulture), "nextval(name), currval(name), setval(name, integer [, boolean]), lastval()"); }
     }
 
+    internal static Action? PersistedNodeVisited { get; set; }
+
     internal static void RefusePersistedNode(SqlExpression expression)
     {
+        PersistedNodeVisited?.Invoke();
         if (expression is SqlCastExpression cast && cast.TargetType.Equals("REGCLASS", StringComparison.OrdinalIgnoreCase) || expression is SqlNextValueExpression || expression is SqlFunctionCallExpression call && IsFunction(call.FunctionName))
         { throw new SqlPlanningException("CS03074", ErrorMessages.SequencePersistedUnsupported, expression.Location); }
     }
@@ -236,7 +239,7 @@ internal sealed class SqlSequenceExecution : IDisposable
             case SqlCreateDomainExpression domain: RefusePersisted(domain.DefaultValue); RefusePersisted(domain.Check); break;
             case SqlCreateFunctionExpression function: RefusePersisted(function.Body); break;
             case SqlCreateViewExpression view:
-                foreach (var node in SqlViewQuery.Nodes(view.Query)) { RefusePersisted(node); } break;
+                foreach (var node in SqlViewQuery.Nodes(view.Query)) { RefusePersistedNode(node); } break;
             case SqlCreateTableExpression create:
                 foreach (var column in create.Columns) { RefusePersisted(column.DefaultValue); foreach (var c in column.Constraints) { RefusePersisted(c.CheckExpression); } }
                 foreach (var c in create.Constraints) { RefusePersisted(c.CheckExpression); }

@@ -168,7 +168,7 @@ structured-carrier messages remain unprefixed.
 | New (#1717, SQ-S2) | CS03073 | Schema/catalog — sequence name or object identity is absent (42P01) |
 | New (#1717, SQ-S2) | CS03074 | Schema/catalog — sequence operation in a persisted expression or declared provisioning script is unsupported (0A000) |
 | New (#1717, SQ-S2) | CS03075 | Schema/catalog — setval value is outside the sequence bounds (22003) |
-| New (#1717, SQ-S2) | CS03076 | Schema/expression — sequence value in an unsupported evaluation context or detached from execution (0A000) |
+| New (#1717, SQ-S2) | CS03076 | Schema/expression — sequence value in an unsupported evaluation context, including NEXT VALUE FOR in RETURNING, or detached from execution (0A000) |
 | New (#1717, SQ-S2) | CS03077 | Schema/expression — malformed sequence reference or runtime sequence-call argument (22023) |
 | COHSQLP001 | CS03101 | Schema/constraints |
 | COHSQLP002 | CS03102 | Schema/constraints |

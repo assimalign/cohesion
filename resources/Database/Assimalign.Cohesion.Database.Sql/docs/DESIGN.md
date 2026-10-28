@@ -18,6 +18,9 @@ directory and scoped per-row NEXT VALUE cache. Disposable value-type row scopes 
 the outer dictionary across nested projections; shared empty arrays never identify a row.
 The planner refuses NEXT VALUE FOR in subqueries, derived bodies, CTE definitions and
 CASE/COALESCE/NULLIF arguments with CS03076, including unused definitions.
+RETURNING also refuses NEXT VALUE FOR during planning, including MERGE and joined DML;
+nextval() retains its independent per-row RETURNING evaluation. Persisted-expression refusal
+visits each node once, including views and declared CHECK expressions.
 Ordinary evaluators and statement contexts gain no state.
 Literal/parameter names lock only their resolved objects; row-varying names take the
 captured directory's Shared grants before execution. This conservative dynamic-name policy

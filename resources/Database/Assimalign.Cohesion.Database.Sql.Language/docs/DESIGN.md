@@ -10,6 +10,11 @@ contextual at the command head, needs complete parsing, and travels over ordinar
 The engine refuses it inside a transaction and clears logical-session state otherwise.
 Its named profile capability and parser/live conformance cases cover that complete statement.
 
+NEXT VALUE FOR remains a parsed scalar leaf in RETURNING; the engine refuses that context
+with CS03076 before evaluation, following Microsoft's OUTPUT exclusion. nextval() retains
+PostgreSQL's separate per-row RETURNING evaluation. Persisted-expression checks visit each
+node once rather than recursively walking every node's subtree.
+
 CREATE/ALTER/DROP SEQUENCE use sealed statement leaves and a closed option list preserving explicit NO bounds and bare RESTART. NEXT VALUE FOR is a scalar leaf; REGCLASS and its PostgreSQL suffix normalize to the existing cast AST. Sequence DDL and NEXT VALUE have independent profile gates and renderer round trips. Existing syntax identities reject malformed or duplicate options; OWNED BY remains CK00001. Five advertised function signatures execute in SQL, with per-row standard sharing independent of nextval. The language and live SQL conformance tables cover all four new clauses; no storage or wire contract changes. See DIALECT for defaults and accepted exclusions.
 
 ## Sequence catalog review (#1717)

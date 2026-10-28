@@ -72,7 +72,7 @@ internal sealed partial class SqlPlanner
                 }
                 if (insert.Returning is not null)
                 {
-                    foreach (var column in insert.Returning) { ValidateFunctionCalls(column.Expression); }
+                    foreach (var column in insert.Returning) { ValidateFunctionCalls(column.Expression, allowNextValue: false); }
                 }
                 if (insert.Values is not null)
                 {
@@ -98,13 +98,13 @@ internal sealed partial class SqlPlanner
                     foreach (var assignment in action.Assignments) { ValidateFunctionCalls(assignment.Value); }
                     foreach (var value in action.Values ?? []) { ValidateFunctionCalls(value); }
                 }
-                foreach (var column in merge.Returning ?? []) { ValidateFunctionCalls(column.Expression); }
+                foreach (var column in merge.Returning ?? []) { ValidateFunctionCalls(column.Expression, allowNextValue: false); }
                 break;
             case SqlUpdateExpression update:
                 ValidateSourceFunctionCalls(update.From);
                 if (update.Returning is not null)
                 {
-                    foreach (var column in update.Returning) { ValidateFunctionCalls(column.Expression); }
+                    foreach (var column in update.Returning) { ValidateFunctionCalls(column.Expression, allowNextValue: false); }
                 }
                 foreach (var assignment in update.Assignments)
                 {
@@ -116,7 +116,7 @@ internal sealed partial class SqlPlanner
                 ValidateSourceFunctionCalls(delete.Using);
                 if (delete.Returning is not null)
                 {
-                    foreach (var column in delete.Returning) { ValidateFunctionCalls(column.Expression); }
+                    foreach (var column in delete.Returning) { ValidateFunctionCalls(column.Expression, allowNextValue: false); }
                 }
                 ValidateFunctionCalls(delete.Where, allowNextValue: false);
                 break;
@@ -263,7 +263,7 @@ internal sealed partial class SqlPlanner
     internal static void ValidateDeclaredCalls(SqlExpression expression, SqlFunctionCatalog catalog)
     {
         RuntimeHelpers.EnsureSufficientExecutionStack();
-        SqlSequenceExecution.RefusePersisted(expression);
+        SqlSequenceExecution.RefusePersistedNode(expression);
         foreach (var child in Children(expression))
         {
             ValidateDeclaredCalls(child, catalog);
