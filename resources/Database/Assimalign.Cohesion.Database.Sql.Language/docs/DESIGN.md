@@ -15,6 +15,11 @@ with CS03076 before evaluation, following Microsoft's OUTPUT exclusion. nextval(
 PostgreSQL's separate per-row RETURNING evaluation. Persisted-expression checks visit each
 node once rather than recursively walking every node's subtree.
 
+Sequence outputs independent of ordering evaluate after sorting and before pagination: OFFSET
+tuples consume values, while tuples beyond OFFSET + LIMIT do not. This applies to unordered,
+grouped and correlated execution. Correlated deferred input retains only qualifying top-N rows
+and charges their rows and keys to the existing statement memory budget (CS05067).
+
 CREATE/ALTER/DROP SEQUENCE use sealed statement leaves and a closed option list preserving explicit NO bounds and bare RESTART. NEXT VALUE FOR is a scalar leaf; REGCLASS and its PostgreSQL suffix normalize to the existing cast AST. Sequence DDL and NEXT VALUE have independent profile gates and renderer round trips. Existing syntax identities reject malformed or duplicate options; OWNED BY remains CK00001. Five advertised function signatures execute in SQL, with per-row standard sharing independent of nextval. The language and live SQL conformance tables cover all four new clauses; no storage or wire contract changes. See DIALECT for defaults and accepted exclusions.
 
 ## Sequence catalog review (#1717)

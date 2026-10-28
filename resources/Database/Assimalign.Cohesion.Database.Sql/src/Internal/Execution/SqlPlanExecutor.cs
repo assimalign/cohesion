@@ -302,7 +302,6 @@ internal sealed partial class SqlPlanExecutor
             if (remaining == 0) { return projected; }
             foreach (var source in matches)
             {
-                if (skip > 0 && HasSequenceProjection(projections)) { skip--; continue; }
                 var output = ProjectRow(source, projections, evaluator, cancellationToken);
                 if (skip > 0) { skip--; continue; }
                 projected.Add(output);
@@ -326,14 +325,14 @@ internal sealed partial class SqlPlanExecutor
                 for (int index = 0; index < keys.Length; index++) { keys[index] = evaluator.Evaluate(orderBy[index].Key, orderedRow); }
                 sources.Add(orderedRow, keys);
             }
-            var selected = sources.Finish(resolveEmptyCollations: false);
+            var selected = sources.Finish(resolveEmptyCollations: false, includeOffset: true);
             var projected = new List<object?[]>(selected.Count);
             foreach (var source in selected)
             {
                 projected.Add(ProjectRow(source, projections, evaluator, cancellationToken, completed,
                     completed is { Count: > 0 } ? source.Length - projections.Count : 0));
             }
-            return projected;
+            return ApplyRowWindow(projected, limit, offset);
         }
         if (outputSlots is not { Count: > 0 } && projections.Any(projection => ContainsVolatileCall(projection.Value)))
         {

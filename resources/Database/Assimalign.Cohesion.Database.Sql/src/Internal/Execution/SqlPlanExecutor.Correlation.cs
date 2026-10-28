@@ -157,28 +157,43 @@ internal sealed partial class SqlPlanExecutor
     }
 
     /// <summary>Computes projection and sort values within each outer row's frame, then sorts fixed keys.</summary>
-    private async Task<DatabaseResult> MaterializeCorrelatedSelectAsync(IEnumerable<object?[]> matches,
+    internal static Action<int>? SequenceCandidatesRetained { get; set; }
+
+    private Task<DatabaseResult> MaterializeCorrelatedSelectAsync(IEnumerable<object?[]> matches,
         IReadOnlyList<SqlProjection> projections, IReadOnlyList<SqlBoundOrdering> orderBy, SqlRowCount? limit, SqlRowCount? offset,
         bool distinct, SqlExpressionEvaluator evaluator, SqlStatementContext statement, CancellationToken cancellationToken,
         SqlBoundExpression? where = null)
     {
-        if (!distinct && HasSequenceProjection(projections))
+        return !distinct && HasSequenceProjection(projections)
+            ? MaterializeSequenceCandidatesAsync(matches, projections, orderBy, limit, offset, evaluator, statement, cancellationToken, where)
+            : MaterializeOrdinaryCorrelatedSelectAsync(matches, projections, orderBy, limit, offset, distinct, evaluator, statement, cancellationToken, where);
+    }
+
+    private async Task<DatabaseResult> MaterializeSequenceCandidatesAsync(IEnumerable<object?[]> matches,
+        IReadOnlyList<SqlProjection> projections, IReadOnlyList<SqlBoundOrdering> orderBy, SqlRowCount? limit, SqlRowCount? offset,
+        SqlExpressionEvaluator evaluator, SqlStatementContext statement, CancellationToken cancellationToken, SqlBoundExpression? where)
+    {
+        if (orderBy.Count == 0)
         {
-            if (orderBy.Count == 0)
-            {
-                return await MaterializeSequenceSelectAsync(matches, projections, orderBy, limit, offset,
-                    evaluator, statement, cancellationToken, where, []).ConfigureAwait(false);
-            }
-            var candidates = matches.ToList();
-            if (candidates.Count == 0) { return MaterializeProjected(projections, []); }
-            var slots = OrderingOutputSlots(orderBy, candidates[0].Length);
-            if (!OrderingUsesSequence(projections, slots))
-            {
-                return await MaterializeSequenceSelectAsync(candidates, projections, orderBy, limit, offset,
-                    evaluator, statement, cancellationToken, where, slots).ConfigureAwait(false);
-            }
-            matches = candidates;
+            return await MaterializeSequenceSelectAsync(matches, projections, orderBy, limit, offset,
+                evaluator, statement, cancellationToken, where, []).ConfigureAwait(false);
         }
+        using var input = matches.GetEnumerator();
+        if (!input.MoveNext()) { return MaterializeProjected(projections, []); }
+        var slots = OrderingOutputSlots(orderBy, input.Current.Length);
+        var candidates = SequenceRows(input);
+        return !OrderingUsesSequence(projections, slots)
+            ? await MaterializeSequenceSelectAsync(candidates, projections, orderBy, limit, offset,
+                evaluator, statement, cancellationToken, where, slots).ConfigureAwait(false)
+            : await MaterializeOrdinaryCorrelatedSelectAsync(candidates, projections, orderBy, limit, offset, false,
+                evaluator, statement, cancellationToken, where).ConfigureAwait(false);
+    }
+
+    private async Task<DatabaseResult> MaterializeOrdinaryCorrelatedSelectAsync(IEnumerable<object?[]> matches,
+        IReadOnlyList<SqlProjection> projections, IReadOnlyList<SqlBoundOrdering> orderBy, SqlRowCount? limit, SqlRowCount? offset,
+        bool distinct, SqlExpressionEvaluator evaluator, SqlStatementContext statement, CancellationToken cancellationToken,
+        SqlBoundExpression? where = null)
+    {
         var collected = new SqlRowCollector(orderBy, _subqueryValues,
             distinct ? null : limit, distinct ? null : offset, cancellationToken, statement.Metrics);
         Collation[]? projectionCollations = null;
@@ -232,6 +247,11 @@ internal sealed partial class SqlPlanExecutor
         return FinishSelect(collected.Finish(), projections, limit, offset, distinct, evaluator, cancellationToken, projectionCollations);
     }
 
+    private static IEnumerable<object?[]> SequenceRows(IEnumerator<object?[]> input)
+    {
+        do { yield return input.Current; } while (input.MoveNext());
+    }
+
     private static HashSet<int> OrderingOutputSlots(IReadOnlyList<SqlBoundOrdering> ordering, int width)
     {
         var result = new HashSet<int>();
@@ -258,7 +278,12 @@ internal sealed partial class SqlPlanExecutor
         SqlExpressionEvaluator evaluator, SqlStatementContext statement, CancellationToken cancellationToken,
         SqlBoundExpression? where, HashSet<int> orderingSlots)
     {
-        var collected = new SqlRowCollector(orderBy, _subqueryValues, limit, offset, cancellationToken, statement.Metrics);
+        if (limit?.Count == 0) { return MaterializeProjected(projections, []); }
+        // An unordered collector must retain the offset tuples until their projections run.
+        var retainedLimit = orderBy.Count == 0 && limit is not null
+            ? limit with { Count = limit.Count <= long.MaxValue - (offset?.Count ?? 0) ? limit.Count + (offset?.Count ?? 0) : long.MaxValue } : limit;
+        using var collected = new SqlSequenceRowCollector(orderBy, _subqueryValues, retainedLimit,
+            orderBy.Count == 0 ? null : offset, cancellationToken, statement.Metrics, _definitions.StatementMemoryBudget);
         if (collected.IsComplete) { return MaterializeProjected(projections, []); }
         foreach (var source in matches)
         {
@@ -281,6 +306,7 @@ internal sealed partial class SqlPlanExecutor
                 keys[index] = evaluator.Evaluate(orderBy[index].Key, ordered);
             }
             collected.Add(ordered, keys);
+            SequenceCandidatesRetained?.Invoke(collected.RetainedCount);
             if (collected.IsComplete) { break; }
         }
         var returned = new List<object?[]>();
@@ -308,6 +334,6 @@ internal sealed partial class SqlPlanExecutor
             }
             returned.Add(output);
         }
-        return MaterializeProjected(projections, returned);
+        return MaterializeProjected(projections, ApplyRowWindow(returned, limit, offset));
     }
 }

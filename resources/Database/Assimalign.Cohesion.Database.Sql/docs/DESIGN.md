@@ -55,9 +55,14 @@ lookups; SQL scalar planning remains monitor-free as SQ-S1 established. RETURNIN
 sequence calls evaluate after preparation and before the global apply gate, so durable reservation
 and setval commits never occupy that gate. Deterministic held-reservation probes record writer
 gate waits dropping from one to zero for INSERT, upsert, UPDATE, DELETE and their joined paths.
-Independent sequence outputs project after Sort and Limit, including alias/ordinal ordering and
-grouped/correlated paths (PostgreSQL planner.c:6703-6763); sequence sort keys still evaluate first.
-Unordered correlated sequence projections stream directly into their row window.
+Independent sequence outputs project after Sort and before Limit, including alias/ordinal ordering
+and grouped/correlated paths. OFFSET tuples pass through projection and consume values before
+being discarded; tuples beyond OFFSET + LIMIT remain unevaluated. PostgreSQL
+src/backend/optimizer/plan/planner.c:2216-2225 places Limit above projection, and
+src/backend/executor/nodeLimit.c:91-116 pulls offset tuples through its child.
+Correlated deferred inputs filter before retention and stream through the bounded top-N collector;
+its retained rows, keys and conservative capacity overhead share StatementMemoryBudget (CS05067).
+Only sequence plans allocate this budget owner; ordinary collectors retain their instance layout.
 Cached sort aliases retain the declared output type, including numeric CASE promotion.
 DISCARD ALL clears sequence state and timeout overrides outside a transaction; ordinary rollback
 preserves it. Pool return sends DISCARD ALL over the existing Execute envelope after any rollback

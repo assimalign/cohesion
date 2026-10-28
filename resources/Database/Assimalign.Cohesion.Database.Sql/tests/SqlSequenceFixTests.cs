@@ -188,12 +188,12 @@ public sealed class SqlSequenceFixTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - Sequence output: grouped and correlated sorting limits reached calls")]
-    [InlineData("SELECT nextval('s'), k FROM t GROUP BY k ORDER BY 2 LIMIT 1")]
-    [InlineData("SELECT NEXT VALUE FOR s, NEXT VALUE FOR s, k FROM t GROUP BY k ORDER BY 3 LIMIT 1")]
-    [InlineData("SELECT nextval('s'), (SELECT u.k FROM t u WHERE u.k = t.k) AS v FROM t ORDER BY v LIMIT 1")]
-    [InlineData("SELECT nextval('s'), (SELECT u.k FROM t u WHERE u.k = t.k) AS v FROM t ORDER BY k LIMIT 1")]
-    [InlineData("SELECT nextval('s'), k FROM t LIMIT 1 OFFSET 1")]
-    public async Task Execute_SequenceOutputAcrossPlans_ShouldApplyWindowFirst(string sql)
+    [InlineData("SELECT nextval('s'), k FROM t GROUP BY k ORDER BY 2 LIMIT 1", 1L)]
+    [InlineData("SELECT NEXT VALUE FOR s, NEXT VALUE FOR s, k FROM t GROUP BY k ORDER BY 3 LIMIT 1", 1L)]
+    [InlineData("SELECT nextval('s'), (SELECT u.k FROM t u WHERE u.k = t.k) AS v FROM t ORDER BY v LIMIT 1", 1L)]
+    [InlineData("SELECT nextval('s'), (SELECT u.k FROM t u WHERE u.k = t.k) AS v FROM t ORDER BY k LIMIT 1", 1L)]
+    [InlineData("SELECT nextval('s'), k FROM t LIMIT 1 OFFSET 1", 2L)]
+    public async Task Execute_SequenceOutputAcrossPlans_ShouldEvaluateOffsetAndLimitRows(string sql, long expected)
     {
         // Arrange
         await using var engine = SqlDatabaseEngine.Create("sequence-fix", new());
@@ -206,10 +206,10 @@ public sealed class SqlSequenceFixTests
         var rows = await Rows(session, sql);
 
         // Assert
-        rows.ShouldHaveSingleItem()[0].ShouldBe(1L);
+        rows.ShouldHaveSingleItem()[0].ShouldBe(expected);
         rows[0][^1].ShouldBe(1);
         if (rows[0].Length == 3) { rows[0][1].ShouldBe(1L); }
-        (await Rows(session, "SELECT nextval('s')"))[0][0].ShouldBe(2L);
+        (await Rows(session, "SELECT nextval('s')"))[0][0].ShouldBe(expected + 1);
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - Sequence output: volatile alias sort keys evaluate once per input")]
