@@ -21,8 +21,8 @@ namespace Assimalign.Cohesion.Web.Hosting.Resources.Internal;
 /// Bodies in both directions are written by the control plane's content serializer, and responses
 /// carry its media type. An action or restore answers with its <see cref="ResourceActionResult"/>,
 /// whose <c>state</c> is the snapshot a successful write to a stateful action left. Statuses map to
-/// 200 (succeeded), 400 (rejected), 404 (no such action), 405 (operation not accepted), and 503 with
-/// no body (the control plane is not started).
+/// 200 (succeeded), 400 (rejected), 404 (no such action), and 405 (operation not accepted). Any other
+/// failure is the engine's 500.
 /// </remarks>
 internal static class ControlPlaneHttpHandler
 {
@@ -60,16 +60,7 @@ internal static class ControlPlaneHttpHandler
             }
 
             byte[] input = operation == ResourceActionKind.Write ? await ReadBodyAsync(context, cancellationToken).ConfigureAwait(false) : [];
-            ResourceActionResult result;
-            try
-            {
-                result = await controlPlane.ExecuteAsync(action, ResourceActionContext.Create(operation, serializer, input), cancellationToken).ConfigureAwait(false);
-            }
-            catch (InvalidOperationException)
-            {
-                context.Response.StatusCode = HttpStatusCode.ServiceUnavailable;
-                return;
-            }
+            ResourceActionResult result = await controlPlane.ExecuteAsync(action, ResourceActionContext.Create(operation, serializer, input), cancellationToken).ConfigureAwait(false);
 
             await WriteResultAsync(context, serializer, result, cancellationToken).ConfigureAwait(false);
             return;
@@ -90,16 +81,7 @@ internal static class ControlPlaneHttpHandler
                 return;
             }
 
-            ResourceActionResult result;
-            try
-            {
-                result = await controlPlane.RestoreAsync(ResourceStateSnapshot.Create(action, value), cancellationToken).ConfigureAwait(false);
-            }
-            catch (InvalidOperationException)
-            {
-                context.Response.StatusCode = HttpStatusCode.ServiceUnavailable;
-                return;
-            }
+            ResourceActionResult result = await controlPlane.RestoreAsync(ResourceStateSnapshot.Create(action, value), cancellationToken).ConfigureAwait(false);
 
             await WriteResultAsync(context, serializer, result, cancellationToken).ConfigureAwait(false);
             return;

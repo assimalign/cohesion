@@ -16,7 +16,7 @@ public class JsonResourceContentSerializerTests
     public void Serialize_TypesFromDifferentContexts_ShouldKeepEachContextsNaming()
     {
         // Arrange
-        ResourceManifest manifest = ResourceControlPlane.Create(new TestResource(), new TestPublisher(), TestSerializer.Json).Manifest;
+        ResourceManifest manifest = ResourceControlPlane.Create(new TestResource(), TestSerializer.Json).Manifest;
 
         // Act
         string setting = Encoding.UTF8.GetString(TestSerializer.Json.Serialize(new LogLevelSetting("Debug")).Span);

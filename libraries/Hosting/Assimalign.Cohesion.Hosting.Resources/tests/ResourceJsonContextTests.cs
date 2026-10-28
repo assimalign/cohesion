@@ -19,7 +19,7 @@ public class ResourceJsonContextTests
     {
         // Arrange
         var resource = new TestResource(new LogLevelAction());
-        ResourceManifest manifest = ResourceControlPlane.Create(resource, new TestPublisher(), TestSerializer.Json).Manifest;
+        ResourceManifest manifest = ResourceControlPlane.Create(resource, TestSerializer.Json).Manifest;
 
         // Act
         byte[] json = JsonSerializer.SerializeToUtf8Bytes(manifest, ResourceJsonContext.Default.ResourceManifest);

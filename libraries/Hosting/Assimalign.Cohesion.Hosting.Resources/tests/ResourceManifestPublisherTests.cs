@@ -152,8 +152,8 @@ public class ResourceManifestPublisherTests
         await Should.ThrowAsync<InvalidOperationException>(() => publisher.PublishAsync(CreateManifest()).AsTask());
     }
 
-    [Fact(DisplayName = DisplayPrefix + "A control plane restores the state the gateway answers with before its host serves")]
-    public async Task StartAsync_WithGatewaySnapshot_ShouldRestoreTheActionState()
+    [Fact(DisplayName = DisplayPrefix + "A resource service restores the state the gateway answers with before its host serves")]
+    public async Task StartingAsync_WithGatewaySnapshot_ShouldRestoreTheActionState()
     {
         // Arrange
         var handler = new StubHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
@@ -161,11 +161,11 @@ public class ResourceManifestPublisherTests
             Content = new StringContent("""{"snapshots":[{"action":"log-level","value":{"Level":"Debug"}}],"lease":"00:00:30"}""", Encoding.UTF8, "application/json"),
         });
         var action = new LogLevelAction();
-        ResourceControlPlane controlPlane = ResourceControlPlane.Create(new TestResource(action), CreatePublisher(handler), TestSerializer.Json);
+        ResourceService service = ResourceService.Create(ResourceControlPlane.Create(new TestResource(action), TestSerializer.Json), CreatePublisher(handler));
 
         // Act
-        await controlPlane.StartAsync();
-        await controlPlane.StopAsync();
+        await service.StartingAsync();
+        await service.StopAsync();
 
         // Assert
         action.Current.ShouldBe(new LogLevelSetting("Debug"));
@@ -244,6 +244,6 @@ public class ResourceManifestPublisherTests
 
     private static ResourceManifest CreateManifest(params IResourceAction[] actions)
     {
-        return ResourceControlPlane.Create(new TestResource(actions), new TestPublisher(), TestSerializer.Json).Manifest;
+        return ResourceControlPlane.Create(new TestResource(actions), TestSerializer.Json).Manifest;
     }
 }

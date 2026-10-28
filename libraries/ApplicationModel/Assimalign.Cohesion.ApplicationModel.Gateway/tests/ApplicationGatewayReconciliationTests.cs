@@ -191,14 +191,14 @@ public sealed class ApplicationGatewayReconciliationTests : IDisposable
     // gateway, which restores it on the others.
     private async Task WriteLogLevelAsync(ApplicationGateway gateway, string level)
     {
-        (TestInstance instance, ResourceControlPlane controlPlane) = _infrastructure.Instances.Values.First();
-        ResourceActionResult write = await controlPlane.ExecuteAsync(
+        (TestInstance instance, ResourceService service) = _infrastructure.Instances.Values.First();
+        ResourceActionResult write = await service.ControlPlane.ExecuteAsync(
             "log-level",
             ResourceActionContext.Create(ResourceActionKind.Write, TestSerializer.Json, Encoding.UTF8.GetBytes($$"""{"Level":"{{level}}"}""")));
 
         foreach (ResourceInstanceKey target in await gateway.RecordAsync("Web", "orders-api", instance.Key, write.State!))
         {
-            await _infrastructure.Instances[target].ControlPlane.RestoreAsync(write.State!);
+            await _infrastructure.Instances[target].Service.ControlPlane.RestoreAsync(write.State!);
         }
     }
 

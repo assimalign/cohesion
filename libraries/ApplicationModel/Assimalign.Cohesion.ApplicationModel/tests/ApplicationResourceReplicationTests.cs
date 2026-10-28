@@ -27,8 +27,8 @@ public class ApplicationResourceReplicationTests
         async Task<TestResource> StartInstanceAsync()
         {
             var instance = new TestResource();
-            ResourceControlPlane controlPlane = ResourceControlPlane.Create(instance, publisher, TestSerializer.Json);
-            await controlPlane.StartAsync(CancellationToken.None);
+            ResourceControlPlane controlPlane = ResourceControlPlane.Create(instance, TestSerializer.Json);
+            await ResourceService.Create(controlPlane, publisher).StartingAsync(CancellationToken.None);
             instances.Add(instance.Key, (instance, controlPlane));
             return instance;
         }

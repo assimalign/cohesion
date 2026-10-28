@@ -159,15 +159,15 @@ public class ApplicationGatewayTests
         await gateway.Started.WaitAsync(TimeSpan.FromSeconds(10));
         TestInstance second = await infrastructure.StartInstanceAsync("Web", "orders-api");
         IApplicationResource ordersApi = gateway.Resources.Single();
-        (TestInstance first, ResourceControlPlane firstControlPlane) = infrastructure.Instances.Values.First(entry => entry.Instance.Key != second.Key);
+        (TestInstance first, ResourceService firstService) = infrastructure.Instances.Values.First(entry => entry.Instance.Key != second.Key);
 
         // Act: the write runs once; the gateway records it and restores it on the others.
-        ResourceActionResult write = await firstControlPlane.ExecuteAsync(
+        ResourceActionResult write = await firstService.ControlPlane.ExecuteAsync(
             "log-level",
             ResourceActionContext.Create(ResourceActionKind.Write, TestSerializer.Json, """{"Level":"Debug"}"""u8.ToArray()));
         foreach (ResourceInstanceKey target in ordersApi.Record(first.Key, write.State!))
         {
-            await infrastructure.Instances[target].ControlPlane.RestoreAsync(write.State!);
+            await infrastructure.Instances[target].Service.ControlPlane.RestoreAsync(write.State!);
         }
 
         TestInstance scaledOut = await infrastructure.StartInstanceAsync("Web", "orders-api");

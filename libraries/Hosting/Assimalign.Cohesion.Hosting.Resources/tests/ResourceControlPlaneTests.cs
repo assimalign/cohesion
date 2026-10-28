@@ -22,7 +22,7 @@ public class ResourceControlPlaneTests
         var resource = new TestResource(new TestAction(), new TestAction());
 
         // Act & Assert
-        Should.Throw<ArgumentException>(() => ResourceControlPlane.Create(resource, new TestPublisher(), TestSerializer.Json));
+        Should.Throw<ArgumentException>(() => ResourceControlPlane.Create(resource, TestSerializer.Json));
     }
 
     [Fact(DisplayName = DisplayPrefix + "State on an action that accepts no writes is refused")]
@@ -33,7 +33,7 @@ public class ResourceControlPlaneTests
         var resource = new TestResource(new TestAction { Kind = ResourceActionKind.Read, State = state });
 
         // Act & Assert
-        Should.Throw<ArgumentException>(() => ResourceControlPlane.Create(resource, new TestPublisher(), TestSerializer.Json));
+        Should.Throw<ArgumentException>(() => ResourceControlPlane.Create(resource, TestSerializer.Json));
     }
 
     [Theory(DisplayName = DisplayPrefix + "An action must accept Read, Write, or both")]
@@ -45,7 +45,7 @@ public class ResourceControlPlaneTests
         var resource = new TestResource(new TestAction { Kind = kind });
 
         // Act & Assert
-        Should.Throw<ArgumentException>(() => ResourceControlPlane.Create(resource, new TestPublisher(), TestSerializer.Json));
+        Should.Throw<ArgumentException>(() => ResourceControlPlane.Create(resource, TestSerializer.Json));
     }
 
     [Fact(DisplayName = DisplayPrefix + "An instance without a key is refused")]
@@ -55,7 +55,7 @@ public class ResourceControlPlaneTests
         var resource = new TestResource { Key = default };
 
         // Act & Assert
-        Should.Throw<ArgumentException>(() => ResourceControlPlane.Create(resource, new TestPublisher(), TestSerializer.Json));
+        Should.Throw<ArgumentException>(() => ResourceControlPlane.Create(resource, TestSerializer.Json));
     }
 
     [Fact(DisplayName = DisplayPrefix + "A serializer that cannot write an action's state is refused before anything runs")]
@@ -66,7 +66,7 @@ public class ResourceControlPlaneTests
 
         // Act
         ArgumentException exception = Should.Throw<ArgumentException>(() =>
-            ResourceControlPlane.Create(resource, new TestPublisher(), JsonResourceContentSerializer.Create()));
+            ResourceControlPlane.Create(resource, JsonResourceContentSerializer.Create()));
 
         // Assert
         exception.ParamName.ShouldBe("serializer");
@@ -80,7 +80,7 @@ public class ResourceControlPlaneTests
         var resource = new TestResource(new LogLevelAction(), new TestAction());
 
         // Act
-        ResourceManifest manifest = ResourceControlPlane.Create(resource, new TestPublisher(), TestSerializer.Json).Manifest;
+        ResourceManifest manifest = ResourceControlPlane.Create(resource, TestSerializer.Json).Manifest;
 
         // Assert
         manifest.Provider.ShouldBe(resource.Provider);
@@ -91,68 +91,28 @@ public class ResourceControlPlaneTests
         manifest.Actions[1].ShouldBe(new ResourceActionDescriptor(_logLevel, ResourceActionKind.ReadWrite, true));
     }
 
-    [Fact(DisplayName = DisplayPrefix + "Start publishes the manifest and restores the state the publisher returns")]
-    public async Task StartAsync_WithReturnedSnapshot_ShouldRestoreBeforeCompleting()
+    [Fact(DisplayName = DisplayPrefix + "A control plane accepts invocations and restores as soon as it is created")]
+    public async Task ExecuteAsync_RightAfterCreate_ShouldRun()
     {
         // Arrange
         var action = new LogLevelAction();
-        var publisher = new TestPublisher(ResourceStateSnapshot.Create(_logLevel, """{"Level":"Warning"}"""u8.ToArray()));
-        ResourceControlPlane controlPlane = ResourceControlPlane.Create(new TestResource(action), publisher, TestSerializer.Json);
+        ResourceControlPlane controlPlane = ResourceControlPlane.Create(new TestResource(action), TestSerializer.Json);
 
         // Act
-        await controlPlane.StartAsync(CancellationToken.None);
+        ResourceActionResult read = await controlPlane.ExecuteAsync(_logLevel, ResourceActionContext.Create(ResourceActionKind.Read, TestSerializer.Json), CancellationToken.None);
+        ResourceActionResult restore = await controlPlane.RestoreAsync(ResourceStateSnapshot.Create(_logLevel, """{"Level":"Warning"}"""u8.ToArray()), CancellationToken.None);
 
         // Assert
-        publisher.Published.ShouldHaveSingleItem().ShouldBeSameAs(controlPlane.Manifest);
+        read.Status.ShouldBe(ResourceActionStatus.Succeeded);
+        restore.Status.ShouldBe(ResourceActionStatus.Succeeded);
         action.Current.Level.ShouldBe("Warning");
-        action.Applied.ShouldHaveSingleItem().Level.ShouldBe("Warning");
-    }
-
-    [Fact(DisplayName = DisplayPrefix + "A returned snapshot for an unknown action fails the start and leaves it unstarted")]
-    public async Task StartAsync_WithSnapshotForUnknownAction_ShouldFailAndStayUnstarted()
-    {
-        // Arrange
-        var publisher = new TestPublisher(ResourceStateSnapshot.Create("cors", """{"Origins":[]}"""u8.ToArray()));
-        ResourceControlPlane controlPlane = ResourceControlPlane.Create(new TestResource(new LogLevelAction()), publisher, TestSerializer.Json);
-
-        // Act
-        await Should.ThrowAsync<InvalidOperationException>(() => controlPlane.StartAsync(CancellationToken.None));
-
-        // Assert
-        await Should.ThrowAsync<InvalidOperationException>(async () =>
-            await controlPlane.ExecuteAsync(_logLevel, ResourceActionContext.Create(ResourceActionKind.Read, TestSerializer.Json), CancellationToken.None));
-    }
-
-    [Fact(DisplayName = DisplayPrefix + "A control plane starts once")]
-    public async Task StartAsync_Twice_ShouldThrow()
-    {
-        // Arrange
-        ResourceControlPlane controlPlane = ResourceControlPlane.Create(new TestResource(), new TestPublisher(), TestSerializer.Json);
-        await controlPlane.StartAsync(CancellationToken.None);
-
-        // Act & Assert
-        await Should.ThrowAsync<InvalidOperationException>(() => controlPlane.StartAsync(CancellationToken.None));
-    }
-
-    [Fact(DisplayName = DisplayPrefix + "Invocations are refused before start and after stop")]
-    public async Task ExecuteAsync_OutsideLifecycle_ShouldThrow()
-    {
-        // Arrange
-        ResourceControlPlane controlPlane = ResourceControlPlane.Create(new TestResource(new TestAction()), new TestPublisher(), TestSerializer.Json);
-        ResourceActionContext context = ResourceActionContext.Create(ResourceActionKind.Write, TestSerializer.Json);
-
-        // Act & Assert
-        await Should.ThrowAsync<InvalidOperationException>(async () => await controlPlane.ExecuteAsync(_flushCache, context, CancellationToken.None));
-        await controlPlane.StartAsync(CancellationToken.None);
-        await controlPlane.StopAsync(CancellationToken.None);
-        await Should.ThrowAsync<InvalidOperationException>(async () => await controlPlane.ExecuteAsync(_flushCache, context, CancellationToken.None));
     }
 
     [Fact(DisplayName = DisplayPrefix + "An unknown action is not found")]
     public async Task ExecuteAsync_WithUnknownAction_ShouldReturnNotFound()
     {
         // Arrange
-        ResourceControlPlane controlPlane = await StartAsync(new TestResource(new TestAction()));
+        ResourceControlPlane controlPlane = Create(new TestResource(new TestAction()));
 
         // Act
         ResourceActionResult result = await controlPlane.ExecuteAsync("cors", ResourceActionContext.Create(ResourceActionKind.Read, TestSerializer.Json), CancellationToken.None);
@@ -166,7 +126,7 @@ public class ResourceControlPlaneTests
     {
         // Arrange
         var action = new TestAction();
-        ResourceControlPlane controlPlane = await StartAsync(new TestResource(action));
+        ResourceControlPlane controlPlane = Create(new TestResource(action));
 
         // Act
         ResourceActionResult result = await controlPlane.ExecuteAsync(_flushCache, ResourceActionContext.Create(ResourceActionKind.Read, TestSerializer.Json), CancellationToken.None);
@@ -181,7 +141,7 @@ public class ResourceControlPlaneTests
     {
         // Arrange
         var action = new LogLevelAction();
-        ResourceControlPlane controlPlane = await StartAsync(new TestResource(action));
+        ResourceControlPlane controlPlane = Create(new TestResource(action));
 
         // Act
         ResourceActionResult result = await controlPlane.ExecuteAsync(
@@ -202,7 +162,7 @@ public class ResourceControlPlaneTests
     public async Task ExecuteAsync_WithReadOrStatelessWrite_ShouldReturnNoSnapshot()
     {
         // Arrange
-        ResourceControlPlane controlPlane = await StartAsync(new TestResource(new LogLevelAction(), new TestAction()));
+        ResourceControlPlane controlPlane = Create(new TestResource(new LogLevelAction(), new TestAction()));
 
         // Act
         ResourceActionResult read = await controlPlane.ExecuteAsync(_logLevel, ResourceActionContext.Create(ResourceActionKind.Read, TestSerializer.Json), CancellationToken.None);
@@ -223,7 +183,7 @@ public class ResourceControlPlaneTests
     {
         // Arrange
         var action = new LogLevelAction();
-        ResourceControlPlane controlPlane = await StartAsync(new TestResource(action));
+        ResourceControlPlane controlPlane = Create(new TestResource(action));
 
         // Act
         ResourceActionResult result = await controlPlane.ExecuteAsync(
@@ -246,7 +206,7 @@ public class ResourceControlPlaneTests
         {
             Handler = _ => throw new ResourceContentException("Replicas must be zero or more."),
         };
-        ResourceControlPlane controlPlane = await StartAsync(new TestResource(action));
+        ResourceControlPlane controlPlane = Create(new TestResource(action));
 
         // Act
         ResourceActionResult result = await controlPlane.ExecuteAsync(_flushCache, ResourceActionContext.Create(ResourceActionKind.Write, TestSerializer.Json), CancellationToken.None);
@@ -260,7 +220,7 @@ public class ResourceControlPlaneTests
     public async Task RestoreAsync_WithStatelessAction_ShouldReturnNotSupported()
     {
         // Arrange
-        ResourceControlPlane controlPlane = await StartAsync(new TestResource(new TestAction()));
+        ResourceControlPlane controlPlane = Create(new TestResource(new TestAction()));
 
         // Act
         ResourceActionResult result = await controlPlane.RestoreAsync(ResourceStateSnapshot.Create(_flushCache, "{}"u8.ToArray()), CancellationToken.None);
@@ -275,8 +235,8 @@ public class ResourceControlPlaneTests
         // Arrange: two instances of one resource, as a scaled-out platform runs them.
         var first = new LogLevelAction();
         var second = new LogLevelAction();
-        ResourceControlPlane firstInstance = await StartAsync(new TestResource(first));
-        ResourceControlPlane secondInstance = await StartAsync(new TestResource(second));
+        ResourceControlPlane firstInstance = Create(new TestResource(first));
+        ResourceControlPlane secondInstance = Create(new TestResource(second));
         ResourceActionResult write = await firstInstance.ExecuteAsync(
             _logLevel,
             ResourceActionContext.Create(ResourceActionKind.Write, TestSerializer.Json, """{"Level":"Debug"}"""u8.ToArray()),
@@ -297,7 +257,7 @@ public class ResourceControlPlaneTests
     {
         // Arrange
         var action = new LogLevelAction();
-        ResourceControlPlane controlPlane = await StartAsync(new TestResource(action));
+        ResourceControlPlane controlPlane = Create(new TestResource(action));
 
         // Act
         ResourceActionResult result = await controlPlane.RestoreAsync(ResourceStateSnapshot.Create(_logLevel, "null"u8.ToArray()), CancellationToken.None);
@@ -307,86 +267,8 @@ public class ResourceControlPlaneTests
         action.Current.Level.ShouldBe("Information");
     }
 
-    [Fact(DisplayName = DisplayPrefix + "A publication with a lease is renewed until the control plane stops")]
-    public async Task StartAsync_WithLease_ShouldRenewUntilStopped()
+    private static ResourceControlPlane Create(TestResource resource)
     {
-        // Arrange
-        var publisher = new TestPublisher { Lease = TimeSpan.FromMilliseconds(150) };
-        ResourceControlPlane controlPlane = ResourceControlPlane.Create(new TestResource(), publisher, TestSerializer.Json);
-
-        // Act
-        await controlPlane.StartAsync(CancellationToken.None);
-        await Eventually.WaitUntilAsync(() => publisher.Renewals >= 2);
-        await controlPlane.StopAsync(CancellationToken.None);
-        int renewals = publisher.Renewals;
-        await Task.Delay(300);
-
-        // Assert
-        publisher.Renewals.ShouldBe(renewals);
-        publisher.Published.ShouldHaveSingleItem();
-    }
-
-    [Fact(DisplayName = DisplayPrefix + "An instance its gateway no longer knows publishes again and restores the answer")]
-    public async Task Renewal_WhenGatewayDoesNotKnowTheInstance_ShouldPublishAgainAndRestore()
-    {
-        // Arrange
-        var action = new LogLevelAction();
-        var publisher = new TestPublisher(ResourceStateSnapshot.Create(_logLevel, """{"Level":"Warning"}"""u8.ToArray()))
-        {
-            Lease = TimeSpan.FromMilliseconds(150),
-            Known = false,
-        };
-        ResourceControlPlane controlPlane = ResourceControlPlane.Create(new TestResource(action), publisher, TestSerializer.Json);
-
-        // Act
-        await controlPlane.StartAsync(CancellationToken.None);
-        await Eventually.WaitUntilAsync(() => publisher.Published.Count >= 2 && action.Applied.Count >= 2);
-        await controlPlane.StopAsync(CancellationToken.None);
-
-        // Assert
-        action.Current.Level.ShouldBe("Warning");
-    }
-
-    [Fact(DisplayName = DisplayPrefix + "An unreachable gateway does not stop the instance: renewals are retried")]
-    public async Task Renewal_WhenGatewayIsUnreachable_ShouldKeepServingAndRetry()
-    {
-        // Arrange
-        var publisher = new TestPublisher
-        {
-            Lease = TimeSpan.FromMilliseconds(150),
-            RenewalFailure = new TimeoutException("The gateway did not answer."),
-        };
-        ResourceControlPlane controlPlane = ResourceControlPlane.Create(new TestResource(new LogLevelAction()), publisher, TestSerializer.Json);
-        await controlPlane.StartAsync(CancellationToken.None);
-
-        // Act
-        await Eventually.WaitUntilAsync(() => publisher.Renewals >= 3);
-        ResourceActionResult read = await controlPlane.ExecuteAsync(_logLevel, ResourceActionContext.Create(ResourceActionKind.Read, TestSerializer.Json), CancellationToken.None);
-        await controlPlane.StopAsync(CancellationToken.None);
-
-        // Assert
-        read.Status.ShouldBe(ResourceActionStatus.Succeeded);
-    }
-
-    [Fact(DisplayName = DisplayPrefix + "A lease that is not positive fails the start")]
-    public async Task StartAsync_WithNonPositiveLease_ShouldFailAndStayUnstarted()
-    {
-        // Arrange
-        var publisher = new TestPublisher { Lease = TimeSpan.Zero };
-        ResourceControlPlane controlPlane = ResourceControlPlane.Create(new TestResource(new TestAction()), publisher, TestSerializer.Json);
-
-        // Act
-        await Should.ThrowAsync<InvalidOperationException>(() => controlPlane.StartAsync(CancellationToken.None));
-
-        // Assert
-        await Should.ThrowAsync<InvalidOperationException>(async () =>
-            await controlPlane.ExecuteAsync(_flushCache, ResourceActionContext.Create(ResourceActionKind.Write, TestSerializer.Json), CancellationToken.None));
-    }
-
-    private static async Task<ResourceControlPlane> StartAsync(TestResource resource)
-    {
-        ResourceControlPlane controlPlane = ResourceControlPlane.Create(resource, new TestPublisher(), TestSerializer.Json);
-        await controlPlane.StartAsync(CancellationToken.None);
-        return controlPlane;
+        return ResourceControlPlane.Create(resource, TestSerializer.Json);
     }
 }

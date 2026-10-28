@@ -37,7 +37,7 @@ internal sealed class TestInfrastructure : IInfrastructureProvider
     /// <summary>The workloads the platform runs, with the revision each runs.</summary>
     public ConcurrentDictionary<ResourceName, string> Running { get; } = new();
 
-    public ConcurrentDictionary<ResourceInstanceKey, (TestInstance Instance, ResourceControlPlane ControlPlane)> Instances { get; } = new();
+    public ConcurrentDictionary<ResourceInstanceKey, (TestInstance Instance, ResourceService Service)> Instances { get; } = new();
 
     /// <summary>
     /// The outputs the platform reports for each resource; an endpoint named after the resource and
@@ -105,9 +105,9 @@ internal sealed class TestInfrastructure : IInfrastructureProvider
     public async Task<TestInstance> StartInstanceAsync(ProviderName provider, ResourceName name, CancellationToken cancellationToken = default)
     {
         var instance = new TestInstance(provider, name);
-        ResourceControlPlane controlPlane = ResourceControlPlane.Create(instance, new GatewayForwarder(this), TestSerializer.Json);
-        await controlPlane.StartAsync(cancellationToken);
-        Instances[instance.Key] = (instance, controlPlane);
+        ResourceService service = ResourceService.Create(ResourceControlPlane.Create(instance, TestSerializer.Json), new GatewayForwarder(this));
+        await service.StartingAsync(cancellationToken);
+        Instances[instance.Key] = (instance, service);
         return instance;
     }
 }

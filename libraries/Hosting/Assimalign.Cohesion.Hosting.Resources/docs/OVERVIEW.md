@@ -9,9 +9,10 @@ publishes to the gateway that manages it. The design record is [DESIGN.md](DESIG
 ## Scope
 
 - In scope: identity value objects, actions and their replayable state, invocation results, the
-  manifest, the publication seam, health contributions, and the generic `ResourceControlPlane`.
-- Out of scope: transports (the Web area binds HTTP), gateways and application resources
-  (`Assimalign.Cohesion.ApplicationModel` and `.Gateway`), identity and credentials.
+  manifest, the publication seam, health contributions, the generic `ResourceControlPlane`, and the
+  `ResourceService` that joins it to its host and gateway.
+- Out of scope: servers (the Web area serves the control plane over HTTP), gateways and application
+  resources (`Assimalign.Cohesion.ApplicationModel` and `.Gateway`), identity and credentials.
 
 ## Dependencies
 
@@ -39,14 +40,17 @@ ResourceManifestPublisher publisher = ResourceManifestPublisher.Create(new Resou
     Serializer = serializer,
 });
 
-ResourceControlPlane controlPlane = ResourceControlPlane.Create(resource, publisher, serializer);
+ResourceControlPlane controlPlane = ResourceControlPlane.Create(resource, serializer);
 
-// Wrap it in the area's IResourceService and register that before the services that serve
-// traffic: the host starts it first, and it restores the state written since the last
-// deployment before they start.
-builder.AddService(new AreaResourceService(controlPlane));
+// The resource service publishes the manifest and restores the state written since the last
+// deployment before the host starts any service or server, wherever it is registered.
+builder.AddService(ResourceService.Create(controlPlane, publisher));
+
+// The area's server, a host service of its own, starts after that and serves the control plane.
+builder.AddService(new AreaControlPlaneServer(listener, controlPlane));
 ```
 
-A transport then calls `controlPlane.ExecuteAsync(name, ResourceActionContext.Create(operation,
+A server calls `controlPlane.ExecuteAsync(name, ResourceActionContext.Create(operation,
 controlPlane.Serializer, input))` for an invocation and `controlPlane.RestoreAsync(snapshot)` when
-the gateway replicates a write.
+the gateway replicates a write. In process, a gateway calls the same members on
+`IResourceService.ControlPlane` and no server is registered.

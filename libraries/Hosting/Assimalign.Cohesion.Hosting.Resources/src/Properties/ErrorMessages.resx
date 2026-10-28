@@ -21,8 +21,7 @@
   <data name="ResourceActionResultNull" xml:space="preserve"><value>Action '{0}' returned null instead of a result.</value></data>
   <data name="ResourceStateSnapshotEmpty" xml:space="preserve"><value>A state snapshot is a UTF-8 JSON value and cannot be empty.</value></data>
   <data name="ResourceStateSnapshotNull" xml:space="preserve"><value>A state snapshot cannot be a null value.</value></data>
-  <data name="ResourceControlPlaneAlreadyStarted" xml:space="preserve"><value>The resource control plane has already been started.</value></data>
-  <data name="ResourceControlPlaneNotStarted" xml:space="preserve"><value>The resource control plane is not started; it accepts invocations and restores only between StartAsync and StopAsync.</value></data>
+  <data name="ResourceServiceAlreadyStarted" xml:space="preserve"><value>The resource service has already been started, or a start is in progress.</value></data>
   <data name="ResourcePublicationNull" xml:space="preserve"><value>The manifest publisher returned null instead of a publication, or a publication without a snapshot list.</value></data>
   <data name="ResourcePublicationLeaseInvalid" xml:space="preserve"><value>The manifest publisher returned a lease of {0}; a lease is positive.</value></data>
   <data name="ResourcePublicationSnapshotNull" xml:space="preserve"><value>The manifest publisher returned a null snapshot.</value></data>

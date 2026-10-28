@@ -217,6 +217,22 @@ public sealed class WebResourceEndToEndTests
         instance.Resource.CorsPolicy.ShouldNotBeNull().Origins.ShouldBe([partner]);
     }
 
+    [Fact(DisplayName = DisplayPrefix + "A service registered ahead of the resource starts only once the gateway's state is restored")]
+    public async Task Start_WithServiceRegisteredFirst_ShouldStartItAfterTheRestore()
+    {
+        // Arrange
+        await using GatewayStandIn gateway = await GatewayStandIn.StartAsync();
+        gateway.AnswerWith($$$"""[{"action":"cors","value":{"origins":["{{{partner}}}"]}}]""");
+        StartProbe? probe = null;
+
+        // Act
+        await using RunningResource instance = await RunningResource.StartAsync(gateway.ManifestEndpoint, new WebCorsPolicy { Origins = [shop] },
+            beforeResource: builder => builder.AddService(context => probe = new StartProbe(context)));
+
+        // Assert
+        probe.ShouldNotBeNull().PolicyAtStart.ShouldNotBeNull().Origins.ShouldBe([partner]);
+    }
+
     [Fact(DisplayName = DisplayPrefix + "The policy one instance's write leaves is what the next instance starts with")]
     public async Task CorsWrite_ThenNewInstance_ShouldCarryThePolicyForward()
     {

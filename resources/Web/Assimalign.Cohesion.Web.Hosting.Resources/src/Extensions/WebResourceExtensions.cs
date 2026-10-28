@@ -21,10 +21,11 @@ public static class WebResourceExtensions
         /// <para>
         /// When the resource has a manifest endpoint (by default the
         /// <see cref="AppEnvironment.Variables.ManifestEndpoint"/> variable its gateway sets), the
-        /// instance is managed. Before any of the application's servers start, it serves its control
-        /// plane on <see cref="WebResourceBuilder.ControlPlaneEndpoint"/>, publishes its manifest, and
-        /// restores the state the gateway answers with. A publication the gateway refuses or cannot
-        /// receive fails the application's start.
+        /// instance is managed. Before any of the application's services or servers start, it
+        /// publishes its manifest and restores the state the gateway answers with; it then serves its
+        /// control plane on <see cref="WebResourceBuilder.ControlPlaneEndpoint"/>, ahead of the
+        /// application's servers and until they have drained. A publication the gateway refuses or
+        /// cannot receive fails the application's start.
         /// </para>
         /// <para>
         /// Without a manifest endpoint the application runs unmanaged, with the state its code defines.
@@ -61,7 +62,7 @@ public static class WebResourceExtensions
             Uri controlPlaneEndpoint = resourceBuilder.ControlPlaneEndpoint
                 ?? throw new InvalidOperationException(string.Format(CultureInfo.CurrentCulture,
                     ErrorMessages.ControlPlaneEndpointRequired, AppEnvironment.Variables.ControlPlaneEndpoint));
-            IPEndPoint listener = WebResourceService.ParseEndpoint(controlPlaneEndpoint);
+            IPEndPoint listener = WebResourceControlPlaneServer.ParseEndpoint(controlPlaneEndpoint);
 
             IResourceContentSerializer serializer = resourceBuilder.Serializer;
             ResourceManifestPublisher publisher = ResourceManifestPublisher.Create(new ResourceManifestPublisherOptions
@@ -70,13 +71,14 @@ public static class WebResourceExtensions
                 HttpClientFactory = resourceBuilder.HttpClientFactory,
                 Serializer = serializer,
             });
-            ResourceControlPlane controlPlane = ResourceControlPlane.Create(resource, publisher, serializer);
+            ResourceControlPlane controlPlane = ResourceControlPlane.Create(resource, serializer);
 
-            // Lifecycle services start in registration order, before every Web server. The resource
-            // service opens the control plane's listener, then starts the control plane, which
-            // publishes and restores, so the application serves traffic only once the restored state
-            // is in effect.
-            builder.AddService(_ => new WebResourceService(controlPlane, listener));
+            // The resource service publishes and restores in StartingAsync, which the host completes
+            // for every lifecycle service before it starts any service or server. The control-plane
+            // server is a host service of its own, so it listens only once the gateway's state is in
+            // effect, and the Web host stops it only after the application's servers have drained.
+            builder.AddService(_ => ResourceService.Create(controlPlane, publisher));
+            builder.AddService(_ => new WebResourceControlPlaneServer(listener, controlPlane));
 
             return resource;
         }

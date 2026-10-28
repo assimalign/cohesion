@@ -38,10 +38,14 @@ internal sealed class TestPublisher : IResourceManifestPublisher
 
     public int Renewals => Volatile.Read(ref _renewals);
 
-    public ValueTask<ResourcePublication> PublishAsync(ResourceManifest manifest, CancellationToken cancellationToken = default)
+    /// <summary>A task each publication waits for before it answers, as a slow gateway would.</summary>
+    public Task PublishGate { get; init; } = Task.CompletedTask;
+
+    public async ValueTask<ResourcePublication> PublishAsync(ResourceManifest manifest, CancellationToken cancellationToken = default)
     {
         Published.Enqueue(manifest);
-        return ValueTask.FromResult(new ResourcePublication(_snapshots, Lease));
+        await PublishGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        return new ResourcePublication(_snapshots, Lease);
     }
 
     public ValueTask<bool> RenewAsync(ResourceManifest manifest, CancellationToken cancellationToken = default)

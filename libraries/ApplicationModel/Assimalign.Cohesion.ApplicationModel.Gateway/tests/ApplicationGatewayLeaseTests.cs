@@ -32,9 +32,9 @@ public sealed class ApplicationGatewayLeaseTests : IDisposable
 
     public void Dispose()
     {
-        foreach ((_, ResourceControlPlane controlPlane) in _infrastructure.Instances.Values)
+        foreach ((_, ResourceService service) in _infrastructure.Instances.Values)
         {
-            controlPlane.StopAsync().GetAwaiter().GetResult();
+            service.StopAsync().GetAwaiter().GetResult();
         }
 
         _directory.Dispose();
@@ -45,10 +45,10 @@ public sealed class ApplicationGatewayLeaseTests : IDisposable
     {
         // Arrange
         await using RunningGateway running = await StartAsync(_store);
-        ResourceControlPlane controlPlane = _infrastructure.Instances.Values.Single().ControlPlane;
+        ResourceService service = _infrastructure.Instances.Values.Single().Service;
 
         // Act: the instance dies, so its renewals stop.
-        await controlPlane.StopAsync();
+        await service.StopAsync();
         await Eventually.WaitUntilAsync(() => running.Gateway.Resources.Single().Instances.Count == 0);
 
         // Assert
@@ -74,7 +74,7 @@ public sealed class ApplicationGatewayLeaseTests : IDisposable
         // Arrange: the instance dies along with the first gateway.
         await using (await StartAsync(_store))
         {
-            await _infrastructure.Instances.Values.Single().ControlPlane.StopAsync();
+            await _infrastructure.Instances.Values.Single().Service.StopAsync();
         }
 
         // Act

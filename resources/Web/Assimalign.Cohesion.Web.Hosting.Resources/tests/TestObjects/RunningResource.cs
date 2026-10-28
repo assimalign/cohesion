@@ -51,13 +51,22 @@ internal sealed class RunningResource : IAsyncDisposable
         .OfType<IResourceService>()
         .ToArray();
 
-    public static async Task<RunningResource> StartAsync(Uri? manifestEndpoint, WebCorsPolicy cors, Action<WebResourceBuilder>? configure = null)
+    /// <param name="manifestEndpoint">Where the instance publishes; <see langword="null"/> runs it unmanaged.</param>
+    /// <param name="cors">The CORS policy the application's code defines.</param>
+    /// <param name="configure">Configures the resource further.</param>
+    /// <param name="beforeResource">Composes the application ahead of <c>AddResource</c>.</param>
+    public static async Task<RunningResource> StartAsync(
+        Uri? manifestEndpoint,
+        WebCorsPolicy cors,
+        Action<WebResourceBuilder>? configure = null,
+        Action<WebApplicationBuilder>? beforeResource = null)
     {
         int applicationPort = TestPorts.GetFree();
         int controlPlanePort = TestPorts.GetFree();
 
         WebApplicationBuilder builder = WebApplication.CreateBuilder(new WebApplicationOptions());
         builder.Server.UseServer(options => options.UseHttp1(tcp => tcp.EndPoint = new IPEndPoint(IPAddress.Loopback, applicationPort)));
+        beforeResource?.Invoke(builder);
         WebResource resource = builder.AddResource("orders-api", resource =>
         {
             resource.ManifestEndpoint = manifestEndpoint;

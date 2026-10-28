@@ -4,16 +4,22 @@ using System.Threading.Tasks;
 namespace Assimalign.Cohesion.Hosting.Resources;
 
 /// <summary>
-/// The control plane of one resource instance. It joins the instance's host lifecycle, publishes
-/// the instance's manifest when the host starts, and executes actions and restores state on request.
+/// The control plane of one resource instance: the manifest it publishes and the actions its gateway
+/// executes on it.
 /// </summary>
 /// <remarks>
-/// The control plane is transport-neutral. A transport, such as the Web endpoint an area embeds,
-/// maps its requests onto <see cref="ExecuteAsync"/> and <see cref="RestoreAsync"/>, and reads and
-/// writes their content with <see cref="Serializer"/>. Both are accepted only between
-/// <see cref="IHostService.StartAsync"/> and <see cref="IHostService.StopAsync"/>.
+/// <para>
+/// The control plane has no lifecycle of its own and accepts invocations and restores from the
+/// moment it is created. Joining the instance's host and gateway is the work of the
+/// <see cref="IResourceService"/> that runs it.
+/// </para>
+/// <para>
+/// The control plane is transport-neutral. A server, such as the HTTP listener an area registers as
+/// a host service of its own, maps its requests onto <see cref="ExecuteAsync"/> and
+/// <see cref="RestoreAsync"/>, and reads and writes their content with <see cref="Serializer"/>.
+/// </para>
 /// </remarks>
-public interface IResourceControlPlane : IHostService
+public interface IResourceControlPlane
 {
     /// <summary>
     /// Gets the resource instance this control plane serves.
@@ -21,12 +27,12 @@ public interface IResourceControlPlane : IHostService
     IResource Resource { get; }
 
     /// <summary>
-    /// Gets the manifest the control plane publishes when its host starts.
+    /// Gets the manifest the instance publishes to its gateway.
     /// </summary>
     ResourceManifest Manifest { get; }
 
     /// <summary>
-    /// Gets the content serializer the control plane writes its states' snapshots with. A transport
+    /// Gets the content serializer the control plane writes its states' snapshots with. A server
     /// creates invocation contexts with it and writes the manifest and results with it.
     /// </summary>
     IResourceContentSerializer Serializer { get; }
@@ -47,7 +53,6 @@ public interface IResourceControlPlane : IHostService
     /// requested operation.
     /// </returns>
     /// <exception cref="System.ArgumentNullException"><paramref name="context"/> is <see langword="null"/>.</exception>
-    /// <exception cref="System.InvalidOperationException">The control plane is not started.</exception>
     ValueTask<ResourceActionResult> ExecuteAsync(ResourceActionName action, ResourceActionContext context, CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -62,6 +67,5 @@ public interface IResourceControlPlane : IHostService
     /// of the state's type.
     /// </returns>
     /// <exception cref="System.ArgumentNullException"><paramref name="snapshot"/> is <see langword="null"/>.</exception>
-    /// <exception cref="System.InvalidOperationException">The control plane is not started.</exception>
     ValueTask<ResourceActionResult> RestoreAsync(ResourceStateSnapshot snapshot, CancellationToken cancellationToken = default);
 }
