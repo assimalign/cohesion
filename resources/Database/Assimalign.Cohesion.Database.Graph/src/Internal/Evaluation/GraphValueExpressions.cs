@@ -217,22 +217,24 @@ internal static partial class GraphValueExpressions
 
     // Track group lists at their exact container depth. Accessing a group's entity is not
     // itself a group, while extracting a group from a list/map retains its provenance.
-    internal static bool IsGroup(GqlExpression expression, Func<string, int, bool> variableGroup, int accesses, Func<GqlNamedFunctionCallExpression, GqlExpression?>? nativeExpression = null)
+    internal static bool IsGroup(GqlExpression expression, Func<string, int, bool> variableGroup, int accesses, Func<GqlNamedFunctionCallExpression, GqlExpression?>? nativeExpression = null, GraphReductionAnalysis? analysis = null)
     {
         RuntimeHelpers.EnsureSufficientExecutionStack();
+        if (analysis?.ScalarList(expression, null, out _) == true) { return false; }
         var pending = new Stack<(GqlExpression Expression, int Accesses)>();
         pending.Push((expression, accesses));
         while (pending.TryPop(out var item))
         {
             var (value, depth) = item;
+            analysis?.Visit(value);
             switch (value)
             {
                 case GqlReduceExpression reduce:
-                    if (ReduceGroup(reduce, variableGroup, depth, nativeExpression)) { return true; }
+                    if (ReduceGroup(reduce, variableGroup, depth, nativeExpression, analysis)) { return true; }
                     break;
                 case GqlListComprehensionExpression comprehension:
                     if (depth == 0) { break; }
-                    if (ComprehensionGroup(comprehension, variableGroup, depth, nativeExpression)) { return true; }
+                    if (ComprehensionGroup(comprehension, variableGroup, depth, nativeExpression, analysis)) { return true; }
                     break;
                 case GqlListSliceExpression slice: pending.Push((slice.Operand, depth)); break;
                 case GqlNamedFunctionCallExpression named:
@@ -268,22 +270,24 @@ internal static partial class GraphValueExpressions
     }
 
     // Access consumes a container level; accessing an entity produces a scalar property.
-    internal static bool MayReturn(GqlExpression expression, IReadOnlyDictionary<string, object?>? parameters, bool entity, Func<string, int, bool, bool>? variableShape = null, int initialAccesses = 0, Func<GqlNamedFunctionCallExpression, GraphFunctionType>? functionType = null, Func<GqlNamedFunctionCallExpression, GqlExpression?>? nativeExpression = null)
+    internal static bool MayReturn(GqlExpression expression, IReadOnlyDictionary<string, object?>? parameters, bool entity, Func<string, int, bool, bool>? variableShape = null, int initialAccesses = 0, Func<GqlNamedFunctionCallExpression, GraphFunctionType>? functionType = null, Func<GqlNamedFunctionCallExpression, GqlExpression?>? nativeExpression = null, GraphReductionAnalysis? analysis = null)
     {
         RuntimeHelpers.EnsureSufficientExecutionStack();
         var pending = new Stack<(GqlExpression Expression, int Accesses)>();
+        if (analysis?.ScalarList(expression, parameters, out _) == true) { return !entity && initialAccesses == 0; }
         pending.Push((expression, initialAccesses));
         while (pending.TryPop(out var item))
         {
             var (value, accesses) = item;
+            analysis?.Visit(value);
             switch (value)
             {
                 case GqlReduceExpression reduce:
-                    if (ReduceMayReturn(reduce, parameters, entity, variableShape, accesses, functionType, nativeExpression)) { return true; }
+                    if (ReduceMayReturn(reduce, parameters, entity, variableShape, accesses, functionType, nativeExpression, analysis)) { return true; }
                     break;
                 case GqlListComprehensionExpression comprehension:
                     if (!entity && accesses == 0) { return true; }
-                    if (ComprehensionMayReturn(comprehension, parameters, entity, variableShape, accesses, functionType, nativeExpression)) { return true; }
+                    if (ComprehensionMayReturn(comprehension, parameters, entity, variableShape, accesses, functionType, nativeExpression, analysis)) { return true; }
                     break;
                 case GqlListSliceExpression slice: pending.Push((slice.Operand, accesses)); break;
                 case GqlNamedFunctionCallExpression call:
@@ -341,9 +345,10 @@ internal static partial class GraphValueExpressions
     // Proof is stricter than MayReturn: every possible non-NULL result must have
     // the same entity kind. Accesses retain this proof through projection boundaries.
     internal static GraphEntityShape EntityShape(GqlExpression expression, Func<string, int, GraphEntityShape> variableShape,
-        int accesses, CancellationToken token, Func<GqlNamedFunctionCallExpression, GraphFunctionType>? functionType = null, Func<GqlNamedFunctionCallExpression, GqlExpression?>? nativeExpression = null)
+        int accesses, CancellationToken token, Func<GqlNamedFunctionCallExpression, GraphFunctionType>? functionType = null, Func<GqlNamedFunctionCallExpression, GqlExpression?>? nativeExpression = null, GraphReductionAnalysis? analysis = null)
     {
         RuntimeHelpers.EnsureSufficientExecutionStack();
+        if (analysis?.ScalarList(expression, null, out _) == true) { return default; }
         var pending = new Stack<(GqlExpression Expression, int Depth, bool NonNull)>();
         pending.Push((expression, accesses, false));
         var kind = GraphProjectionKind.Scalar;
@@ -352,14 +357,15 @@ internal static partial class GraphValueExpressions
         {
             token.ThrowIfCancellationRequested();
             var (value, depth, nonNull) = item;
+            analysis?.Visit(value);
             switch (value)
             {
                 case GqlReduceExpression reduce:
-                    if (!Merge(ReduceEntity(reduce, variableShape, depth, token, functionType, nativeExpression), nonNull)) { return default; }
+                    if (!Merge(ReduceEntity(reduce, variableShape, depth, token, functionType, nativeExpression, analysis), nonNull)) { return default; }
                     break;
                 case GqlListComprehensionExpression comprehension:
                     if (depth == 0) { return default; }
-                    if (!Merge(ComprehensionEntity(comprehension, variableShape, depth, token, functionType, nativeExpression), nonNull)) { return default; }
+                    if (!Merge(ComprehensionEntity(comprehension, variableShape, depth, token, functionType, nativeExpression, analysis), nonNull)) { return default; }
                     break;
                 case GqlListSliceExpression slice: pending.Push((slice.Operand, depth, nonNull)); break;
                 case GqlFunctionCallExpression { Function: GqlScalarFunction.Properties } call when depth > 0:
@@ -443,22 +449,24 @@ internal static partial class GraphValueExpressions
     // A missing/NULL element has no known scalar type. Mixed container/scalar
     // branches defer container validation to evaluation (CG02013).
     internal static bool IsKnownScalar(GqlExpression expression, IReadOnlyDictionary<string, object?>? parameters,
-        Func<string, int, bool> variableScalar, int accesses, Func<GqlNamedFunctionCallExpression, GraphFunctionType>? functionType = null, Func<GqlNamedFunctionCallExpression, GqlExpression?>? nativeExpression = null)
+        Func<string, int, bool> variableScalar, int accesses, Func<GqlNamedFunctionCallExpression, GraphFunctionType>? functionType = null, Func<GqlNamedFunctionCallExpression, GqlExpression?>? nativeExpression = null, GraphReductionAnalysis? analysis = null)
     {
         RuntimeHelpers.EnsureSufficientExecutionStack();
+        if (analysis?.ScalarList(expression, parameters, out bool scalars) == true) { return accesses == 1 && scalars; }
         var pending = new Stack<(GqlExpression Expression, int Accesses)>();
         pending.Push((expression, accesses));
         while (pending.TryPop(out var item))
         {
             var (value, depth) = item;
+            analysis?.Visit(value);
             switch (value)
             {
                 case GqlReduceExpression reduce:
-                    if (!ReduceScalar(reduce, parameters, variableScalar, depth, functionType, nativeExpression)) { return false; }
+                    if (!ReduceScalar(reduce, parameters, variableScalar, depth, functionType, nativeExpression, analysis)) { return false; }
                     break;
                 case GqlListComprehensionExpression comprehension:
                     if (depth == 0) { return false; }
-                    if (!ComprehensionScalar(comprehension, parameters, variableScalar, depth, functionType, nativeExpression)) { return false; }
+                    if (!ComprehensionScalar(comprehension, parameters, variableScalar, depth, functionType, nativeExpression, analysis)) { return false; }
                     break;
                 case GqlListSliceExpression slice: pending.Push((slice.Operand, depth)); break;
                 case GqlFunctionCallExpression { Function: GqlScalarFunction.Properties } call when depth > 0:
@@ -516,30 +524,30 @@ internal static partial class GraphValueExpressions
     // Keep captured lexical callbacks on the comprehension-only path. Ordinary expressions
     // retain their existing allocation shape and iterative traversal.
     private static bool ComprehensionGroup(GqlListComprehensionExpression expression, Func<string, int, bool> outer,
-        int depth, Func<GqlNamedFunctionCallExpression, GqlExpression?>? native)
+        int depth, Func<GqlNamedFunctionCallExpression, GqlExpression?>? native, GraphReductionAnalysis? analysis)
         => IsGroup(expression.Projection ?? new GqlVariableExpression(expression.Variable),
-            (name, access) => name == expression.Variable ? IsGroup(expression.List, outer, access + 1, native) : outer(name, access), depth - 1, native);
+            (name, access) => name == expression.Variable ? IsGroup(expression.List, outer, access + 1, native, analysis) : outer(name, access), depth - 1, native, analysis);
 
     private static bool ComprehensionMayReturn(GqlListComprehensionExpression expression, IReadOnlyDictionary<string, object?>? parameters,
         bool entity, Func<string, int, bool, bool>? outer, int depth, Func<GqlNamedFunctionCallExpression, GraphFunctionType>? functions,
-        Func<GqlNamedFunctionCallExpression, GqlExpression?>? native)
+        Func<GqlNamedFunctionCallExpression, GqlExpression?>? native, GraphReductionAnalysis? analysis)
         => MayReturn(expression.Projection ?? new GqlVariableExpression(expression.Variable), parameters, entity,
-            (name, access, entities) => name == expression.Variable ? MayReturn(expression.List, parameters, entities, outer, access + 1, functions, native)
-                : outer?.Invoke(name, access, entities) ?? entities && access == 0, Math.Max(0, depth - 1), functions, native);
+            (name, access, entities) => name == expression.Variable ? MayReturn(expression.List, parameters, entities, outer, access + 1, functions, native, analysis)
+                : outer?.Invoke(name, access, entities) ?? entities && access == 0, Math.Max(0, depth - 1), functions, native, analysis);
 
     private static GraphEntityShape ComprehensionEntity(GqlListComprehensionExpression expression, Func<string, int, GraphEntityShape> outer,
         int depth, CancellationToken token, Func<GqlNamedFunctionCallExpression, GraphFunctionType>? functions,
-        Func<GqlNamedFunctionCallExpression, GqlExpression?>? native)
+        Func<GqlNamedFunctionCallExpression, GqlExpression?>? native, GraphReductionAnalysis? analysis)
         => EntityShape(expression.Projection ?? new GqlVariableExpression(expression.Variable),
-            (name, access) => name == expression.Variable ? EntityShape(expression.List, outer, access + 1, token, functions, native) : outer(name, access),
-            depth - 1, token, functions, native);
+            (name, access) => name == expression.Variable ? EntityShape(expression.List, outer, access + 1, token, functions, native, analysis) : outer(name, access),
+            depth - 1, token, functions, native, analysis);
 
     private static bool ComprehensionScalar(GqlListComprehensionExpression expression, IReadOnlyDictionary<string, object?>? parameters,
         Func<string, int, bool> outer, int depth, Func<GqlNamedFunctionCallExpression, GraphFunctionType>? functions,
-        Func<GqlNamedFunctionCallExpression, GqlExpression?>? native)
+        Func<GqlNamedFunctionCallExpression, GqlExpression?>? native, GraphReductionAnalysis? analysis)
         => IsKnownScalar(expression.Projection ?? new GqlVariableExpression(expression.Variable), parameters,
-            (name, access) => name == expression.Variable ? IsKnownScalar(expression.List, parameters, outer, access + 1, functions, native) : outer(name, access),
-            depth - 1, functions, native);
+            (name, access) => name == expression.Variable ? IsKnownScalar(expression.List, parameters, outer, access + 1, functions, native, analysis) : outer(name, access),
+            depth - 1, functions, native, analysis);
 
     private static bool ContainsEntity(GraphFunctionType type)
     {

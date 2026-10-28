@@ -16,6 +16,8 @@ public sealed class GraphOrderAliasKindTests
     [Theory(DisplayName = "Cohesion Test [Graph] - ORDER BY alias kinds retain the incoming scope under iterator shadowing")]
     [InlineData("TRUE", "all(x IN [n] WHERE old)")]
     [InlineData("[TRUE]", "all(x IN [n] WHERE all(y IN old WHERE y))")]
+    [InlineData("TRUE", "[x IN [n] WHERE old | 1][0]")]
+    [InlineData("[TRUE]", "[x IN [n] WHERE all(y IN old WHERE y) | 1][0]")]
     public async Task ExecuteAsync_ShadowedProjectionInput_ShouldResolveAliasKindAsync(string seed, string ordering)
     {
         // Arrange

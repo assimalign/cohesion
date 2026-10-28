@@ -730,3 +730,10 @@ diagnostics. This changes error categorization, with no frame-layout or protocol
 
 ORDER BY alias result kinds resolve projection expressions in the saved incoming scope,
 including Boolean and list aliases referenced beneath shadowing collection iterators (#1736).
+
+Reduce propagates a conservative union of seed and body result kinds through accumulator
+feedback. A union containing no Boolean is CG02013 in a predicate, and one containing no list
+is CG02015 as a source, including empty inputs and EXPLAIN. Unknown kinds retain runtime
+validation. Reduce shape/type planning observes cancellation and a fixed statement cap of
+65,536 visited nodes or closure steps, with structured CG05026 on exhaustion. This planning
+cap is independent of the execution memory/work limits.

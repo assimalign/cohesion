@@ -127,6 +127,7 @@ public sealed class GqlProfileExecutionTests
             [GqlClauses.Reduce] =
             [
                 new("RETURN reduce(a=0,x IN [1,2,3] | a+x)", [[6L]]),
+                new("RETURN all(x IN [1] WHERE reduce(a=1,y IN [1] | TRUE))", [[true]]),
                 new("RETURN reduce(a=42,x IN [] | 1/0), reduce(a=42,x IN NULL | a+x)", [[42L, null]]),
                 new("MATCH (a:Person) WHERE reduce(s=0,x IN [a.age,1] | s+x) > 40 RETURN a.name", [["Alice"]]),
             ],
@@ -223,6 +224,8 @@ public sealed class GqlProfileExecutionTests
             ],
             [GqlClauses.OrderBy] =
             [
+                new("LET x=TRUE MATCH (n:Person {name:'Alice'}) RETURN x AS old ORDER BY [x IN [n] WHERE old | 1][0]", [[true]]),
+                new("LET x=[TRUE] MATCH (n:Person {name:'Alice'}) RETURN x AS old ORDER BY [x IN [n] WHERE all(y IN old WHERE y) | 1][0]", [[new object?[] { true }]]),
                 new("MATCH (a:Person) RETURN a.name ORDER BY a.age", [["Bob"], ["Isolated"], ["Alice"]]),
             ],
             [GqlClauses.Offset] =
@@ -531,6 +534,7 @@ public sealed class GqlProfileExecutionTests
         GqlClauses.Case => query.Projections.Any(item => item.Expression is GqlCaseExpression or GqlCoalesceExpression or GqlNullIfExpression),
         GqlClauses.Reduce => query.Text?.Contains("reduce(", StringComparison.OrdinalIgnoreCase) == true,
         GqlClauses.ListPredicate => query.Projections.Any(projection => projection.Expression is GqlListPredicateExpression) ||
+            query.OrderBy.Any(order => order.Expression is GqlListPredicateExpression) ||
             query.Text?.Contains("any(", StringComparison.OrdinalIgnoreCase) == true,
         GqlClauses.ListComprehension => query.Projections.Any(item => item.Expression is GqlListComprehensionExpression),
         GqlClauses.ListSlice => query.Projections.Any(item => item.Expression is GqlListSliceExpression),

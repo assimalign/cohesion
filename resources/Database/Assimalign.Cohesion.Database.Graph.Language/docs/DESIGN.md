@@ -1654,3 +1654,10 @@ StatementParseFailed); standalone parser diagnostics are unchanged. See DIALECT.
 
 ORDER BY alias result kinds resolve projection expressions in the saved incoming scope,
 including Boolean and list aliases referenced beneath shadowing collection iterators (#1736).
+
+Reduce static result kinds use the same accumulator closure: the union includes the seed and
+body feedback, keeps Boolean alternatives, and lets unknown kinds retain runtime checks.
+NULL-only branches add no non-NULL kind. Known incompatible predicate/source kinds fail
+CG02013/CG02015 even for empty sources. Graph bounds this analysis separately from execution
+with a cancellable 65,536-visit/step statement planning cap (CG05026), including EXPLAIN.
+Invariant source/seed facts and completed closure depths are memoized within their lexical scope.

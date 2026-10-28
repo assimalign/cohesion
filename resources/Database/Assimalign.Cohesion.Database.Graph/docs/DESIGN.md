@@ -1853,6 +1853,7 @@ to exercise that enforcement path; compiled provisioning is not included.
 | `CG05023` | Internal MERGE seam: invalid bound pattern identity, topology or property equality |
 | `CG05024` | Aggregate in a list comprehension predicate or projection |
 | `CG05025` | Malformed reduce/list-predicate body or quantifier AST, or an aggregate inside that body |
+| `CG05026` | Reduce shape/type analysis exceeds the fixed statement planning cap of 65,536 visited nodes or closure steps |
 | `CG08021` | Query limits are nonpositive or exceed the configured engine ceilings; invalid engine ceilings use the same code in the configuration exception message |
 | `CK06101` | `Database.Indexing`'s code, carried unchanged: opening a database whose property-index pages are in a B-tree page format this engine does not read (format 1, written before #1194) fails with "Database 'x' cannot be opened. CK06101: …", checked before recovery's scrub, so a cleanly closed database's files stay as they were (a crashed one has had only the storage layer's journal redo and undo, and keeps its journal) |
 | `CK06001` | `Database.Storage`'s code, carried unchanged: opening a database whose file set is in another storage format (#1251) fails with "Database 'x' cannot be opened. CK06001: …", the storage's `StorageFormatException` as its inner exception, refused before its journal is read, so the files stay as they were |
@@ -3596,3 +3597,14 @@ elapsed-time distributions remain descriptive rather than an acceptance gate.
 
 ORDER BY alias result kinds resolve projection expressions in the saved incoming scope,
 including Boolean and list aliases referenced beneath shadowing collection iterators (#1736).
+
+Reduce result kinds form a conservative seed/body union closed over accumulator feedback.
+NULL adds no non-NULL kind; unknown absorbs the union. Predicates and list sources with a
+provably incompatible union fail planning even on empty inputs and under EXPLAIN. Shape
+closures memoize invariant seeds and sources and share depth results using a dependency work
+queue. Binary body result shapes have no accumulator feedback, so scalar folds avoid
+closure allocation. Nested body closures are recomputed when their incoming accumulator facts change.
+All reduce shape/type analysis shares a cancellable statement cap of 65,536 node visits and
+closure steps (CG05026), independently of execution work and retained-memory budgets.
+The cap bounds temporary planning allocation, including nonexecuting EXPLAIN. Ordinary
+statements retain their planner object size and allocation path.

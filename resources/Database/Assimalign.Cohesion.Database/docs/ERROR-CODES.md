@@ -347,6 +347,7 @@ transaction-state diagnostics; it allocates no new identity. These changes add n
 | New (#1735, GQ-M1) | CG05023 | Execution — invalid bound MERGE pattern lock identity |
 | New (#1736, GQ-C1) | CG05024 | Execution — aggregate inside a list comprehension predicate or projection |
 | New (#1736, GQ-C2) | CG05025 | Execution — malformed reduce/list-predicate body or aggregate inside that body |
+| New (#1736, GQ-C2) | CG05026 | Planning — reduce shape/type analysis exceeds 65,536 visited nodes or closure steps |
 | COHDBG006 | CG06006 | Storage/durability |
 | COHDBG012 | CG06012 | Storage/durability |
 | COHDBG017 | CG06017 | Storage/durability |

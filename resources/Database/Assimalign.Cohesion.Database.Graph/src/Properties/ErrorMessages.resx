@@ -303,4 +303,7 @@
   <data name="MergeNodeDeclared" xml:space="preserve">
     <value>A repeated or already-bound MERGE node must be a bare variable without labels or properties.</value>
   </data>
+  <data name="ReductionPlanningLimit" xml:space="preserve">
+    <value>Reduce shape analysis exceeded the fixed planning work limit.</value>
+  </data>
 </root>

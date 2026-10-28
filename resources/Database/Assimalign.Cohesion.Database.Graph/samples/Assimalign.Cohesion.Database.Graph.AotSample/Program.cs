@@ -53,6 +53,9 @@ await Check("FOR x IN $xs FOR y IN $xs WITH x,y ORDER BY x DESC,y DESC OFFSET 2 
 await Check("FOR x IN $xs RETURN count(DISTINCT x),min(x),max(x)", [[317L, 0L, 316L]]);
 await Check("FOR x IN [2,1,2] RETURN DISTINCT x ORDER BY x", [[1L], [2L]]);
 await session.ExecuteAsync("INSERT (a:N {k:1})-[:T]->(b:N {k:2})-[:T]->(:N {k:3})", cancellationToken: CancellationToken.None);
+await Check("LET x=TRUE MATCH (n:N {k:1}) RETURN x AS old ORDER BY all(x IN [n] WHERE old)", [[1L]]);
+await Check("LET x=TRUE MATCH (n:N {k:1}) RETURN x AS old ORDER BY [x IN [n] WHERE old | 1][0]", [[1L]]);
+await Check("LET x=[TRUE] MATCH (n:N {k:1}) RETURN x[0] AS old ORDER BY all(x IN [n] WHERE old)", [[1L]]);
 await Check("MATCH (a:N {k:1})-[rs:T]->{2}(b) RETURN size([r IN rs | type(r)]), [n IN [a,b] | n.k][1]", [[2L,3L]]);
 await Check("MATCH (a:N)-[:T]->(b:N) RETURN a.k,b.k ORDER BY a.k", [[1L, 2L], [2L, 3L]]);
 {
@@ -122,6 +125,8 @@ foreach (var (expression, code) in new[]
     ("[x IN [] WHERE 1]", "CG02013"),
     ("all(x IN [] WHERE 1)", "CG02013"),
     ("reduce(a=0,x IN 1 | a)", "CG02015"),
+    ("all(x IN [] WHERE reduce(a=1,y IN [] | a))", "CG02013"),
+    ("any(x IN reduce(a=1,y IN [] | a) WHERE TRUE)", "CG02015"),
     ("reduce(a=0,x IN [] | sum(x))", "CG05025"),
     ("reduce(x=0,x IN [] | x)", "CG01018"),
 })
