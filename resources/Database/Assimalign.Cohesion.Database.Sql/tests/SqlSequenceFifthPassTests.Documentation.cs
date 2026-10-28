@@ -28,7 +28,7 @@ public sealed partial class SqlSequenceFifthPassTests
         // Assert: four candidate predicates followed by one reached projection, then the next call.
         rows.ShouldHaveSingleItem()[0].ShouldBe(5L);
         (await Rows(session, "SELECT nextval('s')"))[0][0].ShouldBe(6L);
-        design.ShouldContain("Correlated joins filter every candidate pair before projection", Case.Sensitive);
+        design.ShouldContain("Joins, correlated or not, filter every candidate pair before projection", Case.Sensitive);
         design.ShouldNotContain("Predicate and projection effects therefore interleave per row", Case.Sensitive);
         _output.WriteLine("candidate pairs=4; WHERE calls=4; LIMIT=1; projection=5; next=6");
     }

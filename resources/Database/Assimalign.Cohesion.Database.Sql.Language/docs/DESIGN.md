@@ -25,8 +25,9 @@ including subtotal and empty groups; HAVING runs before projection.
 Unordered grouped and correlated inputs apply WHERE/HAVING, project each qualifying row immediately,
 discard OFFSET rows and stop at LIMIT, without deferred
 input retention or charges. Ordered deferral uses the ordinary uncharged sort collector on plain,
-correlated, grouped and grouping-set paths, including LIMIT and deep OFFSET pages. Retention is
-bounded by OFFSET + LIMIT when ordering collations are fixed; deferred collations require full
+correlated, grouped and grouping-set paths, including LIMIT and deep OFFSET pages. Plain and
+correlated retention is bounded by OFFSET + LIMIT when ordering collations are fixed; grouped and
+grouping-set deferral retains every group that passes HAVING, and deferred collations require full
 retention. Grouping-set group/aggregate state retains its existing statement-budget charge on
 both sequence and sequence-free paths; sequence deferral adds none.
 

@@ -80,13 +80,19 @@ Unordered grouped/correlated sequence inputs apply WHERE/HAVING, project each qu
 immediately, discard OFFSET rows and stop at LIMIT, retaining no deferred input and charging no grant.
 Scan and grouped predicate/projection effects interleave per reached row (PostgreSQL
 src/include/executor/execScan.h:224-235 and src/backend/executor/nodeAgg.c:1378-1384).
-Correlated joins filter every candidate pair before projection, buffering qualifying pairs;
+Joins, correlated or not, filter every candidate pair before projection, buffering qualifying pairs;
 nextval() in their WHERE therefore runs for every pair even under LIMIT 1. The projection window
-then consumes OFFSET rows and stops at LIMIT. PostgreSQL also evaluates WHERE below the Limit
-node above it (src/backend/executor/nodeNestloop.c:213-220 and nodeLimit.c:91-116).
+then consumes OFFSET rows and stops at LIMIT. This differs from PostgreSQL, whose nested loop
+projects and returns each qualifying pair as its Limit node pulls it, and stops at LIMIT
+(src/backend/optimizer/plan/initsplan.c:2975-2979, src/backend/executor/nodeNestloop.c:194-219,
+nodeLimit.c:153-159). With two rows in t, the four-pair query
+`SELECT nextval('s') FROM t a CROSS JOIN t b WHERE nextval('s') > 0 LIMIT 1` returns 2 in
+PostgreSQL and 5 here.
 Ordered deferral keeps filtering before retention and uses the ordinary uncharged sort collector
 on plain, correlated, grouped and grouping-set paths, including LIMIT and deep OFFSET pages.
-Top-N retention stays bounded by OFFSET + LIMIT; deferred ordering collations require full retention.
+Plain and correlated top-N retention stays bounded by OFFSET + LIMIT when ordering collations are
+fixed; grouped and grouping-set deferral retains every group that passes HAVING, as the
+sequence-free grouped sort does, and deferred ordering collations require full retention.
 Neither form adds a StatementMemoryBudget charge. Grouping-set group/aggregate state retains its
 existing charge for both sequence and sequence-free queries. Ordinary collectors retain their instance layout.
 Cached sort aliases retain the declared output type, including numeric CASE promotion.

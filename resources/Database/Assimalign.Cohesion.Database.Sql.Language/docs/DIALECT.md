@@ -77,8 +77,9 @@ src/backend/executor/nodeLimit.c:91-116). Unordered grouped and correlated input
 project each qualifying row immediately, discard OFFSET rows and stop at LIMIT.
 They retain no deferred input and charge no grant. Ordered deferred inputs filter before retention
 and use the same uncharged sorting as sequence-free queries on plain, correlated, grouped and
-grouping-set paths. LIMIT and deep OFFSET pages add no deferral charge; fixed collations bound
-retention by OFFSET + LIMIT, while deferred collations retain all candidates. Existing grouping-set
+grouping-set paths. LIMIT and deep OFFSET pages add no deferral charge. On plain and correlated
+paths, fixed collations bound retention by OFFSET + LIMIT; grouped and grouping-set deferral
+retains every group that passes HAVING, and deferred collations retain all candidates. Existing grouping-set
 group/aggregate state charges still apply equally with and without sequence outputs.
 Without ORDER BY the source row order is unspecified;
 sequence values are not ordered by transaction commit. Short-circuited expressions
