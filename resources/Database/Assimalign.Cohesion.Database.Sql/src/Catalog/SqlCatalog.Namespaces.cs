@@ -106,6 +106,7 @@ public sealed partial class SqlCatalog
                 if (publication is not null) { CommitScriptAbsence(publication, SqlObjectIdentity.Schema(name)); return default; }
                 throw new SqlCatalogException("CS01028", string.Format(CultureInfo.CurrentCulture, ErrorMessages.EngineNamespaceMissing, name));
             }
+            var sequences = _sequences.Values.Where(slot => slot.Value.Schema.Equals(name, StringComparison.OrdinalIgnoreCase)).ToArray();
             var objects = ObjectsInNamespace(name);
             var ids = objects.Select(slot => slot.Table.ObjectId).ToHashSet();
             var droppedViews = _views.Where(pair => pair.Value.Value.Schema.Equals(name, StringComparison.OrdinalIgnoreCase) || pair.Value.Value.TableDependencies.Any(ids.Contains)).ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.OrdinalIgnoreCase);
@@ -117,7 +118,7 @@ public sealed partial class SqlCatalog
                 { if (pair.Value.Value.Dependencies.Any(droppedViews.ContainsKey)) { added |= droppedViews.TryAdd(pair.Key, pair.Value); } }
             } while (added);
             if (!cascade && droppedViews.Count != 0) { RefuseViewDependency(droppedViews.Values.First().Value); }
-            if (!cascade && objects.Length != 0)
+            if (!cascade && (objects.Length != 0 || sequences.Length != 0))
             {
                 throw new SqlCatalogException("CS03030", string.Format(CultureInfo.CurrentCulture, ErrorMessages.EngineNamespaceDependentObjects, schema.Value.Name));
             }
@@ -151,9 +152,15 @@ public sealed partial class SqlCatalog
             var registrationsLocation = _registrationsLocation;
             if (indexes.Length != 0) { registrationsLocation = UpsertRecord(transaction, registrationsLocation, EncodeRegistrations(registrations)); }
             foreach (var view in droppedViews.Values) { _storage.DeleteRow(transaction, view.Location.PageId, view.Location.SlotIndex); }
+            foreach (var sequence in sequences) { DeleteSequence(transaction, sequence); }
             _storage.DeleteRow(transaction, schema.Location.PageId, schema.Location.SlotIndex);
             CommitCatalogChange(transaction, publication: publication, actualObject: SqlObjectIdentity.Schema(schema.Value.Name));
             foreach (var key in droppedViews.Keys) { _views.Remove(key); }
+            foreach (var sequence in sequences)
+            {
+                _sequences.Remove((sequence.Value.Schema, sequence.Value.Name));
+                _sequenceCounters.Remove(sequence.Value.ObjectId);
+            }
             _namespaces.Remove(name);
             _namespaceCapture = null;
             foreach (var slot in objects)

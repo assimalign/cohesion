@@ -121,7 +121,7 @@ structured-carrier messages remain unprefixed.
 | New (#1719, SQ-R1) | CS01060 | Binding/names — Recursive term has more than one self-reference (42P19) |
 | New (#1719, SQ-R1) | CS01061 | Binding/names — Aggregate at the query level containing a recursive reference (42P19) |
 | COHSQLE001 | CS02001 | Values/types |
-| COHSQLE002 | CS02002 | Values/types |
+| COHSQLE002 | CS02002 | Values/types — identity or standalone sequence range exhaustion (#1717) |
 | COHSQLE003 | CS02003 | Values/types |
 | COHSQLE010 | CS02010 | Values/types |
 | COHSQLE011 | CS02011 | Values/types |
@@ -161,6 +161,10 @@ structured-carrier messages remain unprefixed.
 | COHSQLE066 | CS03066 | Schema/constraints |
 | New (#1716) | CS03067 | Schema/constraints — TRUNCATE omits a required referencing table (0A000) |
 | New (#1716) | CS03068 | Schema/catalog — CTAS output names are missing, blank, duplicate or have the wrong width (42601) |
+| New (#1717) | CS03069 | Schema/catalog — invalid resolved sequence options |
+| New (#1717) | CS03070 | Schema/catalog — occupied sequence/table/view relation name |
+| New (#1717) | CS03071 | Schema/catalog — sequence namespace is absent |
+| New (#1717) | CS03072 | Schema/catalog — sequence definition exceeds the record limit |
 | COHSQLP001 | CS03101 | Schema/constraints |
 | COHSQLP002 | CS03102 | Schema/constraints |
 | COHSQLP003 | CS03103 | Schema/constraints |
@@ -186,6 +190,7 @@ structured-carrier messages remain unprefixed.
 | COHSQLE064 | CS04064 | Transactions/locking — serialization failure, including a concurrently changed MERGE target under Snapshot (#1715) |
 | New (w11 review) | CS04065 | Transactions/locking — hard deadlock (`40P01`) |
 | New (#1716) | CS04066 | Transactions/locking — TRUNCATE inside an explicit transaction (25001) |
+| New (#1717) | CS04067 | Transactions/locking — dropped or replaced sequence incarnation |
 | COHSQLE004 | CS05004 | Execution/budgets |
 | COHSQLE007 | CS05007 | Execution/budgets |
 | COHSQLE013 | CS05013 | Execution/budgets |
@@ -410,6 +415,7 @@ and invariant exceptions and lower child-root typed failures retain their docume
 | CK07004 | Session is closed | — |
 | CS06059 | Persisted SQL catalog metadata is malformed | XX001 |
 | CS06060 | SQL catalog metadata format/version is unsupported | 0A000 |
+| CS06061 | Standalone sequence catalog definition or reservation is malformed | XX001 |
 | CD04102 | Catalog snapshot conflict | — |
 | CD04103 | Expected document version differs | — |
 | CD04104 | No explicit document transaction is open for COMMIT or ROLLBACK (#1725) | — |

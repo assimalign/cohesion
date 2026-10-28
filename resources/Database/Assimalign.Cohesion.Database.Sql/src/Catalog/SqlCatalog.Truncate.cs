@@ -194,7 +194,7 @@ public sealed partial class SqlCatalog
             foreach (var slot in oldIndexes) { _storage.DeleteRow(transaction, slot.Location.PageId, slot.Location.SlotIndex); }
             var retired = expected.Select(table => (table.ObjectId, Location: _storage.InsertRow(transaction, table.ObjectId,
                 SqlReclamationRecord.Encode(table.ObjectId, table.Schema, table.Name)))).ToArray();
-            var counters = new List<(ulong Id, IdentityCounter Counter)>();
+            var counters = new List<(ulong Id, SqlAllocationCounter Counter)>();
             foreach (var table in expected)
             {
                 DeleteIdentityCounter(transaction, table.ObjectId);
@@ -224,7 +224,7 @@ public sealed partial class SqlCatalog
                     long reserved = checked((long)(remaining == 0 ? last : previous.Next + (Int128)(remaining - 1) * identity.Increment));
                     ulong id = mapping[table.ObjectId].ObjectId;
                     var record = new DatabaseKeyWriter().AppendInt32(identityCounterRecordKind).AppendInt64((long)id).AppendInt64(reserved).ToArray();
-                    counters.Add((id, new IdentityCounter { Next = previous.Next, Remaining = remaining,
+                    counters.Add((id, new SqlAllocationCounter { Next = previous.Next, Remaining = remaining,
                         Location = _storage.InsertRow(transaction, record) }));
                 }
             }

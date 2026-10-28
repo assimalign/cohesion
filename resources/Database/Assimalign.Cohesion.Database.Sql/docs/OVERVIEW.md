@@ -131,7 +131,7 @@ shared storage, with DDL flowing through this assembly's relational Catalog comp
 - **SQL definitions and declared scripts (E4)** — database-local SQL functions use the same
   bound expression evaluator and scalar ABI as registered functions. SQL domains share type
   resolution and write enforcement with registered domains. Canonical definitions, dependencies,
-  ownership, script receipts and table reclamation intents persist in the catalog (format 27). A builder's named scripts run
+  ownership, script receipts and table reclamation intents persist in the catalog (format 28). A builder's named scripts run
   inline after its typed schema, in declaration order, and resume at committed statement
   boundaries after a crash. Checksums prohibit edits to an applied name; Verify checks receipts;
   an unchanged script-set hash and catalog generation skip reconciliation in constant time.
@@ -317,6 +317,12 @@ var users = await catalog.CreateTableAsync("dbo", "users", new[]
 
 See [DESIGN.md](DESIGN.md) for the persistence model and decisions.
 
+
+Standalone sequences have internal catalog objects and share the identity allocator (#1717,
+SQ-S1). SQL format 28 adds sequence definitions and reservations; SQL sequence syntax and public
+entry points remain deferred. Both allocators reserve up to 32 values before use, retain rollback
+and recovery gaps, and serialize allocation engine-wide. CACHE is stored without per-session
+caches. See DESIGN for option defaults, incarnation checks and the lock order.
 
 ## Storage component
 
