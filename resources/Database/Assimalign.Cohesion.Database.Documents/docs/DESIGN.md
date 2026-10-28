@@ -154,6 +154,30 @@ Administrative database lookup remains ordinal-ignore-case. SQL database default
 column collations, and expression `COLLATE` have no effect on this model.
 Configurable document collation is deferred; stored text retains its original form.
 
+## ORDER BY null placement (#1730)
+
+Each term accepts `expr [ASC | DESC] [NULLS FIRST | LAST]`, including projection aliases,
+multiple terms and LIMIT/OFFSET. ASC is the omitted direction. The omitted placement is FIRST
+for ASC and LAST for DESC. FIRST/LAST moves the whole MISSING/NULL block; direction controls
+its internal order: ASC keeps MISSING before NULL, DESC keeps NULL before MISSING. Thus the
+older “MISSING before NULL” wording means the ascending base order, not every direction.
+This follows the pinned [Couchbase table](https://github.com/couchbaselabs/docs-devex/blob/c3bb1549af4887019b9983e371d9e8b4f569052c/modules/n1ql/pages/n1ql-language-reference/orderby.adoc#L64-L99).
+Values retain Boolean, number, ordinal string, array and object order (reversed for DESC).
+Equal query keys retain ordinal document identity, independent of direction; later ORDER BY
+terms precede that tie break. NULLS stays contextual, so existing fields named nulls remain valid.
+Malformed NULLS options give located CD00013; an invalid direct-AST placement gives CD01032.
+No new sorting bound or budget diagnostic is introduced; retained sorting still uses CD05018.
+
+| Term | First to last |
+|---|---|
+| ASC / ASC NULLS FIRST | MISSING, NULL, values ascending |
+| ASC NULLS LAST | values ascending, MISSING, NULL |
+| DESC / DESC NULLS LAST | values descending, NULL, MISSING |
+| DESC NULLS FIRST | NULL, MISSING, values descending |
+
+The sort executor uses CompareOrdered; grouping and equality continue to use the base total
+comparison. The omitted option preserves the previous comparison and allocation shape.
+
 ## Incremental index reads (#1542)
 
 Catalog index scans and unique probes pass their statement token at cursor open and on every move. Shared B+Tree cursors copy bounded batches and release their read latch before document decoding or validation. Scans and unique checks finish before applying index changes, so transaction-stamped own writes cannot extend an active scan.
@@ -483,7 +507,9 @@ CD00007 for the same count rule at parse and plan time:
 | `CD05015` | A query/RETURNING array or object constructor exceeds the 256-level result limit |
 | `CD05018` | Retained statement source rows, groups, RETURNING results or aggregate values exceed the statement memory budget |
 | `CD00011` | ALL/DISTINCT applied to a scalar or star call |
+| `CD00013` | NULLS without FIRST or LAST |
 | `CD01029` | Direct call AST has an invalid aggregate quantifier or quantifier target |
+| `CD01032` | Direct ordering AST has an invalid null placement |
 | `CD05019` | Serialized RETURNING value exceeds 256 levels, including a named projection wrapper |
 | `CD02016` | Invalid UPDATE target or an incompatible object/array shape or index |
 | `CD01017` | UPDATE targets duplicate or prefix-overlap after alias normalization |
@@ -524,7 +550,7 @@ through two virtual document collections:
 
 | Source | Document properties | Cardinality |
 | --- | --- | --- |
-| `COHESION_SCHEMA.INDEXES` | `COLLECTION_CATALOG`, `COLLECTION_NAME`, `INDEX_NAME`, `PATH`, `PATHS`, `IS_UNIQUE` | One document per visible definition; PATHS is the ordered path array, PATH its leading element, and IS_UNIQUE the actual flag |
+| `COHESION_SCHEMA.INDEXES` | `COLLECTION_CATALOG`, `COLLECTION_NAME`, `INDEX_NAME`, `PATH`, `PATHS`, `IS_UNIQUE`, `INCLUDE_MISSING` | One document per visible definition; PATHS is the rendered key array, PATH its leading element, and both flags are the actual values |
 | `COHESION_SCHEMA.OBJECT_OWNERSHIP` | `COLLECTION_CATALOG`, `COLLECTION_NAME`, `OBJECT_TYPE`, `OBJECT_NAME`, `OWNER`, `OWNING_SCHEMA` | One document per visible collection; `OBJECT_TYPE` is `COLLECTION` |
 
 `COLLECTION_CATALOG` is the bound database name. `OWNER` preserves SQL's `Adhoc`
@@ -1157,6 +1183,7 @@ It changes no documents or catalog entries, including when its explicit transact
 | `Unnest`, `LeftUnnest` | Array expansion between projection/grouping and access, with the variable name in Detail |
 | `CollectionScan` | Candidate retrieval from the named collection |
 | `IndexSeek` | Catalog index name, collection, inclusive/exclusive bounds and bounded index-entry estimate |
+| `IndexOrderCandidate` | Per-index ordering eligibility, reason, direction and equal-key bucket contract; consumed=False in OQ-O1 |
 | `IndexIntersection` | Ordinal identity intersection before JSON reads; children are the selected IndexSeek inputs |
 | `Delete` | Snapshot-filtered deletion; detail names its IndexSeek, IndexIntersection or CollectionScan child |
 | `Update` | Snapshot-filtered partial update; detail names its IndexSeek, IndexIntersection or CollectionScan child |
@@ -2440,7 +2467,7 @@ and exponent spellings within its domain. CLR Single/Double literals in a direct
 AST are refused (CD02027), like the typed catalog API. Parameters, computed mappings and sources,
 and other WHEN expressions are refused before catalog mutation with located CD01028/CD02027/
 CD03027/CD03028 diagnostics. Catalog CD03025 still refuses multiple array keys and UNIQUE arrays.
-ALL remains CK00001; INCLUDE MISSING syntax stays deferred. No format changes beyond existing v3.
+ALL remains CK00001; INCLUDE MISSING is now a leading scalar-key suffix (#1632). No format changes beyond existing v3.
 `OqlCreateIndexExpression.Keys` snapshots paths/comprehensions; each comprehension denotes DISTINCT.
 Its scalar Paths view remains empty for array indexes, matching the catalog's coverage boundary.
 
@@ -2851,6 +2878,45 @@ Malformed current-format bytes still carry located CK06003. The existing v1 inde
 engine tests retain their original message prefix, coordinator-disposal and byte-identical-file
 assertions. Registration truncation retains its exact EndOfStreamException beneath the located
 corruption and catalog wrappers. No format reader, upgrader or public exception member is added.
+
+### INCLUDE MISSING and ordered-access eligibility (#1632, OQ-O1)
+
+`CREATE INDEX ix ON items (score INCLUDE MISSING, category)` includes leading-MISSING
+records using the existing v3 flag; INCLUDE is contextual. The suffix belongs inside the key
+list on the first scalar key, following [Couchbase](https://github.com/couchbaselabs/docs-devex/blob/c3bb1549af4887019b9983e371d9e8b4f569052c/modules/n1ql/pages/n1ql-language-reference/createindex.adoc#L317-L330).
+It is invalid on later keys or after the closing parenthesis. Direct AST leading-array definitions
+still receive CD03025. COHESION_SCHEMA.INDEXES exposes INCLUDE_MISSING and renders the suffix
+in PATH and PATHS[0], making the key list reusable as DDL. No format or wire bump is needed.
+
+EXPLAIN reports order_eligible and order_reason on the selected access and one
+IndexOrderCandidate per visible index, including ORDER BY-only candidates. Eligible candidates
+report forward/reverse direction, equality prefix, complete equal-key buckets and the document
+identity tie break. Ordinary sparse indexes need a mandatory predicate proving that leading
+MISSING cannot qualify. AND needs either proof, OR needs both; direct presence tests and direct
+comparisons are recognized. Calls and computed paths establish no proof. ORDER BY must match
+consecutive leading keys after optional equality-fixed keys, with one direction for varying keys.
+Nondefault null placement requires proof that both unknowns are excluded. Arrays, grouping,
+DISTINCT, UNNEST, nonindex expressions and intersections retain their stated fallback reasons.
+
+Lossy array/object values never establish ordering. UNIQUE enforces scalar keys; direct scalar
+comparisons or NULL/MISSING tests can also prove a domain. Otherwise a snapshot-visible,
+512-entry/32-page absence probe checks complex tags on the first varying component, without
+fetching documents. Incomplete probes and later varying components without a scalar proof
+report scalar_domain_unproven. This deliberately conservative fallback needs no new diagnostic.
+A shorter ORDER BY than the physical key still requires a complete equal-ORDER-BY-prefix bucket,
+including all trailing physical components, before identity sorting and LIMIT termination.
+OQ-O1 computes eligibility only for EXPLAIN: ordinary execution retains its existing planning
+allocation path, including ORDER BY without NULLS. EXPLAIN explicitly says consumed=False and
+sort=retained. OQ-O2 must enable AnalyzeOrdering for execution when it adds scan consumption,
+sort elision and earlier LIMIT/OFFSET termination.
+
+Equality-fixed leading keys can be skipped, following PostgreSQL's constant-pathkey principle
+(src/backend/optimizer/path/pathkeys.c:129-137,164-166 in the local reference clone);
+Cohesion deliberately uses only its direct scalar equality bounds, with no equivalence-class solver.
+DocumentOrderingPath wraps the existing access only for EXPLAIN queries with ordering. Its candidates
+carry DocumentOrderEligibility; the executor unwraps Input and retains every existing sort.
+Ordinary execution queries allocate no wrapper or eligibility state. ProbeComplexOrderKeys uses
+existing tagged v3 keys and the shared bounded CountRange, never content reads or a new public seam.
 
 ## Probe costing and identity intersection (D3, #1527)
 

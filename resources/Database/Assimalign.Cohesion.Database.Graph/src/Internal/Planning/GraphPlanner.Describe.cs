@@ -37,7 +37,7 @@ internal sealed partial class GraphPlanner
     internal DatabasePlanDescription Describe(GraphPlan plan, GraphPlanExecutor.ExpansionBudget? budget = null)
     {
         var nodes = new List<DatabasePlanNode>();
-        bool pipeline = plan.Stages.Any(item => item.Stage is GqlLetStage or GqlForStage or GqlFilterStage or GqlNextStage or GqlSetStage or GqlRemoveStage or GqlReturnStage { IsWith: true }) ||
+        bool pipeline = plan.Stages.Any(item => item.Stage is GqlMergeStage or GqlLetStage or GqlForStage or GqlFilterStage or GqlNextStage or GqlSetStage or GqlRemoveStage or GqlReturnStage { IsWith: true }) ||
             plan.Stages.Select((item, i) => item.Stage is GqlMatchStage && plan.Stages.Take(i).Any(earlier => earlier.Stage is GqlInsertStage or GqlDeleteStage)).Any(value => value) ||
             plan.Stages.Count(item => item.Stage is GqlInsertStage or GqlDeleteStage) > 1;
         if (pipeline)
@@ -47,6 +47,13 @@ internal sealed partial class GraphPlanner
             {
                 int stageRoot = nodes.Count;
                 Append(item.Plan, 0, StageName(item.Stage));
+                if (item.Stage is GqlMergeStage merge)
+                {
+                    int create = Add("OnCreate", stageRoot, detail: "create every unbound part; undirected creation follows source order");
+                    int match = Add("OnMatch", stageRoot, detail: "complete path; per input row; pattern lock and freshness check");
+                    foreach (var change in merge.OnCreate) { Add("UpdateEntity", create, change.Variable, detail: "set"); }
+                    foreach (var change in merge.OnMatch) { Add("UpdateEntity", match, change.Variable, detail: "set"); }
+                }
                 if (item.Stage is GqlSetStage set)
                 {
                     foreach (var change in set.Items)
@@ -193,6 +200,7 @@ internal sealed partial class GraphPlanner
         GqlForStage { IsUnwind: true } => "Unwind",
         GqlForStage => "For",
         GqlInsertStage => "Insert",
+        GqlMergeStage => "Merge",
         GqlSetStage => "Set",
         GqlRemoveStage => "Remove",
         GqlDeleteStage { Detach: true } => "DetachDelete",
@@ -206,6 +214,7 @@ internal sealed partial class GraphPlanner
     private static string Value(object? value) => value switch
     {
         null => "NULL",
+        GqlExpression expression => GraphProjectionText.Describe(expression),
         string text => "'" + text.Replace("'", "''", StringComparison.Ordinal) + "'",
         _ => Convert.ToString(value, CultureInfo.InvariantCulture) ?? "NULL",
     };

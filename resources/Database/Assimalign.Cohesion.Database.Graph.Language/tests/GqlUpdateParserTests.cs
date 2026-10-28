@@ -64,8 +64,6 @@ public sealed class GqlUpdateParserTests
     [InlineData("MATCH (a) SET a = $p", "CK00001")]
     [InlineData("MATCH (a) SET a += $p", "CK00001")]
     [InlineData("MATCH (a), (b) SET a = properties(b)", "CK00001")]
-    [InlineData("MERGE (n) ON CREATE SET n.x=1", "CK00001")]
-    [InlineData("MERGE (n) ON MATCH SET n.x=1", "CK00001")]
     [InlineData("SHOW LABELS SET", "CG00007")]
     [InlineData("SESSION SET GRAPH other", "CK00001")]
     public void Parse_ExcludedUpdates_ShouldReportOneDiagnostic(string source, string code)
@@ -76,6 +74,5 @@ public sealed class GqlUpdateParserTests
         // Assert
         var error = query.Diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error).ShouldHaveSingleItem();
         error.Code.ShouldBe(code);
-        if (source.StartsWith("MERGE", System.StringComparison.Ordinal)) { error.Message!.ShouldContain("MERGE", Case.Sensitive); }
     }
 }

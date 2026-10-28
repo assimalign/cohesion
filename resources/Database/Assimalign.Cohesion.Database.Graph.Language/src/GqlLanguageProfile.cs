@@ -73,6 +73,7 @@ public static class GqlLanguageProfile
         GqlClauses.ListSlice,
         GqlClauses.Create,
         GqlClauses.Insert,
+        GqlClauses.Merge,
         GqlClauses.Set,
         GqlClauses.Remove,
         GqlClauses.Delete,

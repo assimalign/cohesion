@@ -406,9 +406,87 @@ The Database solution includes `Graph.RecoveryFixture` so solution builds keep t
 the selected configuration. The Graph test build copies that configuration's outputs beside the
 test assembly, allowing `dotnet test --no-build` after a Debug or Release solution build.
 
+### Whole-pattern MERGE execution (#1735, GQ-M2)
+
+The planner treats GqlMergeStage as a writing stage and validates both SET bodies through the same
+local validation as ordinary SET. It admits one creation-compatible fixed path and binds all path
+variables before checking branch items. Equalities see only the incoming scope and are evaluated
+once per input row; known null/invalid equalities also fail EXPLAIN (CG03004). Dynamic invalid
+values fail before the seam or creation. A bound null/missing/incompatible entity uses CG03005.
+The language DIALECT records repeated branch ordering, undirected orientation and bare repeated
+node variables. Already-declared relationship variables refuse during planning (CG03007); labels
+or properties on a repeated or incoming node refuse there too (CG03006), including EXPLAIN.
+No new public execution boundary or interface is added.
+
+| Code | MERGE condition |
+| --- | --- |
+| CG03004 | Null, non-finite or non-scalar equality, proven at planning or evaluated per row |
+| CG03005 | Null or absent bound node, or incompatible bound identity |
+| CG03006 | Repeated or already-bound node decorated with labels or properties |
+| CG03007 | Relationship variable declared before MERGE |
+| CK04002 | Statement or session ended while the database is live, including writer, parent and pattern lock queues and late grants |
+
+The executor gives every anonymous element a collision-free internal binding, constructs a fully
+evaluated path and lock identity, then delegates both probes to GraphMergeConcurrency. Each probe
+uses the supplied read view through GraphUpdates, includes overlays, and enumerates every complete
+match. Its freshness read set includes all matched elements and bound node identities, even
+when the remaining path has no match. Each probe re-reads incoming node and relationship values
+at its supplied view, including overlays, so ON MATCH expressions and replacement construction
+cannot republish stale incoming properties after a ReadCommitted pattern wait. That refreshed
+view also supplies incoming aliases outside the pattern to ON CREATE. Each incoming entity
+refresh checks cancellation and consumes one work unit. Work and both probe result tables are
+charged to the statement budget and released per input row. Output copies leave probe tables
+immutable while branch SET updates and binding cleanup run. Creation reuses bound nodes;
+later bare occurrences reuse the first node slot without merging labels or property maps.
+Both branches use ApplyAsync. After all input rows, RefreshMergeBindings refreshes the complete
+output table through SET's recursive alias refresh. Ordinary creation validates schema before entering the overlay;
+MERGE creation discovers definitions and checks supplied property types then, defers Required
+checks until ON CREATE has finished, and validates every created entity before the row leaves
+that branch. An entity still missing a Required property refuses with the existing CG03003.
+ApplyAsync validates complete changed entities after each SET branch. The one-time PublishAsync
+owns storage publication and affected counts; it does not own schema validation.
+
+The planner chooses an indexed label/property for row-dependent MERGE equalities and retains
+the expression as its value placeholder. The executor substitutes the already-evaluated row value
+before both probes, so an UNWIND upsert performs a seek per row and view. Row-dependent
+seeks rank ahead of every label or relationship-type scan, including zero published counts,
+because those estimates exclude the growing statement overlay. EXPLAIN renders the placeholder
+as GQL expression text. Property seeks maintain a lazy value-keyed view of current
+overlay postings for each label/property, updated on creation, replacement, relabeling and deletion.
+Exact graph scalar equality supplies the keys, including numeric equality across CLR tags.
+Building a view charges each earlier overlay entry once; each probe charges its value lookup and
+matching entries, and each subsequent change charges index maintenance. Persisted candidates
+whose identities are in the overlay are already suppressed; original-value removal postings
+would duplicate that check and are not retained. Overlay label scans visit only the selected
+label's postings; unions deduplicate those postings, and only NodeScan visits every overlay node.
+Every visited candidate is charged, including property-residual rejections. This follows Neo4j's
+label-specific transaction diff set in
+`community/kernel/src/main/java/org/neo4j/kernel/impl/newapi/DefaultNodeLabelIndexCursor.java:58-68`
+(local clone, behavior consulted; no code copied). Retained change buckets and entries use
+the existing statement memory lease. The MERGE read-view override lives in MERGE's lazy state,
+so this cache adds no object size or eager allocation to ordinary writes. This follows Neo4j's
+value lookup of transaction-state index additions at
+`community/kernel/src/main/java/org/neo4j/kernel/impl/newapi/TxStateIndexChanges.java:333-345`
+(local clone, behavior consulted; no code copied). Latest probes retain
+the dropped-index fallback to a label scan. Ordinary MATCH anchor selection is unchanged.
+EXPLAIN describes the probe and both branches; InMemory/TCP conformance and NativeAOT exercise the
+same stage. Ordinary CREATE/SET/DELETE/MATCH retain their existing paths and lock resources. Release fixtures
+retain their base allocation ceilings: the MERGE count box is allocated only in its branch, and
+flow cleanup reuses RunAsync's existing finally without growing ordinary operations.
+The fix-pass Release fixtures retain the pre-fix MATCH planning/execution minima and enforce
+the measured ordinary CREATE, SET and DELETE allocation ceilings; MERGE-only checks avoid
+captured delegates that would grow every plan's closure.
+Ordinary-write measurements run their own warm-up in a fresh fixture process with fixed catalog
+label identities, keeping the posting layout and runner state reproducible. Their ceilings use
+that fixture's current-head minima plus 128 bytes, excluding the 4096-byte difference previously
+observed in combined runs; that difference is not attributed to snapshot bookkeeping. Injection
+tests require the guards to reject an additional 1 KiB on CREATE and DELETE, and a 129-byte payload on SET and DELETE. Successful assertions stay
+outside measured loops; unexpected outcomes still fail immediately. Existing MATCH ceilings
+and runtime compilation settings are unchanged.
+
 ### Internal MERGE serialization contract (#1735, GQ-M1)
 
-`GraphMergeConcurrency.MatchAsync` is an internal seam for GQ-M2; MERGE text remains refused.
+`GraphMergeConcurrency.MatchAsync` executes every GQL MERGE decision (#1735, GQ-M2).
 Call it inside the existing operation failure bracket, before choosing match or create. Supply
 `GraphMergePatternIdentity` after binding: node binding slots with bound IDs, ordinal labels and
 evaluated property equalities, and fixed relationships with endpoint slots, type, orientation,
@@ -420,7 +498,7 @@ independent of source positions. Equal node tokens can conservatively collapse d
 topologies, just as any lock-hash collision can over-serialize. Equal numeric values share the
 existing exact-fraction hash. Null, non-finite and composite equalities, zero bound IDs, empty
 patterns and invalid endpoint slots are refused with structured CG05023. This validates the
-internal identity only; language admission and matching remain GQ-M2 responsibilities.
+internal identity only; the executor validates language equalities first with CG03004.
 
 The seam takes the existing exclusive database writer lock, then an exclusive logical pattern
 entry in Graph's reserved `ObjectId = ulong.MaxValue - 3` lock namespace.
@@ -441,7 +519,8 @@ including its statement overlays and every match's persisted node/relationship r
 seam owns an internal GraphUpdates read-view override around the latest probe, restored in
 `finally` on success, failure, cancellation or disposal. Every overlay-aware lookup, anchor,
 type selection and incident stream uses that view; type-selection caches are invalidated at
-each view transition, including cached absence. The probe returns complete matches, reports
+each view transition and ReadCommitted writer refresh, including cached absence. A latest-view probe
+whose planned property index was dropped falls back to a label scan under the same locks. The probe returns complete matches, reports
 every persisted entity read, and charges ordinary query work and retained memory to its budget.
 At Snapshot, the seam probes the original view, compares every matched and bound entity's writer
 and revision against the latest committed view, and probes that latest pattern view before
@@ -465,7 +544,7 @@ pattern wait invalidates them and refreshes after its grant. Reentrant mutation 
 reuse the captured view. The evaluated-pattern overload caches the most recent identity by
 reference to an immutable evaluation key, including every bound id and equality. An evaluation
 whose inputs change must use a fresh key. This one-entry cache retains no factory closure and
-cannot grow with distinct input rows; GQ-M2 owns accounting for the evaluated operands.
+cannot grow with distinct input rows; the executor accounts evaluated operands and both complete probe results.
 
 GraphMergeLocks is lazy and transaction-owned, including across statements. A new parent/entry
 charges 640 bytes to the acquiring operation's existing query-memory budget (CG05020 on refusal),
@@ -473,15 +552,28 @@ covering manager state and local bookkeeping. Each MERGE statement also accounts
 pattern state from earlier statements; 256 additional bytes cover its statement cache. All query
 leases end with the statement, so the tracker never retains a completed query's budget or value
 workspaces. A smaller later query budget refuses even a previously held pattern if the retained
-state exceeds that limit. Each pattern first takes parent
+state exceeds that limit, aborting the explicit transaction. Each pattern first takes parent
 IntentExclusive. After 128 distinct entry resources, new patterns use a single Exclusive object
 lock in the same namespace. The earlier, at most 128 entry grants remain held through undo and
 normal coordinator release; escalation never grows that set. This caps both retained lock state
 and the manager's end walk without a new kernel release API or an unsafe early release. The
-parent protocol preserves phantom serialization, and the database writer remains mandatory for
+parent protocol preserves phantom serialization. While the writer lock remains, production never
+waits on a pattern lock: raw test holders exercise those waits and escalation. If writer serialization
+were weakened, competing IntentExclusive-to-Exclusive upgrades would surface as detected retryable
+deadlocks. The database writer remains mandatory for
 overlapping patterns and ordinary writes. Normal writes allocate no MERGE tracker or cache.
 End cleanup fences tracker charges before releasing the statement lease on the same budget;
-late autocommit grant cleanup cannot race that release. End-between-grants tests assert budget
+late autocommit grant cleanup cannot race that release. FinishAsync atomically publishes an ended
+sentinel and disposes only locks, with operation release in finally. RunAsync releases the statement
+memory lease on its flow after execution has stopped, even if teardown already ended the operation.
+Late Merge access returns CK04002; a closing session also ends the statement before rollback
+and pin release publish that sentinel. A disposed pattern tracker reports the same code when
+teardown wins after the seam re-reads its state. Failed writer, parent and pattern queue waits
+also use CK04002 when the session ends while the database is live. Database disposal takes
+precedence and retains CG09019, including engine shutdown during UNWIND MERGE and a disposed
+read inside a probe. Every failure releases late lock ownership before reporting its code.
+The seam rechecks the sentinel before touching its cached tracker
+and after a late grant. A losing CompareExchange releases its unpublished lease. End-between-grants tests assert budget
 and lease release for both explicit transactions and autocommit operations.
 
 Non-parallel tests exercise real transactions for creators, ordinary deleters/replacements,
@@ -489,7 +581,10 @@ directed/undirected relationship overlap, all matched entities, bound endpoints,
 unrelated commits and every return/failure/disposal path. Threaded stress runs for at least
 250 ms, then until at least two recorded queued creator races of each isolation have completed,
 under a 30-second cancellation ceiling; counters and lock-release checks decide success.
-Each iteration disposes its database before the next begins. Actors publish their queued
+GQ-M2 also races teardown against active memory charges until at least two rounds and 200
+post-teardown charges have completed after a 250 ms minimum, under the same 30-second ceiling.
+Indexed-anchor and type-cache regressions cover the latest-view fallback and writer refresh.
+Each creator-stress iteration disposes its database before the next begins. Actors publish their queued
 progress before assertions, so a failed assertion reaches the caller instead of hiding behind
 the progress wait's hang guard. The pending state is captured before publication: the signal
 may let the main actor commit before the assertion executes. Deterministic inline-completion
@@ -498,14 +593,26 @@ and already-completed-task tests cover both orderings.
 The strict unselected-MATCH allocation fixture runs in the same non-parallel collection.
 Concurrent suite activity perturbs its small retained fixture ceiling; isolated baseline and
 current implementations allocate identically. All existing allocation ceilings remain enforced.
-An optional internal, instance-free test gate after writer acquisition deterministically ends
-the session or cancels before the pattern grant, proving late-grant cleanup. Tests also force a
+Optional internal, instance-free test gates after writer acquisition and after pattern bookkeeping
+deterministically end the session or cancel before the manager request, proving actual late-grant
+cleanup and CK04002. Creator tests record the loser's pinned view before allowing the winner to
+commit. The seam's wait hook records an incomplete grant before releasing a raw pattern holder.
+Tests also force a
 pattern-only wait and check failure release before the caller rolls back its faulted transaction.
 
 Behavior consulted, no code copied: Neo4j
 `community/cypher/interpreted-runtime/src/main/scala/org/neo4j/cypher/internal/runtime/interpreted/pipes/MergePipe.scala:32-45,79-102`
-branches on a whole input match and its locking variant locks then re-reads. The fixed-Snapshot
+branches on a whole input match and its locking variant locks then re-reads. Neo4j's
+`community/cypher/front-end/ast/src/main/scala/org/neo4j/cypher/internal/ast/semantics/SemanticPatternCheck.scala:467-488`
+permits undirected MERGE and rejects variable-length update relationships. The fixed-Snapshot
 retry requirement above is the stronger owner-approved contract (2026-10-25).
+Redeclaration checks follow `SemanticPatternCheck.scala:670` and
+`community/cypher/cypher-planner/src/main/scala/org/neo4j/cypher/internal/compiler/ast/convert/plannerQuery/ClauseConverters.scala:519,885`.
+Repeated actions follow that converter at `:816-822` and
+`community/cypher/front-end/parser/v5/parser/src/main/antlr4/org/neo4j/cypher/internal/parser/v5/Cypher5Parser.g4:188`.
+Required-property deferral follows Neo4j's validation before commit
+(`community/kernel/src/main/java/org/neo4j/kernel/impl/api/KernelTransactionImplementation.java:1383,1830`);
+Graph validates the finished ON CREATE row before publication.
 
 ### Failed statements in explicit transactions (#1188)
 
@@ -1716,11 +1823,13 @@ to exercise that enforcement path; compiled provisioning is not included.
 | `CG05001` | Invalid hand-built function arity or unbound argument; invalid pattern, variable binding, label expression, predicate or traversal specification, including an insertion that names `\|`, `!`, `%` or an either-direction edge, a binary `AND`, and a chain with fewer than two operands |
 | `CG01002` | Unknown label or relationship type in a schema write (`CreateIndexAsync`, `DropLabelAsync`, `DropRelationshipTypeAsync`), a failed statement. A read never reports it; see `CG01010` and `CG01011` |
 | `CG03003` | Proven incompatible function argument kind; schema/data mismatch, restricted deletion or invalid graph mutation; deterministic catalog identity reuse/rename, identity mismatch, index retargeting or missing owner |
+| `CG03004` | MERGE equality is null, non-finite or non-scalar |
+| `CG03005` | Bound MERGE node is null, absent or incompatible with its node pattern |
 | `CG05004` | Physical-work budget or 64-hop path limit exceeded |
 | `CG07005` | Session/database binding mismatch |
 | `CG06006` | Storage, index, or malformed catalog-record failure translated at the engine boundary |
 | `CG04007` | A retryable catalog conflict, or the session's explicit transaction is aborted by a failed statement: a statement, BEGIN or COMMIT is refused until a rollback completes; the message and `InnerException` name the original failure |
-| `CG04024` | Internal MERGE seam: retryable Snapshot match-or-create decision invalidated by a committed entity replacement/deletion or a new matching pattern |
+| `CG04024` | MERGE: retryable Snapshot match-or-create decision invalidated by a committed entity replacement/deletion or a new matching pattern |
 | `CG05008` | Statement too complex: parsing, planning or evaluating it needs more stack than the executing thread has left (ISO SQLSTATE 54001). The statement fails and the session stays open; Graph.Client retains the connection after a terminal rejection before path output |
 | `CG02009` | Element too large: catalog metadata, a node's labels and properties, or a relationship's type and properties, exceed the 8,092-byte graph record, or an indexed property value exceeds the 1,016-byte index key. Nothing is written for the element; the statement fails and the session stays open |
 | `CG01010` | **Warning**, not a failure: a read-only statement or `GetIndexesAsync` names a label the database does not have at the statement's snapshot. No node carries it, so the read returns the rows the expression still matches (none for a required label), reports this `DiagnosticSeverity.Warning` diagnostic in `DatabaseResult.Diagnostics` or `GraphSchemaResult<T>.Diagnostics`, and leaves an explicit transaction active. Neo4j's `UnknownLabelWarning`, GQLSTATUS 01N50. Not sent over protocol 2.0 |

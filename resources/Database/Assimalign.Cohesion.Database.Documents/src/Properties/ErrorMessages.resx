@@ -44,6 +44,7 @@
   <data name="NumberOutsideDecimalDomain" xml:space="preserve"><value>OQL numbers must fit the decimal scalar domain exactly, without rounding or underflow.</value></data>
   <data name="LikeEscapeInvalid" xml:space="preserve"><value>LIKE ESCAPE must be empty or one Unicode scalar.</value></data>
   <data name="LikeTrailingEscape" xml:space="preserve"><value>LIKE pattern must not end with the escape character.</value></data>
+  <data name="NullPlacementInvalid" xml:space="preserve"><value>The ORDER BY null placement is invalid.</value></data>
   <data name="DistinctOrderNotProjected" xml:space="preserve">
     <value>SELECT DISTINCT requires every ORDER BY expression to appear in the projection.</value>
   </data>

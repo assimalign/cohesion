@@ -11,7 +11,15 @@ using Assimalign.Cohesion.Database.Graph;
 using Assimalign.Cohesion.Database.Graph.Protocol;
 using Assimalign.Cohesion.Database.Graph.RecoveryFixture;
 
-if (args.Length != 2) { throw new ArgumentException("Usage: seed|verify directory"); }
+if (args.Length != 2 && !(args.Length == 3 && args[0] == "allocations"))
+{ throw new ArgumentException("Usage: seed|verify directory; allocations injectedKind [injectedBytes]"); }
+if (args[0] == "allocations")
+{
+    int injectedKind = int.Parse(args[1], System.Globalization.CultureInfo.InvariantCulture);
+    int injectedBytes = args.Length == 3 ? int.Parse(args[2], System.Globalization.CultureInfo.InvariantCulture) : 1024;
+    Console.WriteLine("allocations=" + string.Join(",", GraphWriteAllocations.Measure(injectedKind, injectedBytes)));
+    return;
+}
 await using var engine = GraphDatabaseEngine.Create("graph-engine", new()
 {
     RootPath = args[1], CheckpointInterval = TimeSpan.FromHours(1), PageWriteBackInterval = TimeSpan.FromHours(1),

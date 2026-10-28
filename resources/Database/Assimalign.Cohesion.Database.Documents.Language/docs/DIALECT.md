@@ -398,6 +398,29 @@ may be normalized. A successful UPDATE returns the matched count, including unch
 and allocates fresh versions. Failure or cancellation writes nothing under the transaction rules
 above. EXPLAIN UPDATE describes the access without writing. USE KEYS, LIMIT and FOR remain CK00001. DocumentUpdateTests covers paths, atomicity, serialization and matched counts.
 
+## ORDER BY null placement (#1730)
+
+Each term accepts `expr [ASC | DESC] [NULLS FIRST | LAST]`, including projection aliases,
+multiple terms and LIMIT/OFFSET. ASC is the omitted direction. The omitted placement is FIRST
+for ASC and LAST for DESC. FIRST/LAST moves the whole MISSING/NULL block; direction controls
+its internal order: ASC keeps MISSING before NULL, DESC keeps NULL before MISSING. Thus the
+older “MISSING before NULL” wording means the ascending base order, not every direction.
+This follows the pinned [Couchbase table](https://github.com/couchbaselabs/docs-devex/blob/c3bb1549af4887019b9983e371d9e8b4f569052c/modules/n1ql/pages/n1ql-language-reference/orderby.adoc#L64-L99).
+Values retain Boolean, number, ordinal string, array and object order (reversed for DESC).
+Equal query keys retain ordinal document identity, independent of direction; later ORDER BY
+terms precede that tie break. NULLS stays contextual, so existing fields named nulls remain valid.
+Malformed NULLS options give located CD00013; an invalid direct-AST placement gives CD01032.
+NULLS ALL, NULLS DISTINCT and numeric options report CD00013 at the option; bare NULLS reports
+it at end of input. NULLS FIRST LAST reports CK00001 at the extra LAST, outside the completed suffix.
+No new sorting bound or budget diagnostic is introduced; retained sorting still uses CD05018.
+
+| Term | First to last |
+|---|---|
+| ASC / ASC NULLS FIRST | MISSING, NULL, values ascending |
+| ASC NULLS LAST | values ascending, MISSING, NULL |
+| DESC / DESC NULLS LAST | values descending, NULL, MISSING |
+| DESC NULLS FIRST | NULL, MISSING, values descending |
+
 ## Index DDL (#1135)
 
 CREATE [UNIQUE] INDEX [IF NOT EXISTS] name ON collection (path [, path ...]) and
@@ -414,7 +437,7 @@ carry structured diagnostics. OQL index DDL is autocommit-only; an explicit tran
 it with CD04105 before catalog access. After a failed autocommit statement the next can run immediately.
 PATHS in COHESION_SCHEMA.INDEXES is the ordered array, PATH is its first entry, and IS_UNIQUE is real.
 
-Leading MISSING omits the entry. Components sort MISSING, NULL, FALSE, TRUE, numbers, ordinal
+Leading MISSING omits the entry unless the leading scalar key has INCLUDE MISSING. Components sort MISSING, NULL, FALSE, TRUE, numbers, ordinal
 strings, arrays, objects; full predicates always filter seek candidates. UNIQUE keys containing
 any NULL or MISSING do not conflict (PostgreSQL NULLS DISTINCT, diverging from Cohesion SQL).
 Duplicate valued scalar keys fail CD03020 (23505), naming index and collection without key data;
@@ -422,7 +445,7 @@ array/object UNIQUE components fail CD02021 naming index and path. Constraints a
 per row, so key swaps may fail. A failed explicit transaction requires RollbackAsync before reuse.
 The wire uses ExecutionFailure (6) without a protocol change and keeps the connection usable.
 The path-count cap reports CD00009 at the 33rd key (CD03022 for a directly constructed AST). Duplicate/empty keys, expressions, wildcards, ASC/DESC, partial
-WHERE and INCLUDE MISSING receive CD00002. ALL array keys get one CK00001 at ALL.
+WHERE receive CD00002. ALL array keys get one CK00001 at ALL.
 The catalog uses v3 index records (#1530) and refuses v1/v2 indexes before recovery writes;
 there is no upgrade path or legacy reader. Composite seeks support a leading equality prefix
 and one range on the next path. Bounded snapshot-visible probes rank candidate cost first;
@@ -441,7 +464,7 @@ literals bind directly to Decimal, including `1.0`; CLR Single/Double constants 
 are refused. WHEN has at most 32 levels and 128 predicate nodes (a negated presence test counts
 as NOT plus the test). Binding failures use CD01028, unsupported constants CD02027, restricted
 expression failures CD03027 and predicate size failures CD03028, all located before catalog writes.
-Multiple array keys and UNIQUE array indexes use CD03025. INCLUDE MISSING syntax remains deferred.
+Multiple array keys and UNIQUE array indexes use CD03025. INCLUDE MISSING is a leading scalar-key suffix.
 PATH/PATHS render normalized array keys with a canonical `v` binding and a quoted source root.
 Source, projection and WHEN path segments containing punctuation, keywords, Unicode or quotes
 are quoted individually, preserving typed catalog definitions as executable DDL.
@@ -473,6 +496,37 @@ after 1,001 fetches. WHEN alone guarantees no ratio for additional residuals or 
 These are local probes, not an SF10 run.
 The syntax/matching basis is [Couchbase array indexing](https://docs.couchbase.com/server/current/n1ql/n1ql-language-reference/indexing-arrays.html);
 the DISTINCT-only, scalar projection and no-UNIQUE restrictions are Cohesion's approved boundary.
+
+### INCLUDE MISSING and ordered-access eligibility (#1632, OQ-O1)
+
+`CREATE INDEX ix ON items (score INCLUDE MISSING, category)` includes leading-MISSING
+records using the existing v3 flag; INCLUDE is contextual. The suffix belongs inside the key
+list on the first scalar key, following [Couchbase](https://github.com/couchbaselabs/docs-devex/blob/c3bb1549af4887019b9983e371d9e8b4f569052c/modules/n1ql/pages/n1ql-language-reference/createindex.adoc#L317-L330).
+It is invalid on later keys or after the closing parenthesis. Direct AST leading-array definitions
+still receive CD03025. COHESION_SCHEMA.INDEXES exposes INCLUDE_MISSING and renders the suffix
+in PATH and PATHS[0], making the key list reusable as DDL. No format or wire bump is needed.
+
+EXPLAIN reports order_eligible and order_reason on the selected access and one
+IndexOrderCandidate per visible index, including ORDER BY-only candidates. Eligible candidates
+report forward/reverse direction, equality prefix, complete equal-key buckets and the document
+identity tie break. Ordinary sparse indexes need a mandatory predicate proving that leading
+MISSING cannot qualify. AND needs either proof, OR needs both; direct presence tests and direct
+comparisons are recognized. Calls and computed paths establish no proof. ORDER BY must match
+consecutive leading keys after optional equality-fixed keys, with one direction for varying keys.
+Nondefault null placement requires proof that both unknowns are excluded. Arrays, grouping,
+DISTINCT, UNNEST, nonindex expressions and intersections retain their stated fallback reasons.
+
+Lossy array/object values never establish ordering. UNIQUE enforces scalar keys; direct scalar
+comparisons or NULL/MISSING tests can also prove a domain. Otherwise a snapshot-visible,
+512-entry/32-page absence probe checks complex tags on the first varying component, without
+fetching documents. Incomplete probes and later varying components without a scalar proof
+report scalar_domain_unproven. This deliberately conservative fallback needs no new diagnostic.
+A shorter ORDER BY than the physical key still requires a complete equal-ORDER-BY-prefix bucket,
+including all trailing physical components, before identity sorting and LIMIT termination.
+OQ-O1 computes eligibility only for EXPLAIN: ordinary execution retains its existing planning
+allocation path, including ORDER BY without NULLS. EXPLAIN explicitly says consumed=False and
+sort=retained. OQ-O2 must enable AnalyzeOrdering for execution when it adds scan consumption,
+sort elision and earlier LIMIT/OFFSET termination.
 
 Conformance lives in OqlSqlppBasisTests, OqlKeywordDispositionTests, DocumentMissingTests,
 OqlExecutionConformanceTests, DocumentQueryTests and DocumentMissingWireTests. The wire tests

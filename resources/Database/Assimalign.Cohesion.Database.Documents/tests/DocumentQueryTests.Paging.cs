@@ -51,7 +51,7 @@ public sealed partial class DocumentQueryTests
             new Dictionary<string, object?> { ["n"] = 2 }, CancellationToken.None);
         await foreach (var row in explained.GetRowsAsync(CancellationToken.None))
         {
-            if (row.GetInt32(0) == 0) { row.GetString(5).ShouldBe("filter=False; grouped=False; order_keys=1; limit=2; offset=1"); }
+            if (row.GetInt32(0) == 0) { row.GetString(5).ShouldBe("filter=False; grouped=False; order_keys=1; limit=2; offset=1; ordering=name ASC; sort=retained"); }
         }
     }
 
@@ -243,7 +243,7 @@ public sealed partial class DocumentQueryTests
             {
                 if (row.GetString(2) == "Select")
                 {
-                    row.GetString(5).ShouldBe("filter=False; grouped=False; order_keys=1; limit=1; offset=1");
+                    row.GetString(5).ShouldBe("filter=False; grouped=False; order_keys=1; limit=1; offset=1; ordering=META().id ASC; sort=retained");
                     sourceDescribed = true;
                 }
             }

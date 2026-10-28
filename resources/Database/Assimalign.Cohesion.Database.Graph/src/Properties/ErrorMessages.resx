@@ -6,6 +6,8 @@
   <data name="CatalogOwnerMissing" xml:space="preserve"><value>The owning graph definition does not exist.</value></data>
   <data name="CatalogSnapshotChanged" xml:space="preserve"><value>The graph catalog changed since this transaction's snapshot. Retry the transaction.</value></data>
   <data name="MergeSnapshotConflict" xml:space="preserve"><value>The MERGE pattern decision changed after this transaction's snapshot. Retry the transaction.</value></data>
+  <data name="MergePropertyInvalid" xml:space="preserve"><value>MERGE property equalities require non-null finite scalar values.</value></data>
+  <data name="MergeBoundInvalid" xml:space="preserve"><value>A bound MERGE entity must be present and satisfy its pattern, endpoints and direction.</value></data>
   <data name="MergeIdentityInvalid" xml:space="preserve"><value>A bound MERGE pattern requires valid entity identities, endpoint slots, labels, relationship types and non-null finite scalar property equalities.</value></data>
   <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
   <resheader name="version"><value>2.0</value></resheader>
@@ -285,4 +287,10 @@
   <data name="ShortestPathNodeMissing" xml:space="preserve"><value>The selected shortest path contains a node absent from this statement snapshot.</value></data>
   <data name="ShortestPathRelationshipMissing" xml:space="preserve"><value>The selected shortest path contains a relationship absent from this statement snapshot.</value></data>
   <data name="SelectivePrefilterPeerBinding" xml:space="preserve"><value>Selected path prefilters cannot reference '{0}', which is introduced by another path in the same MATCH. Bind it in an earlier clause or in this path.</value></data>
+  <data name="MergeRelationshipDeclared" xml:space="preserve">
+    <value>A MERGE relationship variable must not already be declared.</value>
+  </data>
+  <data name="MergeNodeDeclared" xml:space="preserve">
+    <value>A repeated or already-bound MERGE node must be a bare variable without labels or properties.</value>
+  </data>
 </root>

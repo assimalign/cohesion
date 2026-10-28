@@ -20,7 +20,7 @@ public class OqlLanguageProfileTests
         profile.Keywords.ToArray().ShouldContain("ON");
         profile.Functions.ToArray().ShouldContain("COUNT");
         profile.Functions.ToArray().ShouldContain("META");
-        foreach (string word in new[] { "KEY", "VALUES", "INTO" }) { profile.Keywords.ToArray().ShouldNotContain(word); }
+        foreach (string word in new[] { "KEY", "VALUES", "INTO", "NULLS", "INCLUDE" }) { profile.Keywords.ToArray().ShouldNotContain(word); }
     }
 
     [Theory]

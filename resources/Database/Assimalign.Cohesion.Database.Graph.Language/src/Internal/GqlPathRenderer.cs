@@ -10,7 +10,10 @@ namespace Assimalign.Cohesion.Database.Graph.Language.Internal;
 // and original spellings are not syntax: all semantic children are rendered from the AST.
 internal static class GqlPathRenderer
 {
-    internal static string Render(GqlPathPattern path)
+    internal static string Render(GqlPathPattern path) => RenderObject(path);
+    internal static string RenderExpression(GqlExpression expression) => RenderObject(expression);
+
+    private static string RenderObject(object path)
     {
         var builder = new StringBuilder();
         var pending = new Stack<object>();

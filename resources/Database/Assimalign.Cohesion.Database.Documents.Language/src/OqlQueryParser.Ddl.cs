@@ -80,6 +80,7 @@ public sealed partial class OqlQueryParser
         string collection = CollectionName();
         Expect(TokenType.LeftParen, "'('");
         var paths = new List<OqlExpression>();
+        bool includeMissing = false;
         do
         {
             var token = Current;
@@ -110,10 +111,16 @@ public sealed partial class OqlQueryParser
             if (paths.OfType<OqlPathExpression>().Any(prior => prior.Segments.SequenceEqual(path.Segments)))
             { Error("CD00002", ErrorMessages.OqlQueryParserParseCreateIndexVoid2, token); break; }
             paths.Add(path);
+            if (Take("INCLUDE"))
+            {
+                if (paths.Count != 1) { Error("CD00002", ErrorMessages.IncludeMissingLeadingKey, Previous); break; }
+                Expect("MISSING");
+                includeMissing = true;
+            }
         } while (Take(TokenType.Comma));
         if (!Failed) { Expect(TokenType.RightParen, "')'"); }
 
-        return new OqlCreateIndexExpression(indexName, collection, paths, unique, ifNotExists, Span(start, Previous));
+        return new OqlCreateIndexExpression(indexName, collection, paths, unique, ifNotExists, Span(start, Previous), includeMissing);
     }
 
     private OqlDropIndexExpression ParseDropIndex()

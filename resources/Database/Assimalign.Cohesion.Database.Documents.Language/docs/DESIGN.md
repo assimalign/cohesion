@@ -86,7 +86,7 @@ Lexical recognition preserves the established vocabulary so rejected constructs 
 | `GROUP BY` | Yes | One or more grouping expressions, optionally aliased with or without AS |
 | `GROUP AS` | Yes | Array of input binding wrappers, including group-term aliases |
 | `HAVING` | Yes | Group filtering, including aggregate calls |
-| `ORDER BY` | Yes | One or more expressions, each optionally `ASC` or `DESC` |
+| `ORDER BY` | Yes | One or more expressions, each optionally `ASC` or `DESC`, then `NULLS FIRST` or `LAST` |
 | `LIMIT` | Yes | Non-negative signed Int64 integer literal or parameter, applied after ordering |
 | `OFFSET` | Yes | Non-negative signed Int64 integer literal or parameter; either order with LIMIT |
 | `FETCH` | No | The SQL FETCH FIRST spelling is not adopted; one CK00001 at FETCH |
@@ -240,6 +240,34 @@ parser, in-process execution and both transports. No disk or frame format change
 Older clients can reject the successful completion after an autocommit write has committed,
 so retrying may repeat the write; disconnect rolls back explicit uncommitted work. The dialect
 states both outcomes beside the compatibility contract, and permanent wire probes cover them.
+
+## ORDER BY null placement (#1730)
+
+Each term accepts `expr [ASC | DESC] [NULLS FIRST | LAST]`, including projection aliases,
+multiple terms and LIMIT/OFFSET. ASC is the omitted direction. The omitted placement is FIRST
+for ASC and LAST for DESC. FIRST/LAST moves the whole MISSING/NULL block; direction controls
+its internal order: ASC keeps MISSING before NULL, DESC keeps NULL before MISSING. Thus the
+older “MISSING before NULL” wording means the ascending base order, not every direction.
+This follows the pinned [Couchbase table](https://github.com/couchbaselabs/docs-devex/blob/c3bb1549af4887019b9983e371d9e8b4f569052c/modules/n1ql/pages/n1ql-language-reference/orderby.adoc#L64-L99).
+Values retain Boolean, number, ordinal string, array and object order (reversed for DESC).
+Equal query keys retain ordinal document identity, independent of direction; later ORDER BY
+terms precede that tie break. NULLS stays contextual, so existing fields named nulls remain valid.
+Malformed NULLS options give located CD00013; an invalid direct-AST placement gives CD01032.
+The capability scan defers ALL and DISTINCT immediately after NULLS to the ordering parser,
+so they receive CD00013 at that option, like a numeric option or end of input. A second LAST
+after NULLS FIRST retains CK00001 at LAST, outside the completed placement suffix.
+No new sorting bound or budget diagnostic is introduced; retained sorting still uses CD05018.
+
+| Term | First to last |
+|---|---|
+| ASC / ASC NULLS FIRST | MISSING, NULL, values ascending |
+| ASC NULLS LAST | values ascending, MISSING, NULL |
+| DESC / DESC NULLS LAST | values descending, NULL, MISSING |
+| DESC NULLS FIRST | NULL, MISSING, values descending |
+
+OqlOrdering retains OqlNullPlacement (Default/First/Last) through alias rewriting. OQL has no
+general AST renderer; parsed source text remains intact and EXPLAIN renders direction and
+written NULLS suffixes. The lexical profile keeps NULLS and INCLUDE contextual.
 
 ### LIMIT and OFFSET (#1129)
 
@@ -507,14 +535,14 @@ object       := '{' [(string | identifier) ':' expression (',' (string | identif
 metadata     := META '(' [identifier] ')' '.' (id | version)
 create-collection := CREATE COLLECTION [IF NOT EXISTS] collection
 drop-collection   := DROP COLLECTION [IF EXISTS] collection
-create-index := CREATE [UNIQUE] INDEX [IF NOT EXISTS] identifier ON collection '(' index-path (',' index-path)* ')'
+create-index := CREATE [UNIQUE] INDEX [IF NOT EXISTS] identifier ON collection '(' index-path [INCLUDE MISSING] (',' index-path)* ')'
 index-path   := (identifier | '[' string ']') ('.' identifier | '[' integer ']' | '[' string ']')*
 drop-index   := DROP INDEX [IF EXISTS] identifier ON collection
 collection   := identifier | COHESION_SCHEMA '.' identifier
 projection   := expression [AS label]
 label        := identifier | quoted-identifier | reserved-word
 array        := '[' [expression (',' expression)*] ']'
-ordering     := expression [ASC | DESC]
+ordering     := expression [ASC | DESC] [NULLS (FIRST | LAST)]
 path         := identifier ('.' identifier | '[' integer ']' | '[' string ']')*
 presence-test := expression IS [NOT] (NULL | MISSING | VALUED)
 membership   := expression [NOT] IN ('(' expression (',' expression)* ')' | expression)
@@ -644,6 +672,7 @@ The keyword-disposition corpus covers these identifiers both with and without th
 | `CD00009` | More than 32 index key paths, at the 33rd path |
 | `CD00010` | A duplicate variable within one FROM/UNNEST or quantifier binding list, at the repeated name |
 | `CD00011` | ALL/DISTINCT on a scalar or star call, at the quantifier |
+| `CD00013` | NULLS without FIRST or LAST, at the expected option |
 
 Every error has an absolute start/end span and source line. End-of-input errors use the source
 length for both offsets. A line breaks at LF, CR, NEL (U+0085), LS (U+2028) or PS (U+2029), and
@@ -833,7 +862,7 @@ CREATE INDEX retains Paths in source order, with Path as the first path. IsUniqu
 are explicit AST flags; DROP INDEX retains IfExists. Single-path constructors remain useful
 convenience forms. Quoted "if" stays an index name. Duplicate paths compare segment values, so
 `a`, `"a"` and `['a']` name the same key. Empty/duplicate paths, wildcards, expressions, ASC/DESC,
-partial WHERE and INCLUDE MISSING receive CD00002 at the invalid token. The engine enforces the
+partial WHERE receive CD00002 at the invalid token. The engine enforces the
 32-key cap on directly constructed ASTs with CD03022; text reports CD00009 at the 33rd key.
 ALL array keys receive one CK00001 from the key parser; DISTINCT ARRAY uses the restricted
 grammar above. Capability validation computes the balanced key-list token range once, so repeated
@@ -885,6 +914,37 @@ The root DatabaseException.Diagnostics carrier preserves the complete parser lis
 factories and session boundaries, including parsed typed requests. DatabaseParseException
 retains the existing first-error message and no error-recovery AST executes. Graph's path
 request factory shares this contract. Diagnostics remain plain Database.Types data.
+
+### INCLUDE MISSING and ordered-access eligibility (#1632, OQ-O1)
+
+`CREATE INDEX ix ON items (score INCLUDE MISSING, category)` includes leading-MISSING
+records using the existing v3 flag; INCLUDE is contextual. The suffix belongs inside the key
+list on the first scalar key, following [Couchbase](https://github.com/couchbaselabs/docs-devex/blob/c3bb1549af4887019b9983e371d9e8b4f569052c/modules/n1ql/pages/n1ql-language-reference/createindex.adoc#L317-L330).
+It is invalid on later keys or after the closing parenthesis. Direct AST leading-array definitions
+still receive CD03025. COHESION_SCHEMA.INDEXES exposes INCLUDE_MISSING and renders the suffix
+in PATH and PATHS[0], making the key list reusable as DDL. No format or wire bump is needed.
+
+EXPLAIN reports order_eligible and order_reason on the selected access and one
+IndexOrderCandidate per visible index, including ORDER BY-only candidates. Eligible candidates
+report forward/reverse direction, equality prefix, complete equal-key buckets and the document
+identity tie break. Ordinary sparse indexes need a mandatory predicate proving that leading
+MISSING cannot qualify. AND needs either proof, OR needs both; direct presence tests and direct
+comparisons are recognized. Calls and computed paths establish no proof. ORDER BY must match
+consecutive leading keys after optional equality-fixed keys, with one direction for varying keys.
+Nondefault null placement requires proof that both unknowns are excluded. Arrays, grouping,
+DISTINCT, UNNEST, nonindex expressions and intersections retain their stated fallback reasons.
+
+Lossy array/object values never establish ordering. UNIQUE enforces scalar keys; direct scalar
+comparisons or NULL/MISSING tests can also prove a domain. Otherwise a snapshot-visible,
+512-entry/32-page absence probe checks complex tags on the first varying component, without
+fetching documents. Incomplete probes and later varying components without a scalar proof
+report scalar_domain_unproven. This deliberately conservative fallback needs no new diagnostic.
+A shorter ORDER BY than the physical key still requires a complete equal-ORDER-BY-prefix bucket,
+including all trailing physical components, before identity sorting and LIMIT termination.
+OQ-O1 computes eligibility only for EXPLAIN: ordinary execution retains its existing planning
+allocation path, including ORDER BY without NULLS. EXPLAIN explicitly says consumed=False and
+sort=retained. OQ-O2 must enable AnalyzeOrdering for execution when it adds scan consumption,
+sort elision and earlier LIMIT/OFFSET termination.
 
 ## Access estimates (#1527)
 

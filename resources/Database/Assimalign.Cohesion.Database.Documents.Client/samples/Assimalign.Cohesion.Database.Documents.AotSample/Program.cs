@@ -216,6 +216,23 @@ internal static class Program
             Check(synthetic.IsDocumentQuery && synthetic.Documents.Count == 2 && synthetic.Documents[0].GetProperty("d").GetProperty("name").GetString() == "東京" &&
                 synthetic.Documents[0].GetProperty("t").GetInt32() == 1, "UNNEST synthetic documents");
             Check((await connection.QueryAsync("SELECT SUM(score) AS total FROM items HAVING SUM(score) > 0", cancellationToken: token))[0][0] is 3m, "aggregate");
+            Check(await connection.ExecuteAsync("CREATE COLLECTION ordering", cancellationToken: token) == 0, "ordering collection");
+            await connection.ExecuteAsync("INSERT INTO ordering (KEY, VALUE) VALUES ('m', {}), ('n', {'v':NULL}), ('v', {'v':1})", cancellationToken: token);
+            (string Suffix, string Expected)[] orderings =
+            [
+                ("ASC NULLS FIRST", "m,n,v"), ("ASC NULLS LAST", "v,m,n"),
+                ("DESC NULLS FIRST", "n,m,v"), ("DESC NULLS LAST", "v,n,m"),
+            ];
+            foreach (var ordering in orderings)
+            {
+                var ordered = await connection.QueryAsync($"SELECT META().id AS id, v AS k FROM ordering ORDER BY k {ordering.Suffix}", cancellationToken: token);
+                Check(string.Join(',', ordered.Select(row => (string)row.GetValue(0)!)) == ordering.Expected, "NULLS " + ordering.Suffix);
+            }
+            await connection.ExecuteAsync("CREATE INDEX ordering_ix ON ordering (v INCLUDE MISSING)", cancellationToken: token);
+            var orderingPlan = await connection.QueryAsync("EXPLAIN SELECT META().id FROM ordering ORDER BY v DESC", cancellationToken: token);
+            Check(orderingPlan.Documents.Any(document => document.GetProperty("operator").GetString() == "IndexOrderCandidate" &&
+                document.GetProperty("detail").GetString()!.Contains("order_eligible=True", StringComparison.Ordinal)), "ordered eligibility only");
+            Check(await connection.ExecuteAsync("DROP COLLECTION ordering", cancellationToken: token) == 0, "ordering cleanup");
             Check(await connection.ExecuteAsync("CREATE INDEX by_score ON items (score)", cancellationToken: token) == 0, "index create");
             var explained = await connection.QueryAsync("EXPLAIN SELECT score FROM items WHERE score >= 2", cancellationToken: token);
             Check(explained.IsDocumentQuery && explained.Documents.Any(document =>

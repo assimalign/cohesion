@@ -210,6 +210,10 @@ SQLSTATE meanings remain those in [the SQL dialect](../../Assimalign.Cohesion.Da
 
 ## Documents migration
 
+OQL null placement (#1730) adds CD00013 for a malformed NULLS suffix and CD01032 for an
+invalid directly constructed placement. Existing CD05018 still bounds sorting; #1632 ordering
+proof probes fall back on exhaustion and add no execution failure or format change.
+
 OQL aggregate quantifiers and native aggregates (#1729, OQ-G1) add CD00011 for a scalar/star
 quantifier and CD01029 for an invalid directly constructed call quantifier. Existing CD02007
 covers a statistical result outside the decimal domain, CD02008 preserves SUM/AVG nonnumber refusal, CD05001 covers
@@ -244,6 +248,7 @@ payload accepts rows plus a matching affected count without capability negotiati
 | OQL0010 | CD00010 | Language/syntax |
 | New (#1729, OQ-G1) | CD00011 | Language/syntax — ALL/DISTINCT on a scalar or star call |
 | New (#1729, OQ-G2) | CD00012 | Language/syntax — GROUP AS without preceding GROUP BY terms |
+| New (#1730) | CD00013 | Language/syntax — NULLS without FIRST or LAST |
 | COHDOC002 | CD01002 | Binding/names |
 | COHDOC003 | CD01003 | Binding/names |
 | COHDOC005 | CD01005 | Binding/names |
@@ -258,6 +263,7 @@ payload accepts rows plus a matching affected count without capability negotiati
 | New (#1729, OQ-G1) | CD01029 | Binding/names — invalid aggregate quantifier or target in a directly constructed call AST |
 | New (#1729, OQ-G2) | CD01030 | Binding/names — invalid grouping alias declaration, shape or collision with FROM/UNNEST |
 | New (#1729, OQ-G2) | CD01031 | Binding/names — GROUP AS referenced in an aggregate's row input |
+| New (#1730) | CD01032 | Binding/names — invalid null placement in a direct ordering AST |
 | COHDOC006 | CD02006 | Values/types |
 | COHDOC007 | CD02007 | Values/types |
 | COHDOC008 | CD02008 | Values/types |
@@ -322,6 +328,10 @@ transaction-state diagnostics; it allocates no new identity. These changes add n
 | COHDBG013 | CG02013 | Values/types |
 | New (#1736, GQ-C1) | CG02014 | Values/types — invalid list-operation source or numeric slice-bound kind/range |
 | COHDBG003 | CG03003 | Schema/constraints |
+| New (#1735, GQ-M2) | CG03004 | Constraints — MERGE equality is null, non-finite or non-scalar |
+| New (#1735, GQ-M2) | CG03005 | Constraints — bound MERGE node is null, absent or incompatible with its node pattern |
+| New (#1735, GQ-M2 fixes) | CG03006 | Constraints — repeated or already-bound MERGE node has labels or properties |
+| New (#1735, GQ-M2 fixes) | CG03007 | Constraints — MERGE relationship variable is already declared before the clause |
 | COHDBG007 | CG04007 | Transactions/locking |
 | COHDBG022 | CG04022 | Transactions/locking |
 | COHDBG023 | CG04023 | Transactions/locking |
@@ -397,7 +407,7 @@ and invariant exceptions and lower child-root typed failures retain their docume
 | CK03001 | Logical database or storage already exists | — |
 | CK03002 | Logical database is absent | — |
 | CK04001 | Requested isolation level is unsupported | — |
-| CK04002 | Statement operation has already completed | — |
+| CK04002 | Statement operation has already completed; MERGE includes session end during writer/parent/pattern waits or late grants while the database is live (database disposal retains CG09019) | — |
 | CK04003 | Active statement apply bracket is absent | — |
 | CK04004 | Session already has an active transaction | — |
 | CK04005 | Transaction has already ended | — |

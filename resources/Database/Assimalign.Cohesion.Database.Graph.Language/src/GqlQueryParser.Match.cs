@@ -34,6 +34,26 @@ public sealed partial class GqlQueryParser
                 hasNamedBinding |= HasNamedBinding(paths);
                 stages.Add(new GqlMatchStage(new GqlMatchClause(paths, predicate, optional), Span(clauseStart, Previous)));
             }
+            else if (Take("MERGE"))
+            {
+                var paths = ParsePatterns();
+                if (!Failed && paths.Count != 1) { Error("CG00002", ErrorMessages.MergeSinglePath, clauseStart); }
+                var onCreate = new List<GqlSetItem>();
+                var onMatch = new List<GqlSetItem>();
+                while (!Failed && Take("ON"))
+                {
+                    var branch = Current;
+                    bool create = Take("CREATE");
+                    if (!create) { Expect("MATCH"); }
+                    Expect("SET");
+                    if (Failed) { break; }
+                    var set = ParseSet(branch);
+                    (create ? onCreate : onMatch).AddRange(set.Items);
+                }
+                hasNamedBinding |= HasNamedBinding(paths);
+                if (!Failed) { stages.Add(new GqlMergeStage(paths[0], onCreate.AsReadOnly(), onMatch.AsReadOnly(), Span(clauseStart, Previous))); }
+                segmentWrites = true;
+            }
             else if (Is("CREATE") || Is("INSERT"))
             {
                 bool create = Take("CREATE");
@@ -54,49 +74,7 @@ public sealed partial class GqlQueryParser
             }
             else if (Take("SET"))
             {
-                var items = new List<GqlSetItem>();
-                do
-                {
-                    var startItem = Current;
-                    string variable = Identifier();
-                    if (Take(TokenType.Dot))
-                    {
-                        string property = Identifier(allowKeyword: true);
-                        Expect(TokenType.Equals, "'='");
-                        if (Current.Type is TokenType.LeftBrace or TokenType.LeftBracket) { _ = ParseScalar(); break; }
-                        var value = ParsePredicate();
-                        if (!Failed) { RejectCompositePropertyLiteral(value); }
-                        items.Add(new GqlSetPropertyItem(variable, property, value, Span(startItem, Previous)));
-                    }
-                    else if (Is("IS") || Current.Type == TokenType.Colon)
-                    {
-                        bool colon = Take(TokenType.Colon);
-                        if (!colon) { Advance(); }
-                        var labels = new List<string> { Identifier(allowKeyword: true) };
-                        while (!Failed && colon && Take(TokenType.Colon)) { labels.Add(Identifier(allowKeyword: true)); }
-                        items.Add(new GqlSetLabelsItem(variable, labels.AsReadOnly(), colon, Span(startItem, Previous)));
-                    }
-                    else
-                    {
-                        bool merge = Current.Type == TokenType.Unrecognized && Current.Text == "+=";
-                        if (merge) { Advance(); } else { Expect(TokenType.Equals, "'=', '+=', '.', ':' or IS"); }
-                        if (Failed) { break; }
-                        if (Current.Type != TokenType.LeftBrace)
-                        {
-                            if (Current.Type == TokenType.Parameter) { RejectUnsupportedParameter("WHOLE-MAP PARAMETER"); }
-                            else { Unsupported("WHOLE-MAP EXPRESSION", Current); }
-                            break;
-                        }
-                        var properties = ParseProperties();
-                        if (!Failed)
-                        {
-                            foreach (var value in properties.Values)
-                            { RejectCompositePropertyLiteral(value); if (Failed) { break; } }
-                        }
-                        items.Add(new GqlSetPropertiesItem(variable, properties, merge, Span(startItem, Previous)));
-                    }
-                } while (!Failed && Take(TokenType.Comma));
-                stages.Add(new GqlSetStage(items.AsReadOnly(), Span(clauseStart, Previous)));
+                stages.Add(ParseSet(clauseStart));
                 segmentWrites = true;
             }
             else if (Take("REMOVE"))
@@ -286,4 +264,51 @@ public sealed partial class GqlQueryParser
         }
         return text.ToString();
     }
+    private GqlSetStage ParseSet(Lexeme clauseStart)
+    {
+        var items = new List<GqlSetItem>();
+        do
+        {
+            var startItem = Current;
+            string variable = Identifier();
+            if (Take(TokenType.Dot))
+            {
+                string property = Identifier(allowKeyword: true);
+                Expect(TokenType.Equals, "'='");
+                if (Current.Type is TokenType.LeftBrace or TokenType.LeftBracket) { _ = ParseScalar(); break; }
+                var value = ParsePredicate();
+                if (!Failed) { RejectCompositePropertyLiteral(value); }
+                items.Add(new GqlSetPropertyItem(variable, property, value, Span(startItem, Previous)));
+            }
+            else if (Is("IS") || Current.Type == TokenType.Colon)
+            {
+                bool colon = Take(TokenType.Colon);
+                if (!colon) { Advance(); }
+                var labels = new List<string> { Identifier(allowKeyword: true) };
+                while (!Failed && colon && Take(TokenType.Colon)) { labels.Add(Identifier(allowKeyword: true)); }
+                items.Add(new GqlSetLabelsItem(variable, labels.AsReadOnly(), colon, Span(startItem, Previous)));
+            }
+            else
+            {
+                bool merge = Current.Type == TokenType.Unrecognized && Current.Text == "+=";
+                if (merge) { Advance(); } else { Expect(TokenType.Equals, "'=', '+=', '.', ':' or IS"); }
+                if (Failed) { break; }
+                if (Current.Type != TokenType.LeftBrace)
+                {
+                    if (Current.Type == TokenType.Parameter) { RejectUnsupportedParameter("WHOLE-MAP PARAMETER"); }
+                    else { Unsupported("WHOLE-MAP EXPRESSION", Current); }
+                    break;
+                }
+                var properties = ParseProperties();
+                if (!Failed)
+                {
+                    foreach (var value in properties.Values)
+                    { RejectCompositePropertyLiteral(value); if (Failed) { break; } }
+                }
+                items.Add(new GqlSetPropertiesItem(variable, properties, merge, Span(startItem, Previous)));
+            }
+        } while (!Failed && Take(TokenType.Comma));
+        return new GqlSetStage(items.AsReadOnly(), Span(clauseStart, Previous));
+    }
+
 }
