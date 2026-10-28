@@ -2,6 +2,11 @@
 
 ## Owned identity syntax (#1717, SQ-S3)
 
+The dialect records preserved restart state
+through identity type changes, bounded backfill refusal, hidden orphan names and snapshots,
+and the intentional inclusion of identity generators in INFORMATION_SCHEMA.SEQUENCES with
+8/16/32/64-bit precision. Existing diagnostic identities and grammar remain unchanged.
+
 The identity AST retains explicit sequence options, SERIAL aliases lower to built-in integer
 BY DEFAULT identities, and ALTER identity actions are separate sealed leaves. INSERT and
 MERGE INSERT retain an explicit override enum, and sequence options retain structured owning

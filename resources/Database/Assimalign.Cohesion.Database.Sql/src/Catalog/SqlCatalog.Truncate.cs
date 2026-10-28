@@ -56,6 +56,13 @@ public sealed partial class SqlCatalog
         // Publication markers are serialized by TruncateSnapshotGate. Seeing the maximum
         // therefore implies seeing every earlier marker, even with older readers pinned.
         if (retirements.Length == 0 || snapshot.IsVisible(retirements[^1].Marker)) { return null; }
+        return CaptureRetiredReadSnapshot(snapshot);
+    }
+
+    // Keep captured predicates out of the common no-retirement check. Adding a
+    // visibility filter must not allocate a closure for every ordinary statement.
+    private SqlCatalogSnapshot? CaptureRetiredReadSnapshot(TransactionSnapshot snapshot)
+    {
         lock (_sync)
         {
             ThrowIfOffline();
@@ -85,7 +92,9 @@ public sealed partial class SqlCatalog
                 _defaultCollation, _functions.Values.Select(slot => slot.Value), _domains.Values.Select(slot => slot.Value),
                 _namespaces.Values.Select(slot => slot.Value),
                 _views.Where(pair => !views.ContainsKey(pair.Key)).Select(pair => pair.Value.Value).Concat(views.Values))
-                { Sequences = Array.AsReadOnly(_sequencesById.Values.Where(sequence => !sequences.ContainsKey(sequence.ObjectId)).Concat(sequences.Values).ToArray()) };
+                { Sequences = Array.AsReadOnly(_sequencesById.Values.Where(sequence =>
+                    (sequence.OwnerTableId == 0 || !_pendingReclamations.ContainsKey(sequence.OwnerTableId)) &&
+                    !sequences.ContainsKey(sequence.ObjectId)).Concat(sequences.Values).ToArray()) };
         }
     }
 

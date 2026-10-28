@@ -144,9 +144,15 @@ retains sequence locks after a failed statement under the existing lock contract
 INFORMATION_SCHEMA.SEQUENCES is read-only and participates in the ordinary immutable
 catalog snapshot. Columns are SEQUENCE_CATALOG, SEQUENCE_SCHEMA, SEQUENCE_NAME,
 DATA_TYPE, NUMERIC_PRECISION, NUMERIC_PRECISION_RADIX, NUMERIC_SCALE, START_VALUE,
-MINIMUM_VALUE, MAXIMUM_VALUE, INCREMENT and CYCLE_OPTION. Precision is 16/32/64,
+MINIMUM_VALUE, MAXIMUM_VALUE, INCREMENT and CYCLE_OPTION. Precision is 8/16/32/64,
 radix 2, scale 0; option values are invariant text and CYCLE_OPTION is YES/NO.
-Identity-owned generators are listed alongside standalone sequences. Existing result framing carries
+Identity-owned generators are listed alongside standalone sequences so their generated names
+are discoverable for currval. This deliberately differs from PostgreSQL, which excludes identity
+sequences (src/backend/catalog/information_schema.sql:1696); this engine has no pg_sequences.
+Prepared and abandoned generators are hidden, including in retained TRUNCATE snapshots.
+Abandoned generators do not reserve relation names; reuse retires their metadata atomically
+with the new relation. Catalog loading validates metadata without committing cleanup writes.
+Existing result framing carries
 all DDL, functions, EXPLAIN and metadata over InMemory and TCP. LIMIT/OFFSET sequence calls evaluate once at execution before the input rows; EXPLAIN still has no effects. Detached evaluation without a statement scope refuses CS03076 (0A000). NEXT VALUE FOR is limited to row value positions: predicates, aggregate arguments, grouping keys, direct ordering expressions and row counts refuse CS03076 before allocation; ordering by a projected alias remains valid.
 Subqueries at any depth, derived tables, CTE definitions (including unused ones), and
 CASE/COALESCE/NULLIF arguments also refuse NEXT VALUE FOR with CS03076 during planning,
@@ -193,7 +199,9 @@ requires an already NOT NULL column (CS03078), retains all existing values, and 
 existing identity or default. Other forms require an identity (CS03079), except guarded DROP.
 Sequence options and SET GENERATED may be combined in any order.
 DROP IDENTITY preserves NOT NULL and stored values. RESTART without a value uses START;
-SET START only changes future restart metadata. Each ALTER statement self-commits and is
+SET START only changes future restart metadata. A following identity TYPE change preserves
+the live last value and called flag, including pending RESTART and setval(false) positions
+(PostgreSQL parse_utilcmd.c:3700-3727; sequence.c:479-480,513-514). Each ALTER statement self-commits and is
 refused within an explicit transaction (CS04003).
 
 Omitted values and DEFAULT allocate through the shared sequence allocator. ALWAYS rejects
@@ -204,12 +212,15 @@ before defaults. UPDATE, ON CONFLICT UPDATE and MERGE UPDATE of ALWAYS identitie
 only DEFAULT; BY DEFAULT also accepts ordinary explicit assignments. Identity allocation
 sets the session's currval and lastval, including populated-table ADD COLUMN backfill, and
 therefore participates in the existing pool-return DISCARD ALL reset. Rollback and failures
-leave gaps. Explicit assignments do not advance the allocator.
+leave gaps. Explicit assignments do not advance the allocator. DDL removing an identity during planning
+uses retryable CS04067 (40001).
 
 Adding a new identity column to a populated table rewrites currently live rows in physical
 owner-page/slot scan order. It uses recoverable prepared-owner storage and one atomic catalog
 publication: every crash image exposes the old table or the complete new column and enforcing
-indexes. A failed copy leaves reclaimable unreachable storage. ADD GENERATED on an existing
+indexes. Scanned records and retained decoded/conversion chunk buffers count against statement
+work and memory accounting. StatementMemoryBudget exhaustion reports CS05067 before publication,
+leaves the old table intact and releases every retained charge. A failed copy leaves reclaimable unreachable storage. ADD GENERATED on an existing
 column is metadata-only and keeps its values. TRUNCATE RESTART IDENTITY atomically restarts
 all sequences owned by every table in the truncate closure; CONTINUE IDENTITY preserves them.
 

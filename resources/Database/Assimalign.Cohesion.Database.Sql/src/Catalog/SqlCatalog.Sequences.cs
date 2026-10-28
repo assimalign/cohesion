@@ -62,8 +62,10 @@ public sealed partial class SqlCatalog
             var sequence = new SqlCatalogSequence(_nextObjectId, schema, name, options, ownerTableId, ownerColumn);
             byte[] record = EncodeSequence(sequence);
             using var transaction = _storage.BeginTransaction();
+            var orphan = StageOrphanSequenceName(transaction, schema, name);
             var location = _storage.InsertRow(transaction, record);
             CommitCatalogChange(transaction, checked(_nextObjectId + 1));
+            if (orphan is not null) { RemoveSequence(orphan); }
             _sequences.Add((schema, name), new(sequence, location));
             _sequencesById.Add(sequence.ObjectId, sequence);
             return ValueTask.FromResult(sequence);
@@ -266,7 +268,24 @@ public sealed partial class SqlCatalog
     { lock (_sync) { ThrowIfOffline(); return RelationExists(schema, name); } }
 
     private bool RelationExists(string schema, string name)
-        => _tables.ContainsKey((schema, name)) || _views.ContainsKey(SqlObjectIdentity.View(schema, name)) || _sequences.ContainsKey((schema, name));
+        => _tables.ContainsKey((schema, name)) || _views.ContainsKey(SqlObjectIdentity.View(schema, name)) || SequenceNameExists(schema, name);
+
+    // Prepared owners can still publish and reserve their names. Permanently abandoned
+    // owners are invisible and may surrender their sequence metadata in the new owner's
+    // publication transaction; their data pages and reclamation intent remain untouched.
+    private bool IsOrphanSequence(SqlCatalogSequence sequence)
+        => sequence.OwnerTableId != 0 && _pendingReclamations.ContainsKey(sequence.OwnerTableId) &&
+            !_preparedTruncateOwners.Contains(sequence.OwnerTableId);
+
+    private bool SequenceNameExists(string schema, string name)
+        => _sequences.TryGetValue((schema, name), out var slot) && !IsOrphanSequence(slot.Value);
+
+    private SqlCatalogSequence? StageOrphanSequenceName(StorageTransaction transaction, string schema, string name)
+    {
+        if (!_sequences.TryGetValue((schema, name), out var slot) || !IsOrphanSequence(slot.Value)) { return null; }
+        DeleteSequence(transaction, slot);
+        return slot.Value;
+    }
 
     private SqlCatalogException RelationNameCollision(string schema, string name)
     {
@@ -369,11 +388,7 @@ public sealed partial class SqlCatalog
             { throw new SqlCatalogException("CS06061", ErrorMessages.SequenceRecordMalformed); }
             counter.Next = RecoverAllocation(counter.Reserved, sequence.Options.Increment, counter.IsCalled);
         }
-        // Recovery writes begin only after all global references and reservations validate.
-        foreach (var orphan in _sequences.Values.Where(slot => slot.Value.OwnerTableId != 0 && _pendingReclamations.ContainsKey(slot.Value.OwnerTableId)).ToArray())
-        {
-            using var transaction = _storage.BeginTransaction();
-            DeleteSequence(transaction, orphan); transaction.Commit(); RemoveSequence(orphan.Value);
-        }
+        // Loading is read-only. The published database's reclamation worker removes
+        // invisible orphan sequences atomically with their retired owner's intent.
     }
 }

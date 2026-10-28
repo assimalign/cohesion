@@ -60,7 +60,7 @@ internal sealed partial class SqlPlanExecutor
                 var options = sequence.Options;
                 string Text(long value) => value.ToString(CultureInfo.InvariantCulture);
                 yield return [database, sequence.Schema, sequence.Name, SystemDataType(options.Type),
-                    options.Type == DatabaseType.Int16 ? 16L : options.Type == DatabaseType.Int32 ? 32L : 64L,
+                    options.Type == DatabaseType.Int8 ? 8L : options.Type == DatabaseType.Int16 ? 16L : options.Type == DatabaseType.Int32 ? 32L : 64L,
                     2L, 0L, Text(options.Start), Text(options.Minimum), Text(options.Maximum), Text(options.Increment), options.Cycle ? "YES" : "NO"];
             }
             yield break;

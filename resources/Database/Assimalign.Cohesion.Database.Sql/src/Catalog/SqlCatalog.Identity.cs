@@ -59,7 +59,7 @@ public sealed partial class SqlCatalog
         lock (_sync)
         {
             if (_identitySequences.TryGetValue(tableId, out var sequence) && string.Equals(sequence.OwnerColumn, column, StringComparison.OrdinalIgnoreCase)) { return sequence; }
-            throw new SqlCatalogException("CS06061", ErrorMessages.SequenceRecordMalformed);
+            throw new SqlCatalogException("CS04067", ErrorMessages.SequenceChanged);
         }
     }
 
@@ -88,8 +88,10 @@ public sealed partial class SqlCatalog
         bool hasOwned = false;
         if (previous is not null && _sequences.Count != 0)
         { foreach (var slot in _sequences.Values) { if (slot.Value.OwnerTableId == previous.ObjectId) { hasOwned = true; break; } } }
-        if (!hasIdentity && !hasOwned) { return static () => { }; }
+        var nameOrphan = updated is null ? null : StageOrphanSequenceName(transaction, updated.Schema, updated.Name);
+        if (!hasIdentity && !hasOwned && nameOrphan is null) { return static () => { }; }
         var removed = new List<SqlCatalogSequence>();
+        if (nameOrphan is not null) { removed.Add(nameOrphan); }
         var staged = new List<DefinitionSlot<SqlCatalogSequence>>();
         var reset = new List<(ulong Id, SqlSequenceCounter Counter)>();
         if (previous is not null)
@@ -124,7 +126,8 @@ public sealed partial class SqlCatalog
                 {
                     _sequenceCounters.TryGetValue(sequence.ObjectId, out var previousCounter);
                     bool called = !restart && previousCounter is { IsCalled: true };
-                    long reserved = called ? checked((long)(previousCounter!.Next - sequence.Options.Increment)) : options.Start;
+                    long reserved = restart ? options.Start : called ? checked((long)(previousCounter!.Next - sequence.Options.Increment))
+                        : previousCounter?.Reserved ?? sequence.Options.Start;
                     options.ValidateRestart(reserved);
                     var location = UpsertRecord(transaction, previousCounter?.Location,
                         EncodeAllocation(sequenceCounterRecordKind, sequence.ObjectId, reserved, called));
@@ -146,6 +149,8 @@ public sealed partial class SqlCatalog
                 int suffix = 0;
                 while (RelationExists(updated.Schema, name) || name.Equals(updated.Name, StringComparison.OrdinalIgnoreCase) || staged.Any(slot => slot.Value.Name.Equals(name, StringComparison.OrdinalIgnoreCase)))
                 { name = stem + (++suffix).ToString(CultureInfo.InvariantCulture); }
+                var orphan = StageOrphanSequenceName(transaction, updated.Schema, name);
+                if (orphan is not null) { removed.Add(orphan); }
                 var sequence = new SqlCatalogSequence(checked(nextId++), updated.Schema, name, options, updated.ObjectId, column.Name, identity: true);
                 staged.Add(new(sequence, _storage.InsertRow(transaction, EncodeSequence(sequence))));
             }

@@ -973,7 +973,12 @@ public sealed class SqlLanguageConformanceTests
             }),
         [SqlClauses.AlterIdentity] = new("ALTER TABLE ids ALTER id RESTART WITH 7;", ["CREATE TABLE ids(id SERIAL);"],
             expression => expression is SqlAlterTableExpression { Action: SqlAlterIdentityAction },
-            async (session, _) => { await ExecuteAsync(session, "INSERT INTO ids DEFAULT VALUES;"); await ExpectRowsAsync(session, "SELECT id FROM ids;", [[7]]); }),
+            async (session, _) =>
+            {
+                await ExecuteAsync(session, "ALTER TABLE ids ALTER id TYPE BIGINT;");
+                await ExecuteAsync(session, "INSERT INTO ids DEFAULT VALUES;");
+                await ExpectRowsAsync(session, "SELECT id FROM ids;", [[7L]]);
+            }),
         [SqlClauses.Serial] = new("CREATE TABLE ids(id SERIAL);", [],
             expression => expression is SqlCreateTableExpression create && create.Columns[0].Identity is { IsAlways: false },
             async (session, _) => { await ExecuteAsync(session, "INSERT INTO ids DEFAULT VALUES;"); await ExpectRowsAsync(session, "SELECT id FROM ids;", [[1]]); }),

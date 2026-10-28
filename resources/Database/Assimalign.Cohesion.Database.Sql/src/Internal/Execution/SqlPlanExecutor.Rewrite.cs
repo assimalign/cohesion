@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Indexing;
 using Assimalign.Cohesion.Database.Sql.Catalog;
+using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
@@ -177,38 +178,57 @@ internal sealed partial class SqlPlanExecutor
         // writer stamps. A prepared owner's intent remains durable until publication.
         // The scan retains one source-page pin across chunks, with no page latch.
         // Target writes use a different owner; decoded-row retention is bounded to 64.
-        foreach (var batch in ScanVersions(previous, cancellationToken)
+        using var scan = ScanVersions(previous, cancellationToken, statement.Metrics)
             .Where(version => snapshot.IsVisible(version.Writer) &&
-                (version.Deleter == TransactionSequence.None || !snapshot.IsVisible(version.Deleter))).Chunk(64))
+                (version.Deleter == TransactionSequence.None || !snapshot.IsVisible(version.Deleter))).GetEnumerator();
+        while (scan.MoveNext())
         {
+            using var memory = new SqlDmlMemory(statement.Metrics, _definitions.StatementMemoryBudget);
+            // Tuple slots and conversion-array references are retained together. Charge
+            // before growing the chunk, then charge each decoded row before retaining it.
+            memory.Reserve(80L + 64L * 48);
+            var batch = new List<((PageId PageId, int SlotIndex) Location, object?[] Values,
+                TransactionSequence Writer, TransactionSequence Deleter)>(64);
+            do
+            {
+                memory.Retain(scan.Current.Values);
+                batch.Add(scan.Current);
+            } while (batch.Count < 64 && scan.MoveNext());
             // User callbacks and constraint evaluation must not hold the database-wide
             // apply gate. Prepare this bounded chunk as ordinary DML does, then apply
             // storage/index mutations only. The source table X keeps its rows stable.
-            var converted = new object?[batch.Length][];
-            for (int i = 0; i < batch.Length; i++)
+            var converted = new object?[batch.Count][];
+            for (int i = 0; i < batch.Count; i++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 converted[i] = transform is null ? batch[i].Values : transform(batch[i].Values);
+                memory.Retain(converted[i]);
             }
             await statement.Coordinator.ApplyStatementAsync(statement.Transaction, async bracket =>
             {
-                for (int i = 0; i < batch.Length; i++)
+                for (int i = 0; i < batch.Count; i++)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     var version = batch[i];
                     var values = converted[i];
                     byte[] record = SqlRowCodec.Encode(replacement, values, version.Writer);
-                    var location = _storage.InsertRow(bracket, replacement.ObjectId, record);
-                    foreach (var index in indexes)
+                    long recordBytes = (24L + record.Length + 7) & ~7L;
+                    memory.Reserve(recordBytes);
+                    try
                     {
-                        await index.Index.InsertVersionAsync(bracket, BuildIndexKey(replacement, index.Ordinals, values),
-                            SqlRecordLocation.Pack(location.PageId, location.SlotIndex), version.Writer,
-                            TransactionSequence.None, cancellationToken).ConfigureAwait(false);
+                        var location = _storage.InsertRow(bracket, replacement.ObjectId, record);
+                        foreach (var index in indexes)
+                        {
+                            await index.Index.InsertVersionAsync(bracket, BuildIndexKey(replacement, index.Ordinals, values),
+                                SqlRecordLocation.Pack(location.PageId, location.SlotIndex), version.Writer,
+                                TransactionSequence.None, cancellationToken).ConfigureAwait(false);
+                        }
                     }
+                    finally { memory.Release(recordBytes); }
                 }
                 return true;
             }, durable: true, cancellationToken).ConfigureAwait(false);
-            processed += batch.Length;
+            processed += batch.Count;
             statement.ProvisioningProgress?.Invoke(processed, null);
             RewriteStage?.Invoke("Copied", processed);
         }

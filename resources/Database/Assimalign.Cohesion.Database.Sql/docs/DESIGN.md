@@ -2,6 +2,26 @@
 
 ## Owned identity sequences (#1717, SQ-S3)
 
+Identity type changes preserve the live last value and called flag, including an uncalled
+RESTART or setval(false); SET START remains metadata until a restart. This follows PostgreSQL
+src/backend/parser/parse_utilcmd.c:3700-3727 and src/backend/commands/sequence.c:479-480,513-514.
+A disappearing identity incarnation uses retryable CS04067, never the persisted-metadata
+corruption condition CS06061.
+
+Catalog load is read-only. It validates live/retired owner disjointness, every ownership edge,
+default dependency and reservation before open publication; the reclamation worker later deletes
+orphan sequence definitions and reservations with their retired owner's intent. Abandoned owners
+do not reserve relation names: reuse deletes the invisible sequence metadata atomically with
+the new relation. Prepared owners still reserve their names until they publish or abandon.
+TRUNCATE read snapshots filter prepared and abandoned sequences from their current directory.
+
+The shared rewrite copier counts every scanned version and charges decoded rows, conversion
+arrays and encoded records for each chunk through the statement memory ledger. Charges unwind
+on success, cancellation and refusal. Budget exhaustion uses CS05067 before publication and
+leaves the old owner and definition live, even after earlier chunks have been copied durably.
+INFORMATION_SCHEMA lists identity sequences deliberately, unlike PostgreSQL's information_schema.sql:1696
+internal-dependency exclusion; TINYINT has eight-bit numeric precision.
+
 SQL format **29** extends kind 18 with owning table id, column name and identity ownership;
 kind 16 is retired and never decoded. Format 28 and earlier are refused by the existing open
 gate. Compiled-schema v8 and wire/result framing are unchanged. Table creation, identity

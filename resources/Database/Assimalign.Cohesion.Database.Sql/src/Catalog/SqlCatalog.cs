@@ -1479,13 +1479,13 @@ public sealed partial class SqlCatalog
 
         var tablesById = _tables.Values.ToDictionary(slot => slot.Table.ObjectId, slot => slot.Table);
 
-        ValidateSequenceDirectory(tablesById);
-        ValidateViewDirectory(tablesById);
-
         if (_tables.Values.Any(slot => _pendingReclamations.ContainsKey(slot.Table.ObjectId)))
         {
             throw new System.IO.InvalidDataException();
         }
+
+        ValidateSequenceDirectory(tablesById);
+        ValidateViewDirectory(tablesById);
 
         if (schemaStateChunks.Count > 0)
         {
@@ -2386,7 +2386,7 @@ public sealed partial class SqlCatalog
             {
                 throw new SqlCatalogException("CS05060", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.PublishTableCoreAsyncSqlCatalog2, table.Schema, table.Name));
             }
-            if (_sequences.ContainsKey((table.Schema, table.Name))) { throw RelationNameCollision(table.Schema, table.Name); }
+            if (SequenceNameExists(table.Schema, table.Name)) { throw RelationNameCollision(table.Schema, table.Name); }
             if (_views.ContainsKey(SqlObjectIdentity.View(table.Schema, table.Name))) { throw new SqlCatalogException("CS03033", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ViewExists, table.Schema, table.Name)); }
             if (existing is not null)
             {

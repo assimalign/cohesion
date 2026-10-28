@@ -118,7 +118,7 @@ public sealed partial class SqlCatalog
                 { if (pair.Value.Value.Dependencies.Any(droppedViews.ContainsKey)) { added |= droppedViews.TryAdd(pair.Key, pair.Value); } }
             } while (added);
             if (!cascade && droppedViews.Count != 0) { RefuseViewDependency(droppedViews.Values.First().Value); }
-            if (!cascade && (objects.Length != 0 || sequences.Length != 0))
+            if (!cascade && (objects.Length != 0 || sequences.Any(slot => !IsOrphanSequence(slot.Value))))
             {
                 throw new SqlCatalogException("CS03030", string.Format(CultureInfo.CurrentCulture, ErrorMessages.EngineNamespaceDependentObjects, schema.Value.Name));
             }
