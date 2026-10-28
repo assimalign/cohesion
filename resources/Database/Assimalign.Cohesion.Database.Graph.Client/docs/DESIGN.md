@@ -42,6 +42,10 @@ sequenceDiagram
 
 ## Scalar completion
 
+Collection admission regressions (#1736) cover scalar comprehension properties and both MERGE
+action branches over InMemory and TCP. Static slice/filter refusals retain structured codes
+CG00012, CG02014 and CG02013 and the authenticated session; protocol 2.1 is unchanged.
+
 SET and REMOVE execute through existing requests and ResultComplete affected counts (#1149).
 QueryAsync returns post-update values and the distinct mutation count. NULL optional targets
 count zero. Label removal is visible to subsequent reads. Schema/kind refusals arrive as

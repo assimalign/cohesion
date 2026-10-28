@@ -111,6 +111,23 @@ checks++;
 if (await database.FindShortestDistanceAsync(session, shortestSearch with { Target = shortestStart.Id }, CancellationToken.None) != 0)
 { throw new InvalidOperationException("Zero shortest distance smoke mismatch."); }
 checks++;
+foreach (var (expression, code) in new[]
+{
+    ("[1][..]", "CG00012"),
+    ("[1][1.5..]", "CG02014"),
+    ("[x IN [] WHERE 1]", "CG02013"),
+})
+{
+    foreach (string prefix in new[] { "RETURN ", "EXPLAIN RETURN " })
+    {
+        bool refused = false;
+        try { await session.ExecuteAsync(prefix + expression, cancellationToken: CancellationToken.None); }
+        catch (DatabaseException error) when (error.Diagnostics.Count == 1 && error.Diagnostics[0].Code == code)
+        { refused = true; }
+        if (!refused) { throw new InvalidOperationException(); }
+        checks++;
+    }
+}
 Console.WriteLine($"Graph NativeAOT: {checks}/{checks} checks passed.");
 
 async Task Check(string query, long[][] expected)

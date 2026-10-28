@@ -51,6 +51,23 @@ public sealed class GraphCompositeWireTests
         }
         var badBound = await Should.ThrowAsync<GraphClientException>(async () => await connection.QueryAsync("INSERT (:Unwritten) RETURN [1]['x'..]", cancellationToken: harness.Token));
         badBound.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG02014");
+        foreach (var (query, code) in new[]
+        {
+            ("RETURN [1][..]", "CG00012"),
+            ("EXPLAIN RETURN [1][1.5..]", "CG02014"),
+            ("RETURN [x IN [] WHERE 1]", "CG02013"),
+            ("EXPLAIN RETURN [x IN NULL WHERE 1]", "CG02013"),
+            ("MERGE (n:Rejected {k:[x IN [1] | x]})", "CK00001"),
+        })
+        {
+            var error = await Should.ThrowAsync<GraphClientException>(async () => await connection.QueryAsync(query, cancellationToken: harness.Token));
+            error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(code);
+        }
+        await connection.ExecuteAsync("UNWIND [1,2,1] AS k MERGE (n:CollectionMerge {k:[x IN [k] | x*2][0]}) ON CREATE SET n.c=[x IN [k] | x+10][0] ON MATCH SET n.m=[x IN [k] | x+20][0]", cancellationToken: harness.Token);
+        var merged = await connection.QueryAsync("MATCH (n:CollectionMerge) RETURN n.k,n.c,n.m ORDER BY n.k", cancellationToken: harness.Token);
+        merged.Count.ShouldBe(2);
+        merged[0].ToArray().ShouldBe(new object?[] { 2L, 11L, 21L });
+        merged[1].ToArray().ShouldBe(new object?[] { 4L, 12L, null });
         var unsupported = await Should.ThrowAsync<GraphClientException>(async () => await connection.QueryAsync("RETURN all(x IN [] WHERE TRUE)", cancellationToken: harness.Token));
         unsupported.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CK00001");
         (await connection.QueryAsync("MATCH (n:Unwritten) RETURN count(*)", cancellationToken: harness.Token)).ShouldHaveSingleItem()[0].ShouldBe(0L);
