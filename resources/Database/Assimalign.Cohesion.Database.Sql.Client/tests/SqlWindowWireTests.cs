@@ -14,7 +14,7 @@ public sealed class SqlWindowWireTests
     [Theory(DisplayName = "Cohesion Test [Sql.Client] - Windows: budget refusals preserve the code and connection on both transports")]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task QueryAsync_WindowBudget_ShouldKeepConnectionUsable(bool tcp)
+    public async Task QueryAsync_WindowBudget_ShouldKeepConnectionUsableAsync(bool tcp)
     {
         // Arrange
         await using var harness = await SqlClientTestHarness.StartAsync(tcp: tcp,
@@ -37,7 +37,7 @@ public sealed class SqlWindowWireTests
     [Theory(DisplayName = "Cohesion Test [Sql.Client] - Windows: ranking and navigation types, values and refusals survive both transports")]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task QueryAsync_WindowStage_ShouldPreserveValuesAndReusableDiagnostics(bool tcp)
+    public async Task QueryAsync_WindowStage_ShouldPreserveValuesAndReusableDiagnosticsAsync(bool tcp)
     {
         // Arrange
         await using var harness = await SqlClientTestHarness.StartAsync(tcp: tcp);

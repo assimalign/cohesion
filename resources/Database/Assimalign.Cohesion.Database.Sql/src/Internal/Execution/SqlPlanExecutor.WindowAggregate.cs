@@ -87,7 +87,7 @@ internal sealed partial class SqlPlanExecutor
                 // cells remain in the separately charged input/result rows until the stage ends.
                 long scratch = 64L + group.Functions.Count * 32L;
                 memory.Reserve(scratch);
-                try { await ComputePartition(partitionStart, partitionEnd, group).ConfigureAwait(false); }
+                try { await ComputePartitionAsync(partitionStart, partitionEnd, group).ConfigureAwait(false); }
                 finally { memory.Release(scratch); }
                 partitionStart = partitionEnd;
             }
@@ -111,7 +111,7 @@ internal sealed partial class SqlPlanExecutor
             return true;
         }
 
-        async Task ComputePartition(int start, int end, SqlWindowGroup group)
+        async Task ComputePartitionAsync(int start, int end, SqlWindowGroup group)
         {
             int size = end - start;
             var buckets = new long?[group.Functions.Count];
@@ -147,7 +147,7 @@ internal sealed partial class SqlPlanExecutor
                             "PERCENT_RANK" => size == 1 ? 0d : (double)(peerStart - start) / (size - 1),
                             "CUME_DIST" => (double)(peerEnd - start) / size,
                             "NTILE" => buckets[f] is { } count ? Tile(position - start, size, count) : null,
-                            _ => await Navigate(function, position, start, end).ConfigureAwait(false),
+                            _ => await NavigateAsync(function, position, start, end).ConfigureAwait(false),
                         };
                         if (result is not null) { memory.Reserve(SqlHashJoinTable.ValueBytes(result)); }
                         row[function.Ordinal] = result;
@@ -157,7 +157,7 @@ internal sealed partial class SqlPlanExecutor
             }
         }
 
-        async Task<object?> Navigate(SqlWindowFunction function, int position, int start, int end)
+        async Task<object?> NavigateAsync(SqlWindowFunction function, int position, int start, int end)
         {
             var args = function.Arguments;
             var current = rows[sorted[position]];

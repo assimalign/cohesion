@@ -22,19 +22,19 @@ public sealed class SqlWindowExecutionTests
     [InlineData(false, true)]
     [InlineData(true, false)]
     [InlineData(true, true)]
-    public async Task Execute_GeneratedPeers_ShouldMatchIndependentRanks(bool descending, bool nullsFirst)
+    public async Task Execute_GeneratedPeers_ShouldMatchIndependentRanksAsync(bool descending, bool nullsFirst)
     {
         // Arrange
         await using var engine = SqlDatabaseEngine.Create("window-ranks", new());
         var db = await engine.CreateDatabaseAsync("db", CancellationToken.None);
         await using var session = await db.CreateSessionAsync(CancellationToken.None);
         var data = Enumerable.Range(0, 65).Select(i => (Id: i, P: i % 5, K: i % 7 == 0 ? (int?)null : i % 4)).ToArray();
-        await Execute(session, "CREATE TABLE t(id INT,p INT,k INT);");
-        await Execute(session, "INSERT INTO t VALUES " + string.Join(",", data.Select(r => $"({r.Id},{r.P},{r.K?.ToString(CultureInfo.InvariantCulture) ?? "NULL"})")) + ";");
+        await ExecuteAsync(session, "CREATE TABLE t(id INT,p INT,k INT);");
+        await ExecuteAsync(session, "INSERT INTO t VALUES " + string.Join(",", data.Select(r => $"({r.Id},{r.P},{r.K?.ToString(CultureInfo.InvariantCulture) ?? "NULL"})")) + ";");
         string order = "k " + (descending ? "DESC" : "ASC") + (nullsFirst ? " NULLS FIRST" : " NULLS LAST");
 
         // Act
-        var rows = await Rows(session, $"SELECT id,RANK() OVER w,DENSE_RANK() OVER w,PERCENT_RANK() OVER w,CUME_DIST() OVER w,ROW_NUMBER() OVER (PARTITION BY p ORDER BY id),NTILE(3) OVER (PARTITION BY p ORDER BY id) FROM t WINDOW w AS (PARTITION BY p ORDER BY {order}) ORDER BY id;");
+        var rows = await RowsAsync(session, $"SELECT id,RANK() OVER w,DENSE_RANK() OVER w,PERCENT_RANK() OVER w,CUME_DIST() OVER w,ROW_NUMBER() OVER (PARTITION BY p ORDER BY id),NTILE(3) OVER (PARTITION BY p ORDER BY id) FROM t WINDOW w AS (PARTITION BY p ORDER BY {order}) ORDER BY id;");
 
         // Assert
         rows.Count.ShouldBe(data.Length);
@@ -60,55 +60,55 @@ public sealed class SqlWindowExecutionTests
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - Windows: navigation uses per-row signed offsets, NULL and unified defaults")]
-    public async Task Execute_Navigation_ShouldRespectOffsetsAndDefaults()
+    public async Task Execute_Navigation_ShouldRespectOffsetsAndDefaultsAsync()
     {
         // Arrange
         await using var engine = SqlDatabaseEngine.Create("window-navigation", new());
         var db = await engine.CreateDatabaseAsync("db", CancellationToken.None);
         await using var session = await db.CreateSessionAsync(CancellationToken.None);
-        await Execute(session, "CREATE TABLE t(id INT,v INT,n BIGINT);");
-        await Execute(session, "INSERT INTO t VALUES(1,10,0),(2,20,-1),(3,30,99),(4,40,NULL),(5,NULL,-9223372036854775808);");
+        await ExecuteAsync(session, "CREATE TABLE t(id INT,v INT,n BIGINT);");
+        await ExecuteAsync(session, "INSERT INTO t VALUES(1,10,0),(2,20,-1),(3,30,99),(4,40,NULL),(5,NULL,-9223372036854775808);");
 
         // Act
-        var rows = await Rows(session, "SELECT id,LAG(v,n,1.5) OVER w,LEAD(v,n,2.5) OVER w FROM t WINDOW w AS (ORDER BY id) ORDER BY id;");
+        var rows = await RowsAsync(session, "SELECT id,LAG(v,n,1.5) OVER w,LEAD(v,n,2.5) OVER w FROM t WINDOW w AS (ORDER BY id) ORDER BY id;");
 
         // Assert
         object?[][] expected = [[1,10m,10m],[2,30m,10m],[3,1.5m,2.5m],[4,null,null],[5,1.5m,2.5m]];
         for (int i = 0; i < rows.Count; i++) { rows[i].ShouldBe(expected[i]); }
-        (await Rows(session, "SELECT LAG(1,1,'8') OVER ()"))[0][0].ShouldBe(8);
-        (await Rows(session, "SELECT LAG(DATE '2025-01-01',1,TIMESTAMP '2025-02-01 00:00:00') OVER()"))[0][0].ShouldBe(new DateTime(2025,2,1));
+        (await RowsAsync(session, "SELECT LAG(1,1,'8') OVER ()"))[0][0].ShouldBe(8);
+        (await RowsAsync(session, "SELECT LAG(DATE '2025-01-01',1,TIMESTAMP '2025-02-01 00:00:00') OVER()"))[0][0].ShouldBe(new DateTime(2025,2,1));
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - Windows: a singleton, empty input and all-peer partitions retain their boundaries")]
     [InlineData("SELECT ROW_NUMBER() OVER (),RANK() OVER (),DENSE_RANK() OVER (),PERCENT_RANK() OVER (),CUME_DIST() OVER (),NTILE(9) OVER ()", 1)]
     [InlineData("SELECT ROW_NUMBER() OVER () FROM t WHERE false", 0)]
-    public async Task Execute_PartitionEdges_ShouldReturnExpectedRows(string sql, int count)
+    public async Task Execute_PartitionEdges_ShouldReturnExpectedRowsAsync(string sql, int count)
     {
         // Arrange
         await using var engine = SqlDatabaseEngine.Create("window-edges", new());
         var db = await engine.CreateDatabaseAsync("db", CancellationToken.None);
         await using var session = await db.CreateSessionAsync(CancellationToken.None);
-        await Execute(session, "CREATE TABLE t(id INT);");
+        await ExecuteAsync(session, "CREATE TABLE t(id INT);");
         // Act
-        var rows = await Rows(session, sql);
+        var rows = await RowsAsync(session, sql);
         // Assert
         rows.Count.ShouldBe(count);
         if (count > 0) { rows[0].ShouldBe([1L,1L,1L,0d,1d,1]); }
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - Windows: NULL partitions and collated CHAR peers retain engine comparison rules")]
-    public async Task Execute_CharacterPeers_ShouldUseEngineIdentity()
+    public async Task Execute_CharacterPeers_ShouldUseEngineIdentityAsync()
     {
         // Arrange
         await using var engine = SqlDatabaseEngine.Create("window-char", new());
         var db = await engine.CreateDatabaseAsync("db", CancellationToken.None);
         await using var session = await db.CreateSessionAsync(CancellationToken.None);
-        await Execute(session, "CREATE TABLE t(id INT,p INT,k CHAR(3) COLLATE case_insensitive);");
-        await Execute(session, "INSERT INTO t VALUES(1,NULL,'a'),(2,NULL,'A'),(3,NULL,'b'),(4,1,NULL);");
+        await ExecuteAsync(session, "CREATE TABLE t(id INT,p INT,k CHAR(3) COLLATE case_insensitive);");
+        await ExecuteAsync(session, "INSERT INTO t VALUES(1,NULL,'a'),(2,NULL,'A'),(3,NULL,'b'),(4,1,NULL);");
         // Act
-        var rows = await Rows(session, "SELECT id,RANK() OVER(PARTITION BY p ORDER BY k),LAG(k) OVER(PARTITION BY p ORDER BY id) FROM t ORDER BY id;");
-        var grouped = await Rows(session, "SELECT k,RANK() OVER(ORDER BY k) FROM t GROUP BY k ORDER BY k;");
-        var defaults = await Rows(session, "SELECT id,RANK() OVER(ORDER BY k),RANK() OVER(ORDER BY k DESC) FROM t ORDER BY id;");
+        var rows = await RowsAsync(session, "SELECT id,RANK() OVER(PARTITION BY p ORDER BY k),LAG(k) OVER(PARTITION BY p ORDER BY id) FROM t ORDER BY id;");
+        var grouped = await RowsAsync(session, "SELECT k,RANK() OVER(ORDER BY k) FROM t GROUP BY k ORDER BY k;");
+        var defaults = await RowsAsync(session, "SELECT id,RANK() OVER(ORDER BY k),RANK() OVER(ORDER BY k DESC) FROM t ORDER BY id;");
         // Assert
         rows[0].ShouldBe([1,1L,null]); rows[1].ShouldBe([2,1L,"a  "]);
         rows[2].ShouldBe([3,3L,"A  "]); rows[3].ShouldBe([4,1L,null]);
@@ -118,24 +118,24 @@ public sealed class SqlWindowExecutionTests
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - Windows: named inheritance, grouped inputs, CTEs, DISTINCT and ordering compose")]
-    public async Task Execute_GroupedComposition_ShouldRunAfterHaving()
+    public async Task Execute_GroupedComposition_ShouldRunAfterHavingAsync()
     {
         // Arrange
         await using var engine = SqlDatabaseEngine.Create("window-groups", new());
         var db = await engine.CreateDatabaseAsync("db", CancellationToken.None);
         await using var session = await db.CreateSessionAsync(CancellationToken.None);
-        await Execute(session, "CREATE TABLE t(p INT,v INT);");
-        await Execute(session, "INSERT INTO t VALUES(1,10),(1,20),(2,40),(3,1);");
+        await ExecuteAsync(session, "CREATE TABLE t(p INT,v INT);");
+        await ExecuteAsync(session, "INSERT INTO t VALUES(1,10),(1,20),(2,40),(3,1);");
         // Act
-        var rows = await Rows(session, "SELECT p,SUM(v),RANK() OVER (ORDER BY SUM(v) DESC),LAG(SUM(v)) OVER (ORDER BY p) FROM t GROUP BY p HAVING SUM(v)>1 ORDER BY p;");
-        var subtotal = await Rows(session, "SELECT GROUPING(p),p,COUNT(*),ROW_NUMBER() OVER (ORDER BY GROUPING(p),p) FROM t GROUP BY GROUPING SETS((p),()) ORDER BY 4;");
-        var nested = await Rows(session, "WITH q AS (SELECT p,ROW_NUMBER() OVER b AS n FROM t WINDOW a AS (PARTITION BY p),b AS(a ORDER BY v)) SELECT DISTINCT p FROM q WHERE n=1 ORDER BY RANK() OVER (ORDER BY p DESC) LIMIT 2;");
-        var namedSubtotal = await Rows(session, "SELECT ROW_NUMBER() OVER w+1 FROM t GROUP BY ROLLUP(p) WINDOW w AS(ORDER BY GROUPING(p),p) ORDER BY 1;");
-        var scalar = await Rows(session, "SELECT p,(SELECT RANK() OVER() FROM t x WHERE x.v=t.v) FROM t WHERE v=40;");
-        await Execute(session, "CREATE TABLE u(id INT,n BIGINT);");
-        await Execute(session, "INSERT INTO u VALUES(1,0),(2,0),(3,0);");
-        await Execute(session, "UPDATE u SET n=w.n FROM (SELECT p,ROW_NUMBER() OVER(ORDER BY SUM(v)) AS n FROM t GROUP BY p) w WHERE u.id=w.p;");
-        var updated = await Rows(session, "SELECT id,n FROM u ORDER BY id;");
+        var rows = await RowsAsync(session, "SELECT p,SUM(v),RANK() OVER (ORDER BY SUM(v) DESC),LAG(SUM(v)) OVER (ORDER BY p) FROM t GROUP BY p HAVING SUM(v)>1 ORDER BY p;");
+        var subtotal = await RowsAsync(session, "SELECT GROUPING(p),p,COUNT(*),ROW_NUMBER() OVER (ORDER BY GROUPING(p),p) FROM t GROUP BY GROUPING SETS((p),()) ORDER BY 4;");
+        var nested = await RowsAsync(session, "WITH q AS (SELECT p,ROW_NUMBER() OVER b AS n FROM t WINDOW a AS (PARTITION BY p),b AS(a ORDER BY v)) SELECT DISTINCT p FROM q WHERE n=1 ORDER BY RANK() OVER (ORDER BY p DESC) LIMIT 2;");
+        var namedSubtotal = await RowsAsync(session, "SELECT ROW_NUMBER() OVER w+1 FROM t GROUP BY ROLLUP(p) WINDOW w AS(ORDER BY GROUPING(p),p) ORDER BY 1;");
+        var scalar = await RowsAsync(session, "SELECT p,(SELECT RANK() OVER() FROM t x WHERE x.v=t.v) FROM t WHERE v=40;");
+        await ExecuteAsync(session, "CREATE TABLE u(id INT,n BIGINT);");
+        await ExecuteAsync(session, "INSERT INTO u VALUES(1,0),(2,0),(3,0);");
+        await ExecuteAsync(session, "UPDATE u SET n=w.n FROM (SELECT p,ROW_NUMBER() OVER(ORDER BY SUM(v)) AS n FROM t GROUP BY p) w WHERE u.id=w.p;");
+        var updated = await RowsAsync(session, "SELECT id,n FROM u ORDER BY id;");
         // Assert
         rows[0].ShouldBe([1,30L,2L,null]);
         rows[1].ShouldBe([2,40L,1L,30L]);
@@ -172,59 +172,59 @@ public sealed class SqlWindowExecutionTests
     [InlineData("UPDATE t SET id=2 RETURNING RANK() OVER()", "CS05076")]
     [InlineData("SELECT LAG(NEXT VALUE FOR s) OVER() FROM t", "CS03076")]
     [InlineData("SELECT RANK() OVER(ORDER BY NEXT VALUE FOR s) FROM t", "CS03076")]
-    public async Task Execute_InvalidWindows_ShouldReturnCode(string sql, string code)
+    public async Task Execute_InvalidWindows_ShouldReturnCodeAsync(string sql, string code)
     {
         // Arrange
         await using var engine = SqlDatabaseEngine.Create("window-errors", new());
         var db = await engine.CreateDatabaseAsync("db", CancellationToken.None);
         await using var session = await db.CreateSessionAsync(CancellationToken.None);
-        await Execute(session, "CREATE TABLE t(id INT);");
-        await Execute(session, "INSERT INTO t VALUES(1);");
+        await ExecuteAsync(session, "CREATE TABLE t(id INT);");
+        await ExecuteAsync(session, "INSERT INTO t VALUES(1);");
         // Act
-        var error = await Should.ThrowAsync<DatabaseException>(async () => await Execute(session, sql));
+        var error = await Should.ThrowAsync<DatabaseException>(async () => await ExecuteAsync(session, sql));
         // Assert
         error.Diagnostics.ShouldContain(d => d.Code == code);
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - Windows: whole partitions survive LIMIT and NTILE evaluates once per partition")]
-    public async Task Execute_NtileAndLimit_ShouldConsumeWholePartition()
+    public async Task Execute_NtileAndLimit_ShouldConsumeWholePartitionAsync()
     {
         // Arrange
         await using var engine = SqlDatabaseEngine.Create("window-ntile", new());
         var db = await engine.CreateDatabaseAsync("db", CancellationToken.None);
         await using var session = await db.CreateSessionAsync(CancellationToken.None);
-        await Execute(session, "CREATE TABLE t(id INT,n INT);");
-        await Execute(session, "INSERT INTO t VALUES(1,3),(2,0),(3,NULL),(4,-2),(5,9);");
+        await ExecuteAsync(session, "CREATE TABLE t(id INT,n INT);");
+        await ExecuteAsync(session, "INSERT INTO t VALUES(1,3),(2,0),(3,NULL),(4,-2),(5,9);");
         // Act
-        var rows = await Rows(session, "SELECT NTILE(n) OVER(ORDER BY id),CUME_DIST() OVER(ORDER BY id),PERCENT_RANK() OVER(ORDER BY id) FROM t LIMIT 1;");
-        var tiles = await Rows(session, "SELECT NTILE(n) OVER(ORDER BY id) FROM t ORDER BY id;");
+        var rows = await RowsAsync(session, "SELECT NTILE(n) OVER(ORDER BY id),CUME_DIST() OVER(ORDER BY id),PERCENT_RANK() OVER(ORDER BY id) FROM t LIMIT 1;");
+        var tiles = await RowsAsync(session, "SELECT NTILE(n) OVER(ORDER BY id) FROM t ORDER BY id;");
         // Assert
         rows[0].ShouldBe([1,0.2d,0d]);
         tiles.Select(r => r[0]).ShouldBe([1,1,2,2,3]);
-        (await Rows(session, "SELECT NTILE(NULL) OVER() FROM t")).ShouldAllBe(r => r[0] == null);
-        (await Rows(session, "SELECT NTILE(n) OVER(ORDER BY id) FROM t WHERE id>=3")).ShouldAllBe(r => r[0] == null);
+        (await RowsAsync(session, "SELECT NTILE(NULL) OVER() FROM t")).ShouldAllBe(r => r[0] == null);
+        (await RowsAsync(session, "SELECT NTILE(n) OVER(ORDER BY id) FROM t WHERE id>=3")).ShouldAllBe(r => r[0] == null);
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - Windows: budget refusal releases every reservation and permits later reads")]
-    public async Task Execute_BudgetRefusal_ShouldReleaseMemory()
+    public async Task Execute_BudgetRefusal_ShouldReleaseMemoryAsync()
     {
         // Arrange
         await using var engine = SqlDatabaseEngine.Create("window-budget", new() { StatementMemoryBudget = 4096 });
         var db = await engine.CreateDatabaseAsync("db", CancellationToken.None);
         await using var session = await db.CreateSessionAsync(CancellationToken.None);
-        await Execute(session, "CREATE TABLE t(id INT);");
-        await Execute(session, "INSERT INTO t VALUES " + string.Join(",", Enumerable.Range(0, 128).Select(i => $"({i})")) + ";");
+        await ExecuteAsync(session, "CREATE TABLE t(id INT);");
+        await ExecuteAsync(session, "INSERT INTO t VALUES " + string.Join(",", Enumerable.Range(0, 128).Select(i => $"({i})")) + ";");
         // Act
-        var error = await Should.ThrowAsync<DatabaseException>(async () => await Execute(session, "SELECT RANK() OVER(ORDER BY id) FROM t;"));
+        var error = await Should.ThrowAsync<DatabaseException>(async () => await ExecuteAsync(session, "SELECT RANK() OVER(ORDER BY id) FROM t;"));
         // Assert
         error.Diagnostics.ShouldContain(d => d.Code == "CS05079");
         session.LastStatementMetrics.ShouldNotBeNull().HashMemoryBytes.ShouldBe(0);
         SqlWindowMemory.Current.ShouldBeNull();
-        (await Rows(session, "SELECT id FROM t LIMIT 1")).Count.ShouldBe(1);
+        (await RowsAsync(session, "SELECT id FROM t LIMIT 1")).Count.ShouldBe(1);
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - Windows: cancellation during key evaluation releases the complete grant")]
-    public async Task Execute_CancelledWindowKeys_ShouldReleaseMemory()
+    public async Task Execute_CancelledWindowKeys_ShouldReleaseMemoryAsync()
     {
         // Arrange
         using var cancellation = new CancellationTokenSource();
@@ -238,8 +238,8 @@ public sealed class SqlWindowExecutionTests
         await using var engine = await builder.BuildAsync(CancellationToken.None);
         var db = await engine.CreateDatabaseAsync("db", CancellationToken.None);
         await using var session = await db.CreateSessionAsync(CancellationToken.None);
-        await Execute(session, "CREATE TABLE t(id INT);");
-        await Execute(session, "INSERT INTO t VALUES(1),(2),(3),(4),(5);");
+        await ExecuteAsync(session, "CREATE TABLE t(id INT);");
+        await ExecuteAsync(session, "INSERT INTO t VALUES(1),(2),(3),(4),(5);");
         // Act
         var error = await Should.ThrowAsync<OperationCanceledException>(async () => await session.ExecuteAsync(
             "SELECT RANK() OVER(ORDER BY cancel_window_key(id)) FROM t;", cancellationToken: cancellation.Token));
@@ -248,23 +248,23 @@ public sealed class SqlWindowExecutionTests
         error.CancellationToken.ShouldBe(cancellation.Token);
         session.LastStatementMetrics.ShouldNotBeNull().HashMemoryBytes.ShouldBe(0);
         SqlWindowMemory.Current.ShouldBeNull();
-        (await Rows(session, "SELECT COUNT(*) FROM t")).ShouldHaveSingleItem()[0].ShouldBe(5L);
+        (await RowsAsync(session, "SELECT COUNT(*) FROM t")).ShouldHaveSingleItem()[0].ShouldBe(5L);
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - Windows: prefix-compatible stages share one sort with deterministic work counts")]
-    public async Task Execute_SortSharing_ShouldSortOnce()
+    public async Task Execute_SortSharing_ShouldSortOnceAsync()
     {
         // Arrange
         await using var engine = SqlDatabaseEngine.Create("window-sorts", new());
         var db = await engine.CreateDatabaseAsync("db", CancellationToken.None);
         await using var session = await db.CreateSessionAsync(CancellationToken.None);
-        await Execute(session, "CREATE TABLE t(id INT,p INT,k INT);");
-        await Execute(session, "INSERT INTO t VALUES(1,1,2),(2,1,2),(3,1,3);");
+        await ExecuteAsync(session, "CREATE TABLE t(id INT,p INT,k INT);");
+        await ExecuteAsync(session, "INSERT INTO t VALUES(1,1,2),(2,1,2),(3,1,3);");
         // Act
-        var plan = await Rows(session, "EXPLAIN ANALYZE SELECT ROW_NUMBER() OVER(PARTITION BY p ORDER BY k,id),RANK() OVER(PARTITION BY p ORDER BY k) FROM t;");
-        var separate = await Rows(session, "EXPLAIN ANALYZE SELECT ROW_NUMBER() OVER(PARTITION BY p ORDER BY k,id),RANK() OVER(PARTITION BY p ORDER BY id,k) FROM t;");
-        var boundaries = await Rows(session, "EXPLAIN ANALYZE SELECT RANK() OVER(PARTITION BY p ORDER BY k,id),RANK() OVER(PARTITION BY p,k ORDER BY id) FROM t;");
-        var values = await Rows(session, "SELECT RANK() OVER(PARTITION BY p ORDER BY k,id),RANK() OVER(PARTITION BY p,k ORDER BY id) FROM t ORDER BY id;");
+        var plan = await RowsAsync(session, "EXPLAIN ANALYZE SELECT ROW_NUMBER() OVER(PARTITION BY p ORDER BY k,id),RANK() OVER(PARTITION BY p ORDER BY k) FROM t;");
+        var separate = await RowsAsync(session, "EXPLAIN ANALYZE SELECT ROW_NUMBER() OVER(PARTITION BY p ORDER BY k,id),RANK() OVER(PARTITION BY p ORDER BY id,k) FROM t;");
+        var boundaries = await RowsAsync(session, "EXPLAIN ANALYZE SELECT RANK() OVER(PARTITION BY p ORDER BY k,id),RANK() OVER(PARTITION BY p,k ORDER BY id) FROM t;");
+        var values = await RowsAsync(session, "SELECT RANK() OVER(PARTITION BY p ORDER BY k,id),RANK() OVER(PARTITION BY p,k ORDER BY id) FROM t ORDER BY id;");
         // Assert
         var windows = plan.Where(row => Equals(row[2], "WindowAgg")).ToArray();
         windows.Length.ShouldBe(2);
@@ -279,22 +279,22 @@ public sealed class SqlWindowExecutionTests
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - Windows: benchmark category ranks and monthly growth execute natively")]
-    public async Task Execute_BenchmarkQueries_ShouldReturnAnalyticalResults()
+    public async Task Execute_BenchmarkQueries_ShouldReturnAnalyticalResultsAsync()
     {
         // Arrange: deterministic fixtures for the PostgreSql queries in benchmark SQL.md.
         await using var engine = SqlDatabaseEngine.Create("window-benchmarks", new());
         var db = await engine.CreateDatabaseAsync("db", CancellationToken.None);
         await using var session = await db.CreateSessionAsync(CancellationToken.None);
-        await Execute(session, "CREATE TABLE products(category_id INT,product_id INT);");
-        await Execute(session, "CREATE TABLE order_items(product_id INT,line_total DECIMAL);");
-        await Execute(session, "INSERT INTO products VALUES(1,1),(1,2),(1,3),(1,4),(1,5),(2,6),(3,7);");
-        await Execute(session, "INSERT INTO order_items VALUES(1,60),(1,40),(2,100),(3,50),(4,40),(5,30),(6,10);");
-        await Execute(session, "CREATE TABLE orders(order_date DATE,channel TEXT,total DECIMAL);");
-        await Execute(session, "INSERT INTO orders VALUES(DATE '2025-01-01','web',10),(DATE '2025-01-12','app',20),(DATE '2025-02-01','web',50),(DATE '2025-03-01','app',40);");
+        await ExecuteAsync(session, "CREATE TABLE products(category_id INT,product_id INT);");
+        await ExecuteAsync(session, "CREATE TABLE order_items(product_id INT,line_total DECIMAL);");
+        await ExecuteAsync(session, "INSERT INTO products VALUES(1,1),(1,2),(1,3),(1,4),(1,5),(2,6),(3,7);");
+        await ExecuteAsync(session, "INSERT INTO order_items VALUES(1,60),(1,40),(2,100),(3,50),(4,40),(5,30),(6,10);");
+        await ExecuteAsync(session, "CREATE TABLE orders(order_date DATE,channel TEXT,total DECIMAL);");
+        await ExecuteAsync(session, "INSERT INTO orders VALUES(DATE '2025-01-01','web',10),(DATE '2025-01-12','app',20),(DATE '2025-02-01','web',50),(DATE '2025-03-01','app',40);");
 
         // Act
-        var ranked = await Rows(session, "WITH revenues AS (SELECT p.category_id, p.product_id, SUM(i.line_total) AS revenue FROM products p INNER JOIN order_items i ON p.product_id = i.product_id GROUP BY p.category_id, p.product_id), ranked AS (SELECT category_id, product_id, revenue, RANK() OVER (PARTITION BY category_id ORDER BY revenue DESC) AS revenue_rank FROM revenues) SELECT category_id, product_id, revenue, revenue_rank FROM ranked WHERE revenue_rank <= 3 ORDER BY category_id, revenue_rank, product_id;");
-        var growth = await Rows(session, "WITH monthly AS (SELECT CAST(EXTRACT(YEAR FROM order_date) AS INTEGER) AS year_no, CAST(EXTRACT(MONTH FROM order_date) AS INTEGER) AS month_no, SUM(total) AS revenue FROM orders WHERE order_date >= DATE '2025-01-01' AND order_date < DATE '2026-01-01' GROUP BY EXTRACT(YEAR FROM order_date), EXTRACT(MONTH FROM order_date)), growth AS (SELECT year_no, month_no, revenue, LAG(revenue) OVER (ORDER BY year_no, month_no) AS previous_revenue FROM monthly) SELECT year_no, month_no, revenue, previous_revenue, revenue - previous_revenue AS growth FROM growth ORDER BY year_no, month_no;");
+        var ranked = await RowsAsync(session, "WITH revenues AS (SELECT p.category_id, p.product_id, SUM(i.line_total) AS revenue FROM products p INNER JOIN order_items i ON p.product_id = i.product_id GROUP BY p.category_id, p.product_id), ranked AS (SELECT category_id, product_id, revenue, RANK() OVER (PARTITION BY category_id ORDER BY revenue DESC) AS revenue_rank FROM revenues) SELECT category_id, product_id, revenue, revenue_rank FROM ranked WHERE revenue_rank <= 3 ORDER BY category_id, revenue_rank, product_id;");
+        var growth = await RowsAsync(session, "WITH monthly AS (SELECT CAST(EXTRACT(YEAR FROM order_date) AS INTEGER) AS year_no, CAST(EXTRACT(MONTH FROM order_date) AS INTEGER) AS month_no, SUM(total) AS revenue FROM orders WHERE order_date >= DATE '2025-01-01' AND order_date < DATE '2026-01-01' GROUP BY EXTRACT(YEAR FROM order_date), EXTRACT(MONTH FROM order_date)), growth AS (SELECT year_no, month_no, revenue, LAG(revenue) OVER (ORDER BY year_no, month_no) AS previous_revenue FROM monthly) SELECT year_no, month_no, revenue, previous_revenue, revenue - previous_revenue AS growth FROM growth ORDER BY year_no, month_no;");
 
         // Assert
         ranked.Count.ShouldBe(4);
@@ -306,7 +306,7 @@ public sealed class SqlWindowExecutionTests
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - Windows: named window views retain canonical definitions after catalog reload")]
-    public async Task Open_NamedWindowView_ShouldReload()
+    public async Task Open_NamedWindowView_ShouldReloadAsync()
     {
         // Arrange
         string root = Path.Combine(Path.GetTempPath(), "cohesion-window-view-" + Guid.NewGuid().ToString("N"));
@@ -316,27 +316,27 @@ public sealed class SqlWindowExecutionTests
             {
                 var db = await engine.CreateDatabaseAsync("db", CancellationToken.None);
                 await using var session = await db.CreateSessionAsync(CancellationToken.None);
-                await Execute(session, "CREATE TABLE t(id INT,p INT);");
-                await Execute(session, "INSERT INTO t VALUES(1,1),(2,1),(3,2);");
-                await Execute(session, "CREATE VIEW v AS SELECT id,ROW_NUMBER() OVER b AS n,LAG(id) OVER b AS previous FROM t WINDOW a AS(PARTITION BY p),b AS(a ORDER BY id);");
+                await ExecuteAsync(session, "CREATE TABLE t(id INT,p INT);");
+                await ExecuteAsync(session, "INSERT INTO t VALUES(1,1),(2,1),(3,2);");
+                await ExecuteAsync(session, "CREATE VIEW v AS SELECT id,ROW_NUMBER() OVER b AS n,LAG(id) OVER b AS previous FROM t WINDOW a AS(PARTITION BY p),b AS(a ORDER BY id);");
             }
             // Act
             await using var reopened = SqlDatabaseEngine.Create("window-views", new() { RootPath = root });
             var next = await reopened.OpenDatabaseAsync("db", CancellationToken.None);
             await using var reader = await next.CreateSessionAsync(CancellationToken.None);
-            var rows = await Rows(reader, "SELECT id,n,previous FROM v ORDER BY id;");
+            var rows = await RowsAsync(reader, "SELECT id,n,previous FROM v ORDER BY id;");
             // Assert
             rows[0].ShouldBe([1,1L,null]); rows[1].ShouldBe([2,2L,1]); rows[2].ShouldBe([3,1L,null]);
         }
         finally { if (Directory.Exists(root)) { Directory.Delete(root, recursive: true); } }
     }
 
-    private static async Task<DatabaseResult> Execute(SqlDatabaseSession session, string sql)
+    private static async Task<DatabaseResult> ExecuteAsync(SqlDatabaseSession session, string sql)
         => await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None);
 
-    private static async Task<List<object?[]>> Rows(SqlDatabaseSession session, string sql)
+    private static async Task<List<object?[]>> RowsAsync(SqlDatabaseSession session, string sql)
     {
-        await using var result = (await Execute(session, sql)).ShouldBeAssignableTo<DatabaseResultSet>();
+        await using var result = (await ExecuteAsync(session, sql)).ShouldBeAssignableTo<DatabaseResultSet>();
         var rows = new List<object?[]>();
         await foreach (var row in result.GetRowsAsync(CancellationToken.None))
         {
