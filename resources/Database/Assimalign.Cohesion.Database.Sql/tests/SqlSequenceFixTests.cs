@@ -237,6 +237,27 @@ public sealed class SqlSequenceFixTests
         (await Rows(session, "SELECT nextval('s')"))[0][0].ShouldBe(2L);
     }
 
+    [Theory(DisplayName = "Cohesion Test [Sql] - Sequence sorting: cached aliases keep the declared numeric output type")]
+    [InlineData("SELECT nextval('s'), CASE WHEN k>0 THEN k ELSE CAST(0 AS BIGINT) END AS v FROM t GROUP BY k ORDER BY v LIMIT 1")]
+    [InlineData("SELECT nextval('s'), CASE WHEN k>0 THEN (SELECT u.k FROM t u WHERE u.k=t.k) ELSE CAST(0 AS BIGINT) END AS v FROM t ORDER BY v LIMIT 1")]
+    public async Task Execute_SequenceSortAlias_ShouldKeepPromotedType(string sql)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("sequence-fix", new());
+        var db = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+        await using var session = await db.CreateSessionAsync(CancellationToken.None);
+        await Exec(session, "CREATE SEQUENCE s"); await Exec(session, "CREATE TABLE t(k INT)");
+        await Exec(session, "INSERT INTO t VALUES (3),(1),(2)");
+
+        // Act
+        var rows = await Rows(session, sql);
+
+        // Assert
+        rows.ShouldHaveSingleItem().ShouldBe(new object?[] { 1L, 1L });
+        rows[0][1].ShouldBeOfType<long>();
+        (await Rows(session, "SELECT nextval('s')"))[0][0].ShouldBe(2L);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Sql] - Sequence CREATE: existing guard precedes option validation")]
     public async Task Execute_ExistingCreateGuard_ShouldSkipInvalidOptions()
     {

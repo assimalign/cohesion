@@ -272,7 +272,7 @@ internal sealed partial class SqlPlanExecutor
                 var projection = projections[index];
                 await PrepareSubqueriesAsync(projection.Value, source, statement, cancellationToken).ConfigureAwait(false);
                 ordered[source.Length + index] = projection.ColumnOrdinal is int ordinal ? evaluator.DeliverColumn(source, ordinal)
-                    : evaluator.Evaluate(projection.Value!, source, copySharedBinary: true);
+                    : NormalizeGroupValue(evaluator.Evaluate(projection.Value!, source, copySharedBinary: true), projection.Type);
             }
             var keys = new object?[orderBy.Count];
             for (int index = 0; index < keys.Length; index++)
