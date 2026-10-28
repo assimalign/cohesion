@@ -105,7 +105,14 @@ public sealed partial class OqlQueryParser
                     Take("ASC");
                 }
 
-                ordering.Add(new OqlOrdering(expression, descending));
+                var placement = OqlNullPlacement.Default;
+                if (Take("NULLS"))
+                {
+                    if (Take("FIRST")) { placement = OqlNullPlacement.First; }
+                    else if (Take("LAST")) { placement = OqlNullPlacement.Last; }
+                    else { Error("CD00013", ErrorMessages.NullPlacementExpected, Current); }
+                }
+                ordering.Add(new OqlOrdering(expression, descending, placement));
             } while (!Failed && Take(TokenType.Comma));
         }
         OqlExpression? limit = null;

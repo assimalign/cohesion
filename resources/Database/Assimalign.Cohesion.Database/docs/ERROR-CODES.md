@@ -210,6 +210,10 @@ SQLSTATE meanings remain those in [the SQL dialect](../../Assimalign.Cohesion.Da
 
 ## Documents migration
 
+OQL null placement (#1730) adds CD00013 for a malformed NULLS suffix and CD01032 for an
+invalid directly constructed placement. Existing CD05018 still bounds sorting; #1632 ordering
+proof probes fall back on exhaustion and add no execution failure or format change.
+
 OQL aggregate quantifiers and native aggregates (#1729, OQ-G1) add CD00011 for a scalar/star
 quantifier and CD01029 for an invalid directly constructed call quantifier. Existing CD02007
 covers a statistical result outside the decimal domain, CD02008 preserves SUM/AVG nonnumber refusal, CD05001 covers
@@ -244,6 +248,7 @@ payload accepts rows plus a matching affected count without capability negotiati
 | OQL0010 | CD00010 | Language/syntax |
 | New (#1729, OQ-G1) | CD00011 | Language/syntax — ALL/DISTINCT on a scalar or star call |
 | New (#1729, OQ-G2) | CD00012 | Language/syntax — GROUP AS without preceding GROUP BY terms |
+| New (#1730) | CD00013 | Language/syntax — NULLS without FIRST or LAST |
 | COHDOC002 | CD01002 | Binding/names |
 | COHDOC003 | CD01003 | Binding/names |
 | COHDOC005 | CD01005 | Binding/names |
@@ -258,6 +263,7 @@ payload accepts rows plus a matching affected count without capability negotiati
 | New (#1729, OQ-G1) | CD01029 | Binding/names — invalid aggregate quantifier or target in a directly constructed call AST |
 | New (#1729, OQ-G2) | CD01030 | Binding/names — invalid grouping alias declaration, shape or collision with FROM/UNNEST |
 | New (#1729, OQ-G2) | CD01031 | Binding/names — GROUP AS referenced in an aggregate's row input |
+| New (#1730) | CD01032 | Binding/names — invalid null placement in a direct ordering AST |
 | COHDOC006 | CD02006 | Values/types |
 | COHDOC007 | CD02007 | Values/types |
 | COHDOC008 | CD02008 | Values/types |

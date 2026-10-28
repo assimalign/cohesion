@@ -33,7 +33,7 @@ internal sealed partial class DocumentPlanner
     /// <param name="snapshot">The transaction snapshot at which catalog metadata is read.</param>
     /// <param name="parameters">The OQL parameter values, or <see langword="null"/> when the statement supplies none.</param>
     /// <param name="cancellationToken">The statement cancellation token, including constant evaluation.</param>
-    /// <param name="estimateSinglePath">Whether a description also needs estimates for an uncontested input.</param>
+    /// <param name="estimateSinglePath">Whether description planning includes uncontested estimates and ordering eligibility.</param>
     public DocumentPlanner(DocumentCatalog catalog, TransactionSnapshot snapshot, IReadOnlyDictionary<string, object?>? parameters,
         CancellationToken cancellationToken = default, bool estimateSinglePath = false, DocumentFunctionCatalog? functions = null)
     {
@@ -65,8 +65,12 @@ internal sealed partial class DocumentPlanner
     {
         var logical = CreateLogicalPlan(query, _cancellationToken, _parameters, _functions);
         var collection = ResolveCollection(query.Collection, query.Location);
-        return new DocumentPlan(logical, collection, ChooseAccess(query.Predicate, query.Alias, _catalog.GetIndexes(collection.Id, _snapshot),
-            logical.UnnestVariables, query.Unnest));
+        var indexes = _catalog.GetIndexes(collection.Id, _snapshot);
+        var access = ChooseAccess(query.Predicate, query.Alias, indexes, logical.UnnestVariables, query.Unnest);
+        // O1 describes eligibility only. Keep ordinary execution allocations unchanged
+        // until O2 consumes these candidates; the description planner requests estimates.
+        if (_estimateSinglePath && logical.Query.OrderBy.Count > 0) { access = AnalyzeOrdering(logical, access, indexes); }
+        return new DocumentPlan(logical, collection, access);
     }
 
     private static DocumentCreateCollectionPlan PlanCreateCollection(OqlCreateCollectionExpression create)
@@ -119,7 +123,7 @@ internal sealed partial class DocumentPlanner
         { throw new DocumentPlanningException("CD03025", ErrorMessages.ArrayIndexDefinitionInvalid, create.Location); }
         if (keys.Distinct().Count() != keys.Length)
         { throw new DocumentPlanningException("CD05001", ErrorMessages.IndexPathsDuplicate, create.Location); }
-        return new DocumentCreateIndexPlan(ResolveCollection(create.Collection, create.Location), create.IndexName, keys, create.IsUnique, create.IfNotExists);
+        return new DocumentCreateIndexPlan(ResolveCollection(create.Collection, create.Location), create.IndexName, keys, create.IsUnique, create.IfNotExists, create.IncludeMissing);
     }
 
     private DocumentDropIndexPlan PlanDropIndex(OqlDropIndexExpression drop)
@@ -178,7 +182,7 @@ internal sealed partial class DocumentPlanner
         // continue to address source documents, including unprojected fields.
         var ordering = query.OrderBy.Select(order => order.Expression is OqlPathExpression { Segments.Count: 1 } path &&
             query.Projections.FirstOrDefault(projection => projection.Alias is not null && projection.Alias == path.Segments[0].Name) is { } projection
-                ? new OqlOrdering(projection.Expression, order.Descending) : order).ToArray();
+                ? new OqlOrdering(projection.Expression, order.Descending, order.NullPlacement) : order).ToArray();
         query = new OqlSelectExpression(query.Collection, query.Alias, query.Projections, query.Predicate,
             query.GroupBy, query.Having, ordering, query.IsDistinct, query.IsValue, query.Limit, query.Offset, query.Location, query.Unnest);
         bool grouped = query.GroupBy.Count > 0 || query.Projections.Any(projection => ContainsAggregate(projection.Expression, functions)) ||
@@ -225,6 +229,8 @@ internal sealed partial class DocumentPlanner
         }
         foreach (var order in query.OrderBy)
         {
+            if (order.NullPlacement is not (OqlNullPlacement.Default or OqlNullPlacement.First or OqlNullPlacement.Last))
+            { throw new DocumentPlanningException("CD01032", ErrorMessages.NullPlacementInvalid, order.Expression.Location); }
             if (query.IsDistinct && !query.Projections.Any(projection =>
                 EquivalentGroupedExpression(projection.Expression, order.Expression, query, unnestVariables, scopes!)))
             {

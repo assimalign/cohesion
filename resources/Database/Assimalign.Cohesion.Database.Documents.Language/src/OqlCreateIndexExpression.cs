@@ -31,10 +31,11 @@ public sealed class OqlCreateIndexExpression : OqlExpression
     /// <param name="isUnique">Whether valued scalar keys must be unique.</param>
     /// <param name="ifNotExists">Whether an existing name is a no-op.</param>
     /// <param name="location">The statement span.</param>
+    /// <param name="includeMissing">Whether the leading scalar key includes MISSING documents.</param>
     /// <exception cref="ArgumentNullException">The paths are null.</exception>
     public OqlCreateIndexExpression(string indexName, string collection, IReadOnlyList<OqlPathExpression> paths,
-        bool isUnique, bool ifNotExists, Location? location = null)
-        : this(indexName, collection, (paths ?? throw new ArgumentNullException(nameof(paths))).Cast<OqlExpression>().ToArray(), isUnique, ifNotExists, location) { }
+        bool isUnique, bool ifNotExists, Location? location = null, bool includeMissing = false)
+        : this(indexName, collection, (paths ?? throw new ArgumentNullException(nameof(paths))).Cast<OqlExpression>().ToArray(), isUnique, ifNotExists, location, includeMissing) { }
 
     /// <summary>Initializes an index with scalar paths and at most one DISTINCT ARRAY comprehension.</summary>
     /// <param name="indexName">The index name.</param>
@@ -43,9 +44,10 @@ public sealed class OqlCreateIndexExpression : OqlExpression
     /// <param name="isUnique">Whether the scalar-only index is unique.</param>
     /// <param name="ifNotExists">Whether an existing name is a no-op.</param>
     /// <param name="location">The statement span.</param>
+    /// <param name="includeMissing">Whether the leading scalar key includes MISSING documents.</param>
     /// <exception cref="ArgumentNullException">The keys are null.</exception>
     public OqlCreateIndexExpression(string indexName, string collection, IReadOnlyList<OqlExpression> keys,
-        bool isUnique, bool ifNotExists, Location? location = null) : base(location)
+        bool isUnique, bool ifNotExists, Location? location = null, bool includeMissing = false) : base(location)
     {
         ArgumentNullException.ThrowIfNull(keys);
         IndexName = indexName;
@@ -53,6 +55,7 @@ public sealed class OqlCreateIndexExpression : OqlExpression
         Keys = Array.AsReadOnly(keys.ToArray());
         Paths = Keys.All(key => key is OqlPathExpression)
             ? Array.AsReadOnly(Keys.Cast<OqlPathExpression>().ToArray()) : Array.Empty<OqlPathExpression>();
+        IncludeMissing = includeMissing;
         IsUnique = isUnique;
         IfNotExists = ifNotExists;
     }
@@ -71,6 +74,9 @@ public sealed class OqlCreateIndexExpression : OqlExpression
 
     /// <summary>Gets ordered paths and DISTINCT ARRAY comprehensions.</summary>
     public IReadOnlyList<OqlExpression> Keys { get; }
+
+    /// <summary>Gets whether the leading scalar key includes MISSING documents.</summary>
+    public bool IncludeMissing { get; }
 
     /// <summary>Gets whether valued scalar keys must be unique.</summary>
     public bool IsUnique { get; }
@@ -91,6 +97,7 @@ public sealed class OqlCreateIndexExpression : OqlExpression
         public string Collection => _target.Collection;
         public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.Documents.Language.OqlPathExpression> Paths => _target.Paths;
         public IReadOnlyList<OqlExpression> Keys => _target.Keys;
+        public bool IncludeMissing => _target.IncludeMissing;
         public bool IsUnique => _target.IsUnique;
         public bool IfNotExists => _target.IfNotExists;
         public string? Text => _target.Text;

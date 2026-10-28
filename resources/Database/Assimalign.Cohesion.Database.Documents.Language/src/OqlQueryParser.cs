@@ -293,6 +293,9 @@ public sealed partial class OqlQueryParser : QueryParser
             // locates it after the destination, rather than guessing from expression names.
             if (index == updateHeaderEnd && updateClause < 0 && IsUnnestClause(index)) { break; }
 
+            // The ORDER BY parser owns FIRST/LAST immediately following contextual NULLS.
+            if (value is "FIRST" or "LAST" && index > 0 && IsWord(_tokens[index - 1], "NULLS")) { continue; }
+
             // FETCH FIRST is one unsupported spelling. LIMIT ALL is an invalid count.
             // Only a recognized clause head owns the next word; a path or alias does not.
             if (value == "FIRST" && index == fetchHead + 1 || value == "ALL" && index == pagingHead + 1) { continue; }
