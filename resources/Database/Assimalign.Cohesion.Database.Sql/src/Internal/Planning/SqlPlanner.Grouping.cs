@@ -108,10 +108,15 @@ internal sealed partial class SqlPlanner
                 for (int j = 1; j < arguments.Length; j++) { arguments[j] = sourceScope.Bind(call.Arguments[j]); }
             }
             else { arguments = sourceScope.BindArguments(call.Arguments, out collation); }
+            if (function is SqlStatisticsFunction)
+            {
+                arguments[0] = sourceScope.BindStatisticsInput(call.Arguments[0], arguments[0]);
+            }
             sourceScope.BindParameterCoercions(function, arguments, collation);
             boundAggregates[i] = new SqlGroupAggregate(call, function, arguments,
                 SqlFunctionResolver.CoercionTargets(function, arguments.Length), collation, _functions.Database, BindOrdering(call.OrderBy, sourceScope),
-                call.Quantifier == SqlSetQuantifier.Distinct ? call.Arguments.Select(sourceScope.BindCollation).ToArray() : []);
+                call.Quantifier == SqlSetQuantifier.Distinct ? call.Arguments.Select(sourceScope.BindCollation).ToArray() : [],
+                call.Filter is null ? null : sourceScope.BindPredicate(call.Filter));
         }
 
         for (int i = 0; i < projections.Count; i++)
@@ -141,6 +146,14 @@ internal sealed partial class SqlPlanner
             }
             if (expression is SqlFunctionCallExpression call && IsAggregate(call))
             {
+                if (call.Filter is not null)
+                {
+                    if (ContainsAggregate(call.Filter))
+                    {
+                        throw new SqlPlanningException("CS05073", ErrorMessages.FilterContainsAggregate, call.Filter.Location);
+                    }
+                    ValidatePredicate(call.Filter, evaluator, "FILTER", _subqueryTypes);
+                }
                 // The overload is chosen by its arguments' types over the input row: SUM and AVG
                 // take a numeric argument, so SUM over text fails here with CS01006, whatever
                 // the rows (#1189). The grouping executor creates the chosen function's accumulators.
@@ -171,7 +184,8 @@ internal sealed partial class SqlPlanner
                 {
                     throw new SqlUnsupportedQueryException(ErrorMessages.StringAggregateDelimiter, location: call.Arguments[1].Location);
                 }
-                int index = aggregates.FindIndex(candidate => SameGroupExpression(candidate.Call, call, evaluator));
+                bool volatileInputs = call.Filter is not null && Children(call).Any(HasVolatileInput);
+                int index = volatileInputs ? -1 : aggregates.FindIndex(candidate => SameGroupExpression(candidate.Call, call, evaluator));
                 if (index < 0)
                 {
                     index = aggregates.Count;
@@ -179,6 +193,17 @@ internal sealed partial class SqlPlanner
                 }
                 slots[expression] = select.GroupBy.Count + index;
                 return;
+
+                bool HasVolatileInput(SqlExpression input)
+                {
+                    RuntimeHelpers.EnsureSufficientExecutionStack();
+                    // Child query bodies have their own binding; conservatively retain their
+                    // separate invocation rather than sharing a possibly volatile result.
+                    if (input is SqlSubqueryExpression or SqlExistsExpression or SqlQuantifiedComparisonExpression or SqlInExpression { Subquery: not null }) { return true; }
+                    if (input is SqlFunctionCallExpression functionCall &&
+                        evaluator.ResolveFunction(functionCall)?.Volatility == SqlFunctionVolatility.Volatile) { return true; }
+                    return Children(input).Any(HasVolatileInput);
+                }
             }
             for (int i = 0; i < select.GroupBy.Count; i++)
             {
@@ -243,6 +268,7 @@ internal sealed partial class SqlPlanner
             (SqlFunctionCallExpression a, SqlFunctionCallExpression b) => a.FunctionName.Equals(b.FunctionName, StringComparison.OrdinalIgnoreCase)
                 && (a.Quantifier == SqlSetQuantifier.Distinct) == (b.Quantifier == SqlSetQuantifier.Distinct)
                 && a.HasWithinGroupOrdering == b.HasWithinGroupOrdering
+                && (a.Filter is null) == (b.Filter is null)
                 && a.Arguments.Count == b.Arguments.Count && a.OrderBy.Count == b.OrderBy.Count
                 && a.OrderBy.Select(key => (key.IsDescending, key.NullPlacement)).SequenceEqual(b.OrderBy.Select(key => (key.IsDescending, key.NullPlacement))),
             (SqlCollateExpression a, SqlCollateExpression b) => Collation.FromName(a.CollationName) == Collation.FromName(b.CollationName),

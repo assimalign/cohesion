@@ -1528,6 +1528,31 @@ flowchart LR
   conversion remains cached and applies only built-in storage coercion; a domain check runs when
   the value is assigned. A canceled refresh after definition DDL has published leaves the cache
   pending; the next statement or provisioning operation rebuilds it with its own token.
+- **FILTER and statistics (#1720, SQ-H1).** The source-bound optional predicate executes
+  before argument or ordering subqueries, evaluation, coercion, DISTINCT retention or transition
+  calls. Only TRUE admits a row. Independent children inside a filtered call are deferred until
+  demanded and then cached per statement; correlated children retain their row lifetime.
+  Filtered calls containing volatile inputs have independent states, following PostgreSQL
+  prepagg.c:388-389. Child queries conservatively prevent sharing as their bodies bind separately.
+  Bare calls keep the existing execution path and object sizes; optional FILTER payloads
+  allocate only for filtered calls. EVERY uses the BOOL_AND transition; Boolean
+  aggregates are strict and return NULL without non-NULL input. Statistical signatures choose
+  Numeric for signed integer/Decimal inputs and Double for Real/Double inputs (untyped NULL
+  chooses Double). CASE/COALESCE statistical inputs use their numeric common type, with a bound conversion
+  before DISTINCT and transition calls; ordinary scalar-call alternative typing is unchanged.
+  Exact transitions retain scale-28 BigInteger sums and sums of squares; final division/root
+  rounds once into the engine's 96-bit Decimal domain, with midpoint ties
+  away from zero. A root is rounded from the exact rational variance, including sub-Decimal
+  variances whose root is representable. Only the final result can overflow (CS02002).
+  Floating transitions use PostgreSQL's Youngs-Cramer algorithm. Sample results require two
+  non-NULL values; population results require one. New placement identities are CS05072
+  (FILTER on a scalar call, 42809) and CS05073 (aggregate inside FILTER, 42803); predicate
+  types reuse CS02003. EXPLAIN adds filtered_aggregates only when present. No storage/wire
+  format or public implementation boundary changes.
+  References: PostgreSQL execExpr.c:3719-3740; parse_func.c:339-348;
+  parse_agg.c:420-422,941-943; pg_aggregate.dat:335-363,448-477,523-533;
+  float.c:3090-3142; numeric.c:6060-6139,11683-11758; pg_type.dat:225-226;
+  parse_func.c:1284-1360 (preferred Double for an untyped NULL). No reference code is copied.
 - **Aggregate modifiers (#1115).** DISTINCT and input ordering wrap the accumulator ABI in
   the executor, including application aggregates. Coerced tuples use SqlValueComparer equality
   and each argument's collation. Ordered calls buffer evaluated values and keys, prepare key
@@ -3238,6 +3263,8 @@ Deviates from interface-first (database-area.md); new public syntax leaves are s
 | CS05036 | A second modifying action selects the same physical target |
 | CS05070 | FULL association lacks a safe mandatory hash equality or complete ON safety proof |
 | CS05071 | WHEN follows an unconditional clause of the same match kind |
+| CS05072 | FILTER on a scalar call (42809) |
+| CS05073 | Aggregate in FILTER (42803) |
 
 Existing names/duplicates/arity/parameters use CS01014/015/019/006/020; non-Boolean predicates
 and incompatible assignment types use CS02003; aggregates use CS05017; identity uses CS03025.

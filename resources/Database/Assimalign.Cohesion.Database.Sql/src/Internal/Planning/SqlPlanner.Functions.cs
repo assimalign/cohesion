@@ -269,6 +269,10 @@ internal sealed partial class SqlPlanner
 
     internal static void ValidateCallModifiers(SqlFunctionCallExpression call, SqlFunctionCatalog catalog)
     {
+        if (call.Filter is not null && !catalog.IsAggregate(call.FunctionName))
+        {
+            throw new SqlPlanningException("CS05072", ErrorMessages.FilterRequiresAggregate, call.Location);
+        }
         if ((call.Quantifier != SqlSetQuantifier.Default || call.OrderBy.Count > 0) && !catalog.IsAggregate(call.FunctionName))
         {
             throw new SqlPlanningException("CS05032", string.Format(CultureInfo.CurrentCulture, ErrorMessages.AggregateModifiersOnScalar, call.FunctionName), call.Location);
@@ -279,6 +283,8 @@ internal sealed partial class SqlPlanner
     {
         if (IsMergeAction(call))
         {
+            if (call.Filter is not null)
+            { throw new SqlPlanningException("CS05072", ErrorMessages.FilterRequiresAggregate, call.Location); }
             if (call.Arguments.Count != 0 || call.Quantifier != SqlSetQuantifier.Default || call.OrderBy.Count != 0)
             { throw new SqlPlanningException("CS01006", ErrorMessages.MergeActionArity, call.Location); }
             return;

@@ -1545,6 +1545,11 @@ internal sealed partial class SqlPlanner
             throw new SqlPlanningException("CS01053", ErrorMessages.MergeActionContext, expression.Location);
         }
         bool isBound = boundSubqueries is not null && boundSubqueries.ContainsKey(expression);
+        if (expression is SqlFunctionCallExpression { Filter: not null } filtered &&
+            !evaluator.Functions.Catalog.IsAggregate(filtered.FunctionName))
+        {
+            throw new SqlPlanningException("CS05072", ErrorMessages.FilterRequiresAggregate, filtered.Location);
+        }
         switch (expression)
         {
             case SqlParameterExpression parameter when !evaluator.TryGetParameterValue(parameter, out _):
@@ -1949,12 +1954,20 @@ internal sealed partial class SqlPlanner
     internal static IEnumerable<SqlExpression> Children(SqlExpression expression) => expression switch
     {
         SqlLogicalExpression logical => logical.Operands,
+        SqlFunctionCallExpression { Filter: not null } function => FilterOperands(function),
         SqlFunctionCallExpression function => function.OrderBy.Count == 0 ? function.Arguments :
             function.Arguments.Concat(function.OrderBy.Select(key => key.Expression)),
         SqlCollateExpression or SqlBinaryExpression or SqlUnaryExpression or SqlDistinctExpression or SqlBooleanTestExpression or SqlIsNullExpression or SqlBetweenExpression
             or SqlInExpression or SqlQuantifiedComparisonExpression or SqlLikeExpression or SqlCaseExpression or SqlCastExpression => Operands(expression),
         _ => [],
     };
+
+    private static IEnumerable<SqlExpression> FilterOperands(SqlFunctionCallExpression call)
+    {
+        foreach (var argument in call.Arguments) { yield return argument; }
+        foreach (var key in call.OrderBy) { yield return key.Expression; }
+        yield return call.Filter!;
+    }
 
     /// <summary>The operands of a node that has some, in source order (<see cref="Children"/>).</summary>
     private static IEnumerable<SqlExpression> Operands(SqlExpression expression)

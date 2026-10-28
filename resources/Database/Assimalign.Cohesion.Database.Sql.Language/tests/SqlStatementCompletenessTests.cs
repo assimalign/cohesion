@@ -45,6 +45,7 @@ public sealed class SqlStatementCompletenessTests
             "SELECT * FROM t WHERE a = @a OR b = $1",
         ],
         [SqlClauses.GroupBy] = ["SELECT a, COUNT(*) FROM t GROUP BY a", "SELECT a, b FROM t GROUP BY a, b"],
+        [SqlClauses.Filter] = ["SELECT COUNT(*) FILTER (WHERE a > 0) FROM t", "SELECT SUM(DISTINCT a) FILTER (WHERE TRUE) FROM t"],
         [SqlClauses.Having] = ["SELECT a FROM t GROUP BY a HAVING COUNT(*) > 1"],
         [SqlClauses.OrderBy] = ["SELECT a FROM t ORDER BY a", "SELECT a FROM t ORDER BY a DESC, 2 ASC"],
         [SqlClauses.Fetch] = ["SELECT a FROM t OFFSET 1 ROW FETCH FIRST 2 ROWS ONLY", "SELECT a FROM t FETCH NEXT ROW ONLY"],

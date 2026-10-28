@@ -29,7 +29,7 @@ public static class SqlLanguageProfile
         "CROSS", "FULL", "NATURAL", "ON", "USING",
         // Clauses and modifiers
         "AS", "GROUP", "BY", "ORDER", "ASC", "DESC",
-        "HAVING", "LIMIT", "OFFSET", "FETCH", "NEXT",
+        "HAVING", "FILTER", "LIMIT", "OFFSET", "FETCH", "NEXT",
         "ONLY", "ROWS", "DISTINCT", "ALL", "TOP",
         // Set operations
         "UNION", "INTERSECT", "EXCEPT",
@@ -53,6 +53,7 @@ public static class SqlLanguageProfile
     [
         // Aggregate
         "COUNT", "SUM", "AVG", "MIN", "MAX", "STRING_AGG", "LISTAGG",
+        "BOOL_AND", "BOOL_OR", "EVERY", "STDDEV", "STDDEV_SAMP", "STDDEV_POP", "VARIANCE", "VAR_SAMP", "VAR_POP",
         // Null handling
         "COALESCE", "NULLIF",
         // Type
@@ -98,6 +99,7 @@ public static class SqlLanguageProfile
         SqlClauses.Using,
         SqlClauses.Where,
         SqlClauses.GroupBy,
+        SqlClauses.Filter,
         SqlClauses.Having,
         SqlClauses.OrderBy,
         SqlClauses.Limit,

@@ -50,7 +50,6 @@ public class SqlAggregateParserTests
     [InlineData("SELECT category, COUNT(*) FROM t GROUP BY category, ();", "()")]
     [InlineData("SELECT GROUPING(category) FROM t GROUP BY category;", "GROUPING")]
     [InlineData("SELECT GROUPING_ID(category) FROM t GROUP BY category;", "GROUPING_ID")]
-    [InlineData("SELECT SUM(amount) FILTER (WHERE amount > 0) FROM t;", "FILTER")]
     [InlineData("SELECT SUM(amount) OVER () FROM t;", "OVER")]
     [InlineData("SELECT ROW_NUMBER() FROM t;", "ROW_NUMBER")]
     [InlineData("SELECT RANK() FROM t;", "RANK")]

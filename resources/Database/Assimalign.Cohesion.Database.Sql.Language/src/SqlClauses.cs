@@ -75,6 +75,9 @@ public static class SqlClauses
     /// <summary>A <c>GROUP BY</c> clause.</summary>
     public const string GroupBy = "GROUP BY";
 
+    /// <summary>An aggregate input FILTER condition.</summary>
+    public const string Filter = "FILTER";
+
     /// <summary>A <c>HAVING</c> clause.</summary>
     public const string Having = "HAVING";
 

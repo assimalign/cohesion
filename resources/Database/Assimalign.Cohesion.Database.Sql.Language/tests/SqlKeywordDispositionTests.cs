@@ -99,7 +99,7 @@ public sealed class SqlKeywordDispositionTests
         ["ROLLUP"] = Rejects("SELECT a FROM t GROUP BY ROLLUP (a)", "ROLLUP"),
         ["CUBE"] = Rejects("SELECT a FROM t GROUP BY CUBE (a)", "CUBE"),
         ["GROUPING_ID"] = Rejects("SELECT GROUPING_ID(a) FROM t GROUP BY a", "GROUPING_ID"),
-        ["FILTER"] = Rejects("SELECT COUNT(*) FILTER (WHERE a > 1) FROM t", "FILTER"),
+        ["FILTER"] = Parses("SELECT COUNT(*) FILTER (WHERE a > 1) FROM t"),
         ["WITHIN"] = Rejects("SELECT PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY a) FROM t", "WITHIN GROUP"),
         ["ORDER"] = Parses("SELECT a FROM t ORDER BY a"),
         ["ASC"] = Parses("SELECT a FROM t ORDER BY a ASC"),

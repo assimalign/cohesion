@@ -1935,6 +1935,56 @@ Refusing repeated FOREIGN KEY child columns is stricter than PostgreSQL.
 
 ## Grouping and aggregate functions (#1020)
 
+### Aggregate FILTER and Boolean/statistical functions (#1720, SQ-H1)
+
+Every catalog aggregate, including application aggregates, accepts `FILTER (WHERE condition)`
+after the call (after WITHIN GROUP for LISTAGG). Only TRUE admits a row; FALSE and NULL
+reject it before any argument, coercion, input ordering key, DISTINCT tuple or transition is
+evaluated. This includes correlated and independent argument subqueries. Independent children
+inside the filtered call are evaluated on first demand and cached for the statement.
+FILTER works with default/ALL/DISTINCT calls, COUNT(*), ordered STRING_AGG/LISTAGG,
+GROUP BY, HAVING and ORDER BY. Different conditions retain independent aggregate states.
+Filtered calls with volatile arguments, ordering keys or conditions also retain independent
+states; child queries conservatively prevent aggregate sharing.
+The condition binds over input columns and may reference enclosing columns or contain
+subqueries; aggregates local to those child queries belong to the child scope. Calls owned
+entirely by an enclosing query retain the existing outer-only aggregate CK00001 boundary.
+FILTER on a scalar call fails with CS05072 (42809), a same-scope aggregate in the condition with CS05073
+(42803), and a non-Boolean condition with CS02003 (42804). Window calls in a condition and
+FILTER on a window aggregate retain CK00001 until the window family implements them.
+EXPLAIN reports `filtered_aggregates=N` on a grouping node only when N is nonzero.
+
+| Aggregate | Non-NULL input and result |
+|---|---|
+| BOOL_AND / EVERY | Boolean input; TRUE exactly when every non-NULL value is TRUE. EVERY aliases BOOL_AND. |
+| BOOL_OR | Boolean input; TRUE when any non-NULL value is TRUE. |
+| STDDEV / STDDEV_SAMP | Numeric input; sample standard deviation. STDDEV aliases STDDEV_SAMP. |
+| VARIANCE / VAR_SAMP | Numeric input; sample variance. VARIANCE aliases VAR_SAMP. |
+| STDDEV_POP / VAR_POP | Numeric input; population standard deviation / variance. |
+
+All nine names ignore NULL arguments and return NULL for empty/all-NULL input. Boolean
+results are nullable Boolean. Sample statistics return NULL for one value; population
+statistics return zero for one finite value. Signed integer and Decimal inputs return nullable
+Decimal (`numeric`); Real and Double inputs return nullable Float64 (`double precision`).
+An untyped NULL statistical argument resolves to Double. Other argument types fail with
+CS01006. CASE/COALESCE statistical inputs use a numeric common type before DISTINCT and
+accumulation, including REAL rounding before its widening to Double. Integer/Decimal
+transitions accumulate exact scaled sums and squares, avoiding
+intermediate overflow and double rounding even near BIGINT and Decimal limits. The final
+result uses the engine's existing 96-bit Decimal domain, choosing up to 28 fractional digits
+and rounding midpoint ties away from zero; a final value outside that domain is CS02002.
+Standard deviation rounds the root of the exact rational variance directly. This preserves
+representable roots even when the variance rounds to zero. Floating transitions follow
+PostgreSQL's Youngs-Cramer calculation: nonfinite inputs yield NaN when a result is defined;
+finite-input overflow is CS02002. No arbitrary-precision numeric result type is added.
+
+References: PostgreSQL execExpr.c:3719-3740; parse_func.c:339-348; parse_agg.c:420-422,941-943;
+pg_aggregate.dat:335-363,448-477,523-533; float.c:3090-3142; numeric.c:6060-6139,11683-11758;
+pg_type.dat:225-226 and parse_func.c:1284-1360 (preferred Double for an untyped NULL);
+parse_expr.c:1740-1742 and parse_coerce.c:1346-1456 (CASE common type, ELSE first).
+
+### Ordinary grouping and aggregate inputs
+
 Grouping is a separate execution stage over a stored table, a virtual system
 relation, or supported N-way INNER/LEFT/RIGHT/FULL/CROSS/comma joins. `WHERE` first filters
 individual input rows. `GROUP BY` then forms one row per distinct tuple of one
@@ -2044,11 +2094,11 @@ exceed 1,048,576 UTF-16 units. Ordered calls check while buffering, before sorti
 DISTINCT calls retain one representative per equivalence class, selected in sorted input
 order, so case-insensitive aggregation preserves one input spelling.
 
-Aggregate FILTER, empty grouping sets (GROUP BY ()), GROUPING SETS, ROLLUP, CUBE,
+Empty grouping sets (GROUP BY ()), GROUPING SETS, ROLLUP, CUBE,
 GROUPING/GROUPING_ID, windows, non-LISTAGG WITHIN GROUP, and LISTAGG ON OVERFLOW
 (including ERROR and TRUNCATE) retain CK00001. ON OVERFLOW is matched contextually
 inside LISTAGG and names the whole construct once; OVERFLOW remains an ordinary identifier.
-These additions change no named clause count.
+FILTER adds one named clause; the T1 modifiers add none.
 
 Reference behavior: PostgreSQL src/backend/parser/gram.y:16017-16129,
 parse_agg.c:189-203,231-233 and parse_func.c:324-341; executor/nodeAgg.c:832-834,888-898;
@@ -3720,7 +3770,7 @@ rejects with `CK00001`: `RECURSIVE`, `[NOT] MATERIALIZED`, `SEARCH`/`CYCLE`,
 `SELECT ALL`, SELECT-tail `FOR UPDATE` / `FOR NO KEY UPDATE` / `FOR SHARE` /
 `FOR KEY SHARE`,
 `CREATE COLLATION`, `CREATE FULLTEXT`, `GROUPING SETS` and
-the `GROUPING`, `ROLLUP`, `CUBE` and `GROUPING_ID` calls, `FILTER (...)` and
+the `GROUPING`, `ROLLUP`, `CUBE` and `GROUPING_ID` calls, and
 `WITHIN GROUP` after a non-LISTAGG call, LISTAGG ON OVERFLOW (contextual), the `ANY`/`SOME` (and `ALL`) array comparisons,
 `LATERAL`, `~`, `SEQUENCE`, `SERIAL`, `BIGSERIAL`, `SMALLSERIAL`, `OVERRIDING`,
 `MINVALUE`, `MAXVALUE`, `CYCLE`, `CACHE`, `RESTART`, plus `PERCENT` and `WITH TIES` after

@@ -946,7 +946,7 @@ public sealed partial class SqlQueryParser
             if (SqlUnsupportedVocabulary.IsNiladicFunction(name)) { return ParseNiladic(ref lexer, name, pos); }
             if (name.ToUpperInvariant() is "SUBSTRING" or "TRIM" or "POSITION" or "EXTRACT")
             {
-                return ParseStandardForm(ref lexer, name.ToUpperInvariant(), pos);
+                return ParseCallFilter(ref lexer, (SqlFunctionCallExpression)ParseStandardForm(ref lexer, name.ToUpperInvariant(), pos));
             }
         }
         // PostgreSQL scan.l:773-783 preserves quoted case; namespace.c:1237 looks up that spelling.
@@ -1022,8 +1022,22 @@ public sealed partial class SqlQueryParser
             callEnd = CurrentTokenEnd(ref lexer);
             Expect(ref lexer, TokenType.RightParen, _errorWithinGroupClosingExpected);
         }
+        var call = ParseCallFilter(ref lexer, new SqlFunctionCallExpression(name, args, Location.Create(1, 1, pos, callEnd), quantifier, ordering, listagg));
         SkipCallExtensions(ref lexer);
-        return new SqlFunctionCallExpression(name, args, Location.Create(1, 1, pos, callEnd), quantifier, ordering, listagg);
+        return call;
+    }
+
+    private SqlFunctionCallExpression ParseCallFilter(ref TokenLexer lexer, SqlFunctionCallExpression call)
+    {
+        if (!IsWord(ref lexer, "FILTER") || !TryPeekToken(lexer, out string next, out _) || next != "(") { return call; }
+        Advance(ref lexer);
+        Expect(ref lexer, TokenType.LeftParen, "'(' after FILTER");
+        ExpectKeyword(ref lexer, "WHERE", "WHERE in FILTER");
+        var filter = ParseOperand(ref lexer, OperandRule.Expression);
+        int end = CurrentTokenEnd(ref lexer);
+        Expect(ref lexer, TokenType.RightParen, "')' after FILTER condition");
+        return new SqlFunctionCallExpression(call.FunctionName, call.Arguments,
+            Location.Create(1, 1, call.Location?.Start ?? 0, end), call.Quantifier, call.OrderBy, call.HasWithinGroupOrdering, filter);
     }
 
     private void ParseAggregateOrdering(ref TokenLexer lexer, List<SqlOrderByColumn> ordering)
@@ -1061,7 +1075,7 @@ public sealed partial class SqlQueryParser
     }
 
     /// <summary>
-    /// Skips <c>WITHIN GROUP (...)</c> and <c>FILTER (...)</c> after a call, reporting each once.
+    /// Skips unsupported <c>WITHIN GROUP (...)</c> after a call, reporting it once.
     /// <c>WITHIN</c> used to become the column alias and <c>GROUP (ORDER BY ...)</c> a malformed
     /// GROUP BY, so the construct also reported two CS00003 diagnostics (#1101).
     /// </summary>
@@ -1075,11 +1089,6 @@ public sealed partial class SqlQueryParser
             {
                 RequireSkippedConstruct(start, groupEnd, "WITHIN GROUP");
                 Advance(ref lexer);
-                Advance(ref lexer);
-            }
-            else if (IsWord(ref lexer, "FILTER") && TryPeekToken(lexer, out string next, out _) && next == "(")
-            {
-                RequireSkippedConstruct(start, start + lexer.Current.Value.Length, "FILTER");
                 Advance(ref lexer);
             }
             else

@@ -248,7 +248,7 @@ public sealed class SqlLanguageConformanceTests
         // #1714 adds UPDATE FROM and DELETE USING and #1718 adds quantified comparisons:
         // exactly three over #1118's 51. TRUNCATE and CREATE TABLE AS (#1716) and
         // MERGE (#1715) add one each. WITH RECURSIVE (#1719) adds one binding-only clause.
-        SqlLanguageProfile.Instance.Clauses.Count().ShouldBe(58);
+        SqlLanguageProfile.Instance.Clauses.Count().ShouldBe(59);
         RequireExecutionCases(SqlLanguageProfile.Instance.Clauses, cases);
         cases.Keys.Except(SqlLanguageProfile.Instance.Clauses).ShouldBeEmpty("Cases must describe the current profile.");
 
@@ -641,6 +641,15 @@ public sealed class SqlLanguageConformanceTests
             ["COUNT"] = new("COUNT(*)", 3L),
             ["SUM"] = new("SUM(age)", 122m),
             ["AVG"] = new("AVG(age)", 122m / 3m),
+            ["BOOL_AND"] = new("BOOL_AND(age > 40)", false),
+            ["BOOL_OR"] = new("BOOL_OR(age > 40)", true),
+            ["EVERY"] = new("EVERY(age > 40)", false),
+            ["STDDEV"] = new("STDDEV(1)", 0m),
+            ["STDDEV_SAMP"] = new("STDDEV_SAMP(1)", 0m),
+            ["STDDEV_POP"] = new("STDDEV_POP(1)", 0m),
+            ["VARIANCE"] = new("VARIANCE(1)", 0m),
+            ["VAR_SAMP"] = new("VAR_SAMP(1)", 0m),
+            ["VAR_POP"] = new("VAR_POP(1)", 0m),
             ["MIN"] = new("MIN(age)", 36),
             ["MAX"] = new("MAX(age)", 45),
             ["STRING_AGG"] = new("STRING_AGG(name, ',' ORDER BY id)", "Ada,Grace,Alan"),
@@ -812,6 +821,8 @@ public sealed class SqlLanguageConformanceTests
             expression => expression is SqlSelectExpression { Where: SqlBinaryExpression { Right: SqlCollateExpression } }, [[1]]),
         [SqlClauses.GroupBy] = Query("SELECT age > 40, COUNT(*), SUM(age) FROM t GROUP BY age > 40 ORDER BY age > 40;",
             expression => expression is SqlSelectExpression { GroupBy.Count: 1 }, [[false, 1L, 36m], [true, 2L, 86m]]),
+        [SqlClauses.Filter] = Query("SELECT COUNT(*) FILTER (WHERE age > 40), SUM(age) FILTER (WHERE age > 40) FROM t;",
+            expression => expression is SqlSelectExpression select && select.Columns[0].Expression is SqlFunctionCallExpression { Filter: not null }, [[2L, 86m]]),
         [SqlClauses.Having] = Query("SELECT age > 40, COUNT(*), SUM(age) FROM t WHERE age > 35 GROUP BY age > 40 HAVING SUM(age) > 50;",
             expression => expression is SqlSelectExpression { Having: not null }, [[true, 2L, 86m]]),
         [SqlClauses.OrderBy] = new("SELECT id, age AS years FROM ordering_rows ORDER BY years + 1 ASC NULLS LAST, 1 DESC;",

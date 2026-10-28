@@ -254,6 +254,15 @@
   <data name="ViewBindingFailed" xml:space="preserve"><value>View '{0}.{1}' cannot be bound. {2}</value></data>
   <data name="ViewContractChanged" xml:space="preserve"><value>A source definition changed its output type, modifiers, domain or collation.</value></data>
   <data name="AggregateModifiersOnScalar" xml:space="preserve"><value>DISTINCT, ALL or ORDER BY specified, but '{0}' is not an aggregate function.</value></data>
+  <data name="FilterRequiresAggregate" xml:space="preserve">
+    <value>FILTER is allowed only on aggregate calls.</value>
+  </data>
+  <data name="FilterContainsAggregate" xml:space="preserve">
+    <value>Aggregate functions are not allowed in FILTER conditions.</value>
+  </data>
+  <data name="StatisticsOutOfRange" xml:space="preserve">
+    <value>The statistical aggregate result is outside its numeric type range.</value>
+  </data>
   <data name="DistinctOrderingArgument" xml:space="preserve"><value>In an aggregate with DISTINCT, ORDER BY expressions must appear in the argument list.</value></data>
   <data name="StringAggregateTypeHint" xml:space="preserve"><value> Use CAST(... AS TEXT) for non-text inputs; the delimiter must be a string constant or parameter.</value></data>
   <data name="StringAggregateDelimiter" xml:space="preserve"><value>STRING_AGG/LISTAGG delimiter must be a string constant or parameter known at plan time.</value></data>

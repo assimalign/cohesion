@@ -64,7 +64,7 @@ public sealed partial class SqlQueryParser
             clause = "WITHIN GROUP";
             end = nextEnd;
         }
-        else if (next == "(" && token is "ROLLUP" or "CUBE" or "GROUPING" or "GROUPING_ID" or "FILTER")
+        else if (next == "(" && token is "ROLLUP" or "CUBE" or "GROUPING" or "GROUPING_ID")
         {
             clause = token;
         }
