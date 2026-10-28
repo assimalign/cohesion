@@ -84,6 +84,7 @@ dependency the host runs with is a registration in it, and the root
 | `AddService(IHostService)` / `AddService(Func<WebApplicationContext, IHostService>)` | `IHostService` |
 | `IWebApplicationBuilder.AddServer(...)`, `Server.UseServer<TServer>(...)` | `IWebApplicationServer` |
 | `IWebApplicationBuilder.AddFeature(...)`, the feature packages' `builder.Services.Add<Feature>(...)` verbs | `IHttpFeature` (singleton only) |
+| `IWebApplicationBuilder.AddSetting(...)`, setting registrations such as `builder.Services.AddCors(...)` | `IWebApplicationSetting` (singleton), listed on `WebApplicationContext.Settings` |
 | `AddHealthCheck(name, check)` | `IHealthContributor` |
 | HTTP policy defaults, `Services.AddSingleton<IHttpExchangeInterceptor>(...)` | `IHttpExchangeInterceptor` (singleton only; default server) |
 

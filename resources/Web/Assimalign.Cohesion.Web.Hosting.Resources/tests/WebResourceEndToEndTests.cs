@@ -42,6 +42,19 @@ public sealed class WebResourceEndToEndTests
         manifest.Actions.ShouldHaveSingleItem().ShouldBe(new ResourceActionDescriptor("cors", ResourceActionKind.ReadWrite, IsStateful: true));
     }
 
+    [Fact(DisplayName = DisplayPrefix + "An application that registers no CORS exposes no cors action")]
+    public async Task Start_WithoutAddCors_ShouldPublishNoCorsAction()
+    {
+        // Arrange
+        await using GatewayStandIn gateway = await GatewayStandIn.StartAsync();
+
+        // Act
+        await using RunningResource instance = await RunningResource.StartAsync(gateway.ManifestEndpoint, cors: null);
+
+        // Assert
+        gateway.Manifests.ShouldHaveSingleItem().Actions.ShouldBeEmpty();
+    }
+
     [Fact(DisplayName = DisplayPrefix + "A managed instance runs one resource service, whose control plane published the manifest")]
     public async Task Start_WithGateway_ShouldRunOneResourceService()
     {
@@ -177,7 +190,7 @@ public sealed class WebResourceEndToEndTests
         envelope.RootElement.GetProperty("state").GetProperty("value").GetProperty("origins")[0].GetString().ShouldBe(partner);
         (await instance.GetAllowedOriginAsync(partner)).ShouldBe(partner);
         (await instance.GetAllowedOriginAsync(shop)).ShouldBeNull();
-        instance.Resource.CorsPolicy.ShouldNotBeNull().Origins.ShouldBe([partner]);
+        instance.DefaultCorsPolicy.Origins.ShouldBe([partner]);
     }
 
     [Theory(DisplayName = DisplayPrefix + "A write the CORS rules refuse is rejected and the policy in effect stays")]
@@ -214,7 +227,7 @@ public sealed class WebResourceEndToEndTests
         // Assert
         (await instance.GetAllowedOriginAsync(partner)).ShouldBe(partner);
         (await instance.GetAllowedOriginAsync(shop)).ShouldBeNull();
-        instance.Resource.CorsPolicy.ShouldNotBeNull().Origins.ShouldBe([partner]);
+        instance.DefaultCorsPolicy.Origins.ShouldBe([partner]);
     }
 
     [Fact(DisplayName = DisplayPrefix + "A service registered ahead of the resource starts only once the gateway's state is restored")]

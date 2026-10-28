@@ -72,7 +72,11 @@ builder.Services
     .AddAuthorization(authorization => authorization.Options.AddPolicy("admins", policy => policy.RequireRole("admin")))
     .AddAntiforgery()
     .AddOpenApi(openApi => openApi.Options.Title = "Cohesion Web AOT guard")
-    .AddValidation(validation => validation.Options.AddProfile(new GuardItemProfile()));
+    .AddValidation(validation => validation.Options.AddProfile(new GuardItemProfile()))
+    // CORS registers the application's cors setting; UseCors() below only places the middleware.
+    .AddCors(cors => cors.Options
+        .AddDefaultPolicy(policy => policy.WithOrigins(GuardSmoke.TrustedOrigin))
+        .AddPolicy("json-clients", policy => policy.WithOrigins(GuardSmoke.TrustedOrigin).WithHeaders("Content-Type")));
 
 await using WebApplication application = builder.Build();
 
@@ -103,9 +107,7 @@ application.UseRouting();
 
 // Endpoint policy middleware reads the endpoint UseRouting published, so it follows it. CORS goes
 // first: it answers preflights before anything that could reject one.
-application.UseCors(options => options
-    .AddDefaultPolicy(policy => policy.WithOrigins(GuardSmoke.TrustedOrigin))
-    .AddPolicy("json-clients", policy => policy.WithOrigins(GuardSmoke.TrustedOrigin).WithHeaders("Content-Type")));
+application.UseCors();
 application.UseAuthorization();
 application.UseRequestTimeouts(TimeSpan.FromSeconds(30));
 application.UseRateLimiting(options => options.GlobalPolicy = RateLimitingPolicy.Create(

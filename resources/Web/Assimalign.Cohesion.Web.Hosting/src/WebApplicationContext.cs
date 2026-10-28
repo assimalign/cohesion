@@ -92,6 +92,8 @@ public sealed class WebApplicationContext : HostContext, IWebApplicationContext
 
     public IEnumerable<IHttpFeature> Features => ServiceProvider.GetRequiredService<IEnumerable<IHttpFeature>>();
 
+    public IEnumerable<IWebApplicationSetting> Settings => ServiceProvider.GetRequiredService<IEnumerable<IWebApplicationSetting>>();
+
     // Pipeline composition owns these resources until final application teardown.
     internal void RegisterForDisposal(IDisposable resource)
     {

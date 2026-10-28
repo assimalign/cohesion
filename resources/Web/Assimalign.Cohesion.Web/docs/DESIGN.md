@@ -140,6 +140,27 @@ are `Web.Routing`'s since #1379. The contract the root still states is the pipel
 pipeline should run selected endpoints ends in `WebApplicationTerminal.InvokeAsync`. `WebApplication`
 in `Web.Hosting` does, which is one of the two reasons `Web.Hosting` references `Web.Routing`.
 
+## Settings: values an operator changes while the application runs (2026-10-28)
+
+`IWebApplicationSetting` is a named value the application's components read while it serves;
+`IWebApplicationSetting<TValue>` adds `Value` and `Set`. `WebApplicationSetting<TValue>` is the default
+implementation, replacing its value with one reference swap. A feature registers its settings where it is
+configured: its `builder.Services.Add<Feature>(...)` component integration, or the raw
+`IWebApplicationBuilder.AddSetting` path, a singleton registration like `AddFeature`. The context lists them
+on `IWebApplicationContext.Settings`.
+
+A pipeline verb only reads a setting: it finds the one its feature registered when the pipeline is built,
+and its middleware reads `Value` on each request. An operator surface finds the same setting on the context
+and replaces its value, which applies from the next request without rebuilding the pipeline. Web.Cors is the
+first feature with one: the `cors` setting holds the default policy, and Web.Hosting.Resources exposes it as
+a resource action.
+
+*Rejected:* a dynamic-middleware interface, a middleware that exposes its state and reconfigures itself.
+Middleware instances are not discoverable once composed (`Use` keeps delegates), state also lives outside
+middleware, and an untyped state cannot be serialized under NativeAOT. *Rejected:* registering a setting from
+the pipeline builder, or setting one from a `Use` verb: configuration belongs to the registration verb
+(`Add` configures, `Use` places).
+
 ## Application lifecycle services
 
 The concrete `WebApplicationBuilder.AddService` in `Web.Hosting` accepts an

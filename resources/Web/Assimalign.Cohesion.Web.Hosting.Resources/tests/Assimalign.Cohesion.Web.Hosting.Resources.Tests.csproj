@@ -7,8 +7,12 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Hosting.Resources" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Hosting" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Cors" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Resources" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
+	</ItemGroup>
+	<ItemGroup>
+		<CohesionAnalyzerReference Include="Assimalign.Cohesion.SourceGeneration" />
 	</ItemGroup>
 	<ItemGroup>
 		<CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />

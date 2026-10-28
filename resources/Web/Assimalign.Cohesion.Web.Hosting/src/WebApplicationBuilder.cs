@@ -532,6 +532,23 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
         return this;
     }
 
+    IWebApplicationBuilder IWebApplicationBuilder.AddSetting(IWebApplicationSetting setting)
+    {
+        ArgumentNullException.ThrowIfNull(setting);
+
+        Services.AddSingleton<IWebApplicationSetting>(setting);
+        return this;
+    }
+
+    IWebApplicationBuilder IWebApplicationBuilder.AddSetting(Func<IWebApplicationContext, IWebApplicationSetting> setting)
+    {
+        ArgumentNullException.ThrowIfNull(setting);
+
+        Services.AddSingleton<IWebApplicationSetting>(_ => setting.Invoke(_context)
+            ?? throw new InvalidOperationException(ErrorMessages.ApplicationSettingFactoryResultNull));
+        return this;
+    }
+
     private sealed class DebugView
     {
         private readonly WebApplicationBuilder _target;

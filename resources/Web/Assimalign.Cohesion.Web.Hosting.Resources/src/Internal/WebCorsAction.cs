@@ -3,66 +3,84 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Hosting.Resources;
+using Assimalign.Cohesion.Web.Cors;
 
 namespace Assimalign.Cohesion.Web.Hosting.Resources.Internal;
 
 /// <summary>
-/// The <c>cors</c> action: reads the default CORS policy in effect and, on a write, replaces it.
-/// The policy is the action's state, so the gateway restores the last written policy on every
-/// instance that starts before the resource is next deployed.
+/// The <c>cors</c> action over the application's <c>cors</c> setting, which <c>AddCors</c> registered:
+/// a read reports the default policy in effect, and a write or a restore replaces it.
 /// </summary>
-internal sealed class WebCorsAction : IResourceAction
+/// <remarks>
+/// The action keeps no copy: its state is the setting, read and written through. The middleware
+/// <c>UseCors()</c> placed reads the setting on each request, so a change applies from the next one.
+/// </remarks>
+internal sealed class WebCorsAction : IResourceAction, IResourceActionState
 {
-    private readonly ResourceActionState<WebCorsPolicy> _state;
+    private readonly IWebApplicationSetting<CorsPolicy?> _setting;
 
-    public WebCorsAction(WebCorsPolicy policy)
+    public WebCorsAction(IWebApplicationSetting<CorsPolicy?> setting)
     {
-        Middleware = new ResourceCorsMiddleware(CorsMiddlewareCapture.Create(policy));
-        _state = ResourceActionState<WebCorsPolicy>.Create(policy, Apply);
+        _setting = setting;
+        Name = setting.Name;
     }
 
-    public ResourceCorsMiddleware Middleware { get; }
-
-    public WebCorsPolicy Current => _state.Value;
-
-    public ResourceActionName Name => "cors";
+    public ResourceActionName Name { get; }
 
     public ResourceActionKind Kind => ResourceActionKind.ReadWrite;
 
-    public IResourceActionState? State => _state;
+    public IResourceActionState? State => this;
 
-    public async ValueTask<ResourceActionResult> ExecuteAsync(ResourceActionContext context, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Gets the default policy in effect.
+    /// </summary>
+    public WebCorsPolicy Current => WebCorsPolicyMapping.FromPolicy(_setting.Value);
+
+    public ValueTask<ResourceActionResult> ExecuteAsync(ResourceActionContext context, CancellationToken cancellationToken = default)
     {
         if (context.Operation == ResourceActionKind.Read)
         {
-            return ResourceActionResult.Success(_state.Value, context.Serializer);
+            return ValueTask.FromResult(ResourceActionResult.Success(Current, context.Serializer));
         }
 
         WebCorsPolicy? policy = context.ReadInput<WebCorsPolicy>();
         if (policy is null)
         {
-            return ResourceActionResult.Rejected(ErrorMessages.CorsPolicyRequired);
+            return ValueTask.FromResult(ResourceActionResult.Rejected(ErrorMessages.CorsPolicyRequired));
         }
 
-        // A policy CORS refuses throws from Apply; the control plane reports it as rejected.
-        await _state.SetAsync(policy, cancellationToken).ConfigureAwait(false);
-        return ResourceActionResult.Success();
+        Apply(policy);
+        return ValueTask.FromResult(ResourceActionResult.Success());
+    }
+
+    public ReadOnlyMemory<byte> GetSnapshot(IResourceContentSerializer serializer)
+    {
+        return serializer.Serialize(Current);
+    }
+
+    public ValueTask RestoreAsync(ReadOnlyMemory<byte> snapshot, IResourceContentSerializer serializer, CancellationToken cancellationToken = default)
+    {
+        WebCorsPolicy policy = serializer.Deserialize<WebCorsPolicy>(snapshot)
+            ?? throw new ResourceContentException(ErrorMessages.CorsPolicyRequired);
+
+        Apply(policy);
+        return ValueTask.CompletedTask;
     }
 
     // A policy CORS refuses is content the instance does not accept: a write reports it as rejected,
     // a restore as a snapshot that does not fit, and the policy in effect stays.
     private void Apply(WebCorsPolicy policy)
     {
-        IWebApplicationMiddleware middleware;
+        CorsPolicy? built;
         try
         {
-            middleware = CorsMiddlewareCapture.Create(policy);
+            built = WebCorsPolicyMapping.ToPolicy(policy);
         }
         catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
         {
             throw new ResourceContentException(exception.Message, exception);
         }
 
-        Middleware.Replace(middleware);
+        _setting.Set(built);
     }
 }

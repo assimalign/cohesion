@@ -18,11 +18,18 @@ namespace Assimalign.Cohesion.Web.Cors.Tests;
 /// <summary>
 /// Minimal <see cref="IWebApplicationPipelineBuilder"/> that composes middleware in registration order, the
 /// same shape the real <c>WebApplication</c> builder produces, without the hosting stack, so the middleware
-/// is driven through its public verb.
+/// is driven through its public verb. Its application context lists the settings it was given, as the
+/// registrations <c>AddCors</c> makes would.
 /// </summary>
 internal sealed class TestPipelineBuilder : IWebApplicationPipelineBuilder
 {
     private readonly List<Func<WebApplicationMiddleware, WebApplicationMiddleware>> _middleware = new();
+    private readonly TestApplicationContext _context;
+
+    public TestPipelineBuilder(params IWebApplicationSetting[] settings)
+    {
+        _context = new TestApplicationContext(settings);
+    }
 
     public IWebApplicationPipelineBuilder Use(Func<WebApplicationMiddleware, WebApplicationMiddleware> middleware)
     {
@@ -34,7 +41,7 @@ internal sealed class TestPipelineBuilder : IWebApplicationPipelineBuilder
         => Use(next => context => middleware.InvokeAsync(context, next));
 
     public IWebApplicationPipelineBuilder Use(Func<IWebApplicationContext, WebApplicationMiddleware, WebApplicationMiddleware> middleware)
-        => throw new NotSupportedException();
+        => Use(next => middleware(_context, next));
 
     public IWebApplicationPipeline Build()
     {
@@ -62,12 +69,25 @@ internal sealed class TestPipelineBuilder : IWebApplicationPipelineBuilder
             }
         }
     }
+
+    private sealed class TestApplicationContext : IWebApplicationContext
+    {
+        public TestApplicationContext(IWebApplicationSetting[] settings) => Settings = settings;
+
+        public FileSystemPath? ContentRootPath => null;
+        public FileSystemPath? WebRootPath => null;
+        public IEnumerable<IWebApplicationMiddleware> Middleware => Array.Empty<IWebApplicationMiddleware>();
+        public IEnumerable<IWebApplicationServer> Servers => Array.Empty<IWebApplicationServer>();
+        public IEnumerable<IHttpFeature> Features => Array.Empty<IHttpFeature>();
+        public IEnumerable<IWebApplicationSetting> Settings { get; }
+    }
 }
 
 /// <summary>
-/// Drives <c>UseCors</c> over <see cref="TestPipelineBuilder"/>: a stage ahead of the middleware publishes
-/// the route match (what <c>UseRouting</c> does), and a stage behind it records whether the request
-/// continued and runs an optional downstream action.
+/// Drives <c>UseCors</c> over <see cref="TestPipelineBuilder"/>, with the setting <c>AddCors</c> would
+/// register from <paramref name="configure"/>: a stage ahead of the middleware publishes the route match
+/// (what <c>UseRouting</c> does), and a stage behind it records whether the request continued and runs an
+/// optional downstream action.
 /// </summary>
 internal static class CorsPipeline
 {
@@ -78,7 +98,9 @@ internal static class CorsPipeline
         Func<IHttpContext, Task>? downstream = null)
     {
         bool continued = false;
-        TestPipelineBuilder builder = new();
+        CorsBuilder cors = new();
+        configure?.Invoke(cors.Options);
+        TestPipelineBuilder builder = new(cors.Build());
 
         if (match is not null)
         {
@@ -89,7 +111,7 @@ internal static class CorsPipeline
             });
         }
 
-        builder.UseCors(configure);
+        builder.UseCors();
         builder.Use(next => async ctx =>
         {
             continued = true;

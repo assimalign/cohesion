@@ -34,7 +34,7 @@ not an edge.
 | Library areas | 21 |
 | Resource areas | 18 |
 | Declared project references | 718 |
-| Declared shared-source links | 48 |
+| Declared shared-source links | 49 |
 
 ## Ambiguous project names
 
@@ -1014,7 +1014,7 @@ _More than twelve projects: the table below is the area's graph (see the node ce
 | `Assimalign.Cohesion.Web.Caching` | `Assimalign.Cohesion.Caching`<br>`Assimalign.Cohesion.Caching.InMemory`<br>`Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Http.Forwarded`<br>`Assimalign.Cohesion.Http.Streaming`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.Routing`<br>`Assimalign.Cohesion.Web.Server` | — | — | — |
 | `Assimalign.Cohesion.Web.Compression` | `Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Http.Forwarded`<br>`Assimalign.Cohesion.Http.Streaming`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.Server` | — | — | — |
 | `Assimalign.Cohesion.Web.CookiePolicy` | `Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Http.Cookies`<br>`Assimalign.Cohesion.Http.Forwarded`<br>`Assimalign.Cohesion.Web` | — | — | — |
-| `Assimalign.Cohesion.Web.Cors` | `Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.Routing`<br>`Assimalign.Cohesion.Web.Server` | — | — | — |
+| `Assimalign.Cohesion.Web.Cors` | `Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.Routing`<br>`Assimalign.Cohesion.Web.Server` | — | `Assimalign.Cohesion.Core/ComponentIntegration` | — |
 | `Assimalign.Cohesion.Web.Diagnostics` | `Assimalign.Cohesion.Http.Forwarded`<br>`Assimalign.Cohesion.Http.Streaming`<br>`Assimalign.Cohesion.Logging`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.Routing`<br>`Assimalign.Cohesion.Web.Server` | — | — | — |
 | `Assimalign.Cohesion.Web.ErrorHandling` | `Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Http.Streaming`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.ProblemDetails`<br>`Assimalign.Cohesion.Web.Server` | — | `Assimalign.Cohesion.Core/ComponentIntegration` | — |
 | `Assimalign.Cohesion.Web.Forms` | `Assimalign.Cohesion.Http.Forms`<br>`Assimalign.Cohesion.Http.Streaming`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.ProblemDetails`<br>`Assimalign.Cohesion.Web.Server` | — | — | — |
@@ -1050,7 +1050,7 @@ warning, not a problem in itself: these are the assemblies whose contracts cost 
 | `Assimalign.Cohesion.Http` | 103 | Assimalign.Cohesion.ApiManager.Hosting, Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane, Assimalign.Cohesion.ConfigurationStore.Hosting.Tests, Assimalign.Cohesion.Connections.NamedPipes.Tests, … |
 | `Assimalign.Cohesion.Hosting.Resources` | 84 | Assimalign.Cohesion.ApiManager.ApplicationModel, Assimalign.Cohesion.ApiManager.ApplicationModel.Tests, Assimalign.Cohesion.ApiManager.Hosting, Assimalign.Cohesion.ApiManager.Hosting.Tests, … |
 | `Assimalign.Cohesion.Web` | 76 | Assimalign.Cohesion.ApiManager.Hosting, Assimalign.Cohesion.ConfigurationStore.Hosting.Tests, Assimalign.Cohesion.Database, Assimalign.Cohesion.Database.Hosting.Tests, … |
-| `Assimalign.Cohesion.Core` | 66 | Assimalign.Cohesion.Amqp.Connections, Assimalign.Cohesion.ApiManager, Assimalign.Cohesion.ApplicationModel, Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane, … |
+| `Assimalign.Cohesion.Core` | 67 | Assimalign.Cohesion.Amqp.Connections, Assimalign.Cohesion.ApiManager, Assimalign.Cohesion.ApplicationModel, Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane, … |
 | `Assimalign.Cohesion.Connections` | 44 | Assimalign.Cohesion.Amqp.Connections, Assimalign.Cohesion.Amqp.Connections.Tests, Assimalign.Cohesion.Connections.InMemory, Assimalign.Cohesion.Connections.NamedPipes, … |
 | `Assimalign.Cohesion.Connections.Tcp` | 43 | Assimalign.Cohesion.ApiManager.Hosting, Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane, Assimalign.Cohesion.Connections.Tcp.Tests, Assimalign.Cohesion.Database.Blob.Client.Tests, … |
 | `Assimalign.Cohesion.Web.Hosting` | 43 | Assimalign.Cohesion.ApiManager.Hosting, Assimalign.Cohesion.ConfigurationStore.Hosting, Assimalign.Cohesion.Database.Hosting, Assimalign.Cohesion.EmailHub.Hosting, … |

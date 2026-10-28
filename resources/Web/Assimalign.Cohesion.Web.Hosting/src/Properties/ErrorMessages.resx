@@ -132,6 +132,9 @@
   <data name="ApplicationFeatureFactoryResultNull" xml:space="preserve">
     <value>The web application feature factory returned null.</value>
   </data>
+  <data name="ApplicationSettingFactoryResultNull" xml:space="preserve">
+    <value>The web application setting factory returned null.</value>
+  </data>
   <data name="ApplicationResourceDisposalFailed" xml:space="preserve">
     <value>One or more application resources failed to dispose.</value>
   </data>

@@ -10,6 +10,7 @@ using Assimalign.Cohesion.Security.DataProtection;
 using Assimalign.Cohesion.Web.Antiforgery;
 using Assimalign.Cohesion.Web.Authentication;
 using Assimalign.Cohesion.Web.Authorization;
+using Assimalign.Cohesion.Web.Cors;
 using Assimalign.Cohesion.Web.ErrorHandling;
 using Assimalign.Cohesion.Web.OpenApi;
 using Assimalign.Cohesion.Web.Routing;
@@ -51,6 +52,10 @@ internal static class IntegrationSurface
             .AddAuthorization()
             .AddAuthorization(authorization => authorization.Options.FallbackPolicy = null)
             .AddAuthorization((services, authorization) => authorization.Options.FallbackPolicy = null)
+            // CORS registers the application's cors setting (an IWebApplicationSetting), not a feature.
+            .AddCors()
+            .AddCors(cors => cors.Options.AddDefaultPolicy(policy => policy.WithOrigins("https://canary.example")))
+            .AddCors((services, cors) => cors.Options.AddPolicy("canary", policy => policy.AllowAnyOrigin()))
             .AddErrorHandling()
             .AddErrorHandling(errors => errors.OnError(
                 (context, exception, cancellationToken) => ValueTask.FromResult(false)))

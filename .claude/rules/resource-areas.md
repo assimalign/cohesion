@@ -321,6 +321,30 @@ this way. Web is the reference implementation (`resources/Web/Assimalign.Cohesio
   forward to the private engine registry rather than to `Services`, which reserves each engine
   name at registration (owner decision 52 of 2026-10-09).
 
+## `Add` configures, `Use` places (owner decision, 2026-10-28)
+
+An area whose features compose with a registration verb and a pipeline verb keeps all of a
+feature's configuration on the registration verb.
+
+- **`Add<Feature>(...)` configures.** The registration verb, a component integration on
+  `builder.Services` (`component-integration.md`) or an `extension(I<Area>ApplicationBuilder)`
+  member, owns the feature's options, policies and defaults. It registers what the pipeline reads:
+  a feature, a setting, or a service. Precedent:
+  `builder.Services.AddCors(cors => cors.Options.AddDefaultPolicy(...))` registers the `cors`
+  setting.
+- **`Use<Feature>()` places.** The pipeline verb only positions the feature's middleware. It takes
+  no configuration callback, options object or policy, and it never sets or overrides a registered
+  value: it reads what `Add` registered (Web: `IWebApplicationContext.Settings` and `Features`).
+  Arguments that shape the pipeline rather than configure a feature, such as `UseWhen`'s predicate
+  and branch or a `Map*` route pattern, are not configuration.
+- **Why.** Configuration on `Use` splits one feature's settings across two call sites and keeps
+  them out of the registrations the host and an operator surface enumerate. A
+  `<Area>.Hosting.Resources` package could then expose the feature only if the application were
+  rewritten.
+- **Existing verbs.** About 27 Web `Use*` overloads, across 16 packages, still take configuration.
+  Each moves its configuration to the feature's `Add` verb when the feature is next touched.
+  Web.Cors moved first (`UseCors()`, 2026-10-28).
+
 ## What every area is expected to provide
 
 - `Assimalign.Cohesion.<Area>` — the area root: the base abstractions and composition seams

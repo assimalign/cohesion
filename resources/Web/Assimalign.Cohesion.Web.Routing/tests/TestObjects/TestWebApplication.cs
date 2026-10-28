@@ -48,6 +48,8 @@ internal sealed class TestWebApplication : IWebApplicationBuilder, IWebApplicati
     public IWebApplicationBuilder AddServer(IWebApplicationServer server) => this;
 
     public IWebApplicationBuilder AddServer(Func<IWebApplicationContext, IWebApplicationServer> server) => this;
+    public IWebApplicationBuilder AddSetting(IWebApplicationSetting setting) => this;
+    public IWebApplicationBuilder AddSetting(Func<IWebApplicationContext, IWebApplicationSetting> setting) => this;
 
     public IWebApplicationBuilder AddPipeline(IWebApplicationPipeline pipeline) => this;
 
@@ -133,6 +135,7 @@ internal sealed class TestWebApplication : IWebApplicationBuilder, IWebApplicati
         public IEnumerable<IWebApplicationServer> Servers => Array.Empty<IWebApplicationServer>();
 
         public IEnumerable<IHttpFeature> Features => _features;
+        public IEnumerable<IWebApplicationSetting> Settings => global::System.Array.Empty<IWebApplicationSetting>();
     }
 
     private sealed class TestPipeline : IWebApplicationPipeline

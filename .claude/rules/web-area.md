@@ -106,7 +106,10 @@ by kind, and decision 39 of 2026-10-10 (#1395) settled the registration verbs' s
 - **Pipeline verbs ship with the feature as `extension(...)` members:** `Use<Feature>` extends
   `IWebApplicationPipelineBuilder`, and `Map*` verbs extend the pipeline or router surface (all
   from `Assimalign.Cohesion.Web` and `Web.Routing`). Ordering matters there, which the
-  component-integration mechanism does not model.
+  component-integration mechanism does not model. A `Use<Feature>` verb takes no configuration:
+  the feature's registration verb owns it (`resource-areas.md`, "`Add` configures, `Use` places").
+  A value an operator may change while the application runs is an `IWebApplicationSetting` the
+  registration verb registers; the middleware reads it from `IWebApplicationContext.Settings`.
 - Registration stays dependency-free: a factory or builder composes values and options objects
   into the feature eagerly. No configuration binding and no request-time service location — the
   `*.Hosting`-only DI rule still stands; the feature package never sees the container.

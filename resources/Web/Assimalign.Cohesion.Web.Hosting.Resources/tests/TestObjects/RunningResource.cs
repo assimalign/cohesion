@@ -9,6 +9,8 @@ using Assimalign.Cohesion.DependencyInjection;
 using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.Http;
+using Assimalign.Cohesion.Web.Cors;
+using Assimalign.Cohesion.Web.Hosting.Resources.Internal;
 
 using HttpStatusCode = Assimalign.Cohesion.Http.HttpStatusCode;
 using NetHttpMethod = System.Net.Http.HttpMethod;
@@ -18,20 +20,30 @@ namespace Assimalign.Cohesion.Web.Hosting.Resources.Tests;
 /// <summary>
 /// A Web application started as the <c>orders-api</c> resource instance, the way a provisioned
 /// resource's <c>Program.cs</c> composes it, on its own port and with a private control-plane port.
+/// Its CORS policy is registered with <c>AddCors</c> and placed with <c>UseCors()</c>, as any Web
+/// application's is; <c>AddResource</c> adds nothing to that composition.
 /// </summary>
 internal sealed class RunningResource : IAsyncDisposable
 {
     private readonly WebApplication _application;
 
-    private RunningResource(WebApplication application, WebResource resource, int applicationPort, int controlPlanePort)
+    private RunningResource(WebApplication application, int applicationPort, int controlPlanePort)
     {
         _application = application;
-        Resource = resource;
         Application = new HttpClient { BaseAddress = new Uri($"http://127.0.0.1:{applicationPort}/") };
         ControlPlane = new HttpClient { BaseAddress = new Uri($"http://127.0.0.1:{controlPlanePort}/") };
     }
 
-    public WebResource Resource { get; }
+    /// <summary>
+    /// Gets the resource instance the managed application's control plane serves.
+    /// </summary>
+    public IResource Resource => ResourceServices.Single().ControlPlane.Resource;
+
+    /// <summary>
+    /// Gets the default CORS policy in effect, as the <c>cors</c> action reports it.
+    /// </summary>
+    public WebCorsPolicy DefaultCorsPolicy => WebCorsPolicyMapping.FromPolicy(
+        _application.Context.Settings.OfType<IWebApplicationSetting<CorsPolicy?>>().Single().Value);
 
     /// <summary>
     /// Gets a client for the application's own listener.
@@ -52,12 +64,12 @@ internal sealed class RunningResource : IAsyncDisposable
         .ToArray();
 
     /// <param name="manifestEndpoint">Where the instance publishes; <see langword="null"/> runs it unmanaged.</param>
-    /// <param name="cors">The CORS policy the application's code defines.</param>
+    /// <param name="cors">The CORS policy the application's code defines; <see langword="null"/> registers no CORS at all.</param>
     /// <param name="configure">Configures the resource further.</param>
     /// <param name="beforeResource">Composes the application ahead of <c>AddResource</c>.</param>
     public static async Task<RunningResource> StartAsync(
         Uri? manifestEndpoint,
-        WebCorsPolicy cors,
+        WebCorsPolicy? cors,
         Action<WebResourceBuilder>? configure = null,
         Action<WebApplicationBuilder>? beforeResource = null)
     {
@@ -66,17 +78,26 @@ internal sealed class RunningResource : IAsyncDisposable
 
         WebApplicationBuilder builder = WebApplication.CreateBuilder(new WebApplicationOptions());
         builder.Server.UseServer(options => options.UseHttp1(tcp => tcp.EndPoint = new IPEndPoint(IPAddress.Loopback, applicationPort)));
+        if (cors is not null)
+        {
+            builder.Services.AddCors(registration =>
+            {
+                if (WebCorsPolicyMapping.ToPolicy(cors) is { } policy)
+                {
+                    registration.Options.AddDefaultPolicy(policy);
+                }
+            });
+        }
         beforeResource?.Invoke(builder);
-        WebResource resource = builder.AddResource("orders-api", resource =>
+        builder.AddResource("orders-api", resource =>
         {
             resource.ManifestEndpoint = manifestEndpoint;
             resource.ControlPlaneEndpoint = new Uri($"http://127.0.0.1:{controlPlanePort}/");
-            resource.AddCors(cors);
             configure?.Invoke(resource);
         });
 
         WebApplication application = builder.Build();
-        application.UseCors(resource);
+        application.UseCors();
         application.Use((context, _) =>
         {
             context.Response.StatusCode = HttpStatusCode.Ok;
@@ -93,7 +114,7 @@ internal sealed class RunningResource : IAsyncDisposable
             throw;
         }
 
-        return new RunningResource(application, resource, applicationPort, controlPlanePort);
+        return new RunningResource(application, applicationPort, controlPlanePort);
     }
 
     /// <summary>

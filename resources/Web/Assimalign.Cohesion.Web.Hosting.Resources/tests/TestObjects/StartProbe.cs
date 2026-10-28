@@ -1,17 +1,16 @@
-using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
-using Assimalign.Cohesion.DependencyInjection;
 using Assimalign.Cohesion.Hosting;
-using Assimalign.Cohesion.Hosting.Resources;
+using Assimalign.Cohesion.Web.Cors;
+using Assimalign.Cohesion.Web.Hosting.Resources.Internal;
 
 namespace Assimalign.Cohesion.Web.Hosting.Resources.Tests;
 
 /// <summary>
 /// An application service that records the CORS policy in effect when its host starts it, as a
-/// background service that reads the resource's state would see it.
+/// background service that reads the application's settings would see it.
 /// </summary>
 internal sealed class StartProbe : IHostService
 {
@@ -28,11 +27,8 @@ internal sealed class StartProbe : IHostService
 
     public Task StartAsync(CancellationToken cancellationToken = default)
     {
-        IResourceService service = _context.ServiceProvider
-            .GetRequiredService<IEnumerable<IHostService>>()
-            .OfType<IResourceService>()
-            .Single();
-        PolicyAtStart = ((WebResource)service.ControlPlane.Resource).CorsPolicy;
+        IWebApplicationSetting<CorsPolicy?> cors = _context.Settings.OfType<IWebApplicationSetting<CorsPolicy?>>().Single();
+        PolicyAtStart = WebCorsPolicyMapping.FromPolicy(cors.Value);
         return Task.CompletedTask;
     }
 

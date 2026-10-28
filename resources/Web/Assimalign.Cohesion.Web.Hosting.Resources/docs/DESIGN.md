@@ -32,12 +32,13 @@ flowchart LR
 
 ## Composition
 
-For a managed instance, `AddResource` builds these pieces and registers the last two as host
-services:
+`AddResource` adds nothing to the application's own composition: the application registers its
+features the way it always does, and the resource exposes the settings they registered. For a
+managed instance, `AddResource` builds these pieces and registers the last two as host services:
 
 | Piece | Role |
 | --- | --- |
-| `WebResource` | The `IResource`: provider `Web`, the resource's name, a new instance key, and its actions. |
+| `WebResource` (internal) | The `IResource`: provider `Web`, the resource's name, a new instance key, and one action for each registered setting the resource knows, built when the application is built. |
 | `ResourceControlPlane` | Hosting.Resources' control plane over the resource and the content serializer. |
 | `ResourceManifestPublisher` | The HTTP publisher for `COHESION_MANIFEST_ENDPOINT`, with the builder's optional HTTP client callback. |
 | `ResourceService` | Publishes and restores in `StartingAsync`, then renews the lease until `StopAsync`. |
@@ -95,15 +96,26 @@ refused, and the gateway-to-instance channel retries it with the current state.
 application's middleware (authentication, CORS, rate limits) never sees a control-plane request,
 and its public listener never exposes one.
 
-**W4 — The `cors` action swaps the live CORS middleware.** Web.Cors has no seam for changing a
-policy at run time, so the action builds a CORS middleware by calling `UseCors` on a capturing
-builder and swaps it into the middleware `app.UseCors(resource)` registered. A write's snapshot is
-what the gateway restores on new instances.
+**W4 — Actions come from the application's settings (owner decision, 2026-10-28).** A Web
+application exposed as a resource keeps its own code: `builder.Services.AddCors(...)` and
+`app.UseCors()` stay as they are. The resource builds its control plane when the application is
+built, after the container exists, from `IWebApplicationContext.Settings`: each setting whose type
+it knows becomes an action, and the last registration of a name wins, as it does for the feature.
+The `cors` setting (`IWebApplicationSetting<CorsPolicy?>`) becomes the `cors` action. The action
+keeps no copy of the state: a read reports the setting's value as a `WebCorsPolicy`, and a write or
+a restore builds a `CorsPolicy` and sets it, which the CORS middleware applies from the next
+request. A policy CORS refuses is rejected and the setting keeps its value. A setting the resource
+has no action for, or a feature the application never registered, stays out of the manifest.
+*Rejected:* configuring CORS on the resource (`AddCors` on `WebResourceBuilder`, served by
+`app.UseCors(resource)`), the first version. Exposing an existing application then meant rewriting
+it, and the action rebuilt CORS through a capturing pipeline builder to swap the middleware.
 
 ## Open questions
 
 1. **Authentication.** Publication and the control plane are anonymous.
 2. **Content type.** The control plane does not check a request's `Content-Type` against its
    serializer's media type, and nothing tells an instance which serializer its platform uses.
-3. **CORS at run time.** W4's capture goes away once Web.Cors can change its policy at run time, or
-   once CORS becomes restart-applied state.
+3. **Predicate policies.** A CORS policy built with `SetIsOriginAllowed` holds code: it reads as a
+   policy with no origins, and a write replaces it. Web.Cors needs to say when a policy has no data
+   form, so the action can refuse to report or overwrite it.
+4. **Named policies.** Only the default policy is a setting; named policies stay fixed in code.

@@ -17,6 +17,7 @@ on:
       - "resources/Web/Assimalign.Cohesion.Web.Antiforgery/src/**"
       - "resources/Web/Assimalign.Cohesion.Web.Authentication/src/**"
       - "resources/Web/Assimalign.Cohesion.Web.Authorization/src/**"
+      - "resources/Web/Assimalign.Cohesion.Web.Cors/src/**"
       - "resources/Web/Assimalign.Cohesion.Web.ErrorHandling/src/**"
       - "resources/Web/Assimalign.Cohesion.Web.OpenApi/src/**"
       - "resources/Web/Assimalign.Cohesion.Web.Routing/src/**"

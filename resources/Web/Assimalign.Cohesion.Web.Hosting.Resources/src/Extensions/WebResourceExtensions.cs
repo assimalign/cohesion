@@ -15,9 +15,16 @@ public static class WebResourceExtensions
     extension(WebApplicationBuilder builder)
     {
         /// <summary>
-        /// Makes the application a Web resource instance.
+        /// Makes the application a Web resource instance, exposing the settings its features
+        /// registered as the resource's actions.
         /// </summary>
         /// <remarks>
+        /// <para>
+        /// The application keeps its own composition: a feature registers its setting the way it
+        /// always does, and the resource exposes each setting it knows. The <c>cors</c> setting that
+        /// <c>builder.Services.AddCors(...)</c> registers becomes the <c>cors</c> action, whose writes
+        /// change the default policy the middleware <c>UseCors()</c> placed applies.
+        /// </para>
         /// <para>
         /// When the resource has a manifest endpoint (by default the
         /// <see cref="AppEnvironment.Variables.ManifestEndpoint"/> variable its gateway sets), the
@@ -28,20 +35,20 @@ public static class WebResourceExtensions
         /// cannot receive fails the application's start.
         /// </para>
         /// <para>
-        /// Without a manifest endpoint the application runs unmanaged, with the state its code defines.
+        /// Without a manifest endpoint the application runs unmanaged, with the settings its code defines.
         /// </para>
         /// </remarks>
         /// <param name="name">The resource's name, such as <c>orders-api</c>.</param>
-        /// <param name="configure">Configures the resource's endpoints and actions.</param>
-        /// <returns>The resource instance.</returns>
+        /// <param name="configure">Configures the resource's endpoints and content format.</param>
+        /// <returns>The same builder for chaining.</returns>
         /// <exception cref="ArgumentNullException"><paramref name="builder"/> is <see langword="null"/>.</exception>
         /// <exception cref="ArgumentException">
         /// <paramref name="name"/> is <see langword="default"/>; the manifest endpoint is not an
-        /// absolute http or https URL; the control-plane endpoint is not an absolute http URL whose
-        /// host is an IP address or localhost; or the serializer does not know an action's state type.
+        /// absolute http or https URL; or the control-plane endpoint is not an absolute http URL whose
+        /// host is an IP address or localhost.
         /// </exception>
         /// <exception cref="InvalidOperationException">The resource has a manifest endpoint but no control-plane endpoint.</exception>
-        public WebResource AddResource(ResourceName name, Action<WebResourceBuilder>? configure = null)
+        public WebApplicationBuilder AddResource(ResourceName name, Action<WebResourceBuilder>? configure = null)
         {
             ArgumentNullException.ThrowIfNull(builder);
 
@@ -52,11 +59,10 @@ public static class WebResourceExtensions
 
             var resourceBuilder = new WebResourceBuilder(name);
             configure?.Invoke(resourceBuilder);
-            WebResource resource = resourceBuilder.Build();
 
             if (resourceBuilder.ManifestEndpoint is not { } manifestEndpoint)
             {
-                return resource;
+                return builder;
             }
 
             Uri controlPlaneEndpoint = resourceBuilder.ControlPlaneEndpoint
@@ -71,38 +77,24 @@ public static class WebResourceExtensions
                 HttpClientFactory = resourceBuilder.HttpClientFactory,
                 Serializer = serializer,
             });
-            ResourceControlPlane controlPlane = ResourceControlPlane.Create(resource, serializer);
+
+            // The control plane exposes the settings the application registered, so it is created once
+            // the application's container exists: the first of the two services the build resolves
+            // creates it, and the other shares it.
+            ResourceControlPlane? controlPlane = null;
+            ResourceControlPlane GetControlPlane(WebApplicationContext context)
+            {
+                return controlPlane ??= ResourceControlPlane.Create(new WebResource(name, context.Settings), serializer);
+            }
 
             // The resource service publishes and restores in StartingAsync, which the host completes
             // for every lifecycle service before it starts any service or server. The control-plane
             // server is a host service of its own, so it listens only once the gateway's state is in
             // effect, and the Web host stops it only after the application's servers have drained.
-            builder.AddService(_ => ResourceService.Create(controlPlane, publisher));
-            builder.AddService(_ => new WebResourceControlPlaneServer(listener, controlPlane));
+            builder.AddService(context => ResourceService.Create(GetControlPlane(context), publisher));
+            builder.AddService(context => new WebResourceControlPlaneServer(listener, GetControlPlane(context)));
 
-            return resource;
-        }
-    }
-
-    extension(IWebApplicationPipelineBuilder builder)
-    {
-        /// <summary>
-        /// Adds the CORS middleware whose default policy is the resource's <c>cors</c> action: a
-        /// write or a restored snapshot changes the policy the next request is served under.
-        /// </summary>
-        /// <remarks>Register it where <c>UseCors</c> would go: after <c>UseRouting</c>, ahead of
-        /// middleware that can reject a preflight.</remarks>
-        /// <param name="resource">The resource whose CORS policy to serve.</param>
-        /// <returns>The same pipeline builder.</returns>
-        /// <exception cref="ArgumentNullException"><paramref name="builder"/> or <paramref name="resource"/> is <see langword="null"/>.</exception>
-        /// <exception cref="InvalidOperationException">The resource has no CORS policy (<see cref="WebResourceBuilder.AddCors"/>).</exception>
-        public IWebApplicationPipelineBuilder UseCors(WebResource resource)
-        {
-            ArgumentNullException.ThrowIfNull(builder);
-            ArgumentNullException.ThrowIfNull(resource);
-
-            WebCorsAction cors = resource.Cors ?? throw new InvalidOperationException(ErrorMessages.CorsNotAdded);
-            return builder.Use(cors.Middleware);
+            return builder;
         }
     }
 }

@@ -8,12 +8,14 @@ namespace Assimalign.Cohesion.Web.Hosting.Resources;
 
 /// <summary>
 /// Configures the Web resource that <c>builder.AddResource(name, ...)</c> adds: where it publishes
-/// its manifest, where it serves its control plane, the format of its control-plane content, and
-/// the actions it exposes.
+/// its manifest, where it serves its control plane, and the format of its control-plane content.
 /// </summary>
+/// <remarks>
+/// The resource's actions are not configured here: they come from the settings the application's
+/// features registered, such as the <c>cors</c> setting <c>builder.Services.AddCors(...)</c> registers.
+/// </remarks>
 public sealed class WebResourceBuilder
 {
-    private WebCorsAction? _cors;
     private IResourceContentSerializer _serializer = JsonResourceContentSerializer.Create(WebResourceJsonContext.Default);
 
     internal WebResourceBuilder(ResourceName name)
@@ -73,36 +75,6 @@ public sealed class WebResourceBuilder
     /// factory to share its pooled handlers: <c>() =&gt; clients.Create("gateway")</c>.
     /// </remarks>
     public Func<HttpClient>? HttpClientFactory { get; set; }
-
-    /// <summary>
-    /// Exposes the application's default CORS policy as the resource's <c>cors</c> action, starting
-    /// from the policy the code defines. Serve it with <c>app.UseCors(resource)</c>.
-    /// </summary>
-    /// <param name="policy">The policy the code defines.</param>
-    /// <returns>The same builder.</returns>
-    /// <exception cref="ArgumentNullException"><paramref name="policy"/> is <see langword="null"/>.</exception>
-    /// <exception cref="ArgumentException">The policy names an invalid origin, method, or header.</exception>
-    /// <exception cref="InvalidOperationException">
-    /// A CORS policy was already added, or the policy combines settings CORS forbids, such as any
-    /// origin with credentials.
-    /// </exception>
-    public WebResourceBuilder AddCors(WebCorsPolicy policy)
-    {
-        ArgumentNullException.ThrowIfNull(policy);
-
-        if (_cors is not null)
-        {
-            throw new InvalidOperationException(ErrorMessages.CorsAlreadyAdded);
-        }
-
-        _cors = new WebCorsAction(policy);
-        return this;
-    }
-
-    internal WebResource Build()
-    {
-        return new WebResource(Name, _cors);
-    }
 
     private static Uri? ReadEndpoint(string variable)
     {

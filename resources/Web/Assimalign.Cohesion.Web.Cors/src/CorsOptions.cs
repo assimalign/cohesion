@@ -5,14 +5,13 @@ using System.Globalization;
 namespace Assimalign.Cohesion.Web.Cors;
 
 /// <summary>
-/// Builder-time options for the CORS middleware
-/// (<see cref="CorsExtensions.UseCors(IWebApplicationPipelineBuilder, Action{CorsOptions})"/>): the default
-/// policy, and the named policies endpoints reference through <see cref="CorsMetadata"/>.
+/// The CORS policies <c>builder.Services.AddCors(...)</c> registers (<see cref="CorsBuilder.Options"/>):
+/// the default policy, and the named policies endpoints reference through <see cref="CorsMetadata"/>.
 /// </summary>
 /// <remarks>
-/// Composition is dependency-free: the policies are built and validated while <c>UseCors</c> runs, and the
-/// middleware keeps its own copy, so changing the options afterwards has no effect. No service container,
-/// configuration binding or request-time service location is involved.
+/// The policies are built and validated while <c>AddCors</c> runs, and the registered setting keeps its
+/// own copy, so changing the options afterwards has no effect. Only the setting's default policy can
+/// change later, through the setting itself.
 /// </remarks>
 [global::System.Diagnostics.DebuggerDisplay("CorsOptions")]
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
