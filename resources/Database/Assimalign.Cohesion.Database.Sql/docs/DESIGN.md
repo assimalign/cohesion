@@ -1,5 +1,68 @@
 # Assimalign.Cohesion.Database.Sql — Design
 
+## Window stage (#1526, SQ-W1)
+
+OVER accepts inline PARTITION BY and ORDER BY (including direction and NULLS FIRST/LAST),
+OVER name, and parenthesized copies of earlier named windows. WINDOW definitions appear
+after HAVING and before the query tail. Names use the existing case-insensitive identifier
+rules. A copied window cannot specify PARTITION BY; it can supply ORDER BY only if its base
+has none. Definitions cannot reference themselves or later definitions. Explicit ROWS,
+RANGE, GROUPS and EXCLUDE, aggregate windows and FIRST_VALUE/LAST_VALUE/NTH_VALUE remain
+CK00001, naming the deferred form. Frames are not silently approximated with ROWS.
+
+ROW_NUMBER, RANK, DENSE_RANK, PERCENT_RANK, CUME_DIST, NTILE and LAG/LEAD execute after
+WHERE, grouping and HAVING, before DISTINCT, final ORDER BY and pagination. SELECT output
+and ORDER BY are the only legal positions at each query level. Window arguments and keys
+may contain grouped expressions, aggregates and GROUPING, but cannot contain windows.
+RANK leaves peer gaps; DENSE_RANK does not. PERCENT_RANK is (rank-1)/(partition rows-1),
+or zero for a singleton. CUME_DIST includes the last peer. Without window ORDER BY, all rows
+are peers and navigation/ROW_NUMBER use an unspecified order. Ranking outputs are BIGINT,
+distribution outputs DOUBLE PRECISION and NTILE outputs INTEGER. They retain standard NULL
+placement (ascending NULLS LAST, descending NULLS FIRST) unless overridden.
+
+NTILE evaluates its integer bucket argument once on the first row of each ordered partition;
+NULL returns NULL and nonpositive counts report CS05078 (22014). Larger buckets precede
+smaller ones. Counts larger than the partition leave trailing buckets empty. LAG/LEAD use
+offset 1 and default NULL when omitted, respect NULL values, accept per-row signed integer
+offsets (negative reverses direction), and return NULL for NULL offsets. Offset zero reads the
+current row; an out-of-partition target uses that row's default. Value/default expressions use
+the engine's common numeric typing and registered casts; unknown text constants coerce to
+the selected value type. Offsets and bucket counts accept the engine's signed integer types,
+including BIGINT, with overflow-safe navigation through the full Int64 range.
+NEXT VALUE FOR remains excluded from window inputs with existing CS03076; nextval()
+retains per-call evaluation. Window inputs do not extend standard sequence row-sharing scopes.
+
+The WindowAgg stage groups equal partition/order specifications and processes longer orderings
+before compatible prefixes so those groups share a sort. EXPLAIN names partition/order keys,
+functions and sort_shared for each group. Window inputs, augmented result rows, sort indexes,
+key payloads and partition scratch reserve the statement grant before retention; CS05079 refuses
+an excess and every reservation unwinds on success, error or cancellation. Whole input and
+output rows remain charged until the stage ends; scratch releases at each partition boundary.
+Accounting is deliberately conservative for aliased values and retained intermediate outputs;
+SQ-W3 refines full retained-memory accounting. There is no spill. LIMIT cannot truncate the
+input partitions. Window-free queries retain their existing plan and object layouts.
+
+Views render, compare and reload window expressions and named definitions through canonical SQL;
+no disk or wire version changes. Reference semantics were re-derived from PostgreSQL
+src/backend/parser/parse_clause.c:2766-2902, parser/parse_agg.c:879-994,
+utils/adt/windowfuncs.c:139-154,264-285,334-369,416-482,534-575 and
+optimizer/plan/planner.c:6252-6395. Tests compare generated data with independent computations;
+no live PostgreSQL comparison is claimed.
+
+| Code | Condition |
+| --- | --- |
+| CS00011 | Window argument count or call modifier |
+| CS01064 | Duplicate WINDOW name |
+| CS01065 | Unknown or forward window reference |
+| CS01066 | Invalid copied PARTITION BY or ORDER BY |
+| CS02068 | Non-integer offset or bucket argument |
+| CS02069 | Incompatible navigation value/default types |
+| CS05076 | Invalid window placement or missing OVER |
+| CS05077 | Nested windows |
+| CS05078 | Nonpositive NTILE count (22014) |
+| CS05079 | Statement window memory exceeded |
+
+
 ## SQL sequence surface (#1717, SQ-S2)
 
 Ready reports whether currval/lastval entries or changed session settings require reset. Pool return

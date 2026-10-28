@@ -18,6 +18,7 @@ internal sealed partial class SqlPlanner
     // family and exercise this switch, so a new record cannot silently disappear from EXPLAIN.
     internal static string DescribeOperator(SqlPlan plan) => plan switch
     {
+        SqlWindowAggregatePlan => "Window",
         SqlSequenceScopePlan => "Sequences",
         SqlSelectPlan => "Select",
         SqlSetOperationPlan p => p.Operator.ToString(),
@@ -108,6 +109,7 @@ internal sealed partial class SqlPlanner
             };
             string? detail = current switch
             {
+                SqlWindowAggregatePlan p => QueryDetail(false, p.OrderBy, p.IsDistinct, p.Limit, p.Offset),
                 SqlJoinPlan { Steps.Count: 0 } p => QueryDetail(p.Where is not null, p.OrderBy, p.IsDistinct, p.Limit, p.Offset),
                 SqlConstantPlan p => QueryDetail(p.Where is not null, p.OrderBy, p.IsDistinct, p.Limit, p.Offset),
                 SqlSetOperationPlan p => QueryDetail(false, p.OrderBy, !p.IsAll, p.Limit, p.Offset),
@@ -144,6 +146,22 @@ internal sealed partial class SqlPlanner
             Add(DescribeOperator(current), parent, target, indexName, detail, actual: metrics?.ActualCandidates(current));
             switch (current)
             {
+                case SqlWindowAggregatePlan window:
+                    int windowParent = id;
+                    foreach (var group in window.Groups)
+                    {
+                        int groupId = nodes.Count;
+                        Add("WindowAgg", windowParent, null, null,
+                            "partition=" + string.Join(", ", group.PartitionSyntax.Select(SqlExpressionRenderer.Render)) +
+                            "; order=" + string.Join(", ", group.OrderSyntax.Select(key => SqlExpressionRenderer.Render(key.Expression) +
+                                (key.IsDescending ? " DESC" : " ASC") + (NullsFirst(key) ? " NULLS FIRST" : " NULLS LAST"))) +
+                            "; functions=" + string.Join(", ", group.Functions.Select(function => function.Name)) +
+                            "; sort_shared=" + group.SortShared.ToString().ToLowerInvariant() +
+                            (metrics?.ActualCandidates(group.Functions) is { } sorts ? "; sort_count=" + sorts : ""), actual: metrics?.ActualCandidates(group));
+                        windowParent = groupId;
+                    }
+                    Visit(window.Input, windowParent);
+                    break;
                 case SqlSequenceScopePlan sequence:
                     Visit(sequence.Input, id);
                     break;

@@ -119,6 +119,8 @@ internal sealed partial class SqlPlanExecutor
         plan = InitializeWindow(plan, cancellationToken);
         switch (plan)
         {
+            case SqlWindowAggregatePlan window:
+                return await ExecuteWindowAggregateAsync(window, statement, cancellationToken).ConfigureAwait(false);
             case SqlSetOperationPlan set:
                 return await ExecuteSetOperationAsync(set, statement, cancellationToken).ConfigureAwait(false);
             case SqlConstantPlan constant:
@@ -304,6 +306,7 @@ internal sealed partial class SqlPlanExecutor
             {
                 var output = ProjectRow(source, projections, evaluator, cancellationToken);
                 if (skip > 0) { skip--; continue; }
+                SqlWindowMemory.For(_metrics)?.Retain(output);
                 projected.Add(output);
                 if (--remaining == 0) { break; }
             }

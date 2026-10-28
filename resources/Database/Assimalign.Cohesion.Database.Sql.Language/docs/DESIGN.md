@@ -1,5 +1,19 @@
 # Assimalign.Cohesion.Database.Sql.Language — Design
 
+## Window stage (#1526, SQ-W1)
+
+SqlWindowExpression holds a function and either OVER name or an inline SqlWindowSpecification.
+SqlNamedWindow retains declaration order and a specification's inherited name. The SELECT
+node stores named definitions in an optional payload over its existing grouping-list reference,
+so ordinary SELECT nodes keep their allocation size. The profile advertises eight ranking and
+navigation functions plus OVER, PARTITION and WINDOW; explicit frames, aggregate windows and
+value functions retain CK00001. Canonical built-in window names render unquoted, and named
+keys participate in view traversal, structural equivalence and child-subquery binding.
+
+Binding, stage placement, diagnostics and memory ownership are described in Sql DESIGN and
+[DIALECT.md](DIALECT.md). Parser, profile, keyword and completeness corpora advance together.
+PostgreSQL references: parser/parse_clause.c:2766-2902 and parser/parse_agg.c:879-994.
+
 ## Sequence grammar (#1717, SQ-S2)
 
 NEXT VALUE FOR is selected only after lookahead recognizes all three words. Unquoted

@@ -75,6 +75,11 @@ internal static class SqlViewQuery
             if (select.Where is { } where) { yield return where; }
             foreach (var key in select.GroupBy) { yield return key; }
             if (select.Having is { } having) { yield return having; }
+            foreach (var window in select.Windows)
+            {
+                foreach (var key in window.Specification.PartitionBy) { yield return key; }
+                foreach (var key in window.Specification.OrderBy) { yield return key.Expression; }
+            }
         }
         foreach (var order in query.OrderBy) { yield return order.Expression; }
         if (query.Limit is { } limit) { yield return limit; }

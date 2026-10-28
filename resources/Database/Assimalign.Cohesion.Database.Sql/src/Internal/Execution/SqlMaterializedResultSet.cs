@@ -40,6 +40,9 @@ internal sealed class SqlMaterializedResultSet : DatabaseResultSet
     /// <inheritdoc />
     public override IReadOnlyList<DatabaseColumn> Columns => _columns;
 
+    // Internal operators preserve CHAR comparison identity until final delivery.
+    internal IReadOnlyList<object?[]> Rows => _rows;
+
     // Admit query output retained by CTAS alongside its encoded batch and any other
     // statement reservations. The caller releases this grant after source disposal.
     internal long ReserveMemory(SqlStatementMetrics metrics, long budget, CancellationToken cancellationToken)

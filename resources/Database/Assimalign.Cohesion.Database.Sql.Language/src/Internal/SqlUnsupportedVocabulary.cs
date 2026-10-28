@@ -55,15 +55,9 @@ internal static class SqlUnsupportedVocabulary
         new("SOME", "SOME array comparison", SqlWordPosition.Rule),
         new("LATERAL", "LATERAL subquery", SqlWordPosition.Rule),
         // Window functions awaiting execution.
-        new("ROW_NUMBER", "ROW_NUMBER", SqlWordPosition.WindowFunction),
-        new("RANK", "RANK", SqlWordPosition.WindowFunction),
-        new("DENSE_RANK", "DENSE_RANK", SqlWordPosition.WindowFunction),
-        new("LEAD", "LEAD", SqlWordPosition.WindowFunction),
-        new("LAG", "LAG", SqlWordPosition.WindowFunction),
         new("FIRST_VALUE", "FIRST_VALUE", SqlWordPosition.WindowFunction),
         new("LAST_VALUE", "LAST_VALUE", SqlWordPosition.WindowFunction),
         new("NTH_VALUE", "NTH_VALUE", SqlWordPosition.WindowFunction),
-        new("NTILE", "NTILE", SqlWordPosition.WindowFunction),
         new("~", "~ operator", SqlWordPosition.Rule),
     ];
 

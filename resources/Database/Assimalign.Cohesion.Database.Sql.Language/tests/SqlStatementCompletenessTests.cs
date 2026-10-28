@@ -49,6 +49,9 @@ public sealed class SqlStatementCompletenessTests
         [SqlClauses.Rollup] = ["SELECT a,b,COUNT(*) FROM t GROUP BY ROLLUP(a,b)"],
         [SqlClauses.Cube] = ["SELECT a,b,COUNT(*) FROM t GROUP BY CUBE(a,b)"],
         [SqlClauses.Filter] = ["SELECT COUNT(*) FILTER (WHERE a > 0) FROM t", "SELECT SUM(DISTINCT a) FILTER (WHERE TRUE) FROM t"],
+        [SqlClauses.Over] = ["SELECT RANK() OVER()"],
+        [SqlClauses.Partition] = ["SELECT RANK() OVER(PARTITION BY a) FROM t"],
+        [SqlClauses.Window] = ["SELECT RANK() OVER w WINDOW w AS()"],
         [SqlClauses.Having] = ["SELECT a FROM t GROUP BY a HAVING COUNT(*) > 1"],
         [SqlClauses.OrderBy] = ["SELECT a FROM t ORDER BY a", "SELECT a FROM t ORDER BY a DESC, 2 ASC"],
         [SqlClauses.Fetch] = ["SELECT a FROM t OFFSET 1 ROW FETCH FIRST 2 ROWS ONLY", "SELECT a FROM t FETCH NEXT ROW ONLY"],
@@ -411,9 +414,9 @@ public sealed class SqlStatementCompletenessTests
     /// <param name="sql">A statement with a clause outside the profile.</param>
     /// <param name="expected">The error codes, in order.</param>
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - Completeness: excluded and restored clauses retain precise boundaries")]
-    [InlineData("DELETE FROM t WHERE id = 1 WINDOW w AS ();", new[] { "CK00001" })]
-    [InlineData("DELETE FROM t WHERE id = 1 WINDOW w AS (); DELETE FROM t;", new[] { "CK00001" })]
-    [InlineData("DELETE FROM t WHRE id = 1 WINDOW w AS ();", new[] { "CS00003", "CK00001" })]
+    [InlineData("DELETE FROM t WHERE id = 1 WINDOW w AS ();", new[] { "CS00003" })]
+    [InlineData("DELETE FROM t WHERE id = 1 WINDOW w AS (); DELETE FROM t;", new[] { "CS00003" })]
+    [InlineData("DELETE FROM t WHRE id = 1 WINDOW w AS ();", new[] { "CS00003" })]
     // Derived output ordering is classified by the planner; its execution test verifies resolved output ordering.
     [InlineData("SELECT * FROM (SELECT id FROM u) d ORDER BY id;", new string[0])]
     [InlineData("SELECT * FROM t JOIN (SELECT id FROM u) q ON t.id = q.id;", new string[0])]

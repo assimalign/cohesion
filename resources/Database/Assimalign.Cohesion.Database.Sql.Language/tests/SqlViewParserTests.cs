@@ -52,7 +52,7 @@ public sealed class SqlViewParserTests
     [InlineData("CREATE VIEW v AS SELECT a FROM t WITH CHECK OPTION", "CHECK OPTION")]
     [InlineData("CREATE VIEW v AS SELECT a FROM t WITH LOCAL CHECK OPTION", "CHECK OPTION")]
     [InlineData("CREATE VIEW v AS SELECT a FROM t WITH CASCADED CHECK OPTION", "CHECK OPTION")]
-    [InlineData("CREATE VIEW v AS SELECT a FROM t WINDOW w AS ()", "WINDOW")]
+    [InlineData("CREATE VIEW v AS SELECT a FROM t WINDOW w AS (ROWS CURRENT ROW)", "ROWS")]
     public void Parse_ExcludedViewForm_ShouldRejectAtDeclaration(string sql, string form)
     {
         // Arrange

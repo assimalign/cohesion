@@ -1,5 +1,9 @@
 # Assimalign.Cohesion.Database.Sql — Overview
 
+Ranking, distribution, NTILE and LAG/LEAD execute in a budgeted WindowAgg stage between
+HAVING and DISTINCT/ORDER BY/pagination, with named windows and shared compatible sorts
+(#1526, SQ-W1). Frames, value functions and aggregate windows follow in SQ-W2/SQ-W3.
+
 ALTER COLUMN TYPE with optional COLLATE and USING converts original-row values through the
 shared exclusive rewrite, rechecks defaults/constraints/FKs and atomically replaces rows/indexes
 (#1447). This run executes inline; populated-table provisioning handoff follows in SQ-A3.

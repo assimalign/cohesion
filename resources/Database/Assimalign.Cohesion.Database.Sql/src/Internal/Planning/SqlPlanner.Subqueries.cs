@@ -182,6 +182,11 @@ internal sealed partial class SqlPlanner
         {
             yield return column.Expression;
         }
+        foreach (var window in select.Windows)
+        {
+            foreach (var key in window.Specification.PartitionBy) { yield return key; }
+            foreach (var key in window.Specification.OrderBy) { yield return key.Expression; }
+        }
         if (select.From.Count > 1 || select.From.Count == 1 && (select.From[0].Joins.Count > 0 || select.From[0].Table is SqlJoinedTableReference))
         {
             foreach (var condition in JoinConditions(select))

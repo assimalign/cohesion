@@ -104,13 +104,15 @@ public sealed partial class SqlQueryParser
             }
         }
 
+        var windows = ParseWindowClause(ref lexer);
+
         // Consume trailing semicolon (don't advance past it so ParseCore picks it up)
         // The semicolon is tracked by TrackToken when we advance
 
         return new SqlSelectExpression(
             columns, from, where, groupBy, having, [],
             limit, null, isDistinct, null,
-            Location.Create(1, 1, pos, _lastTokenEnd), limitSyntaxKind, groupByDistinct);
+            Location.Create(1, 1, pos, _lastTokenEnd), limitSyntaxKind, groupByDistinct, windows);
     }
 
     private IReadOnlyList<SqlFromItem> ParseFromItems(ref TokenLexer lexer)

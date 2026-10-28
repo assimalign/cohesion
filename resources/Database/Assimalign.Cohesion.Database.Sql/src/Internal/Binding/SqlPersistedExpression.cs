@@ -216,6 +216,8 @@ internal static class SqlPersistedExpression
 
         switch (expression)
         {
+            case SqlWindowExpression:
+                throw new SqlPlanningException("CS05076", ErrorMessages.WindowPlacement, expression.Location);
             case SqlFunctionCallExpression grouping when SqlStandardLibrary.IsGrouping(grouping.FunctionName):
                 throw new SqlPlanningException("CS05074", ErrorMessages.GroupingPlacement, grouping.Location);
             case SqlColumnReferenceExpression column:
@@ -377,6 +379,8 @@ internal static class SqlPersistedExpression
     // SqlPlanner.Children. The counts and presence flags make that child sequence unambiguous.
     private static bool SameNode(SqlExpression left, SqlExpression right) => (left, right) switch
     {
+        (SqlWindowExpression a, SqlWindowExpression b) => Same(a.WindowName, b.WindowName) &&
+            AreEquivalent(a.Function, b.Function) && SameWindow(a.Specification, b.Specification),
         (SqlGroupingSetExpression a, SqlGroupingSetExpression b) => a.Kind == b.Kind && a.Items.Count == b.Items.Count,
         (SqlLogicalExpression a, SqlLogicalExpression b) => a.Operator == b.Operator && a.Operands.Count == b.Operands.Count,
         (SqlBinaryExpression a, SqlBinaryExpression b) => a.Operator == b.Operator,
@@ -439,8 +443,13 @@ internal static class SqlPersistedExpression
                     SameList(x.UsingColumns, y.UsingColumns, Same) && AreEquivalent(x.Condition, y.Condition))) &&
             AreEquivalent(first.Where, second.Where) &&
             SameList(first.GroupBy, second.GroupBy, AreEquivalent) &&
-            AreEquivalent(first.Having, second.Having);
+            AreEquivalent(first.Having, second.Having) && SameList(first.Windows, second.Windows,
+                (a,b) => Same(a.Name,b.Name) && SameWindow(a.Specification,b.Specification));
     }
+
+    private static bool SameWindow(SqlWindowSpecification? a, SqlWindowSpecification? b) => a is null || b is null
+        ? a is null && b is null : Same(a.ExistingWindow, b.ExistingWindow) && SameList(a.PartitionBy, b.PartitionBy, AreEquivalent) &&
+            SameList(a.OrderBy, b.OrderBy, (x,y) => x.IsDescending == y.IsDescending && x.NullPlacement == y.NullPlacement && AreEquivalent(x.Expression,y.Expression));
 
     private static bool SameTable(SqlRelationReference? left, SqlRelationReference? right)
         => left is null || right is null

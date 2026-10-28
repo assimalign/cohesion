@@ -1041,6 +1041,7 @@ public sealed partial class SqlQueryParser
             Expect(ref lexer, TokenType.RightParen, _errorWithinGroupClosingExpected);
         }
         var call = ParseCallFilter(ref lexer, new SqlFunctionCallExpression(name, args, Location.Create(1, 1, pos, callEnd), quantifier, ordering, listagg));
+        if (IsKeyword(ref lexer, "OVER")) { return ParseOver(ref lexer, call); }
         SkipCallExtensions(ref lexer);
         return call;
     }

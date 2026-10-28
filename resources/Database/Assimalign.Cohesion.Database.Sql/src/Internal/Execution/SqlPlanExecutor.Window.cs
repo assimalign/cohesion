@@ -9,6 +9,7 @@ internal sealed partial class SqlPlanExecutor
     {
         bool needsValues = plan switch
         {
+            SqlWindowAggregatePlan p => NeedsValues(p.Limit, p.Offset),
             SqlSelectPlan p => NeedsValues(p.Limit, p.Offset),
             SqlJoinPlan p => NeedsValues(p.Limit, p.Offset),
             SqlGroupPlan p => NeedsValues(p.Limit, p.Offset),
@@ -21,6 +22,7 @@ internal sealed partial class SqlPlanExecutor
         var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken);
         return plan switch
         {
+            SqlWindowAggregatePlan p when NeedsValues(p.Limit, p.Offset) => p with { Limit = p.Limit?.Initialize(evaluator), Offset = p.Offset?.Initialize(evaluator) },
             SqlSelectPlan p when NeedsValues(p.Limit, p.Offset) => p with { Limit = p.Limit?.Initialize(evaluator), Offset = p.Offset?.Initialize(evaluator) },
             SqlJoinPlan p when NeedsValues(p.Limit, p.Offset) => p with { Limit = p.Limit?.Initialize(evaluator), Offset = p.Offset?.Initialize(evaluator) },
             SqlGroupPlan p when NeedsValues(p.Limit, p.Offset) => p with { Limit = p.Limit?.Initialize(evaluator), Offset = p.Offset?.Initialize(evaluator) },
