@@ -18,6 +18,7 @@ internal static partial class DocumentPlanExecutor
         DocumentNestedExecutionContext nested)
         => plan switch
         {
+            DocumentFromPlan source => ExecuteFromAsync(database, operation, source, parameters, cancellationToken, nested),
             DocumentPlan select => ExecuteNestedSelectAsync(database, operation, select, parameters, cancellationToken, null, nested),
             DocumentSystemCollectionPlan system => ExecuteNestedSystemCollectionAsync(database, operation, system, parameters, cancellationToken, null, nested),
             _ => throw new DocumentPlanningException("CD05001", ErrorMessages.PlanExecutorExecuteAsyncFailure),

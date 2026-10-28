@@ -52,12 +52,14 @@ internal sealed partial class DocumentPlanner
         return PlanCore(expression);
     }
 
-    private DocumentStatementPlan PlanCore(OqlExpression expression) => expression switch
+    private DocumentStatementPlan PlanCore(OqlExpression expression,
+        IReadOnlyDictionary<OqlSubqueryExpression, DocumentNestedQueryPlan>? nested = null) => expression switch
     {
         OqlInsertExpression insert => PlanWrite(insert, insert.Collection, insert.Values, insert.Select, insert.KeyName, insert.ValueName),
         OqlUpsertExpression upsert => PlanWrite(upsert, upsert.Collection, upsert.Values, upsert.Select, upsert.KeyName, upsert.ValueName),
         OqlDeleteExpression delete => PlanDelete(delete),
         OqlUpdateExpression update => PlanUpdate(update),
+        OqlSelectExpression { Source: not null } select => PlanFrom(select, nested),
         OqlSelectExpression select when DocumentSystemCollections.Find(select.Collection) is string name =>
             new DocumentSystemCollectionPlan(CreateLogicalPlan(select, _cancellationToken, _parameters, _functions), name),
         OqlSelectExpression select => Plan(select),
@@ -202,7 +204,7 @@ internal sealed partial class DocumentPlanner
             query.Projections.FirstOrDefault(projection => projection.Alias is not null && projection.Alias == path.Segments[0].Name) is { } projection
                 ? new OqlOrdering(projection.Expression, order.Descending, order.NullPlacement) : order).ToArray();
         query = new OqlSelectExpression(query.Collection, query.Alias, query.Projections, query.Predicate,
-            query.GroupBy, query.Having, ordering, query.IsDistinct, query.IsValue, query.Limit, query.Offset, query.Location, query.Unnest);
+            query.GroupBy, query.Having, ordering, query.IsDistinct, query.IsValue, query.Limit, query.Offset, query.Location, query.Unnest, source: query.Source);
         bool grouped = query.GroupBy.Count > 0 || query.Projections.Any(projection => ContainsAggregate(projection.Expression, functions)) ||
             (query.Having is not null && ContainsAggregate(query.Having, functions)) || query.OrderBy.Any(order => ContainsAggregate(order.Expression, functions));
         variables?.Remove(query.Alias ?? query.Collection);

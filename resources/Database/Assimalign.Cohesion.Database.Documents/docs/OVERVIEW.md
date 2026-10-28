@@ -22,7 +22,9 @@ CD00007. Column types remain independent of the page, including empty results.
 INNER/LEFT UNNEST expands array elements into scoped rows before WHERE, grouping and paging.
 ANY/SOME/EVERY and array-value IN query arrays without expansion. Uncorrelated expression SELECTs
 return arrays on a shared nested execution context; EXISTS and IN (SELECT RAW ...) compose with
-SELECT expressions. Correlation, derived FROM and DML subqueries remain deferred. A star with UNNEST returns
+SELECT expressions. Derived FROM streams inner rows; uncorrelated expression sources accept arrays,
+parameters and subqueries. Their stars wrap the source alias, and META returns NULL without a
+stored identity. Correlation and DML subqueries remain deferred. A star with UNNEST returns
 synthetic objects keyed by variable names; an ordinary star preserves the stored document.
 CREATE INDEX admits one DISTINCT ARRAY path projection with an optional restricted WHEN among
 scalar keys. Matching ANY and direct UNNEST sources use deduplicated document candidates while

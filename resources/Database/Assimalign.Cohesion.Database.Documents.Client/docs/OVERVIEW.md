@@ -39,6 +39,9 @@ values. A stored `Document` carries its exact UTF-8 content, identity and versio
 OQL LIMIT/OFFSET accepts literals or JSON parameters in either order. Empty pages retain column
 metadata, and Complete counts returned frames while query AffectedCount remains -1. Invalid
 counts retain CD00007 and the operand location over both transports.
+Derived FROM and uncorrelated expression sources use the same exchange. Source stars wrap the
+alias, RAW preserves JSON kinds, and META without stored identity returns NULL. Their nested
+plans appear in EXPLAIN; no protocol negotiation or version change is required.
 UNNEST and quantified predicates use the same query exchange. A star with UNNEST returns
 synthetic whole-document objects; a MISSING LEFT binding is omitted while actual null elements
 remain null. Grouped counts over expanded rows retain Int64 values and metadata.

@@ -157,6 +157,16 @@ public sealed class OqlExecutionConformanceTests
                 new("SELECT FIRST x FOR x IN [1,2] WHEN x > 1 END AS f FROM items WHERE name = 'alpha'", [[2m]]),
                 new("SELECT FIRST (x) + CASE WHEN TRUE THEN 1 ELSE 2 END FOR x IN [1] END AS result FROM items WHERE name = 'alpha'", [[2m]]),
             ],
+            [OqlClauses.DerivedFrom] =
+            [
+                new("SELECT d.name FROM (SELECT name FROM items WHERE name = 'alpha') d", [["alpha"]]),
+            ],
+            [OqlClauses.ExpressionFrom] =
+            [
+                new("SELECT RAW v FROM [1,2] AS v", [[1m], [2m]]),
+                new("SELECT RAW v FROM NULL AS v", [[null]]),
+                new("SELECT RAW v FROM MISSING AS v", []),
+            ],
             [OqlClauses.From] =
             [
                 new("SELECT d.name FROM items d", [["alpha"], ["beta"], ["gamma"], ["delta"]]),
@@ -563,6 +573,8 @@ public sealed class OqlExecutionConformanceTests
         OqlClauses.ArrayComprehension => expression is OqlSelectExpression arrays && arrays.Projections.Any(p => p.Expression is OqlComprehensionExpression { IsFirst: false }),
         OqlClauses.FirstComprehension => expression is OqlSelectExpression first && first.Projections.Any(p => p.Expression is OqlComprehensionExpression { IsFirst: true }),
         OqlClauses.From => expression is OqlSelectExpression { Collection.Length: > 0 },
+        OqlClauses.DerivedFrom => expression is OqlSelectExpression { Source: OqlSubqueryExpression },
+        OqlClauses.ExpressionFrom => expression is OqlSelectExpression { Source: not null and not OqlSubqueryExpression },
         OqlClauses.Unnest => expression is OqlSelectExpression unnestQuery && unnestQuery.Unnest.Any(binding => !binding.IsLeft),
         OqlClauses.LeftUnnest => expression is OqlSelectExpression leftQuery && leftQuery.Unnest.Any(binding => binding.IsLeft),
         OqlClauses.Any => expression is OqlSelectExpression { Predicate: OqlQuantifiedExpression { IsEvery: false } },

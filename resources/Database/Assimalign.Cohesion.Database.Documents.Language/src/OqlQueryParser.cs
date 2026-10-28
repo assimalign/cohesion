@@ -253,7 +253,7 @@ public sealed partial class OqlQueryParser : QueryParser
         int parentheses = 0;
         bool inSelectList = false;
         int selectHead = -2;
-        Stack<(int Depth, bool InSelectList, int SelectHead)>? selectScopes = null;
+        Stack<(int Depth, bool InSelectList, int SelectHead, bool HasGroupBy)>? selectScopes = null;
         int callQuantifier = -2;
         int fetchHead = -2;
         int pagingHead = -2;
@@ -278,6 +278,7 @@ public sealed partial class OqlQueryParser : QueryParser
                     var enclosing = selectScopes.Pop();
                     inSelectList = enclosing.InSelectList;
                     selectHead = enclosing.SelectHead;
+                    hasGroupBy = enclosing.HasGroupBy;
                 }
             }
 
@@ -455,15 +456,14 @@ public sealed partial class OqlQueryParser : QueryParser
                 {
                     if (statementWithoutQuery || !IsWord(_tokens[statementStart], "SELECT"))
                     { _diagnostics.Add(QueryDiagnostics.UnsupportedClause("SUBQUERY in DML", Profile.Language, Span(token, token))); }
-                    else if (index > 1 && _tokens[index - 1].Type == TokenType.LeftParen && IsWord(_tokens[index - 2], "FROM") && !IsDistinctFromToken(index - 2))
-                    { _diagnostics.Add(QueryDiagnostics.UnsupportedClause("derived FROM subquery", Profile.Language, Span(token, token))); }
                 }
 
                 if (parentheses > 0)
-                { (selectScopes ??= new()).Push((parentheses, inSelectList, selectHead)); }
+                { (selectScopes ??= new()).Push((parentheses, inSelectList, selectHead, hasGroupBy)); }
                 selected = true;
                 selectHead = index;
                 inSelectList = true;
+                hasGroupBy = false;
                 continue;
             }
 

@@ -126,8 +126,8 @@ without executing and shows each SubqueryExpression, owning clause/span, nested 
 `cached_for_statement` or `per_evaluation` policy. Plans are statement-local and rebuilt on the
 next execution, including a reused request after CREATE/DROP INDEX.
 
-Deferred forms use CK00001 and name the form: correlated subqueries (OQ-Q3), derived
-`FROM (SELECT ...) AS alias` (OQ-Q2), and subqueries anywhere inside INSERT, UPSERT, UPDATE or
+Deferred forms use CK00001 and name the form: correlated subqueries (OQ-Q3) and
+subqueries anywhere inside INSERT, UPSERT, UPDATE or
 DELETE, including RETURNING (OQ-Q3). References to outer FROM/UNNEST, group or comprehension
 bindings, and outer projection aliases from ORDER BY, are correlation; inner declarations shadow
 them by ordinal name. Qualified outer stars (`d.*`) and a nested `FROM d` naming an outer alias
@@ -143,6 +143,62 @@ Subquery expressions are known arrays for the literal-array function-kind rule: 
 and CONCAT reject them with CD05001 during planning. Constructors and ARRAY/FIRST retain
 in-order evaluation, serialization and failure reachability on both execution paths. This run adds no disk,
 protocol, frame or capability version. InMemory, TCP and NativeAOT use the ordinary JSON cells.
+
+## Derived and expression FROM sources (#1731, OQ-Q2)
+
+`FROM (SELECT ...) [AS] alias` requires an alias (CD00015 if absent). AS is optional,
+following [from.adoc:276-282](https://github.com/couchbaselabs/docs-devex/blob/c3bb1549af4887019b9983e371d9e8b4f569052c/modules/n1ql/pages/n1ql-language-reference/from.adoc#L276-L282).
+`FROM expression AS alias` accepts uncorrelated arrays, parameters, constructors, functions,
+operators and subqueries. Generic-expression AS is required when supplying an explicit alias,
+as [from.adoc:409-416](https://github.com/couchbaselabs/docs-devex/blob/c3bb1549af4887019b9983e371d9e8b4f569052c/modules/n1ql/pages/n1ql-language-reference/from.adoc#L409-L416)
+specifies. An unnamed expression must have an implicit field name; literals, arrays and parameters
+therefore require an explicit alias (CD01033), matching
+[Couchbase from_expression.go:159-163,244-252](https://github.com/couchbase/query/blob/6d40d1dd24e256588af2ff5bf6627ca76135397c/algebra/from_expression.go#L159-L163).
+An ordinary bare identifier remains a collection source. Database-qualified collection names
+remain unsupported; nested paths naming an outer alias are refused as correlation (CK00001).
+Other free source identifiers give CD01034, including under LIMIT 0. A source has no implicit
+input-row scope; comprehension-local variables remain available. This follows
+[formalizer.go:474-479](https://github.com/couchbase/query/blob/6d40d1dd24e256588af2ff5bf6627ca76135397c/expression/formalizer.go#L474-L479).
+
+The documentation's [generic expression terms and mixed-value example](https://github.com/couchbaselabs/docs-devex/blob/c3bb1549af4887019b9983e371d9e8b4f569052c/modules/n1ql/pages/n1ql-language-reference/from.adoc#L391-L437)
+allow JSON scalar, object and array values. The precise NULL/MISSING behavior follows
+[ExpressionScan, scan_expression.go:136-153,249-250](https://github.com/couchbase/query/blob/6d40d1dd24e256588af2ff5bf6627ca76135397c/execution/scan_expression.go#L136-L153):
+
+| Value | Input rows |
+| --- | --- |
+| Array | One row per element, in array order; an empty array has zero rows |
+| Object | One row containing the complete object |
+| Number, string or Boolean | One row containing the scalar |
+| NULL | One NULL row |
+| MISSING | Zero rows |
+
+Derived sources consume the inner SELECT's rows directly. RAW/VALUE exposes each projected
+value, including NULL for a RAW/VALUE MISSING; named projections expose objects with MISSING
+members omitted. The alias names the complete row, and unqualified fields address its object
+members. WHERE, GROUP BY and aggregates, group aliases/GROUP AS, HAVING, ORDER BY, DISTINCT,
+LIMIT/OFFSET, UNNEST over source fields and further derived nesting all compose normally.
+
+`SELECT *` on these sources produces an object keyed by the source alias (and subsequent UNNEST
+bindings), following [selectclause.adoc:112-121](https://github.com/couchbaselabs/docs-devex/blob/c3bb1549af4887019b9983e371d9e8b4f569052c/modules/n1ql/pages/n1ql-language-reference/selectclause.adoc#L112-L121).
+For example, `SELECT * FROM [1] AS v` produces `{"v":1}`. Stored collection stars retain their
+existing shape, including when that stored SELECT supplies a derived source. META().id/version
+and META(alias).id/version return NULL for expression and derived rows, which have no stored
+identity; metadata explicitly projected inside the stored inner SELECT remains ordinary data.
+This follows [META formalization, formalizer.go:506-521](https://github.com/couchbase/query/blob/6d40d1dd24e256588af2ff5bf6627ca76135397c/expression/formalizer.go#L506-L521) and [func_meta.go:167-192](https://github.com/couchbase/query/blob/6d40d1dd24e256588af2ff5bf6627ca76135397c/expression/func_meta.go#L167-L192).
+The existing restrictions on META's argument, member and grouping placement still apply.
+
+A source is evaluated once when its cursor is reached; LIMIT 0 does not evaluate it. Simple
+derived SELECTs stream one row at a time, so outer LIMIT 1 pulls one matching inner row and
+disposes the inner cursor immediately. Paging precedes projection on this path; dynamic headers
+are inferred over the selected window. Grouping, DISTINCT and ORDER BY retain the rows they
+must re-read, under the shared CD05018 memory budget. Outer ORDER BY sorts; it consumes no
+inner index-order guarantee. EXPLAIN includes DerivedSource/ExpressionSource and nested plans.
+All levels share the operation, snapshot, own writes, function catalog and cancellation. Q1's
+deterministic expression-subquery cache and statement-lifetime array retention remain unchanged.
+Correlation, JOIN/NEST (including comma joins), subqueries in DML and expression FROM sources
+inside INSERT/UPSERT SELECT retain named CK00001 refusals. Mutation-source integration is
+deferred with OQ-Q3. No format or wire
+version changes are required.
 
 ## RETURNING (#1727)
 
