@@ -51,6 +51,7 @@ and setval commits never occupy that gate. Deterministic held-reservation probes
 gate waits dropping from one to zero for INSERT, upsert, UPDATE, DELETE and their joined paths.
 Independent sequence outputs project after Sort and Limit, including alias/ordinal ordering and
 grouped/correlated paths (PostgreSQL planner.c:6703-6763); sequence sort keys still evaluate first.
+Unordered correlated sequence projections stream directly into their row window.
 DISCARD ALL clears sequence state and timeout overrides outside a transaction; ordinary rollback
 preserves it. Pool return sends DISCARD ALL over the existing Execute envelope after any rollback
 (PostgreSQL src/backend/commands/discard.c:59-78). No new wire message is needed.

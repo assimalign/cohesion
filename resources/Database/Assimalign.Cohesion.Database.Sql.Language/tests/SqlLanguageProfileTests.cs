@@ -75,6 +75,7 @@ public class SqlLanguageProfileTests
     [InlineData(SqlClauses.Rollback, "ROLLBACK WORK;")]
     [InlineData(SqlClauses.Transaction, "BEGIN TRANSACTION;")]
     [InlineData(SqlClauses.Transaction, "COMMIT WORK;")]
+    [InlineData(SqlClauses.DiscardAll, "DISCARD ALL;")]
     public void Parse_ImplementedClause_IsDeclaredAndParses(string clause, string sql)
     {
         SqlLanguageProfile.Instance.Supports(clause).ShouldBeTrue();

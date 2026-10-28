@@ -119,6 +119,7 @@ public sealed partial class SqlQueryParser : QueryParser
 
         if (IsWord(ref lexer, "DISCARD"))
         {
+            RequireSchemaClause(ref lexer, SqlClauses.DiscardAll);
             Advance(ref lexer);
             if (!IsWord(ref lexer, "ALL")) { AddExpectedDiagnostic(ref lexer, "ALL"); }
             else { Advance(ref lexer); }

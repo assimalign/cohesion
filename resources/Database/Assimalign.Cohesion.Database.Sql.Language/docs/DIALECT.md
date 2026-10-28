@@ -528,7 +528,7 @@ src/backend/commands/tablecmds.c:2033-2090 and src/backend/catalog/heap.c:3701-3
 
 ## Statement matrix
 
-With INSERT ... ON CONFLICT (#1118), DML RETURNING (#1117), persisted CREATE/DROP VIEW (#1124), CREATE/DROP SCHEMA (#1030), set operations (#1114), quantified comparisons (#1718), UPDATE ... FROM / DELETE ... USING (#1714), TRUNCATE and CREATE TABLE AS (#1716), MERGE (#1715) and aggregate FILTER (#1720), the profile has **63 of 68 declared clauses** measured against the live SQL engine, including MERGE actions and RETURNING. WITH RECURSIVE (#1719, SQ-R1) adds one declared binding-only clause; recursive execution remains CK00001 until SQ-R2.
+With INSERT ... ON CONFLICT (#1118), DML RETURNING (#1117), persisted CREATE/DROP VIEW (#1124), CREATE/DROP SCHEMA (#1030), set operations (#1114), quantified comparisons (#1718), UPDATE ... FROM / DELETE ... USING (#1714), TRUNCATE and CREATE TABLE AS (#1716), MERGE (#1715), aggregate FILTER (#1720) and DISCARD ALL (#1717), the profile has **64 of 69 declared clauses** measured against the live SQL engine, including MERGE actions and RETURNING. WITH RECURSIVE (#1719, SQ-R1) adds one declared binding-only clause; recursive execution remains CK00001 until SQ-R2.
 Phase 22 measured 33 of 49.
 The earlier 32/48 figure included `JOIN`, `GROUP BY`, `HAVING`, and `SUBQUERY`,
 removed in Phase 12e (#1019–#1021), plus a no-op `CAST` removed in Phase 13.
@@ -556,6 +556,7 @@ complete ISO SQL support; the boundaries below are part of the contract.
 
 | Statement | Status | Notes |
 |---|---|---|
+| `DISCARD ALL` | Supported, measured | Clear sequence state and session timeout overrides outside an explicit transaction; pool return uses the existing Execute exchange. |
 | `SELECT` | Supported subset, measured | Stored tables, persisted read-only views, virtual system relations and aliased derived queries, with written-order N-way INNER/LEFT/RIGHT/FULL/CROSS joins and comma items over these source kinds; `DISTINCT`, projections and aliases, scalar expressions, `WHERE`, grouping, multi-expression `ORDER BY ASC/DESC` with per-key `NULLS FIRST`/`NULLS LAST`, nonnegative integer `LIMIT`/`OFFSET`, ISO `FETCH FIRST`/`NEXT`, and the SQL Server `TOP` lexical alias. `COUNT(*)`, `COUNT(expr)`, `SUM`, `AVG`, `MIN`, `MAX`, `STRING_AGG`, and `LISTAGG` execute in grouped and ungrouped queries, with DISTINCT/ALL and ordered inputs. See the aggregate contract below. `SELECT` without `FROM` uses one implicit row, including in CTE bodies. |
 | CREATE / ALTER / DROP SEQUENCE | Supported, measured | Standalone integer sequences, guarded DDL, all documented options, restart and list drops; see the sequence contract above. |
 | NEXT VALUE FOR | Supported, measured | Per-row sequence value sharing; nextval/currval/setval/lastval are volatile BIGINT functions. |
@@ -2521,7 +2522,7 @@ and complete strengths follow PostgreSQL `src/backend/parser/gram.y:13119-13176,
 WITH RECURSIVE before MERGE is refused with CK00001 at RECURSIVE, even for acyclic
 definitions (PostgreSQL `src/backend/parser/parse_merge.c:124-129`). Plain WITH
 before MERGE remains supported and shares SELECT's CTE binding and materialization.
-These contextual exclusions do not change the 63/68 declared-clause count.
+These contextual exclusions do not change the 64/69 declared-clause count.
 
 References re-derived from the local PostgreSQL clone: src/backend/parser/parse_cte.c:
 345-400 (output checks and hints), 580-632 (unknown anchor output), 648-725 and 863-906

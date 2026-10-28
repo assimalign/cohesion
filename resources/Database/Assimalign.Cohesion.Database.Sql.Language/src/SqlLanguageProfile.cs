@@ -92,6 +92,7 @@ public static class SqlLanguageProfile
         SqlClauses.AlterSequence,
         SqlClauses.DropSequence,
         SqlClauses.NextValue,
+        SqlClauses.DiscardAll,
         SqlClauses.CreateIndex,
         SqlClauses.AlterTable,
         SqlClauses.DropTable,

@@ -135,7 +135,8 @@ public sealed class SqlStatementCompletenessTests
         [SqlClauses.Begin] = ["BEGIN", "START TRANSACTION", "BEGIN WORK"],
         [SqlClauses.Commit] = ["COMMIT", "COMMIT WORK", "COMMIT TRANSACTION", "END"],
         [SqlClauses.Rollback] = ["ROLLBACK", "ROLLBACK WORK", "ROLLBACK TRANSACTION"],
-        [SqlClauses.Transaction] = ["BEGIN TRANSACTION", "DISCARD ALL"],
+        [SqlClauses.Transaction] = ["BEGIN TRANSACTION"],
+        [SqlClauses.DiscardAll] = ["DISCARD ALL"],
     };
 
     /// <summary>

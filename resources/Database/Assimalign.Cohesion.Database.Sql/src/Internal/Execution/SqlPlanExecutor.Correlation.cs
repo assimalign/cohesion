@@ -164,6 +164,11 @@ internal sealed partial class SqlPlanExecutor
     {
         if (!distinct && HasSequenceProjection(projections))
         {
+            if (orderBy.Count == 0)
+            {
+                return await MaterializeSequenceSelectAsync(matches, projections, orderBy, limit, offset,
+                    evaluator, statement, cancellationToken, where, []).ConfigureAwait(false);
+            }
             var candidates = matches.ToList();
             if (candidates.Count == 0) { return MaterializeProjected(projections, []); }
             var slots = OrderingOutputSlots(orderBy, candidates[0].Length);

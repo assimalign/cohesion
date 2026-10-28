@@ -248,7 +248,7 @@ public sealed class SqlLanguageConformanceTests
         // #1714 adds UPDATE FROM and DELETE USING and #1718 adds quantified comparisons:
         // exactly three over #1118's 51. TRUNCATE and CREATE TABLE AS (#1716) and
         // MERGE (#1715) add one each. WITH RECURSIVE (#1719) adds one binding-only clause.
-        SqlLanguageProfile.Instance.Clauses.Count().ShouldBe(63);
+        SqlLanguageProfile.Instance.Clauses.Count().ShouldBe(64);
         RequireExecutionCases(SqlLanguageProfile.Instance.Clauses, cases);
         cases.Keys.Except(SqlLanguageProfile.Instance.Clauses).ShouldBeEmpty("Cases must describe the current profile.");
 
@@ -1087,6 +1087,15 @@ public sealed class SqlLanguageConformanceTests
             }),
         [SqlClauses.Begin] = new("BEGIN;", _seed,
             expression => expression is SqlTransactionExpression { CommandType: SqlQueryCommandType.Begin }, VerifyBeginAsync),
+        [SqlClauses.DiscardAll] = new("DISCARD ALL;", ["CREATE SEQUENCE seq;", "SELECT nextval('seq');"],
+            expression => expression is SqlTransactionExpression { CommandType: SqlQueryCommandType.Discard },
+            async (session, result) =>
+            {
+                result.AffectedCount.ShouldBe(0);
+                var failure = await Should.ThrowAsync<DatabaseException>(async () =>
+                    await session.ExecuteAsync("SELECT currval('seq')", cancellationToken: CancellationToken.None));
+                failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS04068");
+            }),
         [SqlClauses.Commit] = new("COMMIT;", [.. _seed, "BEGIN;", "INSERT INTO t VALUES (4, 'new', 1);"],
             expression => expression is SqlTransactionExpression { CommandType: SqlQueryCommandType.Commit },
             async (session, _) =>

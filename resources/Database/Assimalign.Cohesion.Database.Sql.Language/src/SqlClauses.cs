@@ -54,6 +54,9 @@ public static class SqlClauses
     /// <summary>Reads a standard per-row sequence value.</summary>
     public const string NextValue = "NEXT VALUE FOR";
 
+    /// <summary>Discard the logical SQL session's state outside a transaction.</summary>
+    public const string DiscardAll = "DISCARD ALL";
+
     /// <summary>A generated identity column, including the SQL Server lexical alias.</summary>
     public const string Identity = "IDENTITY";
 
