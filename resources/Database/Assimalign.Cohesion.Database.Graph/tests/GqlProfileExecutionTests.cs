@@ -124,8 +124,20 @@ public sealed class GqlProfileExecutionTests
                 new("RETURN CASE 1 WHEN 1.0 THEN 'match' ELSE 'other' END", [["match"]]),
                 new("RETURN COALESCE(NULL, 5), NULLIF(42, 42)", [[5L, null]]),
             ],
+            [GqlClauses.ListComprehension] =
+            [
+                new("RETURN [x IN [1,2,3] WHERE x > 1 | x * 2]", [[new object?[] { 4L, 6L }]]),
+                new("RETURN [x IN NULL | x], [x IN [] WHERE NULL]", [[null, Array.Empty<object?>()]]),
+            ],
+            [GqlClauses.ListSlice] =
+            [
+                new("RETURN [1,2,3][-2..], [1,2,3][..-1], [1,2,3][1..2]",
+                    [[new object?[] { 2L, 3L }, new object?[] { 1L, 2L }, new object?[] { 2L }]]),
+            ],
             [GqlClauses.Set] =
             [
+                Mutation("MATCH (a:Person {name:[x IN ['Alice'] | x][0]}) SET a.age=[x IN [a.age] | x+1][0]", 1,
+                    new ExecutionCase("MATCH (a:Person {name:'Alice'}) RETURN a.age", [[43L]])),
                 Mutation("MATCH (a:Person {name:'Alice'}) SET a.age=43", 1,
                     new ExecutionCase("MATCH (a:Person {name:'Alice'}) RETURN a.age", [[43L]])),
                 Mutation("MATCH (a:Person {name:'Alice'}) SET a:Admin", 1,
@@ -224,6 +236,7 @@ public sealed class GqlProfileExecutionTests
             ],
             [GqlClauses.Insert] =
             [
+                new("INSERT (n:ComprehensionProperty {k:[x IN [1] | x+10][0]}) RETURN n.k", [[11L]], 1),
                 Mutation("INSERT (: \"L\"\"X\" {\"p\"\"q\": 7})-[:\"T\"\"Y\"]->()", 3,
                     new ExecutionCase("MATCH (\"a\"\"b\":\"L\"\"X\")-[:\"T\"\"Y\"]->() RETURN \"a\"\"b\".\"p\"\"q\" AS \"c\"\"d\"", [[7L]])),
                 new("INSERT (:Person {name: $name})", [], 1,
@@ -236,6 +249,8 @@ public sealed class GqlProfileExecutionTests
             ],
             [GqlClauses.Merge] =
             [
+                Mutation("UNWIND [1,2,1] AS k MERGE (n:ComprehensionMerge {k:[x IN [k] | x*2][0]}) ON CREATE SET n.c=[x IN [k] | x+10][0] ON MATCH SET n.m=[x IN [k] | x+20][0]", 2,
+                    new ExecutionCase("MATCH (n:ComprehensionMerge) RETURN n.k,n.c,n.m ORDER BY n.k", [[2L,11L,21L],[4L,12L,null]])),
                 new("MERGE (n:Person {name:'Alice'}) ON MATCH SET n.age = n.age + 1 RETURN n.age", [[43L]], 1),
                 new("MERGE (n:Person {name:'Alice'}) ON MATCH SET n.age=n.age+1 ON MATCH SET n.age=n.age+2 RETURN n.age", [[45L]], 1),
                 new("MERGE (n:MergeRepeat) ON CREATE SET n.x=1 ON CREATE SET n.x=n.x+2 RETURN n.x", [[3L]], 1),
@@ -499,6 +514,8 @@ public sealed class GqlProfileExecutionTests
         GqlClauses.Match => query.MatchClauses.Any(clause => !clause.Optional),
         GqlClauses.OptionalMatch => query.MatchClauses.Any(clause => clause.Optional),
         GqlClauses.Case => query.Projections.Any(item => item.Expression is GqlCaseExpression or GqlCoalesceExpression or GqlNullIfExpression),
+        GqlClauses.ListComprehension => query.Projections.Any(item => item.Expression is GqlListComprehensionExpression),
+        GqlClauses.ListSlice => query.Projections.Any(item => item.Expression is GqlListSliceExpression),
         GqlClauses.Let => query.Stages.Any(stage => stage is GqlLetStage),
         GqlClauses.Filter => query.Stages.Any(stage => stage is GqlFilterStage),
         GqlClauses.For => query.Stages.Any(stage => stage is GqlForStage { IsUnwind: false }),

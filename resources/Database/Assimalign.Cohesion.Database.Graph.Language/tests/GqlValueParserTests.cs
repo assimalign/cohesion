@@ -77,11 +77,10 @@ public sealed class GqlValueParserTests
     }
 
     [Theory(DisplayName = "Cohesion Test [GQL] - Values: excluded collection syntax is a precise capability diagnostic")]
-    [InlineData("[x IN [1] WHERE x > 0 | x]", "LIST COMPREHENSION")]
     [InlineData("[(a)->(b) | b]", "PATTERN COMPREHENSION")]
     [InlineData("[p=(a)->(b) | p]", "PATTERN COMPREHENSION")]
-    [InlineData("[1,2][1..2]", "LIST SLICING")]
     [InlineData("a.b.c", "NESTED PROPERTY ACCESS")]
+    [InlineData("[x IN [a] WHERE x:A | x.b.c]", "NESTED PROPERTY ACCESS")]
     public void Parse_ExcludedValueForm_ShouldNameConstruct(string expression, string construct)
     {
         // Act

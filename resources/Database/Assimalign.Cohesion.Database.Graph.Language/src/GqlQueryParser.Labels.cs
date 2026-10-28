@@ -66,12 +66,12 @@ public sealed partial class GqlQueryParser
     private GqlLabelExpression ParseLabelDisjunction()
     {
         var first = ParseLabelConjunction();
-        if (Failed || Current.Type is not (TokenType.Pipe or TokenType.Concat)) { return first; }
+        if (Failed || _position == _collectionBar || Current.Type is not (TokenType.Pipe or TokenType.Concat)) { return first; }
 
         // A parenthesized disjunction that opens the chain merges into it: (A|B)|C is A|B|C. A term
         // is a disjunction only when it came from parentheses.
         List<GqlLabelExpression> operands = first is GqlLabelDisjunction opening ? opening.DetachOperands() : [first];
-        while (!Failed && Current.Type is TokenType.Pipe or TokenType.Concat)
+        while (!Failed && _position != _collectionBar && Current.Type is TokenType.Pipe or TokenType.Concat)
         {
             if (Current.Type == TokenType.Concat)
             {

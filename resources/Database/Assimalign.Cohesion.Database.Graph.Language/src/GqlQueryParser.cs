@@ -25,6 +25,7 @@ public sealed partial class GqlQueryParser : QueryParser
     private readonly Dictionary<int, Lexeme> _lineComments = new();
     private string _source = string.Empty;
     private int _position;
+    private int _collectionBar = -1;
 
     // A statement that nests deeper than the stack the parsing thread has left. The same text
     // parses on a thread with more stack: the statement is within the language, the thread is too
@@ -64,6 +65,7 @@ public sealed partial class GqlQueryParser : QueryParser
         _questionedPathPositions.Clear();
         _lineComments.Clear();
         _position = 0;
+        _collectionBar = -1;
         int line = 1;
         int scanned = 0;
         while (lexer.MoveNext())
@@ -340,6 +342,8 @@ public sealed partial class GqlQueryParser : QueryParser
                 continue;
             }
             if (value == "WITH" && valuePosition && i > 0 && (IsWordAt(i - 1, "STARTS") || IsWordAt(i - 1, "ENDS"))) { continue; }
+            if (value == "ALL" && i + 3 < _tokens.Count && _tokens[i + 1].Type == TokenType.LeftParen && IsWordAt(i + 3, "IN"))
+            { UnsupportedConstruct("ALL", token, token); continue; }
             if (value == "ALL" && i > 0 && (IsWordAt(i - 1, "RETURN") || IsWordAt(i - 1, "WITH") || _tokens[i - 1].Type == TokenType.LeftParen && i > 1 && (_tokens[i - 2].Type == TokenType.Function || _allowCustomFunctions && _tokens[i - 2].Type == TokenType.Identifier))) { continue; }
             if (patternDepth != 0 && !valuePosition) { continue; }
             if (!GqlUnsupportedVocabulary.TryFind(value, out var word)) { continue; }

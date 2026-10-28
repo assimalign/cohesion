@@ -73,6 +73,11 @@ internal sealed class GraphExpressionShape : IEqualityComparer<GqlExpression>
                     foreach (var branch in conditional.Alternatives) { _token.ThrowIfCancellationRequested(); hash.Add(branch.Comparison, StringComparer.Ordinal); }
                     break;
                 case GqlMemberExpression member: hash.Add(member.Member, StringComparer.Ordinal); break;
+                case GqlListComprehensionExpression comprehension:
+                    hash.Add(comprehension.Variable, StringComparer.Ordinal);
+                    hash.Add(comprehension.Predicate is null); hash.Add(comprehension.Projection is null);
+                    break;
+                case GqlListSliceExpression slice: hash.Add(slice.From is null); hash.Add(slice.To is null); break;
             }
             foreach (var child in GraphValueExpressions.Children(step.Expression))
             { _token.ThrowIfCancellationRequested(); hash.Add(child is null ? 0 : _hashes[child]); }
@@ -109,6 +114,9 @@ internal sealed class GraphExpressionShape : IEqualityComparer<GqlExpression>
                 a.Alternatives.All(branch => branch is not null) && b.Alternatives.All(branch => branch is not null) && (a.Operand is null) == (b.Operand is null) &&
                 (a.Otherwise is null) == (b.Otherwise is null) && a.Alternatives.Select(branch => branch.Comparison).SequenceEqual(b.Alternatives.Select(branch => branch.Comparison)),
             (GqlMemberExpression a, GqlMemberExpression b) => a.Member == b.Member,
+            (GqlListComprehensionExpression a, GqlListComprehensionExpression b) => a.Variable == b.Variable &&
+                (a.Predicate is null) == (b.Predicate is null) && (a.Projection is null) == (b.Projection is null),
+            (GqlListSliceExpression a, GqlListSliceExpression b) => (a.From is null) == (b.From is null) && (a.To is null) == (b.To is null),
             (GqlCoalesceExpression a, GqlCoalesceExpression b) => a.Operands is not null && b.Operands is not null,
             (GqlListExpression, GqlListExpression) or (GqlInExpression, GqlInExpression) or
                 (GqlNullIfExpression, GqlNullIfExpression) or

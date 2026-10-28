@@ -27,11 +27,16 @@ public sealed partial class GqlQueryParser
             {
                 if (!HasStackToNest(Current)) { break; }
                 Advance();
-                if (Current.Type == TokenType.DotDot) { Unsupported("LIST SLICING", Current); break; }
-                var index = ParseExpression(0);
-                if (Current.Type == TokenType.DotDot) { Unsupported("LIST SLICING", Current); break; }
+                var index = Current.Type == TokenType.DotDot ? null : ParseExpression(0);
+                if (Take(TokenType.DotDot))
+                {
+                    var to = Current.Type == TokenType.RightBracket ? null : ParseExpression(0);
+                    Expect(TokenType.RightBracket, "']'");
+                    left = new GqlListSliceExpression(left, index, to, Span(start, Previous));
+                    continue;
+                }
                 Expect(TokenType.RightBracket, "']'");
-                left = new GqlSubscriptExpression(left, index, Span(start, Previous));
+                left = new GqlSubscriptExpression(left, index!, Span(start, Previous));
             }
             else if (Take(TokenType.Dot))
             {
@@ -54,11 +59,71 @@ public sealed partial class GqlQueryParser
             { Unsupported("PATTERN COMPREHENSION", Current); return new GqlListExpression(items); }
             if (Current.Type is TokenType.Identifier or TokenType.QuotedIdentifier or TokenType.Function &&
                 _tokens[_position + 1].Text.Equals("IN", StringComparison.OrdinalIgnoreCase))
-            { Unsupported("LIST COMPREHENSION", Current); return new GqlListExpression(items); }
+            {
+                string variable = Identifier();
+                Expect("IN");
+                var list = ParseExpression(0);
+                GqlExpression? predicate = null;
+                GqlExpression? projection;
+                if (Take("WHERE")) { (predicate, projection) = ParseComprehensionBody(); }
+                else { projection = Take(TokenType.Pipe) ? ParseExpression(0) : null; }
+                Expect(TokenType.RightBracket, "']'");
+                return new GqlListComprehensionExpression(variable, list, predicate, projection, Span(start, Previous));
+            }
             do { items.Add(ParseExpression(0)); } while (!Failed && Take(TokenType.Comma));
         }
         Expect(TokenType.RightBracket, "']'");
         return new GqlListExpression(items, Span(start, Previous));
+    }
+
+    private (GqlExpression Predicate, GqlExpression? Projection) ParseComprehensionBody()
+    {
+        // A top-level label disjunction can share '|' with projection. Prefer a complete
+        // WHERE | projection parse, as Cypher25Parser.g4:714-716 does, then the filter-only
+        // form. Parenthesized label disjunctions never enter this candidate list.
+        var bars = new List<int>();
+        List<(int Position, Lexeme Token)>? arrows = null;
+        int depth = 0;
+        for (int i = _position; i < _tokens.Count; i++)
+        {
+            var type = _tokens[i].Type;
+            if (depth == 0 && type == TokenType.RightBracket) { break; }
+            if (depth == 0 && type == TokenType.Pipe) { bars.Add(i); }
+            if (_tokens[i].Text == "<-") { (arrows ??= []).Add((i, _tokens[i])); }
+            if (type is TokenType.LeftBracket or TokenType.LeftParen or TokenType.LeftBrace) { depth++; }
+            if (type is TokenType.RightBracket or TokenType.RightParen or TokenType.RightBrace) { depth--; }
+        }
+        int start = _position;
+        int diagnostics = _diagnostics.Count;
+        int outerBar = _collectionBar;
+        try
+        {
+            for (int i = bars.Count - 1; i >= 0; i--)
+            {
+                // Try the suffix first: rejected label bars then cost a short suffix probe,
+                // rather than reparsing an increasingly long label prefix for each bar.
+                _position = bars[i] + 1;
+                _collectionBar = outerBar;
+                var projection = ParseExpression(0);
+                int end = _position;
+                if (!Failed && Current.Type == TokenType.RightBracket)
+                {
+                    _position = start;
+                    _collectionBar = bars[i];
+                    var predicate = ParseExpression(0);
+                    if (!Failed && _position == bars[i]) { _position = end; return (predicate, projection); }
+                }
+                // Recognized unsupported syntax and the terminal stack guard must survive
+                // speculative parsing; neither should become a generic fallback syntax error.
+                if (_diagnostics.Count > diagnostics && _diagnostics[^1].Code is statementTooDeepCode or "CK00001") { return (projection, null); }
+                _position = start;
+                _diagnostics.RemoveRange(diagnostics, _diagnostics.Count - diagnostics);
+                if (arrows is not null) { foreach (var arrow in arrows) { _tokens[arrow.Position] = arrow.Token; } }
+            }
+            _collectionBar = outerBar;
+            return (ParseExpression(0), null);
+        }
+        finally { _collectionBar = outerBar; }
     }
 
     private bool HasComprehensionBar()

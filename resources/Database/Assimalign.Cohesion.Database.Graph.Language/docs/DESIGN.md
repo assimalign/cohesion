@@ -142,10 +142,12 @@ remain refused by update-pattern validation. The engine validates creation-compa
 relationship types, incoming-only equality expressions and both branch scopes before execution,
 including EXPLAIN. Already-declared relationship variables are refused (CG03007); a repeated or
 already-bound node must be a bare variable (CG03006). New relationships require one type.
-MERGE property equalities use CG03004 for non-scalar values, whether planning proves them or
-evaluation produces them (a variable, parameter or expression); a list or map literal written
-directly in a pattern is still refused by the literal parser with CK00001. Other property writes
-retain CG03003. Required properties can be supplied by ON CREATE before the
+Property positions parse the complete expression before admission. Direct list/map literals,
+comprehensions and slices that still yield a container are refused by the parser with CK00001,
+including inside MERGE patterns and literal-map updates. Indexing or field access that yields a
+scalar is accepted. The CK00001 diagnostic retains the established list/map storage-refusal
+wording and spans the completed expression. Other proven or evaluated invalid MERGE equalities use CG03004; ordinary
+property writes retain CG03003. Required properties can be supplied by ON CREATE before the
 finished created entity is validated. Row-dependent equalities can use a per-row index seek.
 GqlMergeParserTests and the profile execution corpus pin grammar, rendering and live behavior.
 
@@ -161,7 +163,7 @@ inspection facades. ISO sections 13.3 and 13.4 supply property, all-property and
 GQL token; SQL/OQL lexer behavior is unchanged. GRAPH and SCHEMA are contextual label names.
 The private token uses a parser-only spelling and is consumed only by whole-map SET, so it
 cannot become unary addition, property assignment or a quantified path elsewhere.
-Whole-map parameters and expressions remain CK00001, as do literal composite properties.
+Whole-map parameters and expressions remain CK00001, as do statically composite property values.
 MERGE embeds both SET branch bodies using the same parser and update validation (#1735).
 Leading SET/REMOVE and nested assignment targets are CG00002. See [DIALECT.md](DIALECT.md#set-and-remove)
 for row ordering, NULL, no-op and count semantics. `GqlUpdateParserTests` pins the AST and
@@ -196,6 +198,8 @@ The function table advertises the aggregates and core scalar functions listed be
 | `SKIP` | Cypher spelling of OFFSET | The same offset stage; cannot accompany another OFFSET/SKIP |
 | `LIMIT` | Unsigned Int64 literal or named parameter after RETURN | Unordered reads can stop upstream expansion after OFFSET/LIMIT; ordered finite pages retain OFFSET + LIMIT rows; never reduces mutation inputs |
 | `CASE` | Simple and searched CASE, COALESCE and NULLIF case abbreviations | First matching alternative, lazy selected branch; absent ELSE yields NULL |
+| `LIST COMPREHENSION` | `[x IN list [WHERE predicate] [| projection]]` | Lexical ordered filtering/projection; NULL list returns NULL |
+| `LIST SLICING` | `list[from..to]`, either bound optional, at least one required | Inclusive start, exclusive end, negative offsets and clamped bounds |
 | `INSERT` | Scalar value-expression node/path insertion, optionally following a match; a node takes a label conjunction (`:A&B`, `:A:B`), a relationship one type and a directed edge (`-[:T]->`, `<-[:T]-`) | Inserts nodes and relationships transactionally |
 | `CREATE` | Same insertion grammar as `INSERT`; compatibility extension | Same transactional insertion path |
 | `MERGE` | One complete fixed path, followed by zero or more ON CREATE SET or ON MATCH SET actions | Matches every complete path or creates every unbound part; includes fixed undirected relationships, bound node reuse, overlays and Snapshot freshness checks |
@@ -272,12 +276,13 @@ sum          := product (('+' | '-') product)*
 product      := signed (('*' | '/' | '%') signed)*
 signed       := ('+' | '-') signed | operand
 labeled      := variable (IS [NOT] LABELED | ':') label-expr
-operand      := primary ( '[' predicate ']' | '.' field )*
+operand      := primary ( '[' predicate ']' | '[' [predicate] '..' [predicate] ']' | '.' field )*
 primary      := variable ['.' property] | scalar-literal | parameter | labeled | '(' predicate ')'
               | aggregate '(' ([DISTINCT | ALL] predicate | '*') ')'
               | scalar-function '(' [predicate (',' predicate)*] ')'
               | CAST '(' predicate AS cast-target ')' | CURRENT_DATE | CURRENT_TIMESTAMP
               | '[' [predicate (',' predicate)*] ']'
+              | '[' variable IN predicate [WHERE predicate] ['|' predicate] ']'
               | '{' [field ':' predicate (',' field ':' predicate)*] '}'
               | CASE [predicate] (WHEN predicate THEN predicate)+ [ELSE predicate] END
               | COALESCE '(' predicate ',' predicate (',' predicate)* ')'
@@ -744,7 +749,7 @@ keys. Node and relationship values also accept string subscripts and member acce
 Only containers that are neither entities nor maps fail member lookup. Invalid accesses,
 including (a.name).x on a string, use #1140's CG02013.
 The parser keeps a.b.c on a stored property as CK00001 while {k:{j:1}}.k.j and $m.k
-are field access. Comprehensions, pattern comprehensions and slicing remain named CK00001.
+are field access. List comprehensions and slices execute as described below; pattern comprehensions remain CK00001.
 UNWIND/FOR expand literal and parameter lists through the linear pipeline (#1145).
 
 List equality requires equal lengths and element-wise equality. Map equality requires
@@ -782,13 +787,69 @@ These forms share Cohesion's exact comparison rule (owner, 2026-10-17).
 CypherFunctions.java:988-1017 and :1061-1079 in community/cypher/runtime-util/src/main/java/org/neo4j/cypher/operations/
 read node/relationship properties through member and string-subscript access.
 community/cypher/interpreted-runtime/src/main/scala/org/neo4j/cypher/internal/runtime/interpreted/commands/expressions/ListSlice.scala:34-61
-dispatches omitted bounds to slicing operations, consulted but excluded here.
+dispatches omitted bounds to slicing operations, implemented by GQ-C1 below.
 community/values/src/main/java/org/neo4j/values/AnyValueComparator.java:87-118 and :146-155
 separates ternary orderability from total sorting (NULL and mixed groups are unordered in predicates).
 Its :44-85 places NULL last and sequences before scalars; virtual/VirtualValueGroup.java:26-32
 orders maps before lists, while storable/ValueGroup.java:56-65 orders zoned timestamps, dates, text, Boolean and numbers.
 The selected exact numeric rule is the owner
 decision, including within these composites.
+
+## List comprehensions and slices (#1736, GQ-C1)
+
+`[x IN list [WHERE predicate] [| projection]]` evaluates its source once in the enclosing
+scope, then visits elements in order. The iterator shadows an outer name only in WHERE and
+projection; nested iterators have independent lexical scopes. Omitting projection keeps each
+accepted element. Only TRUE passes WHERE; FALSE and NULL discard the element and skip projection.
+A NULL source yields NULL, and an empty source yields an empty list without evaluating the body.
+The parser resolves a top-level label/projection bar by preferring a complete WHERE/projection
+parse, then filter-only syntax; parenthesized label unions stay within the filter.
+The source must be a list (not a string, map or binary scalar). Function-spelled iterator names
+remain legal. Aggregates may supply the source list; an aggregate in WHERE or projection is
+CG05024, including under EXPLAIN. All names and parameters validate even for empty/NULL sources.
+Known non-Boolean filter types fail planning with CG02013 independently of source cardinality
+or NULL; unknown types retain the runtime Boolean/NULL check.
+
+`list[from..to]`, `list[from..]` and `list[..to]` use an inclusive start and
+exclusive end. Omitted bounds mean zero/list length. Negative bounds count from the end;
+bounds clamp to the list, and a reversed/empty interval yields an empty list. Explicit NULL
+bounds or a NULL source yield NULL. Bounds evaluate before the NULL result is selected.
+Following Neo4j semantic analysis, planning rejects a slice with both bounds omitted (CG00012)
+and known non-integer bound types (CG02014), including integral-valued FLOAT literals.
+Dynamic bounds retain Neo4j runtime conversion: finite numeric values truncate toward zero
+before signed Int32 range validation; Decimal values use the same rule exactly. Invalid sources,
+bound kinds or ranges are CG02014. Non-Boolean filters retain CG02013. Missing/empty iterator
+names in hand-built ASTs use CG01017; ordinary missing bindings retain CG05001.
+
+GqlListComprehensionExpression and GqlListSliceExpression preserve optional operands and source
+spans. Both render through the path renderer and source-free EXPLAIN expression renderer.
+Shape propagation substitutes the source's element shape for the lexical iterator. Scalar
+projections such as `[r IN rs | r.w]` cross Execute for quantified-pattern groups and path lists,
+including through nested containers, slices and WITH/NEXT. Entity-producing results keep the
+existing static Execute refusal until #1662, even when a filter is FALSE or a source is empty.
+Composite scalar lists still require graph.composite-values under protocol 2.1.
+
+Every visited comprehension element and copied slice element consumes the same statement work
+budget (CG05004). Sources, output buffers and nested results share the retained-memory ledger
+(CG05020); buffers reserve capacity before allocation, and failure releases ownership and rolls
+back writes. Constructed-value depth/count/byte bounds retain CG02013. Ordinary expressions
+keep their existing allocation path. No wire or persisted format changes are needed.
+
+reduce and ALL/ANY/NONE/SINGLE remain recognized unsupported CK00001 until GQ-C2; ALL in call
+position now has this diagnostic too. Pattern comprehensions remain CK00001 until GQ-C3/#1537.
+Map comprehensions and allReduce are outside this plan.
+
+Reference evidence (local Neo4j clone, paths relative to its root):
+
+- `community/cypher/front-end/parser/v25/parser/src/main/antlr4/org/neo4j/cypher/internal/parser/v25/Cypher25Parser.g4:714-716`: optional filter/projection grammar; `community/cypher/front-end/parser/parser-test/src/test/scala/org/neo4j/cypher/internal/ast/factory/expression/LabelExpressionsParserTest.scala:741-752,780-824,880-958` fixes the label/projection bar ambiguity.
+- `community/cypher/interpreted-runtime/src/main/scala/org/neo4j/cypher/internal/runtime/interpreted/commands/expressions/ExtractFunction.scala:35-52` and `FilterFunction.scala:36-52`: ordered element evaluation, TRUE-only filtering and NULL-in/NULL-out inheritance.
+- `community/cypher/front-end/ast/src/main/scala/org/neo4j/cypher/internal/ast/semantics/SemanticExpressionCheck.scala:1099-1117,1265-1285`: source checking, scoped iterator declaration and projected element type.
+- `community/cypher/front-end/ast/src/main/scala/org/neo4j/cypher/internal/ast/semantics/SemanticExpressionCheck.scala:726-737` and `community/cypher/front-end/ast-test/src/test/scala/org/neo4j/cypher/internal/ast/semantics/ListSliceTest.scala:51-82`: at least one bound and INTEGER bound types, independently of runtime conversion.
+- `community/cypher/interpreted-runtime/src/main/scala/org/neo4j/cypher/internal/runtime/interpreted/commands/expressions/ListSlice.scala:34-66` and `community/cypher/runtime-util/src/main/java/org/neo4j/cypher/operations/CypherFunctions.java:3257-3301,3485-3509,3533-3550`: open bounds, NULL propagation, negative offsets and numeric Int32 conversion.
+
+The parser/conformance corpus, GraphListComprehensionTests, GraphCompositeWireTests and Graph
+NativeAOT sample cover grammar, lexical shadowing, null/empty lists, slice forms, groups/path
+lists, static admission, EXPLAIN, budget rollback and both transports.
 
 ## Core scalar functions and CAST (#1148)
 
@@ -811,8 +872,7 @@ FUNCTION and the spelling; these table entries apply only before `(` in value po
 CURRENT_TIME, LOCAL_TIME and LOCAL_TIMESTAMP are recognized unsupported niladic expressions.
 CARDINALITY, LTRIM/RTRIM/BTRIM, LEFT/RIGHT, LOG10 and Cypher toStringList/toIntegerList/
 toFloatList/toBooleanList are recognized unsupported calls. Procedures/CALL, reduce, temporal
-constructors, ELEMENTS, head/last/tail/reverse/range, list
-comprehensions and slicing remain outside this subset.
+constructors, ELEMENTS and head/last/tail/reverse/range remain outside this subset.
 
 The table distinguishes ISO clause 20 forms, direct Cypher aliases, and Cohesion extensions.
 **Every scalar is strict:** a NULL argument returns NULL before kind or domain checks; every
@@ -952,8 +1012,8 @@ expressions may use a key as a subtree or a grouped entity's properties; they ca
 introduce an ungrouped variable. RETURN aliases are available in GROUP BY as plain grouping
 names and in ORDER BY, where they shadow input variables. RETURN itself retains input scope.
 Computed-expression reuse in ORDER BY excludes expressions referencing redefined variables;
-aggregate operands retain input scope. Function-named list comprehensions keep the recognized
-CK00001 LIST COMPREHENSION diagnostic. Recursive aggregate parsing checks the thread stack.
+aggregate operands retain input scope. Function-named comprehension iterators parse normally.
+Recursive aggregate parsing checks the thread stack.
 
 All functions skip NULL values; COUNT(*) counts input rows, including OPTIONAL MATCH's
 null-extended rows. DISTINCT and grouping reuse RETURN's exact numeric, composite and
@@ -1066,7 +1126,7 @@ GqlOrderPagingTests and GraphOrderPagingWireTests pin the executable surface.
 
 | Code | Meaning |
 | --- | --- |
-| `CK00001` | Recognized construct outside the executable profile, reported once at its own span: OPTIONAL block operands, MANDATORY MATCH, procedures, excluded functions and datetime forms, unsupported CAST targets, HAVING and statistical aggregates (STDDEV_SAMP/POP, PERCENTILE_CONT/DISC), substituted/whole-map parameters, composite properties, comprehensions, slicing, map projections, questioned paths, subpath variables, nested quantifiers, standalone ORDER BY/page statements, set operations, FOR ordinality/offset suffixes, NEXT YIELD, server/session scope, undirected (tilde) edges, nested path modes/selectors, unselected unbounded WALK, counted ANY and `NODETACH DELETE` |
+| `CK00001` | Recognized construct outside the executable profile, reported once at its own span: OPTIONAL block operands, MANDATORY MATCH, procedures, excluded functions and datetime forms, unsupported CAST targets, HAVING and statistical aggregates (STDDEV_SAMP/POP, PERCENTILE_CONT/DISC), substituted/whole-map parameters, composite properties, pattern comprehensions, map projections, questioned paths, subpath variables, nested quantifiers, standalone ORDER BY/page statements, set operations, FOR ordinality/offset suffixes, NEXT YIELD, server/session scope, undirected (tilde) edges, nested path modes/selectors, unselected unbounded WALK, counted ANY and `NODETACH DELETE` |
 | `CG00001` | Empty statement |
 | `CG00002` | Malformed supported syntax, invalid statement composition, leftover tokens, or a character GQL does not use (`?`, `#`, `^`, ```, ...) |
 | `CG00003` | Unterminated string, quoted name, or block comment |
@@ -1078,6 +1138,7 @@ GqlOrderPagingTests and GraphOrderPagingWireTests pin the executable surface.
 | `CG00009` | The statement nests groups, unary expressions, CASE, subscripts or collection constructors deeper than the parsing thread's stack can follow. Reported at the group, unary, constructor or subscript token that could not be entered; the parse stops there and reports nothing else. The same text parses on a thread with more stack, so the engine's `GraphQueryRequest.FromGql` reports it as `CG05008`, statement too complex, not as a parse error |
 | `CG00010` | Unknown function call; the message names the unregistered spelling |
 | `CG00011` | A counted SHORTEST selector omits a positive Int64 literal count or supplies zero, a sign, a non-integer, a parameter or overflow |
+| `CG00012` | A list slice omits both start and end bounds; rejected during planning, including EXPLAIN |
 
 Locations use zero-based absolute UTF-16 offsets with exclusive ends and one-based line numbers.
 A line breaks at LF, CR, NEL (U+0085), LS (U+2028) or PS (U+2029), and CR LF is one break

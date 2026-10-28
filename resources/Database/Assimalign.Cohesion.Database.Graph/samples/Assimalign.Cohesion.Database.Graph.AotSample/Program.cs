@@ -30,6 +30,11 @@ await Check("RETURN developer_twice(21)", [[42L]]);
 await Check("FOR v IN [1,2,2,NULL] RETURN developer_sum(v), developer_sum(DISTINCT v), count(*)", [[5L,3L,4L]]);
 await Check("FOR v IN [] RETURN developer_sum(v),sum(v)", [[0L,0L]]);
 await Check("RETURN abs(-7),char_length('A😀B')", [[7L,3L]]);
+await Check("RETURN [x IN [1,2,3] WHERE x>1 | x*2][-1], size([1,2,3][..-1]), size([x IN [] | x])", [[6L,2L,0L]]);
+await Check("LET x=99 RETURN [x IN [1,2] | [x IN [x+10] | x][0]][1]+x", [[111L]]);
+await Check("INSERT (a:ComprehensionProperty {k:[x IN [1] | x+10][0]}) SET a.k=[x IN [a.k] | x+10][0] RETURN a.k", [[21L]]);
+await Check("UNWIND [1,2,1] AS k MERGE (n:ComprehensionMerge {k:[x IN [k] | x*2][0]}) ON CREATE SET n.c=[x IN [k] | x+10][0] ON MATCH SET n.m=[x IN [k] | x+20][0] RETURN count(*)", [[3L]]);
+await Check("MATCH (n:ComprehensionMerge) RETURN n.k,n.c,coalesce(n.m,0) ORDER BY n.k", [[2L,11L,21L],[4L,12L,0L]]);
 await Check("RETURN 7", [[7L]]);
 await Check("FOR x IN [1,1,1] MERGE (n:MergeSmoke {id:x}) ON CREATE SET n.hits=1 ON MATCH SET n.hits=n.hits+1 RETURN n.hits", [[3L],[3L],[3L]]);
 await Check("MATCH (a:MergeSmoke {id:1}) MERGE (a)-[r:MergeEdge]-(b:MergeSmoke {id:2}) ON CREATE SET r.hit=1 ON MATCH SET r.hit=r.hit+1 RETURN r.hit", [[1L]]);
@@ -44,6 +49,7 @@ await Check("FOR x IN $xs FOR y IN $xs WITH x,y ORDER BY x DESC,y DESC OFFSET 2 
 await Check("FOR x IN $xs RETURN count(DISTINCT x),min(x),max(x)", [[317L, 0L, 316L]]);
 await Check("FOR x IN [2,1,2] RETURN DISTINCT x ORDER BY x", [[1L], [2L]]);
 await session.ExecuteAsync("INSERT (a:N {k:1})-[:T]->(b:N {k:2})-[:T]->(:N {k:3})", cancellationToken: CancellationToken.None);
+await Check("MATCH (a:N {k:1})-[rs:T]->{2}(b) RETURN size([r IN rs | type(r)]), [n IN [a,b] | n.k][1]", [[2L,3L]]);
 await Check("MATCH (a:N)-[:T]->(b:N) RETURN a.k,b.k ORDER BY a.k", [[1L, 2L], [2L, 3L]]);
 {
     var paths = (GraphPathsQueryResult)await session.ExecuteAsync(GraphPathsQueryRequest.FromGql(
@@ -105,6 +111,23 @@ checks++;
 if (await database.FindShortestDistanceAsync(session, shortestSearch with { Target = shortestStart.Id }, CancellationToken.None) != 0)
 { throw new InvalidOperationException("Zero shortest distance smoke mismatch."); }
 checks++;
+foreach (var (expression, code) in new[]
+{
+    ("[1][..]", "CG00012"),
+    ("[1][1.5..]", "CG02014"),
+    ("[x IN [] WHERE 1]", "CG02013"),
+})
+{
+    foreach (string prefix in new[] { "RETURN ", "EXPLAIN RETURN " })
+    {
+        bool refused = false;
+        try { await session.ExecuteAsync(prefix + expression, cancellationToken: CancellationToken.None); }
+        catch (DatabaseException error) when (error.Diagnostics.Count == 1 && error.Diagnostics[0].Code == code)
+        { refused = true; }
+        if (!refused) { throw new InvalidOperationException(); }
+        checks++;
+    }
+}
 Console.WriteLine($"Graph NativeAOT: {checks}/{checks} checks passed.");
 
 async Task Check(string query, long[][] expected)
