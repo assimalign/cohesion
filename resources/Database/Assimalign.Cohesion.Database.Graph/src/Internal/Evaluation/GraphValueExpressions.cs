@@ -7,7 +7,7 @@ using Assimalign.Cohesion.Database.Graph.Language;
 
 namespace Assimalign.Cohesion.Database.Graph.Internal;
 
-internal static class GraphValueExpressions
+internal static partial class GraphValueExpressions
 {
     internal static bool ReferencesAny(GqlExpression root, IReadOnlySet<string> names, CancellationToken token)
     {
@@ -16,6 +16,24 @@ internal static class GraphValueExpressions
         while (pending.TryPop(out var expression))
         {
             token.ThrowIfCancellationRequested();
+            if (expression is GqlReduceExpression reduce)
+            {
+                RuntimeHelpers.EnsureSufficientExecutionStack();
+                if (ReferencesAny(reduce.List, names, token) || ReferencesAny(reduce.Initial, names, token)) { return true; }
+                var inner = new HashSet<string>(names, StringComparer.Ordinal);
+                inner.Remove(reduce.Variable); inner.Remove(reduce.Accumulator);
+                if (ReferencesAny(reduce.Body, inner, token)) { return true; }
+                continue;
+            }
+            if (expression is GqlListPredicateExpression predicate)
+            {
+                RuntimeHelpers.EnsureSufficientExecutionStack();
+                if (ReferencesAny(predicate.List, names, token)) { return true; }
+                var inner = new HashSet<string>(names, StringComparer.Ordinal);
+                inner.Remove(predicate.Variable);
+                if (ReferencesAny(predicate.Predicate, inner, token)) { return true; }
+                continue;
+            }
             if (expression is GqlListComprehensionExpression comprehension)
             {
                 RuntimeHelpers.EnsureSufficientExecutionStack();
@@ -55,6 +73,21 @@ internal static class GraphValueExpressions
         pending.Push(root);
         while (pending.TryPop(out var expression))
         {
+            if (expression is GqlReduceExpression reduce)
+            {
+                RuntimeHelpers.EnsureSufficientExecutionStack();
+                if (ReferencesUnbound(reduce.List, bindings) || ReferencesUnbound(reduce.Initial, bindings)) { return true; }
+                var inner = new GraphIteratorBinding(new GraphIteratorBinding(bindings, reduce.Accumulator), reduce.Variable);
+                if (ReferencesUnbound(reduce.Body, inner)) { return true; }
+                continue;
+            }
+            if (expression is GqlListPredicateExpression predicate)
+            {
+                RuntimeHelpers.EnsureSufficientExecutionStack();
+                if (ReferencesUnbound(predicate.List, bindings) ||
+                    ReferencesUnbound(predicate.Predicate, new GraphIteratorBinding(bindings, predicate.Variable))) { return true; }
+                continue;
+            }
             if (expression is GqlListComprehensionExpression comprehension)
             {
                 RuntimeHelpers.EnsureSufficientExecutionStack();
@@ -82,6 +115,8 @@ internal static class GraphValueExpressions
     internal static IEnumerable<GqlExpression> Children(GqlExpression expression) => expression switch
     {
         GqlListComprehensionExpression comprehension => ComprehensionChildren(comprehension),
+        GqlReduceExpression reduce => ReduceChildren(reduce),
+        GqlListPredicateExpression predicate => PredicateChildren(predicate),
         GqlListSliceExpression slice => SliceChildren(slice),
         _ => OrdinaryChildren(expression),
     };
@@ -93,6 +128,32 @@ internal static class GraphValueExpressions
         yield return comprehension.List;
         if (comprehension.Predicate is not null) { yield return comprehension.Predicate; }
         if (comprehension.Projection is not null) { yield return comprehension.Projection; }
+    }
+
+    private static IEnumerable<GqlExpression> ReduceChildren(GqlReduceExpression reduce)
+    {
+        ValidateReductionBindings(reduce.Accumulator, reduce.Variable, reduce);
+        if (reduce.Initial is null || reduce.List is null || reduce.Body is null)
+        { throw new GraphPlanningException("CG05025", ErrorMessages.ReductionBodyInvalid, reduce.Location); }
+        yield return reduce.List;
+        yield return reduce.Initial;
+        yield return reduce.Body;
+    }
+
+    private static IEnumerable<GqlExpression> PredicateChildren(GqlListPredicateExpression predicate)
+    {
+        ValidateReductionBindings(null, predicate.Variable, predicate);
+        if (!Enum.IsDefined(predicate.Kind) || predicate.List is null || predicate.Predicate is null)
+        { throw new GraphPlanningException("CG05025", ErrorMessages.ReductionBodyInvalid, predicate.Location); }
+        yield return predicate.List;
+        yield return predicate.Predicate;
+    }
+
+    internal static void ValidateReductionBindings(string? accumulator, string variable, GqlExpression expression)
+    {
+        if (string.IsNullOrEmpty(variable) || expression is GqlReduceExpression &&
+            (string.IsNullOrEmpty(accumulator) || accumulator == variable))
+        { throw new GraphPlanningException("CG01018", ErrorMessages.ReductionBindingInvalid, expression.Location); }
     }
 
     private static IEnumerable<GqlExpression> SliceChildren(GqlListSliceExpression slice)
@@ -166,6 +227,9 @@ internal static class GraphValueExpressions
             var (value, depth) = item;
             switch (value)
             {
+                case GqlReduceExpression reduce:
+                    if (ReduceGroup(reduce, variableGroup, depth, nativeExpression)) { return true; }
+                    break;
                 case GqlListComprehensionExpression comprehension:
                     if (depth == 0) { break; }
                     if (ComprehensionGroup(comprehension, variableGroup, depth, nativeExpression)) { return true; }
@@ -214,6 +278,9 @@ internal static class GraphValueExpressions
             var (value, accesses) = item;
             switch (value)
             {
+                case GqlReduceExpression reduce:
+                    if (ReduceMayReturn(reduce, parameters, entity, variableShape, accesses, functionType, nativeExpression)) { return true; }
+                    break;
                 case GqlListComprehensionExpression comprehension:
                     if (!entity && accesses == 0) { return true; }
                     if (ComprehensionMayReturn(comprehension, parameters, entity, variableShape, accesses, functionType, nativeExpression)) { return true; }
@@ -287,6 +354,9 @@ internal static class GraphValueExpressions
             var (value, depth, nonNull) = item;
             switch (value)
             {
+                case GqlReduceExpression reduce:
+                    if (!Merge(ReduceEntity(reduce, variableShape, depth, token, functionType, nativeExpression), nonNull)) { return default; }
+                    break;
                 case GqlListComprehensionExpression comprehension:
                     if (depth == 0) { return default; }
                     if (!Merge(ComprehensionEntity(comprehension, variableShape, depth, token, functionType, nativeExpression), nonNull)) { return default; }
@@ -383,6 +453,9 @@ internal static class GraphValueExpressions
             var (value, depth) = item;
             switch (value)
             {
+                case GqlReduceExpression reduce:
+                    if (!ReduceScalar(reduce, parameters, variableScalar, depth, functionType, nativeExpression)) { return false; }
+                    break;
                 case GqlListComprehensionExpression comprehension:
                     if (depth == 0) { return false; }
                     if (!ComprehensionScalar(comprehension, parameters, variableScalar, depth, functionType, nativeExpression)) { return false; }

@@ -200,6 +200,8 @@ The function table advertises the aggregates and core scalar functions listed be
 | `CASE` | Simple and searched CASE, COALESCE and NULLIF case abbreviations | First matching alternative, lazy selected branch; absent ELSE yields NULL |
 | `LIST COMPREHENSION` | `[x IN list [WHERE predicate] [| projection]]` | Lexical ordered filtering/projection; NULL list returns NULL |
 | `LIST SLICING` | `list[from..to]`, either bound optional, at least one required | Inclusive start, exclusive end, negative offsets and clamped bounds |
+| `REDUCE` | `reduce(acc = init, x IN list | expression)` | Ordered, type-changing accumulator; NULL source returns NULL and empty source returns seed |
+| `LIST PREDICATE` | `all`, `any`, `none`, `single` with `(x IN list WHERE predicate)` | Lexical iterator, three-valued tests, empty identities and decisive short-circuiting |
 | `INSERT` | Scalar value-expression node/path insertion, optionally following a match; a node takes a label conjunction (`:A&B`, `:A:B`), a relationship one type and a directed edge (`-[:T]->`, `<-[:T]-`) | Inserts nodes and relationships transactionally |
 | `CREATE` | Same insertion grammar as `INSERT`; compatibility extension | Same transactional insertion path |
 | `MERGE` | One complete fixed path, followed by zero or more ON CREATE SET or ON MATCH SET actions | Matches every complete path or creates every unbound part; includes fixed undirected relationships, bound node reuse, overlays and Snapshot freshness checks |
@@ -283,6 +285,8 @@ primary      := variable ['.' property] | scalar-literal | parameter | labeled |
               | CAST '(' predicate AS cast-target ')' | CURRENT_DATE | CURRENT_TIMESTAMP
               | '[' [predicate (',' predicate)*] ']'
               | '[' variable IN predicate [WHERE predicate] ['|' predicate] ']'
+              | REDUCE '(' variable '=' predicate ',' variable IN predicate '|' predicate ')'
+              | (ALL | ANY | NONE | SINGLE) '(' variable IN predicate WHERE predicate ')'
               | '{' [field ':' predicate (',' field ':' predicate)*] '}'
               | CASE [predicate] (WHEN predicate THEN predicate)+ [ELSE predicate] END
               | COALESCE '(' predicate ',' predicate (',' predicate)* ')'
@@ -835,8 +839,8 @@ budget (CG05004). Sources, output buffers and nested results share the retained-
 back writes. Constructed-value depth/count/byte bounds retain CG02013. Ordinary expressions
 keep their existing allocation path. No wire or persisted format changes are needed.
 
-reduce and ALL/ANY/NONE/SINGLE remain recognized unsupported CK00001 until GQ-C2; ALL in call
-position now has this diagnostic too. Pattern comprehensions remain CK00001 until GQ-C3/#1537.
+Reduce and ALL/ANY/NONE/SINGLE execute as described below. Pattern comprehensions remain
+CK00001 until GQ-C3/#1537.
 Map comprehensions and allReduce are outside this plan.
 
 Reference evidence (local Neo4j clone, paths relative to its root):
@@ -850,6 +854,56 @@ Reference evidence (local Neo4j clone, paths relative to its root):
 The parser/conformance corpus, GraphListComprehensionTests, GraphCompositeWireTests and Graph
 NativeAOT sample cover grammar, lexical shadowing, null/empty lists, slice forms, groups/path
 lists, static admission, EXPLAIN, budget rollback and both transports.
+
+## Reduce and list predicates (#1736, GQ-C2)
+
+`GqlReduceExpression` carries accumulator, seed, iterator, source and body. The sealed
+`GqlListPredicateExpression` carries GqlListPredicateKind (All/Any/None/Single), iterator,
+source and required predicate. Both retain source spans, render through path and source-free
+projection renderers, and participate in structural expression comparison. The profile
+advertises REDUCE and LIST PREDICATE capabilities. Reduce is a lexical function spelling;
+list predicate words remain keywords. They never enter the developer function catalog.
+The parser distinguishes `all(...)` from projection/aggregate ALL, including inside scalar
+and developer calls. At a set-quantifier position, a top-level WHERE distinguishes the list
+predicate; existing `RETURN ALL (1+2)` and `count(ALL (x IN [1]))` remain grouped arguments.
+Without WHERE, an ALL-prefixed group in those positions retains its prior set-quantifier meaning. Malformed implemented forms use CG00002 rather than CK00001. UNWIND
+preserves the first expression diagnostic rather than adding a second missing-name error.
+
+The [dialect truth table](DIALECT.md#reduce-and-list-predicates) defines NULL, empty and
+short-circuit results. Reduce evaluates the source before the seed; NULL skips seed/body,
+empty returns the seed, and each ordered body result becomes the next accumulator without
+coercion to the seed type. Both declarations shadow outer names in the body only. Distinct
+accumulator and iterator names are required; quoted/function-spelled names follow ordinary
+identifier rules. Source/seed expressions may contain aggregates in aggregate-enabled
+positions. Bodies reject native/developer aggregates before execution (CG05025), including
+nested sources inside a body. Missing/duplicate declarations use CG01018. Invalid source
+kinds use CG02015, statically when known. Predicate Boolean/NULL checks reuse CG02013;
+unknown kinds defer to visited-element evaluation. All scopes and parameter references
+validate even for NULL/empty sources and EXPLAIN.
+
+Graph reuses GQ-C1 iterator frames, lexical reference walks, grouping rules and the statement
+budget. Accumulator shape closure includes the seed and every possible step, across container
+depths up to the existing shape horizon. Possible entity/composite/group shapes grow to a
+fixed point; scalar/entity-kind proofs only weaken. Beyond that horizon possible shapes are
+unknown and positive proofs are withheld. This permits changing accumulator types without
+letting empty inputs or later wrapping/unwrapping evade entity wire admission. A same-kind
+entity accumulator retains its proof through WITH/NEXT; scalar group properties cross Execute.
+ORDER BY source/seed shapes resolve projected aliases against the original incoming scope;
+lexical declarations still shadow those aliases in bodies, including nested forms. The shared
+comprehension validator uses the same source-shape seam so a surrounding comprehension cannot
+lose an entity alias's element kind before a nested C2 form binds it.
+No public interface, wire capability, protocol version or disk format is added.
+
+Reference evidence, re-derived in the local Neo4j clone (paths relative to its root; no code copied):
+
+- `community/cypher/front-end/parser/v25/parser/src/main/antlr4/org/neo4j/cypher/internal/parser/v25/Cypher25Parser.g4:727-729,745-752`: reduce and list-predicate binding syntax. Cohesion requires WHERE, as Neo4j's semantic predicate-defined check does (`SemanticExpressionCheck.scala:1115-1119`).
+- `community/cypher/interpreted-runtime/src/main/scala/org/neo4j/cypher/internal/runtime/interpreted/commands/InList.scala:46-57,69-83,93-106,117-132,143-163`: NULL sources, empty identities, decisive results and SINGLE's NULL/second-TRUE rule.
+- `community/cypher/interpreted-runtime/src/main/scala/org/neo4j/cypher/internal/runtime/interpreted/commands/expressions/ReduceFunction.scala:35-46`: source-first NULL handling, one seed evaluation, ordered accumulator updates and empty seed identity.
+- `community/cypher/front-end/ast/src/main/scala/org/neo4j/cypher/internal/ast/semantics/SemanticExpressionCheck.scala:696-720`: seed/source outer scope, scoped declarations and result type union. Cohesion deliberately permits arbitrary supported accumulator type changes rather than Neo4j's seed/body coercion restriction, as required by this run.
+
+GqlReduceParserTests, the profile execution corpus, GraphReduceTests, GraphReduceWireTests
+and the Graph NativeAOT sample pin grammar, source/seed order, lexical restoration, NULL truth
+tables, nonexecuting EXPLAIN, type changes, static failures, rollback and both transports.
 
 ## Core scalar functions and CAST (#1148)
 
@@ -871,7 +925,7 @@ FUNCTION and the spelling; these table entries apply only before `(` in value po
 `date` and `duration` remain legal variables. `id(n)` specifically directs callers to element_id.
 CURRENT_TIME, LOCAL_TIME and LOCAL_TIMESTAMP are recognized unsupported niladic expressions.
 CARDINALITY, LTRIM/RTRIM/BTRIM, LEFT/RIGHT, LOG10 and Cypher toStringList/toIntegerList/
-toFloatList/toBooleanList are recognized unsupported calls. Procedures/CALL, reduce, temporal
+toFloatList/toBooleanList are recognized unsupported calls. Procedures/CALL, temporal
 constructors, ELEMENTS and head/last/tail/reverse/range remain outside this subset.
 
 The table distinguishes ISO clause 20 forms, direct Cypher aliases, and Cohesion extensions.

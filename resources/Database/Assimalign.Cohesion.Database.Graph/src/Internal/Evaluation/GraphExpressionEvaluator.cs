@@ -44,6 +44,8 @@ internal static partial class GraphExpressionEvaluator
                 GqlTruthTestExpression test => (Boolean(Evaluate(test.Operand, bindings, context, parameters), test.Operand) == test.TruthValue) != test.IsNegated,
                 GqlListExpression list => list.Items.Select(item => Evaluate(item, bindings, context, parameters)).ToArray(),
                 GqlListComprehensionExpression comprehension => Comprehension(comprehension, bindings, context, parameters),
+                GqlReduceExpression reduce => Reduce(reduce, bindings, context, parameters),
+                GqlListPredicateExpression predicate => ListPredicate(predicate, bindings, context, parameters),
                 GqlListSliceExpression slice => Slice(slice, bindings, context, parameters),
                 GqlMapExpression map => Map(map, bindings, context, parameters),
                 GqlCaseExpression conditional => Case(conditional, bindings, context, parameters),

@@ -435,7 +435,7 @@ CURRENT_DATE, CURRENT_TIMESTAMP, CURRENT_TIME, LOCAL_TIME and LOCAL_TIMESTAMP ar
 words: every unquoted binding site is CG00002; quoted names bind and are referenced quoted.
 CAST is contextual: followed by `(` it starts CAST; elsewhere it is an identifier, as in
 `MATCH (cast:Movie) RETURN cast.title`.
-Recognized unsupported calls (reduce, temporal constructors, head/last/tail/reverse/range,
+Recognized unsupported calls (temporal constructors, head/last/tail/reverse/range,
 ELEMENTS, CARDINALITY, LTRIM/RTRIM/BTRIM, LEFT/RIGHT, LOG10 and Cypher
 toStringList/toIntegerList/toFloatList/toBooleanList) keep CK00001 in call position, preserving variables such as date.
 CURRENT_TIME/LOCAL_TIME/LOCAL_TIMESTAMP and procedures/CALL also remain CK00001.
@@ -500,9 +500,50 @@ existing protocol 2.1 graph.composite-values negotiation. Each visited element/c
 statement work (CG05004); every materialized list and nested result shares the memory grant
 (CG05020). Constructed-value bounds retain CG02013, and failure rolls back writes.
 
-reduce and ALL/ANY/NONE/SINGLE remain CK00001 until GQ-C2, including `all(x IN ... WHERE ...)`.
 Pattern comprehensions remain CK00001 until GQ-C3/#1537; map comprehensions and allReduce are
 outside this plan. See [reference semantics and shape propagation](DESIGN.md#list-comprehensions-and-slices-1736-gq-c1).
+
+## Reduce and list predicates
+
+The Cypher binding forms `reduce(acc = init, x IN list | expression)` and
+`all|any|none|single(x IN list WHERE predicate)` execute in any value position, including
+WHERE, RETURN, aggregate operands, comprehensions, scalar property values and MERGE actions.
+WHERE is required for each list predicate. ALL as a projection/aggregate set quantifier
+remains separate from `all(...)`. At a set-quantifier position, a top-level WHERE identifies
+the list predicate; `RETURN ALL (1+2)` and `count(ALL (x IN [1]))` keep their previous meaning.
+
+The source evaluates once in the enclosing scope. Reduce evaluates its seed once after a
+non-NULL source, then visits elements in order, assigning each body result to the accumulator.
+A NULL source returns NULL without evaluating the seed or body. An empty list returns the
+seed. The accumulator may change type, including to a list/map or NULL. The iterator and
+accumulator shadow outer names only inside the body; they have distinct, case-sensitive names.
+Nested binding forms restore the enclosing values. All names and parameters validate during
+planning even when no body will execute. Aggregates may supply a source or seed; body aggregates
+are CG05025. Missing/empty declarations or identical reduce names are CG01018.
+
+| Predicate | Empty list | Decisive result | Otherwise |
+| --- | --- | --- | --- |
+| all | TRUE | First FALSE returns FALSE | NULL if any test is NULL, else TRUE |
+| any | FALSE | First TRUE returns TRUE | NULL if any test is NULL, else FALSE |
+| none | TRUE | First TRUE returns FALSE | NULL if any test is NULL, else TRUE |
+| single | FALSE | Second TRUE returns FALSE, including after NULL | NULL if any test is NULL, else exactly one TRUE |
+
+Every predicate returns NULL for a NULL list. A NULL element is passed to the predicate;
+`x IS NULL` can therefore return TRUE. Tests must produce Boolean or NULL. Known non-Boolean
+tests fail planning with CG02013, including empty/NULL inputs and EXPLAIN; unknown types are
+checked only for visited elements. Non-list sources use CG02015, during planning when known
+and otherwise at evaluation. Malformed binding bodies/quantifier ASTs use CG05025.
+
+Each visited element consumes statement work (CG05004). Sources and the current accumulator
+remain charged while nested expressions run; replacement releases the previous accumulator.
+Nested expressions share the memory grant (CG05020), and failures release ownership and roll
+back writes. EXPLAIN validates and describes the forms without invoking expressions.
+
+Scalar reductions over entity groups, such as `reduce(s=0,r IN rs | s+r.w)`, cross Execute.
+Shape analysis includes both the seed and possible repeated body results, so an empty source
+cannot bypass entity-result admission. Entity-valued wire results retain the existing gate
+until #1662. Scalar lists/maps use the existing protocol 2.1 capability; no wire or disk change
+is introduced. See [design and local reference evidence](DESIGN.md#reduce-and-list-predicates-1736-gq-c2).
 
 ## Named scalar parameters
 

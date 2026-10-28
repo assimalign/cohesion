@@ -32,6 +32,10 @@ await Check("FOR v IN [] RETURN developer_sum(v),sum(v)", [[0L,0L]]);
 await Check("RETURN abs(-7),char_length('A😀B')", [[7L,3L]]);
 await Check("RETURN [x IN [1,2,3] WHERE x>1 | x*2][-1], size([1,2,3][..-1]), size([x IN [] | x])", [[6L,2L,0L]]);
 await Check("LET x=99 RETURN [x IN [1,2] | [x IN [x+10] | x][0]][1]+x", [[111L]]);
+await Check("RETURN reduce(a=0,x IN [1,2,3] | a*10+x),reduce(a=42,x IN [] | 1/0),reduce(a=1/0,x IN NULL | a) IS NULL", [[123L,42L,1L]]);
+await Check("RETURN all(x IN [] WHERE TRUE),any(x IN [] WHERE TRUE),none(x IN [] WHERE TRUE),single(x IN [] WHERE TRUE)", [[1L,0L,1L,0L]]);
+await Check("RETURN all(x IN [TRUE,NULL] WHERE x) IS NULL,any(x IN [NULL,TRUE] WHERE x),single(x IN [NULL,TRUE,TRUE] WHERE x)", [[1L,1L,0L]]);
+await Check("RETURN reduce(a=0,x IN [1,2] | a+reduce(a=x,x IN [x] | a+x)),reduce(a=0,x IN [1,2] | toInteger(toString(x)))", [[6L,2L]]);
 await Check("INSERT (a:ComprehensionProperty {k:[x IN [1] | x+10][0]}) SET a.k=[x IN [a.k] | x+10][0] RETURN a.k", [[21L]]);
 await Check("UNWIND [1,2,1] AS k MERGE (n:ComprehensionMerge {k:[x IN [k] | x*2][0]}) ON CREATE SET n.c=[x IN [k] | x+10][0] ON MATCH SET n.m=[x IN [k] | x+20][0] RETURN count(*)", [[3L]]);
 await Check("MATCH (n:ComprehensionMerge) RETURN n.k,n.c,coalesce(n.m,0) ORDER BY n.k", [[2L,11L,21L],[4L,12L,0L]]);
@@ -116,6 +120,10 @@ foreach (var (expression, code) in new[]
     ("[1][..]", "CG00012"),
     ("[1][1.5..]", "CG02014"),
     ("[x IN [] WHERE 1]", "CG02013"),
+    ("all(x IN [] WHERE 1)", "CG02013"),
+    ("reduce(a=0,x IN 1 | a)", "CG02015"),
+    ("reduce(a=0,x IN [] | sum(x))", "CG05025"),
+    ("reduce(x=0,x IN [] | x)", "CG01018"),
 })
 {
     foreach (string prefix in new[] { "RETURN ", "EXPLAIN RETURN " })

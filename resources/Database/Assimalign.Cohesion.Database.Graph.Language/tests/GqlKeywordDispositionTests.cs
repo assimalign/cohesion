@@ -81,8 +81,8 @@ public sealed class GqlKeywordDispositionTests
         ["EXISTS"] = Rejects("MATCH (a) WHERE EXISTS { (a)-[]->(b) } RETURN a", "EXISTS"),
         ["LIKE"] = Rejects("MATCH (a) WHERE a.name LIKE 'A%' RETURN a", "LIKE"),
         ["BETWEEN"] = Rejects("MATCH (a) WHERE a.x BETWEEN 1 AND 2 RETURN a", "BETWEEN"),
-        ["NONE"] = Rejects("MATCH (a) WHERE NONE(a.tags) RETURN a", "NONE"),
-        ["SINGLE"] = Rejects("MATCH (a) WHERE SINGLE(a.tags) RETURN a", "SINGLE"),
+        ["NONE"] = Parses("RETURN none(x IN [1,2] WHERE x < 0)"),
+        ["SINGLE"] = Parses("RETURN single(x IN [1,2] WHERE x = 1)"),
         ["CASE"] = Parses(caseExpression),
         ["WHEN"] = Parses(caseExpression),
         ["THEN"] = Parses(caseExpression),
@@ -138,7 +138,7 @@ public sealed class GqlKeywordDispositionTests
         ["TOFLOATLIST"] = Rejects("RETURN toFloatList(1)", "FUNCTION toFloatList"),
         ["TOBOOLEANLIST"] = Rejects("RETURN toBooleanList(1)", "FUNCTION toBooleanList"),
         ["ID"] = Rejects("RETURN id(1)", "FUNCTION id (use element_id)"),
-        ["REDUCE"] = Rejects("RETURN reduce(1)", "FUNCTION reduce"),
+        ["REDUCE"] = Parses("RETURN reduce(a=0,x IN [1,2] | a+x)"),
         ["DATE"] = Rejects("RETURN date(1)", "FUNCTION date"),
         ["DATETIME"] = Rejects("RETURN datetime(1)", "FUNCTION datetime"),
         ["DURATION"] = Rejects("RETURN duration(1)", "FUNCTION duration"),
@@ -304,6 +304,7 @@ public sealed class GqlKeywordDispositionTests
             .Concat(GqlTransactionVocabulary.Spellings)
             .Concat(Enum.GetNames<GqlPathMode>())
             .Append("EXPLAIN") // Contextual statement prefix; identifier cases live in this corpus too.
+            .Append("REDUCE") // Lexical binding form; not an ordinary scalar function.
             .Append("ON") // Contextual MERGE branch prefix; ordinary variable spelling stays valid.
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
