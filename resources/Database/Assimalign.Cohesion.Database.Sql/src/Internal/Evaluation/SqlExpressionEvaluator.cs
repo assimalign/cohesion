@@ -333,6 +333,13 @@ internal sealed partial class SqlExpressionEvaluator
             case SqlBoundExpressionKind.IsNull:
                 var isNull = (SqlBoundIsNull)expression;
                 return Box(EvaluateCore(isNull.Operand, row) is null != isNull.IsNegated);
+            case SqlBoundExpressionKind.Sequence:
+                var sequence = (SqlBoundSequence)expression;
+                object? name = sequence.Arguments.Length == 0 ? null : EvaluateCore(sequence.Arguments[0], row);
+                object? value = sequence.Arguments.Length < 2 ? null : EvaluateCore(sequence.Arguments[1], row);
+                object? called = sequence.Arguments.Length < 3 ? _true : EvaluateCore(sequence.Arguments[2], row);
+                return (SqlSequenceExecution.Current ?? throw new SqlPlanningException("CS03076", ErrorMessages.SequencePlanningUnsupported))
+                    .Evaluate(sequence.Operation, name, value, called, row);
             case SqlBoundExpressionKind.SpecialForm:
                 return EvaluateSpecialForm((SqlBoundSpecialForm)expression, row, copySharedBinary);
             case SqlBoundExpressionKind.Coalesce:

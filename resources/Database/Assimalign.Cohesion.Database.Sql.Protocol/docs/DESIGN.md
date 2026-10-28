@@ -18,8 +18,11 @@ Wire bytes, limits, malformed-payload behavior and exception text are preserved.
 SQL and Graph advertise the shared `transaction-status` capability in protocol 2.1. Startup Ready
 keeps its version/capability payload. When negotiated, each Execute (also Graph ExecutePaths)
 ends with an existing Ready frame (byte 4) after ResultComplete/PathsComplete or a statement Error.
-Its payload is exactly one ASCII byte: `I` idle, `T` explicit transaction active, `E` explicit
-transaction failed. No new message identifier, protocol version or on-disk format is introduced.
+Its payload is exactly two bytes: ASCII `I` idle, `T` explicit transaction active or `E` explicit
+transaction failed, then a retained-session-state byte (`0` clean, `1` requires reset). Other
+lengths and retained-state bytes are malformed (CK07002). This replaces the former one-byte
+payload and public record without a compatibility reader (#1717). The existing transaction-status
+capability gates it; no new identifier, protocol version or on-disk format is introduced.
 Unnegotiated peers retain their original bytes. Ping/Pong and terminal connection errors have no
 postamble. Malformed status payloads use CK07002 and are protocol violations.
 
@@ -63,3 +66,14 @@ not change. SDK and Studio source are outside this rule's scope.
 Protocol data carriers whose only storage is public/protected data or compiler-generated
 auto-property backing keep the normal debugger member view. No new protocol projection or wire
 member is introduced.
+
+## Retained session reset (#1717)
+
+The last statement Ready certifies both transaction state and retained session state. SQL reports
+currval/lastval entries or timeout settings different from the session reset values; Graph and
+Documents always report zero retained state. ProtocolMessageFamily declares ResetStatement
+(SQL: DISCARD ALL; Graph/Documents: null). Pool return sends ROLLBACK only when needed, then
+rechecks the new Ready before sending the declared reset only for retained state. Reuse requires
+Idle plus zero retained state. A clean idle return performs no exchange. A failed, malformed or
+timed-out reset discards the connector. Startup Ready, Ping/Pong and unnegotiated framing stay
+unchanged. The strict two-byte payload is covered by codec and scripted/live transport counters.

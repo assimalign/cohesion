@@ -9,5 +9,5 @@ public static class GraphProtocol
     public static ProtocolCapability CompositeValues { get; } = new("graph.composite-values");
 
     /// <summary>Gets the graph family, including the unchanged catalog exchange and path results.</summary>
-    public static ProtocolMessageFamily Family { get; } = new("Graph", [ProtocolCapability.Diagnostics, ProtocolCapability.TransactionStatus, CompositeValues], 5, 6, 7, 8, 9, 64, 65, 66);
+    public static ProtocolMessageFamily Family { get; } = new("Graph", [ProtocolCapability.Diagnostics, ProtocolCapability.TransactionStatus, CompositeValues], null, 5, 6, 7, 8, 9, 64, 65, 66);
 }

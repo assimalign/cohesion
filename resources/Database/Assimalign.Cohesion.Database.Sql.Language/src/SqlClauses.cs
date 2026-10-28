@@ -42,6 +42,21 @@ public static class SqlClauses
     /// <summary>A <c>CREATE SCHEMA</c> SQL namespace definition.</summary>
     public const string CreateSchema = "CREATE SCHEMA";
 
+    /// <summary>Creates a standalone sequence.</summary>
+    public const string CreateSequence = "CREATE SEQUENCE";
+
+    /// <summary>Changes or restarts a standalone sequence.</summary>
+    public const string AlterSequence = "ALTER SEQUENCE";
+
+    /// <summary>Drops standalone sequences.</summary>
+    public const string DropSequence = "DROP SEQUENCE";
+
+    /// <summary>Reads a standard per-row sequence value.</summary>
+    public const string NextValue = "NEXT VALUE FOR";
+
+    /// <summary>Discard the logical SQL session's state outside a transaction.</summary>
+    public const string DiscardAll = "DISCARD ALL";
+
     /// <summary>A generated identity column, including the SQL Server lexical alias.</summary>
     public const string Identity = "IDENTITY";
 

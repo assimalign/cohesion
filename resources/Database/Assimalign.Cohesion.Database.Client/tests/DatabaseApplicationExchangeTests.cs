@@ -75,7 +75,7 @@ public sealed class DatabaseApplicationExchangeTests
                     request.Type.ShouldBe((ProtocolMessageType)(paths ? 64 : 5));
                     ProtocolExecuteMessage.Decode(request.Payload.Span).Statement.ShouldBe(paths ? "MATCH (n) RETURN n" : "COMMIT");
                     await SendAsync((ProtocolMessageType)(paths ? 66 : 8), new ProtocolResultCompleteMessage(0).Encode());
-                    await SendAsync(ProtocolMessageType.Ready, [(byte)'I']);
+                    await SendAsync(ProtocolMessageType.Ready, [(byte)'I', 0]);
                 }
                 (await channel.Reader.ReadFrameAsync(timeout.Token))!.Value.Type.ShouldBe(ProtocolMessageType.Terminate);
 

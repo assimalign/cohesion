@@ -170,6 +170,8 @@ internal sealed partial class SqlPlanExecutor
                 return await ExecuteDeleteAsync(delete, statement, cancellationToken).ConfigureAwait(false);
             case SqlMergePlan merge:
                 return await ExecuteMergeAsync(merge, statement, cancellationToken).ConfigureAwait(false);
+            case SqlSequencePlan sequence:
+                return await ExecuteSequenceDdlAsync(sequence, statement, cancellationToken).ConfigureAwait(false);
             case SqlCreateTablePlan create:
                 return await ExecuteCreateTableAsync(create, statement, cancellationToken).ConfigureAwait(false);
             case SqlCreateTableAsPlan create:
@@ -308,6 +310,30 @@ internal sealed partial class SqlPlanExecutor
             cancellationToken.ThrowIfCancellationRequested();
             return projected;
         }
+        if (HasSequenceProjection(projections) &&
+            !OrderingUsesSequence(projections, outputSlots?.Values))
+        {
+            // PostgreSQL planner.c:6703-6763 postpones volatile outputs independent of
+            // sorting. Alias/ordinal keys need only their referenced, non-sequence outputs.
+            var sources = new SqlRowCollector(orderBy, evaluator.SubqueryValues, limit, offset, cancellationToken, _metrics);
+            if (sources.IsComplete) { return []; }
+            var completed = outputSlots?.Values.ToHashSet();
+            foreach (var source in matches)
+            {
+                var orderedRow = OrderingRow(source, projections, completed, evaluator, cancellationToken);
+                var keys = new object?[orderBy.Count];
+                for (int index = 0; index < keys.Length; index++) { keys[index] = evaluator.Evaluate(orderBy[index].Key, orderedRow); }
+                sources.Add(orderedRow, keys);
+            }
+            var selected = sources.Finish(resolveEmptyCollations: false, includeOffset: true);
+            var projected = new List<object?[]>(selected.Count);
+            foreach (var source in selected)
+            {
+                projected.Add(ProjectRow(source, projections, evaluator, cancellationToken, completed,
+                    completed is { Count: > 0 } ? source.Length - projections.Count : 0));
+            }
+            return ApplyRowWindow(projected, limit, offset);
+        }
         if (outputSlots is not { Count: > 0 } && projections.Any(projection => ContainsVolatileCall(projection.Value)))
         {
             // Preserve the old sort-then-project path, including its call count before
@@ -349,8 +375,25 @@ internal sealed partial class SqlPlanExecutor
         return rows.Finish(resolveEmptyCollations: false);
     }
 
+    private static object?[] OrderingRow(object?[] source, IReadOnlyList<SqlProjection> projections,
+        IReadOnlySet<int>? outputSlots, SqlExpressionEvaluator evaluator, CancellationToken cancellationToken)
+    {
+        if (outputSlots is not { Count: > 0 }) { return source; }
+        var orderedRow = new object?[source.Length + projections.Count];
+        source.CopyTo(orderedRow, 0);
+        foreach (int index in outputSlots)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var projection = projections[index];
+            orderedRow[source.Length + index] = projection.ColumnOrdinal is int ordinal ? evaluator.DeliverColumn(source, ordinal)
+                : NormalizeGroupValue(evaluator.Evaluate(projection.Value!, source, copySharedBinary: true), projection.Type);
+        }
+        return orderedRow;
+    }
+
     private static bool ContainsVolatileCall(SqlBoundExpression? expression)
     {
+        if (expression is SqlBoundSequence) { return true; }
         System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
         if (expression is null) { return false; }
         if (expression is SqlBoundCall { Function.Volatility: SqlFunctionVolatility.Volatile }) { return true; }
@@ -367,15 +410,50 @@ internal sealed partial class SqlPlanExecutor
         return BoundChildren(expression).Any(ContainsVolatileCall);
     }
 
+    private static bool ContainsSequenceCall(SqlBoundExpression? expression)
+    {
+        if (expression is null) { return false; }
+        if (expression is SqlBoundSequence) { return true; }
+        System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
+        if (expression is SqlBoundCase choice)
+        {
+            if (ContainsSequenceCall(choice.Input) || ContainsSequenceCall(choice.ElseResult)) { return true; }
+            foreach (var when in choice.Whens)
+            { if (ContainsSequenceCall(when.Condition) || ContainsSequenceCall(when.Result)) { return true; } }
+        }
+        if (expression is SqlBoundLogical logical && logical.Operands.Any(ContainsSequenceCall)) { return true; }
+        if (expression is SqlBoundCoalesce coalesce && coalesce.Arguments.Any(ContainsSequenceCall)) { return true; }
+        return BoundChildren(expression).Any(ContainsSequenceCall);
+    }
+
+    private static bool HasSequenceProjection(IReadOnlyList<SqlProjection>? projections)
+    {
+        if (projections is null || SqlSequenceExecution.Current is null) { return false; }
+        foreach (var projection in projections) { if (ContainsSequenceCall(projection.Value)) { return true; } }
+        return false;
+    }
+
+    private static bool OrderingUsesSequence(IReadOnlyList<SqlProjection> projections, IEnumerable<int>? slots)
+    {
+        if (slots is not null)
+        {
+            foreach (int index in slots) { if (ContainsSequenceCall(projections[index].Value)) { return true; } }
+        }
+        return false;
+    }
+
     private static object?[] ProjectRow(object?[] row, IReadOnlyList<SqlProjection> projections,
-        SqlExpressionEvaluator evaluator, CancellationToken cancellationToken)
+        SqlExpressionEvaluator evaluator, CancellationToken cancellationToken,
+        IReadOnlySet<int>? completed = null, int projectionStart = 0)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        using var rowScope = SqlSequenceExecution.Current?.BeginRow();
         var output = new object?[projections.Count];
         for (int i = 0; i < output.Length; i++)
         {
             var projection = projections[i];
-            output[i] = projection.ColumnOrdinal is int ordinal ? evaluator.DeliverColumn(row, ordinal)
+            output[i] = completed?.Contains(i) == true ? row[projectionStart + i]
+                : projection.ColumnOrdinal is int ordinal ? evaluator.DeliverColumn(row, ordinal)
                 : NormalizeGroupValue(evaluator.Evaluate(projection.Value!, row, copySharedBinary: true), projection.Type);
             if (output[i] is byte[])
             {
@@ -530,6 +608,7 @@ internal sealed partial class SqlPlanExecutor
         foreach (var valueRow in plan.Rows)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            using var rowScope = SqlSequenceExecution.Current?.BeginRow();
             var row = new object?[valueRow.Length];
             for (int i = 0; i < row.Length; i++)
             {
@@ -577,6 +656,7 @@ internal sealed partial class SqlPlanExecutor
         int[]? assigned = bound.Domains.Count > 0 ? plan.Assignments.Select(static assignment => assignment.Ordinal).ToArray() : null;
         foreach (var (pageId, slotIndex, values) in targets)
         {
+            using var rowScope = SqlSequenceExecution.Current?.BeginRow();
             cancellationToken.ThrowIfCancellationRequested();
             var updated = (object?[])values.Clone();
 
@@ -639,6 +719,12 @@ internal sealed partial class SqlPlanExecutor
 
         await AcquireUniqueKeyLocksAsync(statement, plan.Table.ObjectId, uniqueKeyHashes, cancellationToken).ConfigureAwait(false);
 
+        if (HasSequenceProjection(plan.Returning))
+        {
+            foreach (var replacement in replacements)
+            { returned!.Add(ProjectRow(replacement.NewValues, plan.Returning!, evaluator, cancellationToken)); }
+        }
+
         try
         {
             return await statement.Coordinator.ApplyStatementAsync(statement.Transaction, async bracket =>
@@ -672,7 +758,7 @@ internal sealed partial class SqlPlanExecutor
                     statement.Coordinator.VersionStore.RecordCreated(statement.Transaction.Sequence, location.PageId, location.SlotIndex);
                     await InsertIndexEntriesAsync(
                         statement, indexes, plan.Table, newValues, SqlRecordLocation.Pack(location.PageId, location.SlotIndex), cancellationToken).ConfigureAwait(false);
-                    if (returned is not null) { returned.Add(ProjectRow(newValues, plan.Returning!, evaluator, cancellationToken)); }
+                    if (returned is not null && !HasSequenceProjection(plan.Returning)) { returned.Add(ProjectRow(newValues, plan.Returning!, evaluator, cancellationToken)); }
                 }
 
                 return await statement.PrepareResultAsync(returned is null ? new SqlQueryResult(DatabaseResultStatus.Success, replacements.Count)
@@ -736,6 +822,14 @@ internal sealed partial class SqlPlanExecutor
                     var updates = await CollectReferentialUpdatesAsync(deletions, scannedTables, statement, cancellationToken).ConfigureAwait(false);
                     ValidateRestrictedDeletes(deletions, updates, statement, cancellationToken);
                     await LockConstraintDeletesAsync(deletions.Values, statement, cancellationToken).ConfigureAwait(false);
+                    if (HasSequenceProjection(plan.Returning))
+                    {
+                        foreach (var deletion in deletions.Values)
+                        {
+                            if (deletion.Table.ObjectId == plan.Table.ObjectId && returningTargets!.Contains(SqlRecordLocation.Pack(deletion.Location.PageId, deletion.Location.SlotIndex)))
+                            { returned!.Add(ProjectRow(deletion.Values, plan.Returning!, evaluator, cancellationToken)); }
+                        }
+                    }
                     return await statement.Coordinator.ApplyStatementAsync(statement.Transaction, async bracket =>
                     {
                         applyStarted = true;
@@ -754,7 +848,7 @@ internal sealed partial class SqlPlanExecutor
                             TombstoneVersion(statement, bracket, deletion.Location.PageId, deletion.Location.SlotIndex);
                             await TombstoneIndexEntriesAsync(statement, GetLiveIndexes(deletion.Table, statement), deletion.Table, deletion.Values,
                                 SqlRecordLocation.Pack(deletion.Location.PageId, deletion.Location.SlotIndex), cancellationToken).ConfigureAwait(false);
-                            if (returned is not null && deletion.Table.ObjectId == plan.Table.ObjectId &&
+                            if (returned is not null && !HasSequenceProjection(plan.Returning) && deletion.Table.ObjectId == plan.Table.ObjectId &&
                                 returningTargets!.Contains(SqlRecordLocation.Pack(deletion.Location.PageId, deletion.Location.SlotIndex)))
                             {
                                 returned.Add(ProjectRow(deletion.Values, plan.Returning!, evaluator, cancellationToken));

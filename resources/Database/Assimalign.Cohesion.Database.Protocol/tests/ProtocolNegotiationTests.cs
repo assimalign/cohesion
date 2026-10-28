@@ -16,7 +16,7 @@ public sealed class ProtocolNegotiationTests
     {
         // Arrange
         using var stream = new MemoryStream();
-        await using var channel = new ProtocolChannel(stream, new ProtocolMessageFamily("test", [ProtocolCapability.Diagnostics], 64), true);
+        await using var channel = new ProtocolChannel(stream, new ProtocolMessageFamily("test", [ProtocolCapability.Diagnostics], null, 64), true);
         // Act
         var ready = channel.Negotiate(new(2, 0), ["diagnostics"]);
         await channel.Writer.WriteFrameAsync(new(ProtocolMessageType.Ready, ready.Encode()), CancellationToken.None);
@@ -35,7 +35,7 @@ public sealed class ProtocolNegotiationTests
     {
         // Arrange
         var extra = new ProtocolCapability("test.extra", 64);
-        var family = new ProtocolMessageFamily("test", [ProtocolCapability.Diagnostics, extra], 64);
+        var family = new ProtocolMessageFamily("test", [ProtocolCapability.Diagnostics, extra], null, 64);
         using var stream = new MemoryStream();
         await using var channel = new ProtocolChannel(stream, family, true);
         // Act
@@ -65,7 +65,7 @@ public sealed class ProtocolNegotiationTests
     {
         // Arrange
         using var stream = new MemoryStream();
-        await using var channel = new ProtocolChannel(stream, new ProtocolMessageFamily("test", [ProtocolCapability.Diagnostics], 64), true);
+        await using var channel = new ProtocolChannel(stream, new ProtocolMessageFamily("test", [ProtocolCapability.Diagnostics], null, 64), true);
         // Act / Assert
         await Should.ThrowAsync<ProtocolException>(async () => await channel.Writer.WriteFrameAsync(new(ProtocolMessageType.Diagnostics, ReadOnlyMemory<byte>.Empty), CancellationToken.None));
         await using var raw = ProtocolFrameWriter.Create(stream, true);

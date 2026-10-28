@@ -25,4 +25,6 @@ public enum SqlQueryCommandType
     Truncate,
     /// <summary>Associate source rows with a target and select ordered actions.</summary>
     Merge,
+    /// <summary>Discard logical-session state outside a transaction.</summary>
+    Discard,
 }

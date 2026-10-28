@@ -71,6 +71,7 @@ internal sealed partial class SqlPlanExecutor
             int[]? assigned = bound.Domains.Count == 0 ? null : plan.Assignments.Select(assignment => assignment.Ordinal).ToArray();
             foreach (var proposal in prepared)
             {
+                using var rowScope = SqlSequenceExecution.Current?.BeginRow();
                 cancellationToken.ThrowIfCancellationRequested();
                 // PostgreSQL nodeModifyTable.c:1108: proposed constraints precede arbitration.
                 ValidateRows(table, [proposal.Values], statement, cancellationToken, checksOnly: true);
@@ -213,6 +214,10 @@ internal sealed partial class SqlPlanExecutor
                 }
             }
             var returned = returning is null ? null : new List<object?[]>(writes.Count);
+            if (HasSequenceProjection(returning))
+            {
+                foreach (var write in writes) { returned!.Add(ProjectRow(write.Values, returning!, evaluator, cancellationToken)); }
+            }
             applyStarted = true;
             return await statement.Coordinator.ApplyStatementAsync(statement.Transaction, async bracket =>
             {
@@ -232,7 +237,7 @@ internal sealed partial class SqlPlanExecutor
                     statement.Coordinator.VersionStore.RecordCreated(statement.Transaction.Sequence, location.PageId, location.SlotIndex);
                     await InsertIndexEntriesAsync(statement, indexes, table, write.Values,
                         SqlRecordLocation.Pack(location.PageId, location.SlotIndex), cancellationToken).ConfigureAwait(false);
-                    if (returned is not null) { returned.Add(ProjectRow(write.Values, returning!, evaluator, cancellationToken)); }
+                    if (returned is not null && !HasSequenceProjection(returning)) { returned.Add(ProjectRow(write.Values, returning!, evaluator, cancellationToken)); }
                 }
                 return await statement.PrepareResultAsync(returned is null ? new SqlQueryResult(DatabaseResultStatus.Success, writes.Count)
                     : MaterializeProjected(returning!, returned, writes.Count), cancellationToken).ConfigureAwait(false);

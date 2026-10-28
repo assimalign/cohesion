@@ -29,6 +29,10 @@ public class SqlLanguageProfileTests
     [InlineData(SqlClauses.UpdateFrom, "UPDATE t SET id=s.id FROM s WHERE t.id=s.id;")]
     [InlineData(SqlClauses.DeleteUsing, "DELETE FROM t USING s WHERE t.id=s.id;")]
     [InlineData(SqlClauses.Delete, "DELETE FROM t;")]
+    [InlineData(SqlClauses.CreateSequence, "CREATE SEQUENCE s;")]
+    [InlineData(SqlClauses.AlterSequence, "ALTER SEQUENCE s RESTART;")]
+    [InlineData(SqlClauses.DropSequence, "DROP SEQUENCE s;")]
+    [InlineData(SqlClauses.NextValue, "SELECT NEXT VALUE FOR s;")]
     [InlineData(SqlClauses.Identity, "CREATE TABLE t (id INT IDENTITY);")]
     [InlineData(SqlClauses.CreateTable, "CREATE TABLE t (id INT);")]
     [InlineData(SqlClauses.CreateTableAs, "CREATE TABLE t (id) AS SELECT 1 WITH NO DATA;")]
@@ -74,6 +78,7 @@ public class SqlLanguageProfileTests
     [InlineData(SqlClauses.Rollback, "ROLLBACK WORK;")]
     [InlineData(SqlClauses.Transaction, "BEGIN TRANSACTION;")]
     [InlineData(SqlClauses.Transaction, "COMMIT WORK;")]
+    [InlineData(SqlClauses.DiscardAll, "DISCARD ALL;")]
     public void Parse_ImplementedClause_IsDeclaredAndParses(string clause, string sql)
     {
         SqlLanguageProfile.Instance.Supports(clause).ShouldBeTrue();

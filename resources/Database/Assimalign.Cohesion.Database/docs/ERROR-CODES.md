@@ -74,6 +74,10 @@ SQL syntax uses `CS00001`–`CS00099`. `CS00009` is the informational note for a
 statement semicolon; it does not refuse parsing or execution. `CS00100` is retired and reserved:
 the migration described it as a profile refusal, but the parser used it for this note.
 Recognized unsupported clauses use `CK00001`.
+Sequence session reset (#1717) reuses CS04070 for DISCARD inside BEGIN and CK07002 for malformed
+two-byte statement Ready (I/T/E plus 0/1 retained state). Host timeout reset values survive DISCARD;
+clean Ready certification avoids a reset exchange. No new diagnostic identity is allocated.
+
 SQL UPDATE ... FROM and DELETE ... USING execute (#1714). Multiple source associations for
 one UPDATE target report CS05068 before any mutation; DELETE deduplicates physical targets.
 Quantified comparisons (#1718) reuse CS01015 for name binding, CS02055 for incompatible
@@ -168,6 +172,11 @@ structured-carrier messages remain unprefixed.
 | New (#1717) | CS03070 | Schema/catalog — occupied sequence/table/view relation name (42P07) |
 | New (#1717) | CS03071 | Schema/catalog — sequence namespace is absent (3F000) |
 | New (#1717) | CS03072 | Schema/catalog — sequence definition exceeds the record limit (54000) |
+| New (#1717, SQ-S2) | CS03073 | Schema/catalog — sequence name or object identity is absent (42P01) |
+| New (#1717, SQ-S2) | CS03074 | Schema/catalog — sequence operation in a persisted expression or declared provisioning script is unsupported (0A000) |
+| New (#1717, SQ-S2) | CS03075 | Schema/catalog — setval value is outside the sequence bounds (22003) |
+| New (#1717, SQ-S2) | CS03076 | Schema/expression — sequence value in an unsupported evaluation context, including NEXT VALUE FOR in RETURNING, or detached from execution (0A000) |
+| New (#1717, SQ-S2) | CS03077 | Schema/expression — malformed sequence reference or runtime sequence-call argument (22023) |
 | COHSQLP001 | CS03101 | Schema/constraints |
 | COHSQLP002 | CS03102 | Schema/constraints |
 | COHSQLP003 | CS03103 | Schema/constraints |
@@ -189,11 +198,14 @@ structured-carrier messages remain unprefixed.
 | COHSQLT005 | CS04005 | Transactions/locking |
 | COHSQLT006 | CS04006 | Transactions/locking |
 | COHSQLE021 | CS04021 | Transactions/locking |
-| COHSQLE044 | CS04044 | Transactions/locking |
+| COHSQLE044 | CS04044 | Transactions/locking — lock timeout, including sequence DDL waiting for a definition lease |
 | COHSQLE064 | CS04064 | Transactions/locking — serialization failure, including a concurrently changed MERGE target under Snapshot (#1715) |
 | New (w11 review) | CS04065 | Transactions/locking — hard deadlock (`40P01`) |
 | New (#1716) | CS04066 | Transactions/locking — TRUNCATE inside an explicit transaction (25001) |
 | New (#1717) | CS04067 | Transactions/locking — dropped or replaced sequence incarnation (40001) |
+| New (#1717, SQ-S2) | CS04068 | Transactions/session state — currval is undefined for this sequence in this session (55000) |
+| New (#1717, SQ-S2) | CS04069 | Transactions/session state — lastval is undefined or its sequence was dropped (55000) |
+| New (#1717, SQ-S2 fix) | CS04070 | Transactions/session state — DISCARD ALL inside an explicit transaction (25001) |
 | COHSQLE004 | CS05004 | Execution/budgets |
 | COHSQLE007 | CS05007 | Execution/budgets |
 | COHSQLE013 | CS05013 | Execution/budgets |
@@ -206,7 +218,7 @@ structured-carrier messages remain unprefixed.
 | COHSQLE045 | CS05045 | Execution/budgets |
 | COHSQLE057 | CS05057 | Execution/budgets |
 | COHSQLE060 | CS05060 | Execution/budgets |
-| COHSQLE067 | CS05067 | Execution/budgets |
+| COHSQLE067 | CS05067 | Execution/budgets — retained statement memory, including filtered deferred sequence inputs and sort keys |
 | New (#1714) | CS05068 | Execution/budgets — UPDATE target matched by multiple source associations (before writes) |
 | New (#1525, SQ-J1) | CS05069 | Execution/budgets — direct RIGHT, FULL or parenthesized joined DML source would require a different target-outer execution tree |
 | New (#1525, SQ-J2) | CS05070 | Execution/capabilities — FULL JOIN lacks a safe mandatory hash equality or has an unproven ON evaluation |

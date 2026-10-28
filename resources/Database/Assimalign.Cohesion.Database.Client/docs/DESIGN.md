@@ -510,6 +510,18 @@ Reference consulted: RavenDB test/StressTests/Voron/InvalidReleasesOfScratchPage
 
 ## Server-reported transaction reset (#1540)
 
+The exact two-byte statement Ready carries transaction I/T/E plus retained state 0/1. The public
+record and payload replace the former one-byte form without a compatibility shim (#1717).
+SQL reports currval/lastval entries and settings different from their initial reset values;
+Graph/Documents report zero. ProtocolMessageFamily declares the reset statement (SQL: DISCARD ALL),
+so the shared client selects no behavior by a family name. Pool return rolls back an open transaction,
+reads its Ready, and resets only when that Ready still reports retained state. An already clean
+Idle return sends nothing and allocates no reset timer. A user DISCARD avoids another reset.
+Reuse requires Idle and zero retained state after cleanup. Reset failure or timeout closes the
+connector. Scripted peers and live InMemory/TCP stream counters cover idle, SELECT, open transaction,
+nextval and user-discarded leases, including waiters in a one-slot pool. No model reference,
+public bridge, new message identifier or capability is introduced.
+
 SQL/Graph transaction-status negotiation adds an existing Ready I/T/E frame after Execute
 completion or a statement error. The shared client drains it before returning, rolls back open
 or failed transactions on pool return, and only reuses an Idle session. Cleanup runs outside the

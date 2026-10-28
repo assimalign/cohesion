@@ -111,6 +111,7 @@ internal sealed partial class SqlPlanExecutor
         {
             foreach (var candidate in candidates)
             {
+                using var rowScope = SqlSequenceExecution.Current?.BeginRow();
                 for (int i = 0; i < plan.Actions.Count; i++)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
@@ -416,6 +417,10 @@ internal sealed partial class SqlPlanExecutor
         var returned = plan.Returning is null ? null : new List<object?[]>(writes.Count);
         var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken,
             Enumerable.Repeat(true, plan.ReturningActionOrdinal + 1).ToArray());
+        if (HasSequenceProjection(plan.Returning))
+        {
+            foreach (var write in writes) { returned!.Add(ProjectRow(MergeReturningRow(plan, write), plan.Returning!, evaluator, cancellationToken)); }
+        }
         try
         {
             return await statement.Coordinator.ApplyStatementAsync(statement.Transaction, async bracket =>
@@ -475,13 +480,9 @@ internal sealed partial class SqlPlanExecutor
                 foreach (var write in writes)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    if (returned is not null)
+                    if (returned is not null && !HasSequenceProjection(plan.Returning))
                     {
-                        var output = new object?[plan.ReturningActionOrdinal + 1];
-                        Array.Copy(write.Candidate.Values, output, plan.ReturningActionOrdinal);
-                        (write.Values ?? write.Candidate.Target!.TargetValues).CopyTo(output, 0);
-                        output[plan.ReturningActionOrdinal] = write.Action.Action.ToString().ToUpperInvariant();
-                        returned.Add(ProjectRow(output, plan.Returning!, evaluator, cancellationToken));
+                        returned.Add(ProjectRow(MergeReturningRow(plan, write), plan.Returning!, evaluator, cancellationToken));
                     }
                 }
                 return await statement.PrepareResultAsync(returned is null ? new SqlQueryResult(DatabaseResultStatus.Success, writes.Count)
@@ -489,5 +490,14 @@ internal sealed partial class SqlPlanExecutor
             }, durable: false, cancellationToken).ConfigureAwait(false);
         }
         catch (IndexUniqueViolationException exception) { throw TranslateUniqueViolation(plan.Table, exception); }
+    }
+
+    private static object?[] MergeReturningRow(SqlMergePlan plan, MergeWrite write)
+    {
+        var output = new object?[plan.ReturningActionOrdinal + 1];
+        Array.Copy(write.Candidate.Values, output, plan.ReturningActionOrdinal);
+        (write.Values ?? write.Candidate.Target!.TargetValues).CopyTo(output, 0);
+        output[plan.ReturningActionOrdinal] = write.Action.Action.ToString().ToUpperInvariant();
+        return output;
     }
 }

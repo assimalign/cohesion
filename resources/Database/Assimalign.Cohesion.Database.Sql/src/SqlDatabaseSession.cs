@@ -67,6 +67,12 @@ namespace Assimalign.Cohesion.Database.Sql;
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.SqlDatabaseSession.DebugView))]
 public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest>
 {
+    private SqlSequenceSessionState? _sequenceState;
+    internal SqlSequenceSessionState SequenceState => _sequenceState ??= new SqlSequenceSessionState();
+
+    internal bool HasRetainedState => _sequenceState is { Values.Count: > 0 } ||
+        _resetValuesCaptured && (_statementTimeout != _initialStatementTimeout || _lockTimeout != _initialLockTimeout);
+
     private readonly SqlDatabase _database;
     private readonly TransactionCoordinator _coordinator;
     private readonly SqlQueryExecutor _executor;
@@ -82,6 +88,9 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
     private CancellationTokenSource? _statementTimer;
     private CancellationToken _statementCallerToken;
     private TimeSpan? _lockTimeout;
+    private bool _resetValuesCaptured;
+    private TimeSpan? _initialStatementTimeout;
+    private TimeSpan? _initialLockTimeout;
 
     /// <summary>Opens a session over a database.</summary>
     /// <param name="database">The database.</param>
@@ -132,6 +141,7 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
     /// Gets or sets this session's statement execution timeout override. Null inherits the engine
     /// option; zero disables it. Changes apply to subsequent statements. A started commit always
     /// completes. Like execution, setting this property requires single-threaded session use.
+    /// DISCARD ALL restores the value configured before the session's first statement.
     /// </summary>
     /// <exception cref="ArgumentOutOfRangeException">The value is negative or exceeds int.MaxValue milliseconds.</exception>
     public TimeSpan? StatementTimeout
@@ -148,6 +158,7 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
     /// Gets or sets this session's timeout override for each individual lock wait, including
     /// unique-index waits. Null inherits the engine option; zero disables it. Changes apply to
     /// subsequent statements and require single-threaded session use.
+    /// DISCARD ALL restores the value configured before the session's first statement.
     /// </summary>
     /// <exception cref="ArgumentOutOfRangeException">The value is negative or exceeds int.MaxValue milliseconds.</exception>
     public TimeSpan? LockTimeout
@@ -280,6 +291,12 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
 
     private ValueTask<DatabaseResult> ExecuteRequestAsync(SqlQueryRequest request, CancellationToken cancellationToken, SqlCatalogScriptPublication? scriptReceipt = null)
     {
+        if (!_resetValuesCaptured)
+        {
+            _initialStatementTimeout = _statementTimeout;
+            _initialLockTimeout = _lockTimeout;
+            _resetValuesCaptured = true;
+        }
         var statementTimeout = StatementTimeout ?? _database.Engine.EngineOptions.StatementTimeout;
         var lockTimeout = LockTimeout ?? _database.Engine.EngineOptions.LockTimeout;
         return request.Statement.SqlExpression is SqlTransactionExpression || (statementTimeout == TimeSpan.Zero && lockTimeout == TimeSpan.Zero)
@@ -489,9 +506,14 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
     private ValueTask<DatabaseResult> ExecuteStatementAsync(SqlQueryRequest request, CancellationToken cancellationToken, SqlCatalogScriptPublication? scriptReceipt)
         => IsSelfCommitting(request) ? ExecuteMetadataStatementAsync(request, cancellationToken, scriptReceipt) : ExecuteStatementCoreAsync(request, cancellationToken, scriptReceipt);
 
+    internal static Action? DefinitionLeaseEntered { get; set; }
+
     private async ValueTask<DatabaseResult> ExecuteMetadataStatementAsync(SqlQueryRequest request, CancellationToken cancellationToken, SqlCatalogScriptPublication? scriptReceipt)
     {
-        // DROP SCHEMA takes its definition lease in the executor, after all table locks.
+        // Sequence DDL uses its object grants; unrelated metadata leases remain compatible.
+        if (request.Statement.SqlExpression is SqlAlterSequenceExpression or SqlDropSequenceExpression)
+        { return await ExecuteStatementCoreAsync(request, cancellationToken, scriptReceipt).ConfigureAwait(false); }
+        // DROP SCHEMA takes its definition lease in the executor, after sequence and table locks.
         if (request.Statement.SqlExpression is SqlDropSchemaExpression)
         {
             if (_ddlLockOwner is null) { _database.DdlInterlock.CheckDefinitionAdmission(_database.Name.ToString()); }
@@ -503,6 +525,7 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
         using var metadata = _ddlLockOwner is not null
             ? await _database.DdlInterlock.EnterMetadataAsync(definition, cancellationToken).ConfigureAwait(false)
             : _database.DdlInterlock.EnterMetadata(_database.Name.ToString(), definition);
+        if (definition) { DefinitionLeaseEntered?.Invoke(); }
         return await ExecuteStatementCoreAsync(request, cancellationToken, scriptReceipt).ConfigureAwait(false);
     }
 
@@ -658,7 +681,9 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
         try
         {
             var scope = new SqlStatementContext(context, _coordinator, _provisioningSchema,
-                _database.Name.ToString(), null, _ddlLockOwner, ProvisioningProgress, scriptReceipt, transactionStart, _database.DdlInterlock, ResultPreparation);
+                _database.Name.ToString(), null, _ddlLockOwner, ProvisioningProgress, scriptReceipt, transactionStart, _database.DdlInterlock, ResultPreparation,
+                request.Statement.SqlExpression is SqlAlterSequenceExpression or SqlDropSequenceExpression
+                    ? LockTimeout ?? _database.Engine.EngineOptions.LockTimeout : TimeSpan.Zero);
             _lastStatementMetrics = scope.Metrics;
             var result = await ExecuteDataOrExplainAsync(request, scope, cancellationToken).ConfigureAwait(false);
             if (scriptReceipt is { } receipt && !IsSelfCommitting(request) && result.Status == DatabaseResultStatus.Success)
@@ -704,7 +729,7 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
             {
                 return ExecuteSelfCommittingResultAsync(request, scope, cancellationToken);
             }
-            var execution = _executor.ExecuteAsync(request, scope, cancellationToken);
+            var execution = _executor.ExecuteAsync(request, scope, cancellationToken, this);
             // Reads encode during delivery. Embedded execution keeps its direct task path.
             return ResultPreparation is not null && request.Statement.SqlExpression.CommandType is
                 SqlQueryCommandType.Insert or SqlQueryCommandType.Update or SqlQueryCommandType.Delete or SqlQueryCommandType.Merge
@@ -724,15 +749,17 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
         try
         {
             var plan = planner.Plan(explain.Statement, scope.Snapshot);
+            var sequenceUsage = plan.SequenceUsage;
+            if (plan is SqlSequenceScopePlan sequenceScope) { plan = sequenceScope.Input; }
             var executor = new SqlPlanExecutor(_database.DataStorage, _database.Catalog, _database.IndexManager, _database.Definitions);
             plan = executor.Cost(plan, scope, cancellationToken);
             scope.Metrics.IsPlanned = true;
             if (explain.Analyze)
             {
                 scope.Metrics.BeginAnalysis();
-                return ExecuteExplainAnalyzeAsync(executor, plan, scope, request.Statement.Diagnostics, cancellationToken);
+                return ExecuteExplainAnalyzeAsync(executor, plan, scope, request.Statement.Diagnostics, cancellationToken, sequenceUsage);
             }
-            var result = SqlPlanner.Describe(plan, request.Statement.Diagnostics);
+            var result = SqlPlanner.Describe(sequenceUsage is null ? plan : new SqlSequenceScopePlan(plan, sequenceUsage), request.Statement.Diagnostics);
             return Task.FromResult<DatabaseResult>(result);
         }
         catch (SqlUnsupportedQueryException exception)
@@ -741,17 +768,18 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
         }
     }
 
-    private static async Task<DatabaseResult> ExecuteExplainAnalyzeAsync(SqlPlanExecutor executor, SqlPlan plan,
-        SqlStatementContext scope, IEnumerable<Diagnostic> diagnostics, CancellationToken cancellationToken)
+    private async Task<DatabaseResult> ExecuteExplainAnalyzeAsync(SqlPlanExecutor executor, SqlPlan plan,
+        SqlStatementContext scope, IEnumerable<Diagnostic> diagnostics, CancellationToken cancellationToken, SqlSequenceUsage? sequenceUsage)
     {
-        await using var result = (DatabaseResultSet)await executor.ExecuteAsync(plan, scope, cancellationToken).ConfigureAwait(false);
+        await using var result = (DatabaseResultSet)await (sequenceUsage is not null ? _executor.ExecuteSequencesAsync(executor, plan, scope, this, cancellationToken, sequenceUsage)
+            : executor.ExecuteAsync(plan, scope, cancellationToken)).ConfigureAwait(false);
         // Drain the SELECT before returning its description; dispose its ordinary result on every exit.
         await foreach (var row in result.GetRowsAsync(cancellationToken).ConfigureAwait(false))
         {
             cancellationToken.ThrowIfCancellationRequested();
             for (int ordinal = 0; ordinal < row.FieldCount; ordinal++) { _ = row.GetValue(ordinal); }
         }
-        return SqlPlanner.Describe(plan, diagnostics, scope.Metrics);
+        return SqlPlanner.Describe(sequenceUsage is null ? plan : new SqlSequenceScopePlan(plan, sequenceUsage), diagnostics, scope.Metrics);
     }
 
     private static async Task<DatabaseResult> PrepareExecutionResultAsync(Task<DatabaseResult> execution,
@@ -764,12 +792,12 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
         // CTAS prepares its row count after copying and before catalog publication.
         if (request.Statement.SqlExpression is SqlCreateTableAsExpression)
         {
-            return await _executor.ExecuteAsync(request, scope, cancellationToken).ConfigureAwait(false);
+            return await _executor.ExecuteAsync(request, scope, cancellationToken, this).ConfigureAwait(false);
         }
         // The remaining DDL statements return only a zero-count completion. Prepare that fixed
         // result before invoking the executor: catalog publication may commit inside execution.
         var prepared = await scope.PrepareResultAsync(new SqlQueryResult(DatabaseResultStatus.Success, 0), cancellationToken).ConfigureAwait(false);
-        var result = await _executor.ExecuteAsync(request, scope, cancellationToken).ConfigureAwait(false);
+        var result = await _executor.ExecuteAsync(request, scope, cancellationToken, this).ConfigureAwait(false);
         return result.Status == DatabaseResultStatus.Success ? prepared : result;
     }
 
@@ -871,6 +899,14 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
         SqlTransactionExpression control, CancellationToken cancellationToken)
     {
         var transaction = CurrentTransaction;
+        if (control.CommandType == SqlQueryCommandType.Discard)
+        {
+            if (transaction is not null) { return TransactionDiagnostic("CS04070", ErrorMessages.DiscardInTransaction); }
+            _sequenceState = null;
+            _statementTimeout = _initialStatementTimeout;
+            _lockTimeout = _initialLockTimeout;
+            return new SqlQueryResult(DatabaseResultStatus.Success, affectedCount: 0);
+        }
         if (control.CommandType == SqlQueryCommandType.Begin)
         {
             if (transaction is not null)

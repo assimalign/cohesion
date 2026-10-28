@@ -76,7 +76,7 @@ internal sealed partial class SqlPlanner
             {
                 state.HasRecursion = true;
                 (_queryScopes ??= new()).DeferQueryEvaluation = true;
-                _scopelessEvaluator = null;
+                CachedScopelessEvaluator = null;
             }
             // PostgreSQL parse_cte.c:214-229 analyzes non-recursive definitions in
             // declaration order and publishes each only after its body is bound.
@@ -86,7 +86,7 @@ internal sealed partial class SqlPlanner
                 state.Dependencies = new(ReferenceEqualityComparer.Instance);
                 state.BindingOperands = CollectCommonTableOperands(definition.Body);
                 state.BindingUnused = !state.Referenced.Contains(definition);
-                ValidateFunctionCalls(definition.Body);
+                ValidateFunctionCalls(definition.Body, allowNextValue: false);
                 SqlDerivedRelation relation;
                 if (recursive?.Contains(definition) == true) { relation = BindRecursiveDefinition(definition); }
                 else

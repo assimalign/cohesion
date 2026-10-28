@@ -124,7 +124,7 @@ internal static class Program
         await channel.Writer.WriteFrameAsync(new((ProtocolMessageType)GraphProtocolMessageType.ResultComplete,
             new GraphProtocolResultCompleteMessage(0).Encode()), cancellationToken);
         await channel.Writer.WriteFrameAsync(new(ProtocolMessageType.Ready,
-            new ProtocolTransactionStatusMessage(ProtocolTransactionStatus.Active).Encode()), cancellationToken);
+            new ProtocolTransactionStatusMessage(ProtocolTransactionStatus.Active, false).Encode()), cancellationToken);
         await channel.Writer.FlushAsync(cancellationToken);
         Check(await channel.Reader.ReadBorrowedFrameAsync(
             frame => Check(frame.Type == (ProtocolMessageType)GraphProtocolMessageType.ExecutePaths), cancellationToken));
@@ -139,7 +139,7 @@ internal static class Program
         await channel.Writer.WriteFrameAsync(new((ProtocolMessageType)GraphProtocolMessageType.PathsComplete,
             new GraphProtocolPathsCompleteMessage(20).Encode()), cancellationToken);
         await channel.Writer.WriteFrameAsync(new(ProtocolMessageType.Ready,
-            new ProtocolTransactionStatusMessage(ProtocolTransactionStatus.Active).Encode()), cancellationToken);
+            new ProtocolTransactionStatusMessage(ProtocolTransactionStatus.Active, false).Encode()), cancellationToken);
         await channel.Writer.FlushAsync(cancellationToken);
         Check(await channel.Reader.ReadBorrowedFrameAsync(frame =>
         {
@@ -149,7 +149,7 @@ internal static class Program
         await channel.Writer.WriteFrameAsync(new((ProtocolMessageType)GraphProtocolMessageType.ResultComplete,
             new GraphProtocolResultCompleteMessage(0).Encode()), cancellationToken);
         await channel.Writer.WriteFrameAsync(new(ProtocolMessageType.Ready,
-            new ProtocolTransactionStatusMessage(ProtocolTransactionStatus.Idle).Encode()), cancellationToken);
+            new ProtocolTransactionStatusMessage(ProtocolTransactionStatus.Idle, false).Encode()), cancellationToken);
         await channel.Writer.FlushAsync(cancellationToken);
         await finished.WaitAsync(cancellationToken);
     }

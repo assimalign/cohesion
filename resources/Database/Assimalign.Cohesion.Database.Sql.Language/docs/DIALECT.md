@@ -29,6 +29,134 @@ executing another statement. In autocommit the next statement runs immediately (
 legitimately reclaimed location retains its existing absence semantics. The engine's
 storage-integrity conformance tests cover corrupted media through the executing language.
 
+## Standalone sequences (#1717, SQ-S2)
+
+CREATE SEQUENCE [IF NOT EXISTS] name accepts AS SMALLINT | INTEGER | BIGINT,
+START [WITH] n, INCREMENT [BY] n, [NO] MINVALUE, [NO] MAXVALUE, CACHE n and
+[NO] CYCLE in any order, each once. MINVALUE/MAXVALUE take an integer unless
+prefixed with NO. ALTER SEQUENCE [IF EXISTS] accepts the same options and
+RESTART [WITH n]; bare RESTART uses the configured START. START changes that
+configured value without restarting. DROP SEQUENCE [IF EXISTS] accepts a name
+list and optional CASCADE | RESTRICT (default RESTRICT). Names default to dbo,
+share the table/view namespace, and follow the engine's case-insensitive identifier
+rules, including quoted names. IF NOT EXISTS atomically skips any occupied relation name
+before validating options (PostgreSQL sequence.c:135-159). IF EXISTS skips a sequence removed
+during the Exclusive wait; a replacement identity still refuses CS04067. DROP validates its entire list
+before one catalog commit. SQL sequence DDL is self-committing and is refused
+inside BEGIN with CS04003, exactly like table DDL.
+
+Defaults are BIGINT, INCREMENT 1, CACHE 1 and NO CYCLE. Ascending sequences use
+MINVALUE 1 and the type maximum; descending sequences use the type minimum and
+MAXVALUE -1. START defaults to the directional bound. AS changes a bound equal
+to the former type limit to the new limit; explicit other bounds remain. CACHE is
+accepted metadata: the shared allocator still reserves 32 values durably and does
+not keep independent per-session caches. This makes setval immediately visible to
+other sessions' next allocation. Type/option errors use CS03069 (22023); exhaustion
+keeps the shared identity CS02002 (22003), deliberately differing from PostgreSQL's
+2200H. Bounds, cycling and reservations reuse SQ-S1 and SQL format 28.
+
+nextval(name), currval(name), setval(name, integer [, is_called]) and lastval()
+return BIGINT. NEXT VALUE FOR also returns BIGINT; AS controls allocation bounds and metadata, without narrowing the result. This stable output type avoids stale projection metadata across a concurrent ALTER AS and differs from SQL Server's declared-sequence return type. Names may be schema-qualified text (with doubled quotes in quoted
+identifiers) or numeric sequence object identities. CAST(name AS REGCLASS) and
+name::regclass resolve a sequence to its BIGINT object identity for these calls;
+REGCLASS is limited to sequences and is not a storable column type. References
+resolve for each statement rather than pinning names across DROP/recreate.
+NULL arguments propagate NULL. Calls are volatile, evaluated left to right once
+per reached row; repeated nextval calls each allocate. Multi-row VALUES assigns
+values in written tuple and expression order. INSERT SELECT assigns in the
+source's evaluation order. Independent sequence outputs evaluate after ORDER BY and before
+LIMIT/OFFSET, including ordering by another output's alias or ordinal; these independent outputs
+beyond OFFSET + LIMIT are not projected. Every path projects qualifying OFFSET rows in their own
+row scopes and consumes their sequence values before discarding them.
+GROUPING SETS, ROLLUP, CUBE and GROUPING() follow these rules for every completed group,
+including subtotals and empty groups, after HAVING.
+Rows rejected by WHERE/HAVING consume no projection values. With a fresh s, LIMIT 1 OFFSET 1
+returns nextval 2 and leaves 3 next. A sequence output used as a sort key evaluates before sorting
+(PostgreSQL src/backend/optimizer/plan/planner.c:2216-2225;
+src/backend/executor/nodeLimit.c:91-116). Unordered grouped and correlated inputs apply WHERE/HAVING,
+project each qualifying row immediately, discard OFFSET rows and stop at LIMIT.
+They retain no deferred input and charge no grant. Ordered deferred inputs filter before retention
+and use the same uncharged sorting as sequence-free queries on plain, correlated, grouped and
+grouping-set paths. LIMIT and deep OFFSET pages add no deferral charge; fixed collations bound
+retention by OFFSET + LIMIT, while deferred collations retain all candidates. Existing grouping-set
+group/aggregate state charges still apply equally with and without sequence outputs.
+Without ORDER BY the source row order is unspecified;
+sequence values are not ordered by transaction commit. Short-circuited expressions
+do not call the allocator. Plain EXPLAIN never allocates; EXPLAIN ANALYZE SELECT
+executes sequence effects. EXPLAIN also describes sequence DDL without executing it.
+
+currval is undefined until this session calls nextval for that sequence, or
+setval with is_called true; lastval is undefined until nextval chooses a sequence.
+Both use session state, which survives rollback and statement failures. DISCARD ALL clears
+this state and restores the timeout values configured before the session's first statement;
+inside BEGIN it reports CS04070 (25001). Host timeout reset values survive repeated discards
+and user overrides (PostgreSQL src/include/utils/guc.h:88; src/backend/utils/misc/guc.c:1927-1929,1940-1945).
+Statement Ready reports retained sequence entries and settings different from those reset values.
+Pool return rolls back an open transaction, then sends the family-declared DISCARD ALL only
+when the last Ready still reports retained state. SELECT 1 and idle returns add no reset exchange;
+a user DISCARD avoids another reset. Graph and Documents report no retained state. PostgreSQL
+src/backend/commands/discard.c:59-78 likewise resets sequence caches with DISCARD ALL. setval
+with omitted is_called means true: it changes currval and makes the next allocation
+value + increment. False leaves currval/lastval unchanged and makes the next
+allocation return value itself. setval does not select a new lastval sequence.
+Allocations and setval are nontransactional; rollback leaves gaps. DROP/recreate
+gets a new object identity and does not inherit session state. CS04068/CS04069
+(55000) identify undefined currval/lastval; CS03073 (42P01) identifies a missing
+sequence; CS03075 (22003) identifies an out-of-bounds setval. CS03077 (22023) identifies a malformed sequence reference or invalid runtime call argument.
+
+NEXT VALUE FOR name uses the standard per-row rule: every occurrence of the same
+sequence within a projected or VALUES row shares one value. For example,
+SELECT NEXT VALUE FOR s, NEXT VALUE FOR s yields two equal values, whereas
+SELECT nextval('s'), nextval('s') consumes two values. PostgreSQL does not implement
+NEXT VALUE FOR ([CREATE SEQUENCE compatibility](https://www.postgresql.org/docs/current/sql-createsequence.html));
+the per-row standard rule is corroborated by [HyperSQL's sequence documentation](https://www.hsqldb.org/doc/guide/databaseobjects-chapt.html)
+and [Microsoft's NEXT VALUE FOR contract](https://learn.microsoft.com/en-us/sql/t-sql/functions/next-value-for-transact-sql).
+Session/setval behavior follows local PostgreSQL src/backend/commands/sequence.c:867-1044;
+option defaults and restart follow :1415-1587. Privileges remain out of scope (#177).
+
+Sequence calls and REGCLASS are refused in persisted DEFAULT, CHECK, domain, view and SQL
+function expressions with CS03074 (0A000), including typed defaults. Thus this run
+creates no default dependency for CASCADE to remove; RESTRICT and CASCADE have the
+same effect for standalone sequences. OWNED BY, SERIAL aliases and identity
+restart/overriding/backfill remain SQ-S3 work. Compiled schemas do not declare
+standalone sequences, and declared provisioning scripts refuse sequence DDL with
+CS03074 until their receipt/ownership model can represent it.
+
+Sequence statements resolve literal and parameter names to object identities and take
+Shared object locks through the transaction lock manager before row evaluation.
+Constant references lock only their objects. Row-varying names conservatively lock all
+sequences in the directory captured at statement execution. Newly created sequences
+become visible to the next statement. This blocks ALTER and DROP of unrelated sequences
+until transaction end, makes one lock request per captured sequence, and a queued Exclusive request
+stalls later dynamic-name statements under FIFO admission. This deliberate directory policy
+keeps sequence object waits in the deadlock graph and avoids synchronous evaluation-time lock waits; use
+literal or parameter names to limit blocking to their referenced objects.
+ALTER, RESTART, DROP and DROP SCHEMA CASCADE take conflicting Exclusive grants and
+wait until every holder commits, rolls back or closes. ALTER/DROP also wait for unrelated definition
+DDL, including CREATE VIEW and DROP SCHEMA, within the session lock timeout (CS04044).
+Sequence object grants precede their metadata lease. DROP SCHEMA takes sequence grants,
+table grants, then its definition lease; definition holders never wait for object grants.
+Compatible non-definition table/CTAS leases may precede object grants without blocking sequence
+metadata admission. Descriptions are resolved after locking and metadata admission;
+a concurrent ALTER cannot fail a running nextval. Deadlock detection,
+lock timeouts and cancellation use the ordinary engine paths. An explicit transaction
+retains sequence locks after a failed statement under the existing lock contract.
+
+INFORMATION_SCHEMA.SEQUENCES is read-only and participates in the ordinary immutable
+catalog snapshot. Columns are SEQUENCE_CATALOG, SEQUENCE_SCHEMA, SEQUENCE_NAME,
+DATA_TYPE, NUMERIC_PRECISION, NUMERIC_PRECISION_RADIX, NUMERIC_SCALE, START_VALUE,
+MINIMUM_VALUE, MAXIMUM_VALUE, INCREMENT and CYCLE_OPTION. Precision is 16/32/64,
+radix 2, scale 0; option values are invariant text and CYCLE_OPTION is YES/NO.
+Identity-owned generators are not listed until SQ-S3. Existing result framing carries
+all DDL, functions, EXPLAIN and metadata over InMemory and TCP. LIMIT/OFFSET sequence calls evaluate once at execution before the input rows; EXPLAIN still has no effects. Detached evaluation without a statement scope refuses CS03076 (0A000). NEXT VALUE FOR is limited to row value positions: predicates, aggregate arguments, grouping keys, direct ordering expressions and row counts refuse CS03076 before allocation; ordering by a projected alias remains valid.
+Subqueries at any depth, derived tables, CTE definitions (including unused ones), and
+CASE/COALESCE/NULLIF arguments also refuse NEXT VALUE FOR with CS03076 during planning,
+following Microsoft's cited contract. Each remaining projected or VALUES row owns a
+disposable cache scope; nested executions save and restore the outer cache. INSERT SELECT
+assigns a distinct value to each row while sharing repeated standard occurrences within it.
+RETURNING lists containing sequence calls evaluate before the global apply gate, keeping
+durable reservation and setval commits outside that gate. Sequence effects remain nontransactional.
+
 ## Identity columns (#1123)
 
 `id BIGINT GENERATED ALWAYS AS IDENTITY` and `GENERATED BY DEFAULT AS IDENTITY`
@@ -74,9 +202,9 @@ column's COLUMN_DEFAULT is null.
 SERIAL, BIGSERIAL and SMALLSERIAL report `CK00001` suggesting GENERATED BY DEFAULT AS
 IDENTITY in type positions and when creating SQL or typed-schema domains of those names.
 Explicit INSERT aliases `AS overriding` and `AS "overriding"` remain valid;
-only a bare OVERRIDING token in clause position is refused. CREATE SEQUENCE, OVERRIDING ... VALUE, identity
+only a bare OVERRIDING token in clause position is refused. OVERRIDING ... VALUE, identity
 MINVALUE/MAXVALUE/CYCLE/CACHE, ALTER COLUMN RESTART/SET GENERATED, and generated stored
-expressions also report named `CK00001`. Sequences, restart, overriding and populated-table
+expressions also report named `CK00001`. Identity restart, overriding and populated-table
 identity backfill remain T2. INSERT ... RETURNING exposes the allocated identity value (#1117). Validation-only full-definition ALTER COLUMN refuses identity type changes,
 nullable definitions and DEFAULT; retaining the type and NOT NULL preserves generation. SET/DROP DEFAULT and DROP NOT NULL refuse identity columns with CS03025 (#1122).
 
@@ -349,7 +477,7 @@ a missing or replaced parent with CS04064 before rebinding or validating existin
 RESTART IDENTITY resets every identity in the resulting set to its declared START, including
 its declared INCREMENT. CONTINUE preserves the allocator's exact in-process next value and
 unused reservation block. Reopen still skips reserved values under the existing identity
-contract. General sequences remain outside this run.
+contract. Standalone sequences follow the separate sequence contract above.
 
 TRUNCATE inside BEGIN is refused with structured CS04066 (25001); prior transaction work
 and its active state remain usable. This deliberately differs from PostgreSQL's transaction-safe
@@ -422,7 +550,7 @@ src/backend/commands/tablecmds.c:2033-2090 and src/backend/catalog/heap.c:3701-3
 
 ## Statement matrix
 
-With INSERT ... ON CONFLICT (#1118), DML RETURNING (#1117), persisted CREATE/DROP VIEW (#1124), CREATE/DROP SCHEMA (#1030), set operations (#1114), quantified comparisons (#1718), UPDATE ... FROM / DELETE ... USING (#1714), TRUNCATE and CREATE TABLE AS (#1716), MERGE (#1715) and aggregate FILTER (#1720), the profile has **62 of 67 declared clauses** measured against the live SQL engine, including MERGE actions and RETURNING. WITH RECURSIVE (#1719, SQ-R1) adds one declared binding-only clause; recursive execution remains CK00001 until SQ-R2.
+With INSERT ... ON CONFLICT (#1118), DML RETURNING (#1117), persisted CREATE/DROP VIEW (#1124), CREATE/DROP SCHEMA (#1030), set operations (#1114), quantified comparisons (#1718), UPDATE ... FROM / DELETE ... USING (#1714), TRUNCATE and CREATE TABLE AS (#1716), MERGE (#1715), aggregate FILTER (#1720), grouping sets (#1720), and sequence DDL, NEXT VALUE FOR and DISCARD ALL (#1717), the profile has **67 of 72 declared clauses** measured against the live SQL engine, including MERGE actions and RETURNING. WITH RECURSIVE (#1719, SQ-R1) adds one declared binding-only clause; recursive execution remains CK00001 until SQ-R2.
 Phase 22 measured 33 of 49.
 The earlier 32/48 figure included `JOIN`, `GROUP BY`, `HAVING`, and `SUBQUERY`,
 removed in Phase 12e (#1019–#1021), plus a no-op `CAST` removed in Phase 13.
@@ -450,8 +578,11 @@ complete ISO SQL support; the boundaries below are part of the contract.
 
 | Statement | Status | Notes |
 |---|---|---|
+| `DISCARD ALL` | Supported, measured | Clear sequence state and restore the timeout values set before the session's first statement, outside an explicit transaction; pool return uses the existing Execute exchange. |
 | `SELECT` | Supported subset, measured | Stored tables, persisted read-only views, virtual system relations and aliased derived queries, with written-order N-way INNER/LEFT/RIGHT/FULL/CROSS joins and comma items over these source kinds; `DISTINCT`, projections and aliases, scalar expressions, `WHERE`, grouping, multi-expression `ORDER BY ASC/DESC` with per-key `NULLS FIRST`/`NULLS LAST`, nonnegative integer `LIMIT`/`OFFSET`, ISO `FETCH FIRST`/`NEXT`, and the SQL Server `TOP` lexical alias. `COUNT(*)`, `COUNT(expr)`, `SUM`, `AVG`, `MIN`, `MAX`, `STRING_AGG`, and `LISTAGG` execute in grouped and ungrouped queries, with DISTINCT/ALL and ordered inputs. See the aggregate contract below. `SELECT` without `FROM` uses one implicit row, including in CTE bodies. |
-| `EXPLAIN` | Supported extension, measured | SELECT, INSERT (including query sources), UPDATE, DELETE or MERGE returns the chosen plan as ordinary rows without executing it. Plain EXPLAIN remains nonexecuting. SELECT-only `EXPLAIN ANALYZE` executes the query and reports actual candidate work (#1522); data changes, including WITH data changes, normally fail `CS05057` (0A000), retaining the earlier `CS04021` read-only catalog refusal where applicable. DDL, transaction control and nested EXPLAIN report `CK00001`. Standalone ANALYZE remains unsupported. |
+| CREATE / ALTER / DROP SEQUENCE | Supported, measured | Standalone integer sequences, guarded DDL, all documented options, restart and list drops; see the sequence contract above. |
+| NEXT VALUE FOR | Supported, measured | Per-row sequence value sharing in SELECT, VALUES and SET; refused in RETURNING with CS03076, following Microsoft's OUTPUT exclusion. nextval/currval/setval/lastval remain volatile BIGINT functions. |
+| `EXPLAIN` | Supported extension, measured | SELECT, INSERT (including query sources), UPDATE, DELETE or MERGE returns the chosen plan as ordinary rows without executing it. Plain EXPLAIN remains nonexecuting. SELECT-only `EXPLAIN ANALYZE` executes the query and reports actual candidate work (#1522); data changes, including WITH data changes, normally fail `CS05057` (0A000), retaining the earlier `CS04021` read-only catalog refusal where applicable. Sequence DDL is also describable (#1717); other DDL, transaction control and nested EXPLAIN report `CK00001`. Standalone ANALYZE remains unsupported. |
 | `INSERT` / `VALUES` | Supported subset, measured | Optional column list, multi-row literal/scalar `VALUES` including whole-item `DEFAULT`, `INSERT ... DEFAULT VALUES` (one row of defaults, with an optional column list), and transactional `INSERT ... SELECT` with the same destination coercion, defaults, and constraints. `VALUES` expressions have no columns in scope: a column reference reports `CS01005` before anything executes (see [VALUES and counts have no column scope](#values-and-counts-have-no-column-scope-1165)). Subqueries inside `VALUES` are excluded; use `INSERT ... SELECT`. |
 | `INSERT ... ON CONFLICT` | Supported subset, measured | Column-set inference, ON CONSTRAINT unique-index names, untargeted DO NOTHING, and targeted DO UPDATE SET/WHERE with target and EXCLUDED scope; inserted/updated RETURNING rows and counts. See the upsert contract above. |
 | `UPDATE` | Supported | multi-column `SET`, including `c = DEFAULT`, and `WHERE` (including correlated and uncorrelated subqueries); qualified references in both use the target name or its alias, which hides the base name (PostgreSQL `parse_relation.c:3759`); hidden/unknown qualifiers fail with located `CS01015` before any write and leave an explicit transaction active; aggregates in SET and outside child queries in WHERE are rejected; aggregates inside WHERE subqueries execute (see [Grouping and aggregate functions](#grouping-and-aggregate-functions-1020)) |
@@ -2464,7 +2595,7 @@ and complete strengths follow PostgreSQL `src/backend/parser/gram.y:13119-13176,
 WITH RECURSIVE before MERGE is refused with CK00001 at RECURSIVE, even for acyclic
 definitions (PostgreSQL `src/backend/parser/parse_merge.c:124-129`). Plain WITH
 before MERGE remains supported and shares SELECT's CTE binding and materialization.
-These contextual exclusions do not change the 62/67 declared-clause count.
+These contextual exclusions do not change the 67/72 declared-clause count.
 
 References re-derived from the local PostgreSQL clone: src/backend/parser/parse_cte.c:
 345-400 (output checks and hints), 580-632 (unknown anchor output), 648-725 and 863-906
@@ -3944,7 +4075,7 @@ and carry an empty call list. Call vectors were introduced in format 10; the cur
 Format 28 adds the internal sequence definition and reservation records (#1717). Relation-name
 collisions involving an existing sequence use CS03070 (42P07), as sequence creation does for any
 occupied relation name; the diagnostic names the existing kind. Table-on-table collisions retain
-CS03049. Sequence SQL syntax remains SQ-S2 work.
+CS03049. Standalone sequence SQL syntax is delivered by SQ-S2; identity integration remains SQ-S3 work.
 
 Domains share E3's type namespace and coercion/check path. Columns inherit their domain's
 literal default unless they supply one; explicit DEFAULT NULL overrides inheritance. Domain

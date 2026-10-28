@@ -555,7 +555,23 @@ public sealed partial class SqlQueryParser
                 Location.Create(1, 1, pos, pos));
         }
 
-        return ParsePrimary(ref lexer);
+        var primary = ParsePrimary(ref lexer);
+        if (CurrentText(ref lexer) is ":" or "::")
+        {
+            var lookahead = lexer;
+            bool pair = CurrentText(ref lookahead) == "::";
+            Advance(ref lookahead);
+            if (!pair && CurrentText(ref lookahead) == ":") { pair = true; Advance(ref lookahead); }
+            if (pair && IsWord(ref lookahead, "REGCLASS"))
+            {
+                RequireSchemaClause(ref lexer, SqlClauses.Cast);
+                lexer = lookahead;
+                Advance(ref lexer);
+                return Nest(ref lexer, new SqlCastExpression(primary, "REGCLASS", null,
+                    Location.Create(1, 1, primary.Location!.Start, _lastTokenEnd)));
+            }
+        }
+        return primary;
     }
 
     /// <summary>
@@ -636,6 +652,8 @@ public sealed partial class SqlQueryParser
         {
             return MissingExpression(ref lexer, pos);
         }
+
+        if (IsWord(ref lexer, "NEXT") && StartsNextValue(lexer)) { return ParseNextValue(ref lexer, pos); }
 
         // Whole VALUES items and SET values are handled by ParseDefaultableValue. A bare
         // DEFAULT is never a scalar, including when a column has that quoted name

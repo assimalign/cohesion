@@ -14,6 +14,9 @@ internal static class SqlSystemViews
     [
         Iso("VIEWS", Text("TABLE_CATALOG"), Text("TABLE_SCHEMA"), Text("TABLE_NAME"), Text("VIEW_DEFINITION"), Text("CHECK_OPTION"), Text("IS_UPDATABLE")),
         Iso("TABLES", Text("TABLE_CATALOG"), Text("TABLE_SCHEMA"), Text("TABLE_NAME"), Text("TABLE_TYPE")),
+        Iso("SEQUENCES", Text("SEQUENCE_CATALOG"), Text("SEQUENCE_SCHEMA"), Text("SEQUENCE_NAME"), Text("DATA_TYPE"),
+            Number("NUMERIC_PRECISION"), Number("NUMERIC_PRECISION_RADIX"), Number("NUMERIC_SCALE"), Text("START_VALUE"),
+            Text("MINIMUM_VALUE"), Text("MAXIMUM_VALUE"), Text("INCREMENT"), Text("CYCLE_OPTION")),
         Iso("SCHEMATA", Text("CATALOG_NAME"), Text("SCHEMA_NAME"), Text("SCHEMA_OWNER", true),
             Text("DEFAULT_CHARACTER_SET_CATALOG", true), Text("DEFAULT_CHARACTER_SET_SCHEMA", true),
             Text("DEFAULT_CHARACTER_SET_NAME", true), Text("SQL_PATH", true)),
@@ -69,6 +72,14 @@ internal static class SqlSystemViews
     // session's transaction-mode check so every supported mutation has one diagnostic.
     internal static void EnsureReadOnly(SqlQueryExpression expression)
     {
+        if (expression is SqlDropSequenceExpression sequences)
+        {
+            foreach (var name in sequences.Sequences)
+            {
+                if (name.SchemaName is { } schema && SqlNamespaces.IsReserved(schema))
+                { throw new SqlPlanningException("CS04021", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SystemNamespaceReadOnly, schema), expression.Location); }
+            }
+        }
         string? namespaceTarget = expression switch
         {
             SqlCreateSchemaExpression create => create.Name,
@@ -76,6 +87,8 @@ internal static class SqlSystemViews
             SqlCreateTableExpression create => create.Table.SchemaName,
             SqlCreateTableAsExpression create => create.Table.SchemaName,
             SqlCreateViewExpression create => create.View.SchemaName,
+            SqlCreateSequenceExpression create => create.Sequence.SchemaName,
+            SqlAlterSequenceExpression alter => alter.Sequence.SchemaName,
             _ => null,
         };
         SqlTableReference? target = expression switch

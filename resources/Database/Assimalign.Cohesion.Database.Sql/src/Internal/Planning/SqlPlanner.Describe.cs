@@ -18,6 +18,7 @@ internal sealed partial class SqlPlanner
     // family and exercise this switch, so a new record cannot silently disappear from EXPLAIN.
     internal static string DescribeOperator(SqlPlan plan) => plan switch
     {
+        SqlSequenceScopePlan => "Sequences",
         SqlSelectPlan => "Select",
         SqlSetOperationPlan p => p.Operator.ToString(),
         SqlJoinPlan { Steps.Count: 0 } => "Select",
@@ -37,6 +38,9 @@ internal sealed partial class SqlPlanner
         SqlCreateTablePlan => "CreateTable",
         SqlCreateTableAsPlan => "CreateTableAs",
         SqlCreateSchemaPlan => "CreateSchema",
+        SqlSequencePlan { Expression: SqlCreateSequenceExpression } => "CreateSequence",
+        SqlSequencePlan { Expression: SqlAlterSequenceExpression } => "AlterSequence",
+        SqlSequencePlan => "DropSequence",
         SqlCreateViewPlan => "CreateView",
         SqlDropViewPlan => "DropView",
         SqlDropTablePlan => "DropTable",
@@ -53,6 +57,15 @@ internal sealed partial class SqlPlanner
         SqlDefinitionPlan => "Definition",
         _ => throw new UnreachableException(),
     };
+
+    private static string SequencePlanTarget(SqlQueryExpression expression)
+        => expression switch
+        {
+            SqlCreateSequenceExpression p => (p.Sequence.SchemaName ?? DefaultSchema) + "." + p.Sequence.TableName,
+            SqlAlterSequenceExpression p => (p.Sequence.SchemaName ?? DefaultSchema) + "." + p.Sequence.TableName,
+            SqlDropSequenceExpression p => string.Join(", ", p.Sequences.Select(s => (s.SchemaName ?? DefaultSchema) + "." + s.TableName)),
+            _ => "",
+        };
 
     internal static DatabasePlanDescription Describe(SqlPlan plan, IEnumerable<Diagnostic>? diagnostics = null, SqlStatementMetrics? metrics = null)
     {
@@ -76,6 +89,7 @@ internal sealed partial class SqlPlanner
                 SqlCreateTablePlan p => p.Schema + "." + p.Name,
                 SqlCreateTableAsPlan p => p.Schema + "." + p.Name,
                 SqlCreateSchemaPlan p => p.Name,
+                SqlSequencePlan p => SequencePlanTarget(p.Expression),
                 SqlDropTablePlan p => p.Schema + "." + p.Name,
                 SqlDropSchemaPlan p => p.Name,
                 SqlAddColumnPlan p => p.Schema + "." + p.Name,
@@ -111,8 +125,16 @@ internal sealed partial class SqlPlanner
                 SqlUpdatePlan p => DmlDetail($"assignments={p.Assignments.Count}; filter={p.Where is not null}", p.Returning),
                 SqlDeletePlan p => DmlDetail($"filter={p.Where is not null}", p.Returning),
                 SqlDefinitionPlan p => p.Expression.CommandType.ToString(),
+                SqlSequencePlan p => p.Expression switch
+                {
+                    SqlCreateSequenceExpression create => SqlExpressionRenderer.Render(create),
+                    SqlAlterSequenceExpression alter => SqlExpressionRenderer.Render(alter),
+                    SqlDropSequenceExpression drop => SqlExpressionRenderer.Render(drop),
+                    _ => null,
+                },
                 _ => null,
             };
+            if (current.ContainsSequences) { detail = (detail is null ? "" : detail + "; ") + "sequences=volatile; object_locks=transaction"; }
             string? indexName = current switch
             {
                 SqlCreateIndexPlan p => p.IndexName,
@@ -122,6 +144,9 @@ internal sealed partial class SqlPlanner
             Add(DescribeOperator(current), parent, target, indexName, detail, actual: metrics?.ActualCandidates(current));
             switch (current)
             {
+                case SqlSequenceScopePlan sequence:
+                    Visit(sequence.Input, id);
+                    break;
                 case SqlSetOperationPlan set:
                     foreach (var operand in set.Operands) { Visit(operand.Query, id); }
                     break;

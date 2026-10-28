@@ -397,7 +397,7 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
                             : transaction.State == Assimalign.Cohesion.Database.Transactions.TransactionState.Faulted
                                 ? ProtocolTransactionStatus.Failed : ProtocolTransactionStatus.Active;
                         await WriteFrameAsync(ProtocolMessageType.Ready,
-                            new ProtocolTransactionStatusMessage(status).Encode(), _lifetimeSource.Token).ConfigureAwait(false);
+                            new ProtocolTransactionStatusMessage(status, false).Encode(), _lifetimeSource.Token).ConfigureAwait(false);
                     }
                     break;
 

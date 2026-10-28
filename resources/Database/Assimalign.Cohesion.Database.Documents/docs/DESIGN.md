@@ -3261,3 +3261,10 @@ Protocol layout and version stay unchanged.
 
 Interleaved same-process Release comparisons did not reproduce the reported native-call
 slowdown; dispatch retains bounded per-statement allocation overhead.
+
+## Ready retained-state contract (#1717)
+
+Every negotiated statement Ready now carries transaction I/T/E followed by a zero retained-state
+byte. This model retains no state requiring a family reset and declares no reset statement. Pool
+return therefore sends only a needed ROLLBACK. The exact two-byte public record/payload replaces
+the former form without a compatibility reader; see Database.Protocol DESIGN.

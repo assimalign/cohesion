@@ -67,7 +67,6 @@ public sealed class SqlIdentityParserTests
     [InlineData("CREATE DOMAIN bigserial AS INT", "BIGSERIAL")]
     [InlineData("CREATE DOMAIN smallserial AS INT", "SMALLSERIAL")]
     [InlineData("CREATE DOMAIN \"serial\" AS INT", "SERIAL")]
-    [InlineData("CREATE SEQUENCE ids", "SEQUENCE")]
     [InlineData("INSERT INTO t OVERRIDING SYSTEM VALUE VALUES (1)", "OVERRIDING")]
     [InlineData("ALTER TABLE t ALTER COLUMN id RESTART", "RESTART")]
     [InlineData("ALTER TABLE t ALTER COLUMN id SET GENERATED ALWAYS", "SET GENERATED")]

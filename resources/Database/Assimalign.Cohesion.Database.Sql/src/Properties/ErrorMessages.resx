@@ -124,6 +124,15 @@
   <data name="SequenceNamespaceMissing" xml:space="preserve"><value>The sequence namespace does not exist.</value></data>
   <data name="SequenceRelationExists" xml:space="preserve"><value>{0} '{1}.{2}' already exists.</value></data>
   <data name="SequenceExhausted" xml:space="preserve"><value>Sequence '{0}.{1}' has exhausted its range.</value></data>
+  <data name="SequenceMissing" xml:space="preserve"><value>The sequence does not exist.</value></data>
+  <data name="SequenceCurrentUndefined" xml:space="preserve"><value>currval is not yet defined for this sequence in this session.</value></data>
+  <data name="SequenceLastUndefined" xml:space="preserve"><value>lastval is not yet defined in this session.</value></data>
+  <data name="SequenceArgumentsInvalid" xml:space="preserve"><value>Sequence calls require a sequence name or object id, an integer value and an optional Boolean is_called.</value></data>
+  <data name="SequencePositionUnsupported" xml:space="preserve"><value>NEXT VALUE FOR requires a row value position; subqueries, derived tables, CTE definitions, CASE/COALESCE/NULLIF arguments, predicates, grouping keys, ordering expressions, row counts and RETURNING lists are not supported.</value></data>
+  <data name="SequenceTransactionEnded" xml:space="preserve"><value>The transaction ended while acquiring sequence locks.</value></data>
+  <data name="SequencePlanningUnsupported" xml:space="preserve"><value>Sequence operations require an executing SQL statement scope.</value></data>
+  <data name="SequencePersistedUnsupported" xml:space="preserve"><value>Sequence operations in persisted DEFAULT, CHECK, view and SQL function expressions are not supported.</value></data>
+  <data name="SequenceSetvalBounds" xml:space="preserve"><value>The setval value is outside the sequence bounds.</value></data>
   <data name="SequenceChanged" xml:space="preserve"><value>The sequence was dropped or changed; resolve its current catalog description.</value></data>
   <data name="SequenceRecordTooLarge" xml:space="preserve"><value>The sequence definition exceeds the catalog record limit.</value></data>
   <data name="SequenceRecordMalformed" xml:space="preserve"><value>Sequence catalog metadata or reservation is malformed.</value></data>
@@ -922,5 +931,6 @@
   <data name="HandshakeDatabaseMissing" xml:space="preserve"><value>The server's engine has no database named '{0}'.</value></data>
   <data name="AuthenticationResponseExpected" xml:space="preserve"><value>Expected an authenticate response but received {0}.</value></data>
   <data name="PrincipalAuthenticationFailed" xml:space="preserve"><value>Authentication failed for principal '{0}'.</value></data>
+  <data name="DiscardInTransaction" xml:space="preserve"><value>DISCARD ALL cannot execute inside a transaction.</value></data>
   <data name="GroupingSetsNesting" xml:space="preserve"><value>GROUPING SETS cannot be nested inside ROLLUP or CUBE.</value></data>
 </root>

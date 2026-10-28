@@ -3608,3 +3608,10 @@ All reduce shape/type analysis shares a cancellable statement cap of 65,536 node
 closure steps (CG05026), independently of execution work and retained-memory budgets.
 The cap bounds temporary planning allocation, including nonexecuting EXPLAIN. Ordinary
 statements retain their planner object size and allocation path.
+
+## Ready retained-state contract (#1717)
+
+Every negotiated statement Ready now carries transaction I/T/E followed by a zero retained-state
+byte. This model retains no state requiring a family reset and declares no reset statement. Pool
+return therefore sends only a needed ROLLBACK. The exact two-byte public record/payload replaces
+the former form without a compatibility reader; see Database.Protocol DESIGN.

@@ -909,6 +909,7 @@ internal sealed partial class SqlSchemaProvisioner
         }
 
         var expression = SqlPersistedExpression.ParseDeclaration(declared, new SqlQueryParserOptions());
+        SqlSequenceExecution.RefusePersisted(expression);
         if (!SqlPersistedExpression.IsDefaultLiteral(expression))
         {
             throw new DatabaseException(ErrorMessages.ProvisionerCanonicalDefaultDatabase);

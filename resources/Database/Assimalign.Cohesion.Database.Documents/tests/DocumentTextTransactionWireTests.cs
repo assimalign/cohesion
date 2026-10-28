@@ -127,7 +127,7 @@ public sealed class DocumentTextTransactionWireTests
             if (!negotiated) { return; }
             var response = (await channel.Reader.ReadFrameAsync(token)).ShouldNotBeNull();
             response.Type.ShouldBe(ProtocolMessageType.Ready);
-            response.Payload.ToArray().ShouldBe([(byte)status]);
+            response.Payload.ToArray().ShouldBe([(byte)status, 0]);
         }
 
         async Task InvalidCommandAsync(DocumentProtocolOperation operation, string code)
