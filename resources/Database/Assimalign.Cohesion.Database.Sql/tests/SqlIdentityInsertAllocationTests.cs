@@ -14,8 +14,8 @@ public sealed class SqlIdentityInsertAllocationTests
     private readonly ITestOutputHelper _output;
     public SqlIdentityInsertAllocationTests(ITestOutputHelper output) { _output = output; }
 
-    [Fact(DisplayName = "Cohesion Test [Sql] - Identity insert: record warmed request allocations")]
-    public async Task ExecuteAsync_WarmedIdentityInsert_ShouldRecordAllocationCost()
+    [Fact(DisplayName = "Cohesion Test [Sql] - Identity insert: retain optimized warmed request allocations")]
+    public async Task ExecuteAsync_WarmedIdentityInsert_ShouldRetainAllocationBudget()
     {
         // Arrange
         await using var engine = SqlDatabaseEngine.Create("identity-insert-allocation", new());
@@ -32,8 +32,11 @@ public sealed class SqlIdentityInsertAllocationTests
             for (int i = 0; i < 64; i++) { await session.ExecuteAsync(request, CancellationToken.None); }
             minimum = Math.Min(minimum, GC.GetTotalAllocatedBytes(precise: true) - before);
         }
-        // Assert: correctness is covered by the identity suite; this requested measurement is diagnostic.
+        // Assert: the identity suite covers correctness; Release guards the optimized request cap.
         minimum.ShouldBeGreaterThan(0);
+#if !DEBUG
+        minimum.ShouldBeLessThanOrEqualTo(651_776L);
+#endif
         _output.WriteLine($"Warmed identity INSERT: minimum {minimum} B / 64 rows = {minimum / 64.0:F2} B/row (5 rounds).");
     }
 }

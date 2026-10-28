@@ -46,6 +46,9 @@ capture keeps its id unboxed without a list, and row-cache dictionaries are lazy
 keeps its own AsyncLocal execution scope, preserving isolation when application code captures an
 execution context beyond the statement. The session's currval state remains independent of that
 scope. All sequence grants remain owned by each statement's transaction.
+Release guards retain the exact pre-S3 ordinary INSERT, UPDATE, DELETE and MERGE byte budgets;
+owned identity insertion also has a warmed request cap. No-retirement snapshot checks remain
+allocation-free because captured visibility predicates live in a separate slow-path method.
 The retirement probe warms append and removal and takes the minimum of three equal-size
 100-owner rounds, excluding confirmed process-shared scratch-buffer misses. Both standalone
 and identity CACHE default to 1; the established durable reservation limit remains 32.
