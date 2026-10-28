@@ -71,7 +71,9 @@ Independent ordered sequence outputs project after Sort and before Limit, includ
 ordering and grouped/correlated paths; these independent outputs beyond OFFSET + LIMIT remain
 unevaluated. Every path projects qualifying OFFSET rows in their own row scopes and consumes
 their sequence values before discarding them; rows rejected by WHERE/HAVING
-consume no projection values. PostgreSQL
+consume no projection values. GROUPING SETS, ROLLUP, CUBE and GROUPING() use the same row scopes,
+HAVING-before-projection and ordered deferral rules as plain grouping, including empty sets.
+PostgreSQL
 src/backend/optimizer/plan/planner.c:2216-2225 places Limit above projection, and
 src/backend/executor/nodeLimit.c:91-116 pulls offset tuples through its child.
 Unordered grouped/correlated sequence inputs apply WHERE/HAVING, project each qualifying row

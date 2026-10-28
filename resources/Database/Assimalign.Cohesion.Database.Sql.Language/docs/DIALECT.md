@@ -68,6 +68,8 @@ source's evaluation order. Independent sequence outputs evaluate after ORDER BY 
 LIMIT/OFFSET, including ordering by another output's alias or ordinal; these independent outputs
 beyond OFFSET + LIMIT are not projected. Every path projects qualifying OFFSET rows in their own
 row scopes and consumes their sequence values before discarding them.
+GROUPING SETS, ROLLUP, CUBE and GROUPING() follow these rules for every completed group,
+including subtotals and empty groups, after HAVING.
 Rows rejected by WHERE/HAVING consume no projection values. With a fresh s, LIMIT 1 OFFSET 1
 returns nextval 2 and leaves 3 next. A sequence output used as a sort key evaluates before sorting
 (PostgreSQL src/backend/optimizer/plan/planner.c:2216-2225;

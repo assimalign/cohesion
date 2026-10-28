@@ -20,6 +20,8 @@ Sequence outputs independent of ordering evaluate after sorting and before pagin
 after OFFSET + LIMIT. Every path projects qualifying OFFSET rows in their own row scopes before
 discarding them, consuming their
 sequence values. Rows rejected by WHERE/HAVING consume no projection values.
+GROUPING SETS, ROLLUP, CUBE and GROUPING() follow the same sequence row scopes and windows,
+including subtotal and empty groups; HAVING runs before projection.
 Unordered grouped and correlated inputs apply WHERE/HAVING, project each qualifying row immediately,
 discard OFFSET rows and stop at LIMIT, without deferred
 input retention or charges. Bounded ordered top-N rows and keys share
