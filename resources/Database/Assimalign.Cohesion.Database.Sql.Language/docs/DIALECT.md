@@ -1011,7 +1011,7 @@ before it binds the statement or reads a row: projections, predicates, joins,
 grouping, ordering, `LIMIT`/`OFFSET`, subqueries, DML values and `CHECK`. The
 statement therefore fails the same way over an empty table as over a populated
 one; the evaluator used to find the name per row, so an empty table succeeded.
-Recognized window names that do not execute yet, such as `RANK` and `LEAD` (see
+Recognized value-window names that do not execute yet, such as `FIRST_VALUE` and `LAST_VALUE` (see
 [Builtin functions](#builtin-functions)), are not unknown. They reject at parse time
 with one named `CK00001` and are absent from the executable profile (#1103).
 
@@ -3828,7 +3828,8 @@ existing compiled schema with newly quoted function-named columns is a no-op.
 
 COUNT/SUM/AVG/MIN/MAX keep their existing signatures: COUNT(*)/COUNT(value),
 SUM(numeric), AVG(numeric), MIN(value), MAX(value). Only COUNT accepts `*`.
-Window functions remain recognized-unsupported (CK00001). LOG(base, x), trig,
+Window frames, aggregate windows and value-window functions remain deferred (CK00001).
+Ranking and LAG/LEAD require OVER and execute as described under Window stage. LOG(base, x), trig,
 regex functions, TO_CHAR and other unknown names remain CS01016.
 
 PostgreSQL implementation references (local reference clone):
@@ -3841,7 +3842,7 @@ No reference implementation code is copied.
 types, a result type, a volatility and a NULL rule. A name and parameter-type list is
 registered once, and a name is either scalar or aggregate. A built-in cannot be replaced: an
 overload of a built-in's name is accepted only for a number of arguments the built-in does
-not take (`upper(TEXT, BIGINT)` beside `UPPER(TEXT)`). The new T1 built-in names above, a name in the recognized-unsupported vocabulary (`RANK`, `LEAD`, ...), a type name (`INT`, `DATE`), `ANY`,
+not take (`upper(TEXT, BIGINT)` beside `UPPER(TEXT)`). The new T1 built-in names above, a window operator name (`RANK`, `LEAD`, ...), a name in the recognized-unsupported vocabulary (`FIRST_VALUE`, ...), a type name (`INT`, `DATE`), `ANY`,
 `SOME`, `LOCALTIME` and `LOCALTIMESTAMP` cannot be registered. An argument converts to its
 parameter's type along INT8 → INT16 → INT32 → INT64 → NUMERIC → DOUBLE, or REAL → DOUBLE;
 nothing converts from text, so a DATE or UUID parameter takes a column or a parameter of
@@ -4194,8 +4195,8 @@ SDK v8 artifacts do not carry scripts; extraction refuses Script calls with COHD
 ## Quoted calls (#1103 review)
 
 A quoted identifier followed by parentheses is a function call. Recognized unsupported
-built-ins use their lowercase lookup spelling for quoted names: `"rank"(id)` reports
-parse-time `CK00001`, while `"RANK"(id)` and `"Rank"(id)` are distinct names outside
+built-ins use their lowercase lookup spelling for quoted names: `"first_value"(id)` reports
+parse-time `CK00001`, while `"FIRST_VALUE"(id)` and `"First_Value"(id)` are distinct names outside
 that vocabulary. Unquoted names match the vocabulary without regard to case. Quoting a name
 without parentheses keeps it a column reference, including `"sqrt"` and `"current_date"`.
 Declared executable calls such as `"abs"(id)` remain executable. Unknown function names

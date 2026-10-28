@@ -49,7 +49,7 @@ input partitions. Window-free queries retain their existing plan and object layo
 Views render, compare and reload window expressions and named definitions through canonical SQL;
 costing and joined-DML source-intent traversal descend through the window input. Internal raw
 materialized rows preserve CHAR comparison identity until the final delivery boundary.
-no disk or wire version changes. Reference semantics were re-derived from PostgreSQL
+No disk or wire version changes. Reference semantics were re-derived from PostgreSQL
 src/backend/parser/parse_clause.c:2766-2902, parser/parse_agg.c:879-994,
 utils/adt/windowfuncs.c:139-154,264-285,334-369,416-482,534-575 and
 optimizer/plan/planner.c:6252-6395. Tests compare generated data with independent computations;
@@ -1585,8 +1585,8 @@ flowchart LR
   added through the same public `Add` (`SqlStandardLibrary.Register`). `Add` refuses
   (`ArgumentException`) a name that is not an identifier, a special form, a keyword, a type
   name (`INT`, `DATE`), a quantifier or date-time value word (`ANY`, `SOME`,
-  `LOCALTIMESTAMP`), or a name the dialect reserves for a built-in that does not execute
-  yet (`RANK`, `LEAD`, `NTILE`, ...), which would fail the application's build the day the
+  `LOCALTIMESTAMP`), or a name the dialect reserves for a window operator (`RANK`, `LEAD`, `NTILE`, ...)
+  or a deferred built-in (`FIRST_VALUE`, ...), which would fail the application's build the day the
   engine ships it; and (`InvalidOperationException`) a name and parameter-type list already
   registered, a built-in's included; an overload of a standard-library name that takes a
   number of arguments the built-in takes (decision 62: a built-in's parameters are

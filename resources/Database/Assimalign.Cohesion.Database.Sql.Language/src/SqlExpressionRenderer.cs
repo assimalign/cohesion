@@ -795,7 +795,7 @@ public static partial class SqlExpressionRenderer
     /// Spells a function name bare when the bare word parses as a call to it: a builtin
     /// function, or a plain identifier. <c>CAST</c> and every other keyword are delimited,
     /// because the bare keyword starts its own construct, and so are the window function names,
-    /// whose bare call the parser rejects.
+    /// whose ordinary call retains its quoted spelling; window expressions render OVER separately.
     /// </summary>
     private static string FunctionName(string name)
     {
