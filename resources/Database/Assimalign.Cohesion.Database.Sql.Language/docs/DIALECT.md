@@ -206,14 +206,19 @@ refused within an explicit transaction (CS04003).
 
 Omitted values and DEFAULT allocate through the shared sequence allocator. ALWAYS rejects
 supplied INSERT values unless OVERRIDING SYSTEM VALUE is present. OVERRIDING USER VALUE
-ignores supplied identity values for either generation mode. This applies to VALUES,
+binds and validates assignment coercion before ignoring supplied identity values for either
+generation mode. Invalid types, literal text and unknown functions still fail before identity
+allocation (PostgreSQL parser/analyze.c:1146, parse_target.c:582-594, parse_merge.c:352).
+Discarded typed numeric casts are not executed (parser/parse_coerce.c:233-249). This applies to VALUES,
 INSERT SELECT, ON CONFLICT and MERGE's INSERT action. SELECT sources materialize normally
 before defaults. UPDATE, ON CONFLICT UPDATE and MERGE UPDATE of ALWAYS identities accept
 only DEFAULT; BY DEFAULT also accepts ordinary explicit assignments. Identity allocation
 sets the session's currval and lastval, including populated-table ADD COLUMN backfill, and
 therefore participates in the existing pool-return DISCARD ALL reset. Rollback and failures
-leave gaps. Explicit assignments do not advance the allocator. DDL removing an identity during planning
-uses retryable CS04067 (40001).
+leave gaps. Explicit assignments do not advance the allocator. Exhaustion retains CS02002
+(22003). DDL removing an identity during planning uses retryable CS04067 (40001).
+UPDATE and DELETE take identity sequence grants only for explicit DEFAULT assignments or
+reachable ON DELETE SET DEFAULT actions; other identity-column changes allocate nothing.
 
 Adding a new identity column to a populated table rewrites currently live rows in physical
 owner-page/slot scan order. It uses recoverable prepared-owner storage and one atomic catalog
@@ -4187,7 +4192,7 @@ quoted names to match uppercase vocabulary entries.
 | `CS04021` | A mutation targets a read-only system relation | 25006 (read-only SQL transaction, analogous restriction) |
 | `CS02022` | A non-temporal CAST input or stored-column assignment has invalid text representation | 22P02 |
 | `CS03024` | A column that disallows NULL receives NULL, including DEFAULT with no declared default | 23502 (`not_null_violation`) |
-| `CS03025` | An identity definition, explicit assignment, ALTER, backfill or allocation violates its generation contract | 428C9 (`generated_always`) for explicit ALWAYS assignments; identity range and definition failures share the local code |
+| `CS03025` | An identity definition, explicit assignment, ALTER or backfill violates its generation contract | 428C9 (`generated_always`) for explicit ALWAYS assignments; allocator exhaustion retains CS02002 (22003) |
 | `CS01026` | Duplicate CTE name or missing relation matching a later sibling, before reading rows | 42712 / 42P01 |
 | `CS02003` | Set-operation column types cannot be matched by implicit conversion; names both types and the one-based position | 42804 |
 

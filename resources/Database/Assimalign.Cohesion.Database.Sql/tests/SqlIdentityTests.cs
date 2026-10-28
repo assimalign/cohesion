@@ -101,7 +101,7 @@ public sealed class SqlIdentityTests
         var failure = await Should.ThrowAsync<DatabaseException>(() => ExecAsync(session, "INSERT INTO ids (label) VALUES (1), (2), (3)"));
 
         // Assert
-        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS03025");
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS02002");
         long limit = increment < 0 ? type == "TINYINT" ? sbyte.MinValue : long.MinValue : start;
         failure.Message.ShouldBe($"Identity column 'id' has exhausted its {type} range ({limit}).");
         failure.InnerException.ShouldBeOfType<SqlCatalogException>().Message.ShouldBe(failure.Message);

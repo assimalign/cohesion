@@ -8,6 +8,7 @@
   <data name="MergeAggregate" xml:space="preserve"><value>Aggregates are not allowed in MERGE conditions or action values; use a source query.</value></data>
   <data name="MergeStar" xml:space="preserve"><value>A wildcard is not allowed in MERGE conditions or action values.</value></data>
   <data name="MergeAssignmentType" xml:space="preserve"><value>MERGE value of type {0} cannot be assigned to column '{1}' of type {2}.</value></data>
+  <data name="IdentityOverrideAssignmentType" xml:space="preserve"><value>Value of type {0} cannot be assigned to column '{1}' of type {2}.</value></data>
   <data name="MergeRepeatedRow" xml:space="preserve"><value>MERGE cannot affect a target row a second time.</value></data>
   <data name="UpsertTargetRequired" xml:space="preserve"><value>DO UPDATE requires a column or ON CONSTRAINT target.</value></data>
   <data name="UpsertConstraintNotUnique" xml:space="preserve"><value>The constraint has no associated unique index (CHECK and FOREIGN KEY cannot arbitrate).</value></data>

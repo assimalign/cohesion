@@ -7,12 +7,13 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// <summary>An <c>INSERT ... VALUES</c>: each row's values bound with no columns in scope.</summary>
 [global::System.Diagnostics.DebuggerDisplay("SqlInsertPlan")]
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlInsertPlan.DebugView))]
-internal sealed record SqlInsertPlan(
+internal record SqlInsertPlan(
     SqlCatalogTable Table,
     IReadOnlyList<int> TargetOrdinals,
     IReadOnlyList<SqlBoundExpression[]> Rows) : SqlPlan
 {
-    public Assimalign.Cohesion.Database.Sql.Language.SqlIdentityOverride Overriding { get; init; }
+    internal Assimalign.Cohesion.Database.Sql.Language.SqlIdentityOverride Overriding
+        => this is SqlIdentityInsertPlan identity ? identity.IdentityOverride : default;
     public IReadOnlyList<SqlProjection>? Returning { get; init; }
     public SqlOnConflictPlan? OnConflict { get; init; }
 

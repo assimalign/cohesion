@@ -27,15 +27,17 @@ internal sealed partial class SqlPlanner
         for (int i = 0; i < projections.Count; i++)
         {
             var target = table.Columns[targetOrdinals[i]];
-            if (target.Identity is not null && overriding == SqlIdentityOverride.User) { continue; }
             var sourceType = projections[i].Type;
             if (!CanAssignInsertType(sourceType, target.Type.Type))
             {
                 throw new SqlPlanningException("CS05013",
                     string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlPlannerPlanInsertSelectSqlPlanning, i + 1, sourceType, target.Name, target.Type.Type), source.Location);
             }
+            if (target.Identity is not null && overriding == SqlIdentityOverride.User)
+            { ValidateIgnoredIdentityInput(target, sourceType, projections[i].Value, projections[i].Expression); }
         }
-        return new SqlInsertSelectPlan(table, targetOrdinals, plan);
+        return overriding == SqlIdentityOverride.None ? new SqlInsertSelectPlan(table, targetOrdinals, plan)
+            : new SqlIdentityInsertSelectPlan(table, targetOrdinals, plan, overriding);
     }
 
     /// <summary>Reads projected types through the closed query plan family.</summary>

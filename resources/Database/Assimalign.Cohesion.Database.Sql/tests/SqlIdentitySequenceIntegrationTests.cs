@@ -95,7 +95,7 @@ public sealed partial class SqlIdentitySequenceIntegrationTests
         await Exec(session, "INSERT INTO t DEFAULT VALUES");
         await Exec(session, "ALTER TABLE t ALTER id SET CACHE 2 SET GENERATED ALWAYS");
         await Exec(session, "INSERT INTO t DEFAULT VALUES");
-        await Refuses(session, "INSERT INTO t DEFAULT VALUES", "CS03025");
+        await Refuses(session, "INSERT INTO t DEFAULT VALUES", "CS02002");
         (await Rows(session, "SELECT id FROM t ORDER BY id")).Select(row => row[0]).ShouldBe(new object?[] {40,42});
     }
 
@@ -110,7 +110,8 @@ public sealed partial class SqlIdentitySequenceIntegrationTests
         // Act: PostgreSQL rewriteHandler.c:930-972,1015-1027.
         await Exec(session, "INSERT INTO t OVERRIDING SYSTEM VALUE VALUES (20,1)");
         await Exec(session, "INSERT INTO t OVERRIDING USER VALUE VALUES (99,2)");
-        await Exec(session, "INSERT INTO t OVERRIDING USER VALUE SELECT DATE '2026-01-01',3");
+        await Refuses(session, "INSERT INTO t OVERRIDING USER VALUE SELECT DATE '2026-01-01',3", "CS05013");
+        await Exec(session, "INSERT INTO t OVERRIDING USER VALUE SELECT 100,3");
         await Exec(session, "INSERT INTO t OVERRIDING USER VALUE VALUES (101,2) ON CONFLICT(k) DO UPDATE SET id=DEFAULT");
         await Exec(session, "INSERT INTO t OVERRIDING SYSTEM VALUE VALUES (30,6)");
         await Exec(session, "INSERT INTO t OVERRIDING USER VALUE SELECT 101,3 UNION ALL SELECT 102,6 ON CONFLICT(k) DO UPDATE SET id=DEFAULT");

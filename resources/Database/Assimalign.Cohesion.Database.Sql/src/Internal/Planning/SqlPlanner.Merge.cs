@@ -18,13 +18,14 @@ internal sealed partial class SqlPlanner
     private SqlPlan PlanMerge(SqlMergeExpression merge)
     {
         var (table, evaluator, source, queries) = BindDmlSources(merge.Table, [merge.Source], merge.Condition, merge, merge: true);
-        RecordIdentityUsage(table);
         var associations = source!.Associations;
         if (merge.Actions.Count == 0) { throw Invalid(); }
         var terminal = new HashSet<SqlMergeMatchKind>();
         var actions = new List<SqlMergeActionPlan>();
         foreach (var clause in merge.Actions)
         {
+            if (clause.Action == SqlMergeAction.Insert) { RecordIdentityUsage(table); }
+            if (clause.Action == SqlMergeAction.Delete) { RecordReferentialSequenceUsage(table); }
             if (!Enum.IsDefined(clause.MatchKind) || !Enum.IsDefined(clause.Action) ||
                 clause.MatchKind == SqlMergeMatchKind.NotMatchedByTarget && clause.Action is SqlMergeAction.Update or SqlMergeAction.Delete ||
                 clause.MatchKind != SqlMergeMatchKind.NotMatchedByTarget && clause.Action == SqlMergeAction.Insert) { throw Invalid(); }
@@ -73,7 +74,13 @@ internal sealed partial class SqlPlanner
                 for (int i = 0; i < insertValues.Count; i++)
                 {
                     if (clause.Overriding == SqlIdentityOverride.None) { ValidateIdentity(ordinals[i], insertValues[i], update: false); }
-                    values.Add(clause.Overriding == SqlIdentityOverride.User && table.Columns[ordinals[i]].Identity is not null ? SqlBoundDefaultItem.Instance : BindValue(ordinals[i], insertValues[i], scope));
+                    var value = BindValue(ordinals[i], insertValues[i], scope);
+                    if (clause.Overriding == SqlIdentityOverride.User && table.Columns[ordinals[i]].Identity is not null && insertValues[i] is not SqlDefaultExpression)
+                    {
+                        ValidateIgnoredIdentityInput(table.Columns[ordinals[i]], scope.StaticTypeOf(insertValues[i]), value, insertValues[i]);
+                        value = SqlBoundDefaultItem.Instance;
+                    }
+                    values.Add(value);
                 }
             }
             actions.Add(new(clause.MatchKind, clause.Action, condition, assignments, ordinals, values, clause.IsDefaultValues, actionQueries));
@@ -141,7 +148,8 @@ internal sealed partial class SqlPlanner
 
         SqlBoundExpression BindValue(int ordinal, SqlExpression expression, SqlExpressionEvaluator scope)
         {
-            if (expression is SqlDefaultExpression) { return SqlBoundDefaultItem.Instance; }
+            if (expression is SqlDefaultExpression)
+            { RecordColumnSequenceUsage(table, table.Columns[ordinal]); return SqlBoundDefaultItem.Instance; }
             ValidateMergeValue(expression, scope);
             var type = scope.StaticTypeOf(expression);
             var target = table.Columns[ordinal];

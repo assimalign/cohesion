@@ -5,7 +5,12 @@
 Identity type changes preserve the live last value and called flag, including an uncalled
 RESTART or setval(false); SET START remains metadata until a restart. This follows PostgreSQL
 src/backend/parser/parse_utilcmd.c:3700-3727 and src/backend/commands/sequence.c:479-480,513-514.
-A disappearing identity incarnation uses retryable CS04067, never the persisted-metadata
+OVERRIDING USER binds and checks assignment conversion before discarding an identity input,
+including VALUES, SELECT and MERGE (PostgreSQL parser/analyze.c:1146, parse_target.c:582-594,
+parse_merge.c:352). Untyped string input conversion is checked at binding; discarded typed
+numeric casts are never executed (parser/parse_coerce.c:233-249). Allocator exhaustion retains
+CS02002 through the column context. A
+disappearing identity incarnation uses retryable CS04067, never the persisted-metadata
 corruption condition CS06061.
 
 Catalog load is read-only. It validates live/retired owner disjointness, every ownership edge,
@@ -33,6 +38,14 @@ Identity allocation uses the shared kind-19 allocator, sequence object grants an
 currval/lastval state. Its cached catalog allocation remains allocation-free. Direct identity facet lookup also
 avoids enumerator allocation. A single pinned sequence reuses its immutable singleton capture;
 sequence-free DDL skips owned-sequence bookkeeping. Release allocation caps remain unchanged.
+Ordinary INSERT plans keep their original fields; explicit overrides use sealed derived plans,
+and captured row scopes live only in sequence insertion buffers/iterators. Direct UPDATE defaults
+and reachable DELETE SET DEFAULT actions alone record implicit sequence use. Sequence-free catalogs
+skip FK discovery, and the presence of defaults is cached by DDL generation. A singleton identity
+capture keeps its id unboxed without a list, and row-cache dictionaries are lazy. Every invocation
+keeps its own AsyncLocal execution scope, preserving isolation when application code captures an
+execution context beyond the statement. The session's currval state remains independent of that
+scope. All sequence grants remain owned by each statement's transaction.
 The retirement probe warms append and removal and takes the minimum of three equal-size
 100-owner rounds, excluding confirmed process-shared scratch-buffer misses. Both standalone
 and identity CACHE default to 1; the established durable reservation limit remains 32.

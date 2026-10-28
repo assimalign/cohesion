@@ -984,7 +984,15 @@ public sealed class SqlLanguageConformanceTests
             async (session, _) => { await ExecuteAsync(session, "INSERT INTO ids DEFAULT VALUES;"); await ExpectRowsAsync(session, "SELECT id FROM ids;", [[1]]); }),
         [SqlClauses.Overriding] = new("INSERT INTO ids OVERRIDING SYSTEM VALUE VALUES(9);", ["CREATE TABLE ids(id INT GENERATED ALWAYS AS IDENTITY);"],
             expression => expression is SqlInsertExpression { Overriding: SqlIdentityOverride.System },
-            async (session, _) => { await ExpectRowsAsync(session, "SELECT id FROM ids;", [[9]]); }),
+            async (session, _) =>
+            {
+                await ExpectRowsAsync(session, "SELECT id FROM ids;", [[9]]);
+                var error = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session,
+                    "INSERT INTO ids OVERRIDING USER VALUE SELECT DATE '2026-01-01';"));
+                error.Diagnostics[0].Code.ShouldBe("CS05013");
+                await ExecuteAsync(session, "INSERT INTO ids OVERRIDING USER VALUE VALUES(99);");
+                await ExpectRowsAsync(session, "SELECT id FROM ids ORDER BY id;", [[1], [9]]);
+            }),
         [SqlClauses.OwnedBy] = new("CREATE SEQUENCE owned OWNED BY ids.id;", ["CREATE TABLE ids(id INT);"],
             expression => expression is SqlCreateSequenceExpression,
             async (session, _) => { await ExecuteAsync(session, "DROP TABLE ids;"); await ExpectRowsAsync(session, "SELECT SEQUENCE_NAME FROM INFORMATION_SCHEMA.SEQUENCES;", []); }),

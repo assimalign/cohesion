@@ -810,13 +810,13 @@ internal sealed partial class SqlPlanner
         if (insert.SelectSource is not null)
         {
             var plan = PlanInsertSelect(table, targetOrdinals, insert.SelectSource, insert.Overriding);
-            return plan with { Returning = returning, OnConflict = onConflict, Overriding = insert.Overriding };
+            return plan with { Returning = returning, OnConflict = onConflict };
         }
 
         if (insert.IsDefaultValues)
         {
             // Validate any column list above, then omit every column through the shared INSERT path.
-            return new SqlInsertPlan(table, [], [Array.Empty<SqlBoundExpression>()]) { Returning = returning, OnConflict = onConflict, Overriding = insert.Overriding };
+            return InsertPlan(table, [], [Array.Empty<SqlBoundExpression>()], insert.Overriding, returning, onConflict);
         }
 
         foreach (var row in insert.Values!)
@@ -851,14 +851,20 @@ internal sealed partial class SqlPlanner
             var bound = new SqlBoundExpression[row.Count];
             for (int ordinal = 0; ordinal < bound.Length; ordinal++)
             {
-                bound[ordinal] = row[ordinal] is SqlDefaultExpression || insert.Overriding == SqlIdentityOverride.User && table.Columns[targetOrdinals[ordinal]].Identity is not null
-                    ? SqlBoundDefaultItem.Instance : ScopelessEvaluator.Bind(row[ordinal]);
+                var expression = row[ordinal];
+                var value = expression is SqlDefaultExpression ? SqlBoundDefaultItem.Instance : ScopelessEvaluator.Bind(expression);
+                if (insert.Overriding == SqlIdentityOverride.User && table.Columns[targetOrdinals[ordinal]].Identity is not null && expression is not SqlDefaultExpression)
+                {
+                    ValidateIgnoredIdentityInput(table.Columns[targetOrdinals[ordinal]], ScopelessEvaluator.StaticTypeOf(expression), value, expression);
+                    value = SqlBoundDefaultItem.Instance;
+                }
+                bound[ordinal] = value;
             }
 
             rows[index] = bound;
         }
 
-        return new SqlInsertPlan(table, targetOrdinals, rows) { Returning = returning, OnConflict = onConflict, Overriding = insert.Overriding };
+        return InsertPlan(table, targetOrdinals, rows, insert.Overriding, returning, onConflict);
     }
 
     /// <summary>
@@ -969,6 +975,7 @@ internal sealed partial class SqlPlanner
             }
             if (assignment.Value is SqlDefaultExpression)
             {
+                RecordColumnSequenceUsage(table, table.Columns[ordinal]);
                 assignments.Add((ordinal, SqlBoundDefaultItem.Instance));
                 continue;
             }
@@ -1004,6 +1011,7 @@ internal sealed partial class SqlPlanner
     private SqlPlan PlanDelete(SqlDeleteExpression delete)
     {
         var (table, evaluator, source, queries) = BindDmlSources(delete.Table, delete.Using, delete.Where, delete);
+        RecordReferentialSequenceUsage(table);
 
         SqlBoundExpression? where = null;
         if (delete.Where is not null)

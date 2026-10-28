@@ -12,6 +12,33 @@ namespace Assimalign.Cohesion.Database.Sql.Catalog;
 public sealed partial class SqlCatalog
 {
     private readonly Dictionary<ulong, SqlCatalogSequence> _identitySequences = new();
+    private ulong _sequenceDefaultGeneration = ulong.MaxValue;
+    private bool _hasSequenceDefaults;
+
+    internal bool HasSequenceDefaults
+    {
+        get
+        {
+            lock (_sync)
+            {
+                ThrowIfOffline();
+                if (_sequences.Count == 0) { return false; }
+                if (_sequenceDefaultGeneration == _ddlGeneration) { return _hasSequenceDefaults; }
+                _hasSequenceDefaults = false;
+                foreach (var slot in _tables.Values)
+                {
+                    foreach (var column in slot.Table.Columns)
+                    {
+                        if (column.Identity is not null || column.DefaultFunctionCalls.Any(static call => call.StartsWith("S:", StringComparison.Ordinal)))
+                        { _hasSequenceDefaults = true; break; }
+                    }
+                    if (_hasSequenceDefaults) { break; }
+                }
+                _sequenceDefaultGeneration = _ddlGeneration;
+                return _hasSequenceDefaults;
+            }
+        }
+    }
     /// <summary>Allocates through the column's owned sequence.</summary>
     /// <param name="table">The current table description.</param>
     /// <returns>The next generated value.</returns>

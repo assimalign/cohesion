@@ -27,7 +27,8 @@ internal sealed partial class SqlPlanExecutor
             throw new SqlExecutionException(SqlExecutionException.InternalErrorCode,
                 string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.InsertSelectWidth, source.Columns.Count, plan.TargetOrdinals.Count));
         }
-        var rows = new List<object?[]>();
+        List<object?[]> rows = SqlSequenceExecution.Current is not null || plan.Overriding != Language.SqlIdentityOverride.None
+            ? new SqlSequenceInsertValues(0, plan.Overriding) : new List<object?[]>();
         await foreach (var sourceRow in source.GetRowsAsync(cancellationToken).ConfigureAwait(false))
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -39,7 +40,7 @@ internal sealed partial class SqlPlanExecutor
             rows.Add(row);
         }
         return await ExecuteInsertRowsAsync(plan.Table, plan.TargetOrdinals, rows, statement, cancellationToken, plan.Returning,
-            onConflict: plan.OnConflict, overriding: plan.Overriding).ConfigureAwait(false);
+            onConflict: plan.OnConflict).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -50,7 +51,7 @@ internal sealed partial class SqlPlanExecutor
     private async Task<DatabaseResult> ExecuteInsertRowsAsync(SqlCatalogTable table, IReadOnlyList<int> targetOrdinals,
         IReadOnlyList<object?[]> sourceRows, SqlStatementContext statement, CancellationToken cancellationToken,
         IReadOnlyList<SqlProjection>? returning = null, IReadOnlyList<SqlBoundExpression[]>? valueRows = null,
-        SqlOnConflictPlan? onConflict = null, Assimalign.Cohesion.Database.Sql.Language.SqlIdentityOverride overriding = default, IReadOnlyList<IReadOnlyDictionary<ulong, long>?>? sequenceRows = null)
+        SqlOnConflictPlan? onConflict = null)
     {
         await AcquireReferenceIntentLocksAsync(table, statement, cancellationToken, incoming: onConflict?.DoUpdate == true).ConfigureAwait(false);
         var indexes = GetLiveIndexes(table, statement);
@@ -67,7 +68,7 @@ internal sealed partial class SqlPlanExecutor
                 if (table.Columns[ordinal].Identity is null && defaults[ordinal] is not SqlBoundDefault { RequiresSourceOrder: true }) { continue; }
                 int target = -1;
                 for (int i = 0; i < targetOrdinals.Count; i++) { if (targetOrdinals[i] == ordinal) { target = i; break; } }
-                orderedDefaults = target < 0 || table.Columns[ordinal].Identity is not null && overriding == Assimalign.Cohesion.Database.Sql.Language.SqlIdentityOverride.User;
+                orderedDefaults = target < 0 || table.Columns[ordinal].Identity is not null && sourceRows is SqlSequenceInsertValues { Overriding: Language.SqlIdentityOverride.User };
                 if (!orderedDefaults && valueRows is not null)
                 {
                     for (int i = 0; i < valueRows.Count; i++)
@@ -92,18 +93,18 @@ internal sealed partial class SqlPlanExecutor
                 if (targetOrdinals[index] == identityOrdinal) { identityTargetIndex = index; break; }
             }
         }
+        var generated = SqlSequenceInsertValues.ScopeRows(sourceRows, BuildRows(), table);
         if (onConflict is not null)
         {
-            return await ExecuteUpsertRowsAsync(table, indexes, BuildRows(), onConflict, returning, statement,
+            return await ExecuteUpsertRowsAsync(table, indexes, generated, onConflict, returning, statement,
                 orderedDefaults, cancellationToken).ConfigureAwait(false);
         }
-        rows.AddRange(BuildRows().Select(values => (SqlRowCodec.Encode(table, values, statement.Transaction.Sequence), values)));
+        rows.AddRange(generated.Select(values => (SqlRowCodec.Encode(table, values, statement.Transaction.Sequence), values)));
 
         IEnumerable<object?[]> BuildRows()
         {
             for (int rowIndex = 0; rowIndex < sourceRows.Count; rowIndex++)
             {
-                using var sequenceRow = SqlSequenceExecution.Current?.BeginRow(sequenceRows?[rowIndex]);
                 var sourceRow = sourceRows[rowIndex];
                 cancellationToken.ThrowIfCancellationRequested();
                 if (sourceRow.Length != targetOrdinals.Count)
@@ -116,7 +117,7 @@ internal sealed partial class SqlPlanExecutor
                 // Reserve a requested identity before any column's NOT NULL/default validation,
                 // including when ALTER appended it after another required column. A failed row
                 // consumes its generated value; explicit BY DEFAULT assignments never allocate.
-                if (identityOrdinal >= 0 && (identityTargetIndex < 0 || overriding == Assimalign.Cohesion.Database.Sql.Language.SqlIdentityOverride.User || valueRows is not null &&
+                if (identityOrdinal >= 0 && (identityTargetIndex < 0 || sourceRows is SqlSequenceInsertValues { Overriding: Language.SqlIdentityOverride.User } || valueRows is not null &&
                     valueRows[rowIndex][identityTargetIndex].Kind == SqlBoundExpressionKind.DefaultItem))
                 {
                     values[identityOrdinal] = ResolveColumnDefault(table, identityOrdinal, defaults[identityOrdinal], statement, cancellationToken);
@@ -129,8 +130,8 @@ internal sealed partial class SqlPlanExecutor
                         continue;
                     }
                     int ordinal = targetOrdinals[i];
-                    if (table.Columns[ordinal].Identity is not null && overriding == Assimalign.Cohesion.Database.Sql.Language.SqlIdentityOverride.User) { continue; }
-                    if (table.Columns[ordinal].Identity is { IsAlways: true } && overriding != Assimalign.Cohesion.Database.Sql.Language.SqlIdentityOverride.System)
+                    if (table.Columns[ordinal].Identity is not null && sourceRows is SqlSequenceInsertValues { Overriding: Language.SqlIdentityOverride.User }) { continue; }
+                    if (table.Columns[ordinal].Identity is { IsAlways: true } && sourceRows is not SqlSequenceInsertValues { Overriding: Language.SqlIdentityOverride.System })
                     {
                         throw SqlPlanningException.IdentityViolation(table.Columns[ordinal].Name, ErrorMessages.IdentityInsertForbidden);
                     }
@@ -213,7 +214,7 @@ internal sealed partial class SqlPlanExecutor
             }
             catch (SqlCatalogException failure)
             {
-                throw new SqlPlanningException("CS03025", failure.Message, innerException: failure);
+                throw new SqlPlanningException(failure.Diagnostics[0].Code!, failure.Message, innerException: failure);
             }
         }
         if (boundDefault is null)

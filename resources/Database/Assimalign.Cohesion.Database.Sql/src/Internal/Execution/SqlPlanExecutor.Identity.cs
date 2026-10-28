@@ -13,6 +13,36 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 internal sealed partial class SqlPlanExecutor
 {
+    private async Task<DatabaseResult> ExecuteSequenceInsertAsync(SqlInsertPlan plan, SqlStatementContext statement,
+        CancellationToken cancellationToken)
+    {
+        var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken);
+        List<object?[]> values = plan.Overriding == Language.SqlIdentityOverride.None ? new List<object?[]>(plan.Rows.Count)
+            : new SqlSequenceInsertValues(plan.Rows.Count, plan.Overriding);
+        foreach (var expressions in plan.Rows)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            using var scope = SqlSequenceExecution.Current?.BeginRow();
+            var row = new object?[expressions.Length];
+            for (int i = 0; i < row.Length; i++)
+            {
+                if (expressions[i].Kind != SqlBoundExpressionKind.DefaultItem)
+                { row[i] = evaluator.Evaluate(expressions[i], Array.Empty<object?>(), copySharedBinary: true); }
+            }
+            var captured = SqlSequenceExecution.Current?.CaptureRow();
+            if (captured is not null && values is not SqlSequenceInsertValues)
+            {
+                var scoped = new SqlSequenceInsertValues(plan.Rows.Count, plan.Overriding);
+                scoped.AddRange(values);
+                values = scoped;
+            }
+            if (values is SqlSequenceInsertValues sequenceValues) { sequenceValues.Add(row, captured); }
+            else { values.Add(row); }
+        }
+        return await ExecuteInsertRowsAsync(plan.Table, plan.TargetOrdinals, values, statement, cancellationToken,
+            plan.Returning, plan.Rows, plan.OnConflict).ConfigureAwait(false);
+    }
+
     private void VerifyOwnedSequences(IEnumerable<SqlCatalogTable> tables, IReadOnlySet<ulong> grants, SqlStatementContext statement)
     {
         SqlSequenceExecution.CheckGrant(statement, statement.DdlLockOwner);

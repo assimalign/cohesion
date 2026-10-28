@@ -22,13 +22,14 @@ internal sealed class SqlSequenceExecution : IDisposable
     private readonly SqlSequenceSessionState _session;
     private readonly IReadOnlyList<SqlCatalogSequence> _sequences;
     private readonly SqlSequenceExecution? _previous;
-    private Dictionary<ulong, long> _rowValues = new();
+    private Dictionary<ulong, long>? _rowValues;
     private int _rowDepth;
     private object? _lastName;
     private SqlCatalogSequence? _lastResolved;
     private readonly CancellationToken _cancellationToken;
 
-    private SqlSequenceExecution(SqlCatalog catalog, SqlSequenceSessionState session, IReadOnlyList<SqlCatalogSequence> sequences, CancellationToken cancellationToken)
+    private SqlSequenceExecution(SqlCatalog catalog, SqlSequenceSessionState session,
+        IReadOnlyList<SqlCatalogSequence> sequences, CancellationToken cancellationToken)
     { _catalog = catalog; _session = session; _sequences = sequences; _previous = Current; _cancellationToken = cancellationToken; }
 
     internal static SqlSequenceExecution? Current => _current.Value;
@@ -58,7 +59,7 @@ internal sealed class SqlSequenceExecution : IDisposable
     {
         // Identity/default binding pins an object id. One immutable incarnation needs no
         // temporary directory, LINQ ordering buffers or copied singleton collection.
-        if (usage is { DynamicNames: false } && usage.Names.Count == 1 && usage.Names[0] is ulong id)
+        if (usage is { DynamicNames: false } && usage.TrySingleIdentity(out ulong id))
         {
             var sequence = catalog.FindSequence(id);
             if (sequence is not null)
@@ -106,14 +107,15 @@ internal sealed class SqlSequenceExecution : IDisposable
     // AsyncLocal changes made inside OpenAsync do not flow back to its caller.
     internal void Enter() => _current.Value = this;
     public void Dispose() => _current.Value = _previous;
-    internal IReadOnlyDictionary<ulong, long>? CaptureRow() => _rowValues.Count == 0 ? null : new Dictionary<ulong, long>(_rowValues);
+    internal IReadOnlyDictionary<ulong, long>? CaptureRow() => _rowValues is not { Count: > 0 } ? null : new Dictionary<ulong, long>(_rowValues);
 
     internal RowScope BeginRow(IReadOnlyDictionary<ulong, long>? seed = null)
     {
         var previous = _rowValues;
-        if (_rowDepth++ == 0) { _rowValues.Clear(); }
-        else { _rowValues = new(); }
-        if (seed is not null) { foreach (var pair in seed) { _rowValues[pair.Key] = pair.Value; } }
+        if (_rowDepth++ == 0) { _rowValues?.Clear(); }
+        else { _rowValues = null; }
+        if (seed is not null)
+        { _rowValues ??= new(); foreach (var pair in seed) { _rowValues[pair.Key] = pair.Value; } }
         return new RowScope(this, previous);
     }
 
@@ -122,10 +124,14 @@ internal sealed class SqlSequenceExecution : IDisposable
     internal readonly struct RowScope : IDisposable
     {
         private readonly SqlSequenceExecution _execution;
-        private readonly Dictionary<ulong, long> _previous;
-        internal RowScope(SqlSequenceExecution execution, Dictionary<ulong, long> previous)
+        private readonly Dictionary<ulong, long>? _previous;
+        internal RowScope(SqlSequenceExecution execution, Dictionary<ulong, long>? previous)
         { _execution = execution; _previous = previous; }
-        public void Dispose() { _execution._rowValues = _previous; _execution._rowDepth--; }
+        public void Dispose()
+        {
+            if (_execution._rowDepth > 1) { _execution._rowValues = _previous; }
+            _execution._rowDepth--;
+        }
         private sealed class DebugView { public DebugView(RowScope scope) { _ = scope; } }
     }
 
@@ -159,12 +165,12 @@ internal sealed class SqlSequenceExecution : IDisposable
         }
         if (operation == "NEXT VALUE FOR")
         {
-            if (_rowValues.TryGetValue(sequence.ObjectId, out long existing)) { return existing; }
+            if (_rowValues?.TryGetValue(sequence.ObjectId, out long existing) == true) { return existing; }
         }
         long next = _catalog.AllocateSequence(sequence.ObjectId);
         _session.Values[sequence.ObjectId] = next;
         _session.Last = sequence.ObjectId;
-        if (operation == "NEXT VALUE FOR") { _rowValues[sequence.ObjectId] = next; }
+        if (operation == "NEXT VALUE FOR") { (_rowValues ??= new())[sequence.ObjectId] = next; }
         return next;
     }
 

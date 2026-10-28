@@ -600,18 +600,21 @@ internal sealed partial class SqlPlanExecutor
     //   deleter, and every effect is recorded in the version-store ledger so
     //   rollback can undo it logically.
 
-    private async Task<DatabaseResult> ExecuteInsertAsync(SqlInsertPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
+    private Task<DatabaseResult> ExecuteInsertAsync(SqlInsertPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
+        => SqlSequenceExecution.Current is not null || plan.Overriding != Language.SqlIdentityOverride.None
+            ? ExecuteSequenceInsertAsync(plan, statement, cancellationToken)
+            : ExecutePlainInsertAsync(plan, statement, cancellationToken);
+
+    private async Task<DatabaseResult> ExecutePlainInsertAsync(SqlInsertPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
         // A VALUES row has no columns in scope: the planner rejects column references (#1165) and
         // binds the values with no columns in scope, so no reference can resolve to an ordinal the
         // empty row they are evaluated against does not have.
         var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken);
         var values = new List<object?[]>(plan.Rows.Count);
-        List<IReadOnlyDictionary<ulong, long>?>? sequenceRows = null;
         foreach (var valueRow in plan.Rows)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            using var rowScope = SqlSequenceExecution.Current?.BeginRow();
             var row = new object?[valueRow.Length];
             for (int i = 0; i < row.Length; i++)
             {
@@ -620,17 +623,9 @@ internal sealed partial class SqlPlanExecutor
                     row[i] = evaluator.Evaluate(valueRow[i], Array.Empty<object?>(), copySharedBinary: true);
                 }
             }
-            var captured = SqlSequenceExecution.Current?.CaptureRow();
-            if (captured is not null)
-            {
-                sequenceRows ??= new(plan.Rows.Count);
-                while (sequenceRows.Count < values.Count) { sequenceRows.Add(null); }
-                sequenceRows.Add(captured);
-            }
-            else { sequenceRows?.Add(null); }
             values.Add(row);
         }
-        return await ExecuteInsertRowsAsync(plan.Table, plan.TargetOrdinals, values, statement, cancellationToken, plan.Returning, plan.Rows, plan.OnConflict, plan.Overriding, sequenceRows).ConfigureAwait(false);
+        return await ExecuteInsertRowsAsync(plan.Table, plan.TargetOrdinals, values, statement, cancellationToken, plan.Returning, plan.Rows, plan.OnConflict).ConfigureAwait(false);
     }
 
     private Task<DatabaseResult> ExecuteUpdateAsync(SqlUpdatePlan plan, SqlStatementContext statement, CancellationToken cancellationToken)

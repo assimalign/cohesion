@@ -78,11 +78,16 @@ Sequence session reset (#1717) reuses CS04070 for DISCARD inside BEGIN and CK070
 two-byte statement Ready (I/T/E plus 0/1 retained state). Host timeout reset values survive DISCARD;
 clean Ready certification avoids a reset exchange. No new diagnostic identity is allocated.
 
-Identity catalog corrections (#1717) preserve CS04067 for an identity incarnation removed
-during planning. Admission is read-only even on malformed images, including live/retired owner
-collisions under their existing refusal. CS05067 also bounds rewrite/backfill chunk rows and
-conversion buffers; refusal keeps the old table and releases charges. Preserved restart positions,
-hidden names/snapshots and precision corrections add no diagnostic, persisted format or wire change.
+Identity integration corrections (#1717) preserve CS02002 for allocator exhaustion, including
+column-context wrapping, and CS04067 for an identity incarnation removed during planning.
+CS06061 remains a persisted sequence metadata failure; live/retired owner collisions retain
+their existing catalog refusal, and admission is read-only even on malformed images. OVERRIDING
+USER performs binding and assignment checks before discarding an input, retaining their existing
+diagnostics; typed numeric casts that are discarded are not executed.
+CS05067 also bounds rewrite/backfill chunk rows and conversion buffers; refusal leaves the old
+table published and releases retained charges. Hidden sequence names/snapshots, conditional DML
+grants, allocation reductions and metadata precision corrections add no diagnostic, persisted
+format or wire change.
 
 SQL UPDATE ... FROM and DELETE ... USING execute (#1714). Multiple source associations for
 one UPDATE target report CS05068 before any mutation; DELETE deduplicates physical targets.
