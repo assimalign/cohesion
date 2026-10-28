@@ -128,7 +128,7 @@ structured-carrier messages remain unprefixed.
 | New (#1719, SQ-R1) | CS01061 | Binding/names — Aggregate at the query level containing a recursive reference (42P19) |
 | New (#1720, SQ-H2) | CS01062 | Binding/grouping — GROUPING argument is not a grouping expression of the associated query level (42803) |
 | New (#1720, SQ-H2) | CS01063 | Binding/grouping — GROUPING requires 1–31 non-star expression arguments (54023) |
-| New (#1526, SQ-W1) | CS01064 | Duplicate WINDOW name (42710) |
+| New (#1526, SQ-W1) | CS01064 | Duplicate WINDOW name (42P20) |
 | New (#1526, SQ-W1) | CS01065 | Unknown window or forward WINDOW reference (42704) |
 | New (#1526, SQ-W1) | CS01066 | Copied window overrides PARTITION BY or ORDER BY (42P20) |
 | COHSQLE001 | CS02001 | Values/types |
