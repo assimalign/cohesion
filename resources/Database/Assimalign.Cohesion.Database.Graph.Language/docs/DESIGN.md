@@ -806,6 +806,8 @@ parse, then filter-only syntax; parenthesized label unions stay within the filte
 The source must be a list (not a string, map or binary scalar). Function-spelled iterator names
 remain legal. Aggregates may supply the source list; an aggregate in WHERE or projection is
 CG05024, including under EXPLAIN. All names and parameters validate even for empty/NULL sources.
+Known non-Boolean filter types fail planning with CG02013 independently of source cardinality
+or NULL; unknown types retain the runtime Boolean/NULL check.
 
 `list[from..to]`, `list[from..]` and `list[..to]` use an inclusive start and
 exclusive end. Omitted bounds mean zero/list length. Negative bounds count from the end;
@@ -840,7 +842,7 @@ Reference evidence (local Neo4j clone, paths relative to its root):
 
 - `community/cypher/front-end/parser/v25/parser/src/main/antlr4/org/neo4j/cypher/internal/parser/v25/Cypher25Parser.g4:714-716`: optional filter/projection grammar; `community/cypher/front-end/parser/parser-test/src/test/scala/org/neo4j/cypher/internal/ast/factory/expression/LabelExpressionsParserTest.scala:741-752,780-824,880-958` fixes the label/projection bar ambiguity.
 - `community/cypher/interpreted-runtime/src/main/scala/org/neo4j/cypher/internal/runtime/interpreted/commands/expressions/ExtractFunction.scala:35-52` and `FilterFunction.scala:36-52`: ordered element evaluation, TRUE-only filtering and NULL-in/NULL-out inheritance.
-- `community/cypher/front-end/ast/src/main/scala/org/neo4j/cypher/internal/ast/semantics/SemanticExpressionCheck.scala:1099-1117,1265-1281`: source checking, scoped iterator declaration and projected element type.
+- `community/cypher/front-end/ast/src/main/scala/org/neo4j/cypher/internal/ast/semantics/SemanticExpressionCheck.scala:1099-1117,1265-1285`: source checking, scoped iterator declaration and projected element type.
 - `community/cypher/front-end/ast/src/main/scala/org/neo4j/cypher/internal/ast/semantics/SemanticExpressionCheck.scala:726-737` and `community/cypher/front-end/ast-test/src/test/scala/org/neo4j/cypher/internal/ast/semantics/ListSliceTest.scala:51-82`: at least one bound and INTEGER bound types, independently of runtime conversion.
 - `community/cypher/interpreted-runtime/src/main/scala/org/neo4j/cypher/internal/runtime/interpreted/commands/expressions/ListSlice.scala:34-66` and `community/cypher/runtime-util/src/main/java/org/neo4j/cypher/operations/CypherFunctions.java:3257-3301,3485-3509,3533-3550`: open bounds, NULL propagation, negative offsets and numeric Int32 conversion.
 

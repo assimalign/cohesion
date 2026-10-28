@@ -482,7 +482,9 @@ Malformed components are ProtocolViolation. Path result encoding is unchanged.
 once in the outer scope; x shadows an outer name only in the filter/projection, including nested
 comprehensions. Missing projection keeps each element. WHERE keeps only TRUE and skips projection
 for FALSE/NULL. A NULL list returns NULL; an empty list returns []. Names and parameters still
-validate before execution. Aggregates can supply the source; body aggregates fail CG05024.
+validate before execution. Known non-Boolean filters fail planning with CG02013 even for
+empty/NULL sources and under EXPLAIN; unknown filter types retain runtime validation.
+Aggregates can supply the source; body aggregates fail CG05024.
 
 Slices `list[from..to]`, `list[from..]` and `list[..to]` use inclusive start,
 exclusive end and omitted zero/list-length defaults. Negative bounds count from the end; bounds

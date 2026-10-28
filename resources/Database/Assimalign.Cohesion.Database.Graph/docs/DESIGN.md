@@ -2186,7 +2186,9 @@ including both MERGE action branches and per-row UNWIND evaluation. The parser r
 list/map constructors, comprehensions and unindexed slices with CK00001. Dynamic invalid property
 results retain CG03003 for ordinary writes and CG03004 for MERGE equalities.
 Grouping and deferred pattern-property checks respect lexical names. EXPLAIN validates the same
-scopes without evaluating bodies. Aggregates are permitted in sources, but not iterator bodies.
+scopes without evaluating bodies. Known non-Boolean filters fail planning with CG02013 even
+for empty/NULL sources; unknown types retain runtime checks. Aggregates are permitted in sources,
+but not iterator bodies.
 
 Comprehension iteration and slice copying consume the existing work budget; temporary source
 ownership, output buffers and retained nested projections share the statement memory ledger.

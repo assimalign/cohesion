@@ -970,6 +970,12 @@ internal sealed partial class GraphPlanner
             try
             {
                 ValidateExpression(expression.Predicate, ordering: ordering, variableScope: variableScope, iterators: inner);
+                if (expression.Predicate is not null)
+                {
+                    var kind = KnownFunctionKind(expression.Predicate, ordering, inner);
+                    if (kind != GraphFunctionKind.Unknown && (kind & GraphFunctionKind.Boolean) == 0)
+                    { throw new GraphPlanningException("CG02013", ErrorMessages.BooleanRequired, expression.Predicate.Location); }
+                }
                 ValidateExpression(expression.Projection, ordering: ordering, variableScope: variableScope, iterators: inner);
             }
             finally { variables = outerVariables; shapes = outerShapes; }
