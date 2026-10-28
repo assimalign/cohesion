@@ -24,7 +24,7 @@ internal static partial class GraphPlanExecutor
 
     // Carry runtime search metadata only on selected plans, rather than adding retained
     // parameters to every ordinary match iterator.
-    private sealed record PathSearch : GraphPathPlan
+    private record PathSearch : GraphPathPlan
     {
         public PathSearch(GraphPathPlan plan) : base(plan.Pattern, plan.Anchor)
         { Shape = plan.Shape; Selection = plan.Selection; }
@@ -43,7 +43,9 @@ internal static partial class GraphPlanExecutor
         GraphDatabase database, GraphOperation operation, GraphPathPlan plan, Dictionary<string, object?> input,
         ExpansionBudget budget, IReadOnlyDictionary<string, object?>? parameters,
         CancellationToken token, bool deferUnbound = false)
-        => plan.Selection is null
+        => plan.Pattern.Variable is { } name && input.ContainsKey(name)
+            ? BoundPathStreamAsync(database, operation, plan, input, budget, parameters, token, deferUnbound)
+            : plan.Selection is null
             ? SearchPathStreamAsync(database, operation, plan, input, budget, parameters, token, deferUnbound)
             : SelectPathStreamAsync(database, operation, plan, input, budget, parameters, token);
 

@@ -55,6 +55,7 @@
   <data name="ReductionBindingInvalid" xml:space="preserve">
     <value>Reduce and list predicates require nonempty iterator names; a reduce accumulator must have a different name from its iterator.</value>
   </data>
+  <data name="CorrelatedPlanRequired" xml:space="preserve"><value>A correlated pattern requires a nonempty, validated inner plan and its bound arguments.</value></data>
   <data name="ReductionBodyInvalid" xml:space="preserve">
     <value>Reduce and list predicate bodies require valid expressions without aggregates.</value>
   </data>
@@ -81,6 +82,8 @@
   <data name="PropertyScalarRequired" xml:space="preserve"><value>A graph property requires a scalar value.</value></data>
   <data name="StageUnsupported" xml:space="preserve"><value>Unsupported graph statement stage.</value></data>
   <data name="ForListRequired" xml:space="preserve"><value>FOR and UNWIND require a list value or NULL.</value></data>
+  <data name="CorrelatedBindingConflict" xml:space="preserve"><value>An outer binding is incompatible with its correlated pattern position.</value></data>
+  <data name="CorrelatedEntityRequired" xml:space="preserve"><value>A correlated pattern argument must be the required node, relationship or path, or NULL.</value></data>
   <data name="EntityBindingRequired" xml:space="preserve"><value>This operation requires a node or relationship binding.</value></data>
   <data name="InsertPropertyScope" xml:space="preserve">
     <value>Inserted property maps may reference only variables bound before this INSERT clause.</value>

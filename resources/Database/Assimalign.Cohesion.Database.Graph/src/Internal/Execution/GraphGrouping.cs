@@ -8,8 +8,22 @@ namespace Assimalign.Cohesion.Database.Graph.Internal;
 
 internal static class GraphGrouping
 {
+    internal static bool ContainsAggregate(GqlExpression root, GraphFunctionCatalog? functions, CancellationToken token)
+    {
+        var pending = new Stack<GqlExpression>();
+        pending.Push(root);
+        while (pending.TryPop(out var expression))
+        {
+            token.ThrowIfCancellationRequested();
+            if (expression is GqlAggregateExpression || expression is GqlNamedFunctionCallExpression named && functions?.Resolve(named) is GraphAggregateFunction)
+            { return true; }
+            foreach (var child in GraphValueExpressions.Children(expression)) { pending.Push(child); }
+        }
+        return false;
+    }
+
     internal static GraphGroupingPlan? Plan(GqlQueryExpression query, IReadOnlyList<GraphProjectionPlan> projections, CancellationToken token,
-        Action<GqlExpression>? validateKey = null, GraphFunctionCatalog? functions = null)
+        Action<GqlExpression>? validateKey = null, GraphFunctionCatalog? functions = null, IReadOnlyDictionary<GqlExpression, GraphCorrelatedSubplan>? subplans = null)
     {
         var shape = new GraphExpressionShape(token);
         var aggregates = new HashSet<GqlExpression>(shape);
@@ -62,7 +76,7 @@ internal static class GraphGrouping
         }
         var scope = new GraphGroupingScope(keyList, aggregateList, shape, token, functions);
         var plan = new GraphGroupingPlan(keyList.AsReadOnly(), aggregateList.AsReadOnly(), scope);
-        foreach (var projection in projections) { scope.Validate(projection.Expression); }
+        foreach (var projection in projections) { scope.Validate(projection.Expression, subplans: subplans); }
         return plan;
     }
 

@@ -79,6 +79,7 @@ internal sealed class GraphExpressionShape : IEqualityComparer<GqlExpression>
                     break;
                 case GqlReduceExpression reduce:
                     hash.Add(reduce.Accumulator, StringComparer.Ordinal); hash.Add(reduce.Variable, StringComparer.Ordinal); break;
+                case GqlExistsExpression exists: hash.Add(exists.ToString(), StringComparer.Ordinal); break;
                 case GqlListPredicateExpression predicate:
                     hash.Add(predicate.Kind); hash.Add(predicate.Variable, StringComparer.Ordinal); break;
                 case GqlListSliceExpression slice: hash.Add(slice.From is null); hash.Add(slice.To is null); break;
@@ -90,6 +91,21 @@ internal sealed class GraphExpressionShape : IEqualityComparer<GqlExpression>
         return _hashes[expression];
     }
 
+    private static bool EquivalentExists(GqlExistsExpression left, GqlExistsExpression right, CancellationToken token)
+    {
+        // Syntax compares the pattern topology; scalar inputs retain ordinary expression
+        // identity/type rules, including conservative reuse of registered function calls.
+        if (left.ToString() != right.ToString()) { return false; }
+        using var first = GraphValueExpressions.ExistsInputs(left).GetEnumerator();
+        using var second = GraphValueExpressions.ExistsInputs(right).GetEnumerator();
+        while (first.MoveNext())
+        {
+            token.ThrowIfCancellationRequested();
+            if (!second.MoveNext() || !Equivalent(first.Current, second.Current, token)) { return false; }
+        }
+        return !second.MoveNext();
+    }
+
     internal static bool Equivalent(GqlExpression? left, GqlExpression? right, CancellationToken token = default)
     {
         token.ThrowIfCancellationRequested();
@@ -98,6 +114,7 @@ internal sealed class GraphExpressionShape : IEqualityComparer<GqlExpression>
         if (ReferenceEquals(left, right)) { return true; }
         bool same = (left, right) switch
         {
+            (GqlExistsExpression a, GqlExistsExpression b) => EquivalentExists(a, b, token),
             (GqlFunctionCallExpression a, GqlFunctionCallExpression b) => a.Function == b.Function && a.Arguments is not null && b.Arguments is not null,
             (GqlNamedFunctionCallExpression, GqlNamedFunctionCallExpression) => false,
             (GqlCastExpression a, GqlCastExpression b) => a.Target == b.Target,

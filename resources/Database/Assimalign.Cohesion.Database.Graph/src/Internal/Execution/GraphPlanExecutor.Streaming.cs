@@ -185,7 +185,7 @@ internal static partial class GraphPlanExecutor
                     var match = part.Cursor.Current;
                     var deferred = part.Deferred;
                     for (var property = match.Properties; property is not null; property = property.Previous)
-                    { deferred = DeferProperties(property.Expected, property.Actual, match.Bindings, deferred); }
+                    { deferred = DeferProperties(property.Expected, property.Actual, match.Bindings, deferred, operation.FunctionBindings as GraphCorrelatedBindings); }
                     int next = part.Index + 1;
                     if (next < clause.Paths.Count)
                     {

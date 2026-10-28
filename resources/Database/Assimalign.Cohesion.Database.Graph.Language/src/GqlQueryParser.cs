@@ -195,7 +195,7 @@ public sealed partial class GqlQueryParser : QueryParser
     /// <c>ALL SHORTEST</c> and <c>NODETACH DELETE</c> are one construct. Label names, in a
     /// pattern or in a <c>WHERE</c> label expression, are never looked up as words.
     /// </summary>
-    private void FindUnsupported()
+    private void FindUnsupported(int start = 0, int? endExclusive = null, bool existsPattern = false)
     {
         int patternDepth = 0;
         int mapDepth = 0;
@@ -203,12 +203,12 @@ public sealed partial class GqlQueryParser : QueryParser
         var containers = new Stack<TokenType>();
         int mapSeparatorPosition = -1;
         bool inValueExpression = false;
-        bool inPattern = false;
+        bool inPattern = existsPattern;
         bool sawCall = false;
         bool inUpdate = false;
         var label = LabelScan.None;
         int labelParens = 0;
-        for (int i = 0; i < _tokens.Count; i++)
+        for (int i = start; i < (endExclusive ?? _tokens.Count); i++)
         {
             var token = _tokens[i];
             if (token.Type == TokenType.Semicolon) { break; }
@@ -281,6 +281,22 @@ public sealed partial class GqlQueryParser : QueryParser
                 _tokens[i - 1].Type == TokenType.Colon && i - 1 != mapSeparatorPosition)) { continue; }
             if (i + 1 < _tokens.Count && _tokens[i + 1].Type == TokenType.Colon) { continue; }
             string value = token.Text.ToUpperInvariant();
+            // Scan the body in its own pattern context. Its WHERE and inline predicates use
+            // exactly the ordinary capability checks; pattern identifiers remain names.
+            if (valuePosition && value == "EXISTS" && i + 1 < _tokens.Count && _tokens[i + 1].Type == TokenType.LeftBrace)
+            {
+                if (!HasStackToNest(token)) { return; }
+                int body = i + 2;
+                int depth = 0;
+                for (i++; i < _tokens.Count; i++)
+                {
+                    if (_tokens[i].Type == TokenType.LeftBrace) { depth++; }
+                    if (_tokens[i].Type == TokenType.RightBrace && --depth == 0) { break; }
+                    if (_tokens[i].Type == TokenType.Eof) { break; }
+                }
+                FindUnsupported(body, i, existsPattern: true);
+                continue;
+            }
             if (value == "WHERE" && inPattern && patternDepth > 0)
             { inlinePredicateDepth = patternDepth; continue; }
             // MATCH owns selector validation, including malformed counts and nested prefixes.

@@ -183,6 +183,7 @@ The function table advertises the aggregates and core scalar functions listed be
 | `PATH SELECTOR` | ANY, ALL, ANY/ALL SHORTEST, SHORTEST k [PATHS], SHORTEST k GROUPS | Selects independently per endpoint pair and input row; deterministic identity ties, prefilters inside search and ordinary WHERE after selection |
 | `PATH MODE` | WALK, TRAIL, SIMPLE or ACYCLIC after an optional path assignment, with optional PATH/PATHS | Applies to the complete path; nested explicit modes and unselected unbounded WALK remain CK00001 |
 | `QUANTIFIED PATH` | ISO edge/subpath `{m,n}`, `{m}`, `{m,}`, `{,n}`, `{,}`, `+`, `*`; Cypher bracketed `*m..n` | Enumerates paths under the outer mode, including zero-length matches; group variables bind source-ordered lists |
+| `EXISTS` | `EXISTS { MATCH pattern [WHERE predicate] ... }` or `EXISTS { pattern [, pattern] [WHERE predicate] }`; scalar NOT supplies NOT EXISTS | Correlated semi/anti apply, isolated scope, Boolean result and first-match exit |
 | `WHERE` | Boolean and scalar expressions: comparisons, labels, AND/OR/XOR/NOT, IS null/truth tests, arithmetic, concatenation, IN lists and string predicates | Keeps TRUE only; see [DIALECT.md](DIALECT.md) and scalar expressions below |
 | `EXPLAIN` | One linear statement of the supported stages | Shared description rows without executing any read expansion or write; Cohesion extension |
 | `LET` | One or more `variable = expression` assignments | Adds new value bindings in assignment order; rebinding is CG03003 |
@@ -799,6 +800,35 @@ orders maps before lists, while storable/ValueGroup.java:56-65 orders zoned time
 The selected exact numeric rule is the owner
 decision, including within these composites.
 
+## Correlated EXISTS patterns (#1537, GQ-E1)
+
+GqlExistsExpression carries a nonempty list of ordinary GqlMatchClause nodes. Both explicit
+MATCH blocks (including successive MATCH/OPTIONAL MATCH clauses) and implicit pattern lists
+execute; rendering canonicalizes to explicit MATCH. Scalar NOT supplies NOT EXISTS. The
+EXISTS profile entry covers these braced patterns only. Empty/unbraced operands use CG00013;
+full query bodies, parenthesized EXISTS, COUNT/COLLECT blocks and bare pattern predicates
+retain CK00001. Inner RETURN/WITH/NEXT/UNION/CALL/order/page/write stages are excluded.
+
+Outer names correlate by lexical identity, including iterator names and enclosing EXISTS
+locals. New names remain inside the braces. Pattern NULL arguments match nothing; EXISTS
+always returns a Boolean. Value arguments remain available to maps and predicates; entity
+positions enforce their node/relationship/path kinds (CG01019 statically, CG02016 dynamically).
+EXISTS is available throughout Boolean and value expressions, including CASE, projection,
+ordering, list comprehensions and list predicates. Aggregates inside inner predicates retain
+ordinary MATCH's aggregate-placement refusal. No disk or wire format changes are involved.
+Hand-built ASTs may reuse the same expression in multiple lexical scopes; each occurrence
+binds independently. Iterators shadow enclosing names inside their bodies, including through
+nested EXISTS, without adding dependencies on the shadowed binding. Unsupported predicate
+vocabulary inside an EXISTS body uses the same context-aware CK00001 checks as outer
+predicates, while pattern variables, labels, relationship types and property names remain names.
+
+Behavior consulted, no code copied: C:/Source/repos/neo4j/neo4j/
+community/cypher/front-end/parser/v25/parser/src/main/antlr4/org/neo4j/cypher/internal/parser/v25/Cypher25Parser.g4:816-818
+admits explicit query and implicit pattern bodies; Cohesion restricts the explicit body to MATCH.
+community/cypher/slotted-runtime/src/main/scala/org/neo4j/cypher/internal/runtime/slotted/pipes/SelectOrSemiApplySlottedPipe.scala:46-59
+seeds an inner execution from the outer row, tests hasNext (negated for anti apply), closes the
+inner iterator immediately, and preserves the outer row.
+
 ## List comprehensions and slices (#1736, GQ-C1)
 
 `[x IN list [WHERE predicate] [| projection]]` evaluates its source once in the enclosing
@@ -1193,6 +1223,7 @@ GqlOrderPagingTests and GraphOrderPagingWireTests pin the executable surface.
 | `CG00010` | Unknown function call; the message names the unregistered spelling |
 | `CG00011` | A counted SHORTEST selector omits a positive Int64 literal count or supplies zero, a sign, a non-integer, a parameter or overflow |
 | `CG00012` | A list slice omits both start and end bounds; rejected during planning, including EXPLAIN |
+| `CG00013` | Language/syntax — EXISTS omits its nonempty braced pattern |
 
 Locations use zero-based absolute UTF-16 offsets with exclusive ends and one-based line numbers.
 A line breaks at LF, CR, NEL (U+0085), LS (U+2028) or PS (U+2029), and CR LF is one break
