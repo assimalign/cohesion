@@ -253,6 +253,9 @@ Values retain Boolean, number, ordinal string, array and object order (reversed 
 Equal query keys retain ordinal document identity, independent of direction; later ORDER BY
 terms precede that tie break. NULLS stays contextual, so existing fields named nulls remain valid.
 Malformed NULLS options give located CD00013; an invalid direct-AST placement gives CD01032.
+The capability scan defers ALL and DISTINCT immediately after NULLS to the ordering parser,
+so they receive CD00013 at that option, like a numeric option or end of input. A second LAST
+after NULLS FIRST retains CK00001 at LAST, outside the completed placement suffix.
 No new sorting bound or budget diagnostic is introduced; retained sorting still uses CD05018.
 
 | Term | First to last |

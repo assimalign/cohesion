@@ -32,17 +32,47 @@ public sealed class OqlOrderingParserTests
     }
 
     [Theory(DisplayName = "Cohesion Test [OQL] - Malformed NULLS receives its located syntax identity (#1730)")]
-    [InlineData("SELECT v FROM c ORDER BY v NULLS", "")]
-    [InlineData("SELECT v FROM c ORDER BY v NULLS MIDDLE", "MIDDLE")]
-    [InlineData("SELECT v FROM c ORDER BY v NULLS , n", ",")]
-    public void Parse_InvalidPlacement_ShouldLocateExpectedOption(string text, string token)
+    [InlineData("SELECT v FROM c ORDER BY v NULLS", "CD00013", "", 1)]
+    [InlineData("SELECT v FROM c ORDER BY v NULLS MIDDLE", "CD00013", "MIDDLE", 1)]
+    [InlineData("SELECT v FROM c ORDER BY v NULLS , n", "CD00013", ",", 1)]
+    [InlineData("SELECT v FROM c ORDER BY v NULLS ALL", "CD00013", "ALL", 1)]
+    [InlineData("SELECT v FROM c ORDER BY v NULLS DISTINCT", "CD00013", "DISTINCT", 1)]
+    [InlineData("SELECT v FROM c ORDER BY v NULLS 1", "CD00013", "1", 1)]
+    [InlineData("SELECT v FROM c ORDER BY v NULLS FIRST LAST", "CK00001", "LAST", 1)]
+    [InlineData("SELECT v FROM c ORDER BY v NULLS\r\nALL", "CD00013", "ALL", 2)]
+    public void Parse_InvalidPlacement_ShouldLocateExpectedOption(string text, string code, string token, int line)
     {
-        // Arrange / Act
+        // Arrange
+        int start = token.Length == 0 ? text.Length : text.IndexOf(token, StringComparison.Ordinal);
+
+        // Act
         var diagnostic = new OqlQueryParser().Parse(text).Diagnostics.ShouldHaveSingleItem();
 
         // Assert
-        diagnostic.Code.ShouldBe("CD00013");
-        diagnostic.Start.ShouldBe(token.Length == 0 ? text.Length : text.IndexOf(token, StringComparison.Ordinal));
+        diagnostic.Code.ShouldBe(code);
+        diagnostic.Start.ShouldBe(start);
+        diagnostic.End.ShouldBe(start + token.Length);
+        diagnostic.Line.ShouldBe(line);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [OQL] - NULLS remains a contextual name (#1730)")]
+    [InlineData("SELECT nulls FROM c")]
+    [InlineData("SELECT c.nulls AS nulls FROM c")]
+    [InlineData("SELECT v FROM nulls")]
+    [InlineData("SELECT nulls.v FROM c AS nulls")]
+    [InlineData("SELECT nulls.v FROM c nulls")]
+    [InlineData("SELECT v FROM c ORDER BY nulls")]
+    [InlineData("SELECT v FROM c ORDER BY nulls NULLS LAST")]
+    public void Parse_NullsIdentifier_ShouldKeepContextualMeaning(string text)
+    {
+        // Arrange
+        var parser = new OqlQueryParser();
+
+        // Act
+        var statement = parser.Parse(text);
+
+        // Assert
+        statement.Diagnostics.ShouldBeEmpty();
     }
 
     [Fact(DisplayName = "Cohesion Test [OQL] - INCLUDE MISSING attaches only to the leading scalar key (#1632)")]
