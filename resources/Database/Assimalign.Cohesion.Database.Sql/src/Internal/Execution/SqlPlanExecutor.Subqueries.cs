@@ -14,7 +14,7 @@ internal sealed partial class SqlPlanExecutor
     {
         var parent = _subqueryValues;
         bool deferred = false;
-        foreach (var query in queries) { deferred |= query.IsDeferred; }
+        for (int index = 0; index < queries.Count; index++) { deferred |= queries[index].IsDeferred; }
         var frame = new SqlSubqueryValues(parent, queries[0].ScopeId, queries, lazy: deferred);
         _subqueryValues = frame;
         try
