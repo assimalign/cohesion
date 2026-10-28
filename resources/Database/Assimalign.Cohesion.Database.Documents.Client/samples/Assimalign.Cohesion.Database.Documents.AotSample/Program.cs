@@ -156,6 +156,24 @@ internal static class Program
             Check(subqueryIn.Count == subqueries.Count, "IN SELECT RAW");
             var lazySubquery = await connection.QueryAsync("SELECT COALESCE(1, (SELECT RAW 1/0 FROM items)) AS n FROM items LIMIT 1", cancellationToken: token);
             Check(lazySubquery.Count == 1 && Equals(lazySubquery[0][0], 1m), "lazy nested SELECT");
+            using (var deep = JsonDocument.Parse(new string('[', 255) + "0" + new string(']', 255), new JsonDocumentOptions { MaxDepth = 256 }))
+            {
+                var parameters = new Dictionary<string, object?> { ["deep"] = deep.RootElement };
+                foreach (string query in new[] {
+                    "SELECT (SELECT RAW @deep FROM items LIMIT 1) AS v FROM items LIMIT 1",
+                    "SELECT [@deep, 1/0], (SELECT RAW name FROM items) AS v FROM items LIMIT 1" })
+                {
+                    try
+                    {
+                        await connection.QueryAsync(query, parameters, token);
+                        throw new InvalidOperationException("Overdeep subquery projection succeeded.");
+                    }
+                    catch (DocumentClientException error)
+                    { Check(error.Diagnostics.Count == 1 && error.Diagnostics[0].Code == "CD05015" && error.Diagnostics[0].Start is not null, "located subquery depth"); }
+                }
+                var reusable = await connection.QueryAsync("SELECT RAW (SELECT RAW @deep FROM items LIMIT 1) FROM items LIMIT 1", parameters, token);
+                Check(reusable.Count == 1 && connection.IsOpen, "depth refusal preserves session and RAW depth boundary");
+            }
             var count = await connection.QueryAsync("SELECT COUNT(*) AS n FROM items", cancellationToken: token);
             Check(count.Columns[0].Type == Assimalign.Cohesion.Database.Types.DatabaseType.Int64 && count.Single()[0] is long number && number == 1, "COUNT Int64");
             var aggregates = (await connection.QueryAsync(

@@ -27,7 +27,9 @@ failure suppression, EXPLAIN cache policy, located correlation refusal and conne
 Overdeep subquery projections return located CD05015 before the formatter on both transports,
 including the named wrapper; the same connection then successfully reads another result.
 The existing NativeAOT consumer checks arrays, EXISTS, IN and lazy conditional behavior on both
-transports. No client public API, frame, capability or version changes are needed.
+transports. The NativeAOT consumer also checks located depth refusals, constructor failure
+order and RAW depth boundaries while preserving connection reuse. No client public API,
+frame, capability or version changes are needed.
 
 ## Comprehension wire conformance (#1728)
 
