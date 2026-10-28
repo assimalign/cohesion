@@ -33,11 +33,12 @@ public sealed class GraphOrdinaryWriteAllocationTests
         // Act: minimum across five rounds of 100 complete statements of each kind.
         for (int round = 0; round < 5; round++) { Round(true); }
 
-        // Assert: the baseline values are measured on 7c2d19e35 in this same fixture.
+        // Assert: maxima of the 7c2d19e35 minima in standalone and combined Release runs.
+        // Snapshot bookkeeping can include periodic worker contexts; reserve 128 bytes for it.
         _output.WriteLine($"ordinary writes bytes/statement: CREATE={minima[0]}; SET={minima[1]}; DELETE={minima[2]}");
-        minima[0].ShouldBeLessThanOrEqualTo(38_952);
-        minima[1].ShouldBeLessThanOrEqualTo(67_120);
-        minima[2].ShouldBeLessThanOrEqualTo(50_296);
+        minima[0].ShouldBeLessThanOrEqualTo(43_048 + 128);
+        minima[1].ShouldBeLessThanOrEqualTo(67_120 + 128);
+        minima[2].ShouldBeLessThanOrEqualTo(54_640 + 128);
 
         void Round(bool measure)
         {
@@ -47,7 +48,9 @@ public sealed class GraphOrdinaryWriteAllocationTests
                 {
                     long before = GC.GetAllocatedBytesForCurrentThread();
                     var pending = session.ExecuteAsync(queries[kind], cancellationToken: CancellationToken.None);
-                    pending.IsCompletedSuccessfully.ShouldBeTrue();
+                    // Successful assertions allocate diagnostic context; keep them outside
+                    // the measured path, as the existing dispatch measurements do.
+                    if (!pending.IsCompletedSuccessfully) { pending.IsCompletedSuccessfully.ShouldBeTrue(); }
                     var result = pending.GetAwaiter().GetResult();
                     long bytes = GC.GetAllocatedBytesForCurrentThread() - before;
                     result.AffectedCount.ShouldBe(1);

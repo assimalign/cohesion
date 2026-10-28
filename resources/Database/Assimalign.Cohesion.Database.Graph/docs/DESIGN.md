@@ -457,6 +457,10 @@ flow cleanup reuses RunAsync's existing finally without growing ordinary operati
 The fix-pass Release fixtures retain the pre-fix MATCH planning/execution minima and enforce
 the measured ordinary CREATE, SET and DELETE allocation ceilings; MERGE-only checks avoid
 captured delegates that would grow every plan's closure.
+Ordinary-write ceilings cover the pre-fix standalone and combined Release measurements, with
+128 bytes for snapshot bookkeeping variation from worker contexts. Successful assertions stay
+outside measured loops; unexpected outcomes still fail immediately. Existing MATCH ceilings
+and runtime compilation settings are unchanged.
 
 ### Internal MERGE serialization contract (#1735, GQ-M1)
 
