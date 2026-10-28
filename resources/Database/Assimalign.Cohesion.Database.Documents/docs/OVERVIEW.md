@@ -12,7 +12,7 @@ snapshot and read-committed transactions, durable file or in-memory storage, and
 
 OQL accepts ALL/DISTINCT aggregate arguments and ARRAY_AGG, BOOL_AND, BOOL_OR, aggregate EVERY,
 STDDEV and VARIANCE alongside COUNT/SUM/AVG/MIN/MAX. Retained distinct values and arrays consume
-the statement memory budget, shared with SELECT source/group staging. Scratch reservations release at expression and sort boundaries. GROUP AS remains deferred. OQL executes 34 SQL++ scalar functions, including Unicode string operations, exact math,
+the statement memory budget, shared with SELECT source/group staging, GROUP AS wrappers and DML pending buffers. Scratch reservations release at expression and sort boundaries. GROUP BY supports term aliases; GROUP AS retains input binding wrappers for projection, HAVING, ordering and ARRAY/FIRST or quantified expressions. OQL executes 34 SQL++ scalar functions, including Unicode string operations, exact math,
 UTC date conversion, type/array tests and short-circuit conditionals. Clock functions share the
 transaction-start instant. COUNT and string/array lengths and positions return Int64 long values,
 with matching wire column types; the language [dialect](../../Assimalign.Cohesion.Database.Documents.Language/docs/DIALECT.md)

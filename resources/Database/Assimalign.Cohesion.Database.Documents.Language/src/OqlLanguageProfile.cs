@@ -77,6 +77,7 @@ public static class OqlLanguageProfile
         OqlClauses.Like,
         OqlClauses.Case,
         OqlClauses.GroupBy,
+        OqlClauses.GroupAs,
         OqlClauses.Having,
         OqlClauses.OrderBy,
         OqlClauses.Limit,

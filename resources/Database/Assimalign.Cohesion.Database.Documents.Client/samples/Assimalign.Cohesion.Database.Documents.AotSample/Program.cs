@@ -158,6 +158,15 @@ internal static class Program
             Check(aggregates[5] is System.Text.Json.JsonElement aggregateArray && aggregateArray.GetArrayLength() == 1 && aggregateArray[0][1].ValueKind == System.Text.Json.JsonValueKind.Null, "ARRAY_AGG DISTINCT owned JSON");
             Check(aggregates[6] is true && aggregates[7] is true && aggregates[8] is false, "Boolean aggregates and quantified EVERY");
             Check(aggregates[9] is 0m && aggregates[10] is 0m, "sample singleton statistics");
+            var groupBindings = await connection.QueryAsync("SELECT key, g, FIRST r.d.name FOR r IN g END AS first_name, ARRAY r.t FOR r IN g END AS elements FROM items d LEFT UNNEST d.nested t GROUP BY d.score AS key GROUP AS g HAVING ANY r IN g SATISFIES r.d.score = 3 END ORDER BY ARRAY_LENGTH(g)", cancellationToken: token);
+            Check(groupBindings.Count == 1 && groupBindings[0][0] is 3m && groupBindings[0][2] is "東京", "GROUP AS aliases FIRST HAVING ORDER BY");
+            var bindingArray = (System.Text.Json.JsonElement)groupBindings[0][1]!;
+            Check(bindingArray.GetArrayLength() == 2 && bindingArray.EnumerateArray().All(value => value.GetProperty("key").GetDecimal() == 3m && value.GetProperty("d").GetProperty("name").GetString() == "東京"), "GROUP AS binding wrappers include aliases");
+            Check(((System.Text.Json.JsonElement)groupBindings[0][3]!).GetArrayLength() == 2, "GROUP AS ARRAY comprehension");
+            var emptyGroup = await connection.QueryAsync("SELECT g FROM items WHERE FALSE GROUP BY TRUE GROUP AS g", cancellationToken: token);
+            Check(emptyGroup.Count == 0 && emptyGroup.Columns[0].Type == Assimalign.Cohesion.Database.Types.DatabaseType.Json, "GROUP AS empty metadata");
+            var groupPlan = await connection.QueryAsync("EXPLAIN SELECT g FROM items GROUP BY 1/0 AS key GROUP AS g", cancellationToken: token);
+            Check(groupPlan.Documents.Any(value => value.GetProperty("detail").ValueKind == System.Text.Json.JsonValueKind.String && value.GetProperty("detail").GetString() == "group_as=g; group_aliases=key"), "GROUP AS nonexecuting EXPLAIN");
             var tinyStatistic = await connection.QueryAsync("SELECT STDDEV(v) FROM items UNNEST [1e-20,2e-20] v", cancellationToken: token);
             Check(tinyStatistic[0][0] is 7.0710678e-21m, "sample statistic avoids intermediate underflow");
             var wideStatistic = await connection.QueryAsync("SELECT VARIANCE(v) AS v, STDDEV(v) AS s FROM items UNNEST [-2e14,2e14,0] v", cancellationToken: token);

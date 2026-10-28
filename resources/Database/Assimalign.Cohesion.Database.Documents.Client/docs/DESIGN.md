@@ -220,6 +220,18 @@ autocommit retry and explicit disconnect cleanup. The malformed-peer zero-affect
 a valid decoded Complete and a matching result count, so it reaches ValidateCompletion's
 affected-count predicate directly.
 
+## GROUP AS and group aliases (#1729, OQ-G2)
+
+GROUP BY term aliases and GROUP AS use existing JSON result cells and headers. Each group-array
+member wraps the FROM value, UNNEST values and explicit group-term aliases; MISSING members
+are absent and NULL members remain. ARRAY/FIRST, quantified predicates, HAVING and ORDER BY
+execute on the server with their existing lexical scopes. Empty grouped results retain Json
+metadata for the group array. EXPLAIN describes aliases without execution. InMemory/TCP tests
+and the NativeAOT sample cover wrappers, scopes, owned results and empty metadata. CD00012,
+CD01030/CD01031 and wrapper-budget CD05018 use the existing structured Failure response and
+preserve the wire session. DML pending-buffer CD05018 (#1755) also retains unchanged documents
+and connection reuse on both transports. No production client API or frame change is needed.
+
 ## Failures and pooling
 
 ### Text transactions and pool return (#1725)

@@ -6,6 +6,7 @@
 <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
   <data name="PagingCountInvalid" xml:space="preserve"><value>{0} requires a non-negative integer in the signed 64-bit range.</value></data>
   <data name="BindingNameDuplicate" xml:space="preserve"><value>An OQL binding list cannot repeat a variable name.</value></data>
+  <data name="GroupAsRequiresBy" xml:space="preserve"><value>GROUP AS requires GROUP BY with at least one group term.</value></data>
   <data name="TransactionKindRequired" xml:space="preserve"><value>START requires WORK, TRAN or TRANSACTION.</value></data>
   <data name="TransactionIsolationRequired" xml:space="preserve"><value>Expected SNAPSHOT or READ COMMITTED after ISOLATION LEVEL.</value></data>
   <data name="OqlQueryParserParseCoreVoid" xml:space="preserve"><value>Unterminated block comment.</value></data>

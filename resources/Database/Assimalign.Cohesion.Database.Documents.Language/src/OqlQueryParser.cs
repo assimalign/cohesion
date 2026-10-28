@@ -248,6 +248,7 @@ public sealed partial class OqlQueryParser : QueryParser
                 IsWord(_tokens[statementStart], "DROP"));
         var (updateHeaderEnd, updateClause) = FindUpdateClause(statementStart);
         bool selected = false;
+        bool hasGroupBy = false;
         bool returningList = false;
         int parentheses = 0;
         bool inSelectList = false;
@@ -445,6 +446,16 @@ public sealed partial class OqlQueryParser : QueryParser
                 pagingHead = index;
                 continue;
             }
+
+            if (value == "GROUP" && index + 1 < _tokens.Count && IsWord(_tokens[index + 1], "AS"))
+            {
+                AddUnsupported(result, OqlClauses.GroupAs, token);
+                continue;
+            }
+            if (value == "GROUP" && index + 1 < _tokens.Count && IsWord(_tokens[index + 1], "BY")) { hasGroupBy = true; }
+            // LETTING is a deferred grouping clause, but remains an ordinary field or
+            // FROM/UNNEST binding name before that clause, including implicit aliases.
+            if (value == "LETTING" && index > statementStart && !hasGroupBy) { continue; }
 
             // ODMG's quantifiers, FOR ALL x IN e: p and EXISTS x IN e: p, bind with IN too.
             if (value == "FOR" && index + 1 < _tokens.Count && IsWord(_tokens[index + 1], "ALL") &&

@@ -73,7 +73,7 @@ this per-statement budget; exhaustion gives CD05018 at the clause span
 and rolls back the writes. Serialized rows are preflighted in the same transaction: the existing
 CD05016 covers the 16 MiB frame cap, and CD05019 covers values deeper than 256 levels including
 the named projection wrapper. This is a retained-result estimate, not a managed-heap measurement;
-SELECT source and group staging share this counter; mutation pending-write buffers remain outside the estimate.
+SELECT source and group staging share this counter; UPDATE, DELETE, INSERT and UPSERT pending buffers share it too (#1755). Pending-buffer exhaustion refuses with CD05018 before any write, including INSERT/UPSERT SELECT; all reservations release on every exit.
 An over-deep array/object constructor gives CD05015 naming RETURNING at its expression span;
 other serialization failures retain their own diagnostic identity.
 
@@ -141,11 +141,55 @@ release reservations on every exit. DISTINCT sets and array input lists release 
 HAVING scratch releases per predicate, projected results are charged separately, and ORDER BY
 storage releases after sorting. JSON charges UTF-8/token metadata and ownership; input and result
 representations are charged separately while both live. INSERT/UPSERT SELECT sources and RETURNING
-share the operation counter. This estimate excludes mutation pending-write buffers and application
+share the operation counter. DML pending buffers share this estimate (#1755); it excludes application
 callback-owned state. Exhaustion aborts explicit work and preserves reusable sessions after rollback. EXPLAIN lists aggregate names and
 quantifiers in Group detail without evaluating arguments or reading documents. Arrays, booleans,
 NULL and decimals use existing wire values and headers; no frame or format version changes.
-GROUP AS and group aliases remain for OQ-G2.
+GROUP AS and group-term aliases use the same grouping stage, as described below.
+
+## GROUP AS and group-term aliases (#1729, OQ-G2)
+
+`GROUP BY expr [AS alias], ... GROUP AS g` retains an owned JSON array of binding-wrapper
+objects. AS may be omitted for a group-term alias. GROUP AS requires at least one GROUP BY
+term; a bare `GROUP AS g` is CD00012. GROUP BY over an empty input produces no groups and no
+synthetic wrapper; a projected g still has Json column metadata. Ungrouped aggregates retain
+their existing one-empty-group behavior and cannot declare GROUP AS.
+
+Each wrapper has one member for the FROM binding (the explicit alias, otherwise the collection
+name), one for each UNNEST binding, and one for each explicitly named group term. For example,
+`FROM items d LEFT UNNEST d.tags t GROUP BY d.kind AS key GROUP AS g` produces
+`[{"d": {original document}, "t": element, "key": group value}, ...]`.
+The FROM member preserves object, array, scalar and NULL roots. MISSING bindings and MISSING
+group aliases omit their members; explicit NULL members remain. LEFT UNNEST's absent element
+therefore omits t. Unnamed group terms add no wrapper member. No group-array element ordering
+is promised. This follows Couchbase's [GROUP BY / GROUP AS wrapper and alias contract](https://github.com/couchbaselabs/docs-devex/blob/c3bb1549af4887019b9983e371d9e8b4f569052c/modules/n1ql/pages/n1ql-language-reference/groupby.adoc#L47-L81),
+with the owner's requirement to include group-term aliases. LETTING stays unavailable (CK00001),
+as do subqueries and FROM-array sources. LETTING remains contextual as a field or FROM/UNNEST name; use AS or quotes for a group-term alias named letting.
+
+Group terms evaluate against the input row, independently of other group-term aliases.
+Named terms then bind each member's computed value for aggregate row inputs and bind the
+representative key in SELECT, HAVING and ORDER BY. Group AS g is visible after grouping in
+those clauses, including nested constructors, scalar calls, ARRAY/FIRST comprehensions and
+ANY/SOME/EVERY predicates. A path such as `g[0].d.name` addresses a wrapper; a comprehension
+such as `ARRAY r.d.name FOR r IN g END` maps the members. Local variables shadow group bindings
+only within their lexical scope. Existing standalone projection aliases still take precedence
+in ORDER BY. WHERE and GROUP BY retain input-field lookup and do not see these new bindings.
+Original input fields outside aggregate calls still require grouping; GROUP AS does not relax
+that rule. Names are ordinal and case-sensitive; quoted whitespace names retain their exact identifier value. Empty/duplicate declarations and collisions
+with FROM or UNNEST names are CD01030; malformed direct-AST alias lists use that code too.
+GROUP AS cannot appear in an aggregate's row input (CD01031), where the array does not yet
+exist; a local variable introduced inside that row-input expression may reuse the name.
+
+Wrappers, the final group array, source rows, group keys, aggregates, DML pending buffers and
+projected results share StatementMemoryBudget. Alias bindings charge a shared key representation
+once while retaining per-row binding overhead; independently owned values and serialized JSON
+copies are charged separately. Temporary wrappers release after constructing the array; arrays
+remain charged through HAVING, projection and ordering. Rejected groups
+release their array charge immediately. Every exit releases staging reservations, including
+cancellation and CD05018. Output JSON owns its data independently. EXPLAIN records group_as
+and group_aliases on Group (or system-source detail) without reading or evaluating inputs.
+Queries without grouping metadata retain their base allocation shape. Existing Json values
+and headers carry the arrays over InMemory and TCP; no format/version change is required.
 
 ## ARRAY and FIRST comprehensions (#1728)
 

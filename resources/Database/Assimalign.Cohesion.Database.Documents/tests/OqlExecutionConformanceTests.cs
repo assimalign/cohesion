@@ -202,10 +202,19 @@ public sealed class OqlExecutionConformanceTests
             ],
             [OqlClauses.GroupBy] =
             [
+                new("SELECT COUNT(*) FROM items UNNEST [" + string.Join(",", Enumerable.Range(0, 100)) + "] x WHERE META().id = 'a' GROUP BY @v AS key",
+                    [[100L]], Parameters: new Dictionary<string, object?> { ["v"] = new string('p', 16000) }, StatementMemoryBudget: 1024 * 1024),
+                new("SELECT key, COUNT(*) AS n FROM items GROUP BY category AS key ORDER BY key", [["a", 3L], ["b", 1L]]),
                 new("SELECT category, COUNT(*) AS total, COUNT(amount) AS present, SUM(amount) AS sum, AVG(amount) AS average, MIN(amount) AS minimum, MAX(amount) AS maximum FROM items GROUP BY category ORDER BY category",
                     [["a", 3L, 2L, 8m, 4m, 2m, 6m], ["b", 1L, 1L, 4m, 4m, 4m, 4m]]),
                 new("SELECT category, tags[0] AS tag, COUNT(*) AS total FROM items GROUP BY category, tags[0] ORDER BY category, tag",
                     [["a", null, 1L], ["a", "blue", 1L], ["a", "green", 1L], ["b", "blue", 1L]], Missing: [(0, 1)]),
+            ],
+            [OqlClauses.GroupAs] =
+            [
+                new("SELECT key, ARRAY_LENGTH(g) AS n, FIRST r.d.name FOR r IN g WHEN r.d.name = 'gamma' END AS found FROM items d GROUP BY category AS key GROUP AS g HAVING ANY r IN g SATISFIES r.d.amount > 0 END ORDER BY key",
+                    [["a", 3L, null], ["b", 1L, "gamma"]], Missing: [(0, 2)]),
+                new("SELECT g FROM items WHERE FALSE GROUP BY TRUE GROUP AS g", []),
             ],
             [OqlClauses.Having] =
             [
@@ -289,7 +298,9 @@ public sealed class OqlExecutionConformanceTests
                 parsed.Diagnostics.ShouldBeEmpty(context);
                 ContainsClause(parsed.OqlExpression, clause).ShouldBeTrue(context);
 
-                await using var engine = DocumentDatabaseEngine.Create("document-engine", new());
+                var options = new DocumentDatabaseEngineOptions();
+                if (execution.StatementMemoryBudget is long budget) { options.StatementMemoryBudget = budget; }
+                await using var engine = DocumentDatabaseEngine.Create("document-engine", options);
                 var database = await engine.CreateDatabaseAsync("conformance", cancellationToken);
                 await using var session = await database.CreateSessionAsync(cancellationToken);
                 var collection = await session.CreateCollectionAsync("items", cancellationToken);
@@ -528,6 +539,7 @@ public sealed class OqlExecutionConformanceTests
         OqlClauses.Like => expression is OqlSelectExpression { Predicate: OqlLikeExpression },
         OqlClauses.Case => expression is OqlSelectExpression select && select.Projections.Any(projection => ContainsCase(projection.Expression)),
         OqlClauses.GroupBy => expression is OqlSelectExpression { GroupBy.Count: > 0 },
+        OqlClauses.GroupAs => expression is OqlSelectExpression { GroupAs: not null },
         OqlClauses.Having => expression is OqlSelectExpression { Having: not null },
         OqlClauses.OrderBy => expression is OqlSelectExpression { OrderBy.Count: > 0 },
         OqlClauses.Limit => expression is OqlSelectExpression { Limit: not null },
@@ -590,7 +602,7 @@ public sealed class OqlExecutionConformanceTests
 
     private sealed record ExecutionCase(string Statement, object?[][] ExpectedRows,
         string[]? Setup = null, string? VerificationStatement = null, (int Row, int Column)[]? Missing = null,
-        long ExpectedAffectedCount = 0, IReadOnlyDictionary<string, object?>? Parameters = null);
+        long ExpectedAffectedCount = 0, IReadOnlyDictionary<string, object?>? Parameters = null, long? StatementMemoryBudget = null);
 
     private static ExecutionCase UpsertCase()
     {
