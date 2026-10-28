@@ -93,7 +93,7 @@ internal sealed partial class SqlPlanExecutor
         var matches = new List<object?[]>();
         var sequenceOrdering = !plan.IsDistinct && HasSequenceProjection(plan.Projections)
             ? OrderingOutputSlots(plan.OrderBy, projectionStart) : null;
-        bool deferredSequence = sequenceOrdering is not null && !OrderingUsesSequence(plan.Projections, sequenceOrdering);
+        bool deferredSequence = sequenceOrdering is not null && plan.OrderBy.Count > 0 && !OrderingUsesSequence(plan.Projections, sequenceOrdering);
         bool correlatedOrdering = _subqueryValues is { HasCorrelatedQueries: true } && plan.OrderBy.Count > 0;
         var collected = new SqlRowCollector(plan.OrderBy, _subqueryValues,
             plan.IsDistinct ? null : plan.Limit, plan.IsDistinct ? null : plan.Offset, cancellationToken, statement.Metrics);
@@ -126,6 +126,7 @@ internal sealed partial class SqlPlanExecutor
                 continue;
             }
             if (deferredSequence) { matches.Add(row[..projectionStart]); continue; }
+            if (sequenceOrdering is not null && collected.SkipSequenceOffset()) { continue; }
             for (int i = 0; i < plan.Projections.Count; i++)
             {
                 await PrepareSubqueriesAsync(plan.Projections[i].Value, row, statement, cancellationToken).ConfigureAwait(false);

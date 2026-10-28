@@ -4,7 +4,7 @@ using System.Threading;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
-/// <summary>Charges retained deferred sequence inputs to the shared statement budget.</summary>
+/// <summary>Collects ordered sequence inputs, charging bounded selection to the shared statement budget.</summary>
 [global::System.Diagnostics.DebuggerDisplay("SqlSequenceRowCollector")]
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class SqlSequenceRowCollector : IDisposable
@@ -12,7 +12,7 @@ internal sealed class SqlSequenceRowCollector : IDisposable
     private readonly SqlRowCollector _rows;
     private readonly SqlStatementMetrics _metrics;
     private readonly long _budget;
-    private readonly Dictionary<object?[], long> _charges = new(ReferenceEqualityComparer.Instance);
+    private readonly Dictionary<object?[], long>? _charges;
     private long _reserved;
 
     internal SqlSequenceRowCollector(IReadOnlyList<SqlBoundOrdering> orderBy, SqlSubqueryValues? subqueries,
@@ -21,6 +21,8 @@ internal sealed class SqlSequenceRowCollector : IDisposable
         _rows = new(orderBy, subqueries, limit, offset, cancellationToken, metrics);
         _metrics = metrics;
         _budget = budget;
+        // Unbounded sorting follows the sequence-free collector's uncharged accounting.
+        if (_rows.IsBounded) { _charges = new(ReferenceEqualityComparer.Instance); }
     }
 
     internal bool IsComplete => _rows.IsComplete;
@@ -29,7 +31,7 @@ internal sealed class SqlSequenceRowCollector : IDisposable
     internal void Add(object?[] output, object?[] keys)
     {
         var replaced = _rows.Add(output, keys);
-        if (ReferenceEquals(replaced, output)) { return; }
+        if (_charges is null || ReferenceEquals(replaced, output)) { return; }
         if (replaced is not null)
         {
             long bytes = _charges[replaced];
@@ -50,7 +52,7 @@ internal sealed class SqlSequenceRowCollector : IDisposable
     {
         _metrics.ReleaseHashMemory(_reserved);
         _reserved = 0;
-        _charges.Clear();
+        _charges?.Clear();
     }
 
     private sealed class DebugView

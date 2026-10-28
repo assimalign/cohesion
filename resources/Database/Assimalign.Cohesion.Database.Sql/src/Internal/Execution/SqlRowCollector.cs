@@ -51,6 +51,16 @@ internal sealed class SqlRowCollector
 
     internal int RetainedCount => _orderBy.Count == 0 ? _rows.Count : _ordered.Count;
 
+    internal bool IsBounded => _orderBy.Count > 0 && _canBound;
+
+    /// <summary>Skips an unordered sequence input before its volatile projection runs.</summary>
+    internal bool SkipSequenceOffset()
+    {
+        if (_orderBy.Count != 0 || _visited >= _offset) { return false; }
+        _visited++;
+        return true;
+    }
+
     internal object?[]? Add(object?[] output, object?[] keys)
     {
         _cancellationToken.ThrowIfCancellationRequested();

@@ -175,8 +175,8 @@ internal sealed partial class SqlPlanExecutor
     {
         if (orderBy.Count == 0)
         {
-            return await MaterializeSequenceSelectAsync(matches, projections, orderBy, limit, offset,
-                evaluator, statement, cancellationToken, where, []).ConfigureAwait(false);
+            return await MaterializeUnorderedSequenceSelectAsync(matches, projections, limit, offset,
+                evaluator, statement, cancellationToken, where).ConfigureAwait(false);
         }
         using var input = matches.GetEnumerator();
         if (!input.MoveNext()) { return MaterializeProjected(projections, []); }
@@ -252,6 +252,43 @@ internal sealed partial class SqlPlanExecutor
         do { yield return input.Current; } while (input.MoveNext());
     }
 
+    private async Task<DatabaseResult> MaterializeUnorderedSequenceSelectAsync(IEnumerable<object?[]> matches,
+        IReadOnlyList<SqlProjection> projections, SqlRowCount? limit, SqlRowCount? offset,
+        SqlExpressionEvaluator evaluator, SqlStatementContext statement, CancellationToken cancellationToken,
+        SqlBoundExpression? where)
+    {
+        var returned = new List<object?[]>();
+        long skip = offset?.Count ?? 0;
+        long remaining = limit?.Count ?? long.MaxValue;
+        if (remaining == 0) { return MaterializeProjected(projections, returned); }
+        foreach (var source in matches)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            using var rowScope = SqlSequenceExecution.Current?.BeginRow();
+            await PrepareSubqueriesAsync(where, source, statement, cancellationToken).ConfigureAwait(false);
+            if (!evaluator.Matches(where, source)) { continue; }
+            if (skip > 0) { skip--; continue; }
+            var output = new object?[projections.Count];
+            for (int index = 0; index < output.Length; index++)
+            {
+                var projection = projections[index];
+                await PrepareSubqueriesAsync(projection.Value, source, statement, cancellationToken).ConfigureAwait(false);
+                output[index] = projection.ColumnOrdinal is int ordinal ? evaluator.DeliverColumn(source, ordinal)
+                    : NormalizeGroupValue(evaluator.Evaluate(projection.Value!, source, copySharedBinary: true), projection.Type);
+                if (output[index] is byte[])
+                {
+                    for (int previous = 0; previous < index; previous++)
+                    {
+                        if (ReferenceEquals(output[previous], output[index])) { output[index] = SqlBinaryValue.CopyShared(output[index]); break; }
+                    }
+                }
+            }
+            returned.Add(output);
+            if (--remaining == 0) { break; }
+        }
+        return MaterializeProjected(projections, returned);
+    }
+
     private static HashSet<int> OrderingOutputSlots(IReadOnlyList<SqlBoundOrdering> ordering, int width)
     {
         var result = new HashSet<int>();
@@ -279,11 +316,8 @@ internal sealed partial class SqlPlanExecutor
         SqlBoundExpression? where, HashSet<int> orderingSlots)
     {
         if (limit?.Count == 0) { return MaterializeProjected(projections, []); }
-        // An unordered collector must retain the offset tuples until their projections run.
-        var retainedLimit = orderBy.Count == 0 && limit is not null
-            ? limit with { Count = limit.Count <= long.MaxValue - (offset?.Count ?? 0) ? limit.Count + (offset?.Count ?? 0) : long.MaxValue } : limit;
-        using var collected = new SqlSequenceRowCollector(orderBy, _subqueryValues, retainedLimit,
-            orderBy.Count == 0 ? null : offset, cancellationToken, statement.Metrics, _definitions.StatementMemoryBudget);
+        using var collected = new SqlSequenceRowCollector(orderBy, _subqueryValues, limit,
+            offset, cancellationToken, statement.Metrics, _definitions.StatementMemoryBudget);
         if (collected.IsComplete) { return MaterializeProjected(projections, []); }
         foreach (var source in matches)
         {

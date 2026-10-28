@@ -56,7 +56,7 @@ public sealed class SqlDatabaseEngineOptions
     public TimeSpan LockTimeout { get; set; }
 
     /// <summary>Gets or sets the maximum accounted bytes retained by hash builds, joined DML and CREATE TABLE AS copying in one statement.</summary>
-    /// <remarks>Defaults to 64 MiB. Must be positive. Joined DML charges retained inputs, associations and selected writes. CREATE TABLE AS charges retained query output and batch buffers. Exceeding the budget fails before writes or publication; hash joins never spill.</remarks>
+    /// <remarks>Defaults to 64 MiB. Must be positive. Joined DML charges retained inputs, associations and selected writes. CREATE TABLE AS charges retained query output and batch buffers. Bounded ordered sequence deferral charges retained candidates and keys. Unordered sequence projection streams without retaining inputs; unbounded ordered deferral, like sequence-free sorting and grouping, is uncharged. Exceeding the budget fails before writes or publication; hash joins never spill.</remarks>
     public long StatementMemoryBudget { get; set; } = 64L * 1024 * 1024;
 
     /// <summary>
