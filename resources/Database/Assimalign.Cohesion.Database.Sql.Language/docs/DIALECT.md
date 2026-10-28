@@ -550,7 +550,7 @@ src/backend/commands/tablecmds.c:2033-2090 and src/backend/catalog/heap.c:3701-3
 
 ## Statement matrix
 
-With INSERT ... ON CONFLICT (#1118), DML RETURNING (#1117), persisted CREATE/DROP VIEW (#1124), CREATE/DROP SCHEMA (#1030), set operations (#1114), quantified comparisons (#1718), UPDATE ... FROM / DELETE ... USING (#1714), TRUNCATE and CREATE TABLE AS (#1716), MERGE (#1715), aggregate FILTER and grouping sets (#1720), and sequence DDL, NEXT VALUE FOR and DISCARD ALL (#1717), the profile has **67 of 72 declared clauses** measured against the live SQL engine, including MERGE actions and RETURNING. WITH RECURSIVE (#1719, SQ-R1) adds one declared binding-only clause; recursive execution remains CK00001 until SQ-R2.
+With INSERT ... ON CONFLICT (#1118), DML RETURNING (#1117), persisted CREATE/DROP VIEW (#1124), CREATE/DROP SCHEMA (#1030), set operations (#1114), quantified comparisons (#1718), UPDATE ... FROM / DELETE ... USING (#1714), TRUNCATE and CREATE TABLE AS (#1716), MERGE (#1715), aggregate FILTER (#1720), grouping sets (#1720), and sequence DDL, NEXT VALUE FOR and DISCARD ALL (#1717), the profile has **67 of 72 declared clauses** measured against the live SQL engine, including MERGE actions and RETURNING. WITH RECURSIVE (#1719, SQ-R1) adds one declared binding-only clause; recursive execution remains CK00001 until SQ-R2.
 Phase 22 measured 33 of 49.
 The earlier 32/48 figure included `JOIN`, `GROUP BY`, `HAVING`, and `SUBQUERY`,
 removed in Phase 12e (#1019–#1021), plus a no-op `CAST` removed in Phase 13.
