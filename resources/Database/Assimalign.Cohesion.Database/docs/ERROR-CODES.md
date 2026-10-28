@@ -172,7 +172,7 @@ structured-carrier messages remain unprefixed.
 | COHSQLT006 | CS04006 | Transactions/locking |
 | COHSQLE021 | CS04021 | Transactions/locking |
 | COHSQLE044 | CS04044 | Transactions/locking |
-| COHSQLE064 | CS04064 | Transactions/locking |
+| COHSQLE064 | CS04064 | Transactions/locking — serialization failure, including a concurrently changed MERGE target under Snapshot (#1715) |
 | New (w11 review) | CS04065 | Transactions/locking — hard deadlock (`40P01`) |
 | New (#1716) | CS04066 | Transactions/locking — TRUNCATE inside an explicit transaction (25001) |
 | COHSQLE004 | CS05004 | Execution/budgets |
@@ -198,6 +198,12 @@ structured-carrier messages remain unprefixed.
 SQLSTATE meanings remain those in [the SQL dialect](../../Assimalign.Cohesion.Database.Sql.Language/docs/DIALECT.md); the Cohesion identities changed, not ISO/PostgreSQL SQLSTATE values.
 
 ## Documents migration
+
+OQL aggregate quantifiers and native aggregates (#1729, OQ-G1) add CD00011 for a scalar/star
+quantifier and CD01029 for an invalid directly constructed call quantifier. Existing CD02007
+covers a statistical result outside the decimal domain, CD02008 preserves SUM/AVG nonnumber refusal, CD05001 covers
+aggregate placement and CD05018 covers the same statement retained-memory exhaustion condition
+for DISTINCT sets and ARRAY_AGG as for RETURNING. No disk or wire identity changes.
 
 OQL ARRAY/FIRST comprehensions (#1728) reuse CD00002/CD00005 for malformed/deep syntax,
 CD01005 for missing parameters, CD02006/CD02007/CD02008 for scalar failures and CD05001 for
@@ -225,6 +231,7 @@ payload accepts rows plus a matching affected count without capability negotiati
 | OQL0008 | CD00008 | Language/syntax |
 | OQL0009 | CD00009 | Language/syntax |
 | OQL0010 | CD00010 | Language/syntax |
+| New (#1729, OQ-G1) | CD00011 | Language/syntax — ALL/DISTINCT on a scalar or star call |
 | COHDOC002 | CD01002 | Binding/names |
 | COHDOC003 | CD01003 | Binding/names |
 | COHDOC005 | CD01005 | Binding/names |
@@ -236,6 +243,7 @@ payload accepts rows plus a matching affected count without capability negotiati
 | New (#1727) | CD01026 | Binding/names — empty RETURNING output name in a directly constructed AST |
 | New (#1728) | CD01027 | Binding/names — empty comprehension variable in a directly constructed AST |
 | New (#1530, OQ-I2) | CD01028 | Binding/names — array index projection or WHEN path is not rooted in its element variable |
+| New (#1729, OQ-G1) | CD01029 | Binding/names — invalid aggregate quantifier or target in a directly constructed call AST |
 | COHDOC006 | CD02006 | Values/types |
 | COHDOC007 | CD02007 | Values/types |
 | COHDOC008 | CD02008 | Values/types |
@@ -301,11 +309,13 @@ transaction-state diagnostics; it allocates no new identity. These changes add n
 | COHDBG007 | CG04007 | Transactions/locking |
 | COHDBG022 | CG04022 | Transactions/locking |
 | COHDBG023 | CG04023 | Transactions/locking |
+| New (#1735, GQ-M1) | CG04024 | Transactions/locking — retryable stale Snapshot MERGE pattern decision |
 | COHDBG001 | CG05001 | Execution/budgets |
 | COHDBG004 | CG05004 | Execution/budgets — physical work or qualifying 65th hop, including selector search |
 | COHDBG008 | CG05008 | Execution/budgets |
 | COHDBG020 | CG05020 | Execution/budgets — retained statement memory, including selector history and output |
 | New (#1536) | CG05022 | Execution — selected shortest-path record is absent while reconstruction's operation remains active |
+| New (#1735, GQ-M1) | CG05023 | Execution — invalid bound MERGE pattern lock identity |
 | COHDBG006 | CG06006 | Storage/durability |
 | COHDBG012 | CG06012 | Storage/durability |
 | COHDBG017 | CG06017 | Storage/durability |
@@ -387,7 +397,7 @@ and invariant exceptions and lower child-root typed failures retain their docume
 | CD04104 | No explicit document transaction is open for COMMIT or ROLLBACK (#1725) | — |
 | CD04105 | OQL collection/index DDL inside an explicit transaction (#1725) | — |
 | CD05016 | Result byte/frame limit exceeded | — |
-| CD05018 | RETURNING retained result exceeds the statement memory budget (#1727) | — |
+| CD05018 | Retained SELECT sources/groups, native aggregate state/values or RETURNING results exceed the statement memory budget (#1727, #1729, #1753) | — |
 | CD05019 | Serialized RETURNING value exceeds 256 levels, including the named projection wrapper (#1727) | — |
 | CD07001 | Session belongs to another database | — |
 | CD07002 | Text transaction control requires the negotiated transaction-status capability (#1725) | — |

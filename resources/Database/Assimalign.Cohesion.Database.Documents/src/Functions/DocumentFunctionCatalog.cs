@@ -49,7 +49,7 @@ public sealed class DocumentFunctionCatalog : IReadOnlyCollection<DocumentFuncti
     internal static bool IsSpecial(string name) => name is "META" or "COALESCE" or "IFMISSING" or "IFNULL" or "IFMISSINGORNULL";
     internal static bool IsReserved(string name) => name.ToUpperInvariant() is
         "ELEMENT" or "FLATTEN" or "STRUCT" or "LIST" or "BAG" or "LISTTOSET" or "TYPEOF" or
-        "ARRAY_AGG" or "REGEXP_LIKE" or "REGEXP_REPLACE" or "REGEXP_POSITION";
+        "REGEXP_LIKE" or "REGEXP_REPLACE" or "REGEXP_POSITION";
 
     private sealed class DebugView
     {

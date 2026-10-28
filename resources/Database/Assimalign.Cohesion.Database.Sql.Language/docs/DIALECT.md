@@ -321,7 +321,7 @@ a real target table or alias is named excluded, which stays referenceable (Postg
 MySQL ON DUPLICATE KEY UPDATE and SQLite INSERT OR IGNORE/REPLACE report one CK00001
 suggesting ON CONFLICT and execute nothing. These spellings and CONFLICT, DO, NOTHING,
 EXCLUDED remain contextual, so stored identifier quoting is unchanged. MERGE executes ordered
-actions, BY SOURCE and RETURNING (#1715, SQ-M2).
+actions, BY SOURCE and RETURNING, with target rechecks and final-state foreign keys (#1715, SQ-M2/SQ-M3).
 
 ## TRUNCATE (#1716, SQ-T1)
 
@@ -484,7 +484,7 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | `ON DELETE CASCADE` / `RESTRICT` / `NO ACTION` / `SET NULL` / `SET DEFAULT` | Supported | omitted deletion action defaults to `NO ACTION`; a cascade deletes its whole transitive closure with no depth limit, so a self-referencing chain deletes however long it is (#1164), and a cycle deletes each row once; `DROP TABLE ... CASCADE` is not supported |
 | `ON UPDATE` | Recognized, not supported | absent from the profile; rejected with `CK00001` |
 | `START TRANSACTION` / `BEGIN [WORK\|TRANSACTION]` / `COMMIT [WORK\|TRANSACTION]` / `END` / `ROLLBACK [WORK\|TRANSACTION]` | Supported | Spellings map to the existing BEGIN/COMMIT/ROLLBACK session commands (+0 clauses). Like every SQL statement, a valid spelling without `;` receives informational CS00009, with no error or warning; with `;` it has no parser diagnostics. START and WORK are contextual, so columns named start/work remain valid. END takes no suffix; without a transaction its CS04002 message names COMMIT. Commit and rollback observe caller cancellation only before their end starts (#1246); a pre-canceled explicit end leaves the transaction usable. Once execution completes, automatic commit ignores caller cancellation and delivers the committed result; real append and durability failures retain their normal errors. Catalog DDL that self-committed finishes mandatory cleanup with CancellationToken.None and delivers its committed result even if the caller canceled; a successful CREATE TABLE requires no retry and exists once after reopen. `SqlCommitCancellationConformanceTests` covers the end boundary and committed rows after reopen. END WORK/TRANSACTION, AND [NO] CHAIN, modes, ROLLBACK [WORK] TO [SAVEPOINT], BEGIN TRAN/named transactions and COMMIT PREPARED stay CS00003. ABORT [WORK\|TRANSACTION], SAVEPOINT, RELEASE, SET TRANSACTION and PREPARE TRANSACTION stay CS00002 (#1012); TRANSACTION alone is not a statement. |
-| `MERGE` | Ordered actions, BY SOURCE and RETURNING execute; concurrent-target rechecks and complete mixed-action final-state constraints remain for SQ-M3 | Existing constraint and action codes |
+| `MERGE` | Ordered actions, BY SOURCE and RETURNING, ReadCommitted target rechecks and mixed-action final-state foreign keys | Existing constraint/action codes; CS04064 for Snapshot target conflicts |
 | `GRANT` | Not in the dialect | `CS00002` |
 
 ## Unique-build failure order (#1444)
@@ -1432,7 +1432,7 @@ Capability preflight skips advertised clauses and reports the first unadvertised
 one. Thus USING cannot mask a later NATURAL, WINDOW or OVER. MERGE INTO ... USING
 binds and explains; DELETE ... USING executes; CREATE INDEX ... USING remains a syntax error.
 
-## MERGE syntax, binding and execution (#1715, SQ-M1/SQ-M2)
+## MERGE syntax, binding and execution (#1715, SQ-M1/SQ-M2/SQ-M3)
 
 ```sql
 MERGE INTO target [AS a] USING source [AS b] ON condition
@@ -1499,10 +1499,40 @@ uniqueness enforcement. Identity allocation, defaults, coercion, domain/CHECK va
 referential actions and lock ordering reuse existing DML rules. Hash builds share the
 statement memory grant and cancellation unwinds reservations and statement locks.
 Plain EXPLAIN succeeds without writes; EXPLAIN ANALYZE stays SELECT-only.
-SQ-M3 supplies PostgreSQL concurrent-target rechecks and complete mixed-action final-state
-constraint validation; SQ-M2 still refuses a stale target through existing version checks.
-No disk/protocol/result-frame changes. Repeated modification follows PostgreSQL
-executor/nodeModifyTable.c:3521-3551.
+SQ-M3 locks the latest version of a concurrently changed modifying target under ReadCommitted
+and reevaluates the original ON predicate and ordered WHEN clauses against it, retaining the
+original source. A broken match produces both unmatched directions; a deleted MATCHED target
+produces BY TARGET only. BY SOURCE never becomes MATCHED and a concurrently deleted BY SOURCE
+row disappears. Snapshot retains a retryable serialization refusal with CS04064. Competing INSERTs
+use ordinary uniqueness enforcement. Independent action subqueries remain cached per statement;
+scalar assignments reevaluate on a target recheck.
+
+Foreign keys see the composed final INSERT/UPDATE/DELETE rows, including overlapping CASCADE,
+SET NULL and SET DEFAULT effects. A child moved away from a deleted parent survives. NO ACTION
+allows a replacement parent key within the statement; RESTRICT refuses substitution. Children
+moved to a deleted parent and then cascaded away retain locks on their old stored
+parents through commit or rollback, so a concurrent parent delete waits before reading children.
+Direct CHECK/domain and unique proposal failures remain errors even when a cascade would remove the
+proposed row. RETURNING and affected counts describe direct actions before referential effects.
+An UPDATE removed by a cascade still validates children of its old stored parent key against
+the final state; surviving old-key children refuse the whole statement with CS03039. Immediate
+direct-proposal uniqueness takes precedence over final-state foreign-key failures and
+NOT NULL, CHECK, domain or identity failures on SET NULL/DEFAULT rows, following PostgreSQL
+executor/nodeModifyTable.c:2371-2383 and utils/adt/ri_triggers.c:887,923-955. A retained failure
+performs no further parent-row locking, so a stale matched parent cannot mask the statement error.
+CS04064 identifies actual target-version conflicts. Cascade snapshot crosschecks and matched-parent
+version checks retain plain DML's uncoded transaction-abort contract, as do host-ended transactions
+and abandoned lock owners. The
+[review regression corpus](../../Assimalign.Cohesion.Database.Sql/tests/SqlMergeReviewRegressionTests.cs)
+pins these conditions and unchanged tables on refusal.
+The [engine recheck corpus](../../Assimalign.Cohesion.Database.Sql/tests/SqlMergeConcurrencyTests.cs),
+[final-state corpus](../../Assimalign.Cohesion.Database.Sql/tests/SqlMergeConstraintTests.cs),
+[InMemory/TCP corpus](../../Assimalign.Cohesion.Database.Sql.Client/tests/SqlMergeWireTests.cs) and
+[wire Snapshot corpus](../../Assimalign.Cohesion.Database.Sql.Client/tests/SqlMergeConcurrencyWireTests.cs)
+exercise this contract. Wire BEGIN keeps its default Snapshot isolation. No disk/protocol/result-frame
+changes. Repeated modification and target rechecks follow PostgreSQL
+executor/nodeModifyTable.c:3521-3551,3557-3744; NO ACTION substitution follows
+utils/adt/ri_triggers.c:944-959.
 Namespace/order rules follow PostgreSQL parser/parse_merge.c:52-99,138-178,247-285;
 join preservation follows optimizer/prep/prepjointree.c:222-246 and FULL eligibility follows
 optimizer/path/joinrels.c:1165-1179 in the local reference clone.

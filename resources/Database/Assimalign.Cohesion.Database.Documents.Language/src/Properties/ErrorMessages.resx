@@ -31,6 +31,9 @@
   <data name="OqlQueryParserParsePrimaryVoid" xml:space="preserve"><value>CASE requires a WHEN branch.</value></data>
   <data name="OqlQueryParserParsePrimaryVoid2" xml:space="preserve"><value>A parameter name must be an identifier (a letter or _, then letters, digits or _) or digits only; use $name, @name, or $1.</value></data>
   <data name="OqlQueryParserParsePrimaryVoid3" xml:space="preserve"><value>The numeric literal is invalid.</value></data>
+  <data name="AggregateQuantifierInvalid" xml:space="preserve">
+    <value>ALL or DISTINCT requires one non-star aggregate expression.</value>
+  </data>
   <data name="OqlQueryParserParsePrimaryVoid4" xml:space="preserve"><value>Unknown OQL function '{0}'.</value></data>
   <data name="OqlQueryParserParsePrimaryVoid5" xml:space="preserve"><value>Invalid argument for OQL function '{0}'; only COUNT accepts '*'.</value></data>
   <data name="OqlQueryParserParsePrimaryVoid6" xml:space="preserve"><value>Invalid argument count for OQL function '{0}'.</value></data>

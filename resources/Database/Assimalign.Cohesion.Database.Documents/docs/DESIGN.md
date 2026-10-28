@@ -481,7 +481,9 @@ CD00007 for the same count rule at parse and plan time:
 | `CD02013` | Invalid evaluated LIKE escape or a pattern ending in its escape character |
 | `CD01014` | DISTINCT ORDER BY expression is absent from the projection |
 | `CD05015` | A query/RETURNING array or object constructor exceeds the 256-level result limit |
-| `CD05018` | RETURNING retained result exceeds the statement memory budget |
+| `CD05018` | Retained statement source rows, groups, RETURNING results or aggregate values exceed the statement memory budget |
+| `CD00011` | ALL/DISTINCT applied to a scalar or star call |
+| `CD01029` | Direct call AST has an invalid aggregate quantifier or quantifier target |
 | `CD05019` | Serialized RETURNING value exceeds 256 levels, including a named projection wrapper |
 | `CD02016` | Invalid UPDATE target or an incompatible object/array shape or index |
 | `CD01017` | UPDATE targets duplicate or prefix-overlap after alias normalization |
@@ -690,10 +692,58 @@ Paths and lone stars can observe heterogeneous scalar roots and
 still inspect all matches to guarantee page-independent column types; their result is materialized.
 This preserves the metadata contract while making early termination safe where types are fixed.
 
+#### Aggregate quantifiers and native accumulators (#1729, OQ-G1)
+
+The [dialect](../../Assimalign.Cohesion.Database.Documents.Language/docs/DIALECT.md#aggregate-quantifiers-and-native-aggregates-1729-oq-g1)
+defines ALL/DISTINCT and the eleven native aggregate names. Each call/group still creates a fresh
+DocumentAggregateAccumulator through #1711's NVI boundary. Native ARRAY_AGG opts into unknown
+inputs, skips MISSING and retains NULL; Boolean/statistic cores skip valued wrong kinds. Existing
+SUM/AVG numeric refusal is preserved. Exact BigInteger moments at decimal scale 28 avoid
+cancellation from large offsets and premature decimal overflow/underflow. The largest intermediate
+is bounded by 604 bits even at Int64.MaxValue inputs, so state is independent of group size.
+Sample statistics return singleton zero. VARIANCE rounds the final rational to decimal using
+nearest-even rounding; STDDEV uses SQRT's decimal conversion and square-root convention, falling
+back to the rational's double value when intermediate variance is not exactly representable.
+The exact rational decides root overflow; if floating conversion crosses the decimal boundary, an exact midpoint comparison rounds the integral root to nearest-even. Only a final out-of-range result uses CD02007. No new public function seam,
+interface, visibility grant or dependency is needed; local native configuration carries the
+statement memory counter and constructor depth without exposing implementation state publicly.
+
+The evaluator applies DISTINCT before Add, using grouping comparison with cancellation through
+structural comparisons. It retains separate state per call/group, deduplicates 1 and 1.0 and
+structurally equal objects regardless of member order, and releases set charges after Finish.
+ARRAY_AGG returns independently owned JSON through the ordinary constructor writer; no input-order
+promise is made. Each appearance in projection/HAVING/ORDER BY remains independent, as #1711 states. Quantified predicates inherit aggregate permission and carry the enclosing group through collection and SATISFIES evaluation; aggregate arguments still disable nested aggregates.
+EXPLAIN names aggregate kinds/quantifiers on Group without calling an accumulator or reading data.
+PostgreSQL src/backend/executor/nodeAgg.c:888-906 also removes DISTINCT duplicates before the
+transition function; src/backend/utils/adt/float.c:2937-2955 explains why stable online moments
+avoid naive floating squared-sum subtraction. Cohesion uses its own grouping comparator and exact
+integer squared-sum subtraction, where cancellation loses no digits; no reference-engine code was copied.
+
+The operation-owned counter applies StatementMemoryBudget to catalog identities and sort staging,
+retained SELECT source rows (including JSON, IDs, raw star bytes and expanded bindings), group
+keys and membership, native accumulator state, DISTINCT sets, array inputs, scratch expressions,
+and projected output. It reuses CD05018 for retained statement memory exhaustion (#1753, #1097).
+Source and group reservations release on every executor exit; a reservation can also own the
+GROUP AS wrappers planned for OQ-G2. Fixed transition-state estimates include the bounded exact
+statistic moments. Planning never creates this execution-only state.
+
+A set reserves 128 bytes plus 64 bytes per entry and scalar ownership. An array input list
+reserves 256 bytes plus entries/values; its independently owned JSON result is charged separately
+while both representations coexist. JSON costs raw UTF-8 length plus 12 bytes per token and
+128 bytes per owner, as RETURNING does. HAVING scratch releases after each predicate; projection
+scratch transfers to independently charged result rows; ORDER BY values release after sorting.
+Duplicate and paged-away results release their row charges. Statement completion releases remaining
+charges. Budget refusal or cancellation publishes no partial result and uses ordinary rollback.
+These lifetimes follow the separation of input, transition and output contexts described in the
+local PostgreSQL src/backend/executor/nodeAgg.c:66-80; no reference-engine code was copied.
+The limit remains a retained-storage estimate; mutation pending-write buffers and application
+callback-owned state are outside these native estimates. Parser, execution-conformance and
+InMemory/TCP corpora and the NativeAOT sample cover the contract.
+
 #### SQL++ functions and transaction clock (#1137)
 
-Documents.Language's public immutable OqlFunctions table declares the 40 standard executable
-names (META, five aggregates and 34 scalars), arities, kind constraints and static result types.
+Documents.Language's public immutable OqlFunctions table declares the 46 standard executable
+names (META, eleven aggregates and 34 scalars), arities, kind constraints and static result types.
 Native registrations use that metadata; the frozen engine function catalog also contains application
 registrations and supplies planning and execution binding. No visibility grant is added. Scalar validation
 passes aggregate permission into its arguments, while aggregates forbid nested aggregates.
@@ -1184,8 +1234,7 @@ arrays by token count while large strings pay for their bytes. A lone star retai
 and one original raw image; each representation is charged once. A 1,024-byte ASCII object
 with one string property costs 2,448 bytes per row (224 row storage + 1,200 clone + 1,024 raw),
 plus 208 bytes of statement metadata. Charges accumulate before rows enter the result list; CD05018 at the clause span rolls
-back the statement on exhaustion. This does not retrofit accounting onto existing SELECT or
-mutation/source staging and is not a process-heap cap. The public option is a model configuration
+back the statement on exhaustion. SELECT source/group staging, native accumulators and aggregate results share this limit and release reservations according to their lifetimes, as described above. Mutation pending-write buffers remain outside this estimate. The public option is a model configuration
 capability, not an assembly-visibility bridge. No new public interface or dependency is added.
 
 The server already serializes both counts into Complete; updated Documents.Client accepts an
@@ -2972,9 +3021,8 @@ The public family is `DocumentFunction`, `DocumentScalarFunction`,
 `DocumentValue`, borrowed `DocumentArguments`, and `DocumentFunctionContext`.
 Scalar `Invoke`, aggregate `CreateAccumulator`, accumulator `Add` and `Finish` are
 nonvirtual validation boundaries over protected abstract cores. Native functions use those
-same boundaries. The standard catalog contains 30 scalar registrations and six aggregate
-registrations: COUNT has separate value and star signatures; SUM, AVG, MIN and MAX have one
-each. META and the four lazy conditional forms remain grammar forms, like SQL CASE, rather
+same boundaries. The standard catalog contains 30 scalar registrations and twelve aggregate
+registrations: COUNT has separate value and star signatures; each of the other ten aggregate names has one. META and the four lazy conditional forms remain grammar forms, like SQL CASE, rather
 than eager callbacks.
 
 `DocumentFunctionName` is a generated identifier value with implicit string conversion and

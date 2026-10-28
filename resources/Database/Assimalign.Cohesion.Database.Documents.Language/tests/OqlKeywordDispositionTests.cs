@@ -82,7 +82,6 @@ public sealed class OqlKeywordDispositionTests
         ["UNIQUE"] = Parses("CREATE UNIQUE INDEX ix ON c (a)"),
         ["LISTTOSET"] = Rejects("SELECT LISTTOSET(a) FROM c", "LISTTOSET"),
         ["TYPEOF"] = Rejects("SELECT TYPEOF(a) FROM c", "TYPEOF"),
-        ["ARRAY_AGG"] = Rejects("SELECT ARRAY_AGG(a) FROM c", "ARRAY_AGG"),
         ["REGEXP_LIKE"] = Rejects("SELECT REGEXP_LIKE(a, 'x') FROM c", "REGEXP_LIKE"),
         ["REGEXP_REPLACE"] = Rejects("SELECT REGEXP_REPLACE(a, 'x', 'y') FROM c", "REGEXP_REPLACE"),
         ["REGEXP_POSITION"] = Rejects("SELECT REGEXP_POSITION(a, 'x') FROM c", "REGEXP_POSITION"),

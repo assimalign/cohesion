@@ -43,6 +43,8 @@ using Assimalign.Cohesion.Database.Storage;
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Storage.SqlStorage.DebugView))]
 public sealed class SqlStorage : Assimalign.Cohesion.Database.Storage.Storage
 {
+    internal Internal.SqlRowVersionLinks RowVersionLinks { get; } = new();
+
     private SqlStorage(StorageStream data, StorageStream journal, StorageStream backup)
         : base(StorageModel.Sql, data, journal, backup) { }
 

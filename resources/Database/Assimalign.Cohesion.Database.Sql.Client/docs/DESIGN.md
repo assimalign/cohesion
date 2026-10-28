@@ -16,11 +16,16 @@ abort, and idle eviction must release the sole session slot for a fresh client a
 
 Direct references are Database.Client, Sql.Protocol, Database.Types, Database.Protocol and Connections. Wire contracts live in each model Protocol assembly, shared by client and engine. This client has no engine, area-root, storage, transaction, indexing, model parser or schema reference. Cache.Client remains an empty placeholder. Engine-free trimming and NativeAOT coverage lives in Database.Client/samples/Assimalign.Cohesion.Database.Client.AotSample.
 
-## MERGE (#1715, SQ-M2)
+## MERGE (#1715, SQ-M2/SQ-M3)
 
 The existing exchange carries MERGE actions, BY SOURCE and RETURNING with merge_action().
 InMemory/TCP tests assert new UPDATE/INSERT targets, old DELETE targets, NULL absent-source
-cells and reusable CS05036 failures with unchanged rows. No client API or protocol changes.
+cells and reusable CS05036 failures with unchanged rows. The final-state corpus covers moved
+children, overlapping CASCADE/SET NULL/SET DEFAULT writes, CHECK/unique/FK refusals and late
+RETURNING rollback while preserving earlier transaction writes. Recorded row-lock waits drive
+concurrent UPDATE/DELETE commits and assert CS04064 under wire BEGIN's default Snapshot
+isolation, with reusable connections. ReadCommitted rechecks are exercised through the engine
+transaction API. No client API or protocol changes.
 
 ## TRUNCATE (#1716, SQ-T1)
 

@@ -49,8 +49,11 @@ public sealed class DocumentResponseStreamingTests
         // DocumentRowWriterTests separately measures peak backing-buffer capacity directly.
         // This raw peer discards rows while verifying every frame and its distinct marker.
         // Neither check bounds InMemory transport queues when a peer stops reading.
+        // The statement budget includes 32 MiB each of source JSON, raw star images and
+        // independent output ownership. Admit that storage while retaining the formatter's 8 MiB assertion.
         const int rowCount = 128;
-        await using var harness = await DocumentClientTestHarness.StartAsync();
+        await using var harness = await DocumentClientTestHarness.StartAsync(
+            configureEngine: builder => builder.Options.StatementMemoryBudget = 256L * 1024 * 1024);
         await using (var session = await harness.Database.CreateSessionAsync(harness.Token))
         {
             var collection = await session.CreateCollectionAsync("items", harness.Token);

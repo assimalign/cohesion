@@ -663,10 +663,12 @@ internal sealed partial class SqlPlanExecutor
                 // Release every replaced unique mapping before inserting replacements,
                 // so statement-consistent key swaps do not fail on an old live entry.
                 applied = 0;
-                foreach (var (_, _, _, newValues, newVersion) in replacements)
+                foreach (var (pageId, slotIndex, _, newValues, newVersion) in replacements)
                 {
                     if ((applied++ & 63) == 0) { cancellationToken.ThrowIfCancellationRequested(); }
                     var location = _storage.InsertRow(bracket, plan.Table.ObjectId, newVersion);
+                    _storage.RowVersionLinks.Add(SqlRecordLocation.Pack(pageId, slotIndex),
+                        SqlRecordLocation.Pack(location.PageId, location.SlotIndex), statement.Transaction.Sequence);
                     statement.Coordinator.VersionStore.RecordCreated(statement.Transaction.Sequence, location.PageId, location.SlotIndex);
                     await InsertIndexEntriesAsync(
                         statement, indexes, plan.Table, newValues, SqlRecordLocation.Pack(location.PageId, location.SlotIndex), cancellationToken).ConfigureAwait(false);
@@ -769,6 +771,8 @@ internal sealed partial class SqlPlanExecutor
                         {
                             cancellationToken.ThrowIfCancellationRequested();
                             var location = _storage.InsertRow(bracket, update.Table.ObjectId, update.NewVersion);
+                            _storage.RowVersionLinks.Add(SqlRecordLocation.Pack(update.Location.PageId, update.Location.SlotIndex),
+                                SqlRecordLocation.Pack(location.PageId, location.SlotIndex), statement.Transaction.Sequence);
                             statement.Coordinator.VersionStore.RecordCreated(statement.Transaction.Sequence, location.PageId, location.SlotIndex);
                             try
                             {
@@ -1072,14 +1076,20 @@ internal sealed partial class SqlPlanExecutor
     /// deleted slot, so a short record is a live slot's, and it is damaged, not a reclaimed version
     /// to retry against (#1362).
     /// </exception>
-    private void EnsureLatestVersion(SqlCatalogTable table, PageId pageId, int slotIndex, TransactionSequence self)
+    private void EnsureLatestVersion(SqlCatalogTable table, PageId pageId, int slotIndex, TransactionSequence self, bool codeSerialization = false)
     {
         var (_, deleter) = ReadVersionStamps(table, pageId, slotIndex);
 
         if (deleter != TransactionSequence.None && deleter != self)
         {
-            throw new TransactionAbortedException(
+            var conflict = new TransactionAbortedException(
                 string.Format(System.Globalization.CultureInfo.CurrentCulture, _errorExecutorEnsureLatestVersionFailure, table.Schema, table.Name, deleter));
+            if (codeSerialization)
+            {
+                throw new DatabaseTransactionAbortedException(conflict.Message,
+                    [new Diagnostic { Code = SqlExecutionException.SerializationFailureCode, Severity = DiagnosticSeverity.Error, Message = conflict.Message }], conflict);
+            }
+            throw conflict;
         }
     }
 
@@ -1117,6 +1127,9 @@ internal sealed partial class SqlPlanExecutor
         var current = _storage.ReadRow(pageId, slotIndex);
         byte[] tombstoned = SqlRowCodec.WithDeleter(current.Span, statement.Transaction.Sequence);
         _storage.UpdateRow(bracket, pageId, slotIndex, tombstoned);
+        // A failed UPDATE followed by DELETE in the same transaction must not reuse
+        // the failed replacement link (the transaction stamp alone cannot distinguish it).
+        _storage.RowVersionLinks.Forget(SqlRecordLocation.Pack(pageId, slotIndex));
         statement.Coordinator.VersionStore.RecordTombstoned(statement.Transaction.Sequence, pageId, slotIndex);
     }
 
