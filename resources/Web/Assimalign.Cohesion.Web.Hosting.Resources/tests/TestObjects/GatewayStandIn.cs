@@ -4,7 +4,6 @@ using System.Collections.Generic;
 using System.IO;
 using System.Net;
 using System.Text;
-using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -24,6 +23,7 @@ internal sealed class GatewayStandIn : IAsyncDisposable
 {
     private readonly WebApplication _application;
     private readonly ConcurrentQueue<ResourceManifest> _manifests = new();
+    private readonly JsonResourceContentSerializer _json = JsonResourceContentSerializer.Create();
     private byte[] _answer = "[]"u8.ToArray();
     private string _lease = "null";
     private int _refusal;
@@ -127,7 +127,7 @@ internal sealed class GatewayStandIn : IAsyncDisposable
             return;
         }
 
-        _manifests.Enqueue(JsonSerializer.Deserialize(body.ToArray(), ResourceJsonContext.Default.ResourceManifest)!);
+        _manifests.Enqueue(_json.Deserialize<ResourceManifest>(body.ToArray())!);
 
         if (Volatile.Read(ref _refusal) is int refusal and > 0)
         {

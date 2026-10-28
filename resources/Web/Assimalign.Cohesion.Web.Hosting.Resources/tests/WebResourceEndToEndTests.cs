@@ -253,7 +253,7 @@ public sealed class WebResourceEndToEndTests
 
         // Assert
         response.StatusCode.ShouldBe(NetHttpStatusCode.OK);
-        ResourceManifest? manifest = JsonSerializer.Deserialize(await response.Content.ReadAsByteArrayAsync(), ResourceJsonContext.Default.ResourceManifest);
+        ResourceManifest? manifest = JsonResourceContentSerializer.Create().Deserialize<ResourceManifest>(await response.Content.ReadAsByteArrayAsync());
         manifest.ShouldNotBeNull().Key.ShouldBe(instance.Resource.Key);
     }
 

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Concurrent;
 
 using Assimalign.Cohesion.Hosting.Resources;
+using Assimalign.Cohesion.Web.Hosting.Resources.Internal;
 
 namespace Assimalign.Cohesion.Web.Hosting.Resources.Tests;
 

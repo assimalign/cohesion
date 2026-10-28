@@ -4,6 +4,8 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 
+using Assimalign.Cohesion.Hosting.Resources.Internal;
+
 namespace Assimalign.Cohesion.Hosting.Resources;
 
 /// <summary>
@@ -11,10 +13,12 @@ namespace Assimalign.Cohesion.Hosting.Resources;
 /// </summary>
 /// <remarks>
 /// <para>
-/// The serializer looks each type up in <see cref="ResourceJsonContext"/> first, then in the contexts
-/// it was created with, in order, and writes the type with the options of the context that declares
-/// it. An area's types therefore keep the naming its own context chose, and this library's types
-/// keep camel case whatever the other contexts choose.
+/// The serializer looks each type up in this library's own source-generated context first, then in
+/// the contexts it was created with, in order, and writes the type with the options of the context
+/// that declares it. An area's types therefore keep the naming its own context chose, and this
+/// library's types keep camel case whatever the other contexts choose. Contexts are internal to the
+/// assembly that declares them: a platform that exchanges JSON declares its own context for the
+/// public types it needs, such as an area's state types.
 /// </para>
 /// <para>
 /// It discovers nothing by reflection: a type no context declares is not supported, so a resource's

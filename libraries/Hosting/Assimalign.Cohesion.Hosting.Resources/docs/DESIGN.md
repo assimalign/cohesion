@@ -172,8 +172,8 @@ lives: a control plane is created with one, invocation contexts carry it, and tr
 manifest and results with it and label content with its media type. A platform that exchanges
 another format brings its own serializer, and that serializer must know every type the instances
 exchange, this library's and each area's action types. The owner accepted that cost.
-`JsonResourceContentSerializer` is the default. It resolves each type from `ResourceJsonContext`,
-then from the contexts it was created with, and writes each type with its own context's options,
+`JsonResourceContentSerializer` is the default. It resolves each type from this library's own,
+internal context, then from the contexts it was created with, and writes each type with its own context's options,
 so an area's naming survives being combined with others. *Rejected:* one merged
 `JsonSerializerOptions` over all resolvers would impose one naming policy on every area's types.
 Content the instance refuses is a `ResourceContentException` rather than a `JsonException`, so the

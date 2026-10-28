@@ -6,6 +6,8 @@ using System.Text.Json;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Hosting.Resources.Internal;
+
 namespace Assimalign.Cohesion.Hosting.Resources.Tests;
 
 public class ResourceJsonContextTests

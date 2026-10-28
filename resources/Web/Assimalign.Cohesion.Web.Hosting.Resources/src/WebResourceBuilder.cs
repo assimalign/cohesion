@@ -53,8 +53,9 @@ public sealed class WebResourceBuilder
     /// inputs and outputs, state snapshots, and results.
     /// </summary>
     /// <remarks>
-    /// Defaults to JSON over <see cref="WebResourceJsonContext"/>. A gateway platform that exchanges
-    /// another format sets its own serializer, which must know <see cref="WebCorsPolicy"/>.
+    /// Defaults to JSON over the resource's own source-generated context. A gateway platform that
+    /// exchanges another format, or JSON written its own way, sets its own serializer, which must
+    /// know <see cref="WebCorsPolicy"/>.
     /// </remarks>
     /// <exception cref="ArgumentNullException">The value is <see langword="null"/>.</exception>
     public IResourceContentSerializer Serializer
