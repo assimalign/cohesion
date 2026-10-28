@@ -727,3 +727,6 @@ Engine requests admit named calls and resolve them against the executing catalog
 name retains CG00010 but now fails during binding/execution: the wire category is ExecutionFailure,
 and no StatementParseFailed event is raised. Standalone parsers retain unknown-name parse
 diagnostics. This changes error categorization, with no frame-layout or protocol-version change.
+
+ORDER BY alias result kinds resolve projection expressions in the saved incoming scope,
+including Boolean and list aliases referenced beneath shadowing collection iterators (#1736).

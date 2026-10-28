@@ -3593,3 +3593,6 @@ unknown calls; no frame layout or version changes.
 
 Interleaved same-process Release comparisons retain bounded native-dispatch allocation overhead;
 elapsed-time distributions remain descriptive rather than an acceptance gate.
+
+ORDER BY alias result kinds resolve projection expressions in the saved incoming scope,
+including Boolean and list aliases referenced beneath shadowing collection iterators (#1736).

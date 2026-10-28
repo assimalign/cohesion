@@ -1651,3 +1651,6 @@ community/kernel/src/main/java/org/neo4j/kernel/api/procedure/CallableUserFuncti
 Engine request parsing admits unknown named calls for engine-local catalog binding. Unknown names
 retain CG00010 but ordinary requests fail during execution (wire ExecutionFailure, without
 StatementParseFailed); standalone parser diagnostics are unchanged. See DIALECT.md.
+
+ORDER BY alias result kinds resolve projection expressions in the saved incoming scope,
+including Boolean and list aliases referenced beneath shadowing collection iterators (#1736).

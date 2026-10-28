@@ -21,6 +21,8 @@ internal sealed partial class GraphPlanner
     private IReadOnlyDictionary<string, object?>? _parameters;
     private Dictionary<GqlNamedFunctionCallExpression, GraphFunction>? _functions;
     private Dictionary<GqlNamedFunctionCallExpression, GqlExpression?>? _nativeExpressions;
+    private Dictionary<string, BindingKind>? _orderVariables;
+    private Dictionary<string, GraphBindingShape>? _orderShapes;
 
     /// <summary>Initializes a new instance of the <see cref="GraphPlanner"/> class.</summary>
     /// <param name="database">The graph database whose catalog and store resolve labels, relationship types, and indexes.</param>
@@ -303,6 +305,8 @@ internal sealed partial class GraphPlanner
             if (query.OrderBy is null || projections.Count == 0 && (query.OrderBy.Count != 0 || query.Offset is not null || query.Limit is not null))
             { throw new GraphPlanningException("CG05001", ErrorMessages.SortShapeInvalid, query.Location); }
             grouping = GraphGrouping.Plan(query, projections, token, key => ValidateExpression(key), _database.Engine.Functions);
+            _orderVariables = variables;
+            _orderShapes = shapes;
             orderAliases = new Dictionary<string, int>(StringComparer.Ordinal);
             orderProjections = new Dictionary<GqlExpression, int>(new GraphExpressionShape(token));
             var shadowed = new HashSet<string>(StringComparer.Ordinal);
@@ -1143,7 +1147,17 @@ internal sealed partial class GraphPlanner
                 case GqlReduceExpression: return GraphFunctionKind.Unknown;
                 case GqlVariableExpression variable:
                     if (ordering && iterators?.Contains(variable.Variable) != true && orderAliases?.TryGetValue(variable.Variable, out int index) == true)
-                    { return KnownFunctionKind(projections[index].Expression, false); }
+                    {
+                        var currentVariables = variables;
+                        var currentShapes = shapes;
+                        try
+                        {
+                            variables = _orderVariables!;
+                            shapes = _orderShapes!;
+                            return KnownFunctionKind(projections[index].Expression, false);
+                        }
+                        finally { variables = currentVariables; shapes = currentShapes; }
+                    }
                     if (shapes.TryGetValue(variable.Variable, out var shape))
                     {
                         if (shape.Group) { return GraphFunctionKind.List; }

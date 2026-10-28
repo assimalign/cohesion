@@ -132,6 +132,8 @@ public sealed class GqlProfileExecutionTests
             ],
             [GqlClauses.ListPredicate] =
             [
+                new("LET x=TRUE MATCH (n:Person {name:'Alice'}) RETURN x AS old ORDER BY all(x IN [n] WHERE old)", [[true]]),
+                new("LET x=[TRUE] MATCH (n:Person {name:'Alice'}) RETURN x AS old ORDER BY all(x IN [n] WHERE all(y IN old WHERE y))", [[new object?[] { true }]]),
                 new("RETURN all(x IN [] WHERE TRUE), any(x IN [] WHERE TRUE), none(x IN [] WHERE TRUE), single(x IN [] WHERE TRUE)", [[true, false, true, false]]),
                 new("RETURN all(x IN [TRUE,NULL] WHERE x), any(x IN [FALSE,NULL] WHERE x), none(x IN [FALSE,NULL] WHERE x), single(x IN [TRUE,NULL] WHERE x)", [[null, null, null, null]]),
                 new("MATCH (a:Person) WHERE any(x IN [a.age] WHERE x > 40) RETURN a.name", [["Alice"]]),
