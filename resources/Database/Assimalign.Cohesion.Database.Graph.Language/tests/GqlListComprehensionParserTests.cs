@@ -64,24 +64,6 @@ public sealed class GqlListComprehensionParserTests
         statement.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG00002");
     }
 
-    [Theory(DisplayName = "Cohesion Test [GQL] - List predicates: admission remains recognized unsupported until GQ-C2")]
-    [InlineData("all")]
-    [InlineData("any")]
-    [InlineData("none")]
-    [InlineData("single")]
-    public void Parse_ListPredicate_ShouldReportCapability(string name)
-    {
-        // Arrange / Act
-        foreach (string source in new[] { $"RETURN {name}(x IN [1] WHERE x > 0)", $"RETURN 1, {name}(x IN [] WHERE NULL)", $"WITH {name}(x IN [] WHERE TRUE) AS p RETURN p" })
-        {
-            var statement = new GqlQueryParser().Parse(source);
-            // Assert
-            var diagnostic = statement.Diagnostics.ShouldHaveSingleItem();
-            diagnostic.Code.ShouldBe("CK00001");
-            diagnostic.Message.ShouldNotBeNull().ShouldContain(name.ToUpperInvariant(), Case.Sensitive);
-        }
-    }
-
     [Fact(DisplayName = "Cohesion Test [GQL] - Collections: path renderer round-trips lexical expressions")]
     public void Render_CollectionPredicate_ShouldPreserveSemanticTree()
     {

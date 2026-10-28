@@ -77,6 +77,10 @@ internal sealed class GraphExpressionShape : IEqualityComparer<GqlExpression>
                     hash.Add(comprehension.Variable, StringComparer.Ordinal);
                     hash.Add(comprehension.Predicate is null); hash.Add(comprehension.Projection is null);
                     break;
+                case GqlReduceExpression reduce:
+                    hash.Add(reduce.Accumulator, StringComparer.Ordinal); hash.Add(reduce.Variable, StringComparer.Ordinal); break;
+                case GqlListPredicateExpression predicate:
+                    hash.Add(predicate.Kind); hash.Add(predicate.Variable, StringComparer.Ordinal); break;
                 case GqlListSliceExpression slice: hash.Add(slice.From is null); hash.Add(slice.To is null); break;
             }
             foreach (var child in GraphValueExpressions.Children(step.Expression))
@@ -116,6 +120,8 @@ internal sealed class GraphExpressionShape : IEqualityComparer<GqlExpression>
             (GqlMemberExpression a, GqlMemberExpression b) => a.Member == b.Member,
             (GqlListComprehensionExpression a, GqlListComprehensionExpression b) => a.Variable == b.Variable &&
                 (a.Predicate is null) == (b.Predicate is null) && (a.Projection is null) == (b.Projection is null),
+            (GqlReduceExpression a, GqlReduceExpression b) => a.Accumulator == b.Accumulator && a.Variable == b.Variable,
+            (GqlListPredicateExpression a, GqlListPredicateExpression b) => a.Kind == b.Kind && a.Variable == b.Variable,
             (GqlListSliceExpression a, GqlListSliceExpression b) => (a.From is null) == (b.From is null) && (a.To is null) == (b.To is null),
             (GqlCoalesceExpression a, GqlCoalesceExpression b) => a.Operands is not null && b.Operands is not null,
             (GqlListExpression, GqlListExpression) or (GqlInExpression, GqlInExpression) or

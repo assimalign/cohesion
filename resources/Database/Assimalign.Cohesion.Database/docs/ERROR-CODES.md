@@ -101,6 +101,7 @@ structured-carrier messages remain unprefixed.
 | SQL0007 | CS00007 | Language/syntax |
 | SQL0008 | CS00008 | Language/syntax |
 | SQL0100 / CS00100 (retired) | CS00009 | Language/syntax — omitted semicolon (Information) |
+| New (#1720, SQ-H2 fixes) | CS00010 | Language/syntax — GROUPING SETS inside ROLLUP or CUBE (42601) |
 | COHSQLE005 | CS01005 | Binding/names |
 | COHSQLE006 | CS01006 | Binding/names |
 | COHSQLE008 | CS01008 | Binding/names |
@@ -124,6 +125,8 @@ structured-carrier messages remain unprefixed.
 | New (#1719, SQ-R1) | CS01059 | Binding/names — Recursive reference in a prohibited EXCEPT operand (42P19) |
 | New (#1719, SQ-R1) | CS01060 | Binding/names — Recursive term has more than one self-reference (42P19) |
 | New (#1719, SQ-R1) | CS01061 | Binding/names — Aggregate at the query level containing a recursive reference (42P19) |
+| New (#1720, SQ-H2) | CS01062 | Binding/grouping — GROUPING argument is not a grouping expression of the associated query level (42803) |
+| New (#1720, SQ-H2) | CS01063 | Binding/grouping — GROUPING requires 1–31 non-star expression arguments (54023) |
 | COHSQLE001 | CS02001 | Values/types |
 | COHSQLE002 | CS02002 | Values/types — identity or standalone sequence range exhaustion (#1717) |
 | COHSQLE003 | CS02003 | Values/types |
@@ -222,6 +225,8 @@ structured-carrier messages remain unprefixed.
 | New (#1715, SQ-M1) | CS05071 | Action planning — MERGE WHEN follows an unconditional clause of the same match kind |
 | New (#1720, SQ-H1) | CS05072 | Execution/placement — FILTER on a non-aggregate call (42809) |
 | New (#1720, SQ-H1) | CS05073 | Execution/placement — same-scope aggregate in FILTER (42803) |
+| New (#1720, SQ-H2) | CS05074 | Execution/placement — GROUPING outside grouped output, or in grouping/aggregate inputs (42803) |
+| New (#1720, SQ-H2) | CS05075 | Execution/expansion — more than 4096 grouping sets before DISTINCT (54001) |
 | COHSQLE041 | CS06041 | Storage/durability |
 | COHSQLE058 | CS06058 | Storage/durability |
 
@@ -344,9 +349,11 @@ transaction-state diagnostics; it allocates no new identity. These changes add n
 | COHDBG015 | CG01015 | Binding/names |
 | New (#1734) | CG01016 | Binding/names — path search prefilter references a binding introduced by a peer path in the same MATCH, with or without an explicit selector |
 | New (#1736, GQ-C1) | CG01017 | Binding/names — missing/empty comprehension iterator declaration in a hand-built AST |
+| New (#1736, GQ-C2) | CG01018 | Binding/names — missing reduce/list-predicate declaration or identical accumulator and iterator names |
 | COHDBG009 | CG02009 | Values/types |
 | COHDBG013 | CG02013 | Values/types |
 | New (#1736, GQ-C1) | CG02014 | Values/types — invalid list-operation source or numeric slice-bound kind/range |
+| New (#1736, GQ-C2) | CG02015 | Values/types — reduce or list predicate source is neither list nor NULL |
 | COHDBG003 | CG03003 | Schema/constraints |
 | New (#1735, GQ-M2) | CG03004 | Constraints — MERGE equality is null, non-finite or non-scalar |
 | New (#1735, GQ-M2) | CG03005 | Constraints — bound MERGE node is null, absent or incompatible with its node pattern |
@@ -363,6 +370,8 @@ transaction-state diagnostics; it allocates no new identity. These changes add n
 | New (#1536) | CG05022 | Execution — selected shortest-path record is absent while reconstruction's operation remains active |
 | New (#1735, GQ-M1) | CG05023 | Execution — invalid bound MERGE pattern lock identity |
 | New (#1736, GQ-C1) | CG05024 | Execution — aggregate inside a list comprehension predicate or projection |
+| New (#1736, GQ-C2) | CG05025 | Execution — malformed reduce/list-predicate body or aggregate inside that body |
+| New (#1736, GQ-C2) | CG05026 | Planning — reduce shape/type analysis exceeds 65,536 visited nodes or closure steps |
 | COHDBG006 | CG06006 | Storage/durability |
 | COHDBG012 | CG06012 | Storage/durability |
 | COHDBG017 | CG06017 | Storage/durability |
@@ -445,7 +454,7 @@ and invariant exceptions and lower child-root typed failures retain their docume
 | CD04104 | No explicit document transaction is open for COMMIT or ROLLBACK (#1725) | — |
 | CD04105 | OQL collection/index DDL inside an explicit transaction (#1725) | — |
 | CD05016 | Result byte/frame limit exceeded | — |
-| CD05018 | Retained SELECT sources/groups, native aggregate state/values, DML pending buffers or RETURNING results exceed the statement memory budget (#1727, #1729, #1753, #1755) | — |
+| CD05018 | Retained SELECT sources/groups, ordered candidate buckets, native aggregate state/values, DML pending buffers or RETURNING results exceed the statement memory budget (#1632, #1727, #1729, #1753, #1755) | — |
 | CD05019 | Serialized RETURNING value exceeds 256 levels, including the named projection wrapper (#1727) | — |
 | CD07001 | Session belongs to another database | — |
 | CD07002 | Text transaction control requires the negotiated transaction-status capability (#1725) | — |

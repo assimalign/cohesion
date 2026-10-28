@@ -52,7 +52,7 @@ public sealed class GqlValueParserTests
     }
 
     [Theory(DisplayName = "Cohesion Test [GQL] - Values: unsupported map values retain capability diagnostics")]
-    [InlineData("{n: reduce(1)}")]
+    [InlineData("{n: reverse(1)}")]
     [InlineData("{e: EXISTS {(a)->(b)}}")]
     public void Parse_UnsupportedMapValue_ShouldRetainCapabilityDiagnostic(string value)
     {

@@ -52,6 +52,7 @@ public sealed partial class SqlQueryParser
 
         // GROUP BY
         var groupBy = new List<SqlExpression>();
+        bool groupByDistinct = false;
         if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "GROUP"))
         {
             Advance(ref lexer);
@@ -64,6 +65,11 @@ public sealed partial class SqlQueryParser
                 AddSyntaxDiagnostic(ref lexer, ErrorMessages.SqlQueryParserParseSelectVoid);
             }
 
+            if (IsKeyword(ref lexer, "DISTINCT") || IsKeyword(ref lexer, "ALL"))
+            {
+                groupByDistinct = IsKeyword(ref lexer, "DISTINCT");
+                Advance(ref lexer);
+            }
             while (true)
             {
                 if (IsAtEnd(ref lexer) || lexer.Current.Type is TokenType.Semicolon or TokenType.RightParen or TokenType.Comma ||
@@ -104,7 +110,7 @@ public sealed partial class SqlQueryParser
         return new SqlSelectExpression(
             columns, from, where, groupBy, having, [],
             limit, null, isDistinct, null,
-            Location.Create(1, 1, pos, _lastTokenEnd), limitSyntaxKind);
+            Location.Create(1, 1, pos, _lastTokenEnd), limitSyntaxKind, groupByDistinct);
     }
 
     private IReadOnlyList<SqlFromItem> ParseFromItems(ref TokenLexer lexer)

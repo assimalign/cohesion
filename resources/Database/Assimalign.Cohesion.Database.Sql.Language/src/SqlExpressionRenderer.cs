@@ -75,7 +75,7 @@ public static partial class SqlExpressionRenderer
 
     // Words that are not profile keywords or functions but that a parser rule reads by spelling
     // in some position: the LIKE escape clause, IS UNKNOWN, and NULLS FIRST/LAST.
-    private static readonly string[] _positionalWords = ["ESCAPE", "UNKNOWN", "BOTH", "LEADING", "TRAILING", "NULLS"];
+    private static readonly string[] _positionalWords = ["ROLLUP", "CUBE", "ESCAPE", "UNKNOWN", "BOTH", "LEADING", "TRAILING", "NULLS"];
 
     /// <summary>Renders TRUNCATE as canonical SQL without a terminator.</summary>
     /// <param name="query">The parsed statement.</param>
@@ -317,6 +317,13 @@ public static partial class SqlExpressionRenderer
 
     private static string Node(SqlExpression expression) => expression switch
     {
+        SqlGroupingSetExpression group => (group.Kind switch
+        {
+            SqlGroupingSetKind.Sets => "GROUPING SETS ",
+            SqlGroupingSetKind.Rollup => "ROLLUP ",
+            SqlGroupingSetKind.Cube => "CUBE ",
+            _ => "",
+        }) + "(" + List(group.Items) + ")",
         SqlLogicalExpression logical => Logical(logical),
         SqlBinaryExpression binary => Binary(binary),
         SqlUnaryExpression unary => Unary(unary),
@@ -644,7 +651,7 @@ public static partial class SqlExpressionRenderer
         }
         if (select.GroupBy.Count > 0)
         {
-            builder.Append(" GROUP BY ").Append(List(select.GroupBy));
+            builder.Append(select.IsGroupByDistinct ? " GROUP BY DISTINCT " : " GROUP BY ").Append(List(select.GroupBy));
         }
         if (select.Having is not null)
         {

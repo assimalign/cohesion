@@ -281,6 +281,18 @@
   <data name="FilterContainsAggregate" xml:space="preserve">
     <value>Aggregate functions are not allowed in FILTER conditions.</value>
   </data>
+  <data name="GroupingPlacement" xml:space="preserve">
+    <value>GROUPING is allowed only in a grouped query's SELECT, HAVING or ORDER BY, outside aggregate inputs and grouping keys.</value>
+  </data>
+  <data name="GroupingExpansionLimit" xml:space="preserve">
+    <value>Too many grouping sets present (maximum 4096).</value>
+  </data>
+  <data name="GroupingArgument" xml:space="preserve">
+    <value>Arguments to GROUPING must be grouping expressions of the associated query level.</value>
+  </data>
+  <data name="GroupingArity" xml:space="preserve">
+    <value>GROUPING requires between 1 and 31 expression arguments.</value>
+  </data>
   <data name="StatisticsOutOfRange" xml:space="preserve">
     <value>The statistical aggregate result is outside its numeric type range.</value>
   </data>
@@ -920,4 +932,5 @@
   <data name="AuthenticationResponseExpected" xml:space="preserve"><value>Expected an authenticate response but received {0}.</value></data>
   <data name="PrincipalAuthenticationFailed" xml:space="preserve"><value>Authentication failed for principal '{0}'.</value></data>
   <data name="DiscardInTransaction" xml:space="preserve"><value>DISCARD ALL cannot execute inside a transaction.</value></data>
+  <data name="GroupingSetsNesting" xml:space="preserve"><value>GROUPING SETS cannot be nested inside ROLLUP or CUBE.</value></data>
 </root>

@@ -40,16 +40,6 @@ public class SqlAggregateParserTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Database.Sql.Language] - Aggregates: Rejects unsupported extensions explicitly")]
-    [InlineData("SELECT category, COUNT(*) FROM t GROUP BY ROLLUP(category);", "ROLLUP")]
-    [InlineData("SELECT category, COUNT(*) FROM t GROUP BY CUBE(category);", "CUBE")]
-    [InlineData("SELECT category, COUNT(*) FROM t GROUP BY GROUPING SETS ((category), ());", "GROUPING SETS")]
-    [InlineData("select category, count(*) from t group by grouping /* trivia */ sets ((category));", "grouping /* trivia */ sets")]
-    [InlineData("SELECT category, COUNT(*) FROM t GROUP BY category, ROLLUP(region);", "ROLLUP")]
-    [InlineData("SELECT COUNT(*) FROM t GROUP BY ();", "()")]
-    [InlineData("SELECT COUNT(*) FROM t GROUP BY (/* trivia */);", "(/* trivia */)")]
-    [InlineData("SELECT category, COUNT(*) FROM t GROUP BY category, ();", "()")]
-    [InlineData("SELECT GROUPING(category) FROM t GROUP BY category;", "GROUPING")]
-    [InlineData("SELECT GROUPING_ID(category) FROM t GROUP BY category;", "GROUPING_ID")]
     [InlineData("SELECT SUM(amount) OVER () FROM t;", "OVER")]
     [InlineData("SELECT ROW_NUMBER() FROM t;", "ROW_NUMBER")]
     [InlineData("SELECT RANK() FROM t;", "RANK")]

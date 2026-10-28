@@ -40,11 +40,12 @@ internal sealed partial class SqlPlanner
     // Inspect namespace names before grouped-row substitution or child planning:
     // arguments of an aggregate of a grouped level may read its ungrouped source
     // columns (parse_agg.c:1385-1405). This walk never plans a derived body or sublink.
-    private int AggregateLevel(SqlFunctionCallExpression call, List<SqlSelectExpression?> scopes)
+    private int AggregateLevel(SqlFunctionCallExpression call, List<SqlSelectExpression?> scopes, SqlExpression? argument = null)
     {
         int minimum = int.MaxValue;
         bool unresolved = false;
-        foreach (var argument in Children(call)) { Visit(argument, 0); }
+        if (argument is not null) { Visit(argument, 0); }
+        else { foreach (var child in Children(call)) { Visit(child, 0); } }
         return unresolved ? -1 : minimum == int.MaxValue ? 0 : minimum;
 
         void Visit(SqlExpression expression, int depth)

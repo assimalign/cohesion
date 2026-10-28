@@ -54,6 +54,7 @@ public static class SqlLanguageProfile
         // Aggregate
         "COUNT", "SUM", "AVG", "MIN", "MAX", "STRING_AGG", "LISTAGG",
         "BOOL_AND", "BOOL_OR", "EVERY", "STDDEV", "STDDEV_SAMP", "STDDEV_POP", "VARIANCE", "VAR_SAMP", "VAR_POP",
+        "GROUPING", "GROUPING_ID",
         // Null handling
         "COALESCE", "NULLIF",
         // Type
@@ -106,6 +107,9 @@ public static class SqlLanguageProfile
         SqlClauses.Using,
         SqlClauses.Where,
         SqlClauses.GroupBy,
+        SqlClauses.GroupingSets,
+        SqlClauses.Rollup,
+        SqlClauses.Cube,
         SqlClauses.Filter,
         SqlClauses.Having,
         SqlClauses.OrderBy,

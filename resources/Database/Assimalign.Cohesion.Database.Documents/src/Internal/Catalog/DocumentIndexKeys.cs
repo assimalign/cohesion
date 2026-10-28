@@ -193,6 +193,56 @@ internal static class DocumentIndexKeys
         return new IndexKey(bytes.ToArray());
     }
 
+    // Walk only the requested Documents components. Numeric/binary payloads are
+    // self-delimiting DatabaseKeyWriter encodings; trailing physical keys do not
+    // participate in an ORDER BY tie. No decoded values or key copies are needed.
+    internal static ReadOnlyMemory<byte> OrderPrefix(IndexKey key, int components)
+    {
+        var bytes = key.Encoded.Span;
+        int at = 0;
+        for (int component = 0; component < components; component++)
+        {
+            if (at >= bytes.Length) { throw new DatabaseTypeException(ErrorMessages.OrderedIndexKeyMalformed); }
+            byte tag = bytes[at++];
+            if (tag is 0 or 1 or 2 or 3 or 6 or 7) { continue; }
+            if (tag == 4)
+            {
+                if (at + 1 >= bytes.Length || bytes[at++] != (byte)DatabaseType.Decimal)
+                { throw new DatabaseTypeException(ErrorMessages.OrderedIndexKeyMalformed); }
+                byte sign = bytes[at++];
+                if (sign == 1) { continue; }
+                if (sign is not (0 or 2) || at >= bytes.Length)
+                { throw new DatabaseTypeException(ErrorMessages.OrderedIndexKeyMalformed); }
+                at++; // exponent
+                int digits = 0;
+                while (true)
+                {
+                    if (at >= bytes.Length) { throw new DatabaseTypeException(ErrorMessages.OrderedIndexKeyMalformed); }
+                    byte digit = sign == 0 ? (byte)~bytes[at++] : bytes[at++];
+                    if (digit == 0 && digits > 0) { break; }
+                    if (digit is < 1 or > 10) { throw new DatabaseTypeException(ErrorMessages.OrderedIndexKeyMalformed); }
+                    digits++;
+                }
+            }
+            else if (tag == 5)
+            {
+                if (at >= bytes.Length || bytes[at++] != (byte)DatabaseType.Binary)
+                { throw new DatabaseTypeException(ErrorMessages.OrderedIndexKeyMalformed); }
+                while (true)
+                {
+                    if (at >= bytes.Length) { throw new DatabaseTypeException(ErrorMessages.OrderedIndexKeyMalformed); }
+                    if (bytes[at++] != 0) { continue; }
+                    if (at >= bytes.Length) { throw new DatabaseTypeException(ErrorMessages.OrderedIndexKeyMalformed); }
+                    byte marker = bytes[at++];
+                    if (marker == 0) { break; }
+                    if (marker != 255) { throw new DatabaseTypeException(ErrorMessages.OrderedIndexKeyMalformed); }
+                }
+            }
+            else { throw new DatabaseTypeException(ErrorMessages.OrderedIndexKeyMalformed); }
+        }
+        return key.Encoded[..at];
+    }
+
     // SQL's prefix-successor rule, SqlPlanExecutor.BuildIndexRange: a prefix is
     // [P, successor(P)), including all following components of the composite.
     internal static IndexKey? Successor(IndexKey key)

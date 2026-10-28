@@ -28,6 +28,7 @@ internal sealed partial class SqlExpressionEvaluator
                 (DatabaseType.Null or DatabaseType.String or DatabaseType.Character or DatabaseType.Int8 or DatabaseType.Int16 or DatabaseType.Int32 or DatabaseType.Int64))
             { throw SqlEvaluationException.FunctionArgumentTypeMismatch(call.FunctionName, StaticTypeOf(call.Arguments[0]).ToString(), "sequence name or integer object id"); }
         }
+        if (SqlStandardLibrary.IsGrouping(call.FunctionName)) { return null; }
         // A MERGE action slot has its own type; an application function with the same
         // spelling must not supply its arity, length or domain metadata.
         if (_projectionSources?.ContainsKey(call) == true &&
@@ -343,6 +344,7 @@ internal sealed partial class SqlExpressionEvaluator
     internal DatabaseType StaticCallType(SqlFunctionCallExpression call, bool scalarOnly = false)
     {
         if (SqlSequenceExecution.IsFunction(call.FunctionName)) { return DatabaseType.Int64; }
+        if (SqlStandardLibrary.IsGrouping(call.FunctionName)) { return DatabaseType.Int32; }
         if (call.FunctionName.Equals("EXTRACT", StringComparison.OrdinalIgnoreCase)) { return DatabaseType.Decimal; }
         if (call.FunctionName.Equals("NULLIF", StringComparison.OrdinalIgnoreCase)) { return call.Arguments.Count > 0 ? StaticTypeOf(call.Arguments[0]) : DatabaseType.Null; }
         if (SqlStandardLibrary.IsCoalesce(call.FunctionName))

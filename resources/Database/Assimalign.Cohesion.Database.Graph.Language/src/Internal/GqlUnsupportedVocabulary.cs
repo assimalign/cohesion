@@ -59,7 +59,6 @@ internal static class GqlUnsupportedVocabulary
         new("TOFLOATLIST", "FUNCTION toFloatList", GqlWordPosition.FunctionCall),
         new("TOBOOLEANLIST", "FUNCTION toBooleanList", GqlWordPosition.FunctionCall),
         new("ID", "FUNCTION id (use element_id)", GqlWordPosition.FunctionCall),
-        new("REDUCE", "FUNCTION reduce", GqlWordPosition.FunctionCall),
         new("DATE", "FUNCTION date", GqlWordPosition.FunctionCall),
         new("DATETIME", "FUNCTION datetime", GqlWordPosition.FunctionCall),
         new("DURATION", "FUNCTION duration", GqlWordPosition.FunctionCall),

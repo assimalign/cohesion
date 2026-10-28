@@ -42,6 +42,69 @@ internal static partial class GraphExpressionEvaluator
         return output[..count];
     }
 
+    private static object? Reduce(GqlReduceExpression expression, IReadOnlyDictionary<string, object?> bindings,
+        GraphEvaluationContext context, IReadOnlyDictionary<string, object?>? parameters)
+    {
+        var source = Evaluate(expression.List, bindings, context, parameters);
+        if (source is null) { return null; }
+        if (source is not object?[] list)
+        { throw new GraphPlanningException("CG02015", ErrorMessages.ReductionListRequired, expression.List.Location); }
+        var budget = context.Operation?.QueryBudget;
+        using var memory = budget is null ? null : new GraphMemoryOwner(budget.Memory);
+        var token = context.Operation?.FunctionCancellation ?? default;
+        memory?.RetainValue(list, token);
+        var accumulator = new GraphIteratorBinding(bindings, expression.Accumulator);
+        var scope = new GraphIteratorBinding(accumulator, expression.Variable);
+        accumulator.Value = Evaluate(expression.Initial, bindings, context, parameters);
+        memory?.RetainValue(accumulator.Value, token);
+        foreach (var element in list)
+        {
+            token.ThrowIfCancellationRequested();
+            budget?.Consume();
+            scope.Value = element;
+            var next = Evaluate(expression.Body, scope, context, parameters);
+            // Retain the replacement before releasing the old value: the two coexist, and
+            // a replacement can contain or be the old value. Every failure unwinds the owner.
+            memory?.RetainValue(next, token);
+            memory?.ReleaseValue(accumulator.Value);
+            accumulator.Value = next;
+        }
+        return accumulator.Value;
+    }
+
+    private static object? ListPredicate(GqlListPredicateExpression expression, IReadOnlyDictionary<string, object?> bindings,
+        GraphEvaluationContext context, IReadOnlyDictionary<string, object?>? parameters)
+    {
+        var source = Evaluate(expression.List, bindings, context, parameters);
+        if (source is null) { return null; }
+        if (source is not object?[] list)
+        { throw new GraphPlanningException("CG02015", ErrorMessages.ReductionListRequired, expression.List.Location); }
+        var budget = context.Operation?.QueryBudget;
+        using var memory = budget is null ? null : new GraphMemoryOwner(budget.Memory);
+        var token = context.Operation?.FunctionCancellation ?? default;
+        memory?.RetainValue(list, token);
+        var scope = new GraphIteratorBinding(bindings, expression.Variable);
+        bool unknown = false, matched = false;
+        foreach (var element in list)
+        {
+            token.ThrowIfCancellationRequested();
+            budget?.Consume();
+            scope.Value = element;
+            var value = Boolean(Evaluate(expression.Predicate, scope, context, parameters), expression.Predicate);
+            if (value is null) { unknown = true; continue; }
+            if (expression.Kind == GqlListPredicateKind.All && value == false) { return false; }
+            if (value == true)
+            {
+                if (expression.Kind == GqlListPredicateKind.Any) { return true; }
+                if (expression.Kind == GqlListPredicateKind.None || expression.Kind == GqlListPredicateKind.Single && matched) { return false; }
+                matched = true;
+            }
+        }
+        if (unknown) { return null; }
+        return expression.Kind is GqlListPredicateKind.All or GqlListPredicateKind.None ||
+            expression.Kind == GqlListPredicateKind.Single && matched;
+    }
+
     private static object? Slice(GqlListSliceExpression expression, IReadOnlyDictionary<string, object?> bindings,
         GraphEvaluationContext context, IReadOnlyDictionary<string, object?>? parameters)
     {

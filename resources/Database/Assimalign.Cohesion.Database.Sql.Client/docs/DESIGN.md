@@ -41,6 +41,12 @@ no frees until it ends. No client surface, result shape or protocol version chan
 
 ## Quantified comparisons (#1718)
 
+Grouping sets (#1720, SQ-H2) use the existing execute exchange. InMemory and TCP
+tests cover subtotal versus stored NULL masks, GROUPING_ID, HAVING/ORDER BY,
+FILTER/DISTINCT and Boolean/statistical/string aggregates, empty grouping sets,
+EXPLAIN expansion and reusable CS01062 failures. Mask metadata is non-null INTEGER;
+subtotal grouping columns remain nullable. No client API or wire format changes.
+
 The existing execute exchange carries scalar ANY/SOME/ALL subqueries without a
 protocol change. InMemory and TCP tests measure all comparison operators against
 empty, TRUE/FALSE/UNKNOWN and mixed sets, NULL operands, correlated scopes,

@@ -35,6 +35,10 @@ internal static class Program
         "slugify(Note) AS note_slug, or_none(Note) AS note_or FROM customers ORDER BY Id";
 
     private const string aggregates = "SELECT product(Score) AS p, median(Score) AS m, join_names(Name) AS names, COUNT(*) AS c FROM customers";
+    private const string groupingSets = "SELECT Active,GROUPING(Active),GROUPING_ID(Active),COUNT(*),SUM(Score) FILTER(WHERE Score>0) " +
+        "FROM customers GROUP BY DISTINCT GROUPING SETS ((Active),(),()) ORDER BY GROUPING(Active),Active";
+    private const string outerGrouping = "SELECT Active,(SELECT GROUPING(customers.Active) GROUP BY customers.Active)," +
+        "(SELECT GROUPING_ID(customers.Active)),COUNT(*) FROM customers GROUP BY ROLLUP(Active) ORDER BY GROUPING(Active),Active";
     private const string aggregateFilter = "SELECT COUNT(*) FILTER (WHERE Score > 0), " +
         "SUM(1/0) FILTER (WHERE FALSE), BOOL_AND(Score > 0), BOOL_OR(Score > 150), EVERY(Score > 0), " +
         "VAR_SAMP(Score), VARIANCE(Score), STDDEV_POP(Score), VAR_POP(CAST(Score AS DOUBLE PRECISION)), " +
@@ -440,6 +444,10 @@ internal static class Program
         }
         Check("in process: scalars of every arity, strict and non-strict", await RowsAsync(session, projection), _projection);
         Check("in process: typed and hand-written aggregates", await RowsAsync(session, aggregates), _aggregates);
+        Check("in process: grouping sets and subtotal masks", await RowsAsync(session, groupingSets),
+            [[false,0,0,1L,200m],[true,0,0,1L,100m],[null,1,1,2L,300m]]);
+        Check("in process: correlated grouping masks", await RowsAsync(session, outerGrouping),
+            [[false,0,0,1L],[true,0,0,1L],[null,1,1,2L]]);
         Check("in process: FILTER and Boolean/statistical aggregates", await RowsAsync(session, aggregateFilter),
             [[2L, null, true, true, true, 5000m, 5000m, 50m, 2500d, 1d]]);
         Check("in process: COHESION_SCHEMA.FUNCTIONS", await RowsAsync(session, registered), _registered);
@@ -607,6 +615,10 @@ internal static class Program
         Check("over the wire: CHAR length", fixedCodes.Columns[0].MaxLength == 3, true);
         Check("over the wire: scalars of every arity, strict and non-strict", await RowsAsync(connection, projection, timeout.Token), _projection);
         Check("over the wire: typed and hand-written aggregates", await RowsAsync(connection, aggregates, timeout.Token), _aggregates);
+        Check("over the wire: grouping sets and subtotal masks", await RowsAsync(connection, groupingSets, timeout.Token),
+            [[false,0,0,1L,200m],[true,0,0,1L,100m],[null,1,1,2L,300m]]);
+        Check("over the wire: correlated grouping masks", await RowsAsync(connection, outerGrouping, timeout.Token),
+            [[false,0,0,1L],[true,0,0,1L],[null,1,1,2L]]);
         Check("over the wire: FILTER and Boolean/statistical aggregates", await RowsAsync(connection, aggregateFilter, timeout.Token),
             [[2L, null, true, true, true, 5000m, 5000m, 50m, 2500d, 1d]]);
         Check("over the wire: COHESION_SCHEMA.FUNCTIONS", await RowsAsync(connection, registered, timeout.Token), _registered);

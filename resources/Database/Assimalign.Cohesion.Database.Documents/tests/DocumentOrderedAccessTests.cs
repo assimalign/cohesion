@@ -14,7 +14,33 @@ namespace Assimalign.Cohesion.Database.Documents.Tests;
 
 public sealed class DocumentOrderedAccessTests
 {
-    [Theory(DisplayName = "Cohesion Test [Documents] - EXPLAIN proves index ordering eligibility and retains sorting (#1632)")]
+    [Fact(DisplayName = "Cohesion Test [Documents] - Complex order existence probing stops at its first visible match (#1632)")]
+    public async Task Plan_ComplexDomainProbe_ShouldStopAtFirstVisibleEntryAsync()
+    {
+        // Arrange
+        await using var engine = DocumentDatabaseEngine.Create("complex-order-probe", new());
+        var database = await engine.CreateDatabaseAsync("test", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        var collection = await session.CreateCollectionAsync("items", CancellationToken.None);
+        for (int i = 0; i < 512; i++)
+        { await collection.PutAsync(session, i.ToString("D3"), "{\"v\":[1,2]}"u8.ToArray(), cancellationToken: CancellationToken.None); }
+        await session.ExecuteAsync("CREATE INDEX ix ON items (v INCLUDE MISSING)", cancellationToken: CancellationToken.None);
+
+        // Act
+        var probe = await database.RunAsync(session, operation =>
+        {
+            var metadata = database.Catalog.FindCollection("items", operation.Context.Snapshot)!.Value;
+            var index = database.Catalog.GetIndexes(metadata.Id, operation.Context.Snapshot).Single();
+            return ValueTask.FromResult(database.Catalog.ProbeComplexOrderKeys(index, [], operation.Context.Snapshot, CancellationToken.None));
+        }, CancellationToken.None);
+
+        // Assert: existence is sufficient to reject; completeness is irrelevant.
+        probe.Count.ShouldBe(1);
+        probe.EntriesExamined.ShouldBe(1);
+        probe.PagesVisited.ShouldBeLessThanOrEqualTo(32);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Documents] - EXPLAIN proves index ordering and reports consumption (#1632)")]
     [InlineData("a", "", "a", false, "leading_missing_not_rejected")]
     [InlineData("a", "WHERE a IS NOT MISSING", "a", true, "forward")]
     [InlineData("a", "WHERE a IS NOT NULL", "a DESC", true, "reverse")]
@@ -33,7 +59,7 @@ public sealed class DocumentOrderedAccessTests
     [InlineData("a, b", "WHERE a > 0", "a, b", false, "scalar_domain_unproven")]
     [InlineData("a INCLUDE MISSING", "", "a + 1", false, "non_index_expression")]
     [InlineData("DISTINCT ARRAY v FOR v IN arr END", "", "a", false, "array_index")]
-    public async Task Explain_IndexShape_ShouldDescribeProofWithoutConsumingOrderAsync(string keys, string where, string ordering,
+    public async Task Explain_IndexShape_ShouldDescribeProofAndConsumptionAsync(string keys, string where, string ordering,
         bool eligible, string reason)
     {
         // Arrange
@@ -47,15 +73,15 @@ public sealed class DocumentOrderedAccessTests
         // Act
         var nodes = await NodesAsync(session, $"EXPLAIN SELECT META().id FROM items {where} ORDER BY {ordering}");
 
-        // Assert: the candidate and selected access are separate; every query still sorts.
+        // Assert: eligibility and actual selection are both visible.
         string detail = (string)nodes.Single(row => Equals(row[2], "IndexOrderCandidate"))[5]!;
         detail.ShouldContain("order_eligible=" + eligible, Case.Sensitive);
         detail.ShouldContain(eligible ? "order_direction=" + reason : "order_reason=" + reason, Case.Sensitive);
-        detail.ShouldContain("consumed=False; sort=retained", Case.Sensitive);
+        detail.ShouldContain(eligible ? "consumed=True; sort=elided" : "consumed=False; sort=retained", Case.Sensitive);
         if (eligible) { detail.ShouldContain("tie_break=document_identity; equal_key_buckets=complete", Case.Sensitive); }
         if (where == "WHERE a = 1 AND b = 2")
         { detail.ShouldContain("equality_keys=2; order_prefix_keys=1", Case.Sensitive); }
-        ((string)nodes[0][5]!).ShouldContain("sort=retained", Case.Sensitive);
+        ((string)nodes[0][5]!).ShouldContain(eligible ? "sort=elided" : "sort=retained", Case.Sensitive);
     }
 
     [Theory(DisplayName = "Cohesion Test [Documents] - Complex indexed values never prove complete scalar order (#1632)")]

@@ -14,11 +14,16 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 internal sealed partial class SqlPlanExecutor
 {
+    private Task<DatabaseResult> ExecuteGroupAsync(SqlGroupPlan plan, SqlStatementContext statement,
+        CancellationToken cancellationToken) => plan is SqlGroupingSetsPlan grouped
+            ? ExecuteGroupingSetsAsync(grouped, statement, cancellationToken)
+            : ExecutePlainGroupAsync(plan, statement, cancellationToken);
+
     /// <summary>
     /// Consumes a filtered relation, accumulates one state per group, then applies
     /// HAVING, ordering, projection and pagination to completed groups.
     /// </summary>
-    private async Task<DatabaseResult> ExecuteGroupAsync(SqlGroupPlan plan, SqlStatementContext statement,
+    private async Task<DatabaseResult> ExecutePlainGroupAsync(SqlGroupPlan plan, SqlStatementContext statement,
         CancellationToken cancellationToken)
     {
         await using var input = (DatabaseResultSet)await ExecuteAsync(plan.Input, statement, cancellationToken).ConfigureAwait(false);

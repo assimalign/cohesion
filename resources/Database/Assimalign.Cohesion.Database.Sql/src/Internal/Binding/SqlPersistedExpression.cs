@@ -216,6 +216,8 @@ internal static class SqlPersistedExpression
 
         switch (expression)
         {
+            case SqlFunctionCallExpression grouping when SqlStandardLibrary.IsGrouping(grouping.FunctionName):
+                throw new SqlPlanningException("CS05074", ErrorMessages.GroupingPlacement, grouping.Location);
             case SqlColumnReferenceExpression column:
                 evaluator.ResolveColumn(column);
                 break;
@@ -375,6 +377,7 @@ internal static class SqlPersistedExpression
     // SqlPlanner.Children. The counts and presence flags make that child sequence unambiguous.
     private static bool SameNode(SqlExpression left, SqlExpression right) => (left, right) switch
     {
+        (SqlGroupingSetExpression a, SqlGroupingSetExpression b) => a.Kind == b.Kind && a.Items.Count == b.Items.Count,
         (SqlLogicalExpression a, SqlLogicalExpression b) => a.Operator == b.Operator && a.Operands.Count == b.Operands.Count,
         (SqlBinaryExpression a, SqlBinaryExpression b) => a.Operator == b.Operator,
         (SqlUnaryExpression a, SqlUnaryExpression b) => a.Operator == b.Operator,
@@ -429,7 +432,7 @@ internal static class SqlPersistedExpression
         }
         var first = (SqlSelectExpression)left;
         var second = (SqlSelectExpression)right;
-        return first.IsDistinct == second.IsDistinct &&
+        return first.IsDistinct == second.IsDistinct && first.IsGroupByDistinct == second.IsGroupByDistinct &&
             SameList(first.Columns, second.Columns, (a, b) => Same(a.Alias, b.Alias) && AreEquivalent(a.Expression, b.Expression)) &&
             SameList(first.From, second.From, (a, b) => SameTable(a.Table, b.Table) &&
                 SameList(a.Joins, b.Joins, (x, y) => x.JoinType == y.JoinType && SameTable(x.Table, y.Table) &&

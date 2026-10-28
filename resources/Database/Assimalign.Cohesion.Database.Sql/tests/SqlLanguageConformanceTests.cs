@@ -248,7 +248,8 @@ public sealed class SqlLanguageConformanceTests
         // #1714 adds UPDATE FROM and DELETE USING and #1718 adds quantified comparisons:
         // exactly three over #1118's 51. TRUNCATE and CREATE TABLE AS (#1716) and
         // MERGE (#1715) add one each. WITH RECURSIVE (#1719) adds one binding-only clause.
-        SqlLanguageProfile.Instance.Clauses.Count().ShouldBe(64);
+        // Sequence DDL, NEXT VALUE FOR and DISCARD ALL (#1717) add five; GROUPING SETS, ROLLUP and CUBE (#1720) add three.
+        SqlLanguageProfile.Instance.Clauses.Count().ShouldBe(67);
         RequireExecutionCases(SqlLanguageProfile.Instance.Clauses, cases);
         cases.Keys.Except(SqlLanguageProfile.Instance.Clauses).ShouldBeEmpty("Cases must describe the current profile.");
 
@@ -650,6 +651,8 @@ public sealed class SqlLanguageConformanceTests
             ["VARIANCE"] = new("VARIANCE(1)", 0m),
             ["VAR_SAMP"] = new("VAR_SAMP(1)", 0m),
             ["VAR_POP"] = new("VAR_POP(1)", 0m),
+            ["GROUPING"] = new("GROUPING(age-age)", 0, DatabaseType.Int32, "t GROUP BY age-age"),
+            ["GROUPING_ID"] = new("GROUPING_ID(age-age)", 0, DatabaseType.Int32, "t GROUP BY age-age"),
             ["MIN"] = new("MIN(age)", 36),
             ["MAX"] = new("MAX(age)", 45),
             ["STRING_AGG"] = new("STRING_AGG(name, ',' ORDER BY id)", "Ada,Grace,Alan"),
@@ -826,6 +829,12 @@ public sealed class SqlLanguageConformanceTests
             expression => expression is SqlSelectExpression { Where: SqlBinaryExpression { Right: SqlCollateExpression } }, [[1]]),
         [SqlClauses.GroupBy] = Query("SELECT age > 40, COUNT(*), SUM(age) FROM t GROUP BY age > 40 ORDER BY age > 40;",
             expression => expression is SqlSelectExpression { GroupBy.Count: 1 }, [[false, 1L, 36m], [true, 2L, 86m]]),
+        [SqlClauses.GroupingSets] = Query("SELECT GROUPING(age), COUNT(*) FROM t GROUP BY GROUPING SETS ((age), ()) ORDER BY GROUPING(age), age;",
+            expression => expression is SqlSelectExpression { GroupBy: [SqlGroupingSetExpression] }, [[0, 1L], [0, 1L], [0, 1L], [1, 3L]]),
+        [SqlClauses.Rollup] = Query("SELECT GROUPING(age), COUNT(*) FROM t GROUP BY ROLLUP(age) ORDER BY GROUPING(age), age;",
+            expression => expression is SqlSelectExpression { GroupBy: [SqlGroupingSetExpression { Kind: SqlGroupingSetKind.Rollup }] }, [[0, 1L], [0, 1L], [0, 1L], [1, 3L]]),
+        [SqlClauses.Cube] = Query("SELECT GROUPING(age), COUNT(*) FROM t GROUP BY CUBE(age) ORDER BY GROUPING(age), age;",
+            expression => expression is SqlSelectExpression { GroupBy: [SqlGroupingSetExpression { Kind: SqlGroupingSetKind.Cube }] }, [[0, 1L], [0, 1L], [0, 1L], [1, 3L]]),
         [SqlClauses.Filter] = Query("SELECT COUNT(*) FILTER (WHERE age > 40), SUM(age) FILTER (WHERE age > 40), " +
             "VAR_POP(COALESCE(CASE WHEN id=1 THEN 16777217 ELSE CAST(16777216 AS REAL) END, CAST(0 AS DOUBLE PRECISION))) FILTER (WHERE id > 0) FROM t;",
             expression => expression is SqlSelectExpression select && select.Columns[0].Expression is SqlFunctionCallExpression { Filter: not null }, [[2L, 86m, 0d]]),

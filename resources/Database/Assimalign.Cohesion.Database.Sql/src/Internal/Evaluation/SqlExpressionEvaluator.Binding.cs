@@ -695,6 +695,11 @@ internal sealed partial class SqlExpressionEvaluator
             collation = default;
             return new SqlBoundSequence(call.FunctionName.ToUpperInvariant(), BindArguments(call.Arguments, out _));
         }
+        if (SqlStandardLibrary.IsGrouping(call.FunctionName) && OuterGrouping(call) is { } grouping)
+        {
+            collation = default;
+            return grouping;
+        }
         if (SqlStandardLibrary.IsEvaluatorForm(call.FunctionName) && !SqlStandardLibrary.IsCoalesce(call.FunctionName))
         {
             ValidateEvaluatorForm(call);
