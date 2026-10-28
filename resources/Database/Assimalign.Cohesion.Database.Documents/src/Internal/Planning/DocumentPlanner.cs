@@ -78,8 +78,8 @@ internal sealed partial class DocumentPlanner
                 // Type inference observes every match before paging. Only fixed result
                 // types can stop content reads without changing the result header.
                 logical = logical with { CanStopEarly = logical.Projections.All(projection =>
-                    projection.Expression is not OqlStarExpression && (projection.Type != DatabaseType.Null ||
-                    projection.Expression is OqlLiteralExpression { Value: null or JsonElement { ValueKind: JsonValueKind.Null } } or OqlMissingExpression)) };
+                    projection.Type != DatabaseType.Null ||
+                    projection.Expression is OqlLiteralExpression { Value: null or JsonElement { ValueKind: JsonValueKind.Null } } or OqlMissingExpression) };
             }
         }
         return new DocumentPlan(logical, collection, access);

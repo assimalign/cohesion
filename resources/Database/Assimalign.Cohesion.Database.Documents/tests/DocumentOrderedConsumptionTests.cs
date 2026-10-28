@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -250,6 +251,47 @@ public sealed class DocumentOrderedConsumptionTests
             { rows.Add(string.Join("|", Enumerable.Range(0, row.FieldCount).Select(i => row.GetValue(i)?.ToString() ?? "NULL"))); }
             return rows.ToArray();
         }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Documents] - Star projection stops after the ordered page with a fixed JSON header (#1632)")]
+    [InlineData("ASC", false)]
+    [InlineData("DESC", false)]
+    [InlineData("ASC", true)]
+    [InlineData("DESC", true)]
+    public async Task Execute_OrderedStarPage_ShouldBoundFetchesAndFitStatementBudgetAsync(string direction, bool bounded)
+    {
+        // Arrange: the full scan exceeds 256 KiB; the 50-document page fits.
+        await using var engine = DocumentDatabaseEngine.Create("ordered-star", new()
+        { StatementMemoryBudget = bounded ? 256 * 1024 : 64 * 1024 * 1024 });
+        var database = await engine.CreateDatabaseAsync("test", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        var collection = await session.CreateCollectionAsync("items", CancellationToken.None);
+        for (int i = 0; i < 256; i++)
+        {
+            await collection.PutAsync(session, i.ToString("D3"), Encoding.UTF8.GetBytes(
+                "{\"k\":" + i + ",\"pad\":\"" + new string('p', 512) + "\"}"), cancellationToken: CancellationToken.None);
+        }
+        await session.ExecuteAsync("CREATE INDEX ix ON items (k INCLUDE MISSING)", cancellationToken: CancellationToken.None);
+
+        // Act
+        await using var result = (DatabaseResultSet)await session.ExecuteAsync(
+            $"SELECT * FROM items ORDER BY k {direction} LIMIT 50", cancellationToken: CancellationToken.None);
+        var values = new List<int>();
+        await foreach (var row in result.GetRowsAsync(CancellationToken.None))
+        {
+            var document = (JsonElement)row.GetValue(0)!;
+            values.Add(document.GetProperty("k").GetInt32());
+            document.GetProperty("pad").GetString().ShouldBe(new string('p', 512));
+        }
+
+        // Assert
+        result.Columns.Single().Type.ShouldBe(DatabaseType.Json);
+        values.ShouldBe((direction == "ASC" ? Enumerable.Range(0, 256) : Enumerable.Range(0, 256).Reverse()).Take(50));
+        _output.WriteLine($"Star {direction}; bounded={bounded}; entries={session.LastQueryIndexEntriesRead}; fetches={session.LastQueryDocumentsRead}.");
+        session.LastQueryIndexEntriesRead.ShouldBe(51);
+        session.LastQueryDocumentsRead.ShouldBe(50);
+        var details = await DetailsAsync(session, $"EXPLAIN SELECT * FROM items ORDER BY k {direction} LIMIT 50");
+        details.ShouldContain(detail => detail.Contains("sort=elided; early_paging=True", StringComparison.Ordinal));
     }
 
     private static async Task<string[]> IdsAsync(DocumentDatabaseSession session, string query)

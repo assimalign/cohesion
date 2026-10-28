@@ -953,7 +953,7 @@ release the cursor and reservations.
 
 With fixed projection types, LIMIT/OFFSET stop after OFFSET + LIMIT residual survivors. LIMIT 0
 opens no cursor. One next-bucket entry establishes completeness, and the B-tree may already have
-read ahead in its bounded batch. Projections needing result type inference (including SELECT *)
+read ahead in its bounded batch. SELECT * has a fixed JSON type and stops early on a consumed ordered path. Projections needing result type inference
 still read all matching documents so column headers retain the existing full-result contract;
 their proven index order still elides sorting. EXPLAIN reports consumed=True; sort=elided on the
 selected access and candidate, early_paging, and paging_reason=result_type_inference when needed.
