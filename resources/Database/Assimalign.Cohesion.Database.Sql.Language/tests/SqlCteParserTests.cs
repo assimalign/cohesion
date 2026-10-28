@@ -60,7 +60,6 @@ public sealed class SqlCteParserTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - WITH: excluded forms retain precise capability diagnostics")]
-    [InlineData("WITH RECURSIVE a AS (SELECT * FROM t) SELECT * FROM a;", "RECURSIVE")]
     [InlineData("SELECT * FROM (WITH a AS (SELECT * FROM t) SELECT * FROM a) d;", "WITH inside")]
     [InlineData("SELECT id FROM t WHERE id IN (WITH a AS (SELECT id FROM t) SELECT id FROM a);", "WITH inside")]
     [InlineData("SELECT (WITH a AS (SELECT id FROM t) SELECT id FROM a) FROM t;", "WITH inside")]
@@ -91,11 +90,6 @@ public sealed class SqlCteParserTests
         var diagnostic = statement.Diagnostics.Where(item => item.Code == "CK00001").ShouldHaveSingleItem();
         diagnostic.Message!.ShouldContain(construct);
         statement.Diagnostics.ShouldNotContain(item => item.Code == "CS00002");
-        if (construct == "RECURSIVE")
-        {
-            statement.Diagnostics.Count(item => item.Severity == DiagnosticSeverity.Error).ShouldBe(1);
-            diagnostic.Start.ShouldBe(sql.IndexOf("RECURSIVE", System.StringComparison.Ordinal));
-        }
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - WITH: malformed lists and unsupported command roots are syntax errors")]

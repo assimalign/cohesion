@@ -112,6 +112,14 @@ structured-carrier messages remain unprefixed.
 | COHSQLE051 | CS01051 | Binding/names |
 | COHSQLE052 | CS01052 | Binding/names |
 | New (#1715, SQ-M1) | CS01053 | Binding/names — merge_action() outside MERGE RETURNING |
+| New (#1719, SQ-R1) | CS01054 | Binding/names — Recursive definition lacks a top-level anchor UNION [ALL] recursive term (42P19) |
+| New (#1719, SQ-R1) | CS01055 | Binding/names — Recursive reference in the anchor (42P19) |
+| New (#1719, SQ-R1) | CS01056 | Binding/names — Recursive reference inside a scalar, IN, quantified or EXISTS subquery (42P19) |
+| New (#1719, SQ-R1) | CS01057 | Binding/names — Recursive reference on the nullable side of an outer join (42P19) |
+| New (#1719, SQ-R1) | CS01058 | Binding/names — Recursive reference under INTERSECT ALL (42P19) |
+| New (#1719, SQ-R1) | CS01059 | Binding/names — Recursive reference in a prohibited EXCEPT operand (42P19) |
+| New (#1719, SQ-R1) | CS01060 | Binding/names — Recursive term has more than one self-reference (42P19) |
+| New (#1719, SQ-R1) | CS01061 | Binding/names — Aggregate at the query level containing a recursive reference (42P19) |
 | COHSQLE001 | CS02001 | Values/types |
 | COHSQLE002 | CS02002 | Values/types |
 | COHSQLE003 | CS02003 | Values/types |
@@ -128,6 +136,9 @@ structured-carrier messages remain unprefixed.
 | COHSQLE062 | CS02062 | Values/types |
 | COHSQLE063 | CS02063 | Values/types |
 | New (#1447) | CS02064 | Values/types — ALTER COLUMN TYPE old value, USING result or dependent DEFAULT has no assignment cast (42804) |
+| New (#1719, SQ-R1) | CS02065 | Values/types — Recursive anchor, recursive output or declared column-list width mismatch (42601) |
+| New (#1719, SQ-R1) | CS02066 | Values/types — Recursive UNION changes the anchor type, domain or type modifiers; cast hint (42804) |
+| New (#1719, SQ-R1) | CS02067 | Values/types — Recursive UNION changes or conflicts with the anchor collation; COLLATE hint (42P21) |
 | COHSQLE024 | CS03024 | Schema/constraints |
 | COHSQLE025 | CS03025 | Schema/constraints |
 | COHSQLE027 | CS03027 | Schema/constraints |

@@ -755,7 +755,7 @@ public sealed partial class SqlQueryParser : QueryParser
             return new SqlTableReference("?", null, null);
         }
 
-        if (IsNameToken(ref lexer))
+        if (IsNameToken(ref lexer) || !insertTarget && !dmlTarget && IsContextualCommonTableKeyword(ref lexer))
         {
             return ParseTableReference(ref lexer, insertTarget, dmlTarget || insertTarget);
         }
@@ -896,6 +896,7 @@ public sealed partial class SqlQueryParser : QueryParser
         else if (!IsAtEnd(ref lexer) && IsIdentifierOrKeyword(ref lexer) &&
                  !(insertTarget && IsWord(ref lexer, "OVERRIDING")) &&
                  !(dmlTarget && IsWord(ref lexer, "OUTPUT")) &&
+                 !TryReadSelectLockingStrength(lexer, out _) &&
                  !IsStatementBoundaryKeyword(ref lexer))
         {
             alias = CurrentIdentifierText(ref lexer);
@@ -914,6 +915,7 @@ public sealed partial class SqlQueryParser : QueryParser
         }
 
         var value = lexer.Current.Value;
+        if (IsContextualCommonTableKeyword(ref lexer) && TryPeekToken(lexer, out string qualifier, out _) && qualifier == ".") { return false; }
         if (value.Equals("LEFT", StringComparison.OrdinalIgnoreCase) || value.Equals("RIGHT", StringComparison.OrdinalIgnoreCase))
         {
             if (TryPeekToken(lexer, out string next, out _) && next == "(") { return false; }
@@ -1070,13 +1072,14 @@ public sealed partial class SqlQueryParser : QueryParser
             if (!returning && IsKeyword(ref lexer, "WITH")) { inWithDefinitions = true; }
             if (withStatement && !onConflictUpdate && fromScopes.Count == 0 &&
                 (IsKeyword(ref lexer, "SELECT") || IsKeyword(ref lexer, "INSERT") ||
-                 IsKeyword(ref lexer, "UPDATE") || IsKeyword(ref lexer, "DELETE")))
+                 IsKeyword(ref lexer, "UPDATE") || IsKeyword(ref lexer, "DELETE") || IsKeyword(ref lexer, "MERGE")))
             {
                 firstToken = token;
                 inWithDefinitions = false;
             }
-            if (inWithDefinitions && fromScopes.Count == 0 && IsNameToken(ref lexer) &&
-                (string.Equals(previousToken, "WITH", StringComparison.OrdinalIgnoreCase) || previousToken == ","))
+            if (inWithDefinitions && fromScopes.Count == 0 && IsCommonTableNameToken(ref lexer) &&
+                (string.Equals(previousToken, "WITH", StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(previousToken, "RECURSIVE", StringComparison.OrdinalIgnoreCase) || previousToken == ","))
             {
                 (cteNames ??= new(StringComparer.OrdinalIgnoreCase)).Add(CurrentIdentifierText(ref lexer));
             }
@@ -1172,7 +1175,7 @@ public sealed partial class SqlQueryParser : QueryParser
                 return true;
             }
             if (withStatement && previousToken == "(" &&
-                (IsKeyword(ref lexer, "INSERT") || IsKeyword(ref lexer, "UPDATE") || IsKeyword(ref lexer, "DELETE")))
+                (IsKeyword(ref lexer, "INSERT") || IsKeyword(ref lexer, "UPDATE") || IsKeyword(ref lexer, "DELETE") || IsKeyword(ref lexer, "MERGE")))
             {
                 clause = $"data-modifying CTE body ({token.ToUpperInvariant()})";
                 location = tokenLocation;
@@ -1217,13 +1220,14 @@ public sealed partial class SqlQueryParser : QueryParser
                     return true;
                 }
 
-                bool cteIdentifier = cteNames?.Contains(CurrentIdentifierText(ref lexer)) == true && IsNameToken(ref lexer) &&
+                bool cteIdentifier = cteNames?.Contains(CurrentIdentifierText(ref lexer)) == true && IsCommonTableNameToken(ref lexer) &&
                     !(IsKeyword(ref lexer, "RECURSIVE") && string.Equals(previousToken, "WITH", StringComparison.OrdinalIgnoreCase)) &&
                     (inWithDefinitions && fromScopes.Count == 0 &&
-                        (string.Equals(previousToken, "WITH", StringComparison.OrdinalIgnoreCase) || previousToken == ",") ||
+                        (string.Equals(previousToken, "WITH", StringComparison.OrdinalIgnoreCase) ||
+                         string.Equals(previousToken, "RECURSIVE", StringComparison.OrdinalIgnoreCase) || previousToken == ",") ||
                      string.Equals(previousToken, "FROM", StringComparison.OrdinalIgnoreCase) ||
                      string.Equals(previousToken, "USING", StringComparison.OrdinalIgnoreCase) &&
-                        fromScopes.Count == 0 && firstToken.Equals("DELETE", StringComparison.OrdinalIgnoreCase) ||
+                        fromScopes.Count == 0 && (firstToken.Equals("DELETE", StringComparison.OrdinalIgnoreCase) || firstToken.Equals("MERGE", StringComparison.OrdinalIgnoreCase)) ||
                      string.Equals(previousToken, "JOIN", StringComparison.OrdinalIgnoreCase) ||
                      string.Equals(previousToken, "AS", StringComparison.OrdinalIgnoreCase) ||
                      inFrom && previousToken == "," || previousToken == "." ||

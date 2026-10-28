@@ -160,6 +160,46 @@ public static class SqlExpressionRenderer
         return Select(query);
     }
 
+    /// <summary>Renders an INSERT, including WITH and query sources, as canonical SQL without a terminator.</summary>
+    /// <param name="query">The parsed statement.</param>
+    /// <returns>The canonical statement text.</returns>
+    /// <exception cref="ArgumentNullException">The query is null.</exception>
+    /// <exception cref="NotSupportedException">The tree cannot be represented by the dialect.</exception>
+    /// <exception cref="InsufficientExecutionStackException">The thread has insufficient stack.</exception>
+    public static string Render(SqlInsertExpression query)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        ThrowIfTooDeep(query.NestingDepth);
+        var builder = new StringBuilder();
+        AppendCommonTables(builder, query.CommonTables);
+        builder.Append("INSERT INTO ").Append(Table(query.Table));
+        if (query.Columns is { } columns)
+        { builder.Append(" (").Append(string.Join(", ", columns.Select(Identifier))).Append(')'); }
+        if (query.IsDefaultValues) { builder.Append(" DEFAULT VALUES"); }
+        else if (query.SelectSource is { } source) { builder.Append(' ').Append(Select(source)); }
+        else
+        {
+            builder.Append(" VALUES ").Append(string.Join(", ", query.Values!.Select(row =>
+                "(" + string.Join(", ", row.Select(Expression)) + ")")));
+        }
+        if (query.OnConflict is { } conflict)
+        {
+            builder.Append(" ON CONFLICT");
+            if (conflict.Columns.Count > 0)
+            { builder.Append(" (").Append(string.Join(", ", conflict.Columns.Select(Identifier))).Append(')'); }
+            if (conflict.ConstraintName is { } constraint) { builder.Append(" ON CONSTRAINT ").Append(Identifier(constraint)); }
+            if (conflict.Action == SqlOnConflictAction.DoNothing) { builder.Append(" DO NOTHING"); }
+            else
+            {
+                builder.Append(" DO UPDATE SET ").Append(string.Join(", ", conflict.Assignments.Select(assignment =>
+                    Identifier(assignment.ColumnName) + " = " + Expression(assignment.Value))));
+                if (conflict.Where is { } where) { builder.Append(" WHERE ").Append(Expression(where)); }
+            }
+        }
+        AppendDmlTail(builder, null, query.Returning);
+        return builder.ToString();
+    }
+
     /// <summary>Renders an UPDATE, including FROM sources, as canonical SQL without a terminator.</summary>
     /// <param name="query">The parsed statement.</param>
     /// <returns>The canonical statement text.</returns>
@@ -189,7 +229,9 @@ public static class SqlExpressionRenderer
     {
         ArgumentNullException.ThrowIfNull(query);
         ThrowIfTooDeep(query.NestingDepth);
-        var builder = new StringBuilder("MERGE INTO ");
+        var builder = new StringBuilder();
+        AppendCommonTables(builder, query.CommonTables);
+        builder.Append("MERGE INTO ");
         builder.Append(Table(query.Table));
         AppendSources(builder, [query.Source], " USING ");
         builder.Append(" ON ").Append(Expression(query.Condition));
@@ -614,7 +656,7 @@ public static class SqlExpressionRenderer
     {
         if (definitions.Count > 0)
         {
-            builder.Append("WITH ");
+            builder.Append(definitions[0].IsRecursiveScope ? "WITH RECURSIVE " : "WITH ");
             for (int i = 0; i < definitions.Count; i++)
             {
                 if (i > 0) { builder.Append(", "); }

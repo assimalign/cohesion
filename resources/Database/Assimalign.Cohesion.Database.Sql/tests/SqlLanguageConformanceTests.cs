@@ -246,9 +246,9 @@ public sealed class SqlLanguageConformanceTests
         // The profile drives enumeration. A newly advertised clause cannot silently escape this test.
         var cases = CreateCases();
         // #1714 adds UPDATE FROM and DELETE USING and #1718 adds quantified comparisons:
-        // exactly three over #1118's 51. TRUNCATE and CREATE TABLE AS (#1716) and binding-only
-        // MERGE (#1715) add one each.
-        SqlLanguageProfile.Instance.Clauses.Count().ShouldBe(57);
+        // exactly three over #1118's 51. TRUNCATE and CREATE TABLE AS (#1716) and
+        // MERGE (#1715) add one each. WITH RECURSIVE (#1719) adds one binding-only clause.
+        SqlLanguageProfile.Instance.Clauses.Count().ShouldBe(58);
         RequireExecutionCases(SqlLanguageProfile.Instance.Clauses, cases);
         cases.Keys.Except(SqlLanguageProfile.Instance.Clauses).ShouldBeEmpty("Cases must describe the current profile.");
 
@@ -742,6 +742,15 @@ public sealed class SqlLanguageConformanceTests
             expression => expression is SqlSetOperationExpression { Operator: SqlSetOperator.Intersect }, [[2]]),
         [SqlClauses.Except] = Query("SELECT id FROM t EXCEPT SELECT id FROM t WHERE id <> 2;",
             expression => expression is SqlSetOperationExpression { Operator: SqlSetOperator.Except }, [[2]]),
+        [SqlClauses.Recursive] = new("WITH RECURSIVE a AS (SELECT 7 AS n) SELECT n FROM a;", [],
+            expression => expression is SqlQueryBodyExpression { CommonTables: [ { IsRecursiveScope: true } ] },
+            async (session, result) =>
+            {
+                (await ReadRowsAsync((DatabaseResultSet)result)).ShouldHaveSingleItem().ShouldBe([7L]);
+                var error = await session.ExecuteAsync(
+                    "WITH RECURSIVE a(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM a) SELECT n FROM a;", cancellationToken: CancellationToken.None);
+                error.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CK00001");
+            }),
         [SqlClauses.Cte] = new("WITH a AS (SELECT id FROM t WHERE age > 40), b AS (SELECT id FROM a) SELECT id FROM b ORDER BY id;", _seed,
             expression => expression is SqlSelectExpression { CommonTables.Count: 2 },
             async (session, result) =>

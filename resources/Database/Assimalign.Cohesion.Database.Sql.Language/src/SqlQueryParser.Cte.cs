@@ -10,11 +10,14 @@ public sealed partial class SqlQueryParser
     {
         var definitions = new List<SqlCommonTableExpression>();
         Advance(ref lexer); // WITH
-        if (IsKeyword(ref lexer, "RECURSIVE")) { return RejectWithForm(ref lexer, "RECURSIVE"); }
+        bool recursive = IsKeyword(ref lexer, "RECURSIVE");
+        int recursiveStart = lexer.Current.Position;
+        int recursiveEnd = CurrentTokenEnd(ref lexer);
+        if (recursive) { Advance(ref lexer); }
         do
         {
             int start = lexer.Current.Position;
-            if (!IsNameToken(ref lexer))
+            if (!IsCommonTableNameToken(ref lexer))
             {
                 AddExpectedDiagnostic(ref lexer, "a common table expression name");
                 return EmptyWithQuery();
@@ -30,7 +33,7 @@ public sealed partial class SqlQueryParser
             }
             if (!Expect(ref lexer, TokenType.LeftParen, _errorCteBodyOpeningExpected)) { return EmptyWithQuery(); }
             if (IsKeyword(ref lexer, "WITH")) { return RejectWithForm(ref lexer, "WITH inside a subquery or derived table"); }
-            if (IsKeyword(ref lexer, "INSERT") || IsKeyword(ref lexer, "UPDATE") || IsKeyword(ref lexer, "DELETE"))
+            if (IsKeyword(ref lexer, "INSERT") || IsKeyword(ref lexer, "UPDATE") || IsKeyword(ref lexer, "DELETE") || IsKeyword(ref lexer, "MERGE"))
             {
                 return RejectWithForm(ref lexer, $"data-modifying CTE body ({CurrentText(ref lexer)})");
             }
@@ -44,7 +47,7 @@ public sealed partial class SqlQueryParser
             var body = ParseQueryExpression(ref lexer);
             int end = lexer.Current.Position + lexer.Current.Value.Length;
             if (!Expect(ref lexer, TokenType.RightParen, _errorCteBodyClosingExpected)) { return EmptyWithQuery(); }
-            definitions.Add(new SqlCommonTableExpression(name, columns, body, Location.Create(1, 1, start, end)));
+            definitions.Add(new SqlCommonTableExpression(name, columns, body, Location.Create(1, 1, start, end), recursive));
             if (lexer.Current.Type != TokenType.Comma) { break; }
             Advance(ref lexer);
         } while (!IsAtEnd(ref lexer));
@@ -58,9 +61,21 @@ public sealed partial class SqlQueryParser
         else if (!insertSource && IsKeyword(ref lexer, "INSERT")) { statement = ParseInsert(ref lexer); }
         else if (!insertSource && IsKeyword(ref lexer, "UPDATE")) { statement = ParseUpdate(ref lexer); }
         else if (!insertSource && IsKeyword(ref lexer, "DELETE")) { statement = ParseDelete(ref lexer); }
+        else if (!insertSource && IsKeyword(ref lexer, "MERGE"))
+        {
+            // PostgreSQL src/backend/parser/parse_merge.c:124-129 rejects the
+            // modifier even when every CTE is acyclic. Plain WITH stays supported.
+            if (recursive)
+            {
+                RequireSkippedConstruct(recursiveStart, recursiveEnd, "WITH RECURSIVE for MERGE");
+                ConsumeRemaining(ref lexer);
+                return EmptyWithQuery();
+            }
+            statement = ParseMerge(ref lexer);
+        }
         else
         {
-            AddExpectedDiagnostic(ref lexer, insertSource ? "SELECT after WITH" : "SELECT, INSERT, UPDATE or DELETE after WITH");
+            AddExpectedDiagnostic(ref lexer, insertSource ? "SELECT after WITH" : "SELECT, INSERT, UPDATE, DELETE or MERGE after WITH");
             return EmptyWithQuery();
         }
         var commonTables = definitions.AsReadOnly();
@@ -70,6 +85,7 @@ public sealed partial class SqlQueryParser
             case SqlInsertExpression insert: insert.CommonTables = commonTables; break;
             case SqlUpdateExpression update: update.CommonTables = commonTables; break;
             case SqlDeleteExpression delete: delete.CommonTables = commonTables; break;
+            case SqlMergeExpression merge: merge.CommonTables = commonTables; break;
         }
         return statement;
     }
@@ -83,10 +99,19 @@ public sealed partial class SqlQueryParser
 
     private static SqlSelectExpression EmptyWithQuery() => new([], [], null, [], null, [], null, null, false, null, null);
 
+    private static bool IsCommonTableNameToken(ref TokenLexer lexer)
+        => IsNameToken(ref lexer) || IsContextualCommonTableKeyword(ref lexer);
+
+    private static bool IsContextualCommonTableKeyword(ref TokenLexer lexer)
+        => IsKeyword(ref lexer, "OVER") || IsKeyword(ref lexer, "PARTITION") ||
+           IsKeyword(ref lexer, "WINDOW") || IsKeyword(ref lexer, "NATURAL");
+
     // WITH ties AS (...) names a relation. WITH TIES after a paging clause does not.
     private static bool WithStartsNamedDefinition(TokenLexer lexer)
     {
-        if (!NextWithToken(ref lexer) || !NextWithToken(ref lexer)) { return false; }
+        if (!NextWithToken(ref lexer)) { return false; }
+        if (IsKeyword(ref lexer, "RECURSIVE") && !NextWithToken(ref lexer)) { return false; }
+        if (!NextWithToken(ref lexer)) { return false; }
         if (IsKeyword(ref lexer, "AS")) { return true; }
         if (lexer.Current.Type != TokenType.LeftParen) { return false; }
         int depth = 1;

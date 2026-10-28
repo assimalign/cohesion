@@ -741,6 +741,69 @@ vocabulary rows for array refusals and stable persisted identifier quoting, so
 no persisted contract or wire version changes. No public interface, construction
 bridge, assembly grant or project reference is added.
 
+## WITH RECURSIVE binding (#1719, SQ-R1)
+
+WITH RECURSIVE declares visibility of every name throughout its WITH list. Acyclic
+entries bind in dependency order and keep ordinary reachable-only materialization.
+Unqualified self-references identify recursive entries; schema-qualified names still
+resolve in the catalog. Mutual recursion reports CK00001. A recursive entry requires
+an anchor UNION [ALL] recursive term and exactly one self-reference in the latter.
+The anchor fixes output names, width, types, modifiers, domains and collations before
+the recursive FROM binds. A complete column list renames the output. Unknown anchor
+NULL/string output becomes text. Overall UNION type/modifier and collation changes
+report CS02066 and CS02067 with cast/COLLATE hints; widths report CS02065.
+
+The recursive reference cannot appear in the anchor, in scalar/IN/EXISTS/quantified
+subqueries, on a nullable outer-join side, under INTERSECT ALL, or on either side of
+EXCEPT ALL or the right of EXCEPT DISTINCT. INTERSECT DISTINCT, the left of EXCEPT
+DISTINCT, preserved outer-join sides and derived FROM queries follow PostgreSQL's
+allowed forms. Aggregates at the level containing the reference are invalid;
+independent subquery aggregates remain allowed. Outer-only subquery aggregates
+owned by the recursive level also report CS01061. Grouped correlation scopes retain
+their relation bindings so projection, HAVING and ORDER BY subqueries preserve that
+ownership (PostgreSQL `src/backend/parser/parse_agg.c:646-690,1327-1334`).
+Top-level recursive UNION ORDER BY,
+LIMIT/FETCH, OFFSET and FOR UPDATE/SHARE use CK00001. SEARCH/CYCLE, CREATE RECURSIVE
+VIEW, nested WITH and modifying CTE bodies remain CK00001.
+
+Valid recursive definitions bind all entries and the consuming statement, then
+planning, EXPLAIN and execution return CK00001 until SQ-R2, even for an unused
+recursive definition. No working-table operator or depth limit is introduced here.
+Binding defers count/seek and constant-fold evaluation once recursion is identified.
+CREATE VIEW with a recursive query body freezes ordinary anchor metadata without
+executing it; cached and reopened view use propagates the same planning refusal.
+No catalog, storage or wire format changes are needed.
+
+IsRecursiveScope records the list modifier on each AST definition, independently
+of whether it self-references. Binding retains the existing case-insensitive name
+rules, requires complete output-name lists and conservatively makes recursive
+columns nullable. Independent ready definitions retain declaration-order priority.
+Complete FOR UPDATE, FOR NO KEY UPDATE, FOR SHARE and FOR KEY SHARE strengths
+are refused with CK00001 only in the SELECT tail; qualified identifiers and
+implicit aliases remain valid. WITH RECURSIVE before MERGE refuses with CK00001
+at the modifier even for acyclic lists, following PostgreSQL
+`src/backend/parser/parse_merge.c:124-129`. Plain WITH before MERGE remains supported.
+
+References re-derived from the local PostgreSQL clone: src/backend/parser/parse_cte.c:
+345-400 (output checks and hints), 580-632 (unknown anchor output), 648-725 and 863-906
+(dependencies), 915-1019 (form/tails), 1027-1199 (references and joins), 1209-1277
+(set operands); parse_collate.c:807-860 (implicit default and conflicts);
+parse_agg.c:1327-1334 (aggregates). No reference code is copied.
+
+| Code | Condition | PostgreSQL SQLSTATE |
+| --- | --- | --- |
+| CS01054 | Recursive definition lacks a top-level anchor UNION [ALL] recursive term | 42P19 |
+| CS01055 | Recursive reference in the anchor | 42P19 |
+| CS01056 | Recursive reference inside a scalar, IN, quantified or EXISTS subquery | 42P19 |
+| CS01057 | Recursive reference on the nullable side of an outer join | 42P19 |
+| CS01058 | Recursive reference under INTERSECT ALL | 42P19 |
+| CS01059 | Recursive reference in a prohibited EXCEPT operand | 42P19 |
+| CS01060 | Recursive term has more than one self-reference | 42P19 |
+| CS01061 | Aggregate at the query level containing a recursive reference | 42P19 |
+| CS02065 | Recursive anchor, recursive output or declared column-list width mismatch | 42601 |
+| CS02066 | Recursive UNION changes the anchor type, domain or type modifiers; cast hint | 42804 |
+| CS02067 | Recursive UNION changes or conflicts with the anchor collation; COLLATE hint | 42P21 |
+
 ## Subquery and insert-source operators (#1021)
 
 Non-recursive WITH (#1116) binds every definition in declaration order and resolves
@@ -874,7 +937,7 @@ evaluator layout and synchronous execution path, preserving its allocation budge
 PostgreSQL's source references and SQL-visible errors are recorded in DIALECT.md.
 Parsing and planning enforce at most 32
 subquery levels, counting derived bodies too. UPDATE SET, VALUES, CHECK/DEFAULT and LIMIT/OFFSET expression
-subqueries, recursive/nested CTEs and lateral joins remain
+subqueries, nested CTEs, recursive execution and lateral joins remain
 outside the profile. Every FROM-less SELECT uses one implicit row, with ordinary filters, aggregation and row windows. Subquery resolution binds
 each use site to its slot number when the statement is planned; it needs no
 language-assembly friend access or public AST constructors. See [DIALECT.md](../../Assimalign.Cohesion.Database.Sql.Language/docs/DIALECT.md#subqueries-and-query-source-inserts-1021)
@@ -3044,7 +3107,15 @@ Regression cases pair MERGE USING with UPDATE FROM for stored tables, system rel
 views, aliased derived queries and supported INNER/LEFT/CROSS joins, before and after
 canonical rendering. Unsupported source forms retain the existing read-source codes;
 no VALUES relation is added. The parser reserves a trailing source CROSS JOIN's ON for MERGE.
-WITH-prefixed MERGE is outside the requested statement grammar.
+Plain WITH-prefixed MERGE shares SELECT's CTE namespace and binding: definitions bind
+in declaration order, every definition is validated, and only reachable definitions
+materialize once under the statement snapshot. SqlWithPlan wraps the MERGE input;
+USING, ON, action subqueries and RETURNING use the bound CTE outputs, and the joined
+statement mark brackets materialization and writes. Keyword-spelled CTE names such as
+over, partition, window and natural work after USING and as output qualifiers.
+WITH RECURSIVE before MERGE is refused at RECURSIVE with CK00001 even for acyclic
+lists (PostgreSQL `src/backend/parser/parse_merge.c:124-129`). Other consumers bind
+recursive lists before the SQ-R2 planning/execution gate described above.
 Each action retains its own bound condition/value subqueries. A lazy action frame prepares
 only reached scalar branches; independent query values cache per statement, correlated values
 expire per candidate. A failed condition never evaluates the action's values. The first matching
@@ -5739,7 +5810,7 @@ for every declared name and rejects evidence for undeclared names. OQL's
 
 Execution and DDL refusals carry structured diagnostics at their source (#1653). The internal
 SqlExecutionException covers cardinality, store assignment, DDL admission, persisted-expression
-damage and executor invariants; scalar evaluation keeps SqlEvaluationException. CS02046–066
+damage and executor invariants; scalar evaluation keeps SqlEvaluationException. CS02046–CS02067
 and their PostgreSQL SQLSTATE mappings are listed in the SQL dialect. Invalid store text reuses
 CS02022, numeric overflow keeps CS02002, and NOT NULL keeps CS03024. Catalog DDL
 guards use the same codes without depending on engine-layer types. An otherwise uncoded catalog

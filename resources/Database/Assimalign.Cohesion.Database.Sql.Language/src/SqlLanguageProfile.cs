@@ -111,6 +111,7 @@ public static class SqlLanguageProfile
         SqlClauses.Subquery,
         SqlClauses.QuantifiedComparison,
         SqlClauses.Cte,
+        SqlClauses.Recursive,
         SqlClauses.Case,
         SqlClauses.Cast,
         SqlClauses.Collate,
@@ -132,7 +133,7 @@ public static class SqlLanguageProfile
 
     /// <summary>
     /// Gets the SQL language profile, including MERGE actions, BY SOURCE, RETURNING,
-    /// repeated-target detection and EXPLAIN. Clauses awaiting execution are excluded.
+    /// repeated-target detection and EXPLAIN. WITH RECURSIVE binds; recursive execution is deferred.
     /// </summary>
     public static QueryLanguageProfile Instance { get; } = new(
         "SQL",

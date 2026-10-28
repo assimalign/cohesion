@@ -15,6 +15,7 @@ internal sealed partial class SqlPlanner
         SqlInsertExpression insert => insert.CommonTables,
         SqlUpdateExpression update => update.CommonTables,
         SqlDeleteExpression delete => delete.CommonTables,
+        SqlMergeExpression merge => merge.CommonTables,
         _ => [],
     };
 
@@ -62,6 +63,17 @@ internal sealed partial class SqlPlanner
                 case SqlInsertExpression insert:
                     if (insert.SelectSource is { } source) { pending.Push((source, scope, visible)); }
                     break;
+                case SqlMergeExpression merge:
+                    Sources([merge.Source], scope, visible);
+                    Expressions(merge.Condition, scope, visible);
+                    foreach (var action in merge.Actions)
+                    {
+                        Expressions(action.Condition, scope, visible);
+                        foreach (var assignment in action.Assignments) { Expressions(assignment.Value, scope, visible); }
+                        foreach (var value in action.Values ?? []) { Expressions(value, scope, visible); }
+                    }
+                    foreach (var column in merge.Returning ?? []) { Expressions(column.Expression, scope, visible); }
+                    break;
                 case SqlUpdateExpression update:
                     Sources(update.From, scope, visible);
                     Expressions(update.Where, scope, visible);
@@ -100,7 +112,7 @@ internal sealed partial class SqlPlanner
                 scope.TryResolve(named.TableName, visible, out var owner, out int index))
             {
                 var definition = owner.Definitions[index];
-                if (referenced.Add(definition)) { pending.Push((definition.Body, owner, index)); }
+                if (referenced.Add(definition)) { pending.Push((definition.Body, owner, definition.IsRecursiveScope ? owner.Definitions.Count : index)); }
             }
         }
 
