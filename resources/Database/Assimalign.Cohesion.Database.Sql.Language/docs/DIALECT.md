@@ -1,5 +1,72 @@
 # The Declared SQL Dialect
 
+## Window stage (#1526, SQ-W1)
+
+OVER accepts inline PARTITION BY and ORDER BY (including direction and NULLS FIRST/LAST),
+OVER name, and parenthesized copies of earlier named windows. WINDOW definitions appear
+after HAVING and before the query tail. Names use the existing case-insensitive identifier
+rules. A copied window cannot specify PARTITION BY; it can supply ORDER BY only if its base
+has none. Definitions cannot reference themselves or later definitions. Explicit ROWS,
+RANGE, GROUPS and EXCLUDE, aggregate windows and FIRST_VALUE/LAST_VALUE/NTH_VALUE remain
+CK00001, naming the deferred form. Frames are not silently approximated with ROWS.
+
+ROW_NUMBER, RANK, DENSE_RANK, PERCENT_RANK, CUME_DIST, NTILE and LAG/LEAD execute after
+WHERE, grouping and HAVING, before DISTINCT, final ORDER BY and pagination. SELECT output
+and ORDER BY are the only legal positions at each query level. Window arguments and keys
+may contain grouped expressions, aggregates and GROUPING, but cannot contain windows.
+RANK leaves peer gaps; DENSE_RANK does not. PERCENT_RANK is (rank-1)/(partition rows-1),
+or zero for a singleton. CUME_DIST includes the last peer. Without window ORDER BY, all rows
+are peers and navigation/ROW_NUMBER use an unspecified order. Ranking outputs are BIGINT,
+distribution outputs DOUBLE PRECISION and NTILE outputs INTEGER. They retain the engine's NULL
+placement (ascending NULLS FIRST, descending NULLS LAST) unless overridden, following
+the existing engine rule. This differs from PostgreSQL's defaults.
+
+NTILE evaluates its integer bucket argument once on the first row of each ordered partition;
+NULL returns NULL and nonpositive counts report CS05078 (22014). Larger buckets precede
+smaller ones. Counts larger than the partition leave trailing buckets empty. LAG/LEAD use
+offset 1 and default NULL when omitted, respect NULL values, accept per-row signed integer
+offsets (negative reverses direction), and return NULL for NULL offsets. Offset zero reads the
+current row; an out-of-partition target uses that row's default. Value/default expressions use
+the engine's common-type implicit-cast rules and registered casts; unknown text constants coerce to
+the selected value type during binding, including unused defaults, with ordinary CAST diagnostics. Offsets and bucket counts accept the engine's signed integer types,
+including BIGINT, with overflow-safe navigation through the full Int64 range.
+NEXT VALUE FOR retains its existing CS03076 exclusion in window arguments and keys;
+PostgreSQL-style nextval() keeps its ordinary per-call evaluation.
+If the first NTILE argument is NULL, the entire partition returns NULL even when later
+rows' bucket expressions differ. This follows the SQ-W1 contract; PostgreSQL can retry
+initialization after a NULL argument (windowfuncs.c:424-440).
+
+The WindowAgg stage groups equal partition/order specifications and processes longer orderings
+before compatible prefixes so those groups share a sort. EXPLAIN names partition/order keys,
+functions and sort_shared for each group. Window inputs, augmented result rows, sort indexes,
+key payloads and partition scratch reserve the statement grant before retention; CS05079 refuses
+an excess and every reservation unwinds on success, error or cancellation. Whole input and
+output rows remain charged until the stage ends; scratch releases at each partition boundary.
+Accounting is deliberately conservative for aliased values and retained intermediate outputs;
+SQ-W3 refines full retained-memory accounting. There is no spill. LIMIT cannot truncate the
+input partitions. Window-free queries retain their existing plan and object layouts.
+
+Views render, compare and reload window expressions and named definitions through canonical SQL;
+no disk or wire version changes. Reference semantics were re-derived from PostgreSQL
+src/backend/parser/parse_clause.c:2766-2902, parser/parse_agg.c:879-994,
+utils/adt/windowfuncs.c:139-154,264-285,334-369,416-482,534-575 and
+optimizer/plan/planner.c:6252-6395. Tests compare generated data with independent computations;
+no live PostgreSQL comparison is claimed.
+
+| Code | Condition |
+| --- | --- |
+| CS00011 | Window argument count or call modifier |
+| CS01064 | Duplicate WINDOW name |
+| CS01065 | Unknown or forward window reference |
+| CS01066 | Invalid copied PARTITION BY or ORDER BY |
+| CS02068 | Non-integer offset or bucket argument |
+| CS02069 | Incompatible navigation value/default types |
+| CS05076 | Invalid window placement or missing OVER |
+| CS05077 | Nested windows |
+| CS05078 | Nonpositive NTILE count (22014) |
+| CS05079 | Statement window memory exceeded |
+
+
 Double-quoted identifiers use doubled `""` for an embedded double quote: `"a""b"` names
 `a"b` in tables, columns, aliases and function names. Rendering escapes it the same way.
 An escaped final quote without a closing delimiter is CS00003 (#1235).
@@ -551,7 +618,7 @@ src/backend/commands/tablecmds.c:2033-2090 and src/backend/catalog/heap.c:3701-3
 
 ## Statement matrix
 
-With INSERT ... ON CONFLICT (#1118), DML RETURNING (#1117), persisted CREATE/DROP VIEW (#1124), CREATE/DROP SCHEMA (#1030), set operations (#1114), quantified comparisons (#1718), UPDATE ... FROM / DELETE ... USING (#1714), TRUNCATE and CREATE TABLE AS (#1716), MERGE (#1715), aggregate FILTER (#1720), grouping sets (#1720), and sequence DDL, NEXT VALUE FOR and DISCARD ALL (#1717), the profile has **67 of 72 declared clauses** measured against the live SQL engine, including MERGE actions and RETURNING. WITH RECURSIVE (#1719, SQ-R1) adds one declared binding-only clause; recursive execution remains CK00001 until SQ-R2.
+With INSERT ... ON CONFLICT (#1118), DML RETURNING (#1117), persisted CREATE/DROP VIEW (#1124), CREATE/DROP SCHEMA (#1030), set operations (#1114), quantified comparisons (#1718), UPDATE ... FROM / DELETE ... USING (#1714), TRUNCATE and CREATE TABLE AS (#1716), MERGE (#1715), aggregate FILTER (#1720), grouping sets (#1720), and sequence DDL, NEXT VALUE FOR and DISCARD ALL (#1717), the profile has **70 of 72 declared clauses** measured against the live SQL engine, including MERGE actions and RETURNING. WITH RECURSIVE (#1719, SQ-R1) adds one declared binding-only clause; recursive execution remains CK00001 until SQ-R2.
 Phase 22 measured 33 of 49.
 The earlier 32/48 figure included `JOIN`, `GROUP BY`, `HAVING`, and `SUBQUERY`,
 removed in Phase 12e (#1019–#1021), plus a no-op `CAST` removed in Phase 13.
@@ -572,8 +639,7 @@ projection aliases, including aliases inside scalar expressions, and select-list
 ordinals through the SQL server/client (#1024). At Phase 22 the count remained 33/49 because
 `ALTER TABLE` and `ORDER BY` were already advertised for smaller executable subsets.
 
-The **5 excluded clauses** are window clauses (`WINDOW`,
-`OVER`, `PARTITION`), `NATURAL`,
+The **2 excluded clauses** are `NATURAL`,
 and `ALL`. Counts describe named clauses, not
 complete ISO SQL support; the boundaries below are part of the contract.
 
@@ -614,7 +680,7 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | `WITH RECURSIVE` | Parsed and bound; execution deferred | Dependency analysis, anchor output contract and PostgreSQL recursive-reference restrictions; valid recursion refuses planning/EXPLAIN/execution with CK00001 until SQ-R2. Acyclic lists execute except before MERGE. |
 | `WITH RECURSIVE ... MERGE` | Recognized, not supported | CK00001 at RECURSIVE even for acyclic lists; plain WITH ... MERGE binds and executes. |
 | `SELECT ... FOR UPDATE` / `FOR NO KEY UPDATE` / `FOR SHARE` / `FOR KEY SHARE` | Recognized, not supported | Complete locking strengths in the SELECT tail report CK00001, including in subqueries and CTE bodies. Deliberate change from CS00003 in #1719; qualified identifiers and implicit aliases retain their ordinary meaning. |
-| Window functions / `OVER` / `WINDOW` | Recognized, not supported | function names lexed; clauses rejected with `CK00001` |
+| Window functions / `OVER` / `WINDOW` | Ranking and navigation execute | See Window stage; frames, aggregate windows and value functions remain deferred |
 | `CREATE [OR REPLACE] VIEW` / `DROP VIEW` | Yes | Persisted read-only views; DROP defaults to RESTRICT and supports CASCADE |
 | `CONSTRAINT` / `FOREIGN KEY` / `REFERENCES` / `CHECK` / `UNIQUE` constraints | Supported subset, measured | Column and table declarations normalize into constraint definitions; UNIQUE lowers to a unique catalog index. NULL is an equal index key: a second NULL violates a single-column UNIQUE constraint. Foreign-key NULL values are allowed; CHECK accepts UNKNOWN and rejects FALSE. CHECK expressions must be deterministic Boolean row expressions with the engine's scalar functions (built-in or registered, `IMMUTABLE` only), each called with arguments its signature accepts (`CS01006` otherwise); parameters and aggregates are excluded. CHECK predicates and DEFAULT expressions are stored as canonical text and parsed once per table version; see [Persisted definitions are canonical](#persisted-definitions-are-canonical). |
 | `ON DELETE CASCADE` / `RESTRICT` / `NO ACTION` / `SET NULL` / `SET DEFAULT` | Supported | omitted deletion action defaults to `NO ACTION`; a cascade deletes its whole transitive closure with no depth limit, so a self-referencing chain deletes however long it is (#1164), and a cycle deletes each row once; `DROP TABLE ... CASCADE` is not supported |
@@ -890,10 +956,10 @@ comment, and a string literal or block comment may span lines. `//` is not a
 comment: `/` is the division operator, so `//` is a syntax error.
 
 A recognized clause outside the profile keeps its `CK00001`, for example
-`WINDOW`. The parser stops at such a clause by design, so the text
+`NATURAL JOIN`. The parser stops at such a clause by design, so the text
 from that clause on adds no second diagnostic. Text the parser stopped at before
 it reached the clause still reports `CS00003`: `DELETE FROM t WHRE id = 1
-WINDOW w AS ()` reports both, so fixing `WINDOW` does not reveal a new error. A
+NATURAL JOIN u` reports both, so fixing the unsupported join does not reveal a new error. A
 derived table, `(SELECT ...) alias`, is parsed as a query relation; its alias is required.
 Named `:name` parameters are not part of the dialect; bind `@name` or `$1`.
 
@@ -945,7 +1011,7 @@ before it binds the statement or reads a row: projections, predicates, joins,
 grouping, ordering, `LIMIT`/`OFFSET`, subqueries, DML values and `CHECK`. The
 statement therefore fails the same way over an empty table as over a populated
 one; the evaluator used to find the name per row, so an empty table succeeded.
-Recognized window names that do not execute yet, such as `RANK` and `LEAD` (see
+Recognized value-window names that do not execute yet, such as `FIRST_VALUE` and `LAST_VALUE` (see
 [Builtin functions](#builtin-functions)), are not unknown. They reject at parse time
 with one named `CK00001` and are absent from the executable profile (#1103).
 
@@ -1565,7 +1631,7 @@ index inner is freshly decoded. Earlier indexed inputs retained by later steps a
 copied on delivery, as are unmatched LEFT outer values used in multiple results.
 
 Capability preflight skips advertised clauses and reports the first unadvertised
-one. Thus USING cannot mask a later NATURAL, WINDOW or OVER. MERGE INTO ... USING
+one. Thus USING cannot mask a later NATURAL JOIN or deferred window frame. MERGE INTO ... USING
 binds and explains; DELETE ... USING executes; CREATE INDEX ... USING remains a syntax error.
 
 ## MERGE syntax, binding and execution (#1715, SQ-M1/SQ-M2/SQ-M3)
@@ -1912,8 +1978,7 @@ Without ORDER BY, the count still applies but the choice of rows has no ordering
 Each SELECT accepts one limit spelling and one OFFSET. LIMIT and OFFSET can appear in
 either order, including PostgreSQL FETCH before OFFSET; rendering uses ISO OFFSET before FETCH. LIMIT with FETCH, TOP with LIMIT/OFFSET/FETCH,
 duplicate limits/offsets, or FETCH without ONLY receive CS00003. PERCENT, WITH TIES
-and INSERT/UPDATE/DELETE TOP receive CK00001 naming the form. A paging clause cannot mask
-a later unsupported WINDOW clause, and WITH TIES never becomes a CTE diagnostic.
+and INSERT/UPDATE/DELETE TOP receive CK00001 naming the form. TOP cannot mask a later deferred window frame, and WITH TIES never becomes a CTE diagnostic.
 
 These spellings execute at every accepted SELECT position: scalar, IN and EXISTS
 children, derived/CTE bodies and INSERT SELECT sources, retaining the existing
@@ -2230,7 +2295,7 @@ exceed 1,048,576 UTF-16 units. Ordered calls check while buffering, before sorti
 DISTINCT calls retain one representative per equivalence class, selected in sorted input
 order, so case-insensitive aggregation preserves one input spelling.
 
-Windows, non-LISTAGG WITHIN GROUP, and LISTAGG ON OVERFLOW
+Window frames/aggregate windows/value functions, non-LISTAGG WITHIN GROUP, and LISTAGG ON OVERFLOW
 (including ERROR and TRUNCATE) retain CK00001. ON OVERFLOW is matched contextually
 inside LISTAGG and names the whole construct once; OVERFLOW remains an ordinary identifier.
 FILTER adds one named clause; the T1 modifiers add none.
@@ -2546,8 +2611,8 @@ EXPLAIN includes WITH, materialization and constant-source operators without run
 WITH inside subqueries, derived tables or CTE bodies, modifying CTE bodies,
 `AS [NOT] MATERIALIZED` and SEARCH/CYCLE report `CK00001`.
 A WITH list followed by another command kind reports `CS00003`.
-Capability scanning continues through advertised WITH lists, so an excluded OVER,
-NATURAL JOIN or WINDOW still reports its own clause.
+Capability scanning continues through advertised WITH lists, OVER and WINDOW;
+NATURAL JOIN and deferred window forms retain their capability diagnostics.
 
 ## WITH RECURSIVE binding (#1719, SQ-R1)
 
@@ -2596,7 +2661,7 @@ and complete strengths follow PostgreSQL `src/backend/parser/gram.y:13119-13176,
 WITH RECURSIVE before MERGE is refused with CK00001 at RECURSIVE, even for acyclic
 definitions (PostgreSQL `src/backend/parser/parse_merge.c:124-129`). Plain WITH
 before MERGE remains supported and shares SELECT's CTE binding and materialization.
-These contextual exclusions do not change the 67/72 declared-clause count.
+These contextual exclusions do not change the 70/72 declared-clause count.
 
 References re-derived from the local PostgreSQL clone: src/backend/parser/parse_cte.c:
 345-400 (output checks and hints), 580-632 (unknown anchor output), 648-725 and 863-906
@@ -3763,7 +3828,8 @@ existing compiled schema with newly quoted function-named columns is a no-op.
 
 COUNT/SUM/AVG/MIN/MAX keep their existing signatures: COUNT(*)/COUNT(value),
 SUM(numeric), AVG(numeric), MIN(value), MAX(value). Only COUNT accepts `*`.
-Window functions remain recognized-unsupported (CK00001). LOG(base, x), trig,
+Window frames, aggregate windows and value-window functions remain deferred (CK00001).
+Ranking and LAG/LEAD require OVER and execute as described under Window stage. LOG(base, x), trig,
 regex functions, TO_CHAR and other unknown names remain CS01016.
 
 PostgreSQL implementation references (local reference clone):
@@ -3776,7 +3842,7 @@ No reference implementation code is copied.
 types, a result type, a volatility and a NULL rule. A name and parameter-type list is
 registered once, and a name is either scalar or aggregate. A built-in cannot be replaced: an
 overload of a built-in's name is accepted only for a number of arguments the built-in does
-not take (`upper(TEXT, BIGINT)` beside `UPPER(TEXT)`). The new T1 built-in names above, a name in the recognized-unsupported vocabulary (`RANK`, `LEAD`, ...), a type name (`INT`, `DATE`), `ANY`,
+not take (`upper(TEXT, BIGINT)` beside `UPPER(TEXT)`). The new T1 built-in names above, a window operator name (`RANK`, `LEAD`, ...), a name in the recognized-unsupported vocabulary (`FIRST_VALUE`, ...), a type name (`INT`, `DATE`), `ANY`,
 `SOME`, `LOCALTIME` and `LOCALTIMESTAMP` cannot be registered. An argument converts to its
 parameter's type along INT8 → INT16 → INT32 → INT64 → NUMERIC → DOUBLE, or REAL → DOUBLE;
 nothing converts from text, so a DATE or UUID parameter takes a column or a parameter of
@@ -3833,9 +3899,8 @@ A call found in neither the engine catalog nor the profile's executable and reco
 unsupported lists fails at plan time with `CS01016`, `Unknown function '<name>'.`
 before any row is read (#1068). Recognized unsupported functions fail at parse time with
 exactly one `CK00001` naming the function, even over an empty table (#1103):
-the nine window functions ROW_NUMBER, RANK, DENSE_RANK, LEAD, LAG, FIRST_VALUE,
-LAST_VALUE, NTH_VALUE and NTILE. Window rejection also works when these names
-lex as identifiers. An OVER clause keeps its existing clause diagnostic.
+the deferred window value functions FIRST_VALUE, LAST_VALUE and NTH_VALUE.
+Ranking and navigation calls require OVER and bind as described in Window stage.
 
 The ISO datetime value functions execute as described in the T1 table above.
 Their unqualified, unquoted spellings never bind a column; quote an identifier
@@ -3951,7 +4016,7 @@ carried per node.
 the internal recognized-unsupported table (`SqlUnsupportedVocabulary`), either
 parses inside a supported clause or reports exactly one `CK00001` naming its
 construct. The table holds the clause keywords the preflight scan rejects,
-such as `WINDOW` in the statement matrix. UNION, INTERSECT and EXCEPT remain profile keywords and execute; CORRESPONDING is rejected contextually after an operator and optional quantifier, without reserving that identifier. It also holds every other word or
+such as `NATURAL` in the statement matrix. UNION, INTERSECT and EXCEPT remain profile keywords and execute; CORRESPONDING is rejected contextually after an operator and optional quantifier, without reserving that identifier. It also holds every other word or
 operator outside the profile's keywords that a dedicated rule recognizes and
 rejects with `CK00001`: `RECURSIVE`, `[NOT] MATERIALIZED`, `SEARCH`/`CYCLE`,
 `SELECT ALL`, SELECT-tail `FOR UPDATE` / `FOR NO KEY UPDATE` / `FOR SHARE` /
@@ -4130,8 +4195,8 @@ SDK v8 artifacts do not carry scripts; extraction refuses Script calls with COHD
 ## Quoted calls (#1103 review)
 
 A quoted identifier followed by parentheses is a function call. Recognized unsupported
-built-ins use their lowercase lookup spelling for quoted names: `"rank"(id)` reports
-parse-time `CK00001`, while `"RANK"(id)` and `"Rank"(id)` are distinct names outside
+built-ins use their lowercase lookup spelling for quoted names: `"first_value"(id)` reports
+parse-time `CK00001`, while `"FIRST_VALUE"(id)` and `"First_Value"(id)` are distinct names outside
 that vocabulary. Unquoted names match the vocabulary without regard to case. Quoting a name
 without parentheses keeps it a column reference, including `"sqrt"` and `"current_date"`.
 Declared executable calls such as `"abs"(id)` remain executable. Unknown function names

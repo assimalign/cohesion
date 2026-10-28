@@ -351,6 +351,8 @@ public static partial class SqlExpressionRenderer
             => "EXTRACT(" + field.Value + " FROM " + Expression(function.Arguments[1]) + ")",
         SqlFunctionCallExpression function when function.FunctionName.Equals("POSITION", StringComparison.OrdinalIgnoreCase) && function.Arguments.Count == 2 && function.Quantifier == SqlSetQuantifier.Default && function.OrderBy.Count == 0 && function.Filter is null
             => "POSITION(" + Operand(function.Arguments[0], concatLevel) + " IN " + Expression(function.Arguments[1]) + ")",
+        SqlWindowExpression window => AggregateCall(window.Function, window: true) + " OVER " +
+            (window.WindowName is not null ? Identifier(window.WindowName) : "(" + WindowSpecification(window.Specification!) + ")"),
         SqlFunctionCallExpression function => AggregateCall(function),
         SqlCaseExpression caseExpression => Case(caseExpression),
         SqlCastExpression cast => "CAST(" + Expression(cast.Operand) + " AS " + CastTarget(cast.TargetType) + ")",
@@ -359,10 +361,17 @@ public static partial class SqlExpressionRenderer
         _ => throw new NotSupportedException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlExpressionRendererNodeNotSupported, expression.GetType().Name)),
     };
 
+    private static string WindowSpecification(SqlWindowSpecification specification) => string.Join(" ", new[]
+    {
+        specification.ExistingWindow is null ? "" : Identifier(specification.ExistingWindow),
+        specification.PartitionBy.Count == 0 ? "" : "PARTITION BY " + List(specification.PartitionBy),
+        specification.OrderBy.Count == 0 ? "" : "ORDER BY " + string.Join(", ", specification.OrderBy.Select(Ordering)),
+    }.Where(part => part.Length > 0));
+
     private static string Ordering(SqlOrderByColumn key) => Expression(key.Expression) + (key.IsDescending ? " DESC" : "") +
         (key.NullPlacement switch { SqlNullPlacement.First => " NULLS FIRST", SqlNullPlacement.Last => " NULLS LAST", _ => "" });
 
-    private static string AggregateCall(SqlFunctionCallExpression call)
+    private static string AggregateCall(SqlFunctionCallExpression call, bool window = false)
     {
         string quantifier = call.Quantifier switch { SqlSetQuantifier.Distinct => "DISTINCT ", SqlSetQuantifier.All => "ALL ", _ => "" };
         string ordering = call.OrderBy.Count == 0 ? "" : "ORDER BY " + string.Join(", ", call.OrderBy.Select(key =>
@@ -373,7 +382,7 @@ public static partial class SqlExpressionRenderer
         // With no WITHIN GROUP keys it must stay delimited on a round trip.
         bool specialForm = SqlUnsupportedVocabulary.IsNiladicFunction(call.FunctionName) ||
             call.FunctionName.ToUpperInvariant() is "EXTRACT" or "POSITION" or "SUBSTRING" or "TRIM";
-        string name = (listaggName && !listagg) || (specialForm &&
+        string name = window ? call.FunctionName.ToUpperInvariant() : (listaggName && !listagg) || (specialForm &&
             (call.Quantifier != SqlSetQuantifier.Default || call.OrderBy.Count > 0 || call.Filter is not null))
             ? "\"" + call.FunctionName + "\"" : FunctionName(call.FunctionName);
         return name + "(" + quantifier + Arguments(call.Arguments) +
@@ -657,6 +666,11 @@ public static partial class SqlExpressionRenderer
         {
             builder.Append(" HAVING ").Append(Expression(select.Having));
         }
+        if (select.Windows.Count > 0)
+        {
+            builder.Append(" WINDOW ").Append(string.Join(", ", select.Windows.Select(window =>
+                Identifier(window.Name) + " AS (" + WindowSpecification(window.Specification) + ")")));
+        }
         AppendQueryTail(builder, select);
         return builder.ToString();
     }
@@ -781,7 +795,7 @@ public static partial class SqlExpressionRenderer
     /// Spells a function name bare when the bare word parses as a call to it: a builtin
     /// function, or a plain identifier. <c>CAST</c> and every other keyword are delimited,
     /// because the bare keyword starts its own construct, and so are the window function names,
-    /// whose bare call the parser rejects.
+    /// whose ordinary call retains its quoted spelling; window expressions render OVER separately.
     /// </summary>
     private static string FunctionName(string name)
     {

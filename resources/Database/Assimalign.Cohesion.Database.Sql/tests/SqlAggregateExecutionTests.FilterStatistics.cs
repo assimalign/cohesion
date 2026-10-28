@@ -139,7 +139,7 @@ public sealed partial class SqlAggregateExecutionTests
     [InlineData("SELECT merge_action() FILTER (WHERE TRUE);", "CS05072")]
     [InlineData("SELECT SUM(id) FILTER (WHERE COUNT(*) > 0) FROM t;", "CS05073")]
     [InlineData("SELECT SUM(id) FILTER (WHERE 1) FROM t;", "CS02003")]
-    [InlineData("SELECT SUM(id) FILTER (WHERE ROW_NUMBER() > 0) FROM t;", "CK00001")]
+    [InlineData("SELECT SUM(id) FILTER (WHERE ROW_NUMBER() > 0) FROM t;", "CS05076")]
     [InlineData("SELECT SUM(id) FILTER (WHERE TRUE) OVER () FROM t;", "CK00001")]
     [InlineData("SELECT BOOL_AND(id) FROM t;", "CS01006")]
     [InlineData("SELECT VAR_POP('text') FROM t;", "CS01006")]

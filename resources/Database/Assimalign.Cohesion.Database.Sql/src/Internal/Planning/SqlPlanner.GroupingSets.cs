@@ -12,7 +12,7 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 internal sealed partial class SqlPlanner
 {
     /// <summary>Binds aggregation above a normal filtered relation plan.</summary>
-    private SqlGroupPlan PlanGroupingSets(SqlSelectExpression select, SqlCatalogTable? table,
+    private SqlPlan PlanGroupingSets(SqlSelectExpression select, SqlCatalogTable? table,
         SqlSystemViewDefinition? view, IReadOnlyList<SqlCatalogColumn> columns,
         IReadOnlyList<SqlRelationBinding>? bindings, SqlExpressionEvaluator evaluator, IReadOnlyList<SqlJoinStep> steps, SqlJoinTree? tree = null)
     {
@@ -56,6 +56,11 @@ internal sealed partial class SqlPlanner
                     !(column.Expression is SqlFunctionCallExpression projected && IsAggregate(projected)
                     && aggregates[slots[projected] - groupKeys.Count].Function.IsNeverNull),
             });
+        }
+        foreach (var definition in select.Windows)
+        {
+            foreach (var key in definition.Specification.PartitionBy) { BindSlots(key); }
+            foreach (var key in definition.Specification.OrderBy) { BindSlots(key.Expression); }
         }
         if (select.Having is not null)
         {
@@ -134,6 +139,7 @@ internal sealed partial class SqlPlanner
                 call.Filter is null ? null : sourceScope.BindPredicate(call.Filter));
         }
 
+        var windows = HasWindows(select) ? BindWindows(select, groupScope, slots, keys.Length + boundAggregates.Length + (groupingCalls?.Count ?? 0)) : null;
         for (int i = 0; i < projections.Count; i++)
         {
             var value = groupScope.Bind(projections[i].Expression!, out SqlBoundCollation collation, out var candidate);
@@ -148,9 +154,10 @@ internal sealed partial class SqlPlanner
         var ordering = BindOrdering(select.OrderBy,
             groupScope.ForOrdering(projections, orderByProjections, keys.Length + boundAggregates.Length + (groupingCalls?.Count ?? 0)));
 
-        return new SqlGroupingSetsPlan(new SqlGroupPlan(input, columns, bindings, keys, boundAggregates, projections,
+        var result = new SqlGroupingSetsPlan(new SqlGroupPlan(input, columns, bindings, keys, boundAggregates, projections,
             having, ordering, BindCount(select.Limit, LimitClause(select)), BindCount(select.Offset, "OFFSET"), select.IsDistinct),
             groupingSets, groupingCalls?.Select(item => item.Arguments).ToArray());
+        return windows is null ? result : FinishWindowGroup(select, result, groupScope, windows, keys.Length + boundAggregates.Length + (groupingCalls?.Count ?? 0), orderByProjections);
 
         void BindSlots(SqlExpression expression, IReadOnlyDictionary<SqlExpression, int>? outputSlots = null)
         {
@@ -181,6 +188,14 @@ internal sealed partial class SqlPlanner
                 }
                 (groupingCalls ??= []).Add((grouping, arguments));
                 slots[grouping] = -1; // final position follows all aggregate slots
+                return;
+            }
+            if (expression is SqlWindowExpression window)
+            {
+                foreach (var argument in window.Function.Arguments) { BindSlots(argument); }
+                var windowKeys = WindowKeysOf(window, NamedWindows(select));
+                foreach (var key in windowKeys.Partition) { BindSlots(key); }
+                foreach (var key in windowKeys.Order) { BindSlots(key.Expression); }
                 return;
             }
             if (expression is SqlFunctionCallExpression call && IsAggregate(call))

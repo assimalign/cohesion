@@ -193,6 +193,7 @@ internal sealed partial class SqlPlanner
     /// <summary>Binds a SELECT whose subqueries have already been lowered to value slots.</summary>
     private SqlPlan PlanSelectCore(SqlSelectExpression select)
     {
+        ValidateNamedWindows(select);
         if (select.Where is not null && ContainsAggregate(select.Where))
         {
             throw new SqlPlanningException("CS05017", ErrorMessages.SqlPlannerPlanSelectCoreSqlPlanning, select.Where?.Location);
@@ -224,6 +225,8 @@ internal sealed partial class SqlPlanner
             return PlanGroup(select, table, systemView, columns, bindings, evaluator, steps, tree);
         }
 
+        ValidateWindowDefinitions(select, evaluator);
+        if (HasWindows(select)) { return PlanWindowSelect(select, table, systemView, columns, bindings, evaluator, steps, outputOrdinals, tree); }
         var projections = BindProjections(select.Columns, columns, evaluator, outputOrdinals);
 
         SqlBoundExpression? where = null;
@@ -1867,6 +1870,12 @@ internal sealed partial class SqlPlanner
     /// <summary>Whether a projection or an ordering key of a SELECT calls an aggregate, which makes the SELECT a grouping.</summary>
     private bool ProjectsOrOrdersByAggregate(SqlSelectExpression select)
     {
+        for (int i = 0; i < select.Windows.Count; i++)
+        {
+            var definition = select.Windows[i].Specification;
+            for (int k = 0; k < definition.PartitionBy.Count; k++) { if (ContainsAggregate(definition.PartitionBy[k])) { return true; } }
+            for (int k = 0; k < definition.OrderBy.Count; k++) { if (ContainsAggregate(definition.OrderBy[k].Expression)) { return true; } }
+        }
         for (int index = 0; index < select.Columns.Count; index++)
         {
             if (ContainsAggregate(select.Columns[index].Expression))
@@ -1987,6 +1996,8 @@ internal sealed partial class SqlPlanner
     /// </remarks>
     internal static IEnumerable<SqlExpression> Children(SqlExpression expression) => expression switch
     {
+        SqlWindowExpression window => window.Function.Arguments.Concat(window.Specification?.PartitionBy ?? [])
+            .Concat(window.Specification?.OrderBy.Select(key => key.Expression) ?? []),
         SqlGroupingSetExpression grouping => grouping.Items,
         SqlLogicalExpression logical => logical.Operands,
         SqlFunctionCallExpression { Filter: not null } function => FilterOperands(function),

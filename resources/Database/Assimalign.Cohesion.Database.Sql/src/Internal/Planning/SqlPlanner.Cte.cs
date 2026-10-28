@@ -24,6 +24,8 @@ internal sealed partial class SqlPlanner
         {
             return PlanGroup(select, null, null, [], null, evaluator, []);
         }
+        ValidateWindowDefinitions(select, evaluator);
+        if (HasWindows(select)) { return PlanWindowSelect(select, null, null, [], null, evaluator, []); }
         var projections = new List<SqlProjection>();
         foreach (var column in select.Columns)
         {

@@ -188,9 +188,9 @@ public sealed class SqlExpressionRendererTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - Renderer: unsupported quoted calls retain their rejection and recovery tree")]
-    [InlineData("\"rank\"(1)", "NULL")]
-    [InlineData("\"row_number\"()", "NULL")]
-    [InlineData("\"rank\"(\"rank\") = 1", "NULL = 1")]
+    [InlineData("\"first_value\"(1)", "NULL")]
+    [InlineData("\"last_value\"()", "NULL")]
+    [InlineData("\"first_value\"(\"first_value\") = 1", "NULL = 1")]
     public void Render_UnsupportedQuotedCall_ShouldRetainDiagnosticAndRecoveryTree(string written, string canonical)
     {
         // Arrange
@@ -218,14 +218,14 @@ public sealed class SqlExpressionRendererTests
     /// <param name="supported">Whether its quoted spelling lies outside the unsupported vocabulary.</param>
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - Renderer: quoted window-like calls respect identifier case")]
     [InlineData("ROW_NUMBER", true)]
-    [InlineData("rank", false)]
+    [InlineData("rank", true)]
     [InlineData("Dense_Rank", true)]
-    [InlineData("lead", false)]
-    [InlineData("lag", false)]
+    [InlineData("lead", true)]
+    [InlineData("lag", true)]
     [InlineData("first_value", false)]
     [InlineData("last_value", false)]
     [InlineData("nth_value", false)]
-    [InlineData("ntile", false)]
+    [InlineData("ntile", true)]
     public void Render_WindowFunctionNamedCall_ShouldRespectQuotedCase(string name, bool supported)
     {
         // Arrange

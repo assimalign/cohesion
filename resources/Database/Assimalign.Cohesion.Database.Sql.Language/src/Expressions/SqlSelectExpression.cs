@@ -9,6 +9,8 @@ using Assimalign.Cohesion.Database.Language;
 /// </summary>
 public sealed class SqlSelectExpression : SqlQueryBodyExpression
 {
+    private readonly object _grouping;
+
     /// <summary>
     /// Initializes a new <see cref="SqlSelectExpression"/>.
     /// </summary>
@@ -25,6 +27,7 @@ public sealed class SqlSelectExpression : SqlQueryBodyExpression
     /// <param name="location">The source location.</param>
     /// <param name="limitSyntaxKind">The spelling that supplied the row limit.</param>
     /// <param name="isGroupByDistinct">Whether duplicate expanded grouping sets are removed.</param>
+    /// <param name="windows">The optional named windows in declaration order.</param>
     internal SqlSelectExpression(
         IReadOnlyList<SqlSelectColumn> columns,
         IReadOnlyList<SqlFromItem> from,
@@ -38,13 +41,13 @@ public sealed class SqlSelectExpression : SqlQueryBodyExpression
         string? text,
         Location? location,
         SqlLimitSyntaxKind? limitSyntaxKind = null,
-        bool isGroupByDistinct = false)
+        bool isGroupByDistinct = false, IReadOnlyList<SqlNamedWindow>? windows = null)
         : base(text, location)
     {
         Columns = columns;
         From = from;
         Where = where;
-        GroupBy = groupBy;
+        _grouping = windows is { Count: > 0 } ? new WindowClause(groupBy, windows) : groupBy;
         IsGroupByDistinct = isGroupByDistinct;
         Having = having;
         OrderBy = orderBy;
@@ -82,6 +85,7 @@ public sealed class SqlSelectExpression : SqlQueryBodyExpression
             depth = System.Math.Max(depth, order.Expression.Depth);
         }
 
+        foreach (var window in Windows) { depth = System.Math.Max(depth, window.Specification.ExpressionDepth); }
         ExpressionDepth = depth;
     }
 
@@ -117,7 +121,12 @@ public sealed class SqlSelectExpression : SqlQueryBodyExpression
     /// <summary>
     /// Gets the GROUP BY expressions and grouping elements.
     /// </summary>
-    public IReadOnlyList<SqlExpression> GroupBy { get; }
+    public IReadOnlyList<SqlExpression> GroupBy => _grouping is WindowClause clause ? clause.GroupBy : (IReadOnlyList<SqlExpression>)_grouping;
+
+    /// <summary>Gets the named windows, in declaration order.</summary>
+    public IReadOnlyList<SqlNamedWindow> Windows => (_grouping as WindowClause)?.Windows ?? [];
+
+    private sealed record WindowClause(IReadOnlyList<SqlExpression> GroupBy, IReadOnlyList<SqlNamedWindow> Windows);
 
     /// <summary>Gets whether GROUP BY DISTINCT removes duplicate expanded grouping sets.</summary>
     public bool IsGroupByDistinct { get; }

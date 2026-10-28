@@ -72,12 +72,12 @@ public sealed class SqlCteParserTests
     [InlineData("WITH d AS (DELETE FROM t RETURNING *) SELECT * FROM d;", "DELETE")]
     [InlineData("WITH a AS (SELECT id FROM t) SEARCH DEPTH FIRST BY id SET ord SELECT * FROM a;", "SEARCH/CYCLE")]
     [InlineData("WITH a AS (SELECT id FROM t) CYCLE id SET mark USING path SELECT * FROM a;", "SEARCH/CYCLE")]
-    [InlineData("WITH a AS (SELECT ROW_NUMBER() OVER () AS n FROM t) SELECT * FROM a;", "OVER")]
+    [InlineData("WITH a AS (SELECT SUM(id) OVER () AS n FROM t) SELECT * FROM a;", "SUM")]
     [InlineData("WITH a AS (SELECT * FROM t) SELECT * FROM a NATURAL JOIN u;", "NATURAL")]
-    [InlineData("WITH a AS (SELECT * FROM t) SELECT * FROM a WINDOW w AS ();", "WINDOW")]
+    [InlineData("WITH a AS (SELECT * FROM t) SELECT * FROM a WINDOW w AS (ROWS CURRENT ROW);", "ROWS")]
     [InlineData("WITH top AS (SELECT id FROM t) SELECT TOP (1) WITH TIES * FROM top;", "WITH TIES")]
     [InlineData("WITH natural AS (SELECT id FROM t) SELECT * FROM natural NATURAL JOIN u;", "NATURAL")]
-    [InlineData("WITH window AS (SELECT id FROM t) SELECT * FROM window WINDOW w AS ();", "WINDOW")]
+    [InlineData("WITH window AS (SELECT id FROM t) SELECT * FROM window WINDOW w AS (ROWS CURRENT ROW);", "ROWS")]
     public void Parse_ExcludedWithForm_ShouldNameUnsupportedConstruct(string sql, string construct)
     {
         // Arrange

@@ -1,5 +1,6 @@
 using System;
 using System.Globalization;
+using System.Linq;
 using System.Runtime.CompilerServices;
 
 using Assimalign.Cohesion.Database.Sql.Language;
@@ -12,7 +13,8 @@ internal sealed partial class SqlPlanner
     /// Checks every function call in the statement, in every expression position, before binding
     /// reads the catalog or execution reads a row. A name the engine's function catalog does not hold
     /// is unknown (#1068) unless it is an evaluator form or the SQL dialect declares it. Recognized
-    /// non-executing names such as <c>RANK</c> reject at parse time with <c>CK00001</c> (#1103);
+    /// non-executing names such as <c>FIRST_VALUE</c> reject at parse time with <c>CK00001</c> (#1103);
+    /// ranking and navigation bind in their own window stage and require <c>OVER</c>.
     /// a call whose argument count, or <c>*</c>, no overload
     /// of its function accepts fails with <c>CS01006</c> (#1189): <c>ABS(1, 2)</c>, <c>UPPER()</c>,
     /// <c>COALESCE()</c>, <c>COUNT(a, b)</c>, <c>SUM(*)</c>. The evaluator used to find an unknown name
@@ -176,12 +178,17 @@ internal sealed partial class SqlPlanner
 
     private void ValidateFunctionCalls(SqlSelectExpression select, bool allowNextValue = true)
     {
-        foreach (var column in select.Columns) { ValidateFunctionCalls(column.Expression, allowNextValue); }
+        foreach (var column in select.Columns) { ValidateFunctionCalls(column.Expression, allowNextValue, allowWindows: true); }
+        foreach (var window in select.Windows)
+        {
+            foreach (var key in window.Specification.PartitionBy) { ValidateFunctionCalls(key, allowNextValue: false); }
+            foreach (var key in window.Specification.OrderBy) { ValidateFunctionCalls(key.Expression, allowNextValue: false); }
+        }
         ValidateSourceFunctionCalls(select.From);
         ValidateFunctionCalls(select.Where, allowNextValue: false);
         foreach (var key in select.GroupBy) { ValidateFunctionCalls(key, allowNextValue: false); }
         ValidateFunctionCalls(select.Having, allowNextValue: false);
-        foreach (var order in select.OrderBy) { ValidateFunctionCalls(order.Expression, allowNextValue: false); }
+        foreach (var order in select.OrderBy) { ValidateFunctionCalls(order.Expression, allowNextValue: false, allowWindows: true); }
         ValidateFunctionCalls(select.Limit, allowNextValue: false);
         ValidateFunctionCalls(select.Offset, allowNextValue: false);
     }
@@ -210,10 +217,17 @@ internal sealed partial class SqlPlanner
         names.DynamicNames = true;
     }
 
-    private void ValidateFunctionCalls(SqlExpression? expression, bool allowNextValue = true)
+    private void ValidateFunctionCalls(SqlExpression? expression, bool allowNextValue = true, bool allowWindows = false)
     {
         if (!allowNextValue && expression is SqlNextValueExpression)
         { throw new SqlPlanningException("CS03076", ErrorMessages.SequencePositionUnsupported, expression.Location); }
+        if (expression is SqlWindowExpression window)
+        {
+            if (!allowWindows) { throw new SqlPlanningException("CS05076", ErrorMessages.WindowPlacement, expression.Location); }
+            if (Children(window).Any(ContainsWindow)) { throw new SqlPlanningException("CS05077", ErrorMessages.WindowNested, expression.Location); }
+        }
+        if (expression is SqlFunctionCallExpression bare && IsWindowFunction(bare.FunctionName))
+        { throw new SqlPlanningException("CS05076", string.Format(CultureInfo.CurrentCulture, ErrorMessages.WindowRequiresOver, bare.FunctionName), expression.Location); }
         RecordSequenceUsage(expression);
         _containsLike |= expression is SqlLikeExpression;
         // Subqueries recurse through here as well as children (#1151).
@@ -239,10 +253,11 @@ internal sealed partial class SqlPlanner
 
         foreach (var child in Children(expression))
         {
-            ValidateFunctionCalls(child, allowNextValue && expression is not SqlCaseExpression &&
+            ValidateFunctionCalls(child, allowNextValue && expression is not (SqlCaseExpression or SqlWindowExpression) &&
                 !(expression is SqlFunctionCallExpression parent && (ReferenceEquals(parent.Filter, child) ||
                 _functions.Catalog.IsAggregate(parent.FunctionName) || parent.FunctionName.Equals("COALESCE", StringComparison.OrdinalIgnoreCase) ||
-                parent.FunctionName.Equals("NULLIF", StringComparison.OrdinalIgnoreCase))));
+                parent.FunctionName.Equals("NULLIF", StringComparison.OrdinalIgnoreCase))),
+                allowWindows && expression is not SqlWindowExpression && !(expression is SqlFunctionCallExpression aggregate && IsAggregate(aggregate)));
         }
 
         if (expression is SqlFunctionCallExpression call && _functions.ViewCalls?.ContainsKey(call) != true)
@@ -263,12 +278,16 @@ internal sealed partial class SqlPlanner
     /// <exception cref="SqlEvaluationException">A call's argument count matches no overload (<c>CS01006</c>).</exception>
     internal static void ValidateDeclaredCalls(SqlExpression expression, SqlFunctionCatalog catalog)
     {
+        if (expression is SqlWindowExpression)
+        { throw new SqlPlanningException("CS05076", ErrorMessages.WindowPlacement, expression.Location); }
         SqlSequenceExecution.RefusePersisted(expression);
         ValidateDeclaredCallsCore(expression, catalog);
     }
 
     private static void ValidateDeclaredCallsCore(SqlExpression expression, SqlFunctionCatalog catalog)
     {
+        if (expression is SqlWindowExpression)
+        { throw new SqlPlanningException("CS05076", ErrorMessages.WindowPlacement, expression.Location); }
         RuntimeHelpers.EnsureSufficientExecutionStack();
         foreach (var child in Children(expression))
         {

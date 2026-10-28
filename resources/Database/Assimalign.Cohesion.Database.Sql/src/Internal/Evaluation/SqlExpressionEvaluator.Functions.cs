@@ -258,6 +258,7 @@ internal sealed partial class SqlExpressionEvaluator
     internal DatabaseType StaticTypeOf(SqlExpression expression)
     {
         RuntimeHelpers.EnsureSufficientExecutionStack();
+        if (expression is SqlWindowExpression window) { return WindowType(window); }
         if (_valueOrdinals is not null && _valueOrdinals.ContainsKey(expression))
         {
             return SlotType(expression);

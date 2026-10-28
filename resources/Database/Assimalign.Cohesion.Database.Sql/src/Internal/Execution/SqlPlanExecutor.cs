@@ -119,6 +119,8 @@ internal sealed partial class SqlPlanExecutor
         plan = InitializeWindow(plan, cancellationToken);
         switch (plan)
         {
+            case SqlWindowAggregatePlan window:
+                return await ExecuteWindowAggregateAsync(window, statement, cancellationToken).ConfigureAwait(false);
             case SqlSetOperationPlan set:
                 return await ExecuteSetOperationAsync(set, statement, cancellationToken).ConfigureAwait(false);
             case SqlConstantPlan constant:
@@ -304,6 +306,7 @@ internal sealed partial class SqlPlanExecutor
             {
                 var output = ProjectRow(source, projections, evaluator, cancellationToken);
                 if (skip > 0) { skip--; continue; }
+                SqlWindowMemory.For(_metrics)?.Retain(output);
                 projected.Add(output);
                 if (--remaining == 0) { break; }
             }
@@ -329,8 +332,10 @@ internal sealed partial class SqlPlanExecutor
             var projected = new List<object?[]>(selected.Count);
             foreach (var source in selected)
             {
-                projected.Add(ProjectRow(source, projections, evaluator, cancellationToken, completed,
-                    completed is { Count: > 0 } ? source.Length - projections.Count : 0));
+                var output = ProjectRow(source, projections, evaluator, cancellationToken, completed,
+                    completed is { Count: > 0 } ? source.Length - projections.Count : 0);
+                SqlWindowMemory.For(_metrics)?.Retain(output);
+                projected.Add(output);
             }
             return ApplyRowWindow(projected, limit, offset);
         }
@@ -344,7 +349,12 @@ internal sealed partial class SqlPlanExecutor
             if (sources.Count == 0) { return []; }
             var sorted = SortRows(sources, orderBy, evaluator, cancellationToken);
             var projected = new List<object?[]>(sorted.Count);
-            foreach (var source in sorted) { projected.Add(ProjectRow(source, projections, evaluator, cancellationToken)); }
+            foreach (var source in sorted)
+            {
+                var output = ProjectRow(source, projections, evaluator, cancellationToken);
+                SqlWindowMemory.For(_metrics)?.Retain(output);
+                projected.Add(output);
+            }
             cancellationToken.ThrowIfCancellationRequested();
             return ApplyRowWindow(projected, limit, offset);
         }

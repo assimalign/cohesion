@@ -54,7 +54,7 @@ public sealed class SqlSetOperationWireTests
     [InlineData("SELECT id FROM users LIMIT 1 UNION SELECT id FROM users", "CS00003")]
     [InlineData("SELECT id FROM users OFFSET 1 UNION SELECT id FROM users", "CS00003")]
     [InlineData("SELECT id FROM users UNION ALL CORRESPONDING SELECT id FROM users", "CK00001")]
-    [InlineData("SELECT id FROM users UNION SELECT id FROM users WINDOW w AS ()", "CK00001")]
+    [InlineData("SELECT id FROM users UNION SELECT id FROM users WINDOW w AS (ROWS CURRENT ROW)", "CK00001")]
     [InlineData("SELECT id FROM users WHERE id = ALL (SELECT id, name FROM users UNION SELECT id, name FROM users)", "CS05013")]
     [InlineData("SELECT id FROM users UNION SELECT id, name FROM users", "CS05013")]
     [InlineData("SELECT id FROM users UNION SELECT name FROM users", "CS02003")]

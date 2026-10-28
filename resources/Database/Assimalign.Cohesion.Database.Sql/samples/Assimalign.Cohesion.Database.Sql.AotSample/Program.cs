@@ -235,6 +235,9 @@ internal static class Program
         await session.ExecuteAsync("CREATE TABLE sql_defined (n sql_positive DEFAULT sql_increment(2))");
         await session.ExecuteAsync("INSERT INTO sql_defined VALUES (sql_increment(3))");
         await session.ExecuteAsync("CREATE VIEW native_view AS SELECT sql_increment(n) AS n FROM sql_defined");
+        Check("in process: ranking and navigation window stage", await RowsAsync(session,
+            "SELECT Id,RANK() OVER w,LAG(Score,1,0) OVER w FROM customers WINDOW w AS(ORDER BY Id) ORDER BY Id"),
+            [[1L,1L,0L],[2L,2L,100L]]);
         Check("in process: persisted view with pinned call", await RowsAsync(session, "SELECT n FROM native_view"), [[5]]);
         Check("in process: VIEWS metadata", await RowsAsync(session, "SELECT CHECK_OPTION, IS_UPDATABLE FROM INFORMATION_SCHEMA.VIEWS WHERE TABLE_NAME = 'native_view'"), [["NONE", "NO"]]);
         await session.ExecuteAsync("CREATE TABLE fixed_codes (c CHAR(3) PRIMARY KEY)");

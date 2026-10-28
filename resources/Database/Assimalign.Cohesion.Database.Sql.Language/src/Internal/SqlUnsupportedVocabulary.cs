@@ -36,6 +36,8 @@ internal static class SqlUnsupportedVocabulary
         new("TIES", "WITH TIES", SqlWordPosition.Rule),
         new("OVER", SqlClauses.Over, SqlWordPosition.Clause),
         new("PARTITION", SqlClauses.Partition, SqlWordPosition.Clause),
+        new("GROUPS", "GROUPS window frame", SqlWordPosition.Rule),
+        new("EXCLUDE", "EXCLUDE window frame", SqlWordPosition.Rule),
         new("NATURAL", SqlClauses.Natural, SqlWordPosition.Clause),
         new("USING", SqlClauses.Using, SqlWordPosition.Clause),
         new("ALL", SqlClauses.All, SqlWordPosition.Rule),
@@ -55,15 +57,9 @@ internal static class SqlUnsupportedVocabulary
         new("SOME", "SOME array comparison", SqlWordPosition.Rule),
         new("LATERAL", "LATERAL subquery", SqlWordPosition.Rule),
         // Window functions awaiting execution.
-        new("ROW_NUMBER", "ROW_NUMBER", SqlWordPosition.WindowFunction),
-        new("RANK", "RANK", SqlWordPosition.WindowFunction),
-        new("DENSE_RANK", "DENSE_RANK", SqlWordPosition.WindowFunction),
-        new("LEAD", "LEAD", SqlWordPosition.WindowFunction),
-        new("LAG", "LAG", SqlWordPosition.WindowFunction),
         new("FIRST_VALUE", "FIRST_VALUE", SqlWordPosition.WindowFunction),
         new("LAST_VALUE", "LAST_VALUE", SqlWordPosition.WindowFunction),
         new("NTH_VALUE", "NTH_VALUE", SqlWordPosition.WindowFunction),
-        new("NTILE", "NTILE", SqlWordPosition.WindowFunction),
         new("~", "~ operator", SqlWordPosition.Rule),
     ];
 

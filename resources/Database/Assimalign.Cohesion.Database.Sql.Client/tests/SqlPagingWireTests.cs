@@ -61,7 +61,7 @@ public sealed class SqlPagingWireTests
     [InlineData("INSERT TOP (1) users SELECT id FROM users", "CK00001")]
     [InlineData("SELECT id FROM users FETCH FIRST (SELECT id FROM users) ROWS ONLY", "CK00001")]
     [InlineData("SELECT TOP (SELECT id FROM users) id FROM users", "CK00001")]
-    [InlineData("SELECT TOP 1 id FROM users WINDOW w AS ()", "CK00001")]
+    [InlineData("SELECT TOP 1 id FROM users WINDOW w AS (ROWS CURRENT ROW)", "CK00001")]
     [InlineData("SELECT TOP (-1) id FROM users", "CS02018")]
     [InlineData("SELECT id FROM users FETCH FIRST -1 ROWS ONLY", "CS02018")]
     [InlineData("SELECT id FROM users OFFSET -1 ROWS", "CS02018")]

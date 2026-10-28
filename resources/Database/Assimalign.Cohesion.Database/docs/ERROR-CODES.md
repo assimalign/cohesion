@@ -102,6 +102,7 @@ structured-carrier messages remain unprefixed.
 | SQL0008 | CS00008 | Language/syntax |
 | SQL0100 / CS00100 (retired) | CS00009 | Language/syntax — omitted semicolon (Information) |
 | New (#1720, SQ-H2 fixes) | CS00010 | Language/syntax — GROUPING SETS inside ROLLUP or CUBE (42601) |
+| New (#1526, SQ-W1) | CS00011 | Window function argument count or call modifier (42601) |
 | COHSQLE005 | CS01005 | Binding/names |
 | COHSQLE006 | CS01006 | Binding/names |
 | COHSQLE008 | CS01008 | Binding/names |
@@ -127,6 +128,9 @@ structured-carrier messages remain unprefixed.
 | New (#1719, SQ-R1) | CS01061 | Binding/names — Aggregate at the query level containing a recursive reference (42P19) |
 | New (#1720, SQ-H2) | CS01062 | Binding/grouping — GROUPING argument is not a grouping expression of the associated query level (42803) |
 | New (#1720, SQ-H2) | CS01063 | Binding/grouping — GROUPING requires 1–31 non-star expression arguments (54023) |
+| New (#1526, SQ-W1) | CS01064 | Duplicate WINDOW name (42710) |
+| New (#1526, SQ-W1) | CS01065 | Unknown window or forward WINDOW reference (42704) |
+| New (#1526, SQ-W1) | CS01066 | Copied window overrides PARTITION BY or ORDER BY (42P20) |
 | COHSQLE001 | CS02001 | Values/types |
 | COHSQLE002 | CS02002 | Values/types — identity or standalone sequence range exhaustion (#1717) |
 | COHSQLE003 | CS02003 | Values/types |
@@ -146,6 +150,8 @@ structured-carrier messages remain unprefixed.
 | New (#1719, SQ-R1) | CS02065 | Values/types — Recursive anchor, recursive output or declared column-list width mismatch (42601) |
 | New (#1719, SQ-R1) | CS02066 | Values/types — Recursive UNION changes the anchor type, domain or type modifiers; cast hint (42804) |
 | New (#1719, SQ-R1) | CS02067 | Values/types — Recursive UNION changes or conflicts with the anchor collation; COLLATE hint (42P21) |
+| New (#1526, SQ-W1) | CS02068 | Non-integer navigation offset or bucket count (42804) |
+| New (#1526, SQ-W1) | CS02069 | Incompatible navigation value and default types (42804) |
 | COHSQLE024 | CS03024 | Schema/constraints |
 | COHSQLE025 | CS03025 | Schema/constraints |
 | COHSQLE027 | CS03027 | Schema/constraints |
@@ -227,6 +233,10 @@ structured-carrier messages remain unprefixed.
 | New (#1720, SQ-H1) | CS05073 | Execution/placement — same-scope aggregate in FILTER (42803) |
 | New (#1720, SQ-H2) | CS05074 | Execution/placement — GROUPING outside grouped output, or in grouping/aggregate inputs (42803) |
 | New (#1720, SQ-H2) | CS05075 | Execution/expansion — more than 4096 grouping sets before DISTINCT (54001) |
+| New (#1526, SQ-W1) | CS05076 | Window function placement or missing OVER (42P20) |
+| New (#1526, SQ-W1) | CS05077 | Nested window function (42P20) |
+| New (#1526, SQ-W1) | CS05078 | Non-positive NTILE bucket count (22014) |
+| New (#1526, SQ-W1) | CS05079 | Window state exceeds statement memory grant (54000) |
 | COHSQLE041 | CS06041 | Storage/durability |
 | COHSQLE058 | CS06058 | Storage/durability |
 

@@ -41,8 +41,8 @@ public class SqlAggregateParserTests
 
     [Theory(DisplayName = "Cohesion Test [Database.Sql.Language] - Aggregates: Rejects unsupported extensions explicitly")]
     [InlineData("SELECT SUM(amount) OVER () FROM t;", "OVER")]
-    [InlineData("SELECT ROW_NUMBER() FROM t;", "ROW_NUMBER")]
-    [InlineData("SELECT RANK() FROM t;", "RANK")]
+    [InlineData("SELECT FIRST_VALUE() FROM t;", "FIRST_VALUE")]
+    [InlineData("SELECT LAST_VALUE() FROM t;", "LAST_VALUE")]
     [InlineData("SELECT PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY amount) FROM t;", "WITHIN GROUP")]
     [InlineData("SELECT PERCENTILE_DISC(0.5) WITHIN GROUP (ORDER BY amount) FROM t;", "WITHIN GROUP")]
     [InlineData("SELECT MODE() WITHIN GROUP (ORDER BY amount) FROM t;", "WITHIN GROUP")]
