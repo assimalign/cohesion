@@ -492,6 +492,8 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
     private ValueTask<DatabaseResult> ExecuteStatementAsync(SqlQueryRequest request, CancellationToken cancellationToken, SqlCatalogScriptPublication? scriptReceipt)
         => IsSelfCommitting(request) ? ExecuteMetadataStatementAsync(request, cancellationToken, scriptReceipt) : ExecuteStatementCoreAsync(request, cancellationToken, scriptReceipt);
 
+    internal static Action? DefinitionLeaseEntered { get; set; }
+
     private async ValueTask<DatabaseResult> ExecuteMetadataStatementAsync(SqlQueryRequest request, CancellationToken cancellationToken, SqlCatalogScriptPublication? scriptReceipt)
     {
         // Sequence DDL uses its object grants; unrelated metadata leases remain compatible.
@@ -509,6 +511,7 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
         using var metadata = _ddlLockOwner is not null
             ? await _database.DdlInterlock.EnterMetadataAsync(definition, cancellationToken).ConfigureAwait(false)
             : _database.DdlInterlock.EnterMetadata(_database.Name.ToString(), definition);
+        if (definition) { DefinitionLeaseEntered?.Invoke(); }
         return await ExecuteStatementCoreAsync(request, cancellationToken, scriptReceipt).ConfigureAwait(false);
     }
 
@@ -664,7 +667,9 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
         try
         {
             var scope = new SqlStatementContext(context, _coordinator, _provisioningSchema,
-                _database.Name.ToString(), null, _ddlLockOwner, ProvisioningProgress, scriptReceipt, transactionStart, _database.DdlInterlock, ResultPreparation);
+                _database.Name.ToString(), null, _ddlLockOwner, ProvisioningProgress, scriptReceipt, transactionStart, _database.DdlInterlock, ResultPreparation,
+                request.Statement.SqlExpression is SqlAlterSequenceExpression or SqlDropSequenceExpression
+                    ? LockTimeout ?? _database.Engine.EngineOptions.LockTimeout : TimeSpan.Zero);
             _lastStatementMetrics = scope.Metrics;
             var result = await ExecuteDataOrExplainAsync(request, scope, cancellationToken).ConfigureAwait(false);
             if (scriptReceipt is { } receipt && !IsSelfCommitting(request) && result.Status == DatabaseResultStatus.Success)

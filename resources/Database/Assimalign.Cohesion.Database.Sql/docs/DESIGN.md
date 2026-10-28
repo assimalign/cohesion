@@ -33,7 +33,8 @@ The planner reuses its existing scopeless-cache slot for optional sequence metad
 planning and execution therefore preserve the existing Release allocation guards.
 Sequence-dependent ordering checks use static loops so sequence-free execution allocates no closure.
 ALTER/RESTART/DROP take Exclusive
-grants before a non-definition metadata lease, re-resolve by object identity and then publish.
+grants before waiting for a non-definition metadata lease, re-resolve by object identity and then publish.
+The lease wait honors cancellation and the session lock timeout (CS04044).
 Unrelated CREATE INDEX leases remain compatible. CREATE guards check occupied relations before
 option validation under the publication monitor; DROP/ALTER IF EXISTS skip disappearance while
 waiting. DROP SCHEMA locks sequences before tables. Waits enter the existing deadlock graph, and transaction/timeout cleanup
@@ -42,9 +43,16 @@ grants, covering a host rollback between acquisitions for function S grants and 
 DDL X grants. An end observed after a sequence grant refuses before publication. Failed statements retain prior
 explicit-transaction sequence grants as other locks do.
 
-The established latch order is object grants, metadata admission where needed, the data apply
-gate for DML, catalog monitor and catalog storage/page latches. No catalog monitor or metadata
-lease spans a sequence lock wait. Locks retained by earlier transaction statements can still
+Sequence ALTER/DROP take ordered sequence X grants before the non-definition lease.
+DROP SCHEMA takes sequence X, table X, then its definition lease; ordinary conflicting admission
+refuses, while a provisioning step already owns its complete object reservation before waiting.
+CREATE/DROP VIEW, FUNCTION, DOMAIN and CREATE SCHEMA take a definition lease and never wait for
+object grants under it. Ordinary table DDL and CTAS may acquire object grants under non-definition
+leases; those leases are compatible with sequence DDL's lease. Thus a sequence metadata wait is
+blocked only by a definition holder that cannot wait back on its object grants. Deferred apply
+and rewrite steps reserve their table grants before metadata admission. The data apply gate,
+catalog monitor and storage/page latches remain innermost. No catalog monitor spans a sequence
+lock wait. Locks retained by earlier transaction statements can still
 form genuine cycles; the lock manager detects them. setval uses the same durable
 counter record and invalidates unused reservations; session updates occur only after that commit.
 SQL allocation resolves the stable ObjectId after locking and calls SQ-S1 with that current incarnation. No second

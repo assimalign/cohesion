@@ -16,6 +16,7 @@ internal sealed partial class SqlPlanExecutor
 {
     internal static Action? BeforeSequenceDdlLock { get; set; }
     internal static Action? BeforeSequenceCreate { get; set; }
+    internal static Action? BeforeSequenceMetadataLease { get; set; }
 
     private async Task<DatabaseResult> ExecuteSequenceDdlAsync(SqlSequencePlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
@@ -41,7 +42,10 @@ internal sealed partial class SqlPlanExecutor
             await statement.Coordinator.LockManager.AcquireAsync(statement.DdlLockOwner, LockResource.Object(sequence!.ObjectId), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
             SqlSequenceExecution.CheckGrant(statement, statement.DdlLockOwner);
         }
-        using var metadata = statement.DdlInterlock?.EnterMetadata(statement.DatabaseName, definition: false);
+        BeforeSequenceMetadataLease?.Invoke();
+        using var metadata = statement.DdlInterlock is { } interlock
+            ? await interlock.EnterMetadataAsync(definition: false, cancellationToken, statement.MetadataLockTimeout).ConfigureAwait(false) : null;
+        SqlSequenceExecution.CheckGrant(statement, statement.DdlLockOwner);
         var resolved = new List<SqlCatalogSequence>();
         for (int i = 0; i < names.Count; i++)
         {

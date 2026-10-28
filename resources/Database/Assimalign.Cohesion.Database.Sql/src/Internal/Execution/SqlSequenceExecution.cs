@@ -46,7 +46,8 @@ internal sealed class SqlSequenceExecution : IDisposable
 
     // Lock/latch order: transaction-owned sequence object locks (ascending ObjectId), then
     // table/row locks, then the data apply gate, then catalog _sync and storage latches.
-    // No catalog monitor or metadata lease spans a lock wait. Constant references lock only
+    // No catalog monitor or definition lease spans a lock wait. Non-definition table/CTAS
+    // leases remain compatible with sequence DDL's non-definition lease. Constant references lock only
     // their objects; dynamic name expressions conservatively lock the captured directory.
     // Grants belong to the transaction, including failed statements, cancellation and disposal;
     // the session/coordinator's existing commit/rollback/timeout cleanup releases them.

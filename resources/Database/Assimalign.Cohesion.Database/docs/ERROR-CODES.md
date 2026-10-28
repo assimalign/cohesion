@@ -191,7 +191,7 @@ structured-carrier messages remain unprefixed.
 | COHSQLT005 | CS04005 | Transactions/locking |
 | COHSQLT006 | CS04006 | Transactions/locking |
 | COHSQLE021 | CS04021 | Transactions/locking |
-| COHSQLE044 | CS04044 | Transactions/locking |
+| COHSQLE044 | CS04044 | Transactions/locking — lock timeout, including sequence DDL waiting for a definition lease |
 | COHSQLE064 | CS04064 | Transactions/locking — serialization failure, including a concurrently changed MERGE target under Snapshot (#1715) |
 | New (w11 review) | CS04065 | Transactions/locking — hard deadlock (`40P01`) |
 | New (#1716) | CS04066 | Transactions/locking — TRUNCATE inside an explicit transaction (25001) |

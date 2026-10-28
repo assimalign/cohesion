@@ -120,6 +120,12 @@ keeps all waits in the deadlock graph and avoids synchronous evaluation-time loc
 literal or parameter names to limit blocking to their referenced objects.
 ALTER, RESTART, DROP and DROP SCHEMA CASCADE take conflicting Exclusive grants and
 wait until every holder commits, rolls back or closes. Descriptions are resolved
+after a cancellable metadata admission wait as well; ALTER/DROP wait for unrelated definition
+DDL, including CREATE VIEW and DROP SCHEMA, within the session lock timeout (CS04044).
+Sequence object grants precede their metadata lease. DROP SCHEMA takes sequence grants,
+table grants, then its definition lease; definition holders never wait for object grants.
+Compatible non-definition table/CTAS leases may precede object grants without blocking sequence
+metadata admission. Descriptions are resolved
 after locking; a concurrent ALTER cannot fail a running nextval. Deadlock detection,
 lock timeouts and cancellation use the ordinary engine paths. An explicit transaction
 retains sequence locks after a failed statement under the existing lock contract.

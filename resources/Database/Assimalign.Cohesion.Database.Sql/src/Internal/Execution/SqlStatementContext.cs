@@ -37,10 +37,12 @@ internal readonly struct SqlStatementContext
         SqlCatalogScriptPublication? scriptReceipt = null,
         DateTimeOffset? transactionStart = null,
         SqlDdlInterlock? ddlInterlock = null,
-        SqlResultPreparation? resultPreparation = null)
+        SqlResultPreparation? resultPreparation = null,
+        TimeSpan metadataLockTimeout = default)
     {
         _transactionStartTicks = (transactionStart ?? DateTimeOffset.UtcNow).UtcTicks;
-        _names = provisioningSchema is null ? databaseName : new ProvisioningNames(provisioningSchema, databaseName);
+        _names = provisioningSchema is null && metadataLockTimeout == TimeSpan.Zero ? databaseName
+            : new ProvisioningNames(provisioningSchema, databaseName, metadataLockTimeout);
         Transaction = transaction;
         Coordinator = coordinator;
         Snapshot = transaction.Snapshot;
@@ -71,6 +73,8 @@ internal readonly struct SqlStatementContext
 
     /// <summary>The session's metadata admission; direct executor probes may omit it.</summary>
     internal SqlDdlInterlock? DdlInterlock { get; }
+
+    internal TimeSpan MetadataLockTimeout => (_names as ProvisioningNames)?.LockTimeout ?? TimeSpan.Zero;
 
     /// <summary>
     /// Gets the database's transaction coordinator.
@@ -114,14 +118,16 @@ internal readonly struct SqlStatementContext
     [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlStatementContext.ProvisioningNames.DebugView))]
     private sealed class ProvisioningNames
     {
-        internal ProvisioningNames(string schema, string database)
+        internal ProvisioningNames(string? schema, string database, TimeSpan lockTimeout)
         {
             Schema = schema;
             Database = database;
+            LockTimeout = lockTimeout;
         }
 
-        internal string Schema { get; }
+        internal string? Schema { get; }
         internal string Database { get; }
+        internal TimeSpan LockTimeout { get; }
 
         private sealed class DebugView
         {

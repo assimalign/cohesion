@@ -13,6 +13,7 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 internal sealed partial class SqlPlanExecutor
 {
+    internal static Action? SchemaDefinitionLeaseEntered { get; set; }
     private async Task<DatabaseResult> ExecuteCreateSchemaAsync(SqlCreateSchemaPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
         if (SqlNamespaces.Find(_catalog, plan.Name) is not null)
@@ -66,6 +67,7 @@ internal sealed partial class SqlPlanExecutor
                 ? await interlock.EnterMetadataAsync(definition: true, cancellationToken).ConfigureAwait(false)
                 : interlock.EnterMetadata(statement.DatabaseName, definition: true)
             : null;
+        SchemaDefinitionLeaseEntered?.Invoke();
         var current = _catalog.CaptureSnapshot();
         var currentSchema = current.Namespaces.FirstOrDefault(value => value.Name.Equals(plan.Name, StringComparison.OrdinalIgnoreCase));
         var currentContents = ObjectsInNamespace(current, plan.Name);
