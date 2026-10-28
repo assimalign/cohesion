@@ -310,7 +310,10 @@ numbers outside the decimal domain, become CD00007 for paging. Direct AST counts
 No new shared public member or visibility grant is required; the two assemblies keep the message
 locally, with equality covered by planner/parser tests.
 
-Paging follows WHERE, grouping/HAVING, projection, DISTINCT and ORDER BY. INSERT and UPSERT SELECT
+Unless LIMIT is zero, paging follows WHERE, grouping/HAVING, projection, DISTINCT and ORDER BY.
+LIMIT 0 preserves eager static validation, then returns no rows with planned column names and
+types before opening any stored, system, expression or derived source or running a blocking stage.
+This also applies to an inner derived SELECT's own zero limit. INSERT and UPSERT SELECT
 sources use the same final page. UPDATE/DELETE LIMIT and OFFSET remain CK00001, naming the
 statement and clause (for example, DELETE LIMIT). INSERT/UPSERT VALUES paging names
 INSERT VALUES LIMIT, UPSERT VALUES OFFSET, or the corresponding clause. RETURNING as an implicit source alias may precede paging.

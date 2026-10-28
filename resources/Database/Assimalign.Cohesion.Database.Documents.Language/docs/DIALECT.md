@@ -187,9 +187,12 @@ identity; metadata explicitly projected inside the stored inner SELECT remains o
 This follows [META formalization, formalizer.go:506-521](https://github.com/couchbase/query/blob/6d40d1dd24e256588af2ff5bf6627ca76135397c/expression/formalizer.go#L506-L521) and [func_meta.go:167-192](https://github.com/couchbase/query/blob/6d40d1dd24e256588af2ff5bf6627ca76135397c/expression/func_meta.go#L167-L192).
 The existing restrictions on META's argument, member and grouping placement still apply.
 
-A source is evaluated once when its cursor is reached; LIMIT 0 does not evaluate it. Simple
-derived SELECTs stream one row at a time, so outer LIMIT 1 pulls one matching inner row and
-disposes the inner cursor immediately. Paging precedes projection on this path; dynamic headers
+A source is evaluated once when its cursor is reached. After eager static validation, LIMIT 0
+returns no rows with planned column names and types before opening any stored, system,
+expression or derived source, including with ORDER BY, DISTINCT, grouping or aggregates.
+No source, predicate, projection or callback runs; an inner derived SELECT's own zero limit
+has the same rule. Simple derived SELECTs stream one row at a time, so outer LIMIT 1 pulls one
+matching inner row and disposes the inner cursor immediately. Paging precedes projection on this path; dynamic headers
 are inferred over the selected window. Grouping, DISTINCT and ORDER BY retain the rows they
 must re-read, under the shared CD05018 memory budget. Outer ORDER BY sorts; it consumes no
 inner index-order guarantee. EXPLAIN includes DerivedSource/ExpressionSource and nested plans.
@@ -423,8 +426,8 @@ omitted from result objects, while explicit null members remain null. Grouping k
 states separate; ascending order puts MISSING before NULL and descending reverses that order.
 NIL is a NULL synonym; UNDEFINED is reserved and rejected.
 
-LIMIT n, OFFSET m, LIMIT n OFFSET m and OFFSET m LIMIT n execute after HAVING, DISTINCT
-and ORDER BY, including system sources and INSERT/UPSERT SELECT. Each operand is an optionally
+Unless LIMIT is zero, LIMIT n, OFFSET m, LIMIT n OFFSET m and OFFSET m LIMIT n execute after
+HAVING, DISTINCT and ORDER BY, including system sources and INSERT/UPSERT SELECT. Each operand is an optionally
 signed integer literal or a parameter with an integral, non-negative signed Int64 value.
 NULL/NIL, MISSING, Boolean, string, fractional, nonfinite and out-of-range counts give CD00007
 at the operand; literal 2.0/1e2, LIMIT ALL and arbitrary expressions are also invalid.
@@ -434,8 +437,9 @@ validating m, including ALL, negative and string operands. FETCH FIRST gives one
 only when FETCH starts a construct; c.fetch FIRST and c.limit ALL still reject FIRST and ALL.
 LIMIT/OFFSET are reserved: quote field names or use d.limit/d.offset; SELECT a AS limit is valid.
 UPDATE/DELETE and INSERT/UPSERT VALUES paging stays unsupported, naming the statement and clause
-(for example, DELETE LIMIT or INSERT VALUES OFFSET). Column types are computed before paging, so empty pages
-retain metadata, including Int64 COUNT. Scan and seek pages share ordinal document-ID order;
+(for example, DELETE LIMIT or INSERT VALUES OFFSET). Column types are computed before ordinary paging;
+LIMIT 0 uses planned column names and types, including Int64 COUNT, without reading the source.
+Scan and seek pages share ordinal document-ID order;
 groups use group-key order, system sources catalog order, and ORDER BY ties retain baseline order.
 Separate pages need unchanged data or a shared snapshot for repeatability. Completion counts
 only returned frames; query AffectedCount remains -1. EXPLAIN includes resolved paging counts.

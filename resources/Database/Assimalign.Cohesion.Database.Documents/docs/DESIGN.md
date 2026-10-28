@@ -707,6 +707,10 @@ Only surviving final results transfer their reservation to DocumentQueryResult. 
 arrays retain their existing statement ownership. Candidate discovery uses the operation snapshot
 and sees own writes. No new public execution seam, interface, reference or friend grant is needed.
 EXPLAIN includes DerivedSource/ExpressionSource and the inner tree; outer ORDER BY always sorts.
+After eager planning, a zero LIMIT returns an empty result with planned column metadata before
+opening any stored, system, expression or derived source or running grouping, DISTINCT or sorting.
+Derived input iterators enforce their own zero window before opening a cursor, even without an
+outer LIMIT. This follows PostgreSQL src/backend/executor/nodeLimit.c:81-95 in the reference clone.
 The deterministic LIMIT counters prove one inner content read and callback for LIMIT 1. Ordinary
 Release plan, native-query and selective-scan allocation measurements retain their base budgets.
 
@@ -816,9 +820,9 @@ rounding; fractional inputs cannot normalize to zero or round into an integer. C
 the issue's original Int32 bound under the 2026-10-18 ruling. NULL and LIMIT ALL remain invalid,
 diverging from PostgreSQL (src/backend/executor/nodeLimit.c:359-408).
 
-Paging runs last, after HAVING, DISTINCT, ORDER BY and complete column-type inference and numeric
-promotion. Alias rewrites retain both AST operands. Empty and zero-limit pages keep the header
-and static function types, including Int64 COUNT. The window clamps offset to row count, then
+Unless LIMIT is zero, paging runs last, after HAVING, DISTINCT, ORDER BY and complete column-type
+inference and numeric promotion. Alias rewrites retain both AST operands. Empty and zero-limit
+pages keep the header and static function types, including Int64 COUNT. The window clamps offset to row count, then
 limit to remaining rows; it never adds counts, so Int64.MaxValue is safe. The same output slice
 carries original whole-document bytes. Query AffectedCount stays -1; wire Complete's result
 count is the number of frames after paging. INSERT and UPSERT SELECT write only that page.
@@ -831,7 +835,8 @@ data. Writes between separate statements may shift pages; use a shared snapshot 
 EXPLAIN's select detail includes resolved limit (none when absent) and offset (zero when absent).
 Unsorted, ungrouped, non-DISTINCT queries whose projections have fixed static result types stop reads
 once the page is complete, including registered scalar functions, unary and binary operators,
-META, literals and constructors. LIMIT 0 evaluates no row predicates; a completed window never
+META, literals and constructors. LIMIT 0 skips all execution stages after static validation and
+uses planned column types without reading documents or invoking callbacks; a completed window never
 evaluates the next predicate, following PostgreSQL src/backend/executor/nodeLimit.c:153-159.
 Paths and lone stars can observe heterogeneous scalar roots and
 still inspect all matches to guarantee page-independent column types; their result is materialized.

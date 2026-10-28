@@ -18,7 +18,8 @@ transaction-start instant. COUNT and string/array lengths and positions return I
 with matching wire column types; the language [dialect](../../Assimalign.Cohesion.Database.Documents.Language/docs/DIALECT.md)
 records the full contract. LIMIT/OFFSET page stored and system queries after grouping, DISTINCT
 and ordering. Counts accept literals or parameters through Int64.MaxValue; invalid values carry
-CD00007. Column types remain independent of the page, including empty results.
+CD00007. LIMIT 0 returns planned column metadata after static validation and skips all sources
+and blocking stages. Other pages retain full-result column types, including empty results.
 INNER/LEFT UNNEST expands array elements into scoped rows before WHERE, grouping and paging.
 ANY/SOME/EVERY and array-value IN query arrays without expansion. Uncorrelated expression SELECTs
 return arrays on a shared nested execution context; EXISTS and IN (SELECT RAW ...) compose with

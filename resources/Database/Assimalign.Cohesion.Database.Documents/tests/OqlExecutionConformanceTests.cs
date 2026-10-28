@@ -259,6 +259,12 @@ public sealed class OqlExecutionConformanceTests
             ],
             [OqlClauses.Limit] =
             [
+                new("SELECT RAW v FROM [1/0] AS v ORDER BY v LIMIT 0", []),
+                new("SELECT DISTINCT RAW v FROM [1/0] AS v LIMIT 0", []),
+                new("SELECT COUNT(*) FROM [1/0] AS v LIMIT 0", []),
+                new("SELECT RAW d FROM (SELECT RAW v FROM [1/0] AS v) d ORDER BY d LIMIT 0", []),
+                new("SELECT RAW name FROM items WHERE 1/0 = 1 ORDER BY name LIMIT 0", []),
+                new("SELECT RAW OBJECT_NAME FROM COHESION_SCHEMA.OBJECT_OWNERSHIP WHERE 1/0 = 1 ORDER BY OBJECT_NAME LIMIT 0", []),
                 new("SELECT * FROM items ORDER BY k LIMIT 1", [[Json("{\"k\":1}")]],
                     ["DELETE FROM items", "INSERT INTO items (KEY, VALUE) VALUES ('one', {'k':1}), ('two', {'k':2})",
                      "CREATE INDEX ordered_k ON items (k INCLUDE MISSING)"]),

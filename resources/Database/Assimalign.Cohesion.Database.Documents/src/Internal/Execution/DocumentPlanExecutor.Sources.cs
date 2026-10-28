@@ -258,6 +258,8 @@ internal static partial class DocumentPlanExecutor
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         var logical = SourceLogical(plan);
+        // A derived input can have its own empty window even when the outer query has none.
+        if (logical.Limit == 0) { yield break; }
         var evaluator = SourceEvaluator(database, operation, logical, parameters, cancellationToken);
         if (!Streams(logical))
         {
