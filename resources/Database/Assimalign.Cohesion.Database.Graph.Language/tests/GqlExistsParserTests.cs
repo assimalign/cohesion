@@ -7,6 +7,42 @@ namespace Assimalign.Cohesion.Database.Graph.Language.Tests;
 
 public sealed class GqlExistsParserTests
 {
+    [Theory(DisplayName = "Cohesion Test [GQL] - EXISTS: unsupported predicate vocabulary retains its capability diagnostic")]
+    [InlineData("n.k LIKE 'x'", "LIKE")]
+    [InlineData("n.k BETWEEN 1 AND 2", "BETWEEN")]
+    [InlineData("n.k =~ 'x'", "~")]
+    public void Parse_UnsupportedInnerPredicate_ShouldMatchOuterDiagnostic(string predicate, string token)
+    {
+        // Arrange
+        var parser = new GqlQueryParser();
+        var outer = parser.Parse("MATCH (n) WHERE " + predicate + " RETURN n").Diagnostics.Single();
+        string source = "RETURN EXISTS { MATCH (n) WHERE " + predicate + " }";
+        // Act
+        var inner = parser.Parse(source).Diagnostics.Single();
+        // Assert
+        inner.Code.ShouldBe(outer.Code);
+        inner.Code.ShouldBe("CK00001");
+        inner.Start.ShouldBe(source.IndexOf(token, System.StringComparison.Ordinal));
+    }
+
+    [Theory(DisplayName = "Cohesion Test [GQL] - EXISTS: capability scanning retains nested predicate and pattern contexts")]
+    [InlineData("RETURN EXISTS { (n WHERE n.k LIKE 'x') }", "CK00001")]
+    [InlineData("RETURN EXISTS { (n {k: CASE WHEN 1 BETWEEN 1 AND 2 THEN 1 ELSE 0 END}) }", "CK00001")]
+    [InlineData("RETURN EXISTS { (n) WHERE EXISTS { (m) WHERE m.k =~ 'x' } }", "CK00001")]
+    [InlineData("RETURN EXISTS { (n) WHERE any(x IN [n.k] WHERE x LIKE 'x') }", "CK00001")]
+    [InlineData("RETURN EXISTS { (n) WHERE size([x IN [n.k] WHERE x BETWEEN 1 AND 2 | x]) = 1 }", "CK00001")]
+    [InlineData("RETURN EXISTS { (Like:Between)-[:Like]->(Between) }", null)]
+    [InlineData("RETURN EXISTS { (n:Order|Like {Between: 1}) WHERE n.Between = 1 }", null)]
+    [InlineData("RETURN EXISTS { MATCH ANY (Like:Between)-[:Order]->(n) WHERE EXISTS { (Like) } }", null)]
+    public void Parse_NestedBodyContext_ShouldDistinguishCapabilitiesFromNames(string source, string? code)
+    {
+        // Arrange / Act
+        var diagnostics = new GqlQueryParser().Parse(source).Diagnostics;
+        // Assert
+        if (code is null) { diagnostics.ShouldBeEmpty(); }
+        else { diagnostics.ShouldHaveSingleItem().Code.ShouldBe(code); }
+    }
+
     [Theory(DisplayName = "Cohesion Test [GQL] - EXISTS: explicit and implicit pattern blocks round-trip")]
     [InlineData("EXISTS { (a)-[:T]->(b) }")]
     [InlineData("EXISTS { MATCH (a)-[:T]->(b) WHERE a.k = b.k }")]

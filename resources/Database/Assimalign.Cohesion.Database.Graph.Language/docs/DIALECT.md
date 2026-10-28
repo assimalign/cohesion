@@ -582,7 +582,8 @@ NULL/TRUE/FALSE/UNKNOWN, numeric + - * /, % (Cypher MOD spelling), `||`, string 
 labeled predicates and parentheses. IN [items], STARTS WITH, ENDS WITH and CONTAINS
 are Cohesion extensions. String predicates are ordinal, case-sensitive and UNKNOWN unless
 both operands are strings. IN accepts a list-valued expression, including parameters. LIKE, BETWEEN, =~,
-EXISTS, quantified predicates and nested property access remain CK00001; IN (1, 2)
+parenthesized EXISTS, quantified predicates and nested property access remain CK00001;
+the [braced EXISTS and NOT EXISTS forms](#exists-and-not-exists) are supported. IN (1, 2)
 is CG00002 naming a list value.
 
 WHERE keeps TRUE only. Logical operators use three-valued logic. Incomparable non-null values
