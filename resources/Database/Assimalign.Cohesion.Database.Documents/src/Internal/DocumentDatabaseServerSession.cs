@@ -10,6 +10,7 @@ using System.Threading.Tasks;
 using Assimalign.Cohesion.Connections;
 using Assimalign.Cohesion.Database.Documents.Catalog;
 using Assimalign.Cohesion.Database.Documents.Language;
+using Assimalign.Cohesion.Database.Language;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Protocol;
@@ -451,7 +452,7 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
                     }
                     return new DocumentQueryRequest(statement, parameters);
                 }, cancellationToken).ConfigureAwait(false);
-                await WriteResultAsync(result, cancellationToken).ConfigureAwait(false);
+                await WriteResultAsync(result, cancellationToken, statement.OqlExpression.Location).ConfigureAwait(false);
             }
             else
             {
@@ -512,7 +513,7 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
         return value[..limit] + ErrorMessages.DiagnosticTruncated;
     }
 
-    private async Task WriteResultAsync(DatabaseResult result, CancellationToken cancellationToken)
+    private async Task WriteResultAsync(DatabaseResult result, CancellationToken cancellationToken, Location? location = null)
     {
         if (result is DatabasePlanDescription description)
         {
@@ -531,7 +532,7 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
                 await foreach (DatabaseRow row in set.GetRowsAsync(cancellationToken).ConfigureAwait(false))
                 {
                     await WriteResultFrameAsync(DocumentProtocolMessageType.Document,
-                        json.Write(row, set.Columns, wholeDocuments),
+                        json.Write(row, set.Columns, wholeDocuments, location),
                         cancellationToken).ConfigureAwait(false);
                     count++;
                 }

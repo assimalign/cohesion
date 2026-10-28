@@ -19,6 +19,18 @@ syntax/context/overflow/budget diagnostics over InMemory and TCP. Budget failure
 work; rollback permits reuse of the connection. The NativeAOT sample exercises all six names
 and quantifiers on both transports. Source/group staging now shares the statement counter (#1753); aggregate-span fixtures admit source retention before testing the aggregate limit. The 32 MiB response fixtures explicitly allow 256 MiB of statement retention while retaining their existing 8 MiB formatter allocation assertion. No client API, capability, codec, frame or version changes.
 
+## Subquery wire conformance (#1731, OQ-Q1)
+
+Expression SELECT arrays, EXISTS and IN (SELECT RAW ...) use ordinary JSON cells over InMemory
+and TCP. DocumentSubqueryWireTests checks RAW/object arrays, membership, empty EXISTS, lazy
+failure suppression, EXPLAIN cache policy, located correlation refusal and connection reuse.
+Overdeep subquery projections return located CD05015 before the formatter on both transports,
+including the named wrapper; the same connection then successfully reads another result.
+The existing NativeAOT consumer checks arrays, EXISTS, IN and lazy conditional behavior on both
+transports. The NativeAOT consumer also checks located depth refusals, constructor failure
+order and RAW depth boundaries while preserving connection reuse. No client public API,
+frame, capability or version changes are needed.
+
 ## Comprehension wire conformance (#1728)
 
 ARRAY/FIRST use the existing OQL request text, JSON result cells and MISSING bitmap on InMemory
@@ -458,3 +470,11 @@ both require their own publish/execution evidence. No sample project reference c
 Unknown engine-resolved function names use ExecutionFailure rather than ParseFailure, with
 no StatementParseFailed event. Application callback timeout and I/O errors use the model
 callback diagnostic and leave the exact wire session reusable after a completed failure.
+
+## Projection depth recovery (#1731)
+
+Both evaluators derive depth from the serialized row shape: lone stars and RAW/VALUE are bare;
+other projections reserve one object level. Developer-function JSON follows the same check.
+Depth refusals preserve located CD05015 and the exact server session on InMemory and TCP.
+The row writer also translates its own depth failure with the statement span, allowing the
+existing terminal Failure path to recover even if evaluation missed an overdeep value.

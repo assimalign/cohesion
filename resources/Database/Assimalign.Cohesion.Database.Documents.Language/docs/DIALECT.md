@@ -37,6 +37,113 @@ response discards the session and leaves an unacknowledged commit's outcome unkn
 has arrived, bounded status cleanup ignores caller cancellation. No request identifier, protocol
 version or persisted format changes. CD07002 remains live for this capability requirement.
 
+## Expression subqueries and EXISTS (#1731, OQ-Q1)
+
+A parenthesized SELECT is an expression returning an array with zero, one or many elements;
+there is no scalar-cardinality error. SELECT RAW and SELECT VALUE return projected values;
+ordinary named SELECT projections return objects with the usual omitted-MISSING members.
+A lone star retains object roots; a nonobject root is wrapped under `document`, so ordinary
+subquery elements remain objects. Star results deliberately follow this engine's top-level
+SELECT-star shape instead of Couchbase's alias-keyed form. Top-level SELECT star keeps its
+existing stored-value rule. RAW/VALUE MISSING
+becomes a null array element. FROM remains required in every SELECT. Subqueries may nest and
+appear in SELECT projections, WHERE, GROUP BY, HAVING, ORDER BY, function arguments, constructors,
+CASE, comprehensions, quantified predicates and UNNEST operands. Each nested query has its own
+metadata, grouping and binding scope. See the pinned
+[SQL++ subquery contract](https://github.com/couchbaselabs/docs-devex/blob/c3bb1549af4887019b9983e371d9e8b4f569052c/modules/n1ql/pages/n1ql-language-reference/subqueries.adoc#L26-L68).
+
+`EXISTS expression` returns TRUE for a nonempty array, FALSE for an empty array, MISSING for
+MISSING, and NULL for NULL, scalars or objects. NOT EXISTS composes with ordinary negation.
+EXISTS binds below IS presence tests, IS [NOT] DISTINCT FROM, CONCAT (`||`) and arithmetic,
+and above IN, BETWEEN, LIKE, comparisons,
+NOT, AND and OR. Thus `EXISTS x IS NULL` means `EXISTS (x IS NULL)`, while `EXISTS a = TRUE`
+means `(EXISTS a) = TRUE` and `NOT EXISTS x AND y` means `(NOT (EXISTS x)) AND y`. These
+boundaries follow the [Couchbase precedence block](https://github.com/couchbase/query/blob/6d40d1dd24e256588af2ff5bf6627ca76135397c/parser/n1ql/n1ql.y#L389-L409).
+IS now binds tighter than comparisons and the operands of IN, BETWEEN, LIKE and ESCAPE.
+This changes earlier OQL results: with n = 1, 2, 3, WHERE n = 1 IS NOT NULL formerly admitted
+all three rows; it now means n = (1 IS NOT NULL) and admits none. The adopted SQL++ results
+include FALSE for 1 = NULL IS NULL and 2 BETWEEN 1 AND 3 IS NOT NULL, NULL for
+1 IN [1] IS NULL, and FALSE for 2 BETWEEN 1 IS NOT NULL AND 3. Parenthesize an entire
+predicate before IS when that predicate's result is the intended operand.
+
+The full supported expression precedence, tightest first, is below. Parentheses override it;
+CASE, constructors, comprehensions and quantifiers delimit their contained expressions.
+OQL retains its shared comparison/predicate tier; the adopted Couchbase boundary puts IS above
+all of that tier. ESCAPE is a suffix of LIKE and parses its value with the same operand rule.
+
+| Precedence | Operators | Grouping |
+| --- | --- | --- |
+| 1 | Path member and array navigation: . and [] | Left |
+| 2 | Unary + and - | Right |
+| 3 | * / % | Left |
+| 4 | + - | Left |
+| 5 | String concatenation: &#124;&#124; | Left |
+| 6 | IS [NOT] NULL/MISSING/VALUED; IS [NOT] DISTINCT FROM | Left |
+| 7 | EXISTS | Right |
+| 8 | = != <> < <= > >=; [NOT] IN; [NOT] BETWEEN; [NOT] LIKE with optional ESCAPE | Left |
+| 9 | NOT | Right |
+| 10 | AND | Left |
+| 11 | OR | Left |
+
+The string operator &#124;&#124; is an addition in #1731 and uses the existing CONCAT function
+and its literal-kind validation. Two strings concatenate; MISSING wins over NULL, NULL propagates,
+and a wrong-kind stored value yields NULL. Incompatible literal numbers, arrays and objects give
+CD05001 at planning. No implicit string conversion occurs. IS [NOT] DISTINCT FROM is also an addition in #1731. It
+handles top-level NULL/MISSING explicitly and otherwise uses SQL++ equality, following
+[Couchbase func_distinct.go:51-73,134-156](https://github.com/couchbase/query/blob/6d40d1dd24e256588af2ff5bf6627ca76135397c/expression/func_distinct.go#L51-L156).
+For either distinctness operator, two MISSING operands or two NULL operands are not distinct;
+one MISSING or one NULL against another kind is distinct. Valued inputs use structural equality:
+IS DISTINCT FROM is FALSE only for definite equality, while IS NOT DISTINCT FROM returns the
+underlying equality result (including NULL for arrays whose element comparison is unknown).
+The conformance matrix covers MISSING, NULL, numbers, strings, arrays, objects and null elements.
+WITHIN remains a named CK00001 deferred form. The truth table follows
+[Couchbase coll_exists.go:40-53](https://github.com/couchbase/query/blob/6d40d1dd24e256588af2ff5bf6627ca76135397c/expression/coll_exists.go#L40-L53).
+The retired ODMG EXISTS binding quantifier remains a named CK00001 refusal.
+
+`value [NOT] IN (SELECT RAW ...)` uses existing array IN semantics. VALUE is accepted as RAW's
+existing synonym. A direct SELECT without RAW/VALUE in this position gives CD00014 at SELECT.
+This conservative guard is deliberately narrower than Couchbase, pending owner sign-off;
+an extra pair of parentheses denotes an ordinary expression in the existing value-list grammar.
+MISSING on the left propagates MISSING; NULL on the left remains NULL, even for an empty array.
+A match wins over null elements; an unmatched null element yields NULL. Nested RAW MISSING rows
+become null elements before membership testing, matching the existing RAW result rule.
+
+Nested plans execute on the outer statement's operation, fixed snapshot, parameters, frozen
+function catalog, transaction clock, cancellation token and retained-memory counter (CD05018).
+They see the transaction's earlier writes. Deterministic uncorrelated results cache lazily by AST
+identity for that statement. NOW_STR/NOW_MILLIS and every registered developer callback disable
+caching, including when nested further inside the query. Their plans still bind only once per
+statement. An unreached CASE, AND/OR or lazy conditional argument performs no nested execution,
+consumes no nested work or retention, invokes no callback and raises no runtime error. Static
+parameter, numeric, name, metadata and grouping validation still applies to every branch.
+
+Every materialized nested array, including a per-evaluation result, remains retained until the
+statement exits. Arrays are independently owned JSON values, and output projection clones remain
+valid after the statement. Nested source rows, results, scratch and arrays share the existing
+memory budget. A conservative reservation precedes array serialization and then shrinks to its
+measured representation. Cancellation or failure releases all nested reservations. EXPLAIN binds
+without executing and shows each SubqueryExpression, owning clause/span, nested access plan and
+`cached_for_statement` or `per_evaluation` policy. Plans are statement-local and rebuilt on the
+next execution, including a reused request after CREATE/DROP INDEX.
+
+Deferred forms use CK00001 and name the form: correlated subqueries (OQ-Q3), derived
+`FROM (SELECT ...) AS alias` (OQ-Q2), and subqueries anywhere inside INSERT, UPSERT, UPDATE or
+DELETE, including RETURNING (OQ-Q3). References to outer FROM/UNNEST, group or comprehension
+bindings, and outer projection aliases from ORDER BY, are correlation; inner declarations shadow
+them by ordinal name. Qualified outer stars (`d.*`) and a nested `FROM d` naming an outer alias
+also refuse with CK00001 naming correlation. An ordinary unqualified field binds to the inner
+source, as in Couchbase; it does not implicitly capture an outer document field.
+
+Complete projections on both execution paths are limited to 256 serialized JSON levels.
+RAW/VALUE and lone stars have no enclosing row object and allow 256 value levels. Named columns
+and stars beside other columns allow 255, reserving one level for the row object. This also
+checks developer-function JSON. Excess depth gives located CD05015; the row writer applies the
+same diagnostic as a last defence, preserving the connection after a terminal Failure.
+Subquery expressions are known arrays for the literal-array function-kind rule: LENGTH, ABS
+and CONCAT reject them with CD05001 during planning. Constructors and ARRAY/FIRST retain
+in-order evaluation, serialization and failure reachability on both execution paths. This run adds no disk,
+protocol, frame or capability version. InMemory, TCP and NativeAOT use the ordinary JSON cells.
+
 ## RETURNING (#1727)
 
 INSERT and UPSERT (VALUES or SELECT), UPDATE and DELETE accept a final
@@ -164,7 +271,7 @@ group aliases omit their members; explicit NULL members remain. LEFT UNNEST's ab
 therefore omits t. Unnamed group terms add no wrapper member. No group-array element ordering
 is promised. This follows Couchbase's [GROUP BY / GROUP AS wrapper and alias contract](https://github.com/couchbaselabs/docs-devex/blob/c3bb1549af4887019b9983e371d9e8b4f569052c/modules/n1ql/pages/n1ql-language-reference/groupby.adoc#L47-L81),
 with the owner's requirement to include group-term aliases. LETTING stays unavailable (CK00001),
-as do subqueries and FROM-array sources. LETTING remains contextual as a field or FROM/UNNEST name; use AS or quotes for a group-term alias named letting.
+as do correlated subqueries and FROM-array sources. LETTING remains contextual as a field or FROM/UNNEST name; use AS or quotes for a group-term alias named letting.
 
 Group terms evaluate against the input row, independently of other group-term aliases.
 Named terms then bind each member's computed value for aggregate row inputs and bind the

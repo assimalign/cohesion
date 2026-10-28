@@ -29,6 +29,9 @@
   <data name="OqlQueryParserParseWriteVoid2" xml:space="preserve"><value>Expected SELECT after the KEY output binding.</value></data>
   <data name="OqlQueryParserParseExpressionVoid" xml:space="preserve"><value>Expression nesting exceeds 128 levels.</value></data>
   <data name="OqlQueryParserParseExpressionVoid2" xml:space="preserve"><value>LIKE ESCAPE must be empty or one Unicode scalar.</value></data>
+  <data name="InSubqueryRequiresRaw" xml:space="preserve">
+    <value>IN subqueries require SELECT RAW or SELECT VALUE.</value>
+  </data>
   <data name="OqlQueryParserParseExpressionVoid3" xml:space="preserve"><value>Expected IN, BETWEEN, or LIKE after NOT.</value></data>
   <data name="OqlQueryParserParseExpressionVoid4" xml:space="preserve"><value>Expected NULL, MISSING, or VALUED.</value></data>
   <data name="OqlQueryParserParsePrimaryVoid" xml:space="preserve"><value>CASE requires a WHEN branch.</value></data>

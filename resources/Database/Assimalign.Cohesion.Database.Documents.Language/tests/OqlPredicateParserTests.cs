@@ -84,8 +84,7 @@ public sealed class OqlPredicateParserTests
     [InlineData("SELECT CASE «END» FROM c", "CD00002", null)]
     [InlineData("SELECT CASE WHEN a = 1 THEN 2 «FROM» c", "CD00002", null)]
     [InlineData("SELECT a NOT«»", "CD00002", null)]
-    [InlineData("SELECT a IN («SELECT» b FROM d) FROM c", "CK00001", "SUBQUERY")]
-    [InlineData("SELECT «EXISTS» (a) FROM c", "CK00001", "EXISTS")]
+    [InlineData("SELECT a IN («SELECT» b FROM d) FROM c", "CD00014", "RAW")]
     public void Parse_InvalidPredicate_ShouldLocateOneDiagnostic(string marked, string code, string? construct)
     {
         // Arrange

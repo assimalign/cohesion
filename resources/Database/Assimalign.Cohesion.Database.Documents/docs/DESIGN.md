@@ -504,10 +504,11 @@ CD00007 for the same count rule at parse and plan time:
 | `CD03012` | INSERT found an existing key, or INSERT/UPSERT repeated a key in one statement |
 | `CD02013` | Invalid evaluated LIKE escape or a pattern ending in its escape character |
 | `CD01014` | DISTINCT ORDER BY expression is absent from the projection |
-| `CD05015` | A query/RETURNING array or object constructor exceeds the 256-level result limit |
+| `CD05015` | A query/RETURNING constructor, SELECT projection or result formatter exceeds the 256-level serialized result limit, including the row wrapper |
 | `CD05018` | Retained statement source rows, ordered candidate buckets, groups, RETURNING results or aggregate values exceed the statement memory budget |
 | `CD00011` | ALL/DISTINCT applied to a scalar or star call |
 | `CD00013` | NULLS without FIRST or LAST |
+| `CD00014` | Direct IN subquery requires RAW/VALUE |
 | `CD01029` | Direct call AST has an invalid aggregate quantifier or quantifier target |
 | `CD01032` | Direct ordering AST has an invalid null placement |
 | `CD05019` | Serialized RETURNING value exceeds 256 levels, including a named projection wrapper |
@@ -590,6 +591,90 @@ The sources are read-only. `INSERT`, `UPSERT`, `UPDATE`, `DELETE`, `CREATE COLLE
 and `CreateCollectionAsync` or `DropCollectionAsync` using either reserved name,
 throw `DatabaseException` with `System collection '<canonical source>' is read-only.`
 before ordinary catalog lookup or mutation. Virtual sources do not provide mutable `DocumentCollection` handles.
+
+### Nested SELECT execution context (#1731, OQ-Q1)
+
+DocumentNestedPlan owns the root statement plan and an immutable-use, reference-keyed map of
+OqlSubqueryExpression to DocumentNestedQueryPlan. Planning binds every nested SELECT once,
+with its own grouping, metadata and lexical scope. Correlation is refused with named CK00001;
+the scoped visitor preserves inner shadowing and carries all outer declarations to deeper queries.
+There is no cross-statement plan cache in Documents: a reused request rebuilds root and nested
+plans against the current operation snapshot, so CREATE/DROP INDEX cannot retain stale access.
+The wrapper exists only for statements containing subqueries; ordinary plan records stay unchanged.
+
+DocumentNestedExecutionContext borrows the statement's DocumentOperation and database, parameter
+snapshot, frozen function catalog and cancellation token. It never creates or completes an operation,
+transaction or snapshot. EvaluateAsync explicitly receives the caller's DocumentEvaluationContext,
+the binding-frame extension point for OQ-Q3. Every nested access uses ReadCandidatesAsync, including
+asynchronous index/intersection access; there is no sync-over-async bridge. The context drives the
+existing selection, grouping and result helpers through a separate async expression/row path.
+The original synchronous evaluator and executor remain the allocation path for ordinary queries.
+Both paths call the same helpers for Boolean short circuits, binary operations, IN, BETWEEN,
+CASE matching, LIKE compilation/cache/results, collection admission, quantified truth, lazy
+conditional arguments, scalar invocation and aggregate creation/admission/result retention.
+DocumentJsonValue owns constructor serialization, MISSING handling, duplicate-key policy and
+result-depth errors. Async array constructors and ARRAY comprehensions request and serialize one
+value before evaluating the next; FIRST stops after its first admitted mapping. Async objects
+admit each evaluated member directly into the same map helper as synchronous objects, without
+pre-evaluating a list. Both retain the existing last-non-MISSING map stage before final object
+serialization, including the failure order of replaced values; changing that order would change
+ordinary queries. Only operand dispatch, await/iteration scheduling, lazy branch loops,
+synchronous constant-constructor caching and scratch release brackets remain separate: ordinary
+queries keep their original allocation path, while async release excludes nested-owned values.
+The permanent generated parity corpus compares equivalent literal/subquery operands, including
+NULL/MISSING, null/object/nested arrays, results and runtime kinds, diagnostic codes and
+developer callback counts. Several-row clause pairs cover WHERE, ORDER BY, GROUP BY, HAVING,
+star and UNNEST, compare normalized diagnostic spans/lines/location kinds, and assert exact
+subquery-execution counts for cached, per-evaluation and skipped expressions.
+
+Execution is lazy at the expression read. CASE, Boolean short circuits, FIRST and conditional
+functions retain their original reachability, with no work, callbacks, retention or runtime errors
+from an unreached subquery. Static validation remains eager. The context caches successful
+uncorrelated results only when every call is a native nonvolatile function or a lazy grammar form;
+NOW_STR/NOW_MILLIS and all developer callbacks disable caching transitively. Failures never cache.
+LastQuerySubqueriesExecuted is an internal statement counter used by deterministic tests.
+
+The operation owns the existing DocumentAggregateMemory counter. The nested context owns one
+reservation and all materialized subquery arrays until statement exit, including per-evaluation
+arrays. OQ-Q3 changes this ownership contract: uncached results must belong to the evaluating
+row, transferring ownership only to surviving group, order and output consumers; statement-long
+retention must not become the common per-row correlation path. Each nested executor owns
+source/group/sort scratch and its temporary result, sharing that
+same counter; nested result disposal releases its row reservations. Before array serialization the
+context reserves a conservative bound (three times value retention plus item/array overhead,
+covering JSON escaping), then shrinks to the actual owned JSON representation and slot overhead.
+Async expression scratch excludes context-owned reservations from its release delta. On success,
+outer projections clone their values and transfer output reservations as usual; context disposal
+clears its cache/values and releases its reservation. Failure and cancellation unwind the same
+owners, and operation completion or abort clears the statement counter. JSON clones carry their
+own lifetime beyond source JsonDocument disposal. No public execution seam, visibility grant,
+project reference, persisted contract or wire shape was added.
+
+Subqueries preserve zero/multiple-row SQL++ arrays, including RAW/VALUE null normalization and
+object-star preservation (nonobject roots wrap under document). Star deliberately follows this
+engine's top-level SELECT-star shape rather than Couchbase's alias-keyed shape. Direct non-RAW
+IN subqueries retain the conservative CD00014 guard pending owner sign-off; this is a deliberate
+SQL++ deviation. Outer projection aliases are in ORDER BY's enclosing scope; inner declarations
+shadow them. Qualified outer stars and FROM references to outer aliases are named correlation
+refusals. Unqualified fields otherwise bind to the inner source, as in Couchbase. EXISTS uses
+Couchbase coll_exists.go:40-53; the array
+contract follows subqueries.adoc:26-68 at the pinned versions linked in the language DIALECT.
+PostgreSQL src/backend/optimizer/plan/subselect.c:392-410 informed the separate subplan ownership
+boundary, but SQL scalar-cardinality semantics and unconditional init-plan hoisting are not adopted.
+EXPLAIN shows SubqueryExpression owners, spans, child plans and cache policy without invoking
+functions. Tests cover snapshot concurrency, own writes, lazy failures, caching counters, shared
+budget/cancellation cleanup, reusing plans after index DDL, both transports and NativeAOT.
+Before returning a SELECT projection, both evaluators validate the complete JSON depth at the
+projection expression span (CD05015). The row writer owns the shared allowance rule: RAW/VALUE
+and lone stars are bare (256 levels); named columns and stars beside other columns have an
+object wrapper (255 value levels). This also covers JSON
+returned through subqueries, functions, CASE, FIRST and aggregates without a local constructor.
+Developer-function JSON receives the same projection check, even without a local constructor.
+The formatter also translates its own depth refusal to located CD05015 as a last defence; the
+server supplies the statement span and retains a reusable session after a terminal Failure.
+Nested array/object materialization retains the same depth guard and located subquery failure.
+Release measurements preserve the baseline allocations for ordinary plans, native queries and
+selective scans; the statement wrapper adds no ordinary-plan fields.
 
 ### Stored document queries
 
@@ -1739,7 +1824,7 @@ managed memory. UNNEST multiplies input rows and has no row cap; it is not a joi
 does not add JOIN or cross-collection execution. Chunk persistence handles documents larger than a page but does
 not promise a bounded heap independent of document/query size. Database-wide
 writer locking is conservative; there are no persisted query statistics, join,
-subquery, external sort, replication, model-specific security,
+correlated/derived/DML subqueries, external sort, replication, model-specific security,
 ApplicationModel integration, or compiled-schema provisioning.
 
 Co-located tests cover nested/mixed JSON, expected-version writes, explicit commit

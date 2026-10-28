@@ -35,6 +35,8 @@ public class OqlLanguageProfileTests
     [InlineData(OqlClauses.Returning)]
     [InlineData(OqlClauses.Values)]
     [InlineData(OqlClauses.Select)]
+    [InlineData(OqlClauses.Subquery)]
+    [InlineData(OqlClauses.Exists)]
     [InlineData(OqlClauses.Distinct)]
     [InlineData(OqlClauses.SelectValue)]
     [InlineData(OqlClauses.ObjectConstructor)]
@@ -74,7 +76,7 @@ public class OqlLanguageProfileTests
     }
 
     [Theory]
-    [InlineData(OqlClauses.Subquery)]
+    [InlineData("DERIVED FROM")]
     public void Instance_UnimplementedClause_IsNotSupported(string clause)
     {
         OqlLanguageProfile.Instance.Supports(clause).ShouldBeFalse();

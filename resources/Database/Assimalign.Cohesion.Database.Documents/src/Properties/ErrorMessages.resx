@@ -194,6 +194,8 @@
   <data name="DocumentQueryRowRequiredDatabase" xml:space="preserve"><value>Field {0} is null.</value></data>
   <data name="CollectionsEnsureReadOnlyFailure" xml:space="preserve"><value>System collection '{0}' is read-only.</value></data>
   <data name="DocumentOperationEnsureActiveDatabase" xml:space="preserve"><value>The document operation's transaction is no longer active.</value></data>
+  <data name="DmlSubqueryDeferred" xml:space="preserve"><value>Subqueries in DML are not supported yet.</value></data>
+  <data name="CorrelationDeferred" xml:space="preserve"><value>Correlated subqueries are not supported yet.</value></data>
   <data name="DocumentPlannerPlanFailure" xml:space="preserve"><value>The OQL statement is not supported by the document executor.</value></data>
   <data name="DocumentPlannerPlanCreateIndexFailure" xml:space="preserve"><value>CREATE INDEX requires an index name.</value></data>
   <data name="DocumentPlannerPlanCreateIndexFailure2" xml:space="preserve"><value>CREATE INDEX '{0}' requires a representable document path.</value></data>
@@ -236,4 +238,5 @@
   <data name="FunctionUnknown" xml:space="preserve"><value>Unknown OQL function '{0}'.</value></data>
   <data name="FunctionArityInvalid" xml:space="preserve"><value>Invalid argument count for OQL function '{0}'.</value></data>
   <data name="TextTransactionStatusRequired" xml:space="preserve"><value>Text transaction control requires the negotiated transaction-status capability.</value></data>
+  <data name="QualifiedStarDeferred" xml:space="preserve"><value>Qualified star projections are not supported yet.</value></data>
 </root>

@@ -17,12 +17,7 @@ internal sealed partial class DocumentExpressionEvaluator
             foreach (var argument in call.Arguments)
             {
                 var value = Evaluate(argument, document, group);
-                bool skip = call.Name switch
-                {
-                    "IFMISSING" => value is DocumentMissing,
-                    "IFNULL" => value is null,
-                    _ => value is null or DocumentMissing,
-                };
+                bool skip = SkipConditional(call.Name, value);
                 if (!skip) { return value; }
             }
             return null;
@@ -33,9 +28,21 @@ internal sealed partial class DocumentExpressionEvaluator
             return Aggregate(call, aggregate, group ?? throw new DocumentPlanningException("CD05001", ErrorMessages.AggregateContextMissing));
         }
         var values = call.Arguments.Select(argument => Evaluate(argument, document, group)).ToArray();
+        return InvokeScalar((DocumentScalarFunction)function, values);
+    }
+
+    private static bool SkipConditional(string name, object? value) => name switch
+    {
+        "IFMISSING" => value is DocumentMissing,
+        "IFNULL" => value is null,
+        _ => value is null or DocumentMissing,
+    };
+
+    private object? InvokeScalar(DocumentScalarFunction function, object?[] values)
+    {
         var context = new DocumentFunctionContext(_databaseName, _cancellationToken, _transactionStart);
         var arguments = new DocumentArguments(values, in context);
-        return ((DocumentScalarFunction)function).Invoke(in arguments).Value;
+        return function.Invoke(in arguments).Value;
     }
 
     private DocumentFunction ResolveFunction(OqlCallExpression call)

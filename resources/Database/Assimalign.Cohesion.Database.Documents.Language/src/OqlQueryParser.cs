@@ -253,11 +253,13 @@ public sealed partial class OqlQueryParser : QueryParser
         int parentheses = 0;
         bool inSelectList = false;
         int selectHead = -2;
+        Stack<(int Depth, bool InSelectList, int SelectHead)>? selectScopes = null;
         int callQuantifier = -2;
         int fetchHead = -2;
         int pagingHead = -2;
         int openQuantifiers = 0;
         var expressionScopes = new Stack<bool>();
+        HashSet<int>? existsBindings = null;
         var (indexKeyStart, indexKeyEnd) = FindIndexKeyRange();
         for (int index = 0; index < _tokens.Count; index++)
         {
@@ -268,7 +270,16 @@ public sealed partial class OqlQueryParser : QueryParser
             }
 
             if (token.Type == TokenType.LeftParen) { parentheses++; }
-            else if (token.Type == TokenType.RightParen) { parentheses--; }
+            else if (token.Type == TokenType.RightParen)
+            {
+                parentheses--;
+                if (selectScopes is { Count: > 0 } && selectScopes.Peek().Depth > parentheses)
+                {
+                    var enclosing = selectScopes.Pop();
+                    inSelectList = enclosing.InSelectList;
+                    selectHead = enclosing.SelectHead;
+                }
+            }
 
             if (token.Type is not (TokenType.Keyword or TokenType.Function or TokenType.Identifier))
             {
@@ -303,6 +314,11 @@ public sealed partial class OqlQueryParser : QueryParser
             // The DDL parser owns array-key quantifiers and the comprehension binding words.
             if (value is ("ALL" or "DISTINCT" or "ARRAY" or "FOR" or "IN" or "END") && indexKeyStart >= 0 && index > indexKeyStart && index < indexKeyEnd) { continue; }
             if (value == "UNIQUE" && index == 1 && IsIndexStatement("CREATE")) { continue; }
+
+            // DISTINCT in an IS [NOT] DISTINCT FROM predicate is an operator suffix.
+            if (value == "DISTINCT" && index > 0 && (IsWord(_tokens[index - 1], "IS") ||
+                index > 1 && IsWord(_tokens[index - 1], "NOT") && IsWord(_tokens[index - 2], "IS"))) { continue; }
+            if (IsDistinctFromToken(index)) { continue; }
 
             // SELECT and call-head quantifiers are parsed by their respective grammar rules.
             if (openQuantifiers == 0 && value is "DISTINCT" or "ALL")
@@ -402,9 +418,11 @@ public sealed partial class OqlQueryParser : QueryParser
                 break;
             }
 
-            // EXISTS is supported only in the positional DDL modifier. Keep malformed
+            // EXISTS is an expression operator and a positional DDL modifier. Keep malformed
             // modifiers on the syntax path too (CREATE COLLECTION IF EXISTS reports NOT).
-            if (value == "EXISTS" && IsDdlExistenceToken(index))
+            if (value == "EXISTS" && (IsDdlExistenceToken(index) ||
+                !IsWord(_tokens[statementStart], "CREATE") && !IsWord(_tokens[statementStart], "DROP") &&
+                index > statementStart && !IsExistsBindingQuantifier(index, ref existsBindings)))
             {
                 continue;
             }
@@ -435,9 +453,14 @@ public sealed partial class OqlQueryParser : QueryParser
                 // A SELECT inside an expression is nested even when it is the first one.
                 if (statementWithoutQuery || selected || parentheses > 0 || returningList)
                 {
-                    result.Add((OqlClauses.Subquery, token));
+                    if (statementWithoutQuery || !IsWord(_tokens[statementStart], "SELECT"))
+                    { _diagnostics.Add(QueryDiagnostics.UnsupportedClause("SUBQUERY in DML", Profile.Language, Span(token, token))); }
+                    else if (index > 1 && _tokens[index - 1].Type == TokenType.LeftParen && IsWord(_tokens[index - 2], "FROM") && !IsDistinctFromToken(index - 2))
+                    { _diagnostics.Add(QueryDiagnostics.UnsupportedClause("derived FROM subquery", Profile.Language, Span(token, token))); }
                 }
 
+                if (parentheses > 0)
+                { (selectScopes ??= new()).Push((parentheses, inSelectList, selectHead)); }
                 selected = true;
                 selectHead = index;
                 inSelectList = true;
@@ -468,9 +491,9 @@ public sealed partial class OqlQueryParser : QueryParser
                 index += 3;
                 continue;
             }
-            if (value == "EXISTS" && IsQuantifierBinding(index + 1))
+            if (value == "EXISTS" && IsExistsBindingQuantifier(index, ref existsBindings))
             {
-                AddUnsupported(result, "EXISTS", token);
+                _diagnostics.Add(QueryDiagnostics.UnsupportedClause("EXISTS binding quantifier", Profile.Language, Span(token, token)));
                 index += 2;
                 continue;
             }
@@ -491,6 +514,11 @@ public sealed partial class OqlQueryParser : QueryParser
                 if (value == "LIMIT") { continue; }
             }
 
+            if (value == "EXISTS")
+            {
+                _diagnostics.Add(QueryDiagnostics.UnsupportedClause("EXISTS", Profile.Language, Span(token, token)));
+                break;
+            }
             if (!OqlUnsupportedVocabulary.TryFind(value, out var word) || Supports(word.Construct) && value != "RETURNING")
             {
                 continue;
@@ -607,10 +635,45 @@ public sealed partial class OqlQueryParser : QueryParser
                 // for this comprehension's binding. The reverse pass already classified it.
                 next = delimiters.TryPeek(out int end) && IsWord(_tokens[end], "END") ? delimiters.Pop() + 1 : _tokens.Count;
             }
+            bool distinctFrom = IsDistinctFromToken(index);
             bool stop = token.Type is TokenType.Comma or TokenType.Semicolon or TokenType.Eof or TokenType.RightParen ||
-                expressionWord && (IsWord(token, "FROM") || IsWord(token, "AS") || IsWord(token, "END"));
+                expressionWord && (IsWord(token, "FROM") && !distinctFrom || IsWord(token, "AS") || IsWord(token, "END"));
             _comprehensionTails[index] = !stop && (IsWord(token, "FOR") || next < _tokens.Count && _comprehensionTails[next]);
         }
+    }
+
+    private bool IsDistinctFromToken(int index) => index > 1 && IsWord(_tokens[index], "FROM") &&
+        IsWord(_tokens[index - 1], "DISTINCT") && (IsWord(_tokens[index - 2], "IS") ||
+        index > 2 && IsWord(_tokens[index - 2], "NOT") && IsWord(_tokens[index - 3], "IS"));
+
+    private bool IsExistsBindingQuantifier(int index, ref HashSet<int>? bindings)
+    {
+        if (!IsQuantifierBinding(index + 1)) { return false; }
+        bindings ??= FindExistsBindingQuantifiers();
+        return bindings.Contains(index);
+    }
+
+    private HashSet<int> FindExistsBindingQuantifiers()
+    {
+        // Classify colon-bearing ODMG bindings once, in linear work, before the
+        // recursive parser applies its depth limit. Object/parameter scopes inside
+        // balanced delimiters do not turn unary EXISTS followed by IN into a binding.
+        var result = new HashSet<int>();
+        var scopes = new Stack<bool>();
+        bool colon = false;
+        for (int index = _tokens.Count - 1; index >= 0; index--)
+        {
+            var token = _tokens[index];
+            if (token.Type is TokenType.RightParen or TokenType.RightBracket or TokenType.RightBrace)
+            { scopes.Push(colon); colon = false; }
+            else if (token.Type is TokenType.LeftParen or TokenType.LeftBracket or TokenType.LeftBrace)
+            { colon = scopes.TryPop(out bool enclosing) && enclosing; }
+            else if (token.Type == TokenType.Colon) { colon = true; }
+            else if (token.Type is TokenType.Comma or TokenType.Semicolon or TokenType.Eof ||
+                IsWord(token, "FROM") && !IsDistinctFromToken(index) || IsWord(token, "AND") || IsWord(token, "OR")) { colon = false; }
+            else if (colon && IsWord(token, "EXISTS") && IsQuantifierBinding(index + 1)) { result.Add(index); }
+        }
+        return result;
     }
 
     /// <summary>

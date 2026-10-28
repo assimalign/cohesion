@@ -100,6 +100,8 @@ public sealed class OqlExecutionConformanceTests
             ],
             [OqlClauses.Select] =
             [
+                new("SELECT amount = 1 IS NOT NULL, 1 = NULL IS NULL, 1 IN [1] IS NULL, 2 BETWEEN 1 AND 3 IS NOT NULL, 2 BETWEEN 1 IS NOT NULL AND 3 FROM items WHERE name = 'alpha'", [[false, false, null, false, false]]),
+                new("SELECT 'abc' LIKE 'a%' IS NOT NULL, 'a%' LIKE 'a!%' ESCAPE '!' IS NOT NULL, 'a' || 'b', MISSING IS DISTINCT FROM NULL, NULL IS NOT DISTINCT FROM NULL FROM items WHERE name = 'alpha'", [[null, null, "ab", true, true]]),
                 new("SELECT ARRAY_AGG(category) FROM items GROUP BY category HAVING ARRAY_LENGTH(ARRAY_AGG(category)) > 0 ORDER BY ARRAY_AGG(category)", [[Json("[\"a\",\"a\",\"a\"]")], [Json("[\"b\"]")]]),
                 new("SELECT EVERY x IN [TRUE] SATISFIES EVERY(amount > 0) END FROM items", [[true]]),
                 new("SELECT STDDEV(v) FROM items UNNEST [-79228162514264337593543950335,0,79228162514264337593543950335] v WHERE name = 'alpha'", [[decimal.MaxValue]]),
@@ -111,6 +113,18 @@ public sealed class OqlExecutionConformanceTests
                     [[2L, 4L, 12m, 4m, 2m, 6m]]),
                 new("SELECT COUNT(*) AS total, SUM(amount) AS sum, AVG(amount) AS average, MIN(amount) AS minimum, MAX(amount) AS maximum FROM items WHERE amount > 100",
                     [[0L, null, null, null, null]]),
+            ],
+            [OqlClauses.Subquery] =
+            [
+                new("SELECT (SELECT RAW name FROM items WHERE name = 'alpha') AS names FROM items WHERE name = 'beta'", [[Json("[\"alpha\"]")]]),
+                new("SELECT name FROM items WHERE name IN (SELECT RAW name FROM items WHERE category = 'b')", [["gamma"]]),
+                new("SELECT (SELECT RAW name FROM items s WHERE category = 'b') AS names FROM items d WHERE name = 'alpha'", [[Json("[\"gamma\"]")]]),
+            ],
+            [OqlClauses.Exists] =
+            [
+                new("SELECT EXISTS [] AS empty, EXISTS [NULL] AS nonempty, NOT EXISTS [] AS negated FROM items WHERE name = 'alpha'", [[false, true, true]]),
+                new("SELECT EXISTS 'a' || 'b' AS c, EXISTS NULL IS DISTINCT FROM MISSING AS d, NULL IS NOT DISTINCT FROM NULL AS n FROM items WHERE name = 'alpha'", [[null, null, true]]),
+                new("SELECT EXISTS [] IS NULL AS p, EXISTS [] = FALSE AS q, NOT EXISTS [] AND TRUE AS r FROM items WHERE name = 'alpha'", [[null, true, true]]),
             ],
             [OqlClauses.Distinct] =
             [
@@ -540,6 +554,8 @@ public sealed class OqlExecutionConformanceTests
         OqlClauses.Unset => expression is OqlUpdateExpression { Unset.Count: > 0 },
         OqlClauses.Values => expression is OqlInsertExpression { Values.Count: > 0 },
         OqlClauses.Select => expression is OqlSelectExpression { Projections.Count: > 0 },
+        OqlClauses.Subquery => Assimalign.Cohesion.Database.Documents.Internal.DocumentPlanner.HasSubquery(expression),
+        OqlClauses.Exists => expression is OqlSelectExpression exists && exists.Projections.Any(p => p.Expression is OqlUnaryExpression { Operator: "EXISTS" }),
         OqlClauses.Distinct => expression is OqlSelectExpression { IsDistinct: true },
         OqlClauses.SelectValue => expression is OqlSelectExpression { IsValue: true },
         OqlClauses.ObjectConstructor => expression is OqlSelectExpression objectQuery && objectQuery.Projections.Any(p => p.Expression is OqlObjectExpression),

@@ -27,6 +27,7 @@ internal static partial class DocumentPlanExecutor
         var plan = new DocumentPlanner(database.Catalog, operation.Context.Snapshot, parameters, cancellationToken, functions: database.Engine.Functions).Plan(statement.OqlExpression);
         return plan switch
         {
+            DocumentNestedPlan nested => await ExecuteNestedStatementAsync(database, operation, nested, parameters, cancellationToken).ConfigureAwait(false),
             DocumentDeletePlan delete => await ExecuteDeleteAsync(database, operation, delete, parameters, cancellationToken).ConfigureAwait(false),
             DocumentUpdatePlan update => await ExecuteUpdateAsync(database, operation, update, parameters, cancellationToken).ConfigureAwait(false),
             DocumentInsertPlan insert => await ExecuteWriteAsync(database, operation, insert.Collection, insert.Statement, insert.Statement.Values, null, true, insert.Returning, parameters, cancellationToken).ConfigureAwait(false),
@@ -375,7 +376,7 @@ internal static partial class DocumentPlanExecutor
         {
             long before = memory.Bytes;
             object?[] values;
-            try { values = logical.Projections.Select(projection => evaluator.EvaluateProjection(projection.Expression, document, group, query.IsValue)).ToArray(); }
+            try { values = logical.Projections.Select(projection => evaluator.EvaluateProjection(projection.Expression, document, group, DocumentRowWriter.WritesBareValue(query))).ToArray(); }
             finally { memory.Release(memory.Bytes - before); }
             if (query.IsValue && values[0] is DocumentMissing) { values[0] = null; }
             for (int i = 0; i < values.Length; i++)
@@ -425,7 +426,7 @@ internal static partial class DocumentPlanExecutor
         }
         bool wholeDocument = query.Projections.Count == 1 && query.Projections[0].Expression is OqlStarExpression;
         return new DocumentQueryResult(columns, output.Select(row => row.Values).ToList(),
-            query.IsValue || wholeDocument, wholeDocument ? output.Select(row => row.Document.RawContent).ToArray() : null, affectedCount,
+            DocumentRowWriter.WritesBareValue(query), wholeDocument ? output.Select(row => row.Document.RawContent).ToArray() : null, affectedCount,
             memory, memory is null ? 0 : output.Sum(row => row.RetainedBytes));
     }
 

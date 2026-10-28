@@ -71,7 +71,7 @@ internal static partial class DocumentPlanExecutor
             for (int index = 0; index < values.Length; index++)
             {
                 _cancellationToken.ThrowIfCancellationRequested();
-                var value = _evaluator.EvaluateProjection(_plan.Projections[index].Expression, context, null, _plan.Query.IsValue);
+                var value = _evaluator.EvaluateProjection(_plan.Projections[index].Expression, context, null, DocumentRowWriter.WritesBareValue(_plan.Query));
                 if (_plan.Query.IsValue && value is DocumentMissing) { value = null; }
                 Charge(value switch
                 {
@@ -88,7 +88,7 @@ internal static partial class DocumentPlanExecutor
             // Depth was checked while counting JSON tokens. Preflight serialization while
             // rollback is still possible, preserving every other failure's own identity.
             var row = new DocumentQueryResult.DocumentQueryRow(values, rawContent, _plan.Query.IsValue || _wholeDocument);
-            if (_writer.Write(row, _columns, _plan.Query.IsValue || _wholeDocument).Length > ProtocolFrameHeader.MaxPayloadLength)
+            if (_writer.Write(row, _columns, DocumentRowWriter.WritesBareValue(_plan.Query), _plan.Query.Location, "RETURNING").Length > ProtocolFrameHeader.MaxPayloadLength)
             { throw new DocumentPlanningException("CD05016", ErrorMessages.ResultTooLarge, _plan.Query.Location); }
             // Evaluated JSON values own their clones. Do not retain a disposed JsonDocument
             // or an unprojected image through the row's evaluation context.
