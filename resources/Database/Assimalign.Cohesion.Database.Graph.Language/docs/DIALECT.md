@@ -411,8 +411,7 @@ Parameters accept IList (object arrays and List<long>, excluding binary byte[]) 
 IReadOnlyDictionary<string, object?> maps, and preserve scalar element types. Results use
 object arrays and read-only ordinal maps. Negative indexes count from the end; out-of-range
 indexes and missing fields yield NULL. {k:{j:1}}.k.j and $m.k access fields; $l[0] indexes
-a list. Invalid index/key/container types use CG02013. Stored a.b.c, comprehensions and
-slicing remain CK00001. INSERT/CREATE composite properties stay unsupported: syntax is
+a list. Invalid index/key/container types use CG02013. Stored a.b.c remains CK00001. INSERT/CREATE composite properties stay unsupported: syntax is
 CK00001 naming graph storage, parameters are CG03003. (n $props) remains CK00001.
 
 Equality is structural and three-valued: differing lengths/key sets or a FALSE field yields
@@ -433,6 +432,30 @@ Wire composite values require graph.composite-values under existing protocol 2.1
 Without it, projections that may return composites fail statically with CG07016 before writer locking and parameters are
 refused locally. The codec bounds are depth 64, 65536 total values and 16777216 bytes.
 Malformed components are ProtocolViolation. Path result encoding is unchanged.
+
+## List comprehensions and slices
+
+`[x IN list [WHERE predicate] [| projection]]` preserves source order. The source evaluates
+once in the outer scope; x shadows an outer name only in the filter/projection, including nested
+comprehensions. Missing projection keeps each element. WHERE keeps only TRUE and skips projection
+for FALSE/NULL. A NULL list returns NULL; an empty list returns []. Names and parameters still
+validate before execution. Aggregates can supply the source; body aggregates fail CG05024.
+
+Slices `list[from..to]`, `list[from..]`, `list[..to]` and `list[..]` use inclusive start,
+exclusive end and omitted zero/list-length defaults. Negative bounds count from the end; bounds
+clamp, and reversed ranges give []. Explicit NULL bounds or NULL sources give NULL. Numeric bounds
+truncate toward zero then require Int32 range, following Neo4j. Invalid list sources or bounds
+are CG02014; filters require Boolean/NULL (CG02013).
+
+Scalar projections over entity groups/path lists, such as `[r IN rs | r.w]`, cross Execute.
+Entity-valued results retain the existing static gate until #1662. Scalar lists require the
+existing protocol 2.1 graph.composite-values negotiation. Each visited element/copy consumes
+statement work (CG05004); every materialized list and nested result shares the memory grant
+(CG05020). Constructed-value bounds retain CG02013, and failure rolls back writes.
+
+reduce and ALL/ANY/NONE/SINGLE remain CK00001 until GQ-C2, including `all(x IN ... WHERE ...)`.
+Pattern comprehensions remain CK00001 until GQ-C3/#1537; map comprehensions and allReduce are
+outside this plan. See [reference semantics and shape propagation](DESIGN.md#list-comprehensions-and-slices-1736-gq-c1).
 
 ## Named scalar parameters
 

@@ -369,6 +369,15 @@ CK07001 reports diagnostic overflow without turning successful reads into failur
 
 QueryAsync executes LET, FILTER, FOR/UNWIND, WITH and RETURN ... NEXT using the existing request encoding. Lists use the negotiated composite-value parameter codec. Final planned column kinds govern Execute admission: scalar LET/FOR values pass, possible composites require negotiation, and carried entities keep the ExecutePaths hint. Read-only composed path requests preserve optionality; a write stage anywhere rejects the request before execution. GraphLinearCompositionWireTests verifies both InMemory and TCP, own-write reads, row-valued insertion maps, bound MATCH maps, map/entity member access, decoded star bindings and Int64 COUNT metadata through WITH. Scope, duplicate carried-name, INSERT-map and runtime container rejections retain coded diagnostics and permit the next statement on the exact same server session. Comma-separated MATCH maps can reference later pattern parts; their clause-wide predicates, including anonymous elements, execute over both transports and validate under EXPLAIN. FOR/UNWIND retains proven node and relationship list element kinds through WITH/NEXT for later MATCH, DELETE and ExecutePaths; scalar/mixed lists retain coded rejection and exact-session reuse. No protocol format changes.
 
+## List comprehensions and slices (#1736, GQ-C1)
+
+QueryAsync uses the existing scalar/composite encoding for comprehensions and slices. Lexical
+scalar projections over quantified groups and path lists cross Execute; entity-producing lists
+retain the pre-write static refusal until #1662, even with a FALSE filter. Existing protocol 2.1
+composite negotiation remains required. GraphCompositeWireTests covers InMemory/TCP, nested
+shadowing, slices, NULLs, parameters, EXPLAIN, rollback and exact-session reuse after CG02014
+and CK00001 ALL admission errors. No client API, capability or wire bytes change.
+
 ## Explicit transaction text (#1540, D5)
 
 START TRANSACTION, COMMIT and ROLLBACK are standalone ISO statements on Execute, using the

@@ -124,6 +124,16 @@ public sealed class GqlProfileExecutionTests
                 new("RETURN CASE 1 WHEN 1.0 THEN 'match' ELSE 'other' END", [["match"]]),
                 new("RETURN COALESCE(NULL, 5), NULLIF(42, 42)", [[5L, null]]),
             ],
+            [GqlClauses.ListComprehension] =
+            [
+                new("RETURN [x IN [1,2,3] WHERE x > 1 | x * 2]", [[new object?[] { 4L, 6L }]]),
+                new("RETURN [x IN NULL | x], [x IN [] WHERE NULL]", [[null, Array.Empty<object?>()]]),
+            ],
+            [GqlClauses.ListSlice] =
+            [
+                new("RETURN [1,2,3][-2..], [1,2,3][..-1], [1,2,3][1..2]",
+                    [[new object?[] { 2L, 3L }, new object?[] { 1L, 2L }, new object?[] { 2L }]]),
+            ],
             [GqlClauses.Set] =
             [
                 Mutation("MATCH (a:Person {name:'Alice'}) SET a.age=43", 1,
@@ -486,6 +496,8 @@ public sealed class GqlProfileExecutionTests
         GqlClauses.Match => query.MatchClauses.Any(clause => !clause.Optional),
         GqlClauses.OptionalMatch => query.MatchClauses.Any(clause => clause.Optional),
         GqlClauses.Case => query.Projections.Any(item => item.Expression is GqlCaseExpression or GqlCoalesceExpression or GqlNullIfExpression),
+        GqlClauses.ListComprehension => query.Projections.Any(item => item.Expression is GqlListComprehensionExpression),
+        GqlClauses.ListSlice => query.Projections.Any(item => item.Expression is GqlListSliceExpression),
         GqlClauses.Let => query.Stages.Any(stage => stage is GqlLetStage),
         GqlClauses.Filter => query.Stages.Any(stage => stage is GqlFilterStage),
         GqlClauses.For => query.Stages.Any(stage => stage is GqlForStage { IsUnwind: false }),

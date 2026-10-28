@@ -118,6 +118,12 @@ internal static class GqlPathRenderer
                 case GqlPropertyExpression property: Push(Name(property.Variable), ".", Name(property.Property)); break;
                 case GqlMemberExpression member: Push("(", member.Operand, ").", Name(member.Member)); break;
                 case GqlSubscriptExpression subscript: Push("(", subscript.Operand, ")[", subscript.Index, "]"); break;
+                case GqlListSliceExpression slice: Push("(", slice.Operand, ")[", slice.From, "..", slice.To, "]"); break;
+                case GqlListComprehensionExpression comprehension:
+                    Push("[", Name(comprehension.Variable), " IN ", comprehension.List,
+                        comprehension.Predicate is null ? null : " WHERE ", comprehension.Predicate,
+                        comprehension.Projection is null ? null : " | ", comprehension.Projection, "]");
+                    break;
                 case GqlBinaryExpression binary: Push("(", binary.Left, " " + binary.Operator + " ", binary.Right, ")"); break;
                 case GqlLogicalExpression logical:
                     Push(")");

@@ -69,6 +69,8 @@ public static class GqlLanguageProfile
         GqlClauses.Skip,
         GqlClauses.Limit,
         GqlClauses.Case,
+        GqlClauses.ListComprehension,
+        GqlClauses.ListSlice,
         GqlClauses.Create,
         GqlClauses.Insert,
         GqlClauses.Set,

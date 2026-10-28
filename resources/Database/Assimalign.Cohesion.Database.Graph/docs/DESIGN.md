@@ -1730,6 +1730,8 @@ to exercise that enforcement path; compiled provisioning is not included.
 | `CG01014` | Multiple map keys normalize to the same bare parameter name |
 | `CG01015` | Duplicate final result column name, implicit or explicit, under ordinal case-sensitive comparison; rejected during planning before execution |
 | `CG01016` | A path search prefilter, with or without an explicit selector, references a variable introduced by a peer path in the same MATCH; located at the offending reference. Its own path bindings (including quantified singletons) and the scope entering MATCH are allowed |
+| `CG01017` | A hand-built list comprehension omits its iterator name |
+| `CG02014` | Invalid list-operation source or numeric slice bound kind/range |
 | `CG07016` | A composite result requires graph.composite-values; ExecutionFailure before ResultHeader, preserving the authenticated session |
 | `CG06017` | Unsupported graph record or tree-registration format, including formats 1–4: opening is refused before logical recovery scrub with the remedy to recreate the database. Graph.Storage retains the code in its StorageCorruptionException cause's Diagnostics; the engine retains it as an additional Error diagnostic beside CG06018 under DatabaseCorruptionException / CK06003. No upgrade path exists |
 | `CG06018` | Missing or unrecoverable files; preserve the complete file set for recovery and restore missing sidecars from backup |
@@ -1737,6 +1739,7 @@ to exercise that enforcement path; compiled provisioning is not included.
 | `CG05020` | Accounted retained execution memory exceeds the statement limit; no partial result escapes and every owned cursor/lease is released |
 | `CG05022` | A selected shortest-path node or relationship is absent from the statement snapshot while the operation remains active; reconstruction fails without a partial path |
 | `CG05023` | Internal MERGE seam: invalid bound pattern identity, topology or property equality |
+| `CG05024` | Aggregate in a list comprehension predicate or projection |
 | `CG08021` | Query limits are nonpositive or exceed the configured engine ceilings; invalid engine ceilings use the same code in the configuration exception message |
 | `CK06101` | `Database.Indexing`'s code, carried unchanged: opening a database whose property-index pages are in a B-tree page format this engine does not read (format 1, written before #1194) fails with "Database 'x' cannot be opened. CK06101: …", checked before recovery's scrub, so a cleanly closed database's files stay as they were (a crashed one has had only the storage layer's journal redo and undo, and keeps its journal) |
 | `CK06001` | `Database.Storage`'s code, carried unchanged: opening a database whose file set is in another storage format (#1251) fails with "Database 'x' cannot be opened. CK06001: …", the storage's `StorageFormatException` as its inner exception, refused before its journal is read, so the files stay as they were |
@@ -2062,6 +2065,26 @@ aggregate counts, remaining minimum bytes and lengths before allocating a contai
 Malformed scalar/composite payloads, duplicate keys, invalid UTF-8, unknown tags, trailing
 bytes or exceeded bounds are ProtocolViolation, for request parameters and result rows alike.
 Encoding is explicit/static and uses no reflection, JSON serializer or runtime code generation.
+
+List comprehensions and slices (#1736, GQ-C1) use immutable public Values AST leaves and lexical
+iterator frames over the enclosing binding. Sources evaluate once; nested frames shadow without
+mutating outer rows. Shape callbacks resolve each iterator against its source element at every
+container depth, so scalar properties of entity groups/path lists pass Execute through slices,
+WITH/NEXT and nested projections. Entity-valued results remain statically refused until #1662.
+Grouping and deferred pattern-property checks respect lexical names. EXPLAIN validates the same
+scopes without evaluating bodies. Aggregates are permitted in sources, but not iterator bodies.
+
+Comprehension iteration and slice copying consume the existing work budget; temporary source
+ownership, output buffers and retained nested projections share the statement memory ledger.
+Output capacity is reserved before allocation, and all grants unwind on value errors, budget
+refusal or cancellation. No query without these expressions acquires an iterator frame or
+additional shape callback closure. Comprehension/slice child enumeration uses separate iterators
+so ordinary expression walks retain their original iterator size. The Release dispatch measurements preserve baseline allocation
+costs; result checks and both wire transports cover scalar admission and pre-write entity refusal.
+Numeric slice bounds follow Neo4j: truncate toward zero, require Int32 range, then normalize
+negative offsets and clamp. NULL sources/bounds yield NULL and filters retain only TRUE.
+See the language design's [semantics and local reference citations](../../Assimalign.Cohesion.Database.Graph.Language/docs/DESIGN.md#list-comprehensions-and-slices-1736-gq-c1).
+No disk, protocol or public interface boundary changes accompany this run.
 
 Expression semantics and reference-engine evidence are in
 [Graph.Language DESIGN](../../Assimalign.Cohesion.Database.Graph.Language/docs/DESIGN.md#conditional-expressions-and-composite-values-1146).

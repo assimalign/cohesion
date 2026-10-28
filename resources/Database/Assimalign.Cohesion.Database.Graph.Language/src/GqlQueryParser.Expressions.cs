@@ -115,6 +115,12 @@ public sealed partial class GqlQueryParser
         if (Failed) { return new GqlLiteralExpression(null, Span(start, start)); }
         if (Is("CASE")) { return ParseCase(); }
         if (Is("COALESCE") || Is("NULLIF")) { return ParseCaseAbbreviation(); }
+        if (Current.Type == TokenType.Keyword && start.Text.ToUpperInvariant() is "ALL" or "ANY" or "NONE" or "SINGLE" &&
+            _tokens[_position + 1].Type == TokenType.LeftParen)
+        {
+            Unsupported(start.Text.ToUpperInvariant(), start);
+            return new GqlLiteralExpression(null, Span(start, start));
+        }
         if (Current.Type == TokenType.Function && Is("CAST") && _tokens[_position + 1].Type == TokenType.LeftParen) { return ParseCast(); }
         if (Current.Type == TokenType.Function && (Is("CURRENT_DATE") || Is("CURRENT_TIMESTAMP")))
         {
