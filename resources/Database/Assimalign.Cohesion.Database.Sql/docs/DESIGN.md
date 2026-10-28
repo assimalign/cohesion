@@ -759,7 +759,10 @@ EXCEPT ALL or the right of EXCEPT DISTINCT. INTERSECT DISTINCT, the left of EXCE
 DISTINCT, preserved outer-join sides and derived FROM queries follow PostgreSQL's
 allowed forms. Aggregates at the level containing the reference are invalid;
 independent subquery aggregates remain allowed. Outer-only subquery aggregates
-owned by the recursive level also report CS01061. Top-level recursive UNION ORDER BY,
+owned by the recursive level also report CS01061. Grouped correlation scopes retain
+their relation bindings so projection, HAVING and ORDER BY subqueries preserve that
+ownership (PostgreSQL `src/backend/parser/parse_agg.c:646-690,1327-1334`).
+Top-level recursive UNION ORDER BY,
 LIMIT/FETCH, OFFSET and FOR UPDATE/SHARE use CK00001. SEARCH/CYCLE, CREATE RECURSIVE
 VIEW, nested WITH and modifying CTE bodies remain CK00001.
 
