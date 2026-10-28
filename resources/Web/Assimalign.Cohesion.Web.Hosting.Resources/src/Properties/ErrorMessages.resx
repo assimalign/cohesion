@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
+  <resheader name="version"><value>2.0</value></resheader>
+  <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms</value></resheader>
+  <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
+  <data name="ResourceNameMissing" xml:space="preserve"><value>A resource name is required.</value></data>
+  <data name="ControlPlaneEndpointRequired" xml:space="preserve"><value>A resource that publishes its manifest serves a control plane: set ControlPlaneEndpoint or the {0} variable.</value></data>
+  <data name="ControlPlaneEndpointInvalid" xml:space="preserve"><value>A control-plane endpoint is an absolute http URL whose host is an IP address or localhost, such as http://127.0.0.1:5199/.</value></data>
+  <data name="CorsAlreadyAdded" xml:space="preserve"><value>The resource's CORS policy has already been added.</value></data>
+  <data name="CorsNotAdded" xml:space="preserve"><value>UseCors(resource) serves the resource's CORS policy: call AddCors when you add the resource.</value></data>
+  <data name="CorsPolicyRequired" xml:space="preserve"><value>A CORS policy is required.</value></data>
+</root>

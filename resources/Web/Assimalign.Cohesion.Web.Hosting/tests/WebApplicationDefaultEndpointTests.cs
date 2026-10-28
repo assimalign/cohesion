@@ -22,11 +22,9 @@ public sealed class WebApplicationDefaultEndpointTests
 {
     private static readonly TimeSpan _testTimeout = TimeSpan.FromSeconds(30);
 
-    // The Web.Hosting assembly registers no generated control plane, so a builder created for it
-    // is a plain application. (This test assembly registers one through a module initializer.)
     private static WebApplicationBuilder CreatePlainEntryPointBuilder(params string[] args)
     {
-        return WebApplication.CreateBuilder(args, typeof(WebApplication).Assembly);
+        return WebApplication.CreateBuilder(args);
     }
 
     private static int GetFreeTcpPort()

@@ -35,7 +35,9 @@ public class RuntimeContractTests
         "COHESION_TELEMETRY_ENDPOINT",
         "COHESION_TELEMETRY_PROTOCOL",
         "COHESION_TELEMETRY_HEADERS_PATH",
-        "COHESION_LOG_FORMAT"
+        "COHESION_LOG_FORMAT",
+        "COHESION_MANIFEST_ENDPOINT",
+        "COHESION_CONTROL_PLANE_ENDPOINT"
     ];
 
     [Fact(DisplayName = DisplayPrefix + "Document and AppEnvironment.Variables constants stay in lockstep")]

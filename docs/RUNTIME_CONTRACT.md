@@ -44,6 +44,8 @@ its environment name as `COHESION_ENVIRONMENT ?? DOTNET_ENVIRONMENT ?? "Producti
 | `COHESION_TELEMETRY_PROTOCOL` | `otlp-grpc` or `otlp-http` | Optional; otlp-http is implemented as OTLP/HTTP JSON; otlp-grpc remains contract-valid but this build refuses it | Local/Docker: environment; In-process: ambient context; Kubernetes: ConfigMap |
 | `COHESION_TELEMETRY_HEADERS_PATH` | Path to an OTLP headers file | Optional and reserved in v1 when collector headers are required | Local: protected file path; In-process: ambient context; Docker: tmpfs file; Kubernetes: Secret volume |
 | `COHESION_LOG_FORMAT` | `json`; unset means ordinary stdout/stderr text | Optional and reserved in v1 | Local/Docker: environment; In-process: ambient context; Kubernetes: ConfigMap |
+| `COHESION_MANIFEST_ENDPOINT` | Absolute `http` or `https` URL the instance POSTs its resource manifest to | Set by the gateway that provisions the instance; unset means the instance is not managed | Local/Docker: environment; Kubernetes: ConfigMap |
+| `COHESION_CONTROL_PLANE_ENDPOINT` | Absolute `http` URL the instance serves its control plane on | Set with `COHESION_MANIFEST_ENDPOINT` | Local/Docker: environment; Kubernetes: ConfigMap |
 
 ## Name construction
 

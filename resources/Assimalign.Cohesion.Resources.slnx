@@ -1093,6 +1093,13 @@
 	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Hosting/tests/">
 		<Project Path="Web/Assimalign.Cohesion.Web.Hosting/tests/Assimalign.Cohesion.Web.Hosting.Tests.csproj" />
 	</Folder>
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Hosting.Resources/" />
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Hosting.Resources/src/">
+		<Project Path="Web/Assimalign.Cohesion.Web.Hosting.Resources/src/Assimalign.Cohesion.Web.Hosting.Resources.csproj" />
+	</Folder>
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Hosting.Resources/tests/">
+		<Project Path="Web/Assimalign.Cohesion.Web.Hosting.Resources/tests/Assimalign.Cohesion.Web.Hosting.Resources.Tests.csproj" />
+	</Folder>
 	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.OpenApi/">
 		<File Path="Web/Assimalign.Cohesion.Web.OpenApi/README.md" />
 	</Folder>

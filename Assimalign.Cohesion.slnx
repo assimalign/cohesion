@@ -2324,6 +2324,13 @@
 	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Hosting/tests/">
 		<Project Path="resources/Web/Assimalign.Cohesion.Web.Hosting/tests/Assimalign.Cohesion.Web.Hosting.Tests.csproj" />
 	</Folder>
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Hosting.Resources/" />
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Hosting.Resources/src/">
+		<Project Path="resources/Web/Assimalign.Cohesion.Web.Hosting.Resources/src/Assimalign.Cohesion.Web.Hosting.Resources.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Hosting.Resources/tests/">
+		<Project Path="resources/Web/Assimalign.Cohesion.Web.Hosting.Resources/tests/Assimalign.Cohesion.Web.Hosting.Resources.Tests.csproj" />
+	</Folder>
 	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.HttpsPolicy/" />
 	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.HttpsPolicy/docs/">
 		<File Path="resources/Web/Assimalign.Cohesion.Web.HttpsPolicy/docs/DESIGN.md" />

@@ -9,7 +9,6 @@ using System.Security.Cryptography.X509Certificates;
 using Assimalign.Cohesion.Configuration;
 using Assimalign.Cohesion.Connections.Tcp;
 using Assimalign.Cohesion.Connections.Security;
-using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Http.Connections;
 
@@ -587,9 +586,8 @@ internal static class HttpServerConfiguration
     }
 
     /// <summary>
-    /// Resolves a TLS endpoint's certificate: from a file when <c>Certificate</c> is a section
-    /// (<c>Path</c>, optional <c>KeyPath</c> and <c>Password</c>), otherwise from the Secret mount the
-    /// scalar <c>Certificate</c> names (the endpoint's registered mount, or <c>tls</c>, when absent).
+    /// Resolves a TLS endpoint's certificate from the file its <c>Certificate</c> section names
+    /// (<c>Path</c>, optional <c>KeyPath</c> and <c>Password</c>).
     /// </summary>
     private static (X509Certificate2 Leaf, X509Certificate2Collection Chain) ResolveCertificate(
         IConfigurationSection endpoint,
@@ -614,13 +612,10 @@ internal static class HttpServerConfiguration
                 GetString(certificate, "Password"));
         }
 
-        if (!ResourceRuntime.Current.TryGetEndpointCertificate(endpointName, GetString(endpoint, "Certificate"), out X509Certificate2? leaf, out X509Certificate2Collection chain))
-        {
-            throw new InvalidOperationException(
-                string.Format(CultureInfo.CurrentCulture, ErrorMessages.EndpointCertificateRequired, endpointName));
-        }
-
-        return (leaf, chain);
+        // A scalar Certificate named a Secret mount of the retired resource runtime. There is no
+        // secret store any more: the platform supplies certificates as files.
+        throw new InvalidOperationException(
+            string.Format(CultureInfo.CurrentCulture, ErrorMessages.EndpointCertificateRequired, endpointName));
     }
 
     /// <summary>

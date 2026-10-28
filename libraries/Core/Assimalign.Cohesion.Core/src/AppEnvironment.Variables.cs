@@ -92,6 +92,12 @@ public static partial class AppEnvironment
         /// <summary>Gets the optional structured log format variable.</summary>
         public const string LogFormat = "COHESION_LOG_FORMAT";
 
+        /// <summary>Gets the variable naming the URL a resource instance publishes its manifest to.</summary>
+        public const string ManifestEndpoint = "COHESION_MANIFEST_ENDPOINT";
+
+        /// <summary>Gets the variable naming the URL a resource instance serves its control plane on.</summary>
+        public const string ControlPlaneEndpoint = "COHESION_CONTROL_PLANE_ENDPOINT";
+
         /// <summary>
         /// Builds a declared-endpoint environment-variable name.
         /// </summary>

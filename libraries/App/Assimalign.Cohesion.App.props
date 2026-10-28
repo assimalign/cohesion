@@ -155,11 +155,9 @@
 
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App" />
 
-        <!-- The kernel's package-delivered assemblies: the closure above walks project
-             references only, so these are App's one explicit list. Private (runtime-only):
-             Hosting.Resources decrypts Windows mount files with ProtectedData, which is not
-             part of Microsoft.NETCore.App, and exposes none of its types. -->
-        <CohesionFrameworkPrivateAssembly Include="System.Security.Cryptography.ProtectedData" />
+        <!-- The kernel's package-delivered assemblies would be listed here as
+             CohesionFrameworkPrivateAssembly items: the closure above walks project references
+             only. The kernel references no package today. -->
 
         <!--
             Roslyn analyzers / source generators shipped INSIDE this framework's

@@ -1,4 +1,5 @@
 using System;
+using System.Text.Json.Serialization;
 
 namespace Assimalign.Cohesion.Hosting.Resources;
 
@@ -6,6 +7,7 @@ namespace Assimalign.Cohesion.Hosting.Resources;
 /// The state of one stateful action as UTF-8 JSON: what a gateway keeps after a write and restores
 /// on instances that start before the resource is next deployed.
 /// </summary>
+[JsonConverter(typeof(ResourceStateSnapshotJsonConverter))]
 public sealed class ResourceStateSnapshot
 {
     private ResourceStateSnapshot(ResourceActionName action, ReadOnlyMemory<byte> value)

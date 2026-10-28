@@ -344,6 +344,7 @@ $script:CohesionReleaseLibrary = @(
     'resources/Web/Assimalign.Cohesion.Web.Health'
     'resources/Web/Assimalign.Cohesion.Web.HostFiltering'
     'resources/Web/Assimalign.Cohesion.Web.Hosting'
+    'resources/Web/Assimalign.Cohesion.Web.Hosting.Resources'
     'resources/Web/Assimalign.Cohesion.Web.HttpsPolicy'
     'resources/Web/Assimalign.Cohesion.Web.OpenApi'
     'resources/Web/Assimalign.Cohesion.Web.ProblemDetails'

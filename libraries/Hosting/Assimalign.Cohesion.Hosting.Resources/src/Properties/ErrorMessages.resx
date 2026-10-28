@@ -27,4 +27,7 @@
   <data name="ResourcePublicationSnapshotNull" xml:space="preserve"><value>The manifest publisher returned a null snapshot.</value></data>
   <data name="ResourcePublicationSnapshotDuplicate" xml:space="preserve"><value>The manifest publisher returned more than one snapshot for action '{0}'.</value></data>
   <data name="ResourceStateRestoreFailed" xml:space="preserve"><value>The snapshot the manifest publisher returned for action '{0}' was not restored ({1}). {2}</value></data>
+  <data name="ResourceStateSnapshotInvalid" xml:space="preserve"><value>A state snapshot is a JSON object with a string 'action' and a 'value'.</value></data>
+  <data name="ManifestEndpointInvalid" xml:space="preserve"><value>A manifest endpoint is an absolute http or https URL.</value></data>
+  <data name="ManifestPublicationRefused" xml:space="preserve"><value>The gateway at '{0}' refused the resource manifest with HTTP status {1}.</value></data>
 </root>
