@@ -31,7 +31,7 @@ public sealed class GraphOrdinaryWriteAllocationTests
         // Do not treat the old offset as allocation headroom or attribute it to workers.
         var minima = await MeasureAsync(-1);
 
-        // Assert: standalone fcc3fd32f ceilings, with at most 128 B of headroom in either context.
+        // Assert: isolated third-pass minima plus exactly 128 B of headroom.
         _output.WriteLine($"ordinary writes bytes/statement: CREATE={minima[0]}; SET={minima[1]}; DELETE={minima[2]}");
         CheckCeilings(minima);
     }
@@ -49,14 +49,27 @@ public sealed class GraphOrdinaryWriteAllocationTests
         Should.Throw<ShouldAssertException>(() => CheckCeilings(minima));
     }
 
+    [Theory(DisplayName = "Cohesion Test [Graph] - SET and DELETE allocation guards retain only 128 bytes of headroom (#1735)")]
+    [InlineData(1)]
+    [InlineData(2)]
+    public async Task Execute_JustOverHeadroom_ShouldTripGuard(int kind)
+    {
+        // Arrange / Act: a 129-byte payload allocates 160 bytes including the array header.
+        var minima = await MeasureAsync(kind, 129);
+
+        // Assert: stale SET and DELETE ceilings allowed this allocation.
+        _output.WriteLine($"injected 129 B payload, kind={kind}: CREATE={minima[0]}; SET={minima[1]}; DELETE={minima[2]}");
+        Should.Throw<ShouldAssertException>(() => CheckCeilings(minima));
+    }
+
     private static void CheckCeilings(long[] minima)
     {
         minima[0].ShouldBeLessThanOrEqualTo(38_952 + 128);
-        minima[1].ShouldBeLessThanOrEqualTo(67_096 + 128);
-        minima[2].ShouldBeLessThanOrEqualTo(50_296 + 128);
+        minima[1].ShouldBeLessThanOrEqualTo(66_888 + 128);
+        minima[2].ShouldBeLessThanOrEqualTo(50_088 + 128);
     }
 
-    private static async Task<long[]> MeasureAsync(int injectedKind)
+    private static async Task<long[]> MeasureAsync(int injectedKind, int injectedBytes = 1024)
     {
         string fixture = Path.Combine(AppContext.BaseDirectory, "GraphRecoveryFixture", "Assimalign.Cohesion.Database.Graph.RecoveryFixture.dll");
         var start = new ProcessStartInfo("dotnet")
@@ -64,6 +77,7 @@ public sealed class GraphOrdinaryWriteAllocationTests
         start.ArgumentList.Add(fixture);
         start.ArgumentList.Add("allocations");
         start.ArgumentList.Add(injectedKind.ToString(CultureInfo.InvariantCulture));
+        start.ArgumentList.Add(injectedBytes.ToString(CultureInfo.InvariantCulture));
         using var process = Process.Start(start) ?? throw new InvalidOperationException("Could not start graph allocation fixture.");
         var output = process.StandardOutput.ReadToEndAsync();
         var error = process.StandardError.ReadToEndAsync();

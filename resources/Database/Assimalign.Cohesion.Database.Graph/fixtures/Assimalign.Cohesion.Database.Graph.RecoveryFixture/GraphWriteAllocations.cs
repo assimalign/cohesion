@@ -5,7 +5,7 @@ namespace Assimalign.Cohesion.Database.Graph.RecoveryFixture;
 
 internal static class GraphWriteAllocations
 {
-    internal static long[] Measure(int injectedKind)
+    internal static long[] Measure(int injectedKind, int injectedBytes = 1024)
     {
         var engine = GraphDatabaseEngine.Create("allocation", new()
         {
@@ -33,7 +33,7 @@ internal static class GraphWriteAllocations
                     for (int kind = 0; kind < queries.Length; kind++)
                     {
                         long before = GC.GetAllocatedBytesForCurrentThread();
-                        if (kind == injectedKind) { GC.KeepAlive(new byte[1024]); }
+                        if (kind == injectedKind) { GC.KeepAlive(new byte[injectedBytes]); }
                         var pending = session.ExecuteAsync(queries[kind], cancellationToken: CancellationToken.None);
                         if (!pending.IsCompletedSuccessfully) { throw new InvalidOperationException("Allocation fixture changed threads."); }
                         var result = pending.GetAwaiter().GetResult();
