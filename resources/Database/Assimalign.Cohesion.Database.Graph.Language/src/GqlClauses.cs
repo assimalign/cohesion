@@ -108,6 +108,9 @@ public static class GqlClauses
     /// <summary>A list comprehension with an iterator, optional filter and optional projection.</summary>
     public const string ListComprehension = "LIST COMPREHENSION";
 
+    /// <summary>Correlated pattern collection expressions.</summary>
+    public const string PatternComprehension = "PATTERN COMPREHENSION";
+
     /// <summary>A list slice with optional inclusive start and exclusive end.</summary>
     public const string ListSlice = "LIST SLICING";
 

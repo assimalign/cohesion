@@ -71,6 +71,7 @@ public static class GqlLanguageProfile
         GqlClauses.Exists,
         GqlClauses.Case,
         GqlClauses.ListComprehension,
+        GqlClauses.PatternComprehension,
         GqlClauses.ListSlice,
         GqlClauses.Reduce,
         GqlClauses.ListPredicate,

@@ -354,6 +354,7 @@ transaction-state diagnostics; it allocates no new identity. These changes add n
 | New (#1734) | CG00011 | Language/syntax — SHORTEST selector requires a positive Int64 literal count |
 | New (#1736, GQ-C1 fixes) | CG00012 | Language/syntax — list slice omits both bounds; rejected during planning |
 | New (#1537, GQ-E1) | CG00013 | Language/syntax — EXISTS omits its nonempty braced pattern |
+| New (#1736, GQ-C3) | CG00014 | Language — pattern comprehension requires a nonempty path and projection |
 | COHDBG002 | CG01002 | Binding/names |
 | COHDBG010 | CG01010 | Binding/names |
 | COHDBG011 | CG01011 | Binding/names |
@@ -387,6 +388,7 @@ transaction-state diagnostics; it allocates no new identity. These changes add n
 | New (#1736, GQ-C2) | CG05025 | Execution — malformed reduce/list-predicate body or aggregate inside that body |
 | New (#1736, GQ-C2) | CG05026 | Planning — reduce shape/type analysis exceeds 65,536 visited nodes or closure steps |
 | New (#1537, GQ-E1) | CG05027 | Execution — malformed or missing correlated subplan or missing argument |
+| New (#1736, GQ-C3) | CG05028 | Execution — malformed pattern comprehension, aggregate projection, or missing collection plan |
 | COHDBG006 | CG06006 | Storage/durability |
 | COHDBG012 | CG06012 | Storage/durability |
 | COHDBG017 | CG06017 | Storage/durability |

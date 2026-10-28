@@ -44,14 +44,14 @@ internal sealed class GraphGroupingScope
             _token.ThrowIfCancellationRequested();
             if ((iterators is null || !GraphValueExpressions.ReferencesAny(expression, iterators, _token)) &&
                 (_keys.Contains(expression) && (reusable is null || reusable.Contains(expression)) || _aggregates.Contains(expression))) { continue; }
-            if (expression is GqlExistsExpression exists)
+            if (expression is GqlExistsExpression or GqlPatternComprehensionExpression)
             {
-                if (subplans is null || !subplans.TryGetValue(exists, out var subplan))
-                { throw new GraphPlanningException("CG05027", ErrorMessages.CorrelatedPlanRequired, exists.Location); }
+                if (subplans is null || !subplans.TryGetValue(expression, out var subplan))
+                { throw new GraphPlanningException("CG05027", ErrorMessages.CorrelatedPlanRequired, expression.Location); }
                 foreach (string correlated in subplan.CorrelatedVariables)
                 {
                     if (iterators?.Contains(correlated) == true || _variables.Contains(correlated) || aliases?.ContainsKey(correlated) == true) { continue; }
-                    throw new GraphPlanningException("CG05001", ErrorMessages.GroupedExpressionRequired, exists.Location);
+                    throw new GraphPlanningException("CG05001", ErrorMessages.GroupedExpressionRequired, expression.Location);
                 }
                 continue;
             }

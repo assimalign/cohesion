@@ -83,6 +83,18 @@ await Refuse(new() { MemoryBytes = 1024 }, "CG05020");
 await Refuse(new() { WorkUnits = 0 }, "CG08021");
 await Check("RETURN 7", [[7L]]);
 await session.ExecuteAsync("INSERT (s:ModeLoop)-[:LOOP]->(s)", cancellationToken: CancellationToken.None);
+await using (var pattern = (DatabaseResultSet)await session.ExecuteAsync("MATCH (a:N {k:1}) RETURN [x IN [a] | size([p=(x)-[:T]->(b) | size(nodes(p))])]", cancellationToken: CancellationToken.None))
+{
+    int rows = 0;
+    await foreach (var row in pattern.GetRowsAsync(CancellationToken.None))
+    {
+        if (row.GetValue(0) is not object?[] { Length: 1 } list || !Equals(list[0], 1L))
+        { throw new InvalidOperationException("Pattern comprehension AOT scalar projection failed."); }
+        rows++;
+    }
+    if (rows != 1) { throw new InvalidOperationException("Pattern comprehension AOT row count failed."); }
+    checks++;
+}
 await Check("MATCH WALK (a:ModeLoop)-[:LOOP]->{0,3}(b) RETURN count(*)", [[4L]]);
 await Check("MATCH TRAIL (a:ModeLoop)-[:LOOP]->{0,3}(b) RETURN count(*)", [[2L]]);
 await Check("MATCH SIMPLE (a:ModeLoop)-[:LOOP]->{0,3}(b) RETURN count(*)", [[2L]]);

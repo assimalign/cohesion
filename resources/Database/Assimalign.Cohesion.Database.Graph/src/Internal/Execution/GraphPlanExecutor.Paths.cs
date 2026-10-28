@@ -92,6 +92,8 @@ internal static partial class GraphPlanExecutor
             _memory = new GraphMemoryOwner(memory);
         }
         internal int Count => _states.Count;
+        internal void ReserveActive(long bytes, ref long activeBytes)
+        { _memory.Add(bytes); activeBytes += bytes; }
         internal void ReserveTasks(long bytes) => _memory.Add(bytes);
         internal void Push(PathState state)
         {
@@ -110,6 +112,9 @@ internal static partial class GraphPlanExecutor
         {
             long bytes = 384 + 80L * state.Bindings.Count + 48L * state.Used.Count + 128L * state.Groups.Count
                 + 64L * state.Nodes.Count + 80L * state.Relationships.Count;
+            // Named paths retain their GraphPath and two read-only collection wrappers.
+            // Node/relationship buffers are already covered by the state's inline accounting.
+            foreach (var binding in state.Bindings) { if (binding.Value is GraphPath) { bytes += 128; } }
             foreach (var values in state.Groups.Values) { bytes += 32 + 16L * values.Length; }
             for (var check = Predicates(state); check is not null; check = check.Previous)
             { bytes += 64 + (check.Locals is null ? 0 : 128 + 80L * check.Locals.Count); }
@@ -229,7 +234,11 @@ internal static partial class GraphPlanExecutor
                                 {
                                     if (existingPath is not GraphPath boundPath || !SamePath(boundPath, state.Nodes, state.Relationships)) { break; }
                                 }
-                                else { state.Bindings.Add(pathVariable, new GraphPath(state.Nodes.AsReadOnly(), state.Relationships.AsReadOnly())); }
+                                else
+                                {
+                                    frontier.ReserveActive(128, ref stateBytes);
+                                    state.Bindings.Add(pathVariable, new GraphPath(state.Nodes.AsReadOnly(), state.Relationships.AsReadOnly()));
+                                }
                             }
                             frontier.ResizeActive(state, ref stateBytes);
                             // Fixed chains retain the base matcher's source-ordered nodes, then edges,

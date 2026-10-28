@@ -219,7 +219,7 @@ public sealed partial class GqlQueryParser
     private void RejectCompositePropertyValue(GqlExpression value)
     {
         // Decide from the completed expression: indexing/field access can produce a scalar.
-        if (value is GqlListExpression or GqlMapExpression or GqlListComprehensionExpression or GqlListSliceExpression)
+        if (value is GqlListExpression or GqlMapExpression or GqlPatternComprehensionExpression or GqlListComprehensionExpression or GqlListSliceExpression)
         {
             var location = value.Location ?? Span(Current, Current);
             _diagnostics.Add(new Diagnostic

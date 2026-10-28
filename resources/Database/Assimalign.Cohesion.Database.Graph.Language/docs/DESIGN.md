@@ -199,6 +199,7 @@ The function table advertises the aggregates and core scalar functions listed be
 | `SKIP` | Cypher spelling of OFFSET | The same offset stage; cannot accompany another OFFSET/SKIP |
 | `LIMIT` | Unsigned Int64 literal or named parameter after RETURN | Unordered reads can stop upstream expansion after OFFSET/LIMIT; ordered finite pages retain OFFSET + LIMIT rows; never reduces mutation inputs |
 | `CASE` | Simple and searched CASE, COALESCE and NULLIF case abbreviations | First matching alternative, lazy selected branch; absent ELSE yields NULL |
+| `PATTERN COMPREHENSION` | `[ [p =] pattern [WHERE predicate] \| projection ]` | Collects every inner match in order through the correlated-subplan boundary |
 | `LIST COMPREHENSION` | `[x IN list [WHERE predicate] [| projection]]` | Lexical ordered filtering/projection; NULL list returns NULL |
 | `LIST SLICING` | `list[from..to]`, either bound optional, at least one required | Inclusive start, exclusive end, negative offsets and clamped bounds |
 | `REDUCE` | `reduce(acc = init, x IN list | expression)` | Ordered, type-changing accumulator; NULL source returns NULL and empty source returns seed |
@@ -754,7 +755,7 @@ keys. Node and relationship values also accept string subscripts and member acce
 Only containers that are neither entities nor maps fail member lookup. Invalid accesses,
 including (a.name).x on a string, use #1140's CG02013.
 The parser keeps a.b.c on a stored property as CK00001 while {k:{j:1}}.k.j and $m.k
-are field access. List comprehensions and slices execute as described below; pattern comprehensions remain CK00001.
+are field access. List comprehensions and slices execute as described below; pattern comprehensions execute through the correlated collection boundary below.
 UNWIND/FOR expand literal and parameter lists through the linear pipeline (#1145).
 
 List equality requires equal lengths and element-wise equality. Map equality requires
@@ -884,6 +885,42 @@ Reference evidence (local Neo4j clone, paths relative to its root):
 The parser/conformance corpus, GraphListComprehensionTests, GraphCompositeWireTests and Graph
 NativeAOT sample cover grammar, lexical shadowing, null/empty lists, slice forms, groups/path
 lists, static admission, EXPLAIN, budget rollback and both transports.
+
+### Pattern comprehensions (#1736, GQ-C3)
+
+`GqlPatternComprehensionExpression(Pattern, Predicate, Projection)` carries a nonempty
+relationship chain, optional local path name, optional WHERE and mandatory projection.
+`[ [p =] (a)-[r:T]->(b) [WHERE predicate] | projection ]` drains the E1 correlated
+subplan in match order. Duplicates and NULL projections are retained. No matches, including
+an existing NULL node/relationship argument, produce an empty list. The optional path name
+is a new local binding and may shadow an outer name; other existing pattern names correlate.
+Names introduced inside do not escape. Parsed and hand-built AST occurrences bind separately.
+Fixed chains and existing relationship quantifiers (ISO and Cypher bracketed forms) are accepted; path selectors,
+explicit path modes and parenthesized quantified path groups are outside this expression form.
+A relationship quantified to zero still satisfies the syntactically nonempty requirement.
+
+The form is an expression in RETURN, WHERE, SET scalar values, aggregate operands, nested
+pattern/list comprehensions, list predicates and reduce. The inner projection may contain
+nested collection expressions but cannot contain an aggregate over its own match scope
+(CG05028). A known non-Boolean WHERE is CG02013 even on an empty scan. The existing property
+storage restrictions still apply to collection-valued SET/INSERT values. Top-level label
+bars use the list-comprehension disambiguation rule: prefer a complete WHERE | projection.
+Malformed missing-projection forms use CG00014 or the ordinary CG00002 syntax diagnostic.
+
+Lexical shape analysis binds inner node/relationship kinds and leaves outer callbacks live
+through projection, including reduce accumulator closure. Scalar projections of inner entities
+and groups cross Execute using protocol 2.1
+`graph.composite-values`; entity-valued lists retain CG05001 until #1662, including empty
+or FALSE-filtered lists. In-process results can contain nodes, relationships and paths.
+No public interface, assembly reference, wire capability, format or disk version changes.
+
+Reference evidence (local Neo4j clone; no code copied):
+
+- `community/cypher/front-end/parser/v25/parser/src/main/antlr4/org/neo4j/cypher/internal/parser/v25/Cypher25Parser.g4:723-725`: expression form with required projection and nonempty chain.
+- `community/cypher/front-end/frontend/src/main/scala/org/neo4j/cypher/internal/frontend/phases/parserTransformers/ReplacePatternComprehensionWithCollectSubqueryRewriter.scala:59-69,94-138`: collect rewrite and path-name shadowing; other pattern variables reference outer bindings.
+- `community/cypher/front-end/ast/src/main/scala/org/neo4j/cypher/internal/ast/semantics/SemanticExpressionCheck.scala:612-622`: the projection is checked in the simple (non-aggregate) expression context and its type is wrapped in a list.
+- `community/cypher/interpreted-runtime/src/main/scala/org/neo4j/cypher/internal/runtime/interpreted/pipes/ExpandAllPipe.scala:49-71` and `community/cypher/runtime-spec-suite/src/test/scala/org/neo4j/cypher/internal/runtime/spec/tests/ExpandAllTestBase.scala:566-580`: NULL start yields zero inner matches.
+- `community/cypher/interpreted-runtime/src/main/scala/org/neo4j/cypher/internal/runtime/interpreted/pipes/RollUpApplyPipe.scala:33-42` and `community/cypher/runtime-spec-suite/src/test/scala/org/neo4j/cypher/internal/runtime/spec/tests/RollUpApplyTestBase.scala:59-78,102-123`: collection is empty for zero matches and preserves projected NULLs. Together with the rewrite, these establish the empty-list result for NULL outer entities.
 
 ## Reduce and list predicates (#1736, GQ-C2)
 
@@ -1210,7 +1247,7 @@ GqlOrderPagingTests and GraphOrderPagingWireTests pin the executable surface.
 
 | Code | Meaning |
 | --- | --- |
-| `CK00001` | Recognized construct outside the executable profile, reported once at its own span: OPTIONAL block operands, MANDATORY MATCH, procedures, excluded functions and datetime forms, unsupported CAST targets, HAVING and statistical aggregates (STDDEV_SAMP/POP, PERCENTILE_CONT/DISC), substituted/whole-map parameters, composite properties, pattern comprehensions, map projections, questioned paths, subpath variables, nested quantifiers, standalone ORDER BY/page statements, set operations, FOR ordinality/offset suffixes, NEXT YIELD, server/session scope, undirected (tilde) edges, nested path modes/selectors, unselected unbounded WALK, counted ANY and `NODETACH DELETE` |
+| `CK00001` | Recognized construct outside the executable profile, reported once at its own span: OPTIONAL block operands, MANDATORY MATCH, procedures, excluded functions and datetime forms, unsupported CAST targets, HAVING and statistical aggregates (STDDEV_SAMP/POP, PERCENTILE_CONT/DISC), substituted/whole-map parameters, composite properties, map projections, questioned paths, subpath variables, nested quantifiers, standalone ORDER BY/page statements, set operations, FOR ordinality/offset suffixes, NEXT YIELD, server/session scope, undirected (tilde) edges, pattern-comprehension path prefixes, nested path modes/selectors, unselected unbounded WALK, counted ANY and `NODETACH DELETE` |
 | `CG00001` | Empty statement |
 | `CG00002` | Malformed supported syntax, invalid statement composition, leftover tokens, or a character GQL does not use (`?`, `#`, `^`, ```, ...) |
 | `CG00003` | Unterminated string, quoted name, or block comment |
@@ -1224,6 +1261,7 @@ GqlOrderPagingTests and GraphOrderPagingWireTests pin the executable surface.
 | `CG00011` | A counted SHORTEST selector omits a positive Int64 literal count or supplies zero, a sign, a non-integer, a parameter or overflow |
 | `CG00012` | A list slice omits both start and end bounds; rejected during planning, including EXPLAIN |
 | `CG00013` | Language/syntax — EXISTS omits its nonempty braced pattern |
+| `CG00014` | Pattern comprehension requires a nonempty path and projection |
 
 Locations use zero-based absolute UTF-16 offsets with exclusive ends and one-based line numbers.
 A line breaks at LF, CR, NEL (U+0085), LS (U+2028) or PS (U+2029), and CR LF is one break

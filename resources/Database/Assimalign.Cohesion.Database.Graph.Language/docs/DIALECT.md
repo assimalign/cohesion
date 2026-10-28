@@ -492,6 +492,21 @@ Without it, projections that may return composites fail statically with CG07016 
 refused locally. The codec bounds are depth 64, 65536 total values and 16777216 bytes.
 Malformed components are ProtocolViolation. Path result encoding is unchanged.
 
+## Pattern comprehensions
+
+`[ [p =] (a)-[r:T]->(b) [WHERE predicate] | projection ]` returns one ordered list per
+outer row, retaining duplicate matches and NULL projections. It accepts nonempty relationship
+chains and the existing ISO/Cypher relationship quantifiers. The optional path name binds the
+whole matched path locally and can shadow an outer name. Other existing pattern names
+correlate; new names stay local. NULL correlated entities and zero matches return `[]`.
+WHERE keeps TRUE only. Projection is required and cannot aggregate over the inner matches.
+Pattern collections can nest and appear in RETURN, WHERE, scalar SET values, aggregate operands,
+list comprehensions, list predicates and reduce. Existing limits, cancellation and scalar-only
+property storage apply. EXPLAIN shows CollectApply, its correlated names and inner projection.
+Scalar lists use negotiated composite values; entity-valued lists remain refused until #1662.
+Path modes, selectors, parenthesized quantified groups, map comprehensions and allReduce are
+outside this form. See [reference semantics](DESIGN.md#pattern-comprehensions-1736-gq-c3).
+
 ## List comprehensions and slices
 
 `[x IN list [WHERE predicate] [| projection]]` preserves source order. The source evaluates
@@ -516,8 +531,8 @@ existing protocol 2.1 graph.composite-values negotiation. Each visited element/c
 statement work (CG05004); every materialized list and nested result shares the memory grant
 (CG05020). Constructed-value bounds retain CG02013, and failure rolls back writes.
 
-Pattern comprehensions remain CK00001 until GQ-C3/#1537; map comprehensions and allReduce are
-outside this plan. See [reference semantics and shape propagation](DESIGN.md#list-comprehensions-and-slices-1736-gq-c1).
+Pattern comprehensions collect correlated matches as described below; map comprehensions and
+allReduce remain outside this plan. See [reference semantics and shape propagation](DESIGN.md#list-comprehensions-and-slices-1736-gq-c1).
 
 ## Reduce and list predicates
 
