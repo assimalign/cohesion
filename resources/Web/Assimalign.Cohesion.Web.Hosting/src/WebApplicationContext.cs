@@ -199,6 +199,5 @@ public sealed class WebApplicationContext : HostContext, IWebApplicationContext
         public FileSystemPath? WebRootPath => _target.WebRootPath;
         public HostId HostId => _target.HostId;
         public global::Assimalign.Cohesion.Hosting.HostState State => _target.State;
-        public global::Assimalign.Cohesion.Hosting.IHostRunner? Runner => _target.Runner;
     }
 }

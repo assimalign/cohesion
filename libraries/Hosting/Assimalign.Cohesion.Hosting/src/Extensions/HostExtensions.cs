@@ -23,13 +23,16 @@ public static partial class HostExtensions
         }
 
         /// <summary>
-        /// Starts the host, waits for shutdown, and drains it through its complete-run pipeline.
+        /// Starts the host, waits for shutdown, and drains it.
         /// </summary>
         /// <param name="cancellationToken">Signals a shutdown request for this run.</param>
         /// <returns>A task that represents the complete host lifetime.</returns>
         /// <remarks>
         /// A token already cancelled at entry requests a complete start followed immediately
         /// by a graceful stop with fresh lifecycle tokens. Startup failures still propagate.
+        /// While the run is active, the process's shutdown signals (SIGINT, SIGQUIT and SIGTERM)
+        /// request a graceful shutdown instead of ending the process, as cancelling
+        /// <paramref name="cancellationToken"/> does.
         /// </remarks>
         public Task RunAsync(CancellationToken cancellationToken = default)
         {
@@ -54,8 +57,13 @@ public static partial class HostExtensions
 
     private static async Task RunWithoutDispatcherAsync(
         IHost host,
-        CancellationToken cancellationToken)
+        CancellationToken callerCancellationToken)
     {
+        // As for a Cohesion host, a shutdown signal takes the caller's cancellation path.
+        using var shutdownSignal = CancellationTokenSource.CreateLinkedTokenSource(callerCancellationToken);
+        using IDisposable signals = HostShutdownSignals.Register(() => HostShutdownSignals.RequestShutdown(shutdownSignal));
+        CancellationToken cancellationToken = shutdownSignal.Token;
+
         if (cancellationToken.IsCancellationRequested)
         {
             await host.StartAsync(CancellationToken.None).ConfigureAwait(false);

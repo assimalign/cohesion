@@ -92,6 +92,5 @@ public sealed class SecretStoreApplicationContext : HostContext, ISecretStoreApp
         public IEnumerable<IHostService> HostedServices => _target.HostedServices;
         public HostId HostId => _target.HostId;
         public global::Assimalign.Cohesion.Hosting.HostState State => _target.State;
-        public global::Assimalign.Cohesion.Hosting.IHostRunner? Runner => _target.Runner;
     }
 }

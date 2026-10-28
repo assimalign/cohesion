@@ -246,6 +246,5 @@ public sealed class SchedulerApplicationContext : HostContext, ISchedulerApplica
         public string Name => _target.Name;
         public HostId HostId => _target.HostId;
         public global::Assimalign.Cohesion.Hosting.HostState State => _target.State;
-        public global::Assimalign.Cohesion.Hosting.IHostRunner? Runner => _target.Runner;
     }
 }

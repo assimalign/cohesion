@@ -428,6 +428,5 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
         public global::System.IServiceProvider Services => _target.Services;
         public string Name => _target.Name;
         public global::Assimalign.Cohesion.Hosting.HostId HostId => _target.HostId;
-        public global::Assimalign.Cohesion.Hosting.IHostRunner? Runner => _target.Runner;
     }
 }
