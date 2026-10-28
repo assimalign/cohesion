@@ -25,30 +25,39 @@ flowchart LR
     Model --> Resources
 ```
 
-## Startup
+## Startup: reconcile, then run
 
-`RunAsync` creates one aggregate per resource and opens publications, deploys each child gateway,
-then deploys each resource. Every resource must have an instance publish within the startup window.
-If one does not, the gateway tears it down and the run fails; otherwise the gateway runs until
-cancelled.
+`RunAsync` loads the gateway's record from its `IGatewayStore` and plans every resource with the
+infrastructure provider. It creates one aggregate per resource, seeded from the record (G12), and
+opens publications. It then deploys each child gateway and only the resources whose plan creates or
+updates them, and saves the record. Every created or updated resource must have an instance publish
+within the startup window. After startup it tears down what the record holds but the model no
+longer declares, and runs until cancelled. A gateway restarted with the same model plans no change,
+so it deploys nothing and waits for no publication: it adopts what runs.
 
 ```mermaid
 sequenceDiagram
     participant Caller as Pipeline or parent gateway
     participant GW as ApplicationGateway
+    participant Store as Gateway store
     participant Infra as Infrastructure provider
     participant Inst as Resource instance
     Caller->>GW: RunAsync(model)
-    GW->>GW: create one aggregate per resource, open publications
+    GW->>Store: LoadAsync(gateway)
+    GW->>Infra: PlanResourceAsync, once per resource
+    GW->>GW: seed aggregates from the record, open publications
     GW->>Infra: DeployGatewayAsync, once per child gateway
-    GW->>Infra: DeployResourceAsync, once per resource
-    Infra->>Inst: start the workload
+    GW->>Infra: DeployResourceAsync, for each created or updated resource
+    GW->>Store: SaveAsync(record)
+    Infra->>Inst: start or replace the workload
     Inst->>GW: PublishAsync(manifest)
+    GW->>Store: SaveAsync(record)
     GW-->>Inst: snapshots to restore
-    alt every resource published within the startup window
+    alt every created or updated resource published within the window
+        GW->>Infra: TeardownResourceAsync and TeardownGatewayAsync for what the model dropped
         GW-->>Caller: Started completes, the gateway runs until cancelled
     else a resource published nothing
-        GW->>Infra: TeardownResourceAsync for that resource
+        GW->>Infra: TeardownResourceAsync, for a created resource only
         GW-->>Caller: RunAsync fails with StartupTimedOut
     end
 ```
@@ -57,8 +66,11 @@ sequenceDiagram
 
 | Type | Role |
 | --- | --- |
-| `ApplicationGateway` | The orchestrator. Implements `IApplicationGateway` (`RunAsync`) and `IResourceManifestPublisher` (`PublishAsync`, the publication endpoint's logic). Exposes `Model`, `Resources` (the aggregates), `StartupTimeout`, and `Started`. |
-| `IInfrastructureProvider` | The platform: deploys resources and child gateways, tears down a resource that missed its window, and supplies each resource's infrastructure actions. |
+| `ApplicationGateway` | The orchestrator. Implements `IApplicationGateway` (`RunAsync`) and `IResourceManifestPublisher` (`PublishAsync`, the publication endpoint's logic). `RecordAsync` records a write's snapshot and saves the record. Exposes `Model`, `Resources` (the aggregates), `StartupTimeout`, and `Started`. |
+| `IInfrastructureProvider` | The platform: plans a resource (`PlanResourceAsync`), deploys resources and child gateways, tears down resources and child gateways, and supplies each resource's infrastructure actions. |
+| `InfrastructurePlan`, `InfrastructureChange` | What deploying a resource would change (`None`, `Create`, `Update`) and the revision the provider would run. |
+| `IGatewayStore`, `GatewayRecord`, `GatewayResourceRecord` | The gateway's persisted record: child gateways and, per resource, the revision deployed, the state recorded, and the instances registered. |
+| `JsonFileGatewayStore` | One indented JSON file per gateway, replaced atomically on each save; snapshot values as base64. The placeholder for a store over the Database area. |
 | `GatewayDeploymentManifest` | What a gateway deploys (the whole hierarchy plus the gateway's name) and where (opaque provider settings). UTF-8 JSON with camel-case names. `ToModel()` creates the gateway's model. |
 | `ApplicationGatewayException`, `ApplicationGatewayErrorCode` | Refused publications (`PublicationsClosed`, `ResourceUnknown`, `ResourceTornDown`) and a failed startup (`StartupTimedOut`). |
 
@@ -109,6 +121,42 @@ what they set until the next deployment replaces it, so the gateway records noth
 Dispatch uses the controls' statuses: `NotFound`, `NotSupported`, and `Rejected` when the input does
 not bind.
 
+**G10 — Reconcile, don't redeploy (owner request, 2026-10-28).** The provider plans each resource
+first, from what the platform runs: `None`, `Create`, or `Update`, and the revision it would run.
+The gateway deploys only what changes. A plan of `None` is adopted: the resource starts registered,
+outside the startup window, so a gateway restarted with the same model deploys nothing and tears
+nothing down. This replaces the restart behaviour open question 2 described, where a restarted
+gateway saw no registrations and tore everything down. A plan step separate from the deployment
+keeps the decision out of the publication path: in-process providers start instances inside
+`DeployResourceAsync`, and those instances publish before it returns. *Rejected:* one idempotent
+deploy call that reports what it changed. The gateway would learn of an update only after the new
+instances had published with the old state.
+
+**G11 — The record lives behind a store (owner request, 2026-10-28).** `IGatewayStore` loads the
+record once and saves the whole record after every change: deployment, registration, recorded
+write, teardown. Saves never overlap. `JsonFileGatewayStore` is the placeholder. A store over the
+Database area replaces it in each gateway once that area is ready, and the gateway does not change.
+Snapshot values are stored as base64, because the platform's content serializer may not be JSON.
+
+**G12 — State follows the definition.** A resource's revision is a fingerprint of its manifest
+(provider, name, dependencies) followed by the provider's revision (image, platform settings). The
+recorded state survives while the revision does. A new revision is a new deployment of that
+resource and starts without the previous state; a workload that disappeared and is created again
+keeps it. Registered instances survive only while the plan is `None`, because a created or updated
+workload replaces them. This refines "state lasts until the next deployment" to each resource: a
+deployment that does not change a resource leaves its operator changes in place, which keeps every
+running instance consistent with the record.
+
+**G13 — A missed update is not torn down.** A new resource that misses the startup window is torn
+down (G4). An updated one is not: its previous instances are the platform's to keep or replace, as
+a rolling update does. Its later publications are refused, and the run fails with
+`StartupTimedOut`.
+
+**G14 — Retire after startup.** Resources and child gateways the record holds but the model no
+longer declares are torn down only after the deployment has started. A failed deployment therefore
+leaves the previous one running. They stay in the record until their teardown succeeds, so a failed
+run retries them.
+
 **G9 — No HTTP here, yet.** COHLIB001 bars a library from referencing Web, and COHRES003 bars Web
 (any resource package) from referencing a `Gateway*` assembly, so neither side can bind the other
 today. The options are: serve HTTP from this library tier with `Http.Connections`, as the retired
@@ -117,8 +165,8 @@ or relax one of the guards. That choice is open, so this chunk stops at transpor
 
 ## AOT
 
-No reflection or runtime code generation. The deployment manifest is read and written through a
-source-generated JSON context.
+No reflection or runtime code generation. The deployment manifest and the record file are read and
+written through source-generated JSON contexts.
 
 ## Diagnostics
 
@@ -128,13 +176,14 @@ candidates for an event source.
 ## Open questions
 
 1. **HTTP binding** (G9): which of the three options.
-2. **Gateway restart within a deployment.** Instances publish once, at start, so a restarted gateway
-   would see no registrations and tear its resources down. It needs instances to publish again, or
-   a provider that reports what already runs, with idempotent deployment.
-3. **Startup failure scope.** Only missed resources are torn down. Should a failed startup tear down
-   the whole deployment instead?
-4. **State persistence.** Recorded snapshots live in memory. A store seam, which a restarted gateway
-   would seed its aggregates from, is not built.
+2. **Instance liveness after a restart.** Resolved for adoption (G10–G12). A restarted gateway knows
+   its instances only from the record and trusts them until they publish again. Instances publish
+   once and send no heartbeat, so an instance that died while the gateway was down stays registered.
+3. **Startup failure scope.** Only missed new resources are torn down (G13). Should a failed startup
+   tear down the whole deployment instead, or roll updates back?
+4. **Rollout strategy.** An update's rollout is the platform's. Rolling a change through a logical
+   resource's instances a few at a time, such as a restart caused by a dependency's new output, needs
+   the gateway-to-instance channel (question 5).
 5. **Controls fan-out.** Executing a control on one instance and restoring its snapshot on the others
    needs a gateway-to-instance channel, and so the instance's address in its manifest (chunk 1's
    instance-address question). The aggregate's `Record` already names the targets.

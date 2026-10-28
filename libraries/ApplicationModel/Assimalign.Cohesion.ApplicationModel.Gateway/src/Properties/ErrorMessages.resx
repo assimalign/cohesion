@@ -8,7 +8,13 @@
   <data name="GatewayPublicationsClosed" xml:space="preserve"><value>The gateway is not running, so it accepts no publications.</value></data>
   <data name="GatewayResourceUnknown" xml:space="preserve"><value>Gateway '{0}' does not run resource '{1}/{2}'.</value></data>
   <data name="GatewayResourceTornDown" xml:space="preserve"><value>Gateway '{0}' tore down resource '{1}/{2}' after it missed its startup window.</value></data>
-  <data name="GatewayStartupTimedOut" xml:space="preserve"><value>Gateway '{0}' tore down {1} resource(s) that published no manifest within {2}: {3}.</value></data>
+  <data name="GatewayStartupTimedOut" xml:space="preserve"><value>Gateway '{0}': {1} resource(s) published no manifest within {2}: {3}. New resources were torn down; updated resources keep whatever instances the platform still runs.</value></data>
+  <data name="GatewayResourceUpdateMissed" xml:space="preserve"><value>Gateway '{0}' stopped accepting resource '{1}/{2}' after its update missed the startup window.</value></data>
+  <data name="GatewayResourcePlanNull" xml:space="preserve"><value>The infrastructure provider returned no plan, or a plan without a revision, for resource '{0}/{1}'.</value></data>
+  <data name="GatewayStoreDirectoryInvalid" xml:space="preserve"><value>A gateway store directory is a non-empty path.</value></data>
+  <data name="GatewayRecordNull" xml:space="preserve"><value>The gateway record file '{0}' holds the JSON literal null.</value></data>
+  <data name="GatewayRecordSnapshotInvalid" xml:space="preserve"><value>A recorded snapshot is a JSON object with a string 'action' and a non-empty base64 'value'.</value></data>
+  <data name="GatewayNameMissing" xml:space="preserve"><value>A gateway name is required.</value></data>
   <data name="GatewayResourceActionsNull" xml:space="preserve"><value>The infrastructure provider returned no action list for resource '{0}/{1}'.</value></data>
   <data name="GatewayDeploymentManifestNull" xml:space="preserve"><value>The deployment manifest is the JSON literal null.</value></data>
 </root>
