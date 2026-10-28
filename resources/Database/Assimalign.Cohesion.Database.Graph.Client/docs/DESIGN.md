@@ -42,6 +42,13 @@ sequenceDiagram
 
 ## Scalar completion
 
+Reduce and ALL/ANY/NONE/SINGLE (#1736, GQ-C2) use the existing Execute exchange. InMemory/TCP
+regressions pin NULL/empty identities, ordered and nested reduction, scalar entity-group fields,
+aggregate operands, MERGE actions and nonexecuting EXPLAIN. Entity-valued reductions and nested
+entity accumulators retain static pre-write refusal until #1662. CG01018/CG02015/CG05025 and
+existing Boolean CG02013 failures retain structured diagnostics and the authenticated session.
+No client source, protocol message, codec or capability change is required.
+
 Collection admission regressions (#1736) cover scalar comprehension properties and both MERGE
 action branches over InMemory and TCP. Static slice/filter refusals retain structured codes
 CG00012, CG02014 and CG02013 and the authenticated session; protocol 2.1 is unchanged.

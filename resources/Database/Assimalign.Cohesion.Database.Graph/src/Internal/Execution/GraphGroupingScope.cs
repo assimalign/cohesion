@@ -43,6 +43,23 @@ internal sealed class GraphGroupingScope
             _token.ThrowIfCancellationRequested();
             if ((iterators is null || !GraphValueExpressions.ReferencesAny(expression, iterators, _token)) &&
                 (_keys.Contains(expression) && (reusable is null || reusable.Contains(expression)) || _aggregates.Contains(expression))) { continue; }
+            if (expression is GqlReduceExpression reduce)
+            {
+                Validate(reduce.List, aliases, reusable, iterators);
+                Validate(reduce.Initial, aliases, reusable, iterators);
+                var inner = iterators is null ? new HashSet<string>(StringComparer.Ordinal) : new HashSet<string>(iterators, StringComparer.Ordinal);
+                inner.Add(reduce.Variable); inner.Add(reduce.Accumulator);
+                Validate(reduce.Body, aliases, reusable, inner);
+                continue;
+            }
+            if (expression is GqlListPredicateExpression predicate)
+            {
+                Validate(predicate.List, aliases, reusable, iterators);
+                var inner = iterators is null ? new HashSet<string>(StringComparer.Ordinal) : new HashSet<string>(iterators, StringComparer.Ordinal);
+                inner.Add(predicate.Variable);
+                Validate(predicate.Predicate, aliases, reusable, inner);
+                continue;
+            }
             if (expression is GqlListComprehensionExpression comprehension)
             {
                 Validate(comprehension.List, aliases, reusable, iterators);

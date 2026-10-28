@@ -38,6 +38,10 @@ internal static class GraphProjectionText
             GqlListComprehensionExpression comprehension => "[" + Name(comprehension.Variable) + " IN " + Describe(comprehension.List) +
                 (comprehension.Predicate is null ? "" : " WHERE " + Describe(comprehension.Predicate)) +
                 (comprehension.Projection is null ? "" : " | " + Describe(comprehension.Projection)) + "]",
+            GqlReduceExpression reduce => "reduce(" + Name(reduce.Accumulator) + " = " + Describe(reduce.Initial) + ", " +
+                Name(reduce.Variable) + " IN " + Describe(reduce.List) + " | " + Describe(reduce.Body) + ")",
+            GqlListPredicateExpression predicate => predicate.Kind.ToString().ToLowerInvariant() + "(" + Name(predicate.Variable) +
+                " IN " + Describe(predicate.List) + " WHERE " + Describe(predicate.Predicate) + ")",
             GqlListSliceExpression slice => "(" + Describe(slice.Operand) + ")[" + (slice.From is null ? "" : Describe(slice.From)) +
                 ".." + (slice.To is null ? "" : Describe(slice.To)) + "]",
             GqlMapExpression map => "{" + string.Join(", ", map.Entries.Select(entry => Name(entry.Key) + ": " + Describe(entry.Value))) + "}",

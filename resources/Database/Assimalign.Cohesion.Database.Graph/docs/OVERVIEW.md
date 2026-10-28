@@ -10,7 +10,7 @@ enumerates and drops logical databases, opens database-bound sessions, and imple
 node, relationship and traversal operations of `GraphDatabase`. A session executes the bounded GQL
 subset, including WALK/TRAIL/SIMPLE/ACYCLIC path modes (implicit TRAIL), quantified paths with ISO {m,n}/+/* and Cypher *m..n, group lists, source-ordered MATCH/OPTIONAL MATCH with null extension, named scalar/list/map parameters, Boolean/arithmetic WHERE and RETURN expressions,
 core element/string/math functions, CAST, Cypher conversions, transaction-start CURRENT_DATE/CURRENT_TIMESTAMP,
-CASE, COALESCE, NULLIF, list/map constructors, lexical list comprehensions, open-ended slices and field/index access,
+CASE, COALESCE, NULLIF, list/map constructors, lexical list comprehensions, ordered reduce, ALL/ANY/NONE/SINGLE list predicates, open-ended slices and field/index access,
 SET/REMOVE scalar properties and node labels through MVCC replacements, literal-map replacement and merge,
 COUNT, SUM, AVG, MIN, MAX and COLLECT_LIST (Cypher collect), with implicit or ISO GROUP BY,
 RETURN DISTINCT/ALL, star, aliases and standalone RETURN, ORDER BY with explicit null placement,

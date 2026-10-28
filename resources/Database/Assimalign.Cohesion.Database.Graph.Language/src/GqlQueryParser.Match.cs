@@ -124,7 +124,7 @@ public sealed partial class GqlQueryParser
                 string variable;
                 GqlExpression list;
                 if (unwind)
-                { list = ParsePredicate(); Expect("AS"); variable = Identifier(); }
+                { list = ParsePredicate(); Expect("AS"); variable = Failed ? string.Empty : Identifier(); }
                 else
                 { Advance(); variable = Identifier(); Expect("IN"); list = ParsePredicate(); }
                 stages.Add(new GqlForStage(variable, list, unwind, Span(clauseStart, Previous)));
@@ -146,7 +146,7 @@ public sealed partial class GqlQueryParser
                 GqlExpression? limit = null;
                 var quantifier = GqlSetQuantifier.All;
                 if (Take("DISTINCT")) { quantifier = GqlSetQuantifier.Distinct; }
-                else { Take("ALL"); }
+                else { TakeSetQuantifierAll(); }
                 returnStar = Take(TokenType.Asterisk);
                 if (returnStar && !hasNamedBinding)
                 { Error("CG00002", ErrorMessages.GqlQueryParserParseQueryVoid2, Previous); }

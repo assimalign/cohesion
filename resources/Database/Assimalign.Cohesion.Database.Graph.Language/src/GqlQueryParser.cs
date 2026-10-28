@@ -342,8 +342,8 @@ public sealed partial class GqlQueryParser : QueryParser
                 continue;
             }
             if (value == "WITH" && valuePosition && i > 0 && (IsWordAt(i - 1, "STARTS") || IsWordAt(i - 1, "ENDS"))) { continue; }
-            if (value == "ALL" && i + 3 < _tokens.Count && _tokens[i + 1].Type == TokenType.LeftParen && IsWordAt(i + 3, "IN"))
-            { UnsupportedConstruct("ALL", token, token); continue; }
+            if (value is "ALL" or "ANY" or "NONE" or "SINGLE" && valuePosition &&
+                i + 1 < _tokens.Count && _tokens[i + 1].Type == TokenType.LeftParen) { continue; }
             if (value == "ALL" && i > 0 && (IsWordAt(i - 1, "RETURN") || IsWordAt(i - 1, "WITH") || _tokens[i - 1].Type == TokenType.LeftParen && i > 1 && (_tokens[i - 2].Type == TokenType.Function || _allowCustomFunctions && _tokens[i - 2].Type == TokenType.Identifier))) { continue; }
             if (patternDepth != 0 && !valuePosition) { continue; }
             if (!GqlUnsupportedVocabulary.TryFind(value, out var word)) { continue; }

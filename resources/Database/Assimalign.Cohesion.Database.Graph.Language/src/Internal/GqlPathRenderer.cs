@@ -121,6 +121,14 @@ internal static class GqlPathRenderer
                 case GqlPropertyExpression property: Push(Name(property.Variable), ".", Name(property.Property)); break;
                 case GqlMemberExpression member: Push("(", member.Operand, ").", Name(member.Member)); break;
                 case GqlSubscriptExpression subscript: Push("(", subscript.Operand, ")[", subscript.Index, "]"); break;
+                case GqlReduceExpression reduce:
+                    Push("reduce(", Name(reduce.Accumulator), " = ", reduce.Initial, ", ", Name(reduce.Variable),
+                        " IN ", reduce.List, " | ", reduce.Body, ")");
+                    break;
+                case GqlListPredicateExpression predicate:
+                    Push(predicate.Kind.ToString().ToLowerInvariant(), "(", Name(predicate.Variable), " IN ",
+                        predicate.List, " WHERE ", predicate.Predicate, ")");
+                    break;
                 case GqlListSliceExpression slice: Push("(", slice.Operand, ")[", slice.From, "..", slice.To, "]"); break;
                 case GqlListComprehensionExpression comprehension:
                     Push("[", Name(comprehension.Variable), " IN ", comprehension.List,

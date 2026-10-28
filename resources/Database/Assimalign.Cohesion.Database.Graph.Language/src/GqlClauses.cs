@@ -108,6 +108,12 @@ public static class GqlClauses
     /// <summary>A list slice with optional inclusive start and exclusive end.</summary>
     public const string ListSlice = "LIST SLICING";
 
+    /// <summary>Ordered reduction with lexical accumulator and iterator bindings.</summary>
+    public const string Reduce = "REDUCE";
+
+    /// <summary>Three-valued ALL, ANY, NONE and SINGLE predicates over lists.</summary>
+    public const string ListPredicate = "LIST PREDICATE";
+
     /// <summary>Invokes a graph query procedure.</summary>
     public const string Call = "CALL";
 

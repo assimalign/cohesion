@@ -68,8 +68,7 @@ public sealed class GraphCompositeWireTests
         merged.Count.ShouldBe(2);
         merged[0].ToArray().ShouldBe(new object?[] { 2L, 11L, 21L });
         merged[1].ToArray().ShouldBe(new object?[] { 4L, 12L, null });
-        var unsupported = await Should.ThrowAsync<GraphClientException>(async () => await connection.QueryAsync("RETURN all(x IN [] WHERE TRUE)", cancellationToken: harness.Token));
-        unsupported.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CK00001");
+        (await connection.QueryAsync("RETURN all(x IN [] WHERE TRUE)", cancellationToken: harness.Token)).ShouldHaveSingleItem()[0].ShouldBe(true);
         (await connection.QueryAsync("MATCH (n:Unwritten) RETURN count(*)", cancellationToken: harness.Token)).ShouldHaveSingleItem()[0].ShouldBe(0L);
         var explain = await connection.QueryAsync("EXPLAIN MATCH (a)-[rs]->{2}(b) RETURN [r IN rs | r.w]", cancellationToken: harness.Token);
         explain.ShouldNotBeEmpty();
