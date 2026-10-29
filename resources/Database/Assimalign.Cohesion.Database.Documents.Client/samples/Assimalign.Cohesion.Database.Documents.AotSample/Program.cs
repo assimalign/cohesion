@@ -168,6 +168,7 @@ internal static class Program
             Check(((JsonElement)nestedUpdate.Single()[0]!).GetRawText() == "[1]", "DML statement-start nested reads");
             var nestedDelete = await connection.QueryAsync("DELETE FROM nested_writes d WHERE n IN (SELECT RAW s.n FROM nested_writes s) RETURNING n", cancellationToken: token);
             Check(Equals(nestedDelete.Single()[0], 2m), "DELETE nested predicate");
+            Check(await connection.ExecuteAsync("DROP COLLECTION nested_writes", cancellationToken: token) == 0, "nested DML collection cleanup");
             var lazySubquery = await connection.QueryAsync("SELECT COALESCE(1, (SELECT RAW 1/0 FROM items)) AS n FROM items LIMIT 1", cancellationToken: token);
             Check(lazySubquery.Count == 1 && Equals(lazySubquery[0][0], 1m), "lazy nested SELECT");
             using (var deep = JsonDocument.Parse(new string('[', 255) + "0" + new string(']', 255), new JsonDocumentOptions { MaxDepth = 256 }))
