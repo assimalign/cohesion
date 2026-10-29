@@ -117,22 +117,73 @@ statement. An unreached CASE, AND/OR or lazy conditional argument performs no ne
 consumes no nested work or retention, invokes no callback and raises no runtime error. Static
 parameter, numeric, name, metadata and grouping validation still applies to every branch.
 
-Every materialized nested array, including a per-evaluation result, remains retained until the
-statement exits. Arrays are independently owned JSON values, and output projection clones remain
-valid after the statement. Nested source rows, results, scratch and arrays share the existing
+Cached deterministic arrays remain retained until the statement exits. Uncached arrays belong to
+the evaluating expression or row: predicates release them immediately, while projection, grouping,
+UNNEST and ordering consumers clone and charge the values they retain. Filter-only nested retention
+is constant across outer rows. Arrays and output projection clones own their JSON independently.
+Quantifiers and other per-element filters release discarded correlated results after each iteration,
+while preserving the input collection and statement caches. IN-list operands, CASE conditions and
+skipped conditional arguments have the same scratch lifetime. Object construction retains live
+member values until serialization and releases discarded expression scratch per member.
+Object constructors, array constructors, ARRAY and FIRST keep their returned value charged until
+the enclosing consumer releases it at its iteration or row boundary.
+Nested source rows, results, scratch and arrays share the existing
 memory budget. A conservative reservation precedes array serialization and then shrinks to its
 measured representation. Cancellation or failure releases all nested reservations. EXPLAIN binds
 without executing and shows each SubqueryExpression, owning clause/span, nested access plan and
-`cached_for_statement` or `per_evaluation` policy. Plans are statement-local and rebuilt on the
+`cached_for_statement` or `per_evaluation` policy, plus captured names in `correlation`. Plans are statement-local and rebuilt on the
 next execution, including a reused request after CREATE/DROP INDEX.
 
-Deferred forms use CK00001 and name the form: correlated subqueries (OQ-Q3) and
-subqueries anywhere inside INSERT, UPSERT, UPDATE or
-DELETE, including RETURNING (OQ-Q3). References to outer FROM/UNNEST, group or comprehension
-bindings, and outer projection aliases from ORDER BY, are correlation; inner declarations shadow
-them by ordinal name. Qualified outer stars (`d.*`) and a nested `FROM d` naming an outer alias
-also refuse with CK00001 naming correlation. An ordinary unqualified field binds to the inner
-source, as in Couchbase; it does not implicitly capture an outer document field.
+An unaliased FROM exports the collection name to nested SELECTs and recognizes it as the local
+META receiver. Group-key matching compares captured qualified paths with unqualified keys.
+The query's own paths still use only its explicit alias: items.g in FROM items reads the field
+items then g. Thus SELECT items.g FROM items GROUP BY g is refused with CD05001, and
+SELECT DISTINCT g FROM items ORDER BY items.g is refused with CD01014. SELECT RAW g FROM items
+ORDER BY items.g sorts on that field path. Captured group-key matching strips the collection
+receiver only on the captured side. META on an UNNEST variable, comprehension variable or unknown
+name is refused with CD05001 before evaluation.
+Local META identity ordering retains identity paging; EXPLAIN
+reports identity_paging=True when this path applies. A source alias or UNNEST variable that reuses
+a captured name still obeys its own query's grouping restrictions. Complete group keys are matched
+before descending into their subqueries at every depth.
+In ORDER BY only a standalone projection alias substitutes its projection. Direct paths inside
+other expressions resolve through row and outer bindings; nested SELECTs inside ORDER BY can
+capture projection aliases. Their own lexical variables retain precedence over those aliases.
+
+Correlated subqueries capture outer FROM/UNNEST, group and comprehension bindings, and outer
+projection aliases in ORDER BY. Inner declarations shadow outer names by ordinal spelling.
+An unqualified field binds to the inner source.
+Outer captures are constant within each invocation of an inner grouped query, including its
+projection, HAVING and ORDER BY; local fields still require the normal grouping rules.
+Every enclosing grouped scope also checks the capture: group keys and group bindings are visible,
+while an ungrouped source path gives CD05001 just as a direct reference does. The enclosing
+aggregate's row inputs may capture source fields; GROUP AS is unavailable in those inputs (CD01031).
+Inner aggregates do not restore an enclosing query's hidden fields. This follows SQL++'s
+[grouped-object visibility](https://docs.couchbase.com/server/7.6/n1ql/n1ql-language-reference/groupby.html#group-as-clause).
+Captured paths never constrain local indexes or prove local index ordering. Only local-source
+META().id / META(local_alias).id permits identity paging; ordering by captured metadata keeps
+ascending inner document identity for equal keys. Metadata equivalence includes its receiver.
+Repeated subquery group keys must also capture the same bindings; matching text alone does not
+prove grouping when a comprehension or quantifier shadows an enclosing name.
+META(outer_alias).id/version follows a captured stored source's identity. Captured expression,
+derived and local-value bindings have no stored identity and return NULL for metadata.
+A nested `FROM d.items AS i`, or `FROM d AS i`
+where d is an explicit outer alias, iterates that outer value per row. An implicit collection name
+in a bare FROM continues to name the collection. This follows the [Couchbase correlation and scope contract](https://docs.couchbase.com/server/7.6/n1ql/n1ql-language-reference/subqueries.html).
+Qualified stars (`d.*`) retain their existing CK00001 refusal.
+
+Subqueries execute in UPDATE/DELETE predicates, SET and VALUES expressions, INSERT/UPSERT SELECT
+sources and RETURNING. Every nested read sees statement-start data, including writes from earlier
+statements in an explicit transaction, and excludes this statement's writes. Mutation predicates,
+values and SELECT inputs finish staging before writes. RETURNING with subqueries also stages
+before writes, using post-images and versions reserved from the existing durable allocator;
+the eventual writes use those same versions. An aborted statement may leave allocator gaps.
+No correlated result is memoized across outer rows.
+
+`StatementWorkBudget` defaults to 10,000,000 reached expression evaluations for statements using
+subqueries or expression sources. All depths share the counter, including outer expressions and
+cache hits; skipped expressions consume nothing. Exhaustion gives located CD05020 and rolls back
+the statement. The existing StatementMemoryBudget and cancellation apply at every depth.
 
 Complete projections on both execution paths are limited to 256 serialized JSON levels.
 RAW/VALUE and lone stars have no enclosing row object and allow 256 value levels. Named columns
@@ -148,14 +199,14 @@ protocol, frame or capability version. InMemory, TCP and NativeAOT use the ordin
 
 `FROM (SELECT ...) [AS] alias` requires an alias (CD00015 if absent). AS is optional,
 following [from.adoc:276-282](https://github.com/couchbaselabs/docs-devex/blob/c3bb1549af4887019b9983e371d9e8b4f569052c/modules/n1ql/pages/n1ql-language-reference/from.adoc#L276-L282).
-`FROM expression AS alias` accepts uncorrelated arrays, parameters, constructors, functions,
+`FROM expression AS alias` accepts arrays, parameters, constructors, functions,
 operators and subqueries. Generic-expression AS is required when supplying an explicit alias,
 as [from.adoc:409-416](https://github.com/couchbaselabs/docs-devex/blob/c3bb1549af4887019b9983e371d9e8b4f569052c/modules/n1ql/pages/n1ql-language-reference/from.adoc#L409-L416)
 specifies. An unnamed expression must have an implicit field name; literals, arrays and parameters
 therefore require an explicit alias (CD01033), matching
 [Couchbase from_expression.go:159-163,244-252](https://github.com/couchbase/query/blob/6d40d1dd24e256588af2ff5bf6627ca76135397c/algebra/from_expression.go#L159-L163).
 An ordinary bare identifier remains a collection source. Database-qualified collection names
-remain unsupported; nested paths naming an outer alias are refused as correlation (CK00001).
+remain unsupported. Nested paths may capture an outer alias.
 Other free source identifiers give CD01034, including under LIMIT 0. A source has no implicit
 input-row scope; comprehension-local variables remain available. This follows
 [formalizer.go:474-479](https://github.com/couchbase/query/blob/6d40d1dd24e256588af2ff5bf6627ca76135397c/expression/formalizer.go#L474-L479).
@@ -196,11 +247,9 @@ matching inner row and disposes the inner cursor immediately. Paging precedes pr
 are inferred over the selected window. Grouping, DISTINCT and ORDER BY retain the rows they
 must re-read, under the shared CD05018 memory budget. Outer ORDER BY sorts; it consumes no
 inner index-order guarantee. EXPLAIN includes DerivedSource/ExpressionSource and nested plans.
-All levels share the operation, snapshot, own writes, function catalog and cancellation. Q1's
-deterministic expression-subquery cache and statement-lifetime array retention remain unchanged.
-Correlation, JOIN/NEST (including comma joins), subqueries in DML and expression FROM sources
-inside INSERT/UPSERT SELECT retain named CK00001 refusals. Mutation-source integration is
-deferred with OQ-Q3. No format or wire
+All levels share the operation, snapshot, function catalog, work/memory bounds and cancellation.
+Correlated sources are evaluated per outer row. INSERT/UPSERT SELECT accepts both source forms.
+JOIN/NEST (including comma joins) retain named CK00001 refusals. No format or wire
 version changes are required.
 
 ## RETURNING (#1727)
@@ -330,7 +379,7 @@ group aliases omit their members; explicit NULL members remain. LEFT UNNEST's ab
 therefore omits t. Unnamed group terms add no wrapper member. No group-array element ordering
 is promised. This follows Couchbase's [GROUP BY / GROUP AS wrapper and alias contract](https://github.com/couchbaselabs/docs-devex/blob/c3bb1549af4887019b9983e371d9e8b4f569052c/modules/n1ql/pages/n1ql-language-reference/groupby.adoc#L47-L81),
 with the owner's requirement to include group-term aliases. LETTING stays unavailable (CK00001),
-as do correlated subqueries and FROM-array sources. LETTING remains contextual as a field or FROM/UNNEST name; use AS or quotes for a group-term alias named letting.
+while correlated subqueries and FROM-array sources execute. LETTING remains contextual as a field or FROM/UNNEST name; use AS or quotes for a group-term alias named letting.
 
 Group terms evaluate against the input row, independently of other group-term aliases.
 Named terms then bind each member's computed value for aggregate row inputs and bind the

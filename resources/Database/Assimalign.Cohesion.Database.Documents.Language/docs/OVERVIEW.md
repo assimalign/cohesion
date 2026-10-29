@@ -51,10 +51,10 @@ DELETE returns the pre-image; the other writes return the stored post-image. Pro
 serialization or budget failure rolls back writes before any results are exposed.
 USE KEYS, OBJECT transformations, multiple bindings, position variables, WITHIN and UPDATE/DELETE LIMIT remain deferred.
 `DEFINE` is recognized statement-initially, and `ELEMENT` / `FLATTEN` in call position, to
-produce `CK00001`; all three remain usable field names. Uncorrelated SELECT expression subqueries return arrays; EXISTS and IN (SELECT RAW ...) execute.
-Derived FROM requires an alias with optional AS. Uncorrelated expression sources iterate arrays,
+produce `CK00001`; all three remain usable field names. SELECT expression subqueries return arrays; EXISTS and IN (SELECT RAW ...) execute.
+Derived FROM requires an alias with optional AS. Expression sources iterate arrays,
 parameters and subqueries; their explicit aliases require AS. OqlSelectExpression.Source retains
-the FROM expression. Correlation and subqueries in DML remain deferred; see DIALECT.md.
+the FROM expression. Lexical correlation and subqueries in DML execute; see DIALECT.md.
 MISSING has its own AST node, distinct from NULL, and `IS [NOT] MISSING` / `IS [NOT] VALUED`
 are executable presence predicates. NIL remains a NULL synonym.
 

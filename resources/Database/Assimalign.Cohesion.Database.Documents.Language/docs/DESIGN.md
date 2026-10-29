@@ -92,7 +92,7 @@ Lexical recognition preserves the established vocabulary so rejected constructs 
 | `VALUES` | Yes | One or more parenthesized key/value pairs for INSERT or UPSERT |
 | `FROM` | Yes | One collection or reserved `COHESION_SCHEMA` source, optional iteration variable, then ordered UNNEST bindings |
 | `DERIVED FROM` | Yes | Parenthesized SELECT, required alias, optional AS; streams its rows into the outer pipeline |
-| `EXPRESSION FROM` | Yes | Uncorrelated expression, AS before an explicit alias; arrays expand and MISSING supplies no rows |
+| `EXPRESSION FROM` | Yes | Expression with outer captures inside subqueries; AS before an explicit alias; arrays expand and MISSING supplies no rows |
 | `UNNEST` | Yes | Optional INNER; one row per array element, chainable |
 | `LEFT UNNEST` | Yes | Optional OUTER; preserves empty and non-array inputs with a MISSING variable |
 | `WHERE` | Yes | Scalar comparison and Boolean document filtering |
@@ -113,7 +113,7 @@ Lexical recognition preserves the established vocabulary so rejected constructs 
 | `DROP COLLECTION` | Yes | One database-local collection, optionally `IF EXISTS` |
 | `CREATE INDEX` | Yes | 1..32 ordered scalar paths or one DISTINCT ARRAY key; scalar-only UNIQUE; IF NOT EXISTS |
 | `DROP INDEX` | Yes | One named index in one collection, optional IF EXISTS; ON is required |
-| `SUBQUERY` | Yes | Parenthesized uncorrelated SELECT returns an array; correlation and DML subqueries remain named CK00001 refusals |
+| `SUBQUERY` | Yes | Parenthesized SELECT returns an array; lexical correlation and DML expression positions execute |
 | `EXISTS` | Yes | Unary collection operator; arrays test nonemptiness, MISSING propagates, other inputs give NULL |
 | `MERGE` | No (pin) | SQL++ merge; stays a pin with no T1 item lifting it, and #1101 owns it |
 
@@ -247,7 +247,7 @@ this language has no separate expression renderer. RAW/VALUE enforces one non-st
 without an alias. Named projections reuse SELECT's expression parsing and reserved AS labels.
 RETURNING stays contextual: destinations, properties, output bindings and aliases keep that name.
 The recognized-vocabulary row remains for contextual coverage and unsupported prefix/SELECT use.
-The capability scan names SUBQUERY in DML at nested SELECT in RETURNING, including INSERT VALUES.
+The capability scan admits nested SELECT in RETURNING and INSERT/UPSERT VALUES.
 
 The engine binds only the target image (alias or implicit collection binding), validates scalar
 contexts before writes, and uses SELECT projection names/types and JSON semantics. Aggregate
@@ -540,8 +540,8 @@ The retired EXISTS binding quantifier is recognized by its
 unnested colon; an ordinary `EXISTS x IN array` remains an IN expression. Qualified-star
 syntax retains its path in a unary `.*` node so planning can name correlation before refusing
 an otherwise unsupported qualified star. ParseSelect stops at its matching closing parenthesis; recursive expression
-parsing shares CD00005's 128-level limit. The capability scan admits nested SELECT only within
-a SELECT statement and names SUBQUERY in DML for deferred forms. SELECT
+parsing shares CD00005's 128-level limit. The capability scan admits nested SELECT in SELECT,
+INSERT, UPSERT, UPDATE and DELETE, including RETURNING. SELECT
 quantifiers and reserved labels retain their existing positional rules within nested scopes.
 IN with a direct SELECT requires RAW or VALUE (CD00014); an ordinary parenthesized expression
 keeps the existing value-list interpretation. Source Text remains the statement renderer;
@@ -549,6 +549,25 @@ there is no separate OQL AST renderer. The engine renders nested plans in EXPLAI
 The [dialect](DIALECT.md#expression-subqueries-and-exists-1731-oq-q1) records every default,
 cache policy, scope, retention and deferred form. OqlSubqueryParserTests and the engine's
 advertised-clause corpus cover the syntax together with the runtime and transport suites.
+Correlation retains the resolved binding for index constraints, ordering proofs and META receiver
+equivalence. Captures are constants inside an invocation, and every enclosing grouped query still
+enforces group-key visibility (CD05001), including nested FROM and inner aggregate inputs.
+An enclosing aggregate may capture its source-row inputs; its GROUP AS binding remains unavailable
+there (CD01031). An absent alias uses the collection name only for nested captures and META
+receivers. Own paths retain field meaning, including group keys, DISTINCT equivalence and RAW
+ordering; captured group-key matching normalizes only the captured receiver. Metadata validation
+rejects UNNEST, comprehension and unknown receivers with CD05001 before evaluation.
+Local metadata alone permits identity paging, identified in EXPLAIN by identity_paging=True.
+ORDER BY's standalone alias substitution, direct grouped-row paths and nested projection-alias
+captures share one planning rule; reused source and UNNEST names keep local grouping restrictions.
+The engine parity and conformance corpora cover these scope distinctions alongside shadowing and group bindings.
+Subquery group-key equivalence includes free binding identity, retaining inner declarations that
+mask outer names while refusing a proof after an enclosing capture is shadowed.
+Per-element predicate/operand scratch has iteration lifetime, excluding live collections and
+statement caches. Object maps retain their live member results until serialization while releasing
+discarded member scratch; ARRAY/FIRST retain their existing streaming and lazy behavior.
+Constructors, ARRAY and FIRST retain their final returned representation until the consumer's
+iteration or row releases it, including when several constructed operands coexist.
 
 ## FROM source expressions (#1731, OQ-Q2)
 
@@ -852,7 +871,7 @@ overlapping targets and invalid stored results carry CD02016, CD01017 and CD0201
 respectively. The [dialect page](DIALECT.md) records the executable UPDATE contract.
 
 WHERE and SET values share ordinary parameter, numeric and META validation, and reject aggregates.
-Subqueries in either clause report CK00001 naming SUBQUERY at the inner SELECT, including under
+Subqueries in either clause are admitted, including under
 EXPLAIN. USE KEYS remains CK00001 at USE. ARRAY/FIRST comprehensions execute in SET and WHERE;
 UPDATE's separate SQL++ FOR mutation clause remains CK00001 at FOR.
 UPDATE's grammar itself refuses LIMIT and OFFSET, independently of SELECT capabilities. An update without RETURNING returns
@@ -886,7 +905,7 @@ version, including an unchanged value. SELECT sources materialize before writes,
 Repeated keys in one statement raise DocumentDuplicateKeyException and roll back the statement;
 last-writer-wins does not apply. Key/value validation, MISSING omission and complete-row binding
 are shared with INSERT. OPTIONS remains CK00001 at its token, and a nested
-SELECT in VALUES reports SUBQUERY. There is no statement-level version precondition in T1;
+SELECT in VALUES is admitted. There is no statement-level version precondition in T1;
 use PutAsync(expectedVersion) or UPDATE WHERE META().version = $v for optimistic replacement.
 EXPLAIN UPSERT describes Upsert or UpsertSelect without writing. The existing completion carries
 the affected count and optional RETURNING rows; no wire or persisted catalog shape changes.

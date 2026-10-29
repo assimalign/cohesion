@@ -44,7 +44,9 @@ internal sealed partial class DocumentExpressionEvaluator
     /// <param name="starSourceName">The FROM object member name for a synthetic UNNEST star, or null for a stored star.</param>
     /// <param name="resultClause">The result clause named by constructor-depth diagnostics.</param>
     /// <param name="operation">The executing statement that owns retained-value accounting, or null during planning.</param>
-    public DocumentExpressionEvaluator(string? alias, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken = default, string? writeVerb = null, DateTimeOffset? transactionStart = null, string? starSourceName = null, DocumentFunctionCatalog? functions = null, DatabaseName databaseName = default, string resultClause = "SELECT", DocumentOperation? operation = null)
+    /// <param name="nested">The nested statement context, or null on the ordinary evaluator path.</param>
+    /// <param name="sourceName">The local source binding name used when exporting a correlated scope.</param>
+    public DocumentExpressionEvaluator(string? alias, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken = default, string? writeVerb = null, DateTimeOffset? transactionStart = null, string? starSourceName = null, DocumentFunctionCatalog? functions = null, DatabaseName databaseName = default, string resultClause = "SELECT", DocumentOperation? operation = null, DocumentNestedExecutionContext? nested = null, string? sourceName = null)
     {
         _functions = functions ?? DocumentFunctionCatalog.Standard;
         _databaseName = databaseName;
@@ -52,7 +54,8 @@ internal sealed partial class DocumentExpressionEvaluator
         _starSourceName = starSourceName;
         _writeVerb = writeVerb;
         _resultClause = resultClause;
-        _state = operation is null ? null : new EvaluationState(operation);
+        _state = nested is not null ? new NestedEvaluationState(operation, nested.Bindings, sourceName ?? alias) :
+            operation is null ? null : new EvaluationState(operation);
         _transactionStart = transactionStart;
         _cancellationToken = cancellationToken;
         _parameters = parameters;
@@ -69,7 +72,7 @@ internal sealed partial class DocumentExpressionEvaluator
                 OqlMissingExpression => DocumentMissing.Instance,
                 OqlParameterExpression parameter => Parameter(parameter.Name),
                 OqlStarExpression => Star(document),
-                OqlMetaExpression meta => document.Id is null ? null : meta.Member == "id" ? document.Id : (decimal)document.Version,
+                OqlMetaExpression meta => ReadMetadata(meta, document),
                 OqlArrayExpression or OqlObjectExpression => Construct(expression, document, group),
                 OqlPathExpression path => ReadPath(path, document),
                 OqlUnaryExpression unary => Unary(unary.Operator, Evaluate(unary.Operand, document, group)),
@@ -305,20 +308,27 @@ internal sealed partial class DocumentExpressionEvaluator
 
     private object? ReadPath(OqlPathExpression path, DocumentEvaluationContext document)
     {
-        int start = path.Segments.Count > 0 && _alias is not null &&
-            string.Equals(path.Segments[0].Name, _alias, StringComparison.Ordinal) ? 1 : 0;
+        int start = path.Segments.Count > 0 && (_alias ?? (_state as NestedEvaluationState)?.SourceName) is string alias &&
+            string.Equals(path.Segments[0].Name, alias, StringComparison.Ordinal) ? 1 : 0;
         var current = document.Content;
-        if (document.Bindings is not null && path.Segments.Count > 0)
+        DocumentVariableBinding? found = null;
+        if (path.Segments.Count > 0)
         {
             for (var frame = document.Bindings; frame is not null; frame = frame.Parent)
+            { if (frame.Name == path.Segments[0].Name) { found = frame; break; } }
+            if (found is null && start == 0)
             {
-                if (frame.Name != path.Segments[0].Name) { continue; }
-                start = 1;
-                if (frame.Value is not JsonElement json)
-                { return start == path.Segments.Count ? frame.Value : DocumentMissing.Instance; }
-                current = json;
-                break;
+                for (var frame = (_state as NestedEvaluationState)?.Outer; frame is not null; frame = frame.Parent)
+                { if (frame.Name == path.Segments[0].Name) { found = frame; break; } }
             }
+        }
+        if (found is not null)
+        {
+            start = 1;
+            object? value = found.Value is DocumentEvaluationContext source ? ReadJson(source.Content) : found.Value;
+            if (value is not JsonElement json)
+            { return start == path.Segments.Count ? value : DocumentMissing.Instance; }
+            current = json;
         }
         for (int i = start; i < path.Segments.Count; i++)
         {
@@ -334,6 +344,28 @@ internal sealed partial class DocumentExpressionEvaluator
             }
         }
         return ReadJson(current);
+    }
+
+    private object? ReadMetadata(OqlMetaExpression expression, DocumentEvaluationContext document)
+    {
+        var source = document;
+        // With no nested scope or alias, planning has already checked the implicit
+        // collection receiver. There is no outer binding to resolve on this path.
+        if (expression.Arguments.Count == 1 && expression.Arguments[0] is OqlPathExpression { Segments.Count: 1 } path &&
+            path.Segments[0].Name is string name && name != (_alias ?? (_state as NestedEvaluationState)?.SourceName) &&
+            (_alias is not null || _state is NestedEvaluationState))
+        {
+            DocumentVariableBinding? found = null;
+            for (var frame = document.Bindings; frame is not null; frame = frame.Parent)
+            { if (frame.Name == name) { found = frame; break; } }
+            if (found is null)
+            {
+                for (var frame = (_state as NestedEvaluationState)?.Outer; frame is not null; frame = frame.Parent)
+                { if (frame.Name == name) { found = frame; break; } }
+            }
+            source = found?.Value is DocumentEvaluationContext captured ? captured : default;
+        }
+        return source.Id is null ? null : expression.Member == "id" ? source.Id : (decimal)source.Version;
     }
 
     internal static object? Normalize(object? value)

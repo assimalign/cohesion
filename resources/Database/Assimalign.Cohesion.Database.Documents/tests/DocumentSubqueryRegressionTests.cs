@@ -90,7 +90,7 @@ public sealed class DocumentSubqueryRegressionTests
         }
     }
 
-    [Theory(DisplayName = "Cohesion Test [Documents] - Subqueries: outer aliases are named correlation refusals")]
+    [Theory(DisplayName = "Cohesion Test [Documents] - Subqueries: outer aliases execute and qualified stars remain deferred")]
     [InlineData("SELECT n AS p FROM items ORDER BY (SELECT RAW p FROM other s)")]
     [InlineData("SELECT (SELECT RAW d.* FROM other s) FROM items d")]
     [InlineData("SELECT (SELECT RAW n FROM d) FROM items d")]
@@ -104,9 +104,16 @@ public sealed class DocumentSubqueryRegressionTests
         await session.CreateCollectionAsync("other", CancellationToken.None);
         await session.ExecuteAsync("INSERT INTO other (KEY, VALUE) VALUES ('a', {x:9})", cancellationToken: CancellationToken.None);
         // Act / Assert
+        if (!query.Contains(".*", StringComparison.Ordinal))
+        {
+            var rows = await DocumentSubqueryTests.RowsAsync(session, query);
+            rows.Count.ShouldBe(3);
+            session.LastQuerySubqueriesExecuted.ShouldBe(3);
+            return;
+        }
         var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(query, cancellationToken: CancellationToken.None));
         error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CK00001");
-        error.Diagnostics.Single().Message!.ShouldContain("Correlated", Case.Sensitive);
+        error.Diagnostics.Single().Message!.ShouldContain("Qualified star", Case.Sensitive);
         session.LastQuerySubqueriesExecuted.ShouldBe(0);
     }
 

@@ -48,6 +48,9 @@ public sealed class DocumentSubqueryParityTests
             "{v} IS NULL", "{v} IS NOT NULL", "{v} IS MISSING", "{v} IS NOT MISSING", "{v} IS VALUED", "{v} IS NOT VALUED",
             "SUM(ARRAY_LENGTH([{v}]))", "ARRAY_AGG({v})", "COUNT(DISTINCT {v})", "MIN({v})", "MAX({v})",
             "[@deep, tick(1), {v}]", "{a:@deep, b:tick(1), c:{v}}",
+            "{a:{v}} = {a:{v}}", "[{v}] = [{v}]",
+            "(ARRAY {v} FOR x IN [1,2] END) = (ARRAY {v} FOR x IN [1,2] END)",
+            "(FIRST {v} FOR x IN [1,2] END) = (FIRST {v} FOR x IN [1,2] END)",
             "ARRAY CASE WHEN x = 1 THEN @deep ELSE tick(1) END FOR x IN [{v},2] END"];
         string[] values = ["0", "1", "NULL", "TRUE", "FALSE", "'abc'", "[]", "[1]", "{a:1}", "[NULL]", "[1,NULL]", "[{a:1},{}]", "[[1],[]]", "[{a:[NULL]}]"];
         foreach (string form in forms)
@@ -72,11 +75,42 @@ public sealed class DocumentSubqueryParityTests
         // Field/index navigation has a path-only AST; bind the equivalent operand locally.
         yield return ["FIRST q.a[0] FOR q IN [{a:[1]}] END", "FIRST q.a[0] FOR q IN (SELECT RAW {a:[1]} FROM items LIMIT 1) END"];
         yield return ["META().id", "CASE WHEN EXISTS (SELECT RAW 1 FROM items) THEN META().id END"];
+        foreach (string form in new[] { "ANY v IN [1,2] SATISFIES EXISTS {v} END", "EVERY v IN [1,2] SATISFIES EXISTS {v} END",
+            "ARRAY v FOR v IN [1,2] WHEN EXISTS {v} END", "FIRST v FOR v IN [1,2] WHEN EXISTS {v} END",
+            "1 IN (ARRAY_LENGTH({v}), 2)", "CASE WHEN EXISTS {v} THEN TRUE END", "{a:EXISTS {v}, b:EXISTS {v}}" })
+        {
+            yield return [form.Replace("{v}", "[tick(1)]", StringComparison.Ordinal),
+                form.Replace("{v}", "(SELECT RAW tick(1) FROM [1] AS s)", StringComparison.Ordinal)];
+        }
 
     }
 
     public static IEnumerable<object[]> QueryPositions()
     {
+        yield return ["SELECT RAW [n] FROM items GROUP BY n", "SELECT RAW (SELECT RAW items.n FROM [1] AS s) FROM items GROUP BY n", 3];
+        yield return ["SELECT RAW [META().id] FROM items GROUP BY META().id", "SELECT RAW (SELECT RAW META(items).id FROM [1] AS s) FROM items GROUP BY META().id", 3];
+        yield return ["SELECT RAW [[n]] FROM items GROUP BY n", "SELECT RAW (SELECT RAW (SELECT RAW d.n FROM [1] AS s) FROM [1] AS t) FROM items d GROUP BY (SELECT RAW d.n FROM [1] AS s)", 9];
+        yield return ["SELECT RAW META().id FROM items ORDER BY META().id LIMIT 2", "SELECT RAW META(items).id FROM items WHERE EXISTS (SELECT RAW 1 FROM [1] AS s) ORDER BY META(items).id LIMIT 2", 1];
+        yield return ["SELECT RAW [{d:1},{d:2},{d:3}] FROM items d WHERE d.n = 1", "SELECT RAW (SELECT s.n AS d FROM items s ORDER BY d.n) FROM items d WHERE d.n = 1", 1];
+        yield return ["SELECT RAW [{d:2},{d:1},{d:3}] FROM items d WHERE d.n = 2", "SELECT RAW (SELECT s.n AS d FROM items s ORDER BY ABS(d.n-s.n),s.n) FROM items d WHERE d.n = 2", 1];
+        yield return ["SELECT RAW [{p:1},{p:2},{p:3}] FROM items LIMIT 1", "SELECT RAW (SELECT s.n AS p FROM items s ORDER BY p) FROM items LIMIT 1", 1];
+        yield return ["SELECT RAW [{p:-3},{p:-2},{p:-1}] FROM items LIMIT 1", "SELECT RAW (SELECT -s.n AS p FROM items s ORDER BY (SELECT RAW p FROM [1] AS t)) FROM items LIMIT 1", 4];
+        yield return ["SELECT RAW ARRAY [d.n] FOR s IN [0] END FROM items d GROUP BY d.n", "SELECT RAW ARRAY (SELECT RAW d.n FROM [1] AS s) FOR s IN [0] END FROM items d GROUP BY (SELECT RAW d.n FROM [1] AS s)", 6];
+        yield return ["SELECT RAW [META(d).id] FROM items d LIMIT 1", "SELECT RAW (SELECT RAW META(s).id FROM items s ORDER BY META(d).id DESC LIMIT 1) FROM items d LIMIT 1", 1];
+        yield return ["SELECT RAW [d.n] FROM items d GROUP BY d.n", "SELECT RAW (SELECT RAW d.n FROM [1] AS s) FROM items d GROUP BY d.n", 3];
+        yield return ["SELECT RAW [d.n + 1] FROM items d GROUP BY d.n + 1", "SELECT RAW (SELECT RAW d.n + 1 FROM [1] AS s) FROM items d GROUP BY d.n + 1", 3];
+        yield return ["SELECT RAW [1,2,3] FROM items d LIMIT 1", "SELECT RAW (SELECT RAW s.n FROM items s WHERE d.n = 1 ORDER BY s.n) FROM items d LIMIT 1", 1];
+        yield return ["SELECT {n:-d.n} AS d FROM items d WHERE TRUE ORDER BY d.n", "SELECT {n:-d.n} AS d FROM items d WHERE EXISTS (SELECT RAW 1 FROM items) ORDER BY d.n", 1];
+        yield return ["SELECT n AS p FROM items ORDER BY [[-n]]", "SELECT n AS p FROM items ORDER BY ARRAY (SELECT RAW p FROM [1] AS s) FOR p IN [-n] END", 3];
+        yield return ["SELECT [n] AS v FROM items d", "SELECT (SELECT RAW d.n FROM [1] AS s) AS v FROM items d", 3];
+        yield return ["SELECT n FROM items d WHERE n IN [n]", "SELECT n FROM items d WHERE n IN (SELECT RAW d.n FROM [1] AS s)", 3];
+        yield return ["SELECT n FROM items d ORDER BY [-n]", "SELECT n FROM items d ORDER BY (SELECT RAW -d.n FROM [1] AS s)", 3];
+        yield return ["SELECT COUNT(*) AS c FROM items d GROUP BY [n]", "SELECT COUNT(*) AS c FROM items d GROUP BY (SELECT RAW d.n FROM [1] AS s)", 3];
+        yield return ["SELECT COUNT(*) AS c FROM items d GROUP BY n AS k HAVING EXISTS [k]", "SELECT COUNT(*) AS c FROM items d GROUP BY n AS k HAVING EXISTS (SELECT RAW k FROM [1] AS s)", 3];
+        yield return ["SELECT SUM(n) FROM items d", "SELECT SUM(FIRST v FOR v IN (SELECT RAW d.n FROM [1] AS s) END) FROM items d", 3];
+        yield return ["SELECT * FROM items d UNNEST [d.n] AS v", "SELECT * FROM items d UNNEST (SELECT RAW d.n FROM [1] AS s) AS v", 3];
+        yield return ["SELECT RAW [d.n] FROM items d", "SELECT RAW (SELECT RAW v FROM [d.n] AS v) FROM items d", 3];
+        yield return ["SELECT RAW [d.n] FROM items d", "SELECT RAW (SELECT RAW v.n FROM d AS v) FROM items d", 3];
         yield return ["SELECT RAW v FROM [1,2,3] AS v", "SELECT RAW v FROM (SELECT RAW n FROM items) v", 0];
         yield return ["SELECT RAW v FROM [1,2,3] AS v", "SELECT RAW v FROM COALESCE((SELECT RAW n FROM items), []) AS v", 1];
         yield return ["SELECT SUM(v) AS n FROM [1,2,3] AS v", "SELECT SUM(v) AS n FROM (SELECT RAW n FROM items) v", 0];
@@ -176,6 +210,7 @@ public sealed class DocumentSubqueryParityTests
 
     [Theory(DisplayName = "Cohesion Test [Documents] - Subqueries: generated expressions preserve values failures and callback reachability")]
     [MemberData(nameof(Expressions))]
+    [MemberData(nameof(CorrelatedExpressions))]
     public async Task ExecuteAsync_GeneratedExpression_ShouldMatchSynchronousSemanticsAsync(string synchronous, string asynchronous)
     {
         // Arrange
@@ -198,7 +233,7 @@ public sealed class DocumentSubqueryParityTests
             calls = 0;
             try
             {
-                await using var result = (DatabaseResultSet)await session.ExecuteAsync("SELECT " + expression + " FROM items LIMIT 1",
+                await using var result = (DatabaseResultSet)await session.ExecuteAsync("SELECT " + expression + " FROM items AS outer LIMIT 1",
                     DocumentSubqueryRegressionTests.DeepParameters(), CancellationToken.None);
                 await foreach (var row in result.GetRowsAsync(CancellationToken.None))
                 {
@@ -209,6 +244,16 @@ public sealed class DocumentSubqueryParityTests
             }
             catch (DatabaseException exception)
             { return (null, null, false, exception.Diagnostics.Single().Code, calls); }
+        }
+    }
+
+    public static IEnumerable<object[]> CorrelatedExpressions()
+    {
+        foreach (var pair in Expressions())
+        {
+            string nested = ((string)pair[1]).Replace("FROM items LIMIT 1", "FROM items s WHERE outer.n = 1 LIMIT 1", StringComparison.Ordinal)
+                .Replace("FROM items WHERE FALSE", "FROM items s WHERE outer.n = 1 AND FALSE", StringComparison.Ordinal);
+            if (nested != (string)pair[1]) { yield return [pair[0], nested]; }
         }
     }
 }

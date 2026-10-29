@@ -21,11 +21,11 @@ and ordering. Counts accept literals or parameters through Int64.MaxValue; inval
 CD00007. LIMIT 0 returns planned column metadata after static validation and skips all sources
 and blocking stages. Other pages retain full-result column types, including empty results.
 INNER/LEFT UNNEST expands array elements into scoped rows before WHERE, grouping and paging.
-ANY/SOME/EVERY and array-value IN query arrays without expansion. Uncorrelated expression SELECTs
+ANY/SOME/EVERY and array-value IN query arrays without expansion. Expression SELECTs
 return arrays on a shared nested execution context; EXISTS and IN (SELECT RAW ...) compose with
-SELECT expressions. Derived FROM streams inner rows; uncorrelated expression sources accept arrays,
+SELECT expressions. Derived FROM streams inner rows; expression sources accept arrays,
 parameters and subqueries. Their stars wrap the source alias, and META returns NULL without a
-stored identity. Correlation and DML subqueries remain deferred. A star with UNNEST returns
+stored identity. Correlated queries and FROM sources execute per row, including in DML; nested reads see statement-start data. Uncached arrays have expression ownership, and all depths share work/memory bounds. A star with UNNEST returns
 synthetic objects keyed by variable names; an ordinary star preserves the stored document.
 CREATE INDEX admits one DISTINCT ARRAY path projection with an optional restricted WHEN among
 scalar keys. Matching ANY and direct UNNEST sources use deduplicated document candidates while

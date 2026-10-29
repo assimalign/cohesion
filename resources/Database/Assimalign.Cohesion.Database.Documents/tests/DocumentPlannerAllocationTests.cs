@@ -21,6 +21,37 @@ public sealed class DocumentPlannerAllocationTests
         _output = output;
     }
 
+    [Theory(DisplayName = "Cohesion Test [Documents] - ANY and UNNEST plans without subqueries keep their original allocation bytes")]
+    [InlineData("SELECT RAW 1 FROM items d WHERE ANY v IN d.tags SATISFIES v.n = 1 END", 8608L)]
+    [InlineData("SELECT RAW 1 FROM items d UNNEST d.tags AS v WHERE v.n = 1", 9808L)]
+    public async Task Plan_ArrayScopeWithoutSubqueries_ShouldKeepExactAllocationBytesAsync(string query, long expected)
+    {
+        // Arrange
+        await using var engine = DocumentDatabaseEngine.Create("array-planning-allocations", new());
+        var database = await engine.CreateDatabaseAsync("test", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.CreateCollectionAsync("items", CancellationToken.None);
+        await session.ExecuteAsync("CREATE INDEX ix ON items (DISTINCT ARRAY v.n FOR v IN tags END)", cancellationToken: CancellationToken.None);
+        var statement = DocumentQueryRequest.FromOql(query).Statement.OqlExpression;
+        // Act
+        long bytes = await database.RunAsync(session, operation =>
+        {
+            DocumentStatementPlan Plan() => new DocumentPlanner(database.Catalog, operation.Context.Snapshot, null).Plan(statement);
+            for (int i = 0; i < 100; i++) { GC.KeepAlive(Plan()); }
+            long minimum = long.MaxValue;
+            for (int round = 0; round < 5; round++)
+            {
+                long before = GC.GetAllocatedBytesForCurrentThread();
+                for (int i = 0; i < 100; i++) { GC.KeepAlive(Plan()); }
+                minimum = Math.Min(minimum, GC.GetAllocatedBytesForCurrentThread() - before);
+            }
+            return ValueTask.FromResult(minimum / 100);
+        }, CancellationToken.None);
+        // Assert
+        _output.WriteLine($"{query}: {bytes} bytes/plan");
+        bytes.ShouldBe(expected);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Documents] - Scalar planning retains its base allocation budget (#1530)")]
     public async Task Plan_ScalarPredicateWithThreeIndexes_ShouldKeepBaseAllocationBudgetAsync()
     {

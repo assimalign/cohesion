@@ -251,7 +251,7 @@ public sealed partial class DocumentQueryTests
             {
                 if (row.GetString(2) == "Select")
                 {
-                    row.GetString(5).ShouldBe("filter=False; grouped=False; order_keys=1; limit=1; offset=1; ordering=META().id ASC; sort=retained; order_reason=no_index");
+                    row.GetString(5).ShouldBe("filter=False; grouped=False; order_keys=1; limit=1; offset=1; identity_paging=True; ordering=META().id ASC; sort=retained; order_reason=no_index");
                     sourceDescribed = true;
                 }
             }

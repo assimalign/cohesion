@@ -283,6 +283,8 @@ internal sealed partial class DocumentPlanner
 
     private static string SelectDetail(DocumentLogicalPlan logical, DocumentAccessPath? access = null)
         => $"filter={logical.Query.Predicate is not null}; grouped={logical.IsGrouped}; order_keys={logical.Query.OrderBy.Count}; limit={logical.Limit?.ToString(CultureInfo.InvariantCulture) ?? "none"}; offset={logical.Offset.ToString(CultureInfo.InvariantCulture)}" +
+            (logical.CanStopEarly && logical.Query.OrderBy.Count == 1 && logical.Query.OrderBy[0].Expression is OqlMetaExpression
+                ? "; identity_paging=True" : "") +
             (logical.Query.OrderBy.Count == 0 ? "" : "; ordering=" + OrderingDetail(logical) +
                 (access is DocumentOrderingPath { Consumed: not null }
                     ? "; consumed=True; sort=elided; early_paging=" + logical.CanStopEarly +

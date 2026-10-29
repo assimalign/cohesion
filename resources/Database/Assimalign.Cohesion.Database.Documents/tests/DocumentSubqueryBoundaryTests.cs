@@ -18,7 +18,7 @@ namespace Assimalign.Cohesion.Database.Documents.Tests;
 [Collection("Document index concurrency")]
 public sealed class DocumentSubqueryBoundaryTests
 {
-    [Theory(DisplayName = "Cohesion Test [Documents] - Subqueries: correlation and DML remain named deferred forms")]
+    [Theory(DisplayName = "Cohesion Test [Documents] - Subqueries: correlation and DML execute while joins retain their refusal")]
     [InlineData("SELECT (SELECT RAW d.n FROM items s) FROM items d", "Correlated")]
     [InlineData("SELECT (SELECT n FROM items s UNNEST d.tags AS d) FROM items d", "Correlated")]
     [InlineData("SELECT (SELECT COUNT(*) FROM items s WHERE d.n > 0 GROUP BY s.n AS d) FROM items d", "Correlated")]
@@ -36,7 +36,17 @@ public sealed class DocumentSubqueryBoundaryTests
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         await DocumentSubqueryTests.SeedAsync(session);
         // Act / Assert
+        if (form != "JOIN" && !query.StartsWith("UPSERT", StringComparison.Ordinal))
+        {
+            var result = await session.ExecuteAsync(query, cancellationToken: CancellationToken.None);
+            result.Diagnostics.ShouldBeEmpty();
+            session.LastQuerySubqueriesExecuted.ShouldBeGreaterThan(0);
+            if (result is DatabaseResultSet set) { await set.DisposeAsync(); }
+            return;
+        }
         var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(query, cancellationToken: CancellationToken.None));
+        if (query.StartsWith("UPSERT", StringComparison.Ordinal))
+        { error.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CD02008"); return; }
         error.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CK00001" && diagnostic.Message!.Contains(form, StringComparison.Ordinal));
     }
 

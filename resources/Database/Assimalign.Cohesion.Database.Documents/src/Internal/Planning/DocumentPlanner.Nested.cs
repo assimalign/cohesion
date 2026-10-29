@@ -91,52 +91,67 @@ internal sealed partial class DocumentPlanner
 
     private DocumentNestedPlan PlanNested(OqlExpression expression)
     {
-        if (expression is not OqlSelectExpression query)
-        {
-            bool sourceInDml = expression is OqlInsertExpression { Select.Source: not null and not OqlSubqueryExpression } or
-                OqlUpsertExpression { Select.Source: not null and not OqlSubqueryExpression };
-            throw new DocumentPlanningException("CK00001", sourceInDml ? ErrorMessages.DmlSourceDeferred : ErrorMessages.DmlSubqueryDeferred, expression.Location);
-        }
         var queries = new Dictionary<OqlSubqueryExpression, DocumentNestedQueryPlan>(ReferenceEqualityComparer.Instance);
-        VisitQuery(query, new Dictionary<string, bool>(StringComparer.Ordinal));
-        return new DocumentNestedPlan(PlanCore(query, queries), queries);
-
-        void VisitQuery(OqlSelectExpression select, Dictionary<string, bool> outer)
+        var empty = new Dictionary<string, bool>(StringComparer.Ordinal);
+        var free = new HashSet<string>(StringComparer.Ordinal);
+        if (expression is OqlSelectExpression query) { VisitQuery(query, empty, free); }
+        else
         {
-            // A true value marks an implicit collection binding: FROM of that name
-            // starts another keyspace scan. An explicit outer alias is correlation.
-            if (outer.TryGetValue(select.Collection, out bool keyspace) && !keyspace)
-            { throw new DocumentPlanningException("CK00001", ErrorMessages.CorrelationDeferred, select.Location); }
-            var source = new Dictionary<string, bool>(StringComparer.Ordinal) { [select.Alias ?? select.Collection] = select.Alias is null };
-            Visit(select.Source, "FROM", new Dictionary<string, bool>(StringComparer.Ordinal), outer);
+            string? name = expression switch
+            {
+                OqlUpdateExpression update => update.Alias ?? update.Collection,
+                OqlDeleteExpression delete => delete.Alias ?? delete.Collection,
+                OqlInsertExpression insert => insert.Alias ?? insert.Collection,
+                OqlUpsertExpression upsert => upsert.Alias ?? upsert.Collection,
+                _ => null,
+            };
+            var local = new Dictionary<string, bool>(StringComparer.Ordinal);
+            if (name is not null)
+            {
+                local[name] = expression switch
+                {
+                    OqlUpdateExpression update => update.Alias is null,
+                    OqlDeleteExpression delete => delete.Alias is null,
+                    OqlInsertExpression insert => insert.Alias is null,
+                    OqlUpsertExpression upsert => upsert.Alias is null,
+                    _ => false,
+                };
+            }
+            foreach (var child in NestedChildren(expression))
+            {
+                if (child is OqlSelectExpression select) { VisitQuery(select, empty, free); }
+                else { Visit(child, child is OqlReturningExpression ? "RETURNING" : "DML", local, empty, free); }
+            }
+        }
+        return new DocumentNestedPlan(PlanCore(expression, queries), queries);
+
+        void VisitQuery(OqlSelectExpression select, Dictionary<string, bool> outer, HashSet<string> free)
+        {
+            bool capturesSource = select.Source is null && outer.TryGetValue(select.Collection, out bool keyspace) && !keyspace;
+            var source = new Dictionary<string, bool>(StringComparer.Ordinal)
+            { [select.Alias ?? select.Collection] = select.Alias is null && select.Source is null && !capturesSource };
+            if (capturesSource)
+            { free.Add(select.Collection); }
+            Visit(select.Source, "FROM", new Dictionary<string, bool>(StringComparer.Ordinal), outer, free);
             foreach (var binding in select.Unnest)
             {
-                Visit(binding.Collection, "UNNEST", source, outer);
+                Visit(binding.Collection, "UNNEST", source, outer, free);
                 source[binding.Variable] = false;
             }
-            Visit(select.Predicate, "WHERE", source, outer);
-            foreach (var key in select.GroupBy) { Visit(key, "GROUP BY", source, outer); }
+            Visit(select.Predicate, "WHERE", source, outer, free);
+            foreach (var key in select.GroupBy) { Visit(key, "GROUP BY", source, outer, free); }
             var grouped = new Dictionary<string, bool>(source, StringComparer.Ordinal);
             foreach (var alias in select.GroupAliases) { if (alias is not null) { grouped[alias] = false; } }
             if (select.GroupAs is string group) { grouped[group] = false; }
-            foreach (var projection in select.Projections) { Visit(projection.Expression, "projection", grouped, outer); }
-            Visit(select.Having, "HAVING", grouped, outer);
-            var ordered = new Dictionary<string, bool>(grouped, StringComparer.Ordinal);
-            foreach (var projection in select.Projections)
-            { if (projection.Alias is string name) { ordered[name] = false; } }
-            foreach (var order in select.OrderBy)
-            {
-                // ORDER BY's standalone projection aliases take precedence over source
-                // names, exactly as CreateLogicalPlan rewrites them before binding.
-                var expression = order.Expression;
-                if (expression is OqlPathExpression { Segments.Count: 1 } path &&
-                    select.Projections.FirstOrDefault(projection => projection.Alias is not null && projection.Alias == path.Segments[0].Name) is { } projection)
-                { expression = projection.Expression; }
-                Visit(expression, "ORDER BY", ordered, outer);
-            }
+            foreach (var projection in select.Projections) { Visit(projection.Expression, "projection", grouped, outer, free); }
+            Visit(select.Having, "HAVING", grouped, outer, free);
+            VisitOrdering(select, grouped,
+                (scope, name) => new Dictionary<string, bool>(scope, StringComparer.Ordinal) { [name] = false },
+                (expression, scope, nested) => { Visit(expression, "ORDER BY", scope, outer, free, nested); return true; });
         }
 
-        void Visit(OqlExpression? node, string owner, Dictionary<string, bool> local, Dictionary<string, bool> outer)
+        void Visit(OqlExpression? node, string owner, Dictionary<string, bool> local, Dictionary<string, bool> outer, HashSet<string> free,
+            Dictionary<string, bool>? nestedOrder = null)
         {
             _cancellationToken.ThrowIfCancellationRequested();
             System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
@@ -144,8 +159,8 @@ internal sealed partial class DocumentPlanner
             if (node is OqlPathExpression path && path.Segments.Count > 0 && path.Segments[0].Name is string name)
             {
                 if (outer.ContainsKey(name) && !local.ContainsKey(name))
-                { throw new DocumentPlanningException("CK00001", ErrorMessages.CorrelationDeferred, node.Location); }
-                if (owner == "FROM" && !local.ContainsKey(name))
+                { free.Add(name); }
+                if (owner == "FROM" && !local.ContainsKey(name) && !outer.ContainsKey(name))
                 { throw new DocumentPlanningException("CD01034", string.Format(System.Globalization.CultureInfo.CurrentCulture,
                     ErrorMessages.FromVariableUnbound, name), node.Location); }
             }
@@ -153,26 +168,39 @@ internal sealed partial class DocumentPlanner
             {
                 if (queries.ContainsKey(subquery)) { return; }
                 var enclosing = new Dictionary<string, bool>(outer, StringComparer.Ordinal);
-                foreach (var declaration in local) { enclosing[declaration.Key] = declaration.Value; }
-                VisitQuery(subquery.Query, enclosing);
-                queries.Add(subquery, new DocumentNestedQueryPlan(PlanCore(subquery.Query, queries), CanCache(subquery.Query), owner));
+                foreach (var declaration in nestedOrder ?? local) { enclosing[declaration.Key] = declaration.Value; }
+                var outerNames = new HashSet<string>(StringComparer.Ordinal);
+                VisitQuery(subquery.Query, enclosing, outerNames);
+                foreach (var dependency in outerNames)
+                { if (!(nestedOrder ?? local).ContainsKey(dependency)) { free.Add(dependency); } }
+                var select = subquery.Query;
+                if (select.Source is null && enclosing.TryGetValue(select.Collection, out bool keyspace) && !keyspace)
+                {
+                    select = new OqlSelectExpression("", select.Alias ?? select.Collection, select.Projections,
+                        select.Predicate, select.GroupBy, select.Having, select.OrderBy, select.IsDistinct, select.IsValue,
+                        select.Limit, select.Offset, select.Location, select.Unnest, select.GroupAliases, select.GroupAs,
+                        new OqlPathExpression([new OqlPathSegment(select.Collection, null)], select.Location));
+                }
+                queries.Add(subquery, new DocumentNestedQueryPlan(PlanCore(select, queries, outerNames), outerNames.Count == 0 && CanCache(select), owner, outerNames));
                 return;
             }
             if (node is OqlComprehensionExpression comprehension)
             {
-                Visit(comprehension.Collection, owner, local, outer);
+                Visit(comprehension.Collection, owner, local, outer, free, nestedOrder);
                 var inner = new Dictionary<string, bool>(local, StringComparer.Ordinal) { [comprehension.Variable] = false };
-                Visit(comprehension.Projection, owner, inner, outer);
-                Visit(comprehension.Predicate, owner, inner, outer);
+                var orderedInner = nestedOrder is null ? null : new Dictionary<string, bool>(nestedOrder, StringComparer.Ordinal) { [comprehension.Variable] = false };
+                Visit(comprehension.Projection, owner, inner, outer, free, orderedInner);
+                Visit(comprehension.Predicate, owner, inner, outer, free, orderedInner);
                 return;
             }
             if (node is OqlQuantifiedExpression quantified)
             {
-                Visit(quantified.Collection, owner, local, outer);
-                Visit(quantified.Predicate, owner, new Dictionary<string, bool>(local, StringComparer.Ordinal) { [quantified.Variable] = false }, outer);
+                Visit(quantified.Collection, owner, local, outer, free, nestedOrder);
+                Visit(quantified.Predicate, owner, new Dictionary<string, bool>(local, StringComparer.Ordinal) { [quantified.Variable] = false }, outer, free,
+                    nestedOrder is null ? null : new Dictionary<string, bool>(nestedOrder, StringComparer.Ordinal) { [quantified.Variable] = false });
                 return;
             }
-            foreach (var child in NestedChildren(node)) { Visit(child, owner, local, outer); }
+            foreach (var child in NestedChildren(node)) { Visit(child, owner, local, outer, free, nestedOrder); }
         }
 
         bool CanCache(OqlExpression node)
@@ -190,6 +218,28 @@ internal sealed partial class DocumentPlanner
     {
         switch (node)
         {
+            case OqlInsertExpression insert:
+                if (insert.Select is not null) { yield return insert.Select; }
+                foreach (var pair in insert.Values) { yield return pair.Key; yield return pair.Value; }
+                if (insert.Returning is not null) { yield return insert.Returning; }
+                break;
+            case OqlUpsertExpression upsert:
+                if (upsert.Select is not null) { yield return upsert.Select; }
+                foreach (var pair in upsert.Values) { yield return pair.Key; yield return pair.Value; }
+                if (upsert.Returning is not null) { yield return upsert.Returning; }
+                break;
+            case OqlUpdateExpression update:
+                if (update.Predicate is not null) { yield return update.Predicate; }
+                foreach (var assignment in update.Assignments) { yield return assignment.Value; }
+                if (update.Returning is not null) { yield return update.Returning; }
+                break;
+            case OqlDeleteExpression delete:
+                if (delete.Predicate is not null) { yield return delete.Predicate; }
+                if (delete.Returning is not null) { yield return delete.Returning; }
+                break;
+            case OqlReturningExpression returning:
+                foreach (var projection in returning.Projections) { yield return projection.Expression; }
+                break;
             case OqlSubqueryExpression subquery: yield return subquery.Query; break;
             case OqlSelectExpression query:
                 if (query.Source is not null) { yield return query.Source; }
@@ -223,12 +273,28 @@ internal sealed partial class DocumentPlanner
                 nodes.Add(new DatabasePlanNode { NodeId = offset + node.NodeId, ParentId = node.ParentId is int id ? offset + id : parent,
                     Operator = node.Operator, Target = node.Target, Index = node.Index, Detail = node.Detail, EstimatedRows = node.EstimatedRows });
             }
-            var query = QueryLogical(queryPlan).Query;
+            OqlExpression query = queryPlan switch
+            {
+                DocumentUpdatePlan update => update.Statement,
+                DocumentDeletePlan delete => delete.Statement,
+                DocumentInsertPlan insert => insert.Statement,
+                DocumentInsertSelectPlan insert => insert.Statement,
+                DocumentUpsertPlan upsert => upsert.Statement,
+                _ => QueryLogical(queryPlan).Query,
+            };
+            var writeSource = queryPlan switch
+            {
+                DocumentInsertSelectPlan insert => insert.Source as DocumentFromPlan,
+                DocumentUpsertPlan upsert => upsert.Source as DocumentFromPlan,
+                _ => null,
+            };
+            if (writeSource is not null) { AddQuery(writeSource, offset); }
             if (queryPlan is DocumentFromPlan { Input: not null } source)
             { AddQuery(source.Input, nodes.Skip(offset).First(node => node.Operator == "DerivedSource").NodeId); }
             foreach (var child in NestedChildren(query))
             {
-                if (!ReferenceEquals(child, query.Source)) { AddExpressions(child, offset); }
+                if (writeSource is not null && child is OqlSelectExpression) { continue; }
+                if (!ReferenceEquals(child, (query as OqlSelectExpression)?.Source)) { AddExpressions(child, offset); }
                 else if (queryPlan is DocumentFromPlan { Input: null })
                 { AddExpressions(child, nodes.Skip(offset).First(node => node.Operator == "ExpressionSource").NodeId); }
             }
@@ -242,6 +308,7 @@ internal sealed partial class DocumentPlanner
                 int id = nodes.Count;
                 nodes.Add(new DatabasePlanNode { NodeId = id, ParentId = parent, Operator = "SubqueryExpression",
                     Detail = nested.Owner + "; " + (nested.CacheForStatement ? "cached_for_statement" : "per_evaluation") +
+                        "; correlation=" + (nested.OuterNames.Count == 0 ? "none" : string.Join(",", nested.OuterNames.Order(StringComparer.Ordinal))) +
                         "; span=" + expression.Location?.Start + ".." + expression.Location?.End });
                 AddQuery(nested.Plan, id);
                 return;
@@ -271,7 +338,7 @@ internal sealed partial class DocumentPlanner
             left.GroupBy.Count != right.GroupBy.Count) { return false; }
         var scopes = new DocumentBindingScopes();
         bool Same(OqlExpression? a, OqlExpression? b) => a is null || b is null ? a is null && b is null :
-            EquivalentExpression(a, b, left.Alias, variables, scopes);
+            EquivalentExpression(a, b, left, variables, scopes);
         return Same(left.Limit, right.Limit) && Same(left.Offset, right.Offset) &&
             NestedChildren(left).Zip(NestedChildren(right)).All(pair => Same(pair.First, pair.Second));
     }

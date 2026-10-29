@@ -9,7 +9,8 @@ namespace Assimalign.Cohesion.Database.Documents.Internal;
 internal sealed partial class DocumentPlanner
 {
     private DocumentAccessPath AnalyzeOrdering(DocumentLogicalPlan logical, DocumentAccessPath input,
-        IReadOnlyList<DocumentIndexMetadata> indexes, List<(DocumentIndexPath Path, int Prefix, bool Range)> accessCandidates)
+        IReadOnlyList<DocumentIndexMetadata> indexes, List<(DocumentIndexPath Path, int Prefix, bool Range)> accessCandidates,
+        IReadOnlySet<string>? nonSourceNames)
     {
         // GetIndexes already supplies ordinal name order. Ordinary rejected plans
         // retain their access path without allocating EXPLAIN's candidate graph.
@@ -26,7 +27,7 @@ internal sealed partial class DocumentPlanner
                 path = accessCandidates[j].Path;
                 break;
             }
-            var eligibility = OrderEligibility(logical, index, path);
+            var eligibility = OrderEligibility(logical, index, path, nonSourceNames);
             if (!eligibility.Eligible && candidates is null) { continue; }
             var candidate = new DocumentOrderedIndexCandidate(path ?? new DocumentIndexPath(index, null, null), eligibility);
             candidates?.Add(candidate);
@@ -40,7 +41,8 @@ internal sealed partial class DocumentPlanner
             consumed is null ? input : new DocumentOrderingPath(input, [consumed], consumed);
     }
 
-    private DocumentOrderEligibility OrderEligibility(DocumentLogicalPlan logical, DocumentIndexMetadata index, DocumentIndexPath? path)
+    private DocumentOrderEligibility OrderEligibility(DocumentLogicalPlan logical, DocumentIndexMetadata index, DocumentIndexPath? path,
+        IReadOnlySet<string>? nonSourceNames)
     {
         var query = logical.Query;
         DocumentOrderEligibility Refuse(string reason) => new(false, reason);
@@ -49,9 +51,9 @@ internal sealed partial class DocumentPlanner
         if (query.Unnest.Count > 0) { return Refuse("unnest_changes_order"); }
         if (index.Paths.Count == 0) { return Refuse("array_index"); }
         bool Matches(OqlExpression expression, string name) => expression is OqlPathExpression field &&
-            !IsVariablePath(field, logical.UnnestVariables) &&
+            !IsVariablePath(field, nonSourceNames) &&
             MatchesOrderPath(field, query.Alias, name);
-        bool Proves(string name, int fact) => ProvesOrderFact(query.Predicate, name, query.Alias, fact);
+        bool Proves(string name, int fact) => ProvesOrderFact(query.Predicate, name, query.Alias, fact, nonSourceNames);
         if (!index.IncludeMissing && !Proves(index.Path, 0)) { return Refuse("leading_missing_not_rejected"); }
         int at = 0;
         bool? reverse = null;
@@ -145,16 +147,16 @@ internal sealed partial class DocumentPlanner
     // fact 0 = MISSING rejected; 1 = both unknowns rejected; 2 = only scalar/nullish values.
     // AND needs one proof, OR needs both. Unknown functions and computed expressions
     // deliberately establish nothing. Range predicates compare only within scalar kinds.
-    private bool ProvesOrderFact(OqlExpression? predicate, string name, string? alias, int fact)
+    private bool ProvesOrderFact(OqlExpression? predicate, string name, string? alias, int fact, IReadOnlySet<string>? nonSourceNames)
     {
         if (predicate is null) { return false; }
         bool Field(OqlExpression expression) => expression is OqlPathExpression path &&
-            MatchesOrderPath(path, alias, name);
+            !IsVariablePath(path, nonSourceNames) && MatchesOrderPath(path, alias, name);
         if (predicate is OqlBinaryExpression boolean && boolean.Operator is "AND" or "OR")
         {
-            bool left = ProvesOrderFact(boolean.Left, name, alias, fact);
-            return boolean.Operator == "AND" ? left || ProvesOrderFact(boolean.Right, name, alias, fact) :
-                left && ProvesOrderFact(boolean.Right, name, alias, fact);
+            bool left = ProvesOrderFact(boolean.Left, name, alias, fact, nonSourceNames);
+            return boolean.Operator == "AND" ? left || ProvesOrderFact(boolean.Right, name, alias, fact, nonSourceNames) :
+                left && ProvesOrderFact(boolean.Right, name, alias, fact, nonSourceNames);
         }
         if (predicate is OqlUnaryExpression unary && Field(unary.Operand))
         {
@@ -170,7 +172,7 @@ internal sealed partial class DocumentPlanner
             string? operation = test.Operator switch
             { "IS MISSING" => "IS NOT MISSING", "IS NOT MISSING" => "IS MISSING", "IS NULL" => "IS NOT NULL",
                 "IS NOT NULL" => "IS NULL", "IS NOT VALUED" => "IS VALUED", _ => null };
-            return operation is not null && ProvesOrderFact(new OqlUnaryExpression(operation, test.Operand), name, alias, fact);
+            return operation is not null && ProvesOrderFact(new OqlUnaryExpression(operation, test.Operand), name, alias, fact, nonSourceNames);
         }
         if (predicate is OqlBetweenExpression between && Field(between.Operand))
         { return fact < 2 || !between.Negated && ScalarConstant(between.Lower) && ScalarConstant(between.Upper); }
