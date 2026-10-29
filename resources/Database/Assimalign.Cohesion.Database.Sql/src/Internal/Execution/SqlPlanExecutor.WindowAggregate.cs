@@ -344,6 +344,7 @@ internal sealed partial class SqlPlanExecutor
                 else { accumulator = Create(); }
                 long retained = orderedInput ? 128L + 96L * aggregate.OrderBy.Count : 0;
                 memory.Reserve(retained);
+                object? completed = null;
                 try
                 {
                     var ordered = orderedInput ? new GroupAggregateState(accumulator, aggregate, _subqueryValues) : null;
@@ -381,10 +382,15 @@ internal sealed partial class SqlPlanExecutor
                     nextInputs[index] = Math.Max(first, last);
                     previousStarts[index] = first;
                     previousEnds[index] = last;
-                    return results[index] = NormalizeGroupValue((incremental ? accumulator.ReadWindowResult(cancellationToken) : accumulator.Finish(cancellationToken)).ToObject(), function.Type);
+                    completed = NormalizeGroupValue((incremental ? accumulator.ReadWindowResult(cancellationToken) : accumulator.Finish(cancellationToken)).ToObject(), function.Type);
+                    // The finished cell overlaps input/sort buffers and the native builder.
+                    // Admit that peak before releasing scratch; the caller retains its cell.
+                    if (completed is not null) { memory.RetainValue(completed); }
+                    return results[index] = completed;
                 }
                 finally
                 {
+                    if (completed is not null) { memory.ReleaseValue(completed); }
                     memory.Release(retained);
                     if (!incremental) { SqlStringAggregateFunction.ReleaseWindowState(accumulator); memory.Release(256); }
                 }

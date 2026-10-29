@@ -135,7 +135,8 @@ Application and order-sensitive aggregates preserve their input order and use th
 1,000,000 candidate-visit recomputation cap (CS05084), shared across statement stages.
 Ordered aggregate inputs evaluate their arguments and keys once after FILTER, reserving
 computed payloads and sort buffers before retention. String accumulators charge their
-retained builder chunks as well as output values. Reservations unwind on every exit.
+retained builder chunks as well as output values. Finished values are admitted while input,
+sort and builder buffers still overlap. Reservations unwind on every exit.
 No public accumulator contract, disk version or wire format changes.
 EXPLAIN retains frame boundaries for each function and ANALYZE reports frame_visits,
 counting candidate aggregate inputs before FILTER. Frames do not split shared sort groups,

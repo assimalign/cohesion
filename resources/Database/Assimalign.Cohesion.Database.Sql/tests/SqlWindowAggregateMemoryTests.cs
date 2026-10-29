@@ -50,6 +50,31 @@ public sealed class SqlWindowAggregateMemoryTests
         await foreach (var row in usable.GetRowsAsync(CancellationToken.None)) { row.GetValue(0).ShouldBe(64L); }
     }
 
+    [Fact(DisplayName = "Cohesion Test [Sql] - Window memory: a finished string overlaps its recomputed builder")]
+    public async Task Execute_RecomputedStringResult_ShouldChargeBeforeReleasingBuilderAsync()
+    {
+        // Arrange: the input literal belongs to the plan. The recomputed builder and
+        // finished string each fit the grant, but their simultaneous ownership does not.
+        var builder = SqlDatabaseEngine.CreateBuilder("window-string-result-overlap");
+        builder.Options.StatementMemoryBudget = 32768;
+        await using var engine = await builder.BuildAsync(CancellationToken.None);
+        var db = await engine.CreateDatabaseAsync("db",CancellationToken.None);
+        await using var session = await db.CreateSessionAsync(CancellationToken.None);
+        string wide = new('x',8192);
+
+        // Act
+        var failure = await Should.ThrowAsync<DatabaseException>(() => session.ExecuteAsync(
+            $"SELECT STRING_AGG('{wide}','') OVER(ROWS CURRENT ROW EXCLUDE TIES)",
+            cancellationToken:CancellationToken.None).AsTask());
+
+        // Assert
+        failure.Diagnostics.ShouldContain(d => d.Code == "CS05079");
+        session.LastStatementMetrics.ShouldNotBeNull().HashMemoryBytes.ShouldBe(0);
+        SqlWindowMemory.Current.ShouldBeNull();
+        (await SqlWindowRangeGroupsTests.RowsAsync(session,
+            "SELECT STRING_AGG('x','') OVER(ROWS CURRENT ROW EXCLUDE TIES)")).ShouldHaveSingleItem()[0].ShouldBe("x");
+    }
+
     [Fact(DisplayName = "Cohesion Test [Sql] - Window memory: an inherited execution context cannot charge an independent statement")]
     public async Task Execute_IndependentStatement_ShouldKeepItsOwnMemoryOwnerAsync()
     {
