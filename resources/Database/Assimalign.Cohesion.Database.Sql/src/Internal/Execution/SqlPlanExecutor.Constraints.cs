@@ -530,6 +530,37 @@ internal sealed partial class SqlPlanExecutor
         return left is null || right is null ? left is null && right is null : SqlExpressionEvaluator.Compare(left, right, collation) == 0;
     }
 
+    // Action eligibility follows the stored row representation, independently of key
+    // matching (PostgreSQL ri_triggers.c:4237-4250, datum_image_eq). Reuse the row
+    // codec so CHAR padding, temporal offsets and numeric encodings follow storage too.
+    private static bool ReferencedKeyChanged(SqlBoundConstraintKey key, object?[] oldValues, object?[] newValues,
+        SqlStatementMetrics metrics)
+    {
+        foreach (int ordinal in key.Ordinals)
+        {
+            if (oldValues[ordinal] is null) { return false; } // MATCH SIMPLE: no old referenced key
+        }
+        var oldImage = new DatabaseKeyWriter();
+        var newImage = new DatabaseKeyWriter();
+        foreach (int ordinal in key.Ordinals)
+        {
+            metrics.ConstraintKeyComparisons++;
+            var type = key.Table.Columns[ordinal].Type.Type;
+            SqlRowCodec.AppendValue(oldImage, type, oldValues[ordinal]);
+            SqlRowCodec.AppendValue(newImage, type, newValues[ordinal]);
+        }
+        return !oldImage.WrittenSpan.SequenceEqual(newImage.WrittenSpan);
+    }
+
+    private static void ValidateUpdateAction(SqlBoundConstraintKey key, SqlCatalogConstraint constraint,
+        object?[] oldValues, object?[] newValues, SqlStatementMetrics metrics)
+    {
+        if (constraint.OnUpdate is SqlCatalogReferentialAction.Restrict or SqlCatalogReferentialAction.NoAction ||
+            !ReferencedKeyChanged(key, oldValues, newValues, metrics)) { return; }
+        throw new SqlExecutionException("CK00001", string.Format(System.Globalization.CultureInfo.CurrentCulture,
+            ErrorMessages.UpdateActionExecutionUnsupported, ReferentialActionText(constraint.OnUpdate), constraint.Name));
+    }
+
     private static object? SafeValue(object?[] values)
         => values.Length == 1 && values[0] is byte or sbyte or short or ushort or int or uint or long or ulong or decimal or float or double or bool
             ? values[0] : null;
@@ -661,19 +692,7 @@ internal sealed partial class SqlPlanExecutor
                     {
                         cancellationToken.ThrowIfCancellationRequested();
                         if (update.Table.ObjectId != table.ObjectId || update.Location.PageId.Value < 0) { continue; }
-                        bool changed = false, hasNull = false;
-                        for (int key = 0; key < ordinals.Length; key++)
-                        {
-                            int ordinal = ordinals[key];
-                            if (update.OldValues[ordinal] is null) { hasNull = true; break; }
-                            changed |= !ValuesEqual(update.NewValues[ordinal], update.OldValues[ordinal],
-                                reference.ParentKey.Collations[key], statement.Metrics);
-                        }
-                        if (changed && !hasNull)
-                        {
-                            throw new SqlExecutionException("CK00001", string.Format(System.Globalization.CultureInfo.CurrentCulture,
-                                ErrorMessages.UpdateActionExecutionUnsupported, ReferentialActionText(constraint.OnUpdate), constraint.Name));
-                        }
+                        ValidateUpdateAction(reference.ParentKey, constraint, update.OldValues, update.NewValues, statement.Metrics);
                     }
                 }
                 selfKeys = new(new GroupKeyComparer(reference.ParentKey.Collations, statement.Metrics));
@@ -747,6 +766,7 @@ internal sealed partial class SqlPlanExecutor
         foreach (var reference in IncomingReferences(table, statement, cancellationToken))
         {
             var (child, constraint) = reference;
+            ValidateUpdateAction(reference.ParentKey, constraint, oldValues, newValues, statement.Metrics);
             var keys = reference.ParentKey.Read(oldValues);
             if (keys.Any(value => value is null))
             {
@@ -754,11 +774,6 @@ internal sealed partial class SqlPlanExecutor
             }
             bool changed = reference.ParentKey.Ordinals.Select((ordinal, i) => !ValuesEqual(newValues[ordinal], keys[i],
                 reference.ParentKey.Collations[i], statement.Metrics)).Any(value => value);
-            if (changed && constraint.OnUpdate is not (SqlCatalogReferentialAction.Restrict or SqlCatalogReferentialAction.NoAction))
-            {
-                throw new SqlExecutionException("CK00001", string.Format(System.Globalization.CultureInfo.CurrentCulture,
-                    ErrorMessages.UpdateActionExecutionUnsupported, ReferentialActionText(constraint.OnUpdate), constraint.Name));
-            }
             // A different replacement may retain the old referenced key (a swap). Only
             // removing that key from the final parent state can orphan an incoming child.
             if (changed && updates?.Find(reference.ParentKey, keys,

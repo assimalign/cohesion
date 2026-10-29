@@ -285,6 +285,19 @@ internal sealed partial class SqlPlanExecutor
                     }
                 }
             }
+            // Every composed key change must report its stored action before any
+            // table group's outgoing FK validation, including MERGE's deferred pass.
+            foreach (var update in updates.Values)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (update.Location.PageId.Value < 0) { continue; }
+                var incoming = IncomingReferences(update.Table, statement, cancellationToken);
+                for (int index = 0; index < incoming.Count; index++)
+                {
+                    var reference = incoming[index];
+                    ValidateUpdateAction(reference.ParentKey, reference.Constraint, update.OldValues, update.NewValues, statement.Metrics);
+                }
+            }
         }
         catch
         {

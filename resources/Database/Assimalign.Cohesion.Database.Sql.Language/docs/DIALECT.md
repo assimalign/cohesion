@@ -17,11 +17,15 @@ SQ-F1 does not execute update actions. Changing any referenced parent key under 
 SET NULL or SET DEFAULT refuses with CK00001 naming ON UPDATE action execution, even when
 no child currently refers to that key or another final parent retains it. UPDATE, UPDATE FROM,
 ON CONFLICT DO UPDATE and MERGE refuse before any row mutation. Self-referencing updates report
-the action-execution refusal before an outgoing orphan check. Unchanged referenced keys
+the action-execution refusal before an outgoing orphan check. Action eligibility compares the
+stored binary representation: case-only and accent-only changes still refuse under an insensitive
+collation. DELETE, DELETE USING and MERGE DELETE chains that SET NULL/DEFAULT on referenced
+keys check all update actions before outgoing FK validation, so they also report CK00001.
+Unchanged referenced keys
 and unrelated-column updates execute normally. RESTRICT and NO ACTION both retain the existing
 statement-end parent-key check, including substitution by another final parent; SQ-F2 will
 make RESTRICT immediate and implement action closure. PostgreSQL references:
-src/backend/parser/gram.y:4581-4689 and src/backend/utils/adt/ri_triggers.c:897-955.
+src/backend/parser/gram.y:4581-4689 and src/backend/utils/adt/ri_triggers.c:897-955,4237-4250.
 
 ## Window stage (#1526, SQ-W1)
 

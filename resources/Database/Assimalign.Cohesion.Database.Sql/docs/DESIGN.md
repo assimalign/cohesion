@@ -27,6 +27,12 @@ All update paths share ValidateParentUpdate before physical row application. A c
 key under CASCADE/SET NULL/SET DEFAULT throws structured CK00001 naming ON UPDATE action
 execution, before considering child presence or final-parent substitution. Self-references check
 changing actions before outgoing FK validation can mistake the pending key change for an orphan.
+Action eligibility compares the binary stored key representation through the row codec, so case-only,
+accent-only and other representation changes cannot disappear under key collation. Both refusal
+sites share this predicate (PostgreSQL src/backend/utils/adt/ri_triggers.c:4237-4250,
+datum_image_eq). Parent-presence and RESTRICT/NO ACTION checks retain collation-aware equality.
+DELETE, DELETE USING and MERGE compose their SET NULL/DEFAULT updates and check every incoming
+update action before any table group's outgoing FK validation; chain order cannot mask CK00001.
 That branch inspects pending rows only for changing actions; ordinary DML gains no allocation. Unchanged keys and
 unrelated-column changes remain executable. RESTRICT/NO ACTION deliberately keep today's
 statement-end parent validation until SQ-F2 adds immediate RESTRICT and action closure; no stored

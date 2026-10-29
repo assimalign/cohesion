@@ -1128,6 +1128,14 @@ public sealed class SqlLanguageConformanceTests
                 error.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CK00001");
                 await ExpectRowsAsync(session, "SELECT pid FROM c;", [[1]]);
                 await ExpectRowsAsync(session, "SELECT UPDATE_RULE FROM INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS;", [["CASCADE"]]);
+                await ExecuteAsync(session, "CREATE TABLE p_image(id TEXT COLLATE case_insensitive PRIMARY KEY);");
+                await ExecuteAsync(session, "CREATE TABLE c_image(pid TEXT COLLATE case_insensitive REFERENCES p_image(id) ON UPDATE CASCADE);");
+                await ExecuteAsync(session, "INSERT INTO p_image VALUES('Ada');");
+                await ExecuteAsync(session, "INSERT INTO c_image VALUES('Ada');");
+                var imageError = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "UPDATE p_image SET id='ADA';"));
+                imageError.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CK00001");
+                await ExpectRowsAsync(session, "SELECT id FROM p_image;", [["Ada"]]);
+                await ExpectRowsAsync(session, "SELECT pid FROM c_image;", [["Ada"]]);
             }),
         [SqlClauses.References] = ForeignKeyCase("CREATE TABLE c (pid INT REFERENCES t(id));", SqlReferentialAction.NoAction, VerifyReferenceAsync),
         [SqlClauses.Cascade] = ForeignKeyCase("CREATE TABLE c (pid INT REFERENCES t(id) ON DELETE CASCADE);", SqlReferentialAction.Cascade,
