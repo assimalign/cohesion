@@ -147,4 +147,43 @@ public sealed class DocumentNestedScratchTests
         rows.Count.ShouldBe(expected ? 1 : 0);
         calls.ShouldBe(expectedCalls);
     }
+
+    [Theory(DisplayName = "Cohesion Test [Documents] - Construction: returned values stay charged while a binary consumer holds them")]
+    [InlineData("object")]
+    [InlineData("array")]
+    [InlineData("first")]
+    public async Task ExecuteAsync_ConstructedOperands_ShouldRefuseCombinedLiveValuesAsync(string kind)
+    {
+        // Arrange
+        int calls = 0;
+        var builder = DocumentDatabaseEngine.CreateBuilder("constructed-charge");
+        builder.Options.StatementMemoryBudget = 256 * 1024;
+        builder.Functions.Add(DocumentScalarFunction.Create<decimal, string>("payload", value => { calls++; return new string('x', 8192); }));
+        await using var engine = builder.Build();
+        var database = await engine.CreateDatabaseAsync("test", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        string members = string.Join(",", Enumerable.Range(0, 20).Select(n => "a" + n + ":(SELECT RAW payload(d) FROM [1] AS s)"));
+        string operand = kind switch
+        {
+            "object" => "{" + members + "}",
+            "array" => "ARRAY (SELECT RAW payload(v) FROM [1] AS s) FOR v IN @numbers END",
+            _ => "FIRST {" + members + "} FOR v IN [d] END",
+        };
+        using var numbers = JsonDocument.Parse("[" + string.Join(",", Enumerable.Range(0, 20)) + "]");
+        var parameters = new Dictionary<string, object?> { ["numbers"] = numbers.RootElement };
+        var request = DocumentQueryRequest.FromOql("SELECT RAW 1 FROM [1] AS d WHERE " + operand + " = " + operand);
+        // Act / Assert
+        await database.RunAsync(session, async operation =>
+        {
+            var memory = operation.GetStatementMemory(CancellationToken.None);
+            var error = await Should.ThrowAsync<DatabaseException>(async () =>
+                await DocumentPlanExecutor.ExecuteAsync(database, operation, request.Statement, parameters, CancellationToken.None));
+            error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD05018");
+            calls.ShouldBeGreaterThan(20);
+            calls.ShouldBeLessThanOrEqualTo(40);
+            memory.Bytes.ShouldBe(0);
+            _output.WriteLine($"{kind}: callbacks={calls}; peak={memory.PeakBytes}; final={memory.Bytes}");
+            return true;
+        }, CancellationToken.None);
+    }
 }

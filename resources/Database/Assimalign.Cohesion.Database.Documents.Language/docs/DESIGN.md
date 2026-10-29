@@ -557,13 +557,14 @@ there (CD01031). An absent alias uses the collection name as the source for grou
 Local metadata alone permits identity paging, identified in EXPLAIN by identity_paging=True.
 ORDER BY's standalone alias substitution, direct grouped-row paths and nested projection-alias
 captures share one planning rule; reused source and UNNEST names keep local grouping restrictions.
-The engine parity and conformance
-corpora cover these scope distinctions alongside shadowing and group bindings.
+The engine parity and conformance corpora cover these scope distinctions alongside shadowing and group bindings.
 Subquery group-key equivalence includes free binding identity, retaining inner declarations that
 mask outer names while refusing a proof after an enclosing capture is shadowed.
 Per-element predicate/operand scratch has iteration lifetime, excluding live collections and
 statement caches. Object maps retain their live member results until serialization while releasing
 discarded member scratch; ARRAY/FIRST retain their existing streaming and lazy behavior.
+Constructors, ARRAY and FIRST retain their final returned representation until the consumer's
+iteration or row releases it, including when several constructed operands coexist.
 
 ## FROM source expressions (#1731, OQ-Q2)
 

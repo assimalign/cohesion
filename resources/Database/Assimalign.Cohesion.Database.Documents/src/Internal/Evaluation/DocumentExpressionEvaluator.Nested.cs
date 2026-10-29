@@ -240,10 +240,21 @@ internal sealed partial class DocumentExpressionEvaluator
         IReadOnlyList<DocumentEvaluationContext>? group, DocumentNestedExecutionContext nested)
     {
         if (expression is OqlArrayExpression array)
-        { return await DocumentJsonValue.ArrayAsync(ElementsAsync(array), _writeVerb, _constructorMaxDepth, _resultClause).ConfigureAwait(false); }
+        {
+            var result = await DocumentJsonValue.ArrayAsync(ElementsAsync(array), _writeVerb, _constructorMaxDepth, _resultClause).ConfigureAwait(false);
+            Memory.Retain(result);
+            return result;
+        }
         using var members = Memory.Reserve();
         var memberCharges = new Dictionary<string, long>(StringComparer.Ordinal);
-        return await DocumentJsonValue.ObjectAsync(MembersAsync(), _writeVerb, _constructorMaxDepth, _resultClause).ConfigureAwait(false);
+        var constructed = await DocumentJsonValue.ObjectAsync(MembersAsync(), _writeVerb, _constructorMaxDepth, _resultClause).ConfigureAwait(false);
+        // The map no longer owns the member representations. Transfer to the final
+        // JSON value, which remains expression scratch until its consumer releases it.
+        long resultBytes = 64L + Memory.ValueBytes(constructed);
+        if (resultBytes > members.Bytes) { members.Charge(resultBytes - members.Bytes); }
+        else { members.Rewind(resultBytes); }
+        members.Detach();
+        return constructed;
 
         async IAsyncEnumerable<object?> ElementsAsync(OqlArrayExpression array)
         {
@@ -284,9 +295,22 @@ internal sealed partial class DocumentExpressionEvaluator
     {
         var value = await EvaluateAsync(expression.Collection, document, group, nested).ConfigureAwait(false);
         if (!TryCollection(value, out var array, out var unknown)) { return unknown; }
+        using var firstResult = expression.IsFirst ? Memory.Reserve() : null;
         if (!expression.IsFirst)
-        { return await DocumentJsonValue.ArrayAsync(MapAsync(), _writeVerb, _constructorMaxDepth, _resultClause).ConfigureAwait(false); }
-        await foreach (var mapped in MapAsync().ConfigureAwait(false)) { return mapped; }
+        {
+            var result = await DocumentJsonValue.ArrayAsync(MapAsync(), _writeVerb, _constructorMaxDepth, _resultClause).ConfigureAwait(false);
+            Memory.Retain(result);
+            return result;
+        }
+        object? first = DocumentMissing.Instance;
+        await foreach (var mapped in MapAsync().ConfigureAwait(false)) { first = mapped; break; }
+        if (first is not DocumentMissing)
+        {
+            // MapAsync released discarded operands while preserving the selected
+            // representation. Transfer that charge to the expression consumer.
+            firstResult!.Detach();
+            return first;
+        }
         return DocumentMissing.Instance;
 
         async IAsyncEnumerable<object?> MapAsync()
@@ -300,9 +324,19 @@ internal sealed partial class DocumentExpressionEvaluator
                 try
                 {
                     var mapped = await EvaluateAsync(expression.Projection, inner, group, nested).ConfigureAwait(false);
-                    if (KeepMapped(expression, mapped)) { yield return mapped; }
+                    if (KeepMapped(expression, mapped))
+                    {
+                        if (firstResult is not null)
+                        {
+                            long bytes = 64L + Memory.ValueBytes(mapped);
+                            long transferred = Math.Min(bytes, Memory.Bytes - nested.RetainedBytes - before);
+                            firstResult.Adopt(transferred);
+                            firstResult.Charge(bytes - transferred);
+                        }
+                        yield return mapped;
+                    }
                 }
-                finally { Memory.Release(Memory.Bytes - nested.RetainedBytes - before); }
+                finally { Memory.Release(Memory.Bytes - nested.RetainedBytes - (firstResult?.Bytes ?? 0) - before); }
             }
         }
     }

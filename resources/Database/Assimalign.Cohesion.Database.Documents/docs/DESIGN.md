@@ -673,6 +673,10 @@ has been evaluated and excluding statement-cache reservations. IN lists, CASE co
 skipped lazy conditional arguments release each discarded operand; ARRAY/FIRST filters already
 use the same predicate bracket. Object members release expression scratch after charging their
 live map value, retaining only the last non-MISSING value per key until serialization. Budget
+ownership then transfers to the final object representation. Array constructors and ARRAY charge
+their final JSON value; FIRST transfers the selected mapping's charge across iterator disposal.
+Every returned construction stays charged until its consumer's iteration or row releases it,
+including when a binary expression holds several constructed operands. Budget
 regressions compare literal and correlated 8 KiB operands across 1,000 iterations under 256 KiB,
 and separately preserve cached collection reservations and refuse oversized live object maps.
 The deterministic 10,000-row filter test observes identical first/last evaluation peaks under a
