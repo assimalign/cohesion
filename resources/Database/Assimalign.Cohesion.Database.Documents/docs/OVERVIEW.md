@@ -19,7 +19,8 @@ with matching wire column types; the language [dialect](../../Assimalign.Cohesio
 records the full contract. LIMIT/OFFSET page stored and system queries after grouping, DISTINCT
 and ordering. Counts accept literals or parameters through Int64.MaxValue; invalid values carry
 CD00007. LIMIT 0 returns planned column metadata after static validation and skips all sources
-and blocking stages. Other pages retain full-result column types, including empty results.
+and blocking stages. Other stored and system pages retain full-result column types, including
+empty results; expression and derived sources infer theirs over the selected page.
 INNER/LEFT UNNEST expands array elements into scoped rows before WHERE, grouping and paging.
 ANY/SOME/EVERY and array-value IN query arrays without expansion. Expression SELECTs
 return arrays on a shared nested execution context; EXISTS and IN (SELECT RAW ...) compose with
