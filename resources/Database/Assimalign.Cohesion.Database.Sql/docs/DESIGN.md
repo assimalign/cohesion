@@ -1281,9 +1281,9 @@ FALSE/TRUE (PostgreSQL src/backend/executor/nodeSubplan.c:244-269,399-427).
 Scalar folding evaluates the operand once for a nonempty set and skips it for an empty
 one; preparation also skips correlated scalar children of that operand. Independent
 subqueries retain eager statement preparation.
-Comparison folding stops at a deciding result; the existing set materializer still
-reads child output first, once per statement for independent children and per frame
-for correlated children. Lazy correlated preparation follows CASE/COALESCE/Boolean
+Comparison folding stops at a deciding result. Recursive correlated sets compare
+while pulling their input; independent children retain statement materialization.
+Ordinary nonrecursive correlated children retain per-frame materialization. Lazy correlated preparation follows CASE/COALESCE/Boolean
 branches as before. No query, transaction or read view is opened by scalar evaluation.
 
 Ordinary value comparison and CHAR comparand binding are reused, including CS02055
@@ -1334,9 +1334,17 @@ immutable ranges of that buffer. This avoids duplicate payload storage while
 preserving PostgreSQL's iteration boundaries. An outer LIMIT, EXISTS or scalar
 subquery can stop production early, including when a CTE has multiple readers.
 ORDER BY, grouping and INTERSECT/EXCEPT still need their complete inputs.
-A window over an unbounded recursive input reports CS05089 before reading it;
-limit the input in a derived query before applying windows. This explicit demand
-refusal avoids exhausting the budget for a window that PostgreSQL could stream.
+Windows, sorts and set operations consume completed inputs; an unbounded
+blocking input exhausts StatementMemoryBudget with CS05067. Grouping of native
+COUNT, SUM and AVG consumes rows as they arrive and retains keys and aggregate
+state; other aggregates keep their accounted, completed inputs. Infinite pipelines
+with bounded retained state, such as COUNT or a top-K sort, require cancellation;
+there is no growing state for the memory budget to refuse. Correlated IN,
+ANY/SOME and ALL compare each row as it arrives and stop at the first decisive
+comparison; UNKNOWN remains undecided until completion (PostgreSQL
+`src/backend/executor/nodeSubplan.c:399-427`). Independent sets may materialize.
+Correlated slot ownership expires when its frame advances; independent cached
+results retain their statement lifetime.
 
 The working/intermediate ranges, shared buffer, DISTINCT hash state and retained
 query scratch share StatementMemoryBudget (default 64 MiB). Reservations include
@@ -1360,15 +1368,17 @@ scratch uses the same reference ledger as windows, with the general statement
 budget diagnostic. The final selected result is materialized before statement
 resources are released, preserving existing session and wire lifetimes.
 
-The shared buffer retains accepted rows until statement exit so any reader may
-rewind. Its immutable working/intermediate ranges require no additional payload
-copy. DISTINCT membership owns references to the same rows. Container reservations
-precede growth and include old/new overlap; payload references are counted once
-per owner. Nested scratch owners can conservatively overlap charges while both
-are live. There is no spill or row/depth default beyond StatementMemoryBudget.
-A window's demand refusal is conservative: an explicit LIMIT in a derived input,
-an inherently finite working range, or an already blocking group/sort/set input, permits the existing window stage;
-a WHERE bound alone is not a proof of finite demand. All R1 grammar and binding
+Single-pass CTE scans reclaim consumed rows after every reader, including readers
+not opened yet, has passed them and no working range needs them. Working ranges
+expire at iteration boundaries after the old producer closes, following PostgreSQL
+`src/backend/executor/nodeRecursiveunion.c:127-144`. A circular buffer clears released
+references and reuses its slots; DISTINCT keeps its own membership references.
+Logical scan positions use Int64; buffer capacities count only retained rows.
+Reader counts follow the normalized join tree and each view runtime namespace.
+Nested-loop or correlated rescans conservatively retain history, as PostgreSQL's
+rewindable tuplestore does (`src/backend/executor/nodeCtescan.c:185-196`). Container
+reservations precede growth and include old/new overlap. There is no spill or
+row/depth default beyond retained statement memory and cancellation. All R1 grammar and binding
 restrictions remain in force. No public interface, visibility grant, project
 reference, catalog version or wire version is added.
 
@@ -1407,7 +1417,6 @@ parse_agg.c:1327-1334 (aggregates); nodeRecursiveunion.c:68-167 (working-table f
 | CS02066 | Recursive UNION changes the anchor type, domain or type modifiers; cast hint | 42804 |
 | CS02067 | Recursive UNION changes or conflicts with the anchor collation; COLLATE hint | 42P21 |
 | CS05067 | Recursive tables, DISTINCT state or shared buffer exceed StatementMemoryBudget | 53200 |
-| CS05089 | Window over an unbounded recursive input cannot preserve demand; bound its input first | 0A000 |
 
 ## Subquery and insert-source operators (#1021)
 
@@ -1542,7 +1551,7 @@ evaluator layout and synchronous execution path, preserving its allocation budge
 PostgreSQL's source references and SQL-visible errors are recorded in DIALECT.md.
 Parsing and planning enforce at most 32
 subquery levels, counting derived bodies too. UPDATE SET, VALUES, CHECK/DEFAULT and LIMIT/OFFSET expression
-subqueries, nested CTEs, recursive execution and lateral joins remain
+subqueries, nested CTEs and lateral joins remain
 outside the profile. Every FROM-less SELECT uses one implicit row, with ordinary filters, aggregation and row windows. Subquery resolution binds
 each use site to its slot number when the statement is planned; it needs no
 language-assembly friend access or public AST constructors. See [DIALECT.md](../../Assimalign.Cohesion.Database.Sql.Language/docs/DIALECT.md#subqueries-and-query-source-inserts-1021)

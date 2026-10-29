@@ -21,7 +21,9 @@ internal sealed partial class SqlPlanExecutor
     {
         var previous = _materializedRelations;
         using var memory = new SqlWindowMemory(statement.Metrics, _definitions.StatementMemoryBudget, statementBudgetOnly: true);
-        var execution = new RecursiveExecution(memory);
+        var readers = RecursiveReaderCounts(plan);
+        memory.Reserve(128L + 96L * readers.Count);
+        var execution = new RecursiveExecution(memory, readers);
         _materializedRelations = new RecursiveRelationRows(execution, previous?.TransactionStart ?? statement.TransactionStart);
         try { return await ExecuteAsync(plan, statement, cancellationToken).ConfigureAwait(false); }
         finally
@@ -55,8 +57,8 @@ internal sealed partial class SqlPlanExecutor
         if (relation.IsRecursiveReference)
         {
             var working = state.Working[relation];
-            int end = working.WorkingEnd;
-            for (int index = working.WorkingStart; index < end; index++)
+            long end = working.WorkingEnd;
+            for (long index = working.WorkingStart; index < end; index++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 yield return working.Rows[index];
@@ -87,20 +89,27 @@ internal sealed partial class SqlPlanExecutor
                 // Cached view plans reuse their CTE identities. Each view reference
                 // nevertheless owns a separate CTE namespace and producer lifetime.
                 frame = new SqlSubqueryValues();
-                root.AddScope(frame);
+                root.AddScope(frame, relation.Query);
             }
-            table = new RecursiveTable(this, relation, frame, statement, cancellationToken, state.Memory);
+            table = new RecursiveTable(this, relation, frame, statement, cancellationToken, state.Memory,
+                state.ReaderCounts.GetValueOrDefault(relation, -1));
             state.Tables.Add(relation, table);
             if (relation.Query is SqlRecursiveUnionPlan recursive) { state.Working.Add(recursive.Working, table); }
         }
         // Each enumeration owns a read pointer; only the furthest reader drives the
         // shared producer (PostgreSQL nodeCtescan.c:74-129).
-        for (int index = 0; ; index++)
+        var reader = table.OpenReader();
+        try
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (index == table.Rows.Count && !await table.MoveNextAsync().ConfigureAwait(false)) { yield break; }
-            yield return table.Rows[index];
+            for (long index = 0; ; index++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (index == table.Rows.Count && !await table.MoveNextAsync().ConfigureAwait(false)) { yield break; }
+                yield return table.Rows[index];
+                if (reader is not null) { reader.Position = index + 1; table.Reclaim(); }
+            }
         }
+        finally { await table.CloseReaderAsync(reader).ConfigureAwait(false); }
     }
 
     [System.Diagnostics.DebuggerDisplay("RecursiveExecution")]
@@ -108,12 +117,18 @@ internal sealed partial class SqlPlanExecutor
     private sealed class RecursiveExecution : IAsyncDisposable
     {
         private readonly Dictionary<SqlSubqueryValues, RecursiveExecution> _scopes = new(ReferenceEqualityComparer.Instance);
-        internal RecursiveExecution(SqlWindowMemory memory) { Memory = memory; }
+        internal RecursiveExecution(SqlWindowMemory memory, Dictionary<SqlDerivedRelation, int> readers)
+        { Memory = memory; ReaderCounts = readers; }
         internal SqlWindowMemory Memory { get; }
+        internal Dictionary<SqlDerivedRelation, int> ReaderCounts { get; }
         internal Dictionary<SqlDerivedRelation, RecursiveTable> Tables { get; } = new(ReferenceEqualityComparer.Instance);
         internal Dictionary<SqlDerivedRelation, RecursiveTable> Working { get; } = new(ReferenceEqualityComparer.Instance);
-        internal void AddScope(SqlSubqueryValues frame)
-        { Memory.Reserve(256); _scopes.Add(frame, new RecursiveExecution(Memory)); }
+        internal void AddScope(SqlSubqueryValues frame, SqlPlan plan)
+        {
+            var readers = RecursiveReaderCounts(plan);
+            Memory.Reserve(384L + 96L * readers.Count);
+            _scopes.Add(frame, new RecursiveExecution(Memory, readers));
+        }
         internal RecursiveExecution ScopeFor(SqlSubqueryValues? frame)
         {
             for (; frame is not null; frame = frame.Parent)
@@ -157,19 +172,59 @@ internal sealed partial class SqlPlanExecutor
         private bool _recursing;
         private long _iterations;
         private long _candidates;
+        private readonly SqlWindowMemory _memory;
+        private readonly HashSet<RecursiveReader>? _readers;
+        private int _unopenedReaders;
 
         internal RecursiveTable(SqlPlanExecutor executor, SqlDerivedRelation relation, SqlSubqueryValues? frame,
-            SqlStatementContext statement, CancellationToken cancellationToken, SqlWindowMemory memory)
+            SqlStatementContext statement, CancellationToken cancellationToken, SqlWindowMemory memory, int readers)
         {
             _executor = executor; _relation = relation; _frame = new SqlSubqueryValues(frame); _statement = statement; _cancellationToken = cancellationToken;
+            _memory = memory;
+            _unopenedReaders = readers;
+            if (readers > 0) { _readers = []; }
             Rows = new(memory);
             if (relation.Query is SqlRecursiveUnionPlan { IsAll: false } plan)
             { Seen = new(memory, new GroupKeyComparer(plan.Projections.Select(p => p.Collation.Resolve(frame)).ToArray())); }
         }
         internal RecursiveRows Rows { get; }
         internal RecursiveDistinct? Seen { get; }
-        internal int WorkingStart { get; private set; }
-        internal int WorkingEnd { get; private set; }
+        internal long WorkingStart { get; private set; }
+        internal long WorkingEnd { get; private set; }
+
+        internal RecursiveReader? OpenReader()
+        {
+            if (_readers is null) { return null; }
+            _memory.Reserve(128);
+            var reader = new RecursiveReader();
+            _readers.Add(reader); _unopenedReaders--;
+            return reader;
+        }
+
+        internal async ValueTask CloseReaderAsync(RecursiveReader? reader)
+        {
+            if (reader is null) { return; }
+            _readers!.Remove(reader); _memory.Release(128);
+            if (_unopenedReaders == 0 && _readers.Count == 0)
+            {
+                // No later scan can resume this producer. Closing it also closes
+                // readers it suspended in other CTEs before releasing its frontier.
+                await CloseAsync().ConfigureAwait(false);
+                _complete = true;
+                Seen?.Dispose();
+                Rows.Dispose();
+                return;
+            }
+            Reclaim();
+        }
+
+        internal void Reclaim()
+        {
+            if (_readers is null || _unopenedReaders != 0) { return; }
+            long end = _complete || _relation.Query is not SqlRecursiveUnionPlan ? Rows.Count : WorkingStart;
+            foreach (var reader in _readers) { end = Math.Min(end, reader.Position); }
+            Rows.ReleaseBefore(end);
+        }
 
         internal async ValueTask<bool> MoveNextAsync()
         {
@@ -212,14 +267,16 @@ internal sealed partial class SqlPlanExecutor
                 }
                 await CloseAsync().ConfigureAwait(false);
                 if (plan is null || Rows.Count == WorkingEnd)
-                { _complete = true; return false; }
+                { _complete = true; Reclaim(); return false; }
                 WorkingStart = WorkingEnd;
                 WorkingEnd = Rows.Count;
+                Reclaim();
                 _recursing = true;
                 _iterations++;
                 if (_statement.Metrics.Analysis(plan) is { } counter) { counter.RecursiveIterations++; }
-                // Working/intermediate tables are immutable ranges of the charged
-                // shared buffer. No second payload copy or depth ceiling is needed.
+                // The old working range has no remaining producer/rescan after
+                // CloseAsync. Readers alone can still own that prefix (PostgreSQL
+                // src/backend/executor/nodeRecursiveunion.c:127-144).
             }
         }
 
@@ -231,37 +288,79 @@ internal sealed partial class SqlPlanExecutor
         private sealed class DebugView { public DebugView(RecursiveTable value) { _ = value; } }
     }
 
+    private sealed class RecursiveReader
+    {
+        internal long Position { get; set; }
+    }
+
     [System.Diagnostics.DebuggerDisplay("RecursiveRows")]
     [System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
     private sealed class RecursiveRows : IDisposable
     {
         private readonly SqlWindowMemory _memory;
         private List<object?[]> _rows = [];
+        private long _start;
+        private int _head;
         private long _bytes;
         internal RecursiveRows(SqlWindowMemory memory) { _memory = memory; }
-        internal int Count => _rows.Count;
-        internal object?[] this[int index] => _rows[index];
+        internal long Count { get; private set; }
+        internal object?[] this[long index] => _rows[(int)((_head + index - _start) % _rows.Capacity)];
         internal void Add(object?[] row)
         {
-            if (_rows.Count == _rows.Capacity)
+            int retained = checked((int)(Count - _start));
+            if (retained == _rows.Capacity)
             {
                 int capacity = _rows.Capacity == 0 ? 4 : checked(_rows.Capacity * 2);
                 long next = 24L + 8L * capacity;
                 _memory.Reserve(next);
-                _rows.Capacity = capacity;
+                var rows = new List<object?[]>(capacity);
+                for (int index = 0; index < retained; index++) { rows.Add(this[_start + index]); }
+                _rows = rows; _head = 0;
                 _memory.Release(_bytes); _bytes = next;
             }
             _memory.Retain(row);
-            _rows.Add(row);
+            int slot = (_head + retained) % _rows.Capacity;
+            if (slot == _rows.Count) { _rows.Add(row); }
+            else { _rows[slot] = row; }
+            Count++;
+        }
+        internal void ReleaseBefore(long end)
+        {
+            while (_start < end)
+            {
+                var row = _rows[_head];
+                _rows[_head] = null!;
+                _head = (_head + 1) % _rows.Capacity; _start++;
+                _memory.ReleaseRow(row);
+            }
         }
         internal List<object?[]> Detach()
         {
-            var rows = _rows;
-            foreach (var row in rows) { _memory.ReleaseRow(row); }
-            _memory.Release(_bytes); _bytes = 0; _rows = [];
-            return rows;
+            if (_start == 0 && _head == 0)
+            {
+                // Materialized output has never discarded a prefix. Transfer its
+                // existing list without allocating another reference buffer.
+                var rows = _rows;
+                foreach (var row in rows) { _memory.ReleaseRow(row); }
+                _memory.Release(_bytes); _bytes = 0; _rows = []; Count = 0;
+                return rows;
+            }
+            long transferBytes = 24L + 8L * (Count - _start);
+            _memory.Reserve(transferBytes);
+            try
+            {
+                var rows = new List<object?[]>(checked((int)(Count - _start)));
+                for (long index = _start; index < Count; index++) { rows.Add(this[index]); }
+                Dispose();
+                return rows;
+            }
+            finally { _memory.Release(transferBytes); }
         }
-        public void Dispose() { var rows = Detach(); rows.Clear(); }
+        public void Dispose()
+        {
+            ReleaseBefore(Count);
+            _memory.Release(_bytes); _bytes = 0; _rows = []; _start = 0; Count = 0; _head = 0;
+        }
         private sealed class DebugView { public DebugView(RecursiveRows value) { _ = value; } }
     }
 

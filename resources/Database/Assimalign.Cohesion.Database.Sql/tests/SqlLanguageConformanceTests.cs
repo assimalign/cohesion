@@ -782,10 +782,10 @@ public sealed class SqlLanguageConformanceTests
                     "WITH RECURSIVE a(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM a) SELECT n FROM a LIMIT 3;", [[1L], [2L], [3L]]);
                 await ExpectRowsAsync(session,
                     "WITH RECURSIVE a(n) AS (SELECT 1 UNION SELECT n FROM a) SELECT n FROM a;", [[1L]]);
-                var refusal = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(
-                    "WITH RECURSIVE a(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM a) SELECT ROW_NUMBER() OVER() FROM a LIMIT 3;",
-                    cancellationToken: CancellationToken.None));
-                refusal.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS05089");
+                await ExpectRowsAsync(session,
+                    "WITH RECURSIVE a(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM a WHERE n<3) SELECT ROW_NUMBER() OVER() FROM a;", [[1L], [2L], [3L]]);
+                await ExpectRowsAsync(session,
+                    "WITH RECURSIVE a(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM a) SELECT v IN (SELECT n FROM a WHERE n>=t.v),v=ANY(SELECT n FROM a WHERE n>=t.v),v=SOME(SELECT n FROM a WHERE n>=t.v),v>ALL(SELECT n FROM a WHERE n>=t.v) FROM (SELECT 1 AS v) t;", [[true, true, true, false]]);
             }),
         [SqlClauses.Cte] = new("WITH a AS (SELECT id FROM t WHERE age > 40), b AS (SELECT id FROM a) SELECT id FROM b ORDER BY id;", _seed,
             expression => expression is SqlSelectExpression { CommonTables.Count: 2 },

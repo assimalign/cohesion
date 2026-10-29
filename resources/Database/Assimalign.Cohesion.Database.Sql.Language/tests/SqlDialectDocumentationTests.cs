@@ -9,6 +9,21 @@ namespace Assimalign.Cohesion.Database.Sql.Language.Tests;
 
 public sealed class SqlDialectDocumentationTests
 {
+    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Recursive scope: documentation describes executed fixpoints consistently (#1719)")]
+    [InlineData("Sql.Language", "DESIGN.md", "and recursive execution")]
+    [InlineData("Sql", "DESIGN.md", "nested CTEs, recursive execution")]
+    [InlineData("Sql", "OVERVIEW.md", "CS05089")]
+    [InlineData("Sql.Language", "DIALECT.md", "CS05089")]
+    public void Documentation_RecursiveScope_ShouldDescribeExecution(string project, string file, string obsolete)
+    {
+        // Arrange
+        string documentation = ReadDocumentation(project, file);
+
+        // Act / Assert
+        documentation.ShouldNotContain(obsolete, Case.Sensitive);
+        documentation.ShouldContain("fixpoint", Case.Sensitive);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Sql.Language] - Dialect: ON UPDATE describes executed actions and direct RETURNING (#1723)")]
     public void Dialect_UpdateActions_ShouldDescribeExecutedBehavior()
     {

@@ -279,7 +279,6 @@ structured-carrier messages remain unprefixed.
 | New (#1526, SQ-W3) | CS05086 | Offset RANGE requires exactly one ORDER BY key (42P20) |
 | New (#1526, SQ-W3) | CS05087 | GROUPS requires ORDER BY (42P20) |
 | New (#1526, SQ-W3) | CS05088 | NULL treatment on a function other than LAG/LEAD/FIRST_VALUE/LAST_VALUE/NTH_VALUE (42601) |
-| New (#1719, SQ-R2) | CS05089 | Execution — a window stage over an unbounded recursive input cannot preserve demand-driven evaluation; bound the input before the window (0A000) |
 | COHSQLE041 | CS06041 | Storage/durability |
 | COHSQLE058 | CS06058 | Storage/durability |
 

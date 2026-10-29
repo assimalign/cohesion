@@ -129,7 +129,7 @@ internal sealed partial class SqlPlanExecutor
                 try { await ComputePartitionAsync(partitionStart, partitionEnd, group, bytes => { memory.Reserve(bytes); scratch += bytes; }).ConfigureAwait(false); }
                 finally
                 {
-                    if (_subqueryValues is { HasCorrelatedQueries: true } frame) { frame.BeginRow([]); }
+                    if (_subqueryValues is { HasCorrelatedQueries: true } frame) { frame.BeginRow([], RecursiveState?.Memory); }
                     memory.EndPartition();
                     memory.Release(scratch);
                 }
@@ -375,7 +375,7 @@ internal sealed partial class SqlPlanExecutor
                             // visited last. Give its correlated subplans and prepared
                             // branch predicates a fresh evaluation even in that case.
                             if (recomputing && restartSensitive && _subqueryValues is { HasCorrelatedQueries: true } frame)
-                            { frame.BeginRow([]); }
+                            { frame.BeginRow([], RecursiveState?.Memory); }
                             await PrepareSubqueriesAsync(aggregate.Filter, inputRow, statement, cancellationToken).ConfigureAwait(false);
                             if (!evaluator.Matches(aggregate.Filter, inputRow)) { continue; }
                             foreach (var argument in aggregate.Arguments)

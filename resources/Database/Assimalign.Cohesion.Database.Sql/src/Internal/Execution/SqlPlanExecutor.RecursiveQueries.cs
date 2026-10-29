@@ -45,7 +45,11 @@ internal sealed partial class SqlPlanExecutor
             }
             finally { _subqueryValues = parent; }
             var input = plan is SqlSubqueryPlan subquery ? subquery.Input : ((SqlCorrelatedSubqueryPlan)plan).Input;
-            await foreach (var row in ReadRecursiveQueryAsync(input, child, statement, cancellationToken).ConfigureAwait(false)) { yield return row; }
+            try
+            {
+                await foreach (var row in ReadRecursiveQueryAsync(input, child, statement, cancellationToken).ConfigureAwait(false)) { yield return row; }
+            }
+            finally { child.ClearCorrelated(RecursiveState!.Memory); }
             yield break;
         }
         if (plan is SqlSetOperationPlan { Operator: SqlSetOperator.Union } union)
@@ -55,8 +59,6 @@ internal sealed partial class SqlPlanExecutor
         }
         if (plan is SqlGroupPlan or SqlWindowAggregatePlan or SqlSetOperationPlan)
         {
-            if (plan is SqlWindowAggregatePlan windowInput && HasUnboundedRecursiveInput(windowInput.Input))
-            { throw new SqlExecutionException("CS05089", ErrorMessages.CteRecursiveWindowDemand); }
             using var groupMemory = plan is SqlGroupPlan ? new SqlWindowMemory(statement.Metrics,
                 _definitions.StatementMemoryBudget, statementBudgetOnly: true) : null;
             // These operators require completed inputs. Their child reads still use
@@ -217,36 +219,44 @@ internal sealed partial class SqlPlanExecutor
         return values;
     }
 
-    private static bool HasUnboundedRecursiveInput(SqlPlan plan)
+    private async ValueTask<object?> EvaluateRecursiveSetAsync(SqlBoundExpression expression, SqlSubqueryBinding query,
+        object?[] outer, SqlStatementContext statement, CancellationToken cancellationToken)
     {
-        var pending = new Stack<SqlPlan>();
-        var visited = new HashSet<SqlPlan>(ReferenceEqualityComparer.Instance);
-        pending.Push(plan);
-        while (pending.TryPop(out var current))
+        var frame = _subqueryValues!;
+        var evaluator = ExecutionEvaluator(frame, cancellationToken);
+        var member = expression as SqlBoundInSubquery;
+        var quantified = expression as SqlBoundQuantifiedComparison;
+        bool all = quantified?.All == true;
+        bool unknown = false, found = false;
+        object? value = null;
+        await foreach (var row in ReadRecursiveQueryAsync(query.Query, new SqlSubqueryValues(frame), statement, cancellationToken).ConfigureAwait(false))
         {
-            if (!visited.Add(current)) { continue; }
-            switch (current)
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!found)
             {
-                case SqlRecursiveUnionPlan: return true;
-                case SqlJoinPlan join when join.Limit is null && join.OrderBy.Count == 0:
-                    foreach (var binding in join.Bindings)
-                    {
-                        if (binding.Source.Derived is not { } derived) { continue; }
-                        // A recursive-term scan is the completed previous working
-                        // range, so even an unbounded fixpoint has finite input here.
-                        if (derived.IsRecursiveReference) { continue; }
-                        pending.Push(derived.Query);
-                    }
-                    break;
-                case SqlSubqueryPlan subquery: pending.Push(subquery.Input); break;
-                case SqlCorrelatedSubqueryPlan subquery: pending.Push(subquery.Input); break;
-                case SqlWithPlan with: pending.Push(with.Input); break;
-                case SqlSetOperationPlan { Operator: SqlSetOperator.Union, Limit: null, OrderBy.Count: 0 } union:
-                    foreach (var operand in union.Operands) { pending.Push(operand.Query); }
-                    break;
+                var operand = member?.Operand ?? quantified!.Operand;
+                await PrepareExpressionAsync(operand, outer, statement, cancellationToken).ConfigureAwait(false);
+                value = EvaluatePrepared(operand, evaluator, outer);
+                found = true;
             }
+            // UNKNOWN cannot decide OR/AND. A later TRUE/FALSE can still win
+            // (PostgreSQL src/backend/executor/nodeSubplan.c:399-427).
+            if (value is null || row[0] is null) { unknown = true; continue; }
+            int comparison = SqlExpressionEvaluator.Compare(value, row[0]!,
+                (member?.Collation ?? quantified!.Collation).Resolve(frame));
+            bool matches = (quantified?.Operator ?? SqlBinaryOperator.Equal) switch
+            {
+                SqlBinaryOperator.Equal => comparison == 0,
+                SqlBinaryOperator.NotEqual => comparison != 0,
+                SqlBinaryOperator.LessThan => comparison < 0,
+                SqlBinaryOperator.LessOrEqual => comparison <= 0,
+                SqlBinaryOperator.GreaterThan => comparison > 0,
+                SqlBinaryOperator.GreaterOrEqual => comparison >= 0,
+                _ => throw new SqlExecutionException(SqlExecutionException.InternalErrorCode, ErrorMessages.QuerySourceRequired),
+            };
+            if (matches != all) { return member?.IsNegated == true ? !matches : matches; }
         }
-        return false;
+        return unknown ? null : member?.IsNegated == true ? !all : all;
     }
 
     private async IAsyncEnumerable<object?[]> ReadRecursiveUnionOperandsAsync(SqlSetOperationPlan plan,

@@ -24,17 +24,7 @@ internal sealed partial class SqlPlanExecutor
             if (_isDml || !_catalog.IsTruncatedTable(table)) { EnsureCurrentDefinition(table); }
         }
         if (plan.Bindings.Any(b => b.Source.View is not null)) { _ = statement.RequireCatalogSnapshot(); }
-        var root = plan.Tree;
-        if (root is null)
-        {
-            root = new SqlJoinTree(plan.FirstBinding);
-            for (int index = 0; index < plan.Steps.Count; index++)
-            {
-                var step = plan.Steps[index];
-                int inner = index == 0 && plan.FirstBinding == 1 ? 0 : step.Binding;
-                root = new SqlJoinTree(-1, root, new SqlJoinTree(inner), step);
-            }
-        }
+        var root = RecursiveJoinTree(plan);
         statement.Metrics.JoinAccessPaths = plan.Steps.Select(step => step.Access is { } access
             ? "join-seek:" + access.Index.Name : "join-scan").ToArray();
         await foreach (var row in ReadNode(root).ConfigureAwait(false)) { yield return row; }
@@ -152,5 +142,18 @@ internal sealed partial class SqlPlanExecutor
                 foreach (var row in rows) { cancellationToken.ThrowIfCancellationRequested(); yield return row; }
             }
         }
+    }
+
+    private static SqlJoinTree RecursiveJoinTree(SqlJoinPlan plan)
+    {
+        if (plan.Tree is { } tree) { return tree; }
+        var root = new SqlJoinTree(plan.FirstBinding);
+        for (int index = 0; index < plan.Steps.Count; index++)
+        {
+            var step = plan.Steps[index];
+            int inner = index == 0 && plan.FirstBinding == 1 ? 0 : step.Binding;
+            root = new SqlJoinTree(-1, root, new SqlJoinTree(inner), step);
+        }
+        return root;
     }
 }

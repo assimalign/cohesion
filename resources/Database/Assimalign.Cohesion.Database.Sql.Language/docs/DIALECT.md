@@ -943,7 +943,7 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | `NATURAL JOIN` | Recognized, not supported | rejected with `CK00001` |
 | `UNION` / `INTERSECT` / `EXCEPT` | Supported, measured | Each accepts ALL or DISTINCT (default); available in every query position, with parenthesized operands and combined ordering/paging. See [Set operations](#set-operations-1114). |
 | `WITH` (CTEs) | Supported subset, measured | Ordered non-recursive SELECT bodies before SELECT, INSERT, UPDATE, DELETE or MERGE; optional output column lists; also INSERT INTO t WITH ... SELECT |
-| `WITH RECURSIVE` | Supported subset, measured | Anchor-typed UNION ALL and DISTINCT fixpoints, demand-driven shared scans, budget/cancellation and EXPLAIN; unbounded window input uses CS05089. WITH RECURSIVE before MERGE remains excluded. |
+| `WITH RECURSIVE` | Supported subset, measured | Anchor-typed UNION ALL and DISTINCT fixpoints, demand-driven shared scans, budget/cancellation and EXPLAIN. WITH RECURSIVE before MERGE remains excluded. |
 | `WITH RECURSIVE ... MERGE` | Recognized, not supported | CK00001 at RECURSIVE even for acyclic lists; plain WITH ... MERGE binds and executes. |
 | `SELECT ... FOR UPDATE` / `FOR NO KEY UPDATE` / `FOR SHARE` / `FOR KEY SHARE` | Recognized, not supported | Complete locking strengths in the SELECT tail report CK00001, including in subqueries and CTE bodies. Deliberate change from CS00003 in #1719; qualified identifiers and implicit aliases retain their ordinary meaning. |
 | Window functions / `OVER` / `WINDOW` | Ranking, navigation, aggregate and value functions execute | See Window stage; ROWS, RANGE offsets, GROUPS, EXCLUDE and NULL treatment execute, including the peer-based default |
@@ -2915,9 +2915,20 @@ immutable ranges of that buffer. This avoids duplicate payload storage while
 preserving PostgreSQL's iteration boundaries. An outer LIMIT, EXISTS or scalar
 subquery can stop production early, including when a CTE has multiple readers.
 ORDER BY, grouping and INTERSECT/EXCEPT still need their complete inputs.
-A window over an unbounded recursive input reports CS05089 before reading it;
-limit the input in a derived query before applying windows. This explicit demand
-refusal avoids exhausting the budget for a window that PostgreSQL could stream.
+Windows, sorts and set operations consume completed inputs; an unbounded
+blocking input exhausts StatementMemoryBudget with CS05067. Grouping of native
+COUNT, SUM and AVG consumes rows as they arrive and retains keys and aggregate
+state; other aggregates keep their accounted, completed inputs. Infinite pipelines
+with bounded retained state, such as COUNT or a top-K sort, require cancellation;
+there is no growing state for the memory budget to refuse. Correlated IN,
+ANY/SOME and ALL compare each row as it arrives and stop at the first decisive
+comparison; UNKNOWN remains undecided until completion (PostgreSQL
+`src/backend/executor/nodeSubplan.c:399-427`). Independent sets may materialize.
+Correlated slot ownership expires when its frame advances; independent cached
+results retain their statement lifetime.
+Single-pass scans reclaim consumed prefixes after all readers have passed them and
+the old working range has expired. Rescannable consumers retain history; UNION
+DISTINCT retains its membership set throughout production.
 
 The working/intermediate ranges, shared buffer, DISTINCT hash state and retained
 query scratch share StatementMemoryBudget (default 64 MiB). Reservations include
@@ -2969,7 +2980,6 @@ parse_agg.c:1327-1334 (aggregates); nodeRecursiveunion.c:68-167 (working-table f
 | CS02066 | Recursive UNION changes the anchor type, domain or type modifiers; cast hint | 42804 |
 | CS02067 | Recursive UNION changes or conflicts with the anchor collation; COLLATE hint | 42P21 |
 | CS05067 | Recursive tables, DISTINCT state or shared buffer exceed StatementMemoryBudget | 53200 |
-| CS05089 | Window over an unbounded recursive input cannot preserve demand; bound its input first | 0A000 |
 
 ## Derived tables and DML predicates (#1113, part b)
 

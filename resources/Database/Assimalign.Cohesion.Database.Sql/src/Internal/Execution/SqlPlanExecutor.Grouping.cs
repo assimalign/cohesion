@@ -26,7 +26,9 @@ internal sealed partial class SqlPlanExecutor
     private async Task<DatabaseResult> ExecutePlainGroupAsync(SqlGroupPlan plan, SqlStatementContext statement,
         CancellationToken cancellationToken)
     {
-        await using var input = (DatabaseResultSet)await ExecuteAsync(plan.Input, statement, cancellationToken).ConfigureAwait(false);
+        await using var input = (DatabaseResultSet)await (RecursiveState is null
+            ? ExecuteAsync(plan.Input, statement, cancellationToken)
+            : RecursiveGroupInputAsync(plan, statement, cancellationToken)).ConfigureAwait(false);
         var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken);
         var keys = plan.Keys;
         var aggregates = plan.Aggregates;

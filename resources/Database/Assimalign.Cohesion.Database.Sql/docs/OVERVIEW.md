@@ -3,7 +3,8 @@
 WITH RECURSIVE uses anchor-typed working-table iteration and shared demand-driven scans.
 Outer LIMIT and subquery demand can stop an infinite producer. The statement memory grant
 bounds retained rows and DISTINCT state, and cancellation releases every buffer (#1719).
-A window over unbounded recursive input reports CS05089; bound its input before the window.
+Single-pass readers reclaim consumed rows and obsolete working ranges. Windows consume
+completed inputs and report CS05067 when retained statement memory is exhausted.
 
 Foreign keys execute all five ON UPDATE actions on UPDATE, UPDATE FROM, ON CONFLICT DO UPDATE
 and MERGE, including self-references and mixed delete/update chains. RESTRICT checks immediately;

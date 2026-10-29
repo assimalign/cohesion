@@ -103,13 +103,13 @@ public sealed class SqlSubqueryWireTests
         // Act / Assert
         foreach (var item in new[]
         {
-            (Body: "SELECT 1 UNION ALL SELECT n+1 FROM r", Code: "CS05067"),
-            (Body: "SELECT 1 UNION SELECT CAST(n AS DECIMAL) FROM r", Code: "CS02066"),
-            (Body: "SELECT 'x' COLLATE binary UNION SELECT n COLLATE case_insensitive FROM r", Code: "CS02067"),
-            (Body: "SELECT 1 UNION ALL SELECT n+1 FROM r", Code: "CS05089"),
+            (Body: "SELECT 1 UNION ALL SELECT n+1 FROM r", Code: "CS05067", Window: false),
+            (Body: "SELECT 1 UNION SELECT CAST(n AS DECIMAL) FROM r", Code: "CS02066", Window: false),
+            (Body: "SELECT 'x' COLLATE binary UNION SELECT n COLLATE case_insensitive FROM r", Code: "CS02067", Window: false),
+            (Body: "SELECT 1 UNION ALL SELECT n+1 FROM r", Code: "CS05067", Window: true),
         })
         {
-            string consumer = item.Code == "CS05089" ? "SELECT ROW_NUMBER() OVER() FROM r LIMIT 10" : "SELECT n FROM r";
+            string consumer = item.Window ? "SELECT ROW_NUMBER() OVER() FROM r LIMIT 10" : "SELECT n FROM r";
             var error = await Should.ThrowAsync<SqlClientException>(() => QueryAsync(connection, $"WITH RECURSIVE r(n) AS ({item.Body}) {consumer}"));
             error.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
             error.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == item.Code);

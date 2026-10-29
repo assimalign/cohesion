@@ -341,11 +341,11 @@ public sealed class SqlRecursiveFixpointTests
         finally { SqlPlanExecutor.RecursiveProgress = null; }
     }
 
-    [Fact(DisplayName = "Cohesion Test [Sql] - Recursive fixpoint: unbounded window demand refuses before producing rows")]
-    public async Task Execute_UnboundedWindow_ShouldReportDemandRefusal()
+    [Fact(DisplayName = "Cohesion Test [Sql] - Recursive fixpoint: unbounded window demand exhausts the statement budget and releases every grant")]
+    public async Task Execute_UnboundedWindow_ShouldReportMemoryRefusal()
     {
         // Arrange
-        await using var engine = SqlDatabaseEngine.Create("recursive-window", new());
+        await using var engine = SqlDatabaseEngine.Create("recursive-window", new() { StatementMemoryBudget = 32_768 });
         var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         long produced = 0;
@@ -357,8 +357,8 @@ public sealed class SqlRecursiveFixpointTests
                 "WITH RECURSIVE r(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM r) SELECT ROW_NUMBER() OVER() FROM r LIMIT 10", cancellationToken: CancellationToken.None));
 
             // Assert
-            error.Diagnostics.ShouldContain(d => d.Code == "CS05089");
-            produced.ShouldBe(0);
+            error.Diagnostics.ShouldContain(d => d.Code == "CS05067");
+            produced.ShouldBeGreaterThan(0);
             session.LastStatementMetrics!.HashMemoryBytes.ShouldBe(0);
         }
         finally { SqlPlanExecutor.RecursiveProgress = null; }

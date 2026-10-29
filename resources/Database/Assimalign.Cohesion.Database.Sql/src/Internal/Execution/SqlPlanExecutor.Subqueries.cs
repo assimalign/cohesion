@@ -32,7 +32,7 @@ internal sealed partial class SqlPlanExecutor
             }
             return await ExecuteAsync(input, statement, cancellationToken).ConfigureAwait(false);
         }
-        finally { _subqueryValues = parent; }
+        finally { frame.ClearCorrelated(RecursiveState?.Memory); _subqueryValues = parent; }
     }
 
     private Task<object?[]> MaterializeSubqueryAsync(SqlSubqueryBinding query, SqlStatementContext statement, CancellationToken cancellationToken)
