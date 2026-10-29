@@ -225,6 +225,67 @@ public sealed class SqlIsolationSyntaxTests
     private static async Task SuccessAsync(SqlDatabaseSession session, string sql)
         => (await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None)).Status.ShouldBe(DatabaseResultStatus.Success);
 
+    [Fact(DisplayName = "Cohesion Test [Sql] - Isolation: kernel disposal owns every configuration pin during a racing end")]
+    public async Task ExecuteAsync_ConfigurationAndEndRaceDatabaseDisposal_ShouldDrainEveryContext()
+    {
+        // Arrange
+        using var ceiling = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        await using var engine = SqlDatabaseEngine.Create("isolation-database-disposal", new());
+        int ended = 0, refused = 0, races = 0, concurrent = 0;
+        var elapsed = Stopwatch.StartNew();
+
+        // Act: record both ordered outcomes and poised concurrent contenders. The database's
+        // manager may claim the private pin before model cleanup in the concurrent cases.
+        do
+        {
+            ceiling.Token.ThrowIfCancellationRequested();
+            var database = await engine.CreateDatabaseAsync("db" + races, ceiling.Token);
+            await using var session = await database.CreateSessionAsync(ceiling.Token);
+            var transaction = await session.BeginTransactionAsync(IsolationLevel.ReadCommitted, ceiling.Token);
+            using var start = new ManualResetEventSlim();
+            using var ready = new CountdownEvent(2);
+            var endFinished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var disposalFinished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            int iteration = races++;
+            var ending = Task.Run(async () =>
+            {
+                ready.Signal();
+                start.Wait(ceiling.Token);
+                if (iteration % 3 == 1) { await disposalFinished.Task.WaitAsync(ceiling.Token); }
+                try
+                {
+                    transaction.TrySetIsolationLevel(IsolationLevel.Snapshot);
+                    if (iteration % 2 == 0) { await transaction.CommitAsync(ceiling.Token); }
+                    else { await transaction.RollbackAsync(ceiling.Token); }
+                    Interlocked.Increment(ref ended);
+                }
+                catch (Exception failure) when (failure is ObjectDisposedException or DatabaseException or TransactionAbortedException)
+                { Interlocked.Increment(ref refused); }
+                finally { endFinished.TrySetResult(); }
+            }, ceiling.Token);
+            var disposing = Task.Run(async () =>
+            {
+                ready.Signal();
+                start.Wait(ceiling.Token);
+                if (iteration % 3 == 0) { await endFinished.Task.WaitAsync(ceiling.Token); }
+                try { await database.DisposeAsync(); }
+                finally { disposalFinished.TrySetResult(); }
+            }, ceiling.Token);
+            ready.Wait(ceiling.Token);
+            start.Set();
+            await Task.WhenAll(ending, disposing).WaitAsync(ceiling.Token);
+            if (iteration % 3 == 2) { concurrent++; }
+            database.Coordinator.GetOpenContexts().ShouldBeEmpty();
+            transaction.Context.State.ShouldNotBe(TransactionState.Active);
+        } while (elapsed.Elapsed < TimeSpan.FromMilliseconds(250) || concurrent < 16 || ended == 0 || refused == 0);
+
+        // Assert
+        (ended + refused).ShouldBe(races);
+        ended.ShouldBeGreaterThan(0);
+        refused.ShouldBeGreaterThan(0);
+        concurrent.ShouldBeGreaterThanOrEqualTo(16);
+    }
+
     private static async Task<int> CountAsync(SqlDatabaseSession session)
     {
         await using var result = (await session.ExecuteAsync("SELECT id FROM t", cancellationToken: CancellationToken.None))

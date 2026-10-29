@@ -5675,6 +5675,9 @@ storage retains recovery-owned cleanup. SET takes no data locks. Lock order is r
 manager registration, context end latch; coordinator tracking follows manager release. No
 storage/page latch spans those operations. End cores run outside root state; operation admission
 excludes configuration during data work. Auto-commit creates no configuration pin.
+If kernel disposal has already claimed a private configuration pin, cleanup leaves that abort
+to the kernel instead of replacing the completed transaction's outcome with a teardown refusal.
+The database-disposal race corpus verifies that coordinator tracking drains in either ordering.
 
 Unlike PostgreSQL's first-query snapshot acquisition (utils/time/snapmgr.c:293-337), Snapshot
 remains fixed at the original begin after early SET. Timing follows commands/variable.c:576-604,

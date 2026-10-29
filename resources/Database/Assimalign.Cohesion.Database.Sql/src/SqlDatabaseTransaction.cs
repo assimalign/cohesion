@@ -123,7 +123,14 @@ public sealed class SqlDatabaseTransaction : DatabaseTransaction
     {
         var pin = Interlocked.Exchange(ref _configurationPin, null);
         if (pin is not null && pin.State == TransactionState.Active && !_database.IsOffline)
-        { await _coordinator.RollbackAsync(pin).ConfigureAwait(false); }
+        {
+            try { await _coordinator.RollbackAsync(pin).ConfigureAwait(false); }
+            // Exchange gives this path sole ownership. A disposed manager, or an end
+            // already claimed on this private pin, means kernel disposal owns its abort.
+            // Pin teardown must not replace an already-completed transaction's outcome.
+            catch (ObjectDisposedException) { }
+            catch (TransactionAbortedException) { }
+        }
     }
 
     /// <summary>Gets the number of admitted statements still running (observability for tests and diagnostics).</summary>
