@@ -136,6 +136,12 @@ next execution, including a reused request after CREATE/DROP INDEX.
 
 An unaliased FROM exports the collection name to nested SELECTs and recognizes it as the local
 META receiver. Group-key matching compares captured qualified paths with unqualified keys.
+The query's own paths still use only its explicit alias: items.g in FROM items reads the field
+items then g. Thus SELECT items.g FROM items GROUP BY g is refused with CD05001, and
+SELECT DISTINCT g FROM items ORDER BY items.g is refused with CD01014. SELECT RAW g FROM items
+ORDER BY items.g sorts on that field path. Captured group-key matching strips the collection
+receiver only on the captured side. META on an UNNEST variable, comprehension variable or unknown
+name is refused with CD05001 before evaluation.
 Local META identity ordering retains identity paging; EXPLAIN
 reports identity_paging=True when this path applies. A source alias or UNNEST variable that reuses
 a captured name still obeys its own query's grouping restrictions. Complete group keys are matched

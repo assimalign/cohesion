@@ -663,7 +663,7 @@ internal sealed partial class DocumentPlanner
     {
         if (expression is OqlSubqueryExpression subquery)
         {
-            if (query.GroupBy.Any(key => EquivalentExpression(key, expression, query.Alias ?? query.Collection, variables, scopes, rightScope: bound))) { return; }
+            if (query.GroupBy.Any(key => EquivalentExpression(key, expression, query, variables, scopes, rightScope: bound))) { return; }
             ValidateGroupedCaptures(subquery.Query, query, variables, scopes, functions, bound, outerNames);
             return;
         }
@@ -677,7 +677,7 @@ internal sealed partial class DocumentPlanner
                 variables?.Contains(outerName) != true && outerNames?.Contains(outerName) == true)) { return; }
         // PostgreSQL parse_agg.c:1439-1452 adjusts grouping expressions to the current
         // scope before matching. An inner t must never stand in for an outer field t.
-        if (query.GroupBy.Any(key => EquivalentExpression(key, expression, query.Alias ?? query.Collection, variables, scopes, rightScope: bound))) { return; }
+        if (query.GroupBy.Any(key => EquivalentExpression(key, expression, query, variables, scopes, rightScope: bound))) { return; }
         if (expression is OqlComprehensionExpression comprehension)
         {
             ValidateGrouped(comprehension.Collection, query, variables, scopes, functions, bound, outerNames);
@@ -730,51 +730,51 @@ internal sealed partial class DocumentPlanner
     private static IEnumerable<OqlPathSegment> PathSegments(OqlPathExpression path, string? alias)
         => path.Segments.Skip(alias is not null && path.Segments.Count > 0 && path.Segments[0].Name == alias ? 1 : 0);
 
-    private static bool EquivalentExpression(OqlExpression left, OqlExpression right, string? alias, IReadOnlySet<string>? variables,
-        DocumentBindingScopes scopes, DocumentBindingScope? leftScope = null, DocumentBindingScope? rightScope = null, int localDepth = 0) => (left, right) switch
+    private static bool EquivalentExpression(OqlExpression left, OqlExpression right, OqlSelectExpression query, IReadOnlySet<string>? variables,
+        DocumentBindingScopes scopes, DocumentBindingScope? leftScope = null, DocumentBindingScope? rightScope = null, int localDepth = 0, bool captured = false) => (left, right) switch
     {
         (OqlSubqueryExpression a, OqlSubqueryExpression b) => EquivalentNestedQuery(a.Query, b.Query) &&
             EquivalentNestedBindings(a.Query, leftScope, rightScope, localDepth) &&
             EquivalentNestedBindings(b.Query, leftScope, rightScope, localDepth),
         (OqlComprehensionExpression a, OqlComprehensionExpression b) => a.IsFirst == b.IsFirst && a.Variable == b.Variable &&
             (a.Predicate is null) == (b.Predicate is null) &&
-            EquivalentExpression(a.Collection, b.Collection, alias, variables, scopes, leftScope, rightScope, localDepth) &&
-            EquivalentExpression(a.Projection, b.Projection, alias, variables, scopes,
-                scopes.Enter(a, a.Variable, leftScope), scopes.Enter(b, b.Variable, rightScope), localDepth + 1) &&
-            (a.Predicate is null || EquivalentExpression(a.Predicate, b.Predicate!, alias, variables, scopes,
-                scopes.Enter(a, a.Variable, leftScope), scopes.Enter(b, b.Variable, rightScope), localDepth + 1)),
+            EquivalentExpression(a.Collection, b.Collection, query, variables, scopes, leftScope, rightScope, localDepth, captured) &&
+            EquivalentExpression(a.Projection, b.Projection, query, variables, scopes,
+                scopes.Enter(a, a.Variable, leftScope), scopes.Enter(b, b.Variable, rightScope), localDepth + 1, captured) &&
+            (a.Predicate is null || EquivalentExpression(a.Predicate, b.Predicate!, query, variables, scopes,
+                scopes.Enter(a, a.Variable, leftScope), scopes.Enter(b, b.Variable, rightScope), localDepth + 1, captured)),
         (OqlQuantifiedExpression a, OqlQuantifiedExpression b) => a.IsEvery == b.IsEvery && a.Variable == b.Variable &&
-            EquivalentExpression(a.Collection, b.Collection, alias, variables, scopes, leftScope, rightScope, localDepth) &&
-            EquivalentExpression(a.Predicate, b.Predicate, alias, variables, scopes,
-                scopes.Enter(a, a.Variable, leftScope), scopes.Enter(b, b.Variable, rightScope), localDepth + 1),
-        (OqlInExpression a, OqlInExpression b) => (a.Array is null) == (b.Array is null) && a.Negated == b.Negated && EquivalentChildren(a, b, alias, variables, scopes, leftScope, rightScope, localDepth),
-        (OqlBetweenExpression a, OqlBetweenExpression b) => a.Negated == b.Negated && EquivalentChildren(a, b, alias, variables, scopes, leftScope, rightScope, localDepth),
-        (OqlLikeExpression a, OqlLikeExpression b) => a.Negated == b.Negated && EquivalentChildren(a, b, alias, variables, scopes, leftScope, rightScope, localDepth),
+            EquivalentExpression(a.Collection, b.Collection, query, variables, scopes, leftScope, rightScope, localDepth, captured) &&
+            EquivalentExpression(a.Predicate, b.Predicate, query, variables, scopes,
+                scopes.Enter(a, a.Variable, leftScope), scopes.Enter(b, b.Variable, rightScope), localDepth + 1, captured),
+        (OqlInExpression a, OqlInExpression b) => (a.Array is null) == (b.Array is null) && a.Negated == b.Negated && EquivalentChildren(a, b, query, variables, scopes, leftScope, rightScope, localDepth, captured),
+        (OqlBetweenExpression a, OqlBetweenExpression b) => a.Negated == b.Negated && EquivalentChildren(a, b, query, variables, scopes, leftScope, rightScope, localDepth, captured),
+        (OqlLikeExpression a, OqlLikeExpression b) => a.Negated == b.Negated && EquivalentChildren(a, b, query, variables, scopes, leftScope, rightScope, localDepth, captured),
         (OqlCaseExpression a, OqlCaseExpression b) => (a.Operand is null) == (b.Operand is null) &&
-            (a.Otherwise is null) == (b.Otherwise is null) && a.Branches.Count == b.Branches.Count && EquivalentChildren(a, b, alias, variables, scopes, leftScope, rightScope, localDepth),
-        (OqlPathExpression a, OqlPathExpression b) => EquivalentPath(a, b, alias, variables, leftScope, rightScope, localDepth),
+            (a.Otherwise is null) == (b.Otherwise is null) && a.Branches.Count == b.Branches.Count && EquivalentChildren(a, b, query, variables, scopes, leftScope, rightScope, localDepth, captured),
+        (OqlPathExpression a, OqlPathExpression b) => EquivalentPath(a, b, query, variables, leftScope, rightScope, localDepth, captured),
         (OqlLiteralExpression a, OqlLiteralExpression b) => DocumentExpressionEvaluator.Compare(a.Value, b.Value) == 0,
         (OqlCallExpression a, OqlCallExpression b) => a.Name == b.Name && (a.Quantifier == OqlAggregateQuantifier.Distinct) == (b.Quantifier == OqlAggregateQuantifier.Distinct) && a.Arguments.Count == b.Arguments.Count &&
-            a.Arguments.Zip(b.Arguments).All(pair => EquivalentExpression(pair.First, pair.Second, alias, variables, scopes, leftScope, rightScope, localDepth)),
+            a.Arguments.Zip(b.Arguments).All(pair => EquivalentExpression(pair.First, pair.Second, query, variables, scopes, leftScope, rightScope, localDepth, captured)),
         (OqlStarExpression, OqlStarExpression) => true,
         (OqlArrayExpression a, OqlArrayExpression b) => a.Elements.Count == b.Elements.Count &&
-            a.Elements.Zip(b.Elements).All(pair => EquivalentExpression(pair.First, pair.Second, alias, variables, scopes, leftScope, rightScope, localDepth)),
+            a.Elements.Zip(b.Elements).All(pair => EquivalentExpression(pair.First, pair.Second, query, variables, scopes, leftScope, rightScope, localDepth, captured)),
         (OqlMetaExpression a, OqlMetaExpression b) => a.Member == b.Member &&
-            EquivalentMetadataSource(a, b, alias, variables, leftScope, rightScope, localDepth),
+            EquivalentMetadataSource(a, b, query, variables, leftScope, rightScope, localDepth, captured),
         (OqlObjectExpression a, OqlObjectExpression b) => a.Members.Count == b.Members.Count &&
             a.Members.Zip(b.Members).All(pair => pair.First.Key == pair.Second.Key &&
-                EquivalentExpression(pair.First.Value, pair.Second.Value, alias, variables, scopes, leftScope, rightScope, localDepth)),
+                EquivalentExpression(pair.First.Value, pair.Second.Value, query, variables, scopes, leftScope, rightScope, localDepth, captured)),
         (OqlMissingExpression, OqlMissingExpression) => true,
         (OqlParameterExpression a, OqlParameterExpression b) => a.Name == b.Name,
         (OqlBinaryExpression a, OqlBinaryExpression b) => a.Operator == b.Operator &&
-            EquivalentExpression(a.Left, b.Left, alias, variables, scopes, leftScope, rightScope, localDepth) &&
-            EquivalentExpression(a.Right, b.Right, alias, variables, scopes, leftScope, rightScope, localDepth),
-        (OqlUnaryExpression a, OqlUnaryExpression b) => a.Operator == b.Operator && EquivalentExpression(a.Operand, b.Operand, alias, variables, scopes, leftScope, rightScope, localDepth),
+            EquivalentExpression(a.Left, b.Left, query, variables, scopes, leftScope, rightScope, localDepth, captured) &&
+            EquivalentExpression(a.Right, b.Right, query, variables, scopes, leftScope, rightScope, localDepth, captured),
+        (OqlUnaryExpression a, OqlUnaryExpression b) => a.Operator == b.Operator && EquivalentExpression(a.Operand, b.Operand, query, variables, scopes, leftScope, rightScope, localDepth, captured),
         _ => false,
     };
 
-    private static bool EquivalentPath(OqlPathExpression left, OqlPathExpression right, string? alias, IReadOnlySet<string>? variables,
-        DocumentBindingScope? leftScope, DocumentBindingScope? rightScope, int localDepth)
+    private static bool EquivalentPath(OqlPathExpression left, OqlPathExpression right, OqlSelectExpression query, IReadOnlySet<string>? variables,
+        DocumentBindingScope? leftScope, DocumentBindingScope? rightScope, int localDepth, bool captured)
     {
         string? leftName = left.Segments.Count > 0 ? left.Segments[0].Name : null;
         string? rightName = right.Segments.Count > 0 ? right.Segments[0].Name : null;
@@ -789,17 +789,20 @@ internal sealed partial class DocumentPlanner
                 left.Segments.SequenceEqual(right.Segments);
         }
         if (IsVariablePath(left, variables) != IsVariablePath(right, variables)) { return false; }
-        int leftStart = !IsVariablePath(left, variables) && alias is not null && leftName == alias ? 1 : 0;
-        int rightStart = !IsVariablePath(right, variables) && alias is not null && rightName == alias ? 1 : 0;
+        // Own paths strip only an explicit alias. Only the captured side may name
+        // an unaliased outer row by its collection; its group key still reads fields.
+        int leftStart = !IsVariablePath(left, variables) && query.Alias is not null && leftName == query.Alias ? 1 : 0;
+        string? rightSource = captured ? query.Alias ?? query.Collection : query.Alias;
+        int rightStart = !IsVariablePath(right, variables) && rightSource is not null && rightName == rightSource ? 1 : 0;
         return left.Segments.Skip(leftStart).SequenceEqual(right.Segments.Skip(rightStart));
     }
 
-    private static bool EquivalentChildren(OqlExpression left, OqlExpression right, string? alias, IReadOnlySet<string>? variables,
-        DocumentBindingScopes scopes, DocumentBindingScope? leftScope, DocumentBindingScope? rightScope, int localDepth)
+    private static bool EquivalentChildren(OqlExpression left, OqlExpression right, OqlSelectExpression query, IReadOnlySet<string>? variables,
+        DocumentBindingScopes scopes, DocumentBindingScope? leftScope, DocumentBindingScope? rightScope, int localDepth, bool captured)
     {
         var a = PredicateChildren(left).ToArray();
         var b = PredicateChildren(right).ToArray();
-        return a.Length == b.Length && a.Zip(b).All(pair => EquivalentExpression(pair.First, pair.Second, alias, variables, scopes, leftScope, rightScope, localDepth));
+        return a.Length == b.Length && a.Zip(b).All(pair => EquivalentExpression(pair.First, pair.Second, query, variables, scopes, leftScope, rightScope, localDepth, captured));
     }
 
     private sealed class DebugView

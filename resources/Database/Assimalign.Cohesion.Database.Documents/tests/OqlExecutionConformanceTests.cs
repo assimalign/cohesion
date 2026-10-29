@@ -100,6 +100,10 @@ public sealed class OqlExecutionConformanceTests
             ],
             [OqlClauses.Select] =
             [
+                new("SELECT RAW g FROM items ORDER BY items.g", [[3m], [2m], [1m]],
+                    ["DELETE FROM items", "INSERT INTO items (KEY, VALUE) VALUES ('a', {g:3}), ('b', {g:1,items:{g:30}}), ('c', {g:2,items:{g:10}})"]),
+                new("SELECT RAW g FROM items d ORDER BY d.g", [[1m], [2m], [3m]],
+                    ["DELETE FROM items", "INSERT INTO items (KEY, VALUE) VALUES ('a', {g:3}), ('b', {g:1,items:{g:30}}), ('c', {g:2,items:{g:10}})"]),
                 new("SELECT amount = 1 IS NOT NULL, 1 = NULL IS NULL, 1 IN [1] IS NULL, 2 BETWEEN 1 AND 3 IS NOT NULL, 2 BETWEEN 1 IS NOT NULL AND 3 FROM items WHERE name = 'alpha'", [[false, false, null, false, false]]),
                 new("SELECT 'abc' LIKE 'a%' IS NOT NULL, 'a%' LIKE 'a!%' ESCAPE '!' IS NOT NULL, 'a' || 'b', MISSING IS DISTINCT FROM NULL, NULL IS NOT DISTINCT FROM NULL FROM items WHERE name = 'alpha'", [[null, null, "ab", true, true]]),
                 new("SELECT ARRAY_AGG(category) FROM items GROUP BY category HAVING ARRAY_LENGTH(ARRAY_AGG(category)) > 0 ORDER BY ARRAY_AGG(category)", [[Json("[\"a\",\"a\",\"a\"]")], [Json("[\"b\"]")]]),

@@ -338,7 +338,7 @@ internal sealed partial class DocumentPlanner
             left.GroupBy.Count != right.GroupBy.Count) { return false; }
         var scopes = new DocumentBindingScopes();
         bool Same(OqlExpression? a, OqlExpression? b) => a is null || b is null ? a is null && b is null :
-            EquivalentExpression(a, b, left.Alias, variables, scopes);
+            EquivalentExpression(a, b, left, variables, scopes);
         return Same(left.Limit, right.Limit) && Same(left.Offset, right.Offset) &&
             NestedChildren(left).Zip(NestedChildren(right)).All(pair => Same(pair.First, pair.Second));
     }

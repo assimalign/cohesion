@@ -26,7 +26,7 @@ internal sealed partial class DocumentPlanner
         // Do not capture a new group-frame local in ordinary planning's existing lambdas:
         // even one additional closure slot would change its pinned allocation measurements.
         var bound = scopes.FindGroup(query);
-        return EquivalentExpression(left, right, query.Alias ?? query.Collection, variables, scopes, bound, bound);
+        return EquivalentExpression(left, right, query, variables, scopes, bound, bound);
     }
 
     private static DocumentBindingScope? GroupScope(OqlSelectExpression query, IReadOnlySet<string>? unnestVariables)

@@ -41,15 +41,15 @@ internal sealed partial class DocumentPlanner
         => meta.Arguments.Count == 0 || meta.Arguments.Count == 1 && alias is not null &&
             meta.Arguments[0] is OqlPathExpression { Segments.Count: 1 } path && path.Segments[0].Name == alias;
 
-    private static bool EquivalentMetadataSource(OqlMetaExpression left, OqlMetaExpression right, string? alias,
-        IReadOnlySet<string>? variables, DocumentBindingScope? leftScope, DocumentBindingScope? rightScope, int localDepth)
+    private static bool EquivalentMetadataSource(OqlMetaExpression left, OqlMetaExpression right, OqlSelectExpression query,
+        IReadOnlySet<string>? variables, DocumentBindingScope? leftScope, DocumentBindingScope? rightScope, int localDepth, bool captured)
     {
-        bool Local(OqlMetaExpression meta, DocumentBindingScope? scope) => IsLocalMetadata(meta, alias) &&
-            (meta.Arguments.Count == 0 || DocumentBindingScope.Resolve(scope, alias, out _) is null);
+        bool Local(OqlMetaExpression meta, DocumentBindingScope? scope) => IsLocalMetadata(meta, query.Alias ?? query.Collection) &&
+            (meta.Arguments.Count == 0 || DocumentBindingScope.Resolve(scope, query.Alias ?? query.Collection, out _) is null);
         if (Local(left, leftScope) && Local(right, rightScope)) { return true; }
         return left.Arguments.Count == 1 && right.Arguments.Count == 1 &&
             left.Arguments[0] is OqlPathExpression a && right.Arguments[0] is OqlPathExpression b &&
-            EquivalentPath(a, b, alias, variables, leftScope, rightScope, localDepth);
+            EquivalentPath(a, b, query, variables, leftScope, rightScope, localDepth, captured);
     }
 
     private static bool EquivalentNestedBindings(OqlSelectExpression query, DocumentBindingScope? left,
@@ -156,8 +156,8 @@ internal sealed partial class DocumentPlanner
             System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
             // Match complete keys before their components, while retaining every
             // inner binding's identity so shadowed names cannot prove a group key.
-            if (query.GroupBy.Any(key => EquivalentExpression(key, expression, query.Alias ?? query.Collection, variables, scopes,
-                rightScope: expression is OqlSubqueryExpression ? nestedOrder ?? local : local))) { return; }
+            if (query.GroupBy.Any(key => EquivalentExpression(key, expression, query, variables, scopes,
+                rightScope: expression is OqlSubqueryExpression ? nestedOrder ?? local : local, captured: true))) { return; }
             if (expression is OqlSubqueryExpression subquery) { VisitQuery(subquery.Query, nestedOrder ?? local); return; }
             if (expression is OqlMetaExpression meta)
             {
@@ -171,7 +171,9 @@ internal sealed partial class DocumentPlanner
                 if (SourceName(path.Segments[0].Name) && DocumentBindingScope.Resolve(local, path.Segments[0].Name, out _) is null)
                 {
                     if (groupArrayInput) { ValidateGroupArrayInput(path, query, scopes, functions, aggregateInput: true); }
-                    else { ValidateGrouped(path, query, variables, scopes, functions, bound, null); }
+                    // Complete keys were compared above in their respective scopes.
+                    // An unmatched, unshadowed source path is hidden after grouping.
+                    else { throw new DocumentPlanningException("CD05001", ErrorMessages.DocumentPlannerValidateGroupedFailure, path.Location); }
                 }
                 return;
             }

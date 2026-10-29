@@ -607,8 +607,13 @@ Captured outer paths are constant within one inner grouping invocation; grouping
 permits them in projection, HAVING and ordering while preserving local grouping restrictions.
 Scalar/array access constraints and ordered-index presence/domain proofs exclude resolved outer
 bindings. An outer path cannot constrain or prove ordering of the inner stored document.
-Source identity uses the explicit alias or, when absent, the collection name in metadata,
-group-key matching and grouped-capture validation. Identity paging recognizes only local-source
+Equivalence checks for own paths use only the explicit alias: in FROM items, items.g denotes the field items then g.
+The collection name identifies an unaliased source only for captured references from nested
+SELECTs and META receivers. Group-key equivalence normalizes only the captured side to the
+outer query's own path scope; DISTINCT and RAW projected ordering retain that own scope too.
+Metadata validation refuses UNNEST, comprehension and unknown receivers before evaluation
+(CD05001), so the unaliased evaluator shortcut can receive only the collection name.
+Identity paging recognizes only local-source
 META().id or META(local_source).id; EXPLAIN reports identity_paging=True for that path. Captured metadata
 is constant and keeps ascending inner identity ties. Metadata equivalence compares receiver bindings.
 Captured expressions are also checked against every enclosing grouped scope, including captures
@@ -633,6 +638,9 @@ Captured source frames carry their existing row content and identity; path evalu
 the content, while META resolves stored id/version. Expression/derived rows and scalar bindings
 carry no identity, preserving their NULL metadata behavior.
 The wrapper exists only for statements containing subqueries; ordinary plan records stay unchanged.
+A pre-existing evaluation limitation remains: in a statement containing subqueries, an unaliased
+own path can still strip the collection name as a source prefix. This planning correction leaves
+that runtime behavior unchanged.
 
 DocumentNestedExecutionContext borrows the statement's DocumentOperation and database, parameter
 snapshot, frozen function catalog and cancellation token. It never creates or completes an operation,
