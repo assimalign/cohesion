@@ -149,6 +149,8 @@ public sealed class SqlStatementCompletenessTests
             "ALTER TABLE c ADD CONSTRAINT fk FOREIGN KEY (p) REFERENCES t (id) ON DELETE RESTRICT",
         ],
         [SqlClauses.Begin] = ["BEGIN", "START TRANSACTION", "BEGIN WORK"],
+        [SqlClauses.IsolationLevel] = ["BEGIN ISOLATION LEVEL READ COMMITTED", "START TRANSACTION ISOLATION LEVEL REPEATABLE READ"],
+        [SqlClauses.SetTransaction] = ["SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED"],
         [SqlClauses.Commit] = ["COMMIT", "COMMIT WORK", "COMMIT TRANSACTION", "END"],
         [SqlClauses.Rollback] = ["ROLLBACK", "ROLLBACK WORK", "ROLLBACK TRANSACTION"],
         [SqlClauses.Transaction] = ["BEGIN TRANSACTION"],

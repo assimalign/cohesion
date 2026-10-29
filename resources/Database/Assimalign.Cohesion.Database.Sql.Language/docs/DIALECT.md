@@ -299,6 +299,38 @@ the profile requires updating the parser, this matrix, and the engine's
 enumerates the profile and fails if any advertised clause lacks a passing case.
 MERGE's advertised clause is measured through action execution and RETURNING.
 
+## Transaction isolation (#1012)
+
+`BEGIN [WORK|TRANSACTION] [ISOLATION LEVEL level [, ...]]`, `START TRANSACTION
+[ISOLATION LEVEL level [, ...]]` and `SET TRANSACTION ISOLATION LEVEL level [, ...]`
+execute through the existing request and Ready frames. READ COMMITTED maps to ReadCommitted,
+REPEATABLE READ to Snapshot, and READ UNCOMMITTED to ReadCommitted. SERIALIZABLE anywhere
+in a mode list is refused with CS04073 (0A000). Commas are optional between complete modes;
+repeated supported levels use the last mode. All mode words remain contextual identifiers.
+READ ONLY, READ WRITE, DEFERRABLE and NOT DEFERRABLE report CK00001 naming the form.
+Incomplete or malformed isolation modes report CS00012 (42601).
+
+SET requires an active block (CS04071, 25000), before its first admitted data statement
+(CS04072, 25001), including SELECT, plain EXPLAIN and unsuccessful data/DDL attempts.
+Malformed or refused control statements and pre-canceled requests do not consume that first
+statement. Repeated early SET is allowed. Even an idempotent SET after data is refused;
+PostgreSQL permits that exception, but the owner rule here does not. A failed SET leaves the
+transaction usable. Savepoints remain unavailable (#1726); when introduced they must refuse
+isolation changes inside a savepoint using the same timing condition.
+
+Snapshot visibility and the catalog capture are fixed at the original BEGIN, including when
+an early SET changes READ COMMITTED to REPEATABLE READ after a concurrent commit. PostgreSQL
+instead acquires its transaction snapshot at the first query. READ COMMITTED refreshes visibility
+per statement. A temporary begin-horizon pin lasts until the first admitted data statement or
+transaction end, protecting an early switch to Snapshot; SET acquires no data locks and creates
+no further pins. Default BEGIN, auto-commit, DISCARD ALL and pooled reuse retain Snapshot.
+Typed isolation APIs still accept Snapshot and ReadCommitted and refuse Serializable.
+
+Reference behavior: PostgreSQL `src/backend/commands/variable.c:576-604` (early changes and
+subtransactions) and `src/backend/utils/time/snapmgr.c:293-337` (first-query snapshot).
+The conformance corpora are SqlIsolationParserTests, SqlIsolationSyntaxTests and
+SqlIsolationWireTests (InMemory and TCP). No disk or wire version changes.
+
 ## Storage integrity errors (#1160)
 
 A read that detects storage corruption fails with `CK06003`, naming the database and
@@ -884,7 +916,7 @@ src/backend/commands/tablecmds.c:2033-2090 and src/backend/catalog/heap.c:3701-3
 
 ## Statement matrix
 
-With INSERT ... ON CONFLICT (#1118), DML RETURNING (#1117), persisted CREATE/DROP VIEW (#1124), CREATE/DROP SCHEMA (#1030), set operations (#1114), quantified comparisons (#1718), UPDATE ... FROM / DELETE ... USING (#1714), TRUNCATE and CREATE TABLE AS (#1716), MERGE (#1715), aggregate FILTER (#1720), grouping sets (#1720), and sequence DDL, NEXT VALUE FOR and DISCARD ALL (#1717), window functions, frame modes, exclusion and NULL treatment (#1526) and identity, SERIAL and OVERRIDING forms (#1717), and foreign-key ON UPDATE declarations (#1723, SQ-F1), the profile has **80 of 82 declared clauses** measured against the live SQL engine, including MERGE actions and RETURNING. WITH RECURSIVE (#1719, SQ-R1) adds one declared binding-only clause; recursive execution remains CK00001 until SQ-R2.
+With INSERT ... ON CONFLICT (#1118), DML RETURNING (#1117), persisted CREATE/DROP VIEW (#1124), CREATE/DROP SCHEMA (#1030), set operations (#1114), quantified comparisons (#1718), UPDATE ... FROM / DELETE ... USING (#1714), TRUNCATE and CREATE TABLE AS (#1716), MERGE (#1715), aggregate FILTER (#1720), grouping sets (#1720), and sequence DDL, NEXT VALUE FOR and DISCARD ALL (#1717), window functions, frame modes, exclusion and NULL treatment (#1526) and identity, SERIAL and OVERRIDING forms (#1717), and foreign-key ON UPDATE declarations (#1723, SQ-F1), plus isolation options and SET TRANSACTION (#1012), the profile has **82 of 84 declared clauses** measured against the live SQL engine, including MERGE actions and RETURNING. WITH RECURSIVE (#1719, SQ-R1) adds one declared binding-only clause; recursive execution remains CK00001 until SQ-R2.
 Phase 22 measured 33 of 49.
 The earlier 32/48 figure included `JOIN`, `GROUP BY`, `HAVING`, and `SUBQUERY`,
 removed in Phase 12e (#1019–#1021), plus a no-op `CAST` removed in Phase 13.
@@ -951,7 +983,8 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | `CONSTRAINT` / `FOREIGN KEY` / `REFERENCES` / `CHECK` / `UNIQUE` constraints | Supported subset, measured | Column and table declarations normalize into constraint definitions; UNIQUE lowers to a unique catalog index. NULL is an equal index key: a second NULL violates a single-column UNIQUE constraint. Foreign-key NULL values are allowed; CHECK accepts UNKNOWN and rejects FALSE. CHECK expressions must be deterministic Boolean row expressions with the engine's scalar functions (built-in or registered, `IMMUTABLE` only), each called with arguments its signature accepts (`CS01006` otherwise); parameters and aggregates are excluded. CHECK predicates and DEFAULT expressions are stored as canonical text and parsed once per table version; see [Persisted definitions are canonical](#persisted-definitions-are-canonical). |
 | `ON DELETE CASCADE` / `RESTRICT` / `NO ACTION` / `SET NULL` / `SET DEFAULT` | Supported | omitted deletion action defaults to `NO ACTION`; a cascade deletes its whole transitive closure with no depth limit, so a self-referencing chain deletes however long it is (#1164), and a cycle deletes each row once; `DROP TABLE ... CASCADE` is not supported |
 | `ON UPDATE` | Supported | CASCADE, SET NULL, SET DEFAULT, RESTRICT and NO ACTION; defaults to NO ACTION. Either order beside ON DELETE, once each. UPDATE_RULE reports the stored action. Actions execute on UPDATE, UPDATE FROM, ON CONFLICT DO UPDATE and MERGE, including self-references and mixed delete/update chains. Stored key representation changes fire actions even under an equality collation; NULL keys use MATCH SIMPLE. RESTRICT checks existing children immediately and rejects parent substitution; NO ACTION checks the complete statement state and accepts another final parent. SET DEFAULT evaluates per row, including sequence/identity defaults; absent defaults assign NULL. Conflicting cascade assignments fail with CS05085 (27000); the whole statement rolls back. |
-| `START TRANSACTION` / `BEGIN [WORK\|TRANSACTION]` / `COMMIT [WORK\|TRANSACTION]` / `END` / `ROLLBACK [WORK\|TRANSACTION]` | Supported | Spellings map to the existing BEGIN/COMMIT/ROLLBACK session commands (+0 clauses). Like every SQL statement, a valid spelling without `;` receives informational CS00009, with no error or warning; with `;` it has no parser diagnostics. START and WORK are contextual, so columns named start/work remain valid. END takes no suffix; without a transaction its CS04002 message names COMMIT. Commit and rollback observe caller cancellation only before their end starts (#1246); a pre-canceled explicit end leaves the transaction usable. Once execution completes, automatic commit ignores caller cancellation and delivers the committed result; real append and durability failures retain their normal errors. Catalog DDL that self-committed finishes mandatory cleanup with CancellationToken.None and delivers its committed result even if the caller canceled; a successful CREATE TABLE requires no retry and exists once after reopen. `SqlCommitCancellationConformanceTests` covers the end boundary and committed rows after reopen. END WORK/TRANSACTION, AND [NO] CHAIN, modes, ROLLBACK [WORK] TO [SAVEPOINT], BEGIN TRAN/named transactions and COMMIT PREPARED stay CS00003. ABORT [WORK\|TRANSACTION], SAVEPOINT, RELEASE, SET TRANSACTION and PREPARE TRANSACTION stay CS00002 (#1012); TRANSACTION alone is not a statement. |
+| `START TRANSACTION` / `BEGIN [WORK\|TRANSACTION]` / `COMMIT [WORK\|TRANSACTION]` / `END` / `ROLLBACK [WORK\|TRANSACTION]` | Supported | Spellings map to the existing BEGIN/COMMIT/ROLLBACK session commands (+0 clauses). Like every SQL statement, a valid spelling without `;` receives informational CS00009, with no error or warning; with `;` it has no parser diagnostics. START and WORK are contextual, so columns named start/work remain valid. END takes no suffix; without a transaction its CS04002 message names COMMIT. Commit and rollback observe caller cancellation only before their end starts (#1246); a pre-canceled explicit end leaves the transaction usable. Once execution completes, automatic commit ignores caller cancellation and delivers the committed result; real append and durability failures retain their normal errors. Catalog DDL that self-committed finishes mandatory cleanup with CancellationToken.None and delivers its committed result even if the caller canceled; a successful CREATE TABLE requires no retry and exists once after reopen. `SqlCommitCancellationConformanceTests` covers the end boundary and committed rows after reopen. END WORK/TRANSACTION, AND [NO] CHAIN, ROLLBACK [WORK] TO [SAVEPOINT], BEGIN TRAN/named transactions and COMMIT PREPARED stay CS00003. ABORT [WORK\|TRANSACTION], SAVEPOINT, RELEASE and PREPARE TRANSACTION stay CS00002 (#1726); TRANSACTION alone is not a statement. |
+| `BEGIN` / `START TRANSACTION ... ISOLATION LEVEL` and `SET TRANSACTION ISOLATION LEVEL` | Supported (+2 clauses) | READ COMMITTED, READ UNCOMMITTED and REPEATABLE READ execute; SERIALIZABLE is CS04073. SET is early-block-only, with CS04071/CS04072 state refusals. See Transaction isolation (#1012) for mode lists, timing and begin-snapshot semantics. |
 | `MERGE` | Ordered actions, BY SOURCE and RETURNING, ReadCommitted target rechecks and mixed-action final-state foreign keys | Existing constraint/action codes; CS04064 for Snapshot target conflicts |
 | `GRANT` | Not in the dialect | `CS00002` |
 
@@ -1999,7 +2032,7 @@ The [engine recheck corpus](../../Assimalign.Cohesion.Database.Sql/tests/SqlMerg
 [final-state corpus](../../Assimalign.Cohesion.Database.Sql/tests/SqlMergeConstraintTests.cs),
 [InMemory/TCP corpus](../../Assimalign.Cohesion.Database.Sql.Client/tests/SqlMergeWireTests.cs) and
 [wire Snapshot corpus](../../Assimalign.Cohesion.Database.Sql.Client/tests/SqlMergeConcurrencyWireTests.cs)
-exercise this contract. Wire BEGIN keeps its default Snapshot isolation. No disk/protocol/result-frame
+exercise this contract. Wire BEGIN without options keeps its default Snapshot isolation; isolation options execute as specified above. No disk/protocol/result-frame
 changes. Repeated modification and target rechecks follow PostgreSQL
 executor/nodeModifyTable.c:3521-3551,3557-3744; NO ACTION substitution follows
 utils/adt/ri_triggers.c:944-959.
@@ -2926,7 +2959,7 @@ and complete strengths follow PostgreSQL `src/backend/parser/gram.y:13119-13176,
 WITH RECURSIVE before MERGE is refused with CK00001 at RECURSIVE, even for acyclic
 definitions (PostgreSQL `src/backend/parser/parse_merge.c:124-129`). Plain WITH
 before MERGE remains supported and shares SELECT's CTE binding and materialization.
-These contextual exclusions do not change the 80/82 declared-clause count.
+These contextual exclusions do not change the 82/84 declared-clause count.
 
 References re-derived from the local PostgreSQL clone: src/backend/parser/parse_cte.c:
 345-400 (output checks and hints), 580-632 (unknown anchor output), 648-725 and 863-906
@@ -4190,6 +4223,7 @@ pin in the same change.
 | `CS00007` | Error | The statement is within the nesting limit, but the thread parsing it has too little stack left to recurse that deep; the same text parses on a thread with more stack. An engine parsing statement text reports this as `CS05004` (#1151) |
 | `CS00008` | Error | Invalid DATE, TIME, TIMESTAMP, TIMESTAMPTZ, day-time INTERVAL or X binary literal content; the span covers the complete literal. Recognized unsupported forms use CK00001 |
 | `CS00009` | Information | Statement does not end with `;` |
+| `CS00012` | Error | Malformed or incomplete transaction isolation mode (42601) |
 | `CS02001` | Error | Division by zero during evaluation (ISO SQLSTATE 22012) |
 | `CS02002` | Error | Numeric value out of range during evaluation, store assignment, DEFAULT conversion or built-in NUMERIC CAST, including an inexact Decimal representation after any declared-scale rounding (ISO SQLSTATE 22003) |
 | `CS02003` | Error | Datatype mismatch, including non-numeric signs, non-Boolean search conditions (WHERE, JOIN ON, HAVING, ON CONFLICT DO UPDATE WHERE, searched CASE WHEN and AND/OR/NOT operands), non-Boolean IS TRUE/FALSE/UNKNOWN operands, and incompatible set-operation column types; set errors name both types and the one-based position (ISO SQLSTATE 42804) |
@@ -4528,6 +4562,9 @@ the diagnostic fixes introduce no persisted-format change beyond #1422's format-
 | `CS02064` | ALTER COLUMN TYPE old value, USING result or dependent DEFAULT has no assignment cast | 42804 (`datatype_mismatch`) |
 | `CS04064` | A bound table was replaced while DDL waited; retry the statement | 40001 (`serialization_failure`) |
 | `CS04066` | TRUNCATE inside an explicit transaction | 25001 (`active_sql_transaction`) |
+| `CS04071` | SET TRANSACTION outside a transaction block | 25000 (`invalid_transaction_state`) |
+| `CS04072` | SET TRANSACTION after data or during an operation | 25001 (`active_sql_transaction`) |
+| `CS04073` | SERIALIZABLE text isolation is unsupported | 0A000 (`feature_not_supported`) |
 | `CS04065` | Hard lock deadlock; roll back the victim transaction before retrying | 40P01 (`deadlock_detected`) |
 | `CS03065` | Function signature already exists | 42723 (`duplicate_function`) |
 | `CS03067` | TRUNCATE omits a required referencing table | 0A000 (`feature_not_supported`) |

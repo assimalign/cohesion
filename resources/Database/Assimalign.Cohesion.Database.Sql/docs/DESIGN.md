@@ -3710,7 +3710,7 @@ Incoming checks permit an old key retained by another replacement. UPDATE tombst
 replaced row/index versions before inserting any new versions in the same rollback bracket,
 so unique entries also validate the final state during a swap. Snapshot and ReadCommitted
 use the same pending view. Wire regressions select isolation via the existing server-session
-API because SQL BEGIN deliberately has no isolation clause; UPDATE/results use both transports.
+API; SQL BEGIN now also accepts isolation options (#1012); UPDATE/results use both transports.
 
 ## MERGE binding, association and execution (#1715, SQ-M1/SQ-M2/SQ-M3)
 
@@ -5644,6 +5644,44 @@ definition self-commits, 600-row unindexed apply evictions, publication timeout/
 and delayed lock continuations. LockTimeoutTests deterministically cancels between grant dequeue
 and notification until its interleaving and outcome counters move, with a time ceiling.
 
+## Transaction isolation syntax (#1012)
+
+BEGIN/START isolation options initialize the context at the requested effective level.
+READ UNCOMMITTED maps to ReadCommitted and REPEATABLE READ to Snapshot. Optionless BEGIN and
+auto-commit remain Snapshot. SET TRANSACTION applies only to the open block before its first
+admitted data statement; even failed data/DDL attempts and plain EXPLAIN close configuration.
+Control failures and pre-cancellation leave configuration open. Repeated early supported modes
+use the last level; any SERIALIZABLE mode is refused. CS04071 identifies SET outside a block,
+CS04072 identifies late/running configuration, and CS04073 identifies unsupported SERIALIZABLE.
+Other modes retain CK00001. These refusals preserve transaction usability. Savepoints remain
+unimplemented (#1726); future savepoint admission must join the same CS04072 check.
+
+| Code | Isolation condition | SQLSTATE |
+|---|---|---|
+| CS00012 | Malformed or incomplete isolation mode | 42601 |
+| CS04071 | SET TRANSACTION outside an active block | 25000 |
+| CS04072 | SET TRANSACTION after the first data statement or during an operation | 25001 |
+| CS04073 | SERIALIZABLE text isolation is unsupported | 0A000 |
+
+Early SET replaces the immutable kernel context under root transaction state admission,
+preserving id, sequence, lifecycle and the original begin snapshot. A begin-time snapshot pin
+precedes context creation under TruncateSnapshotGate and protects the original horizon while
+READ COMMITTED may still switch to Snapshot. The catalog is captured at BEGIN for either
+initial level and used only in Snapshot mode. The first admitted data statement or every end
+path releases the pin; construction/cancellation failures unwind both registrations. Offline
+storage retains recovery-owned cleanup. SET takes no data locks. Lock order is root state,
+manager registration, context end latch; coordinator tracking follows manager release. No
+storage/page latch spans those operations. End cores run outside root state; operation admission
+excludes configuration during data work. Auto-commit creates no configuration pin.
+
+Unlike PostgreSQL's first-query snapshot acquisition (utils/time/snapmgr.c:293-337), Snapshot
+remains fixed at the original begin after early SET. Timing follows commands/variable.c:576-604,
+except that the owner also refuses idempotent late SET. Pool return and DISCARD ALL keep the
+Snapshot default without retaining isolation state. No protocol or disk version changes.
+Nonparallel race tests assert both configuration/end outcomes and horizon release; two-session
+and InMemory/TCP tests verify effective levels and failure recovery.
+
+
 ## SQL transaction control and the B7 seam
 
 Automatic commit follows the same cancellation boundary as every other engine (#1246):
@@ -5686,8 +5724,8 @@ next commit's, which also takes the database offline (`Database.Storage` DESIGN.
 `SqlTransactionControlTests` drives `START TRANSACTION ... END` and
 `BEGIN WORK ... ROLLBACK WORK` through `ServerTestHarness`, checking observer
 visibility across commit and restoration after rollback. Malformed
-`START TRANSACTION ISOLATION LEVEL SERIALIZABLE` returns wire `ParseFailure`
-carrying `CS00003`, opens no transaction, and permits the next statement on the
+`START TRANSACTION ISOLATION LEVEL READ` returns wire `ParseFailure`
+carrying `CS00012`, opens no transaction, and permits the next statement on the
 same connection. Protocol responses synchronize these checks without fixed sleeps.
 
 The session's transaction is the root `DatabaseSession`'s (concrete-types plan §6.4, phase 4):
@@ -5695,12 +5733,10 @@ the base registers the `SqlDatabaseTransaction` the session's BEGIN core creates
 as `CurrentTransaction` until the caller ends it, so one transaction at a time is open on a
 session. The transaction carries its MVCC context and, under `Snapshot`, the catalog capture
 its system-view statements read (taken at BEGIN). The session's default isolation value is
-`Snapshot`; BEGIN and auto-commit pass that value to the coordinator instead of embedding a
-level at each call site. Before phase 4 the session kept a `Stack<SqlTransactionScope>` with
+`Snapshot`; optionless BEGIN and auto-commit pass that value to the coordinator. Before phase 4 the session kept a `Stack<SqlTransactionScope>` with
 one root entry; B7 anticipates `SAVEPOINT name`, `ROLLBACK TO [SAVEPOINT] name`,
-`RELEASE [SAVEPOINT] name`, and `SET TRANSACTION ISOLATION LEVEL ...`, and will add named
-scopes and undo markers inside the one transaction, while isolation syntax sets the carried
-value. B2 implements none of that syntax or savepoint undo machinery. `Serializable` remains
+`RELEASE [SAVEPOINT] name`, and will add named scopes and undo markers inside the one
+transaction (#1726). Isolation syntax is implemented by #1012. `Serializable` remains
 rejected by the existing C# seam until the coordinator supports serialization detection.
 
 The session lifecycle below applies equally to SQL requests and C# transactions.

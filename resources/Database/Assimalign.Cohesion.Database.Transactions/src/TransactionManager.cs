@@ -390,6 +390,22 @@ public sealed class TransactionManager : IAsyncDisposable
     internal ValueTask<TransactionContext> BeginSnapshotPinAsync(CancellationToken cancellationToken) =>
         BeginAsync(IsolationLevel.Snapshot, isSnapshotPin: true, cancellationToken);
 
+    internal TransactionContext ReplaceIsolationLevel(TransactionContext context, IsolationLevel isolationLevel)
+    {
+        lock (_sync)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            if (context.IsStatementView || context.IsSnapshotPin || !ReferenceEquals(context.Manager, this) ||
+                !_active.TryGetValue(context.Sequence.Value, out var owned) || !ReferenceEquals(context, owned) ||
+                context.ReplaceIsolationLevel(isolationLevel) is not { } replacement)
+            {
+                throw new TransactionAbortedException(_errorTransactionManagerClaimEndFailure);
+            }
+            _active[context.Sequence.Value] = replacement;
+            return replacement;
+        }
+    }
+
     private async ValueTask<TransactionContext> BeginAsync(
         IsolationLevel isolationLevel, bool isSnapshotPin, CancellationToken cancellationToken)
     {

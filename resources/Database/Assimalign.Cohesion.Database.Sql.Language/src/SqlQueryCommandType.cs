@@ -27,4 +27,6 @@ public enum SqlQueryCommandType
     Merge,
     /// <summary>Discard logical-session state outside a transaction.</summary>
     Discard,
+    /// <summary>Configure the current transaction before its first data statement.</summary>
+    SetTransaction,
 }

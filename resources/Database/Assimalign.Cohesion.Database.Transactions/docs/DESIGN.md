@@ -1,5 +1,15 @@
 # Assimalign.Cohesion.Database.Transactions — Design
 
+## Isolation configuration (#1012)
+
+ReplaceIsolationLevel returns an immutable replacement context with the same id, sequence and
+begin snapshot. Earlier handles and statement views share one end/apply lifecycle. Registration
+changes under manager lock before coordinator tracking; those locks are never nested. The context
+end latch follows manager lock, as in ClaimEnd. Stale, pinned, applying or ending contexts refuse
+replacement. Callers exclude data statements and transaction ends, retain a begin snapshot pin
+while READ COMMITTED may still change to Snapshot, and release it when configuration closes.
+This takes no new engine locks, writes no log records and changes no lifecycle rates or formats.
+
 ## Intent
 
 One transaction substrate for five engines. ACID is the platform's defining requirement (area `DESIGN.md` R1), so the machinery that provides it — MVCC snapshots, commit ordering, locking, WAL binding — lives in a kernel project no model owns. Engines *use* the manager; sessions *expose* the resulting `DatabaseTransaction` from the contract root.

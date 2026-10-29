@@ -51,7 +51,11 @@ public sealed partial class SqlTruncateReviewTests
             failure.ShouldBeSameAs(original);
             captures.ShouldBe(1);
             database.IsOffline.ShouldBeTrue();
-            database.Coordinator.GetOpenContexts().ShouldHaveSingleItem().State.ShouldBe(TransactionState.Active);
+            // The transaction and its early-configuration horizon both belong to recovery
+            // once storage goes offline; BEGIN must not attempt either rollback (#1012).
+            var retained = database.Coordinator.GetOpenContexts();
+            retained.Count.ShouldBe(2);
+            retained.ShouldAllBe(context => context.State == TransactionState.Active);
         }
         finally { SqlQueryExecutor.BeforeCatalogCapture = null; }
     }

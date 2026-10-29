@@ -29,7 +29,7 @@ namespace Assimalign.Cohesion.Database.Sql;
 /// closed.", and disposal ends the open transaction as the session's teardown (a later commit of it
 /// reports <c>CS04005</c> naming the closure). This type supplies the model's work: the
 /// isolation-level and offline refusals of BEGIN, the statements, the SQL transaction-control
-/// statements (<c>BEGIN</c>, <c>COMMIT</c>, <c>ROLLBACK</c>) and the translation of the kernel's
+/// statements (<c>BEGIN</c>, <c>SET TRANSACTION</c>, <c>COMMIT</c>, <c>ROLLBACK</c>) and the translation of the kernel's
 /// exceptions at the model boundary.
 /// </para>
 /// <para>
@@ -80,8 +80,8 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
     private readonly string? _provisioningSchema;
     private readonly TransactionSequence? _ddlLockOwner;
 
-    // The isolation level of an auto-commit statement and of a BEGIN statement. The SQL
-    // isolation syntax (SET TRANSACTION ISOLATION LEVEL) that would change it is not implemented.
+    // BEGIN without options and every auto-commit statement use Snapshot. SET TRANSACTION
+    // configures only the current block, never the session or a pooled connection's default.
     private readonly IsolationLevel _isolationLevel = IsolationLevel.Snapshot;
     private SqlStatementMetrics? _lastStatementMetrics;
     private TimeSpan? _statementTimeout;
@@ -240,29 +240,35 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
         try
         {
             var transactionStart = (_database.Engine.EngineOptions.TimeProvider ?? TimeProvider.System).GetUtcNow();
-            TransactionContext context;
+            TransactionContext? context = null;
+            TransactionContext? configurationPin = null;
             try
             {
+                // Retain the begin horizon while early SET may still select Snapshot, even
+                // after a READ COMMITTED begin. The pin precedes the context's capture; no
+                // data lock or page latch is held. The truncate gate precedes registration.
+                configurationPin = await _coordinator.BeginSnapshotPinAsync(cancellationToken).ConfigureAwait(false);
                 context = await _coordinator.BeginAsync(isolationLevel, cancellationToken).ConfigureAwait(false);
-            }
-            catch (Exception exception) when (_database.TranslateFailure(exception) is var offline && !ReferenceEquals(offline, exception))
-            {
-                throw offline;
-            }
-
-            try
-            {
                 return new SqlDatabaseTransaction(_coordinator, context, _database,
-                    isolationLevel == IsolationLevel.Snapshot ? _executor.CaptureCatalogSnapshot() : null, transactionStart);
+                    _executor.CaptureCatalogSnapshot(), transactionStart, configurationPin);
             }
-            catch
+            catch (Exception exception)
             {
                 // Offline storage leaves recovery to abort this context (#1243). Cleanup
                 // must never replace the capture/construction failure that brought us here.
                 if (!_database.IsOffline)
                 {
-                    try { await _coordinator.RollbackAsync(context, CancellationToken.None).ConfigureAwait(false); }
+                    try { if (context is not null) { await _coordinator.RollbackAsync(context, CancellationToken.None).ConfigureAwait(false); } }
                     catch (Exception) { /* Preserve the original capture/construction failure. */ }
+                    try { if (configurationPin is not null) { await _coordinator.RollbackAsync(configurationPin, CancellationToken.None).ConfigureAwait(false); } }
+                    catch (Exception) { /* Preserve the original capture/construction failure. */ }
+                }
+                // BEGIN failures cross the model boundary; catalog capture/construction
+                // failures retain their exact cause, including an offline capture (#1716).
+                if (context is null)
+                {
+                    var translated = _database.TranslateFailure(exception);
+                    if (!ReferenceEquals(translated, exception)) { throw translated; }
                 }
                 throw;
             }
@@ -563,8 +569,6 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
             throw new DatabaseParseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExecuteStatementCoreAsyncFailure, diagnostic.Code, diagnostic.Message), [diagnostic]);
         }
 
-        SqlSystemViews.EnsureReadOnly(request.Statement.SqlExpression);
-
         // Control commands bind to the session before an auto-commit context is
         // opened. Their result follows the ordinary query/wire diagnostic path.
         if (request.Statement.SqlExpression is SqlTransactionExpression control)
@@ -597,6 +601,8 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
 
             try
             {
+                await transaction.StartDataStatementAsync().ConfigureAwait(false);
+                SqlSystemViews.EnsureReadOnly(request.Statement.SqlExpression);
                 if (request.Statement.SqlExpression is SqlTruncateExpression)
                 {
                     return TransactionDiagnostic("CS04066", ErrorMessages.TruncateExplicitTransaction);
@@ -666,6 +672,7 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
 
         // Auto-commit semantics: a one-statement manager transaction, so
         // visibility and conflict semantics are identical to the explicit path.
+        SqlSystemViews.EnsureReadOnly(request.Statement.SqlExpression);
         var transactionStart = (_database.Engine.EngineOptions.TimeProvider ?? TimeProvider.System).GetUtcNow();
         TransactionContext context;
         try
@@ -899,6 +906,21 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
         SqlTransactionExpression control, CancellationToken cancellationToken)
     {
         var transaction = CurrentTransaction;
+        if (control.IsolationLevels.Contains(SqlTransactionIsolationLevel.Serializable))
+        { return TransactionDiagnostic("CS04073", ErrorMessages.TransactionSerializable); }
+        var isolationLevel = control.IsolationLevels.Count == 0 ? _isolationLevel : control.IsolationLevels[^1] switch
+        {
+            SqlTransactionIsolationLevel.RepeatableRead => IsolationLevel.Snapshot,
+            _ => IsolationLevel.ReadCommitted,
+        };
+        if (control.CommandType == SqlQueryCommandType.SetTransaction)
+        {
+            if (transaction is null) { return TransactionDiagnostic("CS04071", ErrorMessages.TransactionIsolationOutside); }
+            ThrowIfTransactionRefuses();
+            return transaction.TrySetIsolationLevel(isolationLevel)
+                ? new SqlQueryResult(DatabaseResultStatus.Success, affectedCount: 0)
+                : TransactionDiagnostic("CS04072", ErrorMessages.TransactionIsolationLate);
+        }
         if (control.CommandType == SqlQueryCommandType.Discard)
         {
             if (transaction is not null) { return TransactionDiagnostic("CS04070", ErrorMessages.DiscardInTransaction); }
@@ -917,7 +939,7 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
                 return TransactionDiagnostic("CS04001", ErrorMessages.TransactionControlAsyncDatabaseResult);
             }
 
-            await BeginTransactionAsync(_isolationLevel, cancellationToken).ConfigureAwait(false);
+            await BeginTransactionAsync(isolationLevel, cancellationToken).ConfigureAwait(false);
         }
         else
         {

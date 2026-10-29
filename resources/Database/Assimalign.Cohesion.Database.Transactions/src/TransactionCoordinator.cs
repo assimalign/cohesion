@@ -390,6 +390,36 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     public ValueTask<TransactionContext> BeginAsync(IsolationLevel isolationLevel, CancellationToken cancellationToken = default) =>
         BeginAsync(isolationLevel, isSnapshotPin: false, cancellationToken);
 
+    /// <summary>Replaces an unused transaction's isolation context, preserving its identity and begin snapshot.</summary>
+    /// <param name="context">The current context, with no statement applies running.</param>
+    /// <param name="isolationLevel">The new isolation level.</param>
+    /// <returns>The replacement context. Earlier handles share its lifecycle.</returns>
+    /// <exception cref="ArgumentNullException">The context is null.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">The level is undefined.</exception>
+    /// <exception cref="TransactionAbortedException">The context is stale, ending, applying, a view or a pin.</exception>
+    /// <exception cref="ObjectDisposedException">The manager was disposed.</exception>
+    /// <remarks>
+    /// The caller excludes data statements and transaction ends, and retains a begin-time snapshot
+    /// pin while READ COMMITTED remains configurable. That pin protects historical versions if the
+    /// caller subsequently selects Snapshot. Release it after configuration or at transaction end.
+    /// No engine locks are acquired. Manager registration precedes coordinator tracking, with no
+    /// nested locks; the manager protects the new horizon before the coordinator publishes it.
+    /// </remarks>
+    public TransactionContext ReplaceIsolationLevel(TransactionContext context, IsolationLevel isolationLevel)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        if (isolationLevel is not (IsolationLevel.Snapshot or IsolationLevel.ReadCommitted or IsolationLevel.Serializable))
+        { throw new ArgumentOutOfRangeException(nameof(isolationLevel)); }
+        var replacement = _manager.ReplaceIsolationLevel(context, isolationLevel);
+        lock (_sync)
+        {
+            // Disposal may already have untracked the shared lifecycle. Never re-enroll it.
+            if (_openContexts.ContainsKey(context.Sequence.Value))
+            { _openContexts[context.Sequence.Value] = replacement; }
+        }
+        return replacement;
+    }
+
     /// <summary>
     /// Begins a snapshot pin that holds the version-pruning horizon for one statement.
     /// It remains tracked by the current-transactions gauge, but contributes no transaction

@@ -52,11 +52,12 @@ public sealed class TransactionContext
     private readonly TransactionManager _manager;
     private readonly TransactionSnapshot _beginSnapshot;
 
-    // The transaction's own context when this one is a statement view (PinStatementSnapshot),
-    // null for the context the manager begins. The end flag, the apply count and the drain
+    // The transaction's original lifecycle owner when this is a statement view or an isolation
+    // replacement, null for the context the manager begins. The end flag, apply count and drain
     // signal below live on the transaction's own context only: a view forwards every member
     // that touches them, so one lock always guards one set of state.
     private readonly TransactionContext? _transaction;
+    private readonly bool _isStatementView;
     private readonly object _endSync;
     private TransactionState _state;
     private int _applying;
@@ -81,16 +82,17 @@ public sealed class TransactionContext
         _state = TransactionState.Active;
     }
 
-    // A statement view of the transaction's own context: everything but the snapshot is the
-    // transaction's, and the snapshot is the one given.
-    private TransactionContext(TransactionContext transaction, TransactionSnapshot snapshot)
+    // An immutable statement view or isolation replacement sharing the original lifecycle.
+    private TransactionContext(TransactionContext transaction, TransactionSnapshot snapshot,
+        IsolationLevel isolationLevel, bool isStatementView)
     {
         _manager = transaction._manager;
-        _transaction = transaction;
+        _transaction = transaction._transaction ?? transaction;
+        _isStatementView = isStatementView;
         _endSync = transaction._endSync;
         Id = transaction.Id;
         Sequence = transaction.Sequence;
-        IsolationLevel = transaction.IsolationLevel;
+        IsolationLevel = isolationLevel;
         _beginSnapshot = snapshot;
         IsSnapshotPin = transaction.IsSnapshotPin;
     }
@@ -105,7 +107,7 @@ public sealed class TransactionContext
     /// Gets whether this context is a statement view (<see cref="PinStatementSnapshot"/>) rather
     /// than the context the manager began. A manager ends only its own contexts, never a view.
     /// </summary>
-    internal bool IsStatementView => _transaction is not null;
+    internal bool IsStatementView => _isStatementView;
 
     /// <summary>Gets whether this context only holds a statement snapshot horizon.</summary>
     internal bool IsSnapshotPin { get; }
@@ -132,7 +134,11 @@ public sealed class TransactionContext
     public TransactionState State
     {
         get => _transaction is null ? _state : _transaction.State;
-        internal set => _state = value;
+        internal set
+        {
+            if (_transaction is null) { _state = value; }
+            else { _transaction.State = value; }
+        }
     }
 
     /// <summary>
@@ -142,7 +148,7 @@ public sealed class TransactionContext
     /// view's snapshot is the one fixed when it was pinned.
     /// </summary>
     public TransactionSnapshot Snapshot =>
-        _transaction is null && IsolationLevel == IsolationLevel.ReadCommitted && _state == TransactionState.Active
+        !_isStatementView && IsolationLevel == IsolationLevel.ReadCommitted && State == TransactionState.Active
             ? _manager.CaptureSnapshot(Sequence)
             : _beginSnapshot;
 
@@ -168,7 +174,20 @@ public sealed class TransactionContext
     /// for this; the decorators were deleted when the context became a sealed type (plan §6.1).
     /// </para>
     /// </remarks>
-    public TransactionContext PinStatementSnapshot() => new(_transaction ?? this, Snapshot);
+    public TransactionContext PinStatementSnapshot() => new(this, Snapshot, IsolationLevel, isStatementView: true);
+
+    // The manager holds its registration lock before this lifecycle latch, as for ClaimEnd.
+    // Replacement preserves the original begin snapshot and shares end/apply state with every
+    // earlier handle. Neither lock spans storage, an engine lock wait, or a coordinator lock.
+    internal TransactionContext? ReplaceIsolationLevel(IsolationLevel isolationLevel)
+    {
+        lock (_endSync)
+        {
+            var owner = _transaction ?? this;
+            if (owner._ending || owner._applying != 0 || State != TransactionState.Active) { return null; }
+            return new TransactionContext(this, _beginSnapshot, isolationLevel, isStatementView: false);
+        }
+    }
 
     /// <summary>
     /// Claims the end of this context for one commit, rollback or abort. Exactly
