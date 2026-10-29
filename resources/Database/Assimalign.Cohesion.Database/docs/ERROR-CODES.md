@@ -174,6 +174,9 @@ structured-carrier messages remain unprefixed.
 | New (#1526, SQ-W2) | CS02071 | NULL frame offset (22004) |
 | New (#1526, SQ-W2) | CS02072 | Negative frame offset (22013) |
 | New (#1526, SQ-W2) | CS02073 | Noninteger NTH_VALUE index (42804) |
+| New (#1526, SQ-W3) | CS02074 | Unsupported RANGE offset ordering-key domain (0A000) |
+| New (#1526, SQ-W3) | CS02075 | Incompatible RANGE offset domain (0A000) |
+| New (#1526, SQ-W3) | CS02076 | Negative or NaN RANGE offset (22013) |
 | COHSQLE024 | CS03024 | Schema/constraints |
 | COHSQLE025 | CS03025 | Schema/constraints |
 | COHSQLE027 | CS03027 | Schema/constraints |
@@ -268,6 +271,9 @@ structured-carrier messages remain unprefixed.
 | New (#1526, SQ-W2) | CS05082 | Nonpositive NTH_VALUE index (22016) |
 | New (#1526, SQ-W2) | CS05083 | OVER on a scalar function (42809) |
 | New (#1526, SQ-W2 fixes) | CS05084 | Window frame recomputation exceeds 1,000,000 candidate input visits per statement (54000) |
+| New (#1526, SQ-W3) | CS05085 | Offset RANGE requires exactly one ORDER BY key (42P20) |
+| New (#1526, SQ-W3) | CS05086 | GROUPS requires ORDER BY (42P20) |
+| New (#1526, SQ-W3) | CS05087 | NULL treatment on a function other than LAG/LEAD/FIRST_VALUE/LAST_VALUE/NTH_VALUE (42601) |
 | COHSQLE041 | CS06041 | Storage/durability |
 | COHSQLE058 | CS06058 | Storage/durability |
 

@@ -42,15 +42,15 @@ execution uses CK00001; syntax and metadata errors keep their existing owning co
 PostgreSQL src/backend/parser/gram.y:4581-4689 defines ordering/defaults; ri_triggers.c:897-955
 records the future RESTRICT/NO ACTION distinction. See Sql.Language DIALECT for the interim contract.
 
-## Window stage (#1526, SQ-W1/SQ-W2)
+## Window stage (#1526, SQ-W1/SQ-W2/SQ-W3)
 
 OVER accepts inline PARTITION BY and ORDER BY (including direction and NULLS FIRST/LAST),
 OVER name, and parenthesized copies of earlier named windows. WINDOW definitions appear
 after HAVING and before the query tail. Names use the existing case-insensitive identifier
 rules. A copied window cannot specify PARTITION BY; it can supply ORDER BY only if its base
-has none. Definitions cannot reference themselves or later definitions. ROWS frames,
-offset-free RANGE, aggregate windows and FIRST_VALUE/LAST_VALUE/NTH_VALUE execute as
-described below; deferred frame forms retain named CK00001 refusals.
+has none. Definitions cannot reference themselves or later definitions. ROWS, RANGE and
+GROUPS frames, exclusion, aggregate windows and FIRST_VALUE/LAST_VALUE/NTH_VALUE execute
+as described below.
 
 ROW_NUMBER, RANK, DENSE_RANK, PERCENT_RANK, CUME_DIST, NTILE and LAG/LEAD execute after
 WHERE, grouping and HAVING, before DISTINCT, final ORDER BY and pagination. SELECT output
@@ -84,8 +84,8 @@ functions and sort_shared for each group. Window inputs, augmented result rows, 
 key payloads and partition scratch reserve the statement grant before retention; CS05079 refuses
 an excess and every reservation unwinds on success, error or cancellation. Whole input and
 output rows remain charged until the stage ends; scratch releases at each partition boundary.
-Accounting is deliberately conservative for aliased values and retained intermediate outputs;
-SQ-W3 refines full retained-memory accounting. There is no spill. LIMIT cannot truncate the
+Reference-identity ownership avoids duplicate payload charges; consumed input rows and
+partition state release as described under SQ-W3 below. There is no spill. LIMIT cannot truncate the
 input partitions. Window-free queries retain their existing plan and object layouts.
 Named-window enumeration uses separate iterators so extra retained enumerators do not
 increase ordinary query or persisted-view traversal allocations.
@@ -132,8 +132,8 @@ Offsets beyond the partition, including Int64.MaxValue, clamp without arithmetic
 Without an explicit frame, ORDER BY uses RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW,
 including every current-row peer; without ORDER BY the frame is the whole partition.
 Explicit offset-free RANGE also executes, including CURRENT ROW peer boundaries and
-UNBOUNDED FOLLOWING. RANGE with offsets, GROUPS, EXCLUDE, FROM FIRST/LAST and
-IGNORE/RESPECT NULLS remain named CK00001 refusals. Explicit frames do not change
+UNBOUNDED FOLLOWING. RANGE offsets, GROUPS, EXCLUDE and NULL treatment execute as
+described under SQ-W3 below; FROM FIRST/LAST retain CK00001. Explicit frames do not change
 ranking/navigation semantics. A named window with an explicit frame may be referenced
 by OVER name, but cannot be copied by OVER(name) or another named definition (CS01066).
 
@@ -149,25 +149,12 @@ current row; NULL yields NULL and nonpositive values report CS05082 (22016), eve
 an empty frame. NTH_VALUE accepts the engine's signed integer types, including BIGINT;
 a noninteger index reports CS02073 (42804). Value types follow the first argument, including CHAR and its collation.
 
-Native frames reuse one accumulator while their head stays fixed, including bounded
-PRECEDING heads clamped to the partition start. They consume each qualifying input once,
-reading a non-consuming native final result. Equal frames share the previously computed
-result. SUM, COUNT, MIN, MAX, AVG, Boolean and statistical native aggregates ignore
-aggregate-local ORDER BY when evaluating frames, including its key expressions, so ordering
-does not disable incremental transitions. FILTER still runs before argument evaluation.
-Application aggregates and ordered string aggregates preserve their specified input order.
-Ordinary application accumulator Finish remains once-only. Recomputed frames (including
-native frames whose head moves) charge each candidate input visit before FILTER or any
-input expression/transition against a fixed 1,000,000-visit statement cap. CS05084 (54000)
-refuses the next visit and releases all reservations. The cap spans functions, partitions
-and window stages sharing the statement, including under LIMIT; equal cached frames spend
-no visits. SQL has no general statement work budget, so this fixed cap bounds otherwise
-quadratic fallback work without changing the public accumulator contract. String output cost is
-also proportional to the total returned text. Native ordered/string buffers and accumulator
-scratch charge CS05079's statement grant. Ordered aggregate inputs evaluate their arguments
-and keys once after FILTER; their actual retained payload and conservative stable-sort scratch
-reserve the grant before buffering. Those reservations release on success, refusal or cancellation;
-complete retained-memory refinement remains SQ-W3.
+Native growing and moving frames use the incremental states described under SQ-W3.
+Application and order-sensitive aggregates preserve their input order and use the existing
+1,000,000 candidate-visit recomputation cap (CS05084), shared across statement stages.
+Ordered aggregate inputs evaluate their arguments and keys once after FILTER, reserving
+computed payloads and sort buffers before retention. String accumulators charge their
+retained builder chunks as well as output values. Reservations unwind on every exit.
 No public accumulator contract, disk version or wire format changes.
 EXPLAIN retains frame boundaries for each function and ANALYZE reports frame_visits,
 counting candidate aggregate inputs before FILTER. Frames do not split shared sort groups,
@@ -193,6 +180,107 @@ utils/adt/windowfuncs.c:656-723 (frame value functions). No live PostgreSQL comp
 | CS05083 | OVER on a scalar function (42809) |
 | CS05084 | Statement window frame recomputation exceeds 1,000,000 input visits (54000) |
 
+
+### RANGE, GROUPS, exclusion and moving state (#1526, SQ-W3)
+
+RANGE offset frames require exactly one ORDER BY key. Integer keys accept signed integer
+offsets; DECIMAL accepts integer/decimal offsets; REAL/DOUBLE accept numeric offsets.
+DATE, TIME, TIMESTAMP, TIMESTAMPTZ and INTERVAL keys accept INTERVAL offsets. Other key
+domains and incompatible offsets report CS02074 and CS02075. NULL offsets retain CS02071;
+negative or NaN RANGE offsets report CS02076. Floating positive infinity is a valid offset.
+Offsets initialize once per execution, including across partitions, and empty inputs do not
+initialize them. GROUPS counts peer groups, accepts the ROWS integer-offset domain and
+requires ORDER BY (CS05086). Offset RANGE ordering arity reports CS05085.
+
+Distance boundaries follow ordering direction, including DESC, explicit NULL placement and
+peer-inclusive zero offsets. A NULL current key's offset boundary is its NULL peer boundary;
+non-NULL frames compare NULL candidates by sort placement. Exact numeric boundaries use
+scaled integers without overflowing a key's storage type. Floating infinities follow PostgreSQL
+in_range, including the indeterminate infinity +/- infinity case. SQL retains its established
+NaN-low ordering, a documented departure from PostgreSQL's NaN-high ordering. Temporal offsets
+use the engine's existing TimeSpan INTERVAL duration, with wall-clock TIMESTAMP and UTC
+TIMESTAMPTZ identity. TIME distances never wrap at midnight. Calendar months and infinite
+temporal values are outside the engine's scalar domain; RANGE adds neither. TIME uses the
+whole duration because TimeSpan does not retain PostgreSQL's separate month/day/time fields.
+Unrepresentable timestamp/date or interval boundaries retain CS02048 (22008) and CS02062 (22015), respectively.
+
+EXCLUDE NO OTHERS is the default. EXCLUDE CURRENT ROW removes just the current row;
+EXCLUDE GROUP removes all current ordering peers; EXCLUDE TIES keeps the current row if
+it belongs to the frame and removes its other peers. These rules also apply to ROWS and to
+windows without ORDER BY, where the whole partition is one peer group. Exclusion affects
+aggregate/value functions; ranking and navigation remain frame-independent. Canonical SQL
+omits explicit NO OTHERS, which is semantically identical to omission.
+
+The local PostgreSQL grammar implements IGNORE/RESPECT NULLS, so these clauses execute for
+LAG, LEAD, FIRST_VALUE, LAST_VALUE and NTH_VALUE. Omission means RESPECT NULLS; explicit
+RESPECT is retained in canonical SQL. IGNORE skips NULL argument values when counting
+navigation/frame members; offset zero still reads the current row. Incompatible functions
+report CS05087. FROM FIRST/LAST has no implementation in the local PostgreSQL grammar and
+retains its named CK00001 refusals. Value-function NULL skipping scans the selected members;
+it does not promise the moving-aggregate complexity bound.
+
+Native SUM, COUNT, AVG, Boolean and statistical functions use inverse transitions. MIN/MAX
+use monotonic queues. A frame after exclusion is represented by at most three intervals,
+whose endpoints advance monotonically. Each function evaluates FILTER once per visited input
+and evaluates its argument only when FILTER admits that input. Cached arguments, FILTER
+outcomes and all interval states release at the partition boundary. Exact decimal SUM/AVG and
+statistics retain scaled BigInteger sums (and squares for statistics), rounding only the result;
+small decimal terms survive cancellation of large terms. Floating statistics use exact binary sums and squares
+in units of 2^-1074, rounding the final quotient to DOUBLE; nonfinite inputs are tracked
+separately so removing them restores finite results. Native aggregate-local ordering remains ignored.
+
+EXPLAIN ANALYZE reports frame_visits (distinct evaluated native inputs; fallback candidate
+visits), transitions, inverse_transitions and boundary_visits. RANGE boundaries use advancing
+cursors; GROUPS uses a partition peer index. Native transition work is O(n), including exclusion;
+MIN/MAX queue comparisons are amortized O(n). The existing 1,000,000-visit CS05084 cap remains
+for application aggregates and order-sensitive recomputation, and application Finish stays
+once-only. Application accumulator internals remain application-owned; the engine accounts
+its fixed state handle, evaluated inputs and sort buffers without inspecting opaque user state.
+
+Window ownership uses a reference-identity ledger with exact power-of-two entry/bucket array
+charges, including simultaneous old/new arrays during growth. Aliased scalar, text, CHAR and
+binary payloads are charged once. Augmented rows replace consumed input rows, and the input
+list drops its capacity. Keys release before an incompatible sort; shared sorts retain their
+keys. Partition peer indexes, argument caches, monotonic queues, exact transition limbs and
+string-builder chunks reserve before retention and release at the partition boundary.
+Correlated argument-result vectors and temporary rows release with their partition; nested
+window outputs are immediately adopted by the enclosing owner when their inner stage completes.
+DISTINCT scratch and final-collector keys share the same owner. Matching statement metrics
+prevent an inherited execution context from charging an independent statement; native string
+builder accounting is enabled only by the window executor.
+Output cells remain charged until the stage ends. Reference-buffer capacity/growth and fixed
+operator scratch use explicit bounded allowances; these are logical retained-memory charges,
+not a claim that GC heap measurements equal the grant. The ownership ledger itself is charged.
+Final ordered collectors release discarded outputs and keys, including bounded LIMIT heaps.
+There is no spill, and success/refusal/cancellation releases the entire grant. Window-free
+queries retain their existing layouts and allocation costs. No public accumulator contract,
+compiled-schema/catalog version or wire format changed.
+
+For the committed full-output fixture, the two-window query peaks at 6,968,704 B for
+10,000 rows (696.8704 B/row) and admits 138,961 rows under the default 64 MiB grant;
+moving AVG peaks at 4,152,800 B (415.28 B/row) and admits 162,448 rows. Both next rows
+refuse and release the grant. Ledger capacity steps make bytes/row depend on row count;
+these are logical peaks, not GC allocation measurements. The Release guards retain
+4,280 / 12,472 / 18,112 / 21,672 B/query for window-free shapes. The former 2,000-row
+shrinking-SUM cap refusal now succeeds with 2,000 input visits and 1,999 inverse transitions.
+
+Independent membership tests cover every legal bound category and all exclusions in ROWS,
+GROUPS and all twelve supported RANGE key types, both directions and NULL placements;
+native aggregates are also compared with ordinary recomputation. InMemory/TCP, EXPLAIN,
+persisted-view reload, budget boundaries and NativeAOT checks exercise the same behavior.
+References re-derived from the local PostgreSQL source: parser/parse_clause.c:2913-2959,
+parser/gram.y:16757-16761, utils/adt/float.c:1068-1135, int.c:652-731,
+date.c:1065-1084,2215-2258, timestamp.c:3864-3979, numeric.c:2582-2687,
+executor/nodeWindowAgg.c:734-770,3674-3697,3860-3935. No live PostgreSQL comparison is claimed.
+
+| Code | Condition |
+| --- | --- |
+| CS02074 | Unsupported RANGE ordering-key domain (0A000) |
+| CS02075 | Incompatible RANGE offset domain (0A000) |
+| CS02076 | Negative or NaN RANGE offset (22013) |
+| CS05085 | Offset RANGE requires exactly one ordering key (42P20) |
+| CS05086 | GROUPS requires ORDER BY (42P20) |
+| CS05087 | NULL treatment on an incompatible function (42601) |
 
 ## Owned identity sequences (#1717, SQ-S3)
 

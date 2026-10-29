@@ -96,7 +96,7 @@ public sealed class SqlSetOperationParserTests
     [InlineData("SELECT a FROM t OFFSET 1 UNION SELECT a FROM u", "CS00003")]
     [InlineData("SELECT a FROM t UNION CORRESPONDING SELECT a FROM u", "CK00001")]
     [InlineData("SELECT a FROM t EXCEPT ALL CORRESPONDING SELECT a FROM u", "CK00001")]
-    [InlineData("SELECT id FROM t UNION SELECT id FROM u WINDOW w AS (GROUPS CURRENT ROW);", "CK00001")]
+    [InlineData("SELECT id FROM t UNION SELECT id FROM u WINDOW w AS (ORDER BY id GROUPS CURRENT ROW) FOR UPDATE;", "CK00001")]
     [InlineData("SELECT a FROM t WHERE a = ALL (1, 2)", "CK00001")]
     public void Parse_RejectedSetForm_ShouldReportCode(string sql, string code)
     {
@@ -106,7 +106,7 @@ public sealed class SqlSetOperationParserTests
         // Assert
         diagnostics.ShouldContain(item => item.Code == code);
         if (sql.Contains("CORRESPONDING")) { diagnostics.Count(item => item.Code == code).ShouldBe(1); }
-        if (sql.Contains("WINDOW")) { diagnostics.Single(item => item.Code == code).Message!.ShouldContain("GROUPS"); }
+        if (sql.Contains("WINDOW")) { diagnostics.Single(item => item.Code == code).Message!.ShouldContain("FOR UPDATE/SHARE"); }
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - Set operations: canonical text preserves associativity and operand windows")]

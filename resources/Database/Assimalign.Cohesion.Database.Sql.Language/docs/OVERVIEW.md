@@ -16,8 +16,8 @@ Aggregate calls retain FILTER conditions, DISTINCT/ALL and ordered inputs. The e
 profile includes BOOL_AND/BOOL_OR/EVERY and sample/population variance and standard deviation
 (#1720, SQ-H1). GROUPING SETS, ROLLUP, CUBE, empty sets, GROUP BY DISTINCT and
 GROUPING/GROUPING_ID subtotal masks execute (#1720, SQ-H2). Ranking, LAG/LEAD, OVER and named WINDOW definitions execute (#1526, SQ-W1);
-ROWS and offset-free RANGE frames, aggregate windows with FILTER and value functions execute;
-RANGE offsets, GROUPS, EXCLUDE and value modifiers remain deferred.
+ROWS, RANGE distances, GROUPS, EXCLUDE, aggregate windows with FILTER, value functions and
+IGNORE/RESPECT NULLS execute (#1526, SQ-W3). FROM FIRST/LAST retain named refusals.
 
 - **Parser** — UNION/INTERSECT/EXCEPT with ALL or DISTINCT in every query position, `WITH [RECURSIVE]` before SELECT/INSERT/UPDATE/DELETE and plain `WITH` before MERGE (recursive bodies bind; execution is deferred to SQ-R2; WITH RECURSIVE before MERGE reports CK00001), plus `SELECT` (INNER/LEFT/RIGHT/FULL/CROSS joins, parenthesized join groups, derived tables, grouping, ordering, limits, subqueries), `INSERT`
   (multi-row, whole-item `DEFAULT`, `DEFAULT VALUES`, `INSERT ... SELECT`), `UPDATE`

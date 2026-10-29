@@ -72,12 +72,12 @@ public sealed class SqlCteParserTests
     [InlineData("WITH d AS (DELETE FROM t RETURNING *) SELECT * FROM d;", "DELETE")]
     [InlineData("WITH a AS (SELECT id FROM t) SEARCH DEPTH FIRST BY id SET ord SELECT * FROM a;", "SEARCH/CYCLE")]
     [InlineData("WITH a AS (SELECT id FROM t) CYCLE id SET mark USING path SELECT * FROM a;", "SEARCH/CYCLE")]
-    [InlineData("WITH a AS (SELECT SUM(id) OVER (GROUPS CURRENT ROW) AS n FROM t) SELECT * FROM a;", "GROUPS")]
+    [InlineData("WITH a AS (SELECT NTH_VALUE(id,1) FROM LAST OVER() AS n FROM t) SELECT * FROM a;", "FROM LAST")]
     [InlineData("WITH a AS (SELECT * FROM t) SELECT * FROM a NATURAL JOIN u;", "NATURAL")]
-    [InlineData("WITH a AS (SELECT * FROM t) SELECT * FROM a WINDOW w AS (GROUPS CURRENT ROW);", "GROUPS")]
+    [InlineData("WITH a AS (SELECT * FROM t) SELECT * FROM a WINDOW w AS (ORDER BY id GROUPS CURRENT ROW) FOR UPDATE;", "FOR UPDATE/SHARE")]
     [InlineData("WITH top AS (SELECT id FROM t) SELECT TOP (1) WITH TIES * FROM top;", "WITH TIES")]
     [InlineData("WITH natural AS (SELECT id FROM t) SELECT * FROM natural NATURAL JOIN u;", "NATURAL")]
-    [InlineData("WITH window AS (SELECT id FROM t) SELECT * FROM window WINDOW w AS (GROUPS CURRENT ROW);", "GROUPS")]
+    [InlineData("WITH window AS (SELECT id FROM t) SELECT * FROM window WINDOW w AS (ORDER BY id GROUPS CURRENT ROW) FOR UPDATE;", "FOR UPDATE/SHARE")]
     public void Parse_ExcludedWithForm_ShouldNameUnsupportedConstruct(string sql, string construct)
     {
         // Arrange

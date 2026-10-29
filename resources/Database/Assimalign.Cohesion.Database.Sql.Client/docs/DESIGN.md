@@ -9,14 +9,16 @@ naming ON UPDATE action execution on UPDATE, UPDATE FROM, ON CONFLICT DO UPDATE 
 with unchanged parent/child rows and a usable connection. RESTRICT/NO ACTION retain their
 statement-end behavior until SQ-F2. No public client or wire format change is required.
 
-## Window ranking, navigation and frames (#1526, SQ-W1/SQ-W2)
+## Window ranking, navigation and frames (#1526, SQ-W1/SQ-W2/SQ-W3)
 
 InMemory and TCP use the existing result and diagnostic exchanges for window rankings,
 navigation, named definitions and EXPLAIN. Tests pin BIGINT ranks, DOUBLE PRECISION
 distributions, INTEGER tiles, numeric navigation default unification, coded placement/name/
 bucket and CS05079 budget refusals and reusable connections. ROWS/default-peer aggregate frames,
 FILTER, Boolean/statistical and value functions preserve types, NULLs and frame diagnostics on
-both transports; EXPLAIN includes frame boundaries and transition visits. No client surface or protocol format changes.
+both transports; EXPLAIN includes frame boundaries and transition visits. RANGE offsets,
+GROUPS, every exclusion and IGNORE NULLS use the same exchange. The wire corpus also checks
+CS02074-02076 and CS05085-05087 with reusable connections. No client surface or protocol format changes.
 
 ## Owned identity wire surface (#1717, SQ-S3)
 

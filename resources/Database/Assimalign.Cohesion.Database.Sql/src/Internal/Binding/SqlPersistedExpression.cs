@@ -379,7 +379,7 @@ internal static class SqlPersistedExpression
     // SqlPlanner.Children. The counts and presence flags make that child sequence unambiguous.
     private static bool SameNode(SqlExpression left, SqlExpression right) => (left, right) switch
     {
-        (SqlWindowExpression a, SqlWindowExpression b) => Same(a.WindowName, b.WindowName) &&
+        (SqlWindowExpression a, SqlWindowExpression b) => a.NullTreatment == b.NullTreatment && Same(a.WindowName, b.WindowName) &&
             AreEquivalent(a.Function, b.Function) && SameWindow(a.Specification, b.Specification),
         (SqlGroupingSetExpression a, SqlGroupingSetExpression b) => a.Kind == b.Kind && a.Items.Count == b.Items.Count,
         (SqlLogicalExpression a, SqlLogicalExpression b) => a.Operator == b.Operator && a.Operands.Count == b.Operands.Count,
@@ -452,7 +452,7 @@ internal static class SqlPersistedExpression
             SameList(a.OrderBy, b.OrderBy, (x,y) => x.IsDescending == y.IsDescending && x.NullPlacement == y.NullPlacement && AreEquivalent(x.Expression,y.Expression));
 
     private static bool SameFrame(SqlWindowFrame? a, SqlWindowFrame? b) => a is null || b is null ? a is null && b is null :
-        a.Mode == b.Mode && a.Start.Kind == b.Start.Kind && a.End.Kind == b.End.Kind &&
+        a.Mode == b.Mode && a.Exclusion == b.Exclusion && a.Start.Kind == b.Start.Kind && a.End.Kind == b.End.Kind &&
         AreEquivalent(a.Start.Offset, b.Start.Offset) && AreEquivalent(a.End.Offset, b.End.Offset);
 
     private static bool SameTable(SqlRelationReference? left, SqlRelationReference? right)

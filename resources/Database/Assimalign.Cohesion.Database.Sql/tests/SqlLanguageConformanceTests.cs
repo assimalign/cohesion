@@ -251,8 +251,8 @@ public sealed class SqlLanguageConformanceTests
         // Sequence DDL, NEXT VALUE FOR and DISCARD ALL (#1717) add five; GROUPING SETS, ROLLUP and CUBE (#1720) add three.
         // Window clauses (#1526) add three measured; identity, SERIAL and OVERRIDING (#1717) add four.
         // ON UPDATE (#1723, SQ-F1) adds one metadata declaration clause.
-        // Two explicit window frame clauses (#1526, SQ-W2).
-        SqlLanguageProfile.Instance.Clauses.Count().ShouldBe(77);
+        // Two explicit window frame clauses (#1526, SQ-W2); GROUPS, EXCLUDE and NULL treatment add three (#1526, SQ-W3).
+        SqlLanguageProfile.Instance.Clauses.Count().ShouldBe(80);
         RequireExecutionCases(SqlLanguageProfile.Instance.Clauses, cases);
         cases.Keys.Except(SqlLanguageProfile.Instance.Clauses).ShouldBeEmpty("Cases must describe the current profile.");
 
@@ -860,7 +860,13 @@ public sealed class SqlLanguageConformanceTests
             expression => expression is SqlSelectExpression { Windows.Count: 1 }, [[1L],[2L],[3L]]),
         [SqlClauses.WindowRows] = Query("SELECT SUM(age ORDER BY id DESC) FILTER(WHERE age>0) OVER(ORDER BY id ROWS 1 PRECEDING) FROM t ORDER BY id;",
             expression => expression is SqlSelectExpression { Columns: var columns } && columns[0].Expression is SqlWindowExpression { Specification.Frame.Mode: SqlWindowFrameMode.Rows }, [[36m],[81m],[86m]]),
-        [SqlClauses.WindowRange] = Query("SELECT LAST_VALUE(age) OVER(ORDER BY id RANGE UNBOUNDED PRECEDING) FROM t ORDER BY id;",
+        [SqlClauses.WindowGroups] = Query("SELECT SUM(age) OVER(ORDER BY id GROUPS 1 PRECEDING) FROM t ORDER BY id;",
+            expression => expression is SqlSelectExpression { Columns.Count: 1 }, [[36m],[81m],[86m]]),
+        [SqlClauses.WindowExclude] = Query("SELECT SUM(age) OVER(ORDER BY id ROWS 1 PRECEDING EXCLUDE CURRENT ROW) FROM t ORDER BY id;",
+            expression => expression is SqlSelectExpression { Columns.Count: 1 }, [[null],[36m],[45m]]),
+        [SqlClauses.WindowNullTreatment] = Query("SELECT LAG(age) IGNORE NULLS OVER(ORDER BY id) FROM t ORDER BY id;",
+            expression => expression is SqlSelectExpression { Columns.Count: 1 }, [[null],[36],[45]]),
+        [SqlClauses.WindowRange] = Query("SELECT LAST_VALUE(age) OVER(ORDER BY id RANGE 1 PRECEDING) FROM t ORDER BY id;",
             expression => expression is SqlSelectExpression { Columns: var columns } && columns[0].Expression is SqlWindowExpression { Specification.Frame.Mode: SqlWindowFrameMode.Range }, [[36],[45],[41]]),
         [SqlClauses.Having] = Query("SELECT age > 40, COUNT(*), SUM(age) FROM t WHERE age > 35 GROUP BY age > 40 HAVING SUM(age) > 50;",
             expression => expression is SqlSelectExpression { Having: not null }, [[true, 2L, 86m]]),

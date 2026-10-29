@@ -43,6 +43,12 @@ internal sealed class SqlMaterializedResultSet : DatabaseResultSet
     // Internal operators preserve CHAR comparison identity until final delivery.
     internal IReadOnlyList<object?[]> Rows => _rows;
 
+    // A consuming window stage transfers cell ownership to augmented rows and drops
+    // the input list storage immediately. This is internal to materialized operators.
+    internal long RowBufferBytes => 24L + 8L * _rows.Capacity;
+    internal void ClearRow(int index) => _rows[index] = [];
+    internal void ClearRows() { _rows.Clear(); _rows.Capacity = 0; }
+
     // Admit query output retained by CTAS alongside its encoded batch and any other
     // statement reservations. The caller releases this grant after source disposal.
     internal long ReserveMemory(SqlStatementMetrics metrics, long budget, CancellationToken cancellationToken)

@@ -296,6 +296,13 @@
   <data name="WindowBucketCount" xml:space="preserve"><value>NTILE requires a positive bucket count (SQLSTATE 22014).</value></data>
   <data name="WindowFrameBounds" xml:space="preserve"><value>A window frame cannot start after its ending boundary category, start with UNBOUNDED FOLLOWING, or end with UNBOUNDED PRECEDING (SQLSTATE 42P20).</value></data>
   <data name="WindowFrameOffsetScope" xml:space="preserve"><value>A window frame offset cannot contain row variables, aggregate or window functions (SQLSTATE 42P20).</value></data>
+  <data name="WindowRangeOrdering" xml:space="preserve"><value>RANGE with offsets requires exactly one ORDER BY key.</value></data>
+  <data name="WindowGroupsOrdering" xml:space="preserve"><value>GROUPS requires an ORDER BY clause.</value></data>
+  <data name="WindowRangeKeyType" xml:space="preserve"><value>RANGE offsets require a numeric, date, time, timestamp or interval ordering key.</value></data>
+  <data name="WindowRangeOffsetType" xml:space="preserve"><value>RANGE offsets require a compatible numeric distance or an interval for a temporal key.</value></data>
+  <data name="WindowRangeBoundary" xml:space="preserve"><value>A RANGE temporal boundary is outside its representable domain.</value></data>
+  <data name="WindowRangeOffsetInvalid" xml:space="preserve"><value>A RANGE offset must be nonnegative and cannot be NaN.</value></data>
+  <data name="WindowNullTreatment" xml:space="preserve"><value>RESPECT/IGNORE NULLS requires LAG, LEAD, FIRST_VALUE, LAST_VALUE or NTH_VALUE.</value></data>
   <data name="WindowFrameInteger" xml:space="preserve"><value>A ROWS window frame offset requires an integer (SQLSTATE 42804).</value></data>
   <data name="WindowFrameNull" xml:space="preserve"><value>A window frame offset must not be NULL (SQLSTATE 22004).</value></data>
   <data name="WindowFrameNegative" xml:space="preserve"><value>A window frame offset must not be negative (SQLSTATE 22013).</value></data>
